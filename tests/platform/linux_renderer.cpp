@@ -83,6 +83,46 @@ TEST_CASE("LinuxRendererTransformsLinearAndRadialGradientSamplingWithoutTransfor
   renderer.Discard();
 }
 
+TEST_CASE("LinuxRendererStrokesPathsWithLinearAndRadialGradients") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 48.0F, 24.0F});
+  paint.StrokePath(Path::RoundedRect({2.0F, 2.0F, 18.0F, 18.0F}, CornerRadii{2.0F}),
+                   LinearGradient{
+                       .start = {0.0F, 0.0F},
+                       .end = {0.0F, 1.0F},
+                       .stops = {{0.0F, Color::Rgb(255, 0, 0)}, {1.0F, Color::Rgb(0, 0, 255)}},
+                   },
+                   StrokeStyle{.width = 3.0F, .join = StrokeJoin::Round});
+  paint.StrokePath(Path{}.MoveTo({34.0F, 12.0F}).LineTo({44.0F, 12.0F}),
+                   RadialGradient{
+                       .stops = {{0.0F, Color::White()}, {1.0F, Color::Black()}},
+                   },
+                   {24.0F, 2.0F, 20.0F, 20.0F}, StrokeStyle{.width = 3.0F, .cap = StrokeCap::Round});
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 48, 24);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  const std::uint32_t linear_top = pixels[2 * 48 + 11];
+  const std::uint32_t linear_bottom = pixels[19 * 48 + 11];
+  REQUIRE(((linear_top >> 16U) & 0xFFU) > (linear_top & 0xFFU));
+  REQUIRE((linear_bottom & 0xFFU) > ((linear_bottom >> 16U) & 0xFFU));
+  const std::uint32_t radial_center = pixels[12 * 48 + 34];
+  const std::uint32_t radial_edge = pixels[12 * 48 + 43];
+  REQUIRE((radial_center & 0xFFU) > (radial_edge & 0xFFU));
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
 TEST_CASE("LinuxRendererDrawsDirectedDashedLines") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();

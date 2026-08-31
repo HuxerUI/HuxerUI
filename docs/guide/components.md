@@ -40,17 +40,19 @@ sector.MoveTo({24.0F, 24.0F})
 paint.FillPath(sector, Color::Black());
 ```
 
-Paths also accept linear and elliptical radial gradients.
+`FillPath()` and `StrokePath()` also accept linear and elliptical radial gradients.
 Normalized gradient geometry uses exact Path bounds by default, or an explicit rectangle when several Paths must share one gradient space.
 The identity-by-default affine transform is expressed in that normalized space and changes gradient sampling without moving or clipping the painted geometry:
 
 ```cpp
-paint.FillPath(sector, LinearGradient{
+const LinearGradient highlight{
     .start = {0.0F, 0.0F},
     .end = {1.0F, 1.0F},
     .stops = {{0.0F, Color::Rgb(103, 80, 164)}, {1.0F, Color::Rgb(208, 188, 255)}},
     .transform = {0.0F, 1.0F, -1.0F, 0.0F, 1.0F, 0.0F},
-});
+};
+paint.FillPath(sector, highlight);
+paint.StrokePath(sector, highlight, StrokeStyle{.width = 3.0F, .join = StrokeJoin::Round});
 ```
 
 Use `Path::Contains(point, fill_rule)` when custom interaction must test the same local filled geometry.

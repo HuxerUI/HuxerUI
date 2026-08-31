@@ -518,6 +518,68 @@ TEST_CASE("PaintContextValidatesGradientPathFillsBeforeRecording") {
   REQUIRE(sequence.Bounds().IsEmpty());
 }
 
+TEST_CASE("PaintContextRecordsAtomicGradientPathStrokes") {
+  const Path path = Path{}.MoveTo({10.0F, 20.0F}).LineTo({50.0F, 20.0F}).LineTo({30.0F, 60.0F}).Close();
+  const LinearGradient linear{
+      .start = {0.0F, 0.0F},
+      .end = {1.0F, 1.0F},
+      .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+      .transform = {1.0F, 0.25F, -0.1F, 1.0F, 0.2F, 0.0F},
+  };
+  const RadialGradient radial{
+      .center = {0.25F, 0.75F},
+      .radius = {0.5F, 0.25F},
+      .stops = {{0.0F, Color::White()}, {1.0F, Color::Black()}},
+      .transform = {0.75F, 0.0F, 0.2F, 1.0F, 0.0F, 0.1F},
+  };
+  const StrokeStyle style{
+      .width = 4.0F,
+      .cap = StrokeCap::Round,
+      .join = StrokeJoin::Bevel,
+      .dash_pattern = {6.0F, 2.0F},
+  };
+
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 100.0F, 80.0F});
+  context.StrokePath(path, linear, style);
+  context.StrokePath(path, radial, {0.0F, 0.0F, 100.0F, 80.0F}, style);
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 2);
+  const auto& linear_stroke = std::get<StrokeLinearGradientPathCommand>(sequence.Commands()[0]);
+  REQUIRE(linear_stroke.gradient_rect == path.Bounds());
+  REQUIRE(linear_stroke.gradient == linear);
+  REQUIRE(linear_stroke.style == style);
+  const auto& radial_stroke = std::get<StrokeRadialGradientPathCommand>(sequence.Commands()[1]);
+  REQUIRE(radial_stroke.gradient_rect == Rect{0.0F, 0.0F, 100.0F, 80.0F});
+  REQUIRE(radial_stroke.gradient == radial);
+  REQUIRE(radial_stroke.style == style);
+  REQUIRE(sequence.Bounds() == Rect{8.0F, 18.0F, 44.0F, 44.0F});
+}
+
+TEST_CASE("PaintContextValidatesGradientPathStrokesBeforeRecording") {
+  const Path path = Path{}.MoveTo({0.0F, 0.0F}).LineTo({20.0F, 0.0F}).LineTo({10.0F, 10.0F}).Close();
+  const LinearGradient gradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}};
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 20.0F, 10.0F});
+
+  REQUIRE_THROWS_AS(context.StrokePath(Path{}, LinearGradient{}, StrokeStyle{.width = 1.0F}), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.StrokePath(path, gradient, StrokeStyle{.width = -1.0F}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.StrokePath(path, gradient, {0.0F, 0.0F, -1.0F, 10.0F}, StrokeStyle{.width = 1.0F}),
+      std::invalid_argument
+  );
+  REQUIRE(sequence.Commands().empty());
+
+  context.StrokePath(path, gradient, {0.0F, 0.0F, 0.0F, 10.0F}, StrokeStyle{.width = 1.0F});
+  context.StrokePath(path, gradient, StrokeStyle{.width = 0.0F});
+  context.StrokePath(Path{}, gradient, StrokeStyle{.width = 1.0F});
+  context.Finish();
+
+  REQUIRE(sequence.Commands().empty());
+  REQUIRE(sequence.Bounds().IsEmpty());
+}
+
 TEST_CASE("PaintContextUsesPathCommandsForAsymmetricCornerRadii") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};

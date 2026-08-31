@@ -15,7 +15,7 @@
 `Canvas` receives a `PaintContext` and assigned `Size`. Give it explicit or parent-derived constraints. Draw in local coordinates and do not use Canvas to arbitrarily place `PlatformView` children.
 
 `PaintContext` emits platform-neutral commands for rectangles, gradients, text, images, circles, lines, arcs, borders, shadows, paths, clips, and transforms. Balance every pushed clip or transform with a pop on every path. Call only public drawing methods; `PaintCommand`, `RenderScene`, and renderer integration are framework boundaries rather than application extension points.
-`FillPath()` accepts a solid color, `LinearGradient`, or `RadialGradient`. Gradient geometry and its transform are normalized to exact Path bounds unless an explicit gradient rectangle is supplied; that rectangle defines coordinates and does not clip the Path. Use the explicit form when separate Paths must share one continuous gradient.
+`FillPath()` and `StrokePath()` accept a solid color, `LinearGradient`, or `RadialGradient`. Gradient geometry and its transform are normalized to exact Path bounds unless an explicit gradient rectangle is supplied; that rectangle defines coordinates and does not clip the fill or stroke. Use the explicit form when separate Paths must share one continuous gradient.
 
 ## Paths and text
 
@@ -28,6 +28,8 @@ Use `Path::Contains(point, fill_rule)` to test a local point against the same fi
 ```cpp
 paint.DrawLine({0.0F, 12.0F}, {120.0F, 12.0F}, Color::Black(),
                StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}});
+paint.StrokePath(path, LinearGradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}},
+                 StrokeStyle{.width = 3.0F, .join = StrokeJoin::Round});
 ```
 
 Respect fill rules when filling, clipping, or querying paths. Text painting uses `TextStyle`, shaping options, and layout options. `UseTextMeasurer()` provides the active platform text measurer during composition; do not invent glyph metrics. Prefer `Text` for ordinary UI text because it owns layout and semantics.

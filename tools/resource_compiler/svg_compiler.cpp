@@ -66,6 +66,7 @@ struct Style {
   std::optional<Color> fill = Color{};
   std::optional<std::string> fill_reference;
   std::optional<Color> stroke;
+  std::optional<std::string> stroke_reference;
   Color current_color{};
   bool fill_uses_current_color = false;
   bool stroke_uses_current_color = false;
@@ -971,12 +972,12 @@ void ApplyStyleProperty(Style& style, std::string_view name, std::string_view va
     }
   } else if (name == "fill" || name == "stroke") {
     if (text.starts_with("url(")) {
-      if (name == "stroke") {
-        throw std::runtime_error("SVG gradient strokes are not supported");
-      }
-      style.fill_reference = ParseLocalReference(text, name);
-      style.fill.reset();
-      style.fill_uses_current_color = false;
+      std::optional<std::string>& reference = name == "fill" ? style.fill_reference : style.stroke_reference;
+      std::optional<Color>& paint = name == "fill" ? style.fill : style.stroke;
+      bool& uses_current = name == "fill" ? style.fill_uses_current_color : style.stroke_uses_current_color;
+      reference = ParseLocalReference(text, name);
+      paint.reset();
+      uses_current = false;
       return;
     }
     const bool current = text == "currentColor";
@@ -984,9 +985,8 @@ void ApplyStyleProperty(Style& style, std::string_view name, std::string_view va
     bool& uses_current = name == "fill" ? style.fill_uses_current_color : style.stroke_uses_current_color;
     paint = current ? std::optional<Color>(style.current_color) : ParseColor(text);
     uses_current = current;
-    if (name == "fill") {
-      style.fill_reference.reset();
-    }
+    std::optional<std::string>& reference = name == "fill" ? style.fill_reference : style.stroke_reference;
+    reference.reset();
   } else if (name == "fill-opacity") {
     style.fill_opacity = ParseOpacity(text, name);
   } else if (name == "stop-color") {
@@ -1538,6 +1538,22 @@ void WriteGradientStops(Writer& writer, const std::vector<std::pair<float, Color
   }
 }
 
+void WriteStrokeStyle(Writer& writer, const Style& style) {
+  ValidateDashPattern(style.dash_pattern);
+  if (style.dash_pattern.size() > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::runtime_error("SVG stroke-dasharray contains too many lengths");
+  }
+  writer.F32(style.stroke_width);
+  writer.U8(style.stroke_cap);
+  writer.U8(style.stroke_join);
+  writer.F32(style.miter_limit);
+  writer.U32(static_cast<std::uint32_t>(style.dash_pattern.size()));
+  for (const float length : style.dash_pattern) {
+    writer.F32(length);
+  }
+  writer.F32(style.dash_offset);
+}
+
 template <class ResolveGradient>
 void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& operation_count,
                 const ResolveGradient& resolve_gradient) {
@@ -1572,25 +1588,31 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
     }
   }
   if (style.stroke.has_value() && style.stroke_width > 0.0F) {
-    ValidateDashPattern(style.dash_pattern);
-    if (style.dash_pattern.size() > std::numeric_limits<std::uint32_t>::max()) {
-      throw std::runtime_error("SVG stroke-dasharray contains too many lengths");
-    }
     Color color = style.stroke_uses_current_color ? style.current_color : *style.stroke;
     color.alpha *= style.stroke_opacity;
     writer.U8(2);
     writer.ColorValue(color);
-    writer.F32(style.stroke_width);
-    writer.U8(style.stroke_cap);
-    writer.U8(style.stroke_join);
-    writer.F32(style.miter_limit);
-    writer.U32(static_cast<std::uint32_t>(style.dash_pattern.size()));
-    for (const float length : style.dash_pattern) {
-      writer.F32(length);
-    }
-    writer.F32(style.dash_offset);
+    WriteStrokeStyle(writer, style);
     writer.PathValue(path);
     ++operation_count;
+  } else if (style.stroke_reference.has_value() && style.stroke_width > 0.0F) {
+    ResolvedGradient gradient = resolve_gradient(*style.stroke_reference, PathBounds(path));
+    if (gradient.coordinate_rect.width > 0.0F && gradient.coordinate_rect.height > 0.0F) {
+      for (auto& stop : gradient.stops) {
+        stop.second.alpha *= style.stroke_opacity;
+      }
+      writer.U8(gradient.radial ? 10 : 9);
+      writer.RectValue(gradient.coordinate_rect);
+      writer.F32(gradient.first.x);
+      writer.F32(gradient.first.y);
+      writer.F32(gradient.second.x);
+      writer.F32(gradient.second.y);
+      WriteTransformValue(writer, gradient.transform);
+      WriteGradientStops(writer, gradient.stops);
+      WriteStrokeStyle(writer, style);
+      writer.PathValue(path);
+      ++operation_count;
+    }
   }
 }
 
@@ -1827,7 +1849,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
     const SvgNode& node = document.nodes[index];
     const bool radial = node.name == "radialGradient";
     if (!radial && node.name != "linearGradient") {
-      throw std::runtime_error("SVG fill reference must target a gradient element");
+      throw std::runtime_error("SVG paint reference must target a gradient element");
     }
     if (std::ranges::find(gradient_references, index) != gradient_references.end() ||
         gradient_references.size() >= max_reference_depth) {
@@ -1939,7 +1961,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
   };
 
   const auto resolve_gradient = [&](std::string_view id, Rect path_bounds) {
-    const GradientDefinition definition = resolve_gradient_definition(find_reference(id, "fill"));
+    const GradientDefinition definition = resolve_gradient_definition(find_reference(id, "paint"));
     const Rect coordinate_rect = definition.object_bounding_box
                                      ? path_bounds
                                      : Rect{result.view_x, result.view_y, result.view_width, result.view_height};

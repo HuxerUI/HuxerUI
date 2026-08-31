@@ -382,6 +382,34 @@ struct StrokePathCommand {
   bool operator==(const StrokePathCommand&) const = default;
 };
 
+/// Strokes every contour of one path with a linear gradient and normalized style.
+struct StrokeLinearGradientPathCommand {
+  /// Path centerline geometry in the active logical coordinate space.
+  Path path;
+  /// Gradient evaluated relative to gradient_rect.
+  LinearGradient gradient;
+  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the stroke.
+  Rect gradient_rect;
+  /// Normalized stroke configuration shared by every contour.
+  StrokeStyle style;
+
+  bool operator==(const StrokeLinearGradientPathCommand&) const = default;
+};
+
+/// Strokes every contour of one path with an elliptical radial gradient and normalized style.
+struct StrokeRadialGradientPathCommand {
+  /// Path centerline geometry in the active logical coordinate space.
+  Path path;
+  /// Gradient evaluated relative to gradient_rect.
+  RadialGradient gradient;
+  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the stroke.
+  Rect gradient_rect;
+  /// Normalized stroke configuration shared by every contour.
+  StrokeStyle style;
+
+  bool operator==(const StrokeRadialGradientPathCommand&) const = default;
+};
+
 /// Draws a blurred solid-color shadow from a filled path caster.
 struct DrawPathShadowCommand {
   /// Caster geometry in the active logical coordinate space.
@@ -514,6 +542,8 @@ using PaintCommand = std::variant<
     FillLinearGradientPathCommand,
     FillRadialGradientPathCommand,
     StrokePathCommand,
+    StrokeLinearGradientPathCommand,
+    StrokeRadialGradientPathCommand,
     DrawPathShadowCommand,
     PushClipCommand,
     PushPathClipCommand,
@@ -657,6 +687,19 @@ public:
   ///
   /// Each contour independently restarts the dash pattern at dash_offset.
   void StrokePath(Path path, Color color, StrokeStyle style);
+  /// Strokes path with a linear gradient evaluated relative to the path bounds.
+  ///
+  /// @code
+  /// paint.StrokePath(path, LinearGradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}},
+  ///                  StrokeStyle{.width = 3.0F, .join = StrokeJoin::Round});
+  /// @endcode
+  void StrokePath(Path path, LinearGradient gradient, StrokeStyle style);
+  /// Strokes path with a linear gradient evaluated relative to gradient_rect without clipping to that rectangle.
+  void StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style);
+  /// Strokes path with an elliptical radial gradient evaluated relative to the path bounds.
+  void StrokePath(Path path, RadialGradient gradient, StrokeStyle style);
+  /// Strokes path with an elliptical radial gradient evaluated relative to gradient_rect without clipping to it.
+  void StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style);
   /// Draws a filled path shadow translated by offset.
   ///
   /// blur_radius is the non-negative outer falloff. Arbitrary path shadows do not support spread.

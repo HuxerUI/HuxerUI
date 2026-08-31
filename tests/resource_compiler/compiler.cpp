@@ -854,6 +854,63 @@ TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
   REQUIRE(user.translate_y == Catch::Approx(0.1F));
 }
 
+TEST_CASE("SvgResourcesCompileGradientPathStrokesInHuxvecVersionOne") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "resources";
+  const std::filesystem::path output = temporary.Path() / "output";
+  Write(
+      root / "images" / "gradient_stroke.svg",
+      R"svg(<svg width="40" height="20" viewBox="0 0 40 20">
+  <defs>
+    <linearGradient id="base" gradientTransform="matrix(1 0.25 -0.5 1 0.2 -0.1)">
+      <stop stop-color="black" stop-opacity="0.5"/><stop offset="1" stop-color="white"/>
+    </linearGradient>
+    <linearGradient id="inherited" href="#base"/>
+    <radialGradient id="radial"><stop stop-color="white"/><stop offset="1" stop-color="black"/></radialGradient>
+  </defs>
+  <g fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="bevel"
+     stroke-dasharray="3 1 2" stroke-dashoffset="-2">
+    <rect x="5" y="2" width="20" height="12" stroke="url(#inherited)" stroke-opacity="0.5"/>
+    <path d="M25 2L38 2L32 16Z" stroke="url(#radial)"/>
+  </g>
+</svg>)svg"
+  );
+
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
+  const std::string payload =
+      Read(output / "package" / "huxerui" / "test_app" / "images" / "gradient_stroke.huxv");
+  REQUIRE(payload.starts_with("HUXVEC"));
+  REQUIRE(static_cast<unsigned char>(payload[8]) == 1U);
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 9U);
+  std::vector<std::byte> truncated(payload.size() - 1);
+  std::memcpy(truncated.data(), payload.data(), truncated.size());
+  REQUIRE_THROWS_AS(
+      huxerui::detail::ResourceAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
+      std::logic_error
+  );
+
+  DirectoryResources platform(output / "package");
+  huxerui::detail::AppResources resources(&platform);
+  const huxerui::VectorAsset vector = resources.ResolveVector(
+      huxerui::ImageResource("test_app", "images/gradient_stroke"), huxerui::Locale::Default()
+  );
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  REQUIRE(commands.size() == 2);
+  const auto& linear = std::get<huxerui::StrokeLinearGradientPathCommand>(commands[0]);
+  REQUIRE(linear.gradient_rect == huxerui::Rect{5.0F, 2.0F, 20.0F, 12.0F});
+  REQUIRE(linear.gradient.transform == huxerui::Transform2D{1.0F, 0.25F, -0.5F, 1.0F, 0.2F, -0.1F});
+  REQUIRE(linear.gradient.stops[0].color == huxerui::Color::Rgb(0, 0, 0, 0.25F));
+  REQUIRE(linear.style.width == 3.0F);
+  REQUIRE(linear.style.cap == huxerui::StrokeCap::Round);
+  REQUIRE(linear.style.join == huxerui::StrokeJoin::Bevel);
+  REQUIRE(linear.style.dash_pattern == std::vector<float>{3.0F, 1.0F, 2.0F, 3.0F, 1.0F, 2.0F});
+  REQUIRE(linear.style.dash_offset == 10.0F);
+  const auto& radial = std::get<huxerui::StrokeRadialGradientPathCommand>(commands[1]);
+  REQUIRE(radial.gradient_rect == huxerui::Rect{25.0F, 2.0F, 13.0F, 14.0F});
+  REQUIRE(radial.gradient.transform.IsIdentity());
+  REQUIRE(radial.style == linear.style);
+}
+
 TEST_CASE("SvgResourcesRejectUnsupportedAndCyclicGradients") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "resources";

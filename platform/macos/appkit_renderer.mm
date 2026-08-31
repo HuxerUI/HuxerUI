@@ -387,6 +387,14 @@ void ApplyStrokeStyle(CGContextRef context, const StrokeStyle& style) {
   CGContextSetLineDash(context, style.dash_offset, dashes.empty() ? nullptr : dashes.data(), dashes.size());
 }
 
+void ClipStrokePath(CGContextRef context, const Path& path, const StrokeStyle& style) {
+  const CFRef<CGPathRef> native_path(CreatePath(path));
+  ApplyStrokeStyle(context, style);
+  CGContextAddPath(context, native_path.Get());
+  CGContextReplacePathWithStrokedPath(context);
+  CGContextClip(context);
+}
+
 void DrawCGImage(
     CGContextRef context,
     CGImageRef image,
@@ -1548,6 +1556,36 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const StrokePathCommand
   CGContextStrokePath(context);
   CGContextRestoreGState(context);
   CGPathRelease(path);
+}
+
+void AppKitRenderer::RenderCommand(CGContextRef context, const StrokeLinearGradientPathCommand& command) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
+  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty() ||
+      command.style.width <= 0.0F) {
+    return;
+  }
+  CGContextSaveGState(context);
+  ClipStrokePath(context, command.path, command.style);
+  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
+  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(command.gradient.start.x, command.gradient.start.y),
+                              CGPointMake(command.gradient.end.x, command.gradient.end.y),
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
+  CGContextRestoreGState(context);
+}
+
+void AppKitRenderer::RenderCommand(CGContextRef context, const StrokeRadialGradientPathCommand& command) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
+  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty() ||
+      command.style.width <= 0.0F) {
+    return;
+  }
+  const CGPoint center = CGPointMake(command.gradient.center.x, command.gradient.center.y);
+  CGContextSaveGState(context);
+  ClipStrokePath(context, command.path, command.style);
+  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
+  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, command.gradient.radius.width,
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
+  CGContextRestoreGState(context);
 }
 
 void AppKitRenderer::RenderCommand(CGContextRef context, const DrawPathShadowCommand& command) {

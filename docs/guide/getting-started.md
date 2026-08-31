@@ -141,9 +141,9 @@ resources/
 
 The build generates typed resource identifiers in `app_resources.h` and packages framework and application resources together.
 Raster density variants share one logical size; SVG resources are compiled to platform-neutral vector data.
-Static SVG resources may use paths and basic shapes, groups, file-local `defs`/`use` references, one-path `clipPath` geometry, solid or linear/radial gradient fills, solid stroke styles, transforms, and root `preserveAspectRatio` mapping.
-Gradients support local inheritance, object-bounds or user-space coordinates, `gradientTransform`, stop opacity, and pad extension.
-The compiler rejects browser-dependent SVG features such as text, scripts, external styles, gradient strokes, invalid gradient transforms, masks, filters, animation, and external references instead of approximating them differently on each renderer.
+Static SVG resources may use paths and basic shapes, groups, file-local `defs`/`use` references, one-path `clipPath` geometry, solid or linear/radial gradient fills and strokes, transforms, and root `preserveAspectRatio` mapping.
+Gradients support local inheritance, object-bounds or user-space coordinates, `gradientTransform`, stop and paint opacity, and pad extension.
+The compiler rejects browser-dependent SVG features such as text, scripts, external styles, invalid gradient transforms, masks, filters, animation, and external references instead of approximating them differently on each renderer.
 
 ```cpp
 #include <app_resources.h>

@@ -84,6 +84,30 @@ TEST_CASE("VectorAssetsPreserveGradientPathFillsAndResolveTint") {
   REQUIRE(command.gradient.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
 }
 
+TEST_CASE("VectorAssetsPreserveGradientPathStrokesAndResolveTint") {
+  const RadialGradient gradient{
+      .center = {0.5F, 0.5F},
+      .radius = {0.5F, 0.25F},
+      .stops = {{0.0F, Color::Rgb(255, 0, 0, 0.5F)}, {1.0F, Color::Rgb(0, 0, 255)}},
+      .transform = {0.75F, 0.2F, -0.1F, 1.0F, 0.25F, -0.1F},
+  };
+  const StrokeStyle style{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {3.0F, 1.0F}};
+  const VectorAsset vector = VectorAsset::Create({20.0F, 10.0F}, [&](VectorBuilder& builder) {
+    builder.StrokePath(Triangle(), gradient, {0.0F, 0.0F, 40.0F, 20.0F}, style);
+  });
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 40.0F, 20.0F});
+  context.DrawImage(vector, {0.0F, 0.0F, 40.0F, 20.0F}, Color::Rgb(20, 40, 60, 0.5F), 0.5F);
+  context.Finish();
+
+  const auto& command = std::get<StrokeRadialGradientPathCommand>(sequence.Commands()[2]);
+  REQUIRE(command.gradient_rect == Rect{0.0F, 0.0F, 40.0F, 20.0F});
+  REQUIRE(command.gradient.transform == gradient.transform);
+  REQUIRE(command.gradient.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
+  REQUIRE(command.gradient.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
+  REQUIRE(command.style == style);
+}
+
 TEST_CASE("VectorAssetsValidateGeometryAndBuilderBalance") {
   REQUIRE_THROWS_AS(VectorAsset::Create({}, [](VectorBuilder&) {}), std::invalid_argument);
   REQUIRE_THROWS_AS(

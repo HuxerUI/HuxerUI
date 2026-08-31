@@ -1212,6 +1212,32 @@ void WebRenderer::RenderCommand(const StrokePathCommand& command) {
   context_.call<void>("restore");
 }
 
+void WebRenderer::RenderCommand(const StrokeLinearGradientPathCommand& command) {
+  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
+    return;
+  }
+  context_.call<void>("save");
+  context_.call<void>("beginPath");
+  AddPath(context_, command.path);
+  context_.set("strokeStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
+  ApplyStrokeStyle(context_, command.style);
+  context_.call<void>("stroke");
+  context_.call<void>("restore");
+}
+
+void WebRenderer::RenderCommand(const StrokeRadialGradientPathCommand& command) {
+  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
+    return;
+  }
+  context_.call<void>("save");
+  context_.call<void>("beginPath");
+  AddPath(context_, command.path);
+  context_.set("strokeStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
+  ApplyStrokeStyle(context_, command.style);
+  context_.call<void>("stroke");
+  context_.call<void>("restore");
+}
+
 void WebRenderer::RenderCommand(const DrawPathShadowCommand& command) {
   if (command.color.alpha <= 0.0F || command.path.IsEmpty()) {
     return;

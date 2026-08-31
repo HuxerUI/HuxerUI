@@ -62,6 +62,8 @@ private:
   void RenderCommand(CGContextRef context, const FillLinearGradientPathCommand& command);
   void RenderCommand(CGContextRef context, const FillRadialGradientPathCommand& command);
   void RenderCommand(CGContextRef context, const StrokePathCommand& command);
+  void RenderCommand(CGContextRef context, const StrokeLinearGradientPathCommand& command);
+  void RenderCommand(CGContextRef context, const StrokeRadialGradientPathCommand& command);
   void RenderCommand(CGContextRef context, const DrawPathShadowCommand& command);
   void RenderCommand(CGContextRef context, const PushClipCommand& command);
   void RenderCommand(CGContextRef context, const PushPathClipCommand& command);

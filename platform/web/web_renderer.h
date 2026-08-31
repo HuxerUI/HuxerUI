@@ -76,6 +76,8 @@ private:
   void RenderCommand(const FillLinearGradientPathCommand& command);
   void RenderCommand(const FillRadialGradientPathCommand& command);
   void RenderCommand(const StrokePathCommand& command);
+  void RenderCommand(const StrokeLinearGradientPathCommand& command);
+  void RenderCommand(const StrokeRadialGradientPathCommand& command);
   void RenderCommand(const DrawPathShadowCommand& command);
   void RenderCommand(const PushClipCommand& command);
   void RenderCommand(const PushPathClipCommand& command);

@@ -239,6 +239,14 @@ public:
   /// Each contour restarts the dash pattern at dash_offset. For example, a rounded dashed stroke can use
   /// `StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}}`.
   void StrokePath(Path path, Color color, StrokeStyle style);
+  /// Records a linear-gradient path stroke evaluated relative to the path bounds.
+  void StrokePath(Path path, LinearGradient gradient, StrokeStyle style);
+  /// Records a linear-gradient path stroke evaluated relative to gradient_rect.
+  void StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style);
+  /// Records an elliptical radial-gradient path stroke evaluated relative to the path bounds.
+  void StrokePath(Path path, RadialGradient gradient, StrokeStyle style);
+  /// Records an elliptical radial-gradient path stroke evaluated relative to gradient_rect.
+  void StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style);
   /// Restricts subsequent vector commands to the filled area of path.
   void PushClip(Path path, PathFillRule fill_rule = PathFillRule::NonZero);
   /// Restores the clip active before the matching PushClip().

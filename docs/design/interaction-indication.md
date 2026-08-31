@@ -21,7 +21,7 @@ The shared gesture-recognition and competition model is specified separately in 
 - The design does not introduce an `InteractionSource`, observer registry, callback subscription convention, or indication factory hierarchy.
 - Arbitrary Views and function painters are not Theme fill values.
 - `ExternalTexture` is not a Theme fill because it has a producer lifetime and independent frame scheduling.
-- Focus-ring brushes and gradient strokes remain deferred until the shared stroke commands gain that capability deliberately.
+- Gradient focus rings and border modifiers remain deferred even though Canvas and Vector path strokes support gradients.
 - InteractionState does not add a generic dragged flag; Drag lifecycle is reported by its typed events and consumers retain any operation-specific state.
 - State-driven foreground replacement remains component-specific because a node cannot reliably recolor arbitrary descendant content.
 - Unbounded effects remain custom `NodeExtension` behavior; built-in ripple is clipped to its indication geometry.
@@ -316,7 +316,7 @@ An absent or transparent `Background` combined with `Border` produces a pure out
 
 A zero-width border explicitly suppresses an inherited or normal border.
 
-Borders remain color-based until the shared paint contract deliberately supports gradient strokes.
+Borders remain color-based; supporting gradient path strokes does not implicitly widen the Border modifier or Theme contract.
 
 ## Indication composition
 

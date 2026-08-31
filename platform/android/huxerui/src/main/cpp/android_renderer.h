@@ -54,6 +54,8 @@ private:
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const FillLinearGradientPathCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const FillRadialGradientPathCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const StrokePathCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const StrokeLinearGradientPathCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const StrokeRadialGradientPathCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawPathShadowCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PushClipCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const PushPathClipCommand& command);
@@ -78,6 +80,8 @@ private:
   jmethodID fill_linear_gradient_path_ = nullptr;
   jmethodID fill_radial_gradient_path_ = nullptr;
   jmethodID stroke_path_ = nullptr;
+  jmethodID stroke_linear_gradient_path_ = nullptr;
+  jmethodID stroke_radial_gradient_path_ = nullptr;
   jmethodID draw_path_shadow_ = nullptr;
   jmethodID push_clip_ = nullptr;
   jmethodID push_path_clip_ = nullptr;

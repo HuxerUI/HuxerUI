@@ -101,6 +101,35 @@ std::vector<GradientStop> ReadGradientStops(VectorReader& reader) {
   return stops;
 }
 
+StrokeStyle ReadStrokeStyle(VectorReader& reader) {
+  const float width = reader.F32();
+  const std::uint8_t cap_value = reader.U8();
+  const std::uint8_t join_value = reader.U8();
+  const float miter_limit = reader.F32();
+  if (cap_value > static_cast<std::uint8_t>(StrokeCap::Square) ||
+      join_value > static_cast<std::uint8_t>(StrokeJoin::Bevel)) {
+    throw std::logic_error("HuxerUI vector payload contains invalid stroke configuration");
+  }
+  const std::uint32_t dash_count = reader.U32();
+  if (reader.RemainingBytes() < sizeof(float) ||
+      dash_count > (reader.RemainingBytes() - sizeof(float)) / sizeof(float)) {
+    throw std::logic_error("HuxerUI vector payload is truncated");
+  }
+  std::vector<float> dash_pattern;
+  dash_pattern.reserve(dash_count);
+  for (std::uint32_t index = 0; index < dash_count; ++index) {
+    dash_pattern.push_back(reader.F32());
+  }
+  return {
+      .width = width,
+      .cap = static_cast<StrokeCap>(cap_value),
+      .join = static_cast<StrokeJoin>(join_value),
+      .miter_limit = miter_limit,
+      .dash_pattern = std::move(dash_pattern),
+      .dash_offset = reader.F32(),
+  };
+}
+
 Path ReadPath(VectorReader& reader) {
   Path path;
   const std::uint32_t count = reader.U32();
@@ -202,6 +231,22 @@ void VectorBuilder::StrokePath(Path path, Color color, StrokeStyle style) {
   impl_->context.StrokePath(std::move(path), color, std::move(style));
 }
 
+void VectorBuilder::StrokePath(Path path, LinearGradient gradient, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), std::move(gradient), std::move(style));
+}
+
+void VectorBuilder::StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
+}
+
+void VectorBuilder::StrokePath(Path path, RadialGradient gradient, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), std::move(gradient), std::move(style));
+}
+
+void VectorBuilder::StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
+}
+
 void VectorBuilder::PushClip(Path path, PathFillRule fill_rule) {
   impl_->context.PushPathClip(std::move(path), fill_rule);
 }
@@ -289,34 +334,8 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
         }
         case 2: {
           const Color color = ReadColor(reader);
-          const float width = reader.F32();
-          const std::uint8_t cap_value = reader.U8();
-          const std::uint8_t join_value = reader.U8();
-          const float miter_limit = reader.F32();
-          if (cap_value > static_cast<std::uint8_t>(StrokeCap::Square) ||
-              join_value > static_cast<std::uint8_t>(StrokeJoin::Bevel)) {
-            throw std::logic_error("HuxerUI vector payload contains invalid stroke configuration");
-          }
-          const std::uint32_t dash_count = reader.U32();
-          if (reader.RemainingBytes() < sizeof(float) ||
-              dash_count > (reader.RemainingBytes() - sizeof(float)) / sizeof(float)) {
-            throw std::logic_error("HuxerUI vector payload is truncated");
-          }
-          std::vector<float> dash_pattern;
-          dash_pattern.reserve(dash_count);
-          for (std::uint32_t dash_index = 0; dash_index < dash_count; ++dash_index) {
-            dash_pattern.push_back(reader.F32());
-          }
-          const float dash_offset = reader.F32();
-          builder.StrokePath(ReadPath(reader), color,
-                             StrokeStyle{
-                                 .width = width,
-                                 .cap = static_cast<StrokeCap>(cap_value),
-                                 .join = static_cast<StrokeJoin>(join_value),
-                                 .miter_limit = miter_limit,
-                                 .dash_pattern = std::move(dash_pattern),
-                                 .dash_offset = dash_offset,
-                             });
+          StrokeStyle style = ReadStrokeStyle(reader);
+          builder.StrokePath(ReadPath(reader), color, std::move(style));
           break;
         }
         case 3: {
@@ -351,6 +370,26 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
           const Transform2D transform = ReadTransform(reader);
           RadialGradient gradient{center, radius, ReadGradientStops(reader), transform};
           builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
+          break;
+        }
+        case 9: {
+          const Rect gradient_rect = ReadRect(reader);
+          const Point start = ReadPoint(reader);
+          const Point end = ReadPoint(reader);
+          const Transform2D transform = ReadTransform(reader);
+          LinearGradient gradient{start, end, ReadGradientStops(reader), transform};
+          StrokeStyle style = ReadStrokeStyle(reader);
+          builder.StrokePath(ReadPath(reader), std::move(gradient), gradient_rect, std::move(style));
+          break;
+        }
+        case 10: {
+          const Rect gradient_rect = ReadRect(reader);
+          const Point center = ReadPoint(reader);
+          const Size radius{reader.F32(), reader.F32()};
+          const Transform2D transform = ReadTransform(reader);
+          RadialGradient gradient{center, radius, ReadGradientStops(reader), transform};
+          StrokeStyle style = ReadStrokeStyle(reader);
+          builder.StrokePath(ReadPath(reader), std::move(gradient), gradient_rect, std::move(style));
           break;
         }
         default:

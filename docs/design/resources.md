@@ -415,20 +415,20 @@ Packaged SVG files remain ImageResource values and live under `resources/images`
 The resource generator validates them and compiles supported geometry into the versioned `HUXVEC` payload.
 Runtime detects that payload signature when it first resolves the ImageResource; ResourceId does not encode the storage format and there is no public ImageKind.
 
-The SVG compiler supports `svg`, `g`, `defs`, `use`, `clipPath`, `linearGradient`, `radialGradient`, `stop`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, and `polygon`; view boxes, intrinsic sizes, and root `preserveAspectRatio`; solid and gradient fills; solid strokes; fill and clip rules; stroke widths, caps, joins, miter limits, dash arrays, and dash offsets; element transforms; and path arcs converted to cubic curves.
+The SVG compiler supports `svg`, `g`, `defs`, `use`, `clipPath`, `linearGradient`, `radialGradient`, `stop`, `path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, and `polygon`; view boxes, intrinsic sizes, and root `preserveAspectRatio`; solid and gradient fills and strokes; fill and clip rules; stroke widths, caps, joins, miter limits, dash arrays, and dash offsets; element transforms; and path arcs converted to cubic curves.
 `defs` establishes file-local definitions without drawing them, while `use` expands `href` or `xlink:href` references during compilation with cycle and missing-reference validation.
 References never survive into HUXVEC and cannot target another file or URL.
 `clipPath` initially accepts one drawable `userSpaceOnUse` Path, including multiple contours declared by that Path; structures requiring a union of independently filled children are rejected rather than changed into intersecting clips.
 Root viewport mapping supports `none` and the standard aligned `meet` or `slice` forms independently from the later `ImageFit` mapping of the complete VectorAsset.
 The compiler supports inline and presentation styles with SVG precedence, inherited `color` and `currentColor`, static display and visibility, exact opacity values zero and one, hexadecimal colors, the basic CSS color keywords, comma-separated `rgb()` and `rgba()` colors, and absolute CSS lengths based on 96 DPI.
 Percentages outside gradient coordinates and stop offsets, font-relative lengths, external styles, and presentation semantics that cannot be resolved without a browser remain unsupported.
-HUXVEC version 1 carries solid and gradient Path fills, complete stroke data, clips, and transforms.
+HUXVEC version 1 carries solid and gradient Path fills and strokes, complete stroke styles, clips, and transforms.
 Every gradient operation stores its complete affine matrix, including the identity default.
-Gradient definitions support local `href` inheritance, `objectBoundingBox` and `userSpaceOnUse` coordinate units, `gradientTransform`, ordered stops, stop opacity, fill opacity, and pad extension.
+Gradient definitions support local `href` inheritance, `objectBoundingBox` and `userSpaceOnUse` coordinate units, `gradientTransform`, ordered stops, stop opacity, fill or stroke opacity, and pad extension.
 An explicitly declared `gradientTransform` replaces an inherited transform, matching other locally overridden gradient attributes.
 Object-bounds transforms already use normalized gradient coordinates; user-space transforms are conjugated through the gradient coordinate rectangle before being stored in the normalized HuxerUI gradient.
-One-stop gradients normalize to a constant two-stop fill, while repeated offsets retain hard color transitions.
-The compiler rejects gradient strokes, non-finite or singular gradient transforms, repeat or reflect extension, and non-concentric radial focal geometry instead of approximating them differently on each renderer.
+One-stop gradients normalize to a constant two-stop gradient, while repeated offsets retain hard color transitions.
+The compiler rejects non-finite or singular gradient transforms, repeat or reflect extension, and non-concentric radial focal geometry instead of approximating them differently on each renderer.
 It also rejects scripts, external entities, text rendering, embedded bitmaps, CSS stylesheets, filters, masks, animation, unsupported units, fractional group opacity, and other unsupported presentation semantics with a source-file diagnostic.
 The parser builds one compiler-owned document tree, indexes unique IDs, resolves paint-server references during semantic traversal, and emits HUXVEC fill, stroke, clip, and transform operations directly.
 It does not build a second resolved tree, expose an SVG DOM, or add an SVG interpreter to Runtime.

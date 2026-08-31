@@ -125,6 +125,24 @@ StrokeStyle NormalizeStrokeStyle(StrokeStyle style) {
   return style;
 }
 
+Rect StrokeBounds(const Path& path, const StrokeStyle& style) {
+  const Rect bounds = path.Bounds();
+  float outset_multiplier = 1.0F;
+  if (style.join == StrokeJoin::Miter) {
+    outset_multiplier = std::max(outset_multiplier, style.miter_limit);
+  }
+  if (style.cap == StrokeCap::Square) {
+    outset_multiplier = std::max(outset_multiplier, 1.41421356237F);
+  }
+  const float outset = style.width * 0.5F * outset_multiplier;
+  return {
+      bounds.x - outset,
+      bounds.y - outset,
+      bounds.width + outset * 2.0F,
+      bounds.height + outset * 2.0F,
+  };
+}
+
 void RequireCornerRadii(CornerRadii corner_radii) {
   detail::ValidateCornerRadii(corner_radii, "HuxerUI paint corner radii must be finite and non-negative");
 }
@@ -469,6 +487,18 @@ void PaintContext::DrawImageRect(
             FillPath(value.path, std::move(gradient), value.gradient_rect, value.fill_rule);
           } else if constexpr (std::same_as<Command, StrokePathCommand>) {
             StrokePath(value.path, resolve_color(value.color), value.style);
+          } else if constexpr (std::same_as<Command, StrokeLinearGradientPathCommand>) {
+            LinearGradient gradient = value.gradient;
+            for (GradientStop& stop : gradient.stops) {
+              stop.color = resolve_color(stop.color);
+            }
+            StrokePath(value.path, std::move(gradient), value.gradient_rect, value.style);
+          } else if constexpr (std::same_as<Command, StrokeRadialGradientPathCommand>) {
+            RadialGradient gradient = value.gradient;
+            for (GradientStop& stop : gradient.stops) {
+              stop.color = resolve_color(stop.color);
+            }
+            StrokePath(value.path, std::move(gradient), value.gradient_rect, value.style);
           } else if constexpr (std::same_as<Command, PushPathClipCommand>) {
             PushPathClip(value.path, value.fill_rule);
           } else if constexpr (std::same_as<Command, PopClipCommand>) {
@@ -677,32 +707,52 @@ void PaintContext::StrokePath(Path path, Color color, StrokeStyle style) {
   RequireOpen();
   RequireColor(color);
   style = NormalizeStrokeStyle(std::move(style));
-  sequence_.commands_.emplace_back(
-      StrokePathCommand{
-          std::move(path),
-          color,
-          std::move(style),
-      }
-  );
+  sequence_.commands_.emplace_back(StrokePathCommand{std::move(path), color, std::move(style)});
   const auto& command = std::get<StrokePathCommand>(sequence_.commands_.back());
-  if (command.path.IsEmpty() || command.style.width <= 0.0F) {
+  if (command.path.IsEmpty() || command.style.width == 0.0F) {
     return;
   }
-  const Rect bounds = command.path.Bounds();
-  float outset_multiplier = 1.0F;
-  if (command.style.join == StrokeJoin::Miter) {
-    outset_multiplier = std::max(outset_multiplier, command.style.miter_limit);
+  Include(StrokeBounds(command.path, command.style));
+}
+
+void PaintContext::StrokePath(Path path, LinearGradient gradient, StrokeStyle style) {
+  const Rect gradient_rect = path.Bounds();
+  StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
+}
+
+void PaintContext::StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style) {
+  RequireOpen();
+  detail::ValidateGradient(gradient);
+  RequireRect(gradient_rect);
+  style = NormalizeStrokeStyle(std::move(style));
+  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F || style.width == 0.0F) {
+    return;
   }
-  if (command.style.cap == StrokeCap::Square) {
-    outset_multiplier = std::max(outset_multiplier, 1.41421356237F);
+  const Rect bounds = StrokeBounds(path, style);
+  sequence_.commands_.emplace_back(
+      StrokeLinearGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, std::move(style)}
+  );
+  Include(bounds);
+}
+
+void PaintContext::StrokePath(Path path, RadialGradient gradient, StrokeStyle style) {
+  const Rect gradient_rect = path.Bounds();
+  StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
+}
+
+void PaintContext::StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style) {
+  RequireOpen();
+  detail::ValidateGradient(gradient);
+  RequireRect(gradient_rect);
+  style = NormalizeStrokeStyle(std::move(style));
+  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F || style.width == 0.0F) {
+    return;
   }
-  const float outset = command.style.width * 0.5F * outset_multiplier;
-  Include({
-      bounds.x - outset,
-      bounds.y - outset,
-      bounds.width + outset * 2.0F,
-      bounds.height + outset * 2.0F,
-  });
+  const Rect bounds = StrokeBounds(path, style);
+  sequence_.commands_.emplace_back(
+      StrokeRadialGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, std::move(style)}
+  );
+  Include(bounds);
 }
 
 void PaintContext::DrawPathShadow(Path path, Color color, Point offset, float blur_radius, PathFillRule fill_rule) {

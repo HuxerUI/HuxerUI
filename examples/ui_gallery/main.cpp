@@ -227,7 +227,12 @@ void PaintPathStudy(PaintContext& paint, Size size, const ColorScheme& colors) {
   );
   paint.PopTransform();
   paint.PopClip();
-  paint.StrokePath(shape, colors.on_primary,
+  paint.StrokePath(shape,
+                   LinearGradient{
+                       .start = {0.0F, 0.0F},
+                       .end = {1.0F, 0.0F},
+                       .stops = {{0.0F, colors.on_primary}, {1.0F, colors.secondary_container}},
+                   },
                    StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
 }
 

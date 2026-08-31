@@ -1192,6 +1192,38 @@ private:
     cairo_stroke(context_);
   }
 
+  void DrawCommand(const StrokeLinearGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
+      return;
+    }
+    cairo_pattern_t* pattern = cairo_pattern_create_linear(
+        command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y
+    );
+    AddStops(pattern, command.gradient.stops);
+    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
+    cairo_set_source(context_, pattern);
+    AppendPath(context_, command.path);
+    ApplyStrokeStyle(context_, command.style);
+    cairo_stroke(context_);
+    cairo_pattern_destroy(pattern);
+  }
+
+  void DrawCommand(const StrokeRadialGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
+      return;
+    }
+    cairo_pattern_t* pattern = cairo_pattern_create_radial(command.gradient.center.x, command.gradient.center.y, 0.0,
+                                                           command.gradient.center.x, command.gradient.center.y,
+                                                           command.gradient.radius.width);
+    AddStops(pattern, command.gradient.stops);
+    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
+    cairo_set_source(context_, pattern);
+    AppendPath(context_, command.path);
+    ApplyStrokeStyle(context_, command.style);
+    cairo_stroke(context_);
+    cairo_pattern_destroy(pattern);
+  }
+
   void DrawCommand(const DrawPathShadowCommand& command) {
     if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
       return;

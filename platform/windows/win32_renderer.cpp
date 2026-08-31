@@ -1950,6 +1950,32 @@ struct Win32Renderer::State {
     device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.style.width, stroke_style.Get());
   }
 
+  void RenderCommand(const StrokeLinearGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
+      return;
+    }
+    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
+    const ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
+    const ComPtr<ID2D1LinearGradientBrush> gradient =
+        CreateLinearGradientBrush(command.gradient_rect, command.gradient);
+    if (geometry && stroke_style && gradient) {
+      device_context_->DrawGeometry(geometry.Get(), gradient.Get(), command.style.width, stroke_style.Get());
+    }
+  }
+
+  void RenderCommand(const StrokeRadialGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
+      return;
+    }
+    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
+    const ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
+    const ComPtr<ID2D1RadialGradientBrush> gradient =
+        CreateRadialGradientBrush(command.gradient_rect, command.gradient);
+    if (geometry && stroke_style && gradient) {
+      device_context_->DrawGeometry(geometry.Get(), gradient.Get(), command.style.width, stroke_style.Get());
+    }
+  }
+
   void RenderCommand(const DrawPathShadowCommand& command) {
     if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
       return;

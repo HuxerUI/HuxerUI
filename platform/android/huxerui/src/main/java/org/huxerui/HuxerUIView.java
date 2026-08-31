@@ -1658,15 +1658,47 @@ public final class HuxerUIView extends ViewGroup {
         gradient.setLocalMatrix(transform);
     }
 
-    private void strokePath(
-            Canvas canvas, float[] elements, int color, float width, int cap, int join, float miterLimit,
-            float[] dashPattern, float dashOffset) {
+    private void strokePath(Canvas canvas, float[] elements, int color, float width, int cap, int join,
+            float miterLimit, float[] dashPattern, float dashOffset) {
         if (width <= 0.0F) {
             return;
         }
         Path drawPath = preparePath(elements, 0);
         prepareStrokePaint(color, width, cap, join, miterLimit, dashPattern, dashOffset);
         canvas.drawPath(drawPath, paint);
+    }
+
+    private void strokeLinearGradientPath(Canvas canvas, float[] elements, float startX, float startY, float endX,
+            float endY, float m11, float m12, float m21, float m22, float translateX, float translateY, float[] stops,
+            int[] colors, float width, int cap, int join, float miterLimit, float[] dashPattern, float dashOffset) {
+        if (width <= 0.0F || stops.length == 0 || stops.length != colors.length) {
+            return;
+        }
+        Path drawPath = preparePath(elements, 0);
+        prepareStrokePaint(0xFFFFFFFF, width, cap, join, miterLimit, dashPattern, dashOffset);
+        LinearGradient gradient = new LinearGradient(startX, startY, endX, endY, colors, stops,
+                Shader.TileMode.CLAMP);
+        applyGradientTransform(gradient, m11, m12, m21, m22, translateX, translateY);
+        paint.setShader(gradient);
+        canvas.drawPath(drawPath, paint);
+        paint.setShader(null);
+    }
+
+    private void strokeRadialGradientPath(Canvas canvas, float[] elements, float centerX, float centerY, float radiusX,
+            float radiusY, float m11, float m12, float m21, float m22, float translateX, float translateY,
+            float[] stops, int[] colors, float width, int cap, int join, float miterLimit, float[] dashPattern,
+            float dashOffset) {
+        if (width <= 0.0F || radiusX <= 0.0F || radiusY <= 0.0F || stops.length == 0 ||
+                stops.length != colors.length) {
+            return;
+        }
+        Path drawPath = preparePath(elements, 0);
+        prepareStrokePaint(0xFFFFFFFF, width, cap, join, miterLimit, dashPattern, dashOffset);
+        RadialGradient gradient = new RadialGradient(centerX, centerY, radiusX, colors, stops, Shader.TileMode.CLAMP);
+        applyGradientTransform(gradient, m11, m12, m21, m22, translateX, translateY);
+        paint.setShader(gradient);
+        canvas.drawPath(drawPath, paint);
+        paint.setShader(null);
     }
 
     private void prepareStrokePaint(int color, float width, int cap, int join, float miterLimit, float[] dashPattern,
