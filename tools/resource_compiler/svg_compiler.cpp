@@ -497,6 +497,30 @@ bool IsFinite(Transform transform) {
          std::isfinite(transform.m22) && std::isfinite(transform.tx) && std::isfinite(transform.ty);
 }
 
+bool IsIdentity(Transform transform) {
+  return transform.m11 == 1.0F && transform.m12 == 0.0F && transform.m21 == 0.0F && transform.m22 == 1.0F &&
+         transform.tx == 0.0F && transform.ty == 0.0F;
+}
+
+std::optional<Transform> Inverse(Transform transform) {
+  const float determinant = transform.m11 * transform.m22 - transform.m12 * transform.m21;
+  if (!std::isfinite(determinant) || std::abs(determinant) <= 0.000001F) {
+    return std::nullopt;
+  }
+  const float inverse_m11 = transform.m22 / determinant;
+  const float inverse_m12 = -transform.m12 / determinant;
+  const float inverse_m21 = -transform.m21 / determinant;
+  const float inverse_m22 = transform.m11 / determinant;
+  return Transform{
+      inverse_m11,
+      inverse_m12,
+      inverse_m21,
+      inverse_m22,
+      -(inverse_m11 * transform.tx + inverse_m21 * transform.ty),
+      -(inverse_m12 * transform.tx + inverse_m22 * transform.ty),
+  };
+}
+
 Transform ParseTransform(std::string_view value) {
   Transform result;
   std::size_t offset = 0;
@@ -1282,17 +1306,21 @@ Path ShapePath(std::string_view name, const std::map<std::string, std::string>& 
   return {};
 }
 
-void WriteTransform(Writer& writer, Transform transform) {
+void WriteTransformValue(Writer& writer, Transform transform) {
   if (!IsFinite(transform)) {
     throw std::runtime_error("SVG transform must be finite");
   }
-  writer.U8(5);
   writer.F32(transform.m11);
   writer.F32(transform.m12);
   writer.F32(transform.m21);
   writer.F32(transform.m22);
   writer.F32(transform.tx);
   writer.F32(transform.ty);
+}
+
+void WriteTransform(Writer& writer, Transform transform) {
+  writer.U8(5);
+  WriteTransformValue(writer, transform);
 }
 
 Point TransformPoint(Transform transform, Point point) {
@@ -1486,6 +1514,7 @@ struct ResolvedGradient {
   Rect coordinate_rect;
   Point first;
   Point second;
+  Transform transform;
   std::vector<std::pair<float, Color>> stops;
 };
 
@@ -1499,6 +1528,7 @@ struct GradientDefinition {
   std::optional<GradientLength> focal_x;
   std::optional<GradientLength> focal_y;
   std::optional<GradientLength> focal_radius;
+  Transform transform;
   std::vector<std::pair<float, Color>> stops;
 };
 
@@ -1533,13 +1563,17 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
       for (auto& stop : gradient.stops) {
         stop.second.alpha *= style.fill_opacity;
       }
-      writer.U8(gradient.radial ? 8 : 7);
+      const bool transformed = !IsIdentity(gradient.transform);
+      writer.U8(gradient.radial ? (transformed ? 10 : 8) : (transformed ? 9 : 7));
       writer.U8(style.fill_rule);
       writer.RectValue(gradient.coordinate_rect);
       writer.F32(gradient.first.x);
       writer.F32(gradient.first.y);
       writer.F32(gradient.second.x);
       writer.F32(gradient.second.y);
+      if (transformed) {
+        WriteTransformValue(writer, gradient.transform);
+      }
       WriteGradientStops(writer, gradient.stops);
       writer.PathValue(path);
       ++operation_count;
@@ -1827,8 +1861,14 @@ CompiledDocument EmitDocument(SvgDocument document) {
     }
     gradient_references.pop_back();
 
-    if (node.attributes.contains("gradientTransform") || node.attributes.contains("transform")) {
-      throw std::runtime_error("SVG gradientTransform is not supported");
+    if (const auto transform = node.attributes.find("gradientTransform"); transform != node.attributes.end()) {
+      definition.transform = ParseTransform(transform->second);
+      if (!Inverse(definition.transform).has_value()) {
+        throw std::runtime_error("SVG gradientTransform must be finite and invertible");
+      }
+    }
+    if (node.attributes.contains("transform")) {
+      throw std::runtime_error("SVG gradients use gradientTransform instead of transform");
     }
     if (const auto spread = node.attributes.find("spreadMethod");
         spread != node.attributes.end() && Trim(spread->second) != "pad") {
@@ -1914,6 +1954,25 @@ CompiledDocument EmitDocument(SvgDocument document) {
     if (coordinate_rect.width <= 0.0F || coordinate_rect.height <= 0.0F) {
       return ResolvedGradient{definition.radial, coordinate_rect};
     }
+    Transform transform = definition.transform;
+    if (!definition.object_bounding_box) {
+      const Transform coordinate_mapping{
+          coordinate_rect.width,
+          0.0F,
+          0.0F,
+          coordinate_rect.height,
+          coordinate_rect.x,
+          coordinate_rect.y,
+      };
+      const std::optional<Transform> inverse_mapping = Inverse(coordinate_mapping);
+      if (!inverse_mapping.has_value()) {
+        throw std::runtime_error("SVG gradient coordinate rectangle must be invertible");
+      }
+      transform = Compose(*inverse_mapping, Compose(transform, coordinate_mapping));
+    }
+    if (!IsFinite(transform) || !Inverse(transform).has_value()) {
+      throw std::runtime_error("SVG gradientTransform must remain finite and invertible after coordinate mapping");
+    }
     const Point first{
         ResolveGradientCoordinate(definition.first_x, coordinate_rect.x, coordinate_rect.width,
                                   definition.object_bounding_box),
@@ -1952,7 +2011,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
                                     definition.object_bounding_box),
       };
     }
-    return ResolvedGradient{definition.radial, coordinate_rect, first, second, definition.stops};
+    return ResolvedGradient{definition.radial, coordinate_rect, first, second, transform, definition.stops};
   };
 
   for (std::size_t node_index = 0; node_index < document.nodes.size(); ++node_index) {

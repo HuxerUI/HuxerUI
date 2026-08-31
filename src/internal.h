@@ -1439,12 +1439,8 @@ Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 void ResolvePresentationTree(MountedNode& node);
-void ValidateColor(Color color, const char* message);
-void ValidateCornerRadii(CornerRadii radii, const char* message);
 void ValidateBorder(const Border& border);
 VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale);
-void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill, CornerRadii corner_radii,
-                     float opacity = 1.0F);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);
 DamageRegion ComputeDamageRegion(
     const RenderNode* root,

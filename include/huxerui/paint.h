@@ -57,7 +57,8 @@ struct GradientStop {
 /// Describes a linear gradient in normalized destination coordinates.
 ///
 /// `(0, 0)` is the destination's top-left corner and `(1, 1)` is its bottom-right corner. Finite endpoints may extend
-/// beyond those bounds.
+/// beyond those bounds. The destination mapping applies after transform, so transform changes only the gradient's
+/// sampling coordinate system rather than the painted geometry.
 struct LinearGradient {
   /// Normalized gradient start point.
   Point start{0.0F, 0.5F};
@@ -65,11 +66,17 @@ struct LinearGradient {
   Point end{1.0F, 0.5F};
   /// Ordered colors sampled along the start-to-end axis.
   std::vector<GradientStop> stops;
+  /// Affine transform applied in normalized gradient coordinates before mapping into the destination.
+  /// The identity default leaves the declared gradient geometry unchanged.
+  Transform2D transform;
 
   bool operator==(const LinearGradient&) const = default;
 };
 
 /// Describes an elliptical radial gradient in normalized destination coordinates.
+///
+/// The destination mapping applies after transform, so rotation, scaling, skew, and translation affect only the
+/// gradient's sampling coordinate system rather than the painted geometry.
 struct RadialGradient {
   /// Normalized center point within the destination.
   Point center{0.5F, 0.5F};
@@ -77,6 +84,9 @@ struct RadialGradient {
   Size radius{0.5F, 0.5F};
   /// Ordered colors sampled from the center to the outer ellipse.
   std::vector<GradientStop> stops;
+  /// Affine transform applied in normalized gradient coordinates before mapping into the destination.
+  /// The identity default leaves the declared gradient geometry unchanged.
+  Transform2D transform;
 
   bool operator==(const RadialGradient&) const = default;
 };

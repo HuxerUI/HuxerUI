@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "path_internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
@@ -54,6 +55,11 @@ D2D1_COLOR_F ToD2DColor(Color color) {
 
 D2D1_RECT_F ToD2DRect(Rect rect) {
   return D2D1::RectF(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height);
+}
+
+D2D1_MATRIX_3X2_F ToD2DTransform(Transform2D transform) {
+  return D2D1::Matrix3x2F(transform.m11, transform.m12, transform.m21, transform.m22, transform.translate_x,
+                         transform.translate_y);
 }
 
 D2D1_CAP_STYLE ToD2DCap(StrokeCap cap) {
@@ -1456,15 +1462,16 @@ struct Win32Renderer::State {
     if (!stops) {
       return {};
     }
-    const auto point = [rect](Point position) {
-      return D2D1::Point2F(rect.x + position.x * rect.width, rect.y + position.y * rect.height);
-    };
     ComPtr<ID2D1LinearGradientBrush> gradient;
     if (FAILED(device_context_->CreateLinearGradientBrush(
-            D2D1::LinearGradientBrushProperties(point(value.start), point(value.end)), stops.Get(),
+            D2D1::LinearGradientBrushProperties(
+                D2D1::Point2F(value.start.x, value.start.y), D2D1::Point2F(value.end.x, value.end.y)
+            ),
+            stops.Get(),
             gradient.GetAddressOf()))) {
       return {};
     }
+    gradient->SetTransform(ToD2DTransform(ResolveGradientTransform(rect, value)));
     return gradient;
   }
 
@@ -1473,15 +1480,15 @@ struct Win32Renderer::State {
     if (!stops) {
       return {};
     }
-    const D2D1_POINT_2F center = D2D1::Point2F(rect.x + value.center.x * rect.width,
-                                               rect.y + value.center.y * rect.height);
     ComPtr<ID2D1RadialGradientBrush> gradient;
     if (FAILED(device_context_->CreateRadialGradientBrush(
-            D2D1::RadialGradientBrushProperties(center, D2D1::Point2F(), value.radius.width * rect.width,
-                                                value.radius.height * rect.height),
+            D2D1::RadialGradientBrushProperties(
+                D2D1::Point2F(value.center.x, value.center.y), D2D1::Point2F(), value.radius.width, value.radius.width
+            ),
             stops.Get(), gradient.GetAddressOf()))) {
       return {};
     }
+    gradient->SetTransform(ToD2DTransform(ResolveGradientTransform(rect, value)));
     return gradient;
   }
 

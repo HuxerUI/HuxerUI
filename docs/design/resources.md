@@ -423,9 +423,12 @@ Root viewport mapping supports `none` and the standard aligned `meet` or `slice`
 The compiler supports inline and presentation styles with SVG precedence, inherited `color` and `currentColor`, static display and visibility, exact opacity values zero and one, hexadecimal colors, the basic CSS color keywords, comma-separated `rgb()` and `rgba()` colors, and absolute CSS lengths based on 96 DPI.
 Percentages outside gradient coordinates and stop offsets, font-relative lengths, external styles, and presentation semantics that cannot be resolved without a browser remain unsupported.
 HUXVEC version 1 carries solid and gradient Path fills, complete stroke data, clips, and transforms.
-Gradient definitions support local `href` inheritance, `objectBoundingBox` and `userSpaceOnUse` coordinate units, ordered stops, stop opacity, fill opacity, and pad extension.
+Its original identity-gradient operations retain their byte layout, while distinct transformed-gradient operations append one affine matrix without changing the format version.
+Gradient definitions support local `href` inheritance, `objectBoundingBox` and `userSpaceOnUse` coordinate units, `gradientTransform`, ordered stops, stop opacity, fill opacity, and pad extension.
+An explicitly declared `gradientTransform` replaces an inherited transform, matching other locally overridden gradient attributes.
+Object-bounds transforms already use normalized gradient coordinates; user-space transforms are conjugated through the gradient coordinate rectangle before being stored in the normalized HuxerUI gradient.
 One-stop gradients normalize to a constant two-stop fill, while repeated offsets retain hard color transitions.
-The compiler rejects gradient strokes, transforms, repeat or reflect extension, and non-concentric radial focal geometry instead of approximating them differently on each renderer.
+The compiler rejects gradient strokes, non-finite or singular gradient transforms, repeat or reflect extension, and non-concentric radial focal geometry instead of approximating them differently on each renderer.
 It also rejects scripts, external entities, text rendering, embedded bitmaps, CSS stylesheets, filters, masks, animation, unsupported units, fractional group opacity, and other unsupported presentation semantics with a source-file diagnostic.
 The parser builds one compiler-owned document tree, indexes unique IDs, resolves paint-server references during semantic traversal, and emits HUXVEC fill, stroke, clip, and transform operations directly.
 It does not build a second resolved tree, expose an SVG DOM, or add an SVG interpreter to Runtime.

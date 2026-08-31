@@ -83,6 +83,10 @@ Rect ReadRect(VectorReader& reader) {
   return {reader.F32(), reader.F32(), reader.F32(), reader.F32()};
 }
 
+Transform2D ReadTransform(VectorReader& reader) {
+  return {reader.F32(), reader.F32(), reader.F32(), reader.F32(), reader.F32(), reader.F32()};
+}
+
 std::vector<GradientStop> ReadGradientStops(VectorReader& reader) {
   const std::uint32_t count = reader.U32();
   constexpr std::size_t bytes_per_stop = sizeof(float) * 5;
@@ -340,6 +344,26 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
           const PathFillRule fill_rule = ReadFillRule(reader);
           const Rect gradient_rect = ReadRect(reader);
           RadialGradient gradient{ReadPoint(reader), {reader.F32(), reader.F32()}, ReadGradientStops(reader)};
+          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
+          break;
+        }
+        case 9: {
+          const PathFillRule fill_rule = ReadFillRule(reader);
+          const Rect gradient_rect = ReadRect(reader);
+          const Point start = ReadPoint(reader);
+          const Point end = ReadPoint(reader);
+          const Transform2D transform = ReadTransform(reader);
+          LinearGradient gradient{start, end, ReadGradientStops(reader), transform};
+          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
+          break;
+        }
+        case 10: {
+          const PathFillRule fill_rule = ReadFillRule(reader);
+          const Rect gradient_rect = ReadRect(reader);
+          const Point center = ReadPoint(reader);
+          const Size radius{reader.F32(), reader.F32()};
+          const Transform2D transform = ReadTransform(reader);
+          RadialGradient gradient{center, radius, ReadGradientStops(reader), transform};
           builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
           break;
         }

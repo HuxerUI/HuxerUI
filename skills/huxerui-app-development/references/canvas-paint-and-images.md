@@ -4,7 +4,7 @@
 
 `Color` stores normalized red, green, blue, and alpha channels. Prefer `Color::Rgb(...)`, `Color::Transparent()`, `Color::Black()`, and `Color::White()` instead of mixing byte and normalized channel conventions.
 
-`VisualFill` accepts a `Color`, `LinearGradient`, `RadialGradient`, or `ImageFill`. Gradient start, end, center, and radius values are normalized to the painted bounds; stops use offsets from `0.0F` to `1.0F`. `ImageFill` adds fit, alignment, sampling, optional tint, and opacity to an `ImageVariant`. The same fill vocabulary is used by `Background` and interaction indication layers.
+`VisualFill` accepts a `Color`, `LinearGradient`, `RadialGradient`, or `ImageFill`. Gradient start, end, center, and radius values are normalized to the painted bounds; stops use offsets from `0.0F` to `1.0F`. Set the gradient's `transform` to rotate, scale, skew, or translate that normalized sampling space without moving the painted geometry; leave its identity default when no transform is needed. `ImageFill` adds fit, alignment, sampling, optional tint, and opacity to an `ImageVariant`. The same fill vocabulary is used by `Background` and interaction indication layers.
 
 ## Image sources
 
@@ -15,7 +15,7 @@
 `Canvas` receives a `PaintContext` and assigned `Size`. Give it explicit or parent-derived constraints. Draw in local coordinates and do not use Canvas to arbitrarily place `PlatformView` children.
 
 `PaintContext` emits platform-neutral commands for rectangles, gradients, text, images, circles, lines, arcs, borders, shadows, paths, clips, and transforms. Balance every pushed clip or transform with a pop on every path. Call only public drawing methods; `PaintCommand`, `RenderScene`, and renderer integration are framework boundaries rather than application extension points.
-`FillPath()` accepts a solid color, `LinearGradient`, or `RadialGradient`. Gradient geometry is normalized to exact Path bounds unless an explicit gradient rectangle is supplied; that rectangle defines coordinates and does not clip the Path. Use the explicit form when separate Paths must share one continuous gradient.
+`FillPath()` accepts a solid color, `LinearGradient`, or `RadialGradient`. Gradient geometry and its transform are normalized to exact Path bounds unless an explicit gradient rectangle is supplied; that rectangle defines coordinates and does not clip the Path. Use the explicit form when separate Paths must share one continuous gradient.
 
 ## Paths and text
 

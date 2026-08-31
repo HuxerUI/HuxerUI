@@ -9,6 +9,7 @@
 
 #include "huxerui_builtin_resources.h"
 #include "internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 #include "indication_internal.h"
 #include "text_field_internal.h"
@@ -114,36 +115,9 @@ const detail::ModifierDescriptor& TextStyleProperty::Descriptor() {
   return ApplyOnlyModifierDescriptor<TextStyleProperty, ApplyTextStyleProperty>();
 }
 
-bool IsFinite(Point point) noexcept {
-  return std::isfinite(point.x) && std::isfinite(point.y);
-}
-
-bool IsFinite(Size size) noexcept {
-  return std::isfinite(size.width) && std::isfinite(size.height);
-}
-
-bool IsFinite(Color color) noexcept {
-  return std::isfinite(color.red) && std::isfinite(color.green) && std::isfinite(color.blue) &&
-         std::isfinite(color.alpha);
-}
-
 } // namespace
 
 namespace detail {
-
-void ValidateColor(Color color, const char* message) {
-  if (!IsFinite(color)) {
-    throw std::invalid_argument(message);
-  }
-}
-
-void ValidateCornerRadii(CornerRadii radii, const char* message) {
-  if (!std::isfinite(radii.top_left) || radii.top_left < 0.0F || !std::isfinite(radii.top_right) ||
-      radii.top_right < 0.0F || !std::isfinite(radii.bottom_right) || radii.bottom_right < 0.0F ||
-      !std::isfinite(radii.bottom_left) || radii.bottom_left < 0.0F) {
-    throw std::invalid_argument(message);
-  }
-}
 
 void ValidateBorder(const Border& border) {
   ValidateColor(border.color, "HuxerUI border color must be finite");
@@ -156,20 +130,6 @@ void ValidateBorder(const Border& border) {
 
 namespace {
 
-void ValidateGradientStops(const std::vector<GradientStop>& stops) {
-  if (stops.size() < 2) {
-    throw std::invalid_argument("HuxerUI visual fill gradient requires at least two stops");
-  }
-  float previous = -1.0F;
-  for (const GradientStop& stop : stops) {
-    if (!std::isfinite(stop.offset) || stop.offset < 0.0F || stop.offset > 1.0F || stop.offset < previous) {
-      throw std::invalid_argument("HuxerUI visual fill gradient stops must be ordered within [0, 1]");
-    }
-    detail::ValidateColor(stop.color, "HuxerUI visual fill gradient colors must be finite");
-    previous = stop.offset;
-  }
-}
-
 void ValidateVisualFill(const VisualFill& fill) {
   std::visit(
       [](const auto& value) {
@@ -177,18 +137,9 @@ void ValidateVisualFill(const VisualFill& fill) {
         if constexpr (std::same_as<Value, Color>) {
           detail::ValidateColor(value, "HuxerUI visual fill color must be finite");
         } else if constexpr (std::same_as<Value, LinearGradient>) {
-          if (!IsFinite(value.start) || !IsFinite(value.end)) {
-            throw std::invalid_argument("HuxerUI visual fill linear gradient endpoints must be finite");
-          }
-          ValidateGradientStops(value.stops);
+          detail::ValidateGradient(value);
         } else if constexpr (std::same_as<Value, RadialGradient>) {
-          if (!IsFinite(value.center) || !IsFinite(value.radius) || value.radius.width <= 0.0F ||
-              value.radius.height <= 0.0F) {
-            throw std::invalid_argument(
-                "HuxerUI visual fill radial gradient geometry must be finite with positive radii"
-            );
-          }
-          ValidateGradientStops(value.stops);
+          detail::ValidateGradient(value);
         } else {
           if (!std::isfinite(value.opacity) || value.opacity < 0.0F || value.opacity > 1.0F) {
             throw std::invalid_argument("HuxerUI visual fill image opacity must be finite within [0, 1]");

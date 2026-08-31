@@ -67,6 +67,7 @@ TEST_CASE("VectorAssetsRetainNormalizedStrokeStyles") {
 TEST_CASE("VectorAssetsPreserveGradientPathFillsAndResolveTint") {
   const LinearGradient gradient{
       .stops = {{0.0F, Color::Rgb(255, 0, 0, 0.5F)}, {1.0F, Color::Rgb(0, 0, 255)}},
+      .transform = {0.75F, 0.2F, -0.1F, 1.0F, 0.25F, -0.1F},
   };
   const VectorAsset vector = VectorAsset::Create({20.0F, 10.0F}, [&](VectorBuilder& builder) {
     builder.FillPath(Triangle(), gradient, {0.0F, 0.0F, 40.0F, 20.0F});
@@ -78,6 +79,7 @@ TEST_CASE("VectorAssetsPreserveGradientPathFillsAndResolveTint") {
 
   const auto& command = std::get<FillLinearGradientPathCommand>(sequence.Commands()[2]);
   REQUIRE(command.gradient_rect == Rect{0.0F, 0.0F, 40.0F, 20.0F});
+  REQUIRE(command.gradient.transform == gradient.transform);
   REQUIRE(command.gradient.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
   REQUIRE(command.gradient.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
 }

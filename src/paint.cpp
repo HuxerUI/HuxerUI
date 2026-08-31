@@ -10,6 +10,7 @@
 #include <huxerui/vector.h>
 
 #include "geometry_internal.h"
+#include "paint_internal.h"
 #include "path_internal.h"
 #include "shadow_internal.h"
 #include "vector_internal.h"
@@ -43,9 +44,7 @@ void RequireRect(Rect rect) {
 }
 
 void RequireColor(Color color) {
-  if (!IsFinite(color)) {
-    throw std::invalid_argument("HuxerUI paint color must be finite");
-  }
+  detail::ValidateColor(color, "HuxerUI paint color must be finite");
 }
 
 void RequireTextStyle(const TextStyle& style) {
@@ -127,41 +126,71 @@ StrokeStyle NormalizeStrokeStyle(StrokeStyle style) {
 }
 
 void RequireCornerRadii(CornerRadii corner_radii) {
-  RequireNonNegative(corner_radii.top_left, "HuxerUI paint corner radii must be finite and non-negative");
-  RequireNonNegative(corner_radii.top_right, "HuxerUI paint corner radii must be finite and non-negative");
-  RequireNonNegative(corner_radii.bottom_right, "HuxerUI paint corner radii must be finite and non-negative");
-  RequireNonNegative(corner_radii.bottom_left, "HuxerUI paint corner radii must be finite and non-negative");
+  detail::ValidateCornerRadii(corner_radii, "HuxerUI paint corner radii must be finite and non-negative");
 }
 
 void RequireGradientStops(const std::vector<GradientStop>& stops) {
   if (stops.size() < 2) {
-    throw std::invalid_argument("HuxerUI paint gradient requires at least two stops");
+    throw std::invalid_argument("HuxerUI gradient requires at least two stops");
   }
   float previous = -1.0F;
   for (const GradientStop& stop : stops) {
     if (!std::isfinite(stop.offset) || stop.offset < 0.0F || stop.offset > 1.0F || stop.offset < previous) {
-      throw std::invalid_argument("HuxerUI paint gradient stops must be ordered within [0, 1]");
+      throw std::invalid_argument("HuxerUI gradient stops must be ordered within [0, 1]");
     }
-    RequireColor(stop.color);
+    detail::ValidateColor(stop.color, "HuxerUI gradient colors must be finite");
     previous = stop.offset;
   }
 }
+} // namespace
 
-void RequireLinearGradient(const LinearGradient& gradient) {
+void detail::ValidateColor(Color color, const char* message) {
+  if (!IsFinite(color)) {
+    throw std::invalid_argument(message);
+  }
+}
+
+void detail::ValidateCornerRadii(CornerRadii radii, const char* message) {
+  if (!std::isfinite(radii.top_left) || radii.top_left < 0.0F || !std::isfinite(radii.top_right) ||
+      radii.top_right < 0.0F || !std::isfinite(radii.bottom_right) || radii.bottom_right < 0.0F ||
+      !std::isfinite(radii.bottom_left) || radii.bottom_left < 0.0F) {
+    throw std::invalid_argument(message);
+  }
+}
+
+void detail::ValidateGradient(const LinearGradient& gradient) {
   if (!IsFinite(gradient.start) || !IsFinite(gradient.end)) {
     throw std::invalid_argument("HuxerUI linear gradient endpoints must be finite");
+  }
+  if (!IsFinite(gradient.transform) || !InverseTransform(gradient.transform).has_value()) {
+    throw std::invalid_argument("HuxerUI linear gradient transform must be finite and invertible");
   }
   RequireGradientStops(gradient.stops);
 }
 
-void RequireRadialGradient(const RadialGradient& gradient) {
+void detail::ValidateGradient(const RadialGradient& gradient) {
   if (!IsFinite(gradient.center) || !std::isfinite(gradient.radius.width) || !std::isfinite(gradient.radius.height) ||
       gradient.radius.width <= 0.0F || gradient.radius.height <= 0.0F) {
     throw std::invalid_argument("HuxerUI radial gradient geometry must be finite with positive radii");
   }
+  if (!IsFinite(gradient.transform) || !InverseTransform(gradient.transform).has_value()) {
+    throw std::invalid_argument("HuxerUI radial gradient transform must be finite and invertible");
+  }
   RequireGradientStops(gradient.stops);
 }
-} // namespace
+
+Transform2D detail::ResolveGradientTransform(Rect rect, const LinearGradient& gradient) noexcept {
+  const Transform2D destination{rect.width, 0.0F, 0.0F, rect.height, rect.x, rect.y};
+  return ComposeTransform(destination, gradient.transform);
+}
+
+Transform2D detail::ResolveGradientTransform(Rect rect, const RadialGradient& gradient) noexcept {
+  const Transform2D destination{rect.width, 0.0F, 0.0F, rect.height, rect.x, rect.y};
+  const Transform2D ellipse = AroundOriginTransform(
+      Transform2D{1.0F, 0.0F, 0.0F, gradient.radius.height / gradient.radius.width, 0.0F, 0.0F}, gradient.center
+  );
+  return ComposeTransform(destination, ComposeTransform(gradient.transform, ellipse));
+}
 
 PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(sequence), bounds_(bounds) {
   RequireRect(bounds);
@@ -188,7 +217,7 @@ void PaintContext::DrawLinearGradient(Rect rect, LinearGradient gradient, Corner
   RequireOpen();
   RequireRect(rect);
   RequireCornerRadii(corner_radii);
-  RequireLinearGradient(gradient);
+  detail::ValidateGradient(gradient);
   corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushClip(rect, corner_radii);
@@ -205,7 +234,7 @@ void PaintContext::DrawRadialGradient(Rect rect, RadialGradient gradient, Corner
   RequireOpen();
   RequireRect(rect);
   RequireCornerRadii(corner_radii);
-  RequireRadialGradient(gradient);
+  detail::ValidateGradient(gradient);
   corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushClip(rect, corner_radii);
@@ -613,7 +642,7 @@ void PaintContext::FillPath(Path path, LinearGradient gradient, PathFillRule fil
 
 void PaintContext::FillPath(Path path, LinearGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
   RequireOpen();
-  RequireLinearGradient(gradient);
+  detail::ValidateGradient(gradient);
   RequireRect(gradient_rect);
   if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F) {
     return;
@@ -632,7 +661,7 @@ void PaintContext::FillPath(Path path, RadialGradient gradient, PathFillRule fil
 
 void PaintContext::FillPath(Path path, RadialGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
   RequireOpen();
-  RequireRadialGradient(gradient);
+  detail::ValidateGradient(gradient);
   RequireRect(gradient_rect);
   if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F) {
     return;

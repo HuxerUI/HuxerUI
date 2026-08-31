@@ -15,6 +15,7 @@
 #include <huxerui/android/jni.h>
 
 #include "path_internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
 
@@ -98,10 +99,10 @@ jfloatArray ToPathArray(JNIEnv* environment, const Path& path) {
 void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_rect_ = environment->GetMethodID(view_class, "drawRect", "(Landroid/graphics/Canvas;FFFFIF)V");
   draw_linear_gradient_ = environment->GetMethodID(
-      view_class, "drawLinearGradient", "(Landroid/graphics/Canvas;FFFFFFFF[F[IF)V"
+      view_class, "drawLinearGradient", "(Landroid/graphics/Canvas;FFFFFFFFFFFFFF[F[IF)V"
   );
   draw_radial_gradient_ = environment->GetMethodID(
-      view_class, "drawRadialGradient", "(Landroid/graphics/Canvas;FFFFFFFF[F[IF)V"
+      view_class, "drawRadialGradient", "(Landroid/graphics/Canvas;FFFFFFFFFFFFFF[F[IF)V"
   );
   draw_text_ =
       environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFFFIFI[BIIIIIII[B)V");
@@ -120,10 +121,10 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_shadow_ = environment->GetMethodID(view_class, "drawShadow", "(Landroid/graphics/Canvas;FFFFIFF)V");
   fill_path_ = environment->GetMethodID(view_class, "fillPath", "(Landroid/graphics/Canvas;[FII)V");
   fill_linear_gradient_path_ = environment->GetMethodID(
-      view_class, "fillLinearGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFF[F[II)V"
+      view_class, "fillLinearGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFFFF[F[II)V"
   );
   fill_radial_gradient_path_ = environment->GetMethodID(
-      view_class, "fillRadialGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFF[F[II)V"
+      view_class, "fillRadialGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFFFF[F[II)V"
   );
   stroke_path_ = environment->GetMethodID(view_class, "strokePath", "(Landroid/graphics/Canvas;[FIFIIF[FF)V");
   draw_path_shadow_ = environment->GetMethodID(view_class, "drawPathShadow", "(Landroid/graphics/Canvas;[FFFFFIFFFI)V");
@@ -298,21 +299,12 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
   if (!java_offsets || !java_colors) {
     return;
   }
+  const Transform2D transform = ResolveGradientTransform(command.rect, command.gradient);
   environment->CallVoidMethod(
-      view,
-      draw_linear_gradient_,
-      canvas,
-      command.rect.x,
-      command.rect.y,
-      command.rect.width,
-      command.rect.height,
-      command.gradient.start.x,
-      command.gradient.start.y,
-      command.gradient.end.x,
-      command.gradient.end.y,
-      java_offsets.Get(),
-      java_colors.Get(),
-      command.corner_radius
+      view, draw_linear_gradient_, canvas, command.rect.x, command.rect.y, command.rect.width, command.rect.height,
+      command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y,
+      transform.m11, transform.m12, transform.m21, transform.m22, transform.translate_x, transform.translate_y,
+      java_offsets.Get(), java_colors.Get(), command.corner_radius
   );
 }
 
@@ -331,21 +323,12 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
   if (!java_offsets || !java_colors) {
     return;
   }
+  const Transform2D transform = ResolveGradientTransform(command.rect, command.gradient);
   environment->CallVoidMethod(
-      view,
-      draw_radial_gradient_,
-      canvas,
-      command.rect.x,
-      command.rect.y,
-      command.rect.width,
-      command.rect.height,
-      command.gradient.center.x,
-      command.gradient.center.y,
-      command.gradient.radius.width,
-      command.gradient.radius.height,
-      java_offsets.Get(),
-      java_colors.Get(),
-      command.corner_radius
+      view, draw_radial_gradient_, canvas, command.rect.x, command.rect.y, command.rect.width, command.rect.height,
+      command.gradient.center.x, command.gradient.center.y, command.gradient.radius.width,
+      command.gradient.radius.height, transform.m11, transform.m12, transform.m21, transform.m22,
+      transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(), command.corner_radius
   );
 }
 
@@ -608,6 +591,9 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const FillLinearGradientPathCommand& command
 ) {
+  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+    return;
+  }
   android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
   std::vector<jfloat> offsets;
   std::vector<jint> colors;
@@ -622,16 +608,21 @@ void AndroidRenderer::RenderCommand(
   if (!path || !java_offsets || !java_colors) {
     return;
   }
-  environment->CallVoidMethod(view, fill_linear_gradient_path_, canvas, path.Get(), command.gradient_rect.x,
-                              command.gradient_rect.y, command.gradient_rect.width, command.gradient_rect.height,
-                              command.gradient.start.x, command.gradient.start.y, command.gradient.end.x,
-                              command.gradient.end.y, java_offsets.Get(), java_colors.Get(),
-                              static_cast<jint>(command.fill_rule));
+  const Transform2D transform = ResolveGradientTransform(command.gradient_rect, command.gradient);
+  environment->CallVoidMethod(
+      view, fill_linear_gradient_path_, canvas, path.Get(), command.gradient.start.x, command.gradient.start.y,
+      command.gradient.end.x, command.gradient.end.y, transform.m11, transform.m12, transform.m21, transform.m22,
+      transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(),
+      static_cast<jint>(command.fill_rule)
+  );
 }
 
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const FillRadialGradientPathCommand& command
 ) {
+  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+    return;
+  }
   android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
   std::vector<jfloat> offsets;
   std::vector<jint> colors;
@@ -646,11 +637,13 @@ void AndroidRenderer::RenderCommand(
   if (!path || !java_offsets || !java_colors) {
     return;
   }
-  environment->CallVoidMethod(view, fill_radial_gradient_path_, canvas, path.Get(), command.gradient_rect.x,
-                              command.gradient_rect.y, command.gradient_rect.width, command.gradient_rect.height,
-                              command.gradient.center.x, command.gradient.center.y, command.gradient.radius.width,
-                              command.gradient.radius.height, java_offsets.Get(), java_colors.Get(),
-                              static_cast<jint>(command.fill_rule));
+  const Transform2D transform = ResolveGradientTransform(command.gradient_rect, command.gradient);
+  environment->CallVoidMethod(
+      view, fill_radial_gradient_path_, canvas, path.Get(), command.gradient.center.x, command.gradient.center.y,
+      command.gradient.radius.width, command.gradient.radius.height, transform.m11, transform.m12, transform.m21,
+      transform.m22, transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(),
+      static_cast<jint>(command.fill_rule)
+  );
 }
 
 void AndroidRenderer::RenderCommand(

@@ -41,13 +41,15 @@ paint.FillPath(sector, Color::Black());
 ```
 
 Paths also accept linear and elliptical radial gradients.
-Normalized gradient geometry uses exact Path bounds by default, or an explicit rectangle when several Paths must share one gradient space:
+Normalized gradient geometry uses exact Path bounds by default, or an explicit rectangle when several Paths must share one gradient space.
+The identity-by-default affine transform is expressed in that normalized space and changes gradient sampling without moving or clipping the painted geometry:
 
 ```cpp
 paint.FillPath(sector, LinearGradient{
     .start = {0.0F, 0.0F},
     .end = {1.0F, 1.0F},
     .stops = {{0.0F, Color::Rgb(103, 80, 164)}, {1.0F, Color::Rgb(208, 188, 255)}},
+    .transform = {0.0F, 1.0F, -1.0F, 0.0F, 1.0F, 0.0F},
 });
 ```
 

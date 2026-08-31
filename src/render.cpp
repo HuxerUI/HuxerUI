@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "external_texture_internal.h"
+#include "paint_internal.h"
 
 namespace huxerui::detail {
 

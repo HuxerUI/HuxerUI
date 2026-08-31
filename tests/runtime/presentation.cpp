@@ -3279,6 +3279,12 @@ TEST_CASE("TestVisualFillIndicationAndFocusRingValidateDuringViewResolution") {
   };
 
   rejects(+[] { return Spacer().With(Background{LinearGradient{.stops = {{0.0F, Color::Black()}}}}); });
+  rejects(+[] {
+    return Spacer().With(Background{LinearGradient{
+        .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+        .transform = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F},
+    }});
+  });
   rejects(+[] { return Spacer().With(Background{ImageFill{.source = ImageAsset{}}}); });
   rejects(+[] {
     return Button("invalid indication").With(Indication{.geometry = {.layer_size = Size{-1.0F, 20.0F}}});

@@ -8,6 +8,7 @@
 
 #include "indication_internal.h"
 #include "internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 
 namespace huxerui::detail {

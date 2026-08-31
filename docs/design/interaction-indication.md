@@ -239,12 +239,14 @@ struct LinearGradient {
   Point start{0.0F, 0.5F};
   Point end{1.0F, 0.5F};
   std::vector<GradientStop> stops;
+  Transform2D transform;
 };
 
 struct RadialGradient {
   Point center{0.5F, 0.5F};
   Size radius{0.5F, 0.5F};
   std::vector<GradientStop> stops;
+  Transform2D transform;
 };
 
 using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
@@ -597,6 +599,9 @@ Interactive controls normally record inexpensive node-owned commands, so adding 
 ## Gradient paint commands
 
 `PaintContext::DrawLinearGradient` and `PaintContext::DrawRadialGradient` record dedicated platform-neutral commands. Solid rectangles retain `DrawRectCommand`, avoiding a generic brush abstraction in commands that cannot use it.
+
+Each gradient carries an identity-by-default affine transform in normalized gradient coordinates.
+The destination mapping is applied after that transform, and only the gradient sampling space changes; indication geometry, layout, clipping, hit testing, and damage bounds remain unchanged.
 
 Asymmetric rounded corners use the existing path clip around the gradient command. `ImageFill` expands into image or vector drawing commands under the required rounded or path clip.
 

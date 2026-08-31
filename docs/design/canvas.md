@@ -70,6 +70,13 @@ The overload without an explicit gradient rectangle evaluates normalized gradien
 An explicit gradient rectangle lets several Paths share one coordinate space without clipping geometry to that rectangle.
 Damage remains based on transformed and clipped Path bounds rather than the gradient coordinate rectangle.
 Renderers map the atomic command to native Path filling where available; Core Graphics uses an equivalent renderer-local Path clip around one gradient draw rather than exposing clip expansion in the shared command sequence.
+
+Linear and radial gradients own an identity-by-default `Transform2D` field in normalized gradient coordinates.
+For destination rectangle `B` and declared gradient transform `T`, renderers sample through the shared mapping `B * T` while leaving the painted rectangle or Path unchanged.
+Radial gradients additionally compose their normalized ellipse mapping around the declared center before the native circular-gradient primitive, so every renderer consumes the same final affine matrix instead of rebuilding ellipse behavior independently.
+Gradient transforms must be finite and invertible; invalid configuration is rejected when the Paint command is recorded.
+The dedicated gradient commands remain geometry-and-paint operations and do not introduce a generic Brush abstraction.
+
 Path clips share the existing balanced clip stack and `PopClipCommand`.
 Stroke bounds conservatively include cap, join, width, and miter-limit overflow.
 Path shadows include offset and blur overflow but intentionally do not expose spread.

@@ -16,6 +16,7 @@
 #include <emscripten.h>
 
 #include "path_internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_input_internal.h"
@@ -234,6 +235,31 @@ void ApplyTransform(val& context, Transform2D transform) {
       transform.translate_x,
       transform.translate_y
   );
+}
+
+val CreateGradient(val& context, Rect rect, const LinearGradient& gradient) {
+  context.call<void>("save");
+  ApplyTransform(context, ResolveGradientTransform(rect, gradient));
+  val result = context.call<val>(
+      "createLinearGradient", gradient.start.x, gradient.start.y, gradient.end.x, gradient.end.y
+  );
+  context.call<void>("restore");
+  for (const GradientStop& stop : gradient.stops) {
+    result.call<void>("addColorStop", stop.offset, CssColor(stop.color));
+  }
+  return result;
+}
+
+val CreateGradient(val& context, Rect rect, const RadialGradient& gradient) {
+  context.call<void>("save");
+  ApplyTransform(context, ResolveGradientTransform(rect, gradient));
+  val result = context.call<val>("createRadialGradient", gradient.center.x, gradient.center.y, 0.0F,
+                                 gradient.center.x, gradient.center.y, gradient.radius.width);
+  context.call<void>("restore");
+  for (const GradientStop& stop : gradient.stops) {
+    result.call<void>("addColorStop", stop.offset, CssColor(stop.color));
+  }
+  return result;
 }
 
 void AddRoundedRect(val& context, Rect rect, float radius) {
@@ -915,21 +941,9 @@ void WebRenderer::RenderCommand(const DrawLinearGradientCommand& command) {
   if (command.rect.IsEmpty()) {
     return;
   }
-  const float start_x = command.rect.x + command.gradient.start.x * command.rect.width;
-  const float start_y = command.rect.y + command.gradient.start.y * command.rect.height;
-  const float end_x = command.rect.x + command.gradient.end.x * command.rect.width;
-  const float end_y = command.rect.y + command.gradient.end.y * command.rect.height;
-  val gradient = context_.call<val>("createLinearGradient", start_x, start_y, end_x, end_y);
-  for (const GradientStop& stop : command.gradient.stops) {
-    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
-  }
-  context_.set("fillStyle", gradient);
-  if (command.corner_radius <= 0.0F) {
-    context_.call<void>("fillRect", command.rect.x, command.rect.y, command.rect.width, command.rect.height);
-    return;
-  }
   context_.call<void>("beginPath");
   AddRoundedRect(context_, command.rect, command.corner_radius);
+  context_.set("fillStyle", CreateGradient(context_, command.rect, command.gradient));
   context_.call<void>("fill");
 }
 
@@ -937,27 +951,10 @@ void WebRenderer::RenderCommand(const DrawRadialGradientCommand& command) {
   if (command.rect.IsEmpty()) {
     return;
   }
-  const float center_x = command.rect.x + command.gradient.center.x * command.rect.width;
-  const float center_y = command.rect.y + command.gradient.center.y * command.rect.height;
-  const float radius_x = command.gradient.radius.width * command.rect.width;
-  const float radius_y = command.gradient.radius.height * command.rect.height;
-  const float scale_y = radius_y / radius_x;
-  context_.call<void>("save");
   context_.call<void>("beginPath");
   AddRoundedRect(context_, command.rect, command.corner_radius);
-  context_.call<void>("clip");
-  context_.call<void>("translate", center_x, center_y);
-  context_.call<void>("scale", 1.0F, scale_y);
-  context_.call<void>("translate", -center_x, -center_y);
-  val gradient = context_.call<val>("createRadialGradient", center_x, center_y, 0.0F, center_x, center_y, radius_x);
-  for (const GradientStop& stop : command.gradient.stops) {
-    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
-  }
-  context_.set("fillStyle", gradient);
-  // fillRect is evaluated in the scaled coordinate space, so map the original bounds through the inverse Y scale.
-  const float fill_y = center_y + (command.rect.y - center_y) / scale_y;
-  context_.call<void>("fillRect", command.rect.x, fill_y, command.rect.width, command.rect.height / scale_y);
-  context_.call<void>("restore");
+  context_.set("fillStyle", CreateGradient(context_, command.rect, command.gradient));
+  context_.call<void>("fill");
 }
 
 void WebRenderer::RenderCommand(const DrawTextCommand& command) {
@@ -1186,17 +1183,9 @@ void WebRenderer::RenderCommand(const FillLinearGradientPathCommand& command) {
   if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
     return;
   }
-  const float start_x = command.gradient_rect.x + command.gradient.start.x * command.gradient_rect.width;
-  const float start_y = command.gradient_rect.y + command.gradient.start.y * command.gradient_rect.height;
-  const float end_x = command.gradient_rect.x + command.gradient.end.x * command.gradient_rect.width;
-  const float end_y = command.gradient_rect.y + command.gradient.end.y * command.gradient_rect.height;
-  val gradient = context_.call<val>("createLinearGradient", start_x, start_y, end_x, end_y);
-  for (const GradientStop& stop : command.gradient.stops) {
-    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
-  }
   context_.call<void>("beginPath");
   AddPath(context_, command.path);
-  context_.set("fillStyle", gradient);
+  context_.set("fillStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
   context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
 }
 
@@ -1204,27 +1193,10 @@ void WebRenderer::RenderCommand(const FillRadialGradientPathCommand& command) {
   if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
     return;
   }
-  const float center_x = command.gradient_rect.x + command.gradient.center.x * command.gradient_rect.width;
-  const float center_y = command.gradient_rect.y + command.gradient.center.y * command.gradient_rect.height;
-  const float radius_x = command.gradient.radius.width * command.gradient_rect.width;
-  const float radius_y = command.gradient.radius.height * command.gradient_rect.height;
-  const float scale_y = radius_y / radius_x;
-  const Rect path_bounds = command.path.Bounds();
-  context_.call<void>("save");
   context_.call<void>("beginPath");
   AddPath(context_, command.path);
-  context_.call<void>("clip", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
-  context_.call<void>("translate", center_x, center_y);
-  context_.call<void>("scale", 1.0F, scale_y);
-  context_.call<void>("translate", -center_x, -center_y);
-  val gradient = context_.call<val>("createRadialGradient", center_x, center_y, 0.0F, center_x, center_y, radius_x);
-  for (const GradientStop& stop : command.gradient.stops) {
-    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
-  }
-  context_.set("fillStyle", gradient);
-  const float fill_y = center_y + (path_bounds.y - center_y) / scale_y;
-  context_.call<void>("fillRect", path_bounds.x, fill_y, path_bounds.width, path_bounds.height / scale_y);
-  context_.call<void>("restore");
+  context_.set("fillStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
+  context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
 }
 
 void WebRenderer::RenderCommand(const StrokePathCommand& command) {

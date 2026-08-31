@@ -11,6 +11,7 @@
 
 #include "external_texture_test_support.h"
 #include "image_test_support.h"
+#include "paint_internal.h"
 #include "shadow_internal.h"
 
 namespace huxerui::test {
@@ -125,11 +126,13 @@ TEST_CASE("PaintContextRecordsPlatformNeutralGradients") {
       .start = {0.0F, 0.0F},
       .end = {1.0F, 1.0F},
       .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+      .transform = {0.8F, 0.2F, -0.3F, 1.1F, 0.1F, -0.2F},
   };
   const RadialGradient radial{
       .center = {0.5F, 0.5F},
       .radius = {0.5F, 0.25F},
       .stops = {{0.0F, Color::White()}, {1.0F, Color::Transparent()}},
+      .transform = {0.0F, 1.0F, -1.0F, 0.0F, 1.0F, 0.0F},
   };
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
@@ -163,6 +166,22 @@ TEST_CASE("PaintContextClipsAsymmetricGradientCornersWithoutApplyingASecondUnifo
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[2]));
 }
 
+TEST_CASE("GradientTransformsResolveThroughOneNormalizedDestinationMapping") {
+  const Rect destination{10.0F, 20.0F, 100.0F, 50.0F};
+  const LinearGradient linear{
+      .transform = {0.0F, 1.0F, -1.0F, 0.0F, 1.0F, 0.0F},
+  };
+  REQUIRE(detail::ResolveGradientTransform(destination, linear) ==
+          Transform2D{0.0F, 50.0F, -100.0F, 0.0F, 110.0F, 20.0F});
+
+  const RadialGradient radial{
+      .center = {0.25F, 0.75F},
+      .radius = {0.5F, 0.25F},
+  };
+  REQUIRE(detail::ResolveGradientTransform(destination, radial) ==
+          Transform2D{100.0F, 0.0F, 0.0F, 25.0F, 10.0F, 38.75F});
+}
+
 TEST_CASE("PaintContextValidatesGradientGeometryAndStops") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
@@ -181,6 +200,27 @@ TEST_CASE("PaintContextValidatesGradientGeometryAndStops") {
       ),
       std::invalid_argument
   );
+  REQUIRE_THROWS_AS(
+      context.DrawLinearGradient(
+          {},
+          LinearGradient{
+              .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+              .transform = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F},
+          }
+      ),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      context.DrawRadialGradient(
+          {},
+          RadialGradient{
+              .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+              .transform = {1.0F, 0.0F, 0.0F, 1.0F, std::numeric_limits<float>::infinity(), 0.0F},
+          }
+      ),
+      std::invalid_argument
+  );
+  REQUIRE(sequence.Commands().empty());
 }
 
 TEST_CASE("PaintContextRejectsUnbalancedCommandStacks") {
@@ -430,11 +470,13 @@ TEST_CASE("PaintContextRecordsAtomicGradientPathFills") {
       .start = {0.0F, 0.0F},
       .end = {1.0F, 1.0F},
       .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+      .transform = {1.0F, 0.25F, -0.1F, 1.0F, 0.2F, 0.0F},
   };
   const RadialGradient radial{
       .center = {0.25F, 0.75F},
       .radius = {0.5F, 0.25F},
       .stops = {{0.0F, Color::White()}, {1.0F, Color::Black()}},
+      .transform = {0.75F, 0.0F, 0.2F, 1.0F, 0.0F, 0.1F},
   };
 
   PaintSequence sequence;
@@ -446,9 +488,11 @@ TEST_CASE("PaintContextRecordsAtomicGradientPathFills") {
   REQUIRE(sequence.Commands().size() == 2);
   const auto& linear_fill = std::get<FillLinearGradientPathCommand>(sequence.Commands()[0]);
   REQUIRE(linear_fill.gradient_rect == path.Bounds());
+  REQUIRE(linear_fill.gradient == linear);
   REQUIRE(linear_fill.fill_rule == PathFillRule::EvenOdd);
   const auto& radial_fill = std::get<FillRadialGradientPathCommand>(sequence.Commands()[1]);
   REQUIRE(radial_fill.gradient_rect == Rect{0.0F, 0.0F, 100.0F, 80.0F});
+  REQUIRE(radial_fill.gradient == radial);
   REQUIRE(sequence.Bounds() == path.Bounds());
 }
 

@@ -20,6 +20,7 @@
 
 #include "macos_external_texture_internal.h"
 #include "path_internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
@@ -88,6 +89,14 @@ void ClipGradientRect(CGContextRef context, Rect rect, float corner_radius) {
   CFRef<CGPathRef> path(CGPathCreateWithRoundedRect(native, corner_radius, corner_radius, nullptr));
   CGContextAddPath(context, path.Get());
   CGContextClip(context);
+}
+
+template <class Gradient> void ConcatGradientTransform(CGContextRef context, Rect rect, const Gradient& gradient) {
+  const Transform2D transform = ResolveGradientTransform(rect, gradient);
+  CGContextConcatCTM(
+      context, CGAffineTransformMake(transform.m11, transform.m12, transform.m21, transform.m22,
+                                     transform.translate_x, transform.translate_y)
+  );
 }
 
 void CombineHash(std::size_t& seed, std::size_t value) noexcept {
@@ -1274,21 +1283,12 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawLinearGradien
   if (gradient.Get() == nullptr || command.rect.IsEmpty()) {
     return;
   }
-  const auto point = [&](Point value) {
-    return CGPointMake(
-        command.rect.x + value.x * command.rect.width,
-        command.rect.y + value.y * command.rect.height
-    );
-  };
   CGContextSaveGState(context);
   ClipGradientRect(context, command.rect, command.corner_radius);
-  CGContextDrawLinearGradient(
-      context,
-      gradient.Get(),
-      point(command.gradient.start),
-      point(command.gradient.end),
-      kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation
-  );
+  ConcatGradientTransform(context, command.rect, command.gradient);
+  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(command.gradient.start.x, command.gradient.start.y),
+                              CGPointMake(command.gradient.end.x, command.gradient.end.y),
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
   CGContextRestoreGState(context);
 }
 
@@ -1297,26 +1297,12 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawRadialGradien
   if (gradient.Get() == nullptr || command.rect.IsEmpty()) {
     return;
   }
-  const CGPoint center = CGPointMake(
-      command.rect.x + command.gradient.center.x * command.rect.width,
-      command.rect.y + command.gradient.center.y * command.rect.height
-  );
-  const CGFloat radius_x = command.gradient.radius.width * command.rect.width;
-  const CGFloat radius_y = command.gradient.radius.height * command.rect.height;
+  const CGPoint center = CGPointMake(command.gradient.center.x, command.gradient.center.y);
   CGContextSaveGState(context);
   ClipGradientRect(context, command.rect, command.corner_radius);
-  CGContextTranslateCTM(context, center.x, center.y);
-  CGContextScaleCTM(context, 1.0, radius_y / radius_x);
-  CGContextTranslateCTM(context, -center.x, -center.y);
-  CGContextDrawRadialGradient(
-      context,
-      gradient.Get(),
-      center,
-      0.0,
-      center,
-      radius_x,
-      kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation
-  );
+  ConcatGradientTransform(context, command.rect, command.gradient);
+  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, command.gradient.radius.width,
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
   CGContextRestoreGState(context);
 }
 
@@ -1523,15 +1509,13 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const FillLinearGradien
   if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
     return;
   }
-  const auto point = [&](Point value) {
-    return CGPointMake(command.gradient_rect.x + value.x * command.gradient_rect.width,
-                       command.gradient_rect.y + value.y * command.gradient_rect.height);
-  };
   const CFRef<CGPathRef> path(CreatePath(command.path));
   CGContextSaveGState(context);
   CGContextAddPath(context, path.Get());
   ClipCurrentPath(context, command.fill_rule);
-  CGContextDrawLinearGradient(context, gradient.Get(), point(command.gradient.start), point(command.gradient.end),
+  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
+  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(command.gradient.start.x, command.gradient.start.y),
+                              CGPointMake(command.gradient.end.x, command.gradient.end.y),
                               kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
   CGContextRestoreGState(context);
 }
@@ -1541,19 +1525,13 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const FillRadialGradien
   if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
     return;
   }
-  const CGFloat center_x = command.gradient_rect.x + command.gradient.center.x * command.gradient_rect.width;
-  const CGFloat center_y = command.gradient_rect.y + command.gradient.center.y * command.gradient_rect.height;
-  const CGPoint center = CGPointMake(center_x, center_y);
-  const CGFloat radius_x = command.gradient.radius.width * command.gradient_rect.width;
-  const CGFloat radius_y = command.gradient.radius.height * command.gradient_rect.height;
+  const CGPoint center = CGPointMake(command.gradient.center.x, command.gradient.center.y);
   const CFRef<CGPathRef> path(CreatePath(command.path));
   CGContextSaveGState(context);
   CGContextAddPath(context, path.Get());
   ClipCurrentPath(context, command.fill_rule);
-  CGContextTranslateCTM(context, center.x, center.y);
-  CGContextScaleCTM(context, 1.0, radius_y / radius_x);
-  CGContextTranslateCTM(context, -center.x, -center.y);
-  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, radius_x,
+  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
+  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, command.gradient.radius.width,
                               kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
   CGContextRestoreGState(context);
 }

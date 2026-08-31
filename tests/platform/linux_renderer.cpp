@@ -4,6 +4,7 @@
 #include <limits>
 #include <string>
 
+#include <huxerui/paint.h>
 #include <huxerui/text.h>
 
 #include "linux_renderer.h"
@@ -32,6 +33,52 @@ TEST_CASE("LinuxRendererReplaysPaintCommandsIntoCairoSurface") {
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE(pixels[4 * 8 + 4] == 0xFFFF0000U);
   REQUIRE(pixels[0] == 0U);
+  cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererTransformsLinearAndRadialGradientSamplingWithoutTransformingGeometry") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const Transform2D quarter_turn{0.0F, 1.0F, -1.0F, 0.0F, 1.0F, 0.0F};
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 44.0F, 20.0F});
+  paint.DrawLinearGradient(
+      {0.0F, 0.0F, 20.0F, 20.0F},
+      LinearGradient{
+          .start = {0.0F, 0.0F},
+          .end = {1.0F, 0.0F},
+          .stops = {{0.0F, Color::Rgb(255, 0, 0)}, {1.0F, Color::Rgb(0, 0, 255)}},
+          .transform = quarter_turn,
+      }
+  );
+  paint.DrawRadialGradient(
+      {24.0F, 0.0F, 20.0F, 20.0F},
+      RadialGradient{
+          .radius = {0.4F, 0.15F},
+          .stops = {{0.0F, Color::White()}, {1.0F, Color::Black()}},
+          .transform = quarter_turn,
+      }
+  );
+  paint.Finish();
+  RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 44, 20);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  renderer.Draw(context, frame);
+  cairo_destroy(context);
+  cairo_surface_flush(surface);
+
+  const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
+  const std::uint32_t linear_top = pixels[2 * 44 + 10];
+  const std::uint32_t linear_bottom = pixels[17 * 44 + 10];
+  REQUIRE(((linear_top >> 16U) & 0xFFU) > (linear_top & 0xFFU));
+  REQUIRE((linear_bottom & 0xFFU) > ((linear_bottom >> 16U) & 0xFFU));
+  const std::uint32_t radial_horizontal = pixels[10 * 44 + 39];
+  const std::uint32_t radial_vertical = pixels[15 * 44 + 34];
+  REQUIRE((radial_vertical & 0xFFU) > (radial_horizontal & 0xFFU));
   cairo_surface_destroy(surface);
   renderer.Discard();
 }

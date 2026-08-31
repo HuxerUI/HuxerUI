@@ -21,6 +21,7 @@
 #include "external_texture_internal.h"
 #include "linux_external_texture_internal.h"
 #include "path_internal.h"
+#include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_layout_internal.h"
@@ -744,6 +745,16 @@ private:
     cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
   }
 
+  template <class Gradient>
+  static void ApplyGradientTransform(cairo_pattern_t* pattern, Rect rect, const Gradient& gradient) {
+    const Transform2D transform = ResolveGradientTransform(rect, gradient);
+    cairo_matrix_t matrix{};
+    cairo_matrix_init(&matrix, transform.m11, transform.m12, transform.m21, transform.m22, transform.translate_x,
+                      transform.translate_y);
+    static_cast<void>(cairo_matrix_invert(&matrix));
+    cairo_pattern_set_matrix(pattern, &matrix);
+  }
+
   void DrawCommand(const DrawRectCommand& command) {
     if (command.rect.IsEmpty() || command.color.alpha <= 0.0F) {
       return;
@@ -759,12 +770,10 @@ private:
       return;
     }
     cairo_pattern_t* pattern = cairo_pattern_create_linear(
-        command.rect.x + command.gradient.start.x * command.rect.width,
-        command.rect.y + command.gradient.start.y * command.rect.height,
-        command.rect.x + command.gradient.end.x * command.rect.width,
-        command.rect.y + command.gradient.end.y * command.rect.height
+        command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y
     );
     AddStops(pattern, command.gradient.stops);
+    ApplyGradientTransform(pattern, command.rect, command.gradient);
     cairo_set_source(context_, pattern);
     cairo_new_path(context_);
     AddRoundedRect(context_, command.rect, command.corner_radius);
@@ -776,23 +785,16 @@ private:
     if (command.rect.IsEmpty()) {
       return;
     }
-    const double center_x = command.rect.x + command.gradient.center.x * command.rect.width;
-    const double center_y = command.rect.y + command.gradient.center.y * command.rect.height;
-    const double radius_x = std::max(0.001F, command.gradient.radius.width * command.rect.width);
-    const double radius_y = std::max(0.001F, command.gradient.radius.height * command.rect.height);
-    cairo_save(context_);
+    cairo_pattern_t* pattern = cairo_pattern_create_radial(command.gradient.center.x, command.gradient.center.y, 0.0,
+                                                           command.gradient.center.x, command.gradient.center.y,
+                                                           command.gradient.radius.width);
+    AddStops(pattern, command.gradient.stops);
+    ApplyGradientTransform(pattern, command.rect, command.gradient);
+    cairo_set_source(context_, pattern);
     cairo_new_path(context_);
     AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_clip(context_);
-    cairo_translate(context_, center_x, center_y);
-    cairo_scale(context_, 1.0, radius_y / radius_x);
-    cairo_translate(context_, -center_x, -center_y);
-    cairo_pattern_t* pattern = cairo_pattern_create_radial(center_x, center_y, 0.0, center_x, center_y, radius_x);
-    AddStops(pattern, command.gradient.stops);
-    cairo_set_source(context_, pattern);
-    cairo_paint(context_);
+    cairo_fill(context_);
     cairo_pattern_destroy(pattern);
-    cairo_restore(context_);
   }
 
   void DrawCommand(const DrawTextCommand& command) {
@@ -1149,12 +1151,10 @@ private:
       return;
     }
     cairo_pattern_t* pattern = cairo_pattern_create_linear(
-        command.gradient_rect.x + command.gradient.start.x * command.gradient_rect.width,
-        command.gradient_rect.y + command.gradient.start.y * command.gradient_rect.height,
-        command.gradient_rect.x + command.gradient.end.x * command.gradient_rect.width,
-        command.gradient_rect.y + command.gradient.end.y * command.gradient_rect.height
+        command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y
     );
     AddStops(pattern, command.gradient.stops);
+    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
     cairo_set_source(context_, pattern);
     AppendPath(context_, command.path);
     cairo_set_fill_rule(
@@ -1168,25 +1168,18 @@ private:
     if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
       return;
     }
-    const double center_x = command.gradient_rect.x + command.gradient.center.x * command.gradient_rect.width;
-    const double center_y = command.gradient_rect.y + command.gradient.center.y * command.gradient_rect.height;
-    const double radius_x = command.gradient.radius.width * command.gradient_rect.width;
-    const double radius_y = command.gradient.radius.height * command.gradient_rect.height;
-    cairo_save(context_);
+    cairo_pattern_t* pattern = cairo_pattern_create_radial(command.gradient.center.x, command.gradient.center.y, 0.0,
+                                                           command.gradient.center.x, command.gradient.center.y,
+                                                           command.gradient.radius.width);
+    AddStops(pattern, command.gradient.stops);
+    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
+    cairo_set_source(context_, pattern);
     AppendPath(context_, command.path);
     cairo_set_fill_rule(
         context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
     );
-    cairo_clip(context_);
-    cairo_translate(context_, center_x, center_y);
-    cairo_scale(context_, 1.0, radius_y / radius_x);
-    cairo_translate(context_, -center_x, -center_y);
-    cairo_pattern_t* pattern = cairo_pattern_create_radial(center_x, center_y, 0.0, center_x, center_y, radius_x);
-    AddStops(pattern, command.gradient.stops);
-    cairo_set_source(context_, pattern);
-    cairo_paint(context_);
+    cairo_fill(context_);
     cairo_pattern_destroy(pattern);
-    cairo_restore(context_);
   }
 
   void DrawCommand(const StrokePathCommand& command) {

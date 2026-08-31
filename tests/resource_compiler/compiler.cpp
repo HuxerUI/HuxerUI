@@ -764,6 +764,7 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "gradient.huxv");
   REQUIRE(payload.starts_with("HUXVEC"));
   REQUIRE(static_cast<unsigned char>(payload[8]) == 1U);
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 7U);
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
@@ -795,6 +796,60 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   REQUIRE(radial_fill.gradient_rect == huxerui::Rect{0.0F, 0.0F, 40.0F, 20.0F});
   REQUIRE(radial_fill.gradient.center == huxerui::Point{0.5F, 0.5F});
   REQUIRE(radial_fill.gradient.radius == huxerui::Size{0.125F, 0.25F});
+}
+
+TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "resources";
+  const std::filesystem::path output = temporary.Path() / "output";
+  Write(
+      root / "images" / "transformed.svg",
+      R"svg(<svg width="40" height="20" viewBox="0 0 40 20">
+  <defs>
+    <linearGradient id="base" gradientTransform="matrix(1 0.25 -0.5 1 0.2 -0.1)">
+      <stop stop-color="black"/><stop offset="1" stop-color="white"/>
+    </linearGradient>
+    <linearGradient id="inherited" href="#base"/>
+    <linearGradient id="overridden" href="#base" gradientTransform="translate(0.25 0.5)"/>
+    <radialGradient id="user" gradientUnits="userSpaceOnUse"
+        gradientTransform="matrix(1 0.25 -0.5 1 4 2)" cx="20" cy="10" r="5">
+      <stop stop-color="white"/><stop offset="1" stop-color="black"/>
+    </radialGradient>
+  </defs>
+  <rect width="10" height="10" fill="url(#inherited)"/>
+  <rect x="10" width="10" height="10" fill="url(#overridden)"/>
+  <rect x="20" width="10" height="10" fill="url(#user)"/>
+</svg>)svg"
+  );
+
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
+  const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "transformed.huxv");
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 9U);
+  std::vector<std::byte> truncated(payload.size() - 1);
+  std::memcpy(truncated.data(), payload.data(), truncated.size());
+  REQUIRE_THROWS_AS(
+      huxerui::detail::ResourceAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
+      std::logic_error
+  );
+
+  DirectoryResources platform(output / "package");
+  huxerui::detail::AppResources resources(&platform);
+  const huxerui::VectorAsset vector = resources.ResolveVector(
+      huxerui::ImageResource("test_app", "images/transformed"), huxerui::Locale::Default()
+  );
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  REQUIRE(commands.size() == 3);
+  const auto& inherited = std::get<huxerui::FillLinearGradientPathCommand>(commands[0]).gradient.transform;
+  REQUIRE(inherited == huxerui::Transform2D{1.0F, 0.25F, -0.5F, 1.0F, 0.2F, -0.1F});
+  const auto& overridden = std::get<huxerui::FillLinearGradientPathCommand>(commands[1]).gradient.transform;
+  REQUIRE(overridden == huxerui::Transform2D{1.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.5F});
+  const auto& user = std::get<huxerui::FillRadialGradientPathCommand>(commands[2]).gradient.transform;
+  REQUIRE(user.m11 == Catch::Approx(1.0F));
+  REQUIRE(user.m12 == Catch::Approx(0.5F));
+  REQUIRE(user.m21 == Catch::Approx(-0.25F));
+  REQUIRE(user.m22 == Catch::Approx(1.0F));
+  REQUIRE(user.translate_x == Catch::Approx(0.1F));
+  REQUIRE(user.translate_y == Catch::Approx(0.1F));
 }
 
 TEST_CASE("SvgResourcesRejectUnsupportedAndCyclicGradients") {
@@ -853,11 +908,11 @@ TEST_CASE("SvgResourcesRejectInexactClipAndPresentationFeatures") {
       Catch::Matchers::ContainsSubstring("must resolve to one drawable path")
   );
 
-  Write(source, R"svg(<svg viewBox="0 0 10 10"><linearGradient id="paint" gradientTransform="rotate(20)">
+  Write(source, R"svg(<svg viewBox="0 0 10 10"><linearGradient id="paint" gradientTransform="scale(0)">
   <stop/><stop offset="1"/></linearGradient><path fill="url(#paint)" d="M0 0L1 1"/></svg>)svg");
   REQUIRE_THROWS_WITH(
       huxerui::resource_compiler::Compile({root, temporary.Path() / "gradient", "test_app"}),
-      Catch::Matchers::ContainsSubstring("gradientTransform is not supported")
+      Catch::Matchers::ContainsSubstring("gradientTransform must be finite and invertible")
   );
 
   Write(source, R"svg(<svg viewBox="0 0 10 10"><defs><path style="filter: blur(1px)" d="M0 0L1 1"/></defs></svg>)svg");
