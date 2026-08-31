@@ -280,7 +280,6 @@ EM_JS(
           const point = position(event);
           Module._huxerui_web_pointer(
               session_id, type, event.pointerId, point[0], point[1], pointerKind(event.pointerType),
-              Math.max(1, event.detail || 1),
               type === 0 || type === 1 ? changedButton(event.button) : 0,
               type === 3 ? 0 : event.buttons & 31
           );
@@ -289,8 +288,7 @@ EM_JS(
           const point = position(event);
           Module._huxerui_web_pointer(
               session_id, type, session.mousePointerId, point[0], point[1], 0,
-              Math.max(1, event.detail || 1), changedButton(event.button),
-              event.buttons & 31
+              changedButton(event.button), event.buttons & 31
           );
         };
 
@@ -1205,7 +1203,7 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_image_ready(std::uintptr_t session_id) {
 
 EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
     std::uintptr_t session_id, int type, std::int32_t pointer_id, float x, float y, int device_kind,
-    std::uint32_t click_count, std::uint32_t changed_button, std::uint32_t pressed_buttons
+    std::uint32_t changed_button, std::uint32_t pressed_buttons
 ) {
   huxerui::detail::DispatchWebSession(session_id, "pointer input", [=](auto& platform) {
     platform.HandlePointer({
@@ -1213,7 +1211,6 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
         pointer_id,
         {x, y},
         static_cast<huxerui::PointerDeviceKind>(std::clamp(device_kind, 0, 2)),
-        click_count,
         static_cast<huxerui::PointerButton>(changed_button & 31U),
         static_cast<huxerui::PointerButton>(pressed_buttons & 31U),
     });

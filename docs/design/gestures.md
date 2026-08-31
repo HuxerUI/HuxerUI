@@ -273,7 +273,7 @@ struct MultiTapEvents {
 };
 ```
 
-Runtime computes the count from successful shared tap results rather than trusting platform click counts as a cross-platform contract.
+Runtime recognizes repeated taps from successful shared tap results using GestureSettings.
 Every contributing tap completes on the same mounted modifier identity, uses a compatible pointer kind, remains within the configured distance, and arrives before the configured deadline.
 
 Declaring Click and MultiTap together does not delay or suppress Click.

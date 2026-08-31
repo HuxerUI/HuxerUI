@@ -164,7 +164,7 @@ The Web backend resolves paragraph direction from the first strong character and
 
 ## Pointer, wheel, and keyboard input
 
-The Web integration uses Pointer Events as the single mouse, touch, and pen input source. Pointer identifiers, type, position, click count, changed button, and complete pressed-button state are converted at the Canvas boundary. Pressure, timestamp, and pointer modifiers are not represented by the current shared PointerEvent contract.
+The Web integration uses Pointer Events as the single mouse, touch, and pen input source. Pointer identifiers, type, position, changed button, and complete pressed-button state are converted at the Canvas boundary. Pressure, timestamp, and pointer modifiers are not represented by the current shared PointerEvent contract.
 
 The resolved `PointerCursorKind` maps to the composition root's CSS cursor.
 DOM PlatformView containers explicitly restore `cursor: auto`, so a HuxerUI ancestor declaration cannot leak into native browser content.

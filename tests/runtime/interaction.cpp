@@ -827,7 +827,7 @@ TEST_CASE("TestActivationImplementationDoesNotInvalidateEqualExtensions") {
   REQUIRE(stable_extension_updates == 0);
 }
 
-TEST_CASE("TestPointerDoubleClickDoesNotSuppressActivation") {
+TEST_CASE("TestConsecutivePointerClicksDoNotSuppressActivation") {
   received_pointer_events.clear();
   pointer_clicks = 0;
 
@@ -843,7 +843,6 @@ TEST_CASE("TestPointerDoubleClickDoesNotSuppressActivation") {
           12,
           {50.0F, 20.0F},
           PointerDeviceKind::Mouse,
-          2,
       }
   );
   runtime.HandlePointerEvent(

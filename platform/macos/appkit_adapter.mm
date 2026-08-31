@@ -1087,7 +1087,6 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
           static_cast<float>(point.y),
       },
       huxerui::PointerDeviceKind::Mouse,
-      type == huxerui::PointerEventType::Down ? static_cast<std::uint32_t>(event.clickCount) : 1U,
       type == huxerui::PointerEventType::Down || type == huxerui::PointerEventType::Up
           ? MacPointerButton(event.buttonNumber)
           : huxerui::PointerButton::None,
@@ -1109,7 +1108,6 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
           static_cast<float>(huxeruiPointerPosition.y),
       },
       huxerui::PointerDeviceKind::Mouse,
-      1,
       huxerui::PointerButton::None,
       huxerui::PointerButton::None,
   });

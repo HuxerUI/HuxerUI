@@ -17,11 +17,12 @@ Do not combine raw pointer handling with a built-in recognizer to observe or own
 
 ## Pointer events
 
-`PointerEvent` reports `type`, `pointer_id`, window-logical `position`, `device_kind`, consecutive `click_count`, `changed_button`, and `pressed_buttons`.
+`PointerEvent` reports `type`, `pointer_id`, window-logical `position`, `device_kind`, `changed_button`, and `pressed_buttons`.
 Its `PointerEventType` is `Down`, `Move`, `Up`, or `Cancel`, and `PointerDeviceKind` distinguishes Mouse, Touch, and Pen.
 `PointerButton` is a flag enum with `Primary`, `Secondary`, `Middle`, `Back`, and `Forward`; Primary and Secondary follow system roles rather than fixed physical left and right positions.
 `changed_button` is the button added by Down or removed by Up, while `pressed_buttons` is the complete post-event mask.
-Use `event.IsButtonPressed(mask)` for raw chord logic instead of inferring a button from `click_count`.
+Use `event.IsButtonPressed(mask)` for raw chord logic.
+Use `MultiTapGesture` when repeated successful taps are part of the application behavior; raw pointer events do not carry a platform click count.
 
 `ViewEvents::Pointer` is one void notification for the complete Down, Move, Up, and Cancel lifecycle of the deepest eligible raw target.
 It does not capture, bubble, return a handled result, or acquire pointer ownership.

@@ -1239,6 +1239,7 @@ struct TextSelectionGestureState {
   std::optional<double> previous_tap_time;
   Point previous_tap_position;
   std::optional<std::uint64_t> previous_tap_node;
+  PointerDeviceKind previous_tap_device = PointerDeviceKind::Mouse;
 };
 
 struct TextSelectionOverlayState {

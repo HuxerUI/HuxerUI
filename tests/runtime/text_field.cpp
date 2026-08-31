@@ -3072,12 +3072,13 @@ TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
   Runtime mouse{TextSelectionOverlayApp, platform};
   mouse.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   mouse.BuildFrame();
+  ClickAt(mouse, {70.0F, 20.0F}, 707);
+  platform.AdvanceTime(0.2);
   mouse.HandlePointerEvent({
       PointerEventType::Down,
-      707,
+      708,
       {70.0F, 20.0F},
       PointerDeviceKind::Mouse,
-      2,
   });
   REQUIRE(mouse.QueryTextInputContext(1, 0, 10).selection == TextSelection{6, 10});
   REQUIRE(FindText(mouse.BuildFrame(), "复制") == nullptr);

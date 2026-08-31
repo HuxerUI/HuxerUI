@@ -595,8 +595,7 @@ void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, P
 
 void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, Point position,
              PointerButton changed_button, PointerButton pressed_buttons) {
-  runtime.HandlePointerEvent({type, pointer_id, position, PointerDeviceKind::Mouse, 1, changed_button,
-                              pressed_buttons});
+  runtime.HandlePointerEvent({type, pointer_id, position, PointerDeviceKind::Mouse, changed_button, pressed_buttons});
 }
 
 void ResetGestureEvents() {
@@ -628,7 +627,6 @@ TEST_CASE("PointerButton masks report changed and pressed buttons") {
       1,
       {10.0F, 20.0F},
       PointerDeviceKind::Mouse,
-      1,
       PointerButton::None,
       chord,
   };

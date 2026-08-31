@@ -188,8 +188,6 @@ struct PointerEvent {
   Point position;
   /// Physical class of the source device.
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
-  /// Platform-reported consecutive click count, starting at one when unavailable.
-  std::uint32_t click_count = 1;
   /// Button added by Down or removed by Up, or None for Move and Cancel.
   PointerButton changed_button = PointerButton::None;
   /// Complete pressed-button state after this event.

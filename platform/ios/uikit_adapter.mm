@@ -976,7 +976,6 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
           pointer_id,
           {static_cast<float>(point.x), static_cast<float>(point.y)},
           kind,
-          static_cast<std::uint32_t>(std::max<NSUInteger>(1, touch.tapCount)),
           changed,
           buttons,
       });

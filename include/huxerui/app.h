@@ -484,8 +484,9 @@ private:
   bool ExtendFocusedTextSelection(Point position, bool start_handle);
   bool QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const;
   bool HandleTextSelectionOverlayPointer(const PointerEvent& event);
-  void HandleTextSelectionClick(const PointerEvent& event);
-  bool TrackTouchTextSelectionGesture(const PointerEvent& event);
+  void HandleTextSelectionPointerDown(const PointerEvent& event);
+  bool TrackTextSelectionGesture(const PointerEvent& event);
+  void RecordTextSelectionTap(const detail::PointerSession& session, const PointerEvent& event);
   void AdvanceTextSelectionLongPress(double timestamp);
   void AdvanceTextSelectionOverlay(const FrameInfo& frame);
   void PaintTextSelectionOverlay();

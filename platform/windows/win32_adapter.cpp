@@ -1007,14 +1007,13 @@ private:
   }
 
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
-                   PointerButton pressed_buttons = PointerButton::None, std::uint32_t click_count = 1) {
+                   PointerButton pressed_buttons = PointerButton::None) {
     last_pointer_position_ = position;
     runtime_->HandlePointerEvent({
         type,
         0,
         position,
         PointerDeviceKind::Mouse,
-        click_count,
         changed_button,
         pressed_buttons,
     });
@@ -1060,18 +1059,12 @@ private:
       CancelPointer();
       return 0;
     case WM_LBUTTONDOWN:
-      SetFocus(window_);
-      SetCapture(source);
-      pointer_down_ = true;
-      SendPointer(PointerEventType::Down, ClientPoint(source, l_param), SemanticMouseButton(true),
-                  MouseButtons(w_param));
-      return 0;
     case WM_LBUTTONDBLCLK:
       SetFocus(window_);
       SetCapture(source);
       pointer_down_ = true;
       SendPointer(PointerEventType::Down, ClientPoint(source, l_param), SemanticMouseButton(true),
-                  MouseButtons(w_param), 2);
+                  MouseButtons(w_param));
       return 0;
     case WM_RBUTTONDOWN:
     case WM_RBUTTONDBLCLK:
@@ -1079,7 +1072,7 @@ private:
       SetCapture(source);
       pointer_down_ = true;
       SendPointer(PointerEventType::Down, ClientPoint(source, l_param), SemanticMouseButton(false),
-                  MouseButtons(w_param), message == WM_RBUTTONDBLCLK ? 2U : 1U);
+                  MouseButtons(w_param));
       return 0;
     case WM_MBUTTONDOWN:
     case WM_MBUTTONDBLCLK:
@@ -1087,7 +1080,7 @@ private:
       SetCapture(source);
       pointer_down_ = true;
       SendPointer(PointerEventType::Down, ClientPoint(source, l_param), PointerButton::Middle,
-                  MouseButtons(w_param), message == WM_MBUTTONDBLCLK ? 2U : 1U);
+                  MouseButtons(w_param));
       return 0;
     case WM_XBUTTONDOWN:
     case WM_XBUTTONDBLCLK: {
@@ -1097,7 +1090,7 @@ private:
       const PointerButton button = GET_XBUTTON_WPARAM(w_param) == XBUTTON1 ? PointerButton::Back
                                                                            : PointerButton::Forward;
       SendPointer(PointerEventType::Down, ClientPoint(source, l_param), button,
-                  MouseButtons(GET_KEYSTATE_WPARAM(w_param)), message == WM_XBUTTONDBLCLK ? 2U : 1U);
+                  MouseButtons(GET_KEYSTATE_WPARAM(w_param)));
       return 0;
     }
     case WM_MOUSEMOVE:

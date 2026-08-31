@@ -177,12 +177,13 @@ TEST_CASE("TestSelectionAreaDoubleClickSelectsWord") {
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
+  ClickAt(runtime, {20.0F, 10.0F}, 810);
+  platform.AdvanceTime(0.2);
   runtime.HandlePointerEvent({
       PointerEventType::Down,
       811,
       {20.0F, 10.0F},
       PointerDeviceKind::Mouse,
-      2,
   });
   REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text == "Alpha");
@@ -196,12 +197,13 @@ TEST_CASE("TestSelectionAreaUsesPresentedTextGeometryAndOpacity") {
   runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
+  ClickAt(runtime, {20.0F, 10.0F}, 811);
+  platform.AdvanceTime(0.2);
   runtime.HandlePointerEvent({
       PointerEventType::Down,
       812,
       {20.0F, 10.0F},
       PointerDeviceKind::Mouse,
-      2,
   });
   REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text == "Alpha");
@@ -255,12 +257,13 @@ TEST_CASE("TestTextSelectionCapabilityDoesNotDependOnBuiltInNodeKinds") {
   runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
+  ClickAt(runtime, {20.0F, 10.0F}, 812);
+  platform.AdvanceTime(0.2);
   runtime.HandlePointerEvent({
       PointerEventType::Down,
       813,
       {20.0F, 10.0F},
       PointerDeviceKind::Mouse,
-      2,
   });
 
   REQUIRE(custom_selection_requested);

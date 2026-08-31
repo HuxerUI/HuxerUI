@@ -862,7 +862,7 @@ void Runtime::CancelPointerRecognition(PointerRecognition& recognition, const Po
       static_cast<void>(EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, cancellation));
     }
   } else if (std::holds_alternative<TextSelectionRecognitionState>(recognition.state)) {
-    TrackTouchTextSelectionGesture(cancellation);
+    TrackTextSelectionGesture(cancellation);
   }
 }
 
@@ -1521,6 +1521,10 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   const PointerButton pressed_buttons = event.pressed_buttons;
   const bool primary = initiating_button == PointerButton::Primary && !HasMultipleButtons(pressed_buttons);
   const bool secondary = initiating_button == PointerButton::Secondary && !HasMultipleButtons(pressed_buttons);
+  if (!primary) {
+    state_->text_selection_gesture_.previous_tap_time.reset();
+    state_->text_selection_gesture_.previous_tap_node.reset();
+  }
   if (primary) {
     for (detail::MountedNode* node : route) {
       if (IsScrollContainer(*node)) {
@@ -1653,13 +1657,17 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
   }
 
   if (!session.raw_target_identity.has_value() && session.recognitions.empty() && !session.focus_pending) {
+    if (primary) {
+      state_->text_selection_gesture_.previous_tap_time.reset();
+      state_->text_selection_gesture_.previous_tap_node.reset();
+    }
     return;
   }
 
   auto [inserted, unused] = state_->pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
   static_cast<void>(unused);
   if (primary) {
-    HandleTextSelectionClick(event);
+    HandleTextSelectionPointerDown(event);
   }
   inserted = state_->pointer_sessions_.find(event.pointer_id);
   if (inserted == state_->pointer_sessions_.end() || inserted->second.quarantined ||
@@ -1707,13 +1715,6 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
       if (detail::MountedNode* target = FindNode(*state_->mounted_root_, target_identity)) {
         EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
       }
-    }
-    inserted = state_->pointer_sessions_.find(event.pointer_id);
-    if (inserted != state_->pointer_sessions_.end() && !inserted->second.quarantined &&
-        std::ranges::any_of(inserted->second.recognitions, [](const PointerRecognition& recognition) {
-          return recognition.started && std::holds_alternative<TextSelectionRecognitionState>(recognition.state);
-        })) {
-      TrackTouchTextSelectionGesture(event);
     }
   }
   AdvancePointerRecognition(timestamp);
@@ -1788,7 +1789,7 @@ void Runtime::HandlePointerMove(const PointerEvent& event, bool hover_moved) {
   if (std::ranges::any_of(session.recognitions, [](const PointerRecognition& recognition) {
         return recognition.started && std::holds_alternative<TextSelectionRecognitionState>(recognition.state);
       })) {
-    TrackTouchTextSelectionGesture(event);
+    TrackTextSelectionGesture(event);
   }
   for (std::size_t index = 0; index < session.recognitions.size(); ++index) {
     if (!session.recognitions[index].started) {
@@ -1921,7 +1922,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
             return recognition.started &&
                    std::holds_alternative<TextSelectionRecognitionState>(recognition.state);
           });
-      if (text_selection != session.recognitions.end() && TrackTouchTextSelectionGesture(event)) {
+      if (text_selection != session.recognitions.end() && TrackTextSelectionGesture(event)) {
         const std::size_t index = static_cast<std::size_t>(text_selection - session.recognitions.begin());
         ResolvePointerRecognition(session, index, event);
         SelectFocusedTextWord(event.position);
@@ -1959,6 +1960,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
   }
 
   if (final_release) {
+    RecordTextSelectionTap(session, event);
     state_->pointer_sessions_.erase(captured);
   }
   if (scroll_velocity.has_value() && momentum_identity.has_value()) {

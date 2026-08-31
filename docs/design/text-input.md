@@ -809,7 +809,7 @@ The first pointer behavior includes:
 - Drag to extend selection.
 - Preserve pointer cancellation behavior when a parent scroll gesture wins.
 
-Mouse or pen double-click selects a word immediately. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles in a framework-owned `FrameworkOverlay` above the shared LayerStack. The overlay state owns its stable RenderNode and is appended to the synthetic RuntimeRoot scene without becoming a mounted application or LayerStack node. It is not a public Layer entry and does not participate in application-layer ordering or focus containment, but Runtime Back routing hides it before consulting public layers. Magnifiers and more advanced gesture behavior remain incremental.
+Shared Runtime recognition selects a word immediately on a mouse or pen double-click. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles in a framework-owned `FrameworkOverlay` above the shared LayerStack. The overlay state owns its stable RenderNode and is appended to the synthetic RuntimeRoot scene without becoming a mounted application or LayerStack node. It is not a public Layer entry and does not participate in application-layer ordering or focus containment, but Runtime Back routing hides it before consulting public layers. Magnifiers and more advanced gesture behavior remain incremental.
 
 ## Theme
 

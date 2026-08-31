@@ -1248,7 +1248,6 @@ public:
         pointer_id,
         {x, y},
         device_kind,
-        1,
         changed_button,
         pressed_buttons,
     });

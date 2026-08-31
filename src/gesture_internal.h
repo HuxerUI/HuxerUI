@@ -171,7 +171,6 @@ struct TextSelectionRecognitionState {
   std::uint64_t node_identity = 0;
   Point tap_position;
   double long_press_deadline = 0.0;
-  bool tap_pending = false;
   bool double_tap_pending = false;
   bool long_press_pending = false;
 };
