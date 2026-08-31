@@ -16,6 +16,22 @@ class ResourceAccess;
 class VectorAccess;
 } // namespace detail
 
+/// Selects the shorter or longer endpoint-based elliptical arc between two points.
+enum class ArcSize {
+  /// Selects an arc whose absolute sweep is no greater than half an ellipse.
+  Small,
+  /// Selects an arc whose absolute sweep is no less than half an ellipse.
+  Large,
+};
+
+/// Selects the visual traversal direction of an endpoint-based elliptical arc.
+enum class ArcDirection {
+  /// Traverses counterclockwise in HuxerUI's downward-Y logical coordinate system.
+  CounterClockwise,
+  /// Traverses clockwise in HuxerUI's downward-Y logical coordinate system.
+  Clockwise,
+};
+
 /// Stores platform-neutral contours for filling, stroking, clipping, and vector assets.
 ///
 /// Path is a copy-on-write value. Coordinates use the logical coordinate space active where the path is consumed.
@@ -52,6 +68,13 @@ public:
   ///
   /// An active contour is required, and all points must be finite.
   Path& CubicTo(Point first_control, Point second_control, Point end);
+  /// Adds an endpoint-based elliptical arc from the current point to end.
+  ///
+  /// radii contains the non-negative local x- and y-axis radii before x_axis_rotation, which is expressed in radians.
+  /// Undersized radii are scaled proportionally to reach end. A zero radius produces a line, while an end equal to the
+  /// current point produces no segment. One call cannot express a complete ellipse; use two arcs with distinct
+  /// intermediate endpoints. An active contour is required, and every numeric input must be finite.
+  Path& ArcTo(Size radii, float x_axis_rotation, ArcSize size, ArcDirection direction, Point end);
   /// Closes the active contour with a segment back to its starting point.
   ///
   /// A subsequent contour must begin with MoveTo().

@@ -20,12 +20,14 @@
 
 Use `Path` and its public builder operations for filled or stroked geometry. `StrokeStyle` is the single stroke configuration accepted by `DrawLine()`, `DrawArc()`, `DrawBorder()`, and `StrokePath()`; do not pass width, cap, or join as parallel arguments. Dash entries alternate painted and skipped lengths in local logical units, an odd entry count repeats to form an even cycle, and each Path contour restarts at `dash_offset`.
 
+`Path::ArcTo()` continues the active contour with an endpoint-based elliptical arc. Supply local x/y radii, x-axis rotation in radians, `ArcSize`, `ArcDirection`, and the endpoint; clockwise follows HuxerUI's downward-Y logical coordinates. Undersized radii scale to reach the endpoint, either zero radius produces a line, and a coincident endpoint adds no segment. Use two endpoint arcs for a complete ellipse. Use `PaintContext::DrawArc()` instead for an independent stroked circular arc that does not join a Path contour.
+
 ```cpp
 paint.DrawLine({0.0F, 12.0F}, {120.0F, 12.0F}, Color::Black(),
                StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}});
 ```
 
-Respect fill rules and radians for arcs. Text painting uses `TextStyle`, shaping options, and layout options. `UseTextMeasurer()` provides the active platform text measurer during composition; do not invent glyph metrics. Prefer `Text` for ordinary UI text because it owns layout and semantics.
+Respect fill rules when filling or clipping paths. Text painting uses `TextStyle`, shaping options, and layout options. `UseTextMeasurer()` provides the active platform text measurer during composition; do not invent glyph metrics. Prefer `Text` for ordinary UI text because it owns layout and semantics.
 
 ## External textures
 

@@ -2,10 +2,13 @@
 
 #include <huxerui/paint.h>
 
+#include <cmath>
 #include <concepts>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "path_internal.h"
 
@@ -50,6 +53,10 @@ TEST_CASE("ClosingPathRequiresMoveToBeforeAnotherContour") {
   REQUIRE_THROWS_AS(path.LineTo({30.0F, 20.0F}), std::logic_error);
   REQUIRE_THROWS_AS(path.QuadraticTo({}, {}), std::logic_error);
   REQUIRE_THROWS_AS(path.CubicTo({}, {}, {}), std::logic_error);
+  REQUIRE_THROWS_AS(
+      path.ArcTo({10.0F, 10.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {30.0F, 20.0F}),
+      std::logic_error
+  );
   REQUIRE_THROWS_AS(path.Close(), std::logic_error);
 
   REQUIRE_NOTHROW(path.MoveTo({30.0F, 20.0F}).LineTo({40.0F, 30.0F}));
@@ -64,6 +71,164 @@ TEST_CASE("PathRejectsInvalidGeometryAndContourOperations") {
   REQUIRE_THROWS_AS(path.MoveTo({nan, 0.0F}), std::invalid_argument);
   path.MoveTo({0.0F, 0.0F});
   REQUIRE_THROWS_AS(path.CubicTo({}, {nan, 0.0F}, {}), std::invalid_argument);
+}
+
+TEST_CASE("PathArcToNormalizesEveryArcSelectionToCubics") {
+  const auto arc = [](ArcSize size, ArcDirection direction) {
+    Path path;
+    path.MoveTo({10.0F, 0.0F}).ArcTo({10.0F, 10.0F}, 0.0F, size, direction, {0.0F, 10.0F});
+    return path;
+  };
+
+  const Path clockwise_small = arc(ArcSize::Small, ArcDirection::Clockwise);
+  const Path counterclockwise_small = arc(ArcSize::Small, ArcDirection::CounterClockwise);
+  const Path clockwise_large = arc(ArcSize::Large, ArcDirection::Clockwise);
+  const Path counterclockwise_large = arc(ArcSize::Large, ArcDirection::CounterClockwise);
+  const auto clockwise_small_elements = detail::PathAccess::Elements(clockwise_small);
+  const auto counterclockwise_small_elements = detail::PathAccess::Elements(counterclockwise_small);
+
+  REQUIRE(clockwise_small_elements.size() == 2);
+  REQUIRE(counterclockwise_small_elements.size() == 2);
+  REQUIRE(detail::PathAccess::Elements(clockwise_large).size() == 4);
+  REQUIRE(detail::PathAccess::Elements(counterclockwise_large).size() == 4);
+  REQUIRE(clockwise_small_elements.back().verb == detail::PathVerb::CubicTo);
+  REQUIRE(clockwise_small_elements.back().points[2] == Point{0.0F, 10.0F});
+  REQUIRE(clockwise_small_elements.back().points[0].x == Catch::Approx(10.0F));
+  REQUIRE(clockwise_small_elements.back().points[0].y == Catch::Approx(5.522847F));
+  REQUIRE(counterclockwise_small_elements.back().points[0].x == Catch::Approx(4.477153F));
+  REQUIRE(counterclockwise_small_elements.back().points[0].y == Catch::Approx(0.0F));
+  REQUIRE(clockwise_small.Bounds() == Rect{0.0F, 0.0F, 10.0F, 10.0F});
+  REQUIRE(counterclockwise_small.Bounds() == Rect{0.0F, 0.0F, 10.0F, 10.0F});
+  REQUIRE(clockwise_large.Bounds() == Rect{0.0F, 0.0F, 20.0F, 20.0F});
+  REQUIRE(counterclockwise_large.Bounds() == Rect{-10.0F, -10.0F, 20.0F, 20.0F});
+}
+
+TEST_CASE("PathArcToScalesUndersizedRadiiAndHandlesDegenerateSegments") {
+  Path coincident;
+  coincident.MoveTo({4.0F, 6.0F}).ArcTo(
+      {20.0F, 10.0F}, 0.0F, ArcSize::Large, ArcDirection::Clockwise, {4.0F, 6.0F}
+  );
+  REQUIRE(coincident.IsEmpty());
+  REQUIRE(detail::PathAccess::Elements(coincident).size() == 1);
+
+  Path line;
+  line.MoveTo({4.0F, 6.0F}).ArcTo(
+      {20.0F, 0.0F}, 0.0F, ArcSize::Large, ArcDirection::CounterClockwise, {24.0F, 16.0F}
+  );
+  REQUIRE(detail::PathAccess::Elements(line).size() == 2);
+  REQUIRE(detail::PathAccess::Elements(line).back().verb == detail::PathVerb::LineTo);
+  REQUIRE(line.Bounds() == Rect{4.0F, 6.0F, 20.0F, 10.0F});
+
+  Path corrected;
+  corrected.MoveTo({0.0F, 0.0F}).ArcTo(
+      {10.0F, 5.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {100.0F, 0.0F}
+  );
+  Path corrected_large;
+  corrected_large.MoveTo({0.0F, 0.0F}).ArcTo(
+      {10.0F, 5.0F}, 0.0F, ArcSize::Large, ArcDirection::Clockwise, {100.0F, 0.0F}
+  );
+  REQUIRE(detail::PathAccess::Elements(corrected).size() == 3);
+  REQUIRE(corrected == corrected_large);
+  REQUIRE(corrected.Bounds().width == Catch::Approx(100.0F));
+  REQUIRE(corrected.Bounds().height == Catch::Approx(25.0F));
+}
+
+TEST_CASE("PathArcToBuildsRotatedEllipsesWithCurveExtremaBounds") {
+  constexpr float rotation = std::numbers::pi_v<float> * 0.25F;
+  constexpr Point center{50.0F, 50.0F};
+  constexpr float radius_x = 30.0F;
+  constexpr float radius_y = 10.0F;
+  const float axis = radius_x * std::cos(rotation);
+  const Point start{center.x + axis, center.y + axis};
+  const Point opposite{center.x - axis, center.y - axis};
+
+  Path ellipse;
+  ellipse.MoveTo(start)
+      .ArcTo({radius_x, radius_y}, rotation, ArcSize::Small, ArcDirection::Clockwise, opposite)
+      .ArcTo({radius_x, radius_y}, rotation, ArcSize::Small, ArcDirection::Clockwise, start)
+      .Close();
+
+  const auto elements = detail::PathAccess::Elements(ellipse);
+  REQUIRE(elements.size() == 6);
+  REQUIRE(elements[1].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[2].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[3].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[4].verb == detail::PathVerb::CubicTo);
+  REQUIRE(elements[5].verb == detail::PathVerb::Close);
+  const float extent = std::sqrt(radius_x * radius_x * 0.5F + radius_y * radius_y * 0.5F);
+  REQUIRE(ellipse.Bounds().x == Catch::Approx(center.x - extent).margin(0.01F));
+  REQUIRE(ellipse.Bounds().y == Catch::Approx(center.y - extent).margin(0.01F));
+  REQUIRE(ellipse.Bounds().width == Catch::Approx(extent * 2.0F).margin(0.02F));
+  REQUIRE(ellipse.Bounds().height == Catch::Approx(extent * 2.0F).margin(0.02F));
+}
+
+TEST_CASE("PathArcToValidatesBeforeMutation") {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float infinity = std::numeric_limits<float>::infinity();
+  Path empty;
+  REQUIRE_THROWS_AS(
+      empty.ArcTo({10.0F, 10.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {10.0F, 0.0F}),
+      std::logic_error
+  );
+
+  Path path;
+  path.MoveTo({0.0F, 0.0F});
+  const Path original = path;
+  REQUIRE_THROWS_AS(
+      path.ArcTo({-1.0F, 10.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {10.0F, 0.0F}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      path.ArcTo({infinity, 10.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {10.0F, 0.0F}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      path.ArcTo({10.0F, 10.0F}, infinity, ArcSize::Small, ArcDirection::Clockwise, {10.0F, 0.0F}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      path.ArcTo({10.0F, 10.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {nan, 0.0F}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      path.ArcTo({10.0F, 10.0F}, 0.0F, static_cast<ArcSize>(20), ArcDirection::Clockwise, {10.0F, 0.0F}),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      path.ArcTo({10.0F, 10.0F}, 0.0F, ArcSize::Small, static_cast<ArcDirection>(20), {10.0F, 0.0F}),
+      std::invalid_argument
+  );
+  REQUIRE(path == original);
+}
+
+TEST_CASE("PathArcToPreservesCopyOnWriteAndPaintSnapshots") {
+  Path path;
+  path.MoveTo({10.0F, 0.0F})
+      .ArcTo({10.0F, 10.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {0.0F, 10.0F});
+  const Path copy = path;
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 20.0F, 20.0F});
+  context.FillPath(path, Color::Black());
+  context.StrokePath(path, Color::Black(), StrokeStyle{.width = 2.0F, .dash_pattern = {2.0F, 1.0F}});
+  context.DrawPathShadow(path, Color::Black(), {}, 2.0F);
+  context.PushPathClip(path);
+  context.PopClip();
+  context.Finish();
+
+  path.ArcTo({10.0F, 10.0F}, 0.0F, ArcSize::Large, ArcDirection::Clockwise, {10.0F, 0.0F});
+
+  REQUIRE(path != copy);
+  REQUIRE(sequence.Commands().size() == 5);
+  REQUIRE(std::get<FillPathCommand>(sequence.Commands()[0]).path == copy);
+  REQUIRE(std::get<StrokePathCommand>(sequence.Commands()[1]).path == copy);
+  REQUIRE(std::get<StrokePathCommand>(sequence.Commands()[1]).style.dash_pattern == std::vector<float>{2.0F, 1.0F});
+  REQUIRE(std::get<DrawPathShadowCommand>(sequence.Commands()[2]).path == copy);
+  REQUIRE(std::get<PushPathClipCommand>(sequence.Commands()[3]).path == copy);
+  REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[4]));
+  REQUIRE(detail::PathAccess::Elements(copy).size() == 2);
+  REQUIRE(detail::PathAccess::Elements(path).size() == 5);
+  path.Reset();
+  REQUIRE(path == Path{});
 }
 
 TEST_CASE("RoundedRectUsesCubicCircularCorners") {

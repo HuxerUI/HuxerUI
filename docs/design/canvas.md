@@ -13,7 +13,7 @@ This document defines HuxerUI's platform-neutral Path value, custom Canvas compo
 ## Path
 
 `Path` is a copy-on-write value containing one or more contours.
-It supports move, line, quadratic curve, cubic curve, and close elements.
+It supports move, line, quadratic curve, cubic curve, endpoint-based elliptical arc, and close operations.
 Copying a Path is inexpensive, and mutating one copy detaches it before changing the shared data.
 A PaintCommand therefore retains a stable geometry snapshot even when the caller later changes the original Path.
 
@@ -23,6 +23,16 @@ Commands that extend or close a contour require a preceding `MoveTo()`.
 Move-only contours do not contribute to Path bounds because they produce no pixels.
 Path equality compares geometry by value and uses shared storage identity as a fast path.
 Bounds include curve extrema rather than only curve endpoints.
+
+`ArcTo()` selects one of the four elliptical arcs between the current point and an endpoint through `ArcSize` and `ArcDirection`.
+Its horizontal and vertical radii precede an explicit x-axis rotation in radians; positive rotation and `ArcDirection::Clockwise` follow HuxerUI's downward-Y logical coordinate system.
+Undersized radii scale proportionally, either zero radius produces a line, and an endpoint equal to the current point produces no segment.
+One endpoint arc cannot identify a complete ellipse, which is expressed by two arcs with distinct intermediate endpoints.
+
+Path normalizes each non-degenerate arc immediately into at most four cubic elements whose absolute sweep does not exceed `pi / 2`.
+The final cubic uses the declared endpoint exactly, and the canonical cubic sequence becomes the geometry observed by equality, bounds, fill, stroke, dash, shadow, clipping, and immutable PaintCommand snapshots.
+The maximum radial deviation of a 90-degree circular segment is approximately `0.0273%` of its radius; applying the ellipse transform bounds the absolute deviation by the same fraction of the larger normalized radius.
+No renderer receives an arc-specific Path element, while the independent circular `DrawArcCommand` remains available for direct stroked arcs.
 
 `PathFillRule::NonZero` and `PathFillRule::EvenOdd` are painting properties supplied by fill, clip, and shadow commands.
 They do not change the underlying geometry value.
@@ -126,6 +136,6 @@ Platform geometry, masks, layers, and device-dependent caches never enter shared
 
 ## Unsupported capabilities
 
-The Path surface does not include arcs, relative commands, boolean geometry operations, path metrics, gradient path fills, or Path-based pointer hit testing.
+The Path surface does not include relative commands, boolean geometry operations, path metrics, gradient path fills, or Path-based pointer hit testing.
 ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
 Rectangle linear and radial gradients use dedicated PaintCommands; there is no generic Brush abstraction.

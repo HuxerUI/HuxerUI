@@ -20,12 +20,24 @@ The returned byte views remain standard immutable spans rather than introducing 
 
 `Canvas` and `Path` provide custom platform-neutral drawing that is replayed by every renderer.
 Filled rectangles use `DrawRect()`, while lines, arcs, borders, and paths share `StrokeStyle` for width, caps, joins, miter limits, and optional dashes.
+`Path::ArcTo()` continues an active contour with an endpoint-based elliptical arc, using explicit radii, x-axis rotation in radians, arc size, direction, and endpoint.
 
 ```cpp
 return Canvas([](PaintContext& paint, Size size) {
   paint.DrawLine({0.0F, size.height * 0.5F}, {size.width, size.height * 0.5F}, Color::Black(),
                  StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}});
 });
+```
+
+Connected arcs can participate in fills, strokes, shadows, and clips:
+
+```cpp
+Path sector;
+sector.MoveTo({24.0F, 24.0F})
+    .LineTo({44.0F, 24.0F})
+    .ArcTo({20.0F, 12.0F}, 0.0F, ArcSize::Large, ArcDirection::Clockwise, {8.0F, 36.0F})
+    .Close();
+paint.FillPath(sector, Color::Black());
 ```
 
 Dash lengths and offsets use the local logical units of the painted geometry.
