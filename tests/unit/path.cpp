@@ -231,6 +231,142 @@ TEST_CASE("PathArcToPreservesCopyOnWriteAndPaintSnapshots") {
   REQUIRE(path == Path{});
 }
 
+TEST_CASE("PathContainsHandlesConvexConcaveAndImplicitlyClosedContours") {
+  Path square;
+  square.MoveTo({0.0F, 0.0F}).LineTo({100.0F, 0.0F}).LineTo({100.0F, 100.0F}).LineTo({0.0F, 100.0F});
+
+  REQUIRE(square.Contains({50.0F, 50.0F}, PathFillRule::NonZero));
+  REQUIRE(square.Contains({0.0F, 50.0F}, PathFillRule::NonZero));
+  REQUIRE(square.Contains({0.0F, 0.0F}, PathFillRule::EvenOdd));
+  REQUIRE_FALSE(square.Contains({110.0F, 50.0F}, PathFillRule::NonZero));
+
+  Path concave;
+  concave.MoveTo({0.0F, 0.0F})
+      .LineTo({100.0F, 0.0F})
+      .LineTo({100.0F, 30.0F})
+      .LineTo({30.0F, 30.0F})
+      .LineTo({30.0F, 100.0F})
+      .LineTo({0.0F, 100.0F})
+      .Close();
+
+  REQUIRE(concave.Contains({80.0F, 10.0F}, PathFillRule::NonZero));
+  REQUIRE(concave.Contains({10.0F, 80.0F}, PathFillRule::EvenOdd));
+  REQUIRE_FALSE(concave.Contains({80.0F, 80.0F}, PathFillRule::NonZero));
+}
+
+TEST_CASE("PathContainsAppliesNonZeroAndEvenOddAcrossContours") {
+  const auto append_clockwise_square = [](Path& path, float inset) {
+    path.MoveTo({inset, inset})
+        .LineTo({100.0F - inset, inset})
+        .LineTo({100.0F - inset, 100.0F - inset})
+        .LineTo({inset, 100.0F - inset})
+        .Close();
+  };
+  const auto append_counterclockwise_square = [](Path& path, float inset) {
+    path.MoveTo({inset, inset})
+        .LineTo({inset, 100.0F - inset})
+        .LineTo({100.0F - inset, 100.0F - inset})
+        .LineTo({100.0F - inset, inset})
+        .Close();
+  };
+
+  Path same_direction;
+  append_clockwise_square(same_direction, 0.0F);
+  append_clockwise_square(same_direction, 25.0F);
+  REQUIRE(same_direction.Contains({50.0F, 50.0F}, PathFillRule::NonZero));
+  REQUIRE_FALSE(same_direction.Contains({50.0F, 50.0F}, PathFillRule::EvenOdd));
+
+  Path opposite_direction;
+  append_clockwise_square(opposite_direction, 0.0F);
+  append_counterclockwise_square(opposite_direction, 25.0F);
+  REQUIRE_FALSE(opposite_direction.Contains({50.0F, 50.0F}, PathFillRule::NonZero));
+  REQUIRE_FALSE(opposite_direction.Contains({50.0F, 50.0F}, PathFillRule::EvenOdd));
+
+  Path overlapping;
+  append_clockwise_square(overlapping, 0.0F);
+  overlapping.MoveTo({50.0F, 0.0F})
+      .LineTo({150.0F, 0.0F})
+      .LineTo({150.0F, 100.0F})
+      .LineTo({50.0F, 100.0F})
+      .Close();
+  REQUIRE(overlapping.Contains({75.0F, 50.0F}, PathFillRule::NonZero));
+  REQUIRE_FALSE(overlapping.Contains({75.0F, 50.0F}, PathFillRule::EvenOdd));
+  REQUIRE(overlapping.Contains({50.0F, 50.0F}, PathFillRule::EvenOdd));
+}
+
+TEST_CASE("PathContainsSubdividesQuadraticCubicAndNormalizedArcGeometry") {
+  Path quadratic;
+  quadratic.MoveTo({0.0F, 0.0F}).QuadraticTo({50.0F, 100.0F}, {100.0F, 0.0F});
+  REQUIRE(quadratic.Contains({50.0F, 25.0F}, PathFillRule::NonZero));
+  REQUIRE(quadratic.Contains({50.0F, 50.0F}, PathFillRule::EvenOdd));
+  REQUIRE_FALSE(quadratic.Contains({50.0F, 51.0F}, PathFillRule::NonZero));
+
+  Path collinear_quadratic;
+  collinear_quadratic.MoveTo({0.0F, 0.0F}).QuadraticTo({200.0F, 0.0F}, {100.0F, 0.0F});
+  REQUIRE(collinear_quadratic.Contains({125.0F, 0.0F}, PathFillRule::NonZero));
+
+  Path cubic;
+  cubic.MoveTo({0.0F, 0.0F}).CubicTo({0.0F, 100.0F}, {100.0F, 100.0F}, {100.0F, 0.0F});
+  REQUIRE(cubic.Contains({50.0F, 50.0F}, PathFillRule::NonZero));
+  REQUIRE(cubic.Contains({50.0F, 75.0F}, PathFillRule::EvenOdd));
+  REQUIRE_FALSE(cubic.Contains({50.0F, 76.0F}, PathFillRule::NonZero));
+
+  Path ellipse;
+  ellipse.MoveTo({10.0F, 0.0F})
+      .ArcTo({10.0F, 5.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {-10.0F, 0.0F})
+      .ArcTo({10.0F, 5.0F}, 0.0F, ArcSize::Small, ArcDirection::Clockwise, {10.0F, 0.0F})
+      .Close();
+  REQUIRE(ellipse.Contains({0.0F, 0.0F}, PathFillRule::NonZero));
+  REQUIRE(ellipse.Contains({10.0F, 0.0F}, PathFillRule::EvenOdd));
+  REQUIRE_FALSE(ellipse.Contains({11.0F, 0.0F}, PathFillRule::NonZero));
+}
+
+TEST_CASE("PathContainsDefinesEmptyAndDegenerateBoundaries") {
+  const Path empty;
+  Path move_only;
+  move_only.MoveTo({4.0F, 6.0F});
+  REQUIRE_FALSE(empty.Contains({}, PathFillRule::NonZero));
+  REQUIRE_FALSE(move_only.Contains({4.0F, 6.0F}, PathFillRule::EvenOdd));
+
+  Path line;
+  line.MoveTo({0.0F, 0.0F}).LineTo({10.0F, 0.0F});
+  REQUIRE(line.Contains({5.0F, 0.0F}, PathFillRule::NonZero));
+  REQUIRE(line.Contains({5.0F, 0.00005F}, PathFillRule::EvenOdd));
+  REQUIRE_FALSE(line.Contains({5.0F, 0.001F}, PathFillRule::NonZero));
+
+  Path point_segment;
+  point_segment.MoveTo({3.0F, 4.0F}).LineTo({3.0F, 4.0F});
+  REQUIRE(point_segment.Contains({3.0F, 4.0F}, PathFillRule::NonZero));
+  REQUIRE_FALSE(point_segment.Contains({3.0F, 4.01F}, PathFillRule::EvenOdd));
+
+  Path closed_point;
+  closed_point.MoveTo({3.0F, 4.0F}).Close();
+  REQUIRE_FALSE(closed_point.Contains({3.0F, 4.0F}, PathFillRule::NonZero));
+}
+
+TEST_CASE("PathContainsValidatesWithoutMutatingPathOrSnapshots") {
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float infinity = std::numeric_limits<float>::infinity();
+  Path path = Path::RoundedRect({0.0F, 0.0F, 20.0F, 20.0F}, CornerRadii{4.0F});
+  const Path copy = path;
+  const auto* storage = detail::PathAccess::Elements(path).data();
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 20.0F, 20.0F});
+  context.FillPath(path, Color::Black());
+  context.Finish();
+
+  REQUIRE_THROWS_AS(path.Contains({nan, 0.0F}, PathFillRule::NonZero), std::invalid_argument);
+  REQUIRE_THROWS_AS(path.Contains({0.0F, infinity}, PathFillRule::EvenOdd), std::invalid_argument);
+  REQUIRE_THROWS_AS(path.Contains({}, static_cast<PathFillRule>(20)), std::invalid_argument);
+  REQUIRE(path.Contains({10.0F, 10.0F}, PathFillRule::NonZero));
+  REQUIRE(path == copy);
+  REQUIRE(detail::PathAccess::Elements(path).data() == storage);
+
+  path.MoveTo({30.0F, 30.0F}).LineTo({40.0F, 40.0F});
+  REQUIRE(path != copy);
+  REQUIRE(std::get<FillPathCommand>(sequence.Commands()[0]).path == copy);
+}
+
 TEST_CASE("RoundedRectUsesCubicCircularCorners") {
   const Path path = Path::RoundedRect({10.0F, 20.0F, 80.0F, 60.0F}, CornerRadii::Top(16.0F));
   const auto elements = detail::PathAccess::Elements(path);

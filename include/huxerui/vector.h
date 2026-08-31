@@ -16,6 +16,14 @@ class ResourceAccess;
 class VectorAccess;
 } // namespace detail
 
+/// Selects how overlapping path contours determine filled and clipped regions.
+enum class PathFillRule {
+  /// Uses signed contour winding counts; opposite contour directions can subtract regions.
+  NonZero,
+  /// Fills points crossed by an odd number of contour segments regardless of contour direction.
+  EvenOdd,
+};
+
 /// Selects the shorter or longer endpoint-based elliptical arc between two points.
 enum class ArcSize {
   /// Selects an arc whose absolute sweep is no greater than half an ellipse.
@@ -93,6 +101,11 @@ public:
   ///
   /// Curve extrema are included. An empty path returns an empty rectangle.
   [[nodiscard]] Rect Bounds() const noexcept;
+  /// Returns whether point lies inside the local filled geometry under fill_rule.
+  ///
+  /// Open contours are implicitly closed as they are during filling. Points on a contour boundary are contained within
+  /// the shared logical tolerance. point must be finite.
+  [[nodiscard]] bool Contains(Point point, PathFillRule fill_rule) const;
 
   bool operator==(const Path& other) const noexcept;
 
@@ -104,14 +117,6 @@ private:
   std::shared_ptr<Data> data_;
 
   friend class detail::PathAccess;
-};
-
-/// Selects how overlapping path contours determine filled and clipped regions.
-enum class PathFillRule {
-  /// Uses signed contour winding counts; opposite contour directions can subtract regions.
-  NonZero,
-  /// Fills points crossed by an odd number of contour segments regardless of contour direction.
-  EvenOdd,
 };
 
 /// Selects the shape drawn at open stroke and dash-segment endpoints.

@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
@@ -222,6 +223,122 @@ void IncludeCubicExtrema(float start, float first_control, float second_control,
   }
   if (second_time > 0.0F && second_time < 1.0F && second_time != first_time) {
     include(second_time);
+  }
+}
+
+struct DoublePoint {
+  double x = 0.0;
+  double y = 0.0;
+};
+
+constexpr double path_containment_tolerance = 0.0001;
+constexpr unsigned maximum_containment_subdivision_depth = 24;
+
+DoublePoint ToDoublePoint(Point point) noexcept {
+  return {static_cast<double>(point.x), static_cast<double>(point.y)};
+}
+
+DoublePoint Midpoint(DoublePoint first, DoublePoint second) noexcept {
+  return {(first.x + second.x) * 0.5, (first.y + second.y) * 0.5};
+}
+
+double SquaredDistance(DoublePoint first, DoublePoint second) noexcept {
+  const double delta_x = first.x - second.x;
+  const double delta_y = first.y - second.y;
+  return delta_x * delta_x + delta_y * delta_y;
+}
+
+double SquaredDistanceToSegment(DoublePoint point, DoublePoint start, DoublePoint end) noexcept {
+  const double delta_x = end.x - start.x;
+  const double delta_y = end.y - start.y;
+  const double length_squared = delta_x * delta_x + delta_y * delta_y;
+  if (length_squared == 0.0) {
+    return SquaredDistance(point, start);
+  }
+  const double projection = std::clamp(
+      ((point.x - start.x) * delta_x + (point.y - start.y) * delta_y) / length_squared,
+      0.0,
+      1.0
+  );
+  return SquaredDistance(point, {start.x + projection * delta_x, start.y + projection * delta_y});
+}
+
+struct ContainmentState {
+  DoublePoint point;
+  double boundary_tolerance_squared = 0.0;
+  double subdivision_tolerance_squared = 0.0;
+  std::int64_t winding = 0;
+  bool parity = false;
+  bool boundary = false;
+
+  void AddEdge(DoublePoint start, DoublePoint end) noexcept {
+    if (SquaredDistanceToSegment(point, start, end) <= boundary_tolerance_squared) {
+      boundary = true;
+      return;
+    }
+
+    const bool crosses_downward = start.y <= point.y && end.y > point.y;
+    const bool crosses_upward = end.y <= point.y && start.y > point.y;
+    if (!crosses_downward && !crosses_upward) {
+      return;
+    }
+    const double intersection_x = start.x + (point.y - start.y) * (end.x - start.x) / (end.y - start.y);
+    if (intersection_x <= point.x) {
+      return;
+    }
+    parity = !parity;
+    winding += crosses_downward ? 1 : -1;
+  }
+};
+
+void AddQuadraticEdges(
+    ContainmentState& state,
+    DoublePoint start,
+    DoublePoint control,
+    DoublePoint end,
+    unsigned depth
+) noexcept {
+  if (depth == maximum_containment_subdivision_depth ||
+      SquaredDistanceToSegment(control, start, end) <= state.subdivision_tolerance_squared) {
+    state.AddEdge(start, end);
+    return;
+  }
+
+  const DoublePoint start_control = Midpoint(start, control);
+  const DoublePoint control_end = Midpoint(control, end);
+  const DoublePoint middle = Midpoint(start_control, control_end);
+  AddQuadraticEdges(state, start, start_control, middle, depth + 1);
+  if (!state.boundary) {
+    AddQuadraticEdges(state, middle, control_end, end, depth + 1);
+  }
+}
+
+void AddCubicEdges(
+    ContainmentState& state,
+    DoublePoint start,
+    DoublePoint first_control,
+    DoublePoint second_control,
+    DoublePoint end,
+    unsigned depth
+) noexcept {
+  const double flatness = std::max(
+      SquaredDistanceToSegment(first_control, start, end),
+      SquaredDistanceToSegment(second_control, start, end)
+  );
+  if (depth == maximum_containment_subdivision_depth || flatness <= state.subdivision_tolerance_squared) {
+    state.AddEdge(start, end);
+    return;
+  }
+
+  const DoublePoint first_half = Midpoint(start, first_control);
+  const DoublePoint control_half = Midpoint(first_control, second_control);
+  const DoublePoint second_half = Midpoint(second_control, end);
+  const DoublePoint first_middle = Midpoint(first_half, control_half);
+  const DoublePoint second_middle = Midpoint(control_half, second_half);
+  const DoublePoint middle = Midpoint(first_middle, second_middle);
+  AddCubicEdges(state, start, first_half, first_middle, middle, depth + 1);
+  if (!state.boundary) {
+    AddCubicEdges(state, middle, second_middle, second_half, end, depth + 1);
   }
 }
 
@@ -466,6 +583,105 @@ Rect Path::Bounds() const noexcept {
       data_->maximum_x - data_->minimum_x,
       data_->maximum_y - data_->minimum_y,
   };
+}
+
+bool Path::Contains(Point point, PathFillRule fill_rule) const {
+  RequirePoint(point);
+  bool even_odd = false;
+  switch (fill_rule) {
+  case PathFillRule::NonZero:
+    break;
+  case PathFillRule::EvenOdd:
+    even_odd = true;
+    break;
+  default:
+    throw std::invalid_argument("HuxerUI path fill rule is invalid");
+  }
+  if (!data_ || !data_->has_drawable_segment || !data_->has_bounds) {
+    return false;
+  }
+
+  const double coordinate_scale = std::max({
+      1.0,
+      std::abs(static_cast<double>(point.x)),
+      std::abs(static_cast<double>(point.y)),
+      std::abs(static_cast<double>(data_->minimum_x)),
+      std::abs(static_cast<double>(data_->minimum_y)),
+      std::abs(static_cast<double>(data_->maximum_x)),
+      std::abs(static_cast<double>(data_->maximum_y)),
+  });
+  const double tolerance = std::max(
+      path_containment_tolerance,
+      coordinate_scale * static_cast<double>(std::numeric_limits<float>::epsilon()) * 4.0
+  );
+  if (static_cast<double>(point.x) < static_cast<double>(data_->minimum_x) - tolerance ||
+      static_cast<double>(point.x) > static_cast<double>(data_->maximum_x) + tolerance ||
+      static_cast<double>(point.y) < static_cast<double>(data_->minimum_y) - tolerance ||
+      static_cast<double>(point.y) > static_cast<double>(data_->maximum_y) + tolerance) {
+    return false;
+  }
+
+  ContainmentState state{
+      .point = ToDoublePoint(point),
+      .boundary_tolerance_squared = tolerance * tolerance,
+      .subdivision_tolerance_squared = tolerance * tolerance * 0.25,
+  };
+  DoublePoint contour_start{};
+  DoublePoint current{};
+  bool contour_active = false;
+  bool contour_has_segment = false;
+  const auto finish_contour = [&] {
+    if (contour_active && contour_has_segment) {
+      state.AddEdge(current, contour_start);
+    }
+    contour_active = false;
+    contour_has_segment = false;
+  };
+
+  for (const PathElement& element : data_->elements) {
+    if (state.boundary) {
+      return true;
+    }
+    switch (element.verb) {
+    case PathVerb::MoveTo:
+      finish_contour();
+      contour_start = current = ToDoublePoint(element.points[0]);
+      contour_active = true;
+      break;
+    case PathVerb::LineTo: {
+      const DoublePoint end = ToDoublePoint(element.points[0]);
+      state.AddEdge(current, end);
+      current = end;
+      contour_has_segment = true;
+      break;
+    }
+    case PathVerb::QuadraticTo: {
+      const DoublePoint control = ToDoublePoint(element.points[0]);
+      const DoublePoint end = ToDoublePoint(element.points[1]);
+      AddQuadraticEdges(state, current, control, end, 0);
+      current = end;
+      contour_has_segment = true;
+      break;
+    }
+    case PathVerb::CubicTo: {
+      const DoublePoint first_control = ToDoublePoint(element.points[0]);
+      const DoublePoint second_control = ToDoublePoint(element.points[1]);
+      const DoublePoint end = ToDoublePoint(element.points[2]);
+      AddCubicEdges(state, current, first_control, second_control, end, 0);
+      current = end;
+      contour_has_segment = true;
+      break;
+    }
+    case PathVerb::Close:
+      finish_contour();
+      break;
+    }
+  }
+  finish_contour();
+  if (state.boundary) {
+    return true;
+  }
+  return even_odd ? state.parity : state.winding != 0;
 }
 
 bool Path::operator==(const Path& other) const noexcept {

@@ -40,6 +40,10 @@ sector.MoveTo({24.0F, 24.0F})
 paint.FillPath(sector, Color::Black());
 ```
 
+Use `Path::Contains(point, fill_rule)` when custom interaction must test the same local filled geometry.
+Pass the fill rule used to paint the path; open contours receive the same implicit closing edge, and points on the boundary are included.
+The query tests fill geometry rather than stroke width.
+
 Dash lengths and offsets use the local logical units of the painted geometry.
 An empty pattern is solid, entries alternate between painted and skipped lengths, and an odd-length pattern repeats to form an even cycle.
 Each Path contour restarts the pattern; `DrawLine`, `DrawArc`, and `DrawBorder` define stable starting points so changing `dash_offset` is deterministic.

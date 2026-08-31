@@ -34,8 +34,16 @@ The final cubic uses the declared endpoint exactly, and the canonical cubic sequ
 The maximum radial deviation of a 90-degree circular segment is approximately `0.0273%` of its radius; applying the ellipse transform bounds the absolute deviation by the same fraction of the larger normalized radius.
 No renderer receives an arc-specific Path element, while the independent circular `DrawArcCommand` remains available for direct stroked arcs.
 
-`PathFillRule::NonZero` and `PathFillRule::EvenOdd` are painting properties supplied by fill, clip, and shadow commands.
+`PathFillRule::NonZero` and `PathFillRule::EvenOdd` are operation inputs supplied by fill, clip, shadow, and containment queries.
 They do not change the underlying geometry value.
+
+`Path::Contains()` evaluates a local point against the same implicitly closed fill contours without consulting a renderer.
+It adaptively subdivides quadratic and cubic elements through deterministic midpoint De Casteljau subdivision, then applies a half-open ray crossing rule to the resulting edges.
+Non-zero filling tracks signed winding, while even-odd filling tracks crossing parity.
+The boundary is contained, including recorded zero-length segments and explicit or implicit closing edges.
+The base logical tolerance is `0.0001`; the effective tolerance is the greater of that value and four single-precision units at the geometry's coordinate scale.
+Curve flatness uses half the effective tolerance and a maximum subdivision depth of 24.
+The query retains no mutable cache and does not alter shared Path storage or PaintCommand snapshots.
 
 ## Paint commands
 
@@ -136,6 +144,6 @@ Platform geometry, masks, layers, and device-dependent caches never enter shared
 
 ## Unsupported capabilities
 
-The Path surface does not include relative commands, boolean geometry operations, path metrics, gradient path fills, or Path-based pointer hit testing.
+The Path surface does not include relative commands, boolean geometry operations, path metrics, gradient path fills, stroke containment, or a reusable hit-shape modifier.
 ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
 Rectangle linear and radial gradients use dedicated PaintCommands; there is no generic Brush abstraction.
