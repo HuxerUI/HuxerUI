@@ -18,6 +18,7 @@
 #include "path_internal.h"
 #include "resource_internal.h"
 #include "runtime_test_support.h"
+#include "vector_internal.h"
 
 namespace {
 
@@ -98,6 +99,21 @@ private:
 
 huxerui::View VectorResourceApp() {
   return huxerui::Image(huxerui::ImageResource("test_app", "images/mark"));
+}
+
+huxerui::VectorAsset CompileVectorResource(
+    const std::filesystem::path& temporary, std::string_view svg, std::string_view output_name = "vector-output"
+) {
+  const std::filesystem::path root = temporary / "vector-assets";
+  const std::filesystem::path output = temporary / output_name;
+  Write(root / "images" / "mark.svg", svg);
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
+  DirectoryResources resources(output / "package");
+  huxerui::detail::AppResources app_resources(&resources);
+  return app_resources.ResolveVector(
+      huxerui::ImageResource("test_app", "images/mark"),
+      huxerui::Locale::Default()
+  );
 }
 
 TEST_CASE("ResourceCompilerGeneratesTypedKeysIndexAndPayloads") {
@@ -528,7 +544,7 @@ TEST_CASE("SvgResourcesRejectMalformedStrokeStyles") {
   );
 }
 
-TEST_CASE("SvgResourcesRejectElementsOutsideTheRootAndUnsupportedPresentationSemantics") {
+TEST_CASE("SvgResourcesRejectElementsOutsideTheRootAndCompileStaticPresentationSemantics") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";
   const std::filesystem::path source = root / "images" / "mark.svg";
@@ -540,21 +556,18 @@ TEST_CASE("SvgResourcesRejectElementsOutsideTheRootAndUnsupportedPresentationSem
   );
 
   Write(source, R"(<svg viewBox="0 0 10 10" preserveAspectRatio="none"/>)");
-  REQUIRE_THROWS_WITH(
-      huxerui::resource_compiler::Compile({root, temporary.Path() / "aspect", "test_app"}),
-      Catch::Matchers::ContainsSubstring("unsupported attribute: preserveAspectRatio")
-  );
+  REQUIRE_NOTHROW(huxerui::resource_compiler::Compile({root, temporary.Path() / "aspect", "test_app"}));
 
   Write(source, R"(<svg viewBox="0 0 10 10"><g visibility="hidden"/></svg>)");
-  REQUIRE_THROWS_WITH(
-      huxerui::resource_compiler::Compile({root, temporary.Path() / "visibility", "test_app"}),
-      Catch::Matchers::ContainsSubstring("unsupported attribute: visibility")
-  );
+  REQUIRE_NOTHROW(huxerui::resource_compiler::Compile({root, temporary.Path() / "visibility", "test_app"}));
 
   Write(source, R"(<svg viewBox="0 0 10 10"><g style="display: none"/></svg>)");
+  REQUIRE_NOTHROW(huxerui::resource_compiler::Compile({root, temporary.Path() / "display", "test_app"}));
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><g opacity="0.5"/></svg>)");
   REQUIRE_THROWS_WITH(
-      huxerui::resource_compiler::Compile({root, temporary.Path() / "display", "test_app"}),
-      Catch::Matchers::ContainsSubstring("unsupported style property: display")
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "opacity", "test_app"}),
+      Catch::Matchers::ContainsSubstring("opacity must be exactly zero or one")
   );
 }
 
@@ -586,6 +599,199 @@ TEST_CASE("SvgStylesAllowTrailingWhitespaceAndSmoothCurvesDoNotReflectArcControl
   REQUIRE_FALSE(elements.empty());
   REQUIRE(elements.back().verb == huxerui::detail::PathVerb::CubicTo);
   REQUIRE(elements.back().points[0] == huxerui::Point{20.0F, 10.0F});
+}
+
+TEST_CASE("SvgResourcesExpandForwardUseReferencesAndCompilePathClips") {
+  TemporaryDirectory temporary;
+  const huxerui::VectorAsset vector = CompileVectorResource(
+      temporary.Path(),
+      R"svg(<svg width="20" height="10" viewBox="0 0 20 10" color="#336699" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <defs>
+    <clipPath id="bounds" clip-rule="nonzero"><rect x="0" y="0" width="8" height="8"/></clipPath>
+  </defs>
+  <use href="#mark" x="2" clip-path="url(#bounds)"/>
+  <use xlink:href="#mark" x="4"/>
+  <path id="mark" d="M0 0L10 0L10 10Z" fill="red" style="fill: currentColor; fill-rule: evenodd"/>
+</svg>)svg"
+  );
+
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  REQUIRE(std::ranges::count_if(commands, [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::FillPathCommand>(command);
+  }) == 3);
+  REQUIRE(std::ranges::count_if(commands, [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::PushPathClipCommand>(command);
+  }) == 1);
+  const auto fill = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::FillPathCommand>(command);
+  });
+  REQUIRE(fill != commands.end());
+  REQUIRE(std::get<huxerui::FillPathCommand>(*fill).color == huxerui::Color::Rgb(51, 102, 153));
+  REQUIRE(std::get<huxerui::FillPathCommand>(*fill).fill_rule == huxerui::PathFillRule::EvenOdd);
+  const auto clip = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::PushPathClipCommand>(command);
+  });
+  REQUIRE(clip != commands.end());
+  REQUIRE(std::get<huxerui::PushPathClipCommand>(*clip).fill_rule == huxerui::PathFillRule::NonZero);
+}
+
+TEST_CASE("SvgResourcesValidateFileLocalReferenceIdentity") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path source = root / "images" / "mark.svg";
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><use href="#missing"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "missing", "test_app"}),
+      Catch::Matchers::ContainsSubstring("references a missing id: missing")
+  );
+
+  Write(source, R"(<svg viewBox="0 0 10 10"><path id="same" d="M0 0"/><g id="same"/></svg>)");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "duplicate", "test_app"}),
+      Catch::Matchers::ContainsSubstring("duplicate id: same")
+  );
+
+  Write(
+      source,
+      R"(<svg viewBox="0 0 10 10"><g id="a"><use href="#b"/></g><g id="b"><use href="#a"/></g><use href="#a"/></svg>)"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "cycle", "test_app"}),
+      Catch::Matchers::ContainsSubstring("references form a cycle")
+  );
+
+  Write(
+      source,
+      R"svg(<svg viewBox="0 0 10 10"><clipPath id="clip"><rect width="2" height="2"/></clipPath>
+  <path clip-path="url(#missing)" d="M0 0L1 1"/>
+</svg>)svg"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "missing-clip", "test_app"}),
+      Catch::Matchers::ContainsSubstring("clip-path references a missing id")
+  );
+}
+
+TEST_CASE("SvgResourcesCompileAspectRatioVisibilityUnitsColorsAndSkew") {
+  TemporaryDirectory temporary;
+  const huxerui::VectorAsset vector = CompileVectorResource(
+      temporary.Path(),
+      R"svg(<svg width="1in" height="2.54cm" viewBox="0 0 10 5">
+  <g visibility="hidden"><rect width="1" height="1"/><rect visibility="visible" width="2" height="2" fill="#0f08"/></g>
+  <path display="none" d="M0 0L1 1"/>
+  <path transform="skewX(45)" fill="rgba(255, 0, 0, 50%)" d="M0 0L1 0L1 1Z"/>
+</svg>)svg"
+  );
+
+  REQUIRE(vector.IntrinsicSize() == huxerui::Size{96.0F, 96.0F});
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  REQUIRE(std::ranges::count_if(commands, [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::FillPathCommand>(command);
+  }) == 2);
+  const auto skew = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
+    return std::holds_alternative<huxerui::PushTransformCommand>(command) &&
+           std::get<huxerui::PushTransformCommand>(command).transform.m21 > 0.99F;
+  });
+  REQUIRE(skew != commands.end());
+  const auto aspect = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
+    if (!std::holds_alternative<huxerui::PushTransformCommand>(command)) {
+      return false;
+    }
+    const huxerui::Transform2D transform = std::get<huxerui::PushTransformCommand>(command).transform;
+    return std::abs(transform.m11 - 1.0F) < 0.001F && std::abs(transform.m22 - 0.5F) < 0.001F;
+  });
+  REQUIRE(aspect != commands.end());
+}
+
+TEST_CASE("SvgResourcesCompileNoneAndSliceAspectRatioModes") {
+  TemporaryDirectory temporary;
+  const huxerui::VectorAsset unscaled = CompileVectorResource(
+      temporary.Path(),
+      R"svg(<svg width="20" height="20" viewBox="0 0 10 5" preserveAspectRatio="none">
+  <rect width="10" height="5"/>
+</svg>)svg",
+      "aspect-none"
+  );
+  REQUIRE(std::ranges::none_of(
+      huxerui::detail::VectorAccess::Sequence(unscaled).Commands(),
+      [](const huxerui::PaintCommand& command) {
+        return std::holds_alternative<huxerui::PushTransformCommand>(command);
+      }
+  ));
+
+  const huxerui::VectorAsset sliced = CompileVectorResource(
+      temporary.Path(),
+      R"svg(<svg width="20" height="20" viewBox="0 0 10 5" preserveAspectRatio="xMidYMid slice">
+  <rect width="10" height="5"/>
+</svg>)svg",
+      "aspect-slice"
+  );
+  const auto transform = std::ranges::find_if(
+      huxerui::detail::VectorAccess::Sequence(sliced).Commands(),
+      [](const huxerui::PaintCommand& command) {
+        if (!std::holds_alternative<huxerui::PushTransformCommand>(command)) {
+          return false;
+        }
+        const huxerui::Transform2D value = std::get<huxerui::PushTransformCommand>(command).transform;
+        return value.m11 == 2.0F && value.m22 == 1.0F && value.translate_x == -5.0F;
+      }
+  );
+  REQUIRE(transform != huxerui::detail::VectorAccess::Sequence(sliced).Commands().end());
+}
+
+TEST_CASE("SvgResourcesRejectInexactClipAndPresentationFeatures") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path source = root / "images" / "mark.svg";
+
+  Write(
+      source,
+      R"svg(<svg viewBox="0 0 10 10">
+  <clipPath id="clip" clipPathUnits="objectBoundingBox"><path d="M0 0L1 1"/></clipPath>
+  <path clip-path="url(#clip)" d="M0 0L1 1"/>
+</svg>)svg"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "clip-units", "test_app"}),
+      Catch::Matchers::ContainsSubstring("supports only userSpaceOnUse")
+  );
+
+  Write(
+      source,
+      R"svg(<svg viewBox="0 0 10 10">
+  <clipPath id="clip"><rect width="2" height="2"/><circle r="1"/></clipPath>
+  <path clip-path="url(#clip)" d="M0 0L1 1"/>
+</svg>)svg"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "compound-clip", "test_app"}),
+      Catch::Matchers::ContainsSubstring("must resolve to one drawable path")
+  );
+
+  Write(
+      source,
+      R"svg(<svg viewBox="0 0 10 10"><linearGradient id="paint"/><path fill="url(#paint)" d="M0 0L1 1"/></svg>)svg"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "gradient", "test_app"}),
+      Catch::Matchers::ContainsSubstring("unsupported element: linearGradient")
+  );
+
+  Write(source, R"svg(<svg viewBox="0 0 10 10"><defs><path style="filter: blur(1px)" d="M0 0L1 1"/></defs></svg>)svg");
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "unused-style", "test_app"}),
+      Catch::Matchers::ContainsSubstring("unsupported style property: filter")
+  );
+
+  Write(
+      source,
+      R"svg(<svg viewBox="0 0 10 10"><path transform="scale(3e38) scale(3e38)" d="M0 0L1 1"/></svg>)svg"
+  );
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Compile({root, temporary.Path() / "overflowing-transform", "test_app"}),
+      Catch::Matchers::ContainsSubstring("transform must remain finite")
+  );
 }
 
 TEST_CASE("ResourceCompilerRejectsUnsupportedSvgFeaturesAndDensityVariants") {

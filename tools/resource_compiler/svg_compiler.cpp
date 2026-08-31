@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -18,6 +19,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -56,21 +58,36 @@ using Path = std::vector<PathOperation>;
 struct Style {
   std::optional<Color> fill = Color{};
   std::optional<Color> stroke;
+  Color current_color{};
+  bool fill_uses_current_color = false;
+  bool stroke_uses_current_color = false;
   float fill_opacity = 1.0F;
   float stroke_opacity = 1.0F;
   float stroke_width = 1.0F;
   std::uint8_t fill_rule = 0;
+  std::uint8_t clip_rule = 0;
   std::uint8_t stroke_cap = 0;
   std::uint8_t stroke_join = 0;
   float miter_limit = 4.0F;
   std::vector<float> dash_pattern;
   float dash_offset = 0.0F;
+  bool displayed = true;
+  bool visible = true;
+  float opacity = 1.0F;
+  std::optional<std::string> clip_reference;
 };
 
-struct ElementFrame {
+struct SvgNode {
   std::string name;
-  Style style;
-  bool pushed_transform = false;
+  std::map<std::string, std::string> attributes;
+  std::vector<std::size_t> children;
+  std::optional<Path> path;
+};
+
+struct SvgDocument {
+  std::vector<SvgNode> nodes;
+  std::size_t root = 0;
+  std::unordered_map<std::string, std::size_t> ids;
 };
 
 class Writer {
@@ -97,6 +114,9 @@ public:
   }
 
   void PathValue(const Path& path) {
+    if (path.size() > std::numeric_limits<std::uint32_t>::max()) {
+      throw std::runtime_error("SVG path contains too many operations");
+    }
     U32(static_cast<std::uint32_t>(path.size()));
     for (const PathOperation& operation : path) {
       U8(operation.verb);
@@ -151,10 +171,29 @@ float ParseNumber(std::string_view value, std::string_view field) {
     throw std::runtime_error("SVG " + std::string(field) + " must be a finite number");
   }
   const std::string_view suffix(end, text.c_str() + text.size() - end);
-  if (!suffix.empty() && suffix != "px") {
+  float scale = 1.0F;
+  if (suffix.empty() || suffix == "px") {
+    scale = 1.0F;
+  } else if (suffix == "in") {
+    scale = 96.0F;
+  } else if (suffix == "cm") {
+    scale = 96.0F / 2.54F;
+  } else if (suffix == "mm") {
+    scale = 96.0F / 25.4F;
+  } else if (suffix == "q") {
+    scale = 96.0F / 101.6F;
+  } else if (suffix == "pt") {
+    scale = 96.0F / 72.0F;
+  } else if (suffix == "pc") {
+    scale = 16.0F;
+  } else {
     throw std::runtime_error("SVG " + std::string(field) + " uses an unsupported unit");
   }
-  return result;
+  const float scaled = result * scale;
+  if (!std::isfinite(scaled)) {
+    throw std::runtime_error("SVG " + std::string(field) + " must be a finite number");
+  }
+  return scaled;
 }
 
 std::vector<float> ParseNumberList(std::string_view value, std::string_view field) {
@@ -196,25 +235,23 @@ std::vector<float> ParseDashPattern(std::string_view value) {
     if (*cursor == ',') {
       throw std::runtime_error("SVG stroke-dasharray must not contain empty lengths");
     }
-    char* next = nullptr;
-    const float length = std::strtof(cursor, &next);
-    if (next == cursor || !std::isfinite(length)) {
+    const char* token_start = cursor;
+    char* number_end = nullptr;
+    const float unscaled_length = std::strtof(cursor, &number_end);
+    if (number_end == cursor || !std::isfinite(unscaled_length)) {
       throw std::runtime_error("SVG stroke-dasharray contains an invalid length");
     }
+    cursor = number_end;
+    while (cursor < end && std::isalpha(static_cast<unsigned char>(*cursor))) {
+      ++cursor;
+    }
+    const float length = ParseNumber(std::string_view(token_start, static_cast<std::size_t>(cursor - token_start)),
+                                     "stroke-dasharray length");
     if (length < 0.0F) {
       throw std::runtime_error("SVG stroke-dasharray lengths must be non-negative");
     }
-    cursor = next;
-    bool has_explicit_unit = false;
-    if (end - cursor >= 2 && cursor[0] == 'p' && cursor[1] == 'x') {
-      cursor += 2;
-      has_explicit_unit = true;
-    }
     if (cursor < end && !std::isspace(static_cast<unsigned char>(*cursor)) && *cursor != ',') {
-      throw std::runtime_error(
-          has_explicit_unit ? "SVG stroke-dasharray lengths must be separated"
-                            : "SVG stroke-dasharray uses an unsupported unit"
-      );
+      throw std::runtime_error("SVG stroke-dasharray lengths must be separated");
     }
     result.push_back(length);
 
@@ -258,7 +295,13 @@ void ValidateDashPattern(const std::vector<float>& pattern) {
 }
 
 float ParseOpacity(std::string_view value, std::string_view field) {
-  const float opacity = ParseNumber(value, field);
+  const std::string text = Trim(value);
+  float opacity = 0.0F;
+  if (text.ends_with('%')) {
+    opacity = ParseNumber(std::string_view(text).substr(0, text.size() - 1), field) / 100.0F;
+  } else {
+    opacity = ParseNumber(text, field);
+  }
   if (opacity < 0.0F || opacity > 1.0F) {
     throw std::runtime_error("SVG " + std::string(field) + " must be between zero and one");
   }
@@ -283,11 +326,59 @@ std::optional<Color> ParseColor(std::string_view value) {
   if (text == "none") {
     return std::nullopt;
   }
-  if (text == "currentColor" || text == "black") {
+  if (text == "black") {
     return Color{};
+  }
+  if (text == "transparent") {
+    return Color{0.0F, 0.0F, 0.0F, 0.0F};
   }
   if (text == "white") {
     return Color{1.0F, 1.0F, 1.0F, 1.0F};
+  }
+  if (text == "red") {
+    return Color{1.0F, 0.0F, 0.0F, 1.0F};
+  }
+  if (text == "green") {
+    return Color{0.0F, 0.5019608F, 0.0F, 1.0F};
+  }
+  if (text == "lime") {
+    return Color{0.0F, 1.0F, 0.0F, 1.0F};
+  }
+  if (text == "blue") {
+    return Color{0.0F, 0.0F, 1.0F, 1.0F};
+  }
+  if (text == "yellow") {
+    return Color{1.0F, 1.0F, 0.0F, 1.0F};
+  }
+  if (text == "orange") {
+    return Color{1.0F, 0.6470588F, 0.0F, 1.0F};
+  }
+  if (text == "gray" || text == "grey") {
+    return Color{0.5019608F, 0.5019608F, 0.5019608F, 1.0F};
+  }
+  if (text == "cyan" || text == "aqua") {
+    return Color{0.0F, 1.0F, 1.0F, 1.0F};
+  }
+  if (text == "magenta" || text == "fuchsia") {
+    return Color{1.0F, 0.0F, 1.0F, 1.0F};
+  }
+  if (text == "maroon") {
+    return Color{0.5019608F, 0.0F, 0.0F, 1.0F};
+  }
+  if (text == "navy") {
+    return Color{0.0F, 0.0F, 0.5019608F, 1.0F};
+  }
+  if (text == "olive") {
+    return Color{0.5019608F, 0.5019608F, 0.0F, 1.0F};
+  }
+  if (text == "purple") {
+    return Color{0.5019608F, 0.0F, 0.5019608F, 1.0F};
+  }
+  if (text == "silver") {
+    return Color{0.7529412F, 0.7529412F, 0.7529412F, 1.0F};
+  }
+  if (text == "teal") {
+    return Color{0.0F, 0.5019608F, 0.5019608F, 1.0F};
   }
   if (text.size() == 4 && text.front() == '#') {
     const int red = HexDigit(text[1]);
@@ -299,6 +390,20 @@ std::optional<Color> ParseColor(std::string_view value) {
           static_cast<float>(green * 17) / 255.0F,
           static_cast<float>(blue * 17) / 255.0F,
           1.0F,
+      };
+    }
+  }
+  if (text.size() == 5 && text.front() == '#') {
+    const int red = HexDigit(text[1]);
+    const int green = HexDigit(text[2]);
+    const int blue = HexDigit(text[3]);
+    const int alpha = HexDigit(text[4]);
+    if (red >= 0 && green >= 0 && blue >= 0 && alpha >= 0) {
+      return Color{
+          static_cast<float>(red * 17) / 255.0F,
+          static_cast<float>(green * 17) / 255.0F,
+          static_cast<float>(blue * 17) / 255.0F,
+          static_cast<float>(alpha * 17) / 255.0F,
       };
     }
   }
@@ -321,6 +426,39 @@ std::optional<Color> ParseColor(std::string_view value) {
       };
     }
   }
+  const bool rgb = text.starts_with("rgb(") && text.ends_with(')');
+  const bool rgba = text.starts_with("rgba(") && text.ends_with(')');
+  if (rgb || rgba) {
+    std::vector<std::string> components;
+    std::string_view remaining(text);
+    remaining.remove_prefix(rgba ? 5 : 4);
+    remaining.remove_suffix(1);
+    while (true) {
+      const std::size_t comma = remaining.find(',');
+      components.push_back(Trim(remaining.substr(0, comma)));
+      if (comma == std::string_view::npos) {
+        break;
+      }
+      remaining.remove_prefix(comma + 1);
+    }
+    if (components.size() == (rgba ? 4U : 3U)) {
+      const auto channel = [](std::string_view component) {
+        const std::string value = Trim(component);
+        const bool percentage = value.ends_with('%');
+        const float parsed = ParseNumber(
+            percentage ? std::string_view(value).substr(0, value.size() - 1) : std::string_view(value),
+            "color channel"
+        );
+        return std::clamp(parsed / (percentage ? 100.0F : 255.0F), 0.0F, 1.0F);
+      };
+      return Color{
+          channel(components[0]),
+          channel(components[1]),
+          channel(components[2]),
+          rgba ? ParseOpacity(components[3], "color alpha") : 1.0F,
+      };
+    }
+  }
   throw std::runtime_error("SVG contains an unsupported color: " + text);
 }
 
@@ -333,6 +471,11 @@ Transform Compose(Transform outer, Transform inner) {
       outer.m11 * inner.tx + outer.m21 * inner.ty + outer.tx,
       outer.m12 * inner.tx + outer.m22 * inner.ty + outer.ty,
   };
+}
+
+bool IsFinite(Transform transform) {
+  return std::isfinite(transform.m11) && std::isfinite(transform.m12) && std::isfinite(transform.m21) &&
+         std::isfinite(transform.m22) && std::isfinite(transform.tx) && std::isfinite(transform.ty);
 }
 
 Transform ParseTransform(std::string_view value) {
@@ -371,10 +514,17 @@ Transform ParseTransform(std::string_view value) {
         const Transform from_origin{1.0F, 0.0F, 0.0F, 1.0F, arguments[1], arguments[2]};
         current = Compose(from_origin, Compose(current, to_origin));
       }
+    } else if (name == "skewX" && arguments.size() == 1) {
+      current.m21 = std::tan(arguments[0] * std::numbers::pi_v<float> / 180.0F);
+    } else if (name == "skewY" && arguments.size() == 1) {
+      current.m12 = std::tan(arguments[0] * std::numbers::pi_v<float> / 180.0F);
     } else {
       throw std::runtime_error("SVG contains an unsupported transform: " + name);
     }
     result = Compose(result, current);
+    if (!IsFinite(result)) {
+      throw std::runtime_error("SVG transform must remain finite after composition");
+    }
     offset = close + 1;
   }
   return result;
@@ -642,6 +792,76 @@ private:
   bool has_current_ = false;
 };
 
+void AppendUtf8(std::string& output, std::uint32_t value) {
+  if (value <= 0x7FU) {
+    output.push_back(static_cast<char>(value));
+  } else if (value <= 0x7FFU) {
+    output.push_back(static_cast<char>(0xC0U | (value >> 6U)));
+    output.push_back(static_cast<char>(0x80U | (value & 0x3FU)));
+  } else if (value <= 0xFFFFU) {
+    output.push_back(static_cast<char>(0xE0U | (value >> 12U)));
+    output.push_back(static_cast<char>(0x80U | ((value >> 6U) & 0x3FU)));
+    output.push_back(static_cast<char>(0x80U | (value & 0x3FU)));
+  } else if (value <= 0x10FFFFU) {
+    output.push_back(static_cast<char>(0xF0U | (value >> 18U)));
+    output.push_back(static_cast<char>(0x80U | ((value >> 12U) & 0x3FU)));
+    output.push_back(static_cast<char>(0x80U | ((value >> 6U) & 0x3FU)));
+    output.push_back(static_cast<char>(0x80U | (value & 0x3FU)));
+  } else {
+    throw std::runtime_error("SVG attribute contains an invalid character reference");
+  }
+}
+
+std::string DecodeXml(std::string_view value) {
+  std::string result;
+  while (!value.empty()) {
+    const std::size_t ampersand = value.find('&');
+    result.append(value.substr(0, ampersand));
+    if (ampersand == std::string_view::npos) {
+      break;
+    }
+    value.remove_prefix(ampersand + 1);
+    const std::size_t semicolon = value.find(';');
+    if (semicolon == std::string_view::npos) {
+      throw std::runtime_error("SVG attribute contains an unterminated entity reference");
+    }
+    const std::string entity(value.substr(0, semicolon));
+    value.remove_prefix(semicolon + 1);
+    if (entity == "amp") {
+      result.push_back('&');
+    } else if (entity == "lt") {
+      result.push_back('<');
+    } else if (entity == "gt") {
+      result.push_back('>');
+    } else if (entity == "quot") {
+      result.push_back('"');
+    } else if (entity == "apos") {
+      result.push_back('\'');
+    } else if (entity.starts_with("#")) {
+      const bool hexadecimal = entity.starts_with("#x") || entity.starts_with("#X");
+      const std::string digits = entity.substr(hexadecimal ? 2 : 1);
+      if (digits.empty()) {
+        throw std::runtime_error("SVG attribute contains an invalid character reference");
+      }
+      std::size_t consumed = 0;
+      unsigned long code_point = 0;
+      try {
+        code_point = std::stoul(digits, &consumed, hexadecimal ? 16 : 10);
+      } catch (const std::exception&) {
+        throw std::runtime_error("SVG attribute contains an invalid character reference");
+      }
+      if (consumed != digits.size() || code_point == 0 || code_point > 0x10FFFFUL ||
+          (code_point >= 0xD800UL && code_point <= 0xDFFFUL)) {
+        throw std::runtime_error("SVG attribute contains an invalid character reference");
+      }
+      AppendUtf8(result, static_cast<std::uint32_t>(code_point));
+    } else {
+      throw std::runtime_error("SVG attribute contains an unsupported entity reference: &" + entity + ";");
+    }
+  }
+  return result;
+}
+
 std::map<std::string, std::string> ParseAttributes(std::string_view value) {
   std::map<std::string, std::string> attributes;
   std::size_t offset = 0;
@@ -674,7 +894,7 @@ std::map<std::string, std::string> ParseAttributes(std::string_view value) {
     if (end == std::string_view::npos) {
       throw std::runtime_error("SVG attribute value is unterminated");
     }
-    if (!attributes.emplace(name, std::string(value.substr(offset, end - offset))).second) {
+    if (!attributes.emplace(name, DecodeXml(value.substr(offset, end - offset))).second) {
       throw std::runtime_error("SVG element contains a duplicate attribute: " + name);
     }
     offset = end + 1;
@@ -682,65 +902,122 @@ std::map<std::string, std::string> ParseAttributes(std::string_view value) {
   return attributes;
 }
 
+bool IsStyleProperty(std::string_view name) {
+  return name == "color" || name == "fill" || name == "stroke" || name == "fill-opacity" ||
+         name == "stroke-opacity" || name == "stroke-width" || name == "fill-rule" || name == "clip-rule" ||
+         name == "stroke-linecap" || name == "stroke-linejoin" || name == "stroke-miterlimit" ||
+         name == "stroke-dasharray" || name == "stroke-dashoffset" || name == "display" || name == "visibility" ||
+         name == "opacity" || name == "clip-path";
+}
+
+std::optional<std::string> ParseLocalReference(std::string_view value, std::string_view field) {
+  const std::string text = Trim(value);
+  if (text == "none") {
+    return std::nullopt;
+  }
+  if (text.starts_with("url(#") && text.ends_with(')') && text.size() > 6) {
+    return text.substr(5, text.size() - 6);
+  }
+  throw std::runtime_error("SVG " + std::string(field) + " must be a file-local reference");
+}
+
 void ApplyStyleProperty(Style& style, std::string_view name, std::string_view value) {
-  if (name == "fill") {
-    style.fill = ParseColor(value);
-  } else if (name == "stroke") {
-    style.stroke = ParseColor(value);
+  const std::string text = Trim(value);
+  if (name == "color") {
+    if (text != "currentColor") {
+      const std::optional<Color> color = ParseColor(text);
+      if (!color.has_value()) {
+        throw std::runtime_error("SVG color does not accept none");
+      }
+      style.current_color = *color;
+    }
+  } else if (name == "fill" || name == "stroke") {
+    const bool current = text == "currentColor";
+    std::optional<Color>& paint = name == "fill" ? style.fill : style.stroke;
+    bool& uses_current = name == "fill" ? style.fill_uses_current_color : style.stroke_uses_current_color;
+    paint = current ? std::optional<Color>(style.current_color) : ParseColor(text);
+    uses_current = current;
   } else if (name == "fill-opacity") {
-    style.fill_opacity = ParseOpacity(value, name);
+    style.fill_opacity = ParseOpacity(text, name);
   } else if (name == "stroke-opacity") {
-    style.stroke_opacity = ParseOpacity(value, name);
+    style.stroke_opacity = ParseOpacity(text, name);
   } else if (name == "stroke-width") {
-    style.stroke_width = ParseNumber(value, name);
+    style.stroke_width = ParseNumber(text, name);
     if (style.stroke_width < 0.0F) {
       throw std::runtime_error("SVG stroke-width must be non-negative");
     }
   } else if (name == "fill-rule" || name == "clip-rule") {
-    if (value == "nonzero") {
-      style.fill_rule = 0;
-    } else if (value == "evenodd") {
-      style.fill_rule = 1;
+    std::uint8_t& rule = name == "fill-rule" ? style.fill_rule : style.clip_rule;
+    if (text == "nonzero") {
+      rule = 0;
+    } else if (text == "evenodd") {
+      rule = 1;
     } else {
-      throw std::runtime_error("SVG contains an unsupported fill rule");
+      throw std::runtime_error("SVG contains an unsupported " + std::string(name));
     }
   } else if (name == "stroke-linecap") {
-    if (value == "butt") {
+    if (text == "butt") {
       style.stroke_cap = 0;
-    } else if (value == "round") {
+    } else if (text == "round") {
       style.stroke_cap = 1;
-    } else if (value == "square") {
+    } else if (text == "square") {
       style.stroke_cap = 2;
     } else {
       throw std::runtime_error("SVG contains an unsupported stroke line cap");
     }
   } else if (name == "stroke-linejoin") {
-    if (value == "miter") {
+    if (text == "miter") {
       style.stroke_join = 0;
-    } else if (value == "round") {
+    } else if (text == "round") {
       style.stroke_join = 1;
-    } else if (value == "bevel") {
+    } else if (text == "bevel") {
       style.stroke_join = 2;
     } else {
       throw std::runtime_error("SVG contains an unsupported stroke line join");
     }
   } else if (name == "stroke-miterlimit") {
-    style.miter_limit = ParseNumber(value, name);
+    style.miter_limit = ParseNumber(text, name);
     if (style.miter_limit < 1.0F) {
       throw std::runtime_error("SVG stroke-miterlimit must be at least one");
     }
   } else if (name == "stroke-dasharray") {
-    style.dash_pattern = ParseDashPattern(value);
+    style.dash_pattern = ParseDashPattern(text);
   } else if (name == "stroke-dashoffset") {
-    style.dash_offset = ParseNumber(value, name);
+    style.dash_offset = ParseNumber(text, name);
+  } else if (name == "display") {
+    if (text == "none") {
+      style.displayed = false;
+    } else if (text != "inline") {
+      throw std::runtime_error("SVG contains an unsupported display value");
+    }
+  } else if (name == "visibility") {
+    if (text == "visible") {
+      style.visible = true;
+    } else if (text == "hidden" || text == "collapse") {
+      style.visible = false;
+    } else {
+      throw std::runtime_error("SVG contains an unsupported visibility value");
+    }
   } else if (name == "opacity") {
-    throw std::runtime_error("SVG group opacity is not supported; use fill-opacity and stroke-opacity");
+    const float opacity = ParseOpacity(text, name);
+    if (opacity != 0.0F && opacity != 1.0F) {
+      throw std::runtime_error("SVG opacity must be exactly zero or one");
+    }
+    style.opacity *= opacity;
+  } else if (name == "clip-path") {
+    style.clip_reference = ParseLocalReference(text, name);
   } else {
     throw std::runtime_error("SVG contains an unsupported style property: " + std::string(name));
   }
 }
 
 Style ResolveStyle(Style inherited, const std::map<std::string, std::string>& attributes) {
+  inherited.clip_reference.reset();
+  for (const auto& [name, value] : attributes) {
+    if (IsStyleProperty(name)) {
+      ApplyStyleProperty(inherited, name, value);
+    }
+  }
   if (const auto style_attribute = attributes.find("style"); style_attribute != attributes.end()) {
     std::string_view value = style_attribute->second;
     while (!value.empty()) {
@@ -769,15 +1046,12 @@ Style ResolveStyle(Style inherited, const std::map<std::string, std::string>& at
       value.remove_prefix(separator + 1);
     }
   }
-  for (const auto& [name, value] : attributes) {
-    if (name == "fill" || name == "stroke" || name == "fill-opacity" || name == "stroke-opacity" ||
-        name == "stroke-width" || name == "fill-rule" || name == "clip-rule" || name == "stroke-linecap" ||
-        name == "stroke-linejoin" || name == "stroke-miterlimit" || name == "stroke-dasharray" ||
-        name == "stroke-dashoffset" || name == "opacity") {
-      ApplyStyleProperty(inherited, name, value);
-    }
-  }
   return inherited;
+}
+
+bool IsShape(std::string_view name) {
+  return name == "path" || name == "rect" || name == "circle" || name == "ellipse" || name == "line" ||
+         name == "polyline" || name == "polygon";
 }
 
 void ValidateAttributes(std::string_view element, const std::map<std::string, std::string>& attributes) {
@@ -785,6 +1059,7 @@ void ValidateAttributes(std::string_view element, const std::map<std::string, st
       "id",
       "xmlns",
       "xmlns:xlink",
+      "color",
       "fill",
       "stroke",
       "fill-opacity",
@@ -797,13 +1072,23 @@ void ValidateAttributes(std::string_view element, const std::map<std::string, st
       "stroke-miterlimit",
       "stroke-dasharray",
       "stroke-dashoffset",
+      "display",
+      "visibility",
       "opacity",
+      "clip-path",
       "style",
       "transform",
   };
   const auto allowed_for_element = [element](std::string_view name) {
     if (element == "svg") {
-      return name == "viewBox" || name == "width" || name == "height" || name == "version";
+      return name == "viewBox" || name == "width" || name == "height" || name == "version" ||
+             name == "preserveAspectRatio";
+    }
+    if (element == "use") {
+      return name == "href" || name == "xlink:href" || name == "x" || name == "y";
+    }
+    if (element == "clipPath") {
+      return name == "clipPathUnits";
     }
     if (element == "path") {
       return name == "d";
@@ -828,7 +1113,7 @@ void ValidateAttributes(std::string_view element, const std::map<std::string, st
   for (const auto& [name, unused] : attributes) {
     static_cast<void>(unused);
     if (std::ranges::find(common, name) == common.end() && !allowed_for_element(name) && !name.starts_with("aria-") &&
-        name != "role") {
+        !name.starts_with("data-") && name != "role") {
       throw std::runtime_error("SVG " + std::string(element) + " contains an unsupported attribute: " + name);
     }
   }
@@ -944,6 +1229,9 @@ Path ShapePath(std::string_view name, const std::map<std::string, std::string>& 
 }
 
 void WriteTransform(Writer& writer, Transform transform) {
+  if (!IsFinite(transform)) {
+    throw std::runtime_error("SVG transform must be finite");
+  }
   writer.U8(5);
   writer.F32(transform.m11);
   writer.F32(transform.m12);
@@ -953,12 +1241,33 @@ void WriteTransform(Writer& writer, Transform transform) {
   writer.F32(transform.ty);
 }
 
+Point TransformPoint(Transform transform, Point point) {
+  return {
+      transform.m11 * point.x + transform.m21 * point.y + transform.tx,
+      transform.m12 * point.x + transform.m22 * point.y + transform.ty,
+  };
+}
+
+Path TransformPath(Path path, Transform transform) {
+  for (PathOperation& operation : path) {
+    for (std::size_t index = 0; index + 1 < operation.values.size(); index += 2) {
+      const Point point = TransformPoint(transform, {operation.values[index], operation.values[index + 1]});
+      if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+        throw std::runtime_error("SVG transformed path coordinates must remain finite");
+      }
+      operation.values[index] = point.x;
+      operation.values[index + 1] = point.y;
+    }
+  }
+  return path;
+}
+
 void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& operation_count) {
-  if (path.empty()) {
+  if (path.empty() || !style.visible) {
     return;
   }
   if (style.fill.has_value()) {
-    Color color = *style.fill;
+    Color color = style.fill_uses_current_color ? style.current_color : *style.fill;
     color.alpha *= style.fill_opacity;
     writer.U8(1);
     writer.ColorValue(color);
@@ -971,7 +1280,7 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
     if (style.dash_pattern.size() > std::numeric_limits<std::uint32_t>::max()) {
       throw std::runtime_error("SVG stroke-dasharray contains too many lengths");
     }
-    Color color = *style.stroke;
+    Color color = style.stroke_uses_current_color ? style.current_color : *style.stroke;
     color.alpha *= style.stroke_opacity;
     writer.U8(2);
     writer.ColorValue(color);
@@ -989,7 +1298,7 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
   }
 }
 
-struct ParsedDocument {
+struct CompiledDocument {
   Writer operations;
   std::uint32_t operation_count = 0;
   float intrinsic_width = 0.0F;
@@ -1000,12 +1309,14 @@ struct ParsedDocument {
   float view_height = 0.0F;
 };
 
-ParsedDocument ParseDocument(std::string_view xml) {
+SvgDocument ParseSvgDocument(std::string_view xml) {
   if (xml.find("<!DOCTYPE") != std::string_view::npos || xml.find("<!ENTITY") != std::string_view::npos) {
     throw std::runtime_error("SVG external entities and document types are not supported");
   }
-  ParsedDocument result;
-  std::vector<ElementFrame> stack;
+  constexpr std::size_t max_nesting = 256;
+  constexpr std::size_t max_nodes = 1'000'000;
+  SvgDocument document;
+  std::vector<std::size_t> stack;
   std::size_t offset = 0;
   bool root_seen = false;
   while (offset < xml.size()) {
@@ -1016,9 +1327,11 @@ ParsedDocument ParseDocument(std::string_view xml) {
       }
       break;
     }
-    if (!Trim(xml.substr(offset, open - offset)).empty() &&
-        (stack.empty() ||
-         (stack.back().name != "title" && stack.back().name != "desc" && stack.back().name != "metadata"))) {
+    const bool metadata_text = !stack.empty() &&
+                               (document.nodes[stack.back()].name == "title" ||
+                                document.nodes[stack.back()].name == "desc" ||
+                                document.nodes[stack.back()].name == "metadata");
+    if (!Trim(xml.substr(offset, open - offset)).empty() && !metadata_text) {
       throw std::runtime_error("SVG text nodes are not supported");
     }
     if (xml.substr(open).starts_with("<!--")) {
@@ -1037,8 +1350,21 @@ ParsedDocument ParseDocument(std::string_view xml) {
       offset = end + 2;
       continue;
     }
-    const std::size_t close = xml.find('>', open + 1);
-    if (close == std::string_view::npos) {
+    std::size_t close = open + 1;
+    char quote = 0;
+    for (; close < xml.size(); ++close) {
+      const char character = xml[close];
+      if (quote != 0) {
+        if (character == quote) {
+          quote = 0;
+        }
+      } else if (character == '\'' || character == '"') {
+        quote = character;
+      } else if (character == '>') {
+        break;
+      }
+    }
+    if (close == xml.size()) {
       throw std::runtime_error("SVG element is unterminated");
     }
     std::string tag = Trim(xml.substr(open + 1, close - open - 1));
@@ -1046,12 +1372,8 @@ ParsedDocument ParseDocument(std::string_view xml) {
     const bool self_closing = !closing && !tag.empty() && tag.back() == '/';
     if (closing) {
       tag = Trim(std::string_view(tag).substr(1));
-      if (stack.empty() || stack.back().name != tag) {
+      if (stack.empty() || document.nodes[stack.back()].name != tag) {
         throw std::runtime_error("SVG closing element does not match its opening element: " + tag);
-      }
-      if (stack.back().pushed_transform) {
-        result.operations.U8(6);
-        ++result.operation_count;
       }
       stack.pop_back();
       offset = close + 1;
@@ -1067,70 +1389,383 @@ ParsedDocument ParseDocument(std::string_view xml) {
     if (name != "svg" && stack.empty()) {
       throw std::runtime_error("SVG elements must be inside the root svg element");
     }
-    ValidateAttributes(name, attributes);
-    const Style inherited = stack.empty() ? Style{} : stack.back().style;
-    const Style style = ResolveStyle(inherited, attributes);
-    bool pushed_transform = false;
-    if (const auto transform = attributes.find("transform"); transform != attributes.end()) {
-      WriteTransform(result.operations, ParseTransform(transform->second));
-      ++result.operation_count;
-      pushed_transform = true;
+    if (name != "svg" && name != "g" && name != "defs" && name != "use" && name != "clipPath" &&
+        name != "title" && name != "desc" && name != "metadata" && !IsShape(name)) {
+      throw std::runtime_error("SVG contains an unsupported element: " + name);
     }
-
+    ValidateAttributes(name, attributes);
+    const std::size_t node_index = document.nodes.size();
+    if (node_index >= max_nodes) {
+      throw std::runtime_error("SVG contains too many elements");
+    }
+    document.nodes.push_back({name, attributes, {}, std::nullopt});
     if (name == "svg") {
       if (root_seen || !stack.empty()) {
         throw std::runtime_error("SVG must contain exactly one root svg element");
       }
       root_seen = true;
-      const auto view_box = attributes.find("viewBox");
-      if (view_box != attributes.end()) {
-        const std::vector<float> values = ParseNumberList(view_box->second, "viewBox");
-        if (values.size() != 4 || values[2] <= 0.0F || values[3] <= 0.0F) {
-          throw std::runtime_error("SVG viewBox must contain four values with positive dimensions");
-        }
-        result.view_x = values[0];
-        result.view_y = values[1];
-        result.view_width = values[2];
-        result.view_height = values[3];
-      }
-      result.intrinsic_width =
-          attributes.contains("width") ? ParseNumber(attributes.at("width"), "width") : result.view_width;
-      result.intrinsic_height =
-          attributes.contains("height") ? ParseNumber(attributes.at("height"), "height") : result.view_height;
-      if (result.view_width == 0.0F || result.view_height == 0.0F) {
-        result.view_width = result.intrinsic_width;
-        result.view_height = result.intrinsic_height;
-      }
-      if (result.intrinsic_width <= 0.0F || result.intrinsic_height <= 0.0F) {
-        throw std::runtime_error("SVG requires positive intrinsic width and height or a viewBox");
-      }
-    } else if (name == "g") {
-    } else if (name == "path" || name == "rect" || name == "circle" || name == "ellipse" || name == "line" || name == "polyline" || name == "polygon") {
-      WriteShape(result.operations, ShapePath(name, attributes), style, result.operation_count);
-    } else if (name == "title" || name == "desc" || name == "metadata") {
+      document.root = node_index;
     } else {
-      throw std::runtime_error("SVG contains an unsupported element: " + name);
+      document.nodes[stack.back()].children.push_back(node_index);
     }
-
+    if (const auto id = attributes.find("id"); id != attributes.end()) {
+      if (id->second.empty()) {
+        throw std::runtime_error("SVG id must not be empty");
+      }
+      if (!document.ids.emplace(id->second, node_index).second) {
+        throw std::runtime_error("SVG contains a duplicate id: " + id->second);
+      }
+    }
     if (!self_closing) {
-      stack.push_back({name, style, pushed_transform});
-    } else if (pushed_transform) {
-      result.operations.U8(6);
-      ++result.operation_count;
+      stack.push_back(node_index);
+      if (stack.size() > max_nesting) {
+        throw std::runtime_error("SVG element nesting exceeds the supported limit");
+      }
     }
     offset = close + 1;
   }
   if (!root_seen || !stack.empty()) {
     throw std::runtime_error("SVG document is incomplete");
   }
+  return document;
+}
+
+CompiledDocument EmitDocument(SvgDocument document) {
+  const SvgNode& root = document.nodes[document.root];
+  CompiledDocument result;
+  if (const auto view_box = root.attributes.find("viewBox"); view_box != root.attributes.end()) {
+    const std::vector<float> values = ParseNumberList(view_box->second, "viewBox");
+    if (values.size() != 4 || values[2] <= 0.0F || values[3] <= 0.0F) {
+      throw std::runtime_error("SVG viewBox must contain four values with positive dimensions");
+    }
+    result.view_x = values[0];
+    result.view_y = values[1];
+    result.view_width = values[2];
+    result.view_height = values[3];
+  }
+  result.intrinsic_width =
+      root.attributes.contains("width") ? ParseNumber(root.attributes.at("width"), "width") : result.view_width;
+  result.intrinsic_height =
+      root.attributes.contains("height") ? ParseNumber(root.attributes.at("height"), "height") : result.view_height;
+  if (result.view_width == 0.0F || result.view_height == 0.0F) {
+    result.view_width = result.intrinsic_width;
+    result.view_height = result.intrinsic_height;
+  }
+  if (result.intrinsic_width <= 0.0F || result.intrinsic_height <= 0.0F) {
+    throw std::runtime_error("SVG requires positive intrinsic width and height or a viewBox");
+  }
+
+  constexpr std::uint32_t max_operations = 1'000'000;
+  constexpr std::size_t max_reference_depth = 64;
+  std::vector<std::size_t> references;
+  const auto count_operation = [&] {
+    if (++result.operation_count > max_operations) {
+      throw std::runtime_error("SVG produces too many vector operations");
+    }
+  };
+  const auto push_transform = [&](Transform transform) {
+    WriteTransform(result.operations, transform);
+    count_operation();
+  };
+  const auto pop_transform = [&] {
+    result.operations.U8(6);
+    count_operation();
+  };
+  const auto find_reference = [&](std::string_view id, std::string_view field) {
+    const auto found = document.ids.find(std::string(id));
+    if (found == document.ids.end()) {
+      throw std::runtime_error("SVG " + std::string(field) + " references a missing id: " + std::string(id));
+    }
+    return found->second;
+  };
+  const auto href = [](const SvgNode& node) -> std::string {
+    const auto direct = node.attributes.find("href");
+    const auto legacy = node.attributes.find("xlink:href");
+    if (direct != node.attributes.end() && legacy != node.attributes.end()) {
+      throw std::runtime_error("SVG use must not declare both href and xlink:href");
+    }
+    const auto& found = direct != node.attributes.end() ? direct : legacy;
+    if (found == node.attributes.end() || !found->second.starts_with('#') || found->second.size() == 1) {
+      throw std::runtime_error("SVG use href must be a file-local reference");
+    }
+    return found->second.substr(1);
+  };
+  const auto node_transform = [](const SvgNode& node) {
+    const auto found = node.attributes.find("transform");
+    return found == node.attributes.end() ? Transform{} : ParseTransform(found->second);
+  };
+
+  for (SvgNode& node : document.nodes) {
+    const Style style = ResolveStyle(Style{}, node.attributes);
+    static_cast<void>(node_transform(node));
+    if (IsShape(node.name)) {
+      node.path = ShapePath(node.name, node.attributes);
+    }
+    if (node.name == "use") {
+      if (!node.children.empty()) {
+        throw std::runtime_error("SVG use elements must not contain child elements");
+      }
+      const std::string reference = href(node);
+      const std::string_view target = document.nodes[find_reference(reference, "use")].name;
+      if (target != "g" && target != "use" && !IsShape(target)) {
+        throw std::runtime_error("SVG use references an unsupported element: " + std::string(target));
+      }
+    }
+    if (style.clip_reference.has_value()) {
+      const std::size_t target = find_reference(*style.clip_reference, "clip-path");
+      if (document.nodes[target].name != "clipPath") {
+        throw std::runtime_error("SVG clip-path must reference a clipPath element");
+      }
+    }
+    if (node.name == "clipPath") {
+      if (const auto units = node.attributes.find("clipPathUnits");
+          units != node.attributes.end() && units->second != "userSpaceOnUse") {
+        throw std::runtime_error("SVG clipPathUnits supports only userSpaceOnUse");
+      }
+    }
+  }
+  std::vector<std::uint8_t> reference_state(document.nodes.size());
+  std::function<void(std::size_t, std::size_t)> validate_references;
+  validate_references = [&](std::size_t index, std::size_t reference_depth) {
+    if (reference_state[index] == 1) {
+      throw std::runtime_error("SVG use references form a cycle");
+    }
+    if (reference_state[index] == 2) {
+      return;
+    }
+    reference_state[index] = 1;
+    const SvgNode& node = document.nodes[index];
+    for (const std::size_t child : node.children) {
+      validate_references(child, reference_depth);
+    }
+    if (node.name == "use") {
+      if (reference_depth >= max_reference_depth) {
+        throw std::runtime_error("SVG use references exceed the supported depth");
+      }
+      validate_references(find_reference(href(node), "use"), reference_depth + 1);
+    }
+    reference_state[index] = 2;
+  };
+  validate_references(document.root, 0);
+
+  std::function<void(std::size_t, Style, Transform, Path&, std::optional<std::uint8_t>&, std::size_t&)>
+      collect_clip;
+  collect_clip = [&](std::size_t index, Style inherited, Transform transform, Path& path,
+                     std::optional<std::uint8_t>& rule, std::size_t& shape_count) {
+    const SvgNode& node = document.nodes[index];
+    const Style style = ResolveStyle(std::move(inherited), node.attributes);
+    if (!style.displayed || style.opacity == 0.0F) {
+      return;
+    }
+    if (style.clip_reference.has_value()) {
+      throw std::runtime_error("SVG nested clip-path references are not supported");
+    }
+    transform = Compose(transform, node_transform(node));
+    if (node.name == "clipPath") {
+      for (const std::size_t child : node.children) {
+        collect_clip(child, style, transform, path, rule, shape_count);
+      }
+      return;
+    }
+    if (node.name == "g") {
+      for (const std::size_t child : node.children) {
+        collect_clip(child, style, transform, path, rule, shape_count);
+      }
+      return;
+    }
+    if (node.name == "use") {
+      Transform translation;
+      translation.tx = AttributeNumber(node.attributes, "x");
+      translation.ty = AttributeNumber(node.attributes, "y");
+      transform = Compose(transform, translation);
+      const std::size_t target = find_reference(href(node), "use");
+      if (std::ranges::find(references, target) != references.end() || references.size() >= max_reference_depth) {
+        throw std::runtime_error("SVG use references form a cycle or exceed the supported depth");
+      }
+      references.push_back(target);
+      collect_clip(target, style, transform, path, rule, shape_count);
+      references.pop_back();
+      return;
+    }
+    if (IsShape(node.name)) {
+      if (!style.visible) {
+        return;
+      }
+      if (rule.has_value() && *rule != style.clip_rule) {
+        throw std::runtime_error("SVG clipPath children must use one clip-rule");
+      }
+      if (++shape_count > 1) {
+        throw std::runtime_error("SVG clipPath must resolve to one drawable path");
+      }
+      rule = style.clip_rule;
+      Path shape = TransformPath(*node.path, transform);
+      path.insert(path.end(), std::make_move_iterator(shape.begin()), std::make_move_iterator(shape.end()));
+      return;
+    }
+    if (node.name != "title" && node.name != "desc" && node.name != "metadata") {
+      throw std::runtime_error("SVG clipPath contains an unsupported element: " + node.name);
+    }
+  };
+
+  const auto push_clip = [&](const Style& style) {
+    if (!style.clip_reference.has_value()) {
+      return false;
+    }
+    const std::size_t target = find_reference(*style.clip_reference, "clip-path");
+    Path path;
+    std::optional<std::uint8_t> rule;
+    std::size_t shape_count = 0;
+    references.push_back(target);
+    collect_clip(target, Style{}, Transform{}, path, rule, shape_count);
+    references.pop_back();
+    if (path.empty()) {
+      throw std::runtime_error("SVG clipPath must contain drawable geometry");
+    }
+    result.operations.U8(3);
+    result.operations.U8(rule.value_or(0));
+    result.operations.PathValue(path);
+    count_operation();
+    return true;
+  };
+
+  std::function<void(std::size_t, Style, bool)> emit_node;
+  emit_node = [&](std::size_t index, Style inherited, bool referenced) {
+    const SvgNode& node = document.nodes[index];
+    const Style style = ResolveStyle(std::move(inherited), node.attributes);
+    if (!style.displayed || style.opacity == 0.0F) {
+      return;
+    }
+    if (node.name == "defs" || node.name == "clipPath") {
+      if (referenced) {
+        throw std::runtime_error("SVG use cannot reference a defs or clipPath element");
+      }
+      return;
+    }
+    if (node.name == "title" || node.name == "desc" || node.name == "metadata") {
+      return;
+    }
+    const bool transformed = node.attributes.contains("transform");
+    if (transformed) {
+      push_transform(node_transform(node));
+    }
+    const bool translated_use = node.name == "use" &&
+                                (node.attributes.contains("x") || node.attributes.contains("y"));
+    if (translated_use) {
+      Transform translation;
+      translation.tx = AttributeNumber(node.attributes, "x");
+      translation.ty = AttributeNumber(node.attributes, "y");
+      push_transform(translation);
+    }
+    const bool clipped = push_clip(style);
+    if (node.name == "g") {
+      for (const std::size_t child : node.children) {
+        emit_node(child, style, false);
+      }
+    } else if (node.name == "use") {
+      const std::size_t target = find_reference(href(node), "use");
+      if (std::ranges::find(references, target) != references.end() || references.size() >= max_reference_depth) {
+        throw std::runtime_error("SVG use references form a cycle or exceed the supported depth");
+      }
+      references.push_back(target);
+      emit_node(target, style, true);
+      references.pop_back();
+    } else if (IsShape(node.name)) {
+      WriteShape(result.operations, *node.path, style, result.operation_count);
+      if (result.operation_count > max_operations) {
+        throw std::runtime_error("SVG produces too many vector operations");
+      }
+    } else {
+      throw std::runtime_error("SVG contains an unsupported render element: " + node.name);
+    }
+    if (clipped) {
+      result.operations.U8(4);
+      count_operation();
+    }
+    if (translated_use) {
+      pop_transform();
+    }
+    if (transformed) {
+      pop_transform();
+    }
+  };
+
+  const auto aspect_transform = [&]() {
+    const auto preserve = root.attributes.find("preserveAspectRatio");
+    const std::string value = preserve == root.attributes.end() ? "xMidYMid meet" : Trim(preserve->second);
+    if (value == "none") {
+      return Transform{};
+    }
+    const std::size_t separator = value.find_first_of(" \t\r\n");
+    const std::string alignment = value.substr(0, separator);
+    const std::string mode = separator == std::string::npos ? "meet" : Trim(std::string_view(value).substr(separator));
+    if ((mode != "meet" && mode != "slice") || alignment.size() != 8 || !alignment.starts_with('x') ||
+        alignment[4] != 'Y') {
+      throw std::runtime_error("SVG preserveAspectRatio is malformed or unsupported");
+    }
+    const std::string_view horizontal(alignment.data() + 1, 3);
+    const std::string_view vertical(alignment.data() + 5, 3);
+    if ((horizontal != "Min" && horizontal != "Mid" && horizontal != "Max") ||
+        (vertical != "Min" && vertical != "Mid" && vertical != "Max")) {
+      throw std::runtime_error("SVG preserveAspectRatio contains an unsupported alignment");
+    }
+    const float scale_x = result.intrinsic_width / result.view_width;
+    const float scale_y = result.intrinsic_height / result.view_height;
+    const float scale = mode == "meet" ? std::min(scale_x, scale_y) : std::max(scale_x, scale_y);
+    const auto align_offset = [](std::string_view alignment_value, float available) {
+      return alignment_value == "Min" ? 0.0F : alignment_value == "Mid" ? available * 0.5F : available;
+    };
+    const float offset_x = align_offset(horizontal, result.intrinsic_width - result.view_width * scale);
+    const float offset_y = align_offset(vertical, result.intrinsic_height - result.view_height * scale);
+    const float ratio_x = scale / scale_x;
+    const float ratio_y = scale / scale_y;
+    return Transform{
+        ratio_x,
+        0.0F,
+        0.0F,
+        ratio_y,
+        result.view_x * (1.0F - ratio_x) + offset_x / scale_x,
+        result.view_y * (1.0F - ratio_y) + offset_y / scale_y,
+    };
+  };
+
+  const Style root_style = ResolveStyle(Style{}, root.attributes);
+  if (root_style.displayed && root_style.opacity != 0.0F) {
+    const bool transformed = root.attributes.contains("transform");
+    if (transformed) {
+      push_transform(node_transform(root));
+    }
+    const Transform aspect = aspect_transform();
+    const bool preserves_aspect = aspect.m11 != 1.0F || aspect.m22 != 1.0F || aspect.tx != 0.0F || aspect.ty != 0.0F;
+    if (preserves_aspect) {
+      push_transform(aspect);
+    }
+    const bool clipped = push_clip(root_style);
+    for (const std::size_t child : root.children) {
+      emit_node(child, root_style, false);
+    }
+    if (clipped) {
+      result.operations.U8(4);
+      count_operation();
+    }
+    if (preserves_aspect) {
+      pop_transform();
+    }
+    if (transformed) {
+      pop_transform();
+    }
+  }
   return result;
+}
+
+CompiledDocument CompileDocument(std::string_view xml) {
+  return EmitDocument(ParseSvgDocument(xml));
 }
 
 } // namespace
 
 CompiledSvg CompileSvg(const std::filesystem::path& path) {
   try {
-    ParsedDocument document = ParseDocument(ReadText(path));
+    CompiledDocument document = CompileDocument(ReadText(path));
     Writer output;
     constexpr std::byte magic[] = {
         std::byte{'H'},
