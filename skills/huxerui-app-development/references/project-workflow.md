@@ -124,6 +124,32 @@ Installed iOS projects consume the selected slice through the canonical HuxerUI 
 
 For manually defined consumer targets, call `huxerui_enable_codegen(target)` after all marked source files are added. Do not include SDK-private paths or link binary files by hand when an exported target owns them.
 
+Acquire an app-side library from a local path or an HTTPS Git repository through `huxerui_use_library`:
+
+```cmake
+huxerui_use_library(my_app
+        TARGET CameraKit::CameraKit
+        PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/CameraKit"
+)
+
+huxerui_use_library(my_app
+        TARGET Charts::Charts
+        URL "https://github.com/example/Charts.git"
+        COMMIT "0123456789abcdef0123456789abcdef01234567"
+)
+
+huxerui_use_library(my_app
+        TARGET Icons::Icons
+        URL "https://github.com/example/Icons.git"
+        TAG "v1.2.0"
+)
+```
+
+PATH and URL are mutually exclusive.
+URL requires exactly one of COMMIT or TAG; use a full commit SHA for reproducible builds, because a repository owner can move a tag.
+TAG accepts a plain Git tag name rather than a branch or a `refs/tags/` value.
+Do not add a second dependency manifest or invoke FetchContent separately for a library already owned by this helper.
+
 ## Build and run without changing toolchains
 
 - Reuse the project's compatible build directory and generator.

@@ -709,13 +709,23 @@ huxerui_use_library(my_app
 )
 ```
 
-A GitHub or other HTTPS Git repository uses a pinned revision:
+A GitHub or other HTTPS Git repository can use a pinned commit:
 
 ```cmake
 huxerui_use_library(my_app
         TARGET CameraKit::CameraKit
         URL "https://github.com/example/CameraKit.git"
-        REVISION "0123456789abcdef0123456789abcdef01234567"
+        COMMIT "0123456789abcdef0123456789abcdef01234567"
+)
+```
+
+It can instead use a release tag when human-readable version selection is preferred:
+
+```cmake
+huxerui_use_library(my_app
+        TARGET CameraKit::CameraKit
+        URL "https://github.com/example/CameraKit.git"
+        TAG "v1.2.0"
 )
 ```
 
@@ -731,14 +741,19 @@ huxerui_use_library(my_app
 
 PATH and URL are mutually exclusive.
 PATH resolves relative to the caller and uses the local source directly.
-URL accepts HTTPS Git repositories only and requires REVISION.
+URL accepts HTTPS Git repositories only and requires exactly one of COMMIT or TAG.
+COMMIT and TAG are mutually exclusive.
+COMMIT requires a full 40-character SHA.
+TAG accepts an unqualified valid Git tag name and resolves it through the repository's exact `refs/tags/` namespace, so a branch with the same name is never selected.
 Remote source uses FetchContent's normal build-directory cache, and repeated use by several application targets acquires and configures the repository only once.
+FetchContent owns Git discovery and tag validation when it needs to clone or update a repository; supplying source through its standard override does not add a separate Git requirement.
 If the requested target already exists, PATH and URL must be omitted; the helper never assigns a requested origin to an unrelated target.
 The helper verifies that acquisition creates the requested CMake target, links it to the application, and appends its compiled resource package in declaration order without a separate finalize call.
 Calling `target_link_libraries` alone links ordinary code but intentionally does not merge library resources or request platform-package discovery.
 
-The application CMakeLists is both the dependency declaration and revision lock.
-A full commit SHA is the reproducible remote form; a release tag may identify a human-facing version on GitHub but is not treated as immutable dependency identity.
+The application CMakeLists is both the dependency declaration and version selection.
+A full commit SHA is the recommended reproducible remote form.
+A tag is easier to read but can be moved by the repository owner, so it does not provide the same immutable dependency identity.
 There is no second dependency list or lock manifest in the current design.
 Remote CMake source executes with the same authority as any other build dependency, so HTTPS transport does not replace commit review and pinning.
 

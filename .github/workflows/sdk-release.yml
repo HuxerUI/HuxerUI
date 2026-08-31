@@ -607,8 +607,8 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  publish:
-    name: Publish release
+  prepare:
+    name: Prepare release
     if: github.event_name != 'workflow_dispatch' || inputs.validation_only == false
     needs:
       - validate
@@ -638,23 +638,21 @@ jobs:
           -DRELEASE_TAG=${RELEASE_TAG}
           -DASSET_DIRECTORY=${{ github.workspace }}/release-assets
           -P ${{ github.workspace }}/cmake/ValidateSdkRelease.cmake
-      - name: Publish GitHub release
+      - name: Prepare GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release edit "${RELEASE_TAG}" \
-              --draft \
               --prerelease=false \
               --title "HuxerUI ${RELEASE_VERSION}" \
               --verify-tag
           else
             gh release create "${RELEASE_TAG}" \
               --draft \
-              --generate-notes \
+              --notes "" \
               --title "HuxerUI ${RELEASE_VERSION}" \
               --verify-tag
           fi
           gh release upload "${RELEASE_TAG}" release-assets/* --clobber
-          gh release edit "${RELEASE_TAG}" --draft=false --prerelease=false

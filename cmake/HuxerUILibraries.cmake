@@ -197,7 +197,7 @@ function(huxerui_use_library target_name)
     endif ()
     cmake_parse_arguments(HUXERUI_USE_LIBRARY
             ""
-            "TARGET;PATH;URL;REVISION"
+            "TARGET;PATH;URL;COMMIT;TAG"
             ""
             ${ARGN}
     )
@@ -214,9 +214,19 @@ function(huxerui_use_library target_name)
                 "huxerui_use_library() PATH and URL are mutually exclusive"
         )
     endif ()
-    if (HUXERUI_USE_LIBRARY_REVISION AND NOT HUXERUI_USE_LIBRARY_URL)
+    if (DEFINED HUXERUI_USE_LIBRARY_COMMIT AND DEFINED HUXERUI_USE_LIBRARY_TAG)
         message(FATAL_ERROR
-                "huxerui_use_library() REVISION requires URL"
+                "huxerui_use_library() COMMIT and TAG are mutually exclusive"
+        )
+    endif ()
+    if (DEFINED HUXERUI_USE_LIBRARY_COMMIT AND NOT HUXERUI_USE_LIBRARY_URL)
+        message(FATAL_ERROR
+                "huxerui_use_library() COMMIT requires URL"
+        )
+    endif ()
+    if (DEFINED HUXERUI_USE_LIBRARY_TAG AND NOT HUXERUI_USE_LIBRARY_URL)
+        message(FATAL_ERROR
+                "huxerui_use_library() TAG requires URL"
         )
     endif ()
 
@@ -264,23 +274,37 @@ function(huxerui_use_library target_name)
                     "huxerui_use_library() URL must not contain credentials"
             )
         endif ()
-        if (NOT HUXERUI_USE_LIBRARY_REVISION)
+        if (NOT DEFINED HUXERUI_USE_LIBRARY_COMMIT
+                AND NOT DEFINED HUXERUI_USE_LIBRARY_TAG)
             message(FATAL_ERROR
-                    "huxerui_use_library() URL requires REVISION"
+                    "huxerui_use_library() URL requires COMMIT or TAG"
             )
         endif ()
-        string(LENGTH "${HUXERUI_USE_LIBRARY_REVISION}"
-                HUXERUI_LIBRARY_REVISION_LENGTH
-        )
-        if (NOT HUXERUI_LIBRARY_REVISION_LENGTH EQUAL 40
-                OR NOT HUXERUI_USE_LIBRARY_REVISION MATCHES "^[0-9A-Fa-f]+$")
-            message(FATAL_ERROR
-                    "huxerui_use_library() REVISION must be a full commit SHA"
+        if (DEFINED HUXERUI_USE_LIBRARY_COMMIT)
+            string(LENGTH "${HUXERUI_USE_LIBRARY_COMMIT}"
+                    HUXERUI_LIBRARY_COMMIT_LENGTH
+            )
+            if (NOT HUXERUI_LIBRARY_COMMIT_LENGTH EQUAL 40
+                    OR NOT HUXERUI_USE_LIBRARY_COMMIT MATCHES "^[0-9A-Fa-f]+$")
+                message(FATAL_ERROR
+                        "huxerui_use_library() COMMIT must be a full commit SHA"
+                )
+            endif ()
+            set(HUXERUI_LIBRARY_CHECKOUT "${HUXERUI_USE_LIBRARY_COMMIT}")
+            set(HUXERUI_LIBRARY_ORIGIN
+                    "URL:${HUXERUI_USE_LIBRARY_URL}@COMMIT:${HUXERUI_USE_LIBRARY_COMMIT}"
+            )
+        else ()
+            if (HUXERUI_USE_LIBRARY_TAG MATCHES "^refs/tags/")
+                message(FATAL_ERROR
+                        "huxerui_use_library() TAG must not include the refs/tags/ prefix"
+                )
+            endif ()
+            set(HUXERUI_LIBRARY_CHECKOUT "refs/tags/${HUXERUI_USE_LIBRARY_TAG}")
+            set(HUXERUI_LIBRARY_ORIGIN
+                    "URL:${HUXERUI_USE_LIBRARY_URL}@TAG:${HUXERUI_USE_LIBRARY_TAG}"
             )
         endif ()
-        set(HUXERUI_LIBRARY_ORIGIN
-                "URL:${HUXERUI_USE_LIBRARY_URL}@${HUXERUI_USE_LIBRARY_REVISION}"
-        )
         if (NOT TARGET ${HUXERUI_USE_LIBRARY_TARGET})
             include(FetchContent)
             string(SHA256 HUXERUI_LIBRARY_SOURCE_HASH
@@ -294,7 +318,7 @@ function(huxerui_use_library target_name)
             )
             FetchContent_Declare(${HUXERUI_LIBRARY_FETCH_NAME}
                     GIT_REPOSITORY "${HUXERUI_USE_LIBRARY_URL}"
-                    GIT_TAG "${HUXERUI_USE_LIBRARY_REVISION}"
+                    GIT_TAG "${HUXERUI_LIBRARY_CHECKOUT}"
                     GIT_SHALLOW FALSE
             )
             FetchContent_MakeAvailable(${HUXERUI_LIBRARY_FETCH_NAME})

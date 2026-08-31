@@ -69,6 +69,11 @@ Linux release CI rejects binaries that require symbols newer than GLIBC 2.35, GL
 Release jobs rebuild their host tools from source before configuration instead of publishing the executables checked into the selected release ref.
 Distributed Linux host tools are built in a GLIBC 2.28 environment and statically link the GNU C++ runtime independently of the newer Linux SDK-library baseline.
 
+Release CI validates the tag, builds the archives, and uploads them to a GitHub release, creating a missing release as a draft.
+It does not derive release notes from commits or publish a draft.
+Before publishing, summarize the changes between the previous published tag and the current tag, paste the curated notes into the draft, and publish it manually.
+Rerunning CI preserves an existing release body and draft or published state while replacing its packaged assets.
+
 Rebuild repository host-tool packages with `scripts/build_tools.sh` or `scripts/build_tools.ps1`.
 The scripts default to the current host and accept explicit platform, architecture, CMake toolchain, Android NDK, build-directory, and output-directory arguments.
 Android builds resolve the NDK automatically, while other cross-platform and non-native Linux builds require an explicit CMake toolchain.

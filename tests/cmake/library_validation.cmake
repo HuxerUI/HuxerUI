@@ -45,18 +45,38 @@ expect_library_configure_failure(
 )
 expect_library_configure_failure(
         library_insecure_url
-        "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL http://example.com/camera.git REVISION 0123456789abcdef0123456789abcdef01234567)"
+        "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL http://example.com/camera.git COMMIT 0123456789abcdef0123456789abcdef01234567)"
         "URL must use HTTPS"
 )
 expect_library_configure_failure(
-        library_missing_revision
+        library_missing_checkout
         "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL https://example.com/camera.git)"
-        "URL requires REVISION"
+        "URL requires COMMIT or TAG"
 )
 expect_library_configure_failure(
-        library_short_revision
-        "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL https://example.com/camera.git REVISION 0123456789abcdef)"
-        "REVISION must be a full commit SHA"
+        library_short_commit
+        "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL https://example.com/camera.git COMMIT 0123456789abcdef)"
+        "COMMIT must be a full commit SHA"
+)
+expect_library_configure_failure(
+        library_commit_and_tag
+        "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL https://example.com/camera.git COMMIT 0123456789abcdef0123456789abcdef01234567 TAG v1.2.3)"
+        "COMMIT and TAG are mutually exclusive"
+)
+expect_library_configure_failure(
+        library_commit_without_url
+        "huxerui_use_library(library_app TARGET CameraKit::CameraKit COMMIT 0123456789abcdef0123456789abcdef01234567)"
+        "COMMIT requires URL"
+)
+expect_library_configure_failure(
+        library_tag_without_url
+        "huxerui_use_library(library_app TARGET CameraKit::CameraKit TAG v1.2.3)"
+        "TAG requires URL"
+)
+expect_library_configure_failure(
+        library_qualified_tag
+        "huxerui_use_library(library_app TARGET CameraKit::CameraKit URL https://example.com/camera.git TAG refs/tags/v1.2.3)"
+        "TAG must not include the refs/tags/ prefix"
 )
 expect_library_configure_failure(
         android_missing_framework
@@ -104,35 +124,62 @@ expect_library_configure_failure(
 )
 
 set(REMOTE_LIBRARY_URL "https://github.com/example/huxerui-test-library.git")
-set(REMOTE_LIBRARY_REVISION "0123456789abcdef0123456789abcdef01234567")
+set(REMOTE_LIBRARY_COMMIT "0123456789abcdef0123456789abcdef01234567")
 set(REMOTE_LIBRARY_ROOT "${TEST_ROOT}/remote-library")
+set(TAGGED_LIBRARY_URL "https://github.com/example/huxerui-tagged-library.git")
+set(TAGGED_LIBRARY_TAG "0")
+set(TAGGED_LIBRARY_ROOT "${TEST_ROOT}/tagged-library")
 set(REMOTE_PROJECT_ROOT "${TEST_ROOT}/remote-source")
 set(REMOTE_BUILD_ROOT "${TEST_ROOT}/remote-build")
-file(MAKE_DIRECTORY "${REMOTE_LIBRARY_ROOT}" "${REMOTE_PROJECT_ROOT}")
+file(MAKE_DIRECTORY
+        "${REMOTE_LIBRARY_ROOT}"
+        "${TAGGED_LIBRARY_ROOT}"
+        "${REMOTE_PROJECT_ROOT}"
+)
 file(WRITE "${REMOTE_LIBRARY_ROOT}/CMakeLists.txt"
         "add_library(huxerui_remote_library INTERFACE)\n"
         "set_property(TARGET huxerui_remote_library PROPERTY HUXERUI_LIBRARY TRUE)\n"
         "add_library(RemoteLibrary::RemoteLibrary ALIAS huxerui_remote_library)\n"
 )
+file(WRITE "${TAGGED_LIBRARY_ROOT}/CMakeLists.txt"
+        "add_library(huxerui_tagged_library INTERFACE)\n"
+        "set_property(TARGET huxerui_tagged_library PROPERTY HUXERUI_LIBRARY TRUE)\n"
+        "add_library(TaggedLibrary::TaggedLibrary ALIAS huxerui_tagged_library)\n"
+)
 file(WRITE "${REMOTE_PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
 string(SHA256 REMOTE_LIBRARY_HASH
-        "URL:${REMOTE_LIBRARY_URL}@${REMOTE_LIBRARY_REVISION}"
+        "URL:${REMOTE_LIBRARY_URL}@COMMIT:${REMOTE_LIBRARY_COMMIT}"
 )
 string(SUBSTRING "${REMOTE_LIBRARY_HASH}" 0 16 REMOTE_LIBRARY_HASH)
 string(TOUPPER
         "huxerui_library_${REMOTE_LIBRARY_HASH}"
         REMOTE_LIBRARY_FETCH_NAME
 )
+string(SHA256 TAGGED_LIBRARY_HASH
+        "URL:${TAGGED_LIBRARY_URL}@TAG:${TAGGED_LIBRARY_TAG}"
+)
+string(SUBSTRING "${TAGGED_LIBRARY_HASH}" 0 16 TAGGED_LIBRARY_HASH)
+string(TOUPPER
+        "huxerui_library_${TAGGED_LIBRARY_HASH}"
+        TAGGED_LIBRARY_FETCH_NAME
+)
 file(WRITE "${REMOTE_PROJECT_ROOT}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(remote_library LANGUAGES CXX)\n"
+        "set(CMAKE_DISABLE_FIND_PACKAGE_Git TRUE)\n"
         "set(FETCHCONTENT_SOURCE_DIR_${REMOTE_LIBRARY_FETCH_NAME} \"${REMOTE_LIBRARY_ROOT}\" CACHE PATH \"\" FORCE)\n"
+        "set(FETCHCONTENT_SOURCE_DIR_${TAGGED_LIBRARY_FETCH_NAME} \"${TAGGED_LIBRARY_ROOT}\" CACHE PATH \"\" FORCE)\n"
         "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUILibraries.cmake\")\n"
         "add_executable(library_app main.cpp)\n"
         "huxerui_use_library(library_app\n"
         "        TARGET RemoteLibrary::RemoteLibrary\n"
         "        URL \"${REMOTE_LIBRARY_URL}\"\n"
-        "        REVISION \"${REMOTE_LIBRARY_REVISION}\"\n"
+        "        COMMIT \"${REMOTE_LIBRARY_COMMIT}\"\n"
+        ")\n"
+        "huxerui_use_library(library_app\n"
+        "        TARGET TaggedLibrary::TaggedLibrary\n"
+        "        URL \"${TAGGED_LIBRARY_URL}\"\n"
+        "        TAG \"${TAGGED_LIBRARY_TAG}\"\n"
         ")\n"
 )
 execute_process(
