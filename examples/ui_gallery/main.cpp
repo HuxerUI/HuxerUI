@@ -138,7 +138,7 @@ void PaintDataGraphic(PaintContext& paint, Size size, const ColorScheme& colors,
   const float right = size.width - inset;
   const float final_y = inset + (1.0F - progress) * (size.height - inset * 2.0F);
 
-  paint.DrawLinearGradient(
+  paint.DrawRect(
       bounds,
       LinearGradient{
           .start = {0.0F, 0.0F},
@@ -172,7 +172,7 @@ void PaintDataGraphic(PaintContext& paint, Size size, const ColorScheme& colors,
   area.LineTo({right, baseline}).LineTo({inset, baseline}).Close();
 
   paint.PushPathClip(area);
-  paint.DrawLinearGradient(
+  paint.DrawRect(
       bounds,
       LinearGradient{
           .start = {0.0F, 0.0F},
@@ -205,7 +205,7 @@ void PaintPathStudy(PaintContext& paint, Size size, const ColorScheme& colors) {
 
   paint.DrawPathShadow(shape, Color::Rgb(0, 0, 0, 0.24F), {}, 18.0F);
   paint.PushPathClip(shape);
-  paint.DrawRadialGradient(
+  paint.DrawRect(
       {0.0F, 0.0F, size.width, size.height},
       RadialGradient{
           .center = {0.28F, 0.22F},

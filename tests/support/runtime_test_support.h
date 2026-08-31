@@ -804,10 +804,19 @@ inline const DrawRectCommand* FindRect(const FlattenedScene& scene, Rect expecte
   return nullptr;
 }
 
+inline const Color* SolidBrushColor(const Brush& brush) {
+  return std::get_if<Color>(&brush.Get());
+}
+
+inline bool BrushIsColor(const Brush& brush, Color expected) {
+  const Color* color = SolidBrushColor(brush);
+  return color != nullptr && *color == expected;
+}
+
 inline const DrawRectCommand* FindRectWithColor(const FlattenedScene& scene, Color expected) {
   for (const auto& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color == expected) {
+    if (rect && BrushIsColor(rect->brush, expected)) {
       return rect;
     }
   }
@@ -830,12 +839,12 @@ inline std::optional<Rect> FindPresentedRectWithColor(
       continue;
     }
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color == expected &&
+    if (rect && BrushIsColor(rect->brush, expected) &&
         (!expected_size.has_value() || Size{rect->rect.width, rect->rect.height} == *expected_size)) {
       return detail::TransformBounds(transform_stack.back(), rect->rect);
     }
     const auto* path = std::get_if<FillPathCommand>(&command);
-    if (path && path->color == expected &&
+    if (path && BrushIsColor(path->brush, expected) &&
         (!expected_size.has_value() || Size{path->path.Bounds().width, path->path.Bounds().height} == *expected_size)) {
       return detail::TransformBounds(transform_stack.back(), path->path.Bounds());
     }
@@ -867,7 +876,9 @@ inline std::optional<float> RectAlpha(const FlattenedScene& scene, Rect expected
   for (const auto& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
     if (rect && rect->rect == expected) {
-      return rect->color.alpha;
+      if (const Color* color = SolidBrushColor(rect->brush)) {
+        return color->alpha;
+      }
     }
   }
   return std::nullopt;
@@ -904,7 +915,7 @@ inline std::optional<Rect> FindPresentedStrokePathRect(const FlattenedScene& sce
       continue;
     }
     const auto* path = std::get_if<StrokePathCommand>(&command);
-    if (path && path->color == expected) {
+    if (path && BrushIsColor(path->brush, expected)) {
       return detail::TransformBounds(transform_stack.back(), path->path.Bounds());
     }
   }

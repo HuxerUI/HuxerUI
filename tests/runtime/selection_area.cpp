@@ -136,7 +136,8 @@ TEST_CASE("TestSelectionAreaSelectsAndCopiesAcrossTextNodes") {
   const FlattenedScene& scene = runtime.BuildFrame();
   REQUIRE(std::ranges::any_of(scene.Commands(), [](const PaintCommand& command) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    return rect != nullptr && rect->color.alpha > 0.0F;
+    const Color* color = rect != nullptr ? SolidBrushColor(rect->brush) : nullptr;
+    return color != nullptr && color->alpha > 0.0F;
   }));
 }
 
@@ -214,7 +215,9 @@ TEST_CASE("TestSelectionAreaUsesPresentedTextGeometryAndOpacity") {
     return rect != nullptr && std::abs(rect->rect.x - 10.0F) < 0.01F && std::abs(rect->rect.width - 50.0F) < 0.01F;
   });
   REQUIRE(selection != scene.Commands().end());
-  REQUIRE(std::abs(std::get<DrawRectCommand>(*selection).color.alpha - 0.16F) < 0.001F);
+  const Color* selection_color = SolidBrushColor(std::get<DrawRectCommand>(*selection).brush);
+  REQUIRE(selection_color != nullptr);
+  REQUIRE(std::abs(selection_color->alpha - 0.16F) < 0.001F);
 }
 
 TEST_CASE("TestSelectionAreaRetainsForegroundPaintAcrossCleanFrames") {

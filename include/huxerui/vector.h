@@ -10,8 +10,7 @@
 
 namespace huxerui {
 
-struct LinearGradient;
-struct RadialGradient;
+class Brush;
 
 namespace detail {
 class PathAccess;
@@ -222,31 +221,17 @@ public:
   VectorBuilder& operator=(VectorBuilder&&) = delete;
   ~VectorBuilder();
 
-  /// Records a filled path using fill_rule to resolve overlapping contours.
-  void FillPath(Path path, Color color, PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Records a linear-gradient path fill evaluated relative to the path bounds.
-  void FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Records a linear-gradient path fill evaluated relative to gradient_rect.
-  void FillPath(Path path, LinearGradient gradient, Rect gradient_rect,
-                PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Records an elliptical radial-gradient path fill evaluated relative to the path bounds.
-  void FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Records an elliptical radial-gradient path fill evaluated relative to gradient_rect.
-  void FillPath(Path path, RadialGradient gradient, Rect gradient_rect,
-                PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Records a path fill using a Brush evaluated relative to the path bounds.
+  void FillPath(Path path, Brush brush, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Records a path fill using a Brush evaluated relative to brush_bounds without clipping to that rectangle.
+  void FillPath(Path path, Brush brush, Rect brush_bounds, PathFillRule fill_rule = PathFillRule::NonZero);
   /// Records a path stroke using one normalized stroke style for every contour.
   ///
   /// Each contour restarts the dash pattern at dash_offset. For example, a rounded dashed stroke can use
   /// `StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .dash_pattern = {8.0F, 4.0F}}`.
-  void StrokePath(Path path, Color color, StrokeStyle style);
-  /// Records a linear-gradient path stroke evaluated relative to the path bounds.
-  void StrokePath(Path path, LinearGradient gradient, StrokeStyle style);
-  /// Records a linear-gradient path stroke evaluated relative to gradient_rect.
-  void StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style);
-  /// Records an elliptical radial-gradient path stroke evaluated relative to the path bounds.
-  void StrokePath(Path path, RadialGradient gradient, StrokeStyle style);
-  /// Records an elliptical radial-gradient path stroke evaluated relative to gradient_rect.
-  void StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style);
+  void StrokePath(Path path, Brush brush, StrokeStyle style);
+  /// Records a path stroke using a Brush evaluated relative to brush_bounds without clipping to that rectangle.
+  void StrokePath(Path path, Brush brush, Rect brush_bounds, StrokeStyle style);
   /// Restricts subsequent vector commands to the filled area of path.
   void PushClip(Path path, PathFillRule fill_rule = PathFillRule::NonZero);
   /// Restores the clip active before the matching PushClip().

@@ -102,7 +102,7 @@ View StageGrid(Size size, const ThemeSpec& theme) {
   const ColorScheme colors = theme.colors;
   const float radius = theme.shapes.large;
   return Canvas([colors, radius](PaintContext& paint, Size canvas_size) {
-    paint.DrawLinearGradient(
+    paint.DrawRect(
         {0.0F, 0.0F, canvas_size.width, canvas_size.height},
         LinearGradient{
             .start = {0.0F, 0.0F},

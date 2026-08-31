@@ -124,7 +124,11 @@ const detail::MountedNode* FindMountedKind(const detail::MountedNode& node, deta
 }
 
 const Color* FillColor(const std::optional<VisualFill>& fill) {
-  return fill.has_value() ? std::get_if<Color>(&fill->Get()) : nullptr;
+  if (!fill.has_value()) {
+    return nullptr;
+  }
+  const Brush* brush = std::get_if<Brush>(&fill->Get());
+  return brush != nullptr ? std::get_if<Color>(&brush->Get()) : nullptr;
 }
 
 const Color* LayerFillColor(const std::optional<IndicationLayer>& layer) {
@@ -996,7 +1000,8 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
   REQUIRE(theme_button->style.font.Size() == 16.0F);
   const DrawRectCommand* theme_button_background = FindRect(initial, theme_button->rect);
   REQUIRE(theme_button_background != nullptr);
-  REQUIRE(theme_button_background->color.blue == Color::Rgb(40, 100, 220).blue);
+  REQUIRE(SolidBrushColor(theme_button_background->brush) != nullptr);
+  REQUIRE(SolidBrushColor(theme_button_background->brush)->blue == Color::Rgb(40, 100, 220).blue);
 
   const DrawTextCommand* nested_button = FindText(initial, "nested button");
   REQUIRE(nested_button != nullptr);
@@ -1021,7 +1026,8 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
   REQUIRE(updated_button != nullptr);
   const DrawRectCommand* updated_button_background = FindRect(updated, updated_button->rect);
   REQUIRE(updated_button_background != nullptr);
-  REQUIRE(updated_button_background->color.red == Color::Rgb(220, 70, 50).red);
+  REQUIRE(SolidBrushColor(updated_button_background->brush) != nullptr);
+  REQUIRE(SolidBrushColor(updated_button_background->brush)->red == Color::Rgb(220, 70, 50).red);
 }
 
 TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
@@ -1045,7 +1051,8 @@ TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
   REQUIRE(button->style.foreground.red == dark.colors.on_primary.red);
   const DrawRectCommand* background = FindRect(scene, button->rect);
   REQUIRE(background != nullptr);
-  REQUIRE(background->color.blue == dark.colors.primary.blue);
+  REQUIRE(SolidBrushColor(background->brush) != nullptr);
+  REQUIRE(SolidBrushColor(background->brush)->blue == dark.colors.primary.blue);
 }
 
 TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
@@ -1324,7 +1331,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(button->style.font.Size() == light.typography.label_large);
   const DrawRectCommand* background = FindRect(initial, button->rect);
   REQUIRE(background != nullptr);
-  REQUIRE(background->color.red == light.colors.primary.red);
+  REQUIRE(SolidBrushColor(background->brush) != nullptr);
+  REQUIRE(SolidBrushColor(background->brush)->red == light.colors.primary.red);
   REQUIRE(background->corner_radius == 20.0F);
 
   const Point pointer{
@@ -1412,7 +1420,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(dark_button != nullptr);
   const DrawRectCommand* dark_background = FindRect(dark_display, dark_button->rect);
   REQUIRE(dark_background != nullptr);
-  REQUIRE(dark_background->color.red == dark.colors.primary.red);
+  REQUIRE(SolidBrushColor(dark_background->brush) != nullptr);
+  REQUIRE(SolidBrushColor(dark_background->brush)->red == dark.colors.primary.red);
 
   Runtime toggle_runtime{MaterialToggleApp, platform};
   toggle_runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
@@ -1865,9 +1874,9 @@ TEST_CASE("TestHorizontalAndVerticalDividerGeometry") {
   const std::vector<DrawRectCommand> rectangles = DrawRectangles(scene);
   REQUIRE(rectangles.size() == 2);
   REQUIRE(rectangles[0].rect == Rect{8.0F, 0.0F, 104.0F, DividerStyle::Default().thickness});
-  REQUIRE(rectangles[0].color == DividerStyle::Default().color);
+  REQUIRE(BrushIsColor(rectangles[0].brush, DividerStyle::Default().color));
   REQUIRE(rectangles[1].rect == Rect{0.0F, 0.0F, DividerStyle::Default().thickness, 24.0F});
-  REQUIRE(rectangles[1].color == DividerStyle::Default().color);
+  REQUIRE(BrushIsColor(rectangles[1].brush, DividerStyle::Default().color));
 }
 
 TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
@@ -2182,10 +2191,10 @@ TEST_CASE("TestMaterialTabsStyleAndValidation") {
   const DrawRectCommand* divider = nullptr;
   const std::vector<DrawRectCommand> rectangles = DrawRectangles(scene);
   for (const DrawRectCommand& rectangle : rectangles) {
-    if (rectangle.color == style.indicator && rectangle.rect.height == style.indicator_height) {
+    if (BrushIsColor(rectangle.brush, style.indicator) && rectangle.rect.height == style.indicator_height) {
       indicator = &rectangle;
     }
-    if (rectangle.color == style.divider_color && rectangle.rect.height == style.divider_height) {
+    if (BrushIsColor(rectangle.brush, style.divider_color) && rectangle.rect.height == style.divider_height) {
       divider = &rectangle;
     }
   }
@@ -2203,7 +2212,7 @@ TEST_CASE("TestMaterialTabsStyleAndValidation") {
   overflow.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   const std::vector<DrawRectCommand> overflow_rectangles = DrawRectangles(overflow.BuildFrame());
   REQUIRE_FALSE(std::ranges::any_of(overflow_rectangles, [&style](const DrawRectCommand& rectangle) {
-    return rectangle.color == style.divider_color && rectangle.rect.height == style.divider_height;
+    return BrushIsColor(rectangle.brush, style.divider_color) && rectangle.rect.height == style.divider_height;
   }));
 }
 
@@ -2594,9 +2603,9 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
   const DrawCircleCommand* stop = nullptr;
   for (const PaintCommand& command : determinate_scene.Commands()) {
     if (const auto* rectangle = std::get_if<DrawRectCommand>(&command)) {
-      if (rectangle->color == style.track_color) {
+      if (BrushIsColor(rectangle->brush, style.track_color)) {
         track = rectangle;
-      } else if (rectangle->color == style.indicator_color) {
+      } else if (BrushIsColor(rectangle->brush, style.indicator_color)) {
         indicator = rectangle;
       }
     } else if (const auto* circle = std::get_if<DrawCircleCommand>(&command)) {
@@ -2622,7 +2631,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
   const FlattenedScene& animated_scene = animated.BuildFrame();
   const auto indicator_segments = std::ranges::count_if(animated_scene.Commands(), [&](const PaintCommand& command) {
     const auto* rectangle = std::get_if<DrawRectCommand>(&command);
-    return rectangle != nullptr && rectangle->color == style.indicator_color;
+    return rectangle != nullptr && BrushIsColor(rectangle->brush, style.indicator_color);
   });
   REQUIRE(indicator_segments == 2);
 
@@ -2634,7 +2643,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
   const FlattenedScene& reduced_scene = reduced.BuildFrame();
   REQUIRE(std::ranges::count_if(reduced_scene.Commands(), [&](const PaintCommand& command) {
             const auto* rectangle = std::get_if<DrawRectCommand>(&command);
-            return rectangle != nullptr && rectangle->color == style.indicator_color;
+            return rectangle != nullptr && BrushIsColor(rectangle->brush, style.indicator_color);
           }) == 2);
   REQUIRE(reduced_platform.requested_frames == requests_before);
   REQUIRE_FALSE(reduced.LastCommit().next_frame_deadline.has_value());
@@ -2662,7 +2671,7 @@ TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
   const huxerui::DrawRectCommand* initial_thumb = nullptr;
   for (const PaintCommand& command : initial.Commands()) {
     if (const auto* rectangle = std::get_if<huxerui::DrawRectCommand>(&command)) {
-      if (rectangle->color == style.thumb && rectangle->rect.width == style.thumb_width &&
+      if (BrushIsColor(rectangle->brush, style.thumb) && rectangle->rect.width == style.thumb_width &&
           rectangle->rect.height == style.thumb_height) {
         initial_thumb = rectangle;
         break;
@@ -2697,7 +2706,7 @@ TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
   const huxerui::DrawRectCommand* pressed_thumb = nullptr;
   for (const PaintCommand& command : pressed.Commands()) {
     if (const auto* rectangle = std::get_if<huxerui::DrawRectCommand>(&command)) {
-      if (rectangle->color == style.thumb && rectangle->rect.height == style.pressed_thumb_height &&
+      if (BrushIsColor(rectangle->brush, style.thumb) && rectangle->rect.height == style.pressed_thumb_height &&
           rectangle->rect.width > style.track_height) {
         pressed_thumb = rectangle;
         break;
@@ -2781,13 +2790,13 @@ TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
   int indicators = 0;
   for (const PaintCommand& command : scene.Commands()) {
     if (const auto* rectangle = std::get_if<huxerui::DrawRectCommand>(&command)) {
-      if (rectangle->color == style.thumb && rectangle->rect.width == style.thumb_width &&
+      if (BrushIsColor(rectangle->brush, style.thumb) && rectangle->rect.width == style.thumb_width &&
           rectangle->rect.height == style.thumb_height) {
         thumb = rectangle;
       }
     }
     if (const auto* fill = std::get_if<huxerui::FillPathCommand>(&command)) {
-      if (fill->color == style.inactive_track && fill->path.Bounds().height == style.track_height) {
+      if (BrushIsColor(fill->brush, style.inactive_track) && fill->path.Bounds().height == style.track_height) {
         drew_inactive_track = true;
       }
     }
@@ -2811,7 +2820,7 @@ TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
   });
   const bool drew_focused_handle = std::ranges::any_of(focused.Commands(), [&](const PaintCommand& command) {
     const auto* rectangle = std::get_if<DrawRectCommand>(&command);
-    return rectangle != nullptr && rectangle->color == style.thumb &&
+    return rectangle != nullptr && BrushIsColor(rectangle->brush, style.thumb) &&
            rectangle->rect.width == style.pressed_thumb_width;
   });
   REQUIRE_FALSE(drew_node_focus_ring);
@@ -2844,10 +2853,10 @@ TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
   bool drew_disabled_thumb = false;
   for (const PaintCommand& command : scene.Commands()) {
     if (const auto* fill = std::get_if<FillPathCommand>(&command)) {
-      drew_disabled_active_track |= fill->color == style.disabled_active_track;
-      drew_disabled_inactive_track |= fill->color == style.disabled_inactive_track;
+      drew_disabled_active_track |= BrushIsColor(fill->brush, style.disabled_active_track);
+      drew_disabled_inactive_track |= BrushIsColor(fill->brush, style.disabled_inactive_track);
     } else if (const auto* rectangle = std::get_if<DrawRectCommand>(&command)) {
-      drew_disabled_thumb |= rectangle->color == style.disabled_thumb;
+      drew_disabled_thumb |= BrushIsColor(rectangle->brush, style.disabled_thumb);
     }
   }
   REQUIRE(drew_disabled_active_track);
@@ -3539,8 +3548,9 @@ TEST_CASE("TestToastAndDialogPresentation") {
   REQUIRE(ContainsText(shown, "command dialog"));
   const DrawRectCommand* scrim = FindRect(shown, Rect{0.0F, 0.0F, 200.0F, 100.0F});
   REQUIRE(scrim != nullptr);
-  REQUIRE(scrim->color.red == Color::Rgb(180, 20, 20, 0.3F).red);
-  REQUIRE(scrim->color.alpha == 0.3F);
+  REQUIRE(SolidBrushColor(scrim->brush) != nullptr);
+  REQUIRE(SolidBrushColor(scrim->brush)->red == Color::Rgb(180, 20, 20, 0.3F).red);
+  REQUIRE(SolidBrushColor(scrim->brush)->alpha == 0.3F);
   REQUIRE(saved_dialogs->Dismiss(dialog));
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
@@ -3853,7 +3863,8 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   const FlattenedScene& dialog = runtime.BuildFrame();
   const DrawRectCommand* scrim = FindRect(dialog, Rect{0.0F, 0.0F, 200.0F, 100.0F});
   REQUIRE(scrim != nullptr);
-  REQUIRE(scrim->color.alpha == dark.colors.scrim.alpha);
+  REQUIRE(SolidBrushColor(scrim->brush) != nullptr);
+  REQUIRE(SolidBrushColor(scrim->brush)->alpha == dark.colors.scrim.alpha);
 }
 
 TEST_CASE("TestDeclarativeDialogModifier") {

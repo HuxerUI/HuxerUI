@@ -666,7 +666,7 @@ const DrawRectCommand* FindTextFieldIndicator(
 ) {
   for (const PaintCommand& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color == color && rect->rect.width == width && rect->rect.height == height) {
+    if (rect && BrushIsColor(rect->brush, color) && rect->rect.width == width && rect->rect.height == height) {
       return rect;
     }
   }
@@ -676,7 +676,7 @@ const DrawRectCommand* FindTextFieldIndicator(
 const DrawRectCommand* FindTextFieldCaret(const FlattenedScene& scene, Color color, float width) {
   for (const PaintCommand& command : scene.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color == color && rect->rect.width == width && rect->rect.height > width) {
+    if (rect && BrushIsColor(rect->brush, color) && rect->rect.width == width && rect->rect.height > width) {
       return rect;
     }
   }
@@ -686,7 +686,7 @@ const DrawRectCommand* FindTextFieldCaret(const FlattenedScene& scene, Color col
 const StrokePathCommand* FindTextFieldOutline(const FlattenedScene& scene, Color color, float width) {
   for (const PaintCommand& command : scene.Commands()) {
     const auto* path = std::get_if<StrokePathCommand>(&command);
-    if (path && path->color == color && path->style.width == width) {
+    if (path && BrushIsColor(path->brush, color) && path->style.width == width) {
       return path;
     }
   }
@@ -991,7 +991,7 @@ TEST_CASE("TestFlatTextFieldLaysOutAndTintsDecorativeIcons") {
   REQUIRE(text->rect.x >= raster_command.destination.x + raster_command.destination.width + style.icon_spacing);
   REQUIRE(std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
     const auto* path = std::get_if<FillPathCommand>(&command);
-    return path && path->color == style.trailing_icon;
+    return path && BrushIsColor(path->brush, style.trailing_icon);
   }));
   REQUIRE(FindTextFieldIndicator(scene, style.standard.border, 180.0F, style.border_width) != nullptr);
   REQUIRE(FindBorderWithColor(scene, style.standard.border) == nullptr);
@@ -1068,11 +1068,11 @@ TEST_CASE("TestMaterialTextFieldUsesIndependentIconStateColors") {
 
   REQUIRE(std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
     const auto* path = std::get_if<FillPathCommand>(&command);
-    return path && path->color == style.error_leading_icon;
+    return path && BrushIsColor(path->brush, style.error_leading_icon);
   }));
   REQUIRE(std::ranges::any_of(scene.Commands(), [&style](const PaintCommand& command) {
     const auto* path = std::get_if<FillPathCommand>(&command);
-    return path && path->color == style.error_trailing_icon;
+    return path && BrushIsColor(path->brush, style.error_trailing_icon);
   }));
   REQUIRE(style.error_leading_icon != style.error_trailing_icon);
 }
@@ -1276,7 +1276,9 @@ TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
   const auto& hover = FlatLightThemeSpec().interactions.indication.hover;
   REQUIRE(hover.has_value());
   REQUIRE(hover->fill.has_value());
-  const Color* hover_color = std::get_if<Color>(&hover->fill->Get());
+  const Brush* hover_brush = std::get_if<Brush>(&hover->fill->Get());
+  REQUIRE(hover_brush != nullptr);
+  const Color* hover_color = std::get_if<Color>(&hover_brush->Get());
   REQUIRE(hover_color != nullptr);
   REQUIRE(FindRectWithColor(scene, *hover_color) == nullptr);
 }
@@ -2741,7 +2743,8 @@ TEST_CASE("TestTextFieldDragSelectionAndGeometry") {
   const FlattenedScene& scene = runtime.BuildFrame();
   const DrawRectCommand* selection = FindRect(scene, {20.0F, 10.0F, 30.0F, 20.0F});
   REQUIRE(selection != nullptr);
-  REQUIRE(selection->color.alpha == TextFieldStyle::Default().selection.alpha);
+  REQUIRE(SolidBrushColor(selection->brush) != nullptr);
+  REQUIRE(SolidBrushColor(selection->brush)->alpha == TextFieldStyle::Default().selection.alpha);
 
   const TextInputGeometry geometry = runtime.QueryTextInputGeometry(1, {1, 4});
   REQUIRE(geometry.result_code == TextInputResultCode::Ok);
@@ -2821,7 +2824,9 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
   REQUIRE(FindText(feedback, "复制") != nullptr);
   REQUIRE(menu_style.item_indication.press.has_value());
   REQUIRE(menu_style.item_indication.press->fill.has_value());
-  const Color* pressed = std::get_if<Color>(&menu_style.item_indication.press->fill->Get());
+  const Brush* pressed_brush = std::get_if<Brush>(&menu_style.item_indication.press->fill->Get());
+  REQUIRE(pressed_brush != nullptr);
+  const Color* pressed = std::get_if<Color>(&pressed_brush->Get());
   REQUIRE(pressed != nullptr);
   REQUIRE(FindRectWithColor(feedback, *pressed) != nullptr);
 

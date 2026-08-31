@@ -786,22 +786,8 @@ void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill,
   std::visit(
       [&](const auto& value) {
         using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::same_as<Value, Color>) {
-          Color color = value;
-          color.alpha *= opacity;
-          context.DrawRect(bounds, color, corner_radii);
-        } else if constexpr (std::same_as<Value, LinearGradient>) {
-          LinearGradient gradient = value;
-          for (GradientStop& stop : gradient.stops) {
-            stop.color.alpha *= opacity;
-          }
-          context.DrawLinearGradient(bounds, std::move(gradient), corner_radii);
-        } else if constexpr (std::same_as<Value, RadialGradient>) {
-          RadialGradient gradient = value;
-          for (GradientStop& stop : gradient.stops) {
-            stop.color.alpha *= opacity;
-          }
-          context.DrawRadialGradient(bounds, std::move(gradient), corner_radii);
+        if constexpr (std::same_as<Value, Brush>) {
+          context.DrawRect(bounds, detail::ModulateBrush(value, {}, opacity), corner_radii);
         } else {
           ImageProperties properties;
           properties.fit = value.fit;

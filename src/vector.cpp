@@ -101,6 +101,27 @@ std::vector<GradientStop> ReadGradientStops(VectorReader& reader) {
   return stops;
 }
 
+Brush ReadBrush(VectorReader& reader) {
+  switch (reader.U8()) {
+  case 1:
+    return ReadColor(reader);
+  case 2: {
+    const Point start = ReadPoint(reader);
+    const Point end = ReadPoint(reader);
+    const Transform2D transform = ReadTransform(reader);
+    return LinearGradient{start, end, ReadGradientStops(reader), transform};
+  }
+  case 3: {
+    const Point center = ReadPoint(reader);
+    const Size radius{reader.F32(), reader.F32()};
+    const Transform2D transform = ReadTransform(reader);
+    return RadialGradient{center, radius, ReadGradientStops(reader), transform};
+  }
+  default:
+    throw std::logic_error("HuxerUI vector payload contains an unknown brush kind");
+  }
+}
+
 StrokeStyle ReadStrokeStyle(VectorReader& reader) {
   const float width = reader.F32();
   const std::uint8_t cap_value = reader.U8();
@@ -207,44 +228,20 @@ VectorBuilder::VectorBuilder(Rect view_box) : impl_(std::make_unique<Impl>(view_
 
 VectorBuilder::~VectorBuilder() = default;
 
-void VectorBuilder::FillPath(Path path, Color color, PathFillRule fill_rule) {
-  impl_->context.FillPath(std::move(path), color, fill_rule);
+void VectorBuilder::FillPath(Path path, Brush brush, PathFillRule fill_rule) {
+  impl_->context.FillPath(std::move(path), std::move(brush), fill_rule);
 }
 
-void VectorBuilder::FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule) {
-  impl_->context.FillPath(std::move(path), std::move(gradient), fill_rule);
+void VectorBuilder::FillPath(Path path, Brush brush, Rect brush_bounds, PathFillRule fill_rule) {
+  impl_->context.FillPath(std::move(path), std::move(brush), brush_bounds, fill_rule);
 }
 
-void VectorBuilder::FillPath(Path path, LinearGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
-  impl_->context.FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
+void VectorBuilder::StrokePath(Path path, Brush brush, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), std::move(brush), std::move(style));
 }
 
-void VectorBuilder::FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule) {
-  impl_->context.FillPath(std::move(path), std::move(gradient), fill_rule);
-}
-
-void VectorBuilder::FillPath(Path path, RadialGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
-  impl_->context.FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
-}
-
-void VectorBuilder::StrokePath(Path path, Color color, StrokeStyle style) {
-  impl_->context.StrokePath(std::move(path), color, std::move(style));
-}
-
-void VectorBuilder::StrokePath(Path path, LinearGradient gradient, StrokeStyle style) {
-  impl_->context.StrokePath(std::move(path), std::move(gradient), std::move(style));
-}
-
-void VectorBuilder::StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style) {
-  impl_->context.StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
-}
-
-void VectorBuilder::StrokePath(Path path, RadialGradient gradient, StrokeStyle style) {
-  impl_->context.StrokePath(std::move(path), std::move(gradient), std::move(style));
-}
-
-void VectorBuilder::StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style) {
-  impl_->context.StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
+void VectorBuilder::StrokePath(Path path, Brush brush, Rect brush_bounds, StrokeStyle style) {
+  impl_->context.StrokePath(std::move(path), std::move(brush), brush_bounds, std::move(style));
 }
 
 void VectorBuilder::PushClip(Path path, PathFillRule fill_rule) {
@@ -327,15 +324,17 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
       for (std::uint32_t index = 0; index < count; ++index) {
         switch (reader.U8()) {
         case 1: {
-          const Color color = ReadColor(reader);
           const PathFillRule fill_rule = ReadFillRule(reader);
-          builder.FillPath(ReadPath(reader), color, fill_rule);
+          Brush brush = ReadBrush(reader);
+          const Rect brush_bounds = ReadRect(reader);
+          builder.FillPath(ReadPath(reader), std::move(brush), brush_bounds, fill_rule);
           break;
         }
         case 2: {
-          const Color color = ReadColor(reader);
+          Brush brush = ReadBrush(reader);
+          const Rect brush_bounds = ReadRect(reader);
           StrokeStyle style = ReadStrokeStyle(reader);
-          builder.StrokePath(ReadPath(reader), color, std::move(style));
+          builder.StrokePath(ReadPath(reader), std::move(brush), brush_bounds, std::move(style));
           break;
         }
         case 3: {
@@ -352,46 +351,6 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
         case 6:
           builder.PopTransform();
           break;
-        case 7: {
-          const PathFillRule fill_rule = ReadFillRule(reader);
-          const Rect gradient_rect = ReadRect(reader);
-          const Point start = ReadPoint(reader);
-          const Point end = ReadPoint(reader);
-          const Transform2D transform = ReadTransform(reader);
-          LinearGradient gradient{start, end, ReadGradientStops(reader), transform};
-          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
-          break;
-        }
-        case 8: {
-          const PathFillRule fill_rule = ReadFillRule(reader);
-          const Rect gradient_rect = ReadRect(reader);
-          const Point center = ReadPoint(reader);
-          const Size radius{reader.F32(), reader.F32()};
-          const Transform2D transform = ReadTransform(reader);
-          RadialGradient gradient{center, radius, ReadGradientStops(reader), transform};
-          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
-          break;
-        }
-        case 9: {
-          const Rect gradient_rect = ReadRect(reader);
-          const Point start = ReadPoint(reader);
-          const Point end = ReadPoint(reader);
-          const Transform2D transform = ReadTransform(reader);
-          LinearGradient gradient{start, end, ReadGradientStops(reader), transform};
-          StrokeStyle style = ReadStrokeStyle(reader);
-          builder.StrokePath(ReadPath(reader), std::move(gradient), gradient_rect, std::move(style));
-          break;
-        }
-        case 10: {
-          const Rect gradient_rect = ReadRect(reader);
-          const Point center = ReadPoint(reader);
-          const Size radius{reader.F32(), reader.F32()};
-          const Transform2D transform = ReadTransform(reader);
-          RadialGradient gradient{center, radius, ReadGradientStops(reader), transform};
-          StrokeStyle style = ReadStrokeStyle(reader);
-          builder.StrokePath(ReadPath(reader), std::move(gradient), gradient_rect, std::move(style));
-          break;
-        }
         default:
           throw std::logic_error("HuxerUI vector payload contains an unknown drawing operation");
         }

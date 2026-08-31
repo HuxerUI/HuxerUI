@@ -47,15 +47,16 @@ The query retains no mutable cache and does not alter shared Path storage or Pai
 
 ## Paint commands
 
-`PaintContext` records Path operations through explicit methods:
+`PaintContext` records rectangle and Path operations through the shared `Brush` value:
 
 ```cpp
-paint.FillPath(path, color, PathFillRule::NonZero);
-const LinearGradient gradient{
+const Brush gradient = LinearGradient{
     .start = {0.0F, 0.0F},
     .end = {1.0F, 1.0F},
     .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
 };
+paint.DrawRect(bounds, gradient, CornerRadii{12.0F});
+paint.FillPath(path, color, PathFillRule::NonZero);
 paint.FillPath(path, gradient);
 paint.StrokePath(path, gradient,
                  StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round,
@@ -65,18 +66,20 @@ paint.PushPathClip(path, PathFillRule::EvenOdd);
 paint.PopClip();
 ```
 
-Solid and gradient fills record `FillPathCommand`, `FillLinearGradientPathCommand`, or `FillRadialGradientPathCommand` as one atomic geometry-and-paint operation.
-Solid and gradient strokes likewise record `StrokePathCommand`, `StrokeLinearGradientPathCommand`, or `StrokeRadialGradientPathCommand`; shadows and clips use `DrawPathShadowCommand` and `PushPathClipCommand`.
-The overload without an explicit gradient rectangle evaluates normalized gradient coordinates relative to exact Path bounds.
-An explicit gradient rectangle lets several Paths share one coordinate space without clipping geometry to that rectangle.
-Damage remains based on transformed and clipped Path bounds rather than the gradient coordinate rectangle.
+`Brush` is the closed platform-neutral source-paint value for `Color`, `LinearGradient`, and `RadialGradient`.
+It does not own geometry, stroke style, opacity, blending, filters, shadows, images, or platform drawing objects.
+Rectangle fills record one `DrawRectCommand`, while Path fills and strokes record `FillPathCommand` and `StrokePathCommand` regardless of the Brush alternative.
+Shadows and clips use `DrawPathShadowCommand` and `PushPathClipCommand`.
+The overload without explicit Brush bounds evaluates normalized gradient coordinates relative to exact Path bounds.
+Explicit Brush bounds let several Paths share one coordinate space without clipping geometry to that rectangle.
+Colors ignore Brush bounds, and damage remains based on transformed and clipped Path bounds rather than the Brush coordinate rectangle.
 Renderers map each atomic command to native Path filling or stroking where available; Core Graphics uses an equivalent renderer-local Path clip around one gradient draw rather than exposing clip expansion in the shared command sequence.
 
 Linear and radial gradients own an identity-by-default `Transform2D` field in normalized gradient coordinates.
 For destination rectangle `B` and declared gradient transform `T`, renderers sample through the shared mapping `B * T` while leaving the painted rectangle or Path unchanged.
 Radial gradients additionally compose their normalized ellipse mapping around the declared center before the native circular-gradient primitive, so every renderer consumes the same final affine matrix instead of rebuilding ellipse behavior independently.
 Gradient transforms must be finite and invertible; invalid configuration is rejected when the Paint command is recorded.
-The dedicated gradient commands remain geometry-and-paint operations and do not introduce a generic Brush abstraction.
+Brush commands remain immutable geometry-and-source operations; compositing stays at the existing presentation and paint-sequence layers.
 
 Path clips share the existing balanced clip stack and `PopClipCommand`.
 Stroke bounds conservatively include cap, join, width, and miter-limit overflow.
@@ -164,4 +167,5 @@ Platform geometry, masks, layers, and device-dependent caches never enter shared
 
 The Path surface does not include relative commands, boolean geometry operations, path metrics, stroke containment, or a reusable hit-shape modifier.
 ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
-Rectangle and Path linear and radial gradients use explicit PaintCommands; there is no generic Brush abstraction.
+Brush is intentionally closed to solid, linear-gradient, and radial-gradient sources.
+Sweep gradients or runtime shaders require explicit platform-neutral semantics and every renderer implementation before becoming another Brush alternative.

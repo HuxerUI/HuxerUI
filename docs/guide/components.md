@@ -40,8 +40,8 @@ sector.MoveTo({24.0F, 24.0F})
 paint.FillPath(sector, Color::Black());
 ```
 
-`FillPath()` and `StrokePath()` also accept linear and elliptical radial gradients.
-Normalized gradient geometry uses exact Path bounds by default, or an explicit rectangle when several Paths must share one gradient space.
+`Brush` is the common Color, linear-gradient, or elliptical-radial-gradient source accepted by `DrawRect()`, `FillPath()`, and `StrokePath()`.
+Normalized gradient geometry uses exact Path bounds by default, or explicit Brush bounds when several Paths must share one gradient space.
 The identity-by-default affine transform is expressed in that normalized space and changes gradient sampling without moving or clipping the painted geometry:
 
 ```cpp

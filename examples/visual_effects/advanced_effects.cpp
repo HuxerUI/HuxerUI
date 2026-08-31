@@ -220,7 +220,7 @@ public:
       return;
     }
     const float center = -0.35F + phase_ * 1.7F;
-    context.DrawLinearGradient(
+    context.DrawRect(
         {0.0F, 0.0F, size.width, size.height},
         LinearGradient{
             .start = {center - 0.28F, 0.0F},
@@ -339,7 +339,7 @@ public:
     const Rect bounds{0.0F, 0.0F, size_.width, size_.height};
     context.PushClip(bounds, CornerRadii{value_.corner_radius});
     if (hovering_) {
-      context.DrawRadialGradient(
+      context.DrawRect(
           bounds,
           RadialGradient{
               .center = pointer_,
@@ -489,7 +489,7 @@ public:
         bounds
     );
     context.PushPathClip(shape);
-    context.DrawRadialGradient(
+    context.DrawRect(
         bounds,
         RadialGradient{
             .center = {

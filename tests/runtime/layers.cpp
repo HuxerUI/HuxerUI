@@ -589,7 +589,7 @@ TEST_CASE("TestMenuSectionsAndSubmenusUseSemanticEntries") {
   const DrawRectCommand* separator = nullptr;
   for (const PaintCommand& command : root_menu.Commands()) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    if (rect && rect->color == MenuStyle::Default().separator_color && rect->rect.height == 1.0F) {
+    if (rect && BrushIsColor(rect->brush, MenuStyle::Default().separator_color) && rect->rect.height == 1.0F) {
       separator = rect;
       break;
     }

@@ -91,6 +91,38 @@ struct RadialGradient {
   bool operator==(const RadialGradient&) const = default;
 };
 
+/// Holds one immutable platform-neutral source used to fill or stroke geometry.
+///
+/// A Brush generates source colors independently from geometry, stroke configuration, opacity, blending, filters,
+/// shadows, and platform drawing objects. Gradient coordinates are normalized to the bounds supplied by the drawing
+/// operation.
+/// @code
+/// const Brush brush = LinearGradient{
+///     .start = {0.0F, 0.0F},
+///     .end = {1.0F, 1.0F},
+///     .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+/// };
+/// @endcode
+class Brush final {
+public:
+  /// Complete set of supported source paints.
+  using Value = std::variant<Color, LinearGradient, RadialGradient>;
+
+  Brush(Color color) : value_(color) {}
+  Brush(LinearGradient gradient) : value_(std::move(gradient)) {}
+  Brush(RadialGradient gradient) : value_(std::move(gradient)) {}
+
+  /// Returns the stored source paint without copying it.
+  [[nodiscard]] const Value& Get() const noexcept {
+    return value_;
+  }
+
+  bool operator==(const Brush&) const = default;
+
+private:
+  Value value_;
+};
+
 /// Configures an image-backed fill inside resolved destination bounds.
 struct ImageFill {
   /// Resource, raster asset, or vector asset used as the fill source.
@@ -125,11 +157,12 @@ struct ImageFill {
 class VisualFill {
 public:
   /// Complete set of supported fill alternatives.
-  using Value = std::variant<Color, LinearGradient, RadialGradient, ImageFill>;
+  using Value = std::variant<Brush, ImageFill>;
 
-  VisualFill(Color color) : value_(color) {}
-  VisualFill(LinearGradient gradient) : value_(std::move(gradient)) {}
-  VisualFill(RadialGradient gradient) : value_(std::move(gradient)) {}
+  VisualFill(Color color) : value_(Brush(color)) {}
+  VisualFill(LinearGradient gradient) : value_(Brush(std::move(gradient))) {}
+  VisualFill(RadialGradient gradient) : value_(Brush(std::move(gradient))) {}
+  VisualFill(Brush brush) : value_(std::move(brush)) {}
   VisualFill(ImageResource image) : value_(ImageFill{.source = std::move(image)}) {}
   VisualFill(ImageAsset image) : value_(ImageFill{.source = std::move(image)}) {}
   VisualFill(VectorAsset image) : value_(ImageFill{.source = std::move(image)}) {}
@@ -146,40 +179,16 @@ private:
   Value value_;
 };
 
-/// Fills one rectangle with a solid color and uniform corner radius.
+/// Fills one rectangle with a Brush and uniform corner radius.
 struct DrawRectCommand {
   /// Destination rectangle in the active logical coordinate space.
   Rect rect;
-  /// Fill color.
-  Color color;
+  /// Source paint evaluated relative to rect.
+  Brush brush;
   /// Uniform outer corner radius normalized to fit rect.
   float corner_radius = 0.0F;
 
   bool operator==(const DrawRectCommand&) const = default;
-};
-
-/// Fills one rectangle with a linear gradient and uniform corner radius.
-struct DrawLinearGradientCommand {
-  /// Destination rectangle in the active logical coordinate space.
-  Rect rect;
-  /// Gradient evaluated relative to rect.
-  LinearGradient gradient;
-  /// Uniform outer corner radius normalized to fit rect.
-  float corner_radius = 0.0F;
-
-  bool operator==(const DrawLinearGradientCommand&) const = default;
-};
-
-/// Fills one rectangle with an elliptical radial gradient and uniform corner radius.
-struct DrawRadialGradientCommand {
-  /// Destination rectangle in the active logical coordinate space.
-  Rect rect;
-  /// Gradient evaluated relative to rect.
-  RadialGradient gradient;
-  /// Uniform outer corner radius normalized to fit rect.
-  float corner_radius = 0.0F;
-
-  bool operator==(const DrawRadialGradientCommand&) const = default;
 };
 
 /// Draws a complete paragraph using platform text layout inside rect.
@@ -330,84 +339,32 @@ struct DrawShadowCommand {
   bool operator==(const DrawShadowCommand&) const = default;
 };
 
-/// Fills the region selected by one path and fill rule.
+/// Fills the region selected by one path and fill rule using a Brush.
 struct FillPathCommand {
   /// Path geometry in the active logical coordinate space.
   Path path;
-  /// Fill color.
-  Color color;
+  /// Source paint used for the filled region.
+  Brush brush;
+  /// Coordinate rectangle used to resolve normalized Brush geometry without clipping the path.
+  Rect brush_bounds;
   /// Rule used to resolve overlapping contours.
   PathFillRule fill_rule = PathFillRule::NonZero;
 
   bool operator==(const FillPathCommand&) const = default;
 };
 
-/// Fills the region selected by one path with a linear gradient.
-struct FillLinearGradientPathCommand {
-  /// Path geometry in the active logical coordinate space.
-  Path path;
-  /// Gradient evaluated relative to gradient_rect.
-  LinearGradient gradient;
-  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the path.
-  Rect gradient_rect;
-  /// Rule used to resolve overlapping contours.
-  PathFillRule fill_rule = PathFillRule::NonZero;
-
-  bool operator==(const FillLinearGradientPathCommand&) const = default;
-};
-
-/// Fills the region selected by one path with an elliptical radial gradient.
-struct FillRadialGradientPathCommand {
-  /// Path geometry in the active logical coordinate space.
-  Path path;
-  /// Gradient evaluated relative to gradient_rect.
-  RadialGradient gradient;
-  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the path.
-  Rect gradient_rect;
-  /// Rule used to resolve overlapping contours.
-  PathFillRule fill_rule = PathFillRule::NonZero;
-
-  bool operator==(const FillRadialGradientPathCommand&) const = default;
-};
-
-/// Strokes every contour of one path with a normalized style.
+/// Strokes every contour of one path with a Brush and normalized style.
 struct StrokePathCommand {
   /// Path centerline geometry in the active logical coordinate space.
   Path path;
-  /// Stroke color.
-  Color color;
+  /// Source paint used for the stroke.
+  Brush brush;
+  /// Coordinate rectangle used to resolve normalized Brush geometry without clipping the stroke.
+  Rect brush_bounds;
   /// Normalized stroke configuration shared by every contour.
   StrokeStyle style;
 
   bool operator==(const StrokePathCommand&) const = default;
-};
-
-/// Strokes every contour of one path with a linear gradient and normalized style.
-struct StrokeLinearGradientPathCommand {
-  /// Path centerline geometry in the active logical coordinate space.
-  Path path;
-  /// Gradient evaluated relative to gradient_rect.
-  LinearGradient gradient;
-  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the stroke.
-  Rect gradient_rect;
-  /// Normalized stroke configuration shared by every contour.
-  StrokeStyle style;
-
-  bool operator==(const StrokeLinearGradientPathCommand&) const = default;
-};
-
-/// Strokes every contour of one path with an elliptical radial gradient and normalized style.
-struct StrokeRadialGradientPathCommand {
-  /// Path centerline geometry in the active logical coordinate space.
-  Path path;
-  /// Gradient evaluated relative to gradient_rect.
-  RadialGradient gradient;
-  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the stroke.
-  Rect gradient_rect;
-  /// Normalized stroke configuration shared by every contour.
-  StrokeStyle style;
-
-  bool operator==(const StrokeRadialGradientPathCommand&) const = default;
 };
 
 /// Draws a blurred solid-color shadow from a filled path caster.
@@ -527,8 +484,6 @@ private:
 /// Commands retain all data required for later renderer replay and contain no operating-system drawing objects.
 using PaintCommand = std::variant<
     DrawRectCommand,
-    DrawLinearGradientCommand,
-    DrawRadialGradientCommand,
     DrawTextCommand,
     DrawTextRunsCommand,
     DrawImageCommand,
@@ -539,11 +494,7 @@ using PaintCommand = std::variant<
     DrawBorderCommand,
     DrawShadowCommand,
     FillPathCommand,
-    FillLinearGradientPathCommand,
-    FillRadialGradientPathCommand,
     StrokePathCommand,
-    StrokeLinearGradientPathCommand,
-    StrokeRadialGradientPathCommand,
     DrawPathShadowCommand,
     PushClipCommand,
     PushPathClipCommand,
@@ -615,12 +566,8 @@ public:
     return bounds_;
   }
 
-  /// Fills rect with color and optional outer corner radii.
-  void DrawRect(Rect rect, Color color, CornerRadii corner_radii = {});
-  /// Fills rect with a normalized-coordinate linear gradient and optional outer corner radii.
-  void DrawLinearGradient(Rect rect, LinearGradient gradient, CornerRadii corner_radii = {});
-  /// Fills rect with a normalized-coordinate radial gradient and optional outer corner radii.
-  void DrawRadialGradient(Rect rect, RadialGradient gradient, CornerRadii corner_radii = {});
+  /// Fills rect with a Brush evaluated relative to rect and optional outer corner radii.
+  void DrawRect(Rect rect, Brush brush, CornerRadii corner_radii = {});
   /// Records a platform-laid-out paragraph inside rect.
   ///
   /// paragraph_offset moves the resolved paragraph within rect without changing its layout width.
@@ -671,35 +618,21 @@ public:
   /// blur_radius is the non-negative outer falloff around the spread caster; a negative spread contracts the caster.
   void DrawShadow(Rect rect, Color color, Point offset, float blur_radius, float spread = 0.0F,
                   CornerRadii corner_radii = {});
-  /// Fills path with color using fill_rule to resolve overlapping contours.
-  void FillPath(Path path, Color color, PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Fills path with a linear gradient evaluated relative to the path bounds.
-  void FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Fills path with a linear gradient evaluated relative to gradient_rect without clipping to that rectangle.
-  void FillPath(Path path, LinearGradient gradient, Rect gradient_rect,
-                PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Fills path with an elliptical radial gradient evaluated relative to the path bounds.
-  void FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
-  /// Fills path with an elliptical radial gradient evaluated relative to gradient_rect without clipping to it.
-  void FillPath(Path path, RadialGradient gradient, Rect gradient_rect,
-                PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Fills path with a Brush evaluated relative to the path bounds.
+  void FillPath(Path path, Brush brush, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Fills path with a Brush evaluated relative to brush_bounds without clipping to that rectangle.
+  void FillPath(Path path, Brush brush, Rect brush_bounds, PathFillRule fill_rule = PathFillRule::NonZero);
   /// Strokes every contour in path with the same normalized style.
   ///
   /// Each contour independently restarts the dash pattern at dash_offset.
-  void StrokePath(Path path, Color color, StrokeStyle style);
-  /// Strokes path with a linear gradient evaluated relative to the path bounds.
+  void StrokePath(Path path, Brush brush, StrokeStyle style);
+  /// Strokes path with a Brush evaluated relative to brush_bounds without clipping to that rectangle.
   ///
   /// @code
   /// paint.StrokePath(path, LinearGradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}},
-  ///                  StrokeStyle{.width = 3.0F, .join = StrokeJoin::Round});
+  ///                  {0.0F, 0.0F, 240.0F, 120.0F}, StrokeStyle{.width = 3.0F, .join = StrokeJoin::Round});
   /// @endcode
-  void StrokePath(Path path, LinearGradient gradient, StrokeStyle style);
-  /// Strokes path with a linear gradient evaluated relative to gradient_rect without clipping to that rectangle.
-  void StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style);
-  /// Strokes path with an elliptical radial gradient evaluated relative to the path bounds.
-  void StrokePath(Path path, RadialGradient gradient, StrokeStyle style);
-  /// Strokes path with an elliptical radial gradient evaluated relative to gradient_rect without clipping to it.
-  void StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style);
+  void StrokePath(Path path, Brush brush, Rect brush_bounds, StrokeStyle style);
   /// Draws a filled path shadow translated by offset.
   ///
   /// blur_radius is the non-negative outer falloff. Arbitrary path shadows do not support spread.

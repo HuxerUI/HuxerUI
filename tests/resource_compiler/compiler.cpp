@@ -626,8 +626,9 @@ TEST_CASE("SvgResourcesExpandForwardUseReferencesAndCompilePathClips") {
     return std::holds_alternative<huxerui::FillPathCommand>(command);
   });
   REQUIRE(fill != commands.end());
-  REQUIRE(std::get<huxerui::FillPathCommand>(*fill).color == huxerui::Color::Rgb(51, 102, 153));
-  REQUIRE(std::get<huxerui::FillPathCommand>(*fill).fill_rule == huxerui::PathFillRule::EvenOdd);
+  const auto& fill_command = std::get<huxerui::FillPathCommand>(*fill);
+  REQUIRE(std::get<huxerui::Color>(fill_command.brush.Get()) == huxerui::Color::Rgb(51, 102, 153));
+  REQUIRE(fill_command.fill_rule == huxerui::PathFillRule::EvenOdd);
   const auto clip = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
     return std::holds_alternative<huxerui::PushPathClipCommand>(command);
   });
@@ -764,7 +765,8 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "gradient.huxv");
   REQUIRE(payload.starts_with("HUXVEC"));
   REQUIRE(static_cast<unsigned char>(payload[8]) == 1U);
-  REQUIRE(static_cast<unsigned char>(payload[40]) == 7U);
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 1U);
+  REQUIRE(static_cast<unsigned char>(payload[42]) == 2U);
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
@@ -779,25 +781,29 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   );
   const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
   const auto linear = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
-    return std::holds_alternative<huxerui::FillLinearGradientPathCommand>(command);
+    const auto* fill = std::get_if<huxerui::FillPathCommand>(&command);
+    return fill != nullptr && std::holds_alternative<huxerui::LinearGradient>(fill->brush.Get());
   });
   const auto radial = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
-    return std::holds_alternative<huxerui::FillRadialGradientPathCommand>(command);
+    const auto* fill = std::get_if<huxerui::FillPathCommand>(&command);
+    return fill != nullptr && std::holds_alternative<huxerui::RadialGradient>(fill->brush.Get());
   });
   REQUIRE(linear != commands.end());
   REQUIRE(radial != commands.end());
-  const auto& linear_fill = std::get<huxerui::FillLinearGradientPathCommand>(*linear);
+  const auto& linear_fill = std::get<huxerui::FillPathCommand>(*linear);
+  const auto& linear_gradient = std::get<huxerui::LinearGradient>(linear_fill.brush.Get());
   REQUIRE(linear_fill.fill_rule == huxerui::PathFillRule::EvenOdd);
-  REQUIRE(linear_fill.gradient_rect == huxerui::Rect{5.0F, 2.0F, 20.0F, 12.0F});
-  REQUIRE(linear_fill.gradient.start == huxerui::Point{0.25F, 0.0F});
-  REQUIRE(linear_fill.gradient.end == huxerui::Point{0.75F, 0.0F});
-  REQUIRE(linear_fill.gradient.transform.IsIdentity());
-  REQUIRE(linear_fill.gradient.stops[0].color == huxerui::Color::Rgb(0, 255, 0, 0.25F));
-  const auto& radial_fill = std::get<huxerui::FillRadialGradientPathCommand>(*radial);
-  REQUIRE(radial_fill.gradient_rect == huxerui::Rect{0.0F, 0.0F, 40.0F, 20.0F});
-  REQUIRE(radial_fill.gradient.center == huxerui::Point{0.5F, 0.5F});
-  REQUIRE(radial_fill.gradient.radius == huxerui::Size{0.125F, 0.25F});
-  REQUIRE(radial_fill.gradient.transform.IsIdentity());
+  REQUIRE(linear_fill.brush_bounds == huxerui::Rect{5.0F, 2.0F, 20.0F, 12.0F});
+  REQUIRE(linear_gradient.start == huxerui::Point{0.25F, 0.0F});
+  REQUIRE(linear_gradient.end == huxerui::Point{0.75F, 0.0F});
+  REQUIRE(linear_gradient.transform.IsIdentity());
+  REQUIRE(linear_gradient.stops[0].color == huxerui::Color::Rgb(0, 255, 0, 0.25F));
+  const auto& radial_fill = std::get<huxerui::FillPathCommand>(*radial);
+  const auto& radial_gradient = std::get<huxerui::RadialGradient>(radial_fill.brush.Get());
+  REQUIRE(radial_fill.brush_bounds == huxerui::Rect{0.0F, 0.0F, 40.0F, 20.0F});
+  REQUIRE(radial_gradient.center == huxerui::Point{0.5F, 0.5F});
+  REQUIRE(radial_gradient.radius == huxerui::Size{0.125F, 0.25F});
+  REQUIRE(radial_gradient.transform.IsIdentity());
 }
 
 TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
@@ -826,7 +832,8 @@ TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
 
   huxerui::resource_compiler::Compile({root, output, "test_app"});
   const std::string payload = Read(output / "package" / "huxerui" / "test_app" / "images" / "transformed.huxv");
-  REQUIRE(static_cast<unsigned char>(payload[40]) == 7U);
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 1U);
+  REQUIRE(static_cast<unsigned char>(payload[42]) == 2U);
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
@@ -841,11 +848,14 @@ TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
   );
   const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
   REQUIRE(commands.size() == 3);
-  const auto& inherited = std::get<huxerui::FillLinearGradientPathCommand>(commands[0]).gradient.transform;
+  const auto& inherited =
+      std::get<huxerui::LinearGradient>(std::get<huxerui::FillPathCommand>(commands[0]).brush.Get()).transform;
   REQUIRE(inherited == huxerui::Transform2D{1.0F, 0.25F, -0.5F, 1.0F, 0.2F, -0.1F});
-  const auto& overridden = std::get<huxerui::FillLinearGradientPathCommand>(commands[1]).gradient.transform;
+  const auto& overridden =
+      std::get<huxerui::LinearGradient>(std::get<huxerui::FillPathCommand>(commands[1]).brush.Get()).transform;
   REQUIRE(overridden == huxerui::Transform2D{1.0F, 0.0F, 0.0F, 1.0F, 0.25F, 0.5F});
-  const auto& user = std::get<huxerui::FillRadialGradientPathCommand>(commands[2]).gradient.transform;
+  const auto& user =
+      std::get<huxerui::RadialGradient>(std::get<huxerui::FillPathCommand>(commands[2]).brush.Get()).transform;
   REQUIRE(user.m11 == Catch::Approx(1.0F));
   REQUIRE(user.m12 == Catch::Approx(0.5F));
   REQUIRE(user.m21 == Catch::Approx(-0.25F));
@@ -881,7 +891,8 @@ TEST_CASE("SvgResourcesCompileGradientPathStrokesInHuxvecVersionOne") {
       Read(output / "package" / "huxerui" / "test_app" / "images" / "gradient_stroke.huxv");
   REQUIRE(payload.starts_with("HUXVEC"));
   REQUIRE(static_cast<unsigned char>(payload[8]) == 1U);
-  REQUIRE(static_cast<unsigned char>(payload[40]) == 9U);
+  REQUIRE(static_cast<unsigned char>(payload[40]) == 2U);
+  REQUIRE(static_cast<unsigned char>(payload[41]) == 2U);
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
@@ -896,18 +907,19 @@ TEST_CASE("SvgResourcesCompileGradientPathStrokesInHuxvecVersionOne") {
   );
   const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
   REQUIRE(commands.size() == 2);
-  const auto& linear = std::get<huxerui::StrokeLinearGradientPathCommand>(commands[0]);
-  REQUIRE(linear.gradient_rect == huxerui::Rect{5.0F, 2.0F, 20.0F, 12.0F});
-  REQUIRE(linear.gradient.transform == huxerui::Transform2D{1.0F, 0.25F, -0.5F, 1.0F, 0.2F, -0.1F});
-  REQUIRE(linear.gradient.stops[0].color == huxerui::Color::Rgb(0, 0, 0, 0.25F));
+  const auto& linear = std::get<huxerui::StrokePathCommand>(commands[0]);
+  const auto& linear_gradient = std::get<huxerui::LinearGradient>(linear.brush.Get());
+  REQUIRE(linear.brush_bounds == huxerui::Rect{5.0F, 2.0F, 20.0F, 12.0F});
+  REQUIRE(linear_gradient.transform == huxerui::Transform2D{1.0F, 0.25F, -0.5F, 1.0F, 0.2F, -0.1F});
+  REQUIRE(linear_gradient.stops[0].color == huxerui::Color::Rgb(0, 0, 0, 0.25F));
   REQUIRE(linear.style.width == 3.0F);
   REQUIRE(linear.style.cap == huxerui::StrokeCap::Round);
   REQUIRE(linear.style.join == huxerui::StrokeJoin::Bevel);
   REQUIRE(linear.style.dash_pattern == std::vector<float>{3.0F, 1.0F, 2.0F, 3.0F, 1.0F, 2.0F});
   REQUIRE(linear.style.dash_offset == 10.0F);
-  const auto& radial = std::get<huxerui::StrokeRadialGradientPathCommand>(commands[1]);
-  REQUIRE(radial.gradient_rect == huxerui::Rect{25.0F, 2.0F, 13.0F, 14.0F});
-  REQUIRE(radial.gradient.transform.IsIdentity());
+  const auto& radial = std::get<huxerui::StrokePathCommand>(commands[1]);
+  REQUIRE(radial.brush_bounds == huxerui::Rect{25.0F, 2.0F, 13.0F, 14.0F});
+  REQUIRE(std::get<huxerui::RadialGradient>(radial.brush.Get()).transform.IsIdentity());
   REQUIRE(radial.style == linear.style);
 }
 

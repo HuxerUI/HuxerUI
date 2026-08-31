@@ -103,8 +103,8 @@ TEST_CASE("PaintContextNormalizesRoundedGeometryAgainstConcreteBounds") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 160.0F, 80.0F}};
   context.DrawRect(pill, Color::White(), CornerRadii{10000.0F});
-  context.DrawLinearGradient(pill, linear, CornerRadii{10000.0F});
-  context.DrawRadialGradient(pill, radial, CornerRadii{10000.0F});
+  context.DrawRect(pill, linear, CornerRadii{10000.0F});
+  context.DrawRect(pill, radial, CornerRadii{10000.0F});
   context.DrawBorder(pill, Color::Black(), StrokeStyle{.width = 2.0F}, CornerRadii{10000.0F});
   context.DrawShadow(pill, Color::Black(), {}, 4.0F, 2.0F, CornerRadii{10000.0F});
   context.PushClip(pill, CornerRadii{10000.0F});
@@ -113,15 +113,15 @@ TEST_CASE("PaintContextNormalizesRoundedGeometryAgainstConcreteBounds") {
 
   REQUIRE(sequence.Commands().size() == 7);
   REQUIRE(std::get<DrawRectCommand>(sequence.Commands()[0]).corner_radius == 10.0F);
-  REQUIRE(std::get<DrawLinearGradientCommand>(sequence.Commands()[1]).corner_radius == 10.0F);
-  REQUIRE(std::get<DrawRadialGradientCommand>(sequence.Commands()[2]).corner_radius == 10.0F);
+  REQUIRE(std::get<DrawRectCommand>(sequence.Commands()[1]).corner_radius == 10.0F);
+  REQUIRE(std::get<DrawRectCommand>(sequence.Commands()[2]).corner_radius == 10.0F);
   REQUIRE(std::get<DrawBorderCommand>(sequence.Commands()[3]).corner_radius == 10.0F);
   REQUIRE(detail::ResolveShadow(std::get<DrawShadowCommand>(sequence.Commands()[4])).corner_radius == 12.0F);
   REQUIRE(std::get<PushClipCommand>(sequence.Commands()[5]).corner_radius == 10.0F);
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[6]));
 }
 
-TEST_CASE("PaintContextRecordsPlatformNeutralGradients") {
+TEST_CASE("PaintContextRecordsPlatformNeutralBrushes") {
   const LinearGradient linear{
       .start = {0.0F, 0.0F},
       .end = {1.0F, 1.0F},
@@ -136,34 +136,34 @@ TEST_CASE("PaintContextRecordsPlatformNeutralGradients") {
   };
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
-  context.DrawLinearGradient({10.0F, 12.0F, 40.0F, 20.0F}, linear, CornerRadii{6.0F});
-  context.DrawRadialGradient({20.0F, 30.0F, 50.0F, 30.0F}, radial, CornerRadii{8.0F});
+  context.DrawRect({10.0F, 12.0F, 40.0F, 20.0F}, linear, CornerRadii{6.0F});
+  context.DrawRect({20.0F, 30.0F, 50.0F, 30.0F}, radial, CornerRadii{8.0F});
   context.Finish();
 
   REQUIRE(sequence.Commands().size() == 2);
-  const auto& linear_command = std::get<DrawLinearGradientCommand>(sequence.Commands()[0]);
-  const auto& radial_command = std::get<DrawRadialGradientCommand>(sequence.Commands()[1]);
-  REQUIRE(linear_command.gradient == linear);
+  const auto& linear_command = std::get<DrawRectCommand>(sequence.Commands()[0]);
+  const auto& radial_command = std::get<DrawRectCommand>(sequence.Commands()[1]);
+  REQUIRE(std::get<LinearGradient>(linear_command.brush.Get()) == linear);
   REQUIRE(linear_command.corner_radius == 6.0F);
-  REQUIRE(radial_command.gradient == radial);
+  REQUIRE(std::get<RadialGradient>(radial_command.brush.Get()) == radial);
   REQUIRE(radial_command.corner_radius == 8.0F);
   REQUIRE(sequence.Bounds() == Rect{10.0F, 12.0F, 60.0F, 48.0F});
 }
 
-TEST_CASE("PaintContextClipsAsymmetricGradientCornersWithoutApplyingASecondUniformRadius") {
+TEST_CASE("PaintContextLowersAsymmetricBrushCornersToOnePathFill") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
-  context.DrawLinearGradient(
+  context.DrawRect(
       {10.0F, 12.0F, 40.0F, 20.0F},
       LinearGradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}},
       CornerRadii{8.0F, 4.0F, 2.0F, 0.0F}
   );
   context.Finish();
 
-  REQUIRE(sequence.Commands().size() == 3);
-  REQUIRE(std::holds_alternative<PushPathClipCommand>(sequence.Commands()[0]));
-  REQUIRE(std::get<DrawLinearGradientCommand>(sequence.Commands()[1]).corner_radius == 0.0F);
-  REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[2]));
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto& command = std::get<FillPathCommand>(sequence.Commands()[0]);
+  REQUIRE(command.brush_bounds == Rect{10.0F, 12.0F, 40.0F, 20.0F});
+  REQUIRE(std::holds_alternative<LinearGradient>(command.brush.Get()));
 }
 
 TEST_CASE("GradientTransformsResolveThroughOneNormalizedDestinationMapping") {
@@ -185,23 +185,23 @@ TEST_CASE("GradientTransformsResolveThroughOneNormalizedDestinationMapping") {
 TEST_CASE("PaintContextValidatesGradientGeometryAndStops") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
-  REQUIRE_THROWS_AS(context.DrawLinearGradient({}, LinearGradient{}), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawRect({}, LinearGradient{}), std::invalid_argument);
   REQUIRE_THROWS_AS(
-      context.DrawLinearGradient(
+      context.DrawRect(
           {},
           LinearGradient{.stops = {{0.8F, Color::White()}, {0.2F, Color::Black()}}}
       ),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      context.DrawRadialGradient(
+      context.DrawRect(
           {},
           RadialGradient{.radius = {0.0F, 0.5F}, .stops = {{0.0F, Color::White()}}}
       ),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      context.DrawLinearGradient(
+      context.DrawRect(
           {},
           LinearGradient{
               .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
@@ -211,7 +211,7 @@ TEST_CASE("PaintContextValidatesGradientGeometryAndStops") {
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      context.DrawRadialGradient(
+      context.DrawRect(
           {},
           RadialGradient{
               .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
@@ -464,7 +464,7 @@ TEST_CASE("PaintContextRecordsPathCommandsAndBounds") {
   REQUIRE(sequence.Bounds() == Rect{6.0F, 18.0F, 46.0F, 46.0F});
 }
 
-TEST_CASE("PaintContextRecordsAtomicGradientPathFills") {
+TEST_CASE("PaintContextRecordsAtomicBrushPathFills") {
   const Path path = Path{}.MoveTo({10.0F, 20.0F}).LineTo({50.0F, 20.0F}).LineTo({30.0F, 60.0F}).Close();
   const LinearGradient linear{
       .start = {0.0F, 0.0F},
@@ -486,13 +486,13 @@ TEST_CASE("PaintContextRecordsAtomicGradientPathFills") {
   context.Finish();
 
   REQUIRE(sequence.Commands().size() == 2);
-  const auto& linear_fill = std::get<FillLinearGradientPathCommand>(sequence.Commands()[0]);
-  REQUIRE(linear_fill.gradient_rect == path.Bounds());
-  REQUIRE(linear_fill.gradient == linear);
+  const auto& linear_fill = std::get<FillPathCommand>(sequence.Commands()[0]);
+  REQUIRE(linear_fill.brush_bounds == path.Bounds());
+  REQUIRE(std::get<LinearGradient>(linear_fill.brush.Get()) == linear);
   REQUIRE(linear_fill.fill_rule == PathFillRule::EvenOdd);
-  const auto& radial_fill = std::get<FillRadialGradientPathCommand>(sequence.Commands()[1]);
-  REQUIRE(radial_fill.gradient_rect == Rect{0.0F, 0.0F, 100.0F, 80.0F});
-  REQUIRE(radial_fill.gradient == radial);
+  const auto& radial_fill = std::get<FillPathCommand>(sequence.Commands()[1]);
+  REQUIRE(radial_fill.brush_bounds == Rect{0.0F, 0.0F, 100.0F, 80.0F});
+  REQUIRE(std::get<RadialGradient>(radial_fill.brush.Get()) == radial);
   REQUIRE(sequence.Bounds() == path.Bounds());
 }
 
@@ -518,7 +518,7 @@ TEST_CASE("PaintContextValidatesGradientPathFillsBeforeRecording") {
   REQUIRE(sequence.Bounds().IsEmpty());
 }
 
-TEST_CASE("PaintContextRecordsAtomicGradientPathStrokes") {
+TEST_CASE("PaintContextRecordsAtomicBrushPathStrokes") {
   const Path path = Path{}.MoveTo({10.0F, 20.0F}).LineTo({50.0F, 20.0F}).LineTo({30.0F, 60.0F}).Close();
   const LinearGradient linear{
       .start = {0.0F, 0.0F},
@@ -546,13 +546,13 @@ TEST_CASE("PaintContextRecordsAtomicGradientPathStrokes") {
   context.Finish();
 
   REQUIRE(sequence.Commands().size() == 2);
-  const auto& linear_stroke = std::get<StrokeLinearGradientPathCommand>(sequence.Commands()[0]);
-  REQUIRE(linear_stroke.gradient_rect == path.Bounds());
-  REQUIRE(linear_stroke.gradient == linear);
+  const auto& linear_stroke = std::get<StrokePathCommand>(sequence.Commands()[0]);
+  REQUIRE(linear_stroke.brush_bounds == path.Bounds());
+  REQUIRE(std::get<LinearGradient>(linear_stroke.brush.Get()) == linear);
   REQUIRE(linear_stroke.style == style);
-  const auto& radial_stroke = std::get<StrokeRadialGradientPathCommand>(sequence.Commands()[1]);
-  REQUIRE(radial_stroke.gradient_rect == Rect{0.0F, 0.0F, 100.0F, 80.0F});
-  REQUIRE(radial_stroke.gradient == radial);
+  const auto& radial_stroke = std::get<StrokePathCommand>(sequence.Commands()[1]);
+  REQUIRE(radial_stroke.brush_bounds == Rect{0.0F, 0.0F, 100.0F, 80.0F});
+  REQUIRE(std::get<RadialGradient>(radial_stroke.brush.Get()) == radial);
   REQUIRE(radial_stroke.style == style);
   REQUIRE(sequence.Bounds() == Rect{8.0F, 18.0F, 44.0F, 44.0F});
 }

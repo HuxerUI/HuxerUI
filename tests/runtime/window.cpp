@@ -428,7 +428,7 @@ TEST_CASE("CustomWindowChromeRerecordsCaptionGlyphsWhenTitleBarBackgroundChanges
   const FlattenedScene& dark = runtime.BuildFrame();
   REQUIRE(std::ranges::count_if(dark.Commands(), [](const PaintCommand& command) {
             const auto* path = std::get_if<StrokePathCommand>(&command);
-            return path != nullptr && path->color == Color::Rgb(245, 245, 245);
+            return path != nullptr && BrushIsColor(path->brush, Color::Rgb(245, 245, 245));
           }) == 3);
 
   title_bar_background = Color::White();
@@ -436,7 +436,7 @@ TEST_CASE("CustomWindowChromeRerecordsCaptionGlyphsWhenTitleBarBackgroundChanges
   const FlattenedScene& light = runtime.BuildFrame();
   REQUIRE(std::ranges::count_if(light.Commands(), [](const PaintCommand& command) {
             const auto* path = std::get_if<StrokePathCommand>(&command);
-            return path != nullptr && path->color == Color::Rgb(32, 32, 32);
+            return path != nullptr && BrushIsColor(path->brush, Color::Rgb(32, 32, 32));
           }) == 3);
 }
 
@@ -532,7 +532,7 @@ TEST_CASE("CustomWindowChromePaintsStateLayerBehindCaptionGlyph") {
 
   const auto state_layer = std::find_if(hovered.Commands().begin(), hovered.Commands().end(), [](const auto& command) {
     const auto* rect = std::get_if<DrawRectCommand>(&command);
-    return rect != nullptr && rect->color == Color::Rgb(196, 43, 28, 0.9F);
+    return rect != nullptr && BrushIsColor(rect->brush, Color::Rgb(196, 43, 28, 0.9F));
   });
   REQUIRE(state_layer != hovered.Commands().end());
   REQUIRE(std::find_if(std::next(state_layer), hovered.Commands().end(), [](const auto& command) {

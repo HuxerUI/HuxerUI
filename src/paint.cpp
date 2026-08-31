@@ -160,6 +160,10 @@ void RequireGradientStops(const std::vector<GradientStop>& stops) {
     previous = stop.offset;
   }
 }
+
+bool BrushUsesBounds(const Brush& brush) noexcept {
+  return !std::holds_alternative<Color>(brush.Get());
+}
 } // namespace
 
 void detail::ValidateColor(Color color, const char* message) {
@@ -197,6 +201,48 @@ void detail::ValidateGradient(const RadialGradient& gradient) {
   RequireGradientStops(gradient.stops);
 }
 
+void detail::ValidateBrush(const Brush& brush) {
+  std::visit(
+      [](const auto& value) {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          ValidateColor(value, "HuxerUI paint color must be finite");
+        } else {
+          ValidateGradient(value);
+        }
+      },
+      brush.Get()
+  );
+}
+
+Brush detail::ModulateBrush(const Brush& brush, std::optional<Color> tint, float opacity) {
+  const auto modulate = [tint, opacity](Color color) {
+    if (tint.has_value()) {
+      color.red = tint->red;
+      color.green = tint->green;
+      color.blue = tint->blue;
+      color.alpha *= tint->alpha;
+    }
+    color.alpha *= opacity;
+    return color;
+  };
+  return std::visit(
+      [&modulate](const auto& value) -> Brush {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          return modulate(value);
+        } else {
+          Value result = value;
+          for (GradientStop& stop : result.stops) {
+            stop.color = modulate(stop.color);
+          }
+          return result;
+        }
+      },
+      brush.Get()
+  );
+}
+
 Transform2D detail::ResolveGradientTransform(Rect rect, const LinearGradient& gradient) noexcept {
   const Transform2D destination{rect.width, 0.0F, 0.0F, rect.height, rect.x, rect.y};
   return ComposeTransform(destination, gradient.transform);
@@ -217,52 +263,18 @@ PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(seq
   sequence_.has_external_texture_commands_ = false;
 }
 
-void PaintContext::DrawRect(Rect rect, Color color, CornerRadii corner_radii) {
+void PaintContext::DrawRect(Rect rect, Brush brush, CornerRadii corner_radii) {
   RequireOpen();
   RequireRect(rect);
-  RequireColor(color);
   RequireCornerRadii(corner_radii);
   corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
-  if (corner_radii.IsUniform()) {
-    sequence_.commands_.emplace_back(DrawRectCommand{rect, color, corner_radii.top_left});
-    Include(rect);
+  if (!corner_radii.IsUniform()) {
+    FillPath(Path::RoundedRect(rect, corner_radii), std::move(brush), rect);
     return;
   }
-  FillPath(Path::RoundedRect(rect, corner_radii), color);
-}
-
-void PaintContext::DrawLinearGradient(Rect rect, LinearGradient gradient, CornerRadii corner_radii) {
-  RequireOpen();
-  RequireRect(rect);
-  RequireCornerRadii(corner_radii);
-  detail::ValidateGradient(gradient);
-  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
-  if (!corner_radii.IsUniform()) {
-    PushClip(rect, corner_radii);
-  }
-  const float command_corner_radius = corner_radii.IsUniform() ? corner_radii.top_left : 0.0F;
-  sequence_.commands_.emplace_back(DrawLinearGradientCommand{rect, std::move(gradient), command_corner_radius});
+  detail::ValidateBrush(brush);
+  sequence_.commands_.emplace_back(DrawRectCommand{rect, std::move(brush), corner_radii.top_left});
   Include(rect);
-  if (!corner_radii.IsUniform()) {
-    PopClip();
-  }
-}
-
-void PaintContext::DrawRadialGradient(Rect rect, RadialGradient gradient, CornerRadii corner_radii) {
-  RequireOpen();
-  RequireRect(rect);
-  RequireCornerRadii(corner_radii);
-  detail::ValidateGradient(gradient);
-  corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
-  if (!corner_radii.IsUniform()) {
-    PushClip(rect, corner_radii);
-  }
-  const float command_corner_radius = corner_radii.IsUniform() ? corner_radii.top_left : 0.0F;
-  sequence_.commands_.emplace_back(DrawRadialGradientCommand{rect, std::move(gradient), command_corner_radius});
-  Include(rect);
-  if (!corner_radii.IsUniform()) {
-    PopClip();
-  }
 }
 
 void PaintContext::DrawText(
@@ -454,51 +466,17 @@ void PaintContext::DrawImageRect(
       destination.x - source.x * destination.width / source.width - view_box.x * scale_x,
       destination.y - source.y * destination.height / source.height - view_box.y * scale_y,
   };
-  const auto resolve_color = [tint, opacity](Color color) {
-    if (tint.has_value()) {
-      color.red = tint->red;
-      color.green = tint->green;
-      color.blue = tint->blue;
-      color.alpha *= tint->alpha;
-    }
-    color.alpha *= opacity;
-    return color;
-  };
-
   PushClip(destination);
   PushTransform(placement);
   for (const PaintCommand& command : detail::VectorAccess::Sequence(image).Commands()) {
     std::visit(
-        [this, &resolve_color](const auto& value) {
+        [this, tint, opacity](const auto& value) {
           using Command = std::decay_t<decltype(value)>;
           if constexpr (std::same_as<Command, FillPathCommand>) {
-            FillPath(value.path, resolve_color(value.color), value.fill_rule);
-          } else if constexpr (std::same_as<Command, FillLinearGradientPathCommand>) {
-            LinearGradient gradient = value.gradient;
-            for (GradientStop& stop : gradient.stops) {
-              stop.color = resolve_color(stop.color);
-            }
-            FillPath(value.path, std::move(gradient), value.gradient_rect, value.fill_rule);
-          } else if constexpr (std::same_as<Command, FillRadialGradientPathCommand>) {
-            RadialGradient gradient = value.gradient;
-            for (GradientStop& stop : gradient.stops) {
-              stop.color = resolve_color(stop.color);
-            }
-            FillPath(value.path, std::move(gradient), value.gradient_rect, value.fill_rule);
+            FillPath(value.path, detail::ModulateBrush(value.brush, tint, opacity), value.brush_bounds,
+                     value.fill_rule);
           } else if constexpr (std::same_as<Command, StrokePathCommand>) {
-            StrokePath(value.path, resolve_color(value.color), value.style);
-          } else if constexpr (std::same_as<Command, StrokeLinearGradientPathCommand>) {
-            LinearGradient gradient = value.gradient;
-            for (GradientStop& stop : gradient.stops) {
-              stop.color = resolve_color(stop.color);
-            }
-            StrokePath(value.path, std::move(gradient), value.gradient_rect, value.style);
-          } else if constexpr (std::same_as<Command, StrokeRadialGradientPathCommand>) {
-            RadialGradient gradient = value.gradient;
-            for (GradientStop& stop : gradient.stops) {
-              stop.color = resolve_color(stop.color);
-            }
-            StrokePath(value.path, std::move(gradient), value.gradient_rect, value.style);
+            StrokePath(value.path, detail::ModulateBrush(value.brush, tint, opacity), value.brush_bounds, value.style);
           } else if constexpr (std::same_as<Command, PushPathClipCommand>) {
             PushPathClip(value.path, value.fill_rule);
           } else if constexpr (std::same_as<Command, PopClipCommand>) {
@@ -655,102 +633,39 @@ void PaintContext::DrawShadow(
   }
 }
 
-void PaintContext::FillPath(Path path, Color color, PathFillRule fill_rule) {
-  RequireOpen();
-  RequireColor(color);
-  sequence_.commands_.emplace_back(FillPathCommand{std::move(path), color, fill_rule});
-  const auto& command = std::get<FillPathCommand>(sequence_.commands_.back());
-  if (!command.path.IsEmpty()) {
-    Include(command.path.Bounds());
-  }
+void PaintContext::FillPath(Path path, Brush brush, PathFillRule fill_rule) {
+  const Rect brush_bounds = path.Bounds();
+  FillPath(std::move(path), std::move(brush), brush_bounds, fill_rule);
 }
 
-void PaintContext::FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule) {
-  const Rect gradient_rect = path.Bounds();
-  FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
-}
-
-void PaintContext::FillPath(Path path, LinearGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
+void PaintContext::FillPath(Path path, Brush brush, Rect brush_bounds, PathFillRule fill_rule) {
   RequireOpen();
-  detail::ValidateGradient(gradient);
-  RequireRect(gradient_rect);
-  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F) {
+  detail::ValidateBrush(brush);
+  RequireRect(brush_bounds);
+  if (path.IsEmpty() || (BrushUsesBounds(brush) && brush_bounds.IsEmpty())) {
     return;
   }
   const Rect path_bounds = path.Bounds();
-  sequence_.commands_.emplace_back(
-      FillLinearGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, fill_rule}
-  );
+  sequence_.commands_.emplace_back(FillPathCommand{std::move(path), std::move(brush), brush_bounds, fill_rule});
   Include(path_bounds);
 }
 
-void PaintContext::FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule) {
-  const Rect gradient_rect = path.Bounds();
-  FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
+void PaintContext::StrokePath(Path path, Brush brush, StrokeStyle style) {
+  const Rect brush_bounds = path.Bounds();
+  StrokePath(std::move(path), std::move(brush), brush_bounds, std::move(style));
 }
 
-void PaintContext::FillPath(Path path, RadialGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
+void PaintContext::StrokePath(Path path, Brush brush, Rect brush_bounds, StrokeStyle style) {
   RequireOpen();
-  detail::ValidateGradient(gradient);
-  RequireRect(gradient_rect);
-  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F) {
-    return;
-  }
-  const Rect path_bounds = path.Bounds();
-  sequence_.commands_.emplace_back(
-      FillRadialGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, fill_rule}
-  );
-  Include(path_bounds);
-}
-
-void PaintContext::StrokePath(Path path, Color color, StrokeStyle style) {
-  RequireOpen();
-  RequireColor(color);
+  detail::ValidateBrush(brush);
+  RequireRect(brush_bounds);
   style = NormalizeStrokeStyle(std::move(style));
-  sequence_.commands_.emplace_back(StrokePathCommand{std::move(path), color, std::move(style)});
-  const auto& command = std::get<StrokePathCommand>(sequence_.commands_.back());
-  if (command.path.IsEmpty() || command.style.width == 0.0F) {
-    return;
-  }
-  Include(StrokeBounds(command.path, command.style));
-}
-
-void PaintContext::StrokePath(Path path, LinearGradient gradient, StrokeStyle style) {
-  const Rect gradient_rect = path.Bounds();
-  StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
-}
-
-void PaintContext::StrokePath(Path path, LinearGradient gradient, Rect gradient_rect, StrokeStyle style) {
-  RequireOpen();
-  detail::ValidateGradient(gradient);
-  RequireRect(gradient_rect);
-  style = NormalizeStrokeStyle(std::move(style));
-  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F || style.width == 0.0F) {
+  if (path.IsEmpty() || style.width == 0.0F || (BrushUsesBounds(brush) && brush_bounds.IsEmpty())) {
     return;
   }
   const Rect bounds = StrokeBounds(path, style);
   sequence_.commands_.emplace_back(
-      StrokeLinearGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, std::move(style)}
-  );
-  Include(bounds);
-}
-
-void PaintContext::StrokePath(Path path, RadialGradient gradient, StrokeStyle style) {
-  const Rect gradient_rect = path.Bounds();
-  StrokePath(std::move(path), std::move(gradient), gradient_rect, std::move(style));
-}
-
-void PaintContext::StrokePath(Path path, RadialGradient gradient, Rect gradient_rect, StrokeStyle style) {
-  RequireOpen();
-  detail::ValidateGradient(gradient);
-  RequireRect(gradient_rect);
-  style = NormalizeStrokeStyle(std::move(style));
-  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F || style.width == 0.0F) {
-    return;
-  }
-  const Rect bounds = StrokeBounds(path, style);
-  sequence_.commands_.emplace_back(
-      StrokeRadialGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, std::move(style)}
+      StrokePathCommand{std::move(path), std::move(brush), brush_bounds, std::move(style)}
   );
   Include(bounds);
 }

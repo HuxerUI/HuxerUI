@@ -1538,6 +1538,21 @@ void WriteGradientStops(Writer& writer, const std::vector<std::pair<float, Color
   }
 }
 
+void WriteBrush(Writer& writer, Color color) {
+  writer.U8(1);
+  writer.ColorValue(color);
+}
+
+void WriteBrush(Writer& writer, const ResolvedGradient& gradient) {
+  writer.U8(gradient.radial ? 3 : 2);
+  writer.F32(gradient.first.x);
+  writer.F32(gradient.first.y);
+  writer.F32(gradient.second.x);
+  writer.F32(gradient.second.y);
+  WriteTransformValue(writer, gradient.transform);
+  WriteGradientStops(writer, gradient.stops);
+}
+
 void WriteStrokeStyle(Writer& writer, const Style& style) {
   ValidateDashPattern(style.dash_pattern);
   if (style.dash_pattern.size() > std::numeric_limits<std::uint32_t>::max()) {
@@ -1560,29 +1575,26 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
   if (path.empty() || !style.visible) {
     return;
   }
+  const Rect path_bounds = PathBounds(path);
   if (style.fill.has_value()) {
     Color color = style.fill_uses_current_color ? style.current_color : *style.fill;
     color.alpha *= style.fill_opacity;
     writer.U8(1);
-    writer.ColorValue(color);
     writer.U8(style.fill_rule);
+    WriteBrush(writer, color);
+    writer.RectValue(path_bounds);
     writer.PathValue(path);
     ++operation_count;
   } else if (style.fill_reference.has_value()) {
-    ResolvedGradient gradient = resolve_gradient(*style.fill_reference, PathBounds(path));
+    ResolvedGradient gradient = resolve_gradient(*style.fill_reference, path_bounds);
     if (gradient.coordinate_rect.width > 0.0F && gradient.coordinate_rect.height > 0.0F) {
       for (auto& stop : gradient.stops) {
         stop.second.alpha *= style.fill_opacity;
       }
-      writer.U8(gradient.radial ? 8 : 7);
+      writer.U8(1);
       writer.U8(style.fill_rule);
+      WriteBrush(writer, gradient);
       writer.RectValue(gradient.coordinate_rect);
-      writer.F32(gradient.first.x);
-      writer.F32(gradient.first.y);
-      writer.F32(gradient.second.x);
-      writer.F32(gradient.second.y);
-      WriteTransformValue(writer, gradient.transform);
-      WriteGradientStops(writer, gradient.stops);
       writer.PathValue(path);
       ++operation_count;
     }
@@ -1591,24 +1603,20 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
     Color color = style.stroke_uses_current_color ? style.current_color : *style.stroke;
     color.alpha *= style.stroke_opacity;
     writer.U8(2);
-    writer.ColorValue(color);
+    WriteBrush(writer, color);
+    writer.RectValue(path_bounds);
     WriteStrokeStyle(writer, style);
     writer.PathValue(path);
     ++operation_count;
   } else if (style.stroke_reference.has_value() && style.stroke_width > 0.0F) {
-    ResolvedGradient gradient = resolve_gradient(*style.stroke_reference, PathBounds(path));
+    ResolvedGradient gradient = resolve_gradient(*style.stroke_reference, path_bounds);
     if (gradient.coordinate_rect.width > 0.0F && gradient.coordinate_rect.height > 0.0F) {
       for (auto& stop : gradient.stops) {
         stop.second.alpha *= style.stroke_opacity;
       }
-      writer.U8(gradient.radial ? 10 : 9);
+      writer.U8(2);
+      WriteBrush(writer, gradient);
       writer.RectValue(gradient.coordinate_rect);
-      writer.F32(gradient.first.x);
-      writer.F32(gradient.first.y);
-      writer.F32(gradient.second.x);
-      writer.F32(gradient.second.y);
-      WriteTransformValue(writer, gradient.transform);
-      WriteGradientStops(writer, gradient.stops);
       WriteStrokeStyle(writer, style);
       writer.PathValue(path);
       ++operation_count;

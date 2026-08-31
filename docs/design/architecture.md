@@ -1381,7 +1381,7 @@ When a pointer drag crosses the scroll threshold, the selected scroll container 
 return Button("Save").With(Indication{});
 ```
 
-`VisualFill` supports colors, linear and radial gradients, image resources, image assets, vector assets, and configured image fills. Generic `Background` and indication layers share this value. Generic `Border` remains independent so transparent surfaces can be outlined. Runtime resolves image resources during mounted reconciliation, while platform renderers execute only immutable paint commands.
+`Brush` owns the closed Color, linear-gradient, and radial-gradient source vocabulary shared by rectangle fills and Path fills or strokes. `VisualFill` stores either a Brush or an image fill and is shared by generic `Background` and indication layers. Generic `Border` remains independent so transparent surfaces can be outlined. Runtime resolves image resources during mounted reconciliation, while platform renderers execute only immutable paint commands.
 
 Retained extensions paint through `PaintBehindContent` and `PaintAboveContent`. The content sequence contains shadow, normal background, behind-content indication, resolved border, and node content; children retain their own sequences; the foreground sequence contains above-content indication and focus ring. Mounted nodes keep only the authoritative interaction snapshot, aggregate Press count, current animated border and radii, and an optional geometry-resolved indication bounds override.
 

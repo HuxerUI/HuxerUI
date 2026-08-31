@@ -37,7 +37,7 @@ TEST_CASE("PaintContextExpandsVectorImagesIntoPlatformNeutralPathCommands") {
   REQUIRE(std::holds_alternative<PushClipCommand>(sequence.Commands()[0]));
   REQUIRE(std::holds_alternative<PushTransformCommand>(sequence.Commands()[1]));
   const auto& fill = std::get<FillPathCommand>(sequence.Commands()[2]);
-  REQUIRE(fill.color == Color::Rgb(20, 40, 60, 0.25F));
+  REQUIRE(std::get<Color>(fill.brush.Get()) == Color::Rgb(20, 40, 60, 0.25F));
   REQUIRE(std::holds_alternative<PopTransformCommand>(sequence.Commands()[3]));
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[4]));
 }
@@ -77,11 +77,12 @@ TEST_CASE("VectorAssetsPreserveGradientPathFillsAndResolveTint") {
   context.DrawImage(vector, {0.0F, 0.0F, 40.0F, 20.0F}, Color::Rgb(20, 40, 60, 0.5F), 0.5F);
   context.Finish();
 
-  const auto& command = std::get<FillLinearGradientPathCommand>(sequence.Commands()[2]);
-  REQUIRE(command.gradient_rect == Rect{0.0F, 0.0F, 40.0F, 20.0F});
-  REQUIRE(command.gradient.transform == gradient.transform);
-  REQUIRE(command.gradient.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
-  REQUIRE(command.gradient.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
+  const auto& command = std::get<FillPathCommand>(sequence.Commands()[2]);
+  const auto& resolved = std::get<LinearGradient>(command.brush.Get());
+  REQUIRE(command.brush_bounds == Rect{0.0F, 0.0F, 40.0F, 20.0F});
+  REQUIRE(resolved.transform == gradient.transform);
+  REQUIRE(resolved.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
+  REQUIRE(resolved.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
 }
 
 TEST_CASE("VectorAssetsPreserveGradientPathStrokesAndResolveTint") {
@@ -100,11 +101,12 @@ TEST_CASE("VectorAssetsPreserveGradientPathStrokesAndResolveTint") {
   context.DrawImage(vector, {0.0F, 0.0F, 40.0F, 20.0F}, Color::Rgb(20, 40, 60, 0.5F), 0.5F);
   context.Finish();
 
-  const auto& command = std::get<StrokeRadialGradientPathCommand>(sequence.Commands()[2]);
-  REQUIRE(command.gradient_rect == Rect{0.0F, 0.0F, 40.0F, 20.0F});
-  REQUIRE(command.gradient.transform == gradient.transform);
-  REQUIRE(command.gradient.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
-  REQUIRE(command.gradient.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
+  const auto& command = std::get<StrokePathCommand>(sequence.Commands()[2]);
+  const auto& resolved = std::get<RadialGradient>(command.brush.Get());
+  REQUIRE(command.brush_bounds == Rect{0.0F, 0.0F, 40.0F, 20.0F});
+  REQUIRE(resolved.transform == gradient.transform);
+  REQUIRE(resolved.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
+  REQUIRE(resolved.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
   REQUIRE(command.style == style);
 }
 

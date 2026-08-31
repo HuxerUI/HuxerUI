@@ -207,9 +207,7 @@ Component-specific disabled, selected, checked, invalid, and other controlled ap
 
 It supports:
 
-- `Color`.
-- `LinearGradient`.
-- `RadialGradient`.
+- A `Brush` containing `Color`, `LinearGradient`, or `RadialGradient`.
 - `ImageResource`.
 - `ImageAsset`.
 - `VectorAsset`.
@@ -249,6 +247,15 @@ struct RadialGradient {
   Transform2D transform;
 };
 
+class Brush {
+public:
+  using Value = std::variant<Color, LinearGradient, RadialGradient>;
+
+  Brush(Color color);
+  Brush(LinearGradient gradient);
+  Brush(RadialGradient gradient);
+};
+
 using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 
 struct ImageFill {
@@ -266,6 +273,7 @@ public:
   VisualFill(Color color);
   VisualFill(LinearGradient gradient);
   VisualFill(RadialGradient gradient);
+  VisualFill(Brush brush);
   VisualFill(ImageResource image);
   VisualFill(ImageAsset image);
   VisualFill(VectorAsset image);
@@ -273,7 +281,7 @@ public:
 };
 ```
 
-The exact storage remains private. Direct image constructors wrap one `ImageFill`, so every image-backed fill follows the same resolution and paint path without duplicating image alternatives in `VisualFill`.
+`VisualFill` stores either one `Brush` or one `ImageFill`. Direct Color and gradient constructors preserve concise declarations, while direct image constructors wrap one `ImageFill`, so every source follows a single owned paint path.
 
 The shared declarations belong in `paint.h` because they are platform-neutral paint values consumed by backgrounds, Images, indication, and Theme rather than indication-specific state.
 
@@ -596,16 +604,16 @@ This may rerecord the current node's text, image, or Canvas commands, but it doe
 
 Interactive controls normally record inexpensive node-owned commands, so adding a third `PaintSequence` to every `RenderNode` is not justified without profiling evidence.
 
-## Gradient paint commands
+## Brush paint commands
 
-`PaintContext::DrawLinearGradient` and `PaintContext::DrawRadialGradient` record dedicated platform-neutral commands. Solid rectangles retain `DrawRectCommand`, avoiding a generic brush abstraction in commands that cannot use it.
+`PaintContext::DrawRect`, `FillPath`, and `StrokePath` accept the same closed `Brush` value and record one command shape each. This prevents geometry and source alternatives from multiplying into parallel command and renderer entry points.
 
 Each gradient carries an identity-by-default affine transform in normalized gradient coordinates.
 The destination mapping is applied after that transform, and only the gradient sampling space changes; indication geometry, layout, clipping, hit testing, and damage bounds remain unchanged.
 
-Asymmetric rounded corners use the existing path clip around the gradient command. `ImageFill` expands into image or vector drawing commands under the required rounded or path clip.
+Asymmetric rounded rectangles lower to one `FillPathCommand` with the rectangle as its Brush bounds. `ImageFill` expands into image or vector drawing commands under the required rounded or path clip.
 
-Every supported renderer handles both gradient commands explicitly.
+Every supported renderer resolves the Brush alternative inside the geometry command. Opacity and blending remain independent presentation concerns rather than Brush fields.
 
 ## Custom indication
 

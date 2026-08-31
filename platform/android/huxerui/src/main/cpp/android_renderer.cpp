@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstdint>
 #include <limits>
 #include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -94,16 +96,61 @@ jfloatArray ToPathArray(JNIEnv* environment, const Path& path) {
   return result;
 }
 
+struct JavaBrush final {
+  jint kind = 0;
+  jint color = 0;
+  android::LocalRef<jfloatArray> geometry;
+  android::LocalRef<jfloatArray> stops;
+  android::LocalRef<jintArray> colors;
+
+  [[nodiscard]] bool IsValid() const noexcept {
+    return kind == 1 || (geometry && stops && colors);
+  }
+};
+
+JavaBrush ToJavaBrush(JNIEnv* environment, Rect bounds, const Brush& brush) {
+  JavaBrush result;
+  std::visit(
+      [&](const auto& value) {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          result.kind = 1;
+          result.color = PackColor(value);
+        } else {
+          result.kind = std::same_as<Value, LinearGradient> ? 2 : 3;
+          const Transform2D transform = ResolveGradientTransform(bounds, value);
+          std::vector<jfloat> geometry;
+          if constexpr (std::same_as<Value, LinearGradient>) {
+            geometry = {value.start.x, value.start.y, value.end.x, value.end.y};
+          } else {
+            geometry = {value.center.x, value.center.y, value.radius.width, value.radius.height};
+          }
+          geometry.insert(geometry.end(),
+                          {transform.m11, transform.m12, transform.m21, transform.m22, transform.translate_x,
+                           transform.translate_y});
+          std::vector<jfloat> offsets;
+          std::vector<jint> colors;
+          offsets.reserve(value.stops.size());
+          colors.reserve(value.stops.size());
+          for (const GradientStop& stop : value.stops) {
+            offsets.push_back(stop.offset);
+            colors.push_back(PackColor(stop.color));
+          }
+          result.geometry = {environment, ToFloatArray(environment, geometry)};
+          result.stops = {environment, ToFloatArray(environment, offsets)};
+          result.colors = {environment, ToIntArray(environment, colors)};
+        }
+      },
+      brush.Get()
+  );
+  return result;
+}
+
 } // namespace
 
 void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
-  draw_rect_ = environment->GetMethodID(view_class, "drawRect", "(Landroid/graphics/Canvas;FFFFIF)V");
-  draw_linear_gradient_ = environment->GetMethodID(
-      view_class, "drawLinearGradient", "(Landroid/graphics/Canvas;FFFFFFFFFFFFFF[F[IF)V"
-  );
-  draw_radial_gradient_ = environment->GetMethodID(
-      view_class, "drawRadialGradient", "(Landroid/graphics/Canvas;FFFFFFFFFFFFFF[F[IF)V"
-  );
+  draw_brush_rect_ =
+      environment->GetMethodID(view_class, "drawBrushRect", "(Landroid/graphics/Canvas;FFFFII[F[F[IF)V");
   draw_text_ =
       environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFFFIFI[BIIIIIII[B)V");
   draw_text_runs_ =
@@ -119,20 +166,10 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_arc_ = environment->GetMethodID(view_class, "drawArc", "(Landroid/graphics/Canvas;FFFFFIFIIF[FF)V");
   draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
   draw_shadow_ = environment->GetMethodID(view_class, "drawShadow", "(Landroid/graphics/Canvas;FFFFIFF)V");
-  fill_path_ = environment->GetMethodID(view_class, "fillPath", "(Landroid/graphics/Canvas;[FII)V");
-  fill_linear_gradient_path_ = environment->GetMethodID(
-      view_class, "fillLinearGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFFFF[F[II)V"
-  );
-  fill_radial_gradient_path_ = environment->GetMethodID(
-      view_class, "fillRadialGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFFFF[F[II)V"
-  );
-  stroke_path_ = environment->GetMethodID(view_class, "strokePath", "(Landroid/graphics/Canvas;[FIFIIF[FF)V");
-  stroke_linear_gradient_path_ = environment->GetMethodID(
-      view_class, "strokeLinearGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFFFF[F[IFIIF[FF)V"
-  );
-  stroke_radial_gradient_path_ = environment->GetMethodID(
-      view_class, "strokeRadialGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFFFF[F[IFIIF[FF)V"
-  );
+  fill_brush_path_ =
+      environment->GetMethodID(view_class, "fillBrushPath", "(Landroid/graphics/Canvas;[FIII[F[F[I)V");
+  stroke_brush_path_ =
+      environment->GetMethodID(view_class, "strokeBrushPath", "(Landroid/graphics/Canvas;[FII[F[F[IFIIF[FF)V");
   draw_path_shadow_ = environment->GetMethodID(view_class, "drawPathShadow", "(Landroid/graphics/Canvas;[FFFFFIFFFI)V");
   push_clip_ = environment->GetMethodID(view_class, "pushClip", "(Landroid/graphics/Canvas;FFFFF)V");
   push_path_clip_ = environment->GetMethodID(view_class, "pushPathClip", "(Landroid/graphics/Canvas;[FI)V");
@@ -142,13 +179,11 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   push_transform_ = environment->GetMethodID(view_class, "pushTransform", "(Landroid/graphics/Canvas;FFFFFF)V");
   pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
 
-  if (draw_rect_ == nullptr || draw_linear_gradient_ == nullptr || draw_radial_gradient_ == nullptr ||
-      draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
+  if (draw_brush_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
       draw_external_texture_ == nullptr || draw_circle_ == nullptr || draw_line_ == nullptr || draw_arc_ == nullptr ||
-      draw_border_ == nullptr || draw_shadow_ == nullptr || fill_path_ == nullptr ||
-      fill_linear_gradient_path_ == nullptr || fill_radial_gradient_path_ == nullptr || stroke_path_ == nullptr ||
-      stroke_linear_gradient_path_ == nullptr || stroke_radial_gradient_path_ == nullptr ||
-      draw_path_shadow_ == nullptr || push_clip_ == nullptr || push_path_clip_ == nullptr || pop_clip_ == nullptr ||
+      draw_border_ == nullptr || draw_shadow_ == nullptr || fill_brush_path_ == nullptr ||
+      stroke_brush_path_ == nullptr || draw_path_shadow_ == nullptr || push_clip_ == nullptr ||
+      push_path_clip_ == nullptr || pop_clip_ == nullptr ||
       push_opacity_ == nullptr || pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
     throw std::runtime_error("HuxerUI Android renderer methods do not match the platform backend");
   }
@@ -278,64 +313,24 @@ bool AndroidRenderer::RenderSceneNode(
 }
 
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command) {
+  JavaBrush brush = ToJavaBrush(environment, command.rect, command.brush);
+  if (!brush.IsValid()) {
+    return;
+  }
   environment->CallVoidMethod(
       view,
-      draw_rect_,
+      draw_brush_rect_,
       canvas,
       command.rect.x,
       command.rect.y,
       command.rect.width,
       command.rect.height,
-      PackColor(command.color),
+      brush.kind,
+      brush.color,
+      brush.geometry.Get(),
+      brush.stops.Get(),
+      brush.colors.Get(),
       command.corner_radius
-  );
-}
-
-void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas,
-                                    const DrawLinearGradientCommand& command) {
-  std::vector<jfloat> offsets;
-  std::vector<jint> colors;
-  offsets.reserve(command.gradient.stops.size());
-  colors.reserve(command.gradient.stops.size());
-  for (const GradientStop& stop : command.gradient.stops) {
-    offsets.push_back(stop.offset);
-    colors.push_back(PackColor(stop.color));
-  }
-  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
-  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
-  if (!java_offsets || !java_colors) {
-    return;
-  }
-  const Transform2D transform = ResolveGradientTransform(command.rect, command.gradient);
-  environment->CallVoidMethod(
-      view, draw_linear_gradient_, canvas, command.rect.x, command.rect.y, command.rect.width, command.rect.height,
-      command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y,
-      transform.m11, transform.m12, transform.m21, transform.m22, transform.translate_x, transform.translate_y,
-      java_offsets.Get(), java_colors.Get(), command.corner_radius
-  );
-}
-
-void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas,
-                                    const DrawRadialGradientCommand& command) {
-  std::vector<jfloat> offsets;
-  std::vector<jint> colors;
-  offsets.reserve(command.gradient.stops.size());
-  colors.reserve(command.gradient.stops.size());
-  for (const GradientStop& stop : command.gradient.stops) {
-    offsets.push_back(stop.offset);
-    colors.push_back(PackColor(stop.color));
-  }
-  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
-  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
-  if (!java_offsets || !java_colors) {
-    return;
-  }
-  const Transform2D transform = ResolveGradientTransform(command.rect, command.gradient);
-  environment->CallVoidMethod(
-      view, draw_radial_gradient_, canvas, command.rect.x, command.rect.y, command.rect.width, command.rect.height,
-      command.gradient.center.x, command.gradient.center.y, command.gradient.radius.width,
-      command.gradient.radius.height, transform.m11, transform.m12, transform.m21, transform.m22,
-      transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(), command.corner_radius
   );
 }
 
@@ -586,170 +581,34 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 }
 
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const FillPathCommand& command) {
-  jfloatArray path = ToPathArray(environment, command.path);
-  if (path == nullptr) {
-    return;
-  }
-  environment
-      ->CallVoidMethod(view, fill_path_, canvas, path, PackColor(command.color), static_cast<jint>(command.fill_rule));
-  environment->DeleteLocalRef(path);
-}
-
-void AndroidRenderer::RenderCommand(
-    JNIEnv* environment, jobject view, jobject canvas, const FillLinearGradientPathCommand& command
-) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-    return;
-  }
   android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
-  std::vector<jfloat> offsets;
-  std::vector<jint> colors;
-  offsets.reserve(command.gradient.stops.size());
-  colors.reserve(command.gradient.stops.size());
-  for (const GradientStop& stop : command.gradient.stops) {
-    offsets.push_back(stop.offset);
-    colors.push_back(PackColor(stop.color));
-  }
-  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
-  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
-  if (!path || !java_offsets || !java_colors) {
+  JavaBrush brush = ToJavaBrush(environment, command.brush_bounds, command.brush);
+  if (!path || !brush.IsValid()) {
     return;
   }
-  const Transform2D transform = ResolveGradientTransform(command.gradient_rect, command.gradient);
   environment->CallVoidMethod(
-      view, fill_linear_gradient_path_, canvas, path.Get(), command.gradient.start.x, command.gradient.start.y,
-      command.gradient.end.x, command.gradient.end.y, transform.m11, transform.m12, transform.m21, transform.m22,
-      transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(),
-      static_cast<jint>(command.fill_rule)
-  );
-}
-
-void AndroidRenderer::RenderCommand(
-    JNIEnv* environment, jobject view, jobject canvas, const FillRadialGradientPathCommand& command
-) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-    return;
-  }
-  android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
-  std::vector<jfloat> offsets;
-  std::vector<jint> colors;
-  offsets.reserve(command.gradient.stops.size());
-  colors.reserve(command.gradient.stops.size());
-  for (const GradientStop& stop : command.gradient.stops) {
-    offsets.push_back(stop.offset);
-    colors.push_back(PackColor(stop.color));
-  }
-  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
-  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
-  if (!path || !java_offsets || !java_colors) {
-    return;
-  }
-  const Transform2D transform = ResolveGradientTransform(command.gradient_rect, command.gradient);
-  environment->CallVoidMethod(
-      view, fill_radial_gradient_path_, canvas, path.Get(), command.gradient.center.x, command.gradient.center.y,
-      command.gradient.radius.width, command.gradient.radius.height, transform.m11, transform.m12, transform.m21,
-      transform.m22, transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(),
-      static_cast<jint>(command.fill_rule)
+      view, fill_brush_path_, canvas, path.Get(), static_cast<jint>(command.fill_rule), brush.kind, brush.color,
+      brush.geometry.Get(), brush.stops.Get(), brush.colors.Get()
   );
 }
 
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const StrokePathCommand& command
 ) {
-  jfloatArray path = ToPathArray(environment, command.path);
-  if (path == nullptr) {
-    return;
-  }
-  jfloatArray dashes =
-      command.style.dash_pattern.empty() ? nullptr : ToFloatArray(environment, command.style.dash_pattern);
-  if (!command.style.dash_pattern.empty() && dashes == nullptr) {
-    environment->DeleteLocalRef(path);
-    return;
-  }
-  environment->CallVoidMethod(
-      view,
-      stroke_path_,
-      canvas,
-      path,
-      PackColor(command.color),
-      command.style.width,
-      static_cast<jint>(command.style.cap),
-      static_cast<jint>(command.style.join),
-      command.style.miter_limit,
-      dashes,
-      command.style.dash_offset
-  );
-  environment->DeleteLocalRef(path);
-  if (dashes != nullptr) {
-    environment->DeleteLocalRef(dashes);
-  }
-}
-
-void AndroidRenderer::RenderCommand(
-    JNIEnv* environment, jobject view, jobject canvas, const StrokeLinearGradientPathCommand& command
-) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-    return;
-  }
   android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
-  std::vector<jfloat> offsets;
-  std::vector<jint> colors;
-  offsets.reserve(command.gradient.stops.size());
-  colors.reserve(command.gradient.stops.size());
-  for (const GradientStop& stop : command.gradient.stops) {
-    offsets.push_back(stop.offset);
-    colors.push_back(PackColor(stop.color));
-  }
-  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
-  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
+  JavaBrush brush = ToJavaBrush(environment, command.brush_bounds, command.brush);
   android::LocalRef<jfloatArray> dashes(
       environment,
       command.style.dash_pattern.empty() ? nullptr : ToFloatArray(environment, command.style.dash_pattern)
   );
-  if (!path || !java_offsets || !java_colors || (!command.style.dash_pattern.empty() && !dashes)) {
+  if (!path || !brush.IsValid() || (!command.style.dash_pattern.empty() && !dashes)) {
     return;
   }
-  const Transform2D transform = ResolveGradientTransform(command.gradient_rect, command.gradient);
   environment->CallVoidMethod(
-      view, stroke_linear_gradient_path_, canvas, path.Get(), command.gradient.start.x, command.gradient.start.y,
-      command.gradient.end.x, command.gradient.end.y, transform.m11, transform.m12, transform.m21, transform.m22,
-      transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(), command.style.width,
+      view, stroke_brush_path_, canvas, path.Get(), brush.kind, brush.color, brush.geometry.Get(), brush.stops.Get(),
+      brush.colors.Get(), command.style.width,
       static_cast<jint>(command.style.cap), static_cast<jint>(command.style.join), command.style.miter_limit,
       dashes.Get(), command.style.dash_offset
-  );
-}
-
-void AndroidRenderer::RenderCommand(
-    JNIEnv* environment, jobject view, jobject canvas, const StrokeRadialGradientPathCommand& command
-) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-    return;
-  }
-  android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
-  std::vector<jfloat> offsets;
-  std::vector<jint> colors;
-  offsets.reserve(command.gradient.stops.size());
-  colors.reserve(command.gradient.stops.size());
-  for (const GradientStop& stop : command.gradient.stops) {
-    offsets.push_back(stop.offset);
-    colors.push_back(PackColor(stop.color));
-  }
-  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
-  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
-  android::LocalRef<jfloatArray> dashes(
-      environment,
-      command.style.dash_pattern.empty() ? nullptr : ToFloatArray(environment, command.style.dash_pattern)
-  );
-  if (!path || !java_offsets || !java_colors || (!command.style.dash_pattern.empty() && !dashes)) {
-    return;
-  }
-  const Transform2D transform = ResolveGradientTransform(command.gradient_rect, command.gradient);
-  environment->CallVoidMethod(
-      view, stroke_radial_gradient_path_, canvas, path.Get(), command.gradient.center.x, command.gradient.center.y,
-      command.gradient.radius.width, command.gradient.radius.height, transform.m11, transform.m12, transform.m21,
-      transform.m22, transform.translate_x, transform.translate_y, java_offsets.Get(), java_colors.Get(),
-      command.style.width, static_cast<jint>(command.style.cap), static_cast<jint>(command.style.join),
-      command.style.miter_limit, dashes.Get(), command.style.dash_offset
   );
 }
 
@@ -816,6 +675,7 @@ void AndroidRenderer::RenderCommand(
                   StrokePathCommand{
                       CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
                       command.color,
+                      command.rect,
                       command.style,
                   });
     return;

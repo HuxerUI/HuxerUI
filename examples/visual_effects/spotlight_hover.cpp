@@ -99,7 +99,7 @@ public:
     hover_tint.alpha *= eased;
     context.PushClip(bounds, corners);
     context.DrawRect(bounds, hover_tint);
-    context.DrawRadialGradient(
+    context.DrawRect(
         bounds,
         RadialGradient{
             .center = center,

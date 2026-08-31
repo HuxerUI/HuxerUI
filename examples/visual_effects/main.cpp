@@ -50,7 +50,7 @@ View AmbientCanvas(bool active) {
   return Canvas([active](PaintContext& paint, Size size) {
     const Rect bounds{0.0F, 0.0F, size.width, size.height};
     paint.DrawRect(bounds, Color::Rgb(7, 8, 13));
-    paint.DrawRadialGradient(
+    paint.DrawRect(
         bounds,
         RadialGradient{
             .center = {0.18F, 0.16F},
@@ -61,7 +61,7 @@ View AmbientCanvas(bool active) {
             },
         }
     );
-    paint.DrawRadialGradient(
+    paint.DrawRect(
         bounds,
         RadialGradient{
             .center = {0.82F, 0.78F},

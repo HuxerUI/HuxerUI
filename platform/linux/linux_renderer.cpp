@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -15,7 +16,9 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "external_texture_internal.h"
@@ -755,46 +758,38 @@ private:
     cairo_pattern_set_matrix(pattern, &matrix);
   }
 
-  void DrawCommand(const DrawRectCommand& command) {
-    if (command.rect.IsEmpty() || command.color.alpha <= 0.0F) {
-      return;
-    }
-    SetSourceColor(context_, command.color);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_fill(context_);
-  }
-
-  void DrawCommand(const DrawLinearGradientCommand& command) {
-    if (command.rect.IsEmpty()) {
-      return;
-    }
-    cairo_pattern_t* pattern = cairo_pattern_create_linear(
-        command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y
+  void ApplyBrush(Rect bounds, const Brush& brush) {
+    std::visit(
+        [this, bounds](const auto& value) {
+          using Value = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<Value, Color>) {
+            SetSourceColor(context_, value);
+          } else {
+            cairo_pattern_t* pattern = nullptr;
+            if constexpr (std::same_as<Value, LinearGradient>) {
+              pattern = cairo_pattern_create_linear(value.start.x, value.start.y, value.end.x, value.end.y);
+            } else {
+              pattern = cairo_pattern_create_radial(value.center.x, value.center.y, 0.0, value.center.x,
+                                                    value.center.y, value.radius.width);
+            }
+            AddStops(pattern, value.stops);
+            ApplyGradientTransform(pattern, bounds, value);
+            cairo_set_source(context_, pattern);
+            cairo_pattern_destroy(pattern);
+          }
+        },
+        brush.Get()
     );
-    AddStops(pattern, command.gradient.stops);
-    ApplyGradientTransform(pattern, command.rect, command.gradient);
-    cairo_set_source(context_, pattern);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_fill(context_);
-    cairo_pattern_destroy(pattern);
   }
 
-  void DrawCommand(const DrawRadialGradientCommand& command) {
+  void DrawCommand(const DrawRectCommand& command) {
     if (command.rect.IsEmpty()) {
       return;
     }
-    cairo_pattern_t* pattern = cairo_pattern_create_radial(command.gradient.center.x, command.gradient.center.y, 0.0,
-                                                           command.gradient.center.x, command.gradient.center.y,
-                                                           command.gradient.radius.width);
-    AddStops(pattern, command.gradient.stops);
-    ApplyGradientTransform(pattern, command.rect, command.gradient);
-    cairo_set_source(context_, pattern);
+    ApplyBrush(command.rect, command.brush);
     cairo_new_path(context_);
     AddRoundedRect(context_, command.rect, command.corner_radius);
     cairo_fill(context_);
-    cairo_pattern_destroy(pattern);
   }
 
   void DrawCommand(const DrawTextCommand& command) {
@@ -988,6 +983,7 @@ private:
       DrawCommand(StrokePathCommand{
           CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
           command.color,
+          command.rect,
           command.style,
       });
       return;
@@ -1135,93 +1131,25 @@ private:
   }
 
   void DrawCommand(const FillPathCommand& command) {
-    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
+    if (command.path.IsEmpty()) {
       return;
     }
-    SetSourceColor(context_, command.color);
+    ApplyBrush(command.brush_bounds, command.brush);
     AppendPath(context_, command.path);
     cairo_set_fill_rule(
         context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
     );
     cairo_fill(context_);
-  }
-
-  void DrawCommand(const FillLinearGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-      return;
-    }
-    cairo_pattern_t* pattern = cairo_pattern_create_linear(
-        command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y
-    );
-    AddStops(pattern, command.gradient.stops);
-    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
-    cairo_set_source(context_, pattern);
-    AppendPath(context_, command.path);
-    cairo_set_fill_rule(
-        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_fill(context_);
-    cairo_pattern_destroy(pattern);
-  }
-
-  void DrawCommand(const FillRadialGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-      return;
-    }
-    cairo_pattern_t* pattern = cairo_pattern_create_radial(command.gradient.center.x, command.gradient.center.y, 0.0,
-                                                           command.gradient.center.x, command.gradient.center.y,
-                                                           command.gradient.radius.width);
-    AddStops(pattern, command.gradient.stops);
-    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
-    cairo_set_source(context_, pattern);
-    AppendPath(context_, command.path);
-    cairo_set_fill_rule(
-        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_fill(context_);
-    cairo_pattern_destroy(pattern);
   }
 
   void DrawCommand(const StrokePathCommand& command) {
-    if (command.path.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.path.IsEmpty() || command.style.width <= 0.0F) {
       return;
     }
-    SetSourceColor(context_, command.color);
+    ApplyBrush(command.brush_bounds, command.brush);
     AppendPath(context_, command.path);
     ApplyStrokeStyle(context_, command.style);
     cairo_stroke(context_);
-  }
-
-  void DrawCommand(const StrokeLinearGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-      return;
-    }
-    cairo_pattern_t* pattern = cairo_pattern_create_linear(
-        command.gradient.start.x, command.gradient.start.y, command.gradient.end.x, command.gradient.end.y
-    );
-    AddStops(pattern, command.gradient.stops);
-    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
-    cairo_set_source(context_, pattern);
-    AppendPath(context_, command.path);
-    ApplyStrokeStyle(context_, command.style);
-    cairo_stroke(context_);
-    cairo_pattern_destroy(pattern);
-  }
-
-  void DrawCommand(const StrokeRadialGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-      return;
-    }
-    cairo_pattern_t* pattern = cairo_pattern_create_radial(command.gradient.center.x, command.gradient.center.y, 0.0,
-                                                           command.gradient.center.x, command.gradient.center.y,
-                                                           command.gradient.radius.width);
-    AddStops(pattern, command.gradient.stops);
-    ApplyGradientTransform(pattern, command.gradient_rect, command.gradient);
-    cairo_set_source(context_, pattern);
-    AppendPath(context_, command.path);
-    ApplyStrokeStyle(context_, command.style);
-    cairo_stroke(context_);
-    cairo_pattern_destroy(pattern);
   }
 
   void DrawCommand(const DrawPathShadowCommand& command) {

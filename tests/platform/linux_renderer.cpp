@@ -44,7 +44,7 @@ TEST_CASE("LinuxRendererTransformsLinearAndRadialGradientSamplingWithoutTransfor
   const Transform2D quarter_turn{0.0F, 1.0F, -1.0F, 0.0F, 1.0F, 0.0F};
   RenderNode root;
   PaintContext paint(root.content, {0.0F, 0.0F, 44.0F, 20.0F});
-  paint.DrawLinearGradient(
+  paint.DrawRect(
       {0.0F, 0.0F, 20.0F, 20.0F},
       LinearGradient{
           .start = {0.0F, 0.0F},
@@ -53,7 +53,7 @@ TEST_CASE("LinuxRendererTransformsLinearAndRadialGradientSamplingWithoutTransfor
           .transform = quarter_turn,
       }
   );
-  paint.DrawRadialGradient(
+  paint.DrawRect(
       {24.0F, 0.0F, 20.0F, 20.0F},
       RadialGradient{
           .radius = {0.4F, 0.15F},

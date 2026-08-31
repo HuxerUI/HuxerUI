@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -19,6 +20,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -1288,17 +1290,12 @@ struct Win32Renderer::State {
   }
 
   void RenderCommand(const DrawRectCommand& command) {
-    if (command.rect.width <= 0.0F || command.rect.height <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.rect.IsEmpty()) {
       return;
     }
-    SetBrushColor(command.color);
-    if (command.corner_radius > 0.0F) {
-      device_context_->FillRoundedRectangle(
-          D2D1::RoundedRect(ToD2DRect(command.rect), command.corner_radius, command.corner_radius),
-          brush_.Get()
-      );
-    } else {
-      device_context_->FillRectangle(ToD2DRect(command.rect), brush_.Get());
+    const ComPtr<ID2D1Brush> brush = CreateBrush(command.rect, command.brush);
+    if (brush) {
+      FillBrushRect(command.rect, command.corner_radius, brush.Get());
     }
   }
 
@@ -1492,8 +1489,34 @@ struct Win32Renderer::State {
     return gradient;
   }
 
-  template <class Brush>
-  void FillGradientRect(Rect rect, float corner_radius, Brush* brush) {
+  ComPtr<ID2D1Brush> CreateBrush(Rect bounds, const Brush& brush) {
+    return std::visit(
+        [this, bounds](const auto& value) -> ComPtr<ID2D1Brush> {
+          using Value = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<Value, Color>) {
+            SetBrushColor(value);
+            return brush_;
+          } else if constexpr (std::same_as<Value, LinearGradient>) {
+            ComPtr<ID2D1Brush> result;
+            const ComPtr<ID2D1LinearGradientBrush> gradient = CreateLinearGradientBrush(bounds, value);
+            if (gradient) {
+              gradient.As(&result);
+            }
+            return result;
+          } else {
+            ComPtr<ID2D1Brush> result;
+            const ComPtr<ID2D1RadialGradientBrush> gradient = CreateRadialGradientBrush(bounds, value);
+            if (gradient) {
+              gradient.As(&result);
+            }
+            return result;
+          }
+        },
+        brush.Get()
+    );
+  }
+
+  void FillBrushRect(Rect rect, float corner_radius, ID2D1Brush* brush) {
     if (corner_radius > 0.0F) {
       device_context_->FillRoundedRectangle(
           D2D1::RoundedRect(ToD2DRect(rect), corner_radius, corner_radius),
@@ -1501,26 +1524,6 @@ struct Win32Renderer::State {
       );
     } else {
       device_context_->FillRectangle(ToD2DRect(rect), brush);
-    }
-  }
-
-  void RenderCommand(const DrawLinearGradientCommand& command) {
-    if (command.rect.IsEmpty()) {
-      return;
-    }
-    const ComPtr<ID2D1LinearGradientBrush> gradient = CreateLinearGradientBrush(command.rect, command.gradient);
-    if (gradient) {
-      FillGradientRect(command.rect, command.corner_radius, gradient.Get());
-    }
-  }
-
-  void RenderCommand(const DrawRadialGradientCommand& command) {
-    if (command.rect.IsEmpty()) {
-      return;
-    }
-    const ComPtr<ID2D1RadialGradientBrush> gradient = CreateRadialGradientBrush(command.rect, command.gradient);
-    if (gradient) {
-      FillGradientRect(command.rect, command.corner_radius, gradient.Get());
     }
   }
 
@@ -1834,6 +1837,7 @@ struct Win32Renderer::State {
       RenderCommand(StrokePathCommand{
           CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
           command.color,
+          command.rect,
           command.style,
       });
       return;
@@ -1902,77 +1906,25 @@ struct Win32Renderer::State {
   }
 
   void RenderCommand(const FillPathCommand& command) {
-    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
+    if (command.path.IsEmpty()) {
       return;
     }
     ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
-    if (!geometry) {
-      return;
-    }
-    SetBrushColor(command.color);
-    device_context_->FillGeometry(geometry.Get(), brush_.Get());
-  }
-
-  void RenderCommand(const FillLinearGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-      return;
-    }
-    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
-    const ComPtr<ID2D1LinearGradientBrush> gradient =
-        CreateLinearGradientBrush(command.gradient_rect, command.gradient);
-    if (geometry && gradient) {
-      device_context_->FillGeometry(geometry.Get(), gradient.Get());
-    }
-  }
-
-  void RenderCommand(const FillRadialGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-      return;
-    }
-    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
-    const ComPtr<ID2D1RadialGradientBrush> gradient =
-        CreateRadialGradientBrush(command.gradient_rect, command.gradient);
-    if (geometry && gradient) {
-      device_context_->FillGeometry(geometry.Get(), gradient.Get());
+    const ComPtr<ID2D1Brush> brush = CreateBrush(command.brush_bounds, command.brush);
+    if (geometry && brush) {
+      device_context_->FillGeometry(geometry.Get(), brush.Get());
     }
   }
 
   void RenderCommand(const StrokePathCommand& command) {
-    if (command.path.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
+    if (command.path.IsEmpty() || command.style.width <= 0.0F) {
       return;
     }
     ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
     ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
-    if (!geometry || !stroke_style) {
-      return;
-    }
-    SetBrushColor(command.color);
-    device_context_->DrawGeometry(geometry.Get(), brush_.Get(), command.style.width, stroke_style.Get());
-  }
-
-  void RenderCommand(const StrokeLinearGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-      return;
-    }
-    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
-    const ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
-    const ComPtr<ID2D1LinearGradientBrush> gradient =
-        CreateLinearGradientBrush(command.gradient_rect, command.gradient);
-    if (geometry && stroke_style && gradient) {
-      device_context_->DrawGeometry(geometry.Get(), gradient.Get(), command.style.width, stroke_style.Get());
-    }
-  }
-
-  void RenderCommand(const StrokeRadialGradientPathCommand& command) {
-    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-      return;
-    }
-    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, PathFillRule::NonZero);
-    const ComPtr<ID2D1StrokeStyle> stroke_style = CreateStrokeStyle(command.style);
-    const ComPtr<ID2D1RadialGradientBrush> gradient =
-        CreateRadialGradientBrush(command.gradient_rect, command.gradient);
-    if (geometry && stroke_style && gradient) {
-      device_context_->DrawGeometry(geometry.Get(), gradient.Get(), command.style.width, stroke_style.Get());
+    const ComPtr<ID2D1Brush> brush = CreateBrush(command.brush_bounds, command.brush);
+    if (geometry && stroke_style && brush) {
+      device_context_->DrawGeometry(geometry.Get(), brush.Get(), command.style.width, stroke_style.Get());
     }
   }
 

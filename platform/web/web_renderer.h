@@ -61,8 +61,6 @@ private:
   void RenderSceneNode(const RenderNode& node, CommandRange* range);
   void RenderSequence(const PaintSequence& sequence, CommandRange* range);
   void RenderCommand(const DrawRectCommand& command);
-  void RenderCommand(const DrawLinearGradientCommand& command);
-  void RenderCommand(const DrawRadialGradientCommand& command);
   void RenderCommand(const DrawTextCommand& command);
   void RenderCommand(const DrawTextRunsCommand& command);
   void RenderCommand(const DrawImageCommand& command);
@@ -73,11 +71,7 @@ private:
   void RenderCommand(const DrawBorderCommand& command);
   void RenderCommand(const DrawShadowCommand& command);
   void RenderCommand(const FillPathCommand& command);
-  void RenderCommand(const FillLinearGradientPathCommand& command);
-  void RenderCommand(const FillRadialGradientPathCommand& command);
   void RenderCommand(const StrokePathCommand& command);
-  void RenderCommand(const StrokeLinearGradientPathCommand& command);
-  void RenderCommand(const StrokeRadialGradientPathCommand& command);
   void RenderCommand(const DrawPathShadowCommand& command);
   void RenderCommand(const PushClipCommand& command);
   void RenderCommand(const PushPathClipCommand& command);

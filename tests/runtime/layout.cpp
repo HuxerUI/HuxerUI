@@ -573,7 +573,7 @@ TEST_CASE("TestVectorImageUsesImageLayoutAndSharedPathPainting") {
     return std::holds_alternative<FillPathCommand>(command);
   });
   REQUIRE(fill != scene.Commands().end());
-  REQUIRE(std::get<FillPathCommand>(*fill).color == Color::Rgb(90, 120, 180));
+  REQUIRE(BrushIsColor(std::get<FillPathCommand>(*fill).brush, Color::Rgb(90, 120, 180)));
   REQUIRE(std::ranges::none_of(scene.Commands(), [](const PaintCommand& command) {
     return std::holds_alternative<DrawImageCommand>(command);
   }));

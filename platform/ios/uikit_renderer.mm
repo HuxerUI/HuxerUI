@@ -7,12 +7,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <functional>
 #include <limits>
 #include <numbers>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -97,6 +99,28 @@ template <class Gradient> void ConcatGradientTransform(CGContextRef context, Rec
       context, CGAffineTransformMake(transform.m11, transform.m12, transform.m21, transform.m22,
                                      transform.translate_x, transform.translate_y)
   );
+}
+
+void DrawGradient(CGContextRef context, Rect bounds, const LinearGradient& value) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(value.stops);
+  if (gradient.Get() == nullptr) {
+    return;
+  }
+  ConcatGradientTransform(context, bounds, value);
+  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(value.start.x, value.start.y),
+                              CGPointMake(value.end.x, value.end.y),
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
+}
+
+void DrawGradient(CGContextRef context, Rect bounds, const RadialGradient& value) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(value.stops);
+  if (gradient.Get() == nullptr) {
+    return;
+  }
+  const CGPoint center = CGPointMake(value.center.x, value.center.y);
+  ConcatGradientTransform(context, bounds, value);
+  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, value.radius.width,
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
 }
 
 void CombineHash(std::size_t& seed, std::size_t value) noexcept {
@@ -1272,44 +1296,32 @@ void UIKitRenderer::RenderSceneNode(const RenderNode& node, CGContextRef context
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawRectCommand& command) {
-  SetFillColor(context, command.color);
-  const CGRect rect = CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
-  if (command.corner_radius > 0.0F) {
-    CGPathRef path = CGPathCreateWithRoundedRect(rect, command.corner_radius, command.corner_radius, nullptr);
-    CGContextAddPath(context, path);
-    CGContextFillPath(context);
-    CGPathRelease(path);
-  } else {
-    CGContextFillRect(context, rect);
-  }
-}
-
-void UIKitRenderer::RenderCommand(CGContextRef context, const DrawLinearGradientCommand& command) {
-  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
-  if (gradient.Get() == nullptr || command.rect.IsEmpty()) {
+  if (command.rect.IsEmpty()) {
     return;
   }
-  CGContextSaveGState(context);
-  ClipGradientRect(context, command.rect, command.corner_radius);
-  ConcatGradientTransform(context, command.rect, command.gradient);
-  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(command.gradient.start.x, command.gradient.start.y),
-                              CGPointMake(command.gradient.end.x, command.gradient.end.y),
-                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-  CGContextRestoreGState(context);
-}
-
-void UIKitRenderer::RenderCommand(CGContextRef context, const DrawRadialGradientCommand& command) {
-  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
-  if (gradient.Get() == nullptr || command.rect.IsEmpty()) {
-    return;
-  }
-  const CGPoint center = CGPointMake(command.gradient.center.x, command.gradient.center.y);
-  CGContextSaveGState(context);
-  ClipGradientRect(context, command.rect, command.corner_radius);
-  ConcatGradientTransform(context, command.rect, command.gradient);
-  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, command.gradient.radius.width,
-                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-  CGContextRestoreGState(context);
+  std::visit(
+      [&](const auto& value) {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          SetFillColor(context, value);
+          const CGRect rect = CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height);
+          if (command.corner_radius > 0.0F) {
+            const CFRef<CGPathRef> path(
+                CGPathCreateWithRoundedRect(rect, command.corner_radius, command.corner_radius, nullptr));
+            CGContextAddPath(context, path.Get());
+            CGContextFillPath(context);
+          } else {
+            CGContextFillRect(context, rect);
+          }
+        } else {
+          CGContextSaveGState(context);
+          ClipGradientRect(context, command.rect, command.corner_radius);
+          DrawGradient(context, command.rect, value);
+          CGContextRestoreGState(context);
+        }
+      },
+      command.brush.Get()
+  );
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& command) {
@@ -1443,6 +1455,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawBorderCommand&
                   StrokePathCommand{
                       CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
                       command.color,
+                      command.rect,
                       command.style,
                   });
     return;
@@ -1498,92 +1511,48 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawShadowCommand&
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const FillPathCommand& command) {
-  if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
-    return;
-  }
-  CGPathRef path = CreatePath(command.path);
-  CGContextSaveGState(context);
-  SetFillColor(context, command.color);
-  CGContextAddPath(context, path);
-  FillCurrentPath(context, command.fill_rule);
-  CGContextRestoreGState(context);
-  CGPathRelease(path);
-}
-
-void UIKitRenderer::RenderCommand(CGContextRef context, const FillLinearGradientPathCommand& command) {
-  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
-  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+  if (command.path.IsEmpty()) {
     return;
   }
   const CFRef<CGPathRef> path(CreatePath(command.path));
-  CGContextSaveGState(context);
-  CGContextAddPath(context, path.Get());
-  ClipCurrentPath(context, command.fill_rule);
-  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
-  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(command.gradient.start.x, command.gradient.start.y),
-                              CGPointMake(command.gradient.end.x, command.gradient.end.y),
-                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-  CGContextRestoreGState(context);
-}
-
-void UIKitRenderer::RenderCommand(CGContextRef context, const FillRadialGradientPathCommand& command) {
-  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
-  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-    return;
-  }
-  const CGPoint center = CGPointMake(command.gradient.center.x, command.gradient.center.y);
-  const CFRef<CGPathRef> path(CreatePath(command.path));
-  CGContextSaveGState(context);
-  CGContextAddPath(context, path.Get());
-  ClipCurrentPath(context, command.fill_rule);
-  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
-  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, command.gradient.radius.width,
-                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-  CGContextRestoreGState(context);
+  std::visit(
+      [&](const auto& value) {
+        CGContextSaveGState(context);
+        CGContextAddPath(context, path.Get());
+        if constexpr (std::same_as<std::decay_t<decltype(value)>, Color>) {
+          SetFillColor(context, value);
+          FillCurrentPath(context, command.fill_rule);
+        } else {
+          ClipCurrentPath(context, command.fill_rule);
+          DrawGradient(context, command.brush_bounds, value);
+        }
+        CGContextRestoreGState(context);
+      },
+      command.brush.Get()
+  );
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const StrokePathCommand& command) {
-  if (command.path.IsEmpty() || command.style.width <= 0.0F || command.color.alpha <= 0.0F) {
+  if (command.path.IsEmpty() || command.style.width <= 0.0F) {
     return;
   }
-  CGPathRef path = CreatePath(command.path);
-  CGContextSaveGState(context);
-  SetStrokeColor(context, command.color);
-  ApplyStrokeStyle(context, command.style);
-  CGContextAddPath(context, path);
-  CGContextStrokePath(context);
-  CGContextRestoreGState(context);
-  CGPathRelease(path);
-}
-
-void UIKitRenderer::RenderCommand(CGContextRef context, const StrokeLinearGradientPathCommand& command) {
-  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
-  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty() ||
-      command.style.width <= 0.0F) {
-    return;
-  }
-  CGContextSaveGState(context);
-  ClipStrokePath(context, command.path, command.style);
-  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
-  CGContextDrawLinearGradient(context, gradient.Get(), CGPointMake(command.gradient.start.x, command.gradient.start.y),
-                              CGPointMake(command.gradient.end.x, command.gradient.end.y),
-                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-  CGContextRestoreGState(context);
-}
-
-void UIKitRenderer::RenderCommand(CGContextRef context, const StrokeRadialGradientPathCommand& command) {
-  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
-  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty() ||
-      command.style.width <= 0.0F) {
-    return;
-  }
-  const CGPoint center = CGPointMake(command.gradient.center.x, command.gradient.center.y);
-  CGContextSaveGState(context);
-  ClipStrokePath(context, command.path, command.style);
-  ConcatGradientTransform(context, command.gradient_rect, command.gradient);
-  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, command.gradient.radius.width,
-                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
-  CGContextRestoreGState(context);
+  std::visit(
+      [&](const auto& value) {
+        CGContextSaveGState(context);
+        if constexpr (std::same_as<std::decay_t<decltype(value)>, Color>) {
+          const CFRef<CGPathRef> path(CreatePath(command.path));
+          SetStrokeColor(context, value);
+          ApplyStrokeStyle(context, command.style);
+          CGContextAddPath(context, path.Get());
+          CGContextStrokePath(context);
+        } else {
+          ClipStrokePath(context, command.path, command.style);
+          DrawGradient(context, command.brush_bounds, value);
+        }
+        CGContextRestoreGState(context);
+      },
+      command.brush.Get()
+  );
 }
 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawPathShadowCommand& command) {

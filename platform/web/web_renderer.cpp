@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -9,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -260,6 +262,20 @@ val CreateGradient(val& context, Rect rect, const RadialGradient& gradient) {
     result.call<void>("addColorStop", stop.offset, CssColor(stop.color));
   }
   return result;
+}
+
+val CreateBrushStyle(val& context, Rect bounds, const Brush& brush) {
+  return std::visit(
+      [&context, bounds](const auto& value) -> val {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Color>) {
+          return val(CssColor(value));
+        } else {
+          return CreateGradient(context, bounds, value);
+        }
+      },
+      brush.Get()
+  );
 }
 
 void AddRoundedRect(val& context, Rect rect, float radius) {
@@ -927,33 +943,16 @@ void WebRenderer::RenderSceneNode(const RenderNode& node, CommandRange* range) {
 }
 
 void WebRenderer::RenderCommand(const DrawRectCommand& command) {
-  context_.set("fillStyle", CssColor(command.color));
+  if (command.rect.IsEmpty()) {
+    return;
+  }
+  context_.set("fillStyle", CreateBrushStyle(context_, command.rect, command.brush));
   if (command.corner_radius <= 0.0F) {
     context_.call<void>("fillRect", command.rect.x, command.rect.y, command.rect.width, command.rect.height);
     return;
   }
   context_.call<void>("beginPath");
   AddRoundedRect(context_, command.rect, command.corner_radius);
-  context_.call<void>("fill");
-}
-
-void WebRenderer::RenderCommand(const DrawLinearGradientCommand& command) {
-  if (command.rect.IsEmpty()) {
-    return;
-  }
-  context_.call<void>("beginPath");
-  AddRoundedRect(context_, command.rect, command.corner_radius);
-  context_.set("fillStyle", CreateGradient(context_, command.rect, command.gradient));
-  context_.call<void>("fill");
-}
-
-void WebRenderer::RenderCommand(const DrawRadialGradientCommand& command) {
-  if (command.rect.IsEmpty()) {
-    return;
-  }
-  context_.call<void>("beginPath");
-  AddRoundedRect(context_, command.rect, command.corner_radius);
-  context_.set("fillStyle", CreateGradient(context_, command.rect, command.gradient));
   context_.call<void>("fill");
 }
 
@@ -1133,6 +1132,7 @@ void WebRenderer::RenderCommand(const DrawBorderCommand& command) {
     RenderCommand(StrokePathCommand{
         CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width),
         command.color,
+        command.rect,
         command.style,
     });
     return;
@@ -1173,29 +1173,12 @@ void WebRenderer::RenderCommand(const DrawShadowCommand& command) {
 }
 
 void WebRenderer::RenderCommand(const FillPathCommand& command) {
-  context_.call<void>("beginPath");
-  AddPath(context_, command.path);
-  context_.set("fillStyle", CssColor(command.color));
-  context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
-}
-
-void WebRenderer::RenderCommand(const FillLinearGradientPathCommand& command) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+  if (command.path.IsEmpty()) {
     return;
   }
   context_.call<void>("beginPath");
   AddPath(context_, command.path);
-  context_.set("fillStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
-  context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
-}
-
-void WebRenderer::RenderCommand(const FillRadialGradientPathCommand& command) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
-    return;
-  }
-  context_.call<void>("beginPath");
-  AddPath(context_, command.path);
-  context_.set("fillStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
+  context_.set("fillStyle", CreateBrushStyle(context_, command.brush_bounds, command.brush));
   context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
 }
 
@@ -1206,33 +1189,7 @@ void WebRenderer::RenderCommand(const StrokePathCommand& command) {
   context_.call<void>("save");
   context_.call<void>("beginPath");
   AddPath(context_, command.path);
-  context_.set("strokeStyle", CssColor(command.color));
-  ApplyStrokeStyle(context_, command.style);
-  context_.call<void>("stroke");
-  context_.call<void>("restore");
-}
-
-void WebRenderer::RenderCommand(const StrokeLinearGradientPathCommand& command) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-    return;
-  }
-  context_.call<void>("save");
-  context_.call<void>("beginPath");
-  AddPath(context_, command.path);
-  context_.set("strokeStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
-  ApplyStrokeStyle(context_, command.style);
-  context_.call<void>("stroke");
-  context_.call<void>("restore");
-}
-
-void WebRenderer::RenderCommand(const StrokeRadialGradientPathCommand& command) {
-  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty() || command.style.width <= 0.0F) {
-    return;
-  }
-  context_.call<void>("save");
-  context_.call<void>("beginPath");
-  AddPath(context_, command.path);
-  context_.set("strokeStyle", CreateGradient(context_, command.gradient_rect, command.gradient));
+  context_.set("strokeStyle", CreateBrushStyle(context_, command.brush_bounds, command.brush));
   ApplyStrokeStyle(context_, command.style);
   context_.call<void>("stroke");
   context_.call<void>("restore");

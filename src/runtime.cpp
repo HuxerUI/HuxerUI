@@ -259,8 +259,10 @@ void CollectWindowDragRegionBackground(
   }
   Color background = inherited_background;
   if (node.properties.background.has_value()) {
-    if (const Color* color = std::get_if<Color>(&node.properties.background->Get())) {
-      background = CompositeOver(*color, inherited_background);
+    if (const Brush* brush = std::get_if<Brush>(&node.properties.background->Get())) {
+      if (const Color* color = std::get_if<Color>(&brush->Get())) {
+        background = CompositeOver(*color, inherited_background);
+      }
     }
   }
   if (node.properties.window_drag_region && node.presentation.resolved_opacity > 0.001F) {

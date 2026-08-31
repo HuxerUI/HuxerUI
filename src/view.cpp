@@ -134,12 +134,8 @@ void ValidateVisualFill(const VisualFill& fill) {
   std::visit(
       [](const auto& value) {
         using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::same_as<Value, Color>) {
-          detail::ValidateColor(value, "HuxerUI visual fill color must be finite");
-        } else if constexpr (std::same_as<Value, LinearGradient>) {
-          detail::ValidateGradient(value);
-        } else if constexpr (std::same_as<Value, RadialGradient>) {
-          detail::ValidateGradient(value);
+        if constexpr (std::same_as<Value, Brush>) {
+          detail::ValidateBrush(value);
         } else {
           if (!std::isfinite(value.opacity) || value.opacity < 0.0F || value.opacity > 1.0F) {
             throw std::invalid_argument("HuxerUI visual fill image opacity must be finite within [0, 1]");

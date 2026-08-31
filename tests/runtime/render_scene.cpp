@@ -872,14 +872,14 @@ TEST_CASE("PaintBoundsKeepOffscreenNodesVisibleWhenTheirCommandsOverflowIntoTheV
   REQUIRE(render_node != nullptr);
   REQUIRE(render_node->visible);
   REQUIRE(render_node->foreground.Bounds() == Rect{-200.0F, 0.0F, 80.0F, 20.0F});
-  REQUIRE(std::get<DrawRectCommand>(render_node->foreground.Commands().front()).color == Color::Black());
+  REQUIRE(BrushIsColor(std::get<DrawRectCommand>(render_node->foreground.Commands().front()).brush, Color::Black()));
 
   overflowing_paint_changed = true;
   const RenderFrame& changed = runtime.BuildRenderFrame();
   render_node = FindRenderNode(*changed.scene.root, mounted->identity);
   REQUIRE(render_node != nullptr);
   REQUIRE(render_node->visible);
-  REQUIRE(std::get<DrawRectCommand>(render_node->foreground.Commands().front()).color == Color::White());
+  REQUIRE(BrushIsColor(std::get<DrawRectCommand>(render_node->foreground.Commands().front()).brush, Color::White()));
   REQUIRE_FALSE(changed.damage.full);
   REQUIRE(DamageContains(changed.damage, {0.0F, 0.0F, 80.0F, 20.0F}));
 }
@@ -932,7 +932,7 @@ TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
   REQUIRE(std::holds_alternative<PushTransformCommand>(render_node->content.Commands()[0]));
   REQUIRE(std::get<PushTransformCommand>(render_node->content.Commands()[0]).transform.translate_x == 10.0F);
   REQUIRE(std::get<PushTransformCommand>(render_node->content.Commands()[0]).transform.translate_y == 10.0F);
-  REQUIRE(std::get<DrawRectCommand>(render_node->content.Commands()[1]).color == Color::Black());
+  REQUIRE(BrushIsColor(std::get<DrawRectCommand>(render_node->content.Commands()[1]).brush, Color::Black()));
   REQUIRE(std::holds_alternative<PopTransformCommand>(render_node->content.Commands()[2]));
   REQUIRE(render_node->content.Bounds() == Rect{10.0F, 10.0F, 60.0F, 40.0F});
   const std::uint64_t first_revision = render_node->revision;
@@ -946,7 +946,7 @@ TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
   REQUIRE(render_node != nullptr);
   REQUIRE(canvas_paint_count == 2);
   REQUIRE(render_node->revision > first_revision);
-  REQUIRE(std::get<DrawRectCommand>(render_node->content.Commands()[1]).color == Color::White());
+  REQUIRE(BrushIsColor(std::get<DrawRectCommand>(render_node->content.Commands()[1]).brush, Color::White()));
   REQUIRE_FALSE(changed.damage.full);
   REQUIRE(DamageContains(changed.damage, Rect{10.0F, 10.0F, 60.0F, 40.0F}));
 }
