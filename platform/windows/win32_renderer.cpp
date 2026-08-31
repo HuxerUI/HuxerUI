@@ -1451,6 +1451,40 @@ struct Win32Renderer::State {
     return collection;
   }
 
+  ComPtr<ID2D1LinearGradientBrush> CreateLinearGradientBrush(Rect rect, const LinearGradient& value) {
+    const ComPtr<ID2D1GradientStopCollection> stops = CreateGradientStops(value.stops);
+    if (!stops) {
+      return {};
+    }
+    const auto point = [rect](Point position) {
+      return D2D1::Point2F(rect.x + position.x * rect.width, rect.y + position.y * rect.height);
+    };
+    ComPtr<ID2D1LinearGradientBrush> gradient;
+    if (FAILED(device_context_->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(point(value.start), point(value.end)), stops.Get(),
+            gradient.GetAddressOf()))) {
+      return {};
+    }
+    return gradient;
+  }
+
+  ComPtr<ID2D1RadialGradientBrush> CreateRadialGradientBrush(Rect rect, const RadialGradient& value) {
+    const ComPtr<ID2D1GradientStopCollection> stops = CreateGradientStops(value.stops);
+    if (!stops) {
+      return {};
+    }
+    const D2D1_POINT_2F center = D2D1::Point2F(rect.x + value.center.x * rect.width,
+                                               rect.y + value.center.y * rect.height);
+    ComPtr<ID2D1RadialGradientBrush> gradient;
+    if (FAILED(device_context_->CreateRadialGradientBrush(
+            D2D1::RadialGradientBrushProperties(center, D2D1::Point2F(), value.radius.width * rect.width,
+                                                value.radius.height * rect.height),
+            stops.Get(), gradient.GetAddressOf()))) {
+      return {};
+    }
+    return gradient;
+  }
+
   template <class Brush>
   void FillGradientRect(Rect rect, float corner_radius, Brush* brush) {
     if (corner_radius > 0.0F) {
@@ -1467,22 +1501,8 @@ struct Win32Renderer::State {
     if (command.rect.IsEmpty()) {
       return;
     }
-    const ComPtr<ID2D1GradientStopCollection> stops = CreateGradientStops(command.gradient.stops);
-    if (!stops) {
-      return;
-    }
-    const auto point = [&](Point value) {
-      return D2D1::Point2F(
-          command.rect.x + value.x * command.rect.width,
-          command.rect.y + value.y * command.rect.height
-      );
-    };
-    ComPtr<ID2D1LinearGradientBrush> gradient;
-    if (SUCCEEDED(device_context_->CreateLinearGradientBrush(
-            D2D1::LinearGradientBrushProperties(point(command.gradient.start), point(command.gradient.end)),
-            stops.Get(),
-            gradient.GetAddressOf()
-        ))) {
+    const ComPtr<ID2D1LinearGradientBrush> gradient = CreateLinearGradientBrush(command.rect, command.gradient);
+    if (gradient) {
       FillGradientRect(command.rect, command.corner_radius, gradient.Get());
     }
   }
@@ -1491,25 +1511,8 @@ struct Win32Renderer::State {
     if (command.rect.IsEmpty()) {
       return;
     }
-    const ComPtr<ID2D1GradientStopCollection> stops = CreateGradientStops(command.gradient.stops);
-    if (!stops) {
-      return;
-    }
-    const Point center{
-        command.rect.x + command.gradient.center.x * command.rect.width,
-        command.rect.y + command.gradient.center.y * command.rect.height,
-    };
-    ComPtr<ID2D1RadialGradientBrush> gradient;
-    if (SUCCEEDED(device_context_->CreateRadialGradientBrush(
-            D2D1::RadialGradientBrushProperties(
-                D2D1::Point2F(center.x, center.y),
-                D2D1::Point2F(),
-                command.gradient.radius.width * command.rect.width,
-                command.gradient.radius.height * command.rect.height
-            ),
-            stops.Get(),
-            gradient.GetAddressOf()
-        ))) {
+    const ComPtr<ID2D1RadialGradientBrush> gradient = CreateRadialGradientBrush(command.rect, command.gradient);
+    if (gradient) {
       FillGradientRect(command.rect, command.corner_radius, gradient.Get());
     }
   }
@@ -1901,6 +1904,30 @@ struct Win32Renderer::State {
     }
     SetBrushColor(command.color);
     device_context_->FillGeometry(geometry.Get(), brush_.Get());
+  }
+
+  void RenderCommand(const FillLinearGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+      return;
+    }
+    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
+    const ComPtr<ID2D1LinearGradientBrush> gradient =
+        CreateLinearGradientBrush(command.gradient_rect, command.gradient);
+    if (geometry && gradient) {
+      device_context_->FillGeometry(geometry.Get(), gradient.Get());
+    }
+  }
+
+  void RenderCommand(const FillRadialGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+      return;
+    }
+    const ComPtr<ID2D1PathGeometry> geometry = PathGeometryFor(command.path, command.fill_rule);
+    const ComPtr<ID2D1RadialGradientBrush> gradient =
+        CreateRadialGradientBrush(command.gradient_rect, command.gradient);
+    if (geometry && gradient) {
+      device_context_->FillGeometry(geometry.Get(), gradient.Get());
+    }
   }
 
   void RenderCommand(const StrokePathCommand& command) {

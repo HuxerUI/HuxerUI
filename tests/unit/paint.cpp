@@ -424,6 +424,56 @@ TEST_CASE("PaintContextRecordsPathCommandsAndBounds") {
   REQUIRE(sequence.Bounds() == Rect{6.0F, 18.0F, 46.0F, 46.0F});
 }
 
+TEST_CASE("PaintContextRecordsAtomicGradientPathFills") {
+  const Path path = Path{}.MoveTo({10.0F, 20.0F}).LineTo({50.0F, 20.0F}).LineTo({30.0F, 60.0F}).Close();
+  const LinearGradient linear{
+      .start = {0.0F, 0.0F},
+      .end = {1.0F, 1.0F},
+      .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+  };
+  const RadialGradient radial{
+      .center = {0.25F, 0.75F},
+      .radius = {0.5F, 0.25F},
+      .stops = {{0.0F, Color::White()}, {1.0F, Color::Black()}},
+  };
+
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 100.0F, 80.0F});
+  context.FillPath(path, linear, PathFillRule::EvenOdd);
+  context.FillPath(path, radial, {0.0F, 0.0F, 100.0F, 80.0F});
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 2);
+  const auto& linear_fill = std::get<FillLinearGradientPathCommand>(sequence.Commands()[0]);
+  REQUIRE(linear_fill.gradient_rect == path.Bounds());
+  REQUIRE(linear_fill.fill_rule == PathFillRule::EvenOdd);
+  const auto& radial_fill = std::get<FillRadialGradientPathCommand>(sequence.Commands()[1]);
+  REQUIRE(radial_fill.gradient_rect == Rect{0.0F, 0.0F, 100.0F, 80.0F});
+  REQUIRE(sequence.Bounds() == path.Bounds());
+}
+
+TEST_CASE("PaintContextValidatesGradientPathFillsBeforeRecording") {
+  const Path path = Path{}.MoveTo({0.0F, 0.0F}).LineTo({20.0F, 0.0F}).LineTo({10.0F, 10.0F}).Close();
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 20.0F, 10.0F});
+
+  REQUIRE_THROWS_AS(context.FillPath(path, LinearGradient{}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      context.FillPath(path,
+                       RadialGradient{.radius = {},
+                                      .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}}),
+      std::invalid_argument
+  );
+  REQUIRE(sequence.Commands().empty());
+
+  context.FillPath(path,
+                   LinearGradient{.stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}}},
+                   {0.0F, 0.0F, 0.0F, 10.0F});
+  context.Finish();
+  REQUIRE(sequence.Commands().empty());
+  REQUIRE(sequence.Bounds().IsEmpty());
+}
+
 TEST_CASE("PaintContextUsesPathCommandsForAsymmetricCornerRadii") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};

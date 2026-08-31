@@ -32,6 +32,13 @@ struct Point {
   float y = 0.0F;
 };
 
+struct Rect {
+  float x = 0.0F;
+  float y = 0.0F;
+  float width = 0.0F;
+  float height = 0.0F;
+};
+
 struct Transform {
   float m11 = 1.0F;
   float m12 = 0.0F;
@@ -57,10 +64,14 @@ using Path = std::vector<PathOperation>;
 
 struct Style {
   std::optional<Color> fill = Color{};
+  std::optional<std::string> fill_reference;
   std::optional<Color> stroke;
   Color current_color{};
   bool fill_uses_current_color = false;
   bool stroke_uses_current_color = false;
+  Color stop_color{};
+  bool stop_uses_current_color = false;
+  float stop_opacity = 1.0F;
   float fill_opacity = 1.0F;
   float stroke_opacity = 1.0F;
   float stroke_width = 1.0F;
@@ -82,6 +93,7 @@ struct SvgNode {
   std::map<std::string, std::string> attributes;
   std::vector<std::size_t> children;
   std::optional<Path> path;
+  std::optional<std::size_t> parent;
 };
 
 struct SvgDocument {
@@ -111,6 +123,13 @@ public:
     F32(color.green);
     F32(color.blue);
     F32(color.alpha);
+  }
+
+  void RectValue(Rect rect) {
+    F32(rect.x);
+    F32(rect.y);
+    F32(rect.width);
+    F32(rect.height);
   }
 
   void PathValue(const Path& path) {
@@ -907,7 +926,7 @@ bool IsStyleProperty(std::string_view name) {
          name == "stroke-opacity" || name == "stroke-width" || name == "fill-rule" || name == "clip-rule" ||
          name == "stroke-linecap" || name == "stroke-linejoin" || name == "stroke-miterlimit" ||
          name == "stroke-dasharray" || name == "stroke-dashoffset" || name == "display" || name == "visibility" ||
-         name == "opacity" || name == "clip-path";
+         name == "opacity" || name == "clip-path" || name == "stop-color" || name == "stop-opacity";
 }
 
 std::optional<std::string> ParseLocalReference(std::string_view value, std::string_view field) {
@@ -932,13 +951,36 @@ void ApplyStyleProperty(Style& style, std::string_view name, std::string_view va
       style.current_color = *color;
     }
   } else if (name == "fill" || name == "stroke") {
+    if (text.starts_with("url(")) {
+      if (name == "stroke") {
+        throw std::runtime_error("SVG gradient strokes are not supported");
+      }
+      style.fill_reference = ParseLocalReference(text, name);
+      style.fill.reset();
+      style.fill_uses_current_color = false;
+      return;
+    }
     const bool current = text == "currentColor";
     std::optional<Color>& paint = name == "fill" ? style.fill : style.stroke;
     bool& uses_current = name == "fill" ? style.fill_uses_current_color : style.stroke_uses_current_color;
     paint = current ? std::optional<Color>(style.current_color) : ParseColor(text);
     uses_current = current;
+    if (name == "fill") {
+      style.fill_reference.reset();
+    }
   } else if (name == "fill-opacity") {
     style.fill_opacity = ParseOpacity(text, name);
+  } else if (name == "stop-color") {
+    style.stop_uses_current_color = text == "currentColor";
+    if (!style.stop_uses_current_color) {
+      const std::optional<Color> color = ParseColor(text);
+      if (!color.has_value()) {
+        throw std::runtime_error("SVG stop-color does not accept none");
+      }
+      style.stop_color = *color;
+    }
+  } else if (name == "stop-opacity") {
+    style.stop_opacity = ParseOpacity(text, name);
   } else if (name == "stroke-opacity") {
     style.stroke_opacity = ParseOpacity(text, name);
   } else if (name == "stroke-width") {
@@ -1089,6 +1131,18 @@ void ValidateAttributes(std::string_view element, const std::map<std::string, st
     }
     if (element == "clipPath") {
       return name == "clipPathUnits";
+    }
+    if (element == "linearGradient") {
+      return name == "x1" || name == "y1" || name == "x2" || name == "y2" || name == "gradientUnits" ||
+             name == "gradientTransform" || name == "spreadMethod" || name == "href" || name == "xlink:href";
+    }
+    if (element == "radialGradient") {
+      return name == "cx" || name == "cy" || name == "r" || name == "fx" || name == "fy" || name == "fr" ||
+             name == "gradientUnits" || name == "gradientTransform" || name == "spreadMethod" || name == "href" ||
+             name == "xlink:href";
+    }
+    if (element == "stop") {
+      return name == "offset" || name == "stop-color" || name == "stop-opacity";
     }
     if (element == "path") {
       return name == "d";
@@ -1262,7 +1316,206 @@ Path TransformPath(Path path, Transform transform) {
   return path;
 }
 
-void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& operation_count) {
+float QuadraticValue(float start, float control, float end, float time) {
+  const float inverse = 1.0F - time;
+  return inverse * inverse * start + 2.0F * inverse * time * control + time * time * end;
+}
+
+float CubicValue(float start, float first_control, float second_control, float end, float time) {
+  const float inverse = 1.0F - time;
+  return inverse * inverse * inverse * start + 3.0F * inverse * inverse * time * first_control +
+         3.0F * inverse * time * time * second_control + time * time * time * end;
+}
+
+template <class Include> void IncludeQuadraticExtrema(float start, float control, float end, Include&& include) {
+  const float denominator = start - 2.0F * control + end;
+  if (std::abs(denominator) <= 0.000001F) {
+    return;
+  }
+  const float time = (start - control) / denominator;
+  if (time > 0.0F && time < 1.0F) {
+    include(time);
+  }
+}
+
+template <class Include>
+void IncludeCubicExtrema(float start, float first_control, float second_control, float end, Include&& include) {
+  const float a = -start + 3.0F * first_control - 3.0F * second_control + end;
+  const float b = 2.0F * (start - 2.0F * first_control + second_control);
+  const float c = first_control - start;
+  if (std::abs(a) <= 0.000001F) {
+    if (std::abs(b) > 0.000001F) {
+      const float time = -c / b;
+      if (time > 0.0F && time < 1.0F) {
+        include(time);
+      }
+    }
+    return;
+  }
+  const float discriminant = b * b - 4.0F * a * c;
+  if (discriminant < 0.0F) {
+    return;
+  }
+  const float root = std::sqrt(discriminant);
+  const float first_time = (-b + root) / (2.0F * a);
+  const float second_time = (-b - root) / (2.0F * a);
+  if (first_time > 0.0F && first_time < 1.0F) {
+    include(first_time);
+  }
+  if (second_time > 0.0F && second_time < 1.0F && second_time != first_time) {
+    include(second_time);
+  }
+}
+
+Rect PathBounds(const Path& path) {
+  bool has_bounds = false;
+  float minimum_x = 0.0F;
+  float minimum_y = 0.0F;
+  float maximum_x = 0.0F;
+  float maximum_y = 0.0F;
+  Point current;
+  Point contour_start;
+  bool has_current = false;
+  auto include = [&](Point point) {
+    if (!has_bounds) {
+      minimum_x = maximum_x = point.x;
+      minimum_y = maximum_y = point.y;
+      has_bounds = true;
+      return;
+    }
+    minimum_x = std::min(minimum_x, point.x);
+    minimum_y = std::min(minimum_y, point.y);
+    maximum_x = std::max(maximum_x, point.x);
+    maximum_y = std::max(maximum_y, point.y);
+  };
+  for (const PathOperation& operation : path) {
+    switch (operation.verb) {
+    case 1:
+      current = {operation.values[0], operation.values[1]};
+      contour_start = current;
+      has_current = true;
+      break;
+    case 2: {
+      const Point end{operation.values[0], operation.values[1]};
+      include(current);
+      include(end);
+      current = end;
+      break;
+    }
+    case 3: {
+      const Point control{operation.values[0], operation.values[1]};
+      const Point end{operation.values[2], operation.values[3]};
+      include(current);
+      include(end);
+      IncludeQuadraticExtrema(current.x, control.x, end.x, [&](float time) {
+        include({QuadraticValue(current.x, control.x, end.x, time),
+                 QuadraticValue(current.y, control.y, end.y, time)});
+      });
+      IncludeQuadraticExtrema(current.y, control.y, end.y, [&](float time) {
+        include({QuadraticValue(current.x, control.x, end.x, time),
+                 QuadraticValue(current.y, control.y, end.y, time)});
+      });
+      current = end;
+      break;
+    }
+    case 4: {
+      const Point first{operation.values[0], operation.values[1]};
+      const Point second{operation.values[2], operation.values[3]};
+      const Point end{operation.values[4], operation.values[5]};
+      include(current);
+      include(end);
+      IncludeCubicExtrema(current.x, first.x, second.x, end.x, [&](float time) {
+        include({CubicValue(current.x, first.x, second.x, end.x, time),
+                 CubicValue(current.y, first.y, second.y, end.y, time)});
+      });
+      IncludeCubicExtrema(current.y, first.y, second.y, end.y, [&](float time) {
+        include({CubicValue(current.x, first.x, second.x, end.x, time),
+                 CubicValue(current.y, first.y, second.y, end.y, time)});
+      });
+      current = end;
+      break;
+    }
+    case 5:
+      if (has_current && (current.x != contour_start.x || current.y != contour_start.y)) {
+        include(current);
+        include(contour_start);
+      }
+      current = contour_start;
+      break;
+    default:
+      break;
+    }
+  }
+  return has_bounds ? Rect{minimum_x, minimum_y, maximum_x - minimum_x, maximum_y - minimum_y} : Rect{};
+}
+
+struct GradientLength {
+  float value = 0.0F;
+  bool percentage = false;
+};
+
+GradientLength ParseGradientLength(std::string_view value, std::string_view field) {
+  const std::string text = Trim(value);
+  if (text.ends_with('%')) {
+    return {ParseNumber(std::string_view(text).substr(0, text.size() - 1), field) / 100.0F, true};
+  }
+  return {ParseNumber(text, field), false};
+}
+
+float ResolveGradientCoordinate(GradientLength value, float origin, float extent, bool object_bounding_box) {
+  if (object_bounding_box) {
+    return value.value;
+  }
+  const float absolute = value.percentage ? origin + value.value * extent : value.value;
+  return (absolute - origin) / extent;
+}
+
+float ResolveGradientRadius(GradientLength value, Rect coordinate_rect, bool horizontal, bool object_bounding_box) {
+  if (object_bounding_box) {
+    return value.value;
+  }
+  const float absolute = value.percentage
+                             ? value.value * std::hypot(coordinate_rect.width, coordinate_rect.height) /
+                                   std::numbers::sqrt2_v<float>
+                             : value.value;
+  return absolute / (horizontal ? coordinate_rect.width : coordinate_rect.height);
+}
+
+struct ResolvedGradient {
+  bool radial = false;
+  Rect coordinate_rect;
+  Point first;
+  Point second;
+  std::vector<std::pair<float, Color>> stops;
+};
+
+struct GradientDefinition {
+  bool radial = false;
+  bool object_bounding_box = true;
+  GradientLength first_x;
+  GradientLength first_y;
+  GradientLength second_x;
+  GradientLength second_y;
+  std::optional<GradientLength> focal_x;
+  std::optional<GradientLength> focal_y;
+  std::optional<GradientLength> focal_radius;
+  std::vector<std::pair<float, Color>> stops;
+};
+
+void WriteGradientStops(Writer& writer, const std::vector<std::pair<float, Color>>& stops) {
+  if (stops.size() > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::runtime_error("SVG gradient contains too many stops");
+  }
+  writer.U32(static_cast<std::uint32_t>(stops.size()));
+  for (const auto& [offset, color] : stops) {
+    writer.F32(offset);
+    writer.ColorValue(color);
+  }
+}
+
+template <class ResolveGradient>
+void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& operation_count,
+                const ResolveGradient& resolve_gradient) {
   if (path.empty() || !style.visible) {
     return;
   }
@@ -1274,6 +1527,23 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
     writer.U8(style.fill_rule);
     writer.PathValue(path);
     ++operation_count;
+  } else if (style.fill_reference.has_value()) {
+    ResolvedGradient gradient = resolve_gradient(*style.fill_reference, PathBounds(path));
+    if (gradient.coordinate_rect.width > 0.0F && gradient.coordinate_rect.height > 0.0F) {
+      for (auto& stop : gradient.stops) {
+        stop.second.alpha *= style.fill_opacity;
+      }
+      writer.U8(gradient.radial ? 8 : 7);
+      writer.U8(style.fill_rule);
+      writer.RectValue(gradient.coordinate_rect);
+      writer.F32(gradient.first.x);
+      writer.F32(gradient.first.y);
+      writer.F32(gradient.second.x);
+      writer.F32(gradient.second.y);
+      WriteGradientStops(writer, gradient.stops);
+      writer.PathValue(path);
+      ++operation_count;
+    }
   }
   if (style.stroke.has_value() && style.stroke_width > 0.0F) {
     ValidateDashPattern(style.dash_pattern);
@@ -1390,7 +1660,8 @@ SvgDocument ParseSvgDocument(std::string_view xml) {
       throw std::runtime_error("SVG elements must be inside the root svg element");
     }
     if (name != "svg" && name != "g" && name != "defs" && name != "use" && name != "clipPath" &&
-        name != "title" && name != "desc" && name != "metadata" && !IsShape(name)) {
+        name != "linearGradient" && name != "radialGradient" && name != "stop" && name != "title" &&
+        name != "desc" && name != "metadata" && !IsShape(name)) {
       throw std::runtime_error("SVG contains an unsupported element: " + name);
     }
     ValidateAttributes(name, attributes);
@@ -1398,7 +1669,8 @@ SvgDocument ParseSvgDocument(std::string_view xml) {
     if (node_index >= max_nodes) {
       throw std::runtime_error("SVG contains too many elements");
     }
-    document.nodes.push_back({name, attributes, {}, std::nullopt});
+    document.nodes.push_back({name, attributes, {}, std::nullopt, stack.empty() ? std::nullopt
+                                                                               : std::optional(stack.back())});
     if (name == "svg") {
       if (root_seen || !stack.empty()) {
         throw std::runtime_error("SVG must contain exactly one root svg element");
@@ -1495,7 +1767,196 @@ CompiledDocument EmitDocument(SvgDocument document) {
     return found == node.attributes.end() ? Transform{} : ParseTransform(found->second);
   };
 
-  for (SvgNode& node : document.nodes) {
+  const auto gradient_href = [](const SvgNode& node) -> std::optional<std::string> {
+    const auto direct = node.attributes.find("href");
+    const auto legacy = node.attributes.find("xlink:href");
+    if (direct != node.attributes.end() && legacy != node.attributes.end()) {
+      throw std::runtime_error("SVG gradient must not declare both href and xlink:href");
+    }
+    const auto found = direct != node.attributes.end() ? direct : legacy;
+    if (found == node.attributes.end()) {
+      return std::nullopt;
+    }
+    if (!found->second.starts_with('#') || found->second.size() == 1) {
+      throw std::runtime_error("SVG gradient href must be a file-local reference");
+    }
+    return found->second.substr(1);
+  };
+
+  const auto node_style = [&](std::size_t index) {
+    std::vector<std::size_t> lineage;
+    for (std::optional<std::size_t> current = index; current.has_value(); current = document.nodes[*current].parent) {
+      lineage.push_back(*current);
+    }
+    Style style;
+    for (auto iterator = lineage.rbegin(); iterator != lineage.rend(); ++iterator) {
+      style = ResolveStyle(std::move(style), document.nodes[*iterator].attributes);
+    }
+    return style;
+  };
+
+  std::vector<std::size_t> gradient_references;
+  std::function<GradientDefinition(std::size_t)> resolve_gradient_definition;
+  resolve_gradient_definition = [&](std::size_t index) {
+    const SvgNode& node = document.nodes[index];
+    const bool radial = node.name == "radialGradient";
+    if (!radial && node.name != "linearGradient") {
+      throw std::runtime_error("SVG fill reference must target a gradient element");
+    }
+    if (std::ranges::find(gradient_references, index) != gradient_references.end() ||
+        gradient_references.size() >= max_reference_depth) {
+      throw std::runtime_error("SVG gradient references form a cycle or exceed the supported depth");
+    }
+    gradient_references.push_back(index);
+    GradientDefinition definition;
+    if (const std::optional<std::string> reference = gradient_href(node); reference.has_value()) {
+      definition = resolve_gradient_definition(find_reference(*reference, "gradient"));
+      if (definition.radial != radial) {
+        throw std::runtime_error("SVG gradient href must reference the same gradient kind");
+      }
+    } else {
+      definition.radial = radial;
+      if (radial) {
+        definition.first_x = {0.5F, true};
+        definition.first_y = {0.5F, true};
+        definition.second_x = {0.5F, true};
+        definition.second_y = {0.5F, true};
+      } else {
+        definition.second_x = {1.0F, true};
+      }
+    }
+    gradient_references.pop_back();
+
+    if (node.attributes.contains("gradientTransform") || node.attributes.contains("transform")) {
+      throw std::runtime_error("SVG gradientTransform is not supported");
+    }
+    if (const auto spread = node.attributes.find("spreadMethod");
+        spread != node.attributes.end() && Trim(spread->second) != "pad") {
+      throw std::runtime_error("SVG gradient spreadMethod supports only pad");
+    }
+    if (const auto units = node.attributes.find("gradientUnits"); units != node.attributes.end()) {
+      const std::string value = Trim(units->second);
+      if (value == "objectBoundingBox") {
+        definition.object_bounding_box = true;
+      } else if (value == "userSpaceOnUse") {
+        definition.object_bounding_box = false;
+      } else {
+        throw std::runtime_error("SVG gradientUnits is unsupported");
+      }
+    }
+    const auto override_length = [&](std::string_view name, GradientLength& destination) {
+      if (const auto value = node.attributes.find(std::string(name)); value != node.attributes.end()) {
+        destination = ParseGradientLength(value->second, name);
+      }
+    };
+    if (radial) {
+      override_length("cx", definition.first_x);
+      override_length("cy", definition.first_y);
+      override_length("r", definition.second_x);
+      definition.second_y = definition.second_x;
+      if (const auto value = node.attributes.find("fx"); value != node.attributes.end()) {
+        definition.focal_x = ParseGradientLength(value->second, "fx");
+      }
+      if (const auto value = node.attributes.find("fy"); value != node.attributes.end()) {
+        definition.focal_y = ParseGradientLength(value->second, "fy");
+      }
+      if (const auto value = node.attributes.find("fr"); value != node.attributes.end()) {
+        definition.focal_radius = ParseGradientLength(value->second, "fr");
+      }
+    } else {
+      override_length("x1", definition.first_x);
+      override_length("y1", definition.first_y);
+      override_length("x2", definition.second_x);
+      override_length("y2", definition.second_y);
+    }
+
+    bool declares_stops = false;
+    std::vector<std::pair<float, Color>> stops;
+    const Style gradient_style = node_style(index);
+    float previous_offset = 0.0F;
+    for (const std::size_t child : node.children) {
+      const SvgNode& stop = document.nodes[child];
+      if (stop.name != "stop") {
+        throw std::runtime_error("SVG gradients may contain only stop elements");
+      }
+      if (!stop.children.empty()) {
+        throw std::runtime_error("SVG stop elements must not contain child elements");
+      }
+      declares_stops = true;
+      const auto offset = stop.attributes.find("offset");
+      const GradientLength parsed =
+          offset == stop.attributes.end() ? GradientLength{} : ParseGradientLength(offset->second, "stop offset");
+      const float resolved_offset = std::max(previous_offset, std::clamp(parsed.value, 0.0F, 1.0F));
+      const Style stop_style = ResolveStyle(gradient_style, stop.attributes);
+      Color color = stop_style.stop_uses_current_color ? stop_style.current_color : stop_style.stop_color;
+      color.alpha *= stop_style.stop_opacity;
+      stops.emplace_back(resolved_offset, color);
+      previous_offset = resolved_offset;
+    }
+    if (declares_stops) {
+      definition.stops = std::move(stops);
+    }
+    if (definition.stops.empty()) {
+      throw std::runtime_error("SVG gradients require at least one stop");
+    }
+    if (definition.stops.size() == 1) {
+      const Color color = definition.stops.front().second;
+      definition.stops = {{0.0F, color}, {1.0F, color}};
+    }
+    return definition;
+  };
+
+  const auto resolve_gradient = [&](std::string_view id, Rect path_bounds) {
+    const GradientDefinition definition = resolve_gradient_definition(find_reference(id, "fill"));
+    const Rect coordinate_rect = definition.object_bounding_box
+                                     ? path_bounds
+                                     : Rect{result.view_x, result.view_y, result.view_width, result.view_height};
+    if (coordinate_rect.width <= 0.0F || coordinate_rect.height <= 0.0F) {
+      return ResolvedGradient{definition.radial, coordinate_rect};
+    }
+    const Point first{
+        ResolveGradientCoordinate(definition.first_x, coordinate_rect.x, coordinate_rect.width,
+                                  definition.object_bounding_box),
+        ResolveGradientCoordinate(definition.first_y, coordinate_rect.y, coordinate_rect.height,
+                                  definition.object_bounding_box),
+    };
+    Point second;
+    if (definition.radial) {
+      second = {
+          ResolveGradientRadius(definition.second_x, coordinate_rect, true, definition.object_bounding_box),
+          ResolveGradientRadius(definition.second_y, coordinate_rect, false, definition.object_bounding_box),
+      };
+      if (second.x <= 0.0F || second.y <= 0.0F) {
+        throw std::runtime_error("SVG radial gradient radius must be positive");
+      }
+      const float focal_x = definition.focal_x.has_value()
+                                ? ResolveGradientCoordinate(*definition.focal_x, coordinate_rect.x,
+                                                            coordinate_rect.width, definition.object_bounding_box)
+                                : first.x;
+      const float focal_y = definition.focal_y.has_value()
+                                ? ResolveGradientCoordinate(*definition.focal_y, coordinate_rect.y,
+                                                            coordinate_rect.height, definition.object_bounding_box)
+                                : first.y;
+      const float focal_radius = definition.focal_radius.has_value()
+                                     ? ResolveGradientRadius(*definition.focal_radius, coordinate_rect, true,
+                                                             definition.object_bounding_box)
+                                     : 0.0F;
+      if (focal_x != first.x || focal_y != first.y || focal_radius != 0.0F) {
+        throw std::runtime_error("SVG non-concentric radial gradients are not supported");
+      }
+    } else {
+      second = {
+          ResolveGradientCoordinate(definition.second_x, coordinate_rect.x, coordinate_rect.width,
+                                    definition.object_bounding_box),
+          ResolveGradientCoordinate(definition.second_y, coordinate_rect.y, coordinate_rect.height,
+                                    definition.object_bounding_box),
+      };
+    }
+    return ResolvedGradient{definition.radial, coordinate_rect, first, second, definition.stops};
+  };
+
+  for (std::size_t node_index = 0; node_index < document.nodes.size(); ++node_index) {
+    SvgNode& node = document.nodes[node_index];
     const Style style = ResolveStyle(Style{}, node.attributes);
     static_cast<void>(node_transform(node));
     if (IsShape(node.name)) {
@@ -1521,6 +1982,18 @@ CompiledDocument EmitDocument(SvgDocument document) {
       if (const auto units = node.attributes.find("clipPathUnits");
           units != node.attributes.end() && units->second != "userSpaceOnUse") {
         throw std::runtime_error("SVG clipPathUnits supports only userSpaceOnUse");
+      }
+    }
+    if (node.name == "linearGradient" || node.name == "radialGradient") {
+      static_cast<void>(resolve_gradient_definition(node_index));
+    }
+    if (node.name == "stop") {
+      if (!node.parent.has_value() || (document.nodes[*node.parent].name != "linearGradient" &&
+                                       document.nodes[*node.parent].name != "radialGradient")) {
+        throw std::runtime_error("SVG stop elements must belong to a gradient");
+      }
+      if (node.attributes.contains("transform")) {
+        throw std::runtime_error("SVG stop transforms are not supported");
       }
     }
   }
@@ -1635,9 +2108,10 @@ CompiledDocument EmitDocument(SvgDocument document) {
     if (!style.displayed || style.opacity == 0.0F) {
       return;
     }
-    if (node.name == "defs" || node.name == "clipPath") {
+    if (node.name == "defs" || node.name == "clipPath" || node.name == "linearGradient" ||
+        node.name == "radialGradient" || node.name == "stop") {
       if (referenced) {
-        throw std::runtime_error("SVG use cannot reference a defs or clipPath element");
+        throw std::runtime_error("SVG use cannot reference a definition-only element");
       }
       return;
     }
@@ -1670,7 +2144,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
       emit_node(target, style, true);
       references.pop_back();
     } else if (IsShape(node.name)) {
-      WriteShape(result.operations, *node.path, style, result.operation_count);
+      WriteShape(result.operations, *node.path, style, result.operation_count, resolve_gradient);
       if (result.operation_count > max_operations) {
         throw std::runtime_error("SVG produces too many vector operations");
       }

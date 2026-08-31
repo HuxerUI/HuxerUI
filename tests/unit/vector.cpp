@@ -64,6 +64,24 @@ TEST_CASE("VectorAssetsRetainNormalizedStrokeStyles") {
   REQUIRE(command.style.dash_offset == 10.0F);
 }
 
+TEST_CASE("VectorAssetsPreserveGradientPathFillsAndResolveTint") {
+  const LinearGradient gradient{
+      .stops = {{0.0F, Color::Rgb(255, 0, 0, 0.5F)}, {1.0F, Color::Rgb(0, 0, 255)}},
+  };
+  const VectorAsset vector = VectorAsset::Create({20.0F, 10.0F}, [&](VectorBuilder& builder) {
+    builder.FillPath(Triangle(), gradient, {0.0F, 0.0F, 40.0F, 20.0F});
+  });
+  PaintSequence sequence;
+  PaintContext context(sequence, {0.0F, 0.0F, 40.0F, 20.0F});
+  context.DrawImage(vector, {0.0F, 0.0F, 40.0F, 20.0F}, Color::Rgb(20, 40, 60, 0.5F), 0.5F);
+  context.Finish();
+
+  const auto& command = std::get<FillLinearGradientPathCommand>(sequence.Commands()[2]);
+  REQUIRE(command.gradient_rect == Rect{0.0F, 0.0F, 40.0F, 20.0F});
+  REQUIRE(command.gradient.stops[0].color == Color::Rgb(20, 40, 60, 0.125F));
+  REQUIRE(command.gradient.stops[1].color == Color::Rgb(20, 40, 60, 0.25F));
+}
+
 TEST_CASE("VectorAssetsValidateGeometryAndBuilderBalance") {
   REQUIRE_THROWS_AS(VectorAsset::Create({}, [](VectorBuilder&) {}), std::invalid_argument);
   REQUIRE_THROWS_AS(

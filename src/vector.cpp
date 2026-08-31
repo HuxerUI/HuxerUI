@@ -79,6 +79,24 @@ Color ReadColor(VectorReader& reader) {
   return {reader.F32(), reader.F32(), reader.F32(), reader.F32()};
 }
 
+Rect ReadRect(VectorReader& reader) {
+  return {reader.F32(), reader.F32(), reader.F32(), reader.F32()};
+}
+
+std::vector<GradientStop> ReadGradientStops(VectorReader& reader) {
+  const std::uint32_t count = reader.U32();
+  constexpr std::size_t bytes_per_stop = sizeof(float) * 5;
+  if (count > reader.RemainingBytes() / bytes_per_stop) {
+    throw std::logic_error("HuxerUI vector payload is truncated");
+  }
+  std::vector<GradientStop> stops;
+  stops.reserve(count);
+  for (std::uint32_t index = 0; index < count; ++index) {
+    stops.push_back({reader.F32(), ReadColor(reader)});
+  }
+  return stops;
+}
+
 Path ReadPath(VectorReader& reader) {
   Path path;
   const std::uint32_t count = reader.U32();
@@ -158,6 +176,22 @@ VectorBuilder::~VectorBuilder() = default;
 
 void VectorBuilder::FillPath(Path path, Color color, PathFillRule fill_rule) {
   impl_->context.FillPath(std::move(path), color, fill_rule);
+}
+
+void VectorBuilder::FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule) {
+  impl_->context.FillPath(std::move(path), std::move(gradient), fill_rule);
+}
+
+void VectorBuilder::FillPath(Path path, LinearGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
+  impl_->context.FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
+}
+
+void VectorBuilder::FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule) {
+  impl_->context.FillPath(std::move(path), std::move(gradient), fill_rule);
+}
+
+void VectorBuilder::FillPath(Path path, RadialGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
+  impl_->context.FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
 }
 
 void VectorBuilder::StrokePath(Path path, Color color, StrokeStyle style) {
@@ -295,6 +329,20 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
         case 6:
           builder.PopTransform();
           break;
+        case 7: {
+          const PathFillRule fill_rule = ReadFillRule(reader);
+          const Rect gradient_rect = ReadRect(reader);
+          LinearGradient gradient{ReadPoint(reader), ReadPoint(reader), ReadGradientStops(reader)};
+          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
+          break;
+        }
+        case 8: {
+          const PathFillRule fill_rule = ReadFillRule(reader);
+          const Rect gradient_rect = ReadRect(reader);
+          RadialGradient gradient{ReadPoint(reader), {reader.F32(), reader.F32()}, ReadGradientStops(reader)};
+          builder.FillPath(ReadPath(reader), std::move(gradient), gradient_rect, fill_rule);
+          break;
+        }
         default:
           throw std::logic_error("HuxerUI vector payload contains an unknown drawing operation");
         }

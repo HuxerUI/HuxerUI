@@ -15,6 +15,7 @@
 `Canvas` receives a `PaintContext` and assigned `Size`. Give it explicit or parent-derived constraints. Draw in local coordinates and do not use Canvas to arbitrarily place `PlatformView` children.
 
 `PaintContext` emits platform-neutral commands for rectangles, gradients, text, images, circles, lines, arcs, borders, shadows, paths, clips, and transforms. Balance every pushed clip or transform with a pop on every path. Call only public drawing methods; `PaintCommand`, `RenderScene`, and renderer integration are framework boundaries rather than application extension points.
+`FillPath()` accepts a solid color, `LinearGradient`, or `RadialGradient`. Gradient geometry is normalized to exact Path bounds unless an explicit gradient rectangle is supplied; that rectangle defines coordinates and does not clip the Path. Use the explicit form when separate Paths must share one continuous gradient.
 
 ## Paths and text
 

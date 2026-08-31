@@ -146,6 +146,21 @@ void RequireGradientStops(const std::vector<GradientStop>& stops) {
     previous = stop.offset;
   }
 }
+
+void RequireLinearGradient(const LinearGradient& gradient) {
+  if (!IsFinite(gradient.start) || !IsFinite(gradient.end)) {
+    throw std::invalid_argument("HuxerUI linear gradient endpoints must be finite");
+  }
+  RequireGradientStops(gradient.stops);
+}
+
+void RequireRadialGradient(const RadialGradient& gradient) {
+  if (!IsFinite(gradient.center) || !std::isfinite(gradient.radius.width) || !std::isfinite(gradient.radius.height) ||
+      gradient.radius.width <= 0.0F || gradient.radius.height <= 0.0F) {
+    throw std::invalid_argument("HuxerUI radial gradient geometry must be finite with positive radii");
+  }
+  RequireGradientStops(gradient.stops);
+}
 } // namespace
 
 PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(sequence), bounds_(bounds) {
@@ -173,10 +188,7 @@ void PaintContext::DrawLinearGradient(Rect rect, LinearGradient gradient, Corner
   RequireOpen();
   RequireRect(rect);
   RequireCornerRadii(corner_radii);
-  if (!IsFinite(gradient.start) || !IsFinite(gradient.end)) {
-    throw std::invalid_argument("HuxerUI linear gradient endpoints must be finite");
-  }
-  RequireGradientStops(gradient.stops);
+  RequireLinearGradient(gradient);
   corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushClip(rect, corner_radii);
@@ -193,11 +205,7 @@ void PaintContext::DrawRadialGradient(Rect rect, RadialGradient gradient, Corner
   RequireOpen();
   RequireRect(rect);
   RequireCornerRadii(corner_radii);
-  if (!IsFinite(gradient.center) || !std::isfinite(gradient.radius.width) || !std::isfinite(gradient.radius.height) ||
-      gradient.radius.width <= 0.0F || gradient.radius.height <= 0.0F) {
-    throw std::invalid_argument("HuxerUI radial gradient geometry must be finite with positive radii");
-  }
-  RequireGradientStops(gradient.stops);
+  RequireRadialGradient(gradient);
   corner_radii = detail::NormalizeCornerRadii(rect, corner_radii);
   if (!corner_radii.IsUniform()) {
     PushClip(rect, corner_radii);
@@ -418,6 +426,18 @@ void PaintContext::DrawImageRect(
           using Command = std::decay_t<decltype(value)>;
           if constexpr (std::same_as<Command, FillPathCommand>) {
             FillPath(value.path, resolve_color(value.color), value.fill_rule);
+          } else if constexpr (std::same_as<Command, FillLinearGradientPathCommand>) {
+            LinearGradient gradient = value.gradient;
+            for (GradientStop& stop : gradient.stops) {
+              stop.color = resolve_color(stop.color);
+            }
+            FillPath(value.path, std::move(gradient), value.gradient_rect, value.fill_rule);
+          } else if constexpr (std::same_as<Command, FillRadialGradientPathCommand>) {
+            RadialGradient gradient = value.gradient;
+            for (GradientStop& stop : gradient.stops) {
+              stop.color = resolve_color(stop.color);
+            }
+            FillPath(value.path, std::move(gradient), value.gradient_rect, value.fill_rule);
           } else if constexpr (std::same_as<Command, StrokePathCommand>) {
             StrokePath(value.path, resolve_color(value.color), value.style);
           } else if constexpr (std::same_as<Command, PushPathClipCommand>) {
@@ -584,6 +604,44 @@ void PaintContext::FillPath(Path path, Color color, PathFillRule fill_rule) {
   if (!command.path.IsEmpty()) {
     Include(command.path.Bounds());
   }
+}
+
+void PaintContext::FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule) {
+  const Rect gradient_rect = path.Bounds();
+  FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
+}
+
+void PaintContext::FillPath(Path path, LinearGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
+  RequireOpen();
+  RequireLinearGradient(gradient);
+  RequireRect(gradient_rect);
+  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F) {
+    return;
+  }
+  const Rect path_bounds = path.Bounds();
+  sequence_.commands_.emplace_back(
+      FillLinearGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, fill_rule}
+  );
+  Include(path_bounds);
+}
+
+void PaintContext::FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule) {
+  const Rect gradient_rect = path.Bounds();
+  FillPath(std::move(path), std::move(gradient), gradient_rect, fill_rule);
+}
+
+void PaintContext::FillPath(Path path, RadialGradient gradient, Rect gradient_rect, PathFillRule fill_rule) {
+  RequireOpen();
+  RequireRadialGradient(gradient);
+  RequireRect(gradient_rect);
+  if (path.IsEmpty() || gradient_rect.width == 0.0F || gradient_rect.height == 0.0F) {
+    return;
+  }
+  const Rect path_bounds = path.Bounds();
+  sequence_.commands_.emplace_back(
+      FillRadialGradientPathCommand{std::move(path), std::move(gradient), gradient_rect, fill_rule}
+  );
+  Include(path_bounds);
 }
 
 void PaintContext::StrokePath(Path path, Color color, StrokeStyle style) {

@@ -10,6 +10,9 @@
 
 namespace huxerui {
 
+struct LinearGradient;
+struct RadialGradient;
+
 namespace detail {
 class PathAccess;
 class ResourceAccess;
@@ -221,6 +224,16 @@ public:
 
   /// Records a filled path using fill_rule to resolve overlapping contours.
   void FillPath(Path path, Color color, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Records a linear-gradient path fill evaluated relative to the path bounds.
+  void FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Records a linear-gradient path fill evaluated relative to gradient_rect.
+  void FillPath(Path path, LinearGradient gradient, Rect gradient_rect,
+                PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Records an elliptical radial-gradient path fill evaluated relative to the path bounds.
+  void FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Records an elliptical radial-gradient path fill evaluated relative to gradient_rect.
+  void FillPath(Path path, RadialGradient gradient, Rect gradient_rect,
+                PathFillRule fill_rule = PathFillRule::NonZero);
   /// Records a path stroke using one normalized stroke style for every contour.
   ///
   /// Each contour restarts the dash pattern at dash_offset. For example, a rounded dashed stroke can use

@@ -473,6 +473,14 @@ void FillCurrentPath(CGContextRef context, PathFillRule fill_rule) {
   }
 }
 
+void ClipCurrentPath(CGContextRef context, PathFillRule fill_rule) {
+  if (fill_rule == PathFillRule::EvenOdd) {
+    CGContextEOClip(context);
+  } else {
+    CGContextClip(context);
+  }
+}
+
 } // namespace
 
 struct AppKitRenderer::State {
@@ -1508,6 +1516,46 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const FillPathCommand& 
   FillCurrentPath(context, command.fill_rule);
   CGContextRestoreGState(context);
   CGPathRelease(path);
+}
+
+void AppKitRenderer::RenderCommand(CGContextRef context, const FillLinearGradientPathCommand& command) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
+  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+    return;
+  }
+  const auto point = [&](Point value) {
+    return CGPointMake(command.gradient_rect.x + value.x * command.gradient_rect.width,
+                       command.gradient_rect.y + value.y * command.gradient_rect.height);
+  };
+  const CFRef<CGPathRef> path(CreatePath(command.path));
+  CGContextSaveGState(context);
+  CGContextAddPath(context, path.Get());
+  ClipCurrentPath(context, command.fill_rule);
+  CGContextDrawLinearGradient(context, gradient.Get(), point(command.gradient.start), point(command.gradient.end),
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
+  CGContextRestoreGState(context);
+}
+
+void AppKitRenderer::RenderCommand(CGContextRef context, const FillRadialGradientPathCommand& command) {
+  const CFRef<CGGradientRef> gradient = CreateGradient(command.gradient.stops);
+  if (gradient.Get() == nullptr || command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+    return;
+  }
+  const CGFloat center_x = command.gradient_rect.x + command.gradient.center.x * command.gradient_rect.width;
+  const CGFloat center_y = command.gradient_rect.y + command.gradient.center.y * command.gradient_rect.height;
+  const CGPoint center = CGPointMake(center_x, center_y);
+  const CGFloat radius_x = command.gradient.radius.width * command.gradient_rect.width;
+  const CGFloat radius_y = command.gradient.radius.height * command.gradient_rect.height;
+  const CFRef<CGPathRef> path(CreatePath(command.path));
+  CGContextSaveGState(context);
+  CGContextAddPath(context, path.Get());
+  ClipCurrentPath(context, command.fill_rule);
+  CGContextTranslateCTM(context, center.x, center.y);
+  CGContextScaleCTM(context, 1.0, radius_y / radius_x);
+  CGContextTranslateCTM(context, -center.x, -center.y);
+  CGContextDrawRadialGradient(context, gradient.Get(), center, 0.0, center, radius_x,
+                              kCGGradientDrawsBeforeStartLocation | kCGGradientDrawsAfterEndLocation);
+  CGContextRestoreGState(context);
 }
 
 void AppKitRenderer::RenderCommand(CGContextRef context, const StrokePathCommand& command) {

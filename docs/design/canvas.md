@@ -51,6 +51,11 @@ The query retains no mutable cache and does not alter shared Path storage or Pai
 
 ```cpp
 paint.FillPath(path, color, PathFillRule::NonZero);
+paint.FillPath(path, LinearGradient{
+    .start = {0.0F, 0.0F},
+    .end = {1.0F, 1.0F},
+    .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+});
 paint.StrokePath(path, color,
                  StrokeStyle{.width = 2.0F, .cap = StrokeCap::Round, .join = StrokeJoin::Round,
                              .dash_pattern = {8.0F, 4.0F}});
@@ -59,7 +64,12 @@ paint.PushPathClip(path, PathFillRule::EvenOdd);
 paint.PopClip();
 ```
 
-The corresponding immutable commands are `FillPathCommand`, `StrokePathCommand`, `DrawPathShadowCommand`, and `PushPathClipCommand`.
+Solid and gradient fills record `FillPathCommand`, `FillLinearGradientPathCommand`, or `FillRadialGradientPathCommand` as one atomic geometry-and-paint operation.
+Strokes, shadows, and clips continue to use `StrokePathCommand`, `DrawPathShadowCommand`, and `PushPathClipCommand`.
+The overload without an explicit gradient rectangle evaluates normalized gradient coordinates relative to exact Path bounds.
+An explicit gradient rectangle lets several Paths share one coordinate space without clipping geometry to that rectangle.
+Damage remains based on transformed and clipped Path bounds rather than the gradient coordinate rectangle.
+Renderers map the atomic command to native Path filling where available; Core Graphics uses an equivalent renderer-local Path clip around one gradient draw rather than exposing clip expansion in the shared command sequence.
 Path clips share the existing balanced clip stack and `PopClipCommand`.
 Stroke bounds conservatively include cap, join, width, and miter-limit overflow.
 Path shadows include offset and blur overflow but intentionally do not expose spread.
@@ -144,6 +154,6 @@ Platform geometry, masks, layers, and device-dependent caches never enter shared
 
 ## Unsupported capabilities
 
-The Path surface does not include relative commands, boolean geometry operations, path metrics, gradient path fills, stroke containment, or a reusable hit-shape modifier.
+The Path surface does not include relative commands, boolean geometry operations, path metrics, gradient strokes, stroke containment, or a reusable hit-shape modifier.
 ImageAsset, DrawImage, and DrawImageRect extend the same PaintSequence and are specified in [App Resources, Images, and Localization Design](resources.md).
-Rectangle linear and radial gradients use dedicated PaintCommands; there is no generic Brush abstraction.
+Rectangle and Path linear and radial gradients use explicit PaintCommands; there is no generic Brush abstraction.

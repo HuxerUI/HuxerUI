@@ -741,6 +741,7 @@ private:
           pattern, stop.offset, stop.color.red, stop.color.green, stop.color.blue, stop.color.alpha
       );
     }
+    cairo_pattern_set_extend(pattern, CAIRO_EXTEND_PAD);
   }
 
   void DrawCommand(const DrawRectCommand& command) {
@@ -1141,6 +1142,51 @@ private:
         context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
     );
     cairo_fill(context_);
+  }
+
+  void DrawCommand(const FillLinearGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+      return;
+    }
+    cairo_pattern_t* pattern = cairo_pattern_create_linear(
+        command.gradient_rect.x + command.gradient.start.x * command.gradient_rect.width,
+        command.gradient_rect.y + command.gradient.start.y * command.gradient_rect.height,
+        command.gradient_rect.x + command.gradient.end.x * command.gradient_rect.width,
+        command.gradient_rect.y + command.gradient.end.y * command.gradient_rect.height
+    );
+    AddStops(pattern, command.gradient.stops);
+    cairo_set_source(context_, pattern);
+    AppendPath(context_, command.path);
+    cairo_set_fill_rule(
+        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
+    );
+    cairo_fill(context_);
+    cairo_pattern_destroy(pattern);
+  }
+
+  void DrawCommand(const FillRadialGradientPathCommand& command) {
+    if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+      return;
+    }
+    const double center_x = command.gradient_rect.x + command.gradient.center.x * command.gradient_rect.width;
+    const double center_y = command.gradient_rect.y + command.gradient.center.y * command.gradient_rect.height;
+    const double radius_x = command.gradient.radius.width * command.gradient_rect.width;
+    const double radius_y = command.gradient.radius.height * command.gradient_rect.height;
+    cairo_save(context_);
+    AppendPath(context_, command.path);
+    cairo_set_fill_rule(
+        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
+    );
+    cairo_clip(context_);
+    cairo_translate(context_, center_x, center_y);
+    cairo_scale(context_, 1.0, radius_y / radius_x);
+    cairo_translate(context_, -center_x, -center_y);
+    cairo_pattern_t* pattern = cairo_pattern_create_radial(center_x, center_y, 0.0, center_x, center_y, radius_x);
+    AddStops(pattern, command.gradient.stops);
+    cairo_set_source(context_, pattern);
+    cairo_paint(context_);
+    cairo_pattern_destroy(pattern);
+    cairo_restore(context_);
   }
 
   void DrawCommand(const StrokePathCommand& command) {

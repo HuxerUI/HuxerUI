@@ -1182,6 +1182,51 @@ void WebRenderer::RenderCommand(const FillPathCommand& command) {
   context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
 }
 
+void WebRenderer::RenderCommand(const FillLinearGradientPathCommand& command) {
+  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+    return;
+  }
+  const float start_x = command.gradient_rect.x + command.gradient.start.x * command.gradient_rect.width;
+  const float start_y = command.gradient_rect.y + command.gradient.start.y * command.gradient_rect.height;
+  const float end_x = command.gradient_rect.x + command.gradient.end.x * command.gradient_rect.width;
+  const float end_y = command.gradient_rect.y + command.gradient.end.y * command.gradient_rect.height;
+  val gradient = context_.call<val>("createLinearGradient", start_x, start_y, end_x, end_y);
+  for (const GradientStop& stop : command.gradient.stops) {
+    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
+  }
+  context_.call<void>("beginPath");
+  AddPath(context_, command.path);
+  context_.set("fillStyle", gradient);
+  context_.call<void>("fill", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
+}
+
+void WebRenderer::RenderCommand(const FillRadialGradientPathCommand& command) {
+  if (command.path.IsEmpty() || command.gradient_rect.IsEmpty()) {
+    return;
+  }
+  const float center_x = command.gradient_rect.x + command.gradient.center.x * command.gradient_rect.width;
+  const float center_y = command.gradient_rect.y + command.gradient.center.y * command.gradient_rect.height;
+  const float radius_x = command.gradient.radius.width * command.gradient_rect.width;
+  const float radius_y = command.gradient.radius.height * command.gradient_rect.height;
+  const float scale_y = radius_y / radius_x;
+  const Rect path_bounds = command.path.Bounds();
+  context_.call<void>("save");
+  context_.call<void>("beginPath");
+  AddPath(context_, command.path);
+  context_.call<void>("clip", std::string(command.fill_rule == PathFillRule::EvenOdd ? "evenodd" : "nonzero"));
+  context_.call<void>("translate", center_x, center_y);
+  context_.call<void>("scale", 1.0F, scale_y);
+  context_.call<void>("translate", -center_x, -center_y);
+  val gradient = context_.call<val>("createRadialGradient", center_x, center_y, 0.0F, center_x, center_y, radius_x);
+  for (const GradientStop& stop : command.gradient.stops) {
+    gradient.call<void>("addColorStop", stop.offset, CssColor(stop.color));
+  }
+  context_.set("fillStyle", gradient);
+  const float fill_y = center_y + (path_bounds.y - center_y) / scale_y;
+  context_.call<void>("fillRect", path_bounds.x, fill_y, path_bounds.width, path_bounds.height / scale_y);
+  context_.call<void>("restore");
+}
+
 void WebRenderer::RenderCommand(const StrokePathCommand& command) {
   if (command.path.IsEmpty() || command.style.width <= 0.0F) {
     return;

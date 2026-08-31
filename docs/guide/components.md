@@ -40,6 +40,17 @@ sector.MoveTo({24.0F, 24.0F})
 paint.FillPath(sector, Color::Black());
 ```
 
+Paths also accept linear and elliptical radial gradients.
+Normalized gradient geometry uses exact Path bounds by default, or an explicit rectangle when several Paths must share one gradient space:
+
+```cpp
+paint.FillPath(sector, LinearGradient{
+    .start = {0.0F, 0.0F},
+    .end = {1.0F, 1.0F},
+    .stops = {{0.0F, Color::Rgb(103, 80, 164)}, {1.0F, Color::Rgb(208, 188, 255)}},
+});
+```
+
 Use `Path::Contains(point, fill_rule)` when custom interaction must test the same local filled geometry.
 Pass the fill rule used to paint the path; open contours receive the same implicit closing edge, and points on the boundary are included.
 The query tests fill geometry rather than stroke width.

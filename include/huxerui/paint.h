@@ -332,6 +332,34 @@ struct FillPathCommand {
   bool operator==(const FillPathCommand&) const = default;
 };
 
+/// Fills the region selected by one path with a linear gradient.
+struct FillLinearGradientPathCommand {
+  /// Path geometry in the active logical coordinate space.
+  Path path;
+  /// Gradient evaluated relative to gradient_rect.
+  LinearGradient gradient;
+  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the path.
+  Rect gradient_rect;
+  /// Rule used to resolve overlapping contours.
+  PathFillRule fill_rule = PathFillRule::NonZero;
+
+  bool operator==(const FillLinearGradientPathCommand&) const = default;
+};
+
+/// Fills the region selected by one path with an elliptical radial gradient.
+struct FillRadialGradientPathCommand {
+  /// Path geometry in the active logical coordinate space.
+  Path path;
+  /// Gradient evaluated relative to gradient_rect.
+  RadialGradient gradient;
+  /// Coordinate rectangle used to resolve normalized gradient geometry without clipping the path.
+  Rect gradient_rect;
+  /// Rule used to resolve overlapping contours.
+  PathFillRule fill_rule = PathFillRule::NonZero;
+
+  bool operator==(const FillRadialGradientPathCommand&) const = default;
+};
+
 /// Strokes every contour of one path with a normalized style.
 struct StrokePathCommand {
   /// Path centerline geometry in the active logical coordinate space.
@@ -473,6 +501,8 @@ using PaintCommand = std::variant<
     DrawBorderCommand,
     DrawShadowCommand,
     FillPathCommand,
+    FillLinearGradientPathCommand,
+    FillRadialGradientPathCommand,
     StrokePathCommand,
     DrawPathShadowCommand,
     PushClipCommand,
@@ -603,6 +633,16 @@ public:
                   CornerRadii corner_radii = {});
   /// Fills path with color using fill_rule to resolve overlapping contours.
   void FillPath(Path path, Color color, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Fills path with a linear gradient evaluated relative to the path bounds.
+  void FillPath(Path path, LinearGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Fills path with a linear gradient evaluated relative to gradient_rect without clipping to that rectangle.
+  void FillPath(Path path, LinearGradient gradient, Rect gradient_rect,
+                PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Fills path with an elliptical radial gradient evaluated relative to the path bounds.
+  void FillPath(Path path, RadialGradient gradient, PathFillRule fill_rule = PathFillRule::NonZero);
+  /// Fills path with an elliptical radial gradient evaluated relative to gradient_rect without clipping to it.
+  void FillPath(Path path, RadialGradient gradient, Rect gradient_rect,
+                PathFillRule fill_rule = PathFillRule::NonZero);
   /// Strokes every contour in path with the same normalized style.
   ///
   /// Each contour independently restarts the dash pattern at dash_offset.

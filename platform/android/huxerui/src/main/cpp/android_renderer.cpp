@@ -119,6 +119,12 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_border_ = environment->GetMethodID(view_class, "drawBorder", "(Landroid/graphics/Canvas;FFFFIFF)V");
   draw_shadow_ = environment->GetMethodID(view_class, "drawShadow", "(Landroid/graphics/Canvas;FFFFIFF)V");
   fill_path_ = environment->GetMethodID(view_class, "fillPath", "(Landroid/graphics/Canvas;[FII)V");
+  fill_linear_gradient_path_ = environment->GetMethodID(
+      view_class, "fillLinearGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFF[F[II)V"
+  );
+  fill_radial_gradient_path_ = environment->GetMethodID(
+      view_class, "fillRadialGradientPath", "(Landroid/graphics/Canvas;[FFFFFFFFF[F[II)V"
+  );
   stroke_path_ = environment->GetMethodID(view_class, "strokePath", "(Landroid/graphics/Canvas;[FIFIIF[FF)V");
   draw_path_shadow_ = environment->GetMethodID(view_class, "drawPathShadow", "(Landroid/graphics/Canvas;[FFFFFIFFFI)V");
   push_clip_ = environment->GetMethodID(view_class, "pushClip", "(Landroid/graphics/Canvas;FFFFF)V");
@@ -129,9 +135,11 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   push_transform_ = environment->GetMethodID(view_class, "pushTransform", "(Landroid/graphics/Canvas;FFFFFF)V");
   pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
 
-  if (draw_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
+  if (draw_rect_ == nullptr || draw_linear_gradient_ == nullptr || draw_radial_gradient_ == nullptr ||
+      draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
       draw_external_texture_ == nullptr || draw_circle_ == nullptr || draw_line_ == nullptr || draw_arc_ == nullptr ||
-      draw_border_ == nullptr || draw_shadow_ == nullptr || fill_path_ == nullptr || stroke_path_ == nullptr ||
+      draw_border_ == nullptr || draw_shadow_ == nullptr || fill_path_ == nullptr ||
+      fill_linear_gradient_path_ == nullptr || fill_radial_gradient_path_ == nullptr || stroke_path_ == nullptr ||
       draw_path_shadow_ == nullptr || push_clip_ == nullptr || push_path_clip_ == nullptr || pop_clip_ == nullptr ||
       push_opacity_ == nullptr || pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
     throw std::runtime_error("HuxerUI Android renderer methods do not match the platform backend");
@@ -595,6 +603,54 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
   environment
       ->CallVoidMethod(view, fill_path_, canvas, path, PackColor(command.color), static_cast<jint>(command.fill_rule));
   environment->DeleteLocalRef(path);
+}
+
+void AndroidRenderer::RenderCommand(
+    JNIEnv* environment, jobject view, jobject canvas, const FillLinearGradientPathCommand& command
+) {
+  android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
+  std::vector<jfloat> offsets;
+  std::vector<jint> colors;
+  offsets.reserve(command.gradient.stops.size());
+  colors.reserve(command.gradient.stops.size());
+  for (const GradientStop& stop : command.gradient.stops) {
+    offsets.push_back(stop.offset);
+    colors.push_back(PackColor(stop.color));
+  }
+  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
+  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
+  if (!path || !java_offsets || !java_colors) {
+    return;
+  }
+  environment->CallVoidMethod(view, fill_linear_gradient_path_, canvas, path.Get(), command.gradient_rect.x,
+                              command.gradient_rect.y, command.gradient_rect.width, command.gradient_rect.height,
+                              command.gradient.start.x, command.gradient.start.y, command.gradient.end.x,
+                              command.gradient.end.y, java_offsets.Get(), java_colors.Get(),
+                              static_cast<jint>(command.fill_rule));
+}
+
+void AndroidRenderer::RenderCommand(
+    JNIEnv* environment, jobject view, jobject canvas, const FillRadialGradientPathCommand& command
+) {
+  android::LocalRef<jfloatArray> path(environment, ToPathArray(environment, command.path));
+  std::vector<jfloat> offsets;
+  std::vector<jint> colors;
+  offsets.reserve(command.gradient.stops.size());
+  colors.reserve(command.gradient.stops.size());
+  for (const GradientStop& stop : command.gradient.stops) {
+    offsets.push_back(stop.offset);
+    colors.push_back(PackColor(stop.color));
+  }
+  android::LocalRef<jfloatArray> java_offsets(environment, ToFloatArray(environment, offsets));
+  android::LocalRef<jintArray> java_colors(environment, ToIntArray(environment, colors));
+  if (!path || !java_offsets || !java_colors) {
+    return;
+  }
+  environment->CallVoidMethod(view, fill_radial_gradient_path_, canvas, path.Get(), command.gradient_rect.x,
+                              command.gradient_rect.y, command.gradient_rect.width, command.gradient_rect.height,
+                              command.gradient.center.x, command.gradient.center.y, command.gradient.radius.width,
+                              command.gradient.radius.height, java_offsets.Get(), java_colors.Get(),
+                              static_cast<jint>(command.fill_rule));
 }
 
 void AndroidRenderer::RenderCommand(

@@ -1615,6 +1615,43 @@ public final class HuxerUIView extends ViewGroup {
         canvas.drawPath(drawPath, paint);
     }
 
+    private void fillLinearGradientPath(Canvas canvas, float[] elements, float x, float y, float width, float height,
+            float startX, float startY, float endX, float endY, float[] stops, int[] colors, int fillRule) {
+        if (width <= 0.0F || height <= 0.0F || stops.length == 0 || stops.length != colors.length) {
+            return;
+        }
+        Path drawPath = preparePath(elements, fillRule);
+        preparePaint(0xFFFFFFFF, Paint.Style.FILL, 0.0F);
+        paint.setShader(new LinearGradient(x + startX * width, y + startY * height, x + endX * width,
+                y + endY * height, colors, stops, Shader.TileMode.CLAMP));
+        canvas.drawPath(drawPath, paint);
+        paint.setShader(null);
+    }
+
+    private void fillRadialGradientPath(Canvas canvas, float[] elements, float x, float y, float width, float height,
+            float centerX, float centerY, float radiusX, float radiusY, float[] stops, int[] colors, int fillRule) {
+        if (width <= 0.0F || height <= 0.0F || radiusX <= 0.0F || radiusY <= 0.0F || stops.length == 0
+                || stops.length != colors.length) {
+            return;
+        }
+        float resolvedCenterX = x + centerX * width;
+        float resolvedCenterY = y + centerY * height;
+        float resolvedRadiusX = radiusX * width;
+        float resolvedRadiusY = radiusY * height;
+        RadialGradient gradient = new RadialGradient(resolvedCenterX, resolvedCenterY, resolvedRadiusX, colors, stops,
+                Shader.TileMode.CLAMP);
+        if (resolvedRadiusX != resolvedRadiusY) {
+            Matrix local = new Matrix();
+            local.setScale(1.0F, resolvedRadiusY / resolvedRadiusX, resolvedCenterX, resolvedCenterY);
+            gradient.setLocalMatrix(local);
+        }
+        Path drawPath = preparePath(elements, fillRule);
+        preparePaint(0xFFFFFFFF, Paint.Style.FILL, 0.0F);
+        paint.setShader(gradient);
+        canvas.drawPath(drawPath, paint);
+        paint.setShader(null);
+    }
+
     private void strokePath(
             Canvas canvas, float[] elements, int color, float width, int cap, int join, float miterLimit,
             float[] dashPattern, float dashOffset) {
