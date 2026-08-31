@@ -955,7 +955,7 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
     const CGPoint point = [touch locationInView:self];
     const huxerui::PointerDeviceKind kind = PointerKind(touch);
     const std::int64_t pointer_id = PointerId(touch);
-    const NSNumber* pointer_key = @(pointer_id);
+    NSNumber* pointer_key = @(pointer_id);
     const huxerui::PointerButton previous =
         static_cast<huxerui::PointerButton>([huxeruiPointerButtons[pointer_key] unsignedIntValue]);
     huxerui::PointerButton pressed = huxerui::PointerButton::None;

@@ -260,6 +260,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(cmake.find("\"id\": \"dev.example.sampleapp\"") != std::string::npos);
   REQUIRE(cmake.find("HUXERUI_LIBRARY_GRAPH_OUTPUT") != std::string::npos);
   REQUIRE(cmake.find("project(sample_app VERSION 0.1.0 LANGUAGES NONE)") != std::string::npos);
+  REQUIRE(cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   REQUIRE(cmake.find("if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)\n    enable_language(CXX)") != std::string::npos);
   REQUIRE(cmake.find("set(CMAKE_CXX_STANDARD") == std::string::npos);
   REQUIRE(cmake.find("set(HUXERUI_BUILD_SHARED ON CACHE BOOL \"\" FORCE)") != std::string::npos);
@@ -350,6 +351,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(std::filesystem::is_regular_file(library / "platform/windows/src/.gitkeep"));
   const std::string swift_package = Read(library / "platform/ios/Package.swift");
   REQUIRE(swift_package.find("name: \"HuxerUI-CameraKit\"") != std::string::npos);
+  REQUIRE(swift_package.find(".iOS(.v15)") != std::string::npos);
   REQUIRE(swift_package.find("targets: [\"HuxerUICameraKit\"]") != std::string::npos);
   const std::string library_cmake = Read(library / "CMakeLists.txt");
   REQUIRE(library_cmake.find("huxerui_add_library(huxer_ui_camera_kit") != std::string::npos);
@@ -364,11 +366,13 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(library_cmake.find("platform/linux/src/*.cpp") != std::string::npos);
   REQUIRE(library_cmake.find("platform/web/src/*.cpp") != std::string::npos);
   REQUIRE(library_cmake.find("platform/windows/src/*.cpp") != std::string::npos);
+  REQUIRE(library_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   REQUIRE(library_cmake.find("set(CMAKE_CXX_STANDARD") == std::string::npos);
   const std::string preview_cmake = Read(preview / "CMakeLists.txt");
   REQUIRE(preview_cmake.find("huxerui_add_app(example_huxer_ui_camera_kit") != std::string::npos);
   REQUIRE(preview_cmake.find("TARGET HuxerUICameraKit::HuxerUICameraKit") != std::string::npos);
   REQUIRE(preview_cmake.find("PATH \"${CMAKE_CURRENT_SOURCE_DIR}/../..\"") != std::string::npos);
+  REQUIRE(preview_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   const std::string preview_application = Read(preview / "src/app.cpp");
   REQUIRE(preview_application.find("huxer_ui_camera_kit::Install") != std::string::npos);
   REQUIRE(preview_application.find("MaterialTheme") == std::string::npos);
@@ -922,6 +926,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   REQUIRE(base_configuration != shell.end());
   REQUIRE(base_configuration->content.find("com.example.sampleapp") != std::string::npos);
   REQUIRE(base_configuration->content.find("HUXERUI_LINK_OPTIONS_FILE") != std::string::npos);
+  REQUIRE(base_configuration->content.find("IPHONEOS_DEPLOYMENT_TARGET = 15.0") != std::string::npos);
   REQUIRE(base_configuration->content.find("HEADER_SEARCH_PATHS") != std::string::npos);
   REQUIRE(base_configuration->content.find("@\"$(HUXERUI_LINK_OPTIONS_FILE)\"") != std::string::npos);
   REQUIRE(base_configuration->content.find("-framework UIKit") == std::string::npos);
@@ -1144,6 +1149,7 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   REQUIRE(camera_dependency != std::string::npos);
   REQUIRE(maps_dependency != std::string::npos);
   REQUIRE(camera_dependency < maps_dependency);
+  REQUIRE(manifest.find(".iOS(.v15)") != std::string::npos);
   REQUIRE(manifest.find("HuxerUICameraKit") != std::string::npos);
   REQUIRE(manifest.find("MapView") != std::string::npos);
   REQUIRE(manifest.find("CommonTools") == std::string::npos);

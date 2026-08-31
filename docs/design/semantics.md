@@ -735,7 +735,7 @@ If a semantic node both owns an actionable element and contains descendants, the
 
 The host maps Text and Heading to static text and header traits, Button and Link to their direct traits, Image to image, SearchField to search field, Slider to adjustable, and disabled or selected state to the corresponding UIKit traits.
 ShowOnScreen remains a navigation capability and does not by itself make a UIKit element report that it responds to user interaction.
-Checkbox and Switch use the UIKit toggle trait when available and retain an iOS 13 fallback with button behavior and a checked value; RadioButton and Tab use button and selected behavior without treating checked state as an unrelated selection.
+Checkbox and Switch use the UIKit toggle trait when available and retain button behavior with a checked value on earlier supported versions; RadioButton and Tab use button and selected behavior without treating checked state as an unrelated selection.
 TabList uses the non-element tab-bar contract.
 List and Navigation map to UIKit list and landmark container types, while Grid adopts the data-table protocols only when every logical item is represented by a queryable committed cell and otherwise remains a semantic group.
 Label, value, placeholder fallback, hint, error, identifier, range, and geometry come from the retained committed frame.
@@ -813,7 +813,7 @@ Shared tests also cover:
 
 Focused Android codec coverage verifies deterministic snapshots, direct virtual IDs, UTF-8 content, and overflow rejection.
 Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, read-only ComboBox values, List selection containers, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
-The iOS bridge compiles against the iOS 13 Simulator boundary.
+The iOS bridge compiles against the iOS 15 Simulator boundary.
 Physical-device VoiceOver validation covers primary ui_gallery traversal, shared controls, text input, and PlatformView substitution.
 Broader manual coverage for modal isolation, scrolling, live regions, and less common actions remains ongoing.
 Dedicated macOS accessibility fixtures and manual screen-reader validation remain deferred.

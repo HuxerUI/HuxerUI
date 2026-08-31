@@ -528,7 +528,7 @@ Reads, imports, and replacements use coordinated file access off the UI thread, 
 
 iOS independently maps durable data to Application Support, cache data to Caches, and temporary data to the application temporary directory.
 Its executable directory is read-only and is never used as a replacement for packaged HuxerUI resources.
-Its picker transport presents `UIDocumentPickerViewController`, maps union filters through `UTType` with an iOS 13 UTI fallback, and retains security-scoped URLs inside `FileReference`.
+Its picker transport presents `UIDocumentPickerViewController`, maps union filters through `UTType`, and retains security-scoped URLs inside `FileReference`.
 Application document activations use the same retained capability for open-in-place URLs. When UIKit marks a delivery as copy-before-use, the application adapter copies it into a private read-only temporary snapshot before returning from the native callback, and the shared `FileReference` state removes that snapshot after its last owner releases it.
 External reads, imports, and replacements use coordinated file access off the main thread.
 Saving exports a copy of the local source, stages a temporary copy only when the suggested filename differs, and removes that staging directory after completion or cancellation.

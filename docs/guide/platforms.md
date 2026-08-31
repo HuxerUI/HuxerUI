@@ -19,7 +19,7 @@ OHOS does not currently have a repository-owned backend.
 
 ## Windows
 
-The default backend targets Windows 10 or later and uses Win32, D3D11, Direct2D, DirectWrite, DXGI, and IMM32.
+The default backend targets Windows 10 version 1607 or later and uses Win32, D3D11, Direct2D, DirectWrite, DXGI, and IMM32.
 Build with MSVC and a supported Visual Studio installation.
 
 The optional `HUXERUI_WINDOWS_7_COMPAT=ON` configuration targets Windows 7 SP1 with Platform Update by using capability-based fallbacks.
@@ -32,6 +32,7 @@ System tray presentation uses the Windows notification area and restores its ite
 
 ## macOS
 
+The macOS backend requires macOS 12 or later.
 The macOS backend uses AppKit, Core Graphics, Core Text, and `NSTextInputClient`.
 Build with Xcode and the macOS SDK.
 
@@ -80,7 +81,7 @@ Termux diagnosis and setup do not require `sdkmanager`, platform-tools, or ADB b
 
 ## iOS
 
-The iOS backend requires iOS 13 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
+The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
 Build on macOS with Xcode and an installed simulator runtime or paired device.
 
 ```bash

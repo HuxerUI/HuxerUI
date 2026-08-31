@@ -201,7 +201,7 @@ build_tool() {
     set -- "$@" "-DCMAKE_TOOLCHAIN_FILE=$toolchain_file"
   fi
   if [ "$platform" = "macos" ]; then
-    set -- "$@" "-DCMAKE_OSX_ARCHITECTURES=$architecture"
+    set -- "$@" "-DCMAKE_OSX_ARCHITECTURES=$architecture" "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"
   elif [ "$platform" = "android" ]; then
     set -- "$@" -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24
   fi

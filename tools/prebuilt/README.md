@@ -18,7 +18,7 @@ Each distributed host and architecture directory must contain every tool require
 Prebuilt executables must be rebuilt from the matching tool source whenever that source changes. Tests compile the tool sources directly and therefore do not prove that a distributed executable is current.
 The checked-in packages bootstrap source builds, while SDK release jobs rebuild the matching package from source before using or distributing it.
 
-Linux x86_64 and aarch64 tools require no GLIBC symbol newer than 2.17 and statically link the GNU C++ runtime.
+Linux x86_64 and aarch64 tools require no GLIBC symbol newer than 2.28 and statically link the GNU C++ runtime.
 Linux uses `aarch64` for 64-bit Arm packages and directories, Apple platforms use `arm64`, and Android uses the ABI name `arm64-v8a`.
 Release CI applies that stricter tool contract through `.github/workflows/scripts/check_linux_binary_compatibility.sh` so a newer build host cannot silently raise their glibc baseline or add a GLIBCXX runtime requirement.
 

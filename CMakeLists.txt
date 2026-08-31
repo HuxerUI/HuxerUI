@@ -1,10 +1,14 @@
 cmake_minimum_required(VERSION 3.20)
 
-if (CMAKE_SYSTEM_NAME STREQUAL "iOS" AND NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum iOS deployment target")
-endif ()
-
 project(huxerui VERSION 0.1.0 LANGUAGES NONE)
+
+if (NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "15.0" CACHE STRING "Minimum iOS deployment target" FORCE)
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS deployment target" FORCE)
+    endif ()
+endif ()
 
 if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
     enable_language(CXX)

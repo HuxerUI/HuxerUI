@@ -210,11 +210,12 @@ The minimum Android API is 23. Guard newer APIs or obtain approval to raise it.
 
 ### iOS
 
-iOS platform configuration lives in `cmake/platform/IOS.cmake`. Register UIKit sources and frameworks there. The minimum deployment target is iOS 13.
+iOS platform configuration lives in `cmake/platform/IOS.cmake`. Register UIKit sources and frameworks there. The minimum deployment target is iOS 15.
 
 ### macOS
 
 macOS platform configuration lives in `cmake/platform/MacOS.cmake`. Register AppKit sources and frameworks there.
+The minimum deployment target is macOS 12.
 
 ### Windows
 

@@ -430,7 +430,7 @@ The adapter combines the full View bounds, current safeAreaInsets, and keyboard 
 HuxerUIIOSViewController stores the resolved status foreground, overrides `preferredStatusBarStyle`, and calls `setNeedsStatusBarAppearanceUpdate` only when the value changes.
 iOS does not expose a corresponding navigation or Home Indicator foreground API, so the navigation brightness field has no native operation there.
 
-The minimum deployment target remains iOS 13.
+The minimum deployment target remains iOS 15.
 All UIKit lifecycle and status-bar work stays on the main thread.
 
 ## OHOS mapping

@@ -46,7 +46,7 @@ cmake -S "$source_directory" -B "$device_build_directory" -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS \
   -DCMAKE_OSX_SYSROOT=iphoneos \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
   -DHUXERUI_BUILD_SHARED=OFF \
   -DHUXERUI_BUILD_STATIC=ON \
   -DHUXERUI_BUILD_CLI=OFF \
@@ -59,7 +59,7 @@ cmake -S "$source_directory" -B "$simulator_build_directory" -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS \
   -DCMAKE_OSX_SYSROOT=iphonesimulator \
   '-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64' \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
   -DHUXERUI_BUILD_SHARED=OFF \
   -DHUXERUI_BUILD_STATIC=ON \
   -DHUXERUI_BUILD_CLI=OFF \
@@ -102,7 +102,7 @@ xcrun --sdk iphonesimulator clang \
   -fsyntax-only \
   -fobjc-arc \
   -fmodules \
-  -target arm64-apple-ios13.0-simulator \
+  -target arm64-apple-ios15.0-simulator \
   -I "$simulator_slice/Headers" \
   "$source_directory/tests/platform/ios_platform_registry.m"
 xcrun --sdk iphonesimulator clang++ \
@@ -110,12 +110,12 @@ xcrun --sdk iphonesimulator clang++ \
   -fobjc-arc \
   -fmodules \
   -std=c++20 \
-  -target arm64-apple-ios13.0-simulator \
+  -target arm64-apple-ios15.0-simulator \
   -I "$simulator_slice/Headers" \
   "$source_directory/tests/platform/ios_platform_registry.mm" \
   -o "$build_directory/huxerui_ios_direct_factory_test.o"
 xcrun --sdk iphonesimulator swiftc \
-  -target arm64-apple-ios13.0-simulator \
+  -target arm64-apple-ios15.0-simulator \
   -I "$simulator_slice/Headers" \
   "$source_directory/tests/platform/ios_platform_registry.swift" \
   -L "$simulator_slice" \

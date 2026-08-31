@@ -169,6 +169,14 @@ jobs:
           "${{ runner.temp }}/huxerui-ios-build"
           "${{ runner.temp }}/huxerui-platform-artifacts/ios/HuxerUI.xcframework"
           Release
+      - name: Validate Apple deployment targets
+        run: |
+          sh .github/workflows/scripts/check_apple_deployment_target.sh 12.0 \
+            tools/prebuilt/macos/arm64/hcg \
+            tools/prebuilt/macos/arm64/hrc
+          sh .github/workflows/scripts/check_apple_deployment_target.sh 15.0 \
+            "${RUNNER_TEMP}/huxerui-platform-artifacts/ios/HuxerUI.xcframework/ios-arm64/libhuxerui_static.a" \
+            "${RUNNER_TEMP}/huxerui-platform-artifacts/ios/HuxerUI.xcframework/ios-arm64_x86_64-simulator/libhuxerui_static.a"
       - name: Upload iOS artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -365,12 +373,21 @@ jobs:
           -S .
           -B build
           -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
       - name: Build
         run: cmake --build build --config Release --parallel "${{ matrix.parallel_jobs }}"
+      - name: Validate macOS deployment targets
+        run: |
+          sh .github/workflows/scripts/check_apple_deployment_target.sh 12.0 \
+            "tools/prebuilt/macos/${{ matrix.architecture }}/hcg" \
+            "tools/prebuilt/macos/${{ matrix.architecture }}/hrc" \
+            build/bin/huxerui \
+            build/lib/libhuxerui.dylib \
+            build/lib/libhuxerui_static.a
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Package

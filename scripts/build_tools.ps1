@@ -176,7 +176,10 @@ function Build-Tool(
         $configureArguments += "-DCMAKE_TOOLCHAIN_FILE=$Toolchain"
     }
     if ($Platform -eq "macos") {
-        $configureArguments += "-DCMAKE_OSX_ARCHITECTURES=$Architecture"
+        $configureArguments += @(
+            "-DCMAKE_OSX_ARCHITECTURES=$Architecture",
+            "-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"
+        )
     } elseif ($Platform -eq "android") {
         $configureArguments += @("-DANDROID_ABI=arm64-v8a", "-DANDROID_PLATFORM=android-24")
     }
