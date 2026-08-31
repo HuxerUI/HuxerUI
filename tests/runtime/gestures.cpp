@@ -59,7 +59,11 @@ static_assert(!AcceptsStringDropPredicate<MoveOnlyDropPredicate>);
 View MultiTapApp() {
   return Button("multi tap")
       .With(huxerui::Frame{120.0F, 60.0F}, MultiTapGesture{})
-      .On<ViewEvents::PointerUp>([](const PointerEvent&) { gesture_events.emplace_back("pointer up"); })
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Up) {
+          gesture_events.emplace_back("pointer up");
+        }
+      })
       .On<MultiTapEvents::Recognized>([](const MultiTapEvent& event) {
         gesture_events.emplace_back("multi " + std::to_string(event.count));
       })
@@ -96,7 +100,11 @@ View NestedTapFallbackApp() {
 View LongPressApp() {
   return Button("long press")
       .With(huxerui::Frame{120.0F, 60.0F}, LongPressGesture{})
-      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++pointer_cancels; })
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Cancel) {
+          ++pointer_cancels;
+        }
+      })
       .On<LongPressEvents::Started>([](const LongPressEvent&) { gesture_events.emplace_back("started"); })
       .On<LongPressEvents::Ended>([](const LongPressEvent&) { gesture_events.emplace_back("ended"); })
       .On<LongPressEvents::Canceled>([](const LongPressEvent&) { gesture_events.emplace_back("canceled"); })
@@ -106,7 +114,11 @@ View LongPressApp() {
 View DragApp() {
   return Button("drag")
       .With(huxerui::Frame{120.0F, 60.0F}, DragGesture{})
-      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++pointer_cancels; })
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Cancel) {
+          ++pointer_cancels;
+        }
+      })
       .On<DragEvents::Started>([](const DragEvent& event) {
         gesture_events.emplace_back("started");
         drag_events.push_back(event);
@@ -129,9 +141,11 @@ View DragApp() {
 View TransformApp() {
   return Button("transform")
       .With(huxerui::Frame{160.0F, 100.0F}, TransformGesture{})
-      .On<ViewEvents::PointerCancel>([](const PointerEvent& event) {
-        ++pointer_cancels;
-        canceled_pointer_events.push_back(event);
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Cancel) {
+          ++pointer_cancels;
+          canceled_pointer_events.push_back(event);
+        }
       })
       .On<TransformEvents::Started>([](const TransformEvent& event) {
         gesture_events.emplace_back("started");
@@ -499,10 +513,9 @@ View PointerInterceptApp() {
   View content = Column {
     Text("raw target")
         .With(huxerui::Frame{120.0F, 60.0F})
-        .On<ViewEvents::PointerDown>([](const PointerEvent&) { gesture_events.emplace_back("raw down"); })
-        .On<ViewEvents::PointerMove>([](const PointerEvent&) { gesture_events.emplace_back("raw move"); })
-        .On<ViewEvents::PointerUp>([](const PointerEvent&) { gesture_events.emplace_back("raw up"); })
-        .On<ViewEvents::PointerCancel>([](const PointerEvent&) { gesture_events.emplace_back("raw cancel"); }),
+        .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+          gesture_events.push_back("raw " + PointerEventName(event.type));
+        }),
   }.With(huxerui::Frame{120.0F, 60.0F}, DragGesture{})
       .On<DragEvents::Started>([](const DragEvent&) { gesture_events.emplace_back("drag started"); });
   if (intercept_present.Get()) {
@@ -534,7 +547,11 @@ View NestedPointerInterceptApp() {
           gesture_events.push_back("child " + PointerEventName(event.type));
           return false;
         })
-        .On<ViewEvents::PointerDown>([](const PointerEvent&) { gesture_events.emplace_back("raw down"); }),
+        .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+          if (event.type == PointerEventType::Down) {
+            gesture_events.emplace_back("raw down");
+          }
+        }),
   }.With(huxerui::Frame{120.0F, 60.0F})
       .On<ViewEvents::PointerIntercept>([](const PointerEvent& event) {
         gesture_events.push_back("parent " + PointerEventName(event.type));
@@ -546,16 +563,11 @@ View PointerButtonApp() {
   return Column {
     Button("target")
         .With(huxerui::Frame{60.0F, 60.0F})
-        .On<ViewEvents::PointerDown>([](const PointerEvent& event) {
-          gesture_events.emplace_back("raw down");
-          pointer_events.push_back(event);
-        })
-        .On<ViewEvents::PointerUp>([](const PointerEvent& event) {
-          gesture_events.emplace_back("raw up");
-          pointer_events.push_back(event);
-        })
-        .On<ViewEvents::PointerCancel>([](const PointerEvent& event) {
-          gesture_events.emplace_back("raw cancel");
+        .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+          if (event.type == PointerEventType::Move) {
+            return;
+          }
+          gesture_events.push_back("raw " + PointerEventName(event.type));
           pointer_events.push_back(event);
         })
         .On<ViewEvents::ContextMenuRequested>([](Point position) {

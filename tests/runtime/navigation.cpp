@@ -166,7 +166,11 @@ View InteractiveRootPage() {
   navigation = UseNavigation();
   return Button("Interactive root")
       .With(huxerui::Frame{120.0F, 40.0F})
-      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++navigation_pointer_cancels; });
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Cancel) {
+          ++navigation_pointer_cancels;
+        }
+      });
 }
 
 View InteractiveNavigationApp() {

@@ -2833,7 +2833,7 @@ void Runtime::ComposeLayers() {
         content.spec_->local_enabled = false;
       }
       if (barrier) {
-        content = std::move(content).On<ViewEvents::PointerDown>([](const PointerEvent&) {});
+        content = std::move(content).On<ViewEvents::Pointer>([](const PointerEvent&) {});
       }
 
       View layer = LayerEntryLayout{std::move(content)}
@@ -2852,11 +2852,11 @@ void Runtime::ComposeLayers() {
       // An exiting modal keeps its focus barrier until removal so input cannot fall through while its content fades.
       layer.spec_->trap_focus = entry.options.trap_focus;
       if (barrier) {
-        layer = std::move(layer).On<ViewEvents::PointerDown>([controller = state_->layer_controller_,
-                                                              id = entry.id,
-                                                              dismiss = entry.options.dismiss_on_outside_press &&
-                                                                        !exiting](const PointerEvent&) {
-          if (!dismiss) {
+        layer = std::move(layer).On<ViewEvents::Pointer>([controller = state_->layer_controller_,
+                                                          id = entry.id,
+                                                          dismiss = entry.options.dismiss_on_outside_press &&
+                                                                    !exiting](const PointerEvent& event) {
+          if (!dismiss || event.type != PointerEventType::Down) {
             return;
           }
           static_cast<void>(controller.RequestDismiss(id).handled);

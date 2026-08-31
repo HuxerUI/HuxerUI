@@ -137,10 +137,7 @@ View PointerInputApp() {
   return Stack{
       Button("Target")
           .With(huxerui::Frame{100.0F, 40.0F})
-          .On<ViewEvents::PointerDown>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
-          .On<ViewEvents::PointerMove>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
-          .On<ViewEvents::PointerUp>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
-          .On<ViewEvents::PointerCancel>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
+          .On<ViewEvents::Pointer>([](const PointerEvent& event) { received_pointer_events.push_back(event); })
           .OnClick([] { ++pointer_clicks; }),
   };
 }
@@ -203,9 +200,16 @@ View HoverOverlayPointerTargetApp() {
 View ExceptionalPointerInputApp() {
   return Button("exceptional pointer")
       .With(huxerui::Frame{100.0F, 40.0F})
-      .On<ViewEvents::PointerDown>([](const PointerEvent&) { throw std::runtime_error("pointer input failed"); })
-      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++exceptional_pointer_cancels; })
-      .On<ViewEvents::PointerUp>([](const PointerEvent&) { ++exceptional_pointer_ups; });
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Down) {
+          throw std::runtime_error("pointer input failed");
+        }
+        if (event.type == PointerEventType::Cancel) {
+          ++exceptional_pointer_cancels;
+        } else if (event.type == PointerEventType::Up) {
+          ++exceptional_pointer_ups;
+        }
+      });
 }
 
 View ExtensionPointerTargetApp() {
@@ -251,7 +255,11 @@ View DragScrollApp() {
              [](std::size_t index) {
                return Button(std::to_string(index))
                    .With(huxerui::Frame{100.0F, 40.0F})
-                   .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++drag_item_cancels; })
+                   .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+                     if (event.type == PointerEventType::Cancel) {
+                       ++drag_item_cancels;
+                     }
+                   })
                    .OnClick([] { ++drag_item_clicks; })
                    .Key(index);
              }

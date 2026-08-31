@@ -52,15 +52,15 @@ PointerIntercept / Click / Drag / LongPress / Transform / Scroll / retained poin
 Raw pointer target delivery remains a side branch while recognition is pending:
 
 ```text
-                    ┌─ raw PointerDown / PointerMove / PointerUp
+                    ┌─ raw ViewEvents::Pointer (Down / Move / Up / Cancel)
 PointerSession ─────┤
                     └─ ownership resolution → one owner
 ```
 
 The raw branch reports the physical stream to the deepest ordinary pointer target while recognition resolves ownership.
-Raw `PointerDown`, `PointerMove`, `PointerUp`, and `PointerCancel` handlers cannot stop propagation, accept a gesture, capture a pointer, or create another owner.
+The aggregate `ViewEvents::Pointer` handler cannot stop propagation, accept a gesture, capture a pointer, or create another owner.
 `ViewEvents::PointerIntercept` is a distinct typed event key whose result participates as one recognition in the existing PointerSession.
-When a competing recognizer accepts, the raw target receives one PointerCancel and no later event from that sequence.
+When a competing recognizer accepts, the raw target receives one Cancel update and no later event from that sequence.
 
 Runtime does not retain separate scroll, extension-capture, extension-observer, and gesture-session ownership paths.
 Scroll recognition and the existing NodeExtension pointer capability are recognizers alongside built-in and public recognizers.
@@ -125,9 +125,9 @@ Retained-modifier recognitions on the same node follow reverse declaration order
 The node's built-in Tap or Scroll recognition follows its retained-modifier recognitions.
 The first recognition to return Accept in that deterministic order owns the sequence.
 
-Runtime resolves immediate recognizers before publishing raw PointerDown.
-If a retained pointer extension returns Capture or consumes Down, it can win without exposing a transient raw Down/PointerCancel pair that did not exist before this design.
-Otherwise Runtime installs the pending PointerSession before publishing raw PointerDown, so a handler that dismisses a Layer can safely quarantine that same session without invalidating stack-local ownership state.
+Runtime resolves immediate recognizers before publishing raw Down.
+If a retained pointer extension returns Capture or consumes Down, it can win without exposing a transient raw Down/Cancel pair that did not exist before this design.
+Otherwise Runtime installs the pending PointerSession before publishing raw Down, so a handler that dismisses a Layer can safely quarantine that same session without invalidating stack-local ownership state.
 
 Acceptance updates the session before invoking framework or application output:
 
@@ -161,7 +161,7 @@ return content.On<ViewEvents::PointerIntercept>([](const PointerEvent& event) {
 The event signature is `Event<bool(const PointerEvent&)>`.
 Returning false on Down or Move keeps that recognition pending and allows deeper or later candidates and the raw target to continue.
 The first candidate that returns true becomes the sole owner before later candidates see that update.
-If the raw target already observed Down, it receives one PointerCancel; immediate Down acceptance prevents raw Down entirely.
+If the raw target already observed Down, it receives one Cancel update; immediate Down acceptance prevents raw Down entirely.
 
 Once accepted, the accepted View's current PointerIntercept binding receives subsequent Move, Up, and Cancel outside its original bounds, and later return values are ignored.
 If another recognition accepts first, a pending interceptor that observed the sequence receives Cancel exactly once.
@@ -194,7 +194,7 @@ The recognizer exists for the deepest eligible node that declares Click, MultiTa
 It remains pending through movement and accepts on an Up that satisfies the existing successful-release hit rules.
 Movement alone does not reject Click; recognizers that need movement tolerance, such as LongPress and Drag, apply their own thresholds.
 If a descendant tap no longer qualifies at release, Runtime continues through the committed route so an eligible ancestor can accept.
-Raw PointerUp is emitted before the successful tap output, preserving current event order.
+Raw Up is emitted before the successful tap output, preserving current event order.
 
 A successful tap has two independent consumers on the same mounted node:
 
@@ -504,19 +504,19 @@ Selection rendering, editing commands, menu actions, controlled TextEditingValue
 Gesture output uses the existing `.On<Key>(handler)` surface.
 Component events remain node-local and do not become routed events.
 
-The raw pointer keys remain notifications:
+The raw pointer lifecycle remains one notification:
 
 ```cpp
-ViewEvents::PointerDown
-ViewEvents::PointerMove
-ViewEvents::PointerUp
-ViewEvents::PointerCancel
+return content.On<ViewEvents::Pointer>([](const PointerEvent& event) {
+  ObserveRawPointer(event);
+});
 ```
 
-They have `Event<void(const PointerEvent&)>` signatures and no capture phase, bubble phase, handled result, or public pointer handle.
+`ViewEvents::Pointer` has the `Event<void(const PointerEvent&)>` signature and reports Down, Move, Up, and Cancel through `PointerEvent::type`.
+It has no capture phase, bubble phase, handled result, or public pointer handle.
 Applications use the separate `ViewEvents::PointerIntercept` key when they need to compete for ownership.
 The deepest ordinary target receives Down and Move while no competing owner exists.
-A successful tap sends PointerUp before Click or MultiTap output; another owner sends one PointerCancel.
+A successful tap sends Up before Click or MultiTap output; another owner sends one Cancel update.
 
 ## Hover lifecycle
 
@@ -591,10 +591,10 @@ Initial Down arbitration therefore preserves the same exclusive PlatformView-or-
 
 Layer dismissal deactivates input before transition-out rendering completes.
 Every active PointerSession whose retained route intersects the dismissed layer subtree is terminated and quarantined until physical Up or Cancel.
-If its raw target is still mounted, it receives PointerCancel synchronously; an accepted recognizer whose modifier remains mounted receives Canceled.
+If its raw target is still mounted, it receives a raw Cancel update synchronously; an accepted recognizer whose modifier remains mounted receives Canceled.
 The remaining physical sequence cannot fall through to application content or a PlatformView behind the layer.
 
-Because a Barrier handler may dismiss its layer from raw PointerDown, Runtime installs the pending PointerSession before invoking that handler.
+Because a Barrier handler may dismiss its layer from raw Down, Runtime installs the pending PointerSession before invoking that handler.
 Dismissal can then quarantine the installed session without retaining a stack-local session reference across application output.
 Captured Environment affects the layer's mounted declarations and event handlers only; it does not create another pointer owner, route, or recognizer lifetime.
 

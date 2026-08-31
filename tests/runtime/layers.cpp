@@ -119,7 +119,11 @@ View AnimatedMenuLayerApp() {
 View ExitingLayerInputContent() {
   return Button("exiting input")
       .With(huxerui::Frame{100.0F, 36.0F})
-      .On<ViewEvents::PointerCancel>([](const PointerEvent&) { ++exiting_layer_pointer_cancels; })
+      .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+        if (event.type == PointerEventType::Cancel) {
+          ++exiting_layer_pointer_cancels;
+        }
+      })
       .OnClick([] { ++exiting_layer_clicks; });
 }
 
@@ -128,7 +132,11 @@ View LayerPointerQuarantineApp() {
     layer_dialogs = UseDialog();
     return Button("background input")
         .With(huxerui::Frame{240.0F, 160.0F})
-        .On<ViewEvents::PointerUp>([](const PointerEvent&) { ++quarantined_background_pointer_ups; });
+        .On<ViewEvents::Pointer>([](const PointerEvent& event) {
+          if (event.type == PointerEventType::Up) {
+            ++quarantined_background_pointer_ups;
+          }
+        });
   });
 }
 

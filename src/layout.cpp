@@ -211,10 +211,7 @@ Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, Layou
 
 bool HandlesPointer(const MountedNode& node) {
   return static_cast<bool>(node.activation) || HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerDown>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerMove>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerUp>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerCancel>(node.event_bindings);
+         HasEventBinding<ViewEvents::Pointer>(node.event_bindings);
 }
 
 bool ExtensionHandlesPointer(MountedNode& node, Point position) {

@@ -346,7 +346,7 @@ An extension whose `HitTest()` returns true keeps its node on the topmost pointe
 Every matching hover extension on the deepest hit node receives the complete `HoverEvent` through `OnHover()` rather than competing for one exclusive hover slot.
 Public Hover handlers on the resolved ancestor route receive their own node-local Enter, Move, and Leave lifecycle without turning those Views into ordinary pointer targets.
 `HoverWhenDisabled()` opts a hover-only affordance into disabled targets without enabling focus, touch, Click, or other pointer behavior.
-An extension that returned `Observe` on pointer down continues receiving the pointer sequence without owning it; returning `CancelTarget` after recognizing a competing gesture sends PointerCancel to the active target and suppresses its activation.
+An extension that returned `Observe` on pointer down continues receiving the pointer sequence without owning it; returning `CancelTarget` after recognizing a competing gesture sends a raw Pointer Cancel update to the active target and suppresses its activation.
 
 Clean content and foreground PaintSequences remain attached to their stable RenderNode.
 An extension calls `InvalidatePaint(PaintInvalidation)` after changing paint-visible retained state; the operation invalidates only the declared owner sequence or sequences and schedules a frame when called outside frame construction.
@@ -1371,7 +1371,7 @@ Runtime defaults own Escape/Back, Tab traversal, keyboard context menus, and Ent
 
 The topmost modal Layer is the active focus traversal root. Opening a nested modal captures the current focus, and dismissing it restores the previously focused mounted node when that node still exists and remains enabled.
 
-When a pointer drag crosses the scroll threshold, the selected scroll container wins gesture arbitration. The original click target receives PointerCancel, Click is suppressed, and its indication runs the cancellation animation.
+When a pointer drag crosses the scroll threshold, the selected scroll container wins gesture arbitration. The original click target receives a raw Pointer Cancel update, Click is suppressed, and its indication runs the cancellation animation.
 
 ### Indication
 

@@ -68,10 +68,7 @@ std::optional<std::string> EffectiveSemanticLabel(const detail::MountedNode& nod
 bool HasIndependentSelectInteraction(const detail::MountedNode& node, bool is_choice_root = true) {
   const bool handles_pointer = static_cast<bool>(node.activation) ||
                                detail::HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
-                               detail::HasEventBinding<ViewEvents::PointerDown>(node.event_bindings) ||
-                               detail::HasEventBinding<ViewEvents::PointerMove>(node.event_bindings) ||
-                               detail::HasEventBinding<ViewEvents::PointerUp>(node.event_bindings) ||
-                               detail::HasEventBinding<ViewEvents::PointerCancel>(node.event_bindings);
+                               detail::HasEventBinding<ViewEvents::Pointer>(node.event_bindings);
   if (handles_pointer || (!is_choice_root && node.focusable)) {
     return true;
   }

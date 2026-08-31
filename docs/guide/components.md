@@ -201,7 +201,9 @@ Do not combine raw pointer handling with a built-in recognizer to recreate the s
 
 `PointerEvent::changed_button` identifies the button added by `Down` or removed by `Up`, while `pressed_buttons` is a `PointerButton` flag mask describing the complete post-event state.
 Use `IsButtonPressed()` for chords and raw custom interaction; primary-button input alone participates in built-in click, selection, drag, and scrolling behavior.
-Attach `ViewEvents::ContextMenuRequested` when a View owns context actions instead of reconstructing a right-click sequence from `PointerDown`.
+Use `ViewEvents::Pointer` only when an application needs the complete raw Down, Move, Up, and Cancel lifecycle for the deepest eligible target.
+It is a void notification; use `PointerIntercept` when custom recognition must take ownership of the sequence.
+Attach `ViewEvents::ContextMenuRequested` when a View owns context actions instead of reconstructing a right-click sequence from raw Down.
 The event reports a window-local position for secondary-button input and the focused View center for the Context Menu key or Shift+F10.
 `ViewEvents::PointerIntercept` may take exclusive ownership of any button stream by returning `true`; pending built-in recognizers and the raw target receive `Cancel` when another participant wins.
 

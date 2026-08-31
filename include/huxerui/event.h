@@ -467,14 +467,7 @@ template <class Function> struct Event {
 struct ViewEvents {
   /// Reports semantic activation from a successful tap, keyboard action, or accessibility Invoke action.
   struct Click : Event<void()> {};
-  /// Reports the start of the raw pointer stream targeting the deepest eligible View.
-  struct PointerDown : Event<void(const PointerEvent&)> {};
-  /// Reports movement in a raw pointer stream or an unowned hover update.
-  struct PointerMove : Event<void(const PointerEvent&)> {};
-  /// Reports successful completion of the raw pointer stream.
-  struct PointerUp : Event<void(const PointerEvent&)> {};
-  /// Reports that another recognizer or the platform canceled the raw pointer stream.
-  struct PointerCancel : Event<void(const PointerEvent&)> {};
+
   /// Reports mouse or pen entry, movement, and departure without joining pointer-sequence ownership.
   ///
   /// Disabled Views participate. Nested bound Views receive independent direct lifecycles rather than a bubbled event,
@@ -485,19 +478,28 @@ struct ViewEvents {
   /// });
   /// @endcode
   struct Hover : Event<void(const HoverEvent&)> {};
-  /// Requests a context menu at a window-local logical position.
-  /// @code
-  /// content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {
-  ///   menu.ShowAt(position, {MenuItem("Refresh", Refresh)});
-  /// });
-  /// @endcode
-  struct ContextMenuRequested : Event<void(Point)> {};
+
+  /// Reports the complete raw pointer lifecycle targeting the deepest eligible View.
+  ///
+  /// Down establishes the raw target, which receives later Move and the final Up unless recognition transfers
+  /// ownership and produces Cancel. Unpressed mouse or pen movement is hit-tested independently. This notification
+  /// does not capture, bubble, return a handled result, or acquire pointer ownership.
+  struct Pointer : Event<void(const PointerEvent&)> {};
   /// Observes a pointer sequence and returns true when this View takes exclusive ownership.
   /// False keeps the recognition pending. After acceptance, later return values are ignored and the handler continues
   /// receiving Move, Up, or Cancel until the sequence ends.
   struct PointerIntercept : Event<bool(const PointerEvent&)> {};
-  /// Reports whether the View gained or lost keyboard focus.
-  struct FocusChanged : Event<void(bool)> {};
+
+  /// Offers an otherwise unhandled key press to the focused View.
+  ///
+  /// Component-owned NodeExtension handling runs first. Return true to prevent Runtime and platform defaults, or use
+  /// KeyIntercept when parent policy must run before the component.
+  struct KeyDown : Event<bool(const KeyEvent&)> {};
+  /// Offers an otherwise unhandled key release to the focused View.
+  ///
+  /// Component-owned NodeExtension handling runs first. Return true to prevent Runtime and platform defaults, or use
+  /// KeyIntercept when parent policy must run before the component.
+  struct KeyUp : Event<bool(const KeyEvent&)> {};
   /// Offers a key event from the active focus scope before focused component and Runtime defaults.
   ///
   /// Runtime visits handlers from the active focus-scope root through the focused View, stopping when one returns true.
@@ -512,16 +514,17 @@ struct ViewEvents {
   /// });
   /// @endcode
   struct KeyIntercept : Event<bool(const KeyEvent&)> {};
-  /// Offers an otherwise unhandled key press to the focused View.
-  ///
-  /// Component-owned NodeExtension handling runs first. Return true to prevent Runtime and platform defaults, or use
-  /// KeyIntercept when parent policy must run before the component.
-  struct KeyDown : Event<bool(const KeyEvent&)> {};
-  /// Offers an otherwise unhandled key release to the focused View.
-  ///
-  /// Component-owned NodeExtension handling runs first. Return true to prevent Runtime and platform defaults, or use
-  /// KeyIntercept when parent policy must run before the component.
-  struct KeyUp : Event<bool(const KeyEvent&)> {};
+
+  /// Reports whether the View gained or lost keyboard focus.
+  struct FocusChanged : Event<void(bool)> {};
+  /// Requests a context menu at a window-local logical position.
+  /// @code
+  /// content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {
+  ///   menu.ShowAt(position, {MenuItem("Refresh", Refresh)});
+  /// });
+  /// @endcode
+  struct ContextMenuRequested : Event<void(Point)> {};
+
   /// Consumes a committed platform Back request and delegates the resulting action to the handler.
   struct BackRequested : Event<void()> {};
 };

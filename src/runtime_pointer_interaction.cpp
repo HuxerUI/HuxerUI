@@ -13,10 +13,7 @@ namespace {
 
 bool HandlesPointerEvents(const MountedNode& node) {
   return static_cast<bool>(node.activation) || HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerDown>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerMove>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerUp>(node.event_bindings) ||
-         HasEventBinding<ViewEvents::PointerCancel>(node.event_bindings);
+         HasEventBinding<ViewEvents::Pointer>(node.event_bindings);
 }
 
 float PointerDelta(Point previous, Point current, Axis axis) {
@@ -408,7 +405,7 @@ void Runtime::CancelPointerSession(PointerSession& session, const PointerEvent& 
   }
   if (raw_target.has_value()) {
     if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target)) {
-      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancellation);
+      EmitEvent<ViewEvents::Pointer>(target->event_bindings, cancellation);
     }
   }
 }
@@ -473,20 +470,9 @@ void Runtime::DispatchChordPointerEvent(PointerSession& session, const PointerEv
     }
     return;
   }
-  switch (event.type) {
-  case PointerEventType::Down:
-    EmitEvent<ViewEvents::PointerDown>(target->event_bindings, event);
-    break;
-  case PointerEventType::Move:
-    EmitEvent<ViewEvents::PointerMove>(target->event_bindings, event);
-    break;
-  case PointerEventType::Up:
-    if (target->interaction.enabled) {
-      EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
-    }
-    break;
-  case PointerEventType::Cancel:
-    break;
+  if (event.type != PointerEventType::Cancel &&
+      (event.type != PointerEventType::Up || target->interaction.enabled)) {
+    EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
   }
 }
 
@@ -511,7 +497,7 @@ void Runtime::CancelPointerTarget(PointerSession& session, const PointerEvent& e
   EndPointerInteraction(session, InteractionEvent::Type::Cancel, cancellation);
   if (raw_target.has_value()) {
     if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target)) {
-      EmitEvent<ViewEvents::PointerCancel>(target->event_bindings, cancellation);
+      EmitEvent<ViewEvents::Pointer>(target->event_bindings, cancellation);
     }
   }
   RequestFrame();
@@ -1719,7 +1705,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
       const std::uint64_t target_identity = *inserted->second.raw_target_identity;
       inserted->second.raw_target_started = true;
       if (detail::MountedNode* target = FindNode(*state_->mounted_root_, target_identity)) {
-        EmitEvent<ViewEvents::PointerDown>(target->event_bindings, event);
+        EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
       }
     }
     inserted = state_->pointer_sessions_.find(event.pointer_id);
@@ -1741,7 +1727,7 @@ void Runtime::HandlePointerMove(const PointerEvent& event, bool hover_moved) {
     }
     if (detail::MountedNode* target = HitTestPointer(*state_->mounted_root_, event.position);
         target && target->interaction.enabled) {
-      EmitEvent<ViewEvents::PointerMove>(target->event_bindings, event);
+      EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
     }
     return;
   }
@@ -1824,7 +1810,7 @@ void Runtime::HandlePointerMove(const PointerEvent& event, bool hover_moved) {
   }
   if (!session.owner.has_value() && session.raw_target_started && session.raw_target_identity.has_value()) {
     if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *session.raw_target_identity)) {
-      EmitEvent<ViewEvents::PointerMove>(target->event_bindings, event);
+      EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
     } else {
       CancelPointerTarget(session, event);
     }
@@ -1848,7 +1834,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
   if (captured == state_->pointer_sessions_.end()) {
     if (detail::MountedNode* target = HitTestPointer(*state_->mounted_root_, event.position);
         target && target->interaction.enabled) {
-      EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
+      EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
     }
     if (SupportsHover(event.device_kind)) {
       RefreshHover(false);
@@ -1946,7 +1932,7 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
       if (session.raw_target_started && raw_target.has_value()) {
         if (detail::MountedNode* target = FindNode(*state_->mounted_root_, *raw_target);
             target && target->interaction.enabled) {
-          EmitEvent<ViewEvents::PointerUp>(target->event_bindings, event);
+          EmitEvent<ViewEvents::Pointer>(target->event_bindings, event);
         }
       }
       for (std::size_t index = 0; index < session.recognitions.size(); ++index) {

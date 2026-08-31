@@ -23,12 +23,12 @@ Its `PointerEventType` is `Down`, `Move`, `Up`, or `Cancel`, and `PointerDeviceK
 `changed_button` is the button added by Down or removed by Up, while `pressed_buttons` is the complete post-event mask.
 Use `event.IsButtonPressed(mask)` for raw chord logic instead of inferring a button from `click_count`.
 
-`ViewEvents::PointerDown`, `PointerMove`, `PointerUp`, and `PointerCancel` are void notifications for the deepest eligible raw target.
-They do not capture, bubble, return a handled result, or acquire pointer ownership.
-When another recognizer accepts after raw Down, the raw target receives one PointerCancel and no later event from that sequence.
+`ViewEvents::Pointer` is one void notification for the complete Down, Move, Up, and Cancel lifecycle of the deepest eligible raw target.
+It does not capture, bubble, return a handled result, or acquire pointer ownership.
+When another recognizer accepts after raw Down, the raw target receives one Cancel update and no later event from that sequence.
 Use `.OnClick(...)` for semantic activation, a built-in gesture for standard recognition, and `PointerIntercept` only for custom synchronous ownership decisions driven by pointer updates.
 Built-in Click, selection, gestures, scrolling, and retained component interaction recognize only an unchorded Primary sequence.
-Middle, Back, and Forward remain available to raw pointer handlers and PointerIntercept without implicit semantic behavior.
+Middle, Back, and Forward remain available to the raw Pointer handler and PointerIntercept without implicit semantic behavior.
 
 Bind `ViewEvents::ContextMenuRequested` for context actions:
 
@@ -38,9 +38,9 @@ return content.On<ViewEvents::ContextMenuRequested>([menu](Point position) {
 });
 ```
 
-An unchorded Secondary tap invokes the deepest enabled binding after raw PointerUp and supplies its window-logical release position.
+An unchorded Secondary tap invokes the deepest enabled binding after raw Up and supplies its window-logical release position.
 The Context Menu key and Shift+F10 use the nearest enabled binding on the focused route and supply that View's center.
-Binding presence claims the request, so do not add a handled result, manually search parents, or rebuild secondary-tap recognition from PointerDown.
+Binding presence claims the request, so do not add a handled result, manually search parents, or rebuild secondary-tap recognition from raw Down.
 PlatformViews retain native context menus, and Web preserves a pointer-initiated browser menu outside HuxerUI content that declares this binding.
 
 ## Hover
@@ -63,7 +63,7 @@ Exact duplicate positions do not emit Move.
 Final geometry changes may still emit Enter or Leave under a stationary pointer.
 Use Enter and Leave for continuous presence, invert those transitions for departure-driven UI, or restart a lifecycle-bound `TaskHandle` on Enter and Move when content should appear only after the pointer remains still.
 `Delay` resumes on the owning UI thread, so a delayed handler may update `State` without `Post`.
-Do not invent `HoverStopped`, a timer service, or a raw PointerMove state machine for these cases.
+Do not invent `HoverStopped`, a timer service, or a raw Pointer Move state machine for these cases.
 
 ## Pointer cursors
 

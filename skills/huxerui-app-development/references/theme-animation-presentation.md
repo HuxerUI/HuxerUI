@@ -109,7 +109,7 @@ Button("Next").OnClick([transition, page] {
 ```
 
 The implicit origin ends when the interaction callback returns and the method throws `std::logic_error` outside that scope.
-Do not store a global last-pointer position, manually record PointerDown, or add Point to OnClick/OnChanged solely to start a transition; asynchronous work retains geometry and calls `RunAt` explicitly.
+Do not store a global last-pointer position, manually record raw Pointer Down, or add Point to OnClick/OnChanged solely to start a transition; asynchronous work retains geometry and calls `RunAt` explicitly.
 Reduced motion is handled by the resolved handle; still keep the mutation correct without the visual effect.
 
 ## Presentation services
