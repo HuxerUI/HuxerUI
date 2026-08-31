@@ -64,6 +64,17 @@ Use `Event<void(Arguments...)>` for notifications.
 A value-returning event is a synchronous decision owned by its key, and `Emit<Key>(...)` returns `std::optional<Result>` so the caller must choose the fallback for a missing binding.
 Do not add `VoidEvent`, result-event aliases, a second registration method, or a parallel callback convention.
 
+### Keyboard routing
+
+Use `ViewEvents::KeyDown` and `KeyUp` for focused-View behavior after built-in component handling, and return `true` only when the application consumed the event.
+Use `ViewEvents::KeyIntercept` when a shortcut or parent policy must run before the focused component; Runtime visits the active focus-scope route from root to target and stops at the first true result without bubbling.
+Unhandled keys continue to Runtime defaults and then the platform.
+Prefer `OnClick` for ordinary control activation because it already includes keyboard and accessibility activation.
+
+`KeyEvent::key` distinguishes portable keys, including main-row and numeric-keypad keys, left/right modifiers, punctuation, international keys, and named function keys, independently of layout-resolved `text`.
+Release events have empty text and `repeat == false`; `Key::Unknown` remains dispatchable.
+Do not add a shortcut registry, key-chord type, callback property, or a second keyboard route when these typed events are sufficient.
+
 ## Environment and theme
 
 `Environment` is typed hierarchical propagation. `UseEnvironment<T>()` resolves the closest provided value or `T::Default()`. `ProvideEnvironment(value, content)` provides a value to descendants. `UseTheme()` is the visual specialization for `ThemeSpec`.

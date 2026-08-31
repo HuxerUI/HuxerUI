@@ -41,7 +41,6 @@ struct FrameInfo {
   /// Whether motion should resolve immediately for the current mounted node.
   bool reduced_motion = false;
 
-  /// Compares all frame inputs.
   bool operator==(const FrameInfo&) const = default;
 };
 
@@ -92,7 +91,6 @@ public:
     /// Requests a frame after this many seconds when continuous frames are unnecessary.
     std::optional<double> wake_after;
 
-    /// Compares both scheduling requests.
     bool operator==(const FrameResult&) const = default;
   };
 
@@ -185,10 +183,11 @@ public:
     static_cast<void>(focused);
   }
 
-  /// Delivers a keyboard event routed to the focused node.
-  virtual void OnKey(MountedNode& node, const KeyEvent& event) {
+  /// Delivers a keyboard event routed to the focused node and returns whether the extension consumed it.
+  [[nodiscard]] virtual bool OnKey(MountedNode& node, const KeyEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
+    return false;
   }
 
   /// Handles a platform back request and returns whether the extension consumed it.
@@ -430,7 +429,6 @@ struct ScrollBarStyle {
   /// Returns the framework baseline style before Theme-specific resolution.
   static ScrollBarStyle Default();
 
-  /// Compares all geometry, motion, and color values.
   bool operator==(const ScrollBarStyle&) const = default;
 };
 
@@ -458,7 +456,6 @@ struct ScrollPhysics {
   /// Largest release velocity accepted by the fling simulation, in logical pixels per second.
   float maximum_fling_velocity = 6000.0F;
 
-  /// Compares all momentum settings.
   bool operator==(const ScrollPhysics&) const = default;
 };
 
@@ -474,7 +471,6 @@ struct Enabled {
   /// Whether the modified View and its descendants may interact.
   bool value = true;
 
-  /// Compares the enabled declaration.
   bool operator==(const Enabled&) const = default;
 };
 
@@ -490,7 +486,6 @@ struct Focusable {
   /// Whether the modified View participates in focus traversal and focus requests.
   bool value = true;
 
-  /// Compares the focusable declaration.
   bool operator==(const Focusable&) const = default;
 };
 
@@ -511,7 +506,6 @@ struct PointerCursor {
   /// Portable cursor requested by the modified View.
   PointerCursorKind kind = PointerCursorKind::Default;
 
-  /// Compares the requested cursor kind.
   bool operator==(const PointerCursor&) const = default;
 };
 
@@ -535,7 +529,6 @@ struct Padding {
   /// Insets applied to the content area.
   EdgeInsets insets;
 
-  /// Compares all edge insets.
   bool operator==(const Padding&) const = default;
 };
 
@@ -551,7 +544,6 @@ struct Background {
   /// Fill painted inside the node's resolved corner shape.
   VisualFill fill;
 
-  /// Compares the background fill.
   bool operator==(const Background&) const = default;
 };
 
@@ -570,7 +562,6 @@ struct Border {
   /// Border width in logical pixels.
   float width = 1.0F;
 
-  /// Compares the border color and width.
   bool operator==(const Border&) const = default;
 };
 
@@ -598,7 +589,6 @@ struct Shadow {
   /// Signed expansion of the shadow caster before blur, in logical pixels.
   float spread = 0.0F;
 
-  /// Compares all shadow values.
   bool operator==(const Shadow&) const = default;
 };
 
@@ -614,7 +604,6 @@ struct Foreground {
   /// Text foreground color.
   Color color;
 
-  /// Compares the foreground color.
   bool operator==(const Foreground&) const = default;
 };
 
@@ -630,7 +619,6 @@ struct FontSize {
   /// Font size in logical pixels.
   float value;
 
-  /// Compares the font size.
   bool operator==(const FontSize&) const = default;
 };
 
@@ -667,7 +655,6 @@ struct Frame {
   /// Maximum outer height in logical pixels.
   std::optional<float> max_height;
 
-  /// Compares all preferred dimensions and bounds.
   bool operator==(const Frame&) const = default;
 };
 
@@ -683,7 +670,6 @@ struct CornerRadius {
   /// Per-corner radii in logical pixels.
   CornerRadii value;
 
-  /// Compares all corner radii.
   bool operator==(const CornerRadius&) const = default;
 };
 
@@ -698,7 +684,6 @@ struct ClipChildren {
   /// Returns the modifier descriptor used by View::With().
   static const detail::ModifierDescriptor& Descriptor();
 
-  /// Compares two stateless clipping declarations.
   bool operator==(const ClipChildren&) const = default;
 };
 
@@ -717,7 +702,6 @@ struct Spacing {
   /// Gap between adjacent children in logical pixels.
   float value;
 
-  /// Compares the spacing value.
   bool operator==(const Spacing&) const = default;
 };
 
@@ -736,7 +720,6 @@ struct MainAlign {
   /// Main-axis alignment consumed by a compatible layout.
   MainAxisAlignment alignment;
 
-  /// Compares the main-axis alignment.
   bool operator==(const MainAlign&) const = default;
 };
 
@@ -755,7 +738,6 @@ struct CrossAlign {
   /// Cross-axis alignment consumed by a compatible layout.
   CrossAxisAlignment alignment;
 
-  /// Compares the cross-axis alignment.
   bool operator==(const CrossAlign&) const = default;
 };
 
@@ -776,7 +758,6 @@ struct Align {
   /// Vertical child alignment.
   VerticalAlignment vertical;
 
-  /// Compares both alignment axes.
   bool operator==(const Align&) const = default;
 };
 
@@ -796,7 +777,6 @@ struct Grow {
   /// Relative share of remaining main-axis space; zero opts out of growth.
   float factor = 1.0F;
 
-  /// Compares the grow factor.
   bool operator==(const Grow&) const = default;
 };
 
@@ -814,7 +794,6 @@ struct ScrollBar {
   /// Explicit style, or std::nullopt to resolve the current Theme style.
   std::optional<ScrollBarStyle> style;
 
-  /// Compares the explicit style declaration.
   bool operator==(const ScrollBar&) const = default;
 };
 

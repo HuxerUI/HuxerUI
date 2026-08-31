@@ -372,10 +372,10 @@ public:
     return PaintInvalidation::None;
   }
 
-  void OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(MountedNode& node, const KeyEvent& event) override {
     if (!node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control ||
         event.modifiers.meta || enabled_items_.empty()) {
-      return;
+      return false;
     }
     std::optional<std::size_t> requested;
     if (event.key == Key::Home) {
@@ -394,6 +394,7 @@ public:
     if (requested.has_value() && *requested != selected_index_) {
       events_.Emit<NavigationEvents::Changed>(*requested);
     }
+    return requested.has_value();
   }
 
 private:

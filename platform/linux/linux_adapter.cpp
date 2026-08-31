@@ -84,85 +84,162 @@ const char* LinuxPointerCursorName(PointerCursorKind kind) noexcept {
 }
 
 Key TranslateKey(guint key_value) noexcept {
+  if ((key_value >= GDK_KEY_a && key_value <= GDK_KEY_z) ||
+      (key_value >= GDK_KEY_A && key_value <= GDK_KEY_Z)) {
+    const guint letter = key_value >= GDK_KEY_a ? key_value - GDK_KEY_a : key_value - GDK_KEY_A;
+    return static_cast<Key>(static_cast<int>(Key::A) + static_cast<int>(letter));
+  }
+  if (key_value >= GDK_KEY_0 && key_value <= GDK_KEY_9) {
+    return static_cast<Key>(static_cast<int>(Key::Digit0) + static_cast<int>(key_value - GDK_KEY_0));
+  }
+  if (key_value >= GDK_KEY_F1 && key_value <= GDK_KEY_F24) {
+    return static_cast<Key>(static_cast<int>(Key::F1) + static_cast<int>(key_value - GDK_KEY_F1));
+  }
+  if (key_value >= GDK_KEY_KP_0 && key_value <= GDK_KEY_KP_9) {
+    return static_cast<Key>(static_cast<int>(Key::Numpad0) + static_cast<int>(key_value - GDK_KEY_KP_0));
+  }
   switch (key_value) {
   case GDK_KEY_Shift_L:
+    return Key::ShiftLeft;
   case GDK_KEY_Shift_R:
-    return Key::Shift;
+    return Key::ShiftRight;
   case GDK_KEY_Control_L:
+    return Key::ControlLeft;
   case GDK_KEY_Control_R:
-    return Key::Control;
+    return Key::ControlRight;
   case GDK_KEY_Alt_L:
+    return Key::AltLeft;
   case GDK_KEY_Alt_R:
-    return Key::Alt;
+    return Key::AltRight;
   case GDK_KEY_Meta_L:
-  case GDK_KEY_Meta_R:
   case GDK_KEY_Super_L:
+    return Key::MetaLeft;
+  case GDK_KEY_Meta_R:
   case GDK_KEY_Super_R:
-    return Key::Meta;
+    return Key::MetaRight;
+  case GDK_KEY_BackSpace:
+    return Key::Backspace;
   case GDK_KEY_Tab:
   case GDK_KEY_ISO_Left_Tab:
     return Key::Tab;
   case GDK_KEY_Return:
-  case GDK_KEY_KP_Enter:
     return Key::Enter;
-  case GDK_KEY_space:
-    return Key::Space;
   case GDK_KEY_Escape:
     return Key::Escape;
-  case GDK_KEY_BackSpace:
-    return Key::Backspace;
+  case GDK_KEY_space:
+    return Key::Space;
+  case GDK_KEY_Insert:
+    return Key::Insert;
   case GDK_KEY_Delete:
-  case GDK_KEY_KP_Delete:
     return Key::Delete;
   case GDK_KEY_Left:
-  case GDK_KEY_KP_Left:
     return Key::ArrowLeft;
   case GDK_KEY_Right:
-  case GDK_KEY_KP_Right:
     return Key::ArrowRight;
   case GDK_KEY_Up:
-  case GDK_KEY_KP_Up:
     return Key::ArrowUp;
   case GDK_KEY_Down:
-  case GDK_KEY_KP_Down:
     return Key::ArrowDown;
   case GDK_KEY_Home:
-  case GDK_KEY_KP_Home:
     return Key::Home;
   case GDK_KEY_End:
-  case GDK_KEY_KP_End:
     return Key::End;
   case GDK_KEY_Page_Up:
-  case GDK_KEY_KP_Page_Up:
     return Key::PageUp;
   case GDK_KEY_Page_Down:
-  case GDK_KEY_KP_Page_Down:
     return Key::PageDown;
-  case GDK_KEY_F10:
-    return Key::F10;
+  case GDK_KEY_grave:
+    return Key::Backquote;
+  case GDK_KEY_minus:
+    return Key::Minus;
+  case GDK_KEY_equal:
+    return Key::Equal;
+  case GDK_KEY_bracketleft:
+    return Key::BracketLeft;
+  case GDK_KEY_bracketright:
+    return Key::BracketRight;
+  case GDK_KEY_backslash:
+    return Key::Backslash;
+  case GDK_KEY_semicolon:
+    return Key::Semicolon;
+  case GDK_KEY_apostrophe:
+    return Key::Quote;
+  case GDK_KEY_comma:
+    return Key::Comma;
+  case GDK_KEY_period:
+    return Key::Period;
+  case GDK_KEY_slash:
+    return Key::Slash;
+  case GDK_KEY_yen:
+    return Key::IntlYen;
+  case GDK_KEY_Caps_Lock:
+    return Key::CapsLock;
+  case GDK_KEY_Num_Lock:
+    return Key::NumLock;
+  case GDK_KEY_Scroll_Lock:
+    return Key::ScrollLock;
+  case GDK_KEY_Print:
+    return Key::PrintScreen;
+  case GDK_KEY_Pause:
+    return Key::Pause;
   case GDK_KEY_Menu:
     return Key::ContextMenu;
-  case GDK_KEY_a:
-  case GDK_KEY_A:
-    return Key::A;
-  case GDK_KEY_c:
-  case GDK_KEY_C:
-    return Key::C;
-  case GDK_KEY_v:
-  case GDK_KEY_V:
-    return Key::V;
-  case GDK_KEY_x:
-  case GDK_KEY_X:
-    return Key::X;
-  case GDK_KEY_y:
-  case GDK_KEY_Y:
-    return Key::Y;
-  case GDK_KEY_z:
-  case GDK_KEY_Z:
-    return Key::Z;
+  case GDK_KEY_Help:
+    return Key::Help;
+  case GDK_KEY_KP_Insert:
+    return Key::Numpad0;
+  case GDK_KEY_KP_End:
+    return Key::Numpad1;
+  case GDK_KEY_KP_Down:
+    return Key::Numpad2;
+  case GDK_KEY_KP_Page_Down:
+    return Key::Numpad3;
+  case GDK_KEY_KP_Left:
+    return Key::Numpad4;
+  case GDK_KEY_KP_Begin:
+    return Key::Numpad5;
+  case GDK_KEY_KP_Right:
+    return Key::Numpad6;
+  case GDK_KEY_KP_Home:
+    return Key::Numpad7;
+  case GDK_KEY_KP_Up:
+    return Key::Numpad8;
+  case GDK_KEY_KP_Page_Up:
+    return Key::Numpad9;
+  case GDK_KEY_KP_Delete:
+  case GDK_KEY_KP_Decimal:
+    return Key::NumpadDecimal;
+  case GDK_KEY_KP_Divide:
+    return Key::NumpadDivide;
+  case GDK_KEY_KP_Multiply:
+    return Key::NumpadMultiply;
+  case GDK_KEY_KP_Subtract:
+    return Key::NumpadSubtract;
+  case GDK_KEY_KP_Add:
+    return Key::NumpadAdd;
+  case GDK_KEY_KP_Enter:
+    return Key::NumpadEnter;
+  case GDK_KEY_KP_Equal:
+    return Key::NumpadEqual;
+  case GDK_KEY_KP_Separator:
+    return Key::NumpadComma;
+  case GDK_KEY_Clear:
+    return Key::NumpadClear;
   default:
     return Key::Unknown;
   }
+}
+
+guint UnmodifiedKeyValue(GdkEvent* event, guint fallback) noexcept {
+  if (event == nullptr) {
+    return fallback;
+  }
+  guint key_value = 0;
+  const gboolean translated = gdk_display_translate_key(
+      gdk_event_get_display(event), gdk_key_event_get_keycode(event), static_cast<GdkModifierType>(0),
+      gdk_key_event_get_layout(event), &key_value, nullptr, nullptr, nullptr
+  );
+  return translated ? key_value : fallback;
 }
 
 PointerButton TranslatePointerButton(guint button) noexcept {
@@ -815,13 +892,13 @@ private:
     SendPointer(PointerEventType::Cancel, last_pointer_position_);
   }
 
-  void SendKey(KeyEventType type, guint key_value, GdkModifierType state, bool repeat = false) {
+  bool SendKey(KeyEventType type, guint key_value, GdkModifierType state, GdkEvent* event, bool repeat = false) {
     if (runtime_ == nullptr) {
-      return;
+      return false;
     }
-    runtime_->HandleKeyEvent({
+    return runtime_->HandleKeyEvent({
         type,
-        TranslateKey(key_value),
+        TranslateKey(UnmodifiedKeyValue(event, key_value)),
         type == KeyEventType::Down ? KeyText(key_value, state) : std::string{},
         TranslateModifiers(state),
         repeat,
@@ -1076,8 +1153,7 @@ private:
     if (!press.dispatch) {
       return TRUE;
     }
-    self.SendKey(KeyEventType::Down, key_value, state, press.repeat);
-    return FALSE;
+    return self.SendKey(KeyEventType::Down, key_value, state, event, press.repeat);
   }
 
   static void KeyReleased(
@@ -1086,7 +1162,7 @@ private:
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
     if (self.key_tracker_.Release(key_code, self.text_input_.FilterKeyEvent(event))) {
-      self.SendKey(KeyEventType::Up, key_value, state);
+      static_cast<void>(self.SendKey(KeyEventType::Up, key_value, state, event));
     }
   }
 

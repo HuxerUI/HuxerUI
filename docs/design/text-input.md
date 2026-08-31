@@ -898,8 +898,10 @@ Text-producing input and control keys remain separate:
 
 - Native committed and composing text enters through input commands.
 - `KeyEvent` handles navigation, shortcuts, deletion, submission, and focus traversal.
-- The focused TextInputClient receives text-related keys before generic activation behavior.
-- An unhandled key continues through the existing NodeExtension and typed View event path.
+- `KeyIntercept` runs along the active focus route before text editing so an explicit parent policy can override it.
+- The focused TextInputClient receives text-related keys before component and generic activation behavior.
+- An unhandled key continues through `NodeExtension::OnKey`, then the focused View's `KeyDown` or `KeyUp` decision event.
+- Runtime and platform defaults run only after every earlier stage returns false.
 - A platform adapter suppresses native character events that duplicate an IME commit.
 
 Default behavior is:
@@ -973,6 +975,8 @@ The macOS adapter maps:
 - `characterIndexForPoint` to client hit testing.
 - Returns no attributed substring for secure input.
 - Enables Secure Event Input only while a secure field is active and the application is active.
+
+Outside an active composition, hardware keys first enter Runtime without inferred text so shortcuts, navigation, and explicit key decisions can consume them before AppKit interpretation. Unhandled keys continue through `NSTextInputContext`, which alone produces committed or marked text. While marked text is active, AppKit retains first ownership of the event so IME composition is not bypassed; command selectors that AppKit does not consume still map to common key events.
 
 The host view remains first responder while one HuxerUI editable node transfers focus to another. Runtime still creates a new logical input session so delayed callbacks from the previous client are rejected.
 

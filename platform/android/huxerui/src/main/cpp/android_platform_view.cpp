@@ -472,8 +472,7 @@ bool AndroidPlatformViews::MoveFocus(std::uint64_t identity, bool reverse) {
   if (state_->runtime == nullptr || RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
     return false;
   }
-  RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, identity, reverse);
-  return true;
+  return RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, identity, reverse);
 }
 
 void AndroidPlatformViews::Shutdown(JNIEnv* environment) {

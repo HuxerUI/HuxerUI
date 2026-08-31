@@ -67,6 +67,32 @@ View Controls() {
 Disabled behavior is configured with the shared enabled modifier where supported.
 Disabled components remain visible but do not emit activation or value-change events.
 
+## Keyboard events
+
+`KeyEvent::key` identifies a portable key independently of localized character text.
+It distinguishes main-row and numeric-keypad keys, left/right modifiers, punctuation, international keys, and named function keys.
+Use `text` only when the layout-resolved UTF-8 character matters; it may be empty, is not a replacement for TextField input, and is always empty on key release.
+
+Use `ViewEvents::KeyDown` and `ViewEvents::KeyUp` for focused-View behavior that should run after the component's built-in key handling.
+Return `true` when the event is handled so Runtime and the platform do not apply later defaults.
+Return `false` to allow defaults such as focus traversal, activation, context menus, or native host behavior.
+
+Use `ViewEvents::KeyIntercept` for a shortcut or parent policy that must run before a focused component.
+Runtime visits the active focus-scope route from its root to the focused View and stops at the first handler that returns `true`; it does not bubble the event back through ancestors.
+
+```cpp
+return page.On<ViewEvents::KeyIntercept>([](const KeyEvent& event) {
+  if (event.type == KeyEventType::Down && event.modifiers.control && event.key == Key::S) {
+    Save();
+    return true;
+  }
+  return false;
+});
+```
+
+Prefer `OnClick` for ordinary control activation because it already unifies pointer, keyboard, and accessibility input.
+Do not recreate Button, Select, Menu, or text-editing key behavior in an application handler.
+
 ## Select
 
 `Select` is a compact controlled choice component for a finite, non-empty data set.

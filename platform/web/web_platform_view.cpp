@@ -543,7 +543,7 @@ void WebPlatformViews::MoveFocus(std::uint32_t token, bool reverse) {
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
   if (identity.has_value()) {
-    RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse);
+    static_cast<void>(RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
   }
 }
 

@@ -567,7 +567,7 @@ void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
   if (state_->pending_focus_traversal.has_value() && state_->pending_focus_traversal->first == *focused) {
     const bool reverse = state_->pending_focus_traversal->second;
     state_->pending_focus_traversal.reset();
-    RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *focused, reverse);
+    static_cast<void>(RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *focused, reverse));
     return;
   }
   RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);

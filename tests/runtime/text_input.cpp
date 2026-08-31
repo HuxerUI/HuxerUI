@@ -296,6 +296,7 @@ View TextKeyClientApp() {
                          [] { ++text_activations; }
   ).On<ViewEvents::KeyDown>([](const KeyEvent&) {
      ++text_key_events;
+     return false;
    }).With(Focusable{}, TextInputProbe{first_text_client});
 }
 

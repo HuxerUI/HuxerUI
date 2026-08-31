@@ -25,66 +25,251 @@ namespace {
 
 Key TranslateKey(unsigned short key_code) {
   switch (key_code) {
-  case 56:
-  case 60:
-    return Key::Shift;
-  case 59:
-  case 62:
-    return Key::Control;
-  case 58:
-  case 61:
-    return Key::Alt;
-  case 54:
-  case 55:
-    return Key::Meta;
-  case 48:
-    return Key::Tab;
-  case 36:
-  case 76:
-    return Key::Enter;
-  case 49:
-    return Key::Space;
-  case 53:
-    return Key::Escape;
-  case 51:
-    return Key::Backspace;
-  case 117:
-    return Key::Delete;
-  case 123:
-    return Key::ArrowLeft;
-  case 124:
-    return Key::ArrowRight;
-  case 125:
-    return Key::ArrowDown;
-  case 126:
-    return Key::ArrowUp;
-  case 115:
-    return Key::Home;
-  case 119:
-    return Key::End;
-  case 116:
-    return Key::PageUp;
-  case 121:
-    return Key::PageDown;
-  case 109:
-    return Key::F10;
-  case 110:
-    return Key::ContextMenu;
-  case 0:
+  case kVK_ANSI_A:
     return Key::A;
-  case 8:
+  case kVK_ANSI_B:
+    return Key::B;
+  case kVK_ANSI_C:
     return Key::C;
-  case 9:
+  case kVK_ANSI_D:
+    return Key::D;
+  case kVK_ANSI_E:
+    return Key::E;
+  case kVK_ANSI_F:
+    return Key::F;
+  case kVK_ANSI_G:
+    return Key::G;
+  case kVK_ANSI_H:
+    return Key::H;
+  case kVK_ANSI_I:
+    return Key::I;
+  case kVK_ANSI_J:
+    return Key::J;
+  case kVK_ANSI_K:
+    return Key::K;
+  case kVK_ANSI_L:
+    return Key::L;
+  case kVK_ANSI_M:
+    return Key::M;
+  case kVK_ANSI_N:
+    return Key::N;
+  case kVK_ANSI_O:
+    return Key::O;
+  case kVK_ANSI_P:
+    return Key::P;
+  case kVK_ANSI_Q:
+    return Key::Q;
+  case kVK_ANSI_R:
+    return Key::R;
+  case kVK_ANSI_S:
+    return Key::S;
+  case kVK_ANSI_T:
+    return Key::T;
+  case kVK_ANSI_U:
+    return Key::U;
+  case kVK_ANSI_V:
     return Key::V;
-  case 7:
+  case kVK_ANSI_W:
+    return Key::W;
+  case kVK_ANSI_X:
     return Key::X;
-  case 16:
+  case kVK_ANSI_Y:
     return Key::Y;
-  case 6:
+  case kVK_ANSI_Z:
     return Key::Z;
+  case kVK_ANSI_0:
+    return Key::Digit0;
+  case kVK_ANSI_1:
+    return Key::Digit1;
+  case kVK_ANSI_2:
+    return Key::Digit2;
+  case kVK_ANSI_3:
+    return Key::Digit3;
+  case kVK_ANSI_4:
+    return Key::Digit4;
+  case kVK_ANSI_5:
+    return Key::Digit5;
+  case kVK_ANSI_6:
+    return Key::Digit6;
+  case kVK_ANSI_7:
+    return Key::Digit7;
+  case kVK_ANSI_8:
+    return Key::Digit8;
+  case kVK_ANSI_9:
+    return Key::Digit9;
+  case kVK_ANSI_Grave:
+    return Key::Backquote;
+  case kVK_ANSI_Minus:
+    return Key::Minus;
+  case kVK_ANSI_Equal:
+    return Key::Equal;
+  case kVK_ANSI_LeftBracket:
+    return Key::BracketLeft;
+  case kVK_ANSI_RightBracket:
+    return Key::BracketRight;
+  case kVK_ANSI_Backslash:
+    return Key::Backslash;
+  case kVK_ANSI_Semicolon:
+    return Key::Semicolon;
+  case kVK_ANSI_Quote:
+    return Key::Quote;
+  case kVK_ANSI_Comma:
+    return Key::Comma;
+  case kVK_ANSI_Period:
+    return Key::Period;
+  case kVK_ANSI_Slash:
+    return Key::Slash;
+  case kVK_ISO_Section:
+    return Key::IntlBackslash;
+  case kVK_JIS_Underscore:
+    return Key::IntlRo;
+  case kVK_JIS_Yen:
+    return Key::IntlYen;
+  case kVK_Shift:
+    return Key::ShiftLeft;
+  case kVK_RightShift:
+    return Key::ShiftRight;
+  case kVK_Control:
+    return Key::ControlLeft;
+  case kVK_RightControl:
+    return Key::ControlRight;
+  case kVK_Option:
+    return Key::AltLeft;
+  case kVK_RightOption:
+    return Key::AltRight;
+  case kVK_Command:
+    return Key::MetaLeft;
+  case kVK_RightCommand:
+    return Key::MetaRight;
+  case kVK_CapsLock:
+    return Key::CapsLock;
+  case kVK_Delete:
+    return Key::Backspace;
+  case kVK_Tab:
+    return Key::Tab;
+  case kVK_Return:
+    return Key::Enter;
+  case kVK_Escape:
+    return Key::Escape;
+  case kVK_Space:
+    return Key::Space;
+  case kVK_ForwardDelete:
+    return Key::Delete;
+  case kVK_Home:
+    return Key::Home;
+  case kVK_End:
+    return Key::End;
+  case kVK_PageUp:
+    return Key::PageUp;
+  case kVK_PageDown:
+    return Key::PageDown;
+  case kVK_LeftArrow:
+    return Key::ArrowLeft;
+  case kVK_RightArrow:
+    return Key::ArrowRight;
+  case kVK_UpArrow:
+    return Key::ArrowUp;
+  case kVK_DownArrow:
+    return Key::ArrowDown;
+  case kVK_F1:
+    return Key::F1;
+  case kVK_F2:
+    return Key::F2;
+  case kVK_F3:
+    return Key::F3;
+  case kVK_F4:
+    return Key::F4;
+  case kVK_F5:
+    return Key::F5;
+  case kVK_F6:
+    return Key::F6;
+  case kVK_F7:
+    return Key::F7;
+  case kVK_F8:
+    return Key::F8;
+  case kVK_F9:
+    return Key::F9;
+  case kVK_F10:
+    return Key::F10;
+  case kVK_F11:
+    return Key::F11;
+  case kVK_F12:
+    return Key::F12;
+  case kVK_F13:
+    return Key::F13;
+  case kVK_F14:
+    return Key::F14;
+  case kVK_F15:
+    return Key::F15;
+  case kVK_F16:
+    return Key::F16;
+  case kVK_F17:
+    return Key::F17;
+  case kVK_F18:
+    return Key::F18;
+  case kVK_F19:
+    return Key::F19;
+  case kVK_F20:
+    return Key::F20;
+  case kVK_ContextualMenu:
+    return Key::ContextMenu;
+  case kVK_Help:
+    return Key::Help;
+  case kVK_ANSI_Keypad0:
+    return Key::Numpad0;
+  case kVK_ANSI_Keypad1:
+    return Key::Numpad1;
+  case kVK_ANSI_Keypad2:
+    return Key::Numpad2;
+  case kVK_ANSI_Keypad3:
+    return Key::Numpad3;
+  case kVK_ANSI_Keypad4:
+    return Key::Numpad4;
+  case kVK_ANSI_Keypad5:
+    return Key::Numpad5;
+  case kVK_ANSI_Keypad6:
+    return Key::Numpad6;
+  case kVK_ANSI_Keypad7:
+    return Key::Numpad7;
+  case kVK_ANSI_Keypad8:
+    return Key::Numpad8;
+  case kVK_ANSI_Keypad9:
+    return Key::Numpad9;
+  case kVK_ANSI_KeypadDecimal:
+    return Key::NumpadDecimal;
+  case kVK_ANSI_KeypadDivide:
+    return Key::NumpadDivide;
+  case kVK_ANSI_KeypadMultiply:
+    return Key::NumpadMultiply;
+  case kVK_ANSI_KeypadMinus:
+    return Key::NumpadSubtract;
+  case kVK_ANSI_KeypadPlus:
+    return Key::NumpadAdd;
+  case kVK_ANSI_KeypadEnter:
+    return Key::NumpadEnter;
+  case kVK_ANSI_KeypadEquals:
+    return Key::NumpadEqual;
+  case kVK_JIS_KeypadComma:
+    return Key::NumpadComma;
+  case kVK_ANSI_KeypadClear:
+    return Key::NumpadClear;
   default:
     return Key::Unknown;
   }
+}
+
+Key TranslateKey(NSEvent* event) {
+  NSString* characters = event.charactersIgnoringModifiers;
+  if (characters.length == 1) {
+    const unichar character = [characters characterAtIndex:0];
+    if (character >= 'a' && character <= 'z') {
+      return static_cast<Key>(static_cast<int>(Key::A) + character - 'a');
+    }
+    if (character >= 'A' && character <= 'Z') {
+      return static_cast<Key>(static_cast<int>(Key::A) + character - 'A');
+    }
+  }
+  return TranslateKey(event.keyCode);
 }
 
 std::optional<TextRange> ToTextRange(NSRange range) {
@@ -137,15 +322,15 @@ KeyEvent MakeMacKeyEvent(NSEvent* event, KeyEventType type) {
   const char* characters = event.characters == nil ? nullptr : event.characters.UTF8String;
   return {
       type,
-      TranslateKey(event.keyCode),
-      characters == nullptr ? std::string{} : std::string(characters),
+      TranslateKey(event),
+      type == KeyEventType::Down && characters != nullptr ? std::string(characters) : std::string{},
       {
           static_cast<bool>(flags & NSEventModifierFlagShift),
           static_cast<bool>(flags & NSEventModifierFlagControl),
           static_cast<bool>(flags & NSEventModifierFlagOption),
           static_cast<bool>(flags & NSEventModifierFlagCommand),
       },
-      static_cast<bool>(event.isARepeat),
+      type == KeyEventType::Down && static_cast<bool>(event.isARepeat),
   };
 }
 
@@ -184,14 +369,25 @@ public:
     if (!IsActive() || event == nil) {
       return false;
     }
-    const KeyEvent key_event = MakeMacKeyEvent(event, KeyEventType::Down);
-    if ((key_event.modifiers.control || key_event.modifiers.meta) && !key_event.modifiers.alt &&
-        (key_event.key == Key::A || key_event.key == Key::C || key_event.key == Key::V ||
-         key_event.key == Key::X || key_event.key == Key::Y || key_event.key == Key::Z)) {
-      runtime_->HandleKeyEvent(key_event);
+    const bool composing = HasMarkedText();
+    if (composing) {
+      const bool handled = [input_context_ handleEvent:event] == YES;
+      if (handled) {
+        return true;
+      }
+    }
+    KeyEvent key_event = MakeMacKeyEvent(event, KeyEventType::Down);
+    key_event.text.clear();
+    if (runtime_->HandleKeyEvent(key_event)) {
       return true;
     }
-    return [input_context_ handleEvent:event] == YES;
+    if (composing) {
+      return false;
+    }
+    routed_event_ = key_event;
+    const bool handled = [input_context_ handleEvent:event] == YES;
+    routed_event_.reset();
+    return handled;
   }
 
   void Start(
@@ -536,6 +732,9 @@ public:
     if (key == Key::Unknown) {
       return;
     }
+    if (routed_event_.has_value() && routed_event_->key == key && routed_event_->modifiers == modifiers) {
+      return;
+    }
     runtime_->HandleKeyEvent({
         KeyEventType::Down,
         key,
@@ -584,6 +783,7 @@ private:
   __strong NSTextInputContext* input_context_ = nil;
   TextInputSessionId session_id_ = 0;
   TextInputConfiguration configuration_;
+  std::optional<KeyEvent> routed_event_;
   bool suppress_callbacks_ = false;
   bool application_active_ = true;
   bool secure_event_input_enabled_ = false;

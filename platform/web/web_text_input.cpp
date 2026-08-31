@@ -207,12 +207,12 @@ EM_JS(bool, ActivateWebTextInput, (
       });
 
       listen("keydown", (event) => {
-        if (session.activeTextInput !== element || session.textComposing) {
+        if (session.activeTextInput !== element || session.textComposing || event.isComposing) {
           return;
         }
-        if (event.key === "Tab") {
+        if (session.sendKey(event, 0, false)) {
           event.preventDefault();
-          session.sendKey(event, 0);
+          event.stopPropagation();
           return;
         }
         if (event.key !== "Enter") {
@@ -229,9 +229,12 @@ EM_JS(bool, ActivateWebTextInput, (
         Module._huxerui_web_text_action(web_session_id, session.textToken, requestedAction);
       });
       listen("keyup", (event) => {
-        if (session.activeTextInput === element && event.key === "Tab") {
+        if (session.activeTextInput !== element || session.textComposing || event.isComposing) {
+          return;
+        }
+        if (session.sendKey(event, 1, false)) {
           event.preventDefault();
-          session.sendKey(event, 1);
+          event.stopPropagation();
         }
       });
     };

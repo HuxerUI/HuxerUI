@@ -37,7 +37,8 @@ bool LayerPaintsAbove(const LayerEntry& candidate, const LayerEntry& current) no
 }
 
 bool IsModifierKey(Key key) noexcept {
-  return key == Key::Shift || key == Key::Control || key == Key::Alt || key == Key::Meta;
+  return key == Key::ShiftLeft || key == Key::ShiftRight || key == Key::ControlLeft || key == Key::ControlRight ||
+         key == Key::AltLeft || key == Key::AltRight || key == Key::MetaLeft || key == Key::MetaRight;
 }
 
 bool BuildNodeRoute(MountedNode& node, std::uint64_t identity, std::vector<MountedNode*>& route) {
@@ -894,17 +895,16 @@ void DispatchFocusChanged(MountedNode& node, bool focused) {
   EmitEvent<ViewEvents::FocusChanged>(node.event_bindings, focused);
 }
 
-void DispatchKey(MountedNode& node, const KeyEvent& event) {
+bool DispatchKey(MountedNode& node, const KeyEvent& event) {
   for (NodeExtensionEntry& entry : node.extensions) {
-    if (entry.extension) {
-      entry.extension->OnKey(node, event);
+    if (entry.extension && entry.extension->OnKey(node, event)) {
+      return true;
     }
   }
   if (event.type == KeyEventType::Down) {
-    EmitEvent<ViewEvents::KeyDown>(node.event_bindings, event);
-  } else {
-    EmitEvent<ViewEvents::KeyUp>(node.event_bindings, event);
+    return EmitEvent<ViewEvents::KeyDown>(node.event_bindings, event).value_or(false);
   }
+  return EmitEvent<ViewEvents::KeyUp>(node.event_bindings, event).value_or(false);
 }
 
 bool RefreshExtensionPresence(MountedNode& node) {
@@ -1372,11 +1372,15 @@ void Runtime::SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity
   }
 }
 
-void Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
+bool Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
   if (FocusedPlatformView() != identity) {
-    return;
+    return false;
   }
-  MoveFocus(reverse);
+  return HandleKeyEvent({
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+      .modifiers = {.shift = reverse},
+  });
 }
 
 std::optional<PlatformPayload> Runtime::DispatchPlatformViewEvent(
@@ -2347,40 +2351,80 @@ bool Runtime::HandleFocusedTextInputKey(const KeyEvent& event) {
   return true;
 }
 
-void Runtime::HandleKeyEvent(const KeyEvent& event) {
+bool Runtime::HandleKeyEvent(const KeyEvent& event) {
   if (!state_->mounted_root_) {
-    return;
-  }
-  if (event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat && HandleBack()) {
-    return;
-  }
-  if (event.type == KeyEventType::Down && event.key == Key::Tab && !event.repeat) {
-    MoveFocus(event.modifiers.shift);
-    RefreshTextInputSession();
-    return;
-  }
-  if (!state_->focused_node_identity_.has_value()) {
-    return;
+    return false;
   }
 
-  detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
-  if (!focused || !focused->interaction.enabled || !focused->focusable) {
+  detail::MountedNode* focused = nullptr;
+  if (state_->focused_node_identity_.has_value()) {
+    focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  }
+  if (focused && (!focused->interaction.enabled || !focused->focusable)) {
     SetFocusedNode(std::nullopt);
     RefreshTextInputSession();
-    return;
+    focused = nullptr;
   }
 
-  const Rect focused_bounds = focused->PresentationBounds();
-  const Point focused_origin{
-      focused_bounds.x + focused_bounds.width * 0.5F,
-      focused_bounds.y + focused_bounds.height * 0.5F,
-  };
-  detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, focused_origin, false);
+  std::optional<detail::InteractionOriginScope> interaction_origin;
+  if (focused) {
+    const Rect focused_bounds = focused->PresentationBounds();
+    interaction_origin.emplace(
+        state_->current_interaction_origin_,
+        Point{
+            focused_bounds.x + focused_bounds.width * 0.5F,
+            focused_bounds.y + focused_bounds.height * 0.5F,
+        },
+        false
+    );
+  }
 
   if (event.type == KeyEventType::Down && !IsModifierKey(event.key)) {
-    SetFocusedNode(focused->identity, true);
+    if (focused) {
+      SetFocusedNode(focused->identity, true);
+    }
   }
-  if (event.type == KeyEventType::Down && !event.repeat && !event.modifiers.alt &&
+
+  const auto cancel_keyboard_activation = [this, &event] {
+    if (event.type != KeyEventType::Up || event.key != Key::Space ||
+        !state_->keyboard_activation_identity_.has_value()) {
+      return;
+    }
+    if (state_->keyboard_press_id_.has_value()) {
+      if (detail::MountedNode* pressed = FindNode(*state_->mounted_root_, *state_->keyboard_activation_identity_)) {
+        EndInteraction(*pressed, InteractionEvent::Type::Cancel, InteractionEvent::Source::Keyboard,
+                       *state_->keyboard_press_id_);
+      }
+    }
+    state_->keyboard_activation_identity_.reset();
+    state_->keyboard_press_id_.reset();
+  };
+  const auto finish_handled = [this, &cancel_keyboard_activation] {
+    cancel_keyboard_activation();
+    RequestFrame();
+    RefreshTextInputSession();
+    return true;
+  };
+
+  detail::MountedNode* active_focus_root = ActiveFocusTrapRoot();
+  detail::MountedNode* focus_root = active_focus_root ? active_focus_root : state_->mounted_root_.get();
+  std::vector<detail::MountedNode*> focus_route;
+  if (focused) {
+    if (!detail::BuildNodeRoute(*focus_root, focused->identity, focus_route)) {
+      focus_route.push_back(focus_root);
+    }
+  } else if (active_focus_root) {
+    focus_route.push_back(active_focus_root);
+  } else if (detail::MountedNode* application = FindApplicationRoot(*state_->mounted_root_)) {
+    focus_route.push_back(application);
+  }
+  for (detail::MountedNode* node : focus_route) {
+    if (detail::EmitEvent<ViewEvents::KeyIntercept>(node->event_bindings, event).value_or(false)) {
+      return finish_handled();
+    }
+  }
+
+  if (focused && event.type == KeyEventType::Down && !event.repeat && !event.modifiers.alt &&
       (event.modifiers.control || event.modifiers.meta)) {
     std::optional<TextEditingAction> action;
     switch (event.key) {
@@ -2401,10 +2445,24 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
     }
     if (action.has_value() && (state_->text_input_session_.has_value() || CanPerformTextEditingAction(*action))) {
       PerformTextEditingAction(*action);
-      RequestFrame();
-      RefreshTextInputSession();
-      return;
+      return finish_handled();
     }
+  }
+  if (focused && HandleFocusedTextInputKey(event)) {
+    return finish_handled();
+  }
+  if (focused && detail::DispatchKey(*focused, event)) {
+    return finish_handled();
+  }
+
+  if (event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat && HandleBack()) {
+    return finish_handled();
+  }
+  if (event.type == KeyEventType::Down && event.key == Key::Tab) {
+    if (!event.repeat) {
+      MoveFocus(event.modifiers.shift);
+    }
+    return finish_handled();
   }
   const bool context_menu_key = event.key == Key::ContextMenu && !event.modifiers.shift &&
                                 !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta;
@@ -2412,46 +2470,55 @@ void Runtime::HandleKeyEvent(const KeyEvent& event) {
                          !event.modifiers.alt && !event.modifiers.meta;
   if (event.type == KeyEventType::Down && !event.repeat && (context_menu_key || shift_f10) &&
       DispatchKeyboardContextMenu()) {
-    RequestFrame();
-    return;
+    return finish_handled();
   }
-  if (HandleFocusedTextInputKey(event)) {
-    return;
+  if (!focused) {
+    return false;
   }
-  DispatchKey(*focused, event);
-  const bool activatable = IsActivatable(*focused);
+
+  const bool activatable = detail::IsActivatable(*focused);
   if (event.type == KeyEventType::Down) {
-    if (activatable && event.key == Key::Enter && !event.repeat) {
-      ActivateNode(*focused);
-    } else if (activatable && event.key == Key::Space && !event.repeat &&
-               !state_->keyboard_activation_identity_.has_value()) {
-      state_->keyboard_activation_identity_ = focused->identity;
-      state_->keyboard_press_id_ = BeginInteraction(*focused, InteractionEvent::Source::Keyboard);
+    if (activatable && event.key == Key::Enter) {
+      if (!event.repeat) {
+        ActivateNode(*focused);
+      }
+      return finish_handled();
     }
-  } else if (event.key == Key::Space) {
+    if (activatable && event.key == Key::Space) {
+      if (!event.repeat && !state_->keyboard_activation_identity_.has_value()) {
+        state_->keyboard_activation_identity_ = focused->identity;
+        state_->keyboard_press_id_ = BeginInteraction(*focused, InteractionEvent::Source::Keyboard);
+      }
+      return finish_handled();
+    }
+  } else if (activatable && event.key == Key::Enter) {
+    return finish_handled();
+  } else if (activatable && event.key == Key::Space) {
     if (state_->keyboard_activation_identity_.has_value() &&
         *state_->keyboard_activation_identity_ == focused->identity) {
       if (state_->keyboard_press_id_.has_value()) {
-        EndInteraction(*focused, activatable ? InteractionEvent::Type::Release : InteractionEvent::Type::Cancel,
-                       InteractionEvent::Source::Keyboard, *state_->keyboard_press_id_);
+        EndInteraction(*focused, InteractionEvent::Type::Release, InteractionEvent::Source::Keyboard,
+                       *state_->keyboard_press_id_);
       }
-      if (activatable) {
-        ActivateNode(*focused);
-      }
+      ActivateNode(*focused);
+      state_->keyboard_activation_identity_.reset();
+      state_->keyboard_press_id_.reset();
     }
-    state_->keyboard_activation_identity_.reset();
-    state_->keyboard_press_id_.reset();
+    return finish_handled();
   }
-  RequestFrame();
-  RefreshTextInputSession();
+  return false;
 }
 
 bool Runtime::DispatchKeyboardContextMenu() {
   if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
     return false;
   }
+  detail::MountedNode* focus_root = ActiveFocusTrapRoot();
+  if (!focus_root) {
+    focus_root = state_->mounted_root_.get();
+  }
   std::vector<detail::MountedNode*> route;
-  if (!BuildNodeRoute(*state_->mounted_root_, *state_->focused_node_identity_, route)) {
+  if (!BuildNodeRoute(*focus_root, *state_->focused_node_identity_, route)) {
     return false;
   }
   const Rect focused_bounds = route.back()->PresentationBounds();

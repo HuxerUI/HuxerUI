@@ -565,7 +565,7 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
                            (!reverse && std::next(current) == tab_order.end());
   state_->pending_focus_visible = true;
   if (leaves_view) {
-    RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse);
+    static_cast<void>(RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
     return true;
   }
   SetFocus(reverse ? *std::prev(current) : *std::next(current));

@@ -1,7 +1,6 @@
 #include <huxerui/app.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -39,22 +38,15 @@ namespace {
 
 using emscripten::val;
 
-constexpr std::array web_key_order{
-    Key::Unknown,   Key::Tab,        Key::Enter,   Key::Space,     Key::Escape, Key::Backspace, Key::Delete,
-    Key::ArrowLeft, Key::ArrowRight, Key::ArrowUp, Key::ArrowDown, Key::Home,   Key::End,       Key::PageUp,
-    Key::PageDown,  Key::A,          Key::C,       Key::V,         Key::X,      Key::Y,         Key::Z,
-    Key::Shift,     Key::Control,    Key::Alt,     Key::Meta,      Key::F10,    Key::ContextMenu,
-};
-
 static_assert(
-    [] {
-      for (std::size_t index = 0; index < web_key_order.size(); ++index) {
-        if (static_cast<std::size_t>(web_key_order[index]) != index) {
-          return false;
-        }
-      }
-      return true;
-    }(),
+    static_cast<int>(Key::Unknown) == 0 && static_cast<int>(Key::Backspace) == 1 &&
+        static_cast<int>(Key::ArrowDown) == 15 && static_cast<int>(Key::A) == 16 &&
+        static_cast<int>(Key::Z) == 41 && static_cast<int>(Key::Digit0) == 42 &&
+        static_cast<int>(Key::Digit9) == 51 && static_cast<int>(Key::Backquote) == 52 &&
+        static_cast<int>(Key::ScrollLock) == 76 && static_cast<int>(Key::F1) == 77 &&
+        static_cast<int>(Key::F24) == 100 && static_cast<int>(Key::PrintScreen) == 101 &&
+        static_cast<int>(Key::Help) == 104 && static_cast<int>(Key::Numpad0) == 105 &&
+        static_cast<int>(Key::NumpadClear) == 123,
     "HuxerUI Web key mapping must match the Key enum order"
 );
 
@@ -472,85 +464,102 @@ EM_JS(
             {capture : true, passive : false}
         );
 
-        const keyValue = (key) => {
-          switch (key) {
-          case "Tab":
-            return 1;
-          case "Enter":
-            return 2;
-          case " ":
-            return 3;
-          case "Escape":
-            return 4;
-          case "Backspace":
-            return 5;
-          case "Delete":
-            return 6;
-          case "ArrowLeft":
-            return 7;
-          case "ArrowRight":
-            return 8;
-          case "ArrowUp":
-            return 9;
-          case "ArrowDown":
-            return 10;
-          case "Home":
-            return 11;
-          case "End":
-            return 12;
-          case "PageUp":
-            return 13;
-          case "PageDown":
-            return 14;
-          case "a":
-          case "A":
-            return 15;
-          case "c":
-          case "C":
-            return 16;
-          case "v":
-          case "V":
-            return 17;
-          case "x":
-          case "X":
-            return 18;
-          case "y":
-          case "Y":
-            return 19;
-          case "z":
-          case "Z":
-            return 20;
-          case "Shift":
-            return 21;
-          case "Control":
-            return 22;
-          case "Alt":
-            return 23;
-          case "Meta":
-            return 24;
-          case "F10":
-            return 25;
-          case "ContextMenu":
-            return 26;
-          default:
-            return 0;
-          }
+        const keyValues = {
+          Backspace : 1,
+          Tab : 2,
+          Enter : 3,
+          Escape : 4,
+          Space : 5,
+          Insert : 6,
+          Delete : 7,
+          Home : 8,
+          End : 9,
+          PageUp : 10,
+          PageDown : 11,
+          ArrowLeft : 12,
+          ArrowRight : 13,
+          ArrowUp : 14,
+          ArrowDown : 15,
+          Backquote : 52,
+          Minus : 53,
+          Equal : 54,
+          BracketLeft : 55,
+          BracketRight : 56,
+          Backslash : 57,
+          Semicolon : 58,
+          Quote : 59,
+          Comma : 60,
+          Period : 61,
+          Slash : 62,
+          IntlBackslash : 63,
+          IntlRo : 64,
+          IntlYen : 65,
+          ShiftLeft : 66,
+          ShiftRight : 67,
+          ControlLeft : 68,
+          ControlRight : 69,
+          AltLeft : 70,
+          AltRight : 71,
+          MetaLeft : 72,
+          MetaRight : 73,
+          CapsLock : 74,
+          NumLock : 75,
+          ScrollLock : 76,
+          PrintScreen : 101,
+          Pause : 102,
+          ContextMenu : 103,
+          Help : 104,
+          NumpadDecimal : 115,
+          NumpadDivide : 116,
+          NumpadMultiply : 117,
+          NumpadSubtract : 118,
+          NumpadAdd : 119,
+          NumpadEnter : 120,
+          NumpadEqual : 121,
+          NumpadComma : 122,
+          NumpadClear : 123,
         };
-        const sendKey = (event, type) => {
+        const keyValue = (code, key) => {
+          const upperKey = key.toUpperCase();
+          if (upperKey.length === 1) {
+            const letter = upperKey.charCodeAt(0) - "A".charCodeAt(0);
+            if (letter >= 0 && letter < 26) {
+              return 16 + letter;
+            }
+          }
+          if (code.length === 6 && code.startsWith("Digit") && code[5] >= "0" && code[5] <= "9") {
+            return 42 + Number(code[5]);
+          }
+          if (code[0] === "F") {
+            const number = Number(code.slice(1));
+            if (Number.isInteger(number) && number >= 1 && number <= 24) {
+              return 76 + number;
+            }
+          }
+          if (code.length === 7 && code.startsWith("Numpad") && code[6] >= "0" && code[6] <= "9") {
+            return 105 + Number(code[6]);
+          }
+          return keyValues[code] || 0;
+        };
+        const sendKey = (event, type, includeText = true) => {
           const text =
-              !event.ctrlKey && !event.metaKey && !event.altKey && Array.from(event.key).length === 1 ? event.key : "";
+              includeText && type === 0 && !event.ctrlKey && !event.metaKey && !event.altKey &&
+                      Array.from(event.key).length === 1
+                  ? event.key
+                  : "";
+          const altGraph = event.getModifierState && event.getModifierState("AltGraph");
           const textPointer = Module.stringToNewUTF8(text);
           try {
-            Module._huxerui_web_key(
+            return Module._huxerui_web_key(
                 session_id,
                 type,
-                keyValue(event.key),
+                keyValue(event.code || "", event.key || ""),
                 textPointer,
                 event.shiftKey,
-                event.ctrlKey,
+                event.ctrlKey && !altGraph,
                 event.altKey,
                 event.metaKey,
-                event.repeat
+                type === 0 && event.repeat
             );
           } finally {
             _free(textPointer);
@@ -585,27 +594,9 @@ EM_JS(
                           }
                           return;
                         }
-                        sendKey(event, 0);
-                        if ([
-                              "Tab",
-                              "Enter",
-                              " ",
-                              "Escape",
-                              "Backspace",
-                              "Delete",
-                              "ArrowLeft",
-                              "ArrowRight",
-                              "ArrowUp",
-                              "ArrowDown",
-                              "Home",
-                              "End",
-                              "PageUp",
-                              "PageDown",
-                              "F10",
-                              "ContextMenu"
-                            ]
-                                .includes(event.key)) {
+                        if (sendKey(event, 0)) {
                           event.preventDefault();
+                          event.stopPropagation();
                         }
                       },
             true
@@ -617,7 +608,10 @@ EM_JS(
             return;
           }
           if (!platformToken(event.target)) {
-            sendKey(event, 1);
+            if (sendKey(event, 1)) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
           }
         }, true);
         listen(window, "keyup", (event) => {
@@ -954,10 +948,8 @@ public:
     }
   }
 
-  void HandleKey(KeyEvent event) {
-    if (runtime_ != nullptr) {
-      runtime_->HandleKeyEvent(event);
-    }
+  bool HandleKey(KeyEvent event) {
+    return runtime_ != nullptr && runtime_->HandleKeyEvent(event);
   }
 
   void UpdateApplicationLifecycleState(int state) {
@@ -1234,7 +1226,7 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_wheel(std::uintptr_t session_id, float x, 
   });
 }
 
-EMSCRIPTEN_KEEPALIVE void huxerui_web_key(
+EMSCRIPTEN_KEEPALIVE bool huxerui_web_key(
     std::uintptr_t session_id,
     int type,
     int key,
@@ -1245,15 +1237,17 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_key(
     bool meta,
     bool repeat
 ) {
+  bool handled = false;
   huxerui::detail::DispatchWebSession(session_id, "key input", [&](auto& platform) {
-    platform.HandleKey({
+    handled = platform.HandleKey({
         static_cast<huxerui::KeyEventType>(std::clamp(type, 0, 1)),
-        static_cast<huxerui::Key>(std::clamp(key, 0, static_cast<int>(huxerui::Key::ContextMenu))),
+        static_cast<huxerui::Key>(std::clamp(key, 0, static_cast<int>(huxerui::Key::NumpadClear))),
         text == nullptr ? std::string{} : std::string{text},
         {shift, control, alt, meta},
         repeat,
     });
   });
+  return handled;
 }
 }
 

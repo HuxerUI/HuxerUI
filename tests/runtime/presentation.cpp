@@ -50,6 +50,13 @@ std::vector<Key> received_keys;
 int first_keyboard_clicks = 0;
 int third_keyboard_clicks = 0;
 int custom_keyboard_clicks = 0;
+std::vector<std::string> key_route;
+bool consume_root_key = false;
+bool consume_focused_intercept = false;
+bool consume_focused_key_down = false;
+bool consume_focused_key_up = false;
+int routed_keyboard_clicks = 0;
+int slider_key_events = 0;
 int disabled_clicks = 0;
 int underlying_clicks = 0;
 int background_dialog_clicks = 0;
@@ -597,10 +604,17 @@ View SliderApp() {
   auto value = UseState(4.0F);
   slider_value = value;
   return Row {
-    Slider(value).Range(0.0F, 10.0F).Step(2.0F).OnChanged([value](float changed) {
-      ++slider_changes;
-      value = changed;
-    }),
+    Slider(value)
+        .Range(0.0F, 10.0F)
+        .Step(2.0F)
+        .OnChanged([value](float changed) {
+          ++slider_changes;
+          value = changed;
+        })
+        .On<ViewEvents::KeyDown>([](const KeyEvent&) {
+          ++slider_key_events;
+          return true;
+        }),
   };
 }
 
@@ -687,13 +701,39 @@ View FocusContent() {
       Text("custom focus")
           .With(Focusable{})
           .OnClick([] { ++custom_keyboard_clicks; })
-          .On<ViewEvents::KeyDown>([](const KeyEvent& event) { received_keys.push_back(event.key); }),
+          .On<ViewEvents::KeyDown>([](const KeyEvent& event) {
+            received_keys.push_back(event.key);
+            return false;
+          }),
     };
   });
 }
 
 View FocusApp() {
   return FocusTestTheme(FocusContent());
+}
+
+View KeyRoutingApp() {
+  return Column {
+    Text("focused")
+        .With(Focusable{})
+        .OnClick([] { ++routed_keyboard_clicks; })
+        .On<ViewEvents::KeyIntercept>([](const KeyEvent&) {
+          key_route.push_back("focused-intercept");
+          return consume_focused_intercept;
+        })
+        .On<ViewEvents::KeyDown>([](const KeyEvent&) {
+          key_route.push_back("down");
+          return consume_focused_key_down;
+        })
+        .On<ViewEvents::KeyUp>([](const KeyEvent&) {
+          key_route.push_back("up");
+          return consume_focused_key_up;
+        }),
+  }.On<ViewEvents::KeyIntercept>([](const KeyEvent&) {
+    key_route.push_back("root-intercept");
+    return consume_root_key;
+  });
 }
 
 View FocusOnlyApp() {
@@ -2602,6 +2642,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
 TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
   slider_changes = 0;
+  slider_key_events = 0;
   const SliderStyle style = SliderStyle::Default();
 
   TestPlatform platform;
@@ -2697,6 +2738,9 @@ TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
   runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::End});
   REQUIRE(slider_changes == 6);
   REQUIRE(slider_value.Get() == 10.0F);
+  REQUIRE(slider_key_events == 0);
+  REQUIRE((runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Unknown})));
+  REQUIRE(slider_key_events == 1);
 
   const Point cancelled_pointer{
       bounds.x + inset + travel * 0.25F,
@@ -3102,6 +3146,61 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   REQUIRE(focus_changes.back() == "third:on");
 }
 
+TEST_CASE("TestKeyRoutingConsumptionAndActivation") {
+  key_route.clear();
+  consume_root_key = false;
+  consume_focused_intercept = false;
+  consume_focused_key_down = false;
+  consume_focused_key_up = false;
+  routed_keyboard_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{KeyRoutingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+  const auto send_key = [&runtime](KeyEventType type, Key key) {
+    return runtime.HandleKeyEvent({.type = type, .key = key});
+  };
+
+  REQUIRE(send_key(KeyEventType::Down, Key::Tab));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept"}));
+
+  key_route.clear();
+  REQUIRE_FALSE(send_key(KeyEventType::Down, Key::Unknown));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept", "focused-intercept", "down"}));
+  REQUIRE(runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab, .repeat = true}));
+
+  key_route.clear();
+  consume_root_key = true;
+  REQUIRE(send_key(KeyEventType::Down, Key::B));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept"}));
+
+  key_route.clear();
+  consume_root_key = false;
+  consume_focused_intercept = true;
+  REQUIRE(send_key(KeyEventType::Down, Key::C));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept", "focused-intercept"}));
+
+  key_route.clear();
+  consume_focused_intercept = false;
+  consume_focused_key_down = true;
+  REQUIRE(send_key(KeyEventType::Down, Key::Enter));
+  REQUIRE(routed_keyboard_clicks == 0);
+
+  consume_focused_key_down = false;
+  REQUIRE(send_key(KeyEventType::Down, Key::Enter));
+  REQUIRE(routed_keyboard_clicks == 1);
+  REQUIRE(runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Enter, .repeat = true}));
+  REQUIRE(send_key(KeyEventType::Up, Key::Enter));
+  REQUIRE(routed_keyboard_clicks == 1);
+
+  REQUIRE(send_key(KeyEventType::Down, Key::Space));
+  REQUIRE(runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Space, .repeat = true}));
+  consume_focused_key_up = true;
+  REQUIRE(send_key(KeyEventType::Up, Key::Space));
+  REQUIRE(routed_keyboard_clicks == 1);
+}
+
 TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
   focus_changes.clear();
 
@@ -3133,7 +3232,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
   });
   runtime.HandleKeyEvent(KeyEvent{
       .type = KeyEventType::Down,
-      .key = Key::Control,
+      .key = Key::ControlLeft,
       .modifiers = {
           .control = true,
       },

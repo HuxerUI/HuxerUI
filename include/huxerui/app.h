@@ -39,25 +39,49 @@ class FilePicker;
 class ApplicationHandle;
 struct ResourceConfiguration;
 
+/// Represents an ordinary application launch without an external payload.
 struct LaunchActivation {
   bool operator==(const LaunchActivation&) const = default;
 };
 
+/// Represents application activation through a URL.
 struct UrlActivation {
+  /// Validated URL supplied by the platform application shell.
   Uri url;
 
   bool operator==(const UrlActivation&) const = default;
 };
 
+/// Represents application activation through one or more platform-granted files.
+///
+/// `files` must not be empty when the value is submitted to Runtime. Each `FileReference` retains its capability
+/// semantics; applications must not assume that every value is a directly accessible local path.
 struct FileActivation {
+  /// Files supplied together by one platform activation.
   std::vector<FileReference> files;
 };
 
+/// Contains the normalized startup or subsequent activation delivered by the platform application shell.
+///
+/// Inspect the closed alternatives without parallel optional fields:
+/// @code
+/// if (std::holds_alternative<LaunchActivation>(activation)) {
+///   ShowHome();
+/// } else if (const auto* url = std::get_if<UrlActivation>(&activation)) {
+///   OpenUrl(url->url);
+/// } else {
+///   OpenFiles(std::get<FileActivation>(activation).files);
+/// }
+/// @endcode
 using ApplicationActivation = std::variant<LaunchActivation, UrlActivation, FileActivation>;
 
+/// Identifies the platform-owned lifecycle state of one Runtime.
 enum class ApplicationLifecycleState {
+  /// The application is visible and accepts user interaction.
   Active,
+  /// The application remains visible but is not currently active for user input.
   Inactive,
+  /// The application is no longer presented as an active foreground experience.
   Background,
 };
 
@@ -67,17 +91,48 @@ class SystemTrayService;
 class TaskScopeState;
 } // namespace detail
 
+/// Configures one system tray presentation.
 struct SystemTrayOptions {
+  /// Optional localized tooltip displayed by the platform tray host.
   StringVariant tooltip;
+  /// Optional native menu shown from the tray presentation.
   std::vector<MenuEntry> menu;
 };
 
+/// Controls the Runtime-owned system tray presentation for the declaring composition scope.
+///
+/// One Runtime owns at most one active tray presentation. Keep presentation lifetime explicit with `Lifecycle` so
+/// unmounting the declaring component also hides its tray item:
+/// @code
+/// const ApplicationHandle application = UseApplication();
+/// const SystemTrayHandle tray = application.SystemTray();
+/// tray.OnActivate([] { ShowMainWindow(); });
+/// Lifecycle([application, tray] {
+///   tray.Show(
+///       ImageAsset::FromFile("tray.png"),
+///       {.tooltip = "Example", .menu = {MenuItem("Quit", [application] { application.Quit(); })}}
+///   );
+///   return [tray] { tray.Hide(); };
+/// });
+/// @endcode
 class SystemTrayHandle final {
 public:
+  /// Returns whether the current platform tray host is available.
+  ///
+  /// Reading this value during composition subscribes the current scope to availability changes.
   [[nodiscard]] bool IsAvailable() const;
+  /// Creates or replaces this owner's tray presentation.
+  ///
+  /// `icon` must resolve to an `ImageAsset`. The desired presentation is retained while the tray host is temporarily
+  /// unavailable and is shown if availability returns.
   void Show(ImageVariant icon, SystemTrayOptions options = {}) const;
+  /// Hides the tray presentation when it is still owned by this handle's declaring scope.
   void Hide() const;
 
+  /// Connects the primary tray activation handler for the declaring component Lifecycle.
+  ///
+  /// Dependencies use the same replacement rules as `Lifecycle`: list captured ordinary values that must reconnect
+  /// the handler after they change. One Runtime may have only one committed tray activation handler.
   template <class... Dependencies>
   void OnActivate(std::function<void()> handler, Dependencies&&... dependencies) const {
     if (!handler) {
@@ -108,19 +163,41 @@ private:
   friend class ApplicationHandle;
 };
 
+/// Configures the process-level application declaration and each Runtime created from it.
 struct AppOptions {
+  /// Initial native-window configuration.
   WindowOptions window;
+  /// Width thresholds used by `UseViewportClass()`.
   ViewportBreakpoints viewport_breakpoints;
 #if defined(NDEBUG)
+  /// Whether Runtime installs the built-in debug overlay above application root hooks.
   bool show_debug_overlay = false;
 #else
+  /// Whether Runtime installs the built-in debug overlay above application root hooks.
   bool show_debug_overlay = true;
 #endif
+  /// Ordered application root extensions installed for every Runtime.
   std::vector<RootHook> root_hooks;
 };
 
+/// Function pointer that creates the application root View.
+///
+/// The root is composed by Runtime and must not be annotated as a reusable composable function.
 using RootFactory = View (*)();
 
+/// Declares the one process-level HuxerUI application used by the platform shell.
+///
+/// Declare one stable instance after defining the root factory:
+/// @code
+/// View App() {
+///   return MaterialTheme {HomePage()};
+/// }
+///
+/// const Application application{
+///     App,
+///     {.window = {.title = "Example", .initial_size = {960.0F, 640.0F}}},
+/// };
+/// @endcode
 class Application final {
 public:
   explicit Application(RootFactory root_factory, AppOptions options = {});
@@ -131,19 +208,45 @@ public:
   Application(Application&&) = delete;
   Application& operator=(Application&&) = delete;
 
+  /// Root factory used by every Runtime for this declaration.
   const RootFactory root_factory;
+  /// Immutable Runtime and platform-shell options.
   const AppOptions options;
 };
 
+/// Provides composition-bound access to application activation, lifecycle, tray, and termination capabilities.
+///
+/// `StartupActivation()` is immutable, while `OnActivation()` receives only later platform activations.
+/// `LifecycleState()` exposes the coalesced current value, while `OnLifecycleChange()` preserves distinct mounted
+/// transitions:
+/// @code
+/// const ApplicationHandle application = UseApplication();
+/// HandleActivation(application.StartupActivation());
+/// UpdateForLifecycle(application.LifecycleState());
+/// application.OnActivation([](ApplicationActivation activation) {
+///   HandleActivation(std::move(activation));
+/// });
+/// application.OnLifecycleChange([](ApplicationLifecycleState state) {
+///   PersistForLifecycle(state);
+/// });
+/// @endcode
 class ApplicationHandle final {
 public:
+  /// Returns the immutable activation used to create the current Runtime.
   [[nodiscard]] const ApplicationActivation& StartupActivation() const noexcept;
-  // Reading the current platform-owned state during composition subscribes that scope to later changes.
+  /// Returns the current platform-owned lifecycle state.
+  ///
+  /// Reading the value during composition subscribes the current scope to later distinct state changes.
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
+  /// Returns the system tray handle owned by the current composition scope.
   [[nodiscard]] SystemTrayHandle SystemTray() const;
+  /// Requests orderly whole-application termination from the platform adapter.
   void Quit() const;
 
-  // Delivers each distinct platform transition while the declaring component Lifecycle is mounted.
+  /// Connects an ordered lifecycle-transition handler while the declaring component Lifecycle is mounted.
+  ///
+  /// The current value is not replayed when the handler connects; read `LifecycleState()` for current state.
+  /// Dependencies reconnect the handler after captured ordinary values change.
   template <class... Dependencies>
   void OnLifecycleChange(
       std::function<void(ApplicationLifecycleState)> handler, Dependencies&&... dependencies
@@ -159,7 +262,10 @@ public:
     );
   }
 
-  // Receives only activations submitted after this Runtime was created; StartupActivation remains separate.
+  /// Connects the handler for activations submitted after the current Runtime was created.
+  ///
+  /// Startup activation is never replayed through this handler. Subsequent activations retain FIFO order and are not
+  /// deduplicated. Dependencies reconnect the handler after captured ordinary values change.
   template <class... Dependencies>
   void OnActivation(std::function<void(ApplicationActivation)> handler, Dependencies&&... dependencies) const {
     if (!handler) {
@@ -184,6 +290,9 @@ private:
   friend ApplicationHandle UseApplication();
 };
 
+/// Returns the application handle installed for the current composition.
+///
+/// A reusable function that calls this composition-bound facility should be marked with the composable attribute.
 ApplicationHandle UseApplication();
 
 namespace detail {
@@ -214,6 +323,16 @@ class VirtualMeasureSession;
 
 } // namespace detail
 
+/// Owns one mounted HuxerUI surface and the shared state used by its platform host.
+///
+/// Platform adapters create Runtime on their UI thread, submit normalized host input, and consume `BuildFrame()`
+/// commits. Application components normally use public hooks and handles instead of calling Runtime directly.
+/// @code
+/// Runtime runtime(application, adapter, LaunchActivation{});
+/// runtime.SetWindowMetrics({.viewport = {960.0F, 640.0F}});
+/// const FrameCommit& commit = runtime.BuildFrame();
+/// // The platform renderer consumes commit.render_frame before the next build.
+/// @endcode
 class Runtime final {
 public:
   Runtime(
@@ -228,35 +347,60 @@ public:
   Runtime(Runtime&&) = delete;
   Runtime& operator=(Runtime&&) = delete;
 
+  /// Updates the native-window metrics in logical coordinates and invalidates affected layout or composition state.
   void SetWindowMetrics(WindowMetrics metrics);
-  // Native non-client hit testing queries the geometry represented by the currently mounted tree.
+  /// Returns whether the current mounted tree claims a window-local point as a native drag region.
+  ///
+  /// Native non-client hit testing queries this without rebuilding the mounted tree.
   [[nodiscard]] bool IsWindowDragRegion(Point position) const;
+  /// Updates platform resource configuration such as locale, display scale, and accessibility preferences.
   void UpdateResourceConfiguration(ResourceConfiguration configuration);
+  /// Builds and commits pending composition, layout, semantics, animation, and rendering work.
+  ///
+  /// The returned reference is owned by Runtime and remains valid until the next frame build or Runtime destruction.
   const FrameCommit& BuildFrame();
+  /// Delivers one normalized pointer event in logical window-local coordinates.
   void HandlePointerEvent(const PointerEvent& event);
   /// Returns whether the window-local position has a HuxerUI context-menu handler.
   /// Platform hosts use this to preserve their native context menu outside claimed HuxerUI content.
   [[nodiscard]] bool HasContextMenuHandler(Point position) const;
+  /// Delivers normalized wheel or trackpad scrolling in logical window-local coordinates.
   void HandleScrollEvent(const ScrollEvent& event);
-  void HandleKeyEvent(const KeyEvent& event);
-  // Platform hosts submit subsequent activation on the Runtime's UI thread; startup input is a constructor argument.
+  /// Dispatches a normalized keyboard event and returns whether HuxerUI consumed it.
+  bool HandleKeyEvent(const KeyEvent& event);
+  /// Queues a subsequent platform activation for ordered delivery on a later frame.
+  ///
+  /// Platform hosts call this on the Runtime UI thread. Startup input is supplied to the constructor instead.
   void HandleApplicationActivation(ApplicationActivation activation);
-  // Platform updates feed both the coalescing current value and any mounted ordered transition handler.
+  /// Updates the coalesced lifecycle value and queues a distinct transition for any mounted handler.
   void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state);
-  // Returns true when application code handled the platform minimize or close request.
+  /// Dispatches a platform minimize or close request and returns whether application code handled it.
   [[nodiscard]] bool HandleWindowRequest(WindowCommand command);
+  /// Commits an immediate platform Back request and returns whether HuxerUI consumed it.
   bool HandleBack();
+  /// Dispatches one phase of a predictive or immediate Back request and returns whether HuxerUI consumed it.
   bool HandleBack(const BackEvent& event);
+  /// Performs a platform text-input action when the session and configured action still match.
   bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action);
+  /// Returns whether the focused text editing or selection client can currently perform an action.
   [[nodiscard]] bool CanPerformTextEditingAction(TextEditingAction action) const;
+  /// Performs a supported editing action for the focused text editing or selection client.
   bool PerformTextEditingAction(TextEditingAction action);
+  /// Applies an ordered platform text-input command batch to its active session.
   TextInputApplyResult HandleTextInputCommands(const TextInputCommandBatch& batch);
+  /// Queries UTF-16 text context from an active text-input session.
+  ///
+  /// `start` and `length` are UTF-16 code-unit offsets. The result reports mismatch or rejection without throwing;
+  /// an invalid result returned by a TextInputClient is a framework invariant failure.
   [[nodiscard]] TextInputContext
   QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const;
-  // Geometry is returned in logical coordinates relative to the HuxerUI host view.
+  /// Queries caret and range geometry for UTF-16 offsets in an active text-input session.
+  ///
+  /// Geometry is returned in logical coordinates relative to the HuxerUI host view.
   [[nodiscard]] TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const;
-  // The point is expressed in logical coordinates relative to the HuxerUI host view.
+  /// Resolves a logical host-view point to the nearest text position in an active text-input session.
   [[nodiscard]] TextInputPositionResult QueryTextInputPosition(TextInputSessionId session_id, Point point) const;
+  /// Dispatches one platform accessibility action and returns whether the current semantic tree accepted it.
   bool PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action);
 
 private:
@@ -274,7 +418,7 @@ private:
   [[nodiscard]] std::optional<std::uint64_t> HitTestPlatformView(Point position) const;
   [[nodiscard]] std::optional<std::uint64_t> FocusedPlatformView() const;
   void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible);
-  void MoveFocusFromPlatformView(std::uint64_t identity, bool reverse);
+  bool MoveFocusFromPlatformView(std::uint64_t identity, bool reverse);
   std::optional<PlatformPayload> DispatchPlatformViewEvent(
       std::uint64_t identity, std::string_view name, const PlatformPayload& payload
   );
@@ -415,6 +559,15 @@ private:
   friend struct detail::RuntimeAccess;
 };
 
+/// Runs the platform application shell for the unique process-level `Application` declaration.
+///
+/// Desktop and Apple platform entry points call this after static application initialization. Android and Web own
+/// their platform entry lifecycle and do not expose this operation.
+/// @code
+/// int main() {
+///   return RunApplication();
+/// }
+/// @endcode
 int RunApplication();
 
 } // namespace huxerui

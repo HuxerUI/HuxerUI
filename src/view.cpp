@@ -782,11 +782,11 @@ public:
     events_ = modifier.events;
   }
 
-  void OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(MountedNode& node, const KeyEvent& event) override {
     const std::size_t segment_count = node.ChildCount();
     if (!node.IsEnabled() || segment_count == 0 || event.type != KeyEventType::Down || event.modifiers.alt ||
         event.modifiers.control || event.modifiers.meta) {
-      return;
+      return false;
     }
     std::optional<std::size_t> requested;
     if (event.key == Key::ArrowLeft) {
@@ -801,6 +801,7 @@ public:
     if (requested.has_value() && *requested != selected_index_) {
       events_.Emit<SegmentedButtonEvents::Changed>(*requested);
     }
+    return requested.has_value();
   }
 
 private:
@@ -1059,10 +1060,10 @@ public:
     return changed ? PaintInvalidation::Foreground : PaintInvalidation::None;
   }
 
-  void OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(MountedNode& node, const KeyEvent& event) override {
     if (!node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control ||
         event.modifiers.meta || enabled_items_.empty()) {
-      return;
+      return false;
     }
     std::optional<std::size_t> requested;
     if (event.key == Key::ArrowLeft) {
@@ -1077,6 +1078,7 @@ public:
     if (requested.has_value() && *requested != selected_index_) {
       events_.Emit<TabsEvents::Changed>(*requested);
     }
+    return requested.has_value();
   }
 
   void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
@@ -1571,28 +1573,28 @@ public:
     UpdateThumbSize(node.IsEnabled());
   }
 
-  void OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(MountedNode& node, const KeyEvent& event) override {
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
-      return;
+      return false;
     }
     const float increment = step_.value_or((maximum_ - minimum_) / 100.0F);
     switch (event.key) {
     case Key::ArrowLeft:
     case Key::ArrowDown:
       EmitValue(node, last_emitted_value_ - increment);
-      break;
+      return true;
     case Key::ArrowRight:
     case Key::ArrowUp:
       EmitValue(node, last_emitted_value_ + increment);
-      break;
+      return true;
     case Key::Home:
       EmitValue(node, minimum_);
-      break;
+      return true;
     case Key::End:
       EmitValue(node, maximum_);
-      break;
+      return true;
     default:
-      break;
+      return false;
     }
   }
 

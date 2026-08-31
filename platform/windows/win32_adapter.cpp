@@ -196,67 +196,127 @@ private:
   GetSystemMetricsForDpiFunction get_system_metrics_for_dpi_ = nullptr;
 #endif
 };
-Key TranslateKey(WPARAM virtual_key) {
+Key TranslateKey(WPARAM virtual_key, LPARAM key_data) {
+  if (virtual_key >= 'A' && virtual_key <= 'Z') {
+    return static_cast<Key>(static_cast<int>(Key::A) + static_cast<int>(virtual_key - 'A'));
+  }
+  if (virtual_key >= '0' && virtual_key <= '9') {
+    return static_cast<Key>(static_cast<int>(Key::Digit0) + static_cast<int>(virtual_key - '0'));
+  }
+  if (virtual_key >= VK_F1 && virtual_key <= VK_F24) {
+    return static_cast<Key>(static_cast<int>(Key::F1) + static_cast<int>(virtual_key - VK_F1));
+  }
+  if (virtual_key >= VK_NUMPAD0 && virtual_key <= VK_NUMPAD9) {
+    return static_cast<Key>(static_cast<int>(Key::Numpad0) + static_cast<int>(virtual_key - VK_NUMPAD0));
+  }
+  const bool extended = (static_cast<std::uintptr_t>(key_data) & (1ULL << 24U)) != 0;
   switch (virtual_key) {
-  case VK_SHIFT:
   case VK_LSHIFT:
+    return Key::ShiftLeft;
   case VK_RSHIFT:
-    return Key::Shift;
-  case VK_CONTROL:
+    return Key::ShiftRight;
+  case VK_SHIFT: {
+    const UINT scan_code = (static_cast<UINT>(key_data) >> 16U) & 0xFFU;
+    return MapVirtualKeyW(scan_code, MAPVK_VSC_TO_VK_EX) == VK_RSHIFT ? Key::ShiftRight : Key::ShiftLeft;
+  }
   case VK_LCONTROL:
+    return Key::ControlLeft;
   case VK_RCONTROL:
-    return Key::Control;
-  case VK_MENU:
+    return Key::ControlRight;
+  case VK_CONTROL:
+    return extended ? Key::ControlRight : Key::ControlLeft;
   case VK_LMENU:
+    return Key::AltLeft;
   case VK_RMENU:
-    return Key::Alt;
+    return Key::AltRight;
+  case VK_MENU:
+    return extended ? Key::AltRight : Key::AltLeft;
   case VK_LWIN:
+    return Key::MetaLeft;
   case VK_RWIN:
-    return Key::Meta;
+    return Key::MetaRight;
+  case VK_BACK:
+    return Key::Backspace;
   case VK_TAB:
     return Key::Tab;
   case VK_RETURN:
-    return Key::Enter;
-  case VK_SPACE:
-    return Key::Space;
+    return extended ? Key::NumpadEnter : Key::Enter;
   case VK_ESCAPE:
     return Key::Escape;
-  case VK_BACK:
-    return Key::Backspace;
+  case VK_SPACE:
+    return Key::Space;
+  case VK_INSERT:
+    return extended ? Key::Insert : Key::Numpad0;
   case VK_DELETE:
-    return Key::Delete;
-  case VK_LEFT:
-    return Key::ArrowLeft;
-  case VK_RIGHT:
-    return Key::ArrowRight;
-  case VK_UP:
-    return Key::ArrowUp;
-  case VK_DOWN:
-    return Key::ArrowDown;
+    return extended ? Key::Delete : Key::NumpadDecimal;
   case VK_HOME:
-    return Key::Home;
+    return extended ? Key::Home : Key::Numpad7;
   case VK_END:
-    return Key::End;
+    return extended ? Key::End : Key::Numpad1;
   case VK_PRIOR:
-    return Key::PageUp;
+    return extended ? Key::PageUp : Key::Numpad9;
   case VK_NEXT:
-    return Key::PageDown;
-  case VK_F10:
-    return Key::F10;
+    return extended ? Key::PageDown : Key::Numpad3;
+  case VK_LEFT:
+    return extended ? Key::ArrowLeft : Key::Numpad4;
+  case VK_RIGHT:
+    return extended ? Key::ArrowRight : Key::Numpad6;
+  case VK_UP:
+    return extended ? Key::ArrowUp : Key::Numpad8;
+  case VK_DOWN:
+    return extended ? Key::ArrowDown : Key::Numpad2;
+  case VK_OEM_3:
+    return Key::Backquote;
+  case VK_OEM_MINUS:
+    return Key::Minus;
+  case VK_OEM_PLUS:
+    return Key::Equal;
+  case VK_OEM_4:
+    return Key::BracketLeft;
+  case VK_OEM_6:
+    return Key::BracketRight;
+  case VK_OEM_5:
+    return Key::Backslash;
+  case VK_OEM_1:
+    return Key::Semicolon;
+  case VK_OEM_7:
+    return Key::Quote;
+  case VK_OEM_COMMA:
+    return Key::Comma;
+  case VK_OEM_PERIOD:
+    return Key::Period;
+  case VK_OEM_2:
+    return Key::Slash;
+  case VK_OEM_102:
+    return Key::IntlBackslash;
+  case VK_CAPITAL:
+    return Key::CapsLock;
+  case VK_NUMLOCK:
+    return Key::NumLock;
+  case VK_SCROLL:
+    return Key::ScrollLock;
+  case VK_SNAPSHOT:
+    return Key::PrintScreen;
+  case VK_PAUSE:
+    return Key::Pause;
   case VK_APPS:
     return Key::ContextMenu;
-  case 'A':
-    return Key::A;
-  case 'C':
-    return Key::C;
-  case 'V':
-    return Key::V;
-  case 'X':
-    return Key::X;
-  case 'Y':
-    return Key::Y;
-  case 'Z':
-    return Key::Z;
+  case VK_HELP:
+    return Key::Help;
+  case VK_DECIMAL:
+    return Key::NumpadDecimal;
+  case VK_DIVIDE:
+    return Key::NumpadDivide;
+  case VK_MULTIPLY:
+    return Key::NumpadMultiply;
+  case VK_SUBTRACT:
+    return Key::NumpadSubtract;
+  case VK_ADD:
+    return Key::NumpadAdd;
+  case VK_SEPARATOR:
+    return Key::NumpadComma;
+  case VK_CLEAR:
+    return Key::Numpad5;
   default:
     return Key::Unknown;
   }
@@ -288,9 +348,11 @@ PointerButton MouseButtons(WPARAM state) noexcept {
 }
 
 KeyModifiers CurrentKeyModifiers() {
+  const bool alt_graph = (GetKeyState(VK_RMENU) & 0x8000) != 0 && (GetKeyState(VK_LCONTROL) & 0x8000) != 0 &&
+                         (GetKeyState(VK_RCONTROL) & 0x8000) == 0;
   return {
       (GetKeyState(VK_SHIFT) & 0x8000) != 0,
-      (GetKeyState(VK_CONTROL) & 0x8000) != 0,
+      !alt_graph && (GetKeyState(VK_CONTROL) & 0x8000) != 0,
       (GetKeyState(VK_MENU) & 0x8000) != 0,
       (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0,
   };
@@ -1161,10 +1223,10 @@ private:
     }
   }
 
-  void SendKey(KeyEventType type, WPARAM virtual_key, LPARAM key_data) {
-    runtime_->HandleKeyEvent({
+  bool SendKey(KeyEventType type, WPARAM virtual_key, LPARAM key_data) {
+    return runtime_->HandleKeyEvent({
         type,
-        TranslateKey(virtual_key),
+        TranslateKey(virtual_key, key_data),
         type == KeyEventType::Down && !text_input_.Active() ? TranslateKeyText(virtual_key, key_data) : std::string{},
         CurrentKeyModifiers(),
         type == KeyEventType::Down && (static_cast<std::uintptr_t>(key_data) & (1ULL << 30U)) != 0,
@@ -1430,20 +1492,22 @@ private:
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
       text_input_.ClearPendingResult();
-      if (message == WM_KEYDOWN && text_input_.Active() &&
-          (w_param == VK_PROCESSKEY || text_input_.Composing() || w_param == VK_SPACE)) {
-        return w_param == VK_SPACE ? 0 : DefWindowProcW(window, message, w_param, l_param);
+      if (message == WM_KEYDOWN && text_input_.Active() && (w_param == VK_PROCESSKEY || text_input_.Composing())) {
+        return DefWindowProcW(window, message, w_param, l_param);
       }
-      SendKey(KeyEventType::Down, w_param, l_param);
-      return message == WM_SYSKEYDOWN ? DefWindowProcW(window, message, w_param, l_param) : 0;
+      if (SendKey(KeyEventType::Down, w_param, l_param)) {
+        return 0;
+      }
+      return DefWindowProcW(window, message, w_param, l_param);
     case WM_KEYUP:
     case WM_SYSKEYUP:
-      if (message == WM_KEYUP && text_input_.Active() &&
-          (w_param == VK_PROCESSKEY || text_input_.Composing() || w_param == VK_SPACE)) {
-        return w_param == VK_SPACE ? 0 : DefWindowProcW(window, message, w_param, l_param);
+      if (message == WM_KEYUP && text_input_.Active() && (w_param == VK_PROCESSKEY || text_input_.Composing())) {
+        return DefWindowProcW(window, message, w_param, l_param);
       }
-      SendKey(KeyEventType::Up, w_param, l_param);
-      return message == WM_SYSKEYUP ? DefWindowProcW(window, message, w_param, l_param) : 0;
+      if (SendKey(KeyEventType::Up, w_param, l_param)) {
+        return 0;
+      }
+      return DefWindowProcW(window, message, w_param, l_param);
     case WM_CHAR:
       return text_input_.CommitCharacter(static_cast<wchar_t>(w_param))
                  ? 0

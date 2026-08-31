@@ -118,11 +118,11 @@ NSCursor* MacPointerCursor(huxerui::PointerCursorKind kind) {
   huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
   NSPoint huxeruiPointerPosition;
   NSTrackingArea* huxeruiTrackingArea;
-  NSEventModifierFlags huxeruiModifierFlags;
+  std::uint8_t huxeruiModifierKeys;
   __strong NSCursor* huxeruiPointerCursor;
 }
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
-- (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
+- (BOOL)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
 - (void)resourceConfigurationDidChange:(NSNotification*)notification;
 - (void)cancelPointer;
 - (void)setHuxerUIPointerCursor:(NSCursor*)cursor;
@@ -567,6 +567,10 @@ public:
 
   NSTextInputContext* InputContext() const noexcept {
     return text_input_ ? text_input_->InputContext() : nil;
+  }
+
+  bool IsTextInputActive() const noexcept {
+    return text_input_ && text_input_->IsActive();
   }
 
   bool HandleTextInputEvent(NSEvent* event) {
@@ -1111,11 +1115,11 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
   });
 }
 
-- (void)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type {
+- (BOOL)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type {
   if (huxeruiRuntime == nullptr) {
-    return;
+    return NO;
   }
-  huxeruiRuntime->HandleKeyEvent(huxerui::detail::MakeMacKeyEvent(event, type));
+  return huxeruiRuntime->HandleKeyEvent(huxerui::detail::MakeMacKeyEvent(event, type));
 }
 
 - (void)mouseDown:(NSEvent*)event {
@@ -1170,45 +1174,88 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (void)keyDown:(NSEvent*)event {
-  if (huxeruiAdapter != nullptr && huxeruiAdapter->HandleTextInputEvent(event)) {
+  if (huxeruiAdapter != nullptr && huxeruiAdapter->IsTextInputActive()) {
+    if (!huxeruiAdapter->HandleTextInputEvent(event)) {
+      [super keyDown:event];
+    }
     return;
   }
-  [self sendKeyEvent:event type:huxerui::KeyEventType::Down];
+  if (![self sendKeyEvent:event type:huxerui::KeyEventType::Down]) {
+    [super keyDown:event];
+  }
 }
 
 - (void)keyUp:(NSEvent*)event {
-  [self sendKeyEvent:event type:huxerui::KeyEventType::Up];
+  if (![self sendKeyEvent:event type:huxerui::KeyEventType::Up]) {
+    [super keyUp:event];
+  }
 }
 
 - (void)flagsChanged:(NSEvent*)event {
   const huxerui::KeyEvent key_event = huxerui::detail::MakeMacKeyEvent(event, huxerui::KeyEventType::Down);
   NSEventModifierFlags modifier_flag = 0;
+  std::uint8_t modifier_bit = 0;
   switch (key_event.key) {
-  case huxerui::Key::Shift:
+  case huxerui::Key::ShiftLeft:
+    modifier_bit = 1U << 0U;
     modifier_flag = NSEventModifierFlagShift;
     break;
-  case huxerui::Key::Control:
+  case huxerui::Key::ShiftRight:
+    modifier_bit = 1U << 1U;
+    modifier_flag = NSEventModifierFlagShift;
+    break;
+  case huxerui::Key::ControlLeft:
+    modifier_bit = 1U << 2U;
     modifier_flag = NSEventModifierFlagControl;
     break;
-  case huxerui::Key::Alt:
+  case huxerui::Key::ControlRight:
+    modifier_bit = 1U << 3U;
+    modifier_flag = NSEventModifierFlagControl;
+    break;
+  case huxerui::Key::AltLeft:
+    modifier_bit = 1U << 4U;
     modifier_flag = NSEventModifierFlagOption;
     break;
-  case huxerui::Key::Meta:
+  case huxerui::Key::AltRight:
+    modifier_bit = 1U << 5U;
+    modifier_flag = NSEventModifierFlagOption;
+    break;
+  case huxerui::Key::MetaLeft:
+    modifier_bit = 1U << 6U;
+    modifier_flag = NSEventModifierFlagCommand;
+    break;
+  case huxerui::Key::MetaRight:
+    modifier_bit = 1U << 7U;
     modifier_flag = NSEventModifierFlagCommand;
     break;
   default:
     break;
   }
 
-  const NSEventModifierFlags next_flags = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-  // HuxerUI collapses left and right modifiers, so only emit the first press and final release.
-  const bool was_down = modifier_flag != 0 && (huxeruiModifierFlags & modifier_flag) != 0;
-  const bool is_down = modifier_flag != 0 && (next_flags & modifier_flag) != 0;
-  huxeruiModifierFlags = next_flags;
-  if (was_down == is_down) {
+  if (key_event.key == huxerui::Key::CapsLock) {
+    const huxerui::KeyEventType type = (event.modifierFlags & NSEventModifierFlagCapsLock) != 0
+                                           ? huxerui::KeyEventType::Down
+                                           : huxerui::KeyEventType::Up;
+    if (![self sendKeyEvent:event type:type]) {
+      [super flagsChanged:event];
+    }
     return;
   }
-  [self sendKeyEvent:event type:is_down ? huxerui::KeyEventType::Down : huxerui::KeyEventType::Up];
+  if (modifier_bit == 0) {
+    [super flagsChanged:event];
+    return;
+  }
+  const bool was_down = (huxeruiModifierKeys & modifier_bit) != 0;
+  const bool aggregate_down = (event.modifierFlags & modifier_flag) != 0;
+  const bool is_down = aggregate_down && !was_down;
+  if (is_down) {
+    huxeruiModifierKeys |= modifier_bit;
+  } else {
+    huxeruiModifierKeys &= static_cast<std::uint8_t>(~modifier_bit);
+  }
+  if (![self sendKeyEvent:event type:is_down ? huxerui::KeyEventType::Down : huxerui::KeyEventType::Up]) {
+    [super flagsChanged:event];
+  }
 }
 
 - (void)cancelOperation:(id)sender {
@@ -1219,7 +1266,7 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 - (void)viewWillMoveToWindow:(NSWindow*)newWindow {
   if (newWindow == nil) {
     [self cancelPointer];
-    huxeruiModifierFlags = 0;
+    huxeruiModifierKeys = 0;
   }
   [super viewWillMoveToWindow:newWindow];
 }

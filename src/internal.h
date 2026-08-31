@@ -1407,8 +1407,8 @@ struct RuntimeAccess {
     runtime.SynchronizePlatformViewFocus(identity, focus_visible);
   }
 
-  static void MoveFocusFromPlatformView(Runtime& runtime, std::uint64_t identity, bool reverse) {
-    runtime.MoveFocusFromPlatformView(identity, reverse);
+  static bool MoveFocusFromPlatformView(Runtime& runtime, std::uint64_t identity, bool reverse) {
+    return runtime.MoveFocusFromPlatformView(identity, reverse);
   }
 
   static std::optional<PlatformPayload> DispatchPlatformViewEvent(

@@ -315,8 +315,8 @@ public:
     runtime_.HandleScrollEvent(event);
   }
 
-  void HandleKeyEvent(const KeyEvent& event) {
-    runtime_.HandleKeyEvent(event);
+  bool HandleKeyEvent(const KeyEvent& event) {
+    return runtime_.HandleKeyEvent(event);
   }
 
   void HandleApplicationActivation(huxerui::ApplicationActivation activation) {

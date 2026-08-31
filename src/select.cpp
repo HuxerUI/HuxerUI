@@ -277,10 +277,10 @@ public:
     return {};
   }
 
-  void OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(MountedNode& node, const KeyEvent& event) override {
     if (!state_ || !node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt ||
         event.modifiers.control || event.modifiers.meta) {
-      return;
+      return false;
     }
     std::optional<std::size_t> requested;
     if (event.key == Key::ArrowUp) {
@@ -291,16 +291,17 @@ public:
       requested = FindEnabledEdge(*state_, false);
     } else if (event.key == Key::End) {
       requested = FindEnabledEdge(*state_, true);
-    } else if ((event.key == Key::Enter || event.key == Key::Space) && !event.repeat &&
-               state_->active_index < state_->enabled.size() && state_->enabled[state_->active_index]) {
-      if (state_->commit) {
+    } else if (event.key == Key::Enter || event.key == Key::Space) {
+      if (!event.repeat && state_->active_index < state_->enabled.size() && state_->enabled[state_->active_index] &&
+          state_->commit) {
         state_->commit(state_->active_index);
       }
-      return;
+      return true;
     }
     if (requested.has_value()) {
       SetActiveChoice(state_, *requested);
     }
+    return requested.has_value();
   }
 
   bool HitTest(MountedNode& node, Point position) const override {
@@ -635,15 +636,19 @@ public:
     return PointerResult::Handled;
   }
 
-  void OnKey(MountedNode& node, const KeyEvent& event) override {
-    if (!node.IsEnabled() || event.type != KeyEventType::Down || event.repeat || event.modifiers.alt ||
-        event.modifiers.control || event.modifiers.meta) {
-      return;
+  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+    if (!node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control ||
+        event.modifiers.meta) {
+      return false;
     }
     if (event.key == Key::Enter || event.key == Key::Space || event.key == Key::ArrowDown ||
         event.key == Key::ArrowUp) {
-      Open();
+      if (!event.repeat) {
+        Open();
+      }
+      return true;
     }
+    return false;
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {

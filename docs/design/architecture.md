@@ -304,7 +304,7 @@ public:
 
   virtual void OnHover(MountedNode& node, const HoverEvent& event);
   virtual void OnFocusChanged(MountedNode& node, bool focused);
-  virtual void OnKey(MountedNode& node, const KeyEvent& event);
+  virtual bool OnKey(MountedNode& node, const KeyEvent& event);
 
   virtual PointerResult OnPointer(
       MountedNode& node,
@@ -1361,7 +1361,13 @@ Each accepted Press receives a Runtime-unique `press_id`. Release and Cancel ret
 
 `Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. A control that directly establishes the disabled boundary uses its component-specific disabled state colors. A non-control boundary applies disabled group opacity once; inherited descendants keep their enabled paint colors so the subtree is not dimmed again.
 
-`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, `KeyDown`, and `KeyUp`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space publishes ordered keyboard Press and Release interactions and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring, disabled opacity, and indication motion resolve from Theme.
+`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space publishes ordered keyboard Press and Release interactions and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit left and right Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring, disabled opacity, and indication motion resolve from Theme.
+
+`Key` identifies portable keys independently of layout-resolved `KeyEvent::text`. Left and right modifiers, main-row and numeric-keypad keys, punctuation, international keys, and F1 through F24 remain distinct. Modifier booleans intentionally report their collapsed active state. Release events have empty text and are never repeats; unmapped keys still travel through the route as `Key::Unknown`.
+
+Keyboard dispatch has one ordered decision path: platform text/IME filtering, `KeyIntercept` from the active focus-scope root to the focused View, the focused text client, focused-node `NodeExtension::OnKey`, the focused View's `KeyDown` or `KeyUp`, Runtime defaults, and finally the platform default. Every decision stage returns `true` only when it consumes the event. `KeyIntercept` stops its root-to-target traversal at the first true result and does not bubble. `KeyDown` and `KeyUp` are direct focused-target events, so a parent that must override component behavior uses `KeyIntercept` instead of a second routing convention.
+
+Runtime defaults own Escape/Back, Tab traversal, keyboard context menus, and Enter or Space activation. A consumed Space release cancels any pending keyboard Press without emitting Click. `Runtime::HandleKeyEvent` returns the final consumption result to the adapter, which suppresses its native default only for a handled event. A PlatformView keeps ordinary keys inside its native subtree; when an implemented host reports that Tab reached the native focus boundary, it re-enters this same Runtime key path rather than calling focus movement directly.
 
 The topmost modal Layer is the active focus traversal root. Opening a nested modal captures the current focus, and dismissing it restores the previously focused mounted node when that node still exists and remains enabled.
 

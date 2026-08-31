@@ -15,7 +15,7 @@ This document defines the HuxerUI Web backend contract, including application st
 
 The Web backend does not provide DOM rendering for ordinary Views, server-side rendering, hydration, CSS layout, WebGPU, pthreads, OffscreenCanvas workers, or PWA packaging.
 
-The Web backend targets a composition-root-owned application surface. Embedding HuxerUI inside a page that must conditionally return wheel, keyboard, or touch gestures to surrounding DOM content is deferred until Runtime exposes an explicit input-consumption result.
+The Web backend targets a composition-root-owned application surface. Keyboard events now return Runtime's explicit consumption result to the browser. Embedding HuxerUI inside a page that must conditionally return wheel or touch gestures to surrounding DOM content remains deferred until those paths expose equivalent ownership results.
 
 A semantic DOM bridge is not part of the current backend; Canvas output alone does not expose the shared semantic tree to browser accessibility.
 
@@ -173,7 +173,7 @@ An accepted HuxerUI pointer down captures that browser pointer to the compositio
 
 Wheel deltas are normalized from pixel, line, or page units into logical pixels before producing a ScrollEvent. The composition root prevents page scrolling for gestures owned by HuxerUI and leaves events owned by a PlatformView to its DOM subtree. An embedded-page mode requires a future Runtime consumption result instead of guessing from concrete components.
 
-The composition root is focusable and receives key down and key up events when HuxerUI owns browser focus. Browser key values, repeat, modifiers, and platform conventions map to the existing KeyEvent model. An active hidden text control forwards Tab to the same Runtime key path. A PlatformView subtree owns ordinary key handling until Tab reaches its internal boundary, where traversal returns to Runtime. Text insertion is never inferred from printable key events while a browser text-input session is active.
+The composition root is focusable and receives key down and key up events when HuxerUI owns browser focus. Browser `code`, repeat, modifiers, and platform conventions map to the shared KeyEvent model, including left/right modifiers and numeric-keypad positions. Runtime's boolean result controls `preventDefault()` and propagation, so an unhandled key remains available to the browser. An active hidden text control forwards every non-composing key down and key up through the same Runtime key path without inferred character text; an unhandled event remains available to browser editing. A PlatformView subtree owns ordinary key handling until Tab reaches its internal boundary, where traversal returns to Runtime. Text insertion is never inferred from printable key events while a browser text-input session is active.
 
 CSS `touch-action` belongs to browser integration policy. A full application surface initially owns direct-manipulation gestures and uses a restrictive value. A future embedded mode may expose an explicit page-gesture policy without adding a C++ View modifier.
 

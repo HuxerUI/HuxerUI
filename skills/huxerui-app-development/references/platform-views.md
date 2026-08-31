@@ -93,6 +93,10 @@ Malformed payloads and handler failures also produce no result; PlatformView han
 Provide bounded geometry because a PlatformView has no portable intrinsic size.
 The shared contract covers layout placement, rectangular visibility and clipping, composition order, focus/input integration, update, typed events, and lifecycle according to the backend.
 
+A PlatformView owns ordinary keyboard handling while native focus is inside its subtree.
+On hosts that implement native Tab-boundary reporting, exhausted native traversal re-enters Runtime's ordinary key route so `KeyIntercept`, focused-target events, and focus defaults remain one path.
+Do not forward every native key through a second PlatformView event convention.
+
 Do not promise arbitrary rotation, path clipping, group opacity, backdrop filters, or transparent mixing unless the active platform contract explicitly supports them.
 Choose `ExternalTexture` when the platform only produces frames and HuxerUI should own effects, interaction, and surrounding semantics.
 

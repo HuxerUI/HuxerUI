@@ -142,40 +142,51 @@ std::string FromByteArray(JNIEnv* environment, jbyteArray bytes) {
 }
 
 Key TranslateKey(jint key_code) {
+  if (key_code >= AKEYCODE_A && key_code <= AKEYCODE_Z) {
+    return static_cast<Key>(static_cast<int>(Key::A) + key_code - AKEYCODE_A);
+  }
+  if (key_code >= AKEYCODE_0 && key_code <= AKEYCODE_9) {
+    return static_cast<Key>(static_cast<int>(Key::Digit0) + key_code - AKEYCODE_0);
+  }
+  if (key_code >= AKEYCODE_F1 && key_code <= AKEYCODE_F12) {
+    return static_cast<Key>(static_cast<int>(Key::F1) + key_code - AKEYCODE_F1);
+  }
+  if (key_code >= AKEYCODE_NUMPAD_0 && key_code <= AKEYCODE_NUMPAD_9) {
+    return static_cast<Key>(static_cast<int>(Key::Numpad0) + key_code - AKEYCODE_NUMPAD_0);
+  }
   switch (key_code) {
   case AKEYCODE_SHIFT_LEFT:
+    return Key::ShiftLeft;
   case AKEYCODE_SHIFT_RIGHT:
-    return Key::Shift;
+    return Key::ShiftRight;
   case AKEYCODE_CTRL_LEFT:
+    return Key::ControlLeft;
   case AKEYCODE_CTRL_RIGHT:
-    return Key::Control;
+    return Key::ControlRight;
   case AKEYCODE_ALT_LEFT:
+    return Key::AltLeft;
   case AKEYCODE_ALT_RIGHT:
-    return Key::Alt;
+    return Key::AltRight;
   case AKEYCODE_META_LEFT:
+    return Key::MetaLeft;
   case AKEYCODE_META_RIGHT:
-    return Key::Meta;
+    return Key::MetaRight;
+  case AKEYCODE_DEL:
+    return Key::Backspace;
   case AKEYCODE_TAB:
     return Key::Tab;
   case AKEYCODE_ENTER:
-  case AKEYCODE_NUMPAD_ENTER:
     return Key::Enter;
-  case AKEYCODE_SPACE:
-    return Key::Space;
+  case AKEYCODE_NUMPAD_ENTER:
+    return Key::NumpadEnter;
   case AKEYCODE_ESCAPE:
     return Key::Escape;
-  case AKEYCODE_DEL:
-    return Key::Backspace;
+  case AKEYCODE_SPACE:
+    return Key::Space;
+  case AKEYCODE_INSERT:
+    return Key::Insert;
   case AKEYCODE_FORWARD_DEL:
     return Key::Delete;
-  case AKEYCODE_DPAD_LEFT:
-    return Key::ArrowLeft;
-  case AKEYCODE_DPAD_RIGHT:
-    return Key::ArrowRight;
-  case AKEYCODE_DPAD_UP:
-    return Key::ArrowUp;
-  case AKEYCODE_DPAD_DOWN:
-    return Key::ArrowDown;
   case AKEYCODE_MOVE_HOME:
     return Key::Home;
   case AKEYCODE_MOVE_END:
@@ -184,22 +195,70 @@ Key TranslateKey(jint key_code) {
     return Key::PageUp;
   case AKEYCODE_PAGE_DOWN:
     return Key::PageDown;
-  case AKEYCODE_F10:
-    return Key::F10;
+  case AKEYCODE_DPAD_LEFT:
+    return Key::ArrowLeft;
+  case AKEYCODE_DPAD_RIGHT:
+    return Key::ArrowRight;
+  case AKEYCODE_DPAD_UP:
+    return Key::ArrowUp;
+  case AKEYCODE_DPAD_DOWN:
+    return Key::ArrowDown;
+  case AKEYCODE_GRAVE:
+    return Key::Backquote;
+  case AKEYCODE_MINUS:
+    return Key::Minus;
+  case AKEYCODE_EQUALS:
+    return Key::Equal;
+  case AKEYCODE_LEFT_BRACKET:
+    return Key::BracketLeft;
+  case AKEYCODE_RIGHT_BRACKET:
+    return Key::BracketRight;
+  case AKEYCODE_BACKSLASH:
+    return Key::Backslash;
+  case AKEYCODE_SEMICOLON:
+    return Key::Semicolon;
+  case AKEYCODE_APOSTROPHE:
+    return Key::Quote;
+  case AKEYCODE_COMMA:
+    return Key::Comma;
+  case AKEYCODE_PERIOD:
+    return Key::Period;
+  case AKEYCODE_SLASH:
+    return Key::Slash;
+  case AKEYCODE_RO:
+    return Key::IntlRo;
+  case AKEYCODE_YEN:
+    return Key::IntlYen;
+  case AKEYCODE_CAPS_LOCK:
+    return Key::CapsLock;
+  case AKEYCODE_NUM_LOCK:
+    return Key::NumLock;
+  case AKEYCODE_SCROLL_LOCK:
+    return Key::ScrollLock;
+  case AKEYCODE_SYSRQ:
+    return Key::PrintScreen;
+  case AKEYCODE_BREAK:
+    return Key::Pause;
   case AKEYCODE_MENU:
     return Key::ContextMenu;
-  case AKEYCODE_A:
-    return Key::A;
-  case AKEYCODE_C:
-    return Key::C;
-  case AKEYCODE_V:
-    return Key::V;
-  case AKEYCODE_X:
-    return Key::X;
-  case AKEYCODE_Y:
-    return Key::Y;
-  case AKEYCODE_Z:
-    return Key::Z;
+  case AKEYCODE_HELP:
+    return Key::Help;
+  case AKEYCODE_NUMPAD_DOT:
+    return Key::NumpadDecimal;
+  case AKEYCODE_NUMPAD_DIVIDE:
+    return Key::NumpadDivide;
+  case AKEYCODE_NUMPAD_MULTIPLY:
+    return Key::NumpadMultiply;
+  case AKEYCODE_NUMPAD_SUBTRACT:
+    return Key::NumpadSubtract;
+  case AKEYCODE_NUMPAD_ADD:
+    return Key::NumpadAdd;
+  case AKEYCODE_NUMPAD_EQUALS:
+    return Key::NumpadEqual;
+  case AKEYCODE_NUMPAD_COMMA:
+    return Key::NumpadComma;
+  case AKEYCODE_CLEAR:
+    return Key::NumpadClear;
   default:
     return Key::Unknown;
   }
@@ -1203,8 +1262,8 @@ public:
     });
   }
 
-  void KeyEvent(KeyEventType type, jint key_code, std::string text, KeyModifiers modifiers, bool repeat) {
-    runtime_.HandleKeyEvent({
+  bool KeyEvent(KeyEventType type, jint key_code, std::string text, KeyModifiers modifiers, bool repeat) {
+    return runtime_.HandleKeyEvent({
         type,
         TranslateKey(key_code),
         std::move(text),
@@ -1675,7 +1734,7 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeScroll(
   }
 }
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
     JNIEnv* environment,
     jclass,
     jlong handle,
@@ -1690,7 +1749,7 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
 ) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->KeyEvent(
+      return session->KeyEvent(
           down ? huxerui::KeyEventType::Down : huxerui::KeyEventType::Up,
           key_code,
           huxerui::detail::FromByteArray(environment, text),
@@ -1706,6 +1765,7 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeKey(
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
   }
+  return false;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

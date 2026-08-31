@@ -20,6 +20,9 @@ Prefer `ViewEvents::Hover` for application-facing mouse or pen presence.
 An extension with specialized retained hover geometry overrides `HoverHitTest` and receives complete Enter, Move, and Leave updates through `OnHover(MountedNode&, const HoverEvent&)`.
 Override `HoverWhenDisabled` only when that affordance intentionally remains active on a disabled View.
 
+`OnKey` receives the focused node's key event after `KeyIntercept` and focused text-input handling but before the node's public `KeyDown` or `KeyUp` event.
+Return `true` only when the extension consumed it; Runtime then skips the public target event and later defaults.
+
 Do not retain raw `MountedNode*`, child references, or platform objects across reconciliation. Visible retained-state changes call protected `InvalidatePaint`; semantic changes call `InvalidateSemantics`. Returning `needs_frame` schedules work but does not itself invalidate an already cached paint sequence.
 
 ## Choose a simpler mechanism when possible

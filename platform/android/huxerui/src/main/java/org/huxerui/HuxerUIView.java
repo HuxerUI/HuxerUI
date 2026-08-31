@@ -615,8 +615,7 @@ public final class HuxerUIView extends ViewGroup {
         if (nativeHandle == 0L) {
             return super.onKeyDown(keyCode, event);
         }
-        sendKey(event, true);
-        return true;
+        return sendKey(event, true) || super.onKeyDown(keyCode, event);
     }
 
     @Override
@@ -627,8 +626,7 @@ public final class HuxerUIView extends ViewGroup {
         if (nativeHandle == 0L) {
             return super.onKeyUp(keyCode, event);
         }
-        sendKey(event, false);
-        return true;
+        return sendKey(event, false) || super.onKeyUp(keyCode, event);
     }
 
     public boolean handleBack() {
@@ -930,12 +928,12 @@ public final class HuxerUIView extends ViewGroup {
         return POINTER_DEVICE_TOUCH;
     }
 
-    private void sendKey(KeyEvent event, boolean down) {
+    private boolean sendKey(KeyEvent event, boolean down) {
         int unicode = down ? event.getUnicodeChar() : 0;
         byte[] text =
                 unicode == 0 ? new byte[0] : new String(Character.toChars(unicode)).getBytes(StandardCharsets.UTF_8);
-        nativeKey(nativeHandle, down, event.getKeyCode(), text, event.isShiftPressed(), event.isCtrlPressed(),
-                event.isAltPressed(), event.isMetaPressed(), event.getRepeatCount() > 0);
+        return nativeKey(nativeHandle, down, event.getKeyCode(), text, event.isShiftPressed(), event.isCtrlPressed(),
+                event.isAltPressed(), event.isMetaPressed(), down && event.getRepeatCount() > 0);
     }
 
     long platformViewAt(float x, float y) {
@@ -2035,7 +2033,7 @@ public final class HuxerUIView extends ViewGroup {
 
     private static native void nativeScroll(long handle, float x, float y, float deltaX, float deltaY);
 
-    private static native void nativeKey(long handle, boolean down, int keyCode, byte[] text, boolean shift,
+    private static native boolean nativeKey(long handle, boolean down, int keyCode, byte[] text, boolean shift,
             boolean control, boolean alt, boolean meta, boolean repeat);
 
     private static native boolean nativeHandleBack(long handle, int phase, float progress);

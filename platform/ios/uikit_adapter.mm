@@ -165,28 +165,31 @@ std::int64_t PointerId(UITouch* touch) {
 }
 
 huxerui::Key TranslateKey(UIKeyboardHIDUsage code) API_AVAILABLE(ios(13.4)) {
+  if (code >= UIKeyboardHIDUsageKeyboardA && code <= UIKeyboardHIDUsageKeyboardZ) {
+    return static_cast<huxerui::Key>(static_cast<int>(huxerui::Key::A) + code - UIKeyboardHIDUsageKeyboardA);
+  }
+  if (code >= UIKeyboardHIDUsageKeyboardF1 && code <= UIKeyboardHIDUsageKeyboardF12) {
+    return static_cast<huxerui::Key>(static_cast<int>(huxerui::Key::F1) + code - UIKeyboardHIDUsageKeyboardF1);
+  }
+  if (code >= UIKeyboardHIDUsageKeyboardF13 && code <= UIKeyboardHIDUsageKeyboardF24) {
+    return static_cast<huxerui::Key>(static_cast<int>(huxerui::Key::F13) + code - UIKeyboardHIDUsageKeyboardF13);
+  }
   switch (code) {
+  case UIKeyboardHIDUsageKeyboardDeleteOrBackspace:
+    return huxerui::Key::Backspace;
   case UIKeyboardHIDUsageKeyboardTab:
     return huxerui::Key::Tab;
   case UIKeyboardHIDUsageKeyboardReturnOrEnter:
   case UIKeyboardHIDUsageKeyboardReturn:
     return huxerui::Key::Enter;
-  case UIKeyboardHIDUsageKeyboardSpacebar:
-    return huxerui::Key::Space;
   case UIKeyboardHIDUsageKeyboardEscape:
     return huxerui::Key::Escape;
-  case UIKeyboardHIDUsageKeyboardDeleteOrBackspace:
-    return huxerui::Key::Backspace;
+  case UIKeyboardHIDUsageKeyboardSpacebar:
+    return huxerui::Key::Space;
+  case UIKeyboardHIDUsageKeyboardInsert:
+    return huxerui::Key::Insert;
   case UIKeyboardHIDUsageKeyboardDeleteForward:
     return huxerui::Key::Delete;
-  case UIKeyboardHIDUsageKeyboardLeftArrow:
-    return huxerui::Key::ArrowLeft;
-  case UIKeyboardHIDUsageKeyboardRightArrow:
-    return huxerui::Key::ArrowRight;
-  case UIKeyboardHIDUsageKeyboardUpArrow:
-    return huxerui::Key::ArrowUp;
-  case UIKeyboardHIDUsageKeyboardDownArrow:
-    return huxerui::Key::ArrowDown;
   case UIKeyboardHIDUsageKeyboardHome:
     return huxerui::Key::Home;
   case UIKeyboardHIDUsageKeyboardEnd:
@@ -195,37 +198,147 @@ huxerui::Key TranslateKey(UIKeyboardHIDUsage code) API_AVAILABLE(ios(13.4)) {
     return huxerui::Key::PageUp;
   case UIKeyboardHIDUsageKeyboardPageDown:
     return huxerui::Key::PageDown;
-  case UIKeyboardHIDUsageKeyboardF10:
-    return huxerui::Key::F10;
+  case UIKeyboardHIDUsageKeyboardLeftArrow:
+    return huxerui::Key::ArrowLeft;
+  case UIKeyboardHIDUsageKeyboardRightArrow:
+    return huxerui::Key::ArrowRight;
+  case UIKeyboardHIDUsageKeyboardUpArrow:
+    return huxerui::Key::ArrowUp;
+  case UIKeyboardHIDUsageKeyboardDownArrow:
+    return huxerui::Key::ArrowDown;
+  case UIKeyboardHIDUsageKeyboard0:
+    return huxerui::Key::Digit0;
+  case UIKeyboardHIDUsageKeyboard1:
+    return huxerui::Key::Digit1;
+  case UIKeyboardHIDUsageKeyboard2:
+    return huxerui::Key::Digit2;
+  case UIKeyboardHIDUsageKeyboard3:
+    return huxerui::Key::Digit3;
+  case UIKeyboardHIDUsageKeyboard4:
+    return huxerui::Key::Digit4;
+  case UIKeyboardHIDUsageKeyboard5:
+    return huxerui::Key::Digit5;
+  case UIKeyboardHIDUsageKeyboard6:
+    return huxerui::Key::Digit6;
+  case UIKeyboardHIDUsageKeyboard7:
+    return huxerui::Key::Digit7;
+  case UIKeyboardHIDUsageKeyboard8:
+    return huxerui::Key::Digit8;
+  case UIKeyboardHIDUsageKeyboard9:
+    return huxerui::Key::Digit9;
+  case UIKeyboardHIDUsageKeyboardGraveAccentAndTilde:
+    return huxerui::Key::Backquote;
+  case UIKeyboardHIDUsageKeyboardHyphen:
+    return huxerui::Key::Minus;
+  case UIKeyboardHIDUsageKeyboardEqualSign:
+    return huxerui::Key::Equal;
+  case UIKeyboardHIDUsageKeyboardOpenBracket:
+    return huxerui::Key::BracketLeft;
+  case UIKeyboardHIDUsageKeyboardCloseBracket:
+    return huxerui::Key::BracketRight;
+  case UIKeyboardHIDUsageKeyboardBackslash:
+    return huxerui::Key::Backslash;
+  case UIKeyboardHIDUsageKeyboardSemicolon:
+    return huxerui::Key::Semicolon;
+  case UIKeyboardHIDUsageKeyboardQuote:
+    return huxerui::Key::Quote;
+  case UIKeyboardHIDUsageKeyboardComma:
+    return huxerui::Key::Comma;
+  case UIKeyboardHIDUsageKeyboardPeriod:
+    return huxerui::Key::Period;
+  case UIKeyboardHIDUsageKeyboardSlash:
+    return huxerui::Key::Slash;
+  case UIKeyboardHIDUsageKeyboardNonUSBackslash:
+    return huxerui::Key::IntlBackslash;
+  case UIKeyboardHIDUsageKeyboardInternational1:
+    return huxerui::Key::IntlRo;
+  case UIKeyboardHIDUsageKeyboardInternational3:
+    return huxerui::Key::IntlYen;
+  case UIKeyboardHIDUsageKeyboardLeftShift:
+    return huxerui::Key::ShiftLeft;
+  case UIKeyboardHIDUsageKeyboardRightShift:
+    return huxerui::Key::ShiftRight;
+  case UIKeyboardHIDUsageKeyboardLeftControl:
+    return huxerui::Key::ControlLeft;
+  case UIKeyboardHIDUsageKeyboardRightControl:
+    return huxerui::Key::ControlRight;
+  case UIKeyboardHIDUsageKeyboardLeftAlt:
+    return huxerui::Key::AltLeft;
+  case UIKeyboardHIDUsageKeyboardRightAlt:
+    return huxerui::Key::AltRight;
+  case UIKeyboardHIDUsageKeyboardLeftGUI:
+    return huxerui::Key::MetaLeft;
+  case UIKeyboardHIDUsageKeyboardRightGUI:
+    return huxerui::Key::MetaRight;
+  case UIKeyboardHIDUsageKeyboardCapsLock:
+    return huxerui::Key::CapsLock;
+  case UIKeyboardHIDUsageKeypadNumLock:
+    return huxerui::Key::NumLock;
+  case UIKeyboardHIDUsageKeyboardScrollLock:
+    return huxerui::Key::ScrollLock;
+  case UIKeyboardHIDUsageKeyboardPrintScreen:
+    return huxerui::Key::PrintScreen;
+  case UIKeyboardHIDUsageKeyboardPause:
+    return huxerui::Key::Pause;
   case UIKeyboardHIDUsageKeyboardApplication:
     return huxerui::Key::ContextMenu;
-  case UIKeyboardHIDUsageKeyboardA:
-    return huxerui::Key::A;
-  case UIKeyboardHIDUsageKeyboardC:
-    return huxerui::Key::C;
-  case UIKeyboardHIDUsageKeyboardV:
-    return huxerui::Key::V;
-  case UIKeyboardHIDUsageKeyboardX:
-    return huxerui::Key::X;
-  case UIKeyboardHIDUsageKeyboardY:
-    return huxerui::Key::Y;
-  case UIKeyboardHIDUsageKeyboardZ:
-    return huxerui::Key::Z;
-  case UIKeyboardHIDUsageKeyboardLeftShift:
-  case UIKeyboardHIDUsageKeyboardRightShift:
-    return huxerui::Key::Shift;
-  case UIKeyboardHIDUsageKeyboardLeftControl:
-  case UIKeyboardHIDUsageKeyboardRightControl:
-    return huxerui::Key::Control;
-  case UIKeyboardHIDUsageKeyboardLeftAlt:
-  case UIKeyboardHIDUsageKeyboardRightAlt:
-    return huxerui::Key::Alt;
-  case UIKeyboardHIDUsageKeyboardLeftGUI:
-  case UIKeyboardHIDUsageKeyboardRightGUI:
-    return huxerui::Key::Meta;
+  case UIKeyboardHIDUsageKeyboardHelp:
+    return huxerui::Key::Help;
+  case UIKeyboardHIDUsageKeypad0:
+    return huxerui::Key::Numpad0;
+  case UIKeyboardHIDUsageKeypad1:
+    return huxerui::Key::Numpad1;
+  case UIKeyboardHIDUsageKeypad2:
+    return huxerui::Key::Numpad2;
+  case UIKeyboardHIDUsageKeypad3:
+    return huxerui::Key::Numpad3;
+  case UIKeyboardHIDUsageKeypad4:
+    return huxerui::Key::Numpad4;
+  case UIKeyboardHIDUsageKeypad5:
+    return huxerui::Key::Numpad5;
+  case UIKeyboardHIDUsageKeypad6:
+    return huxerui::Key::Numpad6;
+  case UIKeyboardHIDUsageKeypad7:
+    return huxerui::Key::Numpad7;
+  case UIKeyboardHIDUsageKeypad8:
+    return huxerui::Key::Numpad8;
+  case UIKeyboardHIDUsageKeypad9:
+    return huxerui::Key::Numpad9;
+  case UIKeyboardHIDUsageKeypadPeriod:
+    return huxerui::Key::NumpadDecimal;
+  case UIKeyboardHIDUsageKeypadSlash:
+    return huxerui::Key::NumpadDivide;
+  case UIKeyboardHIDUsageKeypadAsterisk:
+    return huxerui::Key::NumpadMultiply;
+  case UIKeyboardHIDUsageKeypadHyphen:
+    return huxerui::Key::NumpadSubtract;
+  case UIKeyboardHIDUsageKeypadPlus:
+    return huxerui::Key::NumpadAdd;
+  case UIKeyboardHIDUsageKeypadEnter:
+    return huxerui::Key::NumpadEnter;
+  case UIKeyboardHIDUsageKeypadEqualSign:
+    return huxerui::Key::NumpadEqual;
+  case UIKeyboardHIDUsageKeypadComma:
+    return huxerui::Key::NumpadComma;
+  case UIKeyboardHIDUsageKeyboardClear:
+    return huxerui::Key::NumpadClear;
   default:
     return huxerui::Key::Unknown;
   }
+}
+
+huxerui::Key TranslateKey(UIKey* key) API_AVAILABLE(ios(13.4)) {
+  NSString* characters = key.charactersIgnoringModifiers;
+  if (characters.length == 1) {
+    const unichar character = [characters characterAtIndex:0];
+    if (character >= 'a' && character <= 'z') {
+      return static_cast<huxerui::Key>(static_cast<int>(huxerui::Key::A) + character - 'a');
+    }
+    if (character >= 'A' && character <= 'Z') {
+      return static_cast<huxerui::Key>(static_cast<int>(huxerui::Key::A) + character - 'A');
+    }
+  }
+  return TranslateKey(key.keyCode);
 }
 
 huxerui::KeyEvent MakeKeyEvent(UIPress* press, huxerui::KeyEventType type) {
@@ -236,8 +349,8 @@ huxerui::KeyEvent MakeKeyEvent(UIPress* press, huxerui::KeyEventType type) {
       const UIKeyModifierFlags flags = key.modifierFlags;
       return {
           type,
-          TranslateKey(key.keyCode),
-          characters == nullptr ? std::string{} : std::string{characters},
+          TranslateKey(key),
+          type == huxerui::KeyEventType::Down && characters != nullptr ? std::string{characters} : std::string{},
           {
               static_cast<bool>(flags & UIKeyModifierShift),
               static_cast<bool>(flags & UIKeyModifierControl),
@@ -248,27 +361,6 @@ huxerui::KeyEvent MakeKeyEvent(UIPress* press, huxerui::KeyEventType type) {
     }
   }
   return {.type = type};
-}
-
-bool TextInputConsumesKey(huxerui::Key key) noexcept {
-  switch (key) {
-  case huxerui::Key::Tab:
-  case huxerui::Key::Enter:
-  case huxerui::Key::Escape:
-  case huxerui::Key::Backspace:
-  case huxerui::Key::Delete:
-  case huxerui::Key::ArrowLeft:
-  case huxerui::Key::ArrowRight:
-  case huxerui::Key::ArrowUp:
-  case huxerui::Key::ArrowDown:
-  case huxerui::Key::Home:
-  case huxerui::Key::End:
-  case huxerui::Key::PageUp:
-  case huxerui::Key::PageDown:
-    return true;
-  default:
-    return false;
-  }
 }
 
 } // namespace
@@ -476,10 +568,6 @@ public:
     if (text_input_ && text_input_->IsActive()) {
       [view_ setNeedsLayout];
     }
-  }
-
-  bool TextInputActive() const noexcept {
-    return text_input_ && text_input_->IsActive();
   }
 
   void CancelActiveTouches() {
@@ -955,11 +1043,7 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
   if (huxeruiRuntime != nullptr) {
     for (UIPress* press in presses) {
       const huxerui::KeyEvent key_event = MakeKeyEvent(press, huxerui::KeyEventType::Down);
-      if (key_event.key != huxerui::Key::Unknown) {
-        huxeruiRuntime->HandleKeyEvent(key_event);
-        consumed = consumed || (huxeruiAdapter != nullptr && huxeruiAdapter->TextInputActive() &&
-                                (TextInputConsumesKey(key_event.key) || !key_event.text.empty()));
-      }
+      consumed = huxeruiRuntime->HandleKeyEvent(key_event) || consumed;
     }
   }
   if (!consumed) {
@@ -968,15 +1052,16 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
 }
 
 - (void)pressesEnded:(NSSet<UIPress*>*)presses withEvent:(UIPressesEvent*)event {
+  bool consumed = false;
   if (huxeruiRuntime != nullptr) {
     for (UIPress* press in presses) {
       const huxerui::KeyEvent key_event = MakeKeyEvent(press, huxerui::KeyEventType::Up);
-      if (key_event.key != huxerui::Key::Unknown) {
-        huxeruiRuntime->HandleKeyEvent(key_event);
-      }
+      consumed = huxeruiRuntime->HandleKeyEvent(key_event) || consumed;
     }
   }
-  [super pressesEnded:presses withEvent:event];
+  if (!consumed) {
+    [super pressesEnded:presses withEvent:event];
+  }
 }
 
 @end
