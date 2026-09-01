@@ -5,14 +5,14 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 
 ## Capability overview
 
-| Platform | Rendering and text | HTTP and files | Accessibility | PlatformView | ExternalTexture | System tray |
-|---|---|---:|---:|---:|---:|---:|
-| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | Yes |
-| macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Yes |
-| Linux | Cairo and Pango | Yes | Not implemented | No | Yes | StatusNotifierItem host |
-| Web | Canvas 2D and browser text metrics | Yes | Not implemented | Yes | Yes | No |
-| Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | No |
-| iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | No |
+| Platform | Rendering and text | HTTP and files | Accessibility | PlatformView | ExternalTexture | Permissions | System tray |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | AppCapability | Yes |
+| macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Camera and microphone | Yes |
+| Linux | Cairo and Pango | Yes | Not implemented | No | Yes | Unavailable | StatusNotifierItem host |
+| Web | Canvas 2D and browser text metrics | Yes | Not implemented | Yes | Yes | Query only | No |
+| Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | Camera and microphone | No |
+| iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Camera and microphone | No |
 
 Capabilities not listed as implemented are not implied by the shared API.
 OHOS does not currently have a repository-owned backend.
@@ -29,6 +29,7 @@ Windows 7 without Platform Update is unsupported.
 Custom chrome keeps Win32 window behavior while HuxerUI draws the title-bar content and caption controls.
 Windows 11 Snap Layout is available through the shared maximize-button geometry on the default backend.
 System tray presentation uses the Windows notification area and restores its item after Explorer restarts.
+Runtime camera and microphone permissions use AppCapability when present; package capability declarations remain application-owned.
 
 ## macOS
 
@@ -39,6 +40,7 @@ Build with Xcode and the macOS SDK.
 Custom chrome extends application content into the title bar while preserving AppKit traffic lights and window behavior.
 External file references preserve security-scoped access when required.
 System tray presentation uses an AppKit status item and platform menu.
+Camera and microphone permissions use AVFoundation and require the corresponding bundle usage descriptions.
 The installed SDK exposes AppKit PlatformModule, PlatformView, PlatformPayload, and ExternalTexture protocols to Objective-C and Swift through `HuxerUIPlatform`.
 
 ## Linux
@@ -64,6 +66,7 @@ The pinned Emscripten tools, Python, and `termux-open` must be available on `PAT
 
 Typed routed navigation can bind the authoritative `NavigationPath` to browser URL and history state.
 Browser restrictions still govern clipboard, file pickers, autoplay, cross-origin requests, and storage persistence.
+Camera and microphone permission state is queried through the Permissions API when supported; requesting access remains coupled to browser media acquisition and is not emulated by the shared permission API.
 
 ## Android
 
@@ -72,6 +75,7 @@ The generated Gradle project links the SDK-provided Android shared library and a
 
 Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, and a compatible emulator or device.
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, and ExternalTexture are translated at the Android host boundary.
+Camera and microphone requests use the Activity launcher and require manifest declarations owned by the application.
 
 An Android arm64-v8a host SDK provides the `huxerui` CLI, `hcg`, and `hrc` as native Bionic executables for Termux.
 Termux Android builds target the local `arm64-v8a` ABI, use the Termux `aapt2` executable, and still require an Android SDK platform and NDK layout compatible with Gradle `externalNativeBuild` on Termux.
@@ -92,6 +96,7 @@ huxerui run ios --device <id>
 
 Physical-device builds use Xcode signing settings owned by the generated project and local developer configuration.
 External files preserve security-scoped access when required.
+Camera and microphone permissions use AVFoundation, require native usage descriptions, and can open the application settings page through UIKit.
 The iOS XCFramework exposes UIKit PlatformModule, PlatformView, PlatformPayload, and ExternalTexture protocols to Objective-C and Swift through `HuxerUIPlatform`.
 
 ## Shared behavior

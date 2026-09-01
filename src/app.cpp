@@ -69,6 +69,10 @@ std::shared_ptr<detail::HttpTransport> PlatformAdapter::CreateHttpTransport() {
   return {};
 }
 
+std::shared_ptr<detail::PermissionTransport> PlatformAdapter::CreatePermissionTransport() {
+  return {};
+}
+
 std::shared_ptr<detail::SystemTrayTransport> PlatformAdapter::CreateSystemTrayTransport() {
   return {};
 }

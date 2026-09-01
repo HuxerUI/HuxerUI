@@ -22,6 +22,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 - [Window Insets and System Bars](window-insets.md): safe area, edge-to-edge content, and system-bar appearance.
 - [Window Chrome](window-chrome.md): system and custom desktop chrome.
 - [System Tray and Window Visibility](system-tray.md): tray presentation, window request handling, visibility, and application termination.
+- [Application Permissions](permissions.md): typed authorization, Task delivery, native policy, and platform mapping.
 - [Task and Structured Concurrency](tasks.md): task ownership, cancellation, and UI-thread resumption.
 
 ## Content and services

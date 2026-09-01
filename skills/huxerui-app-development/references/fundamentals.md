@@ -108,6 +108,11 @@ tasks.Launch([]() -> Task<void> {
 
 `ApplicationHandle::LifecycleState()` reads and subscribes to the current `ApplicationLifecycleState`; use `ApplicationHandle::OnLifecycleChange(...)` when every ordered transition matters. Obtain the handle with `UseApplication()`, register callbacks during composition, and keep navigation or file-opening policy in application state.
 
+`ApplicationHandle::CheckPermissionAsync()`, `RequestPermissionAsync()`, and `OpenPermissionSettingsAsync()` expose typed camera and microphone authorization through the owning Task execution.
+Await them from a `TaskScope`; the continuation resumes on its UI thread and may update `State` directly.
+Native manifests, Apple usage descriptions, entitlements, request rationale, and final feature policy remain application-shell responsibilities.
+Treat `PermissionStatus::Unavailable` as a normal platform-capability result rather than inventing a fallback permission path.
+
 ## Reconciliation
 
 `View` is a transient declaration. Retained mutable behavior belongs in state, controllers, or mounted extensions. Unkeyed siblings reconcile by position. Component functions should not retain raw node, child, or platform pointers across reconciliation.

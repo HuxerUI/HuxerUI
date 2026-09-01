@@ -29,6 +29,7 @@ class FilePickerTransport;
 class HttpTransport;
 class PlatformChannelEndpoint;
 class PlatformRegistry;
+class PermissionTransport;
 class SystemTrayTransport;
 class TextLayout;
 
@@ -97,6 +98,7 @@ protected:
   virtual std::shared_ptr<FileSystem> CreateFileSystem();
   virtual std::shared_ptr<detail::FilePickerTransport> CreateFilePickerTransport();
   virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
+  virtual std::shared_ptr<detail::PermissionTransport> CreatePermissionTransport();
   virtual std::shared_ptr<detail::SystemTrayTransport> CreateSystemTrayTransport();
 
   detail::PlatformRegistry& PlatformRegistry() noexcept;

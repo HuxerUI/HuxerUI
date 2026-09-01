@@ -667,6 +667,10 @@ public:
     return CreateIosHttpTransport();
   }
 
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateIosPermissionTransport();
+  }
+
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
     rusage usage{};
     if (getrusage(RUSAGE_SELF, &usage) != 0) {

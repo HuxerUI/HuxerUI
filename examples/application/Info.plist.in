@@ -46,5 +46,9 @@
   </array>
   <key>CFBundleVersion</key>
   <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+  <key>NSCameraUsageDescription</key>
+  <string>Demonstrate the HuxerUI application permission API.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Demonstrate the HuxerUI application permission API.</string>
 </dict>
 </plist>

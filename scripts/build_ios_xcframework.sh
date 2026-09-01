@@ -121,6 +121,7 @@ xcrun --sdk iphonesimulator swiftc \
   -L "$simulator_slice" \
   -lhuxerui_static \
   -lc++ \
+  -framework AVFoundation \
   -framework CoreFoundation \
   -framework CoreGraphics \
   -framework CoreImage \

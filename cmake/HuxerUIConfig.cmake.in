@@ -39,6 +39,7 @@ if (IOS)
                 "${_HUXERUI_IOS_XCFRAMEWORK}/${_HUXERUI_IOS_SLICE}/libhuxerui_static.a"
         )
         set(_HUXERUI_IOS_LINK_LIBRARIES
+                "-framework AVFoundation"
                 "-framework CoreFoundation"
                 "-framework CoreGraphics"
                 "-framework CoreImage"

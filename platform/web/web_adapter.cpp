@@ -26,6 +26,7 @@
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_layout_internal.h"
+#include "web_application_internal.h"
 #include "web_file.h"
 #include "web_http_internal.h"
 #include "web_platform_view.h"
@@ -892,6 +893,10 @@ public:
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
     return CreateWebFilePickerTransport();
+  }
+
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateWebPermissionTransport();
   }
 
   std::shared_ptr<FileSystem> CreateFileSystem() override {

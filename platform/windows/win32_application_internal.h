@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -11,6 +12,8 @@
 #include <huxerui/app.h>
 
 namespace huxerui::detail {
+
+class PermissionTransport;
 
 inline constexpr std::uintptr_t win32_application_activation_data_id = 0x48555841U;
 inline constexpr std::size_t win32_application_activation_max_characters = 32768;
@@ -31,5 +34,6 @@ struct Win32StartupInput {
     std::wstring_view window_class_name,
     std::span<const std::wstring> arguments
 );
+[[nodiscard]] std::shared_ptr<PermissionTransport> CreateWin32PermissionTransport();
 
 } // namespace huxerui::detail

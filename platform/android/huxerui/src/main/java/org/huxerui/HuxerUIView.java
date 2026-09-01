@@ -128,6 +128,12 @@ public final class HuxerUIView extends ViewGroup {
         void cancel(int requestCode);
     }
 
+    public interface PermissionLauncher {
+        void request(String permission, int requestCode);
+
+        boolean openSettings();
+    }
+
     public enum ApplicationLifecycleState {
         ACTIVE(0),
         INACTIVE(1),
@@ -161,6 +167,7 @@ public final class HuxerUIView extends ViewGroup {
     private final int[] screenLocation = new int[2];
     private final HuxerUIAccessibilityProvider accessibilityProvider;
     private final HuxerUIFilePicker filePicker;
+    private final HuxerUIPermission permission;
     private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
     private final SparseIntArray pointerButtons = new SparseIntArray();
     private float density;
@@ -205,6 +212,7 @@ public final class HuxerUIView extends ViewGroup {
     private int safeInsetBottom;
     private SystemBarsController systemBarsController;
     private FilePickerLauncher filePickerLauncher;
+    private PermissionLauncher permissionLauncher;
     private long[] platformComposition = EMPTY_PLATFORM_COMPOSITION;
     private boolean nativeDrawing;
     private boolean applyingPlatformViewFocus;
@@ -234,6 +242,7 @@ public final class HuxerUIView extends ViewGroup {
         super(context, attributes, defaultStyleAttribute);
         accessibilityProvider = new HuxerUIAccessibilityProvider(this);
         filePicker = new HuxerUIFilePicker(this);
+        permission = new HuxerUIPermission(this);
         density = getResources().getDisplayMetrics().density;
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -255,6 +264,18 @@ public final class HuxerUIView extends ViewGroup {
 
     public boolean dispatchFilePickerResult(int requestCode, int resultCode, Intent data) {
         return filePicker.dispatchResult(requestCode, resultCode, data);
+    }
+
+    public void setPermissionLauncher(PermissionLauncher launcher) {
+        if (permissionLauncher == launcher) {
+            return;
+        }
+        permissionLauncher = launcher;
+        permission.launcherChanged();
+    }
+
+    public boolean dispatchPermissionResult(int requestCode, String[] permissions, int[] grantResults) {
+        return permission.dispatchResult(requestCode, permissions, grantResults);
     }
 
     /** Sets the Intent normalized as startup input for the next Runtime created by this View. */
@@ -290,6 +311,22 @@ public final class HuxerUIView extends ViewGroup {
 
     FilePickerLauncher filePickerLauncher() {
         return filePickerLauncher;
+    }
+
+    PermissionLauncher permissionLauncher() {
+        return permissionLauncher;
+    }
+
+    int checkPermission(int permissionKind) {
+        return permission.check(permissionKind);
+    }
+
+    void requestPermission(long nativeHandle, int permissionKind) {
+        permission.request(nativeHandle, permissionKind);
+    }
+
+    boolean openPermissionSettings(int permissionKind) {
+        return permission.openSettings(permissionKind);
     }
 
     boolean canOpenFiles() {

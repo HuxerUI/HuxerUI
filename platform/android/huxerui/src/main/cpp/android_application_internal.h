@@ -2,11 +2,14 @@
 
 #include <jni.h>
 
+#include <memory>
 #include <optional>
 
 #include <huxerui/app.h>
 
 namespace huxerui::detail {
+
+class PermissionTransport;
 
 // JNI object references are borrowed from the current native call and are decoded synchronously.
 struct AndroidApplicationActivationInput {
@@ -24,5 +27,8 @@ struct AndroidApplicationActivationInput {
     jobject context,
     const AndroidApplicationActivationInput& input
 );
+
+[[nodiscard]] std::shared_ptr<PermissionTransport>
+CreateAndroidPermissionTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view);
 
 } // namespace huxerui::detail

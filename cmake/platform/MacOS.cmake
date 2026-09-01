@@ -17,6 +17,7 @@ set(HUXERUI_PLATFORM_COMPILE_OPTIONS
 )
 set(HUXERUI_PLATFORM_LINK_LIBRARIES
         "-framework AppKit"
+        "-framework AVFoundation"
         "-framework Carbon"
         "-framework CoreGraphics"
         "-framework CoreImage"

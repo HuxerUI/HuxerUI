@@ -642,6 +642,10 @@ public:
     return CreateMacHttpTransport();
   }
 
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateMacPermissionTransport();
+  }
+
   std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
     return std::make_shared<AppKitSystemTrayTransport>();
   }

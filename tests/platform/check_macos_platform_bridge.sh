@@ -29,6 +29,7 @@ xcrun --sdk macosx swiftc \
   "$library_path" \
   -lc++ \
   -framework AppKit \
+  -framework AVFoundation \
   -framework Carbon \
   -framework CoreGraphics \
   -framework CoreImage \

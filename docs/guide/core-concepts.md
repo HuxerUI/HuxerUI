@@ -188,9 +188,20 @@ Inspect its typed components directly rather than parsing the serialized string 
 `FileActivation` carries `FileReference` capabilities instead of assuming that every platform-opened document has a local path.
 
 `UseApplication()` returns the application-level handle.
+Its permission methods query or request typed runtime capabilities and resume through the owning Task execution, so the continuation may update `State` directly.
+Native manifests, privacy strings, entitlements, request rationale, and final feature policy remain application-shell concerns.
+
+```cpp
+tasks.Launch([=]() -> Task<void> {
+  camera_status = co_await application.RequestPermissionAsync(Permission::Camera);
+});
+```
+
 On desktop, its `SystemTray()` sub-handle presents one tray item and `Quit()` requests orderly application termination.
 Tray declarations reuse `MenuItem`, `MenuEntry`, and `MenuSection`; their `ImageVariant` icons must resolve to raster `ImageAsset` values.
 `UseWindow()` supplies independent visibility commands and lifecycle-bound minimize and close request handlers, allowing an application to compose minimize-to-tray behavior while preserving the normal window action when no tray host is available.
+
+See [Application Permissions](../design/permissions.md) for status meanings, native declarations, and platform limitations.
 
 ## Runtime model
 

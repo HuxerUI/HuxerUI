@@ -50,6 +50,10 @@
   <string>$(CURRENT_PROJECT_VERSION)</string>
   <key>LSSupportsOpeningDocumentsInPlace</key>
   <true/>
+  <key>NSCameraUsageDescription</key>
+  <string>Demonstrate the HuxerUI application permission API.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Demonstrate the HuxerUI application permission API.</string>
   <key>UILaunchStoryboardName</key>
   <string>LaunchScreen</string>
   <key>UISupportedInterfaceOrientations</key>

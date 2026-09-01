@@ -5,7 +5,10 @@
 
 #include <cstddef>
 #include <cwctype>
+#include <functional>
 #include <limits>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -13,8 +16,16 @@
 #include <utility>
 #include <vector>
 
+#include "application_internal.h"
 #include "win32_file_internal.h"
 #include "win32_internal.h"
+
+#if !defined(HUXERUI_WINDOWS_7_COMPAT)
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Metadata.h>
+#include <winrt/Windows.Security.Authorization.AppCapabilityAccess.h>
+#include <winrt/base.h>
+#endif
 
 namespace huxerui::detail {
 
@@ -80,6 +91,157 @@ std::wstring Hexadecimal(std::uint64_t value) {
   }
   return result;
 }
+
+#if !defined(HUXERUI_WINDOWS_7_COMPAT)
+
+using winrt::Windows::Foundation::AsyncStatus;
+using winrt::Windows::Foundation::IAsyncOperation;
+using winrt::Windows::Foundation::Metadata::ApiInformation;
+using winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapability;
+using winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus;
+
+std::wstring_view CapabilityName(Permission permission) {
+  switch (permission) {
+  case Permission::Camera:
+    return L"webcam";
+  case Permission::Microphone:
+    return L"microphone";
+  }
+  return {};
+}
+
+const wchar_t* SettingsUri(Permission permission) {
+  switch (permission) {
+  case Permission::Camera:
+    return L"ms-settings:privacy-webcam";
+  case Permission::Microphone:
+    return L"ms-settings:privacy-microphone";
+  }
+  return nullptr;
+}
+
+PermissionStatus ResolveStatus(AppCapabilityAccessStatus status) noexcept {
+  switch (status) {
+  case AppCapabilityAccessStatus::Allowed:
+    return PermissionStatus::Granted;
+  case AppCapabilityAccessStatus::UserPromptRequired:
+    return PermissionStatus::NotDetermined;
+  case AppCapabilityAccessStatus::DeniedByUser:
+    return PermissionStatus::PermanentlyDenied;
+  case AppCapabilityAccessStatus::DeniedBySystem:
+    return PermissionStatus::Restricted;
+  case AppCapabilityAccessStatus::NotDeclaredByApp:
+    return PermissionStatus::Unavailable;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+bool IsAppCapabilityAvailable() {
+  try {
+    return ApiInformation::IsTypePresent(L"Windows.Security.Authorization.AppCapabilityAccess.AppCapability");
+  } catch (...) {
+    return false;
+  }
+}
+
+AppCapability Capability(Permission permission) {
+  return AppCapability::Create(winrt::hstring{CapabilityName(permission)});
+}
+
+class Win32PermissionRequest final : public std::enable_shared_from_this<Win32PermissionRequest> {
+public:
+  Win32PermissionRequest(IAsyncOperation<AppCapabilityAccessStatus> operation,
+      PermissionStatusCompletion completion)
+      : operation_(std::move(operation)), completion_(std::move(completion)) {}
+
+  void Start() {
+    std::weak_ptr<Win32PermissionRequest> weak = shared_from_this();
+    operation_.Completed([weak](const IAsyncOperation<AppCapabilityAccessStatus>& operation, AsyncStatus status) {
+      if (const std::shared_ptr<Win32PermissionRequest> request = weak.lock()) {
+        request->Complete(operation, status);
+      }
+    });
+  }
+
+  void Cancel() noexcept {
+    {
+      std::scoped_lock lock(mutex_);
+      completion_ = {};
+    }
+    try {
+      operation_.Cancel();
+    } catch (...) {
+    }
+  }
+
+private:
+  void Complete(const IAsyncOperation<AppCapabilityAccessStatus>& operation, AsyncStatus status) noexcept {
+    PermissionStatus result = PermissionStatus::Unavailable;
+    if (status == AsyncStatus::Completed) {
+      try {
+        result = ResolveStatus(operation.GetResults());
+      } catch (...) {
+      }
+    }
+    PermissionStatusCompletion completion;
+    {
+      std::scoped_lock lock(mutex_);
+      completion = std::move(completion_);
+    }
+    if (completion) {
+      completion(result);
+    }
+  }
+
+  std::mutex mutex_;
+  IAsyncOperation<AppCapabilityAccessStatus> operation_;
+  PermissionStatusCompletion completion_;
+};
+
+class Win32PermissionTransport final : public PermissionTransport {
+public:
+  std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) override {
+    if (!IsAppCapabilityAvailable()) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+    try {
+      completion(ResolveStatus(Capability(permission).CheckAccess()));
+    } catch (...) {
+      completion(PermissionStatus::Unavailable);
+    }
+    return {};
+  }
+
+  std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) override {
+    if (!IsAppCapabilityAvailable()) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+    try {
+      IAsyncOperation<AppCapabilityAccessStatus> operation = Capability(permission).RequestAccessAsync();
+      auto request = std::make_shared<Win32PermissionRequest>(std::move(operation), std::move(completion));
+      request->Start();
+      return [request] { request->Cancel(); };
+    } catch (...) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+  }
+
+  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
+    const wchar_t* uri = SettingsUri(permission);
+    if (uri == nullptr) {
+      completion(false);
+      return {};
+    }
+    const HINSTANCE result = ShellExecuteW(nullptr, L"open", uri, nullptr, nullptr, SW_SHOWNORMAL);
+    completion(reinterpret_cast<std::intptr_t>(result) > 32);
+    return {};
+  }
+};
+
+#endif
 
 } // namespace
 
@@ -213,6 +375,14 @@ bool TryForwardWin32ApplicationActivation(
   ShowWindow(target, IsIconic(target) ? SW_RESTORE : SW_SHOW);
   static_cast<void>(SetForegroundWindow(target));
   return true;
+}
+
+std::shared_ptr<PermissionTransport> CreateWin32PermissionTransport() {
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+  return {};
+#else
+  return std::make_shared<Win32PermissionTransport>();
+#endif
 }
 
 } // namespace huxerui::detail

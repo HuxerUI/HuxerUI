@@ -13,6 +13,7 @@
 #include <variant>
 #include <vector>
 
+#include "application_internal.h"
 #include "internal.h"
 #include "system_tray_internal.h"
 #include "text_layout_internal.h"
@@ -441,6 +442,74 @@ public:
   std::function<void(huxerui::detail::SystemTrayEvent)> event_handler;
 };
 
+class TestPermissionTransport : public huxerui::detail::PermissionTransport {
+public:
+  struct StatusRequest {
+    huxerui::Permission permission = huxerui::Permission::Camera;
+    huxerui::detail::PermissionStatusCompletion completion;
+    bool canceled = false;
+  };
+
+  struct SettingsRequest {
+    huxerui::Permission permission = huxerui::Permission::Camera;
+    huxerui::detail::PermissionSettingsCompletion completion;
+    bool canceled = false;
+  };
+
+  std::function<void()> Check(huxerui::Permission permission,
+      huxerui::detail::PermissionStatusCompletion completion) override {
+    checks.push_back({permission, std::move(completion)});
+    const std::size_t index = checks.size() - 1;
+    if (immediate_check.has_value()) {
+      checks[index].completion(*immediate_check);
+    }
+    return [this, index] { checks[index].canceled = true; };
+  }
+
+  std::function<void()> Request(huxerui::Permission permission,
+      huxerui::detail::PermissionStatusCompletion completion) override {
+    requests.push_back({permission, std::move(completion)});
+    const std::size_t index = requests.size() - 1;
+    if (immediate_request.has_value()) {
+      requests[index].completion(*immediate_request);
+    }
+    if (!request_cancellable) {
+      return {};
+    }
+    return [this, index] { requests[index].canceled = true; };
+  }
+
+  std::function<void()> OpenSettings(huxerui::Permission permission,
+      huxerui::detail::PermissionSettingsCompletion completion) override {
+    settings.push_back({permission, std::move(completion)});
+    const std::size_t index = settings.size() - 1;
+    if (immediate_settings.has_value()) {
+      settings[index].completion(*immediate_settings);
+    }
+    return [this, index] { settings[index].canceled = true; };
+  }
+
+  void CompleteCheck(std::size_t index, huxerui::PermissionStatus status) {
+    checks.at(index).completion(status);
+  }
+
+  void CompleteRequest(std::size_t index, huxerui::PermissionStatus status) {
+    requests.at(index).completion(status);
+  }
+
+  void CompleteSettings(std::size_t index, bool opened) {
+    settings.at(index).completion(opened);
+  }
+
+  std::vector<StatusRequest> checks;
+  std::vector<StatusRequest> requests;
+  std::vector<SettingsRequest> settings;
+  std::optional<huxerui::PermissionStatus> immediate_check;
+  std::optional<huxerui::PermissionStatus> immediate_request;
+  std::optional<bool> immediate_settings;
+  bool request_cancellable = true;
+};
+
 class TestPlatform : public huxerui::PlatformAdapter {
 public:
   TestPlatform()
@@ -739,6 +808,10 @@ public:
     return system_tray_transport;
   }
 
+  std::shared_ptr<huxerui::detail::PermissionTransport> CreatePermissionTransport() override {
+    return permission_transport;
+  }
+
   int requested_frames = 0;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
@@ -750,6 +823,7 @@ public:
   std::vector<huxerui::WindowCommand> window_commands;
   int application_quit_requests = 0;
   std::shared_ptr<TestSystemTrayTransport> system_tray_transport;
+  std::shared_ptr<TestPermissionTransport> permission_transport;
   huxerui::PlatformTextInput* platform_text_input = nullptr;
   huxerui::PlatformClipboard* platform_clipboard = nullptr;
   huxerui::PlatformResources* platform_resources = nullptr;

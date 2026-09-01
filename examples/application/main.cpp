@@ -84,6 +84,24 @@ std::string DescribeLifecycleState(ApplicationLifecycleState state) {
   return "unknown";
 }
 
+std::string DescribePermissionStatus(PermissionStatus status) {
+  switch (status) {
+  case PermissionStatus::NotDetermined:
+    return "not determined";
+  case PermissionStatus::Granted:
+    return "granted";
+  case PermissionStatus::Denied:
+    return "denied";
+  case PermissionStatus::PermanentlyDenied:
+    return "permanently denied";
+  case PermissionStatus::Restricted:
+    return "restricted";
+  case PermissionStatus::Unavailable:
+    return "unavailable";
+  }
+  return "unknown";
+}
+
 std::optional<FileReference> ActivatedFile(const ApplicationActivation& activation) {
   const auto* files = std::get_if<FileActivation>(&activation);
   if (files == nullptr || files->files.empty()) {
@@ -141,6 +159,41 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
   );
 }
 
+[[huxerui::composable]]
+View PermissionCard(const ApplicationHandle& application, TaskScope tasks) {
+  auto status = UseState(std::string{"not checked"});
+  const ThemeSpec& theme = UseTheme();
+  return Column {
+    Text("Runtime permission", TextRole::Title),
+    Text("Camera: " + status.Get(), TextRole::Label).With(Foreground(theme.colors.primary)),
+    Text("The native application shell owns privacy declarations and final permission policy."),
+    Button("Check camera").OnClick([=] {
+      tasks.Launch([=]() -> Task<void> {
+        status = DescribePermissionStatus(co_await application.CheckPermissionAsync(Permission::Camera));
+      });
+    }),
+    Button("Request camera").OnClick([=] {
+      tasks.Launch([=]() -> Task<void> {
+        status = DescribePermissionStatus(co_await application.RequestPermissionAsync(Permission::Camera));
+      });
+    }),
+    Button("Open permission settings").OnClick([=] {
+      tasks.Launch([=]() -> Task<void> {
+        const bool opened = co_await application.OpenPermissionSettingsAsync(Permission::Camera);
+        if (!opened) {
+          status = "settings unavailable";
+        }
+      });
+    }),
+  }.With(
+      Padding(theme.spacing.large),
+      Spacing(theme.spacing.small),
+      CrossAlign(CrossAxisAlignment::Stretch),
+      Background(theme.colors.surface_container_low),
+      CornerRadius(theme.shapes.medium)
+  );
+}
+
 [[huxerui::composable]] View ApplicationContent() {
   const ApplicationHandle application = UseApplication();
   const ApplicationActivation startup_activation = application.StartupActivation();
@@ -191,6 +244,7 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
           CornerRadius(theme.shapes.medium)
       ),
       TextFilePreviewCard(preview),
+      PermissionCard(application, tasks),
     }.With(
         Padding(theme.spacing.extra_large),
         Spacing(theme.spacing.medium),

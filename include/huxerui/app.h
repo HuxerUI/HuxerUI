@@ -27,6 +27,7 @@
 #include <huxerui/render_scene.h>
 #include <huxerui/root.h>
 #include <huxerui/semantics.h>
+#include <huxerui/task.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
 #include <huxerui/window.h>
@@ -83,6 +84,30 @@ enum class ApplicationLifecycleState {
   Inactive,
   /// The application is no longer presented as an active foreground experience.
   Background,
+};
+
+/// Identifies an application-level runtime permission with shared cross-platform semantics.
+enum class Permission {
+  /// Access to cameras used for still-image or video capture.
+  Camera,
+  /// Access to microphones used for audio capture.
+  Microphone,
+};
+
+/// Describes the current authorization state of an application-level runtime permission.
+enum class PermissionStatus {
+  /// The platform has not yet asked the user to decide.
+  NotDetermined,
+  /// The application currently has access.
+  Granted,
+  /// Access is currently denied, but the platform does not reliably expose whether another prompt is possible.
+  Denied,
+  /// Access is denied and the platform explicitly reports that an in-application request cannot prompt again.
+  PermanentlyDenied,
+  /// Access is blocked by system, parental, or administrative policy.
+  Restricted,
+  /// The host, platform API, or native application declaration cannot provide this permission capability.
+  Unavailable,
 };
 
 namespace detail {
@@ -240,6 +265,15 @@ public:
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
   /// Returns the system tray handle owned by the current composition scope.
   [[nodiscard]] SystemTrayHandle SystemTray() const;
+  /// Queries the current platform permission state without presenting system UI.
+  [[nodiscard]] Task<PermissionStatus> CheckPermissionAsync(Permission permission) const;
+  /// Requests a platform permission, presenting system UI when the platform permits it.
+  [[nodiscard]] Task<PermissionStatus> RequestPermissionAsync(Permission permission) const;
+  /// Opens the platform settings surface relevant to a permission when one is available.
+  ///
+  /// A true result means the platform accepted the request to open settings; it does not imply that the permission
+  /// changed.
+  [[nodiscard]] Task<bool> OpenPermissionSettingsAsync(Permission permission) const;
   /// Requests orderly whole-application termination from the platform adapter.
   void Quit() const;
 

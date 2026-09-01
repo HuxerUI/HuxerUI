@@ -1142,6 +1142,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   state_->application_service_ = std::make_shared<ApplicationService>(
       *this,
       std::move(startup_activation),
+      std::make_shared<PermissionController>(platform.CreatePermissionTransport(), platform.ui_thread_dispatcher_),
       SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_)
   );
   root.Provide(state_->application_service_);

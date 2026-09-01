@@ -563,6 +563,10 @@ public:
     return CreateWin32HttpTransport();
   }
 
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateWin32PermissionTransport();
+  }
+
   std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
     if (!system_tray_) {
       system_tray_ = std::make_shared<Win32SystemTrayTransport>();

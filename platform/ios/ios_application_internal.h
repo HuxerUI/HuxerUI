@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 
 #include <huxerui/app.h>
@@ -9,6 +10,10 @@
 #endif
 
 namespace huxerui::detail {
+
+class PermissionTransport;
+
+[[nodiscard]] std::shared_ptr<PermissionTransport> CreateIosPermissionTransport();
 
 #ifdef __OBJC__
 [[nodiscard]] std::optional<ApplicationActivation>

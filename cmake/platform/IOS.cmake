@@ -23,6 +23,7 @@ set(HUXERUI_PLATFORM_LINK_LIBRARIES
         "-framework Foundation"
         "-framework ImageIO"
         "-framework MobileCoreServices"
+        "-framework AVFoundation"
         "-framework QuartzCore"
         "-framework UIKit"
         "-weak_framework UniformTypeIdentifiers"

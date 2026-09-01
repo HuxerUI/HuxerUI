@@ -1084,6 +1084,10 @@ private:
     return CreateAndroidHttpTransport(virtual_machine_, Environment());
   }
 
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateAndroidPermissionTransport(virtual_machine_, Environment(), view_);
+  }
+
   void CallTextInput(
       jmethodID method,
       TextInputSessionId session_id,

@@ -3,8 +3,10 @@ package org.huxerui;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.View;
 import android.view.Window;
 import android.view.WindowInsetsController;
@@ -40,6 +42,21 @@ public class HuxerUIActivity extends Activity {
             @Override
             public void cancel(int requestCode) {
                 finishActivity(requestCode);
+            }
+        });
+        contentView.setPermissionLauncher(new HuxerUIView.PermissionLauncher() {
+            @Override
+            public void request(String permission, int requestCode) {
+                requestPermissions(new String[] {permission}, requestCode);
+            }
+
+            @Override
+            public boolean openSettings() {
+                Intent intent = new Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", getPackageName(), null));
+                startActivity(intent);
+                return true;
             }
         });
         setContentView(contentView);
@@ -114,6 +131,14 @@ public class HuxerUIActivity extends Activity {
     }
 
     @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        if (contentView != null && contentView.dispatchPermissionResult(requestCode, permissions, grantResults)) {
+            return;
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
     protected void onDestroy() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backCallback != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -125,6 +150,7 @@ public class HuxerUIActivity extends Activity {
         }
         if (contentView != null) {
             contentView.setFilePickerLauncher(null);
+            contentView.setPermissionLauncher(null);
             contentView.setSystemBarsController(null);
         }
         contentView = null;

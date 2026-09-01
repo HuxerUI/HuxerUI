@@ -1,12 +1,16 @@
+#import <AVFoundation/AVFoundation.h>
 #import <Foundation/Foundation.h>
 
 #include "macos_application_internal.h"
 
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "application_internal.h"
 #include "macos_file_internal.h"
 
 namespace huxerui::detail {
@@ -23,6 +27,81 @@ std::optional<std::string> Utf8String(NSString* value) {
   }
   return std::string(static_cast<const char*>(data.bytes), data.length);
 }
+
+AVMediaType MediaType(Permission permission) {
+  switch (permission) {
+  case Permission::Camera:
+    return AVMediaTypeVideo;
+  case Permission::Microphone:
+    return AVMediaTypeAudio;
+  }
+}
+
+NSString* UsageDescriptionKey(Permission permission) {
+  switch (permission) {
+  case Permission::Camera:
+    return @"NSCameraUsageDescription";
+  case Permission::Microphone:
+    return @"NSMicrophoneUsageDescription";
+  }
+}
+
+bool HasUsageDescription(Permission permission) {
+  id value = [NSBundle.mainBundle objectForInfoDictionaryKey:UsageDescriptionKey(permission)];
+  return [value isKindOfClass:NSString.class] && [static_cast<NSString*>(value) length] > 0;
+}
+
+PermissionStatus ResolveStatus(AVAuthorizationStatus status) {
+  switch (status) {
+  case AVAuthorizationStatusNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case AVAuthorizationStatusAuthorized:
+    return PermissionStatus::Granted;
+  case AVAuthorizationStatusDenied:
+    return PermissionStatus::PermanentlyDenied;
+  case AVAuthorizationStatusRestricted:
+    return PermissionStatus::Restricted;
+  }
+}
+
+class MacPermissionTransport final : public PermissionTransport {
+public:
+  std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) override {
+    if (!HasUsageDescription(permission)) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+    completion(ResolveStatus([AVCaptureDevice authorizationStatusForMediaType:MediaType(permission)]));
+    return {};
+  }
+
+  std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) override {
+    if (!HasUsageDescription(permission)) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+    const AVMediaType media_type = MediaType(permission);
+    const PermissionStatus current = ResolveStatus([AVCaptureDevice authorizationStatusForMediaType:media_type]);
+    if (current != PermissionStatus::NotDetermined) {
+      completion(current);
+      return {};
+    }
+    auto retained = std::make_shared<PermissionStatusCompletion>(std::move(completion));
+    [AVCaptureDevice requestAccessForMediaType:media_type
+                            completionHandler:^(BOOL granted) {
+                              (*retained)(granted
+                                      ? PermissionStatus::Granted
+                                      : ResolveStatus([AVCaptureDevice authorizationStatusForMediaType:media_type]));
+                            }];
+    return {};
+  }
+
+  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
+    static_cast<void>(permission);
+    completion(false);
+    return {};
+  }
+};
 
 } // namespace
 
@@ -77,6 +156,10 @@ std::optional<std::vector<ApplicationActivation>> DecodeMacApplicationActivation
   } catch (...) {
     return std::nullopt;
   }
+}
+
+std::shared_ptr<PermissionTransport> CreateMacPermissionTransport() {
+  return std::make_shared<MacPermissionTransport>();
 }
 
 } // namespace huxerui::detail

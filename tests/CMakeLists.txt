@@ -43,6 +43,7 @@ add_executable(huxerui_tests
         runtime/lifecycle.cpp
         runtime/navigation.cpp
         runtime/navigation_ui.cpp
+        runtime/permission.cpp
         runtime/platform_module.cpp
         runtime/platform_view.cpp
         runtime/presentation.cpp

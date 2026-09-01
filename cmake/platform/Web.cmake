@@ -1,5 +1,6 @@
 set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/web/web_adapter.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/web/web_application.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_external_texture.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_file.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/web/web_file_picker.cpp"
