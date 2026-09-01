@@ -588,6 +588,7 @@ The shared component contract is listed below.
 | Dialog and BottomSheet | Dialog role, modal isolation, descendants, and Dismiss when allowed |
 | Menu | Menu collection containing labeled, checked, expanded, enabled MenuItem nodes |
 | Toast | Non-focusable polite live region containing its message |
+| SnackBar | Non-modal polite live region with an optional ordinary Button action |
 | VirtualList | List collection with total count and realized item indices; a transparent item root defaults to ListItem |
 | VirtualGrid | Grid collection with total count and realized item positions and spans; a transparent item root defaults to GridCell |
 | Canvas | No inferred semantics; explicit owner semantics or virtual children |
@@ -652,6 +653,9 @@ Submenu items advertise Expand or Collapse through a retained action extension t
 
 Toast applies `SemanticLiveRegion::Polite` directly to its message Text.
 It does not create a Toast role, focus target, action, or announcement service.
+
+SnackBar applies `SemanticLiveRegion::Polite` to its message Text and exposes its optional action as an ordinary Button.
+The presentation does not create a SnackBar role, trap focus, or move focus when shown; keyboard traversal may reach the action through the normal focus order.
 
 ## Platform mapping
 
@@ -808,7 +812,7 @@ Shared tests also cover:
 
 - TextField value, UTF-16 selection, SetText, SetSelection, secure and read-only policy, controlled replacement, active input synchronization, and stale actions.
 - Scroll metrics, nested Scroll, ShowOnScreen, clipping, transforms, and offscreen changes.
-- Dialog and BottomSheet modal isolation and dismissal, Menu collections and submenu expansion, Toast live-region lifecycle, and exiting layers.
+- Dialog and BottomSheet modal isolation and dismissal, Menu collections and submenu expansion, Toast and SnackBar live-region lifecycle, and exiting layers.
 - VirtualList and VirtualGrid counts, realized item metadata, scrolling, cache eviction, and semantic identity.
 
 Focused Android codec coverage verifies deterministic snapshots, direct virtual IDs, UTF-8 content, and overflow rejection.

@@ -1326,7 +1326,7 @@ Explicit scene transitions freeze only committed render data. The new mounted tr
 ### View lifecycle transitions
 
 General View insertion and removal transitions are not part of the public API.
-Dialog, BottomSheet, Menu, and Toast retain Layer entries through their component-owned exit motion and reuse the shared animation engine.
+Dialog, BottomSheet, Menu, Toast, and SnackBar retain Layer entries through their component-owned exit motion and reuse the shared animation engine.
 Future work may generalize lifecycle transitions only after identity, interruption, retained-state ownership, and reduced-motion behavior have one shared contract.
 
 ### Reduced motion
@@ -1523,6 +1523,7 @@ DialogStyle
 BottomSheetStyle
 MenuStyle
 ToastStyle
+SnackBarStyle
 ScrollBarStyle
 ```
 
@@ -1539,7 +1540,7 @@ MaterialTheme {Content()}
 MaterialDarkTheme {Content()}
 ```
 
-`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the corresponding Material tokens. Flat and Material Theme definitions explicitly register their complete Dialog, BottomSheet, Menu, and Toast styles rather than relying on presentation services to infer a style from ThemeSpec. Passing customized tokens as the first constructor argument to `FlatTheme` or `MaterialTheme` rebuilds that system's component styles from those tokens.
+`FlatLightThemeSpec()` and `FlatDarkThemeSpec()` return mutable token values that applications can use as the starting point for a branded flat theme. `MaterialLightThemeSpec()` and `MaterialDarkThemeSpec()` provide the corresponding Material tokens. Flat and Material Theme definitions explicitly register their complete Dialog, BottomSheet, Menu, Toast, and SnackBar styles rather than relying on presentation services to infer a style from ThemeSpec. Passing customized tokens as the first constructor argument to `FlatTheme` or `MaterialTheme` rebuilds that system's component styles from those tokens.
 
 ### Theme syntax
 
@@ -1582,7 +1583,7 @@ Component-owned layout configuration may be completed with resolved Theme values
 
 A complete Theme establishes a design system boundary. A Theme override inherits unspecified values from its parent. Runtime does not branch on Material, flat, liquid, or third-party theme identity.
 
-`ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent.
+`ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, SnackBar, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent.
 
 Built-in component modules supply one internal defaults operation on their ViewSpec declarations rather than adding concrete component branches to Runtime or inserting synthetic defaults into the user modifier sequence. A third-party composed component defines a typed style value, registers it with `ThemeDefinition::Set()`, and reads it with `UseEnvironment<CustomStyle>()` inside its composable function. It does not register a global NodeKind or extend a Runtime style table.
 
@@ -1640,7 +1641,7 @@ enum class LayerCancelPolicy {
 };
 ```
 
-`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient messages such as Toast. `System` contains ordinary HuxerUI diagnostic UI such as the debug ribbon and performance panel. Runtime-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
+`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient feedback such as Toast and SnackBar. `System` contains ordinary HuxerUI diagnostic UI such as the debug ribbon and performance panel. Runtime-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
 
 Layer options separate stacking, pointer behavior, focus containment, and dismissal:
 
@@ -1658,7 +1659,7 @@ struct LayerOptions {
 
 Pointer `PassThrough` never participates in hit testing. `Content` allows uncovered areas to reach lower layers. `Barrier` consumes input outside the presented content and optionally requests dismissal. A dismissible or colored barrier requires `Barrier`.
 
-Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the system window. Toast and passive diagnostic content pass through. [Navigation](navigation.md) extends this Runtime-owned chain after layers with application Back handlers, nested page stacks, and a captured predictive Back transaction. Only a completely unhandled request reaches the platform fallback.
+Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the system window. Toast, SnackBar, and passive diagnostic content pass through. [Navigation](navigation.md) extends this Runtime-owned chain after layers with application Back handlers, nested page stacks, and a captured predictive Back transaction. Only a completely unhandled request reaches the platform fallback.
 
 Desktop adapters map Escape through key dispatch. Android's full-screen `HuxerUIActivity` owns one lifecycle-bound Back callback, maps API 34 predictive phases to `BackEvent`, and asks Runtime before invoking its platform fallback. API 23 through 33 and an embedded `HuxerUIView` retain the Commit-only `handleBack()` entry point. Runtime never pushes Back-handler state into a platform adapter.
 
@@ -1680,6 +1681,7 @@ Concrete presentation policy remains outside Runtime. Typed per-window services 
 
 ```text
 UseToast()       -> Notification, pass-through, timed bottom placement
+UseSnackBar()    -> Notification, interactive content, one active bottom placement
 Tooltip          -> Notification, anchored modifier-owned plain text
 UseDialog()      -> Presentation, modal barrier, theme-controlled vertical placement
 UseBottomSheet() -> Presentation, modal barrier, bottom content
@@ -1717,7 +1719,7 @@ The built-in debug overlay attaches one persistent System entry after root hooks
 
 The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling Runtime accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
 
-LayerController entries without a transition are removed immediately. Dialog, BottomSheet, Menu, and Toast entries with configured motion first become non-interactive, retain their presentation state through the exit animation, and are removed after completion. Modal barriers remain until actual removal, so focus cannot be restored and content behind a visually exiting modal cannot be activated early.
+LayerController entries without a transition are removed immediately. Dialog, BottomSheet, Menu, Toast, and SnackBar entries with configured motion first become non-interactive, retain their presentation state through the exit animation, and are removed after completion. Modal barriers remain until actual removal, so focus cannot be restored and content behind a visually exiting modal cannot be activated early.
 
 ## RootHook
 
@@ -1813,7 +1815,7 @@ Duplicate service types are rejected rather than silently replaced.
 
 Root hooks run once in declaration order. Runtime owns the provided services and attached entries. On window destruction, Runtime removes content and layers before destroying services in reverse registration order. A service uses its destructor to release external subscriptions.
 
-HuxerUI installs its built-in Toast, Tooltip, Dialog, BottomSheet, Popup, and Menu services for every Runtime before application root hooks run. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; root hooks remain the extension mechanism for third-party services and global components. When `AppOptions::show_debug_overlay` is enabled, Runtime installs the built-in DebugOverlay after all root hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
+HuxerUI installs its built-in Toast, SnackBar, Tooltip, Dialog, BottomSheet, Popup, and Menu services for every Runtime before application root hooks run. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; root hooks remain the extension mechanism for third-party services and global components. When `AppOptions::show_debug_overlay` is enabled, Runtime installs the built-in DebugOverlay after all root hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
 
 RootHook does not provide:
 
@@ -1835,6 +1837,7 @@ semantic request
     Menu items, sections, and submenus
     Tooltip message and target bounds
     Toast message
+    SnackBar message and optional action
         -> theme presentation policy
     structure, surface, geometry, placement, and motion
         -> window presentation lifetime
@@ -1853,7 +1856,7 @@ Runtime and LayerController only implement the final contract. Typed services re
 
 The framework composes these semantic values through ordinary HuxerUI Views. A Theme does not receive arbitrary Layer access, own dismissal callbacks, or replace a presentation service. Theme values also do not contain application actions.
 
-`PresentationMotion` is a public Theme value shared by presentation styles, while motion execution remains private to presentation. An absent optional motion disables the transition; otherwise neutral scale and slide values express a fade, and non-neutral values add scale or placement-relative translation without a second motion-kind hierarchy. The implementation interpolates opacity, scale, translation, and transform origin through `AnimationSpec`, retained Layer transition state, and presentation properties. Dialog, Menu, and Toast derive motion from their styles; BottomSheet maps its component-specific motion values into the same private executor.
+`PresentationMotion` is a public Theme value shared by presentation styles, while motion execution remains private to presentation. An absent optional motion disables the transition; otherwise neutral scale and slide values express a fade, and non-neutral values add scale or placement-relative translation without a second motion-kind hierarchy. The implementation interpolates opacity, scale, translation, and transform origin through `AnimationSpec`, retained Layer transition state, and presentation properties. Dialog, Menu, Toast, and SnackBar derive motion from their styles; BottomSheet maps its component-specific motion values into the same private executor.
 
 Menu motion direction and transform origin derive from the requested anchor placement. The origin does not follow a runtime fallback to the opposite side because the resolved side belongs to LayerStack layout rather than the semantic Menu request.
 
@@ -1864,6 +1867,7 @@ Theme policy does not erase semantic component identity:
 - Menu remains an anchored semantic item hierarchy.
 - Popup remains arbitrary anchored content.
 - Toast remains a transient notification.
+- SnackBar remains actionable transient feedback.
 
 Custom View factories are escape hatches for application-specific content. They still receive themed outer placement, scrim, and motion where appropriate, but they do not implicitly receive the standard component's surface, padding, or internal layout.
 
@@ -1950,7 +1954,15 @@ The service retains ownership of submenu chains, focus, outside press, Cancel ro
 
 `ToastStyle` controls surface background, text style, padding, shape, shadow, maximum width, viewport margins, top or bottom placement, and enter and exit motion. Toast duration, timed dismissal, queueing, and deduplication remain service policy rather than Theme values.
 
-The message-only API remains the common entry point. Future semantic actions or icons extend the Toast request model rather than requiring callers to construct the Theme's internal View layout.
+Toast stays passive and message-only. Actionable feedback uses SnackBar rather than adding a second interaction mode to Toast.
+
+### SnackBar presentation policy
+
+`SnackBarStyle` controls the surface, message typography, action appearance, adaptive spacing, size constraints, viewport margins, and enter and exit motion. `SnackBarOptions` owns request duration, including an indefinite presentation when duration is absent.
+
+The SnackBar service owns one active request per Runtime. A new request creates a new Layer id and atomically replaces the previous Layer entry, so no frame exposes two SnackBars and stale ids, timers, or action callbacks cannot affect the replacement. An action first dismisses its owning request and then invokes the application callback, which makes a callback that immediately shows another SnackBar well-defined.
+
+Timed dismissal uses retained frame timing rather than an application thread. It pauses while the surface or action is hovered, while the action is focused or pressed, and while the application is not active. SnackBar remains non-modal, does not trap or steal focus, and passes Back to lower presentation and navigation handlers.
 
 ## Toast
 
@@ -1970,6 +1982,21 @@ return Button("Save")
 The Toast service creates one LayerEntry per call and manages its duration. The Runtime layer stack owns composition, input behavior, and removal. Queueing and deduplication are deferred policies.
 
 There is no process-global `Toast::Show()` because it would be ambiguous in multi-window and multi-Runtime applications.
+
+## SnackBar
+
+SnackBar is a separate command-oriented service for a message with at most one action:
+
+```cpp
+auto snack_bar = UseSnackBar();
+
+snack_bar.Show("Item deleted", "Undo", [snack_bar] {
+  RestoreItem();
+  snack_bar.Show("Item restored");
+});
+```
+
+`UseSnackBar()` captures the current Environment and returns a lightweight handle bound to the current window. `Dismiss` accepts only the id of the currently active request. Replacement and action dismissal begin the normal retained exit path, while replacement exchanges the visual Layer entry atomically instead of waiting for the old exit animation.
 
 ## Dialog
 

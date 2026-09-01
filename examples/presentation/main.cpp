@@ -51,6 +51,7 @@ View PopupCard(PopupContext popup) {
 View App() {
   auto declarative_dialog_visible = UseState(false);
   auto toast = UseToast();
+  auto snack_bar = UseSnackBar();
   auto dialog = UseDialog();
   auto bottom_sheet = UseBottomSheet();
   auto popup = UsePopup();
@@ -65,6 +66,9 @@ View App() {
         Text("Feedback and modal content").With(FontSize(20.0F), Foreground(primary_text_color)),
         Flow {
           Button("Show toast").OnClick([toast] { toast.Show("Changes saved", ToastOptions{2.5}); }),
+          Button("Delete with undo").OnClick([snack_bar] {
+            snack_bar.Show("Item deleted", "Undo", [snack_bar] { snack_bar.Show("Item restored"); });
+          }),
           Button("Open alert").OnClick([dialog] {
             dialog.Show("Save changes?", "The current document has unsaved changes.", "Save");
           }),

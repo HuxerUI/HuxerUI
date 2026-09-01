@@ -11,13 +11,16 @@ namespace {
 std::optional<DialogHandle> semantic_dialog;
 std::optional<BottomSheetHandle> semantic_bottom_sheet;
 std::optional<ToastHandle> semantic_toast;
+std::optional<SnackBarHandle> semantic_snack_bar;
 std::optional<MenuHandle> semantic_menu;
 int semantic_dismiss_requests = 0;
+int semantic_snack_bar_actions = 0;
 
 View PresentationSemanticsApp() {
   semantic_dialog = UseDialog();
   semantic_bottom_sheet = UseBottomSheet();
   semantic_toast = UseToast();
+  semantic_snack_bar = UseSnackBar();
   semantic_menu = UseMenu();
   return Column{
       Button("menu anchor").With(huxerui::Frame{120.0F, 36.0F}, semantic_menu->Anchor()),
@@ -53,8 +56,10 @@ void ResetPresentationSemantics() {
   semantic_dialog.reset();
   semantic_bottom_sheet.reset();
   semantic_toast.reset();
+  semantic_snack_bar.reset();
   semantic_menu.reset();
   semantic_dismiss_requests = 0;
+  semantic_snack_bar_actions = 0;
 }
 
 } // namespace
@@ -160,7 +165,7 @@ TEST_CASE("Standard dialog actions remain real semantic buttons") {
   REQUIRE(HasAction(*action, SemanticActionKind::Activate));
 }
 
-TEST_CASE("Bottom sheets and toasts publish presentation semantics") {
+TEST_CASE("Bottom sheets and transient feedback publish presentation semantics") {
   ResetPresentationSemantics();
   TestPlatform platform;
   Runtime runtime{PresentationSemanticsApp, platform};
@@ -184,6 +189,31 @@ TEST_CASE("Bottom sheets and toasts publish presentation semantics") {
   REQUIRE(toast->live_region == SemanticLiveRegion::Polite);
   REQUIRE(toast->actions == 0);
   REQUIRE(FindSemanticNode(toast_frame, "application semantics") != nullptr);
+
+  semantic_snack_bar->Show(
+      "item deleted",
+      "Undo",
+      [] { ++semantic_snack_bar_actions; },
+      SnackBarOptions{std::nullopt}
+  );
+  const SemanticFrame& snack_bar_frame = SemanticFrameFrom(runtime.BuildCommit());
+  const SemanticNode* snack_bar = FindSemanticNode(snack_bar_frame, "item deleted");
+  const SemanticNode* action = FindSemanticNode(snack_bar_frame, "Undo");
+  REQUIRE(snack_bar != nullptr);
+  REQUIRE(snack_bar->live_region == SemanticLiveRegion::Polite);
+  REQUIRE(action != nullptr);
+  REQUIRE(action->role == SemanticRole::Button);
+  REQUIRE(HasAction(*action, SemanticActionKind::Activate));
+  REQUIRE_FALSE(action->focused);
+  REQUIRE(FindSemanticNode(snack_bar_frame, "application semantics") != nullptr);
+
+  const bool activated =
+      runtime.CoreRuntime().PerformSemanticAction(action->id, SemanticAction{.kind = SemanticActionKind::Activate});
+  REQUIRE(activated);
+  REQUIRE(semantic_snack_bar_actions == 1);
+  const SemanticFrame& dismissed_snack_bar = SemanticFrameFrom(runtime.BuildCommit());
+  REQUIRE(FindSemanticNode(dismissed_snack_bar, "item deleted") == nullptr);
+  REQUIRE(FindSemanticNode(dismissed_snack_bar, "Undo") == nullptr);
 }
 
 TEST_CASE("Menu semantics describe items and keep an expanded submenu in one modal group") {

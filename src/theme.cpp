@@ -81,6 +81,29 @@ ToastStyle FlatToastStyle(const ThemeSpec& theme) {
   };
 }
 
+SnackBarStyle FlatSnackBarStyle(const ThemeSpec& theme) {
+  Color background = theme.colors.inverse_surface;
+  background.alpha *= 0.98F;
+  return {
+      .background = background,
+      .message_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.inverse_on_surface},
+      .action_text_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.primary},
+      .action_background = Color::Transparent(),
+      .action_padding = EdgeInsets::Symmetric(theme.spacing.small + theme.spacing.extra_small, theme.spacing.small),
+      .action_minimum_height = 36.0F,
+      .action_corner_radius = theme.shapes.small,
+      .action_indication = FlatIndication(theme.colors.primary, theme),
+      .padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .content_spacing = theme.spacing.small,
+      .shadow = Shadow{Color::Rgb(0, 0, 0, 0.24F), {}, theme.elevation.medium, 0.0F},
+      .corner_radius = theme.shapes.small,
+      .minimum_height = 48.0F,
+      .maximum_width = 600.0F,
+      .viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F},
+      .motion = std::nullopt,
+  };
+}
+
 TooltipStyle FlatTooltipStyle(const ThemeSpec& theme) {
   Color background = theme.colors.inverse_surface;
   background.alpha *= 0.94F;
@@ -277,6 +300,7 @@ ThemeDefinition FlatDefinition(ThemeSpec theme) {
       }
   );
   definition.Set(FlatToastStyle(theme));
+  definition.Set(FlatSnackBarStyle(theme));
   definition.Set(FlatTooltipStyle(theme));
   definition.Set(FlatDialogStyle(theme));
   definition.Set(FlatBottomSheetStyle(theme));
@@ -701,6 +725,31 @@ ToastStyle MaterialToastStyle(const ThemeSpec& theme) {
   };
 }
 
+SnackBarStyle MaterialSnackBarStyle(const ThemeSpec& theme) {
+  return {
+      .background = theme.colors.inverse_surface,
+      .message_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.inverse_on_surface},
+      .action_text_style = TextStyle{Font::System(theme.typography.label_large), theme.colors.primary},
+      .action_background = Color::Transparent(),
+      .action_padding = EdgeInsets::Symmetric(12.0F, 8.0F),
+      .action_minimum_height = 40.0F,
+      .action_corner_radius = theme.shapes.full,
+      .action_indication = MaterialIndication(theme.colors.primary, theme),
+      .padding = EdgeInsets::Symmetric(16.0F, 8.0F),
+      .content_spacing = 8.0F,
+      .shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.18F), theme.elevation.medium),
+      .corner_radius = theme.shapes.extra_small,
+      .minimum_height = 48.0F,
+      .maximum_width = 600.0F,
+      .viewport_padding = EdgeInsets{16.0F, 16.0F, 24.0F, 16.0F},
+      .motion = PresentationMotion{
+          .slide_distance = 12.0F,
+          .enter = TweenSpec{.duration = theme.motion.normal},
+          .exit = TweenSpec{.duration = theme.motion.fast},
+      },
+  };
+}
+
 TooltipStyle MaterialTooltipStyle(const ThemeSpec& theme) {
   return {
       .background = theme.colors.inverse_surface,
@@ -914,6 +963,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialSliderStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
   definition.Set(MaterialToastStyle(theme));
+  definition.Set(MaterialSnackBarStyle(theme));
   definition.Set(MaterialTooltipStyle(theme));
   definition.Set(MaterialDialogStyle(theme));
   definition.Set(MaterialBottomSheetStyle(theme));
@@ -1463,6 +1513,10 @@ SliderStyle SliderStyle::Default() {
 
 ToastStyle ToastStyle::Default() {
   return FlatToastStyle(FlatLightThemeSpec());
+}
+
+SnackBarStyle SnackBarStyle::Default() {
+  return FlatSnackBarStyle(FlatLightThemeSpec());
 }
 
 TooltipStyle TooltipStyle::Default() {

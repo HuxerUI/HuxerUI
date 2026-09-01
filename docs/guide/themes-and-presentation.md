@@ -61,10 +61,30 @@ Hover, focus, dismissal, placement, and delay are owned by the presentation serv
 The hover delay begins again after each pointer movement over the anchor, and a visible hover-owned Tooltip hides immediately when the pointer moves.
 Keyboard focus keeps its independently owned Tooltip visible.
 
-## Toast
+## Toast and SnackBar
 
-Use the typed toast service for transient non-modal feedback.
-The returned handle can dismiss or replace the presentation without exposing layer internals.
+Use the typed Toast service for passive transient feedback.
+Each call creates an independent non-interactive notification that can be dismissed through its returned id.
+
+Use SnackBar when the feedback needs one optional action:
+
+```cpp
+auto snack_bar = UseSnackBar();
+
+return Button("Delete")
+    .OnClick([snack_bar] {
+      DeleteItem();
+      snack_bar.Show("Item deleted", "Undo", [snack_bar] {
+        RestoreItem();
+        snack_bar.Show("Item restored");
+      });
+    });
+```
+
+Only one SnackBar is active per window.
+A new request atomically replaces the previous one, and the action dismisses its owning SnackBar before invoking the callback.
+The default duration is four seconds; pass `SnackBarOptions{std::nullopt}` for an indefinite presentation that is dismissed explicitly or by its action.
+Timed dismissal pauses while the surface or action is hovered, while the action is focused or pressed, and while the application is inactive.
 
 ## Dialog and BottomSheet
 

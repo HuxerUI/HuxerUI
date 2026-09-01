@@ -33,6 +33,7 @@ int root_app_clicks = 0;
 ViewportClass observed_layer_viewport_class = ViewportClass::Compact;
 int layer_viewport_compositions = 0;
 std::optional<ToastHandle> saved_toast;
+std::optional<SnackBarHandle> saved_snack_bar;
 std::optional<DialogHandle> saved_dialogs;
 std::optional<DialogContext> saved_dialog_context;
 State<bool> declarative_dialog_visible;
@@ -795,6 +796,13 @@ View PresentationApp() {
   });
 }
 
+View SnackBarApp() {
+  HUXERUI_SCOPE({
+    saved_snack_bar = UseSnackBar();
+    return Button("background action");
+  });
+}
+
 View PresentationThemeApp() {
   ThemeDefinition definition;
   definition.Set(
@@ -815,6 +823,10 @@ View PresentationThemeApp() {
 
 View MaterialPresentationApp() {
   return huxerui::MaterialTheme {PresentationApp()};
+}
+
+View MaterialSnackBarApp() {
+  return huxerui::MaterialTheme {SnackBarApp()};
 }
 
 View DialogUpdateEnvironmentContent() {
@@ -1078,6 +1090,11 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   REQUIRE(toast_style.background.red == light.colors.inverse_surface.red);
   REQUIRE_FALSE(toast_style.motion.has_value());
 
+  const SnackBarStyle snack_bar_style = ThemeDefinitionValue<SnackBarStyle>(definition);
+  REQUIRE(snack_bar_style.background.red == light.colors.inverse_surface.red);
+  REQUIRE(snack_bar_style.action_text_style.foreground == light.colors.primary);
+  REQUIRE_FALSE(snack_bar_style.motion.has_value());
+
   const TooltipStyle tooltip_style = ThemeDefinitionValue<TooltipStyle>(definition);
   REQUIRE(tooltip_style.background.red == light.colors.inverse_surface.red);
   REQUIRE(tooltip_style.background.alpha == light.colors.inverse_surface.alpha * 0.94F);
@@ -1271,6 +1288,11 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(slider_style.focus_ring->width == 0.0F);
   const huxerui::ToastStyle toast_style = ThemeDefinitionValue<huxerui::ToastStyle>(definition);
   REQUIRE(toast_style.background.red == Color::Rgb(50, 47, 53).red);
+
+  const huxerui::SnackBarStyle snack_bar_style = ThemeDefinitionValue<huxerui::SnackBarStyle>(definition);
+  REQUIRE(snack_bar_style.background == light.colors.inverse_surface);
+  REQUIRE(snack_bar_style.action_text_style.foreground == light.colors.primary);
+  REQUIRE(snack_bar_style.motion.has_value());
 
   const huxerui::TooltipStyle tooltip_style = ThemeDefinitionValue<huxerui::TooltipStyle>(definition);
   REQUIRE(tooltip_style.background == light.colors.inverse_surface);
@@ -3628,6 +3650,122 @@ TEST_CASE("TestToastRetainsItsLayerUntilExitMotionCompletes") {
   REQUIRE(ContainsText(runtime.BuildFrame(), "animated toast"));
   SettlePresentation(platform, runtime);
   REQUIRE(!ContainsText(runtime.BuildFrame(), "animated toast"));
+}
+
+TEST_CASE("TestSnackBarValidatesRequestsBeforePresentation") {
+  saved_snack_bar.reset();
+
+  TestPlatform platform;
+  Runtime runtime{SnackBarApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 200.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE_THROWS_AS(saved_snack_bar->Show(""), std::invalid_argument);
+  REQUIRE_THROWS_AS(saved_snack_bar->Show("message", SnackBarOptions{0.0}), std::invalid_argument);
+  const SnackBarOptions infinite_duration{std::numeric_limits<double>::infinity()};
+  REQUIRE_THROWS_AS(saved_snack_bar->Show("message", infinite_duration), std::invalid_argument);
+  REQUIRE_THROWS_AS(saved_snack_bar->Show("message", "", [] {}), std::invalid_argument);
+  REQUIRE_THROWS_AS(saved_snack_bar->Show("message", "Action", std::function<void()>{}), std::invalid_argument);
+  REQUIRE_NOTHROW(runtime.BuildFrame());
+}
+
+TEST_CASE("TestSnackBarAtomicallyReplacesRequestsAndGuardsReentrantActions") {
+  saved_snack_bar.reset();
+  int actions = 0;
+  std::optional<LayerId> replacement;
+
+  TestPlatform platform;
+  Runtime runtime{MaterialSnackBarApp, platform};
+  runtime.SetWindowMetrics({.viewport = {360.0F, 220.0F}});
+  runtime.BuildFrame();
+
+  const LayerId first = saved_snack_bar->Show("first message", SnackBarOptions{0.75});
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "first message"));
+
+  const LayerId second = saved_snack_bar->Show(
+      "second message",
+      "Undo",
+      [&] {
+        ++actions;
+        replacement = saved_snack_bar->Show("restored", SnackBarOptions{std::nullopt});
+      },
+      SnackBarOptions{std::nullopt}
+  );
+  const FlattenedScene& replaced = runtime.BuildFrame();
+  REQUIRE(!ContainsText(replaced, "first message"));
+  REQUIRE_FALSE(saved_snack_bar->Dismiss(first));
+
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "second message"));
+  platform.AdvanceTime(1.0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "second message"));
+  const std::optional<Rect> action = FindPresentedTextRect(runtime.BuildFrame(), "Undo");
+  REQUIRE(action.has_value());
+  ClickAt(runtime, {action->x + action->width * 0.5F, action->y + action->height * 0.5F}, 201);
+  REQUIRE(actions == 1);
+  REQUIRE(replacement.has_value());
+  const FlattenedScene& reentrant = runtime.BuildFrame();
+  REQUIRE(!ContainsText(reentrant, "second message"));
+  REQUIRE_FALSE(saved_snack_bar->Dismiss(second));
+  SettlePresentation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "restored"));
+  REQUIRE(saved_snack_bar->Dismiss(*replacement));
+}
+
+TEST_CASE("TestSnackBarTimeoutPausesForHoverFocusAndApplicationLifecycle") {
+  saved_snack_bar.reset();
+
+  TestPlatform platform;
+  Runtime runtime{SnackBarApp, platform};
+  runtime.SetWindowMetrics({.viewport = {360.0F, 220.0F}});
+  runtime.BuildFrame();
+
+  saved_snack_bar->Show("hover pause", SnackBarOptions{1.0});
+  const FlattenedScene& initial = runtime.BuildFrame();
+  const std::optional<Rect> message = FindPresentedTextRect(initial, "hover pause");
+  REQUIRE(message.has_value());
+  platform.AdvanceTime(0.4);
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent(PointerEvent{
+      .type = PointerEventType::Move,
+      .pointer_id = 202,
+      .position = {message->x + message->width * 0.5F, message->y + message->height * 0.5F},
+  });
+  runtime.BuildFrame();
+  platform.AdvanceTime(2.0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "hover pause"));
+  runtime.HandlePointerEvent(PointerEvent{.type = PointerEventType::Move, .pointer_id = 202, .position = {1.0F, 1.0F}});
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.7);
+  runtime.BuildFrame();
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "hover pause"));
+
+  saved_snack_bar->Show("focus pause", "Action", [] {}, SnackBarOptions{1.0});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.BuildFrame();
+  platform.AdvanceTime(2.0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "focus pause"));
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.BuildFrame();
+  platform.AdvanceTime(1.1);
+  runtime.BuildFrame();
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "focus pause"));
+
+  saved_snack_bar->Show("lifecycle pause", SnackBarOptions{0.5});
+  runtime.BuildFrame();
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
+  runtime.BuildFrame();
+  platform.AdvanceTime(2.0);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "lifecycle pause"));
+  runtime.UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.6);
+  runtime.BuildFrame();
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "lifecycle pause"));
 }
 
 TEST_CASE("TestCommandDialogUpdateRefreshesCapturedEnvironmentAndBarrier") {

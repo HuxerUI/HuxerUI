@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <huxerui/animation.h>
+#include <huxerui/app.h>
 #include <huxerui/root.h>
 #include <huxerui/theme.h>
 #include <huxerui/window.h>
@@ -34,6 +35,28 @@ private:
   LayerController layers_;
 
   friend class huxerui::ToastHandle;
+};
+
+struct SnackBarActionRequest {
+  StringVariant label;
+  std::function<void()> callback;
+};
+
+class SnackBarService : public std::enable_shared_from_this<SnackBarService> {
+public:
+  explicit SnackBarService(LayerController& layers) : layers_(layers) {}
+
+  bool Dismiss(LayerId id);
+  void Activate(LayerId id, const std::function<void()>& callback);
+
+private:
+  LayerId Show(StringVariant message, std::optional<SnackBarActionRequest> action, SnackBarOptions options,
+               std::shared_ptr<const Environment> environment);
+
+  LayerController layers_;
+  std::optional<LayerId> replaceable_layer_;
+
+  friend class huxerui::SnackBarHandle;
 };
 
 class DialogService {
@@ -269,6 +292,152 @@ const detail::ModifierDescriptor& ToastLifetime::Descriptor() {
   return detail::ModifierDescriptorFor<ToastLifetime, ToastLifetimeExtension>();
 }
 
+struct SnackBarPauseState {
+  void Set(bool& target, bool value) noexcept {
+    if (target == value) {
+      return;
+    }
+    target = value;
+    ++revision;
+  }
+
+  [[nodiscard]] bool Paused() const noexcept {
+    return !application_active || surface_hovered || action_hovered || action_focused || action_pressed;
+  }
+
+  std::uint64_t revision = 0;
+  bool application_active = true;
+  bool surface_hovered = false;
+  bool action_hovered = false;
+  bool action_focused = false;
+  bool action_pressed = false;
+};
+
+struct SnackBarLifetime {
+  std::weak_ptr<detail::SnackBarService> service;
+  std::shared_ptr<SnackBarPauseState> pause;
+  LayerId id = 0;
+  std::optional<double> duration;
+  bool application_active = true;
+
+  static const detail::ModifierDescriptor& Descriptor();
+};
+
+class SnackBarLifetimeExtension final : public NodeExtension {
+public:
+  SnackBarLifetimeExtension(MountedNode& node, const SnackBarLifetime& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const SnackBarLifetime& modifier) {
+    static_cast<void>(node);
+    const bool request_changed = id_ != modifier.id;
+    service_ = modifier.service;
+    pause_ = modifier.pause;
+    id_ = modifier.id;
+    pause_->Set(pause_->application_active, modifier.application_active);
+    if (request_changed) {
+      remaining_ = modifier.duration;
+      last_timestamp_.reset();
+      pause_revision_ = pause_->revision;
+      dismissed_ = false;
+    }
+  }
+
+  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+    return node.Bounds().Contains(position);
+  }
+
+  void OnHover(MountedNode& node, const HoverEvent& event) override {
+    static_cast<void>(node);
+    pause_->Set(pause_->surface_hovered, event.type != HoverEventType::Leave);
+  }
+
+  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+    static_cast<void>(node);
+    if (dismissed_ || !remaining_.has_value()) {
+      return {};
+    }
+    if (!last_timestamp_.has_value() || pause_revision_ != pause_->revision) {
+      last_timestamp_ = frame.timestamp;
+      pause_revision_ = pause_->revision;
+    } else if (!pause_->Paused()) {
+      *remaining_ -= std::max(0.0, frame.timestamp - *last_timestamp_);
+      last_timestamp_ = frame.timestamp;
+    }
+    if (pause_->Paused()) {
+      return {};
+    }
+    if (*remaining_ > 0.0) {
+      return {.wake_after = *remaining_};
+    }
+    dismissed_ = true;
+    if (const auto service = service_.lock()) {
+      service->Dismiss(id_);
+    }
+    return {};
+  }
+
+private:
+  std::weak_ptr<detail::SnackBarService> service_;
+  std::shared_ptr<SnackBarPauseState> pause_;
+  LayerId id_ = 0;
+  std::optional<double> remaining_;
+  std::optional<double> last_timestamp_;
+  std::uint64_t pause_revision_ = 0;
+  bool dismissed_ = false;
+};
+
+const detail::ModifierDescriptor& SnackBarLifetime::Descriptor() {
+  return detail::ModifierDescriptorFor<SnackBarLifetime, SnackBarLifetimeExtension>();
+}
+
+struct SnackBarActionPause {
+  std::shared_ptr<SnackBarPauseState> pause;
+
+  static const detail::ModifierDescriptor& Descriptor();
+};
+
+class SnackBarActionPauseExtension final : public NodeExtension {
+public:
+  SnackBarActionPauseExtension(MountedNode& node, const SnackBarActionPause& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode& node, const SnackBarActionPause& modifier) {
+    static_cast<void>(node);
+    pause_ = modifier.pause;
+  }
+
+  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+    return node.Bounds().Contains(position);
+  }
+
+  void OnHover(MountedNode& node, const HoverEvent& event) override {
+    static_cast<void>(node);
+    pause_->Set(pause_->action_hovered, event.type != HoverEventType::Leave);
+  }
+
+  void OnFocusChanged(MountedNode& node, bool focused) override {
+    static_cast<void>(node);
+    pause_->Set(pause_->action_focused, focused);
+  }
+
+  void OnInteraction(MountedNode& node, const InteractionState& state,
+                     const std::optional<InteractionEvent>& event) override {
+    static_cast<void>(node);
+    static_cast<void>(event);
+    pause_->Set(pause_->action_pressed, state.pressed);
+  }
+
+private:
+  std::shared_ptr<SnackBarPauseState> pause_;
+};
+
+const detail::ModifierDescriptor& SnackBarActionPause::Descriptor() {
+  return detail::ModifierDescriptorFor<SnackBarActionPause, SnackBarActionPauseExtension>();
+}
+
 template <class Style>
 Style ResolvePresentationStyle(const std::shared_ptr<const Environment>& environment, Style fallback) {
   if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
@@ -282,6 +451,10 @@ Style ResolvePresentationStyle(const std::shared_ptr<const Environment>& environ
 
 ToastStyle ResolveToastStyle(const std::shared_ptr<const Environment>& environment) {
   return ResolvePresentationStyle<ToastStyle>(environment, ToastStyle::Default());
+}
+
+SnackBarStyle ResolveSnackBarStyle(const std::shared_ptr<const Environment>& environment) {
+  return ResolvePresentationStyle<SnackBarStyle>(environment, SnackBarStyle::Default());
 }
 
 DialogStyle ResolveDialogStyle(const std::shared_ptr<const Environment>& environment) {
@@ -591,6 +764,21 @@ void ValidateToastStyle(const ToastStyle& style) {
   }
 }
 
+void ValidateSnackBarStyle(const SnackBarStyle& style) {
+  if (!ValidInsets(style.padding) || !ValidInsets(style.viewport_padding) || !ValidInsets(style.action_padding) ||
+      !ValidShadow(style.shadow) || !std::isfinite(style.content_spacing) || style.content_spacing < 0.0F ||
+      !std::isfinite(style.corner_radius) || style.corner_radius < 0.0F || !std::isfinite(style.minimum_height) ||
+      style.minimum_height < 0.0F || !std::isfinite(style.maximum_width) || style.maximum_width <= 0.0F ||
+      !std::isfinite(style.action_minimum_height) || style.action_minimum_height < 0.0F ||
+      !std::isfinite(style.action_corner_radius) || style.action_corner_radius < 0.0F ||
+      (style.motion.has_value() && !ValidMotion(*style.motion))) {
+    throw std::invalid_argument(
+        "HuxerUI SnackBar geometry, shadow, and motion must be finite with positive maximum width and non-negative "
+        "extents"
+    );
+  }
+}
+
 void ValidateDialogStyle(const DialogStyle& style) {
   if (!ValidInsets(style.content_padding) || !ValidInsets(style.action_padding) || !ValidShadow(style.shadow) ||
       !std::isfinite(style.content_spacing) || style.content_spacing < 0.0F || !std::isfinite(style.action_spacing) ||
@@ -673,6 +861,99 @@ TransformOrigin VerticalMotionOrigin(VerticalPlacement placement) noexcept {
     return {0.5F, 1.0F};
   }
   return {0.5F, 0.5F};
+}
+
+bool IsBlankResolvedString(const std::string& value) {
+  return value.find_first_not_of(" \t\n\r\f\v") == std::string::npos;
+}
+
+ViewFactory SnackBarContent(
+    std::weak_ptr<detail::SnackBarService> service,
+    std::shared_ptr<LayerId> id,
+    StringVariant message,
+    std::optional<detail::SnackBarActionRequest> action,
+    std::optional<double> duration,
+    SnackBarStyle style,
+    std::shared_ptr<detail::LayerTransitionState> transition,
+    std::shared_ptr<SnackBarPauseState> pause
+) {
+  return [service = std::move(service),
+          id = std::move(id),
+          message = std::move(message),
+          action = std::move(action),
+          duration,
+          style = std::move(style),
+          transition = std::move(transition),
+          pause = std::move(pause)] {
+    std::string resolved_message = UseString(message);
+    if (IsBlankResolvedString(resolved_message)) {
+      throw std::invalid_argument("HuxerUI SnackBar message must not be empty");
+    }
+
+    const bool application_active = UseApplication().LifecycleState() == ApplicationLifecycleState::Active;
+    Semantics message_semantics;
+    message_semantics.live_region = SemanticLiveRegion::Polite;
+    std::vector<View> children;
+    children.push_back(
+        Text(std::move(resolved_message))
+            .Style(style.message_style)
+            .With(Grow{1.0F}, detail::BuiltInSemantics{std::move(message_semantics)})
+    );
+
+    if (action.has_value()) {
+      std::string resolved_action = UseString(action->label);
+      if (IsBlankResolvedString(resolved_action)) {
+        throw std::invalid_argument("HuxerUI SnackBar action label must not be empty");
+      }
+      View action_button = Button(std::move(resolved_action))
+                               .With(SnackBarActionPause{pause})
+                               .OnClick([service, id, callback = action->callback] {
+                                 if (const auto active = service.lock()) {
+                                   active->Activate(*id, callback);
+                                 }
+                               });
+      ThemeDefinition action_theme;
+      action_theme.Set(ButtonStyle{
+          .background = style.action_background,
+          .label_style = style.action_text_style,
+          .disabled_background = style.action_background,
+          .disabled_label = style.action_text_style.foreground,
+          .padding = style.action_padding,
+          .minimum_height = style.action_minimum_height,
+          .corner_radius = style.action_corner_radius,
+          .indication = style.action_indication,
+      });
+      children.push_back(Theme {std::move(action_theme), std::move(action_button)});
+    }
+
+    Frame surface_frame;
+    surface_frame.min_height = style.minimum_height;
+    surface_frame.max_width = style.maximum_width;
+    View result = Stack {
+      Flow {std::move(children)}.With(
+          surface_frame,
+          Spacing{style.content_spacing},
+          CrossAlign{CrossAxisAlignment::Center},
+          Padding{style.padding},
+          Background{style.background},
+          CornerRadius{style.corner_radius},
+          ClipChildren{},
+          style.shadow,
+          SnackBarLifetime{service, pause, *id, duration, application_active}
+      ),
+    }.With(Padding{style.viewport_padding});
+    if (!transition || !style.motion.has_value()) {
+      return result;
+    }
+    return std::move(result).With(
+        PresentationContentMotion{
+            .state = transition,
+            .motion = *style.motion,
+            .slide_direction = {0.0F, 1.0F},
+            .origin = TransformOrigin{0.5F, 1.0F},
+        }
+    );
+  };
 }
 
 Semantics DialogOwnerSemantics() {
@@ -1990,6 +2271,7 @@ private:
 
 void InstallBuiltinPresentation(RootContext& root) {
   root.Provide(std::make_shared<ToastService>(root.Layers()));
+  root.Provide(std::make_shared<SnackBarService>(root.Layers()));
   root.Provide(std::make_shared<DialogService>(root.Layers()));
   root.Provide(std::make_shared<BottomSheetService>(root.Layers()));
   root.Provide(std::make_shared<PopupService>(root.Layers()));
@@ -2149,6 +2431,84 @@ bool detail::ToastService::Dismiss(LayerId id) {
 ToastHandle UseToast() {
   return ToastHandle{
       UseService<detail::ToastService>(),
+      detail::CurrentEnvironment(),
+  };
+}
+
+LayerId SnackBarHandle::Show(StringVariant message, SnackBarOptions options) const {
+  return service_->Show(std::move(message), std::nullopt, options, environment_);
+}
+
+LayerId SnackBarHandle::Show(StringVariant message, StringVariant action, std::function<void()> on_action,
+                             SnackBarOptions options) const {
+  detail::SnackBarActionRequest request{std::move(action), std::move(on_action)};
+  return service_->Show(std::move(message), std::move(request), options, environment_);
+}
+
+bool SnackBarHandle::Dismiss(LayerId id) const {
+  return service_->Dismiss(id);
+}
+
+LayerId detail::SnackBarService::Show(StringVariant message, std::optional<SnackBarActionRequest> action,
+                                      SnackBarOptions options, std::shared_ptr<const Environment> environment) {
+  if (options.duration.has_value() &&
+      (!std::isfinite(*options.duration) || *options.duration <= 0.0)) {
+    throw std::invalid_argument("HuxerUI SnackBar duration must be finite and positive when specified");
+  }
+  if (detail::IsBlankStringVariantLiteral(message)) {
+    throw std::invalid_argument("HuxerUI SnackBar message must not be empty");
+  }
+  if (action.has_value() && detail::IsBlankStringVariantLiteral(action->label)) {
+    throw std::invalid_argument("HuxerUI SnackBar action label must not be empty");
+  }
+  if (action.has_value() && !action->callback) {
+    throw std::invalid_argument("HuxerUI SnackBar action callback must not be empty");
+  }
+
+  SnackBarStyle style = ResolveSnackBarStyle(environment);
+  ValidateSnackBarStyle(style);
+  auto transition = PresentationTransition(style.motion);
+  auto id = std::make_shared<LayerId>(0);
+  auto pause = std::make_shared<SnackBarPauseState>();
+  detail::LayerPlacement placement;
+  placement.kind = detail::LayerPlacementKind::BottomCenter;
+  const LayerId attached = layers_.AttachCapturedReplacing(
+      replaceable_layer_,
+      LayerOptions{
+          .level = LayerLevel::Notification,
+          .pointer_policy = LayerPointerPolicy::Content,
+          .trap_focus = false,
+          .dismiss_on_outside_press = false,
+          .cancel_policy = LayerCancelPolicy::PassThrough,
+          .on_dismiss_request = {},
+          .barrier_color = std::nullopt,
+      },
+      SnackBarContent(
+          weak_from_this(), id, std::move(message), std::move(action), options.duration, style, transition, pause
+      ),
+      std::move(environment),
+      std::move(placement),
+      std::move(transition)
+  );
+  *id = attached;
+  replaceable_layer_ = attached;
+  return attached;
+}
+
+bool detail::SnackBarService::Dismiss(LayerId id) {
+  return layers_.Dismiss(id);
+}
+
+void detail::SnackBarService::Activate(LayerId id, const std::function<void()>& callback) {
+  if (!Dismiss(id)) {
+    return;
+  }
+  callback();
+}
+
+SnackBarHandle UseSnackBar() {
+  return SnackBarHandle{
+      UseService<detail::SnackBarService>(),
       detail::CurrentEnvironment(),
   };
 }

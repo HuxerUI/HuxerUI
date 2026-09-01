@@ -47,30 +47,15 @@ LayerId LayerController::AttachCaptured(
     std::shared_ptr<detail::LayerTransitionState> transition,
     std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group
 ) const {
-  if (state_->runtime == nullptr) {
-    throw std::logic_error("HuxerUI layer controller is disconnected");
-  }
-  if (!content) {
-    throw std::invalid_argument("HuxerUI layer content factory must not be empty");
-  }
-  ValidateLayerOptions(options);
-  const LayerId id = state_->next_id++;
-  state_->entries.push_back(
-      detail::LayerEntry{
-          .id = id,
-          .sequence = state_->next_sequence++,
-          .revision = 1,
-          .options = std::move(options),
-          .content = std::move(content),
-          .environment = std::move(environment),
-          .semantic_modal_group = std::move(semantic_modal_group),
-          .placement = std::make_shared<detail::LayerPlacement>(std::move(placement)),
-          .transition = std::move(transition),
-      }
+  return AttachCapturedReplacing(
+      std::nullopt,
+      std::move(options),
+      std::move(content),
+      std::move(environment),
+      std::move(placement),
+      std::move(transition),
+      std::move(semantic_modal_group)
   );
-  BindTransitionCompletion(id, state_->entries.back().transition);
-  state_->runtime->InvalidateLayers();
-  return id;
 }
 
 bool LayerController::UpdatePlacement(LayerId id, detail::LayerPlacement placement) const {
@@ -173,6 +158,50 @@ bool LayerController::UpdateCaptured(
   ++found->revision;
   state_->runtime->InvalidateLayers();
   return true;
+}
+
+LayerId LayerController::AttachCapturedReplacing(
+    std::optional<LayerId> replaced,
+    LayerOptions options,
+    ViewFactory content,
+    std::shared_ptr<const Environment> environment,
+    detail::LayerPlacement placement,
+    std::shared_ptr<detail::LayerTransitionState> transition,
+    std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group
+) const {
+  if (state_->runtime == nullptr) {
+    throw std::logic_error("HuxerUI layer controller is disconnected");
+  }
+  if (!content) {
+    throw std::invalid_argument("HuxerUI layer content factory must not be empty");
+  }
+  ValidateLayerOptions(options);
+  const LayerId replacement = state_->next_id++;
+  detail::LayerEntry entry{
+      .id = replacement,
+      .sequence = state_->next_sequence++,
+      .revision = 1,
+      .options = std::move(options),
+      .content = std::move(content),
+      .environment = std::move(environment),
+      .semantic_modal_group = std::move(semantic_modal_group),
+      .placement = std::make_shared<detail::LayerPlacement>(std::move(placement)),
+      .transition = std::move(transition),
+  };
+  auto found = state_->entries.end();
+  if (replaced.has_value()) {
+    found = std::ranges::find(state_->entries, *replaced, &detail::LayerEntry::id);
+  }
+  if (found != state_->entries.end()) {
+    state_->runtime->DeactivateLayerInput(*replaced);
+    *found = std::move(entry);
+    BindTransitionCompletion(replacement, found->transition);
+  } else {
+    state_->entries.push_back(std::move(entry));
+    BindTransitionCompletion(replacement, state_->entries.back().transition);
+  }
+  state_->runtime->InvalidateLayers();
+  return replacement;
 }
 
 bool LayerController::UpdateEntry(
