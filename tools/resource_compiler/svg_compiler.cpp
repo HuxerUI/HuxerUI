@@ -19,13 +19,18 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "vector_format.h"
+
 namespace huxerui::resource_compiler {
 
 namespace {
+
+namespace vector_format = ::huxerui::detail::vector_format;
 
 struct Point {
   float x = 0.0F;
@@ -56,7 +61,7 @@ struct Color {
 };
 
 struct PathOperation {
-  std::uint8_t verb = 0;
+  vector_format::PathVerb verb = vector_format::PathVerb::MoveTo;
   std::vector<float> values;
 };
 
@@ -76,10 +81,10 @@ struct Style {
   float fill_opacity = 1.0F;
   float stroke_opacity = 1.0F;
   float stroke_width = 1.0F;
-  std::uint8_t fill_rule = 0;
-  std::uint8_t clip_rule = 0;
-  std::uint8_t stroke_cap = 0;
-  std::uint8_t stroke_join = 0;
+  vector_format::FillRule fill_rule = vector_format::FillRule::NonZero;
+  vector_format::FillRule clip_rule = vector_format::FillRule::NonZero;
+  vector_format::StrokeCap stroke_cap = vector_format::StrokeCap::Butt;
+  vector_format::StrokeJoin stroke_join = vector_format::StrokeJoin::Miter;
   float miter_limit = 4.0F;
   std::vector<float> dash_pattern;
   float dash_offset = 0.0F;
@@ -107,6 +112,12 @@ class Writer {
 public:
   void U8(std::uint8_t value) {
     bytes_.push_back(static_cast<std::byte>(value));
+  }
+
+  template <class Enum>
+    requires std::is_enum_v<Enum>
+  void U8(Enum value) {
+    U8(static_cast<std::uint8_t>(value));
   }
 
   void U32(std::uint32_t value) {
@@ -632,12 +643,12 @@ private:
     return point;
   }
 
-  void Add(std::uint8_t verb, std::initializer_list<float> values = {}) {
+  void Add(vector_format::PathVerb verb, std::initializer_list<float> values = {}) {
     path_.push_back({verb, values});
   }
 
   void Move(Point point) {
-    Add(1, {point.x, point.y});
+    Add(vector_format::PathVerb::MoveTo, {point.x, point.y});
     current_ = point;
     contour_start_ = point;
     has_current_ = true;
@@ -647,7 +658,7 @@ private:
 
   void Line(Point point) {
     RequireCurrent();
-    Add(2, {point.x, point.y});
+    Add(vector_format::PathVerb::LineTo, {point.x, point.y});
     current_ = point;
     last_cubic_control_.reset();
     last_quadratic_control_.reset();
@@ -655,7 +666,7 @@ private:
 
   void Cubic(Point first, Point second, Point end) {
     RequireCurrent();
-    Add(4, {first.x, first.y, second.x, second.y, end.x, end.y});
+    Add(vector_format::PathVerb::CubicTo, {first.x, first.y, second.x, second.y, end.x, end.y});
     current_ = end;
     last_cubic_control_ = second;
     last_quadratic_control_.reset();
@@ -663,7 +674,7 @@ private:
 
   void Quadratic(Point control, Point end) {
     RequireCurrent();
-    Add(3, {control.x, control.y, end.x, end.y});
+    Add(vector_format::PathVerb::QuadraticTo, {control.x, control.y, end.x, end.y});
     current_ = end;
     last_quadratic_control_ = control;
     last_cubic_control_.reset();
@@ -800,7 +811,7 @@ private:
     }
     case 'Z':
       RequireCurrent();
-      Add(5);
+      Add(vector_format::PathVerb::Close);
       current_ = contour_start_;
       has_current_ = true;
       last_cubic_control_.reset();
@@ -1008,31 +1019,31 @@ void ApplyStyleProperty(Style& style, std::string_view name, std::string_view va
       throw std::runtime_error("SVG stroke-width must be non-negative");
     }
   } else if (name == "fill-rule" || name == "clip-rule") {
-    std::uint8_t& rule = name == "fill-rule" ? style.fill_rule : style.clip_rule;
+    vector_format::FillRule& rule = name == "fill-rule" ? style.fill_rule : style.clip_rule;
     if (text == "nonzero") {
-      rule = 0;
+      rule = vector_format::FillRule::NonZero;
     } else if (text == "evenodd") {
-      rule = 1;
+      rule = vector_format::FillRule::EvenOdd;
     } else {
       throw std::runtime_error("SVG contains an unsupported " + std::string(name));
     }
   } else if (name == "stroke-linecap") {
     if (text == "butt") {
-      style.stroke_cap = 0;
+      style.stroke_cap = vector_format::StrokeCap::Butt;
     } else if (text == "round") {
-      style.stroke_cap = 1;
+      style.stroke_cap = vector_format::StrokeCap::Round;
     } else if (text == "square") {
-      style.stroke_cap = 2;
+      style.stroke_cap = vector_format::StrokeCap::Square;
     } else {
       throw std::runtime_error("SVG contains an unsupported stroke line cap");
     }
   } else if (name == "stroke-linejoin") {
     if (text == "miter") {
-      style.stroke_join = 0;
+      style.stroke_join = vector_format::StrokeJoin::Miter;
     } else if (text == "round") {
-      style.stroke_join = 1;
+      style.stroke_join = vector_format::StrokeJoin::Round;
     } else if (text == "bevel") {
-      style.stroke_join = 2;
+      style.stroke_join = vector_format::StrokeJoin::Bevel;
     } else {
       throw std::runtime_error("SVG contains an unsupported stroke line join");
     }
@@ -1200,26 +1211,28 @@ Path RectPath(float x, float y, float width, float height, float rx, float ry) {
   ry = std::min(ry, height * 0.5F);
   if (rx == 0.0F || ry == 0.0F) {
     return {
-        {1, {x, y}},
-        {2, {x + width, y}},
-        {2, {x + width, y + height}},
-        {2, {x, y + height}},
-        {5, {}},
+        {vector_format::PathVerb::MoveTo, {x, y}},
+        {vector_format::PathVerb::LineTo, {x + width, y}},
+        {vector_format::PathVerb::LineTo, {x + width, y + height}},
+        {vector_format::PathVerb::LineTo, {x, y + height}},
+        {vector_format::PathVerb::Close, {}},
     };
   }
   constexpr float kappa = 0.552284749831F;
   return {
-      {1, {x + rx, y}},
-      {2, {x + width - rx, y}},
-      {4, {x + width - rx + rx * kappa, y, x + width, y + ry - ry * kappa, x + width, y + ry}},
-      {2, {x + width, y + height - ry}},
-      {4,
+      {vector_format::PathVerb::MoveTo, {x + rx, y}},
+      {vector_format::PathVerb::LineTo, {x + width - rx, y}},
+      {vector_format::PathVerb::CubicTo,
+       {x + width - rx + rx * kappa, y, x + width, y + ry - ry * kappa, x + width, y + ry}},
+      {vector_format::PathVerb::LineTo, {x + width, y + height - ry}},
+      {vector_format::PathVerb::CubicTo,
        {x + width, y + height - ry + ry * kappa, x + width - rx + rx * kappa, y + height, x + width - rx, y + height}},
-      {2, {x + rx, y + height}},
-      {4, {x + rx - rx * kappa, y + height, x, y + height - ry + ry * kappa, x, y + height - ry}},
-      {2, {x, y + ry}},
-      {4, {x, y + ry - ry * kappa, x + rx - rx * kappa, y, x + rx, y}},
-      {5, {}},
+      {vector_format::PathVerb::LineTo, {x + rx, y + height}},
+      {vector_format::PathVerb::CubicTo,
+       {x + rx - rx * kappa, y + height, x, y + height - ry + ry * kappa, x, y + height - ry}},
+      {vector_format::PathVerb::LineTo, {x, y + ry}},
+      {vector_format::PathVerb::CubicTo, {x, y + ry - ry * kappa, x + rx - rx * kappa, y, x + rx, y}},
+      {vector_format::PathVerb::Close, {}},
   };
 }
 
@@ -1229,12 +1242,12 @@ Path EllipsePath(float cx, float cy, float rx, float ry) {
   }
   constexpr float kappa = 0.552284749831F;
   return {
-      {1, {cx + rx, cy}},
-      {4, {cx + rx, cy + ry * kappa, cx + rx * kappa, cy + ry, cx, cy + ry}},
-      {4, {cx - rx * kappa, cy + ry, cx - rx, cy + ry * kappa, cx - rx, cy}},
-      {4, {cx - rx, cy - ry * kappa, cx - rx * kappa, cy - ry, cx, cy - ry}},
-      {4, {cx + rx * kappa, cy - ry, cx + rx, cy - ry * kappa, cx + rx, cy}},
-      {5, {}},
+      {vector_format::PathVerb::MoveTo, {cx + rx, cy}},
+      {vector_format::PathVerb::CubicTo, {cx + rx, cy + ry * kappa, cx + rx * kappa, cy + ry, cx, cy + ry}},
+      {vector_format::PathVerb::CubicTo, {cx - rx * kappa, cy + ry, cx - rx, cy + ry * kappa, cx - rx, cy}},
+      {vector_format::PathVerb::CubicTo, {cx - rx, cy - ry * kappa, cx - rx * kappa, cy - ry, cx, cy - ry}},
+      {vector_format::PathVerb::CubicTo, {cx + rx * kappa, cy - ry, cx + rx, cy - ry * kappa, cx + rx, cy}},
+      {vector_format::PathVerb::Close, {}},
   };
 }
 
@@ -1276,8 +1289,10 @@ Path ShapePath(std::string_view name, const std::map<std::string, std::string>& 
   }
   if (name == "line") {
     return {
-        {1, {AttributeNumber(attributes, "x1"), AttributeNumber(attributes, "y1")}},
-        {2, {AttributeNumber(attributes, "x2"), AttributeNumber(attributes, "y2")}},
+        {vector_format::PathVerb::MoveTo,
+         {AttributeNumber(attributes, "x1"), AttributeNumber(attributes, "y1")}},
+        {vector_format::PathVerb::LineTo,
+         {AttributeNumber(attributes, "x2"), AttributeNumber(attributes, "y2")}},
     };
   }
   if (name == "polyline" || name == "polygon") {
@@ -1289,12 +1304,12 @@ Path ShapePath(std::string_view name, const std::map<std::string, std::string>& 
     if (values.size() < 4 || values.size() % 2 != 0) {
       throw std::runtime_error("SVG points must contain coordinate pairs");
     }
-    Path path{{1, {values[0], values[1]}}};
+    Path path{{vector_format::PathVerb::MoveTo, {values[0], values[1]}}};
     for (std::size_t index = 2; index < values.size(); index += 2) {
-      path.push_back({2, {values[index], values[index + 1]}});
+      path.push_back({vector_format::PathVerb::LineTo, {values[index], values[index + 1]}});
     }
     if (name == "polygon") {
-      path.push_back({5, {}});
+      path.push_back({vector_format::PathVerb::Close, {}});
     }
     return path;
   }
@@ -1314,7 +1329,7 @@ void WriteTransformValue(Writer& writer, Transform transform) {
 }
 
 void WriteTransform(Writer& writer, Transform transform) {
-  writer.U8(5);
+  writer.U8(vector_format::DrawingOperation::PushTransform);
   WriteTransformValue(writer, transform);
 }
 
@@ -1413,19 +1428,19 @@ Rect PathBounds(const Path& path) {
   };
   for (const PathOperation& operation : path) {
     switch (operation.verb) {
-    case 1:
+    case vector_format::PathVerb::MoveTo:
       current = {operation.values[0], operation.values[1]};
       contour_start = current;
       has_current = true;
       break;
-    case 2: {
+    case vector_format::PathVerb::LineTo: {
       const Point end{operation.values[0], operation.values[1]};
       include(current);
       include(end);
       current = end;
       break;
     }
-    case 3: {
+    case vector_format::PathVerb::QuadraticTo: {
       const Point control{operation.values[0], operation.values[1]};
       const Point end{operation.values[2], operation.values[3]};
       include(current);
@@ -1441,7 +1456,7 @@ Rect PathBounds(const Path& path) {
       current = end;
       break;
     }
-    case 4: {
+    case vector_format::PathVerb::CubicTo: {
       const Point first{operation.values[0], operation.values[1]};
       const Point second{operation.values[2], operation.values[3]};
       const Point end{operation.values[4], operation.values[5]};
@@ -1458,14 +1473,12 @@ Rect PathBounds(const Path& path) {
       current = end;
       break;
     }
-    case 5:
+    case vector_format::PathVerb::Close:
       if (has_current && (current.x != contour_start.x || current.y != contour_start.y)) {
         include(current);
         include(contour_start);
       }
       current = contour_start;
-      break;
-    default:
       break;
     }
   }
@@ -1539,12 +1552,12 @@ void WriteGradientStops(Writer& writer, const std::vector<std::pair<float, Color
 }
 
 void WriteBrush(Writer& writer, Color color) {
-  writer.U8(1);
+  writer.U8(vector_format::BrushKind::Color);
   writer.ColorValue(color);
 }
 
 void WriteBrush(Writer& writer, const ResolvedGradient& gradient) {
-  writer.U8(gradient.radial ? 3 : 2);
+  writer.U8(gradient.radial ? vector_format::BrushKind::RadialGradient : vector_format::BrushKind::LinearGradient);
   writer.F32(gradient.first.x);
   writer.F32(gradient.first.y);
   writer.F32(gradient.second.x);
@@ -1579,7 +1592,7 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
   if (style.fill.has_value()) {
     Color color = style.fill_uses_current_color ? style.current_color : *style.fill;
     color.alpha *= style.fill_opacity;
-    writer.U8(1);
+    writer.U8(vector_format::DrawingOperation::FillPath);
     writer.U8(style.fill_rule);
     WriteBrush(writer, color);
     writer.RectValue(path_bounds);
@@ -1591,7 +1604,7 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
       for (auto& stop : gradient.stops) {
         stop.second.alpha *= style.fill_opacity;
       }
-      writer.U8(1);
+      writer.U8(vector_format::DrawingOperation::FillPath);
       writer.U8(style.fill_rule);
       WriteBrush(writer, gradient);
       writer.RectValue(gradient.coordinate_rect);
@@ -1602,7 +1615,7 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
   if (style.stroke.has_value() && style.stroke_width > 0.0F) {
     Color color = style.stroke_uses_current_color ? style.current_color : *style.stroke;
     color.alpha *= style.stroke_opacity;
-    writer.U8(2);
+    writer.U8(vector_format::DrawingOperation::StrokePath);
     WriteBrush(writer, color);
     writer.RectValue(path_bounds);
     WriteStrokeStyle(writer, style);
@@ -1614,7 +1627,7 @@ void WriteShape(Writer& writer, const Path& path, Style style, std::uint32_t& op
       for (auto& stop : gradient.stops) {
         stop.second.alpha *= style.stroke_opacity;
       }
-      writer.U8(2);
+      writer.U8(vector_format::DrawingOperation::StrokePath);
       WriteBrush(writer, gradient);
       writer.RectValue(gradient.coordinate_rect);
       WriteStrokeStyle(writer, style);
@@ -1796,7 +1809,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
     count_operation();
   };
   const auto pop_transform = [&] {
-    result.operations.U8(6);
+    result.operations.U8(vector_format::DrawingOperation::PopTransform);
     count_operation();
   };
   const auto find_reference = [&](std::string_view id, std::string_view field) {
@@ -2102,10 +2115,10 @@ CompiledDocument EmitDocument(SvgDocument document) {
   };
   validate_references(document.root, 0);
 
-  std::function<void(std::size_t, Style, Transform, Path&, std::optional<std::uint8_t>&, std::size_t&)>
+  std::function<void(std::size_t, Style, Transform, Path&, std::optional<vector_format::FillRule>&, std::size_t&)>
       collect_clip;
   collect_clip = [&](std::size_t index, Style inherited, Transform transform, Path& path,
-                     std::optional<std::uint8_t>& rule, std::size_t& shape_count) {
+                     std::optional<vector_format::FillRule>& rule, std::size_t& shape_count) {
     const SvgNode& node = document.nodes[index];
     const Style style = ResolveStyle(std::move(inherited), node.attributes);
     if (!style.displayed || style.opacity == 0.0F) {
@@ -2167,7 +2180,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
     }
     const std::size_t target = find_reference(*style.clip_reference, "clip-path");
     Path path;
-    std::optional<std::uint8_t> rule;
+    std::optional<vector_format::FillRule> rule;
     std::size_t shape_count = 0;
     references.push_back(target);
     collect_clip(target, Style{}, Transform{}, path, rule, shape_count);
@@ -2175,8 +2188,8 @@ CompiledDocument EmitDocument(SvgDocument document) {
     if (path.empty()) {
       throw std::runtime_error("SVG clipPath must contain drawable geometry");
     }
-    result.operations.U8(3);
-    result.operations.U8(rule.value_or(0));
+    result.operations.U8(vector_format::DrawingOperation::PushClip);
+    result.operations.U8(rule.value_or(vector_format::FillRule::NonZero));
     result.operations.PathValue(path);
     count_operation();
     return true;
@@ -2233,7 +2246,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
       throw std::runtime_error("SVG contains an unsupported render element: " + node.name);
     }
     if (clipped) {
-      result.operations.U8(4);
+      result.operations.U8(vector_format::DrawingOperation::PopClip);
       count_operation();
     }
     if (translated_use) {
@@ -2299,7 +2312,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
       emit_node(child, root_style, false);
     }
     if (clipped) {
-      result.operations.U8(4);
+      result.operations.U8(vector_format::DrawingOperation::PopClip);
       count_operation();
     }
     if (preserves_aspect) {
@@ -2322,18 +2335,8 @@ CompiledSvg CompileSvg(const std::filesystem::path& path) {
   try {
     CompiledDocument document = CompileDocument(ReadText(path));
     Writer output;
-    constexpr std::byte magic[] = {
-        std::byte{'H'},
-        std::byte{'U'},
-        std::byte{'X'},
-        std::byte{'V'},
-        std::byte{'E'},
-        std::byte{'C'},
-        std::byte{0},
-        std::byte{0},
-    };
-    output.Append(magic);
-    output.U32(1);
+    output.Append(vector_format::magic);
+    output.U32(vector_format::current_version);
     output.F32(document.view_x);
     output.F32(document.view_y);
     output.F32(document.view_width);

@@ -11,22 +11,12 @@
 #include <huxerui/paint.h>
 
 #include "resource_internal.h"
+#include "vector_format.h"
 #include "vector_internal.h"
 
 namespace huxerui {
 
 namespace {
-
-constexpr std::byte vector_magic[] = {
-    std::byte{'H'},
-    std::byte{'U'},
-    std::byte{'X'},
-    std::byte{'V'},
-    std::byte{'E'},
-    std::byte{'C'},
-    std::byte{0},
-    std::byte{0},
-};
 
 class VectorReader {
 public:
@@ -102,16 +92,16 @@ std::vector<GradientStop> ReadGradientStops(VectorReader& reader) {
 }
 
 Brush ReadBrush(VectorReader& reader) {
-  switch (reader.U8()) {
-  case 1:
+  switch (static_cast<detail::vector_format::BrushKind>(reader.U8())) {
+  case detail::vector_format::BrushKind::Color:
     return ReadColor(reader);
-  case 2: {
+  case detail::vector_format::BrushKind::LinearGradient: {
     const Point start = ReadPoint(reader);
     const Point end = ReadPoint(reader);
     const Transform2D transform = ReadTransform(reader);
     return LinearGradient{start, end, ReadGradientStops(reader), transform};
   }
-  case 3: {
+  case detail::vector_format::BrushKind::RadialGradient: {
     const Point center = ReadPoint(reader);
     const Size radius{reader.F32(), reader.F32()};
     const Transform2D transform = ReadTransform(reader);
@@ -122,15 +112,37 @@ Brush ReadBrush(VectorReader& reader) {
   }
 }
 
-StrokeStyle ReadStrokeStyle(VectorReader& reader) {
-  const float width = reader.F32();
-  const std::uint8_t cap_value = reader.U8();
-  const std::uint8_t join_value = reader.U8();
-  const float miter_limit = reader.F32();
-  if (cap_value > static_cast<std::uint8_t>(StrokeCap::Square) ||
-      join_value > static_cast<std::uint8_t>(StrokeJoin::Bevel)) {
+StrokeCap ReadStrokeCap(VectorReader& reader) {
+  switch (static_cast<detail::vector_format::StrokeCap>(reader.U8())) {
+  case detail::vector_format::StrokeCap::Butt:
+    return StrokeCap::Butt;
+  case detail::vector_format::StrokeCap::Round:
+    return StrokeCap::Round;
+  case detail::vector_format::StrokeCap::Square:
+    return StrokeCap::Square;
+  default:
     throw std::logic_error("HuxerUI vector payload contains invalid stroke configuration");
   }
+}
+
+StrokeJoin ReadStrokeJoin(VectorReader& reader) {
+  switch (static_cast<detail::vector_format::StrokeJoin>(reader.U8())) {
+  case detail::vector_format::StrokeJoin::Miter:
+    return StrokeJoin::Miter;
+  case detail::vector_format::StrokeJoin::Round:
+    return StrokeJoin::Round;
+  case detail::vector_format::StrokeJoin::Bevel:
+    return StrokeJoin::Bevel;
+  default:
+    throw std::logic_error("HuxerUI vector payload contains invalid stroke configuration");
+  }
+}
+
+StrokeStyle ReadStrokeStyle(VectorReader& reader) {
+  const float width = reader.F32();
+  const StrokeCap cap = ReadStrokeCap(reader);
+  const StrokeJoin join = ReadStrokeJoin(reader);
+  const float miter_limit = reader.F32();
   const std::uint32_t dash_count = reader.U32();
   if (reader.RemainingBytes() < sizeof(float) ||
       dash_count > (reader.RemainingBytes() - sizeof(float)) / sizeof(float)) {
@@ -143,8 +155,8 @@ StrokeStyle ReadStrokeStyle(VectorReader& reader) {
   }
   return {
       .width = width,
-      .cap = static_cast<StrokeCap>(cap_value),
-      .join = static_cast<StrokeJoin>(join_value),
+      .cap = cap,
+      .join = join,
       .miter_limit = miter_limit,
       .dash_pattern = std::move(dash_pattern),
       .dash_offset = reader.F32(),
@@ -155,25 +167,25 @@ Path ReadPath(VectorReader& reader) {
   Path path;
   const std::uint32_t count = reader.U32();
   for (std::uint32_t index = 0; index < count; ++index) {
-    switch (reader.U8()) {
-    case 1:
+    switch (static_cast<detail::vector_format::PathVerb>(reader.U8())) {
+    case detail::vector_format::PathVerb::MoveTo:
       path.MoveTo(ReadPoint(reader));
       break;
-    case 2:
+    case detail::vector_format::PathVerb::LineTo:
       path.LineTo(ReadPoint(reader));
       break;
-    case 3: {
+    case detail::vector_format::PathVerb::QuadraticTo: {
       const Point control = ReadPoint(reader);
       path.QuadraticTo(control, ReadPoint(reader));
       break;
     }
-    case 4: {
+    case detail::vector_format::PathVerb::CubicTo: {
       const Point first_control = ReadPoint(reader);
       const Point second_control = ReadPoint(reader);
       path.CubicTo(first_control, second_control, ReadPoint(reader));
       break;
     }
-    case 5:
+    case detail::vector_format::PathVerb::Close:
       path.Close();
       break;
     default:
@@ -184,11 +196,14 @@ Path ReadPath(VectorReader& reader) {
 }
 
 PathFillRule ReadFillRule(VectorReader& reader) {
-  const std::uint8_t value = reader.U8();
-  if (value > static_cast<std::uint8_t>(PathFillRule::EvenOdd)) {
+  switch (static_cast<detail::vector_format::FillRule>(reader.U8())) {
+  case detail::vector_format::FillRule::NonZero:
+    return PathFillRule::NonZero;
+  case detail::vector_format::FillRule::EvenOdd:
+    return PathFillRule::EvenOdd;
+  default:
     throw std::logic_error("HuxerUI vector payload contains an invalid fill rule");
   }
-  return static_cast<PathFillRule>(value);
 }
 
 bool IsValid(Rect rect) noexcept {
@@ -304,8 +319,8 @@ const PaintSequence& detail::VectorAccess::Sequence(const VectorAsset& asset) no
 
 bool detail::ResourceAccess::IsVectorPayload(const RawAsset& asset) noexcept {
   const std::span<const std::byte> bytes = asset.Bytes();
-  return bytes.size() >= std::size(vector_magic) &&
-         std::equal(std::begin(vector_magic), std::end(vector_magic), bytes.begin());
+  return bytes.size() >= vector_format::magic.size() &&
+         std::equal(vector_format::magic.begin(), vector_format::magic.end(), bytes.begin());
 }
 
 VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
@@ -313,8 +328,8 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
     throw std::invalid_argument("HuxerUI image resource is not a vector payload");
   }
   try {
-    VectorReader reader(asset.Bytes().subspan(std::size(vector_magic)));
-    if (reader.U32() != 1) {
+    VectorReader reader(asset.Bytes().subspan(vector_format::magic.size()));
+    if (reader.U32() != vector_format::current_version) {
       throw std::logic_error("HuxerUI vector payload version is unsupported");
     }
     const Rect view_box{reader.F32(), reader.F32(), reader.F32(), reader.F32()};
@@ -322,33 +337,33 @@ VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
     const std::uint32_t count = reader.U32();
     VectorAsset result = VectorAsset::Create(view_box, intrinsic_size, [&](VectorBuilder& builder) {
       for (std::uint32_t index = 0; index < count; ++index) {
-        switch (reader.U8()) {
-        case 1: {
+        switch (static_cast<vector_format::DrawingOperation>(reader.U8())) {
+        case vector_format::DrawingOperation::FillPath: {
           const PathFillRule fill_rule = ReadFillRule(reader);
           Brush brush = ReadBrush(reader);
           const Rect brush_bounds = ReadRect(reader);
           builder.FillPath(ReadPath(reader), std::move(brush), brush_bounds, fill_rule);
           break;
         }
-        case 2: {
+        case vector_format::DrawingOperation::StrokePath: {
           Brush brush = ReadBrush(reader);
           const Rect brush_bounds = ReadRect(reader);
           StrokeStyle style = ReadStrokeStyle(reader);
           builder.StrokePath(ReadPath(reader), std::move(brush), brush_bounds, std::move(style));
           break;
         }
-        case 3: {
+        case vector_format::DrawingOperation::PushClip: {
           const PathFillRule fill_rule = ReadFillRule(reader);
           builder.PushClip(ReadPath(reader), fill_rule);
           break;
         }
-        case 4:
+        case vector_format::DrawingOperation::PopClip:
           builder.PopClip();
           break;
-        case 5:
+        case vector_format::DrawingOperation::PushTransform:
           builder.PushTransform({reader.F32(), reader.F32(), reader.F32(), reader.F32(), reader.F32(), reader.F32()});
           break;
-        case 6:
+        case vector_format::DrawingOperation::PopTransform:
           builder.PopTransform();
           break;
         default:
