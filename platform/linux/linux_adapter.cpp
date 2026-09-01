@@ -3,6 +3,9 @@
 #include <gtk/gtk.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/x11/gdkx.h>
+#ifdef None
+#undef None
+#endif
 #endif
 
 #include <sys/resource.h>
