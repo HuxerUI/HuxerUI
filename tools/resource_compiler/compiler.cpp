@@ -22,15 +22,15 @@
 #include <tuple>
 #include <vector>
 
+#include "resource_format.h"
+
 namespace huxerui::resource_compiler {
 
 namespace {
 
-enum class EntryKind : std::uint8_t {
-  Raw = 1,
-  Image = 2,
-  String = 3,
-};
+namespace resource_format = ::huxerui::detail::resource_format;
+
+using EntryKind = resource_format::EntryKind;
 
 struct Entry {
   EntryKind kind = EntryKind::Raw;
@@ -104,6 +104,19 @@ private:
   std::size_t offset_ = 0;
 };
 
+EntryKind ReadEntryKind(Reader& reader) {
+  switch (static_cast<EntryKind>(reader.U8())) {
+  case EntryKind::Raw:
+    return EntryKind::Raw;
+  case EntryKind::Image:
+    return EntryKind::Image;
+  case EntryKind::String:
+    return EntryKind::String;
+  default:
+    throw std::runtime_error("resource index contains an unknown entry kind");
+  }
+}
+
 std::string Trim(std::string_view value) {
   while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front()))) {
     value.remove_prefix(1);
@@ -153,15 +166,6 @@ void WriteBytesIfChanged(const std::filesystem::path& path, std::span<const std:
 
 void WriteTextIfChanged(const std::filesystem::path& path, std::string_view value) {
   WriteBytesIfChanged(path, std::span<const std::byte>(reinterpret_cast<const std::byte*>(value.data()), value.size()));
-}
-
-std::uint64_t Hash(std::span<const std::byte> bytes) noexcept {
-  std::uint64_t hash = 14695981039346656037ULL;
-  for (std::byte byte : bytes) {
-    hash ^= std::to_integer<std::uint8_t>(byte);
-    hash *= 1099511628211ULL;
-  }
-  return hash;
 }
 
 std::string Utf8PathString(const std::filesystem::path& path) {
@@ -721,7 +725,7 @@ std::vector<Entry> Discover(const CompileOptions& options) {
             1.0F,
             0,
             0,
-            Hash(compiled.payload),
+            resource_format::ContentHash(compiled.payload),
             0,
             file.path(),
             compiled.intrinsic_width,
@@ -746,7 +750,7 @@ std::vector<Entry> Discover(const CompileOptions& options) {
           scale,
           width,
           height,
-          Hash(bytes),
+          resource_format::ContentHash(bytes),
           0,
           file.path(),
           static_cast<float>(width) / scale,
@@ -776,7 +780,7 @@ std::vector<Entry> Discover(const CompileOptions& options) {
           1.0F,
           0,
           0,
-          Hash(bytes),
+          resource_format::ContentHash(bytes),
           0,
           file.path(),
           0.0F,
@@ -843,17 +847,8 @@ std::vector<Entry> Discover(const CompileOptions& options) {
 }
 
 std::vector<std::byte> EncodeIndex(const std::vector<Entry>& entries) {
-  std::vector<std::byte> bytes{
-      std::byte{'H'},
-      std::byte{'U'},
-      std::byte{'X'},
-      std::byte{'R'},
-      std::byte{'E'},
-      std::byte{'S'},
-      std::byte{0},
-      std::byte{0},
-  };
-  AppendU32(bytes, 2);
+  std::vector<std::byte> bytes(resource_format::magic.begin(), resource_format::magic.end());
+  AppendU32(bytes, resource_format::current_version);
   AppendU32(bytes, static_cast<std::uint32_t>(entries.size()));
   for (const Entry& entry : entries) {
     bytes.push_back(static_cast<std::byte>(entry.kind));
@@ -903,36 +898,22 @@ std::string GenerateHeader(std::string_view resource_namespace, const std::vecto
 std::vector<Entry> ReadPackage(const std::filesystem::path& package) {
   const std::filesystem::path index_path = package / "huxerui" / "resources.bin";
   const std::vector<std::byte> bytes = ReadBytes(index_path);
-  constexpr std::byte magic[] = {
-      std::byte{'H'},
-      std::byte{'U'},
-      std::byte{'X'},
-      std::byte{'R'},
-      std::byte{'E'},
-      std::byte{'S'},
-      std::byte{0},
-      std::byte{0},
-  };
-  if (bytes.size() < std::size(magic) || !std::equal(std::begin(magic), std::end(magic), bytes.begin())) {
+  if (bytes.size() < resource_format::magic.size() ||
+      !std::equal(resource_format::magic.begin(), resource_format::magic.end(), bytes.begin())) {
     throw std::runtime_error("resource index has an invalid signature: " + index_path.string());
   }
 
-  Reader reader(std::span<const std::byte>(bytes).subspan(std::size(magic)));
+  Reader reader(std::span<const std::byte>(bytes).subspan(resource_format::magic.size()));
   const std::uint32_t version = reader.U32();
-  if (version != 1 && version != 2) {
+  if (version != resource_format::current_version) {
     throw std::runtime_error("resource index version is unsupported: " + std::to_string(version));
   }
   const std::uint32_t count = reader.U32();
   std::vector<Entry> entries;
   entries.reserve(count);
   for (std::uint32_t index = 0; index < count; ++index) {
-    const std::uint8_t kind_value = reader.U8();
-    if (kind_value < static_cast<std::uint8_t>(EntryKind::Raw) ||
-        kind_value > static_cast<std::uint8_t>(EntryKind::String)) {
-      throw std::runtime_error("resource index contains an unknown entry kind");
-    }
     Entry entry;
-    entry.kind = static_cast<EntryKind>(kind_value);
+    entry.kind = ReadEntryKind(reader);
     entry.domain = reader.String();
     entry.key = reader.String();
     entry.package_path = reader.String();
@@ -944,13 +925,8 @@ std::vector<Entry> ReadPackage(const std::filesystem::path& package) {
     entry.pixel_height = reader.U32();
     entry.content_hash = reader.U64();
     entry.argument_count = reader.U32();
-    if (version >= 2) {
-      entry.intrinsic_width = reader.F32();
-      entry.intrinsic_height = reader.F32();
-    } else if (entry.kind == EntryKind::Image) {
-      entry.intrinsic_width = static_cast<float>(entry.pixel_width) / entry.scale;
-      entry.intrinsic_height = static_cast<float>(entry.pixel_height) / entry.scale;
-    }
+    entry.intrinsic_width = reader.F32();
+    entry.intrinsic_height = reader.F32();
 
     ValidateNamespace(entry.domain);
     const std::string normalized_key = GenericPath(PathFromUtf8(entry.key));
@@ -981,7 +957,7 @@ std::vector<Entry> ReadPackage(const std::filesystem::path& package) {
       if (!std::filesystem::is_regular_file(entry.source_path)) {
         throw std::runtime_error("resource package payload is missing: " + entry.package_path);
       }
-      if (Hash(ReadBytes(entry.source_path)) != entry.content_hash) {
+      if (resource_format::ContentHash(ReadBytes(entry.source_path)) != entry.content_hash) {
         throw std::runtime_error("resource package payload hash does not match the index: " + entry.package_path);
       }
     }

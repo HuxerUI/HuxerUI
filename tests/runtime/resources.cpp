@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -51,6 +52,18 @@ void AppendString(std::vector<std::byte>& bytes, std::string_view value) {
   }
 }
 
+std::uint8_t WireKind(detail::ResourceEntryKind kind) {
+  switch (kind) {
+  case detail::ResourceEntryKind::Raw:
+    return 1;
+  case detail::ResourceEntryKind::Image:
+    return 2;
+  case detail::ResourceEntryKind::String:
+    return 3;
+  }
+  throw std::logic_error("test resource entry has an unknown kind");
+}
+
 RawAsset EncodeIndex(const std::vector<IndexEntry>& entries) {
   std::vector<std::byte> bytes{
       std::byte{'H'},
@@ -65,7 +78,7 @@ RawAsset EncodeIndex(const std::vector<IndexEntry>& entries) {
   AppendU32(bytes, 1);
   AppendU32(bytes, static_cast<std::uint32_t>(entries.size()));
   for (const IndexEntry& entry : entries) {
-    bytes.push_back(static_cast<std::byte>(entry.kind));
+    bytes.push_back(static_cast<std::byte>(WireKind(entry.kind)));
     AppendString(bytes, entry.domain);
     AppendString(bytes, entry.key);
     AppendString(bytes, entry.path);
@@ -77,6 +90,12 @@ RawAsset EncodeIndex(const std::vector<IndexEntry>& entries) {
     AppendU32(bytes, entry.height);
     AppendU64(bytes, entry.content_hash);
     AppendU32(bytes, entry.kind == detail::ResourceEntryKind::String ? entry.argument_count : 0);
+    const float intrinsic_width =
+        entry.kind == detail::ResourceEntryKind::Image ? static_cast<float>(entry.width) / entry.scale : 0.0F;
+    const float intrinsic_height =
+        entry.kind == detail::ResourceEntryKind::Image ? static_cast<float>(entry.height) / entry.scale : 0.0F;
+    AppendU32(bytes, std::bit_cast<std::uint32_t>(intrinsic_width));
+    AppendU32(bytes, std::bit_cast<std::uint32_t>(intrinsic_height));
   }
   return RawAsset::FromBytes(std::move(bytes));
 }

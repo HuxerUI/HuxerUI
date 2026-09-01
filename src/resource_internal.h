@@ -19,10 +19,10 @@ namespace huxerui::detail {
 
 inline constexpr std::string_view resource_index_path = "huxerui/resources.bin";
 
-enum class ResourceEntryKind : std::uint8_t {
-  Raw = 1,
-  Image = 2,
-  String = 3,
+enum class ResourceEntryKind {
+  Raw,
+  Image,
+  String,
 };
 
 // ResourceEntryKind selects the active payload: raw and image entries use package_path and content_hash, image

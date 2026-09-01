@@ -132,7 +132,13 @@ TEST_CASE("ResourceCompilerGeneratesTypedKeysIndexAndPayloads") {
   REQUIRE(header.find("huxerui::RawResource config_json") != std::string::npos);
   REQUIRE(header.find("huxerui::StringResource title") != std::string::npos);
   REQUIRE(Read(output / "package" / "huxerui" / "test_app" / "raw" / "config.json") == "{\"enabled\":true}\n");
-  REQUIRE(std::filesystem::file_size(output / "package" / "huxerui" / "resources.bin") > 16);
+  const std::string index = Read(output / "package" / "huxerui" / "resources.bin");
+  REQUIRE(index.size() > 16);
+  REQUIRE(std::string_view(index.data(), 8) == std::string_view("HUXRES\0\0", 8));
+  REQUIRE(static_cast<unsigned char>(index[8]) == 1);
+  REQUIRE(index[9] == 0);
+  REQUIRE(index[10] == 0);
+  REQUIRE(index[11] == 0);
   REQUIRE_FALSE(std::filesystem::exists(output / "resources.stamp"));
 }
 
@@ -370,6 +376,24 @@ TEST_CASE("ResourceCompilerRejectsMergedPayloadHashMismatches") {
   REQUIRE_THROWS_WITH(
       huxerui::resource_compiler::Merge({{generated / "package"}, temporary.Path() / "merged"}),
       Catch::Matchers::ContainsSubstring("payload hash does not match")
+  );
+}
+
+TEST_CASE("ResourceCompilerMergeRejectsUnsupportedIndexVersions") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "resources";
+  const std::filesystem::path generated = temporary.Path() / "generated";
+  Write(root / "raw" / "config.txt", "value");
+  huxerui::resource_compiler::Compile({root, generated, "app"});
+
+  const std::filesystem::path index_path = generated / "package" / "huxerui" / "resources.bin";
+  std::string index = Read(index_path);
+  index[8] = 2;
+  Write(index_path, index);
+
+  REQUIRE_THROWS_WITH(
+      huxerui::resource_compiler::Merge({{generated / "package"}, temporary.Path() / "merged"}),
+      Catch::Matchers::ContainsSubstring("resource index version is unsupported: 2")
   );
 }
 

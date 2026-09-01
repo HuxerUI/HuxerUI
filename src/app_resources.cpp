@@ -8,6 +8,8 @@
 #include <huxerui/environment.h>
 #include <huxerui/root.h>
 
+#include "resource_format.h"
+
 namespace huxerui::detail {
 
 namespace {
@@ -92,15 +94,6 @@ std::string MissingResourceMessage(const ResourceId& id) {
   return "HuxerUI resource is missing from the installed package: " + id.ToString();
 }
 
-std::uint64_t ContentHash(std::span<const std::byte> bytes) noexcept {
-  std::uint64_t hash = 14695981039346656037ULL;
-  for (std::byte byte : bytes) {
-    hash ^= std::to_integer<std::uint8_t>(byte);
-    hash *= 1099511628211ULL;
-  }
-  return hash;
-}
-
 } // namespace
 
 AppResources::AppResources(PlatformResources* platform_resources) : platform_resources_(platform_resources) {
@@ -167,7 +160,7 @@ RawAsset AppResources::ReadEntry(const ResourceIndexEntry& entry) {
   if (!asset.HasValue()) {
     throw std::logic_error("HuxerUI packaged resource payload is missing: " + entry.package_path);
   }
-  if (ContentHash(asset.Bytes()) != entry.content_hash) {
+  if (resource_format::ContentHash(asset.Bytes()) != entry.content_hash) {
     throw std::logic_error("HuxerUI packaged resource payload does not match its index: " + entry.package_path);
   }
   asset = ResourceAccess::WithMimeType(std::move(asset), entry.mime_type);

@@ -211,6 +211,8 @@ The resource tool:
 - Emits dependency metadata so additions, removals, and content changes rebuild and restage the package.
 - Removes stale payloads from generated and staged output before publishing the current package.
 
+HUXRES version 1 carries typed resource entries, payload hashes, raster metadata, and intrinsic logical image dimensions.
+
 The framework source root is processed once as an ordinary resource package while HuxerUI itself is built, and that package is installed with the SDK.
 Each library or application root is likewise processed as an ordinary package when its application target is built.
 The `hrc merge` operation reads the precompiled framework package first and the target's packages in declaration order, then writes one final `resources.bin` plus only the payloads referenced by that final index.

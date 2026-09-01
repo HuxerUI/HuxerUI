@@ -77,6 +77,8 @@ std::vector<std::byte> MakeIndex() {
   AppendU32(bytes, 0);
   AppendU64(bytes, 42);
   AppendU32(bytes, 0);
+  AppendU32(bytes, 0);
+  AppendU32(bytes, 0);
   return bytes;
 }
 
@@ -173,10 +175,19 @@ TEST_CASE("ImageAssetRejectsTruncatedEncodedImages") {
 
 TEST_CASE("ResourceIndexRejectsUnsupportedVersions") {
   std::vector<std::byte> bytes = MakeIndex();
-  bytes[8] = std::byte{3};
+  bytes[8] = std::byte{2};
   REQUIRE_THROWS_WITH(
       huxerui::detail::ParseResourceIndex(RawAsset::FromBytes(std::move(bytes))),
-      "HuxerUI resource index version is unsupported: 3"
+      "HuxerUI resource index version is unsupported: 2"
+  );
+}
+
+TEST_CASE("ResourceIndexRequiresCompleteVersionOneEntries") {
+  std::vector<std::byte> bytes = MakeIndex();
+  bytes.resize(bytes.size() - sizeof(float) * 2);
+  REQUIRE_THROWS_WITH(
+      huxerui::detail::ParseResourceIndex(RawAsset::FromBytes(std::move(bytes))),
+      "HuxerUI resource index is truncated"
   );
 }
 

@@ -7,6 +7,8 @@
 #include <limits>
 #include <stdexcept>
 
+#include "resource_format.h"
+
 namespace huxerui::detail {
 
 namespace {
@@ -64,45 +66,45 @@ private:
   std::size_t offset_ = 0;
 };
 
+ResourceEntryKind ReadEntryKind(Reader& reader) {
+  switch (static_cast<resource_format::EntryKind>(reader.U8())) {
+  case resource_format::EntryKind::Raw:
+    return ResourceEntryKind::Raw;
+  case resource_format::EntryKind::Image:
+    return ResourceEntryKind::Image;
+  case resource_format::EntryKind::String:
+    return ResourceEntryKind::String;
+  default:
+    throw std::logic_error("HuxerUI resource index contains an unknown entry kind");
+  }
+}
+
 } // namespace
 
 std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index) {
-  constexpr std::byte magic[] = {
-      std::byte{'H'},
-      std::byte{'U'},
-      std::byte{'X'},
-      std::byte{'R'},
-      std::byte{'E'},
-      std::byte{'S'},
-      std::byte{0},
-      std::byte{0},
-  };
   const std::span<const std::byte> bytes = index.Bytes();
   if (bytes.empty()) {
     return {};
   }
-  if (bytes.size() < std::size(magic) || !std::equal(std::begin(magic), std::end(magic), bytes.begin())) {
+  if (bytes.size() < resource_format::magic.size() ||
+      !std::equal(resource_format::magic.begin(), resource_format::magic.end(), bytes.begin())) {
     throw std::logic_error("HuxerUI resource index has an invalid signature");
   }
 
-  Reader reader(bytes.subspan(std::size(magic)));
+  Reader reader(bytes.subspan(resource_format::magic.size()));
   const std::uint32_t version = reader.U32();
-  if (version != 1 && version != 2) {
+  if (version != resource_format::current_version) {
     throw std::logic_error("HuxerUI resource index version is unsupported: " + std::to_string(version));
   }
   const std::uint32_t count = reader.U32();
   std::vector<ResourceIndexEntry> entries;
   entries.reserve(count);
   for (std::uint32_t index_value = 0; index_value < count; ++index_value) {
-    const std::uint8_t kind_value = reader.U8();
-    if (kind_value < static_cast<std::uint8_t>(ResourceEntryKind::Raw) ||
-        kind_value > static_cast<std::uint8_t>(ResourceEntryKind::String)) {
-      throw std::logic_error("HuxerUI resource index contains an unknown entry kind");
-    }
+    const ResourceEntryKind kind = ReadEntryKind(reader);
     const std::string domain = reader.String();
     const std::string key = reader.String();
     ResourceIndexEntry entry{
-        static_cast<ResourceEntryKind>(kind_value),
+        kind,
         ResourceId(domain, key),
         reader.String(),
         reader.String(),
@@ -113,16 +115,8 @@ std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index) {
         reader.U32(),
         reader.U64(),
         reader.U32(),
-        {},
+        {reader.F32(), reader.F32()},
     };
-    if (version >= 2) {
-      entry.intrinsic_size = {reader.F32(), reader.F32()};
-    } else if (entry.kind == ResourceEntryKind::Image) {
-      entry.intrinsic_size = {
-          static_cast<float>(entry.pixel_width) / entry.scale,
-          static_cast<float>(entry.pixel_height) / entry.scale,
-      };
-    }
     if (!std::isfinite(entry.scale) || entry.scale <= 0.0F) {
       throw std::logic_error("HuxerUI resource index contains an invalid image scale");
     }
