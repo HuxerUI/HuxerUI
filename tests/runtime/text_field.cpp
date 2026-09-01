@@ -2521,7 +2521,7 @@ TEST_CASE("TestMultilineTextFieldWheelScrollDoesNotRevealCaretUntilEditingResume
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
 
-  runtime.HandleScrollEvent({
+  runtime.HandleScrollInput({
       {20.0F, 20.0F},
       0.0F,
       20.0F,
@@ -2557,7 +2557,7 @@ TEST_CASE("TestMultilineTextFieldScrollUpdatesImeGeometry") {
   text_input.updated_states.clear();
   text_input.updated_geometry.clear();
 
-  runtime.HandleScrollEvent({
+  runtime.HandleScrollInput({
       {20.0F, 20.0F},
       0.0F,
       20.0F,
@@ -2587,7 +2587,7 @@ TEST_CASE("TestMultilineTextFieldScrollDuringCompositionDoesNotRestartInput") {
   text_input.updated_geometry.clear();
   text_input.restarted_sessions.clear();
 
-  runtime.HandleScrollEvent({
+  runtime.HandleScrollInput({
       {20.0F, 20.0F},
       0.0F,
       20.0F,
@@ -2608,7 +2608,7 @@ TEST_CASE("TestMultilineTextFieldPassesRemainingWheelDeltaToParent") {
   Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
   Pointer(runtime, PointerEventType::Up, 20.0F, 18.0F);
 
-  runtime.HandleScrollEvent({
+  runtime.HandleScrollInput({
       {40.0F, 20.0F},
       0.0F,
       100.0F,
@@ -3190,7 +3190,7 @@ TEST_CASE("TestFocusedSingleLineTextFieldAllowsAncestorWheelScrollUntilEditingRe
   Pointer(runtime, PointerEventType::Up, 20.0F);
   runtime.BuildFrame();
 
-  runtime.HandleScrollEvent({
+  runtime.HandleScrollInput({
       {20.0F, 20.0F},
       0.0F,
       60.0F,

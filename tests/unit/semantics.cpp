@@ -746,7 +746,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
   const std::shared_ptr<const SemanticFrame> revealed = runtime.BuildCommit().semantic_frame;
   REQUIRE_FALSE(FindSemanticNode(*revealed, "Item 3").offscreen);
 
-  runtime.HandleScrollEvent(ScrollEvent{{50.0F, 20.0F}, 0.0F, 1000.0F});
+  runtime.HandleScrollInput(ScrollInputEvent{{50.0F, 20.0F}, 0.0F, 1000.0F});
   runtime.BuildCommit();
   REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       first.id,
@@ -754,7 +754,7 @@ TEST_CASE("VirtualListPublishesRealizedCollectionItemsAndRoutesExistingActions")
   ));
   REQUIRE(semantic_virtual_list_factory_calls < 100);
 
-  runtime.HandleScrollEvent(ScrollEvent{{50.0F, 20.0F}, 0.0F, -1000.0F});
+  runtime.HandleScrollInput(ScrollInputEvent{{50.0F, 20.0F}, 0.0F, -1000.0F});
   const SemanticNode& returned = FindSemanticNode(*runtime.BuildCommit().semantic_frame, "Item 0");
   REQUIRE(returned.id != first.id);
 }

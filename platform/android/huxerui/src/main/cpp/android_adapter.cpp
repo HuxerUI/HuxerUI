@@ -1257,12 +1257,9 @@ public:
     });
   }
 
-  void Scroll(float x, float y, float delta_x, float delta_y) {
-    runtime_.HandleScrollEvent({
-        {x, y},
-        delta_x,
-        delta_y,
-    });
+  bool Scroll(float x, float y, float delta_x, float delta_y, KeyModifiers modifiers) {
+    const Point consumed = runtime_.HandleScrollInput({{x, y}, delta_x, delta_y, modifiers});
+    return consumed.x != 0.0F || consumed.y != 0.0F;
   }
 
   bool KeyEvent(KeyEventType type, jint key_code, std::string text, KeyModifiers modifiers, bool repeat) {
@@ -1725,16 +1722,19 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativePointer(
   }
 }
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeScroll(
-    JNIEnv* environment, jclass, jlong handle, jfloat x, jfloat y, jfloat delta_x, jfloat delta_y
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeScroll(
+    JNIEnv* environment, jclass, jlong handle, jfloat x, jfloat y, jfloat delta_x, jfloat delta_y, jboolean shift,
+    jboolean control, jboolean alt, jboolean meta
 ) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->Scroll(x, y, delta_x, delta_y);
+      return session->Scroll(x, y, delta_x, delta_y, {shift != JNI_FALSE, control != JNI_FALSE, alt != JNI_FALSE,
+                                                       meta != JNI_FALSE});
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
   }
+  return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeKey(

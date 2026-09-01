@@ -1416,7 +1416,7 @@ TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
   REQUIRE(runtime.RootNode()->scroll_state->offset_y == 20.0F);
 }
 
-TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
+TEST_CASE("TestNestedScrollInputPassesRemainingDelta") {
   TestPlatform platform;
   Runtime runtime{NestedDragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
@@ -1424,8 +1424,8 @@ TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
 
   REQUIRE(nested_inner_scroll.ScrollTo(130.0F));
   runtime.BuildFrame();
-  runtime.HandleScrollEvent(
-      ScrollEvent{
+  runtime.HandleScrollInput(
+      ScrollInputEvent{
           {50.0F, 50.0F},
           0.0F,
           30.0F,
@@ -1437,8 +1437,8 @@ TEST_CASE("TestNestedScrollEventPassesRemainingDelta") {
   REQUIRE(nested_inner_scroll.ScrollTo(10.0F));
   REQUIRE(nested_outer_scroll.ScrollTo(20.0F));
   runtime.BuildFrame();
-  runtime.HandleScrollEvent(
-      ScrollEvent{
+  runtime.HandleScrollInput(
+      ScrollInputEvent{
           {50.0F, 50.0F},
           0.0F,
           -40.0F,
@@ -1748,8 +1748,8 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   ClickAt(runtime, {94.0F, 80.0F}, 60);
   REQUIRE(drag_item_clicks == 1);
 
-  runtime.HandleScrollEvent(
-      ScrollEvent{
+  runtime.HandleScrollInput(
+      ScrollInputEvent{
           {50.0F, 50.0F},
           0.0F,
           40.0F,

@@ -65,9 +65,10 @@ When a competing recognizer accepts, the raw target receives one Cancel update a
 Runtime does not retain separate scroll, extension-capture, extension-observer, and gesture-session ownership paths.
 Scroll recognition and the existing NodeExtension pointer capability are recognizers alongside built-in and public recognizers.
 
-Hover and `ScrollEvent` remain outside pointer recognition because neither represents an owned Down-to-Up pointer sequence.
+Hover and `ScrollInputEvent` remain outside pointer recognition because neither represents an owned Down-to-Up pointer sequence.
 Hover performs an ordinary stateless hit test only when no active pointer delivery owns the event.
-`ScrollEvent` is a platform-recognized wheel or trackpad delta and continues through the existing nested scroll-consumption path without competing with Drag.
+`ScrollInputEvent` is a platform-recognized wheel or trackpad delta and enters the nested scroll transaction without competing with Drag.
+Its complete ownership and consumption contract is defined by [Scrolling](scrolling.md).
 
 ## Pointer buttons and chords
 
@@ -471,9 +472,9 @@ There are no Environment values, revisions, registries, per-gesture settings ser
 ## Scrolling and retained pointer extensions
 
 Each compatible scroll branch contributes one internal recognizer.
-The recognizer retains its originating node and walks the session's committed route for ordered nested consumption; Runtime does not retain a parallel `scroll_chain` in PointerSession or duplicate ancestor lists per recognizer.
+The recognizer retains its originating node and walks the session's committed route through the transaction defined by [Scrolling](scrolling.md); Runtime does not retain a parallel `scroll_chain` in PointerSession or duplicate ancestor lists per recognizer.
 After axis movement crosses slop, the deepest recognizer that can consume movement accepts.
-Existing `ScrollNodeBy`, nested remainder consumption, activity indication, `ScrollPhysics`, and retained momentum continue after acceptance.
+Touch may also accept at a boundary when terminal overscroll is enabled.
 
 A descendant Drag and an ancestor Scroll recognition compete only through recognition order and their thresholds.
 A delayed Drag rejects movement before its deadline, allowing scrolling to accept.

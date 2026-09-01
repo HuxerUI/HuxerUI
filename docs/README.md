@@ -24,6 +24,7 @@ User guides describe the current public SDK, development guides cover this repos
 ## Design reference
 
 [Design Documents](design/README.md) indexes the internal contracts by subsystem.
+[Scrolling](design/scrolling.md) defines input normalization, nested consumption, offset ownership, momentum, and overscroll.
 Design documents are implementation references, not a public API stability guarantee.
 
 ## Scope

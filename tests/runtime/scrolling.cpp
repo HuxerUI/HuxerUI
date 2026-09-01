@@ -16,6 +16,81 @@ State<bool> scoped_scroll_content_changed;
 State<float> scoped_scroll_content_height;
 State<std::size_t> indexed_scroll_page;
 int scroll_observer_compositions = 0;
+bool consume_scroll_input = false;
+std::optional<ScrollInputEvent> received_scroll_input;
+ScrollController scroll_input_controller;
+ScrollController cross_axis_outer_scroll;
+ScrollController cross_axis_inner_scroll;
+ScrollController hook_outer_scroll;
+ScrollController hook_inner_scroll;
+ScrollController activity_scroll;
+State<bool> disableable_scroll_enabled;
+std::vector<std::string> scroll_hook_calls;
+std::vector<ScrollActivity> scroll_activities;
+
+struct ScrollHook {
+  class Extension;
+
+  std::string name;
+  float pre_consumption = 0.0F;
+  float post_consumption = 0.0F;
+
+  bool operator==(const ScrollHook&) const = default;
+};
+
+class ScrollHook::Extension final : public NodeExtension {
+public:
+  Extension(MountedNode& node, const ScrollHook& modifier) {
+    Update(node, modifier);
+  }
+
+  void Update(MountedNode&, const ScrollHook& modifier) {
+    name_ = modifier.name;
+    pre_consumption_ = modifier.pre_consumption;
+    post_consumption_ = modifier.post_consumption;
+  }
+
+  float OnPreScroll(MountedNode&, Axis, float, ScrollSource) override {
+    scroll_hook_calls.push_back(name_ + ".pre");
+    return pre_consumption_;
+  }
+
+  float OnPostScroll(MountedNode&, Axis, float, float, ScrollSource) override {
+    scroll_hook_calls.push_back(name_ + ".post");
+    return post_consumption_;
+  }
+
+private:
+  std::string name_;
+  float pre_consumption_ = 0.0F;
+  float post_consumption_ = 0.0F;
+};
+
+struct ScrollActivityProbe {
+  class Extension;
+
+  bool operator==(const ScrollActivityProbe&) const = default;
+};
+
+class ScrollActivityProbe::Extension final : public NodeExtension {
+public:
+  Extension(MountedNode&, const ScrollActivityProbe&) {}
+
+  void Update(MountedNode&, const ScrollActivityProbe&) {}
+
+  void OnScrollActivity(MountedNode&, const ScrollActivity& activity) override {
+    scroll_activities.push_back(activity);
+  }
+};
+
+class ScrollDefaultsPlatform final : public TestPlatform {
+public:
+  ScrollPhysics ScrollDefaults() const noexcept override {
+    return scroll_defaults;
+  }
+
+  ScrollPhysics scroll_defaults;
+};
 
 View ScrollViewApp() {
   return ScrollView{
@@ -182,6 +257,70 @@ View IndexedScrollingApp() {
   );
 }
 
+View ScrollInputApp() {
+  auto scroll = UseScrollController();
+  scroll_input_controller = scroll;
+  return ScrollView {
+    Spacer().With(huxerui::Frame{100.0F, 300.0F}),
+  }.Controller(scroll)
+      .On<ViewEvents::ScrollInput>([](const ScrollInputEvent& event) {
+        received_scroll_input = event;
+        return consume_scroll_input;
+      });
+}
+
+View CrossAxisNestedScrollApp() {
+  auto outer = UseScrollController();
+  auto inner = UseScrollController();
+  cross_axis_outer_scroll = outer;
+  cross_axis_inner_scroll = inner;
+  return ScrollView {
+    Column {
+      ScrollView {
+        Spacer().With(huxerui::Frame{200.0F, 40.0F}),
+      }.ScrollAxis(Axis::Horizontal).Controller(inner).With(huxerui::Frame{100.0F, 40.0F}),
+      Spacer().With(huxerui::Frame{100.0F, 200.0F}),
+    },
+  }.Controller(outer);
+}
+
+View NestedScrollHookApp() {
+  auto outer = UseScrollController();
+  auto inner = UseScrollController();
+  hook_outer_scroll = outer;
+  hook_inner_scroll = inner;
+  return ScrollView {
+    Column {
+      Spacer().With(huxerui::Frame{100.0F, 200.0F}),
+      ScrollView {
+        Spacer().With(huxerui::Frame{100.0F, 200.0F}),
+      }.Controller(inner).With(huxerui::Frame{100.0F, 60.0F}, ScrollHook{"inner", 3.0F, 4.0F}),
+    },
+  }.Controller(outer).With(ScrollHook{"outer", 2.0F, 5.0F});
+}
+
+View ScrollActivityApp() {
+  auto scroll = UseScrollController();
+  activity_scroll = scroll;
+  return ScrollView {
+    Spacer().With(huxerui::Frame{100.0F, 300.0F}),
+  }.Controller(scroll).With(ScrollActivityProbe{}, ScrollPhysics{.fling_enabled = false});
+}
+
+View DisableableOverscrollApp() {
+  auto enabled = UseState(true);
+  disableable_scroll_enabled = enabled;
+  return ScrollView {
+    Spacer().With(huxerui::Frame{100.0F, 300.0F}),
+  }.With(Enabled(enabled.Get()), ScrollPhysics{.fling_enabled = false});
+}
+
+View ReducedMotionOverscrollApp() {
+  ThemeSpec theme = huxerui::FlatLightThemeSpec();
+  theme.motion.reduced_motion = true;
+  return Theme {ThemeDefinition{theme}, ScrollActivityApp()};
+}
+
 TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   scroll_clicked.clear();
 
@@ -217,8 +356,8 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   const std::uint64_t content_layout_revision = root->children[0]->layout_revision;
 
   const int requested_frames = platform.requested_frames;
-  runtime.HandleScrollEvent(
-      ScrollEvent{
+  runtime.HandleScrollInput(
+      ScrollInputEvent{
           {50.0F, 30.0F},
           0.0F,
           45.0F,
@@ -244,8 +383,8 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   root = runtime.RootNode();
   REQUIRE(root->scroll_state->offset_y == 45.0F);
 
-  runtime.HandleScrollEvent(
-      ScrollEvent{
+  runtime.HandleScrollInput(
+      ScrollInputEvent{
           {50.0F, 30.0F},
           0.0F,
           100.0F,
@@ -259,6 +398,183 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   runtime.BuildFrame();
   root = runtime.RootNode();
   REQUIRE(root->scroll_state->offset_y == 20.0F);
+}
+
+TEST_CASE("Scroll input may consume the complete platform update before default scrolling") {
+  consume_scroll_input = true;
+  received_scroll_input.reset();
+
+  TestPlatform platform;
+  Runtime runtime{ScrollInputApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const ScrollInputEvent input{
+      .position = {50.0F, 40.0F},
+      .delta_x = 12.0F,
+      .delta_y = 30.0F,
+      .modifiers = {.control = true},
+  };
+  REQUIRE(runtime.HandleScrollInput(input) == Point{12.0F, 30.0F});
+  REQUIRE(received_scroll_input == input);
+  REQUIRE(scroll_input_controller.Offset() == 0.0F);
+
+  consume_scroll_input = false;
+  REQUIRE(runtime.HandleScrollInput(input) == Point{0.0F, 30.0F});
+  REQUIRE(scroll_input_controller.Offset() == 30.0F);
+
+  REQUIRE(scroll_input_controller.ScrollTo(0.0F));
+  runtime.BuildFrame();
+  const Point boundary_consumption = runtime.HandleScrollInput({{50.0F, 40.0F}, 0.0F, -20.0F});
+  REQUIRE(boundary_consumption == Point{});
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+}
+
+TEST_CASE("Diagonal scroll input coordinates each axis independently") {
+  TestPlatform platform;
+  Runtime runtime{CrossAxisNestedScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.HandleScrollInput({{50.0F, 20.0F}, 25.0F, 30.0F}) == Point{25.0F, 30.0F});
+  REQUIRE(cross_axis_inner_scroll.Offset() == 25.0F);
+  REQUIRE(cross_axis_outer_scroll.Offset() == 30.0F);
+}
+
+TEST_CASE("Nested scroll hooks preserve pre offset post order and actual consumption") {
+  scroll_hook_calls.clear();
+
+  TestPlatform platform;
+  Runtime runtime{NestedScrollHookApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+  REQUIRE(hook_inner_scroll.ScrollTo(1000.0F));
+  REQUIRE(hook_outer_scroll.ScrollTo(1000.0F));
+  runtime.BuildFrame();
+  scroll_hook_calls.clear();
+
+  const Point consumed = runtime.HandleScrollInput({{50.0F, 50.0F}, 0.0F, 30.0F});
+  REQUIRE(consumed.x == 0.0F);
+  REQUIRE(consumed.y == 14.0F);
+  REQUIRE(scroll_hook_calls == std::vector<std::string>{"outer.pre", "inner.pre", "inner.post", "outer.post"});
+
+  Runtime invalid{
+      +[]() -> View {
+        return ScrollView {
+          Spacer().With(huxerui::Frame{100.0F, 200.0F}),
+        }.With(ScrollHook{"invalid", 20.0F, 0.0F});
+      },
+      platform,
+  };
+  invalid.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  invalid.BuildFrame();
+  REQUIRE_THROWS_AS(invalid.HandleScrollInput({{50.0F, 30.0F}, 0.0F, 10.0F}), std::logic_error);
+}
+
+TEST_CASE("Scroll activity unifies indirect programmatic and direct changes") {
+  scroll_activities.clear();
+
+  TestPlatform platform;
+  Runtime runtime{ScrollActivityApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleScrollInput({{50.0F, 40.0F}, 0.0F, 20.0F});
+  REQUIRE(scroll_activities.back().source == ScrollSource::Wheel);
+  REQUIRE(scroll_activities.back().phase == ScrollPhase::Update);
+  REQUIRE(scroll_activities.back().delta == 20.0F);
+  REQUIRE(scroll_activities.back().metrics.offset == 20.0F);
+
+  REQUIRE(activity_scroll.ScrollBy(10.0F));
+  REQUIRE(scroll_activities.back().source == ScrollSource::Programmatic);
+  REQUIRE(scroll_activities.back().phase == ScrollPhase::Update);
+  REQUIRE(scroll_activities.back().metrics.offset == 30.0F);
+
+  scroll_activities.clear();
+  runtime.HandlePointerEvent({PointerEventType::Down, 100, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 100, {50.0F, 30.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 100, {50.0F, 30.0F}, PointerDeviceKind::Touch});
+  REQUIRE(scroll_activities.size() >= 3);
+  REQUIRE(scroll_activities.front().source == ScrollSource::Drag);
+  REQUIRE(scroll_activities.front().phase == ScrollPhase::Begin);
+  REQUIRE(scroll_activities[1].phase == ScrollPhase::Update);
+  REQUIRE(scroll_activities.back().phase == ScrollPhase::End);
+}
+
+TEST_CASE("Direct touch overscroll keeps metrics clamped and settles its presentation displacement") {
+  scroll_activities.clear();
+
+  TestPlatform platform;
+  Runtime runtime{ScrollActivityApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 101, {50.0F, 30.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 101, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  REQUIRE(activity_scroll.Offset() == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->render_node.children_transform.translate_y > 0.0F);
+
+  runtime.HandlePointerEvent({PointerEventType::Up, 101, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  for (int frame = 0; frame < 10 && runtime.RootNode()->scroll_state->overscroll_offset != 0.0F; ++frame) {
+    platform.AdvanceTime(0.05);
+    runtime.BuildFrame();
+  }
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(activity_scroll.Offset() == 0.0F);
+  const auto settlement = std::ranges::find_if(scroll_activities, [](const ScrollActivity& activity) {
+    return activity.source == ScrollSource::Overscroll && activity.phase == ScrollPhase::Begin;
+  });
+  REQUIRE(settlement != scroll_activities.end());
+  REQUIRE(scroll_activities.back().source == ScrollSource::Overscroll);
+  REQUIRE(scroll_activities.back().phase == ScrollPhase::End);
+}
+
+TEST_CASE("Disabling an active scroll clears overscroll and cancels direct activity") {
+  TestPlatform platform;
+  Runtime runtime{DisableableOverscrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 103, {50.0F, 30.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 103, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+
+  disableable_scroll_enabled = false;
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE_FALSE(runtime.RootNode()->interaction.enabled);
+}
+
+TEST_CASE("Reduced motion clears released overscroll without retained settlement") {
+  TestPlatform platform;
+  Runtime runtime{ReducedMotionOverscrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 104, {50.0F, 30.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 104, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 104, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  REQUIRE(runtime.RootNode()->children.front()->scroll_state->overscroll_offset < 0.0F);
+
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children.front()->scroll_state->overscroll_offset == 0.0F);
+}
+
+TEST_CASE("Platform scroll defaults apply when a container has no explicit physics") {
+  ScrollDefaultsPlatform platform;
+  platform.scroll_defaults.overscroll_enabled = false;
+  Runtime runtime{ScrollInputApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+  REQUIRE_FALSE(runtime.RootNode()->layout_values.contains(typeid(ScrollPhysics)));
+  REQUIRE_FALSE(detail::ResolveScrollPhysics(*runtime.RootNode()).overscroll_enabled);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 102, {50.0F, 30.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 102, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 102, {50.0F, 60.0F}, PointerDeviceKind::Touch});
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
 }
 
 TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
@@ -280,8 +596,8 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   REQUIRE(scroll_bar.has_value());
   REQUIRE(scroll_bar->axis == Axis::Horizontal);
 
-  runtime.HandleScrollEvent(
-      ScrollEvent{
+  runtime.HandleScrollInput(
+      ScrollInputEvent{
           {50.0F, 20.0F},
           45.0F,
           0.0F,
@@ -480,7 +796,7 @@ TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {
   };
   REQUIRE(scoped_grow_scroll.Metrics() == initial_metrics);
 
-  runtime.HandleScrollEvent({{50.0F, 60.0F}, 0.0F, 20.0F});
+  runtime.HandleScrollInput({{50.0F, 60.0F}, 0.0F, 20.0F});
   runtime.BuildFrame();
   REQUIRE(scroll->scroll_state->offset_y == 20.0F);
   REQUIRE(scoped_grow_scroll.Offset() == 20.0F);

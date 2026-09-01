@@ -12,6 +12,7 @@
 #include <huxerui/geometry.h>
 #include <huxerui/layout.h>
 #include <huxerui/paint.h>
+#include <huxerui/scroll.h>
 
 namespace huxerui {
 
@@ -136,15 +137,54 @@ public:
     static_cast<void>(event);
   }
 
-  /// Notifies the extension that the node's scroll offset changed.
-  virtual void OnScrollActivity(MountedNode& node) {
+  /// Consumes part of an available nested scroll delta before mounted scroll offsets.
+  ///
+  /// Runtime calls this only when the extension is attached to a scroll container participating in the transaction.
+  /// The returned value must be finite, follow the direction of `available`, and not exceed its magnitude.
+  [[nodiscard]] virtual float OnPreScroll(MountedNode& node, Axis axis, float available, ScrollSource source) {
     static_cast<void>(node);
+    static_cast<void>(axis);
+    static_cast<void>(available);
+    static_cast<void>(source);
+    return 0.0F;
   }
 
-  /// Notifies the extension when direct scrolling begins or ends.
-  virtual void OnScrollGesture(MountedNode& node, bool active) {
+  /// Consumes part of a nested scroll delta after mounted scroll offsets.
+  ///
+  /// `consumed` is the amount already consumed by this transaction. The returned value follows the same invariants as
+  /// OnPreScroll().
+  [[nodiscard]] virtual float OnPostScroll(MountedNode& node, Axis axis, float consumed, float available,
+                                           ScrollSource source) {
     static_cast<void>(node);
-    static_cast<void>(active);
+    static_cast<void>(axis);
+    static_cast<void>(consumed);
+    static_cast<void>(available);
+    static_cast<void>(source);
+    return 0.0F;
+  }
+
+  /// Consumes part of release velocity before retained momentum starts.
+  [[nodiscard]] virtual float OnPreFling(MountedNode& node, Axis axis, float available_velocity) {
+    static_cast<void>(node);
+    static_cast<void>(axis);
+    static_cast<void>(available_velocity);
+    return 0.0F;
+  }
+
+  /// Consumes velocity remaining after this node's retained momentum ends or reaches a boundary.
+  [[nodiscard]] virtual float OnPostFling(MountedNode& node, Axis axis, float consumed_velocity,
+                                          float available_velocity) {
+    static_cast<void>(node);
+    static_cast<void>(axis);
+    static_cast<void>(consumed_velocity);
+    static_cast<void>(available_velocity);
+    return 0.0F;
+  }
+
+  /// Observes transient mounted scroll activity for retained presentation behavior.
+  virtual void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) {
+    static_cast<void>(node);
+    static_cast<void>(activity);
   }
 
   /// Returns whether this extension makes the node an input target at a node-local position.
@@ -430,33 +470,6 @@ struct ScrollBarStyle {
   static ScrollBarStyle Default();
 
   bool operator==(const ScrollBarStyle&) const = default;
-};
-
-/// Configures momentum for a scroll container without changing its controlled content or geometry.
-///
-/// @code
-/// ScrollView(content).With(ScrollPhysics{
-///     .fling_enabled = true,
-///     .deceleration_rate = 4.0F,
-/// });
-/// @endcode
-struct ScrollPhysics {
-  /// Returns the modifier descriptor used by View::With().
-  static const detail::ModifierDescriptor& Descriptor();
-
-  /// Whether release velocity may continue scrolling after direct input ends.
-  bool fling_enabled = true;
-
-  /// Exponential velocity decay rate per second; larger values stop sooner.
-  float deceleration_rate = 3.0F;
-
-  /// Smallest release velocity that starts a fling, in logical pixels per second.
-  float minimum_fling_velocity = 40.0F;
-
-  /// Largest release velocity accepted by the fling simulation, in logical pixels per second.
-  float maximum_fling_velocity = 6000.0F;
-
-  bool operator==(const ScrollPhysics&) const = default;
 };
 
 /// Enables or disables interaction for a View subtree.

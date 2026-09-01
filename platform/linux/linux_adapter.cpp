@@ -1112,16 +1112,20 @@ private:
     }
   }
 
-  static gboolean Scrolled(GtkEventControllerScroll*, double dx, double dy, gpointer data) {
+  static gboolean Scrolled(GtkEventControllerScroll* controller, double dx, double dy, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
     if (self.runtime_ != nullptr) {
-      self.runtime_->HandleScrollEvent({
+      GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
+      const GdkModifierType state = event ? gdk_event_get_modifier_state(event) : GdkModifierType{};
+      const Point consumed = self.runtime_->HandleScrollInput({
           self.last_pointer_position_,
           static_cast<float>(dx * kDipsPerScrollStep),
           static_cast<float>(dy * kDipsPerScrollStep),
+          TranslateModifiers(state),
       });
+      return consumed.x != 0.0F || consumed.y != 0.0F;
     }
-    return TRUE;
+    return FALSE;
   }
 
   static gboolean KeyPressed(

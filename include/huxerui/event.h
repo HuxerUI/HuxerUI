@@ -226,16 +226,34 @@ struct HoverEvent {
   bool operator==(const HoverEvent&) const = default;
 };
 
-/// Carries a platform-recognized wheel or trackpad scroll update.
-struct ScrollEvent {
+/// Describes keyboard modifiers active during an input event.
+struct KeyModifiers {
+  /// Whether Shift is active.
+  bool shift = false;
+  /// Whether Control is active.
+  bool control = false;
+  /// Whether Alt or Option is active.
+  bool alt = false;
+  /// Whether the platform Meta, Command, or Windows modifier is active.
+  bool meta = false;
+
+  bool operator==(const KeyModifiers&) const = default;
+};
+
+/// Carries one platform-recognized wheel or trackpad update before default scrolling.
+///
+/// Touch dragging remains pointer input and does not produce this event.
+struct ScrollInputEvent {
   /// Pointer position in window logical coordinates.
   Point position;
-  /// Horizontal scroll delta in logical units.
+  /// Requested horizontal content-offset change in logical pixels.
   float delta_x = 0.0F;
-  /// Vertical scroll delta in logical units.
+  /// Requested vertical content-offset change in logical pixels.
   float delta_y = 0.0F;
+  /// Keyboard modifiers active during the update.
+  KeyModifiers modifiers;
 
-  bool operator==(const ScrollEvent&) const = default;
+  bool operator==(const ScrollInputEvent&) const = default;
 };
 
 /// Identifies portable keyboard keys independently of layout-resolved text.
@@ -393,20 +411,6 @@ enum class KeyEventType {
   Up,
 };
 
-/// Describes the modifier keys active for a KeyEvent.
-struct KeyModifiers {
-  /// Whether Shift is active.
-  bool shift = false;
-  /// Whether Control is active.
-  bool control = false;
-  /// Whether Alt or Option is active.
-  bool alt = false;
-  /// Whether the platform Meta, Command, or Windows modifier is active.
-  bool meta = false;
-
-  bool operator==(const KeyModifiers&) const = default;
-};
-
 /// Carries normalized keyboard input.
 struct KeyEvent {
   /// Whether the key is being pressed or released.
@@ -487,6 +491,17 @@ struct ViewEvents {
   /// False keeps the recognition pending. After acceptance, later return values are ignored and the handler continues
   /// receiving Move, Up, or Cancel until the sequence ends.
   struct PointerIntercept : Event<bool(const PointerEvent&)> {};
+
+  /// Offers one platform wheel or trackpad update to the deepest enabled bound View before default scrolling.
+  ///
+  /// Return true to consume both axes or false to run the built-in nested scroll transaction. The event is direct and
+  /// does not bubble, capture, or join pointer-sequence ownership.
+  /// @code
+  /// canvas.On<ViewEvents::ScrollInput>([](const ScrollInputEvent& event) {
+  ///   return event.modifiers.control && ZoomAt(event.position, event.delta_y);
+  /// });
+  /// @endcode
+  struct ScrollInput : Event<bool(const ScrollInputEvent&)> {};
 
   /// Offers an otherwise unhandled key press to the focused View.
   ///

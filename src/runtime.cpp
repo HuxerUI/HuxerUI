@@ -880,10 +880,10 @@ HoverEvent LocalHoverEvent(const MountedNode& node, const PointerHoverState& hov
   };
 }
 
-void DispatchScrollActivity(MountedNode& node) {
+void DispatchScrollActivity(MountedNode& node, const ScrollActivity& activity) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (entry.extension) {
-      entry.extension->OnScrollActivity(node);
+      entry.extension->OnScrollActivity(node, activity);
     }
   }
 }
@@ -973,6 +973,9 @@ void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
     node.resolved_corner_radii = node.properties.corner_radii;
   }
   node.applies_disabled_appearance = applies_disabled_appearance;
+  if (node.interaction.enabled && !enabled && node.scroll_state) {
+    StopScrollNodeMotion(node);
+  }
   InteractionState interaction = node.interaction;
   interaction.enabled = enabled;
   if (!enabled) {
@@ -1097,6 +1100,8 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   ValidateViewportBreakpoints(application.options.viewport_breakpoints);
   const GestureSettings gesture_settings = platform.GestureDefaults();
   detail::ValidateGestureSettings(gesture_settings);
+  const ScrollPhysics scroll_physics = platform.ScrollDefaults();
+  detail::ValidateScrollPhysics(scroll_physics);
   const WindowOptions& window_options = application.options.window;
   if (!std::isfinite(window_options.initial_size.width) || window_options.initial_size.width <= 0.0F ||
       !std::isfinite(window_options.initial_size.height) || window_options.initial_size.height <= 0.0F) {
@@ -1128,6 +1133,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
       std::move(window)
   );
   state_->gesture_settings_ = gesture_settings;
+  state_->default_scroll_physics_ = scroll_physics;
   state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
   state_->root_environment_ = std::make_shared<Environment>();
   state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
@@ -1464,13 +1470,13 @@ void Runtime::RequestFrameAfter(double delay_seconds) {
   }
 }
 
-void Runtime::NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source) {
-  DispatchScrollActivity(node);
-  if (source == ScrollActivitySource::External && state_->text_input_session_.has_value() &&
+void Runtime::NotifyScrollActivity(detail::MountedNode& node, const ScrollActivity& activity) {
+  DispatchScrollActivity(node, activity);
+  if (activity.source != ScrollSource::FocusReveal && state_->text_input_session_.has_value() &&
       state_->text_input_session_->node_identity != node.identity) {
-    // External scrolling may move a focused editor off screen; later editing explicitly requests caret reveal again.
-    if (detail::MountedNode* text_input = FindNode(node, state_->text_input_session_->node_identity)) {
-      DispatchScrollActivity(*text_input);
+    // Ancestor scrolling may move a focused editor off screen; later editing explicitly requests caret reveal again.
+    if (FindNode(node, state_->text_input_session_->node_identity)) {
+      state_->text_input_session_->client->ViewportScrolled();
     }
   }
   if (state_->text_selection_overlay_.state.visible) {
@@ -2307,17 +2313,45 @@ void Runtime::BindExtensionInvalidation(detail::MountedNode& node) {
   }
 }
 
-void Runtime::HandleScrollEvent(const ScrollEvent& event) {
+Point Runtime::HandleScrollInput(const ScrollInputEvent& event) {
   if (!state_->mounted_root_) {
-    return;
+    return {};
   }
-  ScrollEventResult result = ApplyScrollEvent(*state_->mounted_root_, event);
-  for (detail::MountedNode* node : result.scroll_chain) {
-    node->scroll_state->motion.Stop();
+  if (!std::isfinite(event.position.x) || !std::isfinite(event.position.y) || !std::isfinite(event.delta_x) ||
+      !std::isfinite(event.delta_y)) {
+    throw std::invalid_argument("HuxerUI scroll input values must be finite");
   }
-  for (detail::MountedNode* node : result.scroll_chain) {
-    NotifyScrollActivity(*node, ScrollActivitySource::External);
+
+  std::vector<detail::MountedNode*> route;
+  if (!BuildPointerRoute(*state_->mounted_root_, event.position, route) || route.empty() ||
+      route.back()->kind == detail::NodeKind::PlatformView) {
+    return {};
   }
+  detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, event.position, true);
+  for (auto target = route.rbegin(); target != route.rend(); ++target) {
+    if ((*target)->interaction.enabled && HasEventBinding<ViewEvents::ScrollInput>((*target)->event_bindings)) {
+      if (EmitEvent<ViewEvents::ScrollInput>((*target)->event_bindings, event).value_or(false)) {
+        return {event.delta_x, event.delta_y};
+      }
+      break;
+    }
+  }
+
+  Point consumed;
+  const auto apply_axis = [&](Axis axis, float delta) {
+    if (delta == 0.0F) {
+      return 0.0F;
+    }
+    for (detail::MountedNode* node : route) {
+      if (node->interaction.enabled && IsScrollContainer(*node) && ScrollAxis(*node) == axis) {
+        StopScrollNodeMotion(*node);
+      }
+    }
+    return ApplyScrollTransaction(route, axis, delta, ScrollSource::Wheel);
+  };
+  consumed.x = apply_axis(Axis::Horizontal, event.delta_x);
+  consumed.y = apply_axis(Axis::Vertical, event.delta_y);
+  return consumed;
 }
 
 bool Runtime::HandleFocusedTextInputKey(const KeyEvent& event) {
@@ -3029,6 +3063,7 @@ Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<
   }
   ViewSpec compiled = CompileViewSpec(*incoming, mounted_environment, *state_->app_resources_);
   auto mounted = std::make_unique<detail::MountedNode>();
+  mounted->runtime = this;
   mounted->identity = state_->next_node_identity_++;
   mounted->owned_environment = std::move(owned_environment);
   ApplyViewDeclaration(*mounted, compiled, mounted_environment);

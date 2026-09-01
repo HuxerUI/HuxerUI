@@ -60,7 +60,7 @@ Use the window-level mode and `SafeArea` behavior documented in [Window Insets a
 ## ScrollView
 
 `ScrollView` measures one content subtree along its scrolling axis and clips presentation to the viewport.
-It owns drag, wheel, kinetic motion, nested-scroll arbitration, focus reveal, and semantic scroll actions.
+It owns direct drag, wheel and trackpad consumption, kinetic motion, nested-scroll arbitration, overscroll, focus reveal, and semantic scroll actions.
 
 ```cpp
 return ScrollView {
@@ -73,6 +73,24 @@ return ScrollView {
 Use `ScrollBar()` as a modifier when a visible indicator is required.
 The scrollbar reads committed scroll geometry; it does not own or duplicate the content offset.
 
+An explicit `ScrollPhysics` modifier configures fling and overscroll behavior for one container.
+Without one, the container uses the current platform adapter's default physics.
+
+```cpp
+return ScrollView(content).With(ScrollPhysics{
+    .fling_enabled = true,
+    .overscroll_enabled = true,
+});
+```
+
+Wheel and trackpad input scrolls nested containers independently on each axis and falls back to the host when HuxerUI consumes neither axis.
+Direct touch dragging may retain a temporary overscroll displacement after every nested consumer reaches its boundary.
+That displacement never changes controller metrics or the authoritative content offset.
+
+Use `ViewEvents::ScrollInput` only when a View needs the raw wheel or trackpad update before default scrolling, such as a zoomable canvas.
+Returning true consumes the complete two-dimensional update; returning false leaves it to built-in scrolling.
+Touch dragging remains pointer input and does not emit `ScrollInputEvent`.
+
 ## ScrollController
 
 A `ScrollController` provides programmatic scrolling and observable metrics.
@@ -81,6 +99,8 @@ Keep the controller stable across recomposition.
 It can scroll to or by an offset and ask a supported virtual layout to scroll to an item.
 Focus and text-input reveal use the same authoritative scroll position internally rather than a separate controller path.
 User input, animation, focus reveal, and controller requests all update one authoritative scroll position.
+Observe `Metrics()` for content-offset and extent changes instead of deriving position from raw scroll input.
+Nested consumption and overscroll do not add another observable scroll state.
 
 ## VirtualList
 

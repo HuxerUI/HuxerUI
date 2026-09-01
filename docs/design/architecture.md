@@ -289,8 +289,11 @@ public:
       const InteractionState& state,
       const std::optional<InteractionEvent>& event);
 
-  virtual void OnScrollActivity(MountedNode& node);
-  virtual void OnScrollGesture(MountedNode& node, bool active);
+  virtual float OnPreScroll(MountedNode& node, Axis axis, float available, ScrollSource source);
+  virtual float OnPostScroll(MountedNode& node, Axis axis, float consumed, float available, ScrollSource source);
+  virtual float OnPreFling(MountedNode& node, Axis axis, float available_velocity);
+  virtual float OnPostFling(MountedNode& node, Axis axis, float consumed_velocity, float available_velocity);
+  virtual void OnScrollActivity(MountedNode& node, const ScrollActivity& activity);
 
   virtual bool HitTest(
       MountedNode& node,

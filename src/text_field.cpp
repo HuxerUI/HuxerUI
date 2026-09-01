@@ -1121,7 +1121,7 @@ public:
     return style_.caret;
   }
 
-  void ScrollActivity() noexcept {
+  void ViewportScrolled() noexcept override {
     caret_reveal_pending_ = false;
     if (node_ && node_->scroll_state) {
       node_->scroll_state->allows_automatic_reveal = false;
@@ -2145,6 +2145,7 @@ private:
     }
     node.scroll_state->axis = configuration_.multiline ? Axis::Vertical : Axis::Horizontal;
     node.scroll_state->touch_drag_only = true;
+    node.scroll_state->allows_overscroll = false;
   }
 
   void ScrollSelectionAtEdge(Point position) {
@@ -2164,7 +2165,7 @@ private:
     } else if (position.x > content.x + content.width) {
       delta = position.x - (content.x + content.width);
     }
-    if (detail::ScrollNodeBy(*node_, delta) != 0.0F) {
+    if (detail::ScrollNodeBy(*node_, delta, ScrollSource::Drag) != 0.0F) {
       caret_reveal_pending_ = false;
     }
   }
@@ -2350,9 +2351,10 @@ public:
     InvalidatePaint();
   }
 
-  void OnScrollActivity(MountedNode& node) override {
+  void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) override {
     static_cast<void>(node);
-    client_->ScrollActivity();
+    static_cast<void>(activity);
+    client_->ViewportScrolled();
     InvalidatePaint();
   }
 

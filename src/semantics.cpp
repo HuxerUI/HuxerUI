@@ -861,11 +861,10 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
     if (!detail::CanScrollNode(*owner, axis_delta)) {
       return false;
     }
-    owner->scroll_state->motion.Stop();
-    if (detail::ScrollNodeBy(*owner, axis_delta) == 0.0F) {
+    detail::StopScrollNodeMotion(*owner);
+    if (detail::ScrollNodeBy(*owner, axis_delta, ScrollSource::Accessibility) == 0.0F) {
       return false;
     }
-    NotifyScrollActivity(*owner, ScrollActivitySource::External);
     return true;
   }
   if (action.kind == SemanticActionKind::ShowOnScreen) {
@@ -881,8 +880,6 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
           continue;
         }
         if (current.scroll_state && detail::ScrollNodeRectIntoView(current, target)) {
-          current.scroll_state->motion.Stop();
-          NotifyScrollActivity(current, ScrollActivitySource::External);
           scrolled = true;
         }
         return true;

@@ -609,9 +609,14 @@ public final class HuxerUIView extends ViewGroup {
         if (action == MotionEvent.ACTION_SCROLL) {
             float horizontal = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
             float vertical = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
-            nativeScroll(nativeHandle, event.getX() / density, event.getY() / density, -horizontal * SCROLL_STEP,
-                    -vertical * SCROLL_STEP);
-            return true;
+            int metaState = event.getMetaState();
+            if (nativeScroll(nativeHandle, event.getX() / density, event.getY() / density,
+                    -horizontal * SCROLL_STEP, -vertical * SCROLL_STEP,
+                    (metaState & KeyEvent.META_SHIFT_ON) != 0, (metaState & KeyEvent.META_CTRL_ON) != 0,
+                    (metaState & KeyEvent.META_ALT_ON) != 0, (metaState & KeyEvent.META_META_ON) != 0)) {
+                return true;
+            }
+            return super.onGenericMotionEvent(event);
         }
         return super.onGenericMotionEvent(event);
     }
@@ -2090,7 +2095,8 @@ public final class HuxerUIView extends ViewGroup {
     private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y,
             int changedButton, int pressedButtons);
 
-    private static native void nativeScroll(long handle, float x, float y, float deltaX, float deltaY);
+    private static native boolean nativeScroll(long handle, float x, float y, float deltaX, float deltaY,
+            boolean shift, boolean control, boolean alt, boolean meta);
 
     private static native boolean nativeKey(long handle, boolean down, int keyCode, byte[] text, boolean shift,
             boolean control, boolean alt, boolean meta, boolean repeat);

@@ -454,11 +454,13 @@ EM_JS(
                                                               : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
                                                                   ? root.clientHeight
                                                                   : 1;
-                        Module._huxerui_web_wheel(
-                            session_id, point[0], point[1], event.deltaX * unit, event.deltaY * unit
-                        );
-                        event.preventDefault();
-                        event.stopPropagation();
+                        if (Module._huxerui_web_wheel(
+                                session_id, point[0], point[1], event.deltaX * unit, event.deltaY * unit,
+                                event.shiftKey, event.ctrlKey, event.altKey, event.metaKey
+                            )) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }
                       },
             {capture : true, passive : false}
         );
@@ -945,10 +947,9 @@ public:
     }
   }
 
-  void HandleWheel(ScrollEvent event) {
-    if (runtime_ != nullptr) {
-      runtime_->HandleScrollEvent(event);
-    }
+  bool HandleWheel(ScrollInputEvent event) {
+    const Point consumed = runtime_ != nullptr ? runtime_->HandleScrollInput(event) : Point{};
+    return consumed.x != 0.0F || consumed.y != 0.0F;
   }
 
   bool HandleKey(KeyEvent event) {
@@ -1222,10 +1223,13 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
   });
 }
 
-EMSCRIPTEN_KEEPALIVE void huxerui_web_wheel(std::uintptr_t session_id, float x, float y, float delta_x, float delta_y) {
-  huxerui::detail::DispatchWebSession(session_id, "wheel input", [=](auto& platform) {
-    platform.HandleWheel({{x, y}, delta_x, delta_y});
+EMSCRIPTEN_KEEPALIVE bool huxerui_web_wheel(std::uintptr_t session_id, float x, float y, float delta_x, float delta_y,
+                                           bool shift, bool control, bool alt, bool meta) {
+  bool handled = false;
+  huxerui::detail::DispatchWebSession(session_id, "wheel input", [&](auto& platform) {
+    handled = platform.HandleWheel({{x, y}, delta_x, delta_y, {shift, control, alt, meta}});
   });
+  return handled;
 }
 
 EMSCRIPTEN_KEEPALIVE bool huxerui_web_key(

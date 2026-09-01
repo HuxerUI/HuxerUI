@@ -1280,14 +1280,23 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 
   const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
   const float scale = event.hasPreciseScrollingDeltas ? 1.0F : 12.0F;
-  huxeruiRuntime->HandleScrollEvent({
+  const huxerui::Point consumed = huxeruiRuntime->HandleScrollInput({
       {
           static_cast<float>(point.x),
           static_cast<float>(point.y),
       },
       static_cast<float>(-event.scrollingDeltaX) * scale,
       static_cast<float>(-event.scrollingDeltaY) * scale,
+      {
+          (event.modifierFlags & NSEventModifierFlagShift) != 0,
+          (event.modifierFlags & NSEventModifierFlagControl) != 0,
+          (event.modifierFlags & NSEventModifierFlagOption) != 0,
+          (event.modifierFlags & NSEventModifierFlagCommand) != 0,
+      },
   });
+  if (consumed.x == 0.0F && consumed.y == 0.0F) {
+    [super scrollWheel:event];
+  }
 }
 
 @end

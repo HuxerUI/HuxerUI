@@ -57,6 +57,10 @@ GestureSettings PlatformAdapter::GestureDefaults() const noexcept {
   return {};
 }
 
+ScrollPhysics PlatformAdapter::ScrollDefaults() const noexcept {
+  return {};
+}
+
 std::shared_ptr<FileSystem> PlatformAdapter::CreateFileSystem() {
   return {};
 }

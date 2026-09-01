@@ -6,6 +6,7 @@
 #include <optional>
 #include <string_view>
 
+#include <huxerui/scroll.h>
 #include <huxerui/text.h>
 
 namespace huxerui {
@@ -62,6 +63,8 @@ public:
   virtual double Now() const noexcept = 0;
   void DispatchToUIThread(std::function<void()> task) const;
   virtual GestureSettings GestureDefaults() const noexcept;
+  /// Returns the default fling and overscroll policy for scroll containers without an explicit ScrollPhysics modifier.
+  virtual ScrollPhysics ScrollDefaults() const noexcept;
   /// Applies the resolved pointer cursor to the HuxerUI host surface.
   ///
   /// Embedded adapters without pointer-cursor support may leave this optional capability as a no-op.

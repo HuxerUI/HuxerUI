@@ -673,22 +673,33 @@ struct ScrollMotionFrameResult {
 
 class ScrollMotion {
 public:
-  void Stop() noexcept;
+  void Stop(MountedNode& node, ScrollPhase phase = ScrollPhase::Cancel);
   bool StartMomentum(MountedNode& node, float velocity);
+  bool StartOverscrollSettlement(MountedNode& node);
   ScrollMotionFrameResult Advance(MountedNode& node, const FrameInfo& frame);
 
 private:
+  enum class Mode {
+    Idle,
+    Momentum,
+    OverscrollSettlement,
+  };
+
+  void Reset() noexcept;
+
   float velocity_ = 0.0F;
   std::optional<double> previous_timestamp_;
-  bool momentum_active_ = false;
+  Mode mode_ = Mode::Idle;
 };
 
 struct ScrollNodeState {
   Axis axis = Axis::Vertical;
   bool touch_drag_only = false;
   bool allows_automatic_reveal = true;
+  bool allows_overscroll = true;
   float offset_y = 0.0F;
   float offset_x = 0.0F;
+  float overscroll_offset = 0.0F;
   float content_height = 0.0F;
   float content_width = 0.0F;
   std::optional<Rect> viewport_override;
@@ -714,6 +725,7 @@ struct NodePresentation {
 // MountedNode is the retained counterpart of ViewSpec. Runtime reads copied component payloads only from matching
 // NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
 struct MountedNode final : public huxerui::MountedNode {
+  Runtime* runtime = nullptr;
   NodeKind kind = NodeKind::Layout;
   std::uint64_t identity = 0;
   std::optional<ViewKey> key;
@@ -1020,13 +1032,11 @@ ComposeSceneTransition(ActiveSceneTransition& transition, const RenderNode* live
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
-  ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerState> state);
+  ScrollConnection(MountedNode& node, const ScrollController& controller);
 
-  [[nodiscard]] const std::shared_ptr<ScrollControllerState>& State() const noexcept {
-    return state_;
-  }
-
+  [[nodiscard]] bool Matches(const ScrollController& controller) const noexcept;
   [[nodiscard]] bool IsCurrent() const noexcept;
+  void Connect();
   bool ScrollTo(float offset);
   bool ScrollBy(float delta);
   bool ScrollToItem(std::size_t index, ScrollAlignment alignment);
@@ -1040,12 +1050,11 @@ private:
   [[nodiscard]] float CurrentOffset() const noexcept;
   void SetCurrentOffset(float offset) noexcept;
 
-  Runtime* runtime_;
   MountedNode* node_;
   std::shared_ptr<ScrollControllerState> state_;
 };
 
-void PrepareScrollController(MountedNode& node, Runtime& runtime);
+void PrepareScrollController(MountedNode& node);
 void CompleteScrollController(MountedNode& node);
 
 class VirtualMeasureSession {
@@ -1345,6 +1354,7 @@ struct Runtime::State {
   std::shared_ptr<detail::WindowService> window_service_;
   std::shared_ptr<detail::SceneTransitionService> scene_transition_service_;
   GestureSettings gesture_settings_;
+  ScrollPhysics default_scroll_physics_;
   std::optional<detail::ActiveSceneTransition> scene_transition_;
   std::unique_ptr<detail::MountedNode> mounted_root_;
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
@@ -1397,6 +1407,18 @@ struct RuntimeAccess {
 
   static const MountedNode* RootNode(const Runtime& runtime) noexcept {
     return runtime.RootNode();
+  }
+
+  static const ScrollPhysics& DefaultScrollPhysics(const Runtime& runtime) noexcept {
+    return runtime.state_->default_scroll_physics_;
+  }
+
+  static void NotifyScrollActivity(Runtime& runtime, MountedNode& node, const ScrollActivity& activity) {
+    runtime.NotifyScrollActivity(node, activity);
+  }
+
+  static void RequestFrame(Runtime& runtime) {
+    runtime.RequestFrame();
   }
 
   static std::optional<std::uint64_t> HitTestPlatformView(const Runtime& runtime, Point position) {
@@ -1469,14 +1491,19 @@ bool IsScrollContainer(const MountedNode& node) noexcept;
 Axis ScrollAxis(const MountedNode& node) noexcept;
 Rect ScrollViewport(const MountedNode& node) noexcept;
 bool CanScrollNode(const MountedNode& node, float delta);
-float ScrollNodeBy(MountedNode& node, float delta);
+bool CanOverscrollNode(const MountedNode& node);
+float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source);
 bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect);
 
-struct ScrollEventResult {
-  std::vector<MountedNode*> scroll_chain;
-};
-
-ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event);
+ScrollMetrics ResolveScrollMetrics(const MountedNode& node) noexcept;
+const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node);
+void ValidateScrollPhysics(const ScrollPhysics& physics);
+void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhase phase, float delta);
+void StopScrollNodeMotion(MountedNode& node, ScrollPhase phase = ScrollPhase::Cancel);
+float ApplyScrollTransaction(const std::vector<MountedNode*>& route, Axis axis, float delta, ScrollSource source,
+                             std::vector<std::uint64_t>* direct_activity_nodes = nullptr,
+                             bool allow_overscroll = false);
+float ApplyPreFling(const std::vector<MountedNode*>& route, Axis axis, float velocity);
 bool AdvanceMountedNodeFrame(MountedNode& node, const FrameInfo& frame);
 
 bool IsVirtualLayoutNode(const MountedNode& node) noexcept;

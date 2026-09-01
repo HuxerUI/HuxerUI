@@ -1152,14 +1152,14 @@ private:
     case WM_MOUSEWHEEL: {
       const float delta =
           static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
-      runtime_->HandleScrollEvent({ScreenPoint(l_param), 0.0F, -delta});
-      return 0;
+      const Point consumed = runtime_->HandleScrollInput({ScreenPoint(l_param), 0.0F, -delta, CurrentKeyModifiers()});
+      return consumed.x != 0.0F || consumed.y != 0.0F ? std::optional<LRESULT>{0} : std::nullopt;
     }
     case WM_MOUSEHWHEEL: {
       const float delta =
           static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
-      runtime_->HandleScrollEvent({ScreenPoint(l_param), delta, 0.0F});
-      return 0;
+      const Point consumed = runtime_->HandleScrollInput({ScreenPoint(l_param), delta, 0.0F, CurrentKeyModifiers()});
+      return consumed.x != 0.0F || consumed.y != 0.0F ? std::optional<LRESULT>{0} : std::nullopt;
     }
     default:
       return std::nullopt;

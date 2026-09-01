@@ -240,6 +240,8 @@ public:
   [[nodiscard]] virtual TextInputPositionResult
   QueryTextInputPosition(TextInputSessionId session_id, Point point) const = 0;
   virtual TextInputKeyResult HandleTextKey(const KeyEvent& event) = 0;
+  /// Notifies the client that scrolling changed its own or an ancestor viewport geometry.
+  virtual void ViewportScrolled() {}
   virtual void EndTextInput(TextInputSessionId session_id, TextInputEndReason reason) = 0;
 };
 

@@ -109,7 +109,7 @@ using huxerui::Scale;
 using huxerui::StrokePathCommand;
 using huxerui::ScrollAlignment;
 using huxerui::ScrollController;
-using huxerui::ScrollEvent;
+using huxerui::ScrollInputEvent;
 using huxerui::ScrollView;
 using huxerui::Select;
 using huxerui::SelectEvents;
@@ -312,8 +312,8 @@ public:
     runtime_.HandlePointerEvent(event);
   }
 
-  void HandleScrollEvent(const ScrollEvent& event) {
-    runtime_.HandleScrollEvent(event);
+  Point HandleScrollInput(const ScrollInputEvent& event) {
+    return runtime_.HandleScrollInput(event);
   }
 
   bool HandleKeyEvent(const KeyEvent& event) {

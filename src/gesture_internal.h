@@ -152,7 +152,7 @@ struct TapRecognitionState {
 struct ScrollRecognitionState {
   std::uint64_t node_identity = 0;
   Axis axis = Axis::Vertical;
-  std::optional<std::uint64_t> active_node;
+  std::vector<std::uint64_t> active_nodes;
 };
 
 struct ExtensionRecognitionState {

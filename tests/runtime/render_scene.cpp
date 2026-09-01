@@ -732,7 +732,7 @@ TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
   const PaintCommand* first_commands = first->render_node.content.Commands().data();
   const Rect first_bounds = first->PresentationBounds();
 
-  runtime.HandleScrollEvent(ScrollEvent{{50.0F, 30.0F}, 0.0F, 20.0F});
+  runtime.HandleScrollInput(ScrollInputEvent{{50.0F, 30.0F}, 0.0F, 20.0F});
   const RenderFrame& scrolled = runtime.BuildRenderFrame();
 
   REQUIRE(scroll_view->scroll_state->offset_y == 20.0F);

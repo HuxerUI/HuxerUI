@@ -105,21 +105,14 @@ public:
     return finish({});
   }
 
-  void OnScrollActivity(MountedNode& node) override {
+  void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) override {
     static_cast<void>(node);
     activity_pending_ = true;
     InvalidatePaint();
-  }
-
-  void OnScrollGesture(MountedNode& node, bool active) override {
-    static_cast<void>(node);
-    if (scroll_dragging_ == active) {
-      return;
-    }
-    scroll_dragging_ = active;
-    if (active) {
-      activity_pending_ = true;
-    } else {
+    if (activity.phase == ScrollPhase::Begin) {
+      scroll_dragging_ = true;
+    } else if (activity.phase == ScrollPhase::End || activity.phase == ScrollPhase::Cancel) {
+      scroll_dragging_ = false;
       hide_delay_pending_ = true;
     }
   }
@@ -150,6 +143,9 @@ public:
   NodeExtension::PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!node.IsEnabled()) {
+      if (pointer_dragging_) {
+        detail::NotifyScrollNodeActivity(mounted, ScrollSource::Scrollbar, ScrollPhase::Cancel, 0.0F);
+      }
       pointer_id_.reset();
       pointer_dragging_ = false;
       pointer_draggable_ = false;
@@ -170,6 +166,7 @@ public:
       pointer_draggable_ = geometry->thumb_travel > 0.0F && geometry->thumb.Contains(event.position);
       pointer_dragging_ = true;
       activity_pending_ = true;
+      detail::NotifyScrollNodeActivity(mounted, ScrollSource::Scrollbar, ScrollPhase::Begin, 0.0F);
       return NodeExtension::PointerResult::Capture;
     }
 
@@ -185,7 +182,7 @@ public:
           maximum_offset_
       );
       const float current = pointer_axis_ == Axis::Vertical ? mounted.scroll_state->offset_y : mounted.scroll_state->offset_x;
-      if (detail::ScrollNodeBy(mounted, desired - current) != 0.0F) {
+      if (detail::ScrollNodeBy(mounted, desired - current, ScrollSource::Scrollbar) != 0.0F) {
         activity_pending_ = true;
         InvalidatePaint();
       }
@@ -193,6 +190,8 @@ public:
     }
 
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
+      const ScrollPhase phase = event.type == PointerEventType::Up ? ScrollPhase::End : ScrollPhase::Cancel;
+      detail::NotifyScrollNodeActivity(mounted, ScrollSource::Scrollbar, phase, 0.0F);
       pointer_id_.reset();
       pointer_dragging_ = false;
       pointer_draggable_ = false;
@@ -259,17 +258,8 @@ ScrollBar CompileScrollBar(
   return ScrollBar{style};
 }
 
-void ValidateScrollPhysics(const ScrollPhysics& physics) {
-  if (!std::isfinite(physics.deceleration_rate) || physics.deceleration_rate <= 0.0F ||
-      !std::isfinite(physics.minimum_fling_velocity) || physics.minimum_fling_velocity <= 0.0F ||
-      !std::isfinite(physics.maximum_fling_velocity) ||
-      physics.maximum_fling_velocity < physics.minimum_fling_velocity) {
-    throw std::invalid_argument("HuxerUI scroll physics values must be finite and valid");
-  }
-}
-
 void ApplyScrollPhysics(detail::ViewSpec& spec, const ScrollPhysics& physics) {
-  ValidateScrollPhysics(physics);
+  detail::ValidateScrollPhysics(physics);
   spec.layout_values.insert_or_assign(typeid(ScrollPhysics), detail::MakeErasedLayoutValue(physics));
 }
 

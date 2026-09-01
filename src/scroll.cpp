@@ -3,28 +3,31 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
-#include <utility>
 
 #include "internal.h"
 
 namespace huxerui::detail {
 
-struct ScrollControllerAccess {
-  static const std::shared_ptr<ScrollControllerState>& State(const ScrollController& controller) noexcept {
-    return controller.state_;
-  }
-};
-
 ScrollControllerState::ScrollControllerState(float initial_offset)
     : metrics(std::make_shared<StateCell<ScrollMetrics>>(ScrollMetrics{.offset = initial_offset})),
       pending_offset(initial_offset) {}
 
-ScrollConnection::ScrollConnection(Runtime& runtime, MountedNode& node, std::shared_ptr<ScrollControllerState> state)
-    : runtime_(&runtime), node_(&node), state_(std::move(state)) {}
+ScrollConnection::ScrollConnection(MountedNode& node, const ScrollController& controller)
+    : node_(&node), state_(controller.state_) {}
+
+bool ScrollConnection::Matches(const ScrollController& controller) const noexcept {
+  return state_ == controller.state_;
+}
 
 bool ScrollConnection::IsCurrent() const noexcept {
   const auto current = state_->connection.lock();
   return current && current.get() == this;
+}
+
+void ScrollConnection::Connect() {
+  state_->connection = shared_from_this();
+  state_->was_connected = true;
+  ApplyPending();
 }
 
 bool ScrollConnection::IsVertical() const noexcept {
@@ -59,15 +62,13 @@ bool ScrollConnection::ScrollTo(float offset) {
   if (!IsCurrent()) {
     return false;
   }
-  node_->scroll_state->motion.Stop();
+  StopScrollNodeMotion(*node_);
   const float maximum = std::max(0.0F, ContentExtent() - ViewportExtent());
   const float next = std::clamp(offset, 0.0F, maximum);
   if (next == CurrentOffset()) {
     return true;
   }
-  SetCurrentOffset(next);
-  PublishMetrics();
-  runtime_->NotifyScrollActivity(*node_, Runtime::ScrollActivitySource::External);
+  static_cast<void>(ScrollNodeBy(*node_, next - CurrentOffset(), ScrollSource::Programmatic));
   return true;
 }
 
@@ -101,13 +102,7 @@ void ScrollConnection::PublishMetrics() {
   if (!IsCurrent()) {
     return;
   }
-  ScrollMetrics next{
-      .axis = ScrollAxis(*node_),
-      .offset = CurrentOffset(),
-      .maximum_offset = std::max(0.0F, ContentExtent() - ViewportExtent()),
-      .viewport_extent = ViewportExtent(),
-      .content_extent = ContentExtent(),
-  };
+  const ScrollMetrics next = ResolveScrollMetrics(*node_);
   if (state_->metrics->value == next) {
     return;
   }
@@ -116,7 +111,7 @@ void ScrollConnection::PublishMetrics() {
   NotifyState(state_->metrics);
 }
 
-void PrepareScrollController(MountedNode& node, Runtime& runtime) {
+void PrepareScrollController(MountedNode& node) {
   const auto found = node.layout_values.find(typeid(ScrollControllerBinding));
   if (found == node.layout_values.end()) {
     node.scroll_state->connection.reset();
@@ -126,13 +121,10 @@ void PrepareScrollController(MountedNode& node, Runtime& runtime) {
   if (controller == nullptr) {
     throw std::logic_error("HuxerUI scroll controller binding type mismatch");
   }
-  const auto& state = ScrollControllerAccess::State(*controller);
-  if (!node.scroll_state->connection || node.scroll_state->connection->State() != state) {
-    node.scroll_state->connection = std::make_shared<ScrollConnection>(runtime, node, state);
+  if (!node.scroll_state->connection || !node.scroll_state->connection->Matches(*controller)) {
+    node.scroll_state->connection = std::make_shared<ScrollConnection>(node, *controller);
   }
-  state->connection = node.scroll_state->connection;
-  state->was_connected = true;
-  node.scroll_state->connection->ApplyPending();
+  node.scroll_state->connection->Connect();
 }
 
 void CompleteScrollController(MountedNode& node) {

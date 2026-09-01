@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <string>
 #include <unordered_set>
 
 #include <huxerui/theme.h>
@@ -389,7 +390,7 @@ void ClampScrollOffsetAndCompleteController(MountedNode& node) {
 
 void StopScrollMotionTree(MountedNode& node) {
   if (node.scroll_state) {
-    node.scroll_state->motion.Stop();
+    node.scroll_state->motion.Stop(node);
   }
   for (auto& child : node.children) {
     StopScrollMotionTree(*child);
@@ -480,7 +481,7 @@ Size MeasureNode(
     node.scroll_state->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   }
   if (IsScrollContainer(node)) {
-    PrepareScrollController(node, runtime);
+    PrepareScrollController(node);
   }
   const Constraints resolved_constraints = ResolveConstraints(node.properties, constraints);
   const Constraints content_constraints = resolved_constraints.Deflate(node.resolved_padding);
@@ -900,7 +901,34 @@ bool CanScrollNode(const MountedNode& node, float delta) {
   return delta < 0.0F ? scroll_offset > 0.0F : scroll_offset < max_offset;
 }
 
-float ScrollNodeBy(MountedNode& node, float delta) {
+ScrollMetrics ResolveScrollMetrics(const MountedNode& node) noexcept {
+  if (!node.scroll_state) {
+    return {};
+  }
+  const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  const Rect viewport = ScrollViewport(node);
+  const float viewport_extent = vertical ? viewport.height : viewport.width;
+  const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
+  const float offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
+  return {
+      .axis = ScrollAxis(node),
+      .offset = offset,
+      .maximum_offset = std::max(0.0F, content_extent - viewport_extent),
+      .viewport_extent = viewport_extent,
+      .content_extent = content_extent,
+  };
+}
+
+void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhase phase, float delta) {
+  if (!node.runtime) {
+    return;
+  }
+  RuntimeAccess::NotifyScrollActivity(
+      *node.runtime, node, ScrollActivity{source, phase, ScrollAxis(node), delta, ResolveScrollMetrics(node)}
+  );
+}
+
+float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source) {
   if (!node.interaction.enabled || !IsScrollContainer(node)) {
     return 0.0F;
   }
@@ -919,6 +947,7 @@ float ScrollNodeBy(MountedNode& node, float delta) {
     if (node.scroll_state->connection) {
       node.scroll_state->connection->PublishMetrics();
     }
+    NotifyScrollNodeActivity(node, source, ScrollPhase::Update, scroll_offset - previous);
   }
   return scroll_offset - previous;
 }
@@ -948,7 +977,11 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
   } else if (rect_end > viewport_end) {
     delta = rect_end - viewport_end;
   }
-  const float applied = ScrollNodeBy(node, delta);
+  if (delta == 0.0F) {
+    return false;
+  }
+  StopScrollNodeMotion(node);
+  const float applied = ScrollNodeBy(node, delta, ScrollSource::FocusReveal);
   if (applied == 0.0F) {
     return false;
   }
@@ -965,8 +998,11 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
 const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node) {
   const auto binding = node.layout_values.find(typeid(ScrollPhysics));
   if (binding == node.layout_values.end()) {
-    static const ScrollPhysics default_physics;
-    return default_physics;
+    if (node.runtime) {
+      return RuntimeAccess::DefaultScrollPhysics(*node.runtime);
+    }
+    static const ScrollPhysics fallback;
+    return fallback;
   }
   const auto* physics = std::any_cast<ScrollPhysics>(&binding->second.value);
   if (!physics) {
@@ -975,37 +1011,162 @@ const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node) {
   return *physics;
 }
 
-void ScrollMotion::Stop() noexcept {
+void ValidateScrollPhysics(const ScrollPhysics& physics) {
+  if (!std::isfinite(physics.deceleration_rate) || physics.deceleration_rate <= 0.0F ||
+      !std::isfinite(physics.minimum_fling_velocity) || physics.minimum_fling_velocity <= 0.0F ||
+      !std::isfinite(physics.maximum_fling_velocity) ||
+      physics.maximum_fling_velocity < physics.minimum_fling_velocity ||
+      !std::isfinite(physics.overscroll_resistance) || physics.overscroll_resistance <= 0.0F ||
+      physics.overscroll_resistance > 1.0F || !std::isfinite(physics.maximum_overscroll) ||
+      physics.maximum_overscroll <= 0.0F || !std::isfinite(physics.overscroll_settle_rate) ||
+      physics.overscroll_settle_rate <= 0.0F) {
+    throw std::invalid_argument("HuxerUI scroll physics values must be finite and valid");
+  }
+}
+
+bool CanOverscrollNode(const MountedNode& node) {
+  return node.interaction.enabled && IsScrollContainer(node) && node.scroll_state->allows_overscroll &&
+         ResolveScrollPhysics(node).overscroll_enabled;
+}
+
+void ScrollMotion::Reset() noexcept {
   velocity_ = 0.0F;
   previous_timestamp_.reset();
-  momentum_active_ = false;
+  mode_ = Mode::Idle;
+}
+
+void ScrollMotion::Stop(MountedNode& node, ScrollPhase phase) {
+  const Mode mode = mode_;
+  const float overscroll = node.scroll_state ? std::exchange(node.scroll_state->overscroll_offset, 0.0F) : 0.0F;
+  Reset();
+  if (mode == Mode::Momentum) {
+    NotifyScrollNodeActivity(node, ScrollSource::Momentum, phase, 0.0F);
+  }
+  if (overscroll != 0.0F && node.runtime) {
+    const bool settling = mode == Mode::OverscrollSettlement;
+    const ScrollSource source = settling ? ScrollSource::Overscroll : ScrollSource::Drag;
+    NotifyScrollNodeActivity(node, source, ScrollPhase::Update, -overscroll);
+    if (settling) {
+      NotifyScrollNodeActivity(node, source, phase, 0.0F);
+    }
+    RuntimeAccess::RequestFrame(*node.runtime);
+  }
 }
 
 bool ScrollMotion::StartMomentum(MountedNode& node, float velocity) {
   const ScrollPhysics& physics = ResolveScrollPhysics(node);
   if (!physics.fling_enabled || !std::isfinite(velocity) || std::abs(velocity) < physics.minimum_fling_velocity ||
       !CanScrollNode(node, velocity)) {
-    Stop();
+    Reset();
     return false;
   }
   velocity_ = std::clamp(velocity, -physics.maximum_fling_velocity, physics.maximum_fling_velocity);
   previous_timestamp_.reset();
-  momentum_active_ = true;
+  mode_ = Mode::Momentum;
+  NotifyScrollNodeActivity(node, ScrollSource::Momentum, ScrollPhase::Begin, 0.0F);
   return true;
 }
 
+bool ScrollMotion::StartOverscrollSettlement(MountedNode& node) {
+  if (!node.scroll_state || node.scroll_state->overscroll_offset == 0.0F) {
+    return false;
+  }
+  velocity_ = 0.0F;
+  previous_timestamp_.reset();
+  mode_ = Mode::OverscrollSettlement;
+  NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::Begin, 0.0F);
+  if (node.runtime) {
+    RuntimeAccess::RequestFrame(*node.runtime);
+  }
+  return true;
+}
+
+namespace {
+
+constexpr float scroll_consumption_epsilon = 0.001F;
+
+float ValidateScrollConsumption(float available, float consumed, const char* operation) {
+  const bool opposite_direction = consumed != 0.0F && std::signbit(consumed) != std::signbit(available);
+  if (!std::isfinite(consumed) || opposite_direction ||
+      std::abs(consumed) > std::abs(available) + scroll_consumption_epsilon) {
+    throw std::logic_error(std::string("HuxerUI ") + operation + " returned invalid scroll consumption");
+  }
+  return std::abs(consumed) < scroll_consumption_epsilon ? 0.0F : consumed;
+}
+
+float ApplyPostFling(MountedNode& node, float consumed_velocity, float available_velocity) {
+  float remaining = available_velocity;
+  for (auto extension = node.extensions.rbegin(); extension != node.extensions.rend(); ++extension) {
+    if (!extension->extension || std::abs(remaining) < scroll_consumption_epsilon) {
+      continue;
+    }
+    const float consumed = ValidateScrollConsumption(
+        remaining,
+        extension->extension->OnPostFling(node, ScrollAxis(node), consumed_velocity, remaining),
+        "NodeExtension::OnPostFling"
+    );
+    remaining -= consumed;
+    consumed_velocity += consumed;
+  }
+  return remaining;
+}
+
+} // namespace
+
 ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo& frame) {
-  if (!momentum_active_) {
+  if (mode_ == Mode::OverscrollSettlement) {
+    if (!node.interaction.enabled || !IsScrollContainer(node)) {
+      Stop(node);
+      return {};
+    }
+    if (frame.reduced_motion) {
+      const float previous = node.scroll_state->overscroll_offset;
+      node.scroll_state->overscroll_offset = 0.0F;
+      Reset();
+      NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::Update, -previous);
+      NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::End, 0.0F);
+      return {};
+    }
+    if (!previous_timestamp_.has_value()) {
+      previous_timestamp_ = frame.timestamp;
+      return {.needs_frame = true};
+    }
+    const double elapsed = std::clamp(frame.timestamp - *previous_timestamp_, 0.0, 0.25);
+    previous_timestamp_ = frame.timestamp;
+    if (elapsed <= 0.0) {
+      return {.needs_frame = true};
+    }
+    const ScrollPhysics& physics = ResolveScrollPhysics(node);
+    const float previous = node.scroll_state->overscroll_offset;
+    const float decay = std::exp(-physics.overscroll_settle_rate * static_cast<float>(elapsed));
+    node.scroll_state->overscroll_offset = previous * decay;
+    if (std::abs(node.scroll_state->overscroll_offset) < 0.1F) {
+      node.scroll_state->overscroll_offset = 0.0F;
+      Reset();
+      NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::Update, -previous);
+      NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::End, 0.0F);
+      return {};
+    }
+    NotifyScrollNodeActivity(
+        node, ScrollSource::Overscroll, ScrollPhase::Update, node.scroll_state->overscroll_offset - previous
+    );
+    return {.needs_frame = true};
+  }
+  if (mode_ != Mode::Momentum) {
+    return {};
+  }
+  if (frame.reduced_motion) {
+    Stop(node, ScrollPhase::End);
     return {};
   }
   const ScrollPhysics& physics = ResolveScrollPhysics(node);
   if (!physics.fling_enabled) {
-    Stop();
+    Stop(node, ScrollPhase::End);
     return {};
   }
   const float stop_velocity = physics.minimum_fling_velocity * 0.3F;
   if (!node.interaction.enabled || !IsScrollContainer(node)) {
-    Stop();
+    Stop(node);
     return {};
   }
   if (!previous_timestamp_.has_value()) {
@@ -1028,17 +1189,12 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
   const float decay = std::exp(-physics.deceleration_rate * static_cast<float>(elapsed));
   const float next_velocity = velocity_ * decay;
   const float delta = (velocity_ - next_velocity) / physics.deceleration_rate;
-  const float consumed = ScrollNodeBy(node, delta);
-  if (consumed != 0.0F) {
-    for (NodeExtensionEntry& entry : node.extensions) {
-      if (entry.extension) {
-        entry.extension->OnScrollActivity(node);
-      }
-    }
-  }
-  if (std::abs(consumed - delta) > 0.001F) {
-    const float transfer_velocity = velocity_ - physics.deceleration_rate * consumed;
-    Stop();
+  const float consumed = ScrollNodeBy(node, delta, ScrollSource::Momentum);
+  if (std::abs(consumed - delta) > scroll_consumption_epsilon) {
+    const float available_velocity = velocity_ - physics.deceleration_rate * consumed;
+    const float transfer_velocity = ApplyPostFling(node, velocity_ - available_velocity, available_velocity);
+    Reset();
+    NotifyScrollNodeActivity(node, ScrollSource::Momentum, ScrollPhase::End, 0.0F);
     if (std::abs(transfer_velocity) >= stop_velocity) {
       return {
           .needs_frame = false,
@@ -1048,7 +1204,9 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
     return {};
   }
   if (std::abs(next_velocity) < stop_velocity) {
-    Stop();
+    static_cast<void>(ApplyPostFling(node, velocity_, 0.0F));
+    Reset();
+    NotifyScrollNodeActivity(node, ScrollSource::Momentum, ScrollPhase::End, 0.0F);
     return {};
   }
   velocity_ = next_velocity;
@@ -1076,8 +1234,10 @@ bool AdvanceMountedNodeFrameImpl(
     needs_frame = AdvanceMountedNodeFrameImpl(*child, frame, scroll_ancestors) || needs_frame;
   }
 
+  FrameInfo node_frame = frame;
+  node_frame.reduced_motion = node_frame.reduced_motion || node.reduced_motion;
   const ScrollMotionFrameResult result =
-      scrollable ? node.scroll_state->motion.Advance(node, frame) : ScrollMotionFrameResult{};
+      scrollable ? node.scroll_state->motion.Advance(node, node_frame) : ScrollMotionFrameResult{};
   needs_frame = needs_frame || result.needs_frame;
   if (scrollable && result.transfer_velocity.has_value()) {
     const Axis axis = ScrollAxis(node);
@@ -1106,31 +1266,160 @@ bool AdvanceMountedNodeFrame(MountedNode& node, const FrameInfo& frame) {
   return AdvanceMountedNodeFrameImpl(node, frame, scroll_ancestors);
 }
 
-ScrollEventResult ApplyScrollEvent(MountedNode& node, const ScrollEvent& event) {
-  std::vector<MountedNode*> route;
-  if (!BuildPointerRoute(node, event.position, route)) {
-    return {};
+void StopScrollNodeMotion(MountedNode& node, ScrollPhase phase) {
+  if (node.scroll_state) {
+    node.scroll_state->motion.Stop(node, phase);
   }
+}
 
-  const Axis axis = std::abs(event.delta_x) > std::abs(event.delta_y) ? Axis::Horizontal : Axis::Vertical;
-  float remaining = axis == Axis::Vertical ? event.delta_y : event.delta_x;
-  ScrollEventResult result;
+namespace {
 
-  for (auto candidate = route.rbegin(); candidate != route.rend(); ++candidate) {
-    if (!(*candidate)->interaction.enabled || !IsScrollContainer(**candidate) || ScrollAxis(**candidate) != axis) {
-      continue;
-    }
-    result.scroll_chain.push_back(*candidate);
-    if (std::abs(remaining) < 0.001F) {
-      continue;
-    }
-    const float consumed = ScrollNodeBy(**candidate, remaining);
-    if (consumed != 0.0F) {
-      remaining -= consumed;
+std::vector<MountedNode*> ScrollCandidates(const std::vector<MountedNode*>& route, Axis axis) {
+  std::vector<MountedNode*> candidates;
+  for (MountedNode* node : route) {
+    if (node->interaction.enabled && IsScrollContainer(*node) && ScrollAxis(*node) == axis) {
+      candidates.push_back(node);
     }
   }
+  return candidates;
+}
 
-  return result;
+void BeginDirectActivity(MountedNode& node, std::vector<std::uint64_t>* activity_nodes) {
+  if (!activity_nodes || std::ranges::find(*activity_nodes, node.identity) != activity_nodes->end()) {
+    return;
+  }
+  activity_nodes->push_back(node.identity);
+  NotifyScrollNodeActivity(node, ScrollSource::Drag, ScrollPhase::Begin, 0.0F);
+}
+
+float ConsumeExistingOverscroll(MountedNode& node, float available,
+                                std::vector<std::uint64_t>* activity_nodes) {
+  const float current = node.scroll_state->overscroll_offset;
+  if (current == 0.0F || available == 0.0F || std::signbit(current) == std::signbit(available)) {
+    return 0.0F;
+  }
+  const float resistance = ResolveScrollPhysics(node).overscroll_resistance;
+  const float requested_change = available * resistance;
+  const float applied_change = std::abs(requested_change) <= std::abs(current) ? requested_change : -current;
+  const float consumed = applied_change / resistance;
+  BeginDirectActivity(node, activity_nodes);
+  node.scroll_state->overscroll_offset += applied_change;
+  if (std::abs(node.scroll_state->overscroll_offset) < scroll_consumption_epsilon) {
+    node.scroll_state->overscroll_offset = 0.0F;
+  }
+  NotifyScrollNodeActivity(node, ScrollSource::Drag, ScrollPhase::Update, applied_change);
+  return consumed;
+}
+
+float ApplyTerminalOverscroll(MountedNode& node, float available,
+                              std::vector<std::uint64_t>* activity_nodes) {
+  const ScrollPhysics& physics = ResolveScrollPhysics(node);
+  if (!node.scroll_state->allows_overscroll || !physics.overscroll_enabled || available == 0.0F) {
+    return 0.0F;
+  }
+  const float current = node.scroll_state->overscroll_offset;
+  const float extent_fraction = std::clamp(std::abs(current) / physics.maximum_overscroll, 0.0F, 1.0F);
+  const float resistance = physics.overscroll_resistance * std::max(0.15F, 1.0F - extent_fraction);
+  const float requested = available * resistance;
+  const float next = std::clamp(current + requested, -physics.maximum_overscroll, physics.maximum_overscroll);
+  const float applied = next - current;
+  if (applied == 0.0F) {
+    return 0.0F;
+  }
+  BeginDirectActivity(node, activity_nodes);
+  node.scroll_state->overscroll_offset = next;
+  NotifyScrollNodeActivity(node, ScrollSource::Drag, ScrollPhase::Update, applied);
+  return applied / resistance;
+}
+
+} // namespace
+
+float ApplyScrollTransaction(const std::vector<MountedNode*>& route, Axis axis, float delta, ScrollSource source,
+                             std::vector<std::uint64_t>* direct_activity_nodes, bool allow_overscroll) {
+  if (!std::isfinite(delta) || std::abs(delta) < scroll_consumption_epsilon) {
+    return 0.0F;
+  }
+  const std::vector<MountedNode*> candidates = ScrollCandidates(route, axis);
+  if (candidates.empty()) {
+    return 0.0F;
+  }
+  float remaining = delta;
+
+  if (allow_overscroll) {
+    for (MountedNode* candidate : candidates) {
+      const float consumed = ConsumeExistingOverscroll(*candidate, remaining, direct_activity_nodes);
+      if (consumed != 0.0F) {
+        remaining -= consumed;
+      }
+      if (std::abs(remaining) < scroll_consumption_epsilon) {
+        return delta;
+      }
+    }
+  }
+
+  for (MountedNode* candidate : candidates) {
+    for (NodeExtensionEntry& entry : candidate->extensions) {
+      if (!entry.extension || std::abs(remaining) < scroll_consumption_epsilon) {
+        continue;
+      }
+      remaining -= ValidateScrollConsumption(
+          remaining,
+          entry.extension->OnPreScroll(*candidate, axis, remaining, source),
+          "NodeExtension::OnPreScroll"
+      );
+    }
+  }
+
+  for (auto candidate = candidates.rbegin(); candidate != candidates.rend(); ++candidate) {
+    if (std::abs(remaining) < scroll_consumption_epsilon || !CanScrollNode(**candidate, remaining)) {
+      continue;
+    }
+    BeginDirectActivity(**candidate, direct_activity_nodes);
+    remaining -= ScrollNodeBy(**candidate, remaining, source);
+  }
+
+  for (auto candidate = candidates.rbegin(); candidate != candidates.rend(); ++candidate) {
+    for (auto extension = (*candidate)->extensions.rbegin(); extension != (*candidate)->extensions.rend();
+         ++extension) {
+      if (!extension->extension || std::abs(remaining) < scroll_consumption_epsilon) {
+        continue;
+      }
+      const float already_consumed = delta - remaining;
+      remaining -= ValidateScrollConsumption(
+          remaining,
+          extension->extension->OnPostScroll(**candidate, axis, already_consumed, remaining, source),
+          "NodeExtension::OnPostScroll"
+      );
+    }
+  }
+
+  if (allow_overscroll && std::abs(remaining) >= scroll_consumption_epsilon) {
+    const auto terminal = std::ranges::find_if(candidates, [](const MountedNode* node) {
+      return CanOverscrollNode(*node);
+    });
+    if (terminal != candidates.end()) {
+      remaining -= ApplyTerminalOverscroll(**terminal, remaining, direct_activity_nodes);
+    }
+  }
+
+  return delta - (std::abs(remaining) < scroll_consumption_epsilon ? 0.0F : remaining);
+}
+
+float ApplyPreFling(const std::vector<MountedNode*>& route, Axis axis, float velocity) {
+  float remaining = velocity;
+  for (MountedNode* candidate : ScrollCandidates(route, axis)) {
+    for (NodeExtensionEntry& entry : candidate->extensions) {
+      if (!entry.extension || std::abs(remaining) < scroll_consumption_epsilon) {
+        continue;
+      }
+      remaining -= ValidateScrollConsumption(
+          remaining,
+          entry.extension->OnPreFling(*candidate, axis, remaining),
+          "NodeExtension::OnPreFling"
+      );
+    }
+  }
+  return std::abs(remaining) < scroll_consumption_epsilon ? 0.0F : remaining;
 }
 
 } // namespace huxerui::detail

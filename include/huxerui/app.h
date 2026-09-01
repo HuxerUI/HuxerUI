@@ -398,8 +398,8 @@ public:
   /// Returns whether the window-local position has a HuxerUI context-menu handler.
   /// Platform hosts use this to preserve their native context menu outside claimed HuxerUI content.
   [[nodiscard]] bool HasContextMenuHandler(Point position) const;
-  /// Delivers normalized wheel or trackpad scrolling in logical window-local coordinates.
-  void HandleScrollEvent(const ScrollEvent& event);
+  /// Delivers normalized wheel or trackpad input and returns the actual delta consumed by HuxerUI.
+  [[nodiscard]] Point HandleScrollInput(const ScrollInputEvent& event);
   /// Dispatches a normalized keyboard event and returns whether HuxerUI consumed it.
   bool HandleKeyEvent(const KeyEvent& event);
   /// Queues a subsequent platform activation for ordered delivery on a later frame.
@@ -440,15 +440,10 @@ public:
 private:
   struct State;
 
-  enum class ScrollActivitySource {
-    External,
-    TextInputReveal,
-  };
-
   void RequestFrame();
   void RequestApplicationQuit();
   void RequestFrameAfter(double delay_seconds);
-  void NotifyScrollActivity(detail::MountedNode& node, ScrollActivitySource source);
+  void NotifyScrollActivity(detail::MountedNode& node, const ScrollActivity& activity);
   [[nodiscard]] std::optional<std::uint64_t> HitTestPlatformView(Point position) const;
   [[nodiscard]] std::optional<std::uint64_t> FocusedPlatformView() const;
   void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible);
@@ -494,8 +489,7 @@ private:
   void AdvancePointerRecognition(double timestamp);
   [[nodiscard]] detail::GestureDecision
   UpdatePointerRecognition(detail::PointerSession& session, std::size_t index, const PointerEvent& event);
-  std::vector<detail::MountedNode*> ApplyDragScroll(const detail::PointerSession& session,
-                                                    detail::ScrollRecognitionState& scroll, float delta);
+  void ApplyDragScroll(const detail::PointerSession& session, detail::ScrollRecognitionState& scroll, float delta);
   void HandlePointerDown(const PointerEvent& event);
   void HandlePointerMove(const PointerEvent& event, bool hover_moved);
   void HandlePointerCancel(const PointerEvent& event);
