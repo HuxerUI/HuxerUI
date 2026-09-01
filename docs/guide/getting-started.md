@@ -158,7 +158,7 @@ return Column {
 
 ```text
 huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
@@ -172,5 +172,10 @@ huxerui open ios [--source <path>]
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
 Packaged application artifacts are collected under `dist/<platform>`.
 Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
+
+Library names remain repository and display identities.
+`--namespace` selects the exact generated C++ namespace, while `--target` selects an unqualified or single-package-qualified public CMake target.
+For example, `--namespace scave::camera --target Scave::Camera` generates `<scave/camera.h>`, `scave::camera::Install`, and the consumer target `Scave::Camera`.
+When omitted, both values retain the name-derived defaults.
 
 Continue with [Core Concepts](core-concepts.md) and [Components and Input](components.md).

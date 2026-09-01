@@ -119,6 +119,6 @@ if (EMSCRIPTEN AND COMMAND huxerui_configure_web_app)
 endif ()
 
 huxerui_use_library(@TARGET_NAME@
-        TARGET @LIBRARY_PRODUCT_NAME@::@LIBRARY_PRODUCT_NAME@
+        TARGET @LIBRARY_PUBLIC_TARGET@
         PATH "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )

@@ -1,7 +1,7 @@
-#include <@TARGET_NAME@/@TARGET_NAME@.h>
+#include <@LIBRARY_PRIMARY_HEADER@>
 
-namespace @TARGET_NAME@ {
+namespace @LIBRARY_NAMESPACE@ {
 
 void Install(huxerui::RootContext&) {}
 
-} // namespace @TARGET_NAME@
+} // namespace @LIBRARY_NAMESPACE@

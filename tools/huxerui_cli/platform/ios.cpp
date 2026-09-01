@@ -388,12 +388,12 @@ public:
     return RenderTemplateTree("platform/ios/app", context);
   }
 
-  std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext& context) const override {
-    const std::string product_name = MakeLibraryProductName(context.project_name);
+  std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext& context) const override {
+    const std::string product_name = LibraryProductName(context.public_target);
     const std::array replacements{
         TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", product_name},
     };
-    std::vector<GeneratedFile> files = RenderTemplateTree("platform/ios/library", context, replacements);
+    std::vector<GeneratedFile> files = RenderTemplateTree("platform/ios/library", context.project, replacements);
     files.push_back({"Sources/" + product_name + "/" + product_name + ".swift", {}});
     return files;
   }

@@ -220,7 +220,7 @@ The implemented command surface is:
 
 ```text
 huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
@@ -568,7 +568,7 @@ CameraKit/
   CMakeLists.txt
   README.md
   LICENSE
-  include/camera_kit/
+  include/camerakit/
   resources/
     images/
     strings/
@@ -598,19 +598,32 @@ Project scaffolding distinguishes the application and library shapes explicitly:
 
 ```text
 huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui create library <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 ```
 
 Library names do not require a `huxerui-` prefix and may use uppercase ASCII letters.
-The scaffold preserves the supplied name for the repository directory and project display name, while deriving one lowercase snake-case identifier for CMake, C++, headers, resources, and Preview targets.
+The scaffold preserves the supplied name for the repository directory and project display name and derives a lowercase snake-case project-local identifier for private source filenames and Preview targets.
 For example, `CameraKit`, `camera-kit`, and `camera_kit` derive `camera_kit`; leading, trailing, or repeated separators are rejected.
-The public product removes separators and capitalizes lowercase segment starts while preserving intentional capitalization, so `CameraKit` generates `CameraKit::CameraKit` and `HuxerUI-CameraKit` generates `HuxerUICameraKit::HuxerUICameraKit`.
-The generated target therefore retains acronyms without placing third-party targets under the framework-owned `HuxerUI::` namespace.
+
+`--namespace` owns the exact C++ namespace used by generated declarations and definitions.
+It accepts one or more non-reserved ASCII C++ identifiers separated by `::` and otherwise preserves the supplied spelling.
+`--target` owns the exact consumer-facing CMake target used by `huxerui_use_library`.
+It accepts either one ASCII letter-and-digit segment or exactly two such segments separated by `::`; a qualified target cannot claim the framework-owned `HuxerUI::` package.
+The default namespace is the project-local snake-case identifier.
+The default public target removes project-name separators and capitalizes lowercase segment starts while preserving intentional capitalization, so `CameraKit` generates `CameraKit::CameraKit` and `HuxerUI-CameraKit` generates `HuxerUICameraKit::HuxerUICameraKit`.
+
+The public target deterministically projects the common build identities without adding more CLI options or editable metadata.
+Each target segment becomes a lowercase token without inserted separators.
+An unqualified target is used directly as the implementation and public target without an alias; its lowercase token remains the resource namespace and both header tokens, so `CameraKit` produces target `CameraKit`, resource namespace `camerakit`, and primary header `<camerakit/camerakit.h>`.
+A qualified target such as `Scave::Camera` produces implementation target and resource namespace `scave_camera`, primary header `<scave/camera.h>`, and alias `Scave::Camera`.
+If both qualified segments normalize to the same token, as in `CameraKit::CameraKit`, the implementation target and resource namespace fold to `camerakit` rather than repeating the token.
+Only qualified public targets need an alias.
 
 `--id` is the complete stable reverse-domain project identifier rather than an organization prefix.
 For an application it initializes the Android application ID and namespace, Apple bundle identifier, and equivalent platform product identifiers.
 For a library it initializes the Android library namespace and the CLI's stable platform-package identity.
-Maven coordinates, Swift package and product names, the C++ namespace, the CMake target, and resource namespaces remain owned by their respective platform or common project files and are not inferred by splitting `--id`.
+Maven coordinates, the C++ namespace, the CMake target, and resource namespaces remain owned by their respective platform or common project files and are not inferred by splitting `--id`.
+The generated iOS Swift product follows the public CMake target suffix because the existing library graph records only that target and source root; the Swift package name and other platform publication policy remain platform-owned.
 When omitted, the scaffold uses `com.example.<normalized-name>` as an editable development default.
 
 Project kind selects the platform artifact shape, so there are no separate Android application-versus-library or Apple application-versus-package options.
@@ -626,6 +639,8 @@ macOS and Web currently add only the Preview shell because no separate platform-
 `platform add` applies the same behavior after creation and refuses to overwrite either an existing platform package or Preview shell.
 Later commands obtain launch artifacts from the owning platform or CMake build output, while platform-package attachment uses the platform-neutral generated library graph.
 Deleting `.huxerui` and regenerating it does not require parsing `CMakeLists.txt` or maintaining a second editable manifest.
+The generated library's CMake planning output records the exact namespace and public target alongside its project identity.
+`platform add` reads that planning output and recomputes the header, implementation target, and resource namespace through the same deterministic projection used during creation.
 
 A library never gains an application entry solely for previewing.
 Every generated library instead contains `examples/preview`, an ordinary standalone HuxerUI application that consumes the library through a local path:
@@ -650,7 +665,7 @@ The preview installs the same public RootHook that a consuming application uses:
 
 ```cpp
 #include <huxerui/huxerui.h>
-#include <camera_kit/camera_kit.h>
+#include <camerakit/camerakit.h>
 
 using namespace huxerui;
 
@@ -687,16 +702,16 @@ Common C++ tests, platform-package tests, and the preview application remain com
 The library repository declares its common C++ target and resources in CMake rather than adding a HuxerUI-specific JSON or YAML manifest:
 
 ```cmake
-huxerui_add_library(camera_kit
+huxerui_add_library(camerakit
         SOURCES
             src/camera_kit.cpp
         RESOURCES
             resources
         RESOURCE_NAMESPACE
-            camera_kit
+            camerakit
 )
 
-add_library(CameraKit::CameraKit ALIAS camera_kit)
+add_library(CameraKit::CameraKit ALIAS camerakit)
 ```
 
 Applications acquire and link one library through one repeated helper.
@@ -794,7 +809,7 @@ Runtime installation remains explicit C++ application policy.
 An application includes the library's public header and places its typed installer directly in `AppOptions::root_hooks`:
 
 ```cpp
-#include <camera_kit/camera_kit.h>
+#include <camerakit/camerakit.h>
 
 const Application application{
     App,
@@ -812,7 +827,8 @@ Generated platform attachment files remain build output rather than another edit
 Platform dependencies remain expressed in their owning ecosystem.
 An Android library's `platform/android` directory is an Android library whose Gradle build declares Java or Kotlin sources, Android resources, C++ dependencies, and third-party libraries, while its library manifest declares mergeable Android components and permissions.
 An Apple library's `platform/ios` directory is a Swift package whose `Package.swift` declares targets, resources, linked system libraries, and package dependencies.
-Its library product matches the suffix of the requested public CMake target, such as `CameraKit` for `CameraKit::CameraKit`, so the generated aggregator can attach it without parsing `Package.swift` or duplicating product metadata in the library graph.
+Its generated library product matches the suffix of a qualified public CMake target, such as `Camera` for `Scave::Camera`, so the generated aggregator can attach it without parsing `Package.swift` or duplicating product metadata in the library graph.
+For an unqualified target, the existing platform product-name normalization remains local to the iOS package generator.
 Equivalent future platforms use their own package and build systems.
 
 The application shell owns final application policy even when a platform package contributes mergeable declarations.

@@ -271,9 +271,9 @@ public:
     return files;
   }
 
-  std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext& context) const override {
+  std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext& context) const override {
     std::vector<GeneratedFile> files =
-        RenderTemplateTree("platform/android/library", context, android_template_replacements);
+        RenderTemplateTree("platform/android/library", context.project, android_template_replacements);
     AppendFiles(files, AndroidWrapperFiles());
     files.push_back({"consumer-rules.pro", {}});
     return files;

@@ -22,7 +22,7 @@ struct GeneratedFile {
 struct ProjectTemplateContext {
   /// User-facing project name.
   std::string project_name;
-  /// Sanitized CMake target and product identifier.
+  /// Sanitized project-local target and source-file identifier.
   std::string target_name;
   /// Reverse-domain application or library identifier.
   std::string project_id;
@@ -31,6 +31,16 @@ struct ProjectTemplateContext {
   /// @param value Template text containing tokens such as `@PROJECT_NAME@` or `@PROJECT_ID@`.
   /// @return Rendered text.
   [[nodiscard]] std::string Render(std::string_view value) const;
+};
+
+/// Independently selected public identities for a generated reusable library.
+struct LibraryTemplateContext {
+  /// Project and platform-package identity derived from the project name and ID.
+  ProjectTemplateContext project;
+  /// Exact C++ namespace used by generated common declarations and definitions.
+  std::string cpp_namespace;
+  /// Exact CMake target requested by consuming applications.
+  std::string public_target;
 };
 
 /// Additional token replacement applied while rendering a template tree.

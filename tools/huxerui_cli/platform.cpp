@@ -160,7 +160,7 @@ std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandC
 
 } // namespace detail
 
-std::vector<GeneratedFile> PlatformDriver::CreateLibraryPackage(const ProjectTemplateContext&) const {
+std::vector<GeneratedFile> PlatformDriver::CreateLibraryPackage(const LibraryTemplateContext&) const {
   return {};
 }
 

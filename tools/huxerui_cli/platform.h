@@ -148,7 +148,7 @@ public:
   /// Generates the platform-owned package for a reusable library.
   /// @param context Library identity used to render templates.
   /// @return Files relative to the library platform root, or an empty vector when no package is needed.
-  [[nodiscard]] virtual std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext& context) const;
+  [[nodiscard]] virtual std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext& context) const;
 
   /// Validates a generated platform shell.
   /// @param shell_root Platform shell directory.

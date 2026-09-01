@@ -81,7 +81,7 @@ public:
     return RenderTemplateTree("platform/desktop/app", context);
   }
 
-  std::vector<GeneratedFile> CreateLibraryPackage(const ProjectTemplateContext&) const override {
+  std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext&) const override {
     return {{"src/.gitkeep", {}}};
   }
 

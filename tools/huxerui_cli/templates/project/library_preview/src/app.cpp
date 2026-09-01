@@ -1,5 +1,5 @@
 #include <huxerui/huxerui.h>
-#include <@LIBRARY_TARGET_NAME@/@LIBRARY_TARGET_NAME@.h>
+#include <@LIBRARY_PRIMARY_HEADER@>
 
 using namespace huxerui;
 
@@ -14,7 +14,7 @@ const Application application{
             .title = "@PROJECT_NAME@",
         },
         .root_hooks = {
-            @LIBRARY_TARGET_NAME@::Install,
+            @LIBRARY_NAMESPACE@::Install,
         },
     }
 };

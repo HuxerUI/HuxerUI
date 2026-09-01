@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "platform.h"
@@ -48,8 +49,8 @@ void PrintHelp(std::ostream& output) {
          << "Usage:\n"
          << "  huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>] "
             "[--agent <agent-list>]\n"
-         << "  huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>] "
-            "[--agent <agent-list>]\n"
+         << "  huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] "
+            "[--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]\n"
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui setup <platform-list> [--yes]\n"
@@ -367,6 +368,8 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   }
 
   std::optional<std::string_view> project_id;
+  std::optional<std::string_view> cpp_namespace;
+  std::optional<std::string_view> public_target;
   std::optional<std::string_view> platform_list;
   std::string_view agent_list = "codex";
   bool platform_specified = false;
@@ -376,7 +379,8 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   }
   for (std::size_t index = 3; index < arguments.size(); ++index) {
     const std::string_view argument = arguments[index];
-    if (argument != "-p" && argument != "--platform" && argument != "--id" && argument != "--agent") {
+    if (argument != "-p" && argument != "--platform" && argument != "--id" && argument != "--agent" &&
+        argument != "--namespace" && argument != "--target") {
       throw UsageError("unexpected create argument: " + std::string(arguments[index]));
     }
     if (++index >= arguments.size()) {
@@ -387,6 +391,22 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
         throw UsageError("--id may be specified only once");
       }
       project_id = arguments[index];
+    } else if (argument == "--namespace") {
+      if (kind != ProjectKind::Library) {
+        throw UsageError("--namespace is supported only for library creation");
+      }
+      if (cpp_namespace) {
+        throw UsageError("--namespace may be specified only once");
+      }
+      cpp_namespace = arguments[index];
+    } else if (argument == "--target") {
+      if (kind != ProjectKind::Library) {
+        throw UsageError("--target is supported only for library creation");
+      }
+      if (public_target) {
+        throw UsageError("--target may be specified only once");
+      }
+      public_target = arguments[index];
     } else if (argument == "-p" || argument == "--platform") {
       if (platform_specified) {
         throw UsageError("--platform may be specified only once");
@@ -405,17 +425,29 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   if (project_id && !IsValidProjectId(*project_id)) {
     throw UsageError("project ID must be a lowercase reverse-domain identifier with letter-prefixed segments");
   }
-  const ProjectTemplateContext context = kind == ProjectKind::Library
-                                             ? MakeLibraryProjectTemplateContext(arguments[2], project_id.value_or(""))
-                                             : MakeProjectTemplateContext(arguments[2], project_id.value_or(""));
+  if (cpp_namespace && cpp_namespace->empty()) {
+    throw UsageError("--namespace requires a non-empty value");
+  }
+  if (public_target && public_target->empty()) {
+    throw UsageError("--target requires a non-empty value");
+  }
+  ProjectTemplate project_template;
+  try {
+    project_template = kind == ProjectKind::Library
+                           ? ProjectTemplate{MakeLibraryTemplateContext(arguments[2], cpp_namespace.value_or(""),
+                                 public_target.value_or(""), project_id.value_or(""))}
+                           : ProjectTemplate{MakeProjectTemplateContext(arguments[2], project_id.value_or(""))};
+  } catch (const std::invalid_argument& error) {
+    throw UsageError(error.what());
+  }
   const std::vector<const PlatformDriver*> platforms =
       platform_list ? ResolvePlatforms(*platform_list) : std::vector<const PlatformDriver*>{};
   const std::vector<AgentSkillDirectory> agent_skill_directories = ResolveAgentSkillDirectories(agent_list);
   const std::filesystem::path skill_source = agent_skill_directories.empty()
                                                  ? std::filesystem::path{}
                                                  : ResolveApplicationDevelopmentSkill(huxerui_home);
-  const std::filesystem::path destination = working_directory / context.project_name;
-  CreateProject(destination, kind, context, platforms, skill_source, agent_skill_directories);
+  const std::filesystem::path destination = working_directory / arguments[2];
+  CreateProject(destination, project_template, platforms, skill_source, agent_skill_directories);
 
   output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << "\nPlatforms:";
   for (const PlatformDriver* platform : platforms) {
@@ -435,16 +467,17 @@ int RunPlatform(std::span<const std::string_view> arguments, const std::filesyst
   }
 
   const Project project = DiscoverProject(working_directory);
-  const auto [kind, context] = LoadProjectTemplateContext(project);
+  const ProjectTemplate project_template = LoadProjectTemplate(project);
+  const bool library = std::holds_alternative<LibraryTemplateContext>(project_template);
   std::vector<const PlatformDriver*> platforms = ResolvePlatforms(arguments[2]);
   if (arguments[2] == "all") {
     platforms.erase(
         std::remove_if(
             platforms.begin(),
             platforms.end(),
-            [&project, kind](const PlatformDriver* platform) {
+            [&project, library](const PlatformDriver* platform) {
               const std::filesystem::path platform_root =
-                  kind == ProjectKind::App ? project.root / "platform" : project.root / "examples/preview/platform";
+                  library ? project.root / "examples/preview/platform" : project.root / "platform";
               return std::filesystem::is_directory(platform_root / platform->Id());
             }
         ),
@@ -454,7 +487,7 @@ int RunPlatform(std::span<const std::string_view> arguments, const std::filesyst
       throw std::runtime_error("all available platforms are already enabled");
     }
   }
-  AddProjectPlatforms(project, kind, context, platforms);
+  AddProjectPlatforms(project, project_template, platforms);
 
   output << "Added platforms:";
   for (const PlatformDriver* platform : platforms) {

@@ -419,6 +419,36 @@ if (TARGET huxerui_cli_core)
             huxerui_cli_core
     )
     add_test(NAME HuxerUICliTests COMMAND huxerui_cli_tests)
+
+    if (WIN32)
+        set(HUXERUI_GENERATED_LIBRARY_PLATFORM windows)
+    elseif (APPLE)
+        set(HUXERUI_GENERATED_LIBRARY_PLATFORM macos)
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(HUXERUI_GENERATED_LIBRARY_PLATFORM linux)
+    else ()
+        unset(HUXERUI_GENERATED_LIBRARY_PLATFORM)
+    endif ()
+    if (TARGET huxerui_cli AND NOT CMAKE_CROSSCOMPILING AND HUXERUI_GENERATED_LIBRARY_PLATFORM)
+        add_test(NAME HuxerUIGeneratedLibraryTests
+                COMMAND "${CMAKE_COMMAND}"
+                        "-DCLI_EXECUTABLE=$<TARGET_FILE:huxerui_cli>"
+                        "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                        "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                        "-DBUILD_CONFIG=$<CONFIG>"
+                        "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                        "-DHOST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+                        "-DHOST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+                        "-DHOST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                        "-DPLATFORM_ID=${HUXERUI_GENERATED_LIBRARY_PLATFORM}"
+                        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generated_library.cmake"
+        )
+        if (MSVC AND CMAKE_GENERATOR MATCHES "^Ninja")
+            set_tests_properties(HuxerUIGeneratedLibraryTests PROPERTIES
+                    ENVIRONMENT "${HUXERUI_SOURCE_SUBDIRECTORY_ENVIRONMENT}"
+            )
+        endif ()
+    endif ()
 endif ()
 
 if (TARGET huxerui_cli AND (WIN32 OR APPLE OR (UNIX AND NOT APPLE AND NOT EMSCRIPTEN)))

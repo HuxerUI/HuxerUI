@@ -17,7 +17,7 @@ The packaged CLI exposes these top-level forms at the time this Skill is distrib
 
 ```text
 huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui create library <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
+huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
@@ -77,8 +77,8 @@ A generated library has its public header and implementation at the root, plus a
 ```text
 LibraryName/
   CMakeLists.txt
-  include/<target>/<target>.h
-  src/<target>.cpp
+  include/<public-target-package>/<public-target-product>.h
+  src/<project-identifier>.cpp
   resources/
     images/
     raw/
@@ -95,7 +95,11 @@ LibraryName/
   <selected-skill-root>/huxerui-app-development/
 ```
 
-The library root uses `huxerui_add_library`; its preview consumes that target through `huxerui_use_library`. Some platform package subtrees are present only when the selected platform needs them.
+The library name owns the repository directory, display name, and private source identity.
+`--namespace` selects the exact generated C++ namespace, while `--target` selects the exact public CMake target and deterministically projects the lowercase public header path, implementation target, and resource namespace.
+For example, `--namespace acme::camera --target Acme::Camera` produces `<acme/camera.h>`, namespace `acme::camera`, implementation target and resource namespace `acme_camera`, and public alias `Acme::Camera`.
+An unqualified target such as `camera` uses `camera` directly without an alias and produces `<camera/camera.h>`.
+The library root uses `huxerui_add_library`; its preview consumes the public target through `huxerui_use_library`. Some platform package subtrees are present only when the selected platform needs them.
 
 Inspect the current generated result because this layout can evolve. Do not hand-create a stale replacement when the CLI is available.
 

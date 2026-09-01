@@ -143,6 +143,8 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   }
   REQUIRE(invocation.output.find("all") != std::string::npos);
   REQUIRE(invocation.output.find("none") != std::string::npos);
+  REQUIRE(invocation.output.find("--namespace <cpp-namespace>") != std::string::npos);
+  REQUIRE(invocation.output.find("--target <public-cmake-target>") != std::string::npos);
   REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
   REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
 }
@@ -196,7 +198,7 @@ TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
   REQUIRE(activity->content.find("@PROJECT_") == std::string::npos);
   REQUIRE_THROWS_WITH(
       huxerui::cli::RenderTemplateTree("project/library", context),
-      "HuxerUI CLI template contains an unresolved replacement: @LIBRARY_PRODUCT_NAME@"
+      "HuxerUI CLI template contains an unresolved replacement: @LIBRARY_NAMESPACE@"
   );
   REQUIRE_THROWS_WITH(
       huxerui::cli::RenderTemplateTree("missing/templates", context),
@@ -335,7 +337,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(invocation.result == 0);
   const std::filesystem::path library = temporary.Path() / "HuxerUI-CameraKit";
   const std::filesystem::path preview = library / "examples/preview";
-  REQUIRE(std::filesystem::is_regular_file(library / "include/huxer_ui_camera_kit/huxer_ui_camera_kit.h"));
+  REQUIRE(std::filesystem::is_regular_file(library / "include/huxeruicamerakit/huxeruicamerakit.h"));
   REQUIRE(std::filesystem::is_regular_file(library / "src/huxer_ui_camera_kit.cpp"));
   REQUIRE(std::filesystem::is_directory(library / "resources/images"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/android/build.gradle"));
@@ -355,12 +357,12 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(swift_package.find(".iOS(.v15)") != std::string::npos);
   REQUIRE(swift_package.find("targets: [\"HuxerUICameraKit\"]") != std::string::npos);
   const std::string library_cmake = Read(library / "CMakeLists.txt");
-  REQUIRE(library_cmake.find("huxerui_add_library(huxer_ui_camera_kit") != std::string::npos);
+  REQUIRE(library_cmake.find("huxerui_add_library(huxeruicamerakit") != std::string::npos);
   REQUIRE(library_cmake.find("RESOURCES\n            resources") != std::string::npos);
-  REQUIRE(library_cmake.find("RESOURCE_NAMESPACE\n            huxer_ui_camera_kit") != std::string::npos);
+  REQUIRE(library_cmake.find("RESOURCE_NAMESPACE\n            huxeruicamerakit") != std::string::npos);
   REQUIRE(library_cmake.find("huxerui_add_resources") == std::string::npos);
   REQUIRE(
-      library_cmake.find("add_library(HuxerUICameraKit::HuxerUICameraKit ALIAS huxer_ui_camera_kit)") !=
+      library_cmake.find("add_library(HuxerUICameraKit::HuxerUICameraKit ALIAS huxeruicamerakit)") !=
       std::string::npos
   );
   REQUIRE(library_cmake.find("platform/android/src/main/cpp/*.cpp") != std::string::npos);
@@ -375,6 +377,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(preview_cmake.find("PATH \"${CMAKE_CURRENT_SOURCE_DIR}/../..\"") != std::string::npos);
   REQUIRE(preview_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   const std::string preview_application = Read(preview / "src/app.cpp");
+  REQUIRE(preview_application.find("#include <huxeruicamerakit/huxeruicamerakit.h>") != std::string::npos);
   REQUIRE(preview_application.find("huxer_ui_camera_kit::Install") != std::string::npos);
   REQUIRE(preview_application.find("MaterialTheme") == std::string::npos);
   REQUIRE(std::filesystem::is_regular_file(preview / "platform/android/settings.gradle"));
@@ -400,6 +403,123 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(doctor.output.find("missing app/build.gradle") == std::string::npos);
   REQUIRE_FALSE(std::filesystem::exists(library / ".huxerui"));
   REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
+}
+
+TEST_CASE("HuxerUICliCreatesLibrariesWithIndependentPublicIdentities") {
+  TemporaryDirectory temporary;
+  const Invocation invocation = Invoke(
+      temporary.Path(),
+      {
+          "create",
+          "library",
+          "CameraKit",
+          "--namespace",
+          "scave::camera",
+          "--target",
+          "Scave::Camera",
+          "--id",
+          "dev.example.camera",
+          "--agent",
+          "none",
+      }
+  );
+
+  REQUIRE(invocation.result == 0);
+  const std::filesystem::path library = temporary.Path() / "CameraKit";
+  const std::filesystem::path preview = library / "examples/preview";
+  REQUIRE(std::filesystem::is_regular_file(library / "include/scave/camera.h"));
+  REQUIRE(std::filesystem::is_regular_file(library / "src/camera_kit.cpp"));
+  const std::string header = Read(library / "include/scave/camera.h");
+  REQUIRE(header.find("namespace scave::camera") != std::string::npos);
+  const std::string source = Read(library / "src/camera_kit.cpp");
+  REQUIRE(source.find("#include <scave/camera.h>") != std::string::npos);
+  REQUIRE(source.find("namespace scave::camera") != std::string::npos);
+
+  const std::string library_cmake = Read(library / "CMakeLists.txt");
+  REQUIRE(library_cmake.find("\"schema\": 1") != std::string::npos);
+  REQUIRE(library_cmake.find("\"namespace\": \"scave::camera\"") != std::string::npos);
+  REQUIRE(library_cmake.find("\"publicTarget\": \"Scave::Camera\"") != std::string::npos);
+  REQUIRE(library_cmake.find("huxerui_add_library(scave_camera") != std::string::npos);
+  REQUIRE(library_cmake.find("RESOURCE_NAMESPACE\n            scave_camera") != std::string::npos);
+  REQUIRE(library_cmake.find("add_library(Scave::Camera ALIAS scave_camera)") != std::string::npos);
+
+  const std::string preview_cmake = Read(preview / "CMakeLists.txt");
+  REQUIRE(preview_cmake.find("huxerui_add_app(example_camera_kit") != std::string::npos);
+  REQUIRE(preview_cmake.find("TARGET Scave::Camera") != std::string::npos);
+  const std::string preview_source = Read(preview / "src/app.cpp");
+  REQUIRE(preview_source.find("#include <scave/camera.h>") != std::string::npos);
+  REQUIRE(preview_source.find("scave::camera::Install") != std::string::npos);
+
+  const huxerui::cli::ProjectTemplate project_template =
+      huxerui::cli::LoadProjectTemplate(huxerui::cli::DiscoverProject(library));
+  const auto* identity = std::get_if<huxerui::cli::LibraryTemplateContext>(&project_template);
+  REQUIRE(identity != nullptr);
+  REQUIRE(identity->project.target_name == "camera_kit");
+  REQUIRE(identity->cpp_namespace == "scave::camera");
+  REQUIRE(identity->public_target == "Scave::Camera");
+
+  const Invocation platform_add = Invoke(library, {"platform", "add", "android,ios"});
+  REQUIRE(platform_add.result == 0);
+  REQUIRE(Read(library / "platform/android/build.gradle").find("namespace = \"dev.example.camera\"") !=
+          std::string::npos);
+  const std::string swift_package = Read(library / "platform/ios/Package.swift");
+  REQUIRE(swift_package.find("name: \"CameraKit\"") != std::string::npos);
+  REQUIRE(swift_package.find("targets: [\"Camera\"]") != std::string::npos);
+  REQUIRE(std::filesystem::is_regular_file(library / "platform/ios/Sources/Camera/Camera.swift"));
+  REQUIRE(std::filesystem::is_regular_file(preview / "platform/android/settings.gradle"));
+  REQUIRE(std::filesystem::is_regular_file(preview / "platform/ios/example_camera_kit.xcodeproj/project.pbxproj"));
+}
+
+TEST_CASE("HuxerUICliUsesUnqualifiedLibraryTargetsDirectly") {
+  TemporaryDirectory temporary;
+  const Invocation lowercase = Invoke(
+      temporary.Path(),
+      {"create", "library", "Scave", "--namespace", "scave", "--target", "scave", "--agent", "none"}
+  );
+
+  REQUIRE(lowercase.result == 0);
+  const std::filesystem::path library = temporary.Path() / "Scave";
+  REQUIRE(std::filesystem::is_regular_file(library / "include/scave/scave.h"));
+  const std::string cmake = Read(library / "CMakeLists.txt");
+  REQUIRE(cmake.find("huxerui_add_library(scave") != std::string::npos);
+  REQUIRE(cmake.find("RESOURCE_NAMESPACE\n            scave") != std::string::npos);
+  REQUIRE(cmake.find("\nadd_library(") == std::string::npos);
+  REQUIRE(Read(library / "examples/preview/CMakeLists.txt").find("TARGET scave") != std::string::npos);
+
+  const Invocation mixed_case = Invoke(
+      temporary.Path(),
+      {"create", "library", "Camera", "--namespace", "camera", "--target", "CameraKit", "--agent", "none"}
+  );
+  REQUIRE(mixed_case.result == 0);
+  const std::filesystem::path mixed_case_library = temporary.Path() / "Camera";
+  REQUIRE(std::filesystem::is_regular_file(mixed_case_library / "include/camerakit/camerakit.h"));
+  const std::string mixed_case_cmake = Read(mixed_case_library / "CMakeLists.txt");
+  REQUIRE(mixed_case_cmake.find("huxerui_add_library(CameraKit") != std::string::npos);
+  REQUIRE(mixed_case_cmake.find("RESOURCE_NAMESPACE\n            camerakit") != std::string::npos);
+  REQUIRE(mixed_case_cmake.find("\nadd_library(") == std::string::npos);
+  REQUIRE(Read(mixed_case_library / "examples/preview/CMakeLists.txt").find("TARGET CameraKit") !=
+          std::string::npos);
+}
+
+TEST_CASE("HuxerUICliRejectsInvalidLibraryPublicIdentitiesBeforePublication") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "library", "InvalidNamespace", "--namespace", "class"}).result ==
+          2);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "InvalidNamespace"));
+  REQUIRE(Invoke(temporary.Path(), {"create", "library", "ReservedNamespace", "--namespace", "scave::__camera"})
+              .result == 2);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "ReservedNamespace"));
+  REQUIRE(Invoke(temporary.Path(), {"create", "library", "InvalidTarget", "--target", "Scave::Camera::View"})
+              .result == 2);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "InvalidTarget"));
+  REQUIRE(Invoke(temporary.Path(), {"create", "library", "ReservedTarget", "--target", "HuxerUI::Camera"})
+              .result == 2);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "ReservedTarget"));
+  REQUIRE(Invoke(temporary.Path(), {"create", "library", "EmptyTarget", "--target", ""}).result == 2);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "EmptyTarget"));
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "AppNamespace", "--namespace", "app", "--platform", "macos"})
+              .result == 2);
+  REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "AppNamespace"));
 }
 
 TEST_CASE("HuxerUICliCreatesSkillsForSelectedAgents") {

@@ -39,11 +39,6 @@ private:
   bool committed_ = false;
 };
 
-struct LibraryTemplateContext {
-  ProjectTemplateContext project;
-  std::string product_name;
-};
-
 std::filesystem::path TemporaryPath(const std::filesystem::path& parent, std::string_view stem) {
   const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
   return parent / ("." + std::string(stem) + ".huxerui-tmp-" + std::to_string(nonce));
@@ -122,6 +117,139 @@ bool IsAsciiDigit(char character) noexcept {
   return character >= '0' && character <= '9';
 }
 
+bool AsciiCaseEqual(std::string_view left, std::string_view right) noexcept {
+  if (left.size() != right.size()) {
+    return false;
+  }
+  for (std::size_t index = 0; index < left.size(); ++index) {
+    const char left_character = IsAsciiUpper(left[index]) ? static_cast<char>(left[index] - 'A' + 'a') : left[index];
+    const char right_character =
+        IsAsciiUpper(right[index]) ? static_cast<char>(right[index] - 'A' + 'a') : right[index];
+    if (left_character != right_character) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::string AsciiLower(std::string_view value) {
+  std::string result(value);
+  for (char& character : result) {
+    if (IsAsciiUpper(character)) {
+      character = static_cast<char>(character - 'A' + 'a');
+    }
+  }
+  return result;
+}
+
+bool IsCppKeyword(std::string_view value) noexcept {
+  static constexpr std::array keywords{
+      std::string_view{"alignas"},       std::string_view{"alignof"},      std::string_view{"and"},
+      std::string_view{"and_eq"},       std::string_view{"asm"},          std::string_view{"auto"},
+      std::string_view{"bitand"},       std::string_view{"bitor"},        std::string_view{"bool"},
+      std::string_view{"break"},        std::string_view{"case"},         std::string_view{"catch"},
+      std::string_view{"char"},         std::string_view{"char8_t"},      std::string_view{"char16_t"},
+      std::string_view{"char32_t"},     std::string_view{"class"},        std::string_view{"compl"},
+      std::string_view{"concept"},      std::string_view{"const"},        std::string_view{"consteval"},
+      std::string_view{"constexpr"},    std::string_view{"constinit"},    std::string_view{"const_cast"},
+      std::string_view{"continue"},     std::string_view{"co_await"},     std::string_view{"co_return"},
+      std::string_view{"co_yield"},     std::string_view{"decltype"},     std::string_view{"default"},
+      std::string_view{"delete"},       std::string_view{"do"},           std::string_view{"double"},
+      std::string_view{"dynamic_cast"}, std::string_view{"else"},         std::string_view{"enum"},
+      std::string_view{"explicit"},     std::string_view{"export"},       std::string_view{"extern"},
+      std::string_view{"false"},        std::string_view{"float"},        std::string_view{"for"},
+      std::string_view{"friend"},       std::string_view{"goto"},         std::string_view{"if"},
+      std::string_view{"import"},       std::string_view{"inline"},       std::string_view{"int"},
+      std::string_view{"long"},         std::string_view{"module"},       std::string_view{"mutable"},
+      std::string_view{"namespace"},    std::string_view{"new"},          std::string_view{"noexcept"},
+      std::string_view{"not"},          std::string_view{"not_eq"},       std::string_view{"nullptr"},
+      std::string_view{"operator"},     std::string_view{"or"},           std::string_view{"or_eq"},
+      std::string_view{"private"},      std::string_view{"protected"},    std::string_view{"public"},
+      std::string_view{"register"},     std::string_view{"reinterpret_cast"}, std::string_view{"requires"},
+      std::string_view{"return"},       std::string_view{"short"},        std::string_view{"signed"},
+      std::string_view{"sizeof"},       std::string_view{"static"},       std::string_view{"static_assert"},
+      std::string_view{"static_cast"},  std::string_view{"struct"},       std::string_view{"switch"},
+      std::string_view{"template"},     std::string_view{"this"},         std::string_view{"thread_local"},
+      std::string_view{"throw"},        std::string_view{"true"},         std::string_view{"try"},
+      std::string_view{"typedef"},      std::string_view{"typeid"},       std::string_view{"typename"},
+      std::string_view{"union"},        std::string_view{"unsigned"},     std::string_view{"using"},
+      std::string_view{"virtual"},      std::string_view{"void"},         std::string_view{"volatile"},
+      std::string_view{"wchar_t"},      std::string_view{"while"},        std::string_view{"xor"},
+      std::string_view{"xor_eq"},
+  };
+  return std::find(keywords.begin(), keywords.end(), value) != keywords.end();
+}
+
+bool IsValidCppIdentifier(std::string_view value) noexcept {
+  if (value.empty() || !IsAsciiLetter(value.front()) || value.find("__") != std::string_view::npos ||
+      IsCppKeyword(value)) {
+    return false;
+  }
+  return std::all_of(value.begin() + 1, value.end(), [](char character) {
+    return IsAsciiLetter(character) || IsAsciiDigit(character) || character == '_';
+  });
+}
+
+bool IsValidCppNamespace(std::string_view value) noexcept {
+  if (value.empty()) {
+    return false;
+  }
+  std::size_t start = 0;
+  while (start < value.size()) {
+    const std::size_t separator = value.find("::", start);
+    const std::size_t end = separator == std::string_view::npos ? value.size() : separator;
+    if (!IsValidCppIdentifier(value.substr(start, end - start))) {
+      return false;
+    }
+    if (separator == std::string_view::npos) {
+      return true;
+    }
+    start = separator + 2;
+  }
+  return false;
+}
+
+bool IsValidLibraryTargetSegment(std::string_view value) noexcept {
+  return !value.empty() && IsAsciiLetter(value.front()) &&
+         std::all_of(value.begin() + 1, value.end(), [](char character) {
+           return IsAsciiLetter(character) || IsAsciiDigit(character);
+         });
+}
+
+bool IsValidLibraryPublicTarget(std::string_view value) noexcept {
+  const std::size_t separator = value.find("::");
+  if (separator == std::string_view::npos) {
+    return IsValidLibraryTargetSegment(value);
+  }
+  if (value.find("::", separator + 2) != std::string_view::npos) {
+    return false;
+  }
+  const std::string_view package = value.substr(0, separator);
+  return !AsciiCaseEqual(package, "huxerui") && IsValidLibraryTargetSegment(package) &&
+         IsValidLibraryTargetSegment(value.substr(separator + 2));
+}
+
+struct LibraryTargetProjection {
+  std::string implementation_target;
+  std::string resource_namespace;
+  std::string include_directory;
+  std::string header_name;
+};
+
+LibraryTargetProjection DeriveLibraryTargetProjection(std::string_view public_target) {
+  const std::size_t separator = public_target.find("::");
+  const bool qualified = separator != std::string_view::npos;
+  const std::string package = AsciiLower(qualified ? public_target.substr(0, separator) : public_target);
+  const std::string product = AsciiLower(qualified ? public_target.substr(separator + 2) : public_target);
+  const std::string flattened = package == product ? package : package + "_" + product;
+  return {
+      qualified ? flattened : std::string(public_target),
+      flattened,
+      package,
+      product,
+  };
+}
+
 std::string NormalizeLibraryIdentifier(std::string_view name) {
   std::string identifier;
   identifier.reserve(name.size());
@@ -150,10 +278,6 @@ std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext&
   return RenderTemplateTree("project/app", context);
 }
 
-LibraryTemplateContext MakeLibraryTemplateContext(const ProjectTemplateContext& context) {
-  return {context, MakeLibraryProductName(context.project_name)};
-}
-
 ProjectTemplateContext PreviewContext(const LibraryTemplateContext& library) {
   return {
       library.project.project_name + " Preview",
@@ -162,19 +286,42 @@ ProjectTemplateContext PreviewContext(const LibraryTemplateContext& library) {
   };
 }
 
+const ProjectTemplateContext& ProjectContext(const ProjectTemplate& project_template) {
+  if (const auto* library = std::get_if<LibraryTemplateContext>(&project_template)) {
+    return library->project;
+  }
+  return std::get<ProjectTemplateContext>(project_template);
+}
+
 std::vector<GeneratedFile> LibraryProjectFiles(const LibraryTemplateContext& library) {
+  const LibraryTargetProjection target = DeriveLibraryTargetProjection(library.public_target);
+  const std::string primary_header = target.include_directory + "/" + target.header_name + ".h";
+  std::string alias;
+  if (library.public_target.find("::") != std::string::npos) {
+    alias = "add_library(" + library.public_target + " ALIAS " + target.implementation_target + ")";
+  }
   const std::array replacements{
-      TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", library.product_name},
+      TemplateReplacement{"@LIBRARY_NAMESPACE@", library.cpp_namespace},
+      TemplateReplacement{"@LIBRARY_PUBLIC_TARGET@", library.public_target},
+      TemplateReplacement{"@LIBRARY_IMPLEMENTATION_TARGET@", target.implementation_target},
+      TemplateReplacement{"@LIBRARY_RESOURCE_NAMESPACE@", target.resource_namespace},
+      TemplateReplacement{"@LIBRARY_INCLUDE_DIRECTORY@", target.include_directory},
+      TemplateReplacement{"@LIBRARY_HEADER_NAME@", target.header_name},
+      TemplateReplacement{"@LIBRARY_PRIMARY_HEADER@", primary_header},
+      TemplateReplacement{"@LIBRARY_ALIAS@", alias},
   };
   return RenderTemplateTree("project/library", library.project, replacements);
 }
 
 std::vector<GeneratedFile> PreviewProjectFiles(const LibraryTemplateContext& library) {
   const ProjectTemplateContext context = PreviewContext(library);
+  const LibraryTargetProjection target = DeriveLibraryTargetProjection(library.public_target);
+  const std::string primary_header = target.include_directory + "/" + target.header_name + ".h";
   const std::array replacements{
-      TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", library.product_name},
+      TemplateReplacement{"@LIBRARY_NAMESPACE@", library.cpp_namespace},
       TemplateReplacement{"@LIBRARY_PROJECT_NAME@", library.project.project_name},
-      TemplateReplacement{"@LIBRARY_TARGET_NAME@", library.project.target_name},
+      TemplateReplacement{"@LIBRARY_PUBLIC_TARGET@", library.public_target},
+      TemplateReplacement{"@LIBRARY_PRIMARY_HEADER@", primary_header},
   };
   return RenderTemplateTree("project/library_preview", context, replacements);
 }
@@ -358,15 +505,31 @@ ProjectTemplateContext MakeProjectTemplateContext(std::string_view project_name,
   return {std::string(project_name), std::move(target_name), resolved_id};
 }
 
-ProjectTemplateContext MakeLibraryProjectTemplateContext(std::string_view project_name, std::string_view project_id) {
+LibraryTemplateContext MakeLibraryTemplateContext(std::string_view project_name, std::string_view cpp_namespace,
+    std::string_view public_target, std::string_view project_id) {
   if (!IsValidLibraryProjectName(project_name)) {
     throw std::invalid_argument(
         "library name must start with a letter and contain non-empty letter or digit segments separated by '-' or '_'"
     );
   }
-  ProjectTemplateContext context = MakeProjectTemplateContext(project_name, project_id);
-  context.target_name = NormalizeLibraryIdentifier(project_name);
-  return context;
+  ProjectTemplateContext project = MakeProjectTemplateContext(project_name, project_id);
+  project.target_name = NormalizeLibraryIdentifier(project_name);
+
+  const std::string resolved_namespace =
+      cpp_namespace.empty() ? project.target_name : std::string(cpp_namespace);
+  if (!IsValidCppNamespace(resolved_namespace)) {
+    throw std::invalid_argument(
+        "library namespace must contain non-reserved ASCII C++ identifiers separated by ::");
+  }
+
+  const std::string product = MakeLibraryProductName(project_name);
+  const std::string resolved_target =
+      public_target.empty() ? product + "::" + product : std::string(public_target);
+  if (!IsValidLibraryPublicTarget(resolved_target)) {
+    throw std::invalid_argument("library target must contain one or two ASCII letter-and-digit segments "
+                                "separated by :: and must not use the HuxerUI package namespace");
+  }
+  return {std::move(project), resolved_namespace, resolved_target};
 }
 
 std::string MakeLibraryProductName(std::string_view library_name) {
@@ -416,7 +579,7 @@ Project DiscoverProject(const std::filesystem::path& start) {
   throw std::runtime_error("no HuxerUI project found from " + start.string());
 }
 
-std::pair<ProjectKind, ProjectTemplateContext> LoadProjectTemplateContext(const Project& project) {
+ProjectTemplate LoadProjectTemplate(const Project& project) {
   const std::filesystem::path temporary = TemporaryPath(std::filesystem::temp_directory_path(), "project-plan");
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
@@ -449,10 +612,18 @@ std::pair<ProjectKind, ProjectTemplateContext> LoadProjectTemplateContext(const 
   if (!IsValidProjectName(context.target_name) || !IsValidProjectId(context.project_id)) {
     throw std::runtime_error("project plan contains an invalid project identity");
   }
-  if (kind == ProjectKind::Library && !IsValidLibraryProjectName(context.project_name)) {
+  if (kind == ProjectKind::App) {
+    return context;
+  }
+  if (!IsValidLibraryProjectName(context.project_name)) {
     throw std::runtime_error("project plan contains an invalid library name");
   }
-  return {kind, std::move(context)};
+  std::string cpp_namespace = JsonString(json, "namespace");
+  std::string public_target = JsonString(json, "publicTarget");
+  if (!IsValidCppNamespace(cpp_namespace) || !IsValidLibraryPublicTarget(public_target)) {
+    throw std::runtime_error("project plan contains an invalid library identity");
+  }
+  return LibraryTemplateContext{std::move(context), std::move(cpp_namespace), std::move(public_target)};
 }
 
 Project ResolveApplicationProject(const Project& project) {
@@ -463,13 +634,15 @@ Project ResolveApplicationProject(const Project& project) {
   return project;
 }
 
-void CreateProject(const std::filesystem::path& destination, ProjectKind kind, const ProjectTemplateContext& context,
-                   std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
-                   std::span<const AgentSkillDirectory> agent_skill_directories) {
+void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
+    std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
+    std::span<const AgentSkillDirectory> agent_skill_directories) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
-  if (kind == ProjectKind::App && platforms.empty()) {
+  const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
+  const ProjectTemplateContext& context = ProjectContext(project_template);
+  if (library == nullptr && platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
   }
 
@@ -482,21 +655,20 @@ void CreateProject(const std::filesystem::path& destination, ProjectKind kind, c
 
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
-  if (kind == ProjectKind::App) {
+  if (library == nullptr) {
     WriteFiles(temporary, ApplicationProjectFiles(context));
     CreateResourceDirectories(temporary);
     for (const PlatformDriver* platform : platforms) {
       WriteFiles(temporary / "platform" / platform->Id(), platform->CreateShell(context));
     }
   } else {
-    const LibraryTemplateContext library = MakeLibraryTemplateContext(context);
-    const ProjectTemplateContext preview = PreviewContext(library);
-    WriteFiles(temporary, LibraryProjectFiles(library));
+    const ProjectTemplateContext preview = PreviewContext(*library);
+    WriteFiles(temporary, LibraryProjectFiles(*library));
     CreateResourceDirectories(temporary);
-    WriteFiles(temporary / "examples/preview", PreviewProjectFiles(library));
+    WriteFiles(temporary / "examples/preview", PreviewProjectFiles(*library));
     CreateResourceDirectories(temporary / "examples/preview");
     for (const PlatformDriver* platform : platforms) {
-      const std::vector<GeneratedFile> library_package = platform->CreateLibraryPackage(context);
+      const std::vector<GeneratedFile> library_package = platform->CreateLibraryPackage(*library);
       if (!library_package.empty()) {
         WriteFiles(temporary / "platform" / platform->Id(), library_package);
       }
@@ -509,15 +681,16 @@ void CreateProject(const std::filesystem::path& destination, ProjectKind kind, c
   cleanup.Commit();
 }
 
-void AddProjectPlatforms(const Project& project, ProjectKind kind, const ProjectTemplateContext& context,
-                         std::span<const PlatformDriver* const> platforms) {
+void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,
+    std::span<const PlatformDriver* const> platforms) {
   if (platforms.empty()) {
     throw std::invalid_argument("at least one platform is required");
   }
-  const std::filesystem::path shell_root =
-      kind == ProjectKind::App ? project.root / "platform" : project.root / "examples/preview/platform";
-  const ProjectTemplateContext shell_context =
-      kind == ProjectKind::App ? context : PreviewContext(MakeLibraryTemplateContext(context));
+  const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
+  const ProjectTemplateContext& context = ProjectContext(project_template);
+  const std::filesystem::path shell_root = library == nullptr ? project.root / "platform"
+                                                              : project.root / "examples/preview/platform";
+  const ProjectTemplateContext shell_context = library == nullptr ? context : PreviewContext(*library);
 
   struct PlatformTrees {
     const PlatformDriver* platform;
@@ -529,7 +702,7 @@ void AddProjectPlatforms(const Project& project, ProjectKind kind, const Project
   for (const PlatformDriver* platform : platforms) {
     PlatformTrees trees{
         platform,
-        kind == ProjectKind::Library ? platform->CreateLibraryPackage(context) : std::vector<GeneratedFile>{},
+        library != nullptr ? platform->CreateLibraryPackage(*library) : std::vector<GeneratedFile>{},
         platform->CreateShell(shell_context),
     };
     const std::filesystem::path shell_destination = shell_root / platform->Id();
@@ -546,7 +719,7 @@ void AddProjectPlatforms(const Project& project, ProjectKind kind, const Project
   created.reserve(platforms.size() * 2);
   try {
     for (PlatformTrees& trees : generated) {
-      if (kind == ProjectKind::Library) {
+      if (library != nullptr) {
         if (!trees.library_package.empty()) {
           PublishGeneratedTree(project.root / "platform" / trees.platform->Id(),
                                std::move(trees.library_package), created);

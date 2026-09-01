@@ -12,7 +12,9 @@ if (HUXERUI_PROJECT_PLAN_OUTPUT)
   "kind": "library",
   "name": "@PROJECT_NAME@",
   "id": "@PROJECT_ID@",
-  "target": "@TARGET_NAME@"
+  "target": "@TARGET_NAME@",
+  "namespace": "@LIBRARY_NAMESPACE@",
+  "publicTarget": "@LIBRARY_PUBLIC_TARGET@"
 }
 ]=])
 endif ()
@@ -95,18 +97,18 @@ if (EMSCRIPTEN)
     list(APPEND LIBRARY_SOURCE_FILES ${LIBRARY_WEB_SOURCE_FILES})
 endif ()
 
-huxerui_add_library(@TARGET_NAME@
+huxerui_add_library(@LIBRARY_IMPLEMENTATION_TARGET@
         SOURCES
             ${LIBRARY_SOURCE_FILES}
         RESOURCES
             resources
         RESOURCE_NAMESPACE
-            @TARGET_NAME@
+            @LIBRARY_RESOURCE_NAMESPACE@
 )
 
-target_include_directories(@TARGET_NAME@ PUBLIC
+target_include_directories(@LIBRARY_IMPLEMENTATION_TARGET@ PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:include>"
 )
 
-add_library(@LIBRARY_PRODUCT_NAME@::@LIBRARY_PRODUCT_NAME@ ALIAS @TARGET_NAME@)
+@LIBRARY_ALIAS@

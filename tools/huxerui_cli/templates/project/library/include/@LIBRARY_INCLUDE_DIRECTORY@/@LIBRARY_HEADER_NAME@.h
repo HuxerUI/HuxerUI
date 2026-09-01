@@ -2,8 +2,8 @@
 
 #include <huxerui/root.h>
 
-namespace @TARGET_NAME@ {
+namespace @LIBRARY_NAMESPACE@ {
 
 void Install(huxerui::RootContext& root);
 
-} // namespace @TARGET_NAME@
+} // namespace @LIBRARY_NAMESPACE@

@@ -4,7 +4,7 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
+#include <variant>
 #include <vector>
 
 #include "platform.h"
@@ -18,6 +18,9 @@ enum class ProjectKind {
   /// Reusable library with a preview application.
   Library,
 };
+
+/// Validated template identity for either an application or a reusable library.
+using ProjectTemplate = std::variant<ProjectTemplateContext, LibraryTemplateContext>;
 
 /// Destination layout used when copying the application-development Skill.
 enum class AgentSkillDirectory {
@@ -64,11 +67,13 @@ MakeProjectTemplateContext(std::string_view project_name, std::string_view proje
 
 /// Creates normalized template values for a library project.
 /// @param project_name Valid segmented library name.
+/// @param cpp_namespace Optional exact C++ namespace; an empty value derives it from `project_name`.
+/// @param public_target Optional exact public CMake target; an empty value derives `Product::Product`.
 /// @param project_id Optional explicit identifier; an empty value derives `com.example.<name>`.
-/// @return Template values containing the original name, normalized library target, and resolved identifier.
-/// @throws std::invalid_argument if the name or identifier is invalid.
-[[nodiscard]] ProjectTemplateContext
-MakeLibraryProjectTemplateContext(std::string_view project_name, std::string_view project_id = {});
+/// @return Validated project and independently owned library identities.
+/// @throws std::invalid_argument if any supplied identity is invalid.
+[[nodiscard]] LibraryTemplateContext MakeLibraryTemplateContext(std::string_view project_name,
+    std::string_view cpp_namespace = {}, std::string_view public_target = {}, std::string_view project_id = {});
 
 /// Converts a segmented library name to its PascalCase product name.
 /// @param library_name Valid library project name, such as `data-grid`.
@@ -84,9 +89,9 @@ MakeLibraryProjectTemplateContext(std::string_view project_name, std::string_vie
 
 /// Loads project identity through the project's CMake planning contract.
 /// @param project Project whose root CMake file should be queried.
-/// @return Project kind and validated template values.
+/// @return Validated application or library template values.
 /// @throws std::runtime_error if planning fails or emits invalid metadata.
-[[nodiscard]] std::pair<ProjectKind, ProjectTemplateContext> LoadProjectTemplateContext(const Project& project);
+[[nodiscard]] ProjectTemplate LoadProjectTemplate(const Project& project);
 
 /// Selects the runnable application for a project.
 /// @param project Discovered application or library project.
@@ -95,25 +100,23 @@ MakeLibraryProjectTemplateContext(std::string_view project_name, std::string_vie
 
 /// Generates a complete project and publishes it atomically at the destination.
 /// @param destination New project directory, which must not already exist.
-/// @param kind Application or library project shape.
-/// @param context Validated project template values.
+/// @param project_template Validated application or library template values.
 /// @param platforms Platform shells to generate.
 /// @param skill_source Canonical application-development Skill directory.
 /// @param agent_skill_directories Agent layouts that should receive the Skill.
 /// @throws std::invalid_argument if an application has no platform.
 /// @throws std::runtime_error if generation or publication fails.
-void CreateProject(const std::filesystem::path& destination, ProjectKind kind, const ProjectTemplateContext& context,
-                   std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
-                   std::span<const AgentSkillDirectory> agent_skill_directories);
+void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
+    std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
+    std::span<const AgentSkillDirectory> agent_skill_directories);
 
 /// Adds platform shells to an existing application or library preview.
 /// @param project Existing project.
-/// @param kind Project shape.
-/// @param context Existing project template values.
+/// @param project_template Existing application or library template values.
 /// @param platforms New platform drivers to add.
 /// @throws std::invalid_argument if no platform is supplied.
 /// @throws std::runtime_error if a requested platform already exists or publication fails.
-void AddProjectPlatforms(const Project& project, ProjectKind kind, const ProjectTemplateContext& context,
-                         std::span<const PlatformDriver* const> platforms);
+void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,
+    std::span<const PlatformDriver* const> platforms);
 
 } // namespace huxerui::cli
