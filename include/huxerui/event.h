@@ -592,6 +592,16 @@ struct TextFieldEvents {
   struct Submitted : Event<void()> {};
 };
 
+/// Event keys emitted by ComboBox.
+struct ComboBoxEvents {
+  /// Requests a complete controlled editing value after direct text input.
+  struct Changed : Event<void(const TextEditingValue&)> {};
+  /// Requests acceptance of a suggestion and supplies its zero-based index and complete replacement value.
+  struct Selected : Event<void(std::size_t, const TextEditingValue&)> {};
+  /// Reports submission when no suggestion is being accepted.
+  struct Submitted : Event<void()> {};
+};
+
 namespace detail {
 
 template <class Signature> struct EventSignature;

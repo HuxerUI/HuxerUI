@@ -51,6 +51,7 @@ add_executable(huxerui_tests
         runtime/render_scene.cpp
         runtime/resources.cpp
         runtime/scrolling.cpp
+        runtime/combo_box.cpp
         runtime/select.cpp
         runtime/system_tray.cpp
         runtime/selection_area.cpp

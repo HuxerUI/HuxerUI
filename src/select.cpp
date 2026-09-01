@@ -19,8 +19,8 @@
 #include <huxerui/semantics.h>
 #include <huxerui/state.h>
 #include <huxerui/theme.h>
-#include <huxerui/vector.h>
 
+#include "huxerui_builtin_resources.h"
 #include "internal.h"
 #include "indication_internal.h"
 
@@ -112,16 +112,6 @@ void ValidateSelectStyle(const SelectStyle& style) {
         "HuxerUI Select geometry and shadow must be finite with positive popup height and non-negative extents"
     );
   }
-}
-
-const VectorAsset& SelectIndicatorAsset() {
-  static const VectorAsset asset = VectorAsset::Create({16.0F, 16.0F}, [](VectorBuilder& builder) {
-    Path path;
-    path.MoveTo({3.5F, 6.0F}).LineTo({8.0F, 10.5F}).LineTo({12.5F, 6.0F});
-    builder.StrokePath(std::move(path), Color::Black(),
-                       StrokeStyle{.width = 1.5F, .cap = StrokeCap::Round, .join = StrokeJoin::Round});
-  });
-  return asset;
 }
 
 void ResizePopupState(const std::shared_ptr<SelectPopupState>& state, std::size_t item_count) {
@@ -803,7 +793,7 @@ std::function<View()> MakeSelectScopeFactory(SelectConfiguration configuration) 
     Frame indicator_frame;
     indicator_frame.width = style.indicator_size;
     indicator_frame.height = style.indicator_size;
-    View indicator = Image(SelectIndicatorAsset())
+    View indicator = Image(images::dropdown_indicator)
                          .Fit(ImageFit::Contain)
                          .Tint(style.indicator)
                          .With(indicator_frame, detail::BuiltInSemantics{Semantics{.hidden = true}});

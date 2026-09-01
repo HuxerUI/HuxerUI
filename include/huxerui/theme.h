@@ -331,6 +331,32 @@ struct TextFieldStyle {
   bool operator==(const TextFieldStyle&) const = default;
 };
 
+/// Defines the suggestion popup appearance for ComboBox.
+///
+/// The editable field continues to use `TextFieldStyle`; this style owns only popup-specific presentation.
+/// @code
+/// ComboBoxStyle style = ComboBoxStyle::Default();
+/// style.maximum_popup_height = 240.0F;
+/// ThemeDefinition theme;
+/// theme.Set(style);
+/// @endcode
+struct ComboBoxStyle {
+  Color popup_background = Color::White();
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color active_item_background = Color::Rgb(31, 111, 235, 0.10F);
+  EdgeInsets item_padding = EdgeInsets::Symmetric(12.0F, 8.0F);
+  EdgeInsets popup_padding;
+  Shadow popup_shadow{Color::Rgb(0, 0, 0, 0.2F), {}, 8.0F, 0.0F};
+  float minimum_item_height = 36.0F;
+  float maximum_popup_height = 320.0F;
+  float popup_corner_radius = 6.0F;
+  std::optional<Indication> item_indication;
+
+  static ComboBoxStyle Default();
+
+  bool operator==(const ComboBoxStyle&) const = default;
+};
+
 struct CheckboxStyle {
   float size = 20.0F;
   float minimum_interactive_size = 20.0F;
@@ -555,6 +581,7 @@ SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme);
 TabsStyle DefaultTabsStyle(const ThemeSpec& theme);
 SelectStyle DefaultSelectStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
+ComboBoxStyle DefaultComboBoxStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme);
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);

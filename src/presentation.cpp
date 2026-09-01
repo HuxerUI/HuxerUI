@@ -1485,15 +1485,17 @@ namespace detail {
 struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   explicit LayerAnchorState(LayerController controller) : layers(std::move(controller)) {}
 
-  void Mount() {
+  void Mount(std::uint64_t identity) {
     if (mounted) {
       throw std::logic_error("HuxerUI presentation anchor must be mounted on only one View");
     }
+    mounted_identity = identity;
     mounted = true;
   }
 
   void Unmount() {
     mounted = false;
+    mounted_identity.reset();
     bounds.reset();
     const std::optional<LayerId> anchored_layer = follows_anchor ? active_layer : std::nullopt;
     follows_anchor = false;
@@ -1564,6 +1566,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
       float gap,
       float viewport_margin,
       Point offset,
+      bool retain_anchor_focus,
       LayerOptions options,
       std::shared_ptr<const Environment> environment,
       std::shared_ptr<LayerTransitionState> transition = {},
@@ -1582,7 +1585,8 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
         std::move(environment),
         placement,
         std::move(transition),
-        std::move(semantic_modal_group)
+        std::move(semantic_modal_group),
+        retain_anchor_focus ? mounted_identity : std::nullopt
     );
     *id = attached;
     Bind(attached, std::move(placement), !point.has_value());
@@ -1591,6 +1595,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
 
   LayerController layers;
   std::optional<Rect> bounds;
+  std::optional<std::uint64_t> mounted_identity;
   // This identifies the layer currently owned by the anchor. It clears when dismissal begins even though the
   // LayerController may retain the same entry until its exit motion completes.
   std::optional<LayerId> active_layer;
@@ -2165,7 +2170,7 @@ public:
     }
     state_ = modifier.state_;
     if (state_) {
-      state_->Mount();
+      state_->Mount(static_cast<const detail::MountedNode&>(node).identity);
     }
   }
 
@@ -2888,6 +2893,7 @@ LayerId detail::PopupService::Show(
   const float gap = options.gap;
   const float viewport_margin = options.viewport_margin;
   const Point offset = options.offset;
+  const bool retain_anchor_focus = options.retain_anchor_focus;
   return anchor->AttachLayer(
       point,
       std::move(content),
@@ -2895,6 +2901,7 @@ LayerId detail::PopupService::Show(
       gap,
       viewport_margin,
       offset,
+      retain_anchor_focus,
       PopupLayerOptions(std::move(options)),
       std::move(environment)
   );
@@ -3055,6 +3062,7 @@ LayerId detail::MenuService::ShowLevel(
       gap,
       viewport_margin,
       offset,
+      false,
       MenuLayerOptions(std::move(options), submenu),
       std::move(environment),
       transition,

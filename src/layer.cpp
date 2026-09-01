@@ -45,7 +45,8 @@ LayerId LayerController::AttachCaptured(
     std::shared_ptr<const Environment> environment,
     detail::LayerPlacement placement,
     std::shared_ptr<detail::LayerTransitionState> transition,
-    std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group
+    std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group,
+    std::optional<std::uint64_t> retained_focus_identity
 ) const {
   return AttachCapturedReplacing(
       std::nullopt,
@@ -54,7 +55,8 @@ LayerId LayerController::AttachCaptured(
       std::move(environment),
       std::move(placement),
       std::move(transition),
-      std::move(semantic_modal_group)
+      std::move(semantic_modal_group),
+      retained_focus_identity
   );
 }
 
@@ -167,7 +169,8 @@ LayerId LayerController::AttachCapturedReplacing(
     std::shared_ptr<const Environment> environment,
     detail::LayerPlacement placement,
     std::shared_ptr<detail::LayerTransitionState> transition,
-    std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group
+    std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group,
+    std::optional<std::uint64_t> retained_focus_identity
 ) const {
   if (state_->runtime == nullptr) {
     throw std::logic_error("HuxerUI layer controller is disconnected");
@@ -185,6 +188,7 @@ LayerId LayerController::AttachCapturedReplacing(
       .content = std::move(content),
       .environment = std::move(environment),
       .semantic_modal_group = std::move(semantic_modal_group),
+      .retained_focus_identity = retained_focus_identity,
       .placement = std::make_shared<detail::LayerPlacement>(std::move(placement)),
       .transition = std::move(transition),
   };

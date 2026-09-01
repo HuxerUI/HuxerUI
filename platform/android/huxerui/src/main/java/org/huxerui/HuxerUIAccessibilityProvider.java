@@ -262,7 +262,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         for (int child : node.children) {
             addChild(current, info, child);
         }
-        info.setClassName(className(node.role));
+        info.setClassName(className(node));
         applyBounds(current, node, info);
         applyText(node, info);
         applyState(node, info);
@@ -326,7 +326,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
 
     private void applyText(Node node, AccessibilityNodeInfo info) {
         boolean textRole = node.role == ROLE_TEXT || node.role == ROLE_HEADING;
-        boolean editable = node.role == ROLE_TEXT_FIELD || node.role == ROLE_SEARCH_FIELD;
+        boolean editable = isEditable(node);
         if (editable) {
             if (!node.secure) {
                 info.setText(node.value);
@@ -744,7 +744,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         Frame current = frame;
         Node node = current == null ? null : current.nodes.get(nodeId);
         if (node != null) {
-            event.setClassName(className(node.role));
+            event.setClassName(className(node));
             event.setEnabled(node.enabled);
             event.setChecked(node.checked == 1);
             event.setPassword(node.secure);
@@ -845,7 +845,8 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     }
 
     private static boolean isEditable(Node node) {
-        return node.role == ROLE_TEXT_FIELD || node.role == ROLE_SEARCH_FIELD;
+        return node.role == ROLE_TEXT_FIELD || node.role == ROLE_SEARCH_FIELD
+                || (node.role == ROLE_COMBO_BOX && Boolean.FALSE.equals(node.readOnly));
     }
 
     private static String stateDescription(Node node) {
@@ -855,8 +856,8 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         return !TextUtils.isEmpty(node.value) && !isEditable(node) ? node.value : null;
     }
 
-    private static String className(int role) {
-        switch (role) {
+    private static String className(Node node) {
+        switch (node.role) {
         case ROLE_TEXT:
         case ROLE_HEADING:
         case ROLE_LINK:
@@ -876,7 +877,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         case ROLE_PROGRESS:
             return "android.widget.ProgressBar";
         case ROLE_COMBO_BOX:
-            return "android.widget.Spinner";
+            return isEditable(node) ? "android.widget.AutoCompleteTextView" : "android.widget.Spinner";
         case ROLE_TEXT_FIELD:
         case ROLE_SEARCH_FIELD:
             return "android.widget.EditText";

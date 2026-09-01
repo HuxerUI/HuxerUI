@@ -559,6 +559,23 @@ TextFieldStyle MaterialTextFieldStyle(const ThemeSpec& theme) {
   };
 }
 
+ComboBoxStyle MaterialComboBoxStyle(const ThemeSpec& theme) {
+  Color active_item_background = theme.colors.primary;
+  active_item_background.alpha *= 0.08F;
+  return {
+      .popup_background = theme.colors.surface_container,
+      .foreground = theme.colors.on_surface,
+      .active_item_background = active_item_background,
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .popup_padding = {},
+      .popup_shadow = MaterialShadow(Color::Rgb(0, 0, 0, 0.24F), theme.elevation.medium),
+      .minimum_item_height = 40.0F,
+      .maximum_popup_height = 320.0F,
+      .popup_corner_radius = theme.shapes.small,
+      .item_indication = MaterialIndication(theme.colors.on_surface, theme),
+  };
+}
+
 CheckboxStyle MaterialCheckboxStyle(const ThemeSpec& theme) {
   Color disabled = theme.colors.on_surface;
   disabled.alpha *= 0.38F;
@@ -955,6 +972,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialSelectStyle(theme));
   definition.Set(MaterialDividerStyle(theme));
   definition.Set(MaterialTextFieldStyle(theme));
+  definition.Set(MaterialComboBoxStyle(theme));
   definition.Set(MaterialCheckboxStyle(theme));
   definition.Set(MaterialRadioButtonStyle(theme));
   definition.Set(MaterialSwitchStyle(theme));
@@ -1306,6 +1324,23 @@ TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme) {
   };
 }
 
+ComboBoxStyle DefaultComboBoxStyle(const ThemeSpec& theme) {
+  Color active_item_background = theme.colors.primary;
+  active_item_background.alpha *= 0.10F;
+  return {
+      .popup_background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .active_item_background = active_item_background,
+      .item_padding = EdgeInsets::Symmetric(theme.spacing.medium, theme.spacing.small),
+      .popup_padding = {},
+      .popup_shadow = Shadow{Color::Rgb(0, 0, 0, 0.2F), {}, theme.elevation.medium, 0.0F},
+      .minimum_item_height = 36.0F,
+      .maximum_popup_height = 320.0F,
+      .popup_corner_radius = theme.shapes.small,
+      .item_indication = std::nullopt,
+  };
+}
+
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme) {
   Color border = theme.colors.on_surface;
   border.alpha *= 0.55F;
@@ -1485,6 +1520,10 @@ DividerStyle DividerStyle::Default() {
 
 TextFieldStyle TextFieldStyle::Default() {
   return detail::DefaultTextFieldStyle(ThemeSpec::Default());
+}
+
+ComboBoxStyle ComboBoxStyle::Default() {
+  return detail::DefaultComboBoxStyle(ThemeSpec::Default());
 }
 
 CheckboxStyle CheckboxStyle::Default() {

@@ -519,6 +519,10 @@ public:
   TestPlatform()
       : PlatformAdapter([this](std::function<void()> task) { platform_module_tasks_.push_back(std::move(task)); }) {}
 
+  explicit TestPlatform(huxerui::PlatformResources* resources) : TestPlatform() {
+    platform_resources = resources;
+  }
+
   explicit TestPlatform(huxerui::UIThreadDispatcher dispatch_to_ui_thread)
       : PlatformAdapter(std::move(dispatch_to_ui_thread)) {}
 

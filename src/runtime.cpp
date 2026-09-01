@@ -1993,6 +1993,19 @@ std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vecto
     }
   }
 
+  if (!candidate.has_value() && state_->focused_node_identity_.has_value()) {
+    // Outside-press barriers terminate at the layer root; only a descendant content hit may retain anchor focus.
+    const detail::MountedNode* pointer_target = route.empty() ? nullptr : route.back();
+    const bool retains_focus = std::ranges::any_of(route, [this, pointer_target](const detail::MountedNode* node) {
+      const auto* snapshot = node->LayoutValue<detail::LayerEntrySnapshotValue>();
+      return node != pointer_target && snapshot != nullptr &&
+             snapshot->retained_focus_identity == state_->focused_node_identity_;
+    });
+    if (retains_focus) {
+      return state_->focused_node_identity_;
+    }
+  }
+
   detail::MountedNode* focus_root = ActiveFocusTrapRoot();
   if (!focus_root || (candidate.has_value() && ContainsNodeIdentity(*focus_root, *candidate))) {
     return candidate;
@@ -2494,7 +2507,10 @@ bool Runtime::HandleKeyEvent(const KeyEvent& event) {
     return finish_handled();
   }
 
-  if (event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat && HandleBack()) {
+  const bool cancel_key = event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat &&
+                          !event.modifiers.shift && !event.modifiers.control && !event.modifiers.alt &&
+                          !event.modifiers.meta;
+  if (cancel_key && HandleBack()) {
     return finish_handled();
   }
   if (event.type == KeyEventType::Down && event.key == Key::Tab) {
@@ -2882,6 +2898,7 @@ void Runtime::ComposeLayers() {
                            .revision = entry.revision,
                            .exiting = exiting,
                            .semantic_modal_group = entry.semantic_modal_group,
+                           .retained_focus_identity = entry.retained_focus_identity,
                        });
       if (entry.placement->safe_area_policy == LayerSafeAreaPolicy::Constrain) {
         layer = std::move(layer).With(SafeAreaPadding{});

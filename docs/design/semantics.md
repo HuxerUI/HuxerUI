@@ -578,6 +578,7 @@ The shared component contract is listed below.
 | Switch | Switch role, label, checked state, and Activate |
 | SegmentedButton | Horizontal collection containing labeled, checked, selected RadioButton items and Activate |
 | Select | Labeled read-only ComboBox owner with selected value and expansion actions; the popup is a single-selection List whose active enabled ListItem owns focus |
+| ComboBox | Editable ComboBox owner with TextField value, selection, editing and expansion actions; the popup is a List whose active enabled ListItem remains transient while field focus is retained |
 | ProgressCircle and ProgressBar | ProgressIndicator role, normalized range when determinate, or localized busy state when indeterminate |
 | Slider | Slider role, range, SetValue, Increment, and Decrement |
 | TextField | TextField or author-overridden SearchField role, value, UTF-16 selection, editing actions, and secure redaction |
@@ -671,7 +672,8 @@ The HWND exposes a UI Automation fragment root with cached providers keyed by Se
 Providers supply only the control patterns supported by committed role, state, and actions.
 Each provider freezes its COM interface set when created; a changed pattern shape replaces the cached provider while preserving the semantic RuntimeId.
 The initial mapping includes Invoke, Toggle, Value, RangeValue, Selection, SelectionItem, ExpandCollapse, ScrollItem, and Scroll.
-Read-only ComboBox nodes expose their committed current value through Value without accepting SetValue.
+Read-only ComboBox nodes expose their committed current value through Value without accepting SetText.
+Editable ComboBox nodes retain Value, SetText, selection, and ExpandCollapse support from their composed TextField behavior.
 It publishes stable runtime IDs, hierarchy, screen geometry, names, identifiers, state, collection position, live regions, and committed property, focus, selection, layout, and structure changes.
 
 UI Automation may query off-thread.

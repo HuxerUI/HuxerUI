@@ -699,6 +699,8 @@ struct PopupOptions {
   bool dismiss_on_cancel = true;
   /// Whether keyboard focus is confined to Popup content while it remains visible.
   bool trap_focus = false;
+  /// Keeps keyboard focus on the mounted anchor when pointer input targets popup content without its own focus target.
+  bool retain_anchor_focus = false;
   /// Optional owner callback that receives dismissal requests instead of automatic removal.
   std::function<void()> on_dismiss_request;
 };

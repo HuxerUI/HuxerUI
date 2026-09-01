@@ -140,10 +140,14 @@ UIAccessibilityTraits Traits(const SemanticNode& node, bool container) {
       traits |= UIAccessibilityTraitImage;
       break;
     case SemanticRole::Button:
-    case SemanticRole::ComboBox:
     case SemanticRole::MenuItem:
     case SemanticRole::Tab:
       traits |= UIAccessibilityTraitButton;
+      break;
+    case SemanticRole::ComboBox:
+      if (node.read_only.value_or(true)) {
+        traits |= UIAccessibilityTraitButton;
+      }
       break;
     case SemanticRole::Link:
       traits |= UIAccessibilityTraitLink;
@@ -245,7 +249,8 @@ NSString* AccessibilityLabel(const SemanticNode& node) {
   if (NSString* label = NSStringFromUtf8(node.label)) {
     return label;
   }
-  if (node.role == SemanticRole::TextField || node.role == SemanticRole::SearchField) {
+  if (node.role == SemanticRole::TextField || node.role == SemanticRole::SearchField ||
+      (node.role == SemanticRole::ComboBox && !node.read_only.value_or(true))) {
     return NSStringFromUtf8(node.placeholder);
   }
   return nil;
@@ -363,8 +368,9 @@ void ConfigureNode(
   object.accessibilityContainerType = container ? ContainerType(node) : UIAccessibilityContainerTypeNone;
   object.accessibilityRespondsToUserInteraction = RespondsToUserInteraction(node);
   if (@available(iOS 18.1, *)) {
-    const bool editable =
-        !container && node.focused && (node.role == SemanticRole::TextField || node.role == SemanticRole::SearchField);
+    const bool editable = !container && node.focused &&
+                          (node.role == SemanticRole::TextField || node.role == SemanticRole::SearchField ||
+                           (node.role == SemanticRole::ComboBox && !node.read_only.value_or(true)));
     object.accessibilityTextInputResponder = editable ? text_input : nil;
   }
   object.accessibilityFrame = root == nil

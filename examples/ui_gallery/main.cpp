@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <iterator>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -445,6 +446,13 @@ View TextInputDemo() {
   auto display_name = UseState(TextEditingValue::FromText("HuxerUI"));
   auto password = UseState(TextEditingValue::FromText(""));
   auto message = UseState(TextEditingValue::FromText(""));
+  auto city_query = UseState(TextEditingValue::FromText(""));
+  const std::vector<std::string> cities{"Amsterdam", "Berlin", "London", "Paris", "Tokyo"};
+  const std::string& query = city_query.Get().text;
+  std::vector<std::string> matching_cities;
+  std::ranges::copy_if(cities, std::back_inserter(matching_cities), [&query](const std::string& city) {
+    return city.find(query) != std::string::npos;
+  });
 
   return Column {
     GallerySection(
@@ -472,6 +480,16 @@ View TextInputDemo() {
               .Validation(Validate(password.Get().text, Required("Password is required")))
               .OnChanged([password](const TextEditingValue& value) { password = value; }),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
+    ),
+    GallerySection(
+        "Editable suggestions",
+        "ComboBox keeps TextField editing and IME behavior while the application owns filtering and acceptance.",
+        ComboBox(city_query, matching_cities)
+            .Label("City")
+            .Placeholder("Filter cities")
+            .EmptyContent([] { return Text("No matching cities").With(Padding(12.0F)); })
+            .OnChanged([city_query](const TextEditingValue& value) { city_query = value; })
+            .OnSelected([city_query](std::size_t, const TextEditingValue& value) { city_query = value; })
     ),
     GallerySection(
         "Multiline editing",

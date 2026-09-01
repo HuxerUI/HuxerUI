@@ -26,6 +26,7 @@ Use the complete container, scrolling, virtualization, navigation-shell, and res
 | `Switch([label,] checked)` | Controlled `bool`; `.OnChanged(bool)` requests a new value. |
 | `SegmentedButton(items, selected_index)` | Controlled index; items may have icon/label or icon-only with semantic label. |
 | `Select(items, selected_index, content)` | Controlled index for a finite non-empty range; `.OnChanged(std::size_t)` requests a different choice. |
+| `ComboBox(value, suggestions[, text, content])` | Controlled `TextEditingValue` with application-owned suggestions; `.OnChanged` requests direct edits and `.OnSelected` proposes accepted text. |
 | `Tabs(items, selected_index)` | Controlled index; `TabItem::Enabled` disables individual destinations. Page content is separately owned. |
 | `Slider(value)` | Controlled `float`; configure `.Range` and optional `.Step`, then write `.OnChanged` values back. |
 
@@ -42,10 +43,26 @@ The choice root is one interaction target and cannot contain another independent
 When choices can insert, remove, or reorder while the popup is open, apply a stable semantic `.Key(...)` to each factory result; otherwise identity follows the current index.
 An empty range or an out-of-range selected index throws `std::invalid_argument`.
 
+## ComboBox
+
+`ComboBox` reuses TextField editing, selection, composition, validation, and platform input behavior while adding an anchored suggestion popup.
+Keep the complete `TextEditingValue` controlled and derive the current suggestion range in application state; do not add a second selected index because free-form text may not match an item.
+The simple range form uses each string-compatible suggestion as accepted text and content.
+For rich application data, pass a text projection and a View factory instead of creating a type-erased item wrapper.
+Apply a stable `.Key(...)` to the factory result when suggestions can insert, remove, or reorder; otherwise identity follows position.
+
+Write `.OnChanged(const TextEditingValue&)` proposals back after direct edits.
+`.OnSelected(std::size_t, const TextEditingValue&)` supplies the accepted index and complete replacement proposal and does not also emit Changed.
+`.OnSubmitted()` reports submission without an active suggestion.
+Use `.EmptyContent(...)` for non-interactive loading or no-result content; without it, an empty range keeps the popup closed.
+Suggestion roots may use `Enabled{false}`, but suggestion and empty-state content cannot contain another pointer action or focusable control.
+Do not intercept composition or modified editing keys except for ComboBox-owned Alt+Up/Down popup control, and do not rebuild this behavior from TextField plus an app-owned Popup.
+
 ## Input and progress
 
 - `TextField(TextEditingValue)` is controlled by the complete editing value. Configure `.Label`, `.Placeholder`, icons, `.Variant`, `.LineLimits`, `.MaxLength`, `.Validation`, `.Secure`, `.Align(TextAlign)`, `.VerticalAlign(TextVerticalAlign)`, and `.InputConfiguration`, then handle `.OnChanged` and optionally `.OnSubmitted`. Alignment applies to the editable paragraph, not the TextField View's placement.
 - `TextFieldVariant` currently contains `Filled`, `Outlined`, and `Standard`.
+- `ComboBox` supports the single-line, non-secure, editable subset of `TextInputConfiguration`; use `Select` for read-only finite choices.
 - `ProgressCircle()` and `ProgressBar()` are indeterminate. Their `float` constructors are determinate.
 
 ## Common review points

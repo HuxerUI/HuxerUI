@@ -1294,6 +1294,50 @@ TEST_CASE("TestMenuTrapsFocusAndDismissesOnBack") {
   REQUIRE(!ContainsText(runtime.BuildFrame(), "first menu item"));
 }
 
+TEST_CASE("TestPopupRetainsAnchorFocusOnlyForNonFocusableContent") {
+  layer_popup.reset();
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  const std::optional<Rect> anchor = FindPresentedTextRect(runtime.BuildFrame(), "popup anchor");
+  REQUIRE(anchor.has_value());
+  ClickAt(runtime, {anchor->x + anchor->width * 0.5F, anchor->y + anchor->height * 0.5F}, 140);
+
+  const auto find_semantic = [](const SemanticFrame& frame, std::string_view label) -> const SemanticNode& {
+    const auto found = std::ranges::find(frame.nodes, label, &SemanticNode::label);
+    REQUIRE(found != frame.nodes.end());
+    return *found;
+  };
+  REQUIRE(find_semantic(*runtime.BuildCommit().semantic_frame, "popup anchor").focused);
+
+  const LayerId popup = layer_popup->Show(
+      [] {
+        return Text("retained popup")
+            .With(huxerui::Frame{80.0F, 30.0F})
+            .On<ViewEvents::Pointer>([](const PointerEvent&) {});
+      },
+      PopupOptions{
+          .dismiss_on_outside_press = false,
+          .retain_anchor_focus = true,
+      }
+  );
+  const std::optional<Rect> retained = FindPresentedTextRect(runtime.BuildFrame(), "retained popup");
+  REQUIRE(retained.has_value());
+  ClickAt(runtime, {retained->x + retained->width * 0.5F, retained->y + retained->height * 0.5F}, 141);
+  REQUIRE(find_semantic(*runtime.BuildCommit().semantic_frame, "popup anchor").focused);
+
+  REQUIRE(layer_popup->Update(popup, [] {
+    return Button("popup focus").With(huxerui::Frame{80.0F, 30.0F});
+  }));
+  const std::optional<Rect> focusable = FindPresentedTextRect(runtime.BuildFrame(), "popup focus");
+  REQUIRE(focusable.has_value());
+  ClickAt(runtime, {focusable->x + focusable->width * 0.5F, focusable->y + focusable->height * 0.5F}, 142);
+  const std::shared_ptr<const SemanticFrame> focused = runtime.BuildCommit().semantic_frame;
+  REQUIRE_FALSE(find_semantic(*focused, "popup anchor").focused);
+  REQUIRE(find_semantic(*focused, "popup focus").focused);
+}
+
 TEST_CASE("TestPointerFocusDoesNotEscapeTrappedLayer") {
   layer_background_clicks = 0;
   popup_focus_clicks = 0;

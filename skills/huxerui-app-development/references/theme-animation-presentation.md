@@ -42,7 +42,7 @@ Component styles are typed Environment values. Verify their current fields in th
 
 | Area | Typed styles | Public header |
 | --- | --- | --- |
-| Text and controls | `TextStyle`, `ButtonStyle`, `IconButtonStyle`, `ChipStyle`, `DividerStyle`, `SegmentedButtonStyle`, `TabsStyle`, `TextFieldStyle`, `CheckboxStyle`, `RadioButtonStyle`, `SwitchStyle`, `ProgressCircleStyle`, `ProgressBarStyle`, `SliderStyle` | `text.h`, `theme.h` |
+| Text and controls | `TextStyle`, `ButtonStyle`, `IconButtonStyle`, `ChipStyle`, `DividerStyle`, `SegmentedButtonStyle`, `TabsStyle`, `SelectStyle`, `TextFieldStyle`, `ComboBoxStyle`, `CheckboxStyle`, `RadioButtonStyle`, `SwitchStyle`, `ProgressCircleStyle`, `ProgressBarStyle`, `SliderStyle` | `text.h`, `theme.h` |
 | Scrolling | `ScrollBarStyle` | `modifier.h` |
 | Navigation | `NavigationStyle`, `TopAppBarStyle`, `NavigationBarStyle`, `NavigationPaneStyle`, `DrawerStyle` | `navigation.h` |
 | Presentation | `ToastStyle`, `TooltipStyle`, `DialogStyle`, `BottomSheetStyle`, `MenuStyle` | `presentation.h` |
@@ -122,5 +122,6 @@ Reduced motion is handled by the resolved handle; still keep the mutation correc
 - `Tooltip` is a modifier for hover/long-press help.
 
 Layer content is outside the ordinary application subtree but captures its environment. Keep modal dismissal, focus trapping, and owner state explicit. Do not retain a presentation context after its layer is dismissed.
+Set `PopupOptions::retain_anchor_focus` only when pointer interaction with non-focusable popup content must keep an editor or other keyboard session on its mounted anchor; focusable popup descendants still receive focus.
 
 Prefer theme style overrides (`ToastStyle`, `DialogStyle`, `BottomSheetStyle`, `MenuStyle`, `TooltipStyle`) over copying built-in presentation implementations.

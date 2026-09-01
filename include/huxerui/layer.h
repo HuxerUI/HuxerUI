@@ -166,7 +166,8 @@ private:
       std::shared_ptr<const Environment> environment,
       detail::LayerPlacement placement,
       std::shared_ptr<detail::LayerTransitionState> transition = {},
-      std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {}
+      std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {},
+      std::optional<std::uint64_t> retained_focus_identity = std::nullopt
   ) const;
   bool UpdateCaptured(
       LayerId id,
@@ -183,7 +184,8 @@ private:
       std::shared_ptr<const Environment> environment,
       detail::LayerPlacement placement,
       std::shared_ptr<detail::LayerTransitionState> transition,
-      std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {}
+      std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {},
+      std::optional<std::uint64_t> retained_focus_identity = std::nullopt
   ) const;
   bool UpdateEntry(
       LayerId id,

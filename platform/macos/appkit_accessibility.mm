@@ -19,9 +19,9 @@
 
 namespace {
 
-NSString* AccessibilityRole(huxerui::SemanticRole role) {
+NSString* AccessibilityRole(const huxerui::SemanticNode& node) {
   using huxerui::SemanticRole;
-  switch (role) {
+  switch (node.role) {
   case SemanticRole::Text:
   case SemanticRole::Heading:
     return NSAccessibilityStaticTextRole;
@@ -41,7 +41,7 @@ NSString* AccessibilityRole(huxerui::SemanticRole role) {
   case SemanticRole::ProgressIndicator:
     return NSAccessibilityProgressIndicatorRole;
   case SemanticRole::ComboBox:
-    return NSAccessibilityPopUpButtonRole;
+    return node.read_only.value_or(true) ? NSAccessibilityPopUpButtonRole : NSAccessibilityComboBoxRole;
   case SemanticRole::TextField:
   case SemanticRole::SearchField:
     return NSAccessibilityTextFieldRole;
@@ -281,7 +281,7 @@ bool MacAccessibility::PerformAction(SemanticNodeId id, SemanticAction action) {
 - (NSString*)accessibilityRole {
   const huxerui::SemanticNode* node =
       huxeruiAccessibility == nullptr ? nullptr : huxeruiAccessibility->NodeForId(huxeruiNodeId);
-  return node == nullptr ? NSAccessibilityGroupRole : AccessibilityRole(node->role);
+  return node == nullptr ? NSAccessibilityGroupRole : AccessibilityRole(*node);
 }
 
 - (NSString*)accessibilityLabel {

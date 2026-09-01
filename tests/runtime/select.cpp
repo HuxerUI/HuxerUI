@@ -206,7 +206,7 @@ TEST_CASE("SelectValidatesItsControlledIndex") {
 }
 
 TEST_CASE("SelectRejectsInvalidFactoryResults") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   for (const auto app :
        {EmptySelectItemApp, UnlabeledSelectItemApp, InteractiveSelectItemApp, NestedInteractiveSelectItemApp}) {
     Runtime runtime{app, platform};
@@ -216,7 +216,7 @@ TEST_CASE("SelectRejectsInvalidFactoryResults") {
 }
 
 TEST_CASE("SelectValidationPreservesItsFluentSurface") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{InvalidSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
@@ -228,7 +228,7 @@ TEST_CASE("SelectValidationPreservesItsFluentSurface") {
 }
 
 TEST_CASE("SelectConfigurationUpdatesThroughRecomposition") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{ReconfiguredSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
 
@@ -247,7 +247,7 @@ TEST_CASE("SelectConfigurationUpdatesThroughRecomposition") {
 }
 
 TEST_CASE("CopiedSelectConfigurationsRemainIndependent") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{CopiedSelectConfigurationApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
@@ -261,7 +261,7 @@ TEST_CASE("CopiedSelectConfigurationsRemainIndependent") {
 }
 
 TEST_CASE("SelectRejectsInvalidThemeGeometry") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   for (invalid_select_style_case = 0; invalid_select_style_case < 3; ++invalid_select_style_case) {
     Runtime runtime{InvalidSelectStyleApp, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
@@ -290,7 +290,7 @@ TEST_CASE("SelectProvidesFlatAndMaterialLightAndDarkStyles") {
 }
 
 TEST_CASE("SelectUsesTheThemeIndicationAndForegroundAcrossItsPopup") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{ThemedSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
@@ -309,7 +309,7 @@ TEST_CASE("SelectUsesTheThemeIndicationAndForegroundAcrossItsPopup") {
 
 TEST_CASE("SelectOpensAnAccessibleChoiceListAndEmitsControlledChanges") {
   select_changes = 0;
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
@@ -358,7 +358,7 @@ TEST_CASE("SelectOpensAnAccessibleChoiceListAndEmitsControlledChanges") {
 }
 
 TEST_CASE("SelectSemanticActivateTogglesItsPopup") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
@@ -381,7 +381,7 @@ TEST_CASE("SelectSemanticActivateTogglesItsPopup") {
 }
 
 TEST_CASE("DisabledSelectCannotOpenAndDynamicDisableDismissesItsPopup") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime disabled{DisabledSelectApp, platform};
   disabled.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> disabled_frame = disabled.BuildCommit().semantic_frame;
@@ -403,7 +403,7 @@ TEST_CASE("DisabledSelectCannotOpenAndDynamicDisableDismissesItsPopup") {
 }
 
 TEST_CASE("SelectUnmountDismissesItsPopup") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{ConditionalSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(runtime);
@@ -417,7 +417,7 @@ TEST_CASE("SelectUnmountDismissesItsPopup") {
 }
 
 TEST_CASE("SelectClearsItsActiveChoiceWhenEveryItemIsDisabled") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(runtime);
@@ -433,7 +433,7 @@ TEST_CASE("SelectClearsItsActiveChoiceWhenEveryItemIsDisabled") {
 
 TEST_CASE("SelectPointerChoiceCommitsAndRestoresTriggerFocus") {
   select_changes = 0;
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(runtime);
@@ -450,7 +450,7 @@ TEST_CASE("SelectPointerChoiceCommitsAndRestoresTriggerFocus") {
 }
 
 TEST_CASE("SelectPointerCancelDoesNotOpenItsPopup") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
@@ -466,7 +466,7 @@ TEST_CASE("SelectPointerCancelDoesNotOpenItsPopup") {
 
 TEST_CASE("SelectKeyboardSkipsDisabledItemsAndCancelDoesNotChangeSelection") {
   select_changes = 0;
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
@@ -493,7 +493,7 @@ TEST_CASE("SelectKeyboardSkipsDisabledItemsAndCancelDoesNotChangeSelection") {
 
 TEST_CASE("SelectPreservesAKeyedActiveItemAcrossReordering") {
   select_changes = 0;
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
@@ -523,7 +523,7 @@ TEST_CASE("SelectPreservesAKeyedActiveItemAcrossReordering") {
 
 TEST_CASE("SelectFallsBackWhenItsActiveKeyedItemIsRemoved") {
   select_changes = 0;
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 

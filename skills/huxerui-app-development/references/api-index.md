@@ -13,7 +13,7 @@ This is a navigation index, not a replacement for the active SDK's public header
 | Environment | `Environment`, `ProvideEnvironment`, `UseEnvironment`, `UseViewportClass` | [fundamentals.md](fundamentals.md) | `environment.h` |
 | Events | `Event<Result(Arguments...)>`, `On`, `OnClick`, `UseEvents`, `EventEmitter::Emit` | [fundamentals.md](fundamentals.md) | `event.h` |
 | Containers | `Column`, `Row`, `Flow`, `Stack`, `IndexedPages`, `Spacer` | [layout-and-ui.md](layout-and-ui.md) | `view.h` |
-| Controls | `Button`, `IconButton`, toggles, `Select`, `TextField`, tabs, progress, slider | [components.md](components.md) | `view.h` |
+| Controls | `Button`, `IconButton`, toggles, `Select`, `ComboBox`, `TextField`, tabs, progress, slider | [components.md](components.md) | `view.h` |
 | Layout | Built-in layout selection; custom `Layout`, `LayoutContext`, `LayoutResult`, `MountedNode` only when needed | [layout-and-ui.md](layout-and-ui.md) | `view.h`, `layout.h` |
 | Virtual layout | `VirtualLayout`, `VirtualLayoutContext`, `VirtualList`, `VirtualGrid` | [layout-and-ui.md](layout-and-ui.md) | `virtual_layout.h`, `view.h` |
 | Scrolling | `ScrollView`, `ScrollController`, `UseScrollController`, `ScrollPhysics`, `ScrollBar` | [layout-and-ui.md](layout-and-ui.md) | `scroll.h`, `modifier.h`, `view.h` |

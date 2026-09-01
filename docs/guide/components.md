@@ -72,6 +72,7 @@ Use `DrawBorder()` to stroke rectangle geometry; `DrawRect()` intentionally rema
 - `Chip` supports an optional icon and controlled selected state.
 - `SegmentedButton` receives items and a controlled selected index.
 - `Select` receives a finite item range and a controlled selected index.
+- `ComboBox` receives a controlled editing value and an application-provided suggestion range.
 - `Slider` receives a controlled value and can define range and step.
 - `ProgressCircle` and `ProgressBar` support determinate and indeterminate presentation.
 
@@ -159,6 +160,65 @@ Opening focuses the selected choice when enabled, otherwise the first enabled ch
 Escape, Back, outside press, and selecting the already controlled value close the popup without emitting a duplicate change.
 Disabling the Select while it is open closes the popup without emitting a change.
 `Validation` presents application-owned validation state without changing selection rules.
+
+## ComboBox
+
+`ComboBox` combines the complete controlled editing model of `TextField` with an anchored suggestion popup.
+The application owns both `TextEditingValue` and the current suggestion range, so filtering, debouncing, remote loading, and caching remain application policy.
+
+```cpp
+struct CitySuggestion {
+  std::string name;
+  std::string region;
+};
+
+[[huxerui::composable]]
+View CityPicker(const std::vector<CitySuggestion>& suggestions) {
+  auto query = UseState(TextEditingValue::FromText(""));
+
+  return ComboBox(
+             query, suggestions, [](const CitySuggestion& city) { return city.name; },
+             [](const CitySuggestion& city) {
+               return Column {
+                 Text(city.name),
+                 Text(city.region, TextRole::Label),
+               }.Key(city.name);
+             }
+         )
+      .Label("City")
+      .Placeholder("Search cities")
+      .OnChanged([query](const TextEditingValue& value) mutable {
+        query = value;
+      })
+      .OnSelected([query](std::size_t, const TextEditingValue& value) mutable {
+        query = value;
+      });
+}
+```
+
+The simple constructor accepts a range of string-compatible values and uses each string as both accepted text and popup content.
+The projected constructor accepts one text projection and one View factory, avoiding a public item wrapper while supporting rich rows.
+Both forms copy the supplied range for the declaration, so temporary filtered vectors are safe.
+Apply a stable `.Key(...)` to the factory result when suggestions can insert, remove, or reorder; otherwise identity follows position.
+
+`OnChanged(const TextEditingValue&)` reports direct edits, including selection and IME composition updates.
+`OnSelected(std::size_t, const TextEditingValue&)` reports an accepted suggestion as a complete replacement proposal and does not also emit `OnChanged`.
+`OnSubmitted()` runs when Enter or the platform action submits without accepting an active suggestion.
+
+Focus and the native input session remain on the field while the popup is open.
+Up and Down move through enabled suggestions without wrapping, Enter accepts the active suggestion, and Escape closes the popup.
+Arrow navigation does not run while an IME composition is active, so the platform input method retains ownership of composition keys.
+Shift-, Control-, and Meta-modified keys remain text-editing input rather than suggestion navigation.
+Alt modifies only Up and Down for popup opening and closing; other Alt-modified keys remain text-editing or platform input.
+Use `Enabled{false}` on a suggestion root to skip it during navigation and prevent activation; suggestion and empty-state content cannot contain another independent pointer target or focusable control.
+
+An empty range does not open a popup by default.
+Use `EmptyContent(...)` for a non-interactive loading or no-results presentation in the same anchored surface.
+Explicit dismissal suppresses reopening for the current query, while a later edit or focus cycle can open current results again.
+
+`TextFieldStyle` continues to own the editor visuals, label, validation, icons, and input states.
+`ComboBoxStyle` owns only the popup surface, item geometry, active background, indication, and height limit.
+The built-in trailing indicator is decorative and does not introduce a second interaction target.
 
 ## Tabs and indexed pages
 

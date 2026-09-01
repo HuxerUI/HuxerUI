@@ -1,7 +1,7 @@
 # Select
 
 `Select` is the non-editable finite-choice component.
-It is separate from a future editable ComboBox, which must own TextField-compatible editing, selection, composition, and submission behavior.
+It remains separate from the editable [ComboBox](combo-box.md), which reuses TextField-compatible editing, selection, composition, and submission behavior.
 
 ## Public contract
 

@@ -279,6 +279,7 @@ struct LayerEntrySnapshot {
   std::uint64_t revision = 0;
   bool exiting = false;
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
+  std::optional<std::uint64_t> retained_focus_identity;
 
   bool operator==(const LayerEntrySnapshot&) const = default;
 };
@@ -297,6 +298,7 @@ struct LayerEntry {
   std::shared_ptr<const Environment> environment;
   // Active menu layers share this token so one logical menu chain remains one semantic modal region.
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
+  std::optional<std::uint64_t> retained_focus_identity;
   // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
   std::shared_ptr<LayerPlacement> placement;
   std::shared_ptr<LayerTransitionState> transition;

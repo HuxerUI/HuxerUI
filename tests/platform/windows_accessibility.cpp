@@ -16,22 +16,36 @@ namespace {
 int accessibility_clicks = 0;
 State<float> accessibility_slider_value;
 State<TextEditingValue> accessibility_text_value;
+State<TextEditingValue> accessibility_combo_value;
 
 View WindowsAccessibilityApp() {
   auto slider = UseState(2.0F);
   auto text = UseState(TextEditingValue::FromText("initial"));
+  auto combo = UseState(TextEditingValue::FromText("initial"));
   accessibility_slider_value = slider;
   accessibility_text_value = text;
+  accessibility_combo_value = combo;
   return Column{
       Button("Run").OnClick([] { ++accessibility_clicks; }),
       Slider(slider.Get()).Range(0.0F, 10.0F).Step(0.5F).OnChanged([slider](float value) mutable { slider = value; }),
       Select(std::array{"One", "Two"}, 0, [](const char* label) { return Text(label); }).Label("Number"),
+      ComboBox(combo, {"initial", "updated"})
+          .Label("Search")
+          .OnChanged([combo](const TextEditingValue& value) mutable { combo = value; }),
       TextField(text).Label("Editor").OnChanged([text](const TextEditingValue& value) mutable { text = value; }),
   };
 }
 
 const SemanticNode& FindNode(const SemanticFrame& frame, SemanticRole role) {
   const auto found = std::ranges::find(frame.nodes, role, &SemanticNode::role);
+  REQUIRE(found != frame.nodes.end());
+  return *found;
+}
+
+const SemanticNode& FindNode(const SemanticFrame& frame, SemanticRole role, const char* label) {
+  const auto found = std::ranges::find_if(frame.nodes, [role, label](const SemanticNode& node) {
+    return node.role == role && node.label == label;
+  });
   REQUIRE(found != frame.nodes.end());
   return *found;
 }
@@ -48,7 +62,7 @@ std::wstring PropertyString(IRawElementProviderSimple& provider, PROPERTYID prop
 } // namespace
 
 TEST_CASE("Windows accessibility maps semantic properties and stable fragments") {
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime(WindowsAccessibilityApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
@@ -88,6 +102,17 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
   REQUIRE(select_value->get_IsReadOnly(&select_read_only) == S_OK);
   REQUIRE(select_read_only == TRUE);
   REQUIRE(select_value->SetValue(L"Two") == UIA_E_NOTSUPPORTED);
+
+  const SemanticNode& combo_node = FindNode(*frame, SemanticRole::ComboBox, "Search");
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> combo;
+  REQUIRE(accessibility.ProviderForNode(combo_node.id, &combo) == S_OK);
+  Microsoft::WRL::ComPtr<IValueProvider> combo_value;
+  REQUIRE(combo.As(&combo_value) == S_OK);
+  BOOL combo_read_only = TRUE;
+  REQUIRE(combo_value->get_IsReadOnly(&combo_read_only) == S_OK);
+  REQUIRE(combo_read_only == FALSE);
+  REQUIRE(combo_value->SetValue(L"updated") == S_OK);
+  REQUIRE(accessibility_combo_value.Get() == TextEditingValue::FromText("updated"));
 
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> same_button;
   REQUIRE(accessibility.ProviderForNode(button_node.id, &same_button) == S_OK);
@@ -166,7 +191,7 @@ TEST_CASE("Windows accessibility exposes semantic Lists with selected children a
 
 TEST_CASE("Windows accessibility patterns route actions through Runtime") {
   accessibility_clicks = 0;
-  TestPlatform platform;
+  TestPlatform platform{BuiltinTestResources()};
   Runtime runtime(WindowsAccessibilityApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
