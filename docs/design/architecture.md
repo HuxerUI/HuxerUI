@@ -800,11 +800,11 @@ platform PlatformPayload
 
 The envelope starts with the four ASCII bytes `HUXP`, a little-endian unsigned 16-bit format version, and a little-endian unsigned 16-bit flags field.
 Version 1 requires zero flags and contains exactly one value followed by no trailing bytes.
-Values use one-byte tags for Null, Boolean, Integer, Double, String, Bytes, List, Object, and ExternalTexture.
+The one-byte tags are Null `0`, Boolean `1`, Integer `2`, Double `3`, String `4`, Bytes `5`, List `6`, Object `7`, and ExternalTexture `8`.
 Integer values use signed 64-bit little-endian representation, Double values use their IEEE 754 binary64 bits in little-endian order, and all byte lengths and container counts use unsigned 32-bit little-endian values.
 Strings contain a byte length followed by UTF-8 bytes, lists contain a count followed by values, and objects contain a count followed by length-prefixed UTF-8 keys and values.
 Object keys are serialized in ascending UTF-8 byte order so one payload has one canonical encoding.
-ExternalTexture contains a one-byte capability kind and an unsigned 32-bit envelope-local slot.
+ExternalTexture contains capability kind `1` as one byte followed by an unsigned 32-bit envelope-local slot.
 
 The binary format preserves all payload kinds without implicit coercion.
 Decoders require the declared tag and range instead of converting strings to numbers, truncating doubles to integers, or treating bytes as text.

@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,15 @@
 
 namespace huxerui::test {
 namespace {
+
+Bytes WireBytes(std::initializer_list<std::uint8_t> values) {
+  Bytes bytes;
+  bytes.reserve(values.size());
+  for (std::uint8_t value : values) {
+    bytes.push_back(static_cast<std::byte>(value));
+  }
+  return bytes;
+}
 
 TEST_CASE("PlatformPayloadPreservesSupportedKinds") {
   const PlatformPayload payload = PlatformPayload::Object{
@@ -108,6 +118,39 @@ TEST_CASE("PlatformPayloadEnvelopeRoundTripsEveryValueKind") {
   REQUIRE(PlatformPayload::Decode(encoded, external_textures) == payload);
 }
 
+TEST_CASE("PlatformPayloadEnvelopeHasStableWireValues") {
+  const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
+  const PlatformPayload payload = PlatformPayload::List{
+      nullptr,
+      true,
+      std::int64_t{-2},
+      1.5,
+      "x",
+      Bytes{std::byte{0xAA}},
+      PlatformPayload::List{},
+      PlatformPayload::Object{},
+      texture,
+  };
+  const Bytes expected = WireBytes({
+      0x48, 0x55, 0x58, 0x50, 0x01, 0x00, 0x00, 0x00,
+      0x06, 0x09, 0x00, 0x00, 0x00,
+      0x00,
+      0x01, 0x01,
+      0x02, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+      0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF8, 0x3F,
+      0x04, 0x01, 0x00, 0x00, 0x00, 0x78,
+      0x05, 0x01, 0x00, 0x00, 0x00, 0xAA,
+      0x06, 0x00, 0x00, 0x00, 0x00,
+      0x07, 0x00, 0x00, 0x00, 0x00,
+      0x08, 0x01, 0x00, 0x00, 0x00, 0x00,
+  });
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
+
+  REQUIRE(payload.Encode(external_textures) == expected);
+  REQUIRE(external_textures == std::vector<std::shared_ptr<ExternalTexture>>{texture});
+  REQUIRE(PlatformPayload::Decode(expected, external_textures) == payload);
+}
+
 TEST_CASE("PlatformPayloadEnvelopeIsCanonical") {
   const PlatformPayload payload = PlatformPayload::Object{{"second", 2}, {"first", 1}};
   std::vector<std::shared_ptr<ExternalTexture>> external_textures;
@@ -124,13 +167,19 @@ TEST_CASE("PlatformPayloadEnvelopeRejectsMalformedInput") {
   truncated.pop_back();
   Bytes trailing = valid;
   trailing.push_back(std::byte{0});
+  Bytes invalid_header = valid;
+  invalid_header[0] = std::byte{0};
   Bytes unsupported_version = valid;
   unsupported_version[4] = std::byte{2};
+  Bytes unsupported_flags = valid;
+  unsupported_flags[6] = std::byte{1};
 
   REQUIRE_THROWS_AS(PlatformPayload::Decode({}), std::invalid_argument);
   REQUIRE_THROWS_AS(PlatformPayload::Decode(truncated), std::invalid_argument);
   REQUIRE_THROWS_AS(PlatformPayload::Decode(trailing), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(invalid_header), std::invalid_argument);
   REQUIRE_THROWS_AS(PlatformPayload::Decode(unsupported_version), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(unsupported_flags), std::invalid_argument);
 }
 
 TEST_CASE("PlatformPayloadEnvelopeRequiresExternalTextureCapabilities") {

@@ -1,6 +1,7 @@
 #include <huxerui/platform_registry.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cmath>
 #include <cstddef>
@@ -76,6 +77,14 @@ struct PlatformPayload::Data {
 
 namespace {
 
+constexpr std::array<std::byte, 4> envelope_magic{
+    static_cast<std::byte>('H'),
+    static_cast<std::byte>('U'),
+    static_cast<std::byte>('X'),
+    static_cast<std::byte>('P'),
+};
+constexpr std::uint16_t envelope_version = 1;
+constexpr std::uint16_t envelope_flags = 0;
 constexpr std::size_t max_envelope_bytes = 64U * 1024U * 1024U;
 constexpr std::size_t max_scalar_bytes = 16U * 1024U * 1024U;
 constexpr std::size_t max_container_entries = 1U * 1024U * 1024U;
@@ -118,15 +127,15 @@ void ValidatePayload(const PlatformPayload& payload) {
 }
 
 enum class PayloadTag : std::uint8_t {
-  Null,
-  Boolean,
-  Integer,
-  Double,
-  String,
-  Bytes,
-  List,
-  Object,
-  ExternalTexture,
+  Null = 0,
+  Boolean = 1,
+  Integer = 2,
+  Double = 3,
+  String = 4,
+  Bytes = 5,
+  List = 6,
+  Object = 7,
+  ExternalTexture = 8,
 };
 
 class EnvelopeWriter final {
@@ -134,14 +143,9 @@ public:
   Bytes Write(
       const PlatformPayload& payload, std::vector<std::shared_ptr<ExternalTexture>>& external_textures
   ) {
-    bytes_ = {
-        static_cast<std::byte>('H'),
-        static_cast<std::byte>('U'),
-        static_cast<std::byte>('X'),
-        static_cast<std::byte>('P'),
-    };
-    WriteUnsigned<std::uint16_t>(1);
-    WriteUnsigned<std::uint16_t>(0);
+    bytes_.assign(envelope_magic.begin(), envelope_magic.end());
+    WriteUnsigned(envelope_version);
+    WriteUnsigned(envelope_flags);
     WriteValue(payload, 0);
     external_textures = std::move(external_textures_);
     return std::move(bytes_);
@@ -277,15 +281,13 @@ public:
         throw std::invalid_argument("HuxerUI PlatformPayload envelope contains a duplicate external texture");
       }
     }
-    if (bytes_.size() > max_envelope_bytes || ReadByte() != static_cast<std::byte>('H') ||
-        ReadByte() != static_cast<std::byte>('U') || ReadByte() != static_cast<std::byte>('X') ||
-        ReadByte() != static_cast<std::byte>('P')) {
+    if (bytes_.size() > max_envelope_bytes || !std::ranges::equal(ReadBytes(envelope_magic.size()), envelope_magic)) {
       throw std::invalid_argument("HuxerUI PlatformPayload envelope has an invalid header");
     }
-    if (ReadUnsigned<std::uint16_t>() != 1) {
+    if (ReadUnsigned<std::uint16_t>() != envelope_version) {
       throw std::invalid_argument("HuxerUI PlatformPayload envelope has an unsupported version");
     }
-    if (ReadUnsigned<std::uint16_t>() != 0) {
+    if (ReadUnsigned<std::uint16_t>() != envelope_flags) {
       throw std::invalid_argument("HuxerUI PlatformPayload envelope has unsupported flags");
     }
     PlatformPayload result = ReadValue(0);
