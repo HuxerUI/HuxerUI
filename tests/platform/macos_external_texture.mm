@@ -16,7 +16,7 @@
 namespace huxerui::test {
 namespace {
 
-ExternalTexture mac_external_texture;
+std::shared_ptr<ExternalTexture> mac_external_texture;
 
 View MacExternalTextureApp() {
   return Column {
@@ -83,15 +83,14 @@ bool Near(std::uint8_t value, std::uint8_t expected) {
 
 TEST_CASE("MacExternalTexturePublishesLatestFrameThroughAppKitRenderer") {
   @autoreleasepool {
-    macos::ExternalTextureSource source({2.0F, 2.0F});
-    mac_external_texture = source.Texture();
-    REQUIRE(mac_external_texture.HasValue());
-    REQUIRE_THROWS_AS(source.Publish(nullptr), std::invalid_argument);
+    const auto texture = std::make_shared<macos::PixelBufferTexture>(Size{2.0F, 2.0F});
+    mac_external_texture = texture;
+    REQUIRE_THROWS_AS(texture->Publish(nullptr), std::invalid_argument);
 
     CVPixelBufferRef red = CreatePixelBuffer({0, 0, 255, 255});
     CVPixelBufferRef green = CreatePixelBuffer({0, 255, 0, 255});
-    source.Publish(red);
-    source.Publish(green);
+    texture->Publish(red);
+    texture->Publish(green);
     CVPixelBufferRelease(red);
     CVPixelBufferRelease(green);
 
@@ -105,10 +104,16 @@ TEST_CASE("MacExternalTexturePublishesLatestFrameThroughAppKitRenderer") {
     REQUIRE(Near(initial_pixel[1], 255));
     REQUIRE(Near(initial_pixel[2], 0));
     REQUIRE(Near(initial_pixel[3], 255));
+    detail::AppKitRenderer other_renderer;
+    const std::array<std::uint8_t, 4> other_pixel = RenderPixel(other_renderer, initial);
+    REQUIRE(Near(other_pixel[0], 0));
+    REQUIRE(Near(other_pixel[1], 255));
+    REQUIRE(Near(other_pixel[2], 0));
+    REQUIRE(Near(other_pixel[3], 255));
 
     const int requests_before_publish = platform.requested_frames;
     CVPixelBufferRef blue = CreatePixelBuffer({255, 0, 0, 255});
-    source.Publish(blue);
+    texture->Publish(blue);
     CVPixelBufferRelease(blue);
     REQUIRE(platform.requested_frames == requests_before_publish);
     platform.RunPlatformModuleTasks();
@@ -123,8 +128,8 @@ TEST_CASE("MacExternalTexturePublishesLatestFrameThroughAppKitRenderer") {
     REQUIRE(Near(updated_pixel[3], 255));
 
     CVPixelBufferRef yellow = CreatePixelBuffer({0, 255, 255, 255});
-    source.Publish(yellow);
-    source.Finish();
+    texture->Publish(yellow);
+    texture->Finish();
     CVPixelBufferRelease(yellow);
     platform.RunPlatformModuleTasks();
     const RenderFrame& finished = runtime.BuildRenderFrame();
@@ -135,21 +140,19 @@ TEST_CASE("MacExternalTexturePublishesLatestFrameThroughAppKitRenderer") {
     REQUIRE(Near(finished_pixel[3], 255));
 
     CVPixelBufferRef rejected = CreatePixelBuffer({0, 0, 0, 255});
-    REQUIRE_THROWS_AS(source.Publish(rejected), std::logic_error);
+    REQUIRE_THROWS_AS(texture->Publish(rejected), std::logic_error);
     CVPixelBufferRelease(rejected);
   }
 }
 
-TEST_CASE("MacExternalTextureSourceIsMoveOnlyAndPreservesItsConsumer") {
-  macos::ExternalTextureSource source({16.0F, 9.0F});
-  const ExternalTexture texture = source.Texture();
-  macos::ExternalTextureSource moved(std::move(source));
+TEST_CASE("MacPixelBufferTextureIsTheSharedExternalTextureIdentity") {
+  const std::shared_ptr<ExternalTexture> texture = std::make_shared<macos::PixelBufferTexture>(Size{16.0F, 9.0F});
 
-  REQUIRE_FALSE(source.Texture().HasValue());
-  REQUIRE(moved.Texture() == texture);
-  REQUIRE_THROWS_AS(source.Publish(nullptr), std::logic_error);
-  moved.Finish();
-  moved.Finish();
+  REQUIRE(texture->IntrinsicSize() == Size{16.0F, 9.0F});
+  const auto pixel_buffer_texture = std::dynamic_pointer_cast<macos::PixelBufferTexture>(texture);
+  REQUIRE(pixel_buffer_texture != nullptr);
+  pixel_buffer_texture->Finish();
+  REQUIRE_THROWS_AS(pixel_buffer_texture->Publish(nullptr), std::invalid_argument);
 }
 
 } // namespace

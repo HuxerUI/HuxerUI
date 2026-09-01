@@ -1176,7 +1176,9 @@ Runtime::~Runtime() {
     StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
   } catch (...) {
   }
-  DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->platform_->external_texture_surface_);
+  DeactivateExternalTextures(
+      state_->committed_scene_snapshot_, state_->platform_->external_texture_frame_requester_
+  );
   state_->pointer_sessions_.clear();
   state_->pointer_hover_.reset();
   state_->layer_controller_.Disconnect();
@@ -1401,7 +1403,6 @@ std::optional<PlatformPayload> Runtime::DispatchPlatformViewEvent(
     return std::nullopt;
   }
   try {
-    detail::BindExternalTextures(payload, state_->platform_->external_texture_surface_);
     if (event->dispatch_payload == nullptr) {
       return std::nullopt;
     }
@@ -1428,7 +1429,6 @@ std::optional<PlatformValue> Runtime::DispatchPlatformViewEvent(
     return std::nullopt;
   }
   try {
-    detail::BindExternalTextures(value, state_->platform_->external_texture_surface_);
     return event->dispatch_direct(value, node->event_bindings);
   } catch (...) {
     return std::nullopt;
@@ -1553,7 +1553,9 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     BuildSemantics();
     state_->frame_commit_.render_frame.scene.root = nullptr;
     state_->frame_commit_.render_frame.damage = {};
-    DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->platform_->external_texture_surface_);
+    DeactivateExternalTextures(
+        state_->committed_scene_snapshot_, state_->platform_->external_texture_frame_requester_
+    );
     state_->has_committed_scene_snapshot_ = false;
     ++state_->frame_commit_.render_frame.revision;
     CommitLifecycles();
@@ -1682,7 +1684,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
       state_->committed_scene_snapshot_,
       state_->committed_viewport_,
       state_->has_committed_scene_snapshot_,
-      state_->platform_->external_texture_surface_
+      state_->platform_->external_texture_frame_requester_
   );
   if (scene_transition_was_active) {
     state_->frame_commit_.render_frame.damage.full = true;
@@ -2956,11 +2958,6 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     environment_transaction.reset();
   }
 
-  if (compiled.platform_view &&
-      !detail::PlatformViewPropertiesEqual(mounted->platform_view, compiled.platform_view)) {
-    detail::BindExternalTextures(compiled.platform_view->properties, state_->platform_->external_texture_surface_);
-  }
-
   bool layout_changed = !LayoutInputsEqual(*mounted, compiled);
   if (!ContentPaintInputsEqual(*mounted, compiled)) {
     mounted->content_paint_dirty = true;
@@ -3030,9 +3027,6 @@ Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<
     mounted_environment = owned_environment;
   }
   ViewSpec compiled = CompileViewSpec(*incoming, mounted_environment, *state_->app_resources_);
-  if (compiled.platform_view) {
-    detail::BindExternalTextures(compiled.platform_view->properties, state_->platform_->external_texture_surface_);
-  }
   auto mounted = std::make_unique<detail::MountedNode>();
   mounted->identity = state_->next_node_identity_++;
   mounted->owned_environment = std::move(owned_environment);

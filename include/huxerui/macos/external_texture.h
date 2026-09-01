@@ -7,19 +7,36 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// The Objective-C and Swift base identity for an opaque HuxerUI external texture capability.
+///
+/// Instances arrive as a concrete HUXPixelBufferTexture or through PlatformPayload. The base class cannot be created
+/// directly and exposes no renderer-specific resource handle.
 NS_SWIFT_NAME(ExternalTexture)
-__attribute__((objc_subclassing_restricted))
 @interface HUXExternalTexture : NSObject
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
 @end
 
-NS_SWIFT_NAME(ExternalTextureSource)
-@interface HUXExternalTextureSource : NSObject
+/// A latest-frame macOS texture backed by retained CVPixelBuffer objects.
+///
+/// Swift imports this class as PixelBufferTexture. The intrinsic size is immutable logical UI geometry rather than the
+/// pixel dimensions of a published buffer.
+///
+/// @code
+/// let texture = PixelBufferTexture(intrinsicSize: CGSize(width: 320, height: 180))
+/// texture.publishPixelBuffer(pixelBuffer)
+/// @endcode
+NS_SWIFT_NAME(PixelBufferTexture)
+__attribute__((objc_subclassing_restricted))
+@interface HUXPixelBufferTexture : HUXExternalTexture
+/// Creates an empty pixel-buffer mailbox with a finite, strictly positive logical size.
 - (instancetype)initWithIntrinsicSize:(CGSize)size NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
-@property(nonatomic, readonly) HUXExternalTexture* texture;
+/// Retains pixelBuffer as the newest immutable frame and schedules every Runtime currently displaying this texture.
+///
+/// Pass a different buffer for later mutable content. A null buffer or publication after finish raises an exception.
 - (void)publishPixelBuffer:(CVPixelBufferRef)pixelBuffer;
+/// Idempotently stops publication while preserving the last successfully published frame.
 - (void)finish;
 @end
 
@@ -35,6 +52,7 @@ NS_ASSUME_NONNULL_END
 #pragma clang diagnostic ignored "-Wnullability-completeness"
 #endif
 #include <memory>
+#include <mutex>
 
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
@@ -42,27 +60,47 @@ NS_ASSUME_NONNULL_END
 namespace huxerui {
 
 namespace detail {
-class MacExternalTextureState;
+class AppKitRenderer;
 } // namespace detail
 
 namespace macos {
 
-class ExternalTextureSource final {
+/// A latest-frame macOS ExternalTexture backed by retained CVPixelBuffer objects.
+///
+/// Publish retains the buffer rather than copying its planes. The producer may release its own reference after the
+/// call, but the buffer contents remain immutable while HuxerUI may render them.
+///
+/// @code
+/// auto texture = std::make_shared<macos::PixelBufferTexture>(Size{320.0F, 180.0F});
+/// texture->Publish(pixel_buffer);
+/// View preview = Image(texture).Fit(ImageFit::Cover);
+/// @endcode
+class PixelBufferTexture final : public huxerui::ExternalTexture {
 public:
-  explicit ExternalTextureSource(Size intrinsic_size);
-  ~ExternalTextureSource();
+  /// Creates an empty pixel-buffer mailbox with a finite, strictly positive logical size.
+  explicit PixelBufferTexture(Size intrinsic_size) : huxerui::ExternalTexture(intrinsic_size) {}
+  /// Releases the retained mailbox buffer; renderer-owned snapshots retain their own resources.
+  ~PixelBufferTexture();
 
-  ExternalTextureSource(const ExternalTextureSource&) = delete;
-  ExternalTextureSource& operator=(const ExternalTextureSource&) = delete;
-  ExternalTextureSource(ExternalTextureSource&& other) noexcept;
-  ExternalTextureSource& operator=(ExternalTextureSource&& other) noexcept;
+  /// PixelBufferTexture identities cannot be copied; share them through std::shared_ptr.
+  PixelBufferTexture(const PixelBufferTexture&) = delete;
+  PixelBufferTexture& operator=(const PixelBufferTexture&) = delete;
 
-  [[nodiscard]] ExternalTexture Texture() const noexcept;
+  /// Retains frame as the newest immutable image and schedules every Runtime currently displaying this texture.
+  ///
+  /// A null frame throws std::invalid_argument. Publication after Finish() throws std::logic_error.
   void Publish(CVPixelBufferRef frame);
+  /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
 private:
-  std::shared_ptr<detail::MacExternalTextureState> state_;
+  [[nodiscard]] CVPixelBufferRef AcquireFrame() const noexcept;
+
+  mutable std::mutex frame_mutex_;
+  CVPixelBufferRef frame_ = nullptr;
+  bool finished_ = false;
+
+  friend class huxerui::detail::AppKitRenderer;
 };
 
 } // namespace macos

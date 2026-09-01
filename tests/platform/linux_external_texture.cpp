@@ -26,16 +26,12 @@
 namespace huxerui::test {
 namespace {
 
-static_assert(!std::is_copy_constructible_v<linux::ExternalTextureSource>);
-static_assert(!std::is_copy_assignable_v<linux::ExternalTextureSource>);
-static_assert(std::is_nothrow_move_constructible_v<linux::ExternalTextureSource>);
-static_assert(std::is_nothrow_move_assignable_v<linux::ExternalTextureSource>);
+static_assert(!std::is_copy_constructible_v<linux::PixelTexture>);
+static_assert(!std::is_copy_assignable_v<linux::PixelTexture>);
+static_assert(!std::is_move_constructible_v<linux::PixelTexture>);
+static_assert(!std::is_move_assignable_v<linux::PixelTexture>);
 
-std::shared_ptr<detail::LinuxExternalTextureState> StateFor(const ExternalTexture& texture) {
-  return std::dynamic_pointer_cast<detail::LinuxExternalTextureState>(detail::ExternalTextureState::From(texture));
-}
-
-std::uint32_t PixelAt(const detail::LinuxExternalTextureFrame& frame, int x, int y) {
+std::uint32_t PixelAt(const detail::LinuxPixelFrame& frame, int x, int y) {
   std::uint32_t pixel = 0;
   const std::span<const std::byte> pixels = frame.Pixels();
   const std::size_t offset = static_cast<std::size_t>(y) * frame.BytesPerRow() + static_cast<std::size_t>(x) * 4U;
@@ -43,8 +39,8 @@ std::uint32_t PixelAt(const detail::LinuxExternalTextureFrame& frame, int x, int
   return pixel;
 }
 
-ExternalTexture scheduled_texture;
-ExternalTexture rendered_texture;
+std::shared_ptr<ExternalTexture> scheduled_texture;
+std::shared_ptr<ExternalTexture> rendered_texture;
 
 View LinuxExternalTextureApp() {
   return Image(scheduled_texture).Fit(ImageFit::Fill).With(Frame{2.0F, 2.0F});
@@ -91,11 +87,8 @@ std::array<std::uint32_t, 20> RenderPixels(detail::LinuxRenderer& renderer, cons
 }
 
 TEST_CASE("LinuxExternalTextureCopiesAndConvertsTheLatestPixelFrame") {
-  linux::ExternalTextureSource source({16.0F, 9.0F});
-  const ExternalTexture texture = source.Texture();
-  const std::shared_ptr<detail::LinuxExternalTextureState> state = StateFor(texture);
-  REQUIRE(state != nullptr);
-  REQUIRE(texture.IntrinsicSize() == Size{16.0F, 9.0F});
+  const auto texture = std::make_shared<linux::PixelTexture>(Size{16.0F, 9.0F});
+  REQUIRE(texture->IntrinsicSize() == Size{16.0F, 9.0F});
 
   std::array<std::byte, 12> rgba{
       std::byte{255},
@@ -111,43 +104,42 @@ TEST_CASE("LinuxExternalTextureCopiesAndConvertsTheLatestPixelFrame") {
       std::byte{0},
       std::byte{128},
   };
-  source.Publish({
+  texture->Publish({
       .pixel_width = 1,
       .pixel_height = 2,
       .bytes_per_row = 8,
-      .format = linux::ExternalTexturePixelFormat::Rgba8888,
+      .format = linux::PixelFormat::Rgba8888,
       .pixels = rgba,
   });
   rgba.fill(std::byte{0});
 
-  const std::optional<detail::LinuxExternalTextureFrame> frame = state->AcquireLatestFrame();
-  REQUIRE(frame.has_value());
+  const std::shared_ptr<const detail::LinuxPixelFrame> frame = detail::GetPixelFrame(*texture);
+  REQUIRE(frame != nullptr);
   REQUIRE(frame->PixelWidth() == 1);
   REQUIRE(frame->PixelHeight() == 2);
   REQUIRE(frame->BytesPerRow() == 4);
   REQUIRE(PixelAt(*frame, 0, 0) == 0xFFFF0000U);
   REQUIRE(PixelAt(*frame, 0, 1) == 0x80008000U);
-  REQUIRE_FALSE(state->AcquireLatestFrame().has_value());
+  REQUIRE(detail::GetPixelFrame(*texture) == frame);
 }
 
 TEST_CASE("LinuxExternalTextureUsesALatestWinsMailboxAndAcceptsBgra") {
-  linux::ExternalTextureSource source({1.0F, 1.0F});
-  const std::shared_ptr<detail::LinuxExternalTextureState> state = StateFor(source.Texture());
+  const auto texture = std::make_shared<linux::PixelTexture>(Size{1.0F, 1.0F});
   const std::array<std::byte, 4> red{std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
   const std::array<std::byte, 4> blue_bgra{std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
 
-  source.Publish({1, 1, 4, linux::ExternalTexturePixelFormat::Rgba8888, red});
-  source.Publish({1, 1, 4, linux::ExternalTexturePixelFormat::Bgra8888, blue_bgra});
+  texture->Publish({1, 1, 4, linux::PixelFormat::Rgba8888, red});
+  texture->Publish({1, 1, 4, linux::PixelFormat::Bgra8888, blue_bgra});
 
-  const std::optional<detail::LinuxExternalTextureFrame> frame = state->AcquireLatestFrame();
-  REQUIRE(frame.has_value());
+  const std::shared_ptr<const detail::LinuxPixelFrame> frame = detail::GetPixelFrame(*texture);
+  REQUIRE(frame != nullptr);
   REQUIRE(PixelAt(*frame, 0, 0) == 0xFF0000FFU);
-  REQUIRE_FALSE(state->AcquireLatestFrame().has_value());
+  REQUIRE(detail::GetPixelFrame(*texture) == frame);
 }
 
 TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThroughCairo") {
-  linux::ExternalTextureSource source({2.0F, 1.0F});
-  rendered_texture = source.Texture();
+  const auto texture = std::make_shared<linux::PixelTexture>(Size{2.0F, 1.0F});
+  rendered_texture = texture;
   const std::array<std::byte, 8> red_green{
       std::byte{255},
       std::byte{0},
@@ -158,7 +150,7 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
       std::byte{0},
       std::byte{255},
   };
-  source.Publish({2, 1, 8, linux::ExternalTexturePixelFormat::Rgba8888, red_green});
+  texture->Publish({2, 1, 8, linux::PixelFormat::Rgba8888, red_green});
 
   TestPlatform platform;
   Runtime runtime{LinuxExternalTextureRenderApp, platform};
@@ -184,7 +176,7 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
       std::byte{0},
       std::byte{255},
   };
-  source.Publish({2, 1, 8, linux::ExternalTexturePixelFormat::Rgba8888, blue_yellow});
+  texture->Publish({2, 1, 8, linux::PixelFormat::Rgba8888, blue_yellow});
   const std::array<std::uint32_t, 20> updated = RenderPixels(renderer, frame);
   REQUIRE(updated[1U * 5U + 2U] == 0xFFFFFF00U);
   REQUIRE(updated[3U * 5U] == 0x80000080U);
@@ -194,59 +186,56 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
   renderer.Discard();
 }
 
-TEST_CASE("LinuxExternalTextureValidatesPixelFramesAndFinishedSources") {
-  linux::ExternalTextureSource source({1.0F, 1.0F});
+TEST_CASE("LinuxExternalTextureValidatesPixelFramesAndFinishedTextures") {
+  const auto texture = std::make_shared<linux::PixelTexture>(Size{1.0F, 1.0F});
   const std::array<std::byte, 4> pixel{};
 
   REQUIRE_THROWS_AS(
-      source.Publish({0, 1, 4, linux::ExternalTexturePixelFormat::Rgba8888, pixel}),
+      texture->Publish({0, 1, 4, linux::PixelFormat::Rgba8888, pixel}),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      source.Publish({1, 1, 3, linux::ExternalTexturePixelFormat::Rgba8888, pixel}),
+      texture->Publish({1, 1, 3, linux::PixelFormat::Rgba8888, pixel}),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      source.Publish({2, 1, 8, linux::ExternalTexturePixelFormat::Rgba8888, pixel}),
+      texture->Publish({2, 1, 8, linux::PixelFormat::Rgba8888, pixel}),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      source.Publish({1, 1, 4, static_cast<linux::ExternalTexturePixelFormat>(99), pixel}),
+      texture->Publish({1, 1, 4, static_cast<linux::PixelFormat>(99), pixel}),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      source.Publish(
+      texture->Publish(
           {std::numeric_limits<int>::max(),
            1,
            std::numeric_limits<std::size_t>::max(),
-           linux::ExternalTexturePixelFormat::Rgba8888,
+           linux::PixelFormat::Rgba8888,
            pixel}
       ),
       std::invalid_argument
   );
 
-  const std::shared_ptr<detail::LinuxExternalTextureState> state = StateFor(source.Texture());
-  source.Publish({1, 1, 4, linux::ExternalTexturePixelFormat::Rgba8888, pixel});
-  source.Finish();
-  REQUIRE(state->AcquireLatestFrame().has_value());
-  REQUIRE_THROWS_AS(source.Publish({1, 1, 4, linux::ExternalTexturePixelFormat::Rgba8888, pixel}), std::logic_error);
-  source.Finish();
+  texture->Publish({1, 1, 4, linux::PixelFormat::Rgba8888, pixel});
+  texture->Finish();
+  REQUIRE(detail::GetPixelFrame(*texture) != nullptr);
+  REQUIRE_THROWS_AS(
+      texture->Publish({1, 1, 4, linux::PixelFormat::Rgba8888, pixel}), std::logic_error
+  );
+  texture->Finish();
 }
 
-TEST_CASE("LinuxExternalTextureSourceMovePreservesItsConsumer") {
-  linux::ExternalTextureSource source({16.0F, 9.0F});
-  const ExternalTexture texture = source.Texture();
-  linux::ExternalTextureSource moved(std::move(source));
-  const std::array<std::byte, 4> pixel{};
+TEST_CASE("LinuxPixelTextureIsTheSharedExternalTextureIdentity") {
+  const std::shared_ptr<ExternalTexture> texture = std::make_shared<linux::PixelTexture>(Size{16.0F, 9.0F});
 
-  REQUIRE_FALSE(source.Texture().HasValue());
-  REQUIRE(moved.Texture() == texture);
-  REQUIRE_THROWS_AS(source.Publish({1, 1, 4, linux::ExternalTexturePixelFormat::Rgba8888, pixel}), std::logic_error);
+  REQUIRE(texture->IntrinsicSize() == Size{16.0F, 9.0F});
+  REQUIRE(std::dynamic_pointer_cast<linux::PixelTexture>(texture) != nullptr);
 }
 
 TEST_CASE("LinuxExternalTexturePublicationSchedulesDamageThroughItsBoundRuntime") {
-  linux::ExternalTextureSource source({2.0F, 2.0F});
-  scheduled_texture = source.Texture();
+  const auto texture = std::make_shared<linux::PixelTexture>(Size{2.0F, 2.0F});
+  scheduled_texture = texture;
   TestPlatform platform;
   Runtime runtime{LinuxExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
@@ -254,7 +243,7 @@ TEST_CASE("LinuxExternalTexturePublicationSchedulesDamageThroughItsBoundRuntime"
 
   const int requests_before_publish = platform.requested_frames;
   const std::array<std::byte, 16> pixels{};
-  source.Publish({2, 2, 8, linux::ExternalTexturePixelFormat::Rgba8888, pixels});
+  texture->Publish({2, 2, 8, linux::PixelFormat::Rgba8888, pixels});
   REQUIRE(platform.requested_frames == requests_before_publish);
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.requested_frames == requests_before_publish + 1);

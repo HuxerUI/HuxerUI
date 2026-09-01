@@ -35,7 +35,8 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
 struct AppleColorStreamState : huxerui::example::ColorStreamService,
                                std::enable_shared_from_this<AppleColorStreamState> {
   explicit AppleColorStreamState(huxerui::PlatformAdapter& adapter_value)
-      : adapter(&adapter_value), source({320.0F, 180.0F}) {}
+      : adapter(&adapter_value),
+        texture(std::make_shared<huxerui_apple::PixelBufferTexture>(huxerui::Size{320.0F, 180.0F})) {}
 
   ~AppleColorStreamState() override {
     Stop();
@@ -64,7 +65,7 @@ struct AppleColorStreamState : huxerui::example::ColorStreamService,
       }
     }
     CVPixelBufferUnlockBaseAddress(pixel_buffer, 0);
-    source.Publish(pixel_buffer);
+    texture->Publish(pixel_buffer);
     CVPixelBufferRelease(pixel_buffer);
     ++phase;
   }
@@ -88,11 +89,11 @@ struct AppleColorStreamState : huxerui::example::ColorStreamService,
   void Stop() noexcept {
     [timer invalidate];
     timer = nil;
-    source.Finish();
+    texture->Finish();
   }
 
   huxerui::PlatformRequestId
-  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+  Texture(std::function<void(huxerui::PlatformResult<std::shared_ptr<huxerui::ExternalTexture>>)> completion) override {
     if (!completion) {
       throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
     }
@@ -100,15 +101,14 @@ struct AppleColorStreamState : huxerui::example::ColorStreamService,
       throw std::logic_error("HuxerUI example Apple color stream must be used on the main thread");
     }
     Start();
-    huxerui::ExternalTexture texture = source.Texture();
-    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = texture]() mutable {
       completion(std::move(texture));
     });
     return ++request_id;
   }
 
   huxerui::PlatformAdapter* adapter;
-  huxerui_apple::ExternalTextureSource source;
+  std::shared_ptr<huxerui_apple::PixelBufferTexture> texture;
   __strong NSTimer* timer = nil;
   std::uint32_t phase = 0;
   huxerui::PlatformRequestId request_id = 0;

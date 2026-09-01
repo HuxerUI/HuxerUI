@@ -67,7 +67,7 @@ void RequireFactory(const val& factory, std::string_view kind) {
 }
 
 val PlatformPayloadToJavaScript(const PlatformPayload& payload) {
-  std::vector<ExternalTexture> external_textures;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   const Bytes encoded = payload.Encode(external_textures);
   if (!external_textures.empty()) {
     throw std::invalid_argument("HuxerUI Web JavaScript bridge does not support ExternalTexture payloads");

@@ -22,7 +22,7 @@ ImageAsset TestImage() {
   return ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
 }
 
-ExternalTexture TestExternalTexture() {
+std::shared_ptr<ExternalTexture> TestExternalTexture() {
   return MakeTestExternalTexture({20.0F, 10.0F});
 }
 
@@ -284,7 +284,7 @@ TEST_CASE("PaintContextValidatesImageSourceAndOpacity") {
 }
 
 TEST_CASE("PaintContextRecordsExternalTexturesWithoutFlatteningThemToImages") {
-  const ExternalTexture texture = TestExternalTexture();
+  const std::shared_ptr<ExternalTexture> texture = TestExternalTexture();
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
   context.DrawImageRect(
@@ -307,7 +307,7 @@ TEST_CASE("PaintContextRecordsExternalTexturesWithoutFlatteningThemToImages") {
   REQUIRE(sequence.Bounds() == command.destination);
 }
 
-TEST_CASE("PaintContextValidatesExternalTextureSourceAndOpacity") {
+TEST_CASE("PaintContextValidatesExternalTextureAndOpacity") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
   REQUIRE_THROWS_AS(
@@ -318,7 +318,7 @@ TEST_CASE("PaintContextValidatesExternalTextureSourceAndOpacity") {
       context.DrawImage(TestExternalTexture(), {0.0F, 0.0F, 10.0F, 10.0F}, ImageSampling::Linear, 1.1F),
       std::invalid_argument
   );
-  REQUIRE_THROWS_AS(context.DrawImage(ExternalTexture{}, {}), std::invalid_argument);
+  REQUIRE_THROWS_AS(context.DrawImage(std::shared_ptr<ExternalTexture>{}, {}), std::invalid_argument);
 }
 
 TEST_CASE("PaintContextOmitsTextRunsWithoutVisibleBounds") {

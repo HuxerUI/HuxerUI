@@ -36,12 +36,13 @@ Respect fill rules when filling, clipping, or querying paths. Text painting uses
 
 ## External textures
 
-`ExternalTexture` is a retained frame source displayed through `Image(texture)`. Platform-specific public `ExternalTextureSource` types publish:
+`ExternalTexture` is the shared base identity of a retained frame producer displayed through `Image(texture)`. Platform-specific concrete types publish:
 
-- Windows/Linux: copied RGBA/BGRA byte frames with explicit dimensions and stride;
-- Android: a Java bitmap;
-- iOS/macOS: a `CVPixelBufferRef`;
-- Web: an `emscripten::val` video-frame source.
+- Windows/Linux `PixelTexture`: copied RGBA/BGRA `PixelFrame` values with explicit dimensions and stride;
+- Android `BitmapTexture`: a Java bitmap;
+- iOS/macOS `PixelBufferTexture`: a `CVPixelBufferRef`;
+- Web `VideoFrameTexture`: an `emscripten::val` WebCodecs video frame.
 
-Create the source with an intrinsic DIP size, expose `Texture()` to UI, publish platform frames, and call `Finish()` when no more frames will arrive. Use `PlatformView` instead when a live platform control must own input, IME, accessibility, or platform lifecycle.
-Objective-C and Swift on iOS or macOS use `ExternalTextureSource` from `HuxerUIPlatform`; it wraps the same platform source, publishes `CVPixelBuffer` frames, and may travel inside `PlatformPayload` without a public texture identifier or second registry.
+Create the concrete texture with an intrinsic DIP size, retain it through `std::shared_ptr`, pass it directly to `Image`, publish platform frames, and call `Finish()` when no more frames will arrive. Use `PlatformView` instead when a live platform control must own input, IME, accessibility, or platform lifecycle.
+Treat Android Bitmap and Apple pixel-buffer contents as immutable while HuxerUI may render them; Windows/Linux inputs are copied and Web VideoFrames are cloned by `Publish()`.
+Objective-C and Swift on iOS or macOS use `PixelBufferTexture` from `HuxerUIPlatform`; it is itself the capability, publishes `CVPixelBuffer` frames, and may travel inside `PlatformPayload` without a public texture identifier or second registry.

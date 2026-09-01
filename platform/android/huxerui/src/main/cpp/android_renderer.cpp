@@ -198,8 +198,8 @@ void AndroidRenderer::BeginDraw() {
   }
   ++draw_epoch_;
   std::erase_if(external_textures_, [](const CachedExternalTexture& cached) {
-    const std::shared_ptr<AndroidExternalTextureState> source = cached.source.lock();
-    return !source || !source->IsActive();
+    const std::shared_ptr<android::BitmapTexture> texture = cached.texture.lock();
+    return !texture || !texture->IsActive();
   });
 }
 
@@ -490,11 +490,11 @@ void AndroidRenderer::RenderCommand(
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command
 ) {
-  const AndroidExternalTextureFrame* frame = FrameFor(command.texture);
+  const AndroidBitmapFrame* frame = FrameFor(command.texture);
   if (frame == nullptr) {
     return;
   }
-  const Size intrinsic_size = command.texture.IntrinsicSize();
+  const Size intrinsic_size = command.texture->IntrinsicSize();
   const float scale_x = static_cast<float>(frame->PixelWidth()) / intrinsic_size.width;
   const float scale_y = static_cast<float>(frame->PixelHeight()) / intrinsic_size.height;
   environment->CallVoidMethod(
@@ -516,27 +516,27 @@ void AndroidRenderer::RenderCommand(
   );
 }
 
-const AndroidExternalTextureFrame* AndroidRenderer::FrameFor(const ExternalTexture& texture) {
-  const std::shared_ptr<AndroidExternalTextureState> source =
-      std::dynamic_pointer_cast<AndroidExternalTextureState>(ExternalTextureState::From(texture));
-  if (!source) {
-    throw std::logic_error("HuxerUI external texture does not contain an Android Bitmap source");
+const AndroidBitmapFrame* AndroidRenderer::FrameFor(const std::shared_ptr<ExternalTexture>& texture) {
+  const std::shared_ptr<android::BitmapTexture> bitmap_texture =
+      std::dynamic_pointer_cast<android::BitmapTexture>(texture);
+  if (!bitmap_texture) {
+    throw std::logic_error("HuxerUI external texture is incompatible with the Android renderer");
   }
-  auto cached = std::ranges::find_if(external_textures_, [&source](const CachedExternalTexture& entry) {
-    return entry.source.lock() == source;
+  auto cached = std::ranges::find_if(external_textures_, [&bitmap_texture](const CachedExternalTexture& entry) {
+    return entry.texture.lock() == bitmap_texture;
   });
   if (cached == external_textures_.end()) {
-    external_textures_.push_back(CachedExternalTexture{source, {}, std::numeric_limits<std::uint64_t>::max()});
+    external_textures_.push_back(CachedExternalTexture{bitmap_texture, {}, std::numeric_limits<std::uint64_t>::max()});
     cached = external_textures_.end() - 1;
   }
   if (cached->draw_epoch != draw_epoch_) {
-    AndroidExternalTextureFrame frame = source->AcquireLatestFrame();
+    const std::shared_ptr<const AndroidBitmapFrame> frame = bitmap_texture->AcquireFrame();
     if (frame) {
-      cached->frame = std::move(frame);
+      cached->frame = frame;
     }
     cached->draw_epoch = draw_epoch_;
   }
-  return cached->frame ? &cached->frame : nullptr;
+  return cached->frame.get();
 }
 
 void AndroidRenderer::RenderCommand(

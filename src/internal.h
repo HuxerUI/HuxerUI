@@ -447,7 +447,7 @@ struct ViewProperties {
 };
 
 struct ImageProperties {
-  std::variant<ImageAsset, VectorAsset, ExternalTexture, ImageResource> source;
+  std::variant<ImageAsset, VectorAsset, std::shared_ptr<ExternalTexture>, ImageResource> source;
   ImageFit fit = ImageFit::Contain;
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Center;
   VerticalAlignment vertical_alignment = VerticalAlignment::Center;
@@ -460,6 +460,8 @@ struct ImageProperties {
           using Image = std::decay_t<decltype(value)>;
           if constexpr (std::same_as<Image, ImageResource>) {
             return Size{};
+          } else if constexpr (std::same_as<Image, std::shared_ptr<ExternalTexture>>) {
+            return value ? value->IntrinsicSize() : Size{};
           } else {
             return value.IntrinsicSize();
           }
@@ -478,6 +480,8 @@ struct ImageProperties {
           using Image = std::decay_t<decltype(value)>;
           if constexpr (std::same_as<Image, ImageResource>) {
             return true;
+          } else if constexpr (std::same_as<Image, std::shared_ptr<ExternalTexture>>) {
+            return static_cast<bool>(value);
           } else {
             return value.HasValue();
           }
@@ -909,7 +913,7 @@ struct RenderComposition {
 RenderComposition BuildRenderComposition(const RenderScene& scene);
 
 struct ExternalTextureUseSnapshot {
-  std::shared_ptr<ExternalTextureState> state;
+  std::shared_ptr<ExternalTexture> texture;
   std::uint64_t revision = 0;
   Rect bounds;
 };
@@ -1448,10 +1452,11 @@ DamageRegion ComputeDamageRegion(
     RenderDamageSnapshot& committed_scene,
     Size& committed_viewport,
     bool& has_committed_scene,
-    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
 );
 void DeactivateExternalTextures(
-    RenderDamageSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    RenderDamageSnapshot& committed_scene,
+    const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
 );
 void UpdateInteraction(MountedNode& node, InteractionState state, std::optional<InteractionEvent> event = std::nullopt);
 bool BuildPointerRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);

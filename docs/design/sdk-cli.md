@@ -824,7 +824,7 @@ Libraries use three runtime integration forms:
 
 - Permission, Audio, Camera control, and similar nonvisual features register PlatformModule factories whose instances are owned by component Lifecycle or typed Root Services.
 - WebView, map, document preview, and platform SDK controls register PlatformView factories by stable string type.
-- Camera preview, video decode, and high-frequency visual streams create platform-owned ExternalTexture sources and return platform-neutral consumer values to shared code.
+- Camera preview, video decode, and high-frequency visual streams create shared platform-specific ExternalTexture objects and return their platform-neutral base pointers to shared code.
 
 One library may combine the forms.
 Camera may provide a shared service or a component-owned session plus ExternalTexture preview, while Audio may expose either lifetime and WebView provides a PlatformView factory.
@@ -844,7 +844,7 @@ The Android SDK, Web adapter, and separate iOS/macOS Objective-C bridges convert
 The Android value type provides explicit construction, exact scalar reads, field and element navigation, unknown-field validation, and path-aware diagnostics without adding a public Reader, Builder, Writer, or Codec.
 Library-defined Java, Swift, Objective-C, and JavaScript boundary types own their local encode and decode operations; the SDK does not provide reflection-based object mapping, JSON conversion, numeric coercion, or public HUXP byte access.
 Library implementations never parse transport bytes, while opaque ExternalTexture values use an envelope-local bridge capability table rather than a public numeric handle.
-Callbacks, arbitrary C++ objects, system handles, and media frames never enter the payload; an `ExternalTexture` value only retains the opaque platform-owned source state.
+Callbacks, arbitrary C++ objects, system handles, and media frames never enter the payload; an ExternalTexture capability retains the same shared platform-owned object used by rendering.
 
 A library's RootHook explicitly registers each visual or nonvisual factory under a nonempty case-sensitive UTF-8 name such as `WebView`, `web/WebView`, or `audio/Player`.
 Names have no required separator, hierarchy, prefix, or grammar beyond valid UTF-8; `/` is only an optional library naming convention.
@@ -895,11 +895,11 @@ Camera or video may still use PlatformView when a platform interactive hierarchy
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a platform input subtree.
 
 ExternalTexture requires neither a factory registry nor a texture registry.
-A library's platform implementation creates a move-only platform source, obtains its copyable ExternalTexture consumer value, and returns that value through its typed service and the framework-owned ExternalTexture boundary conversion when crossing into another platform language.
-The source binds once when the value first crosses a surface-owned adapter boundary, while the matching renderer keeps only a private cache for bound source states.
+A library's platform implementation creates a shared concrete texture such as `ios::PixelBufferTexture` or `android::BitmapTexture` and returns it as `std::shared_ptr<ExternalTexture>` through its typed service and the framework-owned boundary conversion when crossing into another platform language.
+Committed RenderScene visibility subscribes each consuming Runtime independently, while the matching renderer keeps only a private cache for concrete textures it can import.
 Image accepts ExternalTexture and records DrawExternalTextureCommand, so Camera overlays, transforms, clipping, and damage remain ordinary RenderScene behavior.
 Frame publication replaces a latest-wins platform mailbox and requests presentation without writing application State, exposing a numeric texture identity, or executing a per-frame language bridge callback.
-The complete binding, payload, lifetime, scheduling, and staged platform contract is defined in [Architecture Design](architecture.md#externaltexture).
+The complete payload, lifetime, visibility, scheduling, and platform contract is defined in [Architecture Design](architecture.md#externaltexture).
 
 Libraries provide these factories, registrations, boundary value operations, and typed services without introducing Runtime subclasses or platform types into shared public headers.
 Platform integration reports a missing current-platform package, ambiguous platform product, duplicate registration name, factory-kind conflict, malformed subscribed payload, unsupported exact-composition capability, or incompatible HuxerUI version with the owning library and application target in the diagnostic.

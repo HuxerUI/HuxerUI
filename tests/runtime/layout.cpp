@@ -20,7 +20,7 @@ VerticalAlignment layout_test_image_vertical_alignment = VerticalAlignment::Cent
 ImageSampling layout_test_image_sampling = ImageSampling::Linear;
 Size layout_test_image_frame{100.0F, 100.0F};
 VectorAsset layout_test_vector;
-ExternalTexture layout_test_external_texture;
+std::shared_ptr<ExternalTexture> layout_test_external_texture;
 
 class CountingTextPlatform final : public TestPlatform {
 public:

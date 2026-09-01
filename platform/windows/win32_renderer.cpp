@@ -290,9 +290,9 @@ struct Win32Renderer::State {
   };
 
   struct CachedExternalTexture {
-    std::weak_ptr<Win32ExternalTextureState> source;
+    std::weak_ptr<windows::PixelTexture> texture;
     // The CPU frame outlives device resources so a reset can rebuild its Direct2D bitmap without another publish.
-    std::optional<Win32ExternalTextureFrame> frame;
+    std::shared_ptr<const Win32PixelFrame> frame;
     ComPtr<ID2D1Bitmap1> bitmap;
     std::uint64_t draw_epoch = std::numeric_limits<std::uint64_t>::max();
   };
@@ -1086,8 +1086,8 @@ struct Win32Renderer::State {
     }
 
     std::erase_if(external_textures_, [](const CachedExternalTexture& entry) {
-      const std::shared_ptr<Win32ExternalTextureState> source = entry.source.lock();
-      return !source || !source->IsActive();
+      const std::shared_ptr<windows::PixelTexture> texture = entry.texture.lock();
+      return !texture || !texture->IsActive();
     });
   }
 
@@ -1527,7 +1527,7 @@ struct Win32Renderer::State {
     }
   }
 
-  void UploadExternalTextureFrame(CachedExternalTexture& cached, const Win32ExternalTextureFrame& frame) {
+  void UploadExternalTextureFrame(CachedExternalTexture& cached, const Win32PixelFrame& frame) {
     const std::span<const std::byte> pixels = frame.Pixels();
     const auto pitch = static_cast<UINT32>(frame.BytesPerRow());
     if (cached.bitmap) {
@@ -1562,17 +1562,17 @@ struct Win32Renderer::State {
     cached.bitmap = std::move(bitmap);
   }
 
-  ID2D1Bitmap1* ExternalTextureBitmapFor(const ExternalTexture& texture) {
-    const std::shared_ptr<Win32ExternalTextureState> source =
-        std::dynamic_pointer_cast<Win32ExternalTextureState>(ExternalTextureState::From(texture));
-    if (!source) {
-      throw std::logic_error("HuxerUI external texture does not contain a Windows pixel frame source");
+  ID2D1Bitmap1* ExternalTextureBitmapFor(const std::shared_ptr<ExternalTexture>& texture) {
+    const std::shared_ptr<windows::PixelTexture> pixel_texture =
+        std::dynamic_pointer_cast<windows::PixelTexture>(texture);
+    if (!pixel_texture) {
+      throw std::logic_error("HuxerUI external texture is incompatible with the Windows renderer");
     }
-    auto cached = std::ranges::find_if(external_textures_, [&source](const CachedExternalTexture& entry) {
-      return entry.source.lock() == source;
+    auto cached = std::ranges::find_if(external_textures_, [&pixel_texture](const CachedExternalTexture& entry) {
+      return entry.texture.lock() == pixel_texture;
     });
     if (cached == external_textures_.end()) {
-      external_textures_.push_back({.source = source});
+      external_textures_.push_back({.texture = pixel_texture});
       cached = external_textures_.end() - 1;
     }
     if (cached->draw_epoch == external_texture_draw_epoch_) {
@@ -1580,11 +1580,11 @@ struct Win32Renderer::State {
     }
     cached->draw_epoch = external_texture_draw_epoch_;
 
-    std::optional<Win32ExternalTextureFrame> pending = source->AcquireLatestFrame();
-    if (pending.has_value()) {
-      UploadExternalTextureFrame(*cached, *pending);
-      cached->frame = std::move(*pending);
-    } else if (!cached->bitmap && cached->frame.has_value()) {
+    const std::shared_ptr<const Win32PixelFrame> frame = GetPixelFrame(*pixel_texture);
+    if (frame && frame != cached->frame) {
+      UploadExternalTextureFrame(*cached, *frame);
+      cached->frame = frame;
+    } else if (!cached->bitmap && cached->frame) {
       UploadExternalTextureFrame(*cached, *cached->frame);
     }
     return cached->bitmap.Get();
@@ -1598,7 +1598,7 @@ struct Win32Renderer::State {
     if (bitmap == nullptr) {
       return;
     }
-    const Size intrinsic_size = command.texture.IntrinsicSize();
+    const Size intrinsic_size = command.texture->IntrinsicSize();
     const D2D1_SIZE_U pixel_size = bitmap->GetPixelSize();
     const float scale_x = static_cast<float>(pixel_size.width) / intrinsic_size.width;
     const float scale_y = static_cast<float>(pixel_size.height) / intrinsic_size.height;

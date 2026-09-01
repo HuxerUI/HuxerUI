@@ -29,15 +29,15 @@ public:
 private:
   struct CommandRange;
   struct CachedExternalTexture {
-    std::weak_ptr<AndroidExternalTextureState> source;
-    AndroidExternalTextureFrame frame;
+    std::weak_ptr<android::BitmapTexture> texture;
+    std::shared_ptr<const AndroidBitmapFrame> frame;
     std::uint64_t draw_epoch = 0;
   };
 
   bool
   RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, CommandRange* range);
   bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range);
-  [[nodiscard]] const AndroidExternalTextureFrame* FrameFor(const ExternalTexture& texture);
+  [[nodiscard]] const AndroidBitmapFrame* FrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);

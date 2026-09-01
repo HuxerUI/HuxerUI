@@ -25,7 +25,7 @@ State<bool> shadow_changed;
 State<bool> canvas_changed;
 State<bool> clip_children_enabled;
 State<bool> overflow_clip_enabled;
-ExternalTexture render_scene_external_texture;
+std::shared_ptr<ExternalTexture> render_scene_external_texture;
 bool render_scene_external_texture_visible = true;
 int canvas_paint_count = 0;
 int clipped_child_clicks = 0;
@@ -605,8 +605,8 @@ TEST_CASE("FrameCommitSeparatesRuntimeWorkFromPlatformScheduling") {
 }
 
 TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
-  const auto texture_state = std::make_shared<ExternalTextureTestState>(Size{40.0F, 20.0F});
-  render_scene_external_texture = texture_state->Texture();
+  const auto texture = std::make_shared<ExternalTextureTestTexture>(Size{40.0F, 20.0F});
+  render_scene_external_texture = texture;
   render_scene_external_texture_visible = true;
   TestPlatform platform;
   Runtime runtime{ExternalTextureRenderApp, platform};
@@ -624,8 +624,8 @@ TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
   const PaintCommand* commands = before->content.Commands().data();
 
   const int requests_before_frame = platform.requested_frames;
-  texture_state->PublishFrame();
-  texture_state->PublishFrame();
+  texture->PublishFrame();
+  texture->PublishFrame();
   REQUIRE(platform.requested_frames == requests_before_frame);
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.requested_frames == requests_before_frame + 1);
@@ -643,15 +643,25 @@ TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
   runtime.InvalidateRoot();
   runtime.BuildRenderFrame();
   const int requests_after_hiding = platform.requested_frames;
-  texture_state->PublishFrame();
+  texture->PublishFrame();
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.requested_frames == requests_after_hiding);
 
   TestPlatform other_platform;
   Runtime other_runtime{ExternalTextureRenderApp, other_platform};
   render_scene_external_texture_visible = true;
+  runtime.InvalidateRoot();
+  runtime.BuildRenderFrame();
   other_runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
-  REQUIRE_THROWS_AS(other_runtime.BuildRenderFrame(), std::logic_error);
+  other_runtime.BuildRenderFrame();
+
+  const int first_runtime_requests = platform.requested_frames;
+  const int second_runtime_requests = other_platform.requested_frames;
+  texture->PublishFrame();
+  platform.RunPlatformModuleTasks();
+  other_platform.RunPlatformModuleTasks();
+  REQUIRE(platform.requested_frames == first_runtime_requests + 1);
+  REQUIRE(other_platform.requested_frames == second_runtime_requests + 1);
 }
 
 TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {

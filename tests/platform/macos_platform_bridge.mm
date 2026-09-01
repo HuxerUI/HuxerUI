@@ -144,7 +144,7 @@ namespace {
 
 TEST_CASE("MacObjectiveCPlatformPayloadPreservesEveryValueKind") {
   @autoreleasepool {
-    HUXExternalTextureSource* source = [[HUXExternalTextureSource alloc] initWithIntrinsicSize:CGSizeMake(16.0, 9.0)];
+    HUXPixelBufferTexture* texture = [[HUXPixelBufferTexture alloc] initWithIntrinsicSize:CGSizeMake(16.0, 9.0)];
     HUXPlatformPayload* payload = [HUXPlatformPayload objectValue:@{
       @"null" : HUXPlatformPayload.nullValue,
       @"boolean" : [HUXPlatformPayload booleanValue:YES],
@@ -154,9 +154,9 @@ TEST_CASE("MacObjectiveCPlatformPayloadPreservesEveryValueKind") {
       @"bytes" : [HUXPlatformPayload bytesValue:[NSData dataWithBytes:"\x01\x02" length:2]],
       @"list" : [HUXPlatformPayload listValue:@[
         HUXPlatformPayload.nullValue,
-        [HUXPlatformPayload externalTextureValue:source.texture],
+        [HUXPlatformPayload externalTextureValue:texture],
       ]],
-      @"texture" : [HUXPlatformPayload externalTextureValue:source.texture],
+      @"texture" : [HUXPlatformPayload externalTextureValue:texture],
     }];
 
     REQUIRE(payload.kind == HUXPlatformPayloadKindObject);
@@ -168,10 +168,10 @@ TEST_CASE("MacObjectiveCPlatformPayloadPreservesEveryValueKind") {
     REQUIRE([[payload field:@"bytes"] bytesValue].length == 2);
     REQUIRE([[[payload field:@"list"] elementAtIndex:1] kind] == HUXPlatformPayloadKindExternalTexture);
 
-    const ExternalTexture texture =
+    const std::shared_ptr<ExternalTexture> cpp_texture =
         macos::detail::UnwrapExternalTexture([[payload field:@"texture"] externalTextureValue]);
-    REQUIRE(texture.HasValue());
-    REQUIRE(texture.IntrinsicSize() == Size{16.0F, 9.0F});
+    REQUIRE(cpp_texture != nullptr);
+    REQUIRE(cpp_texture->IntrinsicSize() == Size{16.0F, 9.0F});
   }
 }
 
@@ -196,9 +196,9 @@ TEST_CASE("MacObjectiveCPlatformPayloadRejectsInvalidValuesAndTextures") {
   }
 }
 
-TEST_CASE("MacObjectiveCExternalTextureSourceUsesTheExistingMailbox") {
+TEST_CASE("MacObjectiveCPixelBufferTextureUsesTheExistingMailbox") {
   @autoreleasepool {
-    HUXExternalTextureSource* source = [[HUXExternalTextureSource alloc] initWithIntrinsicSize:CGSizeMake(2.0, 2.0)];
+    HUXPixelBufferTexture* texture = [[HUXPixelBufferTexture alloc] initWithIntrinsicSize:CGSizeMake(2.0, 2.0)];
     CVPixelBufferRef pixel_buffer = nullptr;
     REQUIRE(CVPixelBufferCreate(
                 kCFAllocatorDefault,
@@ -209,12 +209,12 @@ TEST_CASE("MacObjectiveCExternalTextureSourceUsesTheExistingMailbox") {
                 &pixel_buffer
             ) == kCVReturnSuccess);
     REQUIRE(pixel_buffer != nullptr);
-    [source publishPixelBuffer:pixel_buffer];
-    [source finish];
+    [texture publishPixelBuffer:pixel_buffer];
+    [texture finish];
 
     bool finished_source_rejected = false;
     @try {
-      [source publishPixelBuffer:pixel_buffer];
+      [texture publishPixelBuffer:pixel_buffer];
     } @catch (NSException*) {
       finished_source_rejected = true;
     }

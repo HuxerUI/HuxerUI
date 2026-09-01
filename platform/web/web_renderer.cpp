@@ -746,8 +746,9 @@ struct WebRenderer::CachedExternalTexture {
     CloseWebVideoFrame(frame);
   }
 
-  std::weak_ptr<WebExternalTextureState> source;
+  std::weak_ptr<web::VideoFrameTexture> texture;
   val frame = val::undefined();
+  std::uint64_t revision = std::numeric_limits<std::uint64_t>::max();
   std::uint64_t draw_epoch = std::numeric_limits<std::uint64_t>::max();
 };
 
@@ -788,33 +789,39 @@ void WebRenderer::BeginFrame() {
   }
 
   std::erase_if(external_textures_, [](const std::unique_ptr<CachedExternalTexture>& entry) {
-    const std::shared_ptr<WebExternalTextureState> source = entry->source.lock();
-    return !source || !source->IsActive();
+    const std::shared_ptr<web::VideoFrameTexture> texture = entry->texture.lock();
+    return !texture || !texture->IsActive();
   });
 }
 
-const val* WebRenderer::FrameFor(const ExternalTexture& texture) {
-  const std::shared_ptr<WebExternalTextureState> source =
-      std::dynamic_pointer_cast<WebExternalTextureState>(ExternalTextureState::From(texture));
-  if (!source) {
-    throw std::logic_error("HuxerUI external texture does not contain a Web VideoFrame source");
+const val* WebRenderer::FrameFor(const std::shared_ptr<ExternalTexture>& texture) {
+  const std::shared_ptr<web::VideoFrameTexture> video_frame_texture =
+      std::dynamic_pointer_cast<web::VideoFrameTexture>(texture);
+  if (!video_frame_texture) {
+    throw std::logic_error("HuxerUI external texture is incompatible with the Web renderer");
   }
-  auto cached = std::find_if(external_textures_.begin(), external_textures_.end(), [&source](const auto& entry) {
-    return entry->source.lock() == source;
-  });
+  auto cached = std::find_if(
+      external_textures_.begin(), external_textures_.end(), [&video_frame_texture](const auto& entry) {
+        return entry->texture.lock() == video_frame_texture;
+      }
+  );
   if (cached == external_textures_.end()) {
     auto entry = std::make_unique<CachedExternalTexture>();
-    entry->source = source;
+    entry->texture = video_frame_texture;
     external_textures_.push_back(std::move(entry));
     cached = std::prev(external_textures_.end());
   }
   CachedExternalTexture& entry = **cached;
   if (entry.draw_epoch != external_texture_draw_epoch_) {
     entry.draw_epoch = external_texture_draw_epoch_;
-    val pending = source->AcquireLatestFrame();
-    if (!pending.isNull() && !pending.isUndefined()) {
-      CloseWebVideoFrame(entry.frame);
-      entry.frame = std::move(pending);
+    const std::uint64_t revision = video_frame_texture->Revision();
+    if (entry.revision != revision) {
+      entry.revision = revision;
+      val pending = video_frame_texture->AcquireFrame();
+      if (!pending.isNull() && !pending.isUndefined()) {
+        CloseWebVideoFrame(entry.frame);
+        entry.frame = std::move(pending);
+      }
     }
   }
   return entry.frame.isNull() || entry.frame.isUndefined() ? nullptr : &entry.frame;
@@ -1054,7 +1061,7 @@ void WebRenderer::RenderCommand(const DrawExternalTextureCommand& command) {
   }
   const float frame_width = NumberProperty(*frame, "displayWidth", 0.0F);
   const float frame_height = NumberProperty(*frame, "displayHeight", 0.0F);
-  const Size intrinsic_size = command.texture.IntrinsicSize();
+  const Size intrinsic_size = command.texture->IntrinsicSize();
   if (frame_width <= 0.0F || frame_height <= 0.0F || intrinsic_size.width <= 0.0F || intrinsic_size.height <= 0.0F) {
     return;
   }

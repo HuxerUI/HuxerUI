@@ -83,7 +83,7 @@ static HUXIOSPayloadStorage* PayloadStorage(HUXPlatformPayload* payload) {
 
 static PlatformPayload DecodePayload(HUXPlatformPayload* payload) {
   HUXIOSPayloadStorage* storage = PayloadStorage(payload);
-  std::vector<ExternalTexture> textures;
+  std::vector<std::shared_ptr<ExternalTexture>> textures;
   textures.reserve(storage->textures.count);
   for (HUXExternalTexture* texture in storage->textures) {
     textures.push_back(huxerui::ios::detail::UnwrapExternalTexture(texture));
@@ -92,10 +92,10 @@ static PlatformPayload DecodePayload(HUXPlatformPayload* payload) {
 }
 
 static HUXPlatformPayload* EncodePayload(PlatformPayload payload) {
-  std::vector<ExternalTexture> textures;
+  std::vector<std::shared_ptr<ExternalTexture>> textures;
   Bytes bytes = payload.Encode(textures);
   NSMutableArray<HUXExternalTexture*>* wrappers = [NSMutableArray arrayWithCapacity:textures.size()];
-  for (ExternalTexture& texture : textures) {
+  for (std::shared_ptr<ExternalTexture>& texture : textures) {
     [wrappers addObject:huxerui::ios::detail::WrapExternalTexture(std::move(texture))];
   }
   HUXPlatformPayload* result = [[HUXPlatformPayload alloc] initForHuxerUI];

@@ -25,17 +25,19 @@ std::vector<const Application*>& Applications() {
 
 PlatformAdapter::PlatformAdapter(UIThreadDispatcher dispatch_to_ui_thread)
     : ui_thread_dispatcher_(std::move(dispatch_to_ui_thread)),
-      external_texture_surface_(std::make_shared<detail::ExternalTextureSurface>(*this, ui_thread_dispatcher_)),
+      external_texture_frame_requester_(
+          std::make_shared<detail::ExternalTextureFrameRequester>(*this, ui_thread_dispatcher_)
+      ),
       platform_registry_(std::make_unique<detail::PlatformRegistry>(*this)) {}
 
 PlatformAdapter::~PlatformAdapter() {
-  external_texture_surface_->Close();
+  external_texture_frame_requester_->Close();
 }
 
 namespace detail {
 
 PlatformChannelEndpoint MakePlatformChannelEndpoint(PlatformAdapter& adapter) {
-  return MakePlatformChannelEndpoint(adapter.ui_thread_dispatcher_, adapter.external_texture_surface_);
+  return MakePlatformChannelEndpoint(adapter.ui_thread_dispatcher_);
 }
 
 } // namespace detail

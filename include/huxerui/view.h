@@ -738,7 +738,7 @@ private:
 class Image final : public View {
 public:
   explicit Image(ImageVariant image);
-  explicit Image(ExternalTexture texture);
+  explicit Image(std::shared_ptr<ExternalTexture> texture);
 
   Image Fit(ImageFit fit) &&;
   Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;

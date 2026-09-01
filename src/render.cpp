@@ -5,6 +5,7 @@
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -89,7 +90,9 @@ void PaintImage(
     std::visit(
         [&](const auto& asset) {
           using Asset = std::decay_t<decltype(asset)>;
-          if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, ExternalTexture>) {
+          if constexpr (
+              std::same_as<Asset, ImageAsset> || std::same_as<Asset, std::shared_ptr<ExternalTexture>>
+          ) {
             context.DrawImageRect(asset, source, destination, properties.sampling, opacity);
           } else if constexpr (std::same_as<Asset, VectorAsset>) {
             context.DrawImageRect(asset, source, destination, vector_tint, opacity);
@@ -261,8 +264,7 @@ void SnapshotExternalTextures(
     const PaintSequence& sequence,
     const Transform2D& world_transform,
     const std::optional<Rect>& world_clip,
-    std::vector<ExternalTextureUseSnapshot>& textures,
-    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    std::vector<ExternalTextureUseSnapshot>& textures
 ) {
   if (!sequence.HasExternalTextureCommands()) {
     return;
@@ -276,14 +278,12 @@ void SnapshotExternalTextures(
         [&](const auto& value) {
           using Command = std::decay_t<decltype(value)>;
           if constexpr (std::same_as<Command, DrawExternalTextureCommand>) {
-            const std::shared_ptr<ExternalTextureState>& state = ExternalTextureState::From(value.texture);
-            state->Bind(texture_surface);
             Rect bounds = TransformBounds(transform, value.destination);
             if (clip.has_value()) {
               bounds = bounds.Intersection(*clip);
             }
             if (!bounds.IsEmpty()) {
-              textures.push_back({state, state->Revision(), bounds});
+              textures.push_back({value.texture, value.texture->Revision(), bounds});
             }
           } else if constexpr (std::same_as<Command, PushTransformCommand>) {
             transforms.push_back(transform);
@@ -313,8 +313,7 @@ std::optional<Rect> SnapshotRenderNode(
     const RenderNode& node,
     const Transform2D& inherited_transform,
     const std::optional<Rect>& inherited_clip,
-    RenderDamageSnapshot& snapshot,
-    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    RenderDamageSnapshot& snapshot
 ) {
   RenderNodeSnapshot node_snapshot;
   node_snapshot.content_revision = node.content.Revision();
@@ -340,18 +339,10 @@ std::optional<Rect> SnapshotRenderNode(
   }
 
   SnapshotExternalTextures(
-      node.content,
-      node_snapshot.world_transform,
-      node_snapshot.world_clip,
-      node_snapshot.external_textures,
-      texture_surface
+      node.content, node_snapshot.world_transform, node_snapshot.world_clip, node_snapshot.external_textures
   );
   SnapshotExternalTextures(
-      node.foreground,
-      node_snapshot.world_transform,
-      node_snapshot.world_clip,
-      node_snapshot.external_textures,
-      texture_surface
+      node.foreground, node_snapshot.world_transform, node_snapshot.world_clip, node_snapshot.external_textures
   );
 
   std::optional<Rect> own_bounds;
@@ -373,11 +364,7 @@ std::optional<Rect> SnapshotRenderNode(
       continue;
     }
     const std::optional<Rect> child_bounds = SnapshotRenderNode(
-        *child,
-        node_snapshot.world_children_transform,
-        node_snapshot.world_child_clip,
-        snapshot,
-        texture_surface
+        *child, node_snapshot.world_children_transform, node_snapshot.world_child_clip, snapshot
     );
     if (child_bounds.has_value()) {
       subtree_bounds = UnionBounds(std::move(subtree_bounds), *child_bounds);
@@ -443,7 +430,7 @@ void AddExternalTextureDamage(
   for (std::size_t index = 0; index < current.size(); ++index) {
     const ExternalTextureUseSnapshot& before = previous[index];
     const ExternalTextureUseSnapshot& after = current[index];
-    if (before.state != after.state || before.bounds != after.bounds) {
+    if (before.texture != after.texture || before.bounds != after.bounds) {
       AddDamageRect(damage, before.bounds, viewport);
       AddDamageRect(damage, after.bounds, viewport);
     } else if (before.revision != after.revision) {
@@ -452,31 +439,35 @@ void AddExternalTextureDamage(
   }
 }
 
-std::unordered_set<ExternalTextureState*> ExternalTextureStates(const RenderDamageSnapshot& scene) {
-  std::unordered_set<ExternalTextureState*> states;
+std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> ExternalTextures(
+    const RenderDamageSnapshot& scene
+) {
+  std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> textures;
   for (const auto& [id, node] : scene) {
     static_cast<void>(id);
     for (const ExternalTextureUseSnapshot& texture : node.external_textures) {
-      states.insert(texture.state.get());
+      textures.try_emplace(texture.texture.get(), texture.texture);
     }
   }
-  return states;
+  return textures;
 }
 
 void UpdateExternalTextureActivity(
     const RenderDamageSnapshot& previous,
     const RenderDamageSnapshot& current,
-    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
 ) {
-  const std::unordered_set<ExternalTextureState*> previous_states = ExternalTextureStates(previous);
-  const std::unordered_set<ExternalTextureState*> current_states = ExternalTextureStates(current);
-  for (ExternalTextureState* state : previous_states) {
-    if (!current_states.contains(state)) {
-      state->SetActive(texture_surface, false);
+  const auto previous_textures = ExternalTextures(previous);
+  const auto current_textures = ExternalTextures(current);
+  for (const auto& [identity, texture] : previous_textures) {
+    if (!current_textures.contains(identity)) {
+      texture_frame_requester->SetActive(texture, false);
     }
   }
-  for (ExternalTextureState* state : current_states) {
-    state->SetActive(texture_surface, true);
+  for (const auto& [identity, texture] : current_textures) {
+    if (!previous_textures.contains(identity)) {
+      texture_frame_requester->SetActive(texture, true);
+    }
   }
 }
 
@@ -847,7 +838,7 @@ DamageRegion ComputeDamageRegion(
     RenderDamageSnapshot& committed_scene,
     Size& committed_viewport,
     bool& has_committed_scene,
-    const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
 ) {
   const Rect viewport_bounds{
       0.0F,
@@ -857,7 +848,7 @@ DamageRegion ComputeDamageRegion(
   };
   RenderDamageSnapshot current_scene;
   if (root != nullptr) {
-    SnapshotRenderNode(*root, Transform2D{}, std::nullopt, current_scene, texture_surface);
+    SnapshotRenderNode(*root, Transform2D{}, std::nullopt, current_scene);
   }
 
   DamageRegion damage;
@@ -905,7 +896,7 @@ DamageRegion ComputeDamageRegion(
     }
   }
 
-  UpdateExternalTextureActivity(committed_scene, current_scene, texture_surface);
+  UpdateExternalTextureActivity(committed_scene, current_scene, texture_frame_requester);
   committed_scene = std::move(current_scene);
   committed_viewport = viewport;
   has_committed_scene = true;
@@ -913,10 +904,12 @@ DamageRegion ComputeDamageRegion(
 }
 
 void DeactivateExternalTextures(
-    RenderDamageSnapshot& committed_scene, const std::shared_ptr<ExternalTextureSurface>& texture_surface
+    RenderDamageSnapshot& committed_scene,
+    const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
 ) {
-  for (ExternalTextureState* state : ExternalTextureStates(committed_scene)) {
-    state->SetActive(texture_surface, false);
+  for (const auto& [identity, texture] : ExternalTextures(committed_scene)) {
+    static_cast<void>(identity);
+    texture_frame_requester->SetActive(texture, false);
   }
   committed_scene.clear();
 }

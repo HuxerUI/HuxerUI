@@ -532,8 +532,9 @@ struct AppKitRenderer::State {
   };
 
   struct CachedExternalTexture {
-    std::weak_ptr<MacExternalTextureState> source;
+    std::weak_ptr<macos::PixelBufferTexture> texture;
     CFRef<CGImageRef> cg_image;
+    std::uint64_t revision = std::numeric_limits<std::uint64_t>::max();
   };
 
   State() : external_texture_context([CIContext contextWithOptions:nil]) {}
@@ -867,21 +868,26 @@ struct AppKitRenderer::State {
     return images.back().cg_image.Get();
   }
 
-  CGImageRef ImageFor(const ExternalTexture& texture) {
-    const std::shared_ptr<MacExternalTextureState> source =
-        std::dynamic_pointer_cast<MacExternalTextureState>(ExternalTextureState::From(texture));
-    if (!source) {
-      throw std::logic_error("HuxerUI external texture does not contain a macOS frame source");
+  CGImageRef ImageFor(const std::shared_ptr<ExternalTexture>& texture) {
+    const std::shared_ptr<macos::PixelBufferTexture> pixel_buffer_texture =
+        std::dynamic_pointer_cast<macos::PixelBufferTexture>(texture);
+    if (!pixel_buffer_texture) {
+      throw std::logic_error("HuxerUI external texture is incompatible with the macOS renderer");
     }
-    auto cached = std::ranges::find_if(external_textures, [&source](const CachedExternalTexture& entry) {
-      return entry.source.lock() == source;
+    auto cached = std::ranges::find_if(external_textures, [&pixel_buffer_texture](const CachedExternalTexture& entry) {
+      return entry.texture.lock() == pixel_buffer_texture;
     });
     if (cached == external_textures.end()) {
-      external_textures.push_back(CachedExternalTexture{source, CFRef<CGImageRef>{}});
+      external_textures.push_back(CachedExternalTexture{pixel_buffer_texture, CFRef<CGImageRef>{}});
       cached = external_textures.end() - 1;
     }
 
-    CVPixelBufferRef frame = source->AcquireLatestFrame();
+    const std::uint64_t revision = pixel_buffer_texture->Revision();
+    if (cached->revision == revision) {
+      return cached->cg_image.Get();
+    }
+    cached->revision = revision;
+    CVPixelBufferRef frame = pixel_buffer_texture->AcquireFrame();
     if (frame == nullptr) {
       return cached->cg_image.Get();
     }
@@ -900,8 +906,8 @@ struct AppKitRenderer::State {
 
   void PruneExternalTextures() {
     std::erase_if(external_textures, [](const CachedExternalTexture& entry) {
-      const std::shared_ptr<MacExternalTextureState> source = entry.source.lock();
-      return !source || !source->IsActive();
+      const std::shared_ptr<macos::PixelBufferTexture> texture = entry.texture.lock();
+      return !texture || !texture->IsActive();
     });
   }
 
@@ -1386,7 +1392,7 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawExternalTextu
   DrawCGImage(
       context,
       state_->ImageFor(command.texture),
-      command.texture.IntrinsicSize(),
+      command.texture->IntrinsicSize(),
       command.source,
       command.destination,
       command.sampling,

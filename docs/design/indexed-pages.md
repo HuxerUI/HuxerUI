@@ -141,7 +141,7 @@ PlatformView mounted nodes keep stable identities.
 
 After a PlatformView has participated, its invisible committed placement keeps the platform instance retained while its page is inactive; a PlatformView on an initially inactive page may defer platform creation until first selection.
 
-ExternalTexture usage disappears from the visible scene and follows the existing surface deactivation contract until the page participates again.
+ExternalTexture usage disappears from the visible scene and releases that Runtime's visibility subscription until the page participates again.
 
 ## Lifecycle, tasks, and recomposition
 

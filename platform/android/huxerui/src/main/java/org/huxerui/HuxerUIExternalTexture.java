@@ -1,10 +1,10 @@
 package org.huxerui;
 
 /**
- * An opaque shared reference to an ExternalTexture owned by the HuxerUI surface.
+ * An opaque shared reference to an ExternalTexture capability.
  *
  * <p>Platform libraries receive this value through {@link PlatformPayload}. It may be retained in another payload while
- * open, but it does not expose the renderer's internal identity or frame source. Close the value when the Java owner no
+ * open, but it does not expose renderer internals or frame publication. Close the value when the Java owner no
  * longer needs it; repeated calls to {@link #close()} are safe.</p>
  */
 public final class HuxerUIExternalTexture implements AutoCloseable {

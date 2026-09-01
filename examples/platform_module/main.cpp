@@ -30,10 +30,10 @@ template <class Result> std::string ResultStatus(const PlatformResult<Result>& r
 [[huxerui::composable]]
 View PlatformSpecificDemo() {
   auto color_stream = example::UseColorStream();
-  auto stream_texture = UseState(ExternalTexture{});
+  auto stream_texture = UseState<std::shared_ptr<ExternalTexture>>({});
   auto stream_status = UseState<std::string>("The platform stream has not been requested");
   View stream_preview = Text(stream_status.Get()).With(Frame{.height = 180.0F});
-  if (stream_texture.Get().HasValue()) {
+  if (stream_texture.Get()) {
     stream_preview = Image(stream_texture.Get()).Fit(ImageFit::Cover).With(Frame{.height = 180.0F});
   }
   const ThemeSpec& theme = UseTheme();
@@ -43,14 +43,16 @@ View PlatformSpecificDemo() {
     Text("The module returns one capability; platform frames then bypass PlatformModule callbacks."),
     Button("Load platform color stream").OnClick([color_stream, stream_texture, stream_status] {
       stream_status = "Waiting for the platform texture";
-      static_cast<void>(color_stream->Texture([stream_texture, stream_status](PlatformResult<ExternalTexture> result) {
-        if (const auto* error = std::get_if<PlatformError>(&result)) {
-          stream_status = error->message;
-          return;
-        }
-        stream_texture = std::get<ExternalTexture>(std::move(result));
-        stream_status = "Streaming";
-      }));
+      static_cast<void>(color_stream->Texture(
+          [stream_texture, stream_status](PlatformResult<std::shared_ptr<ExternalTexture>> result) {
+            if (const auto* error = std::get_if<PlatformError>(&result)) {
+              stream_status = error->message;
+              return;
+            }
+            stream_texture = std::get<std::shared_ptr<ExternalTexture>>(std::move(result));
+            stream_status = "Streaming";
+          }
+      ));
     }),
     std::move(stream_preview),
   }.With(

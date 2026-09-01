@@ -46,8 +46,8 @@ TEST_CASE("PlatformPayloadObjectEqualityIgnoresInsertionOrder") {
 }
 
 TEST_CASE("PlatformPayloadRetainsExternalTextureIdentity") {
-  const ExternalTexture texture = MakeTestExternalTexture({320.0F, 180.0F});
-  const ExternalTexture other = MakeTestExternalTexture({320.0F, 180.0F});
+  const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
+  const std::shared_ptr<ExternalTexture> other = MakeTestExternalTexture({320.0F, 180.0F});
   const PlatformPayload payload = PlatformPayload::Object{
       {"preview", texture},
       {"nested", PlatformPayload::List{texture}},
@@ -59,7 +59,7 @@ TEST_CASE("PlatformPayloadRetainsExternalTextureIdentity") {
   REQUIRE(payload.AsObject().at("nested").AsList().front().AsExternalTexture() == texture);
   REQUIRE(PlatformPayload(texture) == PlatformPayload(texture));
   REQUIRE(PlatformPayload(texture) != PlatformPayload(other));
-  REQUIRE_THROWS_AS(PlatformPayload(ExternalTexture{}), std::invalid_argument);
+  REQUIRE_THROWS_AS(PlatformPayload(std::shared_ptr<ExternalTexture>{}), std::invalid_argument);
 }
 
 TEST_CASE("PlatformPayloadRejectsInvalidScalars") {
@@ -90,7 +90,7 @@ TEST_CASE("PlatformPayloadAccessorsRequireTheDeclaredKind") {
 }
 
 TEST_CASE("PlatformPayloadEnvelopeRoundTripsEveryValueKind") {
-  const ExternalTexture texture = MakeTestExternalTexture({320.0F, 180.0F});
+  const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
   const PlatformPayload payload = PlatformPayload::Object{
       {"boolean", true},
       {"integer", std::numeric_limits<std::int64_t>::min()},
@@ -101,16 +101,16 @@ TEST_CASE("PlatformPayloadEnvelopeRoundTripsEveryValueKind") {
       {"texture", texture},
   };
 
-  std::vector<ExternalTexture> external_textures;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   const Bytes encoded = payload.Encode(external_textures);
 
-  REQUIRE(external_textures == std::vector<ExternalTexture>{texture});
+  REQUIRE(external_textures == std::vector<std::shared_ptr<ExternalTexture>>{texture});
   REQUIRE(PlatformPayload::Decode(encoded, external_textures) == payload);
 }
 
 TEST_CASE("PlatformPayloadEnvelopeIsCanonical") {
   const PlatformPayload payload = PlatformPayload::Object{{"second", 2}, {"first", 1}};
-  std::vector<ExternalTexture> external_textures;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   const Bytes first = payload.Encode(external_textures);
   const Bytes second = PlatformPayload(PlatformPayload::Object{{"first", 1}, {"second", 2}}).Encode(external_textures);
 
@@ -118,7 +118,7 @@ TEST_CASE("PlatformPayloadEnvelopeIsCanonical") {
 }
 
 TEST_CASE("PlatformPayloadEnvelopeRejectsMalformedInput") {
-  std::vector<ExternalTexture> external_textures;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   const Bytes valid = PlatformPayload("value").Encode(external_textures);
   Bytes truncated = valid;
   truncated.pop_back();
@@ -134,10 +134,10 @@ TEST_CASE("PlatformPayloadEnvelopeRejectsMalformedInput") {
 }
 
 TEST_CASE("PlatformPayloadEnvelopeRequiresExternalTextureCapabilities") {
-  const ExternalTexture texture = MakeTestExternalTexture({320.0F, 180.0F});
-  std::vector<ExternalTexture> external_textures;
+  const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   const Bytes encoded = PlatformPayload(texture).Encode(external_textures);
-  const std::vector<ExternalTexture> duplicate_textures{texture, texture};
+  const std::vector<std::shared_ptr<ExternalTexture>> duplicate_textures{texture, texture};
 
   REQUIRE_THROWS_AS(PlatformPayload::Decode(encoded), std::invalid_argument);
   REQUIRE_THROWS_AS(PlatformPayload::Decode(encoded, duplicate_textures), std::invalid_argument);

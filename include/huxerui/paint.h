@@ -250,7 +250,7 @@ struct DrawImageCommand {
 /// Draws a cropped region of a live platform texture.
 struct DrawExternalTextureCommand {
   /// Shared external-texture capability value.
-  ExternalTexture texture;
+  std::shared_ptr<ExternalTexture> texture;
   /// Source rectangle in the texture's intrinsic logical coordinates.
   Rect source;
   /// Destination rectangle in the active logical coordinate space.
@@ -589,10 +589,10 @@ public:
   void DrawImageRect(ImageAsset image, Rect source, Rect destination, ImageSampling sampling = ImageSampling::Linear,
                      float opacity = 1.0F);
   /// Draws a complete live external texture into destination.
-  void DrawImage(ExternalTexture texture, Rect destination, ImageSampling sampling = ImageSampling::Linear,
-                 float opacity = 1.0F);
+  void DrawImage(std::shared_ptr<ExternalTexture> texture, Rect destination,
+                 ImageSampling sampling = ImageSampling::Linear, float opacity = 1.0F);
   /// Draws source, expressed in intrinsic logical texture coordinates, into destination.
-  void DrawImageRect(ExternalTexture texture, Rect source, Rect destination,
+  void DrawImageRect(std::shared_ptr<ExternalTexture> texture, Rect source, Rect destination,
                      ImageSampling sampling = ImageSampling::Linear, float opacity = 1.0F);
   /// Draws a complete vector asset into destination with optional color tint and opacity.
   void DrawImage(VectorAsset image, Rect destination, std::optional<Color> tint = {}, float opacity = 1.0F);

@@ -15,8 +15,6 @@
 #include <utility>
 #include <variant>
 
-#include "external_texture_internal.h"
-
 namespace huxerui {
 
 namespace detail {
@@ -68,7 +66,8 @@ bool IsValidUtf8(std::string_view text) noexcept {
 } // namespace detail
 
 struct PlatformPayload::Data {
-  using Value = std::variant<bool, std::int64_t, double, std::string, Bytes, List, Object, ExternalTexture>;
+  using Value =
+      std::variant<bool, std::int64_t, double, std::string, Bytes, List, Object, std::shared_ptr<ExternalTexture>>;
 
   explicit Data(Value value) : value(std::move(value)) {}
 
@@ -132,7 +131,9 @@ enum class PayloadTag : std::uint8_t {
 
 class EnvelopeWriter final {
 public:
-  Bytes Write(const PlatformPayload& payload, std::vector<ExternalTexture>& external_textures) {
+  Bytes Write(
+      const PlatformPayload& payload, std::vector<std::shared_ptr<ExternalTexture>>& external_textures
+  ) {
     bytes_ = {
         static_cast<std::byte>('H'),
         static_cast<std::byte>('U'),
@@ -227,7 +228,7 @@ private:
     case PlatformPayloadKind::ExternalTexture: {
       WriteTag(PayloadTag::ExternalTexture);
       WriteUnsigned(external_texture_capability);
-      const ExternalTexture& texture = payload.AsExternalTexture();
+      const std::shared_ptr<ExternalTexture>& texture = payload.AsExternalTexture();
       const auto found = std::ranges::find(external_textures_, texture);
       const std::size_t slot = found == external_textures_.end()
                                    ? external_textures_.size()
@@ -252,25 +253,27 @@ private:
   }
 
   Bytes bytes_;
-  std::vector<ExternalTexture> external_textures_;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures_;
 };
 
 class EnvelopeReader final {
 public:
-  EnvelopeReader(std::span<const std::byte> bytes, std::span<const ExternalTexture> external_textures)
+  EnvelopeReader(
+      std::span<const std::byte> bytes, std::span<const std::shared_ptr<ExternalTexture>> external_textures
+  )
       : bytes_(bytes), external_textures_(external_textures) {}
 
   PlatformPayload Read() {
     if (external_textures_.size() > max_capability_slots) {
       throw std::invalid_argument("HuxerUI PlatformPayload envelope contains too many external textures");
     }
-    std::unordered_set<const detail::ExternalTextureState*> textures;
+    std::unordered_set<const ExternalTexture*> textures;
     textures.reserve(external_textures_.size());
-    for (const ExternalTexture& texture : external_textures_) {
-      if (!texture.HasValue()) {
+    for (const std::shared_ptr<ExternalTexture>& texture : external_textures_) {
+      if (!texture) {
         throw std::invalid_argument("HuxerUI PlatformPayload envelope contains an empty external texture");
       }
-      if (!textures.insert(detail::ExternalTextureState::From(texture).get()).second) {
+      if (!textures.insert(texture.get()).second) {
         throw std::invalid_argument("HuxerUI PlatformPayload envelope contains a duplicate external texture");
       }
     }
@@ -393,7 +396,7 @@ private:
   }
 
   std::span<const std::byte> bytes_;
-  std::span<const ExternalTexture> external_textures_;
+  std::span<const std::shared_ptr<ExternalTexture>> external_textures_;
   std::size_t offset_ = 0;
 };
 
@@ -436,8 +439,8 @@ PlatformPayload::PlatformPayload(Object value) : data_(std::make_shared<Data>(st
   ValidatePayload(*this);
 }
 
-PlatformPayload::PlatformPayload(ExternalTexture value) {
-  if (!value.HasValue()) {
+PlatformPayload::PlatformPayload(std::shared_ptr<ExternalTexture> value) {
+  if (!value) {
     throw std::invalid_argument("HuxerUI PlatformPayload external texture must not be empty");
   }
   data_ = std::make_shared<Data>(std::move(value));
@@ -478,8 +481,8 @@ const PlatformPayload::Object& PlatformPayload::AsObject() const {
   return std::get<Object>(RequireData().value);
 }
 
-const ExternalTexture& PlatformPayload::AsExternalTexture() const {
-  return std::get<ExternalTexture>(RequireData().value);
+const std::shared_ptr<ExternalTexture>& PlatformPayload::AsExternalTexture() const {
+  return std::get<std::shared_ptr<ExternalTexture>>(RequireData().value);
 }
 
 const PlatformPayload::Data& PlatformPayload::RequireData() const {
@@ -496,13 +499,13 @@ bool PlatformPayload::operator==(const PlatformPayload& other) const {
   return data_ && other.data_ && data_->value == other.data_->value;
 }
 
-Bytes PlatformPayload::Encode(std::vector<ExternalTexture>& external_textures) const {
+Bytes PlatformPayload::Encode(std::vector<std::shared_ptr<ExternalTexture>>& external_textures) const {
   external_textures.clear();
   return EnvelopeWriter().Write(*this, external_textures);
 }
 
 PlatformPayload PlatformPayload::Decode(std::span<const std::byte> bytes,
-                                        std::span<const ExternalTexture> external_textures) {
+                                        std::span<const std::shared_ptr<ExternalTexture>> external_textures) {
   return EnvelopeReader(bytes, external_textures).Read();
 }
 

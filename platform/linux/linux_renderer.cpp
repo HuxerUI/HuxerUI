@@ -504,7 +504,8 @@ struct LinuxRenderer::State {
   };
 
   struct CachedExternalTexture {
-    std::weak_ptr<LinuxExternalTextureState> source;
+    std::weak_ptr<linux::PixelTexture> texture;
+    std::shared_ptr<const LinuxPixelFrame> frame;
     std::vector<std::byte> pixels;
     cairo_surface_t* surface = nullptr;
   };
@@ -606,14 +607,14 @@ struct LinuxRenderer::State {
     return pixbuf;
   }
 
-  cairo_surface_t* ExternalTextureFor(const ExternalTexture& texture) {
-    const std::shared_ptr<LinuxExternalTextureState> source =
-        std::dynamic_pointer_cast<LinuxExternalTextureState>(ExternalTextureState::From(texture));
-    if (!source) {
-      throw std::logic_error("HuxerUI external texture does not contain a Linux frame source");
+  cairo_surface_t* ExternalTextureFor(const std::shared_ptr<ExternalTexture>& texture) {
+    const std::shared_ptr<linux::PixelTexture> pixel_texture =
+        std::dynamic_pointer_cast<linux::PixelTexture>(texture);
+    if (!pixel_texture) {
+      throw std::logic_error("HuxerUI external texture is incompatible with the Linux renderer");
     }
     for (auto iterator = external_textures.begin(); iterator != external_textures.end();) {
-      const std::shared_ptr<LinuxExternalTextureState> retained = iterator->source.lock();
+      const std::shared_ptr<linux::PixelTexture> retained = iterator->texture.lock();
       if (retained && retained->IsActive()) {
         ++iterator;
         continue;
@@ -623,20 +624,23 @@ struct LinuxRenderer::State {
       }
       iterator = external_textures.erase(iterator);
     }
-    auto entry = std::find_if(external_textures.begin(), external_textures.end(), [&source](const auto& candidate) {
-      return candidate.source.lock() == source;
-    });
+    auto entry = std::find_if(
+        external_textures.begin(), external_textures.end(), [&pixel_texture](const auto& candidate) {
+          return candidate.texture.lock() == pixel_texture;
+        }
+    );
     if (entry == external_textures.end()) {
       entry = external_textures.insert(
           external_textures.end(),
-          CachedExternalTexture{.source = source, .pixels = {}, .surface = nullptr}
+          CachedExternalTexture{.texture = pixel_texture, .frame = {}, .pixels = {}, .surface = nullptr}
       );
     }
-    std::optional<LinuxExternalTextureFrame> frame = source->AcquireLatestFrame();
-    if (frame.has_value()) {
+    const std::shared_ptr<const LinuxPixelFrame> frame = GetPixelFrame(*pixel_texture);
+    if (frame && frame != entry->frame) {
       if (entry->surface != nullptr) {
         cairo_surface_destroy(entry->surface);
       }
+      entry->frame = frame;
       entry->pixels.assign(frame->Pixels().begin(), frame->Pixels().end());
       entry->surface = cairo_image_surface_create_for_data(
           reinterpret_cast<unsigned char*>(entry->pixels.data()),
@@ -886,7 +890,7 @@ private:
     if (surface == nullptr) {
       return;
     }
-    const Size intrinsic = command.texture.IntrinsicSize();
+    const Size intrinsic = command.texture->IntrinsicSize();
     const double source_scale_x = cairo_image_surface_get_width(surface) / std::max(0.001F, intrinsic.width);
     const double source_scale_y = cairo_image_surface_get_height(surface) / std::max(0.001F, intrinsic.height);
     const double source_x = command.source.x * source_scale_x;

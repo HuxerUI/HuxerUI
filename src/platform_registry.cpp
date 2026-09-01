@@ -8,7 +8,6 @@
 
 #include <huxerui/platform_adapter.h>
 
-#include "external_texture_internal.h"
 #include "platform_registry_internal.h"
 
 namespace huxerui {
@@ -28,9 +27,8 @@ public:
     std::function<void()> cancel;
   };
 
-  PlatformChannelState(UIThreadDispatcher ui_thread_dispatcher,
-                       std::shared_ptr<ExternalTextureSurface> external_texture_surface)
-      : dispatch_to_ui_thread_(std::move(ui_thread_dispatcher)), texture_surface_(std::move(external_texture_surface)) {
+  explicit PlatformChannelState(UIThreadDispatcher ui_thread_dispatcher)
+      : dispatch_to_ui_thread_(std::move(ui_thread_dispatcher)) {
     if (!dispatch_to_ui_thread_) {
       throw std::invalid_argument("HuxerUI PlatformChannel UI thread dispatcher must not be empty");
     }
@@ -82,7 +80,6 @@ public:
       if (!connected_) {
         throw std::logic_error("HuxerUI PlatformChannel transport is not connected");
       }
-      BindExternalTextures(arguments, texture_surface_);
       if (next_request_ == 0) {
         throw std::logic_error("HuxerUI PlatformChannel request identity space is exhausted");
       }
@@ -212,11 +209,6 @@ public:
       if (!open_) {
         return;
       }
-      try {
-        BindExternalTextures(payload, texture_surface_);
-      } catch (...) {
-        return;
-      }
       queued_events_.emplace_back(std::move(event), std::move(payload));
       if (event_delivery_scheduled_) {
         return;
@@ -293,19 +285,6 @@ private:
       std::lock_guard lock(mutex_);
       if (!open_ || !pending_.contains(request)) {
         return;
-      }
-      try {
-        if (const auto* payload = std::get_if<PlatformPayload>(&result)) {
-          BindExternalTextures(*payload, texture_surface_);
-        } else {
-          BindExternalTextures(std::get<PlatformError>(result).details, texture_surface_);
-        }
-      } catch (...) {
-        result = PlatformError{
-            "huxerui/invalid-result",
-            "HuxerUI platform call returned an external texture from another platform surface",
-            {},
-        };
       }
       dispatcher = dispatch_to_ui_thread_;
     }
@@ -387,7 +366,6 @@ private:
   }
 
   UIThreadDispatcher dispatch_to_ui_thread_;
-  std::shared_ptr<ExternalTextureSurface> texture_surface_;
   PlatformChannelTransport transport_;
   mutable std::mutex mutex_;
   PlatformRequestId next_request_ = 1;
@@ -399,10 +377,8 @@ private:
   std::deque<std::pair<std::string, PlatformPayload>> queued_events_;
 };
 
-PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher dispatch_to_ui_thread,
-                                                    std::shared_ptr<ExternalTextureSurface> texture_surface) {
-  return PlatformChannelEndpoint(
-      std::make_shared<PlatformChannelState>(std::move(dispatch_to_ui_thread), std::move(texture_surface)));
+PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher dispatch_to_ui_thread) {
+  return PlatformChannelEndpoint(std::make_shared<PlatformChannelState>(std::move(dispatch_to_ui_thread)));
 }
 
 PlatformChannel PlatformChannelEndpoint::Channel() const {

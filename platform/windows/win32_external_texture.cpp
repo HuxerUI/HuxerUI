@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -12,13 +13,13 @@
 namespace huxerui::detail {
 namespace {
 
-Win32ExternalTextureFrame CopyFrame(const windows::ExternalTextureFrame& frame) {
+Win32PixelFrame CopyFrame(const windows::PixelFrame& frame) {
   if (frame.pixel_width <= 0 || frame.pixel_height <= 0) {
     throw std::invalid_argument("HuxerUI Windows external texture frame dimensions must be positive");
   }
   switch (frame.format) {
-  case windows::ExternalTexturePixelFormat::Rgba8888:
-  case windows::ExternalTexturePixelFormat::Bgra8888:
+  case windows::PixelFormat::Rgba8888:
+  case windows::PixelFormat::Bgra8888:
     break;
   default:
     throw std::invalid_argument("HuxerUI Windows external texture pixel format is not supported");
@@ -57,8 +58,8 @@ Win32ExternalTextureFrame CopyFrame(const windows::ExternalTextureFrame& frame) 
       const auto green = static_cast<std::uint8_t>(source[1]);
       const auto third = static_cast<std::uint8_t>(source[2]);
       const auto alpha = static_cast<std::uint8_t>(source[3]);
-      const std::uint8_t red = frame.format == windows::ExternalTexturePixelFormat::Rgba8888 ? first : third;
-      const std::uint8_t blue = frame.format == windows::ExternalTexturePixelFormat::Rgba8888 ? third : first;
+      const std::uint8_t red = frame.format == windows::PixelFormat::Rgba8888 ? first : third;
+      const std::uint8_t blue = frame.format == windows::PixelFormat::Rgba8888 ? third : first;
       const auto premultiply = [alpha](std::uint8_t channel) {
         return static_cast<std::uint8_t>((static_cast<std::uint32_t>(channel) * alpha + 127U) / 255U);
       };
@@ -69,74 +70,56 @@ Win32ExternalTextureFrame CopyFrame(const windows::ExternalTextureFrame& frame) 
       destination[3] = static_cast<std::byte>(alpha);
     }
   }
-  return Win32ExternalTextureFrame(frame.pixel_width, frame.pixel_height, std::move(pixels));
+  return Win32PixelFrame(frame.pixel_width, frame.pixel_height, std::move(pixels));
 }
 
 } // namespace
-
-std::shared_ptr<Win32ExternalTextureState> Win32ExternalTextureState::Create(Size intrinsic_size) {
-  return std::shared_ptr<Win32ExternalTextureState>(new Win32ExternalTextureState(intrinsic_size));
-}
-
-void Win32ExternalTextureState::Publish(const windows::ExternalTextureFrame& frame) {
-  Win32ExternalTextureFrame copied = CopyFrame(frame);
-  {
-    std::lock_guard lock(frame_mutex_);
-    if (finished_) {
-      throw std::logic_error("HuxerUI Windows external texture source is finished");
-    }
-    pending_frame_ = std::move(copied);
-  }
-  NotifyFrameAvailable();
-}
-
-void Win32ExternalTextureState::Finish() noexcept {
-  std::lock_guard lock(frame_mutex_);
-  finished_ = true;
-}
-
-std::optional<Win32ExternalTextureFrame> Win32ExternalTextureState::AcquireLatestFrame() noexcept {
-  std::lock_guard lock(frame_mutex_);
-  return std::exchange(pending_frame_, std::nullopt);
-}
 
 } // namespace huxerui::detail
 
 namespace huxerui::windows {
 
-ExternalTextureSource::ExternalTextureSource(Size intrinsic_size)
-    : state_(detail::Win32ExternalTextureState::Create(intrinsic_size)) {}
+struct PixelTexture::Storage {
+  std::mutex mutex;
+  std::shared_ptr<const detail::Win32PixelFrame> frame;
+  bool finished = false;
+};
 
-ExternalTextureSource::~ExternalTextureSource() {
+PixelTexture::PixelTexture(Size intrinsic_size)
+    : huxerui::ExternalTexture(intrinsic_size), storage_(std::make_unique<Storage>()) {}
+
+PixelTexture::~PixelTexture() {
   Finish();
 }
 
-ExternalTextureSource::ExternalTextureSource(ExternalTextureSource&& other) noexcept
-    : state_(std::move(other.state_)) {}
-
-ExternalTextureSource& ExternalTextureSource::operator=(ExternalTextureSource&& other) noexcept {
-  if (this != &other) {
-    Finish();
-    state_ = std::move(other.state_);
+void PixelTexture::Publish(const PixelFrame& frame) {
+  auto copied = std::make_shared<const detail::Win32PixelFrame>(detail::CopyFrame(frame));
+  {
+    std::lock_guard lock(storage_->mutex);
+    if (storage_->finished) {
+      throw std::logic_error("HuxerUI Windows external texture is finished");
+    }
+    storage_->frame = std::move(copied);
   }
-  return *this;
+  NotifyFrameAvailable();
 }
 
-ExternalTexture ExternalTextureSource::Texture() const noexcept {
-  return state_ ? state_->Texture() : ExternalTexture{};
+void PixelTexture::Finish() noexcept {
+  std::lock_guard lock(storage_->mutex);
+  storage_->finished = true;
 }
 
-void ExternalTextureSource::Publish(const ExternalTextureFrame& frame) {
-  if (!state_) {
-    throw std::logic_error("HuxerUI Windows external texture source is empty");
-  }
-  state_->Publish(frame);
-}
-
-void ExternalTextureSource::Finish() noexcept {
-  if (state_) {
-    state_->Finish();
-  }
+std::shared_ptr<const detail::Win32PixelFrame> PixelTexture::AcquireFrame() const noexcept {
+  std::lock_guard lock(storage_->mutex);
+  return storage_->frame;
 }
 
 } // namespace huxerui::windows
+
+namespace huxerui::detail {
+
+std::shared_ptr<const Win32PixelFrame> GetPixelFrame(const windows::PixelTexture& texture) noexcept {
+  return texture.AcquireFrame();
+}
+
+} // namespace huxerui::detail

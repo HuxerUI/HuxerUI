@@ -37,7 +37,8 @@ void CloseVideoFrame(val& frame) noexcept {
 
 struct WebColorStreamState : huxerui::example::ColorStreamService {
   explicit WebColorStreamState(huxerui::PlatformAdapter& adapter_value)
-      : adapter(&adapter_value), source({320.0F, 180.0F}),
+      : adapter(&adapter_value),
+        texture(std::make_shared<huxerui::web::VideoFrameTexture>(huxerui::Size{320.0F, 180.0F})),
         canvas(val::global("document").call<val>("createElement", std::string("canvas"))) {
     canvas.set("width", 320);
     canvas.set("height", 180);
@@ -65,15 +66,11 @@ struct WebColorStreamState : huxerui::example::ColorStreamService {
 
   void Dispose() noexcept {
     StopTimer();
-    source.Finish();
-  }
-
-  [[nodiscard]] huxerui::ExternalTexture Texture() const noexcept {
-    return source.Texture();
+    texture->Finish();
   }
 
   huxerui::PlatformRequestId
-  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+  Texture(std::function<void(huxerui::PlatformResult<std::shared_ptr<huxerui::ExternalTexture>>)> completion) override {
     if (!completion) {
       throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
     }
@@ -84,8 +81,7 @@ struct WebColorStreamState : huxerui::example::ColorStreamService {
           [completion = std::move(completion), error = std::move(error)]() mutable { completion(std::move(error)); });
       return ++request_id;
     }
-    huxerui::ExternalTexture texture = source.Texture();
-    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = texture]() mutable {
       completion(std::move(texture));
     });
     return ++request_id;
@@ -103,7 +99,7 @@ struct WebColorStreamState : huxerui::example::ColorStreamService {
     options.set("timestamp", static_cast<double>(phase) * (1000000.0 / 30.0));
     val frame = val::global("VideoFrame").new_(canvas, options);
     try {
-      source.Publish(frame);
+      texture->Publish(frame);
     } catch (...) {
       CloseVideoFrame(frame);
       throw;
@@ -130,7 +126,7 @@ private:
   }
 
   huxerui::PlatformAdapter* adapter;
-  huxerui::web::ExternalTextureSource source;
+  std::shared_ptr<huxerui::web::VideoFrameTexture> texture;
   val canvas;
   val context = val::undefined();
   int timer = 0;

@@ -33,37 +33,6 @@ EM_JS(void, ReleaseWebVideoFrame, (emscripten::EM_VAL handle), {
 
 } // namespace
 
-std::shared_ptr<WebExternalTextureState> WebExternalTextureState::Create(Size intrinsic_size) {
-  return std::shared_ptr<WebExternalTextureState>(new WebExternalTextureState(intrinsic_size));
-}
-
-WebExternalTextureState::~WebExternalTextureState() {
-  CloseWebVideoFrame(pending_frame_);
-}
-
-void WebExternalTextureState::Publish(const emscripten::val& video_frame) {
-  if (finished_) {
-    throw std::logic_error("HuxerUI Web external texture source is finished");
-  }
-  emscripten::val cloned_frame = emscripten::val::take_ownership(CloneWebVideoFrame(video_frame.as_handle()));
-  if (cloned_frame.isNull()) {
-    throw std::invalid_argument("HuxerUI Web external texture frame must be an open VideoFrame");
-  }
-  CloseWebVideoFrame(pending_frame_);
-  pending_frame_ = std::move(cloned_frame);
-  NotifyFrameAvailable();
-}
-
-void WebExternalTextureState::Finish() noexcept {
-  finished_ = true;
-}
-
-emscripten::val WebExternalTextureState::AcquireLatestFrame() noexcept {
-  emscripten::val frame = std::move(pending_frame_);
-  pending_frame_ = emscripten::val::undefined();
-  return frame;
-}
-
 void CloseWebVideoFrame(emscripten::val& frame) noexcept {
   if (frame.isNull() || frame.isUndefined()) {
     return;
@@ -76,39 +45,33 @@ void CloseWebVideoFrame(emscripten::val& frame) noexcept {
 
 namespace huxerui::web {
 
-ExternalTextureSource::ExternalTextureSource(Size intrinsic_size)
-    : state_(detail::WebExternalTextureState::Create(intrinsic_size)) {}
-
-ExternalTextureSource::~ExternalTextureSource() {
+VideoFrameTexture::~VideoFrameTexture() {
+  detail::CloseWebVideoFrame(frame_);
   Finish();
 }
 
-ExternalTextureSource::ExternalTextureSource(ExternalTextureSource&& other) noexcept
-    : state_(std::move(other.state_)) {}
-
-ExternalTextureSource& ExternalTextureSource::operator=(ExternalTextureSource&& other) noexcept {
-  if (this != &other) {
-    Finish();
-    state_ = std::move(other.state_);
+void VideoFrameTexture::Publish(const emscripten::val& video_frame) {
+  if (finished_) {
+    throw std::logic_error("HuxerUI Web external texture is finished");
   }
-  return *this;
+  emscripten::val cloned_frame = emscripten::val::take_ownership(detail::CloneWebVideoFrame(video_frame.as_handle()));
+  if (cloned_frame.isNull()) {
+    throw std::invalid_argument("HuxerUI Web external texture frame must be an open VideoFrame");
+  }
+  detail::CloseWebVideoFrame(frame_);
+  frame_ = std::move(cloned_frame);
+  NotifyFrameAvailable();
 }
 
-ExternalTexture ExternalTextureSource::Texture() const noexcept {
-  return state_ ? state_->Texture() : ExternalTexture{};
+void VideoFrameTexture::Finish() noexcept {
+  finished_ = true;
 }
 
-void ExternalTextureSource::Publish(const emscripten::val& video_frame) {
-  if (!state_) {
-    throw std::logic_error("HuxerUI Web external texture source is empty");
+emscripten::val VideoFrameTexture::AcquireFrame() const noexcept {
+  if (frame_.isNull() || frame_.isUndefined()) {
+    return emscripten::val::undefined();
   }
-  state_->Publish(video_frame);
-}
-
-void ExternalTextureSource::Finish() noexcept {
-  if (state_) {
-    state_->Finish();
-  }
+  return emscripten::val::take_ownership(detail::CloneWebVideoFrame(frame_.as_handle()));
 }
 
 } // namespace huxerui::web

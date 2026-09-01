@@ -24,14 +24,17 @@ bool ClearJavaException(JNIEnv* environment) {
 
 struct AndroidColorStreamState : huxerui::example::ColorStreamService {
   AndroidColorStreamState(huxerui::PlatformAdapter& adapter_value, JNIEnv* environment_value)
-      : adapter(&adapter_value), environment(environment_value), source({320.0F, 180.0F}) {}
+      : adapter(&adapter_value), environment(environment_value),
+        texture(std::make_shared<huxerui::android::BitmapTexture>(
+            huxerui::Size{320.0F, 180.0F}
+        )) {}
 
   ~AndroidColorStreamState() override {
     Dispose();
   }
 
   huxerui::PlatformRequestId
-  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+  Texture(std::function<void(huxerui::PlatformResult<std::shared_ptr<huxerui::ExternalTexture>>)> completion) override {
     if (!completion) {
       throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
     }
@@ -46,15 +49,14 @@ struct AndroidColorStreamState : huxerui::example::ColorStreamService {
           [completion = std::move(completion), error = std::move(error)]() mutable { completion(std::move(error)); });
       return 0;
     }
-    huxerui::ExternalTexture texture = source.Texture();
-    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = texture]() mutable {
       completion(std::move(texture));
     });
     return ++request_id;
   }
 
   void Publish(JNIEnv* callback_environment, jobject bitmap) {
-    source.Publish(callback_environment, bitmap);
+    texture->Publish(callback_environment, bitmap);
   }
 
   void Dispose() noexcept {
@@ -66,12 +68,12 @@ struct AndroidColorStreamState : huxerui::example::ColorStreamService {
     }
     delete bridge;
     bridge = nullptr;
-    source.Finish();
+    texture->Finish();
   }
 
   huxerui::PlatformAdapter* adapter = nullptr;
   JNIEnv* environment = nullptr;
-  huxerui::android::ExternalTextureSource source;
+  std::shared_ptr<huxerui::android::BitmapTexture> texture;
   jobject producer = nullptr;
   jmethodID start = nullptr;
   jmethodID dispose_bridge = nullptr;

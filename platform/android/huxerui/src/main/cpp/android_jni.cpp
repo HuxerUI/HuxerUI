@@ -179,7 +179,7 @@ Bytes JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value) {
 
 LocalRef<jobject> PlatformPayloadToJava(JNIEnv* environment, const PlatformPayload& payload) {
   RequireEnvironment(environment);
-  std::vector<ExternalTexture> external_textures;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   const Bytes encoded = payload.Encode(external_textures);
   LocalRef<jbyteArray> bytes = BytesToJavaByteArray(environment, encoded);
   LocalRef<jclass> payload_class(environment, environment->FindClass("org/huxerui/PlatformPayload"));
@@ -202,8 +202,8 @@ LocalRef<jobject> PlatformPayloadToJava(JNIEnv* environment, const PlatformPaylo
   if (!textures || environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI could not allocate the Android PlatformPayload capability table");
   }
-  for (const ExternalTexture& texture : external_textures) {
-    auto handle = std::make_unique<ExternalTexture>(texture);
+  for (const std::shared_ptr<ExternalTexture>& texture : external_textures) {
+    auto handle = std::make_unique<std::shared_ptr<ExternalTexture>>(texture);
     LocalRef<jobject> java_texture(
         environment, environment->NewObject(texture_class.Get(), texture_constructor,
                                             static_cast<jlong>(reinterpret_cast<std::uintptr_t>(handle.get()))));
@@ -260,7 +260,7 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
   if (texture_count < 0 || environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI Android PlatformPayload capability table is invalid");
   }
-  std::vector<ExternalTexture> external_textures;
+  std::vector<std::shared_ptr<ExternalTexture>> external_textures;
   external_textures.reserve(static_cast<std::size_t>(texture_count));
   for (jint index = 0; index < texture_count; ++index) {
     LocalRef<jobject> texture(environment, environment->CallObjectMethod(textures.Get(), list_get, index));
@@ -271,8 +271,8 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
     if (handle == 0 || environment->ExceptionCheck()) {
       throw std::runtime_error("HuxerUI Android PlatformPayload external texture is closed");
     }
-    const std::unique_ptr<ExternalTexture> value(
-        reinterpret_cast<ExternalTexture*>(static_cast<std::uintptr_t>(handle)));
+    const std::unique_ptr<std::shared_ptr<ExternalTexture>> value(
+        reinterpret_cast<std::shared_ptr<ExternalTexture>*>(static_cast<std::uintptr_t>(handle)));
     external_textures.push_back(*value);
   }
   return PlatformPayload::Decode(JavaByteArrayToBytes(environment, bytes.Get()), external_textures);
@@ -281,15 +281,17 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
 } // namespace huxerui::android
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIExternalTexture_release(JNIEnv*, jclass, jlong handle) {
-  delete reinterpret_cast<huxerui::ExternalTexture*>(static_cast<std::uintptr_t>(handle));
+  delete reinterpret_cast<std::shared_ptr<huxerui::ExternalTexture>*>(static_cast<std::uintptr_t>(handle));
 }
 
 extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIExternalTexture_retain(JNIEnv*, jclass, jlong handle) {
   if (handle == 0) {
     return 0;
   }
-  const auto* texture = reinterpret_cast<const huxerui::ExternalTexture*>(static_cast<std::uintptr_t>(handle));
-  return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(new huxerui::ExternalTexture(*texture)));
+  const auto* texture =
+      reinterpret_cast<const std::shared_ptr<huxerui::ExternalTexture>*>(static_cast<std::uintptr_t>(handle));
+  return static_cast<jlong>(
+      reinterpret_cast<std::uintptr_t>(new std::shared_ptr<huxerui::ExternalTexture>(*texture)));
 }
 
 namespace huxerui::android::detail {

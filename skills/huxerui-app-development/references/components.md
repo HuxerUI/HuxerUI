@@ -7,7 +7,7 @@ This is a decision-oriented catalog, not a replacement for the active SDK's publ
 | Component | Important contract |
 | --- | --- |
 | `Text` | Takes `StringVariant` and optional `TextRole`; `.Style(TextStyle)` overrides text styling. `.Align(TextAlign)` and `.VerticalAlign(TextVerticalAlign)` place the paragraph inside its text rectangle. `Text::Format` supports literal and resource formats. |
-| `Image` | Takes `ImageVariant` or `ExternalTexture`; `.Fit`, `.Align`, `.Sampling`, and `.Tint` are component-specific. |
+| `Image` | Takes `ImageVariant` or `std::shared_ptr<ExternalTexture>`; `.Fit`, `.Align`, `.Sampling`, and `.Tint` are component-specific. |
 | `Canvas` | Takes a `CanvasPainter` and paints in the size assigned by layout. |
 | `Divider` | Horizontal by default; pass `Axis::Vertical` only when height is bounded. |
 | `SelectionArea` | Wraps content that participates in text selection. |

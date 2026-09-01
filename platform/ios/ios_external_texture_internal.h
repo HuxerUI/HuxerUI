@@ -1,38 +1,12 @@
 #pragma once
 
-#include <CoreVideo/CVPixelBuffer.h>
-
-#include <memory>
-#include <mutex>
-
-#include "external_texture_internal.h"
+#include <huxerui/ios/external_texture.h>
 
 @class HUXExternalTexture;
 
-namespace huxerui::detail {
-
-class IosExternalTextureState final : public ExternalTextureState {
-public:
-  [[nodiscard]] static std::shared_ptr<IosExternalTextureState> Create(Size intrinsic_size);
-  ~IosExternalTextureState() override;
-
-  void Publish(CVPixelBufferRef frame);
-  void Finish() noexcept;
-  [[nodiscard]] CVPixelBufferRef AcquireLatestFrame() noexcept;
-
-private:
-  explicit IosExternalTextureState(Size intrinsic_size) : ExternalTextureState(intrinsic_size) {}
-
-  std::mutex frame_mutex_;
-  CVPixelBufferRef pending_frame_ = nullptr;
-  bool finished_ = false;
-};
-
-} // namespace huxerui::detail
-
 namespace huxerui::ios::detail {
 
-HUXExternalTexture* WrapExternalTexture(ExternalTexture texture);
-ExternalTexture UnwrapExternalTexture(HUXExternalTexture* texture);
+HUXExternalTexture* WrapExternalTexture(std::shared_ptr<ExternalTexture> texture);
+std::shared_ptr<ExternalTexture> UnwrapExternalTexture(HUXExternalTexture* texture);
 
 } // namespace huxerui::ios::detail

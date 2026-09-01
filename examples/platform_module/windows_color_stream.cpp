@@ -27,7 +27,8 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
 
 struct WindowsColorStreamState : huxerui::example::ColorStreamService {
   explicit WindowsColorStreamState(huxerui::PlatformAdapter& adapter_value)
-      : adapter(&adapter_value), source({320.0F, 180.0F}) {}
+      : adapter(&adapter_value),
+        texture(std::make_shared<huxerui::windows::PixelTexture>(huxerui::Size{320.0F, 180.0F})) {}
 
   ~WindowsColorStreamState() {
     Dispose();
@@ -43,13 +44,12 @@ struct WindowsColorStreamState : huxerui::example::ColorStreamService {
   }
 
   huxerui::PlatformRequestId
-  Texture(std::function<void(huxerui::PlatformResult<huxerui::ExternalTexture>)> completion) override {
+  Texture(std::function<void(huxerui::PlatformResult<std::shared_ptr<huxerui::ExternalTexture>>)> completion) override {
     if (!completion) {
       throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
     }
     Start();
-    huxerui::ExternalTexture texture = source.Texture();
-    adapter->DispatchToUIThread([completion = std::move(completion), texture = std::move(texture)]() mutable {
+    adapter->DispatchToUIThread([completion = std::move(completion), texture = texture]() mutable {
       completion(std::move(texture));
     });
     return ++request_id;
@@ -67,7 +67,7 @@ struct WindowsColorStreamState : huxerui::example::ColorStreamService {
     if (worker.joinable()) {
       worker.join();
     }
-    source.Finish();
+    texture->Finish();
   }
 
   void Run() noexcept {
@@ -95,18 +95,18 @@ struct WindowsColorStreamState : huxerui::example::ColorStreamService {
         pixel[3] = std::byte{255};
       }
     }
-    source.Publish({
+    texture->Publish({
         .pixel_width = 320,
         .pixel_height = 180,
         .bytes_per_row = 320U * 4U,
-        .format = huxerui::windows::ExternalTexturePixelFormat::Rgba8888,
+        .format = huxerui::windows::PixelFormat::Rgba8888,
         .pixels = pixels,
     });
     ++phase;
   }
 
   huxerui::PlatformAdapter* adapter;
-  huxerui::windows::ExternalTextureSource source;
+  std::shared_ptr<huxerui::windows::PixelTexture> texture;
   std::mutex mutex;
   std::condition_variable wake;
   std::thread worker;

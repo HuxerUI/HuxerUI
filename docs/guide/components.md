@@ -11,7 +11,7 @@ Use `Align(TextAlign::...)` for horizontal paragraph alignment and `VerticalAlig
 Vertical alignment does not change intrinsic text measurement.
 
 `ImageVariant` covers `ImageResource`, `ImageAsset`, and `VectorAsset`.
-`Image` also accepts `ExternalTexture` through a separate overload because a live platform texture is not an application image value.
+`Image` also accepts `std::shared_ptr<ExternalTexture>` through a separate overload because a live platform texture is not an application image value.
 Configure fit, alignment, sampling, and tint with typed methods.
 
 `ImageAsset::FromEncoded(Bytes)` and `RawAsset::FromBytes(Bytes)` take ownership of encoded or arbitrary binary data.

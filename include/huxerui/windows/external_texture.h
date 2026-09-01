@@ -9,43 +9,86 @@
 
 namespace huxerui {
 
+namespace windows {
+class PixelTexture;
+} // namespace windows
+
 namespace detail {
-class Win32ExternalTextureState;
+class Win32PixelFrame;
+std::shared_ptr<const Win32PixelFrame> GetPixelFrame(const windows::PixelTexture& texture) noexcept;
 } // namespace detail
 
 namespace windows {
 
-enum class ExternalTexturePixelFormat {
+/// Identifies the byte order of one straight-alpha, untagged sRGB PixelFrame.
+enum class PixelFormat {
+  /// Four bytes per pixel in red, green, blue, alpha order.
   Rgba8888,
+  /// Four bytes per pixel in blue, green, red, alpha order.
   Bgra8888,
 };
 
-// Pixel bytes are untagged sRGB with straight alpha. Publish copies the required rows before returning, so the span
-// may be reused.
-struct ExternalTextureFrame {
+/// Describes one borrowed Windows software frame supplied to PixelTexture::Publish().
+///
+/// Pixel bytes use untagged sRGB color with straight alpha. Publish copies the required rows before returning, so the
+/// producer may immediately reuse or release the span and any row padding.
+struct PixelFrame {
+  /// Width of the image in physical pixels. The value must be greater than zero.
   int pixel_width = 0;
+  /// Height of the image in physical pixels. The value must be greater than zero.
   int pixel_height = 0;
+  /// Byte distance between adjacent rows, including optional padding. It must be at least pixel_width times four.
   std::size_t bytes_per_row = 0;
-  ExternalTexturePixelFormat format = ExternalTexturePixelFormat::Rgba8888;
+  /// Byte order used by every pixel in pixels.
+  PixelFormat format = PixelFormat::Rgba8888;
+  /// Borrowed storage containing at least (pixel_height - 1) * bytes_per_row + pixel_width * 4 bytes.
   std::span<const std::byte> pixels;
 };
 
-class ExternalTextureSource final {
+/// A latest-frame Windows ExternalTexture backed by copied RGBA or BGRA software pixels.
+///
+/// The intrinsic size is immutable logical UI geometry and need not equal a frame's pixel dimensions. Publish converts
+/// straight-alpha input into renderer-owned premultiplied storage and replaces the mailbox atomically.
+///
+/// @code
+/// auto texture = std::make_shared<windows::PixelTexture>(Size{320.0F, 180.0F});
+/// texture->Publish({
+///     .pixel_width = 640,
+///     .pixel_height = 360,
+///     .bytes_per_row = 640 * 4,
+///     .format = windows::PixelFormat::Rgba8888,
+///     .pixels = pixels,
+/// });
+/// View preview = Image(texture).Fit(ImageFit::Cover);
+/// @endcode
+class PixelTexture final : public huxerui::ExternalTexture {
 public:
-  explicit ExternalTextureSource(Size intrinsic_size);
-  ~ExternalTextureSource();
+  /// Creates an empty software-frame mailbox with a finite, strictly positive logical size.
+  explicit PixelTexture(Size intrinsic_size);
+  /// Releases the mailbox copy; renderer-owned snapshots retain any frame resources they still use.
+  ~PixelTexture();
 
-  ExternalTextureSource(const ExternalTextureSource&) = delete;
-  ExternalTextureSource& operator=(const ExternalTextureSource&) = delete;
-  ExternalTextureSource(ExternalTextureSource&& other) noexcept;
-  ExternalTextureSource& operator=(ExternalTextureSource&& other) noexcept;
+  /// PixelTexture identities cannot be copied; share them through std::shared_ptr.
+  PixelTexture(const PixelTexture&) = delete;
+  PixelTexture& operator=(const PixelTexture&) = delete;
 
-  [[nodiscard]] ExternalTexture Texture() const noexcept;
-  void Publish(const ExternalTextureFrame& frame);
+  /// Copies frame into the latest-frame mailbox and schedules every Runtime currently displaying this texture.
+  ///
+  /// Invalid dimensions, stride, format, or storage size throw std::invalid_argument. Publication after Finish()
+  /// throws std::logic_error.
+  void Publish(const PixelFrame& frame);
+  /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
 private:
-  std::shared_ptr<detail::Win32ExternalTextureState> state_;
+  struct Storage;
+
+  [[nodiscard]] std::shared_ptr<const huxerui::detail::Win32PixelFrame> AcquireFrame() const noexcept;
+
+  std::unique_ptr<Storage> storage_;
+
+  friend std::shared_ptr<const huxerui::detail::Win32PixelFrame>
+  huxerui::detail::GetPixelFrame(const PixelTexture& texture) noexcept;
 };
 
 } // namespace windows

@@ -41,6 +41,5 @@ let payload: PlatformPayload = .object([
 ])
 payload.validate(fields: ["enabled", "count"])
 
-let textureSource = ExternalTextureSource(intrinsicSize: CGSize(width: 16, height: 9))
-_ = textureSource.texture
-textureSource.finish()
+let texture = PixelBufferTexture(intrinsicSize: CGSize(width: 16, height: 9))
+texture.finish()

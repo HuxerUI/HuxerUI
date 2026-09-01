@@ -50,7 +50,7 @@ private:
 
   [[nodiscard]] const WebTextLayout&
   ParagraphFor(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
-  [[nodiscard]] const emscripten::val* FrameFor(const ExternalTexture& texture);
+  [[nodiscard]] const emscripten::val* FrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void DrawTarget(
       const emscripten::val& canvas,
       const RenderFrame& frame,

@@ -719,7 +719,7 @@ Scalar and framework data types have built-in boundary conversion; a library wra
 `PlatformPayload` remains an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, `Bytes`, list, string-keyed object, and the closed framework capability `ExternalTexture`.
 It is an in-process boundary value rather than a persistence, network, or general serialization format.
 It never contains callbacks, arbitrary C++ objects, system handles, pointers, platform Views, or executable closures.
-Large or continuous media frames do not travel through it; an `ExternalTexture` value only retains the opaque platform-owned source state.
+Large or continuous media frames do not travel through it; an ExternalTexture payload retains the same shared platform-owned texture object used by rendering.
 
 #### Platform-language value API
 
@@ -814,11 +814,12 @@ All bridge implementations use the same framework constants for maximum envelope
 Unknown versions, flags, tags, or capability kinds, duplicate object keys, invalid UTF-8, non-finite doubles, integer or length overflow, truncated input, excessive allocation, and trailing bytes are malformed payloads.
 
 An `ExternalTexture` is an opaque capability and therefore travels beside the binary data in a bridge-private capability table.
-The binary stream contains only an envelope-local slot, while JNI global references, Objective-C objects, JavaScript handles, or C++ source state remain in the owning bridge for that crossing.
+The binary stream contains only an envelope-local slot, while JNI global references, Objective-C objects, JavaScript handles, or C++ shared objects remain in the owning bridge for that crossing.
 Slots are unique only within one envelope and are not public texture identifiers.
 Repeated references to the same slot preserve capability identity within that decode.
-The encoder rejects an ExternalTexture that cannot be exported by the owning bridge, and the decoder rejects a missing slot, duplicate capability-table entry, or kind mismatch.
-On successful decode, the resulting `ExternalTexture` wrapper retains the capability before the temporary table is released; on failure, the bridge releases the complete table.
+A bridge without ExternalTexture capability transport rejects the value before encoding.
+A bridge that supports the capability rejects a missing slot, duplicate capability-table entry, or kind mismatch while decoding.
+On successful decode, the resulting shared reference or language wrapper retains the capability before the temporary table is released; on failure, the bridge releases the complete table.
 Library code cannot forge, retain, or reuse a slot, and the closed table cannot carry arbitrary platform objects.
 
 | Platform boundary | Binary data | Capability table |
@@ -1212,50 +1213,40 @@ The Windows 7 compatibility renderer does not silently flatten PlatformViews int
 
 ### ExternalTexture
 
-`ExternalTexture` is a copyable platform-neutral consumer value representing one live visual source.
-It exposes fixed logical intrinsic size, stable identity equality, and validity, while its shared opaque state retains platform-owned frame production and lifetime data.
-The public value exposes no frame revision, platform texture, buffer, View, device pointer, registry identity, or mutation operation.
-Application code cannot construct a valid texture from an integer or system handle; only a platform-specific source creates one.
-
-The platform-neutral public surface remains a value type:
+`ExternalTexture` is the platform-neutral shared identity of one live visual producer.
+It owns immutable logical intrinsic size, monotonically increasing frame revision, and committed-visibility subscriptions, while a concrete platform subclass owns the native mailbox and publication API.
+Application and renderer APIs retain it through `std::shared_ptr<ExternalTexture>`; there is no copyable wrapper, separate source object, public numeric identifier, or texture registry.
 
 ```cpp
-class ExternalTexture final {
+class ExternalTexture {
 public:
-  ExternalTexture() noexcept = default;
+  virtual ~ExternalTexture() = 0;
+
+  ExternalTexture(const ExternalTexture&) = delete;
+  ExternalTexture& operator=(const ExternalTexture&) = delete;
 
   [[nodiscard]] Size IntrinsicSize() const noexcept;
-  [[nodiscard]] bool HasValue() const noexcept;
+  [[nodiscard]] std::uint64_t Revision() const noexcept;
+  [[nodiscard]] bool IsActive() const noexcept;
 
-  bool operator==(const ExternalTexture& other) const noexcept;
+protected:
+  explicit ExternalTexture(Size intrinsic_size);
+  void NotifyFrameAvailable();
 };
 ```
 
-Default construction produces an empty value for optional storage.
-Image and PlatformPayload boundary encoding reject that empty value.
+The implemented concrete producers are `android::BitmapTexture`, `ios::PixelBufferTexture`, `macos::PixelBufferTexture`, `windows::PixelTexture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
+Apple Objective-C and Swift use `HUXPixelBufferTexture`, imported as `PixelBufferTexture`, which is itself an `ExternalTexture` capability rather than an owner exposing a second `.texture` value.
+Android accepts a retained `android.graphics.Bitmap`, Apple accepts `CVPixelBufferRef`, Windows and Linux copy borrowed `PixelFrame` rows, and Web clones an open WebCodecs `VideoFrame` on the browser main thread.
+Retained Android and Apple frame storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after `Publish()` returns.
+Future GPU-native producers such as Android GL, Metal, D3D, DMA-BUF, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
 
-A platform source is move-only and may be created before a Runtime or platform surface exists.
-Its `Texture()` operation returns the copyable consumer value, `Publish()` replaces the pending platform frame, and `Finish()` rejects later frames while preserving the last published frame for drawing.
-Source destruction performs the same terminal cleanup and is safe even when the texture was never bound to a surface.
-The implemented producer surfaces are `<huxerui/macos/external_texture.h>`, `<huxerui/linux/external_texture.h>`, `<huxerui/web/external_texture.h>`, `<huxerui/android/external_texture.h>`, `<huxerui/ios/external_texture.h>`, and `<huxerui/windows/external_texture.h>`.
-macOS and iOS accept `CVPixelBufferRef` frames, Linux and Windows copy borrowed RGBA8888 or BGRA8888 pixels with explicit dimensions and row stride, Web clones open WebCodecs `VideoFrame` values on the browser main thread, and Android accepts retained `android.graphics.Bitmap` frames through the publishing thread's `JNIEnv`.
-Each platform retains independent source state and renderer integration without widening the platform-neutral consumer representation.
-The Apple Objective-C/Swift `HUXExternalTextureSource` is a thin owner of the matching iOS or macOS source and exposes the same `CVPixelBuffer` mailbox through `ExternalTextureSource` in the `HuxerUIPlatform` module.
-It does not create another texture identity, frame queue, renderer path, or registry.
-
-An unbound texture binds exactly once when it first enters a surface-owned PlatformAdapter boundary.
-A cross-language envelope binds its capability while the bridge imports or exports that envelope.
-A value moving only through the strongly typed C++ path remains unbound until a surface-owned adapter or renderer operation actually consumes its `ExternalTexture`; returning or emitting an arbitrary C++ structure therefore requires neither payload encoding nor reflective capability traversal.
-A texture created directly by PlatformModule code normally binds when its first committed render use is collected.
-All consuming paths use the same internal surface-binding invariant.
-Re-entering the same surface is valid, while using the texture with another surface fails at the owning boundary with a HuxerUI diagnostic rather than rendering an empty result.
-There is no public or library-visible texture registry: the source state is the capability, and each renderer keeps only the private cache needed to consume sources already bound to its surface.
-
-`PlatformPayloadKind::ExternalTexture` transports the consumer value only when PlatformModule options, calls, results, events, or PlatformView properties cross a platform-language boundary, including when nested in lists and objects.
-Constructing a payload from an empty texture is invalid, and `AsExternalTexture()` requires the exact kind.
-Payload equality delegates to texture identity equality; frame publication never changes payload equality.
-Platform bridges carry an opaque framework wrapper retaining the source state instead of encoding a raw numeric identifier.
+`PlatformPayloadKind::ExternalTexture` transports `std::shared_ptr<ExternalTexture>` only across a platform-language boundary, including when nested in lists and objects.
+The HUXP v1 bytes contain validated slots into a companion capability table; they never contain a process pointer or persistent identifier.
+Constructing a payload from a null pointer is invalid, `AsExternalTexture()` requires the exact kind, and equality compares shared identity.
+Platform bridges retain the same shared object, so publication never changes payload equality and does not create another mailbox.
 This closed capability does not make PlatformPayload a generic object transport, and its binary envelope remains an ephemeral language-bridge format rather than a persistence or network format.
+Strongly typed C++ PlatformModule results, events, and PlatformView properties pass their concrete types directly and require no payload traversal.
 
 The existing Image component accepts ExternalTexture directly and reuses ImageFit, alignment, sampling, measurement, clipping, transform, and opacity behavior:
 
@@ -1269,49 +1260,53 @@ View CameraView(const CameraSession& camera) {
 No separate TextureView or ExternalTextureView class is added.
 Tint remains vector-only and rejects ExternalTexture at the public configuration boundary.
 Camera orientation, mirror state, crop metadata, and color conversion belong to the producer and platform renderer.
-Intrinsic size is immutable because asynchronously changing it would mutate layout without controlled application state; a structural size or format change produces a new ExternalTexture value.
+Intrinsic size is immutable because asynchronously changing it would mutate layout without controlled application state; a structural size or format change produces a new shared texture object.
 
 Painting records a distinct `DrawExternalTextureCommand` in PaintCommand.
-The command owns an ExternalTexture value plus source and destination rectangles, sampling, and opacity.
-It remains distinct from DrawImageCommand because immutable encoded images use decode caches while an external texture resolves the latest platform-owned frame through its opaque source state.
+The command owns a `std::shared_ptr<ExternalTexture>` plus source and destination rectangles, sampling, and opacity.
+It remains distinct from DrawImageCommand because immutable encoded images use decode caches while a platform renderer resolves the latest frame from its matching concrete texture type.
 The command contains no frame revision, so publishing a frame does not make a clean PaintSequence unequal or require rerecording it.
 Adding the command requires explicit handling in every renderer; a backend must not silently draw an empty rectangle.
 
 Frame production does not write application State, recompose a scope, or rerecord an otherwise clean PaintSequence.
-The source accepts frame publication from its platform-supported producer context, atomically advances its private revision, replaces the pending frame, and requests at most one platform frame through the weak scheduler installed during surface binding.
+The concrete texture accepts frame publication from its supported producer context, atomically advances the shared revision, replaces its latest immutable frame snapshot, and requests at most one platform frame from each committed Runtime that currently displays it.
 Runtime records visible texture uses while publishing the RenderScene and retains a committed snapshot of each identity, revision, and transformed destination.
-On the next BuildFrame it compares the source revisions with that snapshot, damages every changed visible destination, and advances the RenderFrame revision while retaining the PaintSequence and RenderNode structure.
+On the next BuildFrame it compares revisions with that snapshot, damages every changed visible destination, and advances the RenderFrame revision while retaining the PaintSequence and RenderNode structure.
 The same texture may appear in several nodes; each visible destination participates independently in damage.
 
 ExternalTexture uses a latest-wins mailbox rather than an unbounded frame queue.
 The capture or decoder thread never waits for Runtime, intermediate frames may be dropped, and a renderer acquires the newest frame available when processing damaged content.
-The source mailbox and renderer cache together retain at most the currently acquired frame and one newer pending frame.
-If no newer frame is ready during an unrelated redraw, the renderer retains the last successfully acquired frame.
+The mailbox retains one immutable latest frame and each active renderer may retain the snapshot it imported.
+Acquisition does not remove the mailbox value, so several renderers or windows can consume the same publication independently.
+If no newer frame is ready during an unrelated redraw, the renderer reuses its last imported resource.
 Before the first frame, Image contributes transparent visual content without treating the valid texture as an error.
-After `Finish()`, rendering freezes on the last acquired or pending frame until the final consumer value and renderer cache release the source state.
+After `Finish()`, rendering freezes on the last published frame until the final shared texture and renderer caches release it.
 
 Committed visibility controls scheduling rather than production ownership.
 When no committed visible command references the texture, publication updates the mailbox but does not continuously wake the UI.
-The source may receive an activity callback when its committed visibility changes so a camera or decoder can throttle, but Runtime does not own or pause the producer automatically.
+`IsActive()` reports whether at least one live Runtime currently displays the texture, but Runtime does not own or pause the producer automatically.
 Becoming visible through an ordinary application frame schedules the newest published revision without requiring a new Publish call.
+Visibility is a private weak subscription from each PlatformAdapter, not a single surface binding.
+The same texture may be displayed by several Runtimes; unmounting one removes only that Runtime's subscription.
 
 Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
-The shared command retains the opaque consumer value and immutable drawing data, while the source state supplies a platform-private mailbox interface only to the matching renderer.
+The shared command retains only the abstract identity and immutable drawing data, while each renderer casts to its matching concrete platform type and uses that type's private mailbox interface.
 Each backend chooses a platform-specific zero-copy path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
 The API promises no copy through shared Runtime; it does not claim universal zero-copy on the current CoreGraphics, Android Canvas, or Cairo backends.
 The Apple implementations accept `CVPixelBufferRef` and use Core Image conversion compatible with their existing renderers.
-The Android API 23 path accepts a retained `Bitmap`, keeps one acquired frame per active source, and draws it through the existing Canvas backend.
-Software and hardware-backed Bitmaps share that source contract, but direct `AHardwareBuffer` import, synchronization fences, and a zero-copy graphics path remain future renderer work.
-The Linux implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into Cairo premultiplied ARGB32 storage, keeps one acquired Cairo surface per active source, and leaves DMA-BUF import and explicit synchronization as future renderer work.
+The Android API 23 path accepts a retained `Bitmap`, keeps one imported frame per active texture, and draws it through the existing Canvas backend.
+Software and hardware-backed Bitmaps share that contract, but direct `AHardwareBuffer` import, synchronization fences, and a zero-copy graphics path remain future renderer work.
+The Linux implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into Cairo premultiplied ARGB32 storage, keeps one Cairo surface per active texture, and leaves DMA-BUF import and explicit synchronization as future renderer work.
 The Windows implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.
 It reuses the bitmap allocation while pixel dimensions remain unchanged and leaves shared D3D textures, keyed synchronization, and zero-copy video import as future renderer work.
-The Web implementation accepts only open WebCodecs `VideoFrame` values, clones each published frame synchronously, and leaves the caller responsible for closing its original value.
-Because `emscripten::val` is thread-affine, source construction, publication, finish, and destruction remain on the browser main thread.
-The Canvas renderer acquires at most once per physical frame, shares that acquired frame across every Canvas slice, maps logical crop coordinates through `displayWidth` and `displayHeight`, and closes replaced or inactive frames.
+The Web implementation accepts only open WebCodecs `VideoFrame` values, clones each publication synchronously, and leaves the caller responsible for closing its original value.
+Because `emscripten::val` is thread-affine, texture construction, publication, finish, and destruction remain on the browser main thread.
+The Canvas renderer clones the latest mailbox frame at most once per physical frame, shares that renderer-owned clone across every Canvas slice, maps logical crop coordinates through `displayWidth` and `displayHeight`, and closes replaced or inactive clones.
 WebCodecs may share the clone's underlying media resource, but Canvas drawing and browser color conversion may still copy, so this backend does not claim zero-copy.
 
-The source, payloads, and retained PaintCommands share the opaque source-state lifetime without a registration record.
-Unmount first removes committed drawing references and visibility callbacks, then renderer-cache eviction releases its acquired frame; platform mailbox resources are released when the source state loses its final owner.
+Payloads and retained PaintCommands share the same opaque texture lifetime without a registration record.
+Unmount first removes committed drawing references and visibility subscriptions.
+Renderer caches are weakly keyed and release imported frames when the owning renderer prunes the entry or is destroyed; platform mailbox resources are released when the texture loses its final owner.
 Runtime destruction releases RenderScene and platform-content frames before Root Services are destroyed in reverse registration order.
 
 ExternalTexture is visual content, not a PlatformView interaction or accessibility subtree.

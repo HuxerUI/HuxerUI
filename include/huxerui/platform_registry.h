@@ -86,7 +86,7 @@ public:
   PlatformPayload(Bytes value);
   PlatformPayload(List value);
   PlatformPayload(Object value);
-  PlatformPayload(ExternalTexture value);
+  PlatformPayload(std::shared_ptr<ExternalTexture> value);
 
   /// Returns the exact stored kind.
   [[nodiscard]] PlatformPayloadKind Kind() const noexcept;
@@ -103,7 +103,7 @@ public:
   [[nodiscard]] std::span<const std::byte> AsBytes() const;
   [[nodiscard]] const List& AsList() const;
   [[nodiscard]] const Object& AsObject() const;
-  [[nodiscard]] const ExternalTexture& AsExternalTexture() const;
+  [[nodiscard]] const std::shared_ptr<ExternalTexture>& AsExternalTexture() const;
 
   /// Compares values by kind and contents. Object insertion order does not affect equality.
   bool operator==(const PlatformPayload& other) const;
@@ -112,10 +112,10 @@ public:
   ///
   /// external_textures is replaced with the ExternalTexture capability table referenced by validated slots in the
   /// byte stream. The returned bytes and companion texture list must be delivered together to Decode.
-  [[nodiscard]] Bytes Encode(std::vector<ExternalTexture>& external_textures) const;
+  [[nodiscard]] Bytes Encode(std::vector<std::shared_ptr<ExternalTexture>>& external_textures) const;
   /// Decodes one complete HUXP value and validates the representation and referenced ExternalTexture slots.
   [[nodiscard]] static PlatformPayload Decode(std::span<const std::byte> bytes,
-                                              std::span<const ExternalTexture> external_textures = {});
+                                              std::span<const std::shared_ptr<ExternalTexture>> external_textures = {});
 
 private:
   template <class Integer> static std::int64_t CheckedInteger(Integer value) {
@@ -259,7 +259,7 @@ template <class Value> Value DecodePlatformPayload(const PlatformPayload& payloa
   } else if constexpr (std::same_as<Value, Bytes>) {
     const std::span<const std::byte> bytes = payload.AsBytes();
     return Bytes(bytes.begin(), bytes.end());
-  } else if constexpr (std::same_as<Value, ExternalTexture>) {
+  } else if constexpr (std::same_as<Value, std::shared_ptr<ExternalTexture>>) {
     return payload.AsExternalTexture();
   } else {
     return Value::Decode(payload);
@@ -274,7 +274,7 @@ template <class Value> PlatformPayload EncodePlatformValue(const Value& value) {
     return value;
   } else if constexpr (std::same_as<Value, bool> || std::integral<Value> || std::floating_point<Value> ||
                        std::same_as<Value, std::string> || std::same_as<Value, Bytes> ||
-                       std::same_as<Value, ExternalTexture>) {
+                       std::same_as<Value, std::shared_ptr<ExternalTexture>>) {
     return PlatformPayload(value);
   } else {
     return Value::Encode(value);
@@ -285,7 +285,8 @@ template <class Value>
 concept PlatformPayloadEncodable =
     std::same_as<Value, std::monostate> || std::same_as<Value, PlatformPayload> || std::same_as<Value, bool> ||
     std::integral<Value> || std::floating_point<Value> || std::same_as<Value, std::string> ||
-    std::same_as<Value, Bytes> || std::same_as<Value, ExternalTexture> || requires(const Value& value) {
+    std::same_as<Value, Bytes> || std::same_as<Value, std::shared_ptr<ExternalTexture>> ||
+    requires(const Value& value) {
       { Value::Encode(value) } -> std::same_as<PlatformPayload>;
     };
 
@@ -293,7 +294,7 @@ template <class Value>
 concept PlatformPayloadDecodable =
     std::same_as<Value, std::monostate> || std::same_as<Value, bool> || std::integral<Value> ||
     std::floating_point<Value> || std::same_as<Value, std::string> || std::same_as<Value, Bytes> ||
-    std::same_as<Value, ExternalTexture> || requires(const PlatformPayload& payload) {
+    std::same_as<Value, std::shared_ptr<ExternalTexture>> || requires(const PlatformPayload& payload) {
       { Value::Decode(payload) } -> std::convertible_to<Value>;
     };
 

@@ -2828,8 +2828,8 @@ std::shared_ptr<detail::ViewSpec> MakeImageSpec(ImageVariant image) {
   return spec;
 }
 
-std::shared_ptr<detail::ViewSpec> MakeExternalTextureSpec(ExternalTexture texture) {
-  if (!texture.HasValue()) {
+std::shared_ptr<detail::ViewSpec> MakeExternalTextureSpec(std::shared_ptr<ExternalTexture> texture) {
+  if (!texture) {
     throw std::invalid_argument("HuxerUI image view asset must not be empty");
   }
   auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Image);
@@ -3029,7 +3029,7 @@ Tabs::Tabs(std::vector<TabItem> items, std::size_t selected_index)
 
 Image::Image(ImageVariant image) : View(MakeImageSpec(std::move(image))) {}
 
-Image::Image(ExternalTexture texture) : View(MakeExternalTextureSpec(std::move(texture))) {}
+Image::Image(std::shared_ptr<ExternalTexture> texture) : View(MakeExternalTextureSpec(std::move(texture))) {}
 
 Image Image::Fit(ImageFit fit) && {
   SetImageFit(fit);

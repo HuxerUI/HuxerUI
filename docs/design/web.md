@@ -39,7 +39,7 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as other p
 | WebSession | Internal ownership of one WebPlatformAdapter and one Runtime for a mounted host element |
 | WebPlatformAdapter | Monotonic time, frame requests, UI-thread dispatch, viewport coordination, and browser service capabilities |
 | WebRenderer | RenderScene traversal, Canvas state, damage replay, path conversion, image decode entries, and renderer caches |
-| Web ExternalTexture source | Main-thread WebCodecs `VideoFrame` validation, cloning, latest-frame ownership, and finish state |
+| Web `VideoFrameTexture` | Main-thread WebCodecs `VideoFrame` validation, cloning, latest-frame ownership, and finish state |
 | WebPlatformViews | DOM factory lifecycle, retained Canvas slices, placement, ordering, hit arbitration, and focus synchronization |
 | WebTextLayout | Browser font resolution, measurements, line records, UTF-16 caret movement, hit testing, and range geometry |
 | WebTextInput | DOM input-element lifecycle and conversion of browser editing events into TextInputCommandBatch values |
@@ -132,17 +132,17 @@ WebGPU, Skia, or another renderer may later implement the same RenderScene contr
 
 ## ExternalTexture
 
-Web libraries include `<huxerui/web/external_texture.h>` and create a move-only `web::ExternalTextureSource` with one immutable logical intrinsic size.
-`Texture()` exposes the existing copyable platform-neutral capability, `Publish()` accepts only an open WebCodecs `VideoFrame`, and `Finish()` idempotently rejects later publication while preserving the last pending or acquired image.
+Web libraries include `<huxerui/web/external_texture.h>` and create a shared `web::VideoFrameTexture` with one immutable logical intrinsic size.
+The same object is passed to `Image` as `std::shared_ptr<ExternalTexture>`; `Publish()` accepts only an open WebCodecs `VideoFrame`, and `Finish()` idempotently rejects later publication while preserving the last image.
 No numeric identity, JavaScript registry, PlatformModule subtype, or additional payload kind is introduced.
 
 Publishing synchronously clones the supplied `VideoFrame`, so the caller retains ownership and may close its original as soon as `Publish()` returns.
 A newer publication closes and replaces the previous pending clone.
 The clone may share its underlying media resource according to WebCodecs lifetime rules, but Canvas import or browser color conversion may copy; the backend does not promise zero-copy.
-Because `emscripten::val` is thread-affine, source construction, publication, finish, and destruction are browser-main-thread operations rather than worker-safe producer APIs.
+Because `emscripten::val` is thread-affine, texture construction, publication, finish, and destruction are browser-main-thread operations rather than worker-safe producer APIs.
 
-At the start of each browser animation-frame commit, WebRenderer advances one external-texture acquisition epoch and drops caches whose sources are no longer committed as active.
-The first draw of a source during that epoch acquires its newest pending clone, closes the replaced cached frame, and retains the new frame for later redraws.
+At the start of each browser animation-frame commit, WebRenderer advances one external-texture acquisition epoch and drops caches whose textures are no longer committed as active.
+The first draw of a texture during that epoch clones its latest mailbox frame, closes the replaced renderer-owned clone, and retains the new frame for later redraws.
 All Canvas slices in one `RenderComposition` share the same epoch, so content split around PlatformViews cannot display different producer frames in one physical presentation.
 Logical source rectangles map through `VideoFrame.displayWidth` and `displayHeight` before Canvas `drawImage`, while Image continues to own fit, alignment, clipping, transforms, sampling, and opacity.
 

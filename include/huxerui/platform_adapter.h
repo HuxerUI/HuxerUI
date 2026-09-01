@@ -24,7 +24,7 @@ enum class WindowCommand;
 
 namespace detail {
 
-class ExternalTextureSurface;
+class ExternalTextureFrameRequester;
 class FilePickerTransport;
 class HttpTransport;
 class PlatformChannelEndpoint;
@@ -103,7 +103,7 @@ protected:
 
 private:
   UIThreadDispatcher ui_thread_dispatcher_;
-  std::shared_ptr<detail::ExternalTextureSurface> external_texture_surface_;
+  std::shared_ptr<detail::ExternalTextureFrameRequester> external_texture_frame_requester_;
   std::unique_ptr<detail::PlatformRegistry> platform_registry_;
 
   friend class Runtime;

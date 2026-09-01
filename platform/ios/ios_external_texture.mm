@@ -10,20 +10,11 @@
 
 @interface HUXIOSExternalTextureStorage : NSObject {
 @public
-  huxerui::ExternalTexture texture;
+  std::shared_ptr<huxerui::ExternalTexture> texture;
 }
 @end
 
 @implementation HUXIOSExternalTextureStorage
-@end
-
-@interface HUXIOSExternalTextureSourceStorage : NSObject {
-@public
-  std::unique_ptr<huxerui::ios::ExternalTextureSource> source;
-}
-@end
-
-@implementation HUXIOSExternalTextureSourceStorage
 @end
 
 @interface HUXExternalTexture ()
@@ -31,37 +22,31 @@
 @end
 
 static char external_texture_storage_key;
-static char external_texture_source_storage_key;
 
-static HUXIOSExternalTextureSourceStorage* SourceStorage(HUXExternalTextureSource* source) {
-  HUXIOSExternalTextureSourceStorage* storage =
-      objc_getAssociatedObject(source, &external_texture_source_storage_key);
-  if (storage == nil || !storage->source) {
+static HUXIOSExternalTextureStorage* TextureStorage(HUXExternalTexture* texture) {
+  HUXIOSExternalTextureStorage* storage = objc_getAssociatedObject(texture, &external_texture_storage_key);
+  if (storage == nil || !storage->texture) {
     @throw [NSException exceptionWithName:NSInternalInconsistencyException
-                                   reason:@"HuxerUI iOS ExternalTextureSource is unavailable"
+                                   reason:@"HuxerUI iOS ExternalTexture is unavailable"
                                  userInfo:nil];
   }
   return storage;
 }
 
-namespace huxerui::detail {
+namespace huxerui::ios {
 
-std::shared_ptr<IosExternalTextureState> IosExternalTextureState::Create(Size intrinsic_size) {
-  return std::shared_ptr<IosExternalTextureState>(new IosExternalTextureState(intrinsic_size));
-}
-
-IosExternalTextureState::~IosExternalTextureState() {
-  CVPixelBufferRef pending_frame = nullptr;
+PixelBufferTexture::~PixelBufferTexture() {
+  CVPixelBufferRef frame = nullptr;
   {
     std::lock_guard lock(frame_mutex_);
-    pending_frame = std::exchange(pending_frame_, nullptr);
+    frame = std::exchange(frame_, nullptr);
   }
-  if (pending_frame != nullptr) {
-    CVPixelBufferRelease(pending_frame);
+  if (frame != nullptr) {
+    CVPixelBufferRelease(frame);
   }
 }
 
-void IosExternalTextureState::Publish(CVPixelBufferRef frame) {
+void PixelBufferTexture::Publish(CVPixelBufferRef frame) {
   if (frame == nullptr) {
     throw std::invalid_argument("HuxerUI iOS external texture frame must not be null");
   }
@@ -73,12 +58,12 @@ void IosExternalTextureState::Publish(CVPixelBufferRef frame) {
     if (finished_) {
       rejected = true;
     } else {
-      replaced = std::exchange(pending_frame_, frame);
+      replaced = std::exchange(frame_, frame);
     }
   }
   if (rejected) {
     CVPixelBufferRelease(frame);
-    throw std::logic_error("HuxerUI iOS external texture source is finished");
+    throw std::logic_error("HuxerUI iOS external texture is finished");
   }
   if (replaced != nullptr) {
     CVPixelBufferRelease(replaced);
@@ -86,53 +71,17 @@ void IosExternalTextureState::Publish(CVPixelBufferRef frame) {
   NotifyFrameAvailable();
 }
 
-void IosExternalTextureState::Finish() noexcept {
+void PixelBufferTexture::Finish() noexcept {
   std::lock_guard lock(frame_mutex_);
   finished_ = true;
 }
 
-CVPixelBufferRef IosExternalTextureState::AcquireLatestFrame() noexcept {
+CVPixelBufferRef PixelBufferTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(frame_mutex_);
-  return std::exchange(pending_frame_, nullptr);
-}
-
-} // namespace huxerui::detail
-
-namespace huxerui::ios {
-
-ExternalTextureSource::ExternalTextureSource(Size intrinsic_size)
-    : state_(huxerui::detail::IosExternalTextureState::Create(intrinsic_size)) {}
-
-ExternalTextureSource::~ExternalTextureSource() {
-  Finish();
-}
-
-ExternalTextureSource::ExternalTextureSource(ExternalTextureSource&& other) noexcept
-    : state_(std::move(other.state_)) {}
-
-ExternalTextureSource& ExternalTextureSource::operator=(ExternalTextureSource&& other) noexcept {
-  if (this != &other) {
-    Finish();
-    state_ = std::move(other.state_);
+  if (frame_ != nullptr) {
+    CVPixelBufferRetain(frame_);
   }
-  return *this;
-}
-
-ExternalTexture ExternalTextureSource::Texture() const noexcept {
-  return state_ ? state_->Texture() : ExternalTexture{};
-}
-
-void ExternalTextureSource::Publish(CVPixelBufferRef frame) {
-  if (!state_) {
-    throw std::logic_error("HuxerUI iOS external texture source is empty");
-  }
-  state_->Publish(frame);
-}
-
-void ExternalTextureSource::Finish() noexcept {
-  if (state_) {
-    state_->Finish();
-  }
+  return frame_;
 }
 
 } // namespace huxerui::ios
@@ -147,8 +96,8 @@ void ExternalTextureSource::Finish() noexcept {
 
 namespace huxerui::ios::detail {
 
-HUXExternalTexture* WrapExternalTexture(ExternalTexture texture) {
-  if (!texture.HasValue()) {
+HUXExternalTexture* WrapExternalTexture(std::shared_ptr<ExternalTexture> texture) {
+  if (!texture) {
     throw std::invalid_argument("HuxerUI Apple ExternalTexture must be valid");
   }
   HUXExternalTexture* result = [[HUXExternalTexture alloc] initForHuxerUI];
@@ -158,32 +107,27 @@ HUXExternalTexture* WrapExternalTexture(ExternalTexture texture) {
   return result;
 }
 
-ExternalTexture UnwrapExternalTexture(HUXExternalTexture* texture) {
+std::shared_ptr<ExternalTexture> UnwrapExternalTexture(HUXExternalTexture* texture) {
   if (texture == nil) {
     throw std::invalid_argument("HuxerUI Apple ExternalTexture must not be nil");
   }
-  HUXIOSExternalTextureStorage* storage = objc_getAssociatedObject(texture, &external_texture_storage_key);
-  if (storage == nil || !storage->texture.HasValue()) {
-    throw std::invalid_argument("HuxerUI Apple platform boundary received an invalid ExternalTexture value");
-  }
-  return storage->texture;
+  return TextureStorage(texture)->texture;
 }
 
 } // namespace huxerui::ios::detail
 
-@implementation HUXExternalTextureSource
+@implementation HUXPixelBufferTexture
 
 - (instancetype)initWithIntrinsicSize:(CGSize)size {
-  self = [super init];
+  self = [super initForHuxerUI];
   if (self == nil) {
     return nil;
   }
   try {
-    auto storage = [HUXIOSExternalTextureSourceStorage new];
-    storage->source = std::make_unique<huxerui::ios::ExternalTextureSource>(
+    auto storage = [HUXIOSExternalTextureStorage new];
+    storage->texture = std::make_shared<huxerui::ios::PixelBufferTexture>(
         huxerui::Size{static_cast<float>(size.width), static_cast<float>(size.height)});
-    objc_setAssociatedObject(
-        self, &external_texture_source_storage_key, storage, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(self, &external_texture_storage_key, storage, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return self;
   } catch (const std::exception& exception) {
     NSString* reason = [NSString stringWithUTF8String:exception.what()];
@@ -191,18 +135,9 @@ ExternalTexture UnwrapExternalTexture(HUXExternalTexture* texture) {
   }
 }
 
-- (HUXExternalTexture*)texture {
-  try {
-    return huxerui::ios::detail::WrapExternalTexture(SourceStorage(self)->source->Texture());
-  } catch (const std::exception& exception) {
-    NSString* reason = [NSString stringWithUTF8String:exception.what()];
-    @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:reason userInfo:nil];
-  }
-}
-
 - (void)publishPixelBuffer:(CVPixelBufferRef)pixelBuffer {
   try {
-    SourceStorage(self)->source->Publish(pixelBuffer);
+    std::static_pointer_cast<huxerui::ios::PixelBufferTexture>(TextureStorage(self)->texture)->Publish(pixelBuffer);
   } catch (const std::exception& exception) {
     NSString* reason = [NSString stringWithUTF8String:exception.what()];
     @throw [NSException exceptionWithName:NSInvalidArgumentException reason:reason userInfo:nil];
@@ -210,7 +145,7 @@ ExternalTexture UnwrapExternalTexture(HUXExternalTexture* texture) {
 }
 
 - (void)finish {
-  SourceStorage(self)->source->Finish();
+  std::static_pointer_cast<huxerui::ios::PixelBufferTexture>(TextureStorage(self)->texture)->Finish();
 }
 
 @end

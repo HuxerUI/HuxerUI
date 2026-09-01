@@ -385,24 +385,26 @@ void PaintContext::DrawImageRect(
 }
 
 void PaintContext::DrawImage(
-    ExternalTexture texture, Rect destination, ImageSampling sampling, float opacity
+    std::shared_ptr<ExternalTexture> texture, Rect destination, ImageSampling sampling, float opacity
 ) {
-  const Size intrinsic = texture.IntrinsicSize();
+  if (!texture) {
+    throw std::invalid_argument("HuxerUI paint external texture must not be empty");
+  }
+  const Size intrinsic = texture->IntrinsicSize();
   DrawImageRect(
       std::move(texture), {0.0F, 0.0F, intrinsic.width, intrinsic.height}, destination, sampling, opacity
   );
 }
 
-void PaintContext::DrawImageRect(
-    ExternalTexture texture, Rect source, Rect destination, ImageSampling sampling, float opacity
-) {
+void PaintContext::DrawImageRect(std::shared_ptr<ExternalTexture> texture, Rect source, Rect destination,
+                                 ImageSampling sampling, float opacity) {
   RequireOpen();
-  if (!texture.HasValue()) {
+  if (!texture) {
     throw std::invalid_argument("HuxerUI paint external texture must not be empty");
   }
   RequireRect(source);
   RequireRect(destination);
-  const Size intrinsic = texture.IntrinsicSize();
+  const Size intrinsic = texture->IntrinsicSize();
   if (source.x < 0.0F || source.y < 0.0F || source.x + source.width > intrinsic.width ||
       source.y + source.height > intrinsic.height) {
     throw std::invalid_argument("HuxerUI external texture source rectangle must be inside the intrinsic bounds");

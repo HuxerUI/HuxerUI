@@ -55,7 +55,7 @@ using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 The typed keys derive from ResourceId, so shared identity operations remain available without another storage wrapper.
 They are not implicitly convertible to one another.
 A string key cannot therefore be passed to Image, and an image key cannot be read as arbitrary raw data by accident.
-ImageVariant is the common immutable image input accepted by Image, component icons, menus, navigation, and image-backed fills; ExternalTexture remains separate because it represents a live platform source.
+ImageVariant is the common immutable image input accepted by Image, component icons, menus, navigation, and image-backed fills; ExternalTexture remains separate because it represents a live shared texture identity.
 
 A ResourceId contains a domain and a key:
 
@@ -504,7 +504,7 @@ enum class ImageSampling {
 class Image final : public View {
 public:
   explicit Image(ImageVariant image);
-  explicit Image(ExternalTexture texture);
+  explicit Image(std::shared_ptr<ExternalTexture> texture);
 
   Image Fit(ImageFit fit) &&;
   Image Align(HorizontalAlignment horizontal, VerticalAlignment vertical) &&;
@@ -517,7 +517,7 @@ public:
 It lets Runtime resolve a resource to either immutable image format from the node's Environment and PlatformResources configuration while preserving already-resolved assets.
 ImageAsset supports files, network results, platform picker libraries, generated images, and explicitly shared application data.
 Packaged SVG resources resolve to VectorAsset values through ImageResource, while VectorAsset::Create constructs programmatic vector geometry.
-ExternalTexture remains a separate constructor because it is a live platform-owned source with frame and lifecycle semantics rather than an immutable ImageVariant value.
+ExternalTexture remains a separate constructor because it is a live platform-owned texture with frame and lifecycle semantics rather than an immutable ImageVariant value.
 
 Sampling configures raster and ExternalTexture filtering and is invalid for a VectorAsset.
 Tint replaces the RGB channels of vector fills and strokes while preserving their per-layer alpha, then multiplies the supplied tint alpha.
@@ -568,7 +568,7 @@ struct DrawImageCommand {
 };
 
 struct DrawExternalTextureCommand {
-  ExternalTexture texture;
+  std::shared_ptr<ExternalTexture> texture;
   Rect source;
   Rect destination;
   ImageSampling sampling = ImageSampling::Linear;
@@ -600,14 +600,14 @@ void DrawImageRect(
 );
 
 void DrawImage(
-    ExternalTexture texture,
+    std::shared_ptr<ExternalTexture> texture,
     Rect destination,
     ImageSampling sampling = ImageSampling::Linear,
     float opacity = 1.0F
 );
 
 void DrawImageRect(
-    ExternalTexture texture,
+    std::shared_ptr<ExternalTexture> texture,
     Rect source,
     Rect destination,
     ImageSampling sampling = ImageSampling::Linear,

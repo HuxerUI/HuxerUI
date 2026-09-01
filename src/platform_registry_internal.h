@@ -12,7 +12,6 @@
 
 namespace huxerui::detail {
 
-class ExternalTextureSurface;
 class PlatformChannelState;
 
 [[nodiscard]] bool IsValidUtf8(std::string_view text) noexcept;
@@ -38,11 +37,9 @@ private:
 
   std::shared_ptr<PlatformChannelState> state_;
 
-  friend PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher,
-                                                             std::shared_ptr<ExternalTextureSurface>);
+  friend PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher);
 };
 
-PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher dispatch_to_ui_thread,
-                                                    std::shared_ptr<ExternalTextureSurface> texture_surface);
+PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher dispatch_to_ui_thread);
 
 } // namespace huxerui::detail

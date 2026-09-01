@@ -24,7 +24,8 @@ public:
   ColorStreamService(ColorStreamService&&) = delete;
   ColorStreamService& operator=(ColorStreamService&&) = delete;
 
-  virtual PlatformRequestId Texture(std::function<void(PlatformResult<ExternalTexture>)> completion) = 0;
+  virtual PlatformRequestId
+  Texture(std::function<void(PlatformResult<std::shared_ptr<ExternalTexture>>)> completion) = 0;
 
 protected:
   ColorStreamService() = default;

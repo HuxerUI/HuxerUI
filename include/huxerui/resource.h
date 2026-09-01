@@ -184,7 +184,7 @@ private:
   friend class detail::ResourceAccess;
 };
 
-// ExternalTexture remains separate because it is a live platform surface rather than an application image value.
+// ExternalTexture remains separate because it is a live shared texture rather than an application image value.
 using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 
 class PlatformResources {

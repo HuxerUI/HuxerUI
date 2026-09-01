@@ -10,27 +10,48 @@
 namespace huxerui {
 
 namespace detail {
-class WebExternalTextureState;
+class WebRenderer;
 } // namespace detail
 
 namespace web {
 
-class ExternalTextureSource final {
+/// A latest-frame Web ExternalTexture backed by cloned WebCodecs VideoFrame objects.
+///
+/// Construction, publication, finish, and destruction run on the browser main thread because emscripten::val is
+/// thread-affine. The intrinsic size is immutable logical UI geometry rather than VideoFrame display dimensions.
+///
+/// @code
+/// auto texture = std::make_shared<web::VideoFrameTexture>(Size{320.0F, 180.0F});
+/// texture->Publish(video_frame);
+/// video_frame.call<void>("close");
+/// View preview = Image(texture).Fit(ImageFit::Cover);
+/// @endcode
+class VideoFrameTexture final : public huxerui::ExternalTexture {
 public:
-  explicit ExternalTextureSource(Size intrinsic_size);
-  ~ExternalTextureSource();
+  /// Creates an empty VideoFrame mailbox with a finite, strictly positive logical size.
+  explicit VideoFrameTexture(Size intrinsic_size) : huxerui::ExternalTexture(intrinsic_size) {}
+  /// Closes the retained mailbox clone on the browser main thread.
+  ~VideoFrameTexture();
 
-  ExternalTextureSource(const ExternalTextureSource&) = delete;
-  ExternalTextureSource& operator=(const ExternalTextureSource&) = delete;
-  ExternalTextureSource(ExternalTextureSource&& other) noexcept;
-  ExternalTextureSource& operator=(ExternalTextureSource&& other) noexcept;
+  /// VideoFrameTexture identities cannot be copied; share them through std::shared_ptr.
+  VideoFrameTexture(const VideoFrameTexture&) = delete;
+  VideoFrameTexture& operator=(const VideoFrameTexture&) = delete;
 
-  [[nodiscard]] ExternalTexture Texture() const noexcept;
+  /// Clones an open VideoFrame into the latest-frame mailbox and schedules every Runtime displaying this texture.
+  ///
+  /// Ownership of the caller's frame does not change, so it may be closed immediately after this function returns.
+  /// An invalid or closed frame throws std::invalid_argument; publication after Finish() throws std::logic_error.
   void Publish(const emscripten::val& video_frame);
+  /// Idempotently stops publication while preserving the last successfully published frame clone.
   void Finish() noexcept;
 
 private:
-  std::shared_ptr<detail::WebExternalTextureState> state_;
+  [[nodiscard]] emscripten::val AcquireFrame() const noexcept;
+
+  emscripten::val frame_ = emscripten::val::undefined();
+  bool finished_ = false;
+
+  friend class huxerui::detail::WebRenderer;
 };
 
 } // namespace web

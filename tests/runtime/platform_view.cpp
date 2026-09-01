@@ -17,7 +17,7 @@ struct TestPlatformEvents {
     static constexpr std::string_view Name = "changed";
   };
 
-  struct TextureChanged : Event<void(ExternalTexture)> {
+  struct TextureChanged : Event<void(std::shared_ptr<ExternalTexture>)> {
     static constexpr std::string_view Name = "textureChanged";
   };
 
@@ -37,8 +37,8 @@ State<bool> alternate_platform_view_type;
 State<bool> reverse_platform_views;
 State<std::size_t> indexed_platform_view_page;
 int received_platform_event = 0;
-ExternalTexture platform_view_external_texture;
-ExternalTexture received_platform_texture;
+std::shared_ptr<ExternalTexture> platform_view_external_texture;
+std::shared_ptr<ExternalTexture> received_platform_texture;
 int platform_view_hover_events = 0;
 
 struct TestProperties {
@@ -140,7 +140,7 @@ View DuplicateControllerPlatformViewApp() {
 
 View TextureEventPlatformViewApp() {
   return PlatformView("test/TextureEvent")
-      .On<TestPlatformEvents::TextureChanged>([](ExternalTexture texture) {
+      .On<TestPlatformEvents::TextureChanged>([](std::shared_ptr<ExternalTexture> texture) {
         received_platform_texture = std::move(texture);
       });
 }
@@ -405,7 +405,7 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
                     std::invalid_argument);
 }
 
-TEST_CASE("PlatformViewBindsExternalTexturesBeforePlatformComposition") {
+TEST_CASE("PlatformViewPayloadDoesNotClaimTextureFrameOwnership") {
   platform_view_external_texture = MakeTestExternalTexture({32.0F, 18.0F});
   TestPlatform platform;
   Runtime runtime(HiddenTexturePlatformViewApp, platform);
@@ -414,12 +414,12 @@ TEST_CASE("PlatformViewBindsExternalTexturesBeforePlatformComposition") {
 
   TestPlatform other_platform;
   Runtime other_runtime(HiddenTexturePlatformViewApp, other_platform);
-  REQUIRE_THROWS_AS(other_runtime.BuildRenderFrame(), std::logic_error);
+  other_runtime.BuildRenderFrame();
 }
 
-TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
+TEST_CASE("PlatformViewTransportsExternalTextureEventsBySharedIdentity") {
   received_platform_texture = {};
-  const ExternalTexture texture = MakeTestExternalTexture({32.0F, 18.0F});
+  const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({32.0F, 18.0F});
   TestPlatform platform;
   Runtime runtime(TextureEventPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
@@ -445,7 +445,7 @@ TEST_CASE("PlatformViewBindsExternalTextureEventsBeforeDispatch") {
   static_cast<void>(detail::RuntimeAccess::DispatchPlatformViewEvent(
       other_runtime.CoreRuntime(), other_placement.Identity(), "textureChanged", PlatformPayload(texture)
   ));
-  REQUIRE(received_platform_texture == ExternalTexture{});
+  REQUIRE(received_platform_texture == texture);
 }
 
 TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
