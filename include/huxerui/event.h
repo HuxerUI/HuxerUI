@@ -612,6 +612,8 @@ struct ComboBoxEvents {
   struct Selected : Event<void(std::size_t, const TextEditingValue&)> {};
   /// Reports submission when no suggestion is being accepted.
   struct Submitted : Event<void()> {};
+  /// Reports true after the suggestion popup opens and false when it begins closing.
+  struct ExpandedChanged : Event<void(bool)> {};
 };
 
 namespace detail {

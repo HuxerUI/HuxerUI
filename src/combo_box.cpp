@@ -66,6 +66,7 @@ struct ComboBoxConfiguration {
   StringVariant label;
   StringVariant placeholder;
   std::optional<ImageVariant> leading_icon;
+  std::optional<ImageVariant> trailing_icon;
   std::optional<TextFieldVariant> variant;
   TextAlign text_align = TextAlign::Leading;
   std::optional<std::size_t> max_length;
@@ -198,6 +199,15 @@ bool HasPopupContent(const std::shared_ptr<ComboBoxSession>& session) {
   return session && (session->source.size > 0 || static_cast<bool>(session->empty_content));
 }
 
+void SetPopupLayer(const std::shared_ptr<ComboBoxSession>& session, std::optional<LayerId> layer) {
+  const bool was_expanded = session->layer.has_value();
+  session->layer = layer;
+  const bool expanded = session->layer.has_value();
+  if (was_expanded != expanded) {
+    session->events.Emit<ComboBoxEvents::ExpandedChanged>(expanded);
+  }
+}
+
 void DismissComboBox(const std::shared_ptr<ComboBoxSession>& session, bool suppress_reopen) {
   if (!session) {
     return;
@@ -210,11 +220,11 @@ void DismissComboBox(const std::shared_ptr<ComboBoxSession>& session, bool suppr
     return;
   }
   const LayerId layer = *session->layer;
-  session->layer.reset();
-  session->popup_state.reset();
   if (session->popup.has_value()) {
     static_cast<void>(session->popup->Dismiss(layer));
   }
+  session->popup_state.reset();
+  SetPopupLayer(session, std::nullopt);
 }
 
 struct ComboBoxSuggestionBehavior {
@@ -514,8 +524,8 @@ void UpdateOpenPopup(const std::shared_ptr<ComboBoxSession>& session) {
   }
   ConfigurePopupState(session);
   if (!session->popup->Update(*session->layer, ComboBoxPopupContentFactory(session))) {
-    session->layer.reset();
     session->popup_state.reset();
+    SetPopupLayer(session, std::nullopt);
   }
 }
 
@@ -539,7 +549,7 @@ void OpenComboBox(const std::shared_ptr<ComboBoxSession>& session, bool allow_un
       DismissComboBox(session, true);
     }
   };
-  session->layer = session->popup->Show(ComboBoxPopupContentFactory(session), std::move(options));
+  SetPopupLayer(session, session->popup->Show(ComboBoxPopupContentFactory(session), std::move(options)));
 }
 
 void HandleEditedValue(const std::shared_ptr<ComboBoxSession>& session, const TextEditingValue& value) {
@@ -748,11 +758,13 @@ std::function<View()> MakeComboBoxScopeFactory(ComboBoxConfiguration configurati
                 .Placeholder(configuration.placeholder)
                 .Align(configuration.text_align)
                 .Validation(configuration.validation)
-                .InputConfiguration(configuration.input_configuration)
-                .TrailingIcon(images::dropdown_indicator);
+                .InputConfiguration(configuration.input_configuration);
     if (configuration.leading_icon.has_value()) {
       field = std::move(field).LeadingIcon(*configuration.leading_icon);
     }
+    const ImageVariant trailing_icon =
+        configuration.trailing_icon.value_or(ImageVariant(images::dropdown_indicator));
+    field = std::move(field).TrailingIcon(trailing_icon);
     if (configuration.variant.has_value()) {
       field = std::move(field).Variant(*configuration.variant);
     }
@@ -837,6 +849,13 @@ ComboBox ComboBox::LeadingIcon(ImageVariant icon) && {
   return std::move(*this);
 }
 
+ComboBox ComboBox::TrailingIcon(ImageVariant icon) && {
+  detail::ValidateImageVariant(icon);
+  trailing_icon_ = std::move(icon);
+  UpdateModifier();
+  return std::move(*this);
+}
+
 ComboBox ComboBox::Variant(TextFieldVariant value) && {
   variant_ = value;
   UpdateModifier();
@@ -879,8 +898,8 @@ ComboBox ComboBox::EmptyContent(std::function<View()> content) && {
 
 void ComboBox::UpdateModifier() {
   SetModifier(detail::MakeModifierSpec(ComboBoxConfiguration{
-      source_, value_, label_, placeholder_, leading_icon_, variant_, text_align_, max_length_, validation_,
-      configuration_, empty_content_,
+      source_, value_, label_, placeholder_, leading_icon_, trailing_icon_, variant_, text_align_, max_length_,
+      validation_, configuration_, empty_content_,
   }));
 }
 

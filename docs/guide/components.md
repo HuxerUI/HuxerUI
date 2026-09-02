@@ -204,6 +204,8 @@ Apply a stable `.Key(...)` to the factory result when suggestions can insert, re
 `OnChanged(const TextEditingValue&)` reports direct edits, including selection and IME composition updates.
 `OnSelected(std::size_t, const TextEditingValue&)` reports an accepted suggestion as a complete replacement proposal and does not also emit `OnChanged`.
 `OnSubmitted()` runs when Enter or the platform action submits without accepting an active suggestion.
+`OnExpandedChanged(bool)` observes actual popup opening and closing while expansion remains internally owned.
+Equal state is not reported twice, and selection or submission reports collapse first.
 
 Focus and the native input session remain on the field while the popup is open.
 Up and Down move through enabled suggestions without wrapping, Enter accepts the active suggestion, and Escape closes the popup.
@@ -218,7 +220,7 @@ Explicit dismissal suppresses reopening for the current query, while a later edi
 
 `TextFieldStyle` continues to own the editor visuals, label, validation, icons, and input states.
 `ComboBoxStyle` owns only the popup surface, item geometry, active background, indication, and height limit.
-The built-in trailing indicator is decorative and does not introduce a second interaction target.
+`TrailingIcon(...)` replaces the built-in dropdown indicator; either icon is decorative and does not introduce a second interaction target.
 
 ## Tabs and indexed pages
 

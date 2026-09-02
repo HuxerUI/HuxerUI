@@ -15,6 +15,8 @@ Direct editing emits `ComboBoxEvents::Changed` with the complete proposed editin
 Accepting an enabled suggestion emits `ComboBoxEvents::Selected` with its current zero-based index and a complete `TextEditingValue::FromText()` replacement proposal.
 Selection does not also emit Changed, including when the suggestion text equals the current text.
 Submission without an active suggestion emits `ComboBoxEvents::Submitted`.
+`ComboBoxEvents::ExpandedChanged` reports a Boolean only when the popup gains or releases its operational layer.
+An accepted suggestion or submission reports collapse before its corresponding Selected or Submitted event.
 
 The application applies any proposal to its controlled value.
 There is no controlled selected index because arbitrary text may not correspond to a suggestion and an active suggestion is transient interaction state rather than committed application data.
@@ -26,11 +28,13 @@ TextField remains the only owner of text reduction, working-value acknowledgemen
 ComboBox forwards its field configuration and translates the TextField Changed and Submitted events into its own typed event keys.
 
 One retained field extension owns a small session shared with the active popup.
-The session retains the Popup layer id, anchor width, focus and explicit-dismiss state, the current suggestion declaration, and popup interaction state.
+The session's optional Popup layer id is the only expanded-state authority.
+It also retains anchor width, focus and explicit-dismiss state, the current suggestion declaration, and popup interaction state.
 Unmount, focus loss, and disabled input dismiss the layer without emitting selection.
 Compatible recomposition updates the existing popup through `PopupHandle::Update`; it does not create a second layer or registry.
+All open and close paths change the optional layer through one transition operation, so overlapping dismissal paths and equal state cannot emit duplicate ExpandedChanged events.
 
-The trailing indicator uses the TextField trailing-icon paint path and is decorative.
+The default dropdown indicator and a `TrailingIcon(...)` override use the TextField trailing-icon paint path and are decorative.
 It does not become another focus target or parallel open callback.
 
 ## Popup interaction
@@ -40,6 +44,7 @@ Real keyboard focus and the native input session stay on TextField while one opt
 Up and Down choose the next enabled suggestion without wrapping and reveal it through the existing ScrollController.
 Enter accepts an active suggestion; otherwise TextField performs ordinary submission.
 Escape, outside press, focus loss, disabled input, and unmount dismiss without selection.
+The collapse event follows operational ownership rather than popup exit animation: the ComboBox requests dismissal, releases the layer id, and then emits it.
 
 Composition takes priority over suggestion navigation.
 When the current working value has an IME composition, ComboBox leaves Arrow, Enter, and Escape to the TextField and platform input path.

@@ -22,8 +22,13 @@ struct Suggestion {
 State<TextEditingValue> combo_box_value;
 State<std::vector<Suggestion>> combo_box_suggestions;
 State<bool> combo_box_visible;
+State<TextEditingValue> observable_combo_box_value;
+State<bool> observable_combo_box_enabled;
+State<bool> observable_combo_box_visible;
 std::vector<TextEditingValue> combo_box_changes;
 std::vector<std::pair<std::size_t, TextEditingValue>> combo_box_selections;
+std::vector<bool> combo_box_expansion_changes;
+std::vector<std::string> combo_box_event_order;
 int combo_box_submissions = 0;
 int invalid_combo_box_style_case = 0;
 
@@ -69,6 +74,52 @@ View ConditionalComboBoxApp() {
     return Text("Replacement");
   }
   return ComboBox(TextEditingValue::FromText(""), {"Alpha", "Beta"}).Label("Language");
+}
+
+VectorAsset ComboBoxTrailingIcon() {
+  static const VectorAsset icon = VectorAsset::Create({12.0F, 8.0F}, [](VectorBuilder& builder) {
+    Path path;
+    path.MoveTo({1.0F, 1.0F}).LineTo({11.0F, 1.0F}).LineTo({6.0F, 7.0F}).Close();
+    builder.FillPath(std::move(path), Color::Black());
+  });
+  return icon;
+}
+
+View DefaultComboBoxIconApp() {
+  return ComboBox(TextEditingValue::FromText(""), {"Alpha"}).With(Frame{.width = 220.0F});
+}
+
+View CustomComboBoxIconApp() {
+  return ComboBox(TextEditingValue::FromText(""), {"Alpha"})
+      .TrailingIcon(ComboBoxTrailingIcon())
+      .With(Frame{.width = 220.0F});
+}
+
+View ObservableComboBoxApp() {
+  observable_combo_box_value = UseState(TextEditingValue::FromText(""));
+  observable_combo_box_enabled = UseState(true);
+  return ComboBox(observable_combo_box_value, {"Alpha", "Beta"})
+      .OnChanged([](const TextEditingValue& value) { observable_combo_box_value = value; })
+      .OnSelected([](std::size_t, const TextEditingValue& value) {
+        combo_box_event_order.push_back("selected");
+        observable_combo_box_value = value;
+      })
+      .OnSubmitted([] { combo_box_event_order.push_back("submitted"); })
+      .OnExpandedChanged([](bool expanded) {
+        combo_box_expansion_changes.push_back(expanded);
+        combo_box_event_order.push_back(expanded ? "expanded" : "collapsed");
+      })
+      .With(Frame{.width = 220.0F}, Enabled{observable_combo_box_enabled.Get()});
+}
+
+View ObservableConditionalComboBoxApp() {
+  observable_combo_box_visible = UseState(true);
+  if (!observable_combo_box_visible.Get()) {
+    return Text("Replacement");
+  }
+  return ComboBox(TextEditingValue::FromText(""), {"Alpha"})
+      .OnExpandedChanged([](bool expanded) { combo_box_expansion_changes.push_back(expanded); })
+      .With(Frame{.width = 220.0F});
 }
 
 View EmptySuggestionViewApp() {
@@ -178,6 +229,11 @@ TEST_CASE("ComboBoxValidatesItsEditingAndFactoryContracts") {
           .EmptyContent(std::function<View()>{}),
       std::invalid_argument
   );
+  REQUIRE_THROWS_AS(
+      std::move(ComboBox(TextEditingValue::FromText(""), std::vector<std::string>{"value"}))
+          .TrailingIcon(VectorAsset{}),
+      std::invalid_argument
+  );
 }
 
 TEST_CASE("ComboBoxRejectsEmptyOrIndependentlyInteractivePopupContent") {
@@ -208,6 +264,27 @@ TEST_CASE("ComboBoxProvidesFlatAndMaterialPopupStyles") {
   REQUIRE(material_light.popup_background == material_light_spec.colors.surface_container);
   REQUIRE(material_dark.foreground == material_dark_spec.colors.on_surface);
   REQUIRE(material_light.item_indication.has_value());
+}
+
+TEST_CASE("ComboBoxUsesItsDefaultOrDeclaredTrailingIcon") {
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime default_icon{DefaultComboBoxIconApp, platform};
+  default_icon.SetWindowMetrics({.viewport = {260.0F, 100.0F}});
+  const FlattenedScene& default_scene = default_icon.BuildFrame();
+
+  Runtime custom_icon{CustomComboBoxIconApp, platform};
+  custom_icon.SetWindowMetrics({.viewport = {260.0F, 100.0F}});
+  const FlattenedScene& custom_scene = custom_icon.BuildFrame();
+  const Color tint = TextFieldStyle::Default().trailing_icon;
+
+  REQUIRE(std::ranges::any_of(default_scene.Commands(), [tint](const PaintCommand& command) {
+    const auto* path = std::get_if<StrokePathCommand>(&command);
+    return path && BrushIsColor(path->brush, tint);
+  }));
+  REQUIRE(std::ranges::any_of(custom_scene.Commands(), [tint](const PaintCommand& command) {
+    const auto* path = std::get_if<FillPathCommand>(&command);
+    return path && BrushIsColor(path->brush, tint);
+  }));
 }
 
 TEST_CASE("ComboBoxRejectsInvalidThemeGeometry") {
@@ -393,6 +470,83 @@ TEST_CASE("ComboBoxSubmitsWithoutAnActiveSuggestionAndDismissesExplicitly") {
   REQUIRE(HasRole(*runtime.BuildCommit().semantic_frame, SemanticRole::List));
   REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Escape}));
   REQUIRE_FALSE(HasRole(*runtime.BuildCommit().semantic_frame, SemanticRole::List));
+}
+
+TEST_CASE("ComboBoxExpansionEventsFollowKeyboardSelectionAndSubmission") {
+  combo_box_expansion_changes.clear();
+  combo_box_event_order.clear();
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime runtime{ObservableComboBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  FocusComboBox(runtime);
+  runtime.BuildCommit();
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true});
+
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Escape}));
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false});
+
+  TextInputCommand edit;
+  edit.kind = TextInputCommandKind::CommitText;
+  edit.text = "a";
+  REQUIRE(runtime.HandleTextInputCommands({1, {edit}}).result_code == TextInputResultCode::Ok);
+  runtime.BuildCommit();
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::ArrowDown}));
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Enter}));
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false, true, false});
+  REQUIRE(combo_box_event_order ==
+          std::vector<std::string>{"expanded", "collapsed", "expanded", "collapsed", "selected"});
+
+  const SemanticNodeId field = FindRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ComboBox).id;
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+      field, {SemanticActionKind::Expand, std::monostate{}}
+  ));
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Enter}));
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false, true, false, true, false});
+  REQUIRE(combo_box_event_order.back() == "submitted");
+  REQUIRE(combo_box_event_order[combo_box_event_order.size() - 2] == "collapsed");
+}
+
+TEST_CASE("ComboBoxExpansionEventsFollowSemanticsOutsideDismissalAndDisable") {
+  combo_box_expansion_changes.clear();
+  combo_box_event_order.clear();
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime runtime{ObservableComboBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  const SemanticNodeId field = FindRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ComboBox).id;
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+      field, {SemanticActionKind::Expand, std::monostate{}}
+  ));
+  runtime.BuildCommit();
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+      field, {SemanticActionKind::Collapse, std::monostate{}}
+  ));
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false});
+
+  FocusComboBox(runtime);
+  ClickAt(runtime, {319.0F, 1.0F});
+  runtime.BuildCommit();
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false, true, false});
+
+  FocusComboBox(runtime);
+  observable_combo_box_enabled = false;
+  runtime.BuildFrame();
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false, true, false, true, false});
+}
+
+TEST_CASE("ComboBoxExpansionEventClosesOnUnmount") {
+  combo_box_expansion_changes.clear();
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime runtime{ObservableConditionalComboBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+
+  FocusComboBox(runtime);
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true});
+  observable_combo_box_visible = false;
+  runtime.BuildCommit();
+  runtime.BuildCommit();
+  REQUIRE(combo_box_expansion_changes == std::vector<bool>{true, false});
 }
 
 TEST_CASE("ComboBoxEmptyContentAndUnmountFollowPopupLifetime") {

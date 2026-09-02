@@ -1136,6 +1136,8 @@ public:
   ComboBox Placeholder(StringVariant value) &&;
   /// Adds an image before the editable text.
   ComboBox LeadingIcon(ImageVariant icon) &&;
+  /// Replaces the decorative dropdown indicator shown after the editable text.
+  ComboBox TrailingIcon(ImageVariant icon) &&;
   /// Selects a TextField visual variant without changing popup behavior.
   ComboBox Variant(TextFieldVariant value) &&;
   /// Sets horizontal text alignment inside the field.
@@ -1164,6 +1166,11 @@ public:
     return std::move(*this).On<ComboBoxEvents::Submitted>(std::forward<Function>(function));
   }
 
+  /// Handles actual suggestion-popup open and close transitions without controlling them.
+  template <class Function> ComboBox OnExpandedChanged(Function&& function) && {
+    return std::move(*this).On<ComboBoxEvents::ExpandedChanged>(std::forward<Function>(function));
+  }
+
 private:
   ComboBox(TextEditingValue value, detail::ComboBoxSuggestionSource source)
       : detail::TypedView<ComboBox>(detail::MakeComboBoxSpec(source, value)), value_(std::move(value)),
@@ -1178,6 +1185,7 @@ private:
   StringVariant label_;
   StringVariant placeholder_;
   std::optional<ImageVariant> leading_icon_;
+  std::optional<ImageVariant> trailing_icon_;
   std::optional<TextFieldVariant> variant_;
   TextAlign text_align_ = TextAlign::Leading;
   std::optional<std::size_t> max_length_;
