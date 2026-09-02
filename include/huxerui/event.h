@@ -572,6 +572,12 @@ struct PagerEvents {
   struct Changed : Event<void(std::size_t)> {};
 };
 
+/// Event keys emitted by RefreshBox.
+struct RefreshEvents {
+  /// Requests that the application refresh its controlled content.
+  struct Requested : Event<void()> {};
+};
+
 /// Event keys emitted by Select.
 struct SelectEvents {
   /// Requests selection of the option at the supplied zero-based index.

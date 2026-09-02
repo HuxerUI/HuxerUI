@@ -1408,6 +1408,21 @@ private:
   bool drag_enabled_ = true;
 };
 
+/// Coordinates leading-edge pull, refresh indication, and controlled refresh state around one content View.
+///
+/// The application owns `refreshing`. An armed direct pull or accessibility action emits OnRefresh; changing the
+/// controlled value programmatically never emits an event.
+class RefreshBox final : public detail::TypedView<RefreshBox> {
+public:
+  RefreshBox(View content, bool refreshing);
+  RefreshBox(View content, const State<bool>& refreshing) : RefreshBox(std::move(content), refreshing.Get()) {}
+
+  /// Handles a requested refresh without making the event system aware of asynchronous work.
+  template <class Function> RefreshBox OnRefresh(Function&& function) && {
+    return std::move(*this).On<RefreshEvents::Requested>(std::forward<Function>(function));
+  }
+};
+
 /// Makes one ordinary content subtree scrollable along a configured axis.
 ///
 /// ScrollView owns clipping, direct drag, wheel and trackpad consumption, nested scrolling, fling, overscroll, focus

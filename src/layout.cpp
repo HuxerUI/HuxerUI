@@ -1063,9 +1063,13 @@ void ValidateScrollPhysics(const ScrollPhysics& physics) {
   }
 }
 
-bool CanOverscrollNode(const MountedNode& node) {
-  return node.interaction.enabled && IsScrollContainer(node) && node.scroll_state->allows_overscroll &&
-         ResolveScrollPhysics(node).overscroll_enabled;
+bool CanOverscrollNode(const MountedNode& node, float delta) {
+  if (!node.interaction.enabled || !IsScrollContainer(node) || delta == 0.0F ||
+      !ResolveScrollPhysics(node).overscroll_enabled) {
+    return false;
+  }
+  return delta < 0.0F ? node.scroll_state->allows_leading_overscroll
+                      : node.scroll_state->allows_trailing_overscroll;
 }
 
 void ScrollMotion::Reset() noexcept {
@@ -1355,7 +1359,7 @@ float ConsumeExistingOverscroll(MountedNode& node, float available,
 float ApplyTerminalOverscroll(MountedNode& node, float available,
                               std::vector<std::uint64_t>* activity_nodes) {
   const ScrollPhysics& physics = ResolveScrollPhysics(node);
-  if (!node.scroll_state->allows_overscroll || !physics.overscroll_enabled || available == 0.0F) {
+  if (!CanOverscrollNode(node, available)) {
     return 0.0F;
   }
   const float current = node.scroll_state->overscroll_offset;
@@ -1435,8 +1439,8 @@ float ApplyScrollTransaction(const std::vector<MountedNode*>& route, Axis axis, 
   }
 
   if (allow_overscroll && std::abs(remaining) >= scroll_consumption_epsilon) {
-    const auto terminal = std::ranges::find_if(candidates, [](const MountedNode* node) {
-      return CanOverscrollNode(*node);
+    const auto terminal = std::ranges::find_if(candidates, [remaining](const MountedNode* node) {
+      return CanOverscrollNode(*node, remaining);
     });
     if (terminal != candidates.end()) {
       remaining -= ApplyTerminalOverscroll(**terminal, remaining, direct_activity_nodes);

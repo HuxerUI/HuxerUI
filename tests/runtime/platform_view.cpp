@@ -36,6 +36,7 @@ State<bool> platform_view_controller_attached;
 State<bool> alternate_platform_view_type;
 State<bool> reverse_platform_views;
 State<std::size_t> indexed_platform_view_page;
+State<bool> refresh_platform_view;
 int received_platform_event = 0;
 std::shared_ptr<ExternalTexture> platform_view_external_texture;
 std::shared_ptr<ExternalTexture> received_platform_texture;
@@ -189,6 +190,15 @@ View IndexedPlatformViewApp() {
   );
 }
 
+View RefreshPlatformViewApp() {
+  auto refreshing = UseState(true);
+  refresh_platform_view = refreshing;
+  return RefreshBox(
+      PlatformView("test/View", TestProperties(1)).With(Frame{80.0F, 40.0F}),
+      refreshing
+  );
+}
+
 const PlacePlatformViewCommand& FindPlatformView(const RenderFrame& frame) {
   REQUIRE(frame.scene.root != nullptr);
   const auto find_in_node = [](const auto& self, const RenderNode& node) -> const PlacePlatformViewCommand* {
@@ -245,6 +255,25 @@ TEST_CASE("PlatformViewUsesOrdinaryLayoutAndRetainsItsPlacement") {
 
   const PlacePlatformViewCommand unchanged = FindPlatformView(runtime.BuildRenderFrame());
   REQUIRE(unchanged.PropertiesRevision() == updated.PropertiesRevision());
+}
+
+TEST_CASE("PlatformView follows RefreshBox descendant presentation without replacement") {
+  TestPlatform platform;
+  Runtime runtime(RefreshPlatformViewApp, platform);
+  runtime.SetWindowMetrics({{100.0F, 100.0F}});
+
+  const detail::RenderComposition refreshing = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);
+  const detail::PlatformViewPlacement& refreshing_placement = FindPlatformViewPlacement(refreshing);
+  const std::uint64_t identity = refreshing_placement.command->Identity();
+  REQUIRE(refreshing_placement.world_bounds.y == Catch::Approx(52.0F));
+
+  refresh_platform_view = false;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.25);
+  const detail::RenderComposition settled = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);
+  const detail::PlatformViewPlacement& settled_placement = FindPlatformViewPlacement(settled);
+  REQUIRE(settled_placement.command->Identity() == identity);
+  REQUIRE(settled_placement.world_bounds.y == Catch::Approx(0.0F));
 }
 
 TEST_CASE("PlatformViewTracksControllerReplacementAndRemovalIndependently") {

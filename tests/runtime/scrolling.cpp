@@ -29,9 +29,13 @@ ScrollController cross_axis_inner_scroll;
 ScrollController hook_outer_scroll;
 ScrollController hook_inner_scroll;
 ScrollController activity_scroll;
+ScrollController refresh_content_scroll;
 State<bool> disableable_scroll_enabled;
+State<bool> refresh_box_refreshing;
 std::vector<std::string> scroll_hook_calls;
 std::vector<ScrollActivity> scroll_activities;
+int refresh_requests = 0;
+bool accept_refresh_requests = true;
 
 struct ScrollHook {
   class Extension;
@@ -365,6 +369,42 @@ View ReducedMotionOverscrollApp() {
   ThemeSpec theme = huxerui::FlatLightThemeSpec();
   theme.motion.reduced_motion = true;
   return Theme {ThemeDefinition{theme}, ScrollActivityApp()};
+}
+
+View RefreshBoxApp() {
+  auto refreshing = UseState(false);
+  refresh_box_refreshing = refreshing;
+  return RefreshBox(Spacer().With(huxerui::Frame{100.0F, 100.0F}), refreshing)
+      .OnRefresh([refreshing] {
+        ++refresh_requests;
+        if (accept_refresh_requests) {
+          refreshing = true;
+        }
+      });
+}
+
+View InvalidRefreshBoxStyleApp() {
+  ThemeDefinition definition = FlatThemeDefinition();
+  huxerui::RefreshBoxStyle style = ThemeDefinitionValue<huxerui::RefreshBoxStyle>(definition);
+  style.maximum_pull_distance = 40.0F;
+  style.trigger_distance = 60.0F;
+  definition.Set(style);
+  return Theme {
+    std::move(definition),
+    RefreshBox(Spacer().With(huxerui::Frame{100.0F, 100.0F}), false).OnRefresh([] {}),
+  };
+}
+
+View NestedRefreshBoxApp() {
+  auto scroll = UseScrollController(80.0F);
+  refresh_content_scroll = scroll;
+  return RefreshBox(
+             ScrollView {
+               Spacer().With(huxerui::Frame{100.0F, 300.0F}),
+             }.Controller(scroll),
+             false
+  )
+      .OnRefresh([] { ++refresh_requests; });
 }
 
 TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
@@ -964,6 +1004,135 @@ TEST_CASE("Pager uses touch release velocity and returns after pointer cancellat
     REQUIRE(pager_proposals.empty());
     REQUIRE(interactive_pager_page.Get() == 1);
   }
+}
+
+TEST_CASE("RefreshBox transfers direct pull displacement into controlled refresh state") {
+  refresh_requests = 0;
+  accept_refresh_requests = true;
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime{RefreshBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 401, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 401, {50.0F, 240.0F}, PointerDeviceKind::Touch});
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+  runtime.HandlePointerEvent({PointerEventType::Up, 401, {50.0F, 240.0F}, PointerDeviceKind::Touch});
+
+  REQUIRE(refresh_requests == 1);
+  REQUIRE(refresh_box_refreshing.Get());
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children.front()->PresentationBounds().y > 0.0F);
+
+  const auto refresh_node = std::ranges::find(
+      runtime.LastCommit().semantic_frame->nodes, SemanticRole::ScrollView, &SemanticNode::role
+  );
+  REQUIRE(refresh_node != runtime.LastCommit().semantic_frame->nodes.end());
+  REQUIRE(refresh_node->busy == true);
+  REQUIRE(refresh_node->custom_actions.empty());
+
+  refresh_box_refreshing = false;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.25);
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children.front()->PresentationBounds().y == Catch::Approx(0.0F));
+}
+
+TEST_CASE("RefreshBox ignores short, canceled, trailing, and non-drag input") {
+  refresh_requests = 0;
+  accept_refresh_requests = false;
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime{RefreshBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 402, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 402, {50.0F, 40.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 402, {50.0F, 40.0F}, PointerDeviceKind::Touch});
+  REQUIRE(refresh_requests == 0);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 403, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 403, {50.0F, 240.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 403, {50.0F, 240.0F}, PointerDeviceKind::Touch});
+  REQUIRE(refresh_requests == 0);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 404, {50.0F, 80.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 404, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 404, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  REQUIRE(refresh_requests == 0);
+  static_cast<void>(runtime.HandleScrollInput({{50.0F, 50.0F}, 0.0F, -200.0F}));
+  REQUIRE(refresh_requests == 0);
+}
+
+TEST_CASE("RefreshBox preserves an active pull when controlled refreshing starts programmatically") {
+  refresh_requests = 0;
+  accept_refresh_requests = true;
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime{RefreshBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 406, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 406, {50.0F, 80.0F}, PointerDeviceKind::Touch});
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+
+  refresh_box_refreshing = true;
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->children.front()->PresentationBounds().y > 0.0F);
+  REQUIRE(refresh_requests == 0);
+}
+
+TEST_CASE("RefreshBox exposes one localized semantic refresh action") {
+  refresh_requests = 0;
+  accept_refresh_requests = true;
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime{RefreshBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const auto refresh_node = std::ranges::find(
+      runtime.LastCommit().semantic_frame->nodes, SemanticRole::ScrollView, &SemanticNode::role
+  );
+  REQUIRE(refresh_node != runtime.LastCommit().semantic_frame->nodes.end());
+  REQUIRE(refresh_node->busy == false);
+  REQUIRE(refresh_node->custom_actions == std::vector<std::pair<std::uint64_t, std::string>>{{1, "Refresh"}});
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+      refresh_node->id, SemanticAction{SemanticActionKind::Custom, std::uint64_t{1}}
+  ));
+  REQUIRE(refresh_requests == 1);
+  REQUIRE(refresh_box_refreshing.Get());
+}
+
+TEST_CASE("RefreshBox receives only the pull remaining after nested content reaches its leading edge") {
+  refresh_requests = 0;
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime{NestedRefreshBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+  REQUIRE(refresh_content_scroll.Offset() == 80.0F);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 405, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 405, {50.0F, 400.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 405, {50.0F, 400.0F}, PointerDeviceKind::Touch});
+
+  REQUIRE(refresh_content_scroll.Offset() == 0.0F);
+  REQUIRE(refresh_requests == 1);
+}
+
+TEST_CASE("RefreshBox validates its required content") {
+  REQUIRE_THROWS_AS(RefreshBox(View{}, false), std::invalid_argument);
+
+  TestPlatform platform;
+  Runtime runtime{InvalidRefreshBoxStyleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
 }
 
 TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {

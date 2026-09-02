@@ -699,7 +699,8 @@ struct ScrollNodeState {
   std::uint32_t allowed_sources = std::numeric_limits<std::uint32_t>::max();
   bool touch_drag_only = false;
   bool allows_automatic_reveal = true;
-  bool allows_overscroll = true;
+  bool allows_leading_overscroll = true;
+  bool allows_trailing_overscroll = true;
   float offset_y = 0.0F;
   float offset_x = 0.0F;
   float overscroll_offset = 0.0F;
@@ -719,6 +720,8 @@ struct NodeExtensionEntry {
 
 struct NodePresentation {
   Transform2D local_transform;
+  // A retained container can move its descendants without changing its own layout or foreground presentation.
+  Transform2D children_transform;
   float local_opacity = 1.0F;
   float render_opacity = 1.0F;
   Transform2D resolved_transform;
@@ -1499,7 +1502,7 @@ Axis ScrollAxis(const MountedNode& node) noexcept;
 Rect ScrollViewport(const MountedNode& node) noexcept;
 bool AllowsScrollSource(const MountedNode& node, ScrollSource source) noexcept;
 bool CanScrollNode(const MountedNode& node, float delta);
-bool CanOverscrollNode(const MountedNode& node);
+bool CanOverscrollNode(const MountedNode& node, float delta);
 float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source);
 bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect);
 

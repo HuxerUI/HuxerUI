@@ -12,6 +12,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 - [Interaction and Indication](interaction-indication.md): interaction facts, visuals, paint ordering, and customization.
 - [Gesture Recognition and Arbitration](gestures.md): recognition, competition, ownership, velocity, and cancellation.
 - [Scrolling](scrolling.md): input consumption, nested coordination, offsets, momentum, overscroll, and observation.
+- [RefreshBox](refresh-box.md): controlled refresh requests, overscroll handoff, retained presentation, and semantics.
 - [Typed Drag-and-Drop](drag-drop.md): typed payloads, targets, previews, auto-scroll, and cancellation.
 - [Animation and Scene Transitions](animation.md): timing, controllers, synchronized transitions, and frozen scenes.
 

@@ -2274,6 +2274,7 @@ bool Runtime::UpdateNodeExtensions(
   }
 
   node.presentation.local_transform = {};
+  node.presentation.children_transform = {};
   node.presentation.local_opacity = 1.0F;
   FrameInfo node_frame = frame;
   if (!node.extensions.empty()) {

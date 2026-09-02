@@ -442,6 +442,30 @@ struct ProgressCircleStyle {
   bool operator==(const ProgressCircleStyle&) const = default;
 };
 
+/// Defines the built-in indicator and retained motion used by RefreshBox.
+struct RefreshBoxStyle {
+  /// Appearance of the determinate pull and indeterminate refresh indicator.
+  ProgressCircleStyle indicator;
+  /// Fill behind the circular indicator.
+  Color container_color = Color::White();
+  /// Diameter of the indicator container in logical pixels.
+  float container_size = 40.0F;
+  /// Fraction of unconsumed direct pull retained near the leading boundary.
+  float pull_resistance = 0.45F;
+  /// Largest pull displacement retained before release.
+  float maximum_pull_distance = 96.0F;
+  /// Leading-edge displacement required to request a refresh.
+  float trigger_distance = 72.0F;
+  /// Content displacement retained while refreshing.
+  float refresh_distance = 56.0F;
+  /// Motion used to reveal or settle the retained displacement.
+  TweenSpec settle_motion{0.2, Easing::EaseOut};
+
+  static RefreshBoxStyle Default();
+
+  bool operator==(const RefreshBoxStyle&) const = default;
+};
+
 enum class ProgressBarIndeterminateMotion {
   Sweep,
   Segmented,
@@ -586,6 +610,7 @@ CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);
 RadioButtonStyle DefaultRadioButtonStyle(const ThemeSpec& theme);
 SwitchStyle DefaultSwitchStyle(const ThemeSpec& theme);
 ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme);
+RefreshBoxStyle DefaultRefreshBoxStyle(const ThemeSpec& theme);
 ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme);
 SliderStyle DefaultSliderStyle(const ThemeSpec& theme);
 

@@ -102,6 +102,7 @@ using huxerui::PushTransformCommand;
 using huxerui::RadioButton;
 using huxerui::RadioButtonStyle;
 using huxerui::Rect;
+using huxerui::RefreshBox;
 using huxerui::RenderFrame;
 using huxerui::RenderNode;
 using huxerui::Rotation;

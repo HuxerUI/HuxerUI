@@ -2145,7 +2145,8 @@ private:
     }
     node.scroll_state->axis = configuration_.multiline ? Axis::Vertical : Axis::Horizontal;
     node.scroll_state->touch_drag_only = true;
-    node.scroll_state->allows_overscroll = false;
+    node.scroll_state->allows_leading_overscroll = false;
+    node.scroll_state->allows_trailing_overscroll = false;
   }
 
   void ScrollSelectionAtEdge(Point position) {

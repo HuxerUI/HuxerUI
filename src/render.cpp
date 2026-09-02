@@ -213,15 +213,17 @@ std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
 }
 
 Transform2D ResolveChildrenTransform(const MountedNode& node) {
-  if (node.scroll_state == nullptr) {
-    return {};
+  Transform2D scroll_transform;
+  if (node.scroll_state != nullptr) {
+    const bool vertical = ScrollAxis(node) == Axis::Vertical;
+    const float content_offset = node.kind == NodeKind::ScrollView
+                                     ? (vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x)
+                                     : 0.0F;
+    const float translation = -content_offset - node.scroll_state->overscroll_offset;
+    scroll_transform = vertical ? TranslationTransform({0.0F, translation})
+                                : TranslationTransform({translation, 0.0F});
   }
-  const bool vertical = ScrollAxis(node) == Axis::Vertical;
-  const float content_offset = node.kind == NodeKind::ScrollView
-                                   ? (vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x)
-                                   : 0.0F;
-  const float translation = -content_offset - node.scroll_state->overscroll_offset;
-  return vertical ? TranslationTransform({0.0F, translation}) : TranslationTransform({translation, 0.0F});
+  return ComposeTransform(node.presentation.children_transform, scroll_transform);
 }
 
 std::optional<Rect> UnionBounds(std::optional<Rect> left, Rect right) {

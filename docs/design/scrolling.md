@@ -113,7 +113,8 @@ Theme owns scrollbar visuals, not physical behavior.
 
 The actual content offset remains clamped from zero through the current maximum.
 After pre-scroll, every compatible mounted offset, and post-scroll have seen a direct touch delta, at most one terminal container may retain the remainder as overscroll displacement.
-The outermost reached container with overscroll enabled is the terminal owner.
+The outermost reached container with overscroll enabled for the remainder's direction is the terminal owner.
+Leading and trailing edge eligibility are separate mounted capabilities so a retained behavior can accept only the edge it owns without introducing a component branch in Runtime.
 
 Overscroll is presentation-only.
 It translates clipped scroll content without changing measurement, virtual ranges, controller metrics, focus reveal, or semantic scroll position.
@@ -124,6 +125,10 @@ Settlement reports `ScrollSource::Overscroll` activity so retained presentation 
 
 Wheel and trackpad input do not create overscroll.
 This prevents an indirect input boundary from accidentally activating retained pull-to-refresh behavior intended for direct manipulation.
+
+A retained behavior may take over the committed overscroll displacement at the terminal `End` or `Cancel` notification.
+It clears the shared temporary offset and applies an equivalent descendant presentation transform in the same commit, then owns only its post-gesture animation.
+This handoff preserves the single authoritative scroll offset and avoids a one-frame jump without keeping two active overscroll owners.
 
 ## Activity and observation
 

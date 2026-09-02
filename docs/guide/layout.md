@@ -14,6 +14,7 @@ Application code normally expresses intent with built-in containers and modifier
 - `Spacer` consumes remaining main-axis space in a `Row` or `Column`.
 - `IndexedPages` retains pages while measuring and placing the selected page.
 - `Pager` retains pages while adding controlled animated and direct paging.
+- `RefreshBox` coordinates controlled leading-edge refresh around one content subtree.
 - `ScrollView` makes one ordinary subtree scrollable.
 - `VirtualList` and `VirtualGrid` materialize only required logical items.
 
@@ -91,6 +92,35 @@ That displacement never changes controller metrics or the authoritative content 
 Use `ViewEvents::ScrollInput` only when a View needs the raw wheel or trackpad update before default scrolling, such as a zoomable canvas.
 Returning true consumes the complete two-dimensional update; returning false leaves it to built-in scrolling.
 Touch dragging remains pointer input and does not emit `ScrollInputEvent`.
+
+## RefreshBox
+
+`RefreshBox` wraps one ordinary content View and turns an unconsumed downward touch pull at the leading vertical boundary into a controlled refresh request.
+The content retains its mounted identity, scroll offsets, focus, editing state, PlatformViews, and textures while its presentation is displaced.
+
+```cpp
+return RefreshBox(
+    ScrollView {
+      MessageList(messages),
+    },
+    refreshing
+).OnRefresh([=] {
+  refreshing = true;
+  tasks.Launch([=]() -> Task<void> {
+    co_await ReloadMessages();
+    refreshing = false;
+  });
+});
+```
+
+The supplied `refreshing` value is authoritative.
+An armed release or the localized accessibility Refresh action emits `RefreshEvents::Requested`; setting `refreshing` to true holds the content at the Theme-defined refresh position, while leaving it false settles the pull immediately.
+Programmatically changing the value to true presents the same refreshing state without emitting an event.
+
+Only direct touch dragging can initiate the gesture.
+Wheel, trackpad, upward, trailing-edge, canceled, disabled, and unarmed input never requests refresh.
+The built-in indicator, pull resistance, maximum displacement, trigger distance, refresh position, and settle motion are resolved from `RefreshBoxStyle` in the active Theme.
+`RefreshBox` does not own a Task, controller, loading result, or application data.
 
 ## IndexedPages and Pager
 

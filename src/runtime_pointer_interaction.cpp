@@ -1149,7 +1149,8 @@ GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::
     }
     detail::MountedNode* node = FindNode(*state_->mounted_root_, scroll_state->node_identity);
     const float delta = PointerDelta(session.down_position, event.position, scroll_state->axis);
-    const bool can_overscroll = node && session.device_kind == PointerDeviceKind::Touch && CanOverscrollNode(*node);
+    const bool can_overscroll =
+        node && session.device_kind == PointerDeviceKind::Touch && CanOverscrollNode(*node, delta);
     return node && node->interaction.enabled && (CanScrollNode(*node, delta) || can_overscroll)
                ? GestureDecision::Accept
                : GestureDecision::Continue;

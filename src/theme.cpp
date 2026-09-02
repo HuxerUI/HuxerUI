@@ -310,6 +310,7 @@ ThemeDefinition FlatDefinition(ThemeSpec theme) {
   definition.Set(FlatNavigationBarStyle(theme));
   definition.Set(FlatNavigationPaneStyle(theme));
   definition.Set(FlatDrawerStyle(theme));
+  definition.Set(detail::DefaultRefreshBoxStyle(theme));
   return definition;
 }
 
@@ -656,6 +657,25 @@ ProgressCircleStyle MaterialProgressCircleStyle(const ThemeSpec& theme) {
   };
 }
 
+RefreshBoxStyle MaterialRefreshBoxStyle(const ThemeSpec& theme) {
+  ProgressCircleStyle indicator = MaterialProgressCircleStyle(theme);
+  indicator.size = 24.0F;
+  indicator.stroke_width = 3.0F;
+  return {
+      .indicator = std::move(indicator),
+      .container_color = theme.colors.surface_container_high,
+      .container_size = 40.0F,
+      .pull_resistance = 0.45F,
+      .maximum_pull_distance = 96.0F,
+      .trigger_distance = 72.0F,
+      .refresh_distance = 56.0F,
+      .settle_motion = TweenSpec{
+          .duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+          .easing = Easing::EaseOut,
+      },
+  };
+}
+
 ProgressBarStyle MaterialProgressBarStyle(const ThemeSpec& theme) {
   return {
       .width = 240.0F,
@@ -977,6 +997,7 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialRadioButtonStyle(theme));
   definition.Set(MaterialSwitchStyle(theme));
   definition.Set(MaterialProgressCircleStyle(theme));
+  definition.Set(MaterialRefreshBoxStyle(theme));
   definition.Set(MaterialProgressBarStyle(theme));
   definition.Set(MaterialSliderStyle(theme));
   definition.Set(MaterialScrollBarStyle(theme));
@@ -1429,6 +1450,24 @@ ProgressCircleStyle DefaultProgressCircleStyle(const ThemeSpec& theme) {
   };
 }
 
+RefreshBoxStyle DefaultRefreshBoxStyle(const ThemeSpec& theme) {
+  ProgressCircleStyle indicator = DefaultProgressCircleStyle(theme);
+  indicator.size = 20.0F;
+  return {
+      .indicator = std::move(indicator),
+      .container_color = theme.colors.surface,
+      .container_size = 36.0F,
+      .pull_resistance = 0.45F,
+      .maximum_pull_distance = 96.0F,
+      .trigger_distance = 68.0F,
+      .refresh_distance = 52.0F,
+      .settle_motion = TweenSpec{
+          .duration = theme.motion.reduced_motion ? 0.0 : theme.motion.normal,
+          .easing = Easing::EaseOut,
+      },
+  };
+}
+
 ProgressBarStyle DefaultProgressBarStyle(const ThemeSpec& theme) {
   Color track = theme.colors.on_surface;
   track.alpha *= 0.16F;
@@ -1540,6 +1579,10 @@ SwitchStyle SwitchStyle::Default() {
 
 ProgressCircleStyle ProgressCircleStyle::Default() {
   return detail::DefaultProgressCircleStyle(ThemeSpec::Default());
+}
+
+RefreshBoxStyle RefreshBoxStyle::Default() {
+  return detail::DefaultRefreshBoxStyle(ThemeSpec::Default());
 }
 
 ProgressBarStyle ProgressBarStyle::Default() {
