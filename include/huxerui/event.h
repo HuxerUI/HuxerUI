@@ -566,6 +566,12 @@ struct TabsEvents {
   struct Changed : Event<void(std::size_t)> {};
 };
 
+/// Event keys emitted by Pager.
+struct PagerEvents {
+  /// Requests selection of the page at the supplied zero-based index.
+  struct Changed : Event<void(std::size_t)> {};
+};
+
 /// Event keys emitted by Select.
 struct SelectEvents {
   /// Requests selection of the option at the supplied zero-based index.

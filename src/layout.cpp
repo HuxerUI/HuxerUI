@@ -81,6 +81,18 @@ Axis ScrollAxis(const MountedNode& node) noexcept {
   return node.scroll_state ? node.scroll_state->axis : Axis::Vertical;
 }
 
+bool AllowsScrollSource(const MountedNode& node, ScrollSource source) noexcept {
+  if (!node.scroll_state) {
+    return false;
+  }
+  const std::uint32_t source_index = static_cast<std::uint32_t>(source);
+  if (source_index >= std::numeric_limits<std::uint32_t>::digits) {
+    return false;
+  }
+  const auto bit = 1U << source_index;
+  return (node.scroll_state->allowed_sources & bit) != 0U;
+}
+
 Rect ScrollViewport(const MountedNode& node) noexcept {
   if (!node.scroll_state) {
     return {};
@@ -429,6 +441,32 @@ void CommitLayoutParticipation(MountedNode& node, const std::vector<LayoutResult
 
 } // namespace
 
+namespace {
+
+Size MeasureWithLayoutDescriptor(MountedNode& node, const Constraints& constraints, LayoutContextState& layout_state,
+                                 EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics) {
+  LayoutContext context = LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area, title_bar_metrics);
+  LayoutResult result = node.layout_descriptor->measure(context, node, constraints);
+  const Size measured_size = constraints.Constrain(result.MeasuredSize());
+  CommitLayoutParticipation(node, result.Placements());
+  node.layout_placements = result.Placements();
+  return measured_size;
+}
+
+void LayoutPlacedChildren(MountedNode& node, Point content_origin) {
+  for (const auto& placement : node.layout_placements) {
+    LayoutNode(
+        static_cast<MountedNode&>(*placement.child),
+        {
+            content_origin.x + placement.offset.x,
+            content_origin.y + placement.offset.y,
+        }
+    );
+  }
+}
+
+} // namespace
+
 Size MeasureNode(
     MountedNode& node,
     const Constraints& constraints,
@@ -614,12 +652,8 @@ Size MeasureNode(
     if (node.layout_descriptor == nullptr || node.layout_descriptor->measure == nullptr) {
       throw std::logic_error("HuxerUI layout node has no measure function");
     }
-    LayoutContext context =
-        LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area, title_bar_metrics);
-    LayoutResult result = node.layout_descriptor->measure(context, node, content_constraints);
-    content_size = content_constraints.Constrain(result.MeasuredSize());
-    CommitLayoutParticipation(node, result.Placements());
-    node.layout_placements = result.Placements();
+    content_size =
+        MeasureWithLayoutDescriptor(node, content_constraints, layout_state, safe_area, title_bar_metrics);
     break;
   }
   case NodeKind::Scope:
@@ -630,7 +664,15 @@ Size MeasureNode(
     content_size = MeasureSelectionArea(node, platform, runtime, content_constraints, safe_area, title_bar_metrics);
     break;
   case NodeKind::ScrollView:
-    content_size = MeasureScrollChild(node, content_constraints, layout_state);
+    if (node.layout_descriptor) {
+      if (!node.layout_descriptor->measure) {
+        throw std::logic_error("HuxerUI scroll layout node has no measure function");
+      }
+      content_size =
+          MeasureWithLayoutDescriptor(node, content_constraints, layout_state, safe_area, title_bar_metrics);
+    } else {
+      content_size = MeasureScrollChild(node, content_constraints, layout_state);
+    }
     break;
   case NodeKind::VirtualLayout: {
     if (node.virtual_layout_descriptor == nullptr || node.virtual_layout_descriptor->measure == nullptr ||
@@ -722,15 +764,7 @@ void LayoutNode(MountedNode& node, Point offset) {
   };
   switch (node.kind) {
   case NodeKind::Layout:
-    for (const auto& placement : node.layout_placements) {
-      LayoutNode(
-          static_cast<MountedNode&>(*placement.child),
-          {
-              content_origin.x + placement.offset.x,
-              content_origin.y + placement.offset.y,
-          }
-      );
-    }
+    LayoutPlacedChildren(node, content_origin);
     break;
   case NodeKind::Scope:
   case NodeKind::Environment:
@@ -740,8 +774,12 @@ void LayoutNode(MountedNode& node, Point offset) {
     }
     break;
   case NodeKind::ScrollView:
-    for (auto& child : node.children) {
-      LayoutNode(*child, content_origin);
+    if (node.layout_descriptor) {
+      LayoutPlacedChildren(node, content_origin);
+    } else {
+      for (auto& child : node.children) {
+        LayoutNode(*child, content_origin);
+      }
     }
     break;
   case NodeKind::VirtualLayout: {
@@ -929,7 +967,7 @@ void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhas
 }
 
 float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source) {
-  if (!node.interaction.enabled || !IsScrollContainer(node)) {
+  if (!node.interaction.enabled || !IsScrollContainer(node) || !AllowsScrollSource(node, source)) {
     return 0.0F;
   }
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
@@ -953,7 +991,8 @@ float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source) {
 }
 
 bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
-  if (!node.interaction.enabled || !IsScrollContainer(node)) {
+  if (!node.interaction.enabled || !IsScrollContainer(node) ||
+      !AllowsScrollSource(node, ScrollSource::FocusReveal)) {
     return false;
   }
 
@@ -1243,7 +1282,8 @@ bool AdvanceMountedNodeFrameImpl(
     const Axis axis = ScrollAxis(node);
     for (std::size_t index = scroll_ancestors.size(); index > 1; --index) {
       MountedNode& ancestor = *scroll_ancestors[index - 2];
-      if (ScrollAxis(ancestor) != axis || !CanScrollNode(ancestor, *result.transfer_velocity)) {
+      if (ScrollAxis(ancestor) != axis || !AllowsScrollSource(ancestor, ScrollSource::Momentum) ||
+          !CanScrollNode(ancestor, *result.transfer_velocity)) {
         continue;
       }
       if (ancestor.scroll_state->motion.StartMomentum(ancestor, *result.transfer_velocity)) {
@@ -1274,10 +1314,11 @@ void StopScrollNodeMotion(MountedNode& node, ScrollPhase phase) {
 
 namespace {
 
-std::vector<MountedNode*> ScrollCandidates(const std::vector<MountedNode*>& route, Axis axis) {
+std::vector<MountedNode*> ScrollCandidates(const std::vector<MountedNode*>& route, Axis axis, ScrollSource source) {
   std::vector<MountedNode*> candidates;
   for (MountedNode* node : route) {
-    if (node->interaction.enabled && IsScrollContainer(*node) && ScrollAxis(*node) == axis) {
+    if (node->interaction.enabled && IsScrollContainer(*node) && ScrollAxis(*node) == axis &&
+        AllowsScrollSource(*node, source)) {
       candidates.push_back(node);
     }
   }
@@ -1339,7 +1380,7 @@ float ApplyScrollTransaction(const std::vector<MountedNode*>& route, Axis axis, 
   if (!std::isfinite(delta) || std::abs(delta) < scroll_consumption_epsilon) {
     return 0.0F;
   }
-  const std::vector<MountedNode*> candidates = ScrollCandidates(route, axis);
+  const std::vector<MountedNode*> candidates = ScrollCandidates(route, axis, source);
   if (candidates.empty()) {
     return 0.0F;
   }
@@ -1407,7 +1448,7 @@ float ApplyScrollTransaction(const std::vector<MountedNode*>& route, Axis axis, 
 
 float ApplyPreFling(const std::vector<MountedNode*>& route, Axis axis, float velocity) {
   float remaining = velocity;
-  for (MountedNode* candidate : ScrollCandidates(route, axis)) {
+  for (MountedNode* candidate : ScrollCandidates(route, axis, ScrollSource::Drag)) {
     for (NodeExtensionEntry& entry : candidate->extensions) {
       if (!entry.extension || std::abs(remaining) < scroll_consumption_epsilon) {
         continue;

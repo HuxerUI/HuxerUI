@@ -15,6 +15,11 @@ ScrollController second_indexed_page_scroll;
 State<bool> scoped_scroll_content_changed;
 State<float> scoped_scroll_content_height;
 State<std::size_t> indexed_scroll_page;
+State<std::size_t> interactive_pager_page;
+State<bool> interactive_pager_drag_enabled;
+State<std::size_t> reversed_pager_page;
+std::vector<std::size_t> pager_proposals;
+bool accept_pager_proposals = true;
 int scroll_observer_compositions = 0;
 bool consume_scroll_input = false;
 std::optional<ScrollInputEvent> received_scroll_input;
@@ -255,6 +260,47 @@ View IndexedScrollingApp() {
       },
       selected
   );
+}
+
+View InteractivePagerApp() {
+  auto selected = UseState<std::size_t>(1);
+  auto drag_enabled = UseState(true);
+  interactive_pager_page = selected;
+  interactive_pager_drag_enabled = drag_enabled;
+  return Pager(
+             {
+                 Text("Previous"),
+                 Text("Current"),
+                 Text("Next"),
+             },
+             selected
+  )
+      .DragEnabled(drag_enabled)
+      .OnChanged([selected](std::size_t index) {
+        pager_proposals.push_back(index);
+        if (accept_pager_proposals) {
+          selected = index;
+        }
+      });
+}
+
+View ReversedVerticalPagerApp() {
+  auto selected = UseState<std::size_t>(1);
+  reversed_pager_page = selected;
+  return Pager(
+             {
+                 Text("First"),
+                 Text("Second"),
+                 Text("Third"),
+             },
+             selected
+  )
+      .ScrollAxis(Axis::Vertical)
+      .Reverse()
+      .OnChanged([selected](std::size_t index) {
+        pager_proposals.push_back(index);
+        selected = index;
+      });
 }
 
 View ScrollInputApp() {
@@ -778,6 +824,146 @@ TEST_CASE("IndexedPages retains an independent ScrollView offset for each page")
   runtime.BuildFrame();
   REQUIRE(first_indexed_page_scroll.Offset() == 60.0F);
   REQUIRE(second_indexed_page_scroll.Offset() == 35.0F);
+}
+
+TEST_CASE("Pager uses direct drag without mapping wheel input and honors DragEnabled") {
+  pager_proposals.clear();
+  accept_pager_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{InteractivePagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.HandleScrollInput({{50.0F, 40.0F}, 60.0F, 0.0F}) == Point{});
+  REQUIRE(interactive_pager_page.Get() == 1);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 301, {80.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 301, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children[2]->PresentationBounds().x == Catch::Approx(40.0F));
+  REQUIRE_FALSE(runtime.RootNode()->children[2]->interaction.enabled);
+  REQUIRE(std::ranges::none_of(runtime.LastCommit().semantic_frame->nodes, [](const SemanticNode& node) {
+    return node.label == "Next";
+  }));
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children[2]->PresentationBounds().x == Catch::Approx(80.0F));
+  runtime.HandlePointerEvent({PointerEventType::Up, 301, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+  REQUIRE(interactive_pager_page.Get() == 2);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 305, {80.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 305, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Up, 305, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+  REQUIRE(runtime.RootNode()->children[2]->PresentationBounds().x == Catch::Approx(80.0F));
+  REQUIRE(runtime.RootNode()->children[2]->interaction.enabled);
+  platform.AdvanceTime(0.25);
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+  interactive_pager_drag_enabled = false;
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Down, 302, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 302, {80.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Up, 302, {80.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+}
+
+TEST_CASE("Pager returns to controlled selection when a proposal is rejected") {
+  pager_proposals.clear();
+  accept_pager_proposals = false;
+  TestPlatform platform;
+  Runtime runtime{InteractivePagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 303, {80.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 303, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Up, 303, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+  REQUIRE(interactive_pager_page.Get() == 1);
+
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.25);
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children[1]->PresentationBounds().x == Catch::Approx(0.0F));
+  REQUIRE_FALSE(runtime.RootNode()->children[2]->participates_in_layout);
+}
+
+TEST_CASE("Pager composes vertical paging with explicit reversal") {
+  pager_proposals.clear();
+  TestPlatform platform;
+  Runtime runtime{ReversedVerticalPagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 304, {50.0F, 70.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 304, {50.0F, 10.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Up, 304, {50.0F, 10.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(pager_proposals == std::vector<std::size_t>{0});
+  REQUIRE(reversed_pager_page.Get() == 0);
+}
+
+TEST_CASE("Pager maps semantic scrolling to one controlled page proposal") {
+  pager_proposals.clear();
+  accept_pager_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{InteractivePagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.LastCommit().semantic_frame != nullptr);
+  const auto pager = std::ranges::find(
+      runtime.LastCommit().semantic_frame->nodes, SemanticRole::ScrollView, &SemanticNode::role
+  );
+  REQUIRE(pager != runtime.LastCommit().semantic_frame->nodes.end());
+  REQUIRE((pager->actions & SemanticActionMask(SemanticActionKind::Scroll)) != 0);
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+      pager->id, SemanticAction{SemanticActionKind::Scroll, Point{100.0F, 0.0F}}
+  ));
+  REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+  REQUIRE(interactive_pager_page.Get() == 2);
+}
+
+TEST_CASE("Pager uses touch release velocity and returns after pointer cancellation") {
+  SECTION("velocity") {
+    pager_proposals.clear();
+    accept_pager_proposals = true;
+    TestPlatform platform;
+    Runtime runtime{InteractivePagerApp, platform};
+    runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+    runtime.BuildFrame();
+
+    runtime.HandlePointerEvent({PointerEventType::Down, 306, {80.0F, 40.0F}, PointerDeviceKind::Touch});
+    platform.AdvanceTime(0.01);
+    runtime.HandlePointerEvent({PointerEventType::Move, 306, {60.0F, 40.0F}, PointerDeviceKind::Touch});
+    runtime.HandlePointerEvent({PointerEventType::Up, 306, {60.0F, 40.0F}, PointerDeviceKind::Touch});
+    runtime.BuildFrame();
+    REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+  }
+
+  SECTION("cancellation") {
+    pager_proposals.clear();
+    accept_pager_proposals = true;
+    TestPlatform platform;
+    Runtime runtime{InteractivePagerApp, platform};
+    runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+    runtime.BuildFrame();
+
+    runtime.HandlePointerEvent({PointerEventType::Down, 307, {80.0F, 40.0F}, PointerDeviceKind::Touch});
+    runtime.HandlePointerEvent({PointerEventType::Move, 307, {20.0F, 40.0F}, PointerDeviceKind::Touch});
+    runtime.HandlePointerEvent({PointerEventType::Cancel, 307, {20.0F, 40.0F}, PointerDeviceKind::Touch});
+    runtime.BuildFrame();
+    REQUIRE(pager_proposals.empty());
+    REQUIRE(interactive_pager_page.Get() == 1);
+  }
 }
 
 TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {

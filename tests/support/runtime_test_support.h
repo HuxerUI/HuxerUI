@@ -85,6 +85,7 @@ using huxerui::Opacity;
 using huxerui::PaintCommand;
 using huxerui::PaintContext;
 using huxerui::PaintSequence;
+using huxerui::Pager;
 using huxerui::Point;
 using huxerui::PointerEvent;
 using huxerui::PointerEventType;

@@ -721,7 +721,8 @@ void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& f
     } else if (position > end - edge) {
       intensity = std::clamp((position - (end - edge)) / edge, 0.0F, 1.0F);
     }
-    if (intensity == 0.0F || !CanScrollNode(*node, intensity)) {
+    if (intensity == 0.0F || !AllowsScrollSource(*node, ScrollSource::DragDrop) ||
+        !CanScrollNode(*node, intensity)) {
       continue;
     }
     if (frame.delta_time <= 0.0) {
@@ -1635,7 +1636,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
     if (tap.activates || !tap.consumers.empty()) {
       session.recognitions.push_back(PointerRecognition{std::move(tap)});
     }
-    if ((*node)->interaction.enabled && IsScrollContainer(**node) &&
+    if ((*node)->interaction.enabled && IsScrollContainer(**node) && AllowsScrollSource(**node, ScrollSource::Drag) &&
         (!(*node)->scroll_state->touch_drag_only || event.device_kind == PointerDeviceKind::Touch)) {
       session.recognitions.push_back(PointerRecognition{ScrollRecognitionState{
           .node_identity = (*node)->identity,
@@ -1953,7 +1954,8 @@ void Runtime::HandlePointerUp(const PointerEvent& event) {
     const float velocity = ApplyPreFling(route, *scroll_axis, *scroll_velocity);
     for (auto candidate = route.rbegin(); candidate != route.rend(); ++candidate) {
       if (!(*candidate)->interaction.enabled || !IsScrollContainer(**candidate) ||
-          ScrollAxis(**candidate) != *scroll_axis || !CanScrollNode(**candidate, velocity)) {
+          ScrollAxis(**candidate) != *scroll_axis ||
+          !AllowsScrollSource(**candidate, ScrollSource::Momentum) || !CanScrollNode(**candidate, velocity)) {
         continue;
       }
       if ((*candidate)->scroll_state->motion.StartMomentum(**candidate, velocity)) {

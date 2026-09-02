@@ -13,6 +13,7 @@ Application code normally expresses intent with built-in containers and modifier
 - `Flow` wraps children across lines.
 - `Spacer` consumes remaining main-axis space in a `Row` or `Column`.
 - `IndexedPages` retains pages while measuring and placing the selected page.
+- `Pager` retains pages while adding controlled animated and direct paging.
 - `ScrollView` makes one ordinary subtree scrollable.
 - `VirtualList` and `VirtualGrid` materialize only required logical items.
 
@@ -90,6 +91,31 @@ That displacement never changes controller metrics or the authoritative content 
 Use `ViewEvents::ScrollInput` only when a View needs the raw wheel or trackpad update before default scrolling, such as a zoomable canvas.
 Returning true consumes the complete two-dimensional update; returning false leaves it to built-in scrolling.
 Touch dragging remains pointer input and does not emit `ScrollInputEvent`.
+
+## IndexedPages and Pager
+
+Use `IndexedPages` when peer pages should retain local state and switch immediately under an external selection control.
+Use `Pager` when the same retained pages also need animated controlled changes and direct one-page dragging.
+
+```cpp
+return Pager(
+           {
+               OverviewPage(),
+               ActivityPage(),
+               SettingsPage(),
+           },
+           selected_page
+)
+    .ScrollAxis(Axis::Horizontal)
+    .OnChanged([selected_page](std::size_t index) {
+      selected_page = index;
+    });
+```
+
+Pager never owns the selected index.
+Set `DragEnabled(false)` to keep programmatic and accessibility paging while disabling direct pointer paging.
+`Reverse()` applies an explicit direction inversion; it is not a replacement for natural layout direction.
+Pager does not map wheel or trackpad distance to page changes.
 
 ## ScrollController
 

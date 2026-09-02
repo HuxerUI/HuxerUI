@@ -13,6 +13,8 @@ State<bool> use_long_cached_text;
 State<bool> expand_cached_scope;
 State<bool> update_opaque_layout_value;
 State<std::size_t> indexed_page_selection;
+State<std::size_t> pager_selection;
+State<std::size_t> reduced_motion_pager_selection;
 ImageAsset layout_test_image;
 ImageFit layout_test_image_fit = ImageFit::Contain;
 HorizontalAlignment layout_test_image_horizontal_alignment = HorizontalAlignment::Center;
@@ -457,6 +459,31 @@ View IndexedPagesApp() {
   );
 }
 
+View PagerLayoutApp() {
+  auto selected = UseState<std::size_t>(1);
+  pager_selection = selected;
+  return Pager(
+      {
+          Text("First"),
+          Text("Second"),
+          Text("Third"),
+          Text("Fourth").With(Semantics{.selected = false}),
+      },
+      selected
+  );
+}
+
+View ReducedMotionPagerApp() {
+  auto selected = UseState<std::size_t>(0);
+  reduced_motion_pager_selection = selected;
+  ThemeSpec theme = FlatLightThemeSpec();
+  theme.motion.reduced_motion = true;
+  return Theme {
+    ThemeDefinition{theme},
+    Pager({Text("First"), Text("Second")}, selected),
+  };
+}
+
 TEST_CASE("TestMainAndCrossAxisAlignment") {
   TestPlatform platform;
   Runtime runtime{AxisAlignmentApp, platform};
@@ -533,6 +560,81 @@ TEST_CASE("IndexedPages retains every page and presents only the selected page")
   REQUIRE(root->children[1]->identity == second_identity);
   REQUIRE(ContainsText(restored, "First 1"));
   REQUIRE_FALSE(ContainsText(restored, "Second 0"));
+}
+
+TEST_CASE("Pager validates and retains its controlled page set") {
+  REQUIRE_THROWS_AS(Pager({}, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(Pager({Text("Page")}, 1), std::invalid_argument);
+  REQUIRE_THROWS_AS(Pager({View{}}, 0), std::invalid_argument);
+
+  TestPlatform platform;
+  Runtime runtime{PagerLayoutApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  const FlattenedScene& initial = runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->kind == detail::NodeKind::ScrollView);
+  REQUIRE(root->children.size() == 4);
+  REQUIRE_FALSE(root->children[0]->participates_in_layout);
+  REQUIRE(root->children[1]->participates_in_layout);
+  REQUIRE_FALSE(root->children[2]->participates_in_layout);
+  REQUIRE_FALSE(root->children[3]->participates_in_layout);
+  REQUIRE(root->scroll_state->offset_x == 240.0F);
+  REQUIRE(root->scroll_state->content_width == 720.0F);
+  REQUIRE_FALSE(ContainsText(initial, "First"));
+  REQUIRE(ContainsText(initial, "Second"));
+  REQUIRE_FALSE(ContainsText(initial, "Third"));
+  REQUIRE(runtime.LastCommit().semantic_frame != nullptr);
+  const auto second_semantics = std::ranges::find(
+      runtime.LastCommit().semantic_frame->nodes, std::string{"Second"}, &SemanticNode::label
+  );
+  REQUIRE(second_semantics != runtime.LastCommit().semantic_frame->nodes.end());
+  REQUIRE(second_semantics->selected == std::optional{true});
+  REQUIRE(second_semantics->collection_item == std::optional{SemanticCollectionItem{.index = 1}});
+
+  const std::uint64_t measure_revision = root->measure_revision;
+  const std::uint64_t layout_revision = root->layout_revision;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->measure_revision == measure_revision);
+  REQUIRE(root->layout_revision == layout_revision);
+
+  const std::uint64_t first_identity = root->children[0]->identity;
+  runtime.SetWindowMetrics({.viewport = {300.0F, 120.0F}});
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->scroll_state->offset_x == 300.0F);
+  REQUIRE(root->children[1]->PresentationBounds().x == Catch::Approx(0.0F));
+
+  pager_selection = 3;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.25);
+  const FlattenedScene& selected = runtime.BuildFrame();
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->children[0]->identity == first_identity);
+  REQUIRE(root->children[3]->participates_in_layout);
+  REQUIRE(ContainsText(selected, "Fourth"));
+  const auto fourth_semantics = std::ranges::find(
+      runtime.LastCommit().semantic_frame->nodes, std::string{"Fourth"}, &SemanticNode::label
+  );
+  REQUIRE(fourth_semantics != runtime.LastCommit().semantic_frame->nodes.end());
+  REQUIRE(fourth_semantics->selected == std::optional{false});
+}
+
+TEST_CASE("Pager resolves programmatic selection immediately under reduced motion") {
+  TestPlatform platform;
+  Runtime runtime{ReducedMotionPagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  reduced_motion_pager_selection = 1;
+  runtime.BuildFrame();
+  const FlattenedScene& settled = runtime.BuildFrame();
+  REQUIRE_FALSE(ContainsText(settled, "First"));
+  REQUIRE(ContainsText(settled, "Second"));
 }
 
 TEST_CASE("TestImageMeasuresIntrinsicSizeAndResolvesContainFit") {

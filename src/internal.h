@@ -696,6 +696,7 @@ private:
 
 struct ScrollNodeState {
   Axis axis = Axis::Vertical;
+  std::uint32_t allowed_sources = std::numeric_limits<std::uint32_t>::max();
   bool touch_drag_only = false;
   bool allows_automatic_reveal = true;
   bool allows_overscroll = true;
@@ -1423,6 +1424,10 @@ struct RuntimeAccess {
     runtime.RequestFrame();
   }
 
+  static void InvalidateLayout(Runtime& runtime, MountedNode& node) {
+    runtime.InvalidateLayout(node);
+  }
+
   static std::optional<std::uint64_t> HitTestPlatformView(const Runtime& runtime, Point position) {
     return runtime.HitTestPlatformView(position);
   }
@@ -1492,6 +1497,7 @@ std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& nod
 bool IsScrollContainer(const MountedNode& node) noexcept;
 Axis ScrollAxis(const MountedNode& node) noexcept;
 Rect ScrollViewport(const MountedNode& node) noexcept;
+bool AllowsScrollSource(const MountedNode& node, ScrollSource source) noexcept;
 bool CanScrollNode(const MountedNode& node, float delta);
 bool CanOverscrollNode(const MountedNode& node);
 float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source);

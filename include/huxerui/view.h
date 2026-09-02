@@ -1372,6 +1372,42 @@ public:
   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
 };
 
+/// Retains peer pages while presenting controlled animated and directly draggable paging.
+///
+/// The selected index remains application-owned. Direct manipulation proposes one adjacent index through OnChanged,
+/// while programmatic selected-index changes animate without emitting an event.
+class Pager final : public detail::TypedView<Pager> {
+public:
+  Pager(std::initializer_list<View> pages, std::size_t selected_index)
+      : Pager(std::vector<View>(pages), selected_index) {}
+  Pager(std::initializer_list<View> pages, const State<std::size_t>& selected_index)
+      : Pager(std::vector<View>(pages), selected_index.Get()) {}
+  Pager(std::vector<View> pages, std::size_t selected_index);
+  Pager(std::vector<View> pages, const State<std::size_t>& selected_index)
+      : Pager(std::move(pages), selected_index.Get()) {}
+
+  /// Selects the paging axis.
+  Pager ScrollAxis(Axis axis) &&;
+  /// Applies an additional direction inversion after the natural layout direction is resolved.
+  Pager Reverse(bool reverse = true) &&;
+  /// Enables or disables direct pointer paging without affecting controlled selection or accessibility actions.
+  Pager DragEnabled(bool enabled) &&;
+
+  /// Handles a requested controlled selected-index change.
+  template <class Function> Pager OnChanged(Function&& function) && {
+    return std::move(*this).On<PagerEvents::Changed>(std::forward<Function>(function));
+  }
+
+private:
+  void UpdateBehavior();
+
+  std::size_t selected_index_ = 0;
+  std::size_t page_count_ = 0;
+  Axis axis_ = Axis::Horizontal;
+  bool reverse_ = false;
+  bool drag_enabled_ = true;
+};
+
 /// Makes one ordinary content subtree scrollable along a configured axis.
 ///
 /// ScrollView owns clipping, direct drag, wheel and trackpad consumption, nested scrolling, fling, overscroll, focus

@@ -75,6 +75,29 @@ Color WithAlpha(Color color, float alpha) {
   return color;
 }
 
+[[huxerui::composable]]
+View PagerPreviewPage(std::string eyebrow, std::string title, Color accent) {
+  const ThemeSpec& theme = UseTheme();
+  auto activity = UseState<std::size_t>(0);
+  return Column {
+    Text(std::move(eyebrow), TextRole::Label).With(Foreground(accent)),
+    Text(std::move(title), TextRole::Title),
+    Spacer(),
+    Row {
+      Text::Format("Local state: {}", activity.Get()).With(Foreground(theme.colors.on_surface_variant)),
+      Spacer(),
+      Button("Increment").OnClick([activity] { activity += 1; }),
+    }.With(CrossAlign(CrossAxisAlignment::Center)),
+  }.With(
+      Padding(theme.spacing.medium),
+      Spacing(theme.spacing.extra_small),
+      Background(WithAlpha(accent, 0.10F)),
+      Border{WithAlpha(accent, 0.24F), 1.0F},
+      CornerRadius(theme.shapes.large),
+      CrossAlign(CrossAxisAlignment::Stretch)
+  );
+}
+
 Path CirclePath(Point center, float radius) {
   const float control = radius * circle_kappa;
   return Path{}
@@ -827,29 +850,45 @@ View LayoutDemo() {
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
     GallerySection(
-        "Stack and retained pages",
-        "Stack overlays aligned children; IndexedPages retains peers while presenting one selected child.",
+        "Stack",
+        "Stack overlays children in one shared layout region and aligns them independently.",
+        Stack {
+          Column {}.With(
+              Frame{.height = 112.0F},
+              Background(theme.colors.secondary_container),
+              CornerRadius(theme.shapes.large)
+          ),
+          Tag("Centered overlay", theme.colors.primary)
+              .With(Align(HorizontalAlignment::Center, VerticalAlignment::Center)),
+        }
+    ),
+    GallerySection(
+        "Retained paging",
+        "Swipe directly or use the buttons; each mounted page keeps its own local state.",
         Column {
-          Stack {
-            Column {}.With(
-                Frame{.height = 112.0F},
-                Background(theme.colors.secondary_container),
-                CornerRadius(theme.shapes.large)
-            ),
-            Tag("Centered overlay", theme.colors.primary)
-                .With(Align(HorizontalAlignment::Center, VerticalAlignment::Center)),
-          },
-          Flow {
-            Button("First").OnClick([preview_page] { preview_page = 0; }),
-            Button("Second").OnClick([preview_page] { preview_page = 1; }),
-          }.With(Spacing(theme.spacing.small)),
-          IndexedPages(
+          Row {
+            Text::Format(TextRole::Label, "Page {} of 3", preview_page.Get() + 1),
+            Spacer(),
+            Text("Drag horizontally").With(Foreground(theme.colors.on_surface_variant)),
+          }.With(CrossAlign(CrossAxisAlignment::Center)),
+          Pager(
               {
-                  Tag("First retained page", theme.colors.primary),
-                  Tag("Second retained page", theme.colors.error),
+                  PagerPreviewPage("EXPLORE", "First retained page", theme.colors.primary),
+                  PagerPreviewPage("FOCUS", "Second retained page", theme.colors.secondary),
+                  PagerPreviewPage("SHIP", "Third retained page", theme.colors.error),
               },
               preview_page
-          ).With(Frame{.height = 56.0F}),
+          )
+              .OnChanged([preview_page](std::size_t index) { preview_page = index; })
+              .With(Frame{.height = 152.0F}),
+          Flow {
+            Button("Previous")
+                .OnClick([preview_page] { preview_page -= 1; })
+                .With(Enabled(preview_page.Get() > 0)),
+            Button("Next")
+                .OnClick([preview_page] { preview_page += 1; })
+                .With(Enabled(preview_page.Get() < 2)),
+          }.With(Spacing(theme.spacing.small)),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
     GallerySection(
