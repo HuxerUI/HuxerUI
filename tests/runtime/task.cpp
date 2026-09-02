@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <stop_token>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -24,7 +25,9 @@ static_assert(std::move_constructible<Task<int>>);
 static_assert(!std::copy_constructible<Task<int>>);
 static_assert(std::copy_constructible<TaskScope>);
 static_assert(std::copy_constructible<TaskHandle>);
+static_assert(std::copy_constructible<WorkerSequence>);
 static_assert(std::same_as<decltype(RunWorker([] { return 1; })), Task<int>>);
+static_assert(std::same_as<decltype(WorkerSequence{}.Run([](std::stop_token) { return 1; })), Task<int>>);
 
 class ThreadSafeTaskQueue {
 public:
@@ -116,6 +119,47 @@ private:
   std::size_t started_ = 0;
   std::size_t departed_ = 0;
   bool released_ = false;
+};
+
+class StopAwareWorkerGate {
+public:
+  void EnterAndWait(std::stop_token stop_token) {
+    std::stop_callback stop_callback(stop_token, [this] {
+      {
+        std::scoped_lock lock(mutex_);
+        stopped_ = true;
+      }
+      condition_.notify_all();
+    });
+    std::unique_lock lock(mutex_);
+    started_ = true;
+    condition_.notify_all();
+    condition_.wait(lock, [this] { return stopped_; });
+    cleaned_ = true;
+    condition_.notify_all();
+  }
+
+  [[nodiscard]] bool WaitForStarted() {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(5), [this] { return started_; });
+  }
+
+  [[nodiscard]] bool WaitForCleanup() {
+    std::unique_lock lock(mutex_);
+    return condition_.wait_for(lock, std::chrono::seconds(5), [this] { return cleaned_; });
+  }
+
+  [[nodiscard]] bool Cleaned() const {
+    std::scoped_lock lock(mutex_);
+    return cleaned_;
+  }
+
+private:
+  mutable std::mutex mutex_;
+  std::condition_variable condition_;
+  bool started_ = false;
+  bool stopped_ = false;
+  bool cleaned_ = false;
 };
 
 struct ManualSuspensionState {
@@ -674,6 +718,191 @@ TEST_CASE("RunWorkerUsesBoundedConcurrencyAndDiscardsCanceledWork") {
   REQUIRE_FALSE(queued_executed);
 }
 
+TEST_CASE("WorkerSequenceSerializesOperationsAcrossCopiedHandles") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const std::thread::id ui_thread = std::this_thread::get_id();
+  std::thread::id resumed_thread;
+  WorkerGate first_gate;
+  std::atomic<bool> second_started = false;
+  std::vector<int> order;
+  int result = 0;
+  int completions = 0;
+
+  {
+    WorkerSequence sequence;
+    WorkerSequence copied_sequence = sequence;
+    auto first = sequence.Run(
+        [&](std::stop_token, std::unique_ptr<int> value) {
+          order.push_back(1);
+          first_gate.EnterAndWait();
+          ++*value;
+          return value;
+        },
+        std::make_unique<int>(41)
+    );
+    auto second = copied_sequence.Run([&](std::stop_token) {
+      second_started = true;
+      order.push_back(2);
+    });
+    captured_task_scope.Launch([&, work = std::move(first)]() mutable -> Task<void> {
+      auto owned = co_await std::move(work);
+      result = *owned;
+      ++completions;
+    });
+    captured_task_scope.Launch([&, work = std::move(second)]() mutable -> Task<void> {
+      co_await std::move(work);
+      resumed_thread = std::this_thread::get_id();
+      ++completions;
+    });
+  }
+  queue.Drain();
+
+  REQUIRE(first_gate.WaitForStarted(1));
+  REQUIRE_FALSE(second_started);
+  first_gate.Release();
+  DrainUntil(queue, [&] { return completions == 2; });
+
+  REQUIRE(result == 42);
+  REQUIRE(order == std::vector<int>{1, 2});
+  REQUIRE(resumed_thread == ui_thread);
+}
+
+TEST_CASE("IndependentWorkerSequencesCanUseTheSharedPoolConcurrently") {
+  if (detail::WorkerConcurrency() < 2) {
+    return;
+  }
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  WorkerSequence first_sequence;
+  WorkerSequence second_sequence;
+  WorkerGate gate;
+  int completions = 0;
+
+  captured_task_scope.Launch([&]() -> Task<void> {
+    co_await first_sequence.Run([&](std::stop_token) { gate.EnterAndWait(); });
+    ++completions;
+  });
+  captured_task_scope.Launch([&]() -> Task<void> {
+    co_await second_sequence.Run([&](std::stop_token) { gate.EnterAndWait(); });
+    ++completions;
+  });
+  queue.Drain();
+
+  REQUIRE(gate.WaitForStarted(2));
+  gate.Release();
+  DrainUntil(queue, [&] { return completions == 2; });
+}
+
+TEST_CASE("WorkerSequenceAndRunWorkerCanUseTheSharedPoolConcurrently") {
+  if (detail::WorkerConcurrency() < 2) {
+    return;
+  }
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  WorkerSequence sequence;
+  WorkerGate gate;
+  int completions = 0;
+
+  captured_task_scope.Launch([&]() -> Task<void> {
+    co_await sequence.Run([&](std::stop_token) { gate.EnterAndWait(); });
+    ++completions;
+  });
+  captured_task_scope.Launch([&]() -> Task<void> {
+    co_await RunWorker([&] { gate.EnterAndWait(); });
+    ++completions;
+  });
+  queue.Drain();
+
+  REQUIRE(gate.WaitForStarted(2));
+  gate.Release();
+  DrainUntil(queue, [&] { return completions == 2; });
+}
+
+TEST_CASE("WorkerSequenceCancellationSkipsQueuedWorkAndStopsActiveWorkCooperatively") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  WorkerSequence sequence;
+  StopAwareWorkerGate active_gate;
+  std::atomic<bool> queued_executed = false;
+  bool active_resumed = false;
+  bool trailing_completed = false;
+  bool trailing_started_after_cleanup = false;
+
+  TaskHandle active = captured_task_scope.Launch([&]() -> Task<void> {
+    co_await sequence.Run([&](std::stop_token stop_token) {
+      active_gate.EnterAndWait(stop_token);
+      throw std::runtime_error("canceled sequence operation failed");
+    });
+    active_resumed = true;
+  });
+  TaskHandle queued = captured_task_scope.Launch([&]() -> Task<void> {
+    co_await sequence.Run([&](std::stop_token) { queued_executed = true; });
+  });
+  captured_task_scope.Launch([&]() -> Task<void> {
+    co_await sequence.Run([&](std::stop_token) {
+      trailing_started_after_cleanup = active_gate.Cleaned();
+    });
+    trailing_completed = true;
+  });
+  queue.Drain();
+  REQUIRE(active_gate.WaitForStarted());
+
+  queued.Cancel();
+  active.Cancel();
+  queue.Drain();
+  REQUIRE(active_gate.WaitForCleanup());
+  DrainUntil(queue, [&] { return trailing_completed; });
+
+  REQUIRE_FALSE(active_resumed);
+  REQUIRE_FALSE(queued_executed);
+  REQUIRE(trailing_started_after_cleanup);
+}
+
+TEST_CASE("WorkerSequencePromotesTheNextOperationAfterAnException") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  WorkerSequence sequence;
+  bool caught = false;
+  int result = 0;
+  int completions = 0;
+
+  captured_task_scope.Launch([&]() -> Task<void> {
+    try {
+      static_cast<void>(co_await sequence.Run([](std::stop_token) -> int {
+        throw std::runtime_error("sequenced worker failed");
+      }));
+    } catch (const std::runtime_error&) {
+      caught = true;
+    }
+    ++completions;
+  });
+  captured_task_scope.Launch([&]() -> Task<void> {
+    result = co_await sequence.Run([](std::stop_token) { return 7; });
+    ++completions;
+  });
+  queue.Drain();
+  DrainUntil(queue, [&] { return completions == 2; });
+
+  REQUIRE(caught);
+  REQUIRE(result == 7);
+}
+
 TEST_CASE("RuntimeDestructionDiscardsARunningWorkerResult") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
@@ -697,6 +926,34 @@ TEST_CASE("RuntimeDestructionDiscardsARunningWorkerResult") {
   REQUIRE_FALSE(resumed);
 }
 
+TEST_CASE("RuntimeDestructionCancelsAWorkerSequenceAndSkipsItsQueuedWork") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  StopAwareWorkerGate active_gate;
+  std::atomic<bool> queued_executed = false;
+  bool resumed = false;
+  {
+    Runtime runtime(TaskScopeApp, platform);
+    runtime.BuildFrame();
+    WorkerSequence sequence;
+    captured_task_scope.Launch([&, sequence]() -> Task<void> {
+      co_await sequence.Run([&](std::stop_token stop_token) { active_gate.EnterAndWait(stop_token); });
+      resumed = true;
+    });
+    captured_task_scope.Launch([&, sequence]() -> Task<void> {
+      co_await sequence.Run([&](std::stop_token) { queued_executed = true; });
+    });
+    queue.Drain();
+    REQUIRE(active_gate.WaitForStarted());
+  }
+
+  REQUIRE(active_gate.WaitForCleanup());
+  queue.Drain();
+  REQUIRE_FALSE(resumed);
+  REQUIRE_FALSE(queued_executed);
+}
+
 #else
 
 TEST_CASE("RunWorkerReportsUnavailableWebWorkerExecution") {
@@ -716,6 +973,31 @@ TEST_CASE("RunWorkerReportsUnavailableWebWorkerExecution") {
   platform.RunPlatformModuleTasks();
 
   REQUIRE(unavailable);
+}
+
+TEST_CASE("WorkerSequenceReportsUnavailableWebWorkerExecution") {
+  captured_task_scope = {};
+  TestPlatform platform;
+  Runtime runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  WorkerSequence sequence;
+  bool unavailable = false;
+  bool invoked = false;
+
+  captured_task_scope.Launch([&]() -> Task<void> {
+    try {
+      static_cast<void>(co_await sequence.Run([&](std::stop_token) {
+        invoked = true;
+        return 1;
+      }));
+    } catch (const std::runtime_error&) {
+      unavailable = true;
+    }
+  });
+  platform.RunPlatformModuleTasks();
+
+  REQUIRE(unavailable);
+  REQUIRE_FALSE(invoked);
 }
 
 #endif

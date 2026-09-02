@@ -174,8 +174,9 @@ View UserSession(UserId user_id) {
 Its tasks are canceled when that scope is replaced or unmounted, and continuations resume on the Runtime thread.
 `RunWorker()` owns a synchronous callable and its arguments, executes them on HuxerUI's bounded native worker pool, and resumes the awaiting Task on that Runtime thread.
 Worker code must not access State, composition, Views, or UI-affine platform objects.
+`WorkerSequence::Run()` uses the same pool but starts only one operation for that sequence at a time; copied sequence handles share ordering, and each callable receives a `std::stop_token` for cooperative cancellation.
 `TaskScope::Post()` is the lifecycle-bound handoff for an external thread or callback to enqueue a `void` update on the same Runtime thread; pending updates are discarded when the scope closes.
-Neither API requests or guarantees platform background execution.
+None of these APIs requests or guarantees platform background execution.
 
 ## Application state
 

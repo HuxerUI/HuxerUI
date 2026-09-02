@@ -237,7 +237,8 @@ Successful scope retirement queues TaskScope closure for the same commit boundar
 
 Runtime performs retired Lifecycle cleanup before closing the corresponding TaskScopes, then releases Root Services and platform state.
 TaskScope uses the owning PlatformAdapter's existing UIThreadDispatcher for initial execution, HuxerUI awaitable resumption, and lifecycle-bound external-thread posting.
-RunWorker and non-Web local File asynchronous operations share one bounded process-wide C++ worker executor, while platform-native asynchronous transports keep their existing owners.
+RunWorker, WorkerSequence, and non-Web local File asynchronous operations share one bounded process-wide C++ worker executor, while platform-native asynchronous transports keep their existing owners.
+WorkerSequence contributes per-instance FIFO admission and cooperative cancellation without owning threads or adding Runtime state.
 Worker execution is process-local and does not imply platform background execution.
 The Task model does not add Runtime branches to State, EventBindings, Lifecycle declarations, or concrete asynchronous services.
 
@@ -2089,7 +2090,7 @@ The current extension points are:
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
 | Custom event | `Event<Result(Arguments...)>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
 | Component external resource lifetime | `Lifecycle(setup, dependencies...)` |
-| Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, `TaskScope::Launch()`, and `RunWorker()` |
+| Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, `TaskScope::Launch()`, `RunWorker()`, and `WorkerSequence` |
 | External-thread UI handoff | Lifecycle-bound `TaskScope::Post()` |
 | Custom View effect | Modifier value and `NodeExtension` |
 | Custom animation | `AnimationSpec` or animated modifier value |

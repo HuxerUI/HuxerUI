@@ -91,7 +91,9 @@ Environment and theme reads belong inside a composable boundary. Do not capture 
 
 Use `RunWorker()` for owned synchronous CPU-bound or blocking work that must not run on the UI thread. Do not access State, composition, Views, or UI-affine platform objects from its callable. After `co_await RunWorker(...)`, the continuation is already back on the owning UI thread and may update State directly; do not call `TaskScope::Post()` for that continuation. Cancellation discards queued work or the result of work already running.
 
-Use `TaskScope::Post()` only when an external thread or callback outside a running HuxerUI Task must enqueue an owned `void` update on the scope's UI thread. A closed scope ignores late posts. Neither `RunWorker()` nor `Post()` requests or guarantees mobile background execution, and Web builds without a worker execution capability report `RunWorker()` as unavailable.
+Use `WorkerSequence::Run()` when one application-owned blocking resource must process operations strictly one at a time. Retain or copy one WorkerSequence for that resource, accept the mandatory leading `std::stop_token`, and return promptly after cancellation; a canceled active callable keeps the sequence occupied until its cleanup finishes. WorkerSequence shares the RunWorker pool and does not provide worker-thread affinity.
+
+Use `TaskScope::Post()` only when an external thread or callback outside a running HuxerUI Task must enqueue an owned `void` update on the scope's UI thread. A closed scope ignores late posts. Neither worker API nor `Post()` requests or guarantees mobile background execution, and Web builds without a worker execution capability report worker execution as unavailable.
 
 Prefer concise duration literals such as `200ms` and `2s` when calling `Delay`.
 

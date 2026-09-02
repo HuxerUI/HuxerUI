@@ -1,5 +1,6 @@
 #include <huxerui/task.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <condition_variable>
@@ -12,6 +13,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -106,6 +108,13 @@ private:
 } // namespace
 
 #endif
+
+class WorkerSequenceState final {
+public:
+  std::mutex mutex;
+  std::weak_ptr<WorkerOperation> active;
+  std::deque<std::weak_ptr<WorkerOperation>> queued;
+};
 
 class TaskDelayScheduler final : public std::enable_shared_from_this<TaskDelayScheduler> {
 public:
@@ -521,17 +530,67 @@ void AdvanceTaskDelays(const std::shared_ptr<TaskDelayScheduler>& scheduler, dou
   scheduler->Advance(timestamp);
 }
 
-void EnqueueWorkerOperation(std::function<void()> operation) {
+void EnqueueWorkerOperation(std::function<void()> operation, const char* api_name) {
   if (!operation) {
     throw std::invalid_argument("HuxerUI worker operation must not be empty");
   }
 #if defined(__EMSCRIPTEN__)
-  throw std::runtime_error(
-      "HuxerUI RunWorker() is unavailable because this Web build has no worker execution capability"
-  );
+  throw std::runtime_error(std::string("HuxerUI ") + api_name +
+                           " is unavailable because this Web build has no worker execution capability");
 #else
+  static_cast<void>(api_name);
   WorkerExecutor::Instance().Submit(std::move(operation));
 #endif
+}
+
+void SubmitWorkerSequenceOperation(
+    const std::shared_ptr<WorkerSequenceState>& sequence,
+    const std::shared_ptr<WorkerOperation>& operation
+) {
+  bool start = false;
+  {
+    std::scoped_lock lock(sequence->mutex);
+    if (!sequence->active.expired()) {
+      sequence->queued.push_back(operation);
+    } else {
+      sequence->active = operation;
+      start = true;
+    }
+  }
+  if (start) {
+    operation->Start();
+  }
+}
+
+void RetireWorkerSequenceOperation(
+    const std::shared_ptr<WorkerSequenceState>& sequence,
+    const std::shared_ptr<WorkerOperation>& operation
+) noexcept {
+  std::shared_ptr<WorkerOperation> next;
+  {
+    std::scoped_lock lock(sequence->mutex);
+    if (sequence->active.lock() == operation) {
+      sequence->active.reset();
+      while (!sequence->queued.empty() && !next) {
+        next = sequence->queued.front().lock();
+        sequence->queued.pop_front();
+      }
+      if (next) {
+        sequence->active = next;
+      }
+    } else {
+      sequence->queued.erase(
+          std::remove_if(sequence->queued.begin(), sequence->queued.end(), [&](const auto& queued) {
+            const std::shared_ptr<WorkerOperation> current = queued.lock();
+            return !current || current == operation;
+          }),
+          sequence->queued.end()
+      );
+    }
+  }
+  if (next) {
+    next->Start();
+  }
 }
 
 std::size_t WorkerConcurrency() noexcept {
@@ -568,6 +627,8 @@ void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_ha
 } // namespace huxerui::detail
 
 namespace huxerui {
+
+WorkerSequence::WorkerSequence() : state_(std::make_shared<detail::WorkerSequenceState>()) {}
 
 void TaskHandle::Cancel() const noexcept {
   if (auto execution = execution_.lock()) {

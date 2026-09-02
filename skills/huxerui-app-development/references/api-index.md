@@ -7,7 +7,7 @@ This is a navigation index, not a replacement for the active SDK's public header
 | App and lifecycle | `Application`, `AppOptions`, `RunApplication`, `UseApplication`, `ApplicationHandle`, `ApplicationActivation`, `ApplicationLifecycleState`, `Lifecycle` | [fundamentals.md](fundamentals.md) | `app.h`, `lifecycle.h` |
 | Permissions | `Permission`, `PermissionStatus`, `ApplicationHandle::CheckPermissionAsync`, `ApplicationHandle::RequestPermissionAsync`, `ApplicationHandle::OpenPermissionSettingsAsync` | [fundamentals.md](fundamentals.md) | `app.h` |
 | System tray | `SystemTrayHandle`, `SystemTrayOptions`, `MenuEntry`, `ApplicationHandle::SystemTray`, `ApplicationHandle::Quit` | [navigation-and-window.md](navigation-and-window.md) | `app.h`, `presentation.h` |
-| Tasks | `Task`, `TaskScope`, `UseTaskScope`, `Delay`, `RunWorker`, `TaskScope::Post` | [fundamentals.md](fundamentals.md) | `task.h` |
+| Tasks | `Task`, `TaskScope`, `UseTaskScope`, `Delay`, `RunWorker`, `WorkerSequence`, `TaskScope::Post` | [fundamentals.md](fundamentals.md) | `task.h` |
 | View and composition | `View`, `Scope`, `[[huxerui::composable]]`, `ForEach` | [fundamentals.md](fundamentals.md) | `view.h` |
 | State | `State`, `StateList`, `UseState`, `UseStateList` | [fundamentals.md](fundamentals.md) | `state.h` |
 | Environment | `Environment`, `ProvideEnvironment`, `UseEnvironment`, `UseViewportClass` | [fundamentals.md](fundamentals.md) | `environment.h` |

@@ -12,6 +12,7 @@ The public model consists of:
 - `UseTaskScope()`, a composition function that returns the TaskScope owned by the current `RecomposeScope`.
 - `Delay()`, a lazy UI-affine minimum-duration suspension.
 - `RunWorker()`, a lazy Task that executes owned synchronous work on the shared worker pool.
+- `WorkerSequence`, a copyable ordering identity for cooperative, strictly serialized worker operations.
 - `TaskScope::Post()`, a lifecycle-bound handoff from an external thread to the scope's UI thread.
 
 The model does not add `UseTask()`, `UseAsync()`, a generic `AsyncResult<T>`, Task-aware Lifecycle overloads, Task-aware event handlers, public executors, or general thread-switching primitives.
@@ -24,6 +25,15 @@ The public declarations live in `<huxerui/task.h>` and are re-exported from `<hu
 ```cpp
 template <class T>
 class [[nodiscard]] Task;
+
+class WorkerSequence {
+public:
+  WorkerSequence();
+
+  template <class Function, class... Arguments>
+    requires std::invocable<std::decay_t<Function>, std::stop_token, std::decay_t<Arguments>...>
+  [[nodiscard]] auto Run(Function&& function, Arguments&&... arguments) const;
+};
 
 class TaskHandle {
 public:
@@ -82,6 +92,11 @@ RunWorker decays and owns its move-constructible callable and arguments when the
 Its synchronous callable may return `void` or a move-constructible non-reference object, but may not return another Task.
 Applications use `std::ref()` when reference semantics are intentional.
 
+WorkerSequence owns only a shared ordering identity.
+Its `Run()` operation has the same lazy ownership and result rules as RunWorker, but the callable receives a mandatory leading `std::stop_token`.
+Copies join the same sequence, while independently constructed WorkerSequence values may execute concurrently.
+Destroying every public handle does not invalidate already-created lazy Tasks because each operation retains its sequence identity.
+
 Post accepts an owned `void` callback, does not create a Task, and does not return a TaskHandle.
 It belongs to TaskScope because an external thread has no active TaskExecution from which to obtain a UI thread or composition lifetime.
 
@@ -117,6 +132,18 @@ Platform thread initialization such as COM apartments, JNI attachment, or platfo
 Cancellation skips a queued callable and releases its owned inputs without searching or removing the small queue entry.
 A callable that already started may finish, but its value or exception is discarded and retired application code is not resumed.
 The queued or running operation state holds TaskExecution weakly and never retains Runtime, TaskScope, or mounted UI state.
+
+WorkerSequence uses the same process-wide executor without reserving or pinning a worker thread.
+At most one callable belonging to a sequence is active; its completion or terminal cleanup promotes the next queued operation in submission order.
+The current completion is posted to its owning UI dispatcher before the next callable starts, but operations awaiting through different UI dispatchers do not gain a cross-dispatcher continuation-order guarantee.
+
+Canceling a queued sequence operation prevents its callable from starting and allows the following operation to advance when it reaches the head.
+Canceling the active operation requests its stop token, detaches its Task continuation, and keeps the sequence occupied until the callable returns and releases its captures.
+The callable must poll the token or register a prompt, non-blocking `std::stop_callback`; WorkerSequence cannot interrupt arbitrary C++ code.
+An exception is delivered through the usual Task continuation, and posting that continuation releases the sequence for the following operation.
+
+WorkerSequence is intended for application-owned blocking resources that permit one operation at a time, such as a database connection, append-only writer, or request/response device protocol.
+It is not an executor, a worker-thread affinity mechanism, a general actor, or a replacement for synchronization inside externally invoked callbacks.
 
 Non-Web local File asynchronous operations reuse this worker executor without calling the public RunWorker API or changing File result and persistence semantics.
 Ordinary platform-native asynchronous HTTP, file-picker, and external-file transports keep their existing cancellation and scheduling owners.
@@ -200,6 +227,7 @@ TaskHandle cancellation, TaskScope closure, and Runtime teardown destroy its awa
 
 A suspended RunWorker operation owns its callable until it starts or is canceled.
 Canceling its Task skips queued work or discards the outcome of work already running.
+A suspended WorkerSequence operation additionally leaves its sequence only after queued cancellation or active callable cleanup, so later operations cannot overlap canceled active work.
 Closing TaskScope also discards every UI callback that Post submitted but the UI thread has not taken for execution.
 
 Canceling one TaskHandle does not cancel sibling tasks in the same TaskScope.

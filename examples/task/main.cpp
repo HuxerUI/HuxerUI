@@ -1,8 +1,10 @@
 #include <huxerui/huxerui.h>
 
 #include <memory>
+#include <stop_token>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 using namespace huxerui;
 
@@ -23,6 +25,15 @@ int CountPrimes(int limit) {
     }
   }
   return count;
+}
+
+void RunSequencedWork(std::stop_token stop_token, int steps) {
+  for (int step = 0; step < steps; ++step) {
+    if (stop_token.stop_requested()) {
+      return;
+    }
+    std::this_thread::sleep_for(20ms);
+  }
 }
 
 class UserService {
@@ -67,10 +78,12 @@ View UserName(UserId user_id, std::shared_ptr<UserService> service) {
 }
 
 [[huxerui::composable]]
-View TaskContent(std::shared_ptr<UserService> service) {
+View TaskContent(std::shared_ptr<UserService> service, WorkerSequence worker_sequence) {
   auto tasks = UseTaskScope();
   auto user_id = UseState<UserId>(1);
   auto worker_status = UseState(std::string{"Worker has not run."});
+  auto sequence_status = UseState(std::string{"No sequenced work is pending."});
+  auto active_sequence_task = UseState(std::shared_ptr<TaskHandle>{});
   auto posted_updates = UseState(0);
   const ThemeSpec& theme = UseTheme();
 
@@ -115,6 +128,44 @@ View TaskContent(std::shared_ptr<UserService> service) {
           Spacing(theme.spacing.medium),
           CrossAlign(CrossAxisAlignment::Center)
       ),
+      Text("Ordered worker operations", TextRole::Title),
+      Text(
+          "WorkerSequence runs blocking operations one at a time. Cancellation requests the active stop token before "
+          "the next operation starts."
+      ),
+      Text(sequence_status),
+      Row {
+        Button("Run sequence").OnClick([=] {
+          sequence_status = "First operation running; second queued.";
+          TaskHandle first = tasks.Launch([=]() -> Task<void> {
+            try {
+              co_await worker_sequence.Run(RunSequencedWork, 30);
+              sequence_status = "First operation finished; second running.";
+            } catch (const std::runtime_error&) {
+              sequence_status = "Worker execution is unavailable in this build.";
+            }
+          });
+          active_sequence_task = std::make_shared<TaskHandle>(first);
+          tasks.Launch([=]() -> Task<void> {
+            try {
+              co_await worker_sequence.Run(RunSequencedWork, 15);
+              sequence_status = "Sequence finished in submission order.";
+            } catch (const std::runtime_error&) {
+              sequence_status = "Worker execution is unavailable in this build.";
+            }
+          });
+        }),
+        Button("Cancel active").OnClick([=] {
+          if (const auto active = active_sequence_task.Get()) {
+            active->Cancel();
+            active_sequence_task = {};
+            sequence_status = "Cancellation requested; queued work will continue.";
+          }
+        }),
+      }.With(
+          Spacing(theme.spacing.medium),
+          CrossAlign(CrossAxisAlignment::Center)
+      ),
     }.With(
         Padding(theme.spacing.extra_large),
         Spacing(theme.spacing.large),
@@ -128,7 +179,8 @@ View TaskContent(std::shared_ptr<UserService> service) {
 
 View App() {
   static const auto service = std::make_shared<UserService>();
-  return MaterialTheme {TaskContent(service)};
+  static const WorkerSequence worker_sequence;
+  return MaterialTheme {TaskContent(service, worker_sequence)};
 }
 
 const Application application{
