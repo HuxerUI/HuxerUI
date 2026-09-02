@@ -174,7 +174,7 @@ int locale_environment_compositions = 0;
 
 View ViewportEnvironmentContent() {
   ++viewport_environment_compositions;
-  return Text(std::to_string(static_cast<int>(UseViewportClass())));
+  return Text(std::to_string(static_cast<int>(UseViewportClass()))).Shaping({.locale = "en-US"});
 }
 
 View LocaleEnvironmentContent() {

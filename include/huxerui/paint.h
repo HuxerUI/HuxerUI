@@ -21,10 +21,12 @@
 namespace huxerui {
 
 class PaintContext;
+struct RenderNode;
 
 namespace detail {
 struct FrozenScene;
 struct PlatformViewPaintAccess;
+void PaintNodeWithinClip(huxerui::MountedNode& node, const Rect& clip, const RenderNode* extra_child);
 } // namespace detail
 
 /// Selects how intrinsic image geometry maps into a destination rectangle.
@@ -654,6 +656,8 @@ public:
   void Finish();
 
 private:
+  PaintContext(PaintSequence& sequence, Rect bounds, std::string default_shaping_locale);
+
   enum class StackEntry {
     Clip,
     Transform,
@@ -665,6 +669,7 @@ private:
 
   PaintSequence& sequence_;
   Rect bounds_;
+  std::string default_shaping_locale_;
   Transform2D transform_;
   std::optional<Rect> clip_;
   std::vector<Transform2D> transform_stack_;
@@ -672,6 +677,7 @@ private:
   std::vector<StackEntry> command_stack_;
   bool finished_ = false;
 
+  friend void detail::PaintNodeWithinClip(huxerui::MountedNode&, const Rect&, const RenderNode*);
   friend struct detail::PlatformViewPaintAccess;
 };
 

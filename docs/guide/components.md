@@ -9,6 +9,16 @@ Use application state for authoritative values and let mounted behavior retain t
 Use `TextRole` for theme typography or provide an explicit `TextStyle`.
 Use `Align(TextAlign::...)` for horizontal paragraph alignment and `VerticalAlign(TextVerticalAlign::...)` when a framed Text should place its paragraph within extra height.
 Vertical alignment does not change intrinsic text measurement.
+Text, built-in labels, and TextField use the inherited `Locale` for shaping when no locale is supplied.
+Use `Shaping(TextShapingOptions{...})` on Text or TextField for a local direction or locale override without changing localized resource lookup:
+
+```cpp
+return Text("مرحبا")
+    .Shaping({.direction = TextDirection::RightToLeft, .locale = "ar"});
+```
+
+Canvas `DrawText`, `DrawTextRun`, and `DrawTextRuns` calls inherit the Canvas node Locale only for entries whose shaping locale is empty.
+TextMeasurer has no implicit Environment lookup; pass a locale explicitly when custom composition measurement needs it.
 
 `ImageVariant` covers `ImageResource`, `ImageAsset`, and `VectorAsset`.
 `Image` also accepts `std::shared_ptr<ExternalTexture>` through a separate overload because a live platform texture is not an application image value.

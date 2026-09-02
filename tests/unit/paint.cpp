@@ -91,6 +91,24 @@ TEST_CASE("PaintContextKeepsTextParagraphOffsetsInsideFixedCommandBounds") {
   REQUIRE(sequence.Bounds() == bounds);
 }
 
+TEST_CASE("IndependentPaintContextLeavesDefaultTextShapingLocaleEmpty") {
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
+  context.DrawText({0.0F, 0.0F, 80.0F, 20.0F}, "paragraph", TextStyle{});
+  context.DrawTextRun({0.0F, 20.0F, 40.0F, 20.0F}, {0.0F, 35.0F}, "run", TextStyle{});
+  context.DrawTextRuns({
+      TextRun{{0.0F, 40.0F, 40.0F, 20.0F}, {0.0F, 55.0F}, "batch", TextStyle{}, {}},
+  });
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 2);
+  REQUIRE(std::get<DrawTextCommand>(sequence.Commands()[0]).options.shaping.locale.empty());
+  const auto& runs = std::get<DrawTextRunsCommand>(sequence.Commands()[1]).runs;
+  REQUIRE(runs.size() == 2);
+  REQUIRE(runs[0].shaping.locale.empty());
+  REQUIRE(runs[1].shaping.locale.empty());
+}
+
 TEST_CASE("PaintContextNormalizesRoundedGeometryAgainstConcreteBounds") {
   const Rect pill{10.0F, 20.0F, 120.0F, 20.0F};
   const LinearGradient linear{

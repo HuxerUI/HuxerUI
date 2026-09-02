@@ -2717,6 +2717,8 @@ void Runtime::EnsureRootStructure() {
                        );
                      }
                    }).LayoutValue<WindowBackplaneValue>(true);
+  // The backplane records only system-bar rectangles and must not subscribe the application root to text Locale.
+  backplane.SetTextShaping({.locale = "und"});
   View application = ApplicationContentLayout{};
   if (state_->window_->content_mode == WindowContentMode::SafeArea) {
     application = std::move(application).With(SafeAreaPadding{});
