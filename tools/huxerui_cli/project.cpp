@@ -275,7 +275,11 @@ std::string NormalizeLibraryIdentifier(std::string_view name) {
 }
 
 std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext& context) {
-  return RenderTemplateTree("project/app", context);
+  std::vector<GeneratedFile> files = RenderTemplateTree("project/app", context);
+  std::vector<GeneratedFile> project_support = RenderTemplateTree("project/application", context);
+  files.insert(files.end(), std::make_move_iterator(project_support.begin()),
+               std::make_move_iterator(project_support.end()));
+  return files;
 }
 
 ProjectTemplateContext PreviewContext(const LibraryTemplateContext& library) {
@@ -323,7 +327,11 @@ std::vector<GeneratedFile> PreviewProjectFiles(const LibraryTemplateContext& lib
       TemplateReplacement{"@LIBRARY_PUBLIC_TARGET@", library.public_target},
       TemplateReplacement{"@LIBRARY_PRIMARY_HEADER@", primary_header},
   };
-  return RenderTemplateTree("project/library_preview", context, replacements);
+  std::vector<GeneratedFile> files = RenderTemplateTree("project/library_preview", context, replacements);
+  std::vector<GeneratedFile> project_support = RenderTemplateTree("project/application", context);
+  files.insert(files.end(), std::make_move_iterator(project_support.begin()),
+               std::make_move_iterator(project_support.end()));
+  return files;
 }
 
 void CreateResourceDirectories(const std::filesystem::path& root) {
@@ -635,15 +643,22 @@ Project ResolveApplicationProject(const Project& project) {
 }
 
 void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
-    std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
+    std::span<const PlatformDriver* const> application_platforms,
+    std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
     std::span<const AgentSkillDirectory> agent_skill_directories) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
   const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
   const ProjectTemplateContext& context = ProjectContext(project_template);
-  if (library == nullptr && platforms.empty()) {
+  if (library == nullptr && application_platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
+  }
+  if (library != nullptr && application_platforms.empty()) {
+    throw std::invalid_argument("library preview creation requires at least one platform");
+  }
+  if (library == nullptr && !library_platforms.empty()) {
+    throw std::logic_error("HuxerUI CLI received library platforms for an application project");
   }
 
   const std::filesystem::path parent = destination.has_parent_path() ? destination.parent_path() : ".";
@@ -658,7 +673,7 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
   if (library == nullptr) {
     WriteFiles(temporary, ApplicationProjectFiles(context));
     CreateResourceDirectories(temporary);
-    for (const PlatformDriver* platform : platforms) {
+    for (const PlatformDriver* platform : application_platforms) {
       WriteFiles(temporary / "platform" / platform->Id(), platform->CreateShell(context));
     }
   } else {
@@ -667,11 +682,13 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
     CreateResourceDirectories(temporary);
     WriteFiles(temporary / "examples/preview", PreviewProjectFiles(*library));
     CreateResourceDirectories(temporary / "examples/preview");
-    for (const PlatformDriver* platform : platforms) {
+    for (const PlatformDriver* platform : library_platforms) {
       const std::vector<GeneratedFile> library_package = platform->CreateLibraryPackage(*library);
       if (!library_package.empty()) {
         WriteFiles(temporary / "platform" / platform->Id(), library_package);
       }
+    }
+    for (const PlatformDriver* platform : application_platforms) {
       WriteFiles(temporary / "examples/preview/platform" / platform->Id(), platform->CreateShell(preview));
     }
   }
@@ -696,6 +713,8 @@ void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_
     const PlatformDriver* platform;
     std::vector<GeneratedFile> library_package;
     std::vector<GeneratedFile> shell;
+    bool publish_library = false;
+    bool publish_shell = false;
   };
   std::vector<PlatformTrees> generated;
   generated.reserve(platforms.size());
@@ -706,26 +725,27 @@ void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_
         platform->CreateShell(shell_context),
     };
     const std::filesystem::path shell_destination = shell_root / platform->Id();
-    const bool has_library_package = !trees.library_package.empty();
     const std::filesystem::path library_destination = project.root / "platform" / platform->Id();
-    if (std::filesystem::exists(shell_destination) ||
-        (has_library_package && std::filesystem::exists(library_destination))) {
-      throw std::runtime_error("platform already exists: " + std::string(platform->Id()));
+    trees.publish_library = !trees.library_package.empty() && !std::filesystem::exists(library_destination);
+    trees.publish_shell = !std::filesystem::exists(shell_destination);
+    if (trees.publish_library || trees.publish_shell) {
+      generated.push_back(std::move(trees));
     }
-    generated.push_back(std::move(trees));
+  }
+  if (generated.empty()) {
+    throw std::runtime_error("all requested platforms are already enabled");
   }
 
   std::vector<std::filesystem::path> created;
   created.reserve(platforms.size() * 2);
   try {
     for (PlatformTrees& trees : generated) {
-      if (library != nullptr) {
-        if (!trees.library_package.empty()) {
-          PublishGeneratedTree(project.root / "platform" / trees.platform->Id(),
-                               std::move(trees.library_package), created);
-        }
+      if (trees.publish_library) {
+        PublishGeneratedTree(project.root / "platform" / trees.platform->Id(), trees.library_package, created);
       }
-      PublishGeneratedTree(shell_root / trees.platform->Id(), std::move(trees.shell), created);
+      if (trees.publish_shell) {
+        PublishGeneratedTree(shell_root / trees.platform->Id(), trees.shell, created);
+      }
     }
   } catch (...) {
     for (const std::filesystem::path& path : created) {

@@ -101,21 +101,23 @@ MakeProjectTemplateContext(std::string_view project_name, std::string_view proje
 /// Generates a complete project and publishes it atomically at the destination.
 /// @param destination New project directory, which must not already exist.
 /// @param project_template Validated application or library template values.
-/// @param platforms Platform shells to generate.
+/// @param application_platforms Platform shells for an application or library Preview.
+/// @param library_platforms Platform packages owned by a reusable library.
 /// @param skill_source Canonical application-development Skill directory.
 /// @param agent_skill_directories Agent layouts that should receive the Skill.
-/// @throws std::invalid_argument if an application has no platform.
+/// @throws std::invalid_argument if an application or library Preview has no platform.
 /// @throws std::runtime_error if generation or publication fails.
 void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
-    std::span<const PlatformDriver* const> platforms, const std::filesystem::path& skill_source,
+    std::span<const PlatformDriver* const> application_platforms,
+    std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
     std::span<const AgentSkillDirectory> agent_skill_directories);
 
-/// Adds platform shells to an existing application or library preview.
+/// Adds missing platform shells and library packages to an existing project.
 /// @param project Existing project.
 /// @param project_template Existing application or library template values.
-/// @param platforms New platform drivers to add.
+/// @param platforms Platform drivers whose missing generated trees should be added.
 /// @throws std::invalid_argument if no platform is supplied.
-/// @throws std::runtime_error if a requested platform already exists or publication fails.
+/// @throws std::runtime_error if every requested platform is already complete or publication fails.
 void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,
     std::span<const PlatformDriver* const> platforms);
 

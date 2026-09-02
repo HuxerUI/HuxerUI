@@ -62,6 +62,7 @@ A generated project has this shape:
 hello_huxer/
   .gitignore
   CMakeLists.txt
+  HuxerUIProject.cmake
   src/app.cpp
   resources/
     images/
@@ -212,7 +213,7 @@ Windows and Linux require no platform projection when their library integration 
 The library graph never contains an application identifier, SDK or NDK versions, ABIs, product names, permissions, platform dependencies, hooks, resource namespaces, or SDK selection.
 Those values remain in their owning Gradle, Xcode, platform package, or CMake files.
 Deleting `.huxerui/generated` and configuring again must reproduce the library graph and derived platform-package integration.
-The CLI never parses `CMakeLists.txt` as source text.
+The CLI never parses `CMakeLists.txt` or `HuxerUIProject.cmake` as source text.
 
 ## CLI surface
 
@@ -249,10 +250,12 @@ huxerui platform add macos
 
 Application creation writes the common CMake project and complete minimal shells for the selected platforms.
 Library creation writes a common CMake library and a normal application under `examples/preview` that consumes it through a local path.
-The generated project recursively collects C++ sources under `src`, so adding a source file does not require a platform-specific CMake edit.
+When no Library platform integration is requested, the Library remains common-only while its Preview receives the same all-platform default as an application.
+Each generated `CMakeLists.txt` explicitly scans and passes its source files to `huxerui_add_app` or `huxerui_add_library`, so applications may replace or refine that policy without changing the CLI integration layer.
+The sibling `HuxerUIProject.cmake` directly emits the CLI project plan and owns SDK discovery plus generated platform-shell configuration; it never creates a target or discovers application and library sources.
 The template creates `resources/images`, `resources/raw`, and `resources/strings` directly, without an additional domain directory.
 It uses a temporary tree and publishes the project only after every file succeeds.
-`platform add` similarly refuses to overwrite an existing platform directory and rolls back directories created by a failed multi-platform operation.
+`platform add` fills only missing application shells or Library platform packages, never overwrites an existing tree, and rolls back directories created by a failed multi-platform operation.
 
 ### Doctor
 
@@ -566,6 +569,7 @@ It is not a runtime plugin and does not require a universal public `Library` bas
 ```text
 CameraKit/
   CMakeLists.txt
+  HuxerUIProject.cmake
   README.md
   LICENSE
   include/camerakit/
@@ -584,6 +588,7 @@ CameraKit/
   examples/
     preview/
       CMakeLists.txt
+      HuxerUIProject.cmake
       src/app.cpp
       resources/
       platform/
@@ -632,11 +637,13 @@ An iOS application receives an Xcode application project, while an iOS library r
 Platform-specific SDK levels, dependencies, permissions, capabilities, publishing coordinates, and product policy are edited in those generated platform projects instead of being additional cross-platform CLI arguments.
 
 Application creation retains the current all-platform default when `--platform` is omitted.
-Library creation without `--platform` creates only the common C++ library and common preview sources; it does not create empty platform packages.
+Library creation without `--platform` creates no Library platform package, while its ordinary Preview application receives every platform shell.
+This keeps the Library platform-neutral and makes `huxerui run <platform>` immediately available from its root on a compatible host.
 Each platform selected for a library creates the matching application shell below `examples/preview`.
-Windows and Linux create CMake source roots under `platform/<platform>/src`, Android additionally creates an independent Gradle library under `platform/android`, and iOS creates a Swift Package under `platform/ios`.
-macOS and Web currently add only the Preview shell because no separate platform-package shape has been defined for them.
-`platform add` applies the same behavior after creation and refuses to overwrite either an existing platform package or Preview shell.
+Windows, Linux, and macOS create CMake source roots under `platform/<platform>/src`, Android additionally creates an independent Gradle library under `platform/android`, and iOS creates a Swift Package under `platform/ios`.
+The macOS source root may contain C++ and Objective-C++ sources compiled into the common library target; iOS native sources remain owned exclusively by its Swift Package and Xcode integration.
+Web currently adds only the Preview shell because no separate platform-package shape has been defined for it.
+`platform add` applies the same behavior after creation, fills whichever Library package or Preview shell is missing, and leaves an existing counterpart untouched.
 Later commands obtain launch artifacts from the owning platform or CMake build output, while platform-package attachment uses the platform-neutral generated library graph.
 Deleting `.huxerui` and regenerating it does not require parsing `CMakeLists.txt` or maintaining a second editable manifest.
 The generated library's CMake planning output records the exact namespace and public target alongside its project identity.

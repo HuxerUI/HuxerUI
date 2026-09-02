@@ -147,6 +147,7 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   REQUIRE(invocation.output.find("--target <public-cmake-target>") != std::string::npos);
   REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
   REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
+  REQUIRE(invocation.output.find("a common library's Preview enable all platforms") != std::string::npos);
 }
 
 TEST_CASE("HuxerUICliValidatesExplicitSourceCheckouts") {
@@ -198,7 +199,7 @@ TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
   REQUIRE(activity->content.find("@PROJECT_") == std::string::npos);
   REQUIRE_THROWS_WITH(
       huxerui::cli::RenderTemplateTree("project/library", context),
-      "HuxerUI CLI template contains an unresolved replacement: @LIBRARY_NAMESPACE@"
+      Catch::Matchers::ContainsSubstring("HuxerUI CLI template contains an unresolved replacement: @LIBRARY_")
   );
   REQUIRE_THROWS_WITH(
       huxerui::cli::RenderTemplateTree("missing/templates", context),
@@ -223,6 +224,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(invocation.result == 0);
   const std::filesystem::path project = temporary.Path() / "Sample-App";
   REQUIRE(std::filesystem::is_regular_file(project / "CMakeLists.txt"));
+  REQUIRE(std::filesystem::is_regular_file(project / "HuxerUIProject.cmake"));
   REQUIRE(std::filesystem::is_regular_file(project / "src/app.cpp"));
   REQUIRE(std::filesystem::is_directory(project / "resources/images"));
   REQUIRE(std::filesystem::is_directory(project / "resources/raw"));
@@ -259,16 +261,20 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(cmake.find("src/*.cpp") != std::string::npos);
   REQUIRE(cmake.find("SOURCES\n            ${APP_SOURCE_FILES}") != std::string::npos);
   REQUIRE(cmake.find("RESOURCES\n            resources") != std::string::npos);
-  REQUIRE(cmake.find("NO_CMAKE_FIND_ROOT_PATH") != std::string::npos);
-  REQUIRE(cmake.find("\"id\": \"dev.example.sampleapp\"") != std::string::npos);
-  REQUIRE(cmake.find("HUXERUI_LIBRARY_GRAPH_OUTPUT") != std::string::npos);
   REQUIRE(cmake.find("project(sample_app VERSION 0.1.0 LANGUAGES NONE)") != std::string::npos);
-  REQUIRE(cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
-  REQUIRE(cmake.find("if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)\n    enable_language(CXX)") != std::string::npos);
+  REQUIRE(cmake.find("huxerui_configure_project_app(sample_app)") != std::string::npos);
   REQUIRE(cmake.find("set(CMAKE_CXX_STANDARD") == std::string::npos);
-  REQUIRE(cmake.find("set(HUXERUI_BUILD_SHARED ON CACHE BOOL \"\" FORCE)") != std::string::npos);
-  REQUIRE(cmake.find("set(HUXERUI_BUILD_STATIC OFF CACHE BOOL \"\" FORCE)") != std::string::npos);
-  REQUIRE(cmake.find("RESOURCE_OUTPUT_DIRECTORY") != std::string::npos);
+  const std::string project_cmake = Read(project / "HuxerUIProject.cmake");
+  REQUIRE(project_cmake.find("NO_CMAKE_FIND_ROOT_PATH") != std::string::npos);
+  REQUIRE(project_cmake.find("\"id\": \"dev.example.sampleapp\"") != std::string::npos);
+  REQUIRE(project_cmake.find("HUXERUI_LIBRARY_GRAPH_OUTPUT") != std::string::npos);
+  REQUIRE(project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(project_cmake.find("if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)\n    enable_language(CXX)") !=
+          std::string::npos);
+  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_SHARED ON CACHE BOOL \"\" FORCE)") != std::string::npos);
+  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_STATIC OFF CACHE BOOL \"\" FORCE)") != std::string::npos);
+  REQUIRE(project_cmake.find("RESOURCE_OUTPUT_DIRECTORY") != std::string::npos);
+  REQUIRE(project_cmake.find("function(huxerui_configure_project_app target_name)") != std::string::npos);
   const std::string application = Read(project / "src/app.cpp");
   REQUIRE(application.find("const Application application") != std::string::npos);
   REQUIRE(application.find("MaterialTheme") == std::string::npos);
@@ -330,7 +336,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
           "--id",
           "dev.example.camera.kit",
           "--platform",
-          "android,ios,linux,windows",
+          "android,ios,linux,macos,windows",
       }
   );
 
@@ -351,12 +357,14 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(std::filesystem::is_regular_file(library / "platform/ios/Package.swift"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/ios/Sources/HuxerUICameraKit/HuxerUICameraKit.swift"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/linux/src/.gitkeep"));
+  REQUIRE(std::filesystem::is_regular_file(library / "platform/macos/src/.gitkeep"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/windows/src/.gitkeep"));
   const std::string swift_package = Read(library / "platform/ios/Package.swift");
   REQUIRE(swift_package.find("name: \"HuxerUI-CameraKit\"") != std::string::npos);
   REQUIRE(swift_package.find(".iOS(.v15)") != std::string::npos);
   REQUIRE(swift_package.find("targets: [\"HuxerUICameraKit\"]") != std::string::npos);
   const std::string library_cmake = Read(library / "CMakeLists.txt");
+  const std::string library_project_cmake = Read(library / "HuxerUIProject.cmake");
   REQUIRE(library_cmake.find("huxerui_add_library(huxeruicamerakit") != std::string::npos);
   REQUIRE(library_cmake.find("RESOURCES\n            resources") != std::string::npos);
   REQUIRE(library_cmake.find("RESOURCE_NAMESPACE\n            huxeruicamerakit") != std::string::npos);
@@ -367,15 +375,21 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   );
   REQUIRE(library_cmake.find("platform/android/src/main/cpp/*.cpp") != std::string::npos);
   REQUIRE(library_cmake.find("platform/linux/src/*.cpp") != std::string::npos);
+  REQUIRE(library_cmake.find("platform/macos/src/*.mm") != std::string::npos);
   REQUIRE(library_cmake.find("platform/web/src/*.cpp") != std::string::npos);
   REQUIRE(library_cmake.find("platform/windows/src/*.cpp") != std::string::npos);
-  REQUIRE(library_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(library_project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(library_project_cmake.find("enable_language(OBJCXX)") != std::string::npos);
+  REQUIRE(library_project_cmake.find("\"publicTarget\": \"HuxerUICameraKit::HuxerUICameraKit\"") !=
+          std::string::npos);
   REQUIRE(library_cmake.find("set(CMAKE_CXX_STANDARD") == std::string::npos);
   const std::string preview_cmake = Read(preview / "CMakeLists.txt");
+  const std::string preview_project_cmake = Read(preview / "HuxerUIProject.cmake");
   REQUIRE(preview_cmake.find("huxerui_add_app(example_huxer_ui_camera_kit") != std::string::npos);
   REQUIRE(preview_cmake.find("TARGET HuxerUICameraKit::HuxerUICameraKit") != std::string::npos);
   REQUIRE(preview_cmake.find("PATH \"${CMAKE_CURRENT_SOURCE_DIR}/../..\"") != std::string::npos);
-  REQUIRE(preview_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(preview_project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(preview_project_cmake.find("\"kind\": \"app\"") != std::string::npos);
   const std::string preview_application = Read(preview / "src/app.cpp");
   REQUIRE(preview_application.find("#include <huxeruicamerakit/huxeruicamerakit.h>") != std::string::npos);
   REQUIRE(preview_application.find("huxer_ui_camera_kit::Install") != std::string::npos);
@@ -387,6 +401,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
       std::filesystem::is_regular_file(preview / "platform/ios/example_huxer_ui_camera_kit.xcodeproj/project.pbxproj")
   );
   REQUIRE(std::filesystem::is_regular_file(preview / "platform/linux/main.cpp"));
+  REQUIRE(std::filesystem::is_regular_file(preview / "platform/macos/main.cpp"));
   REQUIRE(std::filesystem::is_regular_file(preview / "platform/windows/main.cpp"));
 
   std::filesystem::remove_all(library / ".huxerui");
@@ -394,7 +409,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   const huxerui::cli::Project application =
       huxerui::cli::ResolveApplicationProject(huxerui::cli::DiscoverProject(library));
   REQUIRE(std::filesystem::equivalent(application.root, preview));
-  REQUIRE(application.platforms == std::vector<std::string>{"android", "ios", "linux", "windows"});
+  REQUIRE(application.platforms == std::vector<std::string>{"android", "ios", "linux", "macos", "windows"});
   REQUIRE_FALSE(std::filesystem::exists(library / ".huxerui"));
   REQUIRE_FALSE(std::filesystem::exists(preview / ".huxerui"));
 
@@ -436,9 +451,10 @@ TEST_CASE("HuxerUICliCreatesLibrariesWithIndependentPublicIdentities") {
   REQUIRE(source.find("namespace scave::camera") != std::string::npos);
 
   const std::string library_cmake = Read(library / "CMakeLists.txt");
-  REQUIRE(library_cmake.find("\"schema\": 1") != std::string::npos);
-  REQUIRE(library_cmake.find("\"namespace\": \"scave::camera\"") != std::string::npos);
-  REQUIRE(library_cmake.find("\"publicTarget\": \"Scave::Camera\"") != std::string::npos);
+  const std::string library_project_cmake = Read(library / "HuxerUIProject.cmake");
+  REQUIRE(library_project_cmake.find("\"schema\": 1") != std::string::npos);
+  REQUIRE(library_project_cmake.find("\"namespace\": \"scave::camera\"") != std::string::npos);
+  REQUIRE(library_project_cmake.find("\"publicTarget\": \"Scave::Camera\"") != std::string::npos);
   REQUIRE(library_cmake.find("huxerui_add_library(scave_camera") != std::string::npos);
   REQUIRE(library_cmake.find("RESOURCE_NAMESPACE\n            scave_camera") != std::string::npos);
   REQUIRE(library_cmake.find("add_library(Scave::Camera ALIAS scave_camera)") != std::string::npos);
@@ -576,26 +592,39 @@ TEST_CASE("HuxerUICliCreatesSkillsForSelectedAgents") {
   REQUIRE_FALSE(std::filesystem::exists(temporary.Path() / "disabled/.zcode"));
 }
 
-TEST_CASE("HuxerUICliCreatesCommonOnlyLibrariesWithoutPlatformShells") {
+TEST_CASE("HuxerUICliCreatesCommonOnlyLibrariesWithRunnablePreviews") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(temporary.Path(), {"create", "library", "AudioTools"});
 
   REQUIRE(invocation.result == 0);
+  REQUIRE(invocation.output.find("Library platforms: none") != std::string::npos);
+  REQUIRE(invocation.output.find("Preview platforms: android windows linux macos ios web") != std::string::npos);
   const std::filesystem::path library = temporary.Path() / "AudioTools";
   REQUIRE(std::filesystem::is_regular_file(library / "CMakeLists.txt"));
+  REQUIRE(std::filesystem::is_regular_file(library / "HuxerUIProject.cmake"));
   REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/CMakeLists.txt"));
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/HuxerUIProject.cmake"));
   REQUIRE_FALSE(std::filesystem::exists(library / "platform"));
-  REQUIRE_FALSE(std::filesystem::exists(library / "examples/preview/platform"));
+  const huxerui::cli::Project preview =
+      huxerui::cli::ResolveApplicationProject(huxerui::cli::DiscoverProject(library));
+  REQUIRE(preview.platforms == std::vector<std::string>{"android", "ios", "linux", "macos", "web", "windows"});
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/android/settings.gradle"));
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/ios/Config/Base.xcconfig"));
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/linux/main.cpp"));
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/macos/Info.plist.in"));
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/web/index.html.in"));
+  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/windows/main.cpp"));
+
   const Invocation platform_add = Invoke(library, {"platform", "add", "android,macos"});
   REQUIRE(platform_add.result == 0);
   REQUIRE(std::filesystem::is_regular_file(library / "platform/android/build.gradle"));
-  REQUIRE_FALSE(std::filesystem::exists(library / "platform/macos"));
-  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/android/settings.gradle"));
-  REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/macos/Info.plist.in"));
+  REQUIRE(std::filesystem::is_regular_file(library / "platform/macos/src/.gitkeep"));
 
-  const Invocation duplicate = Invoke(library, {"platform", "add", "windows,macos"});
+  const Invocation duplicate = Invoke(library, {"platform", "add", "android,macos"});
   REQUIRE(duplicate.result == 1);
-  REQUIRE_FALSE(std::filesystem::exists(library / "examples/preview/platform/windows"));
+  const Invocation partial = Invoke(library, {"platform", "add", "windows,macos"});
+  REQUIRE(partial.result == 0);
+  REQUIRE(std::filesystem::is_regular_file(library / "platform/windows/src/.gitkeep"));
 }
 
 TEST_CASE("HuxerUICliRefusesInvalidAndExistingDestinations") {

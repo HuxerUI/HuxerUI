@@ -28,6 +28,8 @@ Add another shell later with:
 huxerui platform add web
 ```
 
+A Library created without `--platform` remains a common C++ Library but includes an all-platform `examples/preview` application, so `huxerui run <platform>` from the Library tree runs that Preview on a compatible host.
+
 ## Diagnose the environment
 
 ```bash
@@ -172,6 +174,8 @@ huxerui open ios [--source <path>]
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
 Packaged application artifacts are collected under `dist/<platform>`.
 Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
+The generated `CMakeLists.txt` keeps source discovery, target creation, resources, and library dependencies explicit.
+Its sibling `HuxerUIProject.cmake` contains the generated project plan, SDK discovery, and platform-shell connection details.
 
 Library names remain repository and display identities.
 `--namespace` selects the exact generated C++ namespace, while `--target` selects an unqualified or single-package-qualified public CMake target.

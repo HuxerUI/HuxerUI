@@ -64,6 +64,7 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui open ios [--source <path>]\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n"
+         << "Without --platform, an app and a common library's Preview enable all platforms.\n"
          << "An agent list is comma-separated and supports ";
   for (std::size_t index = 0; index < agent_skill_mappings.size(); ++index) {
     if (index > 0) {
@@ -440,21 +441,42 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   } catch (const std::invalid_argument& error) {
     throw UsageError(error.what());
   }
-  const std::vector<const PlatformDriver*> platforms =
+  const std::vector<const PlatformDriver*> selected_platforms =
       platform_list ? ResolvePlatforms(*platform_list) : std::vector<const PlatformDriver*>{};
+  std::vector<const PlatformDriver*> application_platforms = selected_platforms;
+  std::vector<const PlatformDriver*> library_platforms;
+  if (kind == ProjectKind::Library) {
+    library_platforms = selected_platforms;
+    if (!platform_specified) {
+      application_platforms = ResolvePlatforms("all");
+    }
+  }
   const std::vector<AgentSkillDirectory> agent_skill_directories = ResolveAgentSkillDirectories(agent_list);
   const std::filesystem::path skill_source = agent_skill_directories.empty()
                                                  ? std::filesystem::path{}
                                                  : ResolveApplicationDevelopmentSkill(huxerui_home);
   const std::filesystem::path destination = working_directory / arguments[2];
-  CreateProject(destination, project_template, platforms, skill_source, agent_skill_directories);
+  CreateProject(destination, project_template, application_platforms, library_platforms, skill_source,
+                agent_skill_directories);
 
-  output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << "\nPlatforms:";
-  for (const PlatformDriver* platform : platforms) {
-    output << ' ' << platform->Id();
-  }
-  if (platforms.empty()) {
-    output << " none";
+  output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << '\n';
+  if (kind == ProjectKind::App) {
+    output << "Platforms:";
+    for (const PlatformDriver* platform : application_platforms) {
+      output << ' ' << platform->Id();
+    }
+  } else {
+    output << "Library platforms:";
+    for (const PlatformDriver* platform : library_platforms) {
+      output << ' ' << platform->Id();
+    }
+    if (library_platforms.empty()) {
+      output << " none";
+    }
+    output << "\nPreview platforms:";
+    for (const PlatformDriver* platform : application_platforms) {
+      output << ' ' << platform->Id();
+    }
   }
   output << '\n';
   return 0;
@@ -468,28 +490,10 @@ int RunPlatform(std::span<const std::string_view> arguments, const std::filesyst
 
   const Project project = DiscoverProject(working_directory);
   const ProjectTemplate project_template = LoadProjectTemplate(project);
-  const bool library = std::holds_alternative<LibraryTemplateContext>(project_template);
-  std::vector<const PlatformDriver*> platforms = ResolvePlatforms(arguments[2]);
-  if (arguments[2] == "all") {
-    platforms.erase(
-        std::remove_if(
-            platforms.begin(),
-            platforms.end(),
-            [&project, library](const PlatformDriver* platform) {
-              const std::filesystem::path platform_root =
-                  library ? project.root / "examples/preview/platform" : project.root / "platform";
-              return std::filesystem::is_directory(platform_root / platform->Id());
-            }
-        ),
-        platforms.end()
-    );
-    if (platforms.empty()) {
-      throw std::runtime_error("all available platforms are already enabled");
-    }
-  }
+  const std::vector<const PlatformDriver*> platforms = ResolvePlatforms(arguments[2]);
   AddProjectPlatforms(project, project_template, platforms);
 
-  output << "Added platforms:";
+  output << "Updated platforms:";
   for (const PlatformDriver* platform : platforms) {
     output << ' ' << platform->Id();
   }
