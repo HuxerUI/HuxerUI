@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=@PROJECT_NAME@
+Exec=@TARGET_NAME@
+Icon=@TARGET_NAME@
+Categories=Utility;
+Terminal=false

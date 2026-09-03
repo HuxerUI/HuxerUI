@@ -113,8 +113,17 @@ install(FILES
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILibraries.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResourceBuild.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIGenerateWixPayloads.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIWindowsInstaller.cmake"
         DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
 )
+if (WIN32)
+    install(FILES
+            "${HUXERUI_PROJECT_DIR}/platform/windows/win32_application_runner.h"
+            "${HUXERUI_PROJECT_DIR}/platform/windows/windows_installer.cpp"
+            DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+    )
+endif ()
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND TARGET ${HUXERUI_STATIC_LIB_NAME})
     install(FILES
             "${CMAKE_CURRENT_BINARY_DIR}/HuxerUILinuxStaticDependencies.cmake"

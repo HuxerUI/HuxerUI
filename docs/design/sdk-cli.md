@@ -6,7 +6,7 @@ This document defines the HuxerUI SDK and CLI ownership model, the project workf
 
 - Applications and libraries do not use a HuxerUI-specific manifest.
 - CMake owns common C++ sources, resources, targets, and the library dependency graph.
-- Source-controlled `platform/<platform-id>` shells own platform lifecycle, packaging, signing, and platform-only configuration.
+- Source-controlled `platform/<platform-id>` shells own platform lifecycle, distribution metadata, signing policy, and platform-only configuration.
 - Every platform builds the application through the repository root `CMakeLists.txt`; platform-specific wrapper CMake projects are not part of the target architecture.
 - `.huxerui` contains only reproducible generated metadata and platform incremental build output.
 - The CLI orchestrates CMake and platform tools; it does not replace Gradle, Xcode, Emscripten, or another platform build system.
@@ -345,10 +345,67 @@ For Android on Termux, `run` opens the generated APK through `termux-open` and d
 
 ### Package
 
-`package <platform-list>` builds Release output unless `--profile` is explicit, then asks each platform driver for its user-facing artifacts.
-The shared command validates every declared source and relative destination, replaces only `dist/<platform>`, and copies files or bundles without inferring platform-specific filenames.
-Windows collects the executable, resource directory, and adjacent runtime DLLs; macOS and iOS collect their bundles; Linux collects the executable and resource directory; Android collects the APK; Web collects the target-prefixed HTML, JavaScript, WebAssembly, and related output files.
-An explicitly requested unsupported platform or missing artifact fails the command instead of producing a partial success message.
+`package <platform-list>` builds Release output unless `--profile` is explicit, then asks each platform driver to produce its platform-native distribution artifact.
+Intermediate staging lives below `.huxerui/package/<platform>/<profile>` and is never a user-facing result.
+The shared command validates the final artifact and publishes it below `dist/<platform>` only after every preparation and packaging command succeeds, so a failed package never removes the previous valid result.
+
+Desktop platforms intentionally use different containers:
+
+- Windows produces one Burn `setup.exe` containing the application MSI and its HuxerUI bootstrapper application.
+- macOS produces one DMG containing the complete application bundle and an Applications link.
+- Linux produces one executable AppImage containing the application, its HuxerUI resources, and application-declared runtime payloads.
+
+Android, iOS, and Web retain their platform-owned store, archive, and deployment outputs rather than pretending that an interactive desktop installer applies to them.
+An explicitly requested unsupported platform, missing package tool, malformed staging tree, or missing final artifact fails the command instead of producing a partial success message.
+
+Application installation content comes only from CMake install rules.
+The generated application installs its executable and final HuxerUI resource package, while an application adds explicit install rules for third-party libraries, plugins, codecs, and data that it owns.
+`huxerui_add_app` records the single package component in the application target's `HUXERUI_APPLICATION_INSTALL_COMPONENT` property, so generated shells and application-owned install rules share the same value without a directory-scoped variable.
+The CLI never scans an executable dependency graph or copies every adjacent dynamic library.
+The staged tree is a projection of those rules, not another package manifest.
+
+### Windows installer
+
+Windows uses WiX v5 Burn and MSI as the installation engine.
+Burn owns detection, planning, caching, elevation, apply, cancellation, rollback, repair, uninstall, and restart semantics.
+HuxerUI owns only the bootstrapper application's interface and presentation.
+The bootstrapper application is a normal out-of-process HuxerUI executable using the existing Windows `PlatformAdapter` and shared `Runtime`; it is not a Runtime subclass, embedded MSI UI, NSIS child window, PlatformView, or PlatformModule.
+
+The generated Windows shell contains editable installer source and resources under `platform/windows/package`.
+Its interface text uses the installer target's ordinary HuxerUI string resources and the Runtime's one locale configuration; the required default catalog supplies fallback text, and language or region catalogs use the same resolution chain as application resources.
+The native folder picker and messages returned by Burn remain platform-owned text rather than a second installer localization registry.
+Normal `build` and `run` commands neither build that target nor require WiX.
+Windows package mode restores the pinned WiX tool and native bootstrapper API into package-local generated storage, verifies their hashes, builds the installer UI against `HuxerUI::huxerui_static`, stages the application through CMake install rules, and then produces one bundle.
+The Windows installer CMake module owns the WiX version, package layout, restoration, and tool validation as one dependency contract.
+The restored framework-dependent tool requires `Microsoft.NETCore.App` 6.0 or newer, but does not require a system-wide WiX installation.
+The initial Windows package implementation targets x64 and rejects another architecture explicitly.
+No package dependency becomes part of the installed application or the ordinary framework targets.
+
+The platform-specific `<huxerui/windows/installer.h>` surface provides one composition-bound `InstallerHandle` backed by one root-owned installer session.
+Its coalesced status contains the current phase, detected product state, expanded authored destination and desktop-shortcut default, active action, overall progress, current package, optional prompt, optional failure, and restart requirement.
+Commands choose an installation directory asynchronously through the window-owned system picker, start install with one optional override object, repair or uninstall, request cooperative cancellation, and answer the currently identified prompt.
+It does not expose WiX interfaces, HRESULT callbacks, a second event stream, duplicated `can_xxx` flags, or a generic cross-platform installer abstraction.
+Installing over an older product is the ordinary install action rather than a separate update command.
+
+Burn's `InstallFolder` and `CreateDesktopShortcut` variables are the only authored defaults and the only values passed into the matching MSI properties.
+The generated HuxerUI interface keeps only controlled local drafts, initializes them from the expanded Burn values, and submits one `InstallerInstallOptions` value when installation begins.
+The MSI always installs the Start menu entry and models the optional desktop shortcut as its own Feature so Windows Installer can retain the selected Feature state across major upgrades.
+Taskbar pinning remains an application-owned foreground request because Windows requires explicit user interaction and confirmation and excludes installers from that workflow.
+The folder picker is Windows-installer behavior rather than an expansion of the cross-platform file-capability API.
+Its Task is launched from the interface's composition-owned `TaskScope`, whose queued first resume lets the requesting pointer event finish before the native modal dialog starts.
+
+Burn callbacks publish immutable status changes through the Windows UI dispatcher before notifying composition dependencies.
+User commands enter Burn from the bootstrapper UI thread, while callback-driven continuation follows Burn's callback thread model.
+Synchronous engine questions expose one identified prompt at a time; answering a stale prompt has no effect.
+Closing during an active apply requests cancellation and allows Burn to finish rollback before the bootstrapper exits.
+The installer operation is root-owned and never belongs to a component `TaskScope`, because unmounting one component must not cancel a process-wide installation transaction.
+
+This interface is Windows-only.
+macOS package mode produces a DMG for an ordinary application; release signing and notarization remain owned by the application's release pipeline.
+Products that require multiple privileged destinations or installation scripts may use the system Installer with a PKG outside this ordinary application flow.
+Linux AppImage, deb, rpm, and Flatpak installation remains owned by their native execution or package-manager model.
+Android, iOS, and Web retain system, store, and browser distribution behavior.
+HuxerUI therefore unifies the `package` command and artifact ownership without inventing a cross-platform installer UI contract.
 
 ## SDK selection and distribution
 

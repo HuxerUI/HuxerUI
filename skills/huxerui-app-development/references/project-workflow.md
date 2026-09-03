@@ -164,6 +164,25 @@ Do not add a second dependency manifest or invoke FetchContent separately for a 
 - On Termux, Android and Web use the current device directly: do not pass `--device` or add ADB. Web uses the CLI-planned Python loopback server and opens its URL through `termux-open`.
 - A Termux Android run opens the APK in the system installer; complete installation and choose Open there.
 
+## Package applications
+
+Use `huxerui package <platform-list>` for user-requested distribution output and inspect `dist/<platform>` only after the command succeeds.
+Release is the default package profile.
+Windows produces one setup executable, macOS one DMG, and Linux one AppImage; Android, iOS, and Web retain their platform build outputs.
+Windows setup generation currently supports x64 applications.
+Do not require WiX, `appimagetool`, or `hdiutil` for ordinary `build` or `run`.
+Windows package mode restores its pinned WiX packages automatically and requires `Microsoft.NETCore.App` 6.0 or newer only to run the restored tool.
+
+Desktop package content comes only from CMake install rules using the application target's `HUXERUI_APPLICATION_INSTALL_COMPONENT` property.
+Add an explicit platform-conditional `install()` rule for each third-party dynamic library, plugin, codec, or data file that the application owns; do not scan adjacent output files or copy an inferred dependency directory.
+
+A generated Windows application keeps its editable HuxerUI installer under `platform/windows/package`.
+Localize its interface through `package/resources/strings/default.properties` and additional HuxerUI locale catalogs instead of adding an installer-specific locale store.
+Use the Windows-only `<huxerui/windows/installer.h>` handle and its one observed `InstallerStatus` when customizing that interface.
+Read the authored destination and desktop-shortcut defaults from that status, launch `ChooseDestinationAsync()` from the component's `TaskScope`, and submit user overrides together through `InstallerInstallOptions`; do not add a second installer configuration store.
+Keep the Start menu entry in MSI, model optional shortcuts as MSI Features, and never request taskbar pinning from the installer process.
+Keep Burn responsible for detection, elevation, caching, apply, cancellation, rollback, repair, and uninstall, and do not create a parallel installer state store or use the installer API in the ordinary application executable.
+
 ## Diagnose by phase
 
 Classify a failure before changing code:

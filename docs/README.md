@@ -15,6 +15,7 @@ User guides describe the current public SDK, development guides cover this repos
 - [HTTP Client](guide/http.md): buffered and streaming responses, transfer progress, Tasks, and errors.
 - [Extending HuxerUI](guide/extending.md): custom components, layouts, modifiers, and platform services.
 - [Platform Support](guide/platforms.md): supported hosts, toolchains, and platform capabilities.
+- [Packaging Applications](guide/packaging.md): platform-native outputs, explicit runtime payloads, and custom Windows installer interfaces.
 
 ## Framework development
 

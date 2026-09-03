@@ -10,6 +10,12 @@
 namespace huxerui::cli {
 namespace {
 
+std::filesystem::path MacOSPackageArtifact(const PlatformCommandContext& context, std::string_view plan) {
+  const std::string target = detail::JsonString(plan, "target");
+  const std::string version = detail::JsonString(plan, "version");
+  return context.project_root / ".huxerui/package/macos" / context.profile / (target + "-" + version + ".dmg");
+}
+
 class MacOSDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
@@ -55,6 +61,9 @@ public:
   }
 
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
+    if (context.package && SupportsCurrentHost() && !FindExecutable("hdiutil")) {
+      throw std::runtime_error("HuxerUI macOS packaging requires hdiutil on PATH");
+    }
     return detail::DesktopBuildCommands(context);
   }
 
@@ -68,9 +77,26 @@ public:
   }
 
   std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {
-    const std::filesystem::path bundle =
-        detail::JsonString(detail::ReadFile(detail::AppIntegrationPlan(context)), "bundle");
-    return {{bundle, bundle.filename()}};
+    const std::string plan = detail::ReadFile(detail::AppIntegrationPlan(context));
+    const std::filesystem::path artifact = MacOSPackageArtifact(context, plan);
+    return {{artifact, artifact.filename()}};
+  }
+
+  std::vector<ProcessCommand> PackageCommands(const PlatformCommandContext& context) const override {
+    const std::string plan = detail::ReadFile(detail::AppIntegrationPlan(context));
+    const std::string name = detail::JsonString(plan, "name");
+    const std::string install_component = detail::JsonString(plan, "installComponent");
+    const std::filesystem::path artifact = MacOSPackageArtifact(context, plan);
+    const std::filesystem::path root = artifact.parent_path();
+    const std::filesystem::path staging = root / "staging";
+    std::vector<ProcessCommand> commands =
+        detail::DesktopPackageStageCommands(context, staging, install_component);
+    commands.push_back({"cmake", {"-E", "create_symlink", "/Applications", (staging / "Applications").string()}, root});
+    commands.push_back(
+        {"hdiutil",
+         {"create", "-volname", name, "-srcfolder", staging.string(), "-format", "UDZO", "-ov", artifact.string()},
+         root});
+    return commands;
   }
 };
 

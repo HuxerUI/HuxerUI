@@ -242,6 +242,7 @@ set(HUXERUI_PUBLIC_HEADERS
 if (WIN32)
     list(APPEND HUXERUI_PUBLIC_HEADERS
             windows/external_texture.h
+            windows/installer.h
             windows/platform_registry.h
     )
 endif ()

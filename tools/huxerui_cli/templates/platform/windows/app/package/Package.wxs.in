@@ -1,0 +1,41 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="@PROJECT_NAME@" Manufacturer="@PROJECT_ID@" Version="@HUXERUI_WINDOWS_PROJECT_VERSION@"
+           UpgradeCode="@HUXERUI_WINDOWS_MSI_UPGRADE_CODE@" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of @PROJECT_NAME@ is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="@PROJECT_NAME@" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="APPLICATIONPROGRAMMENU" Name="@PROJECT_NAME@" />
+    </StandardDirectory>
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.Application)\**" />
+    </ComponentGroup>
+    <Component Id="ApplicationShortcut" Directory="APPLICATIONPROGRAMMENU">
+      <Shortcut Id="ApplicationStartMenuShortcut" Name="@PROJECT_NAME@"
+                Target="[INSTALLFOLDER]@TARGET_NAME@.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveApplicationProgramMenu" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\@PROJECT_ID@\@PROJECT_NAME@" Name="installed"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="ApplicationDesktopShortcut" Directory="DesktopFolder">
+      <Shortcut Id="ApplicationDesktopShortcutLink" Name="@PROJECT_NAME@"
+                Target="[INSTALLFOLDER]@TARGET_NAME@.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RegistryValue Root="HKLM" Key="Software\@PROJECT_ID@\@PROJECT_NAME@" Name="desktopShortcut"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Application" Title="@PROJECT_NAME@" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+    <Feature Id="DesktopShortcut" Title="Desktop shortcut" Level="2" AllowAbsent="yes">
+      <Level Value="1" Condition="CREATE_DESKTOP_SHORTCUT = 1" />
+      <ComponentRef Id="ApplicationDesktopShortcut" />
+    </Feature>
+  </Package>
+</Wix>

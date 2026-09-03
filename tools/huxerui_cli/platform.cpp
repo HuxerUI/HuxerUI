@@ -126,6 +126,7 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
       context.build_directory.string(),
       "-DCMAKE_BUILD_TYPE=" + configuration,
       "-DHUXERUI_HOME=" + context.huxerui_home.string(),
+      std::string("-DHUXERUI_PACKAGE=") + (context.package ? "ON" : "OFF"),
   };
   if (!context.cmake_generator.empty()) {
     configure_arguments.insert(configure_arguments.begin(), {"-G", context.cmake_generator});
@@ -134,6 +135,20 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
       {"cmake", std::move(configure_arguments), context.project_root},
       {"cmake",
        {"--build", context.build_directory.string(), "--config", configuration, "--parallel"},
+       context.project_root},
+  };
+}
+
+std::vector<ProcessCommand> DesktopPackageStageCommands(const PlatformCommandContext& context,
+                                                        const std::filesystem::path& staging,
+                                                        std::string_view install_component) {
+  const std::string configuration = ProfileConfiguration(context.profile);
+  return {
+      {"cmake", {"-E", "rm", "-rf", staging.string()}, context.project_root},
+      {"cmake", {"-E", "make_directory", staging.string()}, context.project_root},
+      {"cmake",
+       {"--install", context.build_directory.string(), "--config", configuration, "--component",
+        std::string(install_component), "--prefix", staging.string()},
        context.project_root},
   };
 }
@@ -210,6 +225,10 @@ std::vector<ProcessCommand> PlatformDriver::LibraryGraphCommands(const PlatformC
 }
 
 void PlatformDriver::UpdateProjectIntegration(const PlatformCommandContext&) const {}
+
+std::vector<ProcessCommand> PlatformDriver::PackageCommands(const PlatformCommandContext&) const {
+  return {};
+}
 
 void PlatformDriver::PrepareBuildEnvironment() const {}
 

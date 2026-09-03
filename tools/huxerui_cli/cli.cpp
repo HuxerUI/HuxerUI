@@ -634,6 +634,7 @@ struct BuildOptions {
   std::string cmake_generator;
   std::optional<PlatformDevice> selected_device;
   bool profile_explicit = false;
+  bool package = false;
 };
 
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
@@ -809,6 +810,7 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
       std::move(cmake_generator),
       options.profile,
       options.selected_device,
+      options.package,
   };
 }
 
@@ -929,8 +931,7 @@ int RunApplication(std::span<const std::string_view> arguments, const std::files
   return 0;
 }
 
-void CopyPackageArtifacts(std::span<const PackageArtifact> artifacts,
-                          const std::filesystem::path& destination_root, std::ostream& output) {
+void CopyPackageArtifacts(std::span<const PackageArtifact> artifacts, const std::filesystem::path& destination_root) {
   if (artifacts.empty()) {
     throw std::runtime_error("platform did not produce any package artifacts");
   }
@@ -953,7 +954,62 @@ void CopyPackageArtifacts(std::span<const PackageArtifact> artifacts,
     } else {
       std::filesystem::copy_file(artifact.source, destination, std::filesystem::copy_options::overwrite_existing);
     }
-    output << "Packaged " << destination.string() << '\n';
+  }
+}
+
+void PublishPackageArtifacts(std::span<const PackageArtifact> artifacts, const std::filesystem::path& destination,
+                             std::ostream& output) {
+  const std::filesystem::path parent = destination.parent_path();
+  const std::filesystem::path staging = parent / ("." + destination.filename().string() + ".publishing");
+  const std::filesystem::path previous = parent / ("." + destination.filename().string() + ".previous");
+  std::error_code error;
+  std::filesystem::remove_all(staging, error);
+  if (error) {
+    throw std::runtime_error("cannot prepare package publication: " + error.message());
+  }
+  if (!std::filesystem::exists(destination) && std::filesystem::exists(previous)) {
+    std::filesystem::rename(previous, destination, error);
+    if (error) {
+      throw std::runtime_error("cannot restore previous package directory: " + error.message());
+    }
+  }
+  std::filesystem::remove_all(previous, error);
+  if (error) {
+    throw std::runtime_error("cannot prepare previous package backup: " + error.message());
+  }
+  CopyPackageArtifacts(artifacts, staging);
+
+  const bool had_previous = std::filesystem::exists(destination);
+  if (had_previous) {
+    std::filesystem::rename(destination, previous, error);
+    if (error) {
+      std::error_code cleanup_error;
+      std::filesystem::remove_all(staging, cleanup_error);
+      throw std::runtime_error("cannot preserve existing package directory: " + error.message());
+    }
+  }
+  std::filesystem::rename(staging, destination, error);
+  if (error) {
+    std::string message = "cannot publish package directory: " + error.message();
+    if (had_previous) {
+      std::error_code restore_error;
+      std::filesystem::rename(previous, destination, restore_error);
+      if (restore_error) {
+        message += "; previous package remains at " + previous.string() + ": " + restore_error.message();
+      }
+    }
+    std::error_code cleanup_error;
+    std::filesystem::remove_all(staging, cleanup_error);
+    throw std::runtime_error(message);
+  }
+  if (had_previous) {
+    std::filesystem::remove_all(previous, error);
+    if (error) {
+      output << "Warning: cannot remove previous package directory: " << error.message() << '\n';
+    }
+  }
+  for (const PackageArtifact& artifact : artifacts) {
+    output << "Packaged " << (destination / artifact.destination).string() << '\n';
   }
 }
 
@@ -964,6 +1020,7 @@ int RunPackage(std::span<const std::string_view> arguments, const std::filesyste
   if (!options.profile_explicit) {
     options.profile = "release";
   }
+  options.package = true;
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -977,13 +1034,9 @@ int RunPackage(std::span<const std::string_view> arguments, const std::filesyste
   for (const PlatformDriver* platform : platforms) {
     BuildPlatform(project, *platform, huxerui_home, options, output);
     const PlatformCommandContext context = MakeCommandContext(project, *platform, huxerui_home, options);
+    ExecuteCommands(platform->PackageCommands(context), output);
     const std::filesystem::path destination = project.root / "dist" / platform->Id();
-    std::error_code error;
-    std::filesystem::remove_all(destination, error);
-    if (error) {
-      throw std::runtime_error("cannot replace package directory " + destination.string() + ": " + error.message());
-    }
-    CopyPackageArtifacts(platform->PackageArtifacts(context), destination, output);
+    PublishPackageArtifacts(platform->PackageArtifacts(context), destination, output);
   }
   return 0;
 }

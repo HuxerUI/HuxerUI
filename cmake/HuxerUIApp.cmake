@@ -150,6 +150,7 @@ function(huxerui_add_app target_name)
                 "huxerui_add_app() currently accepts one resource root"
         )
     endif ()
+    set(HUXERUI_APP_INSTALL_COMPONENT "HuxerUIApplication")
 
     if (HUXERUI_LIBRARY_GRAPH_ONLY)
         if (NOT HUXERUI_LIBRARY_GRAPH_OUTPUT)
@@ -160,6 +161,10 @@ function(huxerui_add_app target_name)
         add_library(${target_name} INTERFACE)
         set_property(TARGET ${target_name} PROPERTY
                 HUXERUI_LIBRARY_GRAPH_ONLY TRUE
+        )
+        set_property(TARGET ${target_name} PROPERTY
+                HUXERUI_APPLICATION_INSTALL_COMPONENT
+                "${HUXERUI_APP_INSTALL_COMPONENT}"
         )
         get_filename_component(HUXERUI_APP_LIBRARY_GRAPH_OUTPUT
                 "${HUXERUI_LIBRARY_GRAPH_OUTPUT}"
@@ -200,6 +205,11 @@ function(huxerui_add_app target_name)
     else ()
         add_executable(${target_name} ${HUXERUI_APP_SOURCES})
     endif ()
+
+    set_property(TARGET ${target_name} PROPERTY
+            HUXERUI_APPLICATION_INSTALL_COMPONENT
+            "${HUXERUI_APP_INSTALL_COMPONENT}"
+    )
 
     target_compile_features(${target_name} PRIVATE cxx_std_20)
     target_link_libraries(${target_name} PRIVATE
@@ -279,6 +289,7 @@ function(huxerui_add_app target_name)
 
     _huxerui_json_escape("${target_name}" HUXERUI_APP_JSON_TARGET)
     _huxerui_json_escape("${HUXERUI_APP_BUNDLE_IDENTIFIER}" HUXERUI_APP_JSON_BUNDLE_IDENTIFIER)
+    _huxerui_json_escape("${HUXERUI_APP_BUNDLE_NAME}" HUXERUI_APP_JSON_BUNDLE_NAME)
 
     set(HUXERUI_APP_INTEGRATION_DIRECTORY
             "${CMAKE_CURRENT_BINARY_DIR}/huxerui-integration/${target_name}"
@@ -293,6 +304,6 @@ function(huxerui_add_app target_name)
     file(MAKE_DIRECTORY "${HUXERUI_APP_INTEGRATION_DIRECTORY}")
     file(GENERATE
             OUTPUT "${HUXERUI_APP_INTEGRATION_PLAN}"
-            CONTENT "{\n  \"schema\": 1,\n  \"target\": \"${HUXERUI_APP_JSON_TARGET}\",\n  \"artifact\": \"$<TARGET_FILE:${target_name}>\",\n  \"bundle\": \"${HUXERUI_APP_BUNDLE_PATH}\",\n  \"bundleIdentifier\": \"${HUXERUI_APP_JSON_BUNDLE_IDENTIFIER}\"\n}\n"
+            CONTENT "{\n  \"schema\": 1,\n  \"target\": \"${HUXERUI_APP_JSON_TARGET}\",\n  \"name\": \"${HUXERUI_APP_JSON_BUNDLE_NAME}\",\n  \"version\": \"${PROJECT_VERSION}\",\n  \"artifact\": \"$<TARGET_FILE:${target_name}>\",\n  \"bundle\": \"${HUXERUI_APP_BUNDLE_PATH}\",\n  \"bundleIdentifier\": \"${HUXERUI_APP_JSON_BUNDLE_IDENTIFIER}\",\n  \"installComponent\": \"${HUXERUI_APP_INSTALL_COMPONENT}\"\n}\n"
     )
 endfunction()

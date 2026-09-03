@@ -56,6 +56,8 @@ if (WIN32)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/windows/huxerui.cmake" OPTIONAL)
 elseif (APPLE AND NOT IOS)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/macos/huxerui.cmake" OPTIONAL)
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/platform/linux/huxerui.cmake" OPTIONAL)
 elseif (EMSCRIPTEN)
     include("${CMAKE_CURRENT_SOURCE_DIR}/platform/web/huxerui.cmake" OPTIONAL)
 endif ()
@@ -77,12 +79,39 @@ function(huxerui_configure_project_app target_name)
         message(FATAL_ERROR "huxerui_configure_project_app() target does not exist: ${target_name}")
     endif ()
 
+    get_target_property(HUXERUI_PROJECT_APP_INSTALL_COMPONENT
+            ${target_name}
+            HUXERUI_APPLICATION_INSTALL_COMPONENT
+    )
+    if (NOT HUXERUI_PROJECT_APP_INSTALL_COMPONENT
+            OR HUXERUI_PROJECT_APP_INSTALL_COMPONENT MATCHES "-NOTFOUND$")
+        message(FATAL_ERROR "HuxerUI application target is missing its install component: ${target_name}")
+    endif ()
+
     if (WIN32 AND HUXERUI_WINDOWS_MANIFEST)
         target_sources(${target_name} PRIVATE "${HUXERUI_WINDOWS_MANIFEST}")
+    endif ()
+    if (WIN32 AND COMMAND huxerui_configure_windows_project_package)
+        huxerui_configure_windows_project_package(
+                ${target_name}
+                "${HUXERUI_PROJECT_APP_INSTALL_COMPONENT}"
+        )
     endif ()
     if (APPLE AND NOT IOS AND HUXERUI_MACOS_INFO_PLIST)
         set_target_properties(${target_name} PROPERTIES
                 MACOSX_BUNDLE_INFO_PLIST "${HUXERUI_MACOS_INFO_PLIST}"
+        )
+    endif ()
+    if (APPLE AND NOT IOS AND COMMAND huxerui_configure_macos_project_package)
+        huxerui_configure_macos_project_package(
+                ${target_name}
+                "${HUXERUI_PROJECT_APP_INSTALL_COMPONENT}"
+        )
+    endif ()
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND COMMAND huxerui_configure_linux_project_package)
+        huxerui_configure_linux_project_package(
+                ${target_name}
+                "${HUXERUI_PROJECT_APP_INSTALL_COMPONENT}"
         )
     endif ()
     if (EMSCRIPTEN AND COMMAND huxerui_configure_web_app)

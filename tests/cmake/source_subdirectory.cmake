@@ -54,6 +54,12 @@ if (static_link_index EQUAL -1)
   message(FATAL_ERROR "Source library did not select the static framework target")
 endif ()
 
+huxerui_add_app(source_subdirectory_app SOURCES library.cpp)
+get_target_property(app_install_component source_subdirectory_app HUXERUI_APPLICATION_INSTALL_COMPONENT)
+if (NOT app_install_component STREQUAL "HuxerUIApplication")
+  message(FATAL_ERROR "Source application target has an invalid install component")
+endif ()
+
 get_cmake_property(install_components COMPONENTS)
 if ("HuxerUILibraries" IN_LIST install_components)
   message(FATAL_ERROR "Source subdirectory registered SDK installation components")

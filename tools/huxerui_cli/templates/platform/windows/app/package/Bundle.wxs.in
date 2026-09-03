@@ -1,0 +1,17 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Bundle Name="@PROJECT_NAME@" Manufacturer="@PROJECT_ID@" Version="@HUXERUI_WINDOWS_PROJECT_VERSION@"
+          UpgradeCode="@HUXERUI_WINDOWS_BUNDLE_UPGRADE_CODE@">
+    <BootstrapperApplication SourceFile="!(bindpath.Installer)\@TARGET_NAME@-Installer.exe">
+      <PayloadGroupRef Id="HuxerUIInstallerResources" />
+      <Payload SourceFile="!(bindpath.Installer)\mbanative.dll" />
+    </BootstrapperApplication>
+    <Variable Name="InstallFolder" Type="formatted" Value="[ProgramFiles64Folder]@PROJECT_NAME@" />
+    <Variable Name="CreateDesktopShortcut" Type="numeric" Value="0" />
+    <Chain>
+      <MsiPackage SourceFile="!(bindpath.Package)\@TARGET_NAME@.msi">
+        <MsiProperty Name="INSTALLFOLDER" Value="[InstallFolder]" />
+        <MsiProperty Name="CREATE_DESKTOP_SHORTCUT" Value="[CreateDesktopShortcut]" />
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

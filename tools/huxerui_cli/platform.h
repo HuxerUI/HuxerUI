@@ -103,23 +103,25 @@ struct PlatformCommandContext {
   std::string profile;
   /// Selected external device, or no value for host-local and implicit-device platforms.
   std::optional<PlatformDevice> device;
+  /// Whether command planning is producing a distributable package instead of an ordinary incremental build.
+  bool package = false;
 };
 
-/// One file copied by the `package` command.
+/// One file or directory published by the `package` command.
 struct PackageArtifact {
-  /// Existing build artifact.
+  /// Existing package artifact.
   std::filesystem::path source;
   /// Safe path relative to the package output directory.
   std::filesystem::path destination;
 
-  /// Compares both source and destination paths.
   bool operator==(const PackageArtifact&) const = default;
 };
 
 /// Owns CLI behavior for one target platform.
 ///
-/// Drivers describe environment requirements, generate the platform shell, and plan direct process invocations. They do
-/// not execute commands themselves, which keeps CLI output, failure handling, and tests consistent across platforms.
+/// Drivers describe environment requirements, generate the platform shell, and plan direct process invocations.
+/// They do not execute commands themselves, which keeps CLI output, failure handling, and tests consistent across
+/// platforms.
 class PlatformDriver {
 public:
   /// Destroys a platform driver.
@@ -185,6 +187,11 @@ public:
   /// @param context Active build context, including the selected device when required.
   /// @return Commands executed in order by the CLI.
   [[nodiscard]] virtual std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const = 0;
+
+  /// Plans platform-native packaging commands after a successful build.
+  /// @param context Active package context.
+  /// @return Commands that produce the files returned by `PackageArtifacts()`.
+  [[nodiscard]] virtual std::vector<ProcessCommand> PackageCommands(const PlatformCommandContext& context) const;
 
   /// Resolves files emitted by a successful platform build.
   /// @param context Active build context.
@@ -258,6 +265,10 @@ ValidateRequiredFiles(const std::filesystem::path& root, std::span<const std::st
 
 /// Plans the shared desktop CMake configure and build commands.
 [[nodiscard]] std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& context);
+
+/// Plans the shared CMake install staging commands used by desktop packages.
+[[nodiscard]] std::vector<ProcessCommand> DesktopPackageStageCommands(
+    const PlatformCommandContext& context, const std::filesystem::path& staging, std::string_view install_component);
 
 /// Plans the CMake configure command that emits the app-side library graph.
 [[nodiscard]] std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandContext& context);

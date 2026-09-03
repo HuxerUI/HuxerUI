@@ -173,6 +173,7 @@ huxerui open ios [--source <path>]
 
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
 Packaged application artifacts are collected under `dist/<platform>`.
+Desktop packages are a Windows setup executable, macOS DMG, or Linux AppImage; see [Packaging Applications](packaging.md) for runtime payload and custom Windows installer guidance.
 Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
 The generated `CMakeLists.txt` keeps source discovery, target creation, resources, and library dependencies explicit.
 Its sibling `HuxerUIProject.cmake` contains the generated project plan, SDK discovery, and platform-shell connection details.

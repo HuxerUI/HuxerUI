@@ -240,6 +240,41 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   ));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/main.cpp"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/app.manifest"));
+  REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/huxerui.cmake"));
+  REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/package/Bundle.wxs.in"));
+  REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/package/Package.wxs.in"));
+  REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/package/src/app.cpp"));
+  REQUIRE(std::filesystem::is_regular_file(project / "platform/windows/package/src/main.cpp"));
+  const std::filesystem::path installer_strings = project / "platform/windows/package/resources/strings";
+  for (const char* catalog : {"default.properties", "zh.properties", "zh-TW.properties", "zh-HK.properties",
+                              "ja.properties", "ko.properties", "de.properties", "fr.properties",
+                              "es.properties", "pt-BR.properties"}) {
+    REQUIRE(std::filesystem::is_regular_file(installer_strings / catalog));
+  }
+  const std::string installer_app = Read(project / "platform/windows/package/src/app.cpp");
+  REQUIRE(installer_app.find("status.default_destination") != std::string::npos);
+  REQUIRE(installer_app.find("status.default_create_desktop_shortcut") != std::string::npos);
+  REQUIRE(installer_app.find("UseTaskScope()") != std::string::npos);
+  REQUIRE(installer_app.find("co_await installer.ChooseDestinationAsync") != std::string::npos);
+  REQUIRE(installer_app.find("installer.Install({") != std::string::npos);
+  REQUIRE(installer_app.find("#include <installer_resources.h>") != std::string::npos);
+  REQUIRE(installer_app.find("installer_strings::create_desktop_shortcut") != std::string::npos);
+  REQUIRE(installer_app.find("installer_strings::application_setup") != std::string::npos);
+  REQUIRE(installer_app.find("installer_strings::ready_to_install") != std::string::npos);
+  REQUIRE(installer_app.find("installer_strings::files_in_use") != std::string::npos);
+  REQUIRE(installer_app.find("InstallerPromptChoice::TryAgain") != std::string::npos);
+  REQUIRE(installer_app.find("\"Ready to install\"") == std::string::npos);
+  REQUIRE(installer_app.find("TextFieldVariant::Outlined") != std::string::npos);
+  const std::string default_installer_strings = Read(installer_strings / "default.properties");
+  REQUIRE(default_installer_strings.find("ready_to_install = Ready to install") != std::string::npos);
+  REQUIRE(default_installer_strings.find("application_setup = APPLICATION SETUP") != std::string::npos);
+  REQUIRE(default_installer_strings.find("files_in_use = Close applications") != std::string::npos);
+  const std::string installer_bundle = Read(project / "platform/windows/package/Bundle.wxs.in");
+  REQUIRE(installer_bundle.find("Name=\"InstallFolder\" Type=\"formatted\"") != std::string::npos);
+  REQUIRE(installer_bundle.find("Name=\"CreateDesktopShortcut\" Type=\"numeric\"") != std::string::npos);
+  const std::string installer_package = Read(project / "platform/windows/package/Package.wxs.in");
+  REQUIRE(installer_package.find("Feature Id=\"DesktopShortcut\"") != std::string::npos);
+  REQUIRE(installer_package.find("StandardDirectory Id=\"DesktopFolder\"") != std::string::npos);
   REQUIRE(std::filesystem::is_regular_file(project / "platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/android/gradlew"));
   REQUIRE(std::filesystem::is_regular_file(project / "platform/android/gradlew.bat"));
@@ -663,6 +698,8 @@ TEST_CASE("HuxerUICliAddsMissingPlatformsFromNestedProjectDirectories") {
   REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/web/index.html.in"));
   REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/linux/main.cpp"));
+  REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/linux/huxerui.cmake"));
+  REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/linux/package/AppRun"));
   REQUIRE(
       Read(temporary.Path() / "sample/platform/android/app/build.gradle").find("dev.example.custom") !=
       std::string::npos
@@ -759,6 +796,7 @@ TEST_CASE("HuxerUICliCreatesStableWindowsBuildCommands") {
           context.build_directory.string(),
           "-DCMAKE_BUILD_TYPE=Release",
           "-DHUXERUI_HOME=" + context.huxerui_home.string(),
+          "-DHUXERUI_PACKAGE=OFF",
           "-DCMAKE_CXX_COMPILER=cl",
       }
   );
@@ -772,6 +810,64 @@ TEST_CASE("HuxerUICliCreatesStableWindowsBuildCommands") {
           "--parallel",
       }
   );
+
+  std::filesystem::create_directories(context.huxerui_home / "cmake");
+  std::ofstream(context.huxerui_home / "cmake/HuxerUIGenerateWixPayloads.cmake") << "# payloads\n";
+  huxerui::cli::PlatformCommandContext package_context = context;
+  package_context.package = true;
+  const std::vector<huxerui::cli::ProcessCommand> package_build_commands = windows->BuildCommands(package_context);
+  const std::filesystem::path wix_root = context.project_root / ".huxerui/package/windows/dependencies/wix";
+  REQUIRE(package_build_commands.size() == 2);
+  REQUIRE(
+      package_build_commands[0].arguments ==
+      std::vector<std::string>{
+          "-G", "Ninja", "-S", context.project_root.string(), "-B", context.build_directory.string(),
+          "-DCMAKE_BUILD_TYPE=Release", "-DHUXERUI_HOME=" + context.huxerui_home.string(),
+          "-DHUXERUI_PACKAGE=ON", "-DCMAKE_CXX_COMPILER=cl", "-DHUXERUI_WIX_ROOT=" + wix_root.string(),
+      }
+  );
+
+  const std::filesystem::path package_plan = context.build_directory / "huxerui-package/windows/Release/package.json";
+  const std::filesystem::path installer_plan = temporary.Path() / "installer.json";
+  const std::filesystem::path installer = temporary.Path() / "sample-installer.exe";
+  const std::filesystem::path installer_resources = temporary.Path() / "sample-installer.resources";
+  const std::filesystem::path package_source = temporary.Path() / "Package.wxs";
+  const std::filesystem::path bundle_source = temporary.Path() / "Bundle.wxs";
+  const std::filesystem::path wix = temporary.Path() / "wix.exe";
+  std::filesystem::create_directories(package_plan.parent_path());
+  std::ofstream(package_plan) << "{\n"
+                                 "  \"target\": \"sample\",\n"
+                                 "  \"version\": \"1.2.3\",\n"
+                                 "  \"installComponent\": \"HuxerUIApplication\",\n"
+                                 "  \"packageSource\": \""
+                              << package_source.generic_string() << "\",\n"
+                              << "  \"bundleSource\": \"" << bundle_source.generic_string() << "\",\n"
+                              << "  \"installerPlan\": \"" << installer_plan.generic_string() << "\"\n"
+                              << "}\n";
+  std::ofstream(installer_plan) << "{\n"
+                                   "  \"wix\": \""
+                                << wix.generic_string() << "\",\n"
+                                << "  \"installer\": \"" << installer.generic_string() << "\",\n"
+                                << "  \"installerResources\": \"" << installer_resources.generic_string() << "\",\n"
+                                << "  \"installerResourcesName\": \"sample-installer.resources\"\n"
+                                << "}\n";
+
+  const std::vector<huxerui::cli::ProcessCommand> package_commands = windows->PackageCommands(package_context);
+  REQUIRE(package_commands.size() == 6);
+  REQUIRE(std::filesystem::path(package_commands[3].executable).generic_string() == wix.generic_string());
+  REQUIRE(package_commands[4].executable == "cmake");
+  REQUIRE(std::filesystem::path(package_commands[5].executable).generic_string() == wix.generic_string());
+  const std::filesystem::path installer_payloads =
+      context.project_root / ".huxerui/package/windows/release/installer-resources.wxs";
+  REQUIRE(std::any_of(package_commands[5].arguments.begin(), package_commands[5].arguments.end(),
+                      [&installer_payloads](const std::string& argument) {
+                        return std::filesystem::path(argument).generic_string() == installer_payloads.generic_string();
+                      }));
+  const std::vector<huxerui::cli::PackageArtifact> package_artifacts = windows->PackageArtifacts(package_context);
+  REQUIRE(package_artifacts == std::vector<huxerui::cli::PackageArtifact>{{
+                                   context.project_root / ".huxerui/package/windows/release/sample-Setup-1.2.3.exe",
+                                   "sample-Setup-1.2.3.exe",
+                               }});
 }
 
 TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject") {
@@ -791,9 +887,17 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
 
   const std::vector<huxerui::cli::GeneratedFile> shell =
       linux->CreateShell(huxerui::cli::MakeProjectTemplateContext("sample"));
-  REQUIRE(shell.size() == 1);
-  REQUIRE(shell.front().path == "main.cpp");
-  REQUIRE(shell.front().content.find("RunApplication()") != std::string::npos);
+  const auto main = std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
+    return file.path == "main.cpp";
+  });
+  REQUIRE(main != shell.end());
+  REQUIRE(main->content.find("RunApplication()") != std::string::npos);
+  REQUIRE(std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
+            return file.path == "huxerui.cmake";
+          }) != shell.end());
+  REQUIRE(std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
+            return file.path == "package/AppRun";
+          }) != shell.end());
   REQUIRE(linux->LibraryGraphCommands(context).empty());
 
   const std::vector<huxerui::cli::ProcessCommand> build_commands = linux->BuildCommands(context);
@@ -809,6 +913,7 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
           build.string(),
           "-DCMAKE_BUILD_TYPE=Debug",
           "-DHUXERUI_HOME=" + context.huxerui_home.string(),
+          "-DHUXERUI_PACKAGE=OFF",
       }
   );
   REQUIRE(
@@ -821,7 +926,12 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
   std::filesystem::create_directories(artifact.parent_path());
   std::filesystem::create_directories(plan.parent_path());
   std::ofstream(artifact) << "test\n";
-  std::ofstream(plan) << "{\n  \"artifact\": \"" << artifact.generic_string() << "\"\n}\n";
+  std::ofstream(plan) << "{\n"
+                         "  \"target\": \"sample\",\n"
+                         "  \"version\": \"1.2.3\",\n"
+                         "  \"installComponent\": \"HuxerUIApplication\",\n"
+                         "  \"artifact\": \""
+                      << artifact.generic_string() << "\"\n}\n";
 
   const std::vector<huxerui::cli::ProcessCommand> run_commands = linux->RunCommands(context);
   REQUIRE(run_commands.size() == 1);
@@ -829,14 +939,60 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
   REQUIRE(run_commands[0].arguments.empty());
   REQUIRE(std::filesystem::equivalent(run_commands[0].working_directory, artifact.parent_path()));
 
-  const std::filesystem::path resources = artifact.parent_path() / "sample.resources";
-  std::filesystem::create_directories(resources);
   const std::vector<huxerui::cli::PackageArtifact> package_artifacts = linux->PackageArtifacts(context);
-  const std::vector<huxerui::cli::PackageArtifact> expected_package_artifacts{
-      {artifact, artifact.filename()},
-      {resources, resources.filename()},
-  };
+  const std::filesystem::path app_image = project / ".huxerui/package/linux/debug/sample-1.2.3.AppImage";
+  const std::vector<huxerui::cli::PackageArtifact> expected_package_artifacts{{app_image, app_image.filename()}};
   REQUIRE(package_artifacts == expected_package_artifacts);
+}
+
+TEST_CASE("HuxerUICliCreatesMacOSPackageCommands") {
+  TemporaryDirectory temporary;
+  const huxerui::cli::PlatformDriver* macos = huxerui::cli::FindPlatformDriver("macos");
+  REQUIRE(macos != nullptr);
+  huxerui::cli::PlatformCommandContext context{
+      temporary.Path() / "sample",
+      temporary.Path() / "sdk",
+      temporary.Path() / "sample/.huxerui/build/macos/release",
+      "Ninja",
+      "release",
+      {},
+      true,
+  };
+  const std::filesystem::path plan = context.build_directory / "huxerui-integration/sample/Release/app.json";
+  std::filesystem::create_directories(plan.parent_path());
+  std::ofstream(plan) << "{\n"
+                         "  \"target\": \"sample\",\n"
+                         "  \"name\": \"Sample\",\n"
+                         "  \"version\": \"1.2.3\",\n"
+                         "  \"installComponent\": \"HuxerUIApplication\"\n"
+                         "}\n";
+
+  const std::vector<huxerui::cli::ProcessCommand> build_commands = macos->BuildCommands(context);
+  REQUIRE(std::find(build_commands[0].arguments.begin(), build_commands[0].arguments.end(),
+                    "-DHUXERUI_PACKAGE=ON") != build_commands[0].arguments.end());
+
+  const std::vector<huxerui::cli::ProcessCommand> package_commands = macos->PackageCommands(context);
+  const std::filesystem::path root = context.project_root / ".huxerui/package/macos/release";
+  REQUIRE(package_commands.size() == 5);
+  REQUIRE(package_commands[2].arguments.size() == 8);
+  REQUIRE(package_commands[2].arguments[0] == "--install");
+  REQUIRE(std::filesystem::path(package_commands[2].arguments[1]).generic_string() ==
+          context.build_directory.generic_string());
+  REQUIRE(package_commands[2].arguments[2] == "--config");
+  REQUIRE(package_commands[2].arguments[3] == "Release");
+  REQUIRE(package_commands[2].arguments[4] == "--component");
+  REQUIRE(package_commands[2].arguments[5] == "HuxerUIApplication");
+  REQUIRE(package_commands[2].arguments[6] == "--prefix");
+  REQUIRE(std::filesystem::path(package_commands[2].arguments[7]).generic_string() ==
+          (root / "staging").generic_string());
+  REQUIRE(package_commands[4].executable == "hdiutil");
+  REQUIRE(std::filesystem::path(package_commands[4].arguments.back()).generic_string() ==
+          (root / "sample-1.2.3.dmg").generic_string());
+
+  const std::vector<huxerui::cli::PackageArtifact> package_artifacts = macos->PackageArtifacts(context);
+  REQUIRE(package_artifacts.size() == 1);
+  REQUIRE(package_artifacts.front().source.generic_string() == (root / "sample-1.2.3.dmg").generic_string());
+  REQUIRE(package_artifacts.front().destination == "sample-1.2.3.dmg");
 }
 
 TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {

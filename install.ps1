@@ -16,6 +16,13 @@ function Fail([string]$Message) {
     throw "HuxerUI installer: $Message"
 }
 
+function Get-AbsolutePath([string]$Path) {
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return [System.IO.Path]::GetFullPath($Path)
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path (Get-Location).Path $Path))
+}
+
 function Test-HuxerUISdk([string]$Root) {
     return (Test-Path -LiteralPath (Join-Path $Root "bin/huxerui.exe") -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $Root "include/huxerui/huxerui.h") -PathType Leaf) -and
@@ -99,7 +106,7 @@ if (-not $env:LOCALAPPDATA) {
 if (-not $Prefix) {
     $Prefix = Join-Path $env:LOCALAPPDATA "HuxerUI"
 }
-$Prefix = [System.IO.Path]::GetFullPath($Prefix)
+$Prefix = Get-AbsolutePath $Prefix
 Assert-SafePrefix $Prefix
 
 if ($Uninstall) {
@@ -155,7 +162,7 @@ if (-not $Archive) {
     $ArchiveSource = "$RepositoryUrl/releases/download/$ReleaseTag/$ArchiveName"
     $ArchiveDisplay = $ArchiveSource
 } else {
-    $Archive = [System.IO.Path]::GetFullPath($Archive)
+    $Archive = Get-AbsolutePath $Archive
     if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {
         Fail "archive does not exist: $Archive"
     }

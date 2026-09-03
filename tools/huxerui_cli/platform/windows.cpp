@@ -50,6 +50,35 @@ std::filesystem::path VisualStudioInstallation() {
   return std::filesystem::is_regular_file(path / "Common7/Tools/VsDevCmd.bat") ? path : std::filesystem::path{};
 }
 
+std::filesystem::path WixPayloadScript(const PlatformCommandContext& context) {
+  const std::array candidates{
+      context.huxerui_home / "cmake/HuxerUIGenerateWixPayloads.cmake",
+      context.huxerui_home / "lib/cmake/HuxerUI/HuxerUIGenerateWixPayloads.cmake",
+  };
+  const auto script = std::find_if(candidates.begin(), candidates.end(), [](const std::filesystem::path& candidate) {
+    return std::filesystem::is_regular_file(candidate);
+  });
+  if (script == candidates.end()) {
+    throw std::runtime_error("HuxerUI SDK does not contain the Windows installer payload generator");
+  }
+  return *script;
+}
+
+std::filesystem::path WindowsPackagePlan(const PlatformCommandContext& context) {
+  return context.build_directory / "huxerui-package/windows" / detail::ProfileConfiguration(context.profile) /
+         "package.json";
+}
+
+std::filesystem::path WindowsPackageRoot(const PlatformCommandContext& context) {
+  return context.project_root / ".huxerui/package/windows" / context.profile;
+}
+
+std::filesystem::path WindowsPackageArtifact(const PlatformCommandContext& context, std::string_view plan) {
+  const std::string target = detail::JsonString(plan, "target");
+  const std::string version = detail::JsonString(plan, "version");
+  return WindowsPackageRoot(context) / (target + "-Setup-" + version + ".exe");
+}
+
 void ImportMsvcEnvironment(const std::filesystem::path& installation) {
   const std::filesystem::path developer_command = installation / "Common7/Tools/VsDevCmd.bat";
   if (!std::filesystem::is_regular_file(developer_command)) {
@@ -173,6 +202,10 @@ public:
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     std::vector<ProcessCommand> commands = detail::DesktopBuildCommands(context);
     commands.front().arguments.push_back("-DCMAKE_CXX_COMPILER=cl");
+    if (context.package) {
+      const std::filesystem::path wix_root = context.project_root / ".huxerui/package/windows/dependencies/wix";
+      commands.front().arguments.push_back("-DHUXERUI_WIX_ROOT=" + wix_root.string());
+    }
     return commands;
   }
 
@@ -185,20 +218,47 @@ public:
   }
 
   std::vector<PackageArtifact> PackageArtifacts(const PlatformCommandContext& context) const override {
-    const std::filesystem::path artifact =
-        detail::JsonString(detail::ReadFile(detail::AppIntegrationPlan(context)), "artifact");
-    std::vector<PackageArtifact> artifacts{{artifact, artifact.filename()}};
-    const std::filesystem::path resources = artifact.parent_path() / (artifact.stem().string() + ".resources");
-    if (std::filesystem::is_directory(resources)) {
-      artifacts.push_back({resources, resources.filename()});
-    }
-    for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(artifact.parent_path())) {
-      if (entry.is_regular_file() && entry.path().extension() == ".dll") {
-        artifacts.push_back({entry.path(), entry.path().filename()});
-      }
-    }
-    std::ranges::sort(artifacts.begin() + 1, artifacts.end(), {}, &PackageArtifact::destination);
-    return artifacts;
+    const std::string plan = detail::ReadFile(WindowsPackagePlan(context));
+    const std::filesystem::path artifact = WindowsPackageArtifact(context, plan);
+    return {{artifact, artifact.filename()}};
+  }
+
+  std::vector<ProcessCommand> PackageCommands(const PlatformCommandContext& context) const override {
+    const std::string plan = detail::ReadFile(WindowsPackagePlan(context));
+    const std::string target = detail::JsonString(plan, "target");
+    const std::string install_component = detail::JsonString(plan, "installComponent");
+    const std::filesystem::path package_source = detail::JsonString(plan, "packageSource");
+    const std::filesystem::path bundle_source = detail::JsonString(plan, "bundleSource");
+    const std::string installer_plan = detail::ReadFile(detail::JsonString(plan, "installerPlan"));
+    const std::filesystem::path wix = detail::JsonString(installer_plan, "wix");
+    const std::filesystem::path installer = detail::JsonString(installer_plan, "installer");
+    const std::filesystem::path installer_resources = detail::JsonString(installer_plan, "installerResources");
+    const std::string installer_resources_name = detail::JsonString(installer_plan, "installerResourcesName");
+    const std::filesystem::path root = WindowsPackageRoot(context);
+    const std::filesystem::path staging = root / "staging";
+    const std::filesystem::path msi = root / (target + ".msi");
+    const std::filesystem::path bundle = WindowsPackageArtifact(context, plan);
+    const std::filesystem::path installer_payloads = root / "installer-resources.wxs";
+    std::vector<ProcessCommand> commands =
+        detail::DesktopPackageStageCommands(context, staging, install_component);
+    commands.push_back(
+        {wix.string(),
+         {"build", package_source.string(), "-arch", "x64", "-bindpath", "Application=" + staging.string(),
+          "-out", msi.string()},
+         root});
+    commands.push_back(
+        {"cmake",
+         {"-DHUXERUI_WIX_PAYLOAD_DIRECTORY=" + installer_resources.string(),
+          "-DHUXERUI_WIX_PAYLOAD_NAME=" + installer_resources_name,
+          "-DHUXERUI_WIX_PAYLOAD_OUTPUT=" + installer_payloads.string(), "-P", WixPayloadScript(context).string()},
+         root});
+    commands.push_back(
+        {wix.string(),
+         {"build", bundle_source.string(), installer_payloads.string(), "-arch", "x64", "-bindpath",
+          "Installer=" + installer.parent_path().string(), "-bindpath", "Package=" + root.string(), "-out",
+          bundle.string()},
+         root});
+    return commands;
   }
 };
 

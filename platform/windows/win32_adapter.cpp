@@ -29,6 +29,7 @@
 #include "text_layout_internal.h"
 #include "win32_accessibility.h"
 #include "win32_application_internal.h"
+#include "win32_application_runner.h"
 #include "win32_file_internal.h"
 #include "win32_http_internal.h"
 #include "win32_internal.h"
@@ -410,9 +411,10 @@ class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformClipboard,
                                    public huxerui::PlatformResources {
 public:
-  Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher, std::wstring window_class_name)
+  Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher, std::wstring window_class_name,
+                       Win32WindowReady on_window_ready)
       : PlatformAdapter(ui_dispatcher.Bind()), ui_dispatcher_(ui_dispatcher),
-        window_class_name_(std::move(window_class_name)) {
+        window_class_name_(std::move(window_class_name)), on_window_ready_(std::move(on_window_ready)) {
     win32_api_.ConfigureProcessDpiAwareness();
   }
 
@@ -425,6 +427,9 @@ public:
       renderer_.Initialize();
       RegisterWindowClass();
       CreateApplicationWindow(options);
+      if (on_window_ready_) {
+        on_window_ready_(ui_dispatcher_.Bind(), window_);
+      }
       runtime_->UpdateResourceConfiguration(Configuration());
 
       ShowWindow(window_, SW_SHOW);
@@ -1584,13 +1589,14 @@ private:
   const RenderFrame* committed_frame_ = nullptr;
   Win32UIThreadDispatcher& ui_dispatcher_;
   std::wstring window_class_name_;
+  Win32WindowReady on_window_ready_;
   Win32Api win32_api_;
   Win32Renderer renderer_;
   std::unique_ptr<Win32PlatformViews> platform_views_;
   std::shared_ptr<Win32SystemTrayTransport> system_tray_;
 };
 
-int RunPlatformApplication(const Application& application) {
+int RunWin32PlatformApplication(const Application& application, Win32WindowReady on_window_ready) {
   WindowOptions options = application.options.window;
   Win32StartupInput startup = CurrentWin32StartupInput();
   const std::wstring window_class_name = Win32ApplicationWindowClassName();
@@ -1601,9 +1607,13 @@ int RunPlatformApplication(const Application& application) {
   }
   Win32COMApartment com_apartment;
   Win32UIThreadDispatcher ui_dispatcher;
-  Win32PlatformAdapter platform(ui_dispatcher, window_class_name);
+  Win32PlatformAdapter platform(ui_dispatcher, window_class_name, std::move(on_window_ready));
   Runtime runtime{application, platform, std::move(startup.activation)};
   return platform.Run(runtime, options);
+}
+
+int RunPlatformApplication(const Application& application) {
+  return RunWin32PlatformApplication(application);
 }
 
 } // namespace huxerui::detail

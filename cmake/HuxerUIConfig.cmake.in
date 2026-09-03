@@ -139,6 +139,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/HuxerUICodegen.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUILibraries.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIWindowsInstaller.cmake")
 
 check_required_components(HuxerUI)
 
