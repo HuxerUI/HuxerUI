@@ -4,6 +4,7 @@
 #include <cmath>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -624,10 +625,10 @@ void PaintNodeWithinClip(huxerui::MountedNode& mounted_node, const Rect& clip, c
                                          std::max(0.0F, bounds.height - node.resolved_padding.Vertical()),
                                      }
                                    : bounds;
-    PaintContext content =
-        node.kind == NodeKind::Canvas
-            ? PaintContext(render_node.content, canvas_bounds, node.properties.text_layout_options.shaping.locale)
-            : PaintContext{render_node.content, canvas_bounds};
+    PaintContext content{
+        render_node.content, canvas_bounds,
+        node.kind == NodeKind::Canvas ? node.properties.text_layout_options.shaping.locale : std::string{},
+    };
     std::optional<VisualFill> background = node.properties.background;
     TextStyle text_style = node.properties.text_style;
     if (node.applies_disabled_appearance) {
