@@ -376,7 +376,7 @@ View MaterialIconControlsApp() {
               SegmentedButtonItem::IconOnly(ControlIcon(), "Icon only"),
           },
           1
-      ).OnChanged([](std::size_t) {}),
+      ).OnChanged([](std::size_t) {}).With(Frame{.width = 240.0F}),
     }.With(Spacing(12.0F)),
   };
 }
@@ -1950,6 +1950,13 @@ TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
   REQUIRE(initial_week != nullptr);
   REQUIRE(initial_day->style.foreground == SegmentedButtonStyle::Default().selected_label);
   REQUIRE(initial_week->style.foreground == SegmentedButtonStyle::Default().label_style.foreground);
+  for (const std::string_view label : {"Day", "Week", "Month", "One", "Two"}) {
+    const DrawTextCommand* text = FindText(initial, label);
+    REQUIRE(text != nullptr);
+    REQUIRE(text->options.align == TextAlign::Center);
+    REQUIRE(text->options.vertical_align == TextVerticalAlign::Center);
+    REQUIRE(text->options.wrap == TextWrap::NoWrap);
+  }
 
   const Rect month_bounds = group->children[2]->PresentationBounds();
   const Point month_center{
@@ -1998,6 +2005,7 @@ TEST_CASE("TestSegmentedButtonSelectionLayoutAndKeyboard") {
   const DrawTextCommand* selected_week_label = FindText(selected_week, "Week");
   REQUIRE(selected_week_label != nullptr);
   REQUIRE(selected_week_label->style.foreground == SegmentedButtonStyle::Default().selected_label);
+  REQUIRE(selected_week_label->options.align == TextAlign::Center);
 
   runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::ArrowRight});
   REQUIRE(segmented_button_changes == 2);
@@ -2061,6 +2069,8 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
   const DrawTextCommand* selected = FindText(scene, "Week");
   REQUIRE(selected != nullptr);
   REQUIRE(selected->style.foreground == style.selected_label);
+  REQUIRE(selected->options.align == TextAlign::Center);
+  REQUIRE(selected->options.vertical_align == TextVerticalAlign::Center);
 
   REQUIRE(style.indication.has_value());
   REQUIRE(style.indication->ripple.has_value());
@@ -2287,7 +2297,17 @@ TEST_CASE("TestChipAndSegmentedButtonIconContent") {
   REQUIRE(mixed_content.show_label);
   REQUIRE_FALSE(icon_only_content.show_label);
   REQUIRE(FindText(scene, "With icon") != nullptr);
-  REQUIRE(FindText(scene, "Mixed") != nullptr);
+  const DrawTextCommand* mixed = FindText(scene, "Mixed");
+  REQUIRE(mixed != nullptr);
+  REQUIRE(mixed->options.align == TextAlign::Leading);
+  REQUIRE(mixed->options.vertical_align == TextVerticalAlign::Center);
+  REQUIRE(mixed->options.wrap == TextWrap::NoWrap);
+  const Rect mixed_bounds = segments->children[0]->ContentBounds();
+  const float leading_space =
+      mixed->rect.x - mixed_content.icon_size.width - mixed_content.icon_spacing - mixed_bounds.x;
+  const float trailing_space = mixed_bounds.x + mixed_bounds.width - mixed->rect.x - mixed->rect.width;
+  REQUIRE(leading_space > 0.0F);
+  REQUIRE(leading_space == Catch::Approx(trailing_space));
   REQUIRE(FindText(scene, "Icon only") == nullptr);
   REQUIRE(FindPresentedRectWithColor(scene, segmented_style.selected_label).has_value());
 }

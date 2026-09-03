@@ -1908,7 +1908,7 @@ private:
     spec->properties.frame.min_height = std::max(0.0F, style.minimum_height);
     spec->properties.text_layout_options = {
         .shaping = {},
-        .align = TextAlign::Leading,
+        .align = spec->image_properties.HasValue() ? TextAlign::Leading : TextAlign::Center,
         .vertical_align = TextVerticalAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
