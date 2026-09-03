@@ -16,6 +16,7 @@ class TextLayout;
 enum class Win32RenderResult {
   Presented,
   Skipped,
+  Retry,
   Recreate,
 };
 

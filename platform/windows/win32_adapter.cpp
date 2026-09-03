@@ -1422,7 +1422,7 @@ private:
       PAINTSTRUCT paint{};
       BeginPaint(window, &paint);
       const Win32RenderResult render_result = renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint);
-      if (render_result == Win32RenderResult::Recreate) {
+      if (render_result == Win32RenderResult::Retry || render_result == Win32RenderResult::Recreate) {
         InvalidateFullWindow();
       }
       EndPaint(window, &paint);

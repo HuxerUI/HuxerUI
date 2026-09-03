@@ -4,6 +4,7 @@
 #include <d2d1_1helper.h>
 #include <d2d1effects.h>
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <dcomp.h>
 #include <dwrite.h>
 #include <dxgi1_2.h>
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <concepts>
+#include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -289,12 +291,22 @@ struct Win32Renderer::State {
     ComPtr<ID2D1Bitmap1> bitmap;
   };
 
-  struct CachedExternalTexture {
+  struct CachedPixelTexture {
     std::weak_ptr<windows::PixelTexture> texture;
     // The CPU frame outlives device resources so a reset can rebuild its Direct2D bitmap without another publish.
     std::shared_ptr<const Win32PixelFrame> frame;
     ComPtr<ID2D1Bitmap1> bitmap;
     std::uint64_t draw_epoch = std::numeric_limits<std::uint64_t>::max();
+  };
+
+  struct CachedD3D11Texture {
+    std::weak_ptr<windows::D3D11Texture> texture;
+    // The producer-device snapshot survives renderer device resets and can be reopened without another publication.
+    std::shared_ptr<const Win32D3D11Frame> frame;
+    ComPtr<ID3D11Texture2D> shared_texture;
+    ComPtr<IDXGIKeyedMutex> keyed_mutex;
+    ComPtr<ID2D1Bitmap1> bitmap;
+    bool acquired = false;
   };
 
   struct FontHash {
@@ -1069,24 +1081,49 @@ struct Win32Renderer::State {
     shadow_context_.Reset();
   }
 
-  void ResetExternalTextureBitmaps() noexcept {
-    for (CachedExternalTexture& entry : external_textures_) {
+  HRESULT ReleaseD3D11Textures() noexcept {
+    HRESULT first_failure = S_OK;
+    for (CachedD3D11Texture& entry : d3d11_textures_) {
+      if (!entry.acquired) {
+        continue;
+      }
+      const HRESULT result = entry.keyed_mutex->ReleaseSync(1);
+      if (FAILED(result) && SUCCEEDED(first_failure)) {
+        first_failure = result;
+      }
+      entry.acquired = false;
+    }
+    return first_failure;
+  }
+
+  void ResetExternalTextureResources() noexcept {
+    static_cast<void>(ReleaseD3D11Textures());
+    for (CachedPixelTexture& entry : pixel_textures_) {
       entry.bitmap.Reset();
+    }
+    for (CachedD3D11Texture& entry : d3d11_textures_) {
+      entry.bitmap.Reset();
+      entry.keyed_mutex.Reset();
+      entry.shared_texture.Reset();
     }
   }
 
   void BeginExternalTextureFrame() {
     if (external_texture_draw_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
       external_texture_draw_epoch_ = 0;
-      for (CachedExternalTexture& entry : external_textures_) {
+      for (CachedPixelTexture& entry : pixel_textures_) {
         entry.draw_epoch = std::numeric_limits<std::uint64_t>::max();
       }
     } else {
       ++external_texture_draw_epoch_;
     }
 
-    std::erase_if(external_textures_, [](const CachedExternalTexture& entry) {
+    std::erase_if(pixel_textures_, [](const CachedPixelTexture& entry) {
       const std::shared_ptr<windows::PixelTexture> texture = entry.texture.lock();
+      return !texture || !texture->IsActive();
+    });
+    std::erase_if(d3d11_textures_, [](const CachedD3D11Texture& entry) {
+      const std::shared_ptr<windows::D3D11Texture> texture = entry.texture.lock();
       return !texture || !texture->IsActive();
     });
   }
@@ -1096,7 +1133,7 @@ struct Win32Renderer::State {
     transform_stack_.clear();
     DiscardSizeDependentResources();
     DiscardShadowResources();
-    ResetExternalTextureBitmaps();
+    ResetExternalTextureResources();
     path_geometries_.clear();
     images_.clear();
     image_cache_bytes_ = 0;
@@ -1161,31 +1198,42 @@ struct Win32Renderer::State {
     clip_stack_.clear();
     transform_stack_.clear();
     BeginExternalTextureFrame();
+    if (frame.scene.root != nullptr && !PrepareD3D11Textures(*frame.scene.root)) {
+      return Win32RenderResult::Retry;
+    }
     device_context_->SetTarget(scene_target_.Get());
     device_context_->BeginDraw();
-    device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-    device_context_->PushAxisAlignedClip(ToD2DRect(paint_bounds), D2D1_ANTIALIAS_MODE_ALIASED);
-    SetBrushColor(Color::Rgb(247, 248, 250));
-    device_context_->FillRectangle(ToD2DRect(client_bounds), brush_.Get());
+    HRESULT result = S_OK;
+    try {
+      device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+      device_context_->PushAxisAlignedClip(ToD2DRect(paint_bounds), D2D1_ANTIALIAS_MODE_ALIASED);
+      SetBrushColor(Color::Rgb(247, 248, 250));
+      device_context_->FillRectangle(ToD2DRect(client_bounds), brush_.Get());
 
-    if (frame.scene.root != nullptr) {
-      RenderSceneNode(*frame.scene.root);
+      if (frame.scene.root != nullptr) {
+        RenderSceneNode(*frame.scene.root);
+      }
+      while (!transform_stack_.empty()) {
+        RenderCommand(PopTransformCommand{});
+      }
+      while (!clip_stack_.empty()) {
+        PopClip();
+      }
+      device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
+      device_context_->PopAxisAlignedClip();
+      result = device_context_->EndDraw();
+    } catch (...) {
+      static_cast<void>(device_context_->EndDraw());
+      static_cast<void>(ReleaseD3D11Textures());
+      throw;
     }
-    while (!transform_stack_.empty()) {
-      RenderCommand(PopTransformCommand{});
-    }
-    while (!clip_stack_.empty()) {
-      PopClip();
-    }
-    device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
-    device_context_->PopAxisAlignedClip();
-
-    HRESULT result = device_context_->EndDraw();
+    const HRESULT release_result = ReleaseD3D11Textures();
     if (result == D2DERR_RECREATE_TARGET) {
       DiscardDeviceResources();
       return Win32RenderResult::Recreate;
     }
     ThrowIfFailed(result, "HuxerUI could not render the Windows frame");
+    ThrowIfFailed(release_result, "HuxerUI could not release Windows D3D11 textures after rendering");
 
     device_context_->SetTarget(swap_chain_target_.Get());
     device_context_->BeginDraw();
@@ -1527,7 +1575,7 @@ struct Win32Renderer::State {
     }
   }
 
-  void UploadExternalTextureFrame(CachedExternalTexture& cached, const Win32PixelFrame& frame) {
+  void UploadExternalTextureFrame(CachedPixelTexture& cached, const Win32PixelFrame& frame) {
     const std::span<const std::byte> pixels = frame.Pixels();
     const auto pitch = static_cast<UINT32>(frame.BytesPerRow());
     if (cached.bitmap) {
@@ -1562,18 +1610,18 @@ struct Win32Renderer::State {
     cached.bitmap = std::move(bitmap);
   }
 
-  ID2D1Bitmap1* ExternalTextureBitmapFor(const std::shared_ptr<ExternalTexture>& texture) {
+  ID2D1Bitmap1* PixelTextureBitmapFor(const std::shared_ptr<ExternalTexture>& texture) {
     const std::shared_ptr<windows::PixelTexture> pixel_texture =
         std::dynamic_pointer_cast<windows::PixelTexture>(texture);
     if (!pixel_texture) {
       throw std::logic_error("HuxerUI external texture is incompatible with the Windows renderer");
     }
-    auto cached = std::ranges::find_if(external_textures_, [&pixel_texture](const CachedExternalTexture& entry) {
+    auto cached = std::ranges::find_if(pixel_textures_, [&pixel_texture](const CachedPixelTexture& entry) {
       return entry.texture.lock() == pixel_texture;
     });
-    if (cached == external_textures_.end()) {
-      external_textures_.push_back({.texture = pixel_texture});
-      cached = external_textures_.end() - 1;
+    if (cached == pixel_textures_.end()) {
+      pixel_textures_.push_back({.texture = pixel_texture});
+      cached = pixel_textures_.end() - 1;
     }
     if (cached->draw_epoch == external_texture_draw_epoch_) {
       return cached->bitmap.Get();
@@ -1588,6 +1636,169 @@ struct Win32Renderer::State {
       UploadExternalTextureFrame(*cached, *cached->frame);
     }
     return cached->bitmap.Get();
+  }
+
+  using D3D11TextureList = std::vector<std::shared_ptr<windows::D3D11Texture>>;
+
+  void CollectD3D11Textures(const PaintSequence& sequence, D3D11TextureList& textures) {
+    if (!sequence.HasExternalTextureCommands()) {
+      return;
+    }
+    for (const PaintCommand& paint_command : sequence.Commands()) {
+      const auto* command = std::get_if<DrawExternalTextureCommand>(&paint_command);
+      if (command == nullptr || command->destination.IsEmpty() || command->source.IsEmpty() ||
+          command->opacity <= 0.0F) {
+        continue;
+      }
+      const std::shared_ptr<windows::D3D11Texture> texture =
+          std::dynamic_pointer_cast<windows::D3D11Texture>(command->texture);
+      if (texture && std::ranges::none_of(textures, [&texture](const auto& existing) { return existing == texture; })) {
+        textures.push_back(texture);
+      }
+    }
+  }
+
+  void CollectD3D11Textures(const RenderNode& node, D3D11TextureList& textures) {
+    if (!node.visible || node.opacity <= 0.0F) {
+      return;
+    }
+    CollectD3D11Textures(node.content, textures);
+    for (const RenderNode* child : node.children) {
+      if (child != nullptr) {
+        CollectD3D11Textures(*child, textures);
+      }
+    }
+    CollectD3D11Textures(node.foreground, textures);
+  }
+
+  void ResetD3D11Import(CachedD3D11Texture& cached) noexcept {
+    cached.bitmap.Reset();
+    cached.keyed_mutex.Reset();
+    cached.shared_texture.Reset();
+  }
+
+  HRESULT AcquireD3D11Texture(CachedD3D11Texture& cached) {
+    if (!cached.frame) {
+      return S_OK;
+    }
+    if (!cached.shared_texture) {
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+      throw std::runtime_error("HuxerUI Windows D3D11 textures require Windows 10 or later");
+#else
+      ComPtr<ID3D11Device1> device;
+      ThrowIfFailed(d3d_device_.As(&device), "HuxerUI could not access the Windows D3D11.1 renderer device");
+      ThrowIfFailed(
+          device->OpenSharedResource1(
+              cached.frame->SharedHandle(), __uuidof(ID3D11Texture2D),
+              reinterpret_cast<void**>(cached.shared_texture.GetAddressOf())
+          ),
+          "HuxerUI could not open a Windows D3D11 texture; producer and renderer must use the same adapter"
+      );
+      ThrowIfFailed(
+          cached.shared_texture.As(&cached.keyed_mutex),
+          "HuxerUI could not synchronize a Windows D3D11 texture"
+      );
+#endif
+    }
+
+    const HRESULT acquire_result = cached.keyed_mutex->AcquireSync(1, 0);
+    if (acquire_result != S_OK) {
+      return acquire_result;
+    }
+    cached.acquired = true;
+    if (cached.bitmap) {
+      return S_OK;
+    }
+
+    try {
+      ComPtr<IDXGISurface> surface;
+      ThrowIfFailed(cached.shared_texture.As(&surface), "HuxerUI could not access a Windows D3D11 texture surface");
+      const D2D1_ALPHA_MODE alpha_mode = cached.frame->Alpha() == windows::D3D11Texture::Alpha::Opaque
+                                             ? D2D1_ALPHA_MODE_IGNORE
+                                             : D2D1_ALPHA_MODE_PREMULTIPLIED;
+      const D2D1_BITMAP_PROPERTIES1 properties = D2D1::BitmapProperties1(
+          D2D1_BITMAP_OPTIONS_NONE,
+          D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, alpha_mode),
+          kDipsPerInch,
+          kDipsPerInch
+      );
+      ThrowIfFailed(
+          device_context_->CreateBitmapFromDxgiSurface(surface.Get(), &properties, cached.bitmap.GetAddressOf()),
+          "HuxerUI could not create a Direct2D bitmap for a Windows D3D11 texture"
+      );
+    } catch (...) {
+      static_cast<void>(cached.keyed_mutex->ReleaseSync(1));
+      cached.acquired = false;
+      ResetD3D11Import(cached);
+      throw;
+    }
+    return S_OK;
+  }
+
+  bool PrepareD3D11Textures(const RenderNode& root) {
+    D3D11TextureList requested;
+    CollectD3D11Textures(root, requested);
+    for (const std::shared_ptr<windows::D3D11Texture>& texture : requested) {
+      auto cached = std::ranges::find_if(d3d11_textures_, [&texture](const CachedD3D11Texture& entry) {
+        return entry.texture.lock() == texture;
+      });
+      if (cached == d3d11_textures_.end()) {
+        d3d11_textures_.push_back({.texture = texture});
+        cached = d3d11_textures_.end() - 1;
+      }
+      const std::shared_ptr<const Win32D3D11Frame> frame = GetD3D11Frame(*texture);
+      if (frame != cached->frame) {
+        ResetD3D11Import(*cached);
+        cached->frame = frame;
+      }
+    }
+
+    std::vector<CachedD3D11Texture*> acquisitions;
+    acquisitions.reserve(requested.size());
+    for (CachedD3D11Texture& cached : d3d11_textures_) {
+      const std::shared_ptr<windows::D3D11Texture> texture = cached.texture.lock();
+      if (cached.frame && std::ranges::find(requested, texture) != requested.end()) {
+        acquisitions.push_back(&cached);
+      }
+    }
+    std::ranges::sort(acquisitions, [](const CachedD3D11Texture* left, const CachedD3D11Texture* right) {
+      return std::less<const Win32D3D11Frame*>{}(left->frame.get(), right->frame.get());
+    });
+
+    try {
+      for (CachedD3D11Texture* cached : acquisitions) {
+        const HRESULT result = AcquireD3D11Texture(*cached);
+        if (result == WAIT_TIMEOUT) {
+          ThrowIfFailed(
+              ReleaseD3D11Textures(),
+              "HuxerUI could not release Windows D3D11 textures after a synchronization timeout"
+          );
+          return false;
+        }
+        if (result == WAIT_ABANDONED) {
+          throw std::runtime_error("HuxerUI Windows D3D11 texture synchronization was abandoned");
+        }
+        ThrowIfFailed(result, "HuxerUI could not acquire a Windows D3D11 texture for rendering");
+      }
+    } catch (...) {
+      static_cast<void>(ReleaseD3D11Textures());
+      throw;
+    }
+    return true;
+  }
+
+  ID2D1Bitmap1* D3D11TextureBitmapFor(const std::shared_ptr<windows::D3D11Texture>& texture) {
+    const auto cached = std::ranges::find_if(d3d11_textures_, [&texture](const CachedD3D11Texture& entry) {
+      return entry.texture.lock() == texture;
+    });
+    return cached != d3d11_textures_.end() && cached->acquired ? cached->bitmap.Get() : nullptr;
+  }
+
+  ID2D1Bitmap1* ExternalTextureBitmapFor(const std::shared_ptr<ExternalTexture>& texture) {
+    if (const auto d3d11_texture = std::dynamic_pointer_cast<windows::D3D11Texture>(texture)) {
+      return D3D11TextureBitmapFor(d3d11_texture);
+    }
+    return PixelTextureBitmapFor(texture);
   }
 
   void RenderCommand(const DrawExternalTextureCommand& command) {
@@ -2244,7 +2455,8 @@ struct Win32Renderer::State {
   std::vector<CachedPathGeometry> path_geometries_;
   std::vector<CachedImage> images_;
   std::size_t image_cache_bytes_ = 0;
-  std::vector<CachedExternalTexture> external_textures_;
+  std::vector<CachedPixelTexture> pixel_textures_;
+  std::vector<CachedD3D11Texture> d3d11_textures_;
   std::uint64_t external_texture_draw_epoch_ = 0;
   std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
   std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
@@ -2266,7 +2478,8 @@ void Win32Renderer::Initialize() {
 
 void Win32Renderer::Discard() noexcept {
   state_->DiscardDeviceResources();
-  state_->external_textures_.clear();
+  state_->pixel_textures_.clear();
+  state_->d3d11_textures_.clear();
   state_->platform_composition_ = false;
   state_->paragraphs_.clear();
   state_->text_runs_.clear();

@@ -31,6 +31,24 @@ Windows 11 Snap Layout is available through the shared maximize-button geometry 
 System tray presentation uses the Windows notification area and restores its item after Explorer restarts.
 Runtime camera and microphone permissions use AppCapability when present; package capability declarations remain application-owned.
 
+Native libraries include `<huxerui/windows/external_texture.h>` for `windows::PixelTexture` and `windows::D3D11Texture`.
+`PixelTexture` copies straight-alpha RGBA8888 or BGRA8888 rows into premultiplied CPU storage.
+`D3D11Texture` accepts one-mip, one-slice, single-sampled `DXGI_FORMAT_B8G8R8A8_UNORM` `D3D11_USAGE_DEFAULT` textures without CPU access.
+It synchronously performs one GPU copy into an immutable shared snapshot, so the producer may reuse or release its source after `Publish()` returns.
+
+```cpp
+auto texture = std::make_shared<huxerui::windows::D3D11Texture>(huxerui::Size{320.0F, 180.0F});
+texture->Publish({producer_texture, huxerui::windows::D3D11Texture::Alpha::Opaque});
+```
+
+Submit producer writes before publication and externally serialize use of the source device's immediate context.
+Pixel row zero is interpreted as the logical top edge.
+The producer and every renderer displaying the texture must use the same graphics adapter.
+Renderers open the immutable shared snapshot directly, coordinate read access with its keyed mutex, and do not make a second GPU copy or silently read pixels back to CPU memory.
+Renderer-local resource recreation can reopen the snapshot while its producer device remains valid.
+If the producer device is removed, publish a replacement texture from a valid device before the next render.
+`D3D11Texture` is unavailable when `HUXERUI_WINDOWS_7_COMPAT=ON`.
+
 ## macOS
 
 The macOS backend requires macOS 12 or later.

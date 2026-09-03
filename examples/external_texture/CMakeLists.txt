@@ -1,6 +1,9 @@
 huxerui_add_example(example_external_texture "HuxerUI External Texture" "com.huxerui.external-texture")
 
-if (WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN))
+if (WIN32 AND NOT HUXERUI_WINDOWS_7_COMPAT)
+    target_sources(example_external_texture PRIVATE windows_texture_demo.cpp)
+    target_link_libraries(example_external_texture PRIVATE d3d11)
+elseif (WIN32 OR (UNIX AND NOT APPLE AND NOT ANDROID AND NOT EMSCRIPTEN))
     target_sources(example_external_texture PRIVATE pixel_texture_demo.cpp)
 elseif (ANDROID)
     target_sources(example_external_texture PRIVATE android_texture_demo.cpp)

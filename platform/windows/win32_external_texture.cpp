@@ -1,10 +1,16 @@
 #include <huxerui/windows/external_texture.h>
 
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <windows.h>
+#include <wrl/client.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -12,6 +18,176 @@
 
 namespace huxerui::detail {
 namespace {
+
+using Microsoft::WRL::ComPtr;
+
+void ThrowIfFailed(HRESULT result, const char* message) {
+  if (FAILED(result)) {
+    throw std::runtime_error(message);
+  }
+}
+
+class SharedHandle final {
+public:
+  SharedHandle() noexcept = default;
+  ~SharedHandle() {
+    if (value_ != nullptr) {
+      CloseHandle(value_);
+    }
+  }
+
+  SharedHandle(const SharedHandle&) = delete;
+  SharedHandle& operator=(const SharedHandle&) = delete;
+
+  [[nodiscard]] HANDLE* Address() noexcept {
+    return &value_;
+  }
+
+  [[nodiscard]] HANDLE Get() const noexcept {
+    return value_;
+  }
+
+  [[nodiscard]] HANDLE Release() noexcept {
+    return std::exchange(value_, nullptr);
+  }
+
+private:
+  HANDLE value_ = nullptr;
+};
+
+class KeyedMutexLease final {
+public:
+  explicit KeyedMutexLease(ComPtr<IDXGIKeyedMutex> mutex) : mutex_(std::move(mutex)) {}
+
+  ~KeyedMutexLease() {
+    if (mutex_) {
+      static_cast<void>(mutex_->ReleaseSync(release_key_));
+    }
+  }
+
+  KeyedMutexLease(const KeyedMutexLease&) = delete;
+  KeyedMutexLease& operator=(const KeyedMutexLease&) = delete;
+
+  void SetReleaseKey(UINT64 key) noexcept {
+    release_key_ = key;
+  }
+
+  void Release() {
+    const HRESULT result = mutex_->ReleaseSync(release_key_);
+    mutex_.Reset();
+    ThrowIfFailed(result, "HuxerUI could not release a Windows D3D11 texture snapshot");
+  }
+
+private:
+  ComPtr<IDXGIKeyedMutex> mutex_;
+  UINT64 release_key_ = 0;
+};
+
+void WaitForCopy(ID3D11Device& device, ID3D11DeviceContext& context) {
+  D3D11_QUERY_DESC query_description{};
+  query_description.Query = D3D11_QUERY_EVENT;
+  ComPtr<ID3D11Query> query;
+  ThrowIfFailed(
+      device.CreateQuery(&query_description, query.GetAddressOf()),
+      "HuxerUI could not create a Windows D3D11 texture completion query"
+  );
+  context.End(query.Get());
+  context.Flush();
+  HRESULT result = context.GetData(query.Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+  while (result == S_FALSE) {
+    std::this_thread::yield();
+    result = context.GetData(query.Get(), nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+  }
+  ThrowIfFailed(result, "HuxerUI could not complete a Windows D3D11 texture snapshot");
+}
+
+std::shared_ptr<const Win32D3D11Frame> CopyD3D11Frame(const windows::D3D11Texture::Frame& frame) {
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+  static_cast<void>(frame);
+  throw std::runtime_error("HuxerUI Windows D3D11 textures require Windows 10 or later");
+#else
+  if (frame.texture == nullptr) {
+    throw std::invalid_argument("HuxerUI Windows D3D11 texture source must not be null");
+  }
+  switch (frame.alpha) {
+  case windows::D3D11Texture::Alpha::Opaque:
+  case windows::D3D11Texture::Alpha::Premultiplied:
+    break;
+  default:
+    throw std::invalid_argument("HuxerUI Windows D3D11 texture alpha mode is not supported");
+  }
+
+  D3D11_TEXTURE2D_DESC source_description{};
+  frame.texture->GetDesc(&source_description);
+  if (source_description.Width == 0 || source_description.Height == 0 || source_description.MipLevels != 1 ||
+      source_description.ArraySize != 1 || source_description.Format != DXGI_FORMAT_B8G8R8A8_UNORM ||
+      source_description.SampleDesc.Count != 1 || source_description.SampleDesc.Quality != 0 ||
+      source_description.Usage != D3D11_USAGE_DEFAULT || source_description.CPUAccessFlags != 0) {
+    throw std::invalid_argument(
+        "HuxerUI Windows D3D11 texture source must be a single-sampled, one-mip, one-slice "
+        "DXGI_FORMAT_B8G8R8A8_UNORM D3D11_USAGE_DEFAULT texture without CPU access"
+    );
+  }
+  if (source_description.Width > static_cast<UINT>(std::numeric_limits<int>::max()) ||
+      source_description.Height > static_cast<UINT>(std::numeric_limits<int>::max())) {
+    throw std::invalid_argument("HuxerUI Windows D3D11 texture dimensions are too large");
+  }
+
+  ComPtr<ID3D11Device> device;
+  frame.texture->GetDevice(device.GetAddressOf());
+  if (!device) {
+    throw std::runtime_error("HuxerUI could not access the Windows D3D11 texture device");
+  }
+  ThrowIfFailed(
+      device->GetDeviceRemovedReason(),
+      "HuxerUI cannot publish a Windows D3D11 texture from a removed device"
+  );
+
+  D3D11_TEXTURE2D_DESC snapshot_description = source_description;
+  snapshot_description.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+  snapshot_description.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE | D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
+  ComPtr<ID3D11Texture2D> snapshot;
+  ThrowIfFailed(
+      device->CreateTexture2D(&snapshot_description, nullptr, snapshot.GetAddressOf()),
+      "HuxerUI could not create a shared Windows D3D11 texture snapshot"
+  );
+
+  ComPtr<IDXGIKeyedMutex> keyed_mutex;
+  ThrowIfFailed(snapshot.As(&keyed_mutex), "HuxerUI could not synchronize a shared Windows D3D11 texture snapshot");
+  ThrowIfFailed(
+      keyed_mutex->AcquireSync(0, INFINITE),
+      "HuxerUI could not acquire a shared Windows D3D11 texture snapshot"
+  );
+  KeyedMutexLease lease(std::move(keyed_mutex));
+
+  ComPtr<ID3D11DeviceContext> context;
+  device->GetImmediateContext(context.GetAddressOf());
+  if (!context) {
+    throw std::runtime_error("HuxerUI could not access the Windows D3D11 immediate context");
+  }
+  context->CopyResource(snapshot.Get(), frame.texture);
+  WaitForCopy(*device.Get(), *context.Get());
+
+  ComPtr<IDXGIResource1> resource;
+  ThrowIfFailed(snapshot.As(&resource), "HuxerUI could not share a Windows D3D11 texture snapshot");
+  SharedHandle shared_handle;
+  ThrowIfFailed(
+      resource->CreateSharedHandle(
+          nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, shared_handle.Address()
+      ),
+      "HuxerUI could not create a Windows D3D11 texture shared handle"
+  );
+
+  lease.SetReleaseKey(1);
+  lease.Release();
+  auto copied = std::make_shared<Win32D3D11Frame>(
+      static_cast<int>(source_description.Width), static_cast<int>(source_description.Height), frame.alpha,
+      shared_handle.Get(), std::move(snapshot)
+  );
+  static_cast<void>(shared_handle.Release());
+  return copied;
+#endif
+}
 
 Win32PixelFrame CopyFrame(const windows::PixelFrame& frame) {
   if (frame.pixel_width <= 0 || frame.pixel_height <= 0) {
@@ -75,6 +251,19 @@ Win32PixelFrame CopyFrame(const windows::PixelFrame& frame) {
 
 } // namespace
 
+Win32D3D11Frame::Win32D3D11Frame(
+    int pixel_width, int pixel_height, windows::D3D11Texture::Alpha alpha, HANDLE shared_handle,
+    ComPtr<ID3D11Texture2D> texture
+) noexcept
+    : pixel_width_(pixel_width), pixel_height_(pixel_height), alpha_(alpha), shared_handle_(shared_handle),
+      texture_(std::move(texture)) {}
+
+Win32D3D11Frame::~Win32D3D11Frame() {
+  if (shared_handle_ != nullptr) {
+    CloseHandle(shared_handle_);
+  }
+}
+
 } // namespace huxerui::detail
 
 namespace huxerui::windows {
@@ -82,6 +271,12 @@ namespace huxerui::windows {
 struct PixelTexture::Storage {
   std::mutex mutex;
   std::shared_ptr<const detail::Win32PixelFrame> frame;
+  bool finished = false;
+};
+
+struct D3D11Texture::Storage {
+  std::mutex mutex;
+  std::shared_ptr<const detail::Win32D3D11Frame> frame;
   bool finished = false;
 };
 
@@ -114,11 +309,50 @@ std::shared_ptr<const detail::Win32PixelFrame> PixelTexture::AcquireFrame() cons
   return storage_->frame;
 }
 
+D3D11Texture::D3D11Texture(Size intrinsic_size)
+    : huxerui::ExternalTexture(intrinsic_size), storage_(std::make_unique<Storage>()) {}
+
+D3D11Texture::~D3D11Texture() {
+  Finish();
+}
+
+void D3D11Texture::Publish(Frame frame) {
+  {
+    std::lock_guard lock(storage_->mutex);
+    if (storage_->finished) {
+      throw std::logic_error("HuxerUI Windows D3D11 texture is finished");
+    }
+  }
+  std::shared_ptr<const detail::Win32D3D11Frame> copied = detail::CopyD3D11Frame(frame);
+  {
+    std::lock_guard lock(storage_->mutex);
+    if (storage_->finished) {
+      throw std::logic_error("HuxerUI Windows D3D11 texture is finished");
+    }
+    storage_->frame = std::move(copied);
+  }
+  NotifyFrameAvailable();
+}
+
+void D3D11Texture::Finish() noexcept {
+  std::lock_guard lock(storage_->mutex);
+  storage_->finished = true;
+}
+
+std::shared_ptr<const detail::Win32D3D11Frame> D3D11Texture::AcquireFrame() const noexcept {
+  std::lock_guard lock(storage_->mutex);
+  return storage_->frame;
+}
+
 } // namespace huxerui::windows
 
 namespace huxerui::detail {
 
 std::shared_ptr<const Win32PixelFrame> GetPixelFrame(const windows::PixelTexture& texture) noexcept {
+  return texture.AcquireFrame();
+}
+
+std::shared_ptr<const Win32D3D11Frame> GetD3D11Frame(const windows::D3D11Texture& texture) noexcept {
   return texture.AcquireFrame();
 }
 

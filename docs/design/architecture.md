@@ -1239,11 +1239,11 @@ protected:
 };
 ```
 
-The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `ios::MetalTexture`, `macos::PixelBufferTexture`, `macos::MetalTexture`, `windows::PixelTexture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
+The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `ios::MetalTexture`, `macos::PixelBufferTexture`, `macos::MetalTexture`, `windows::PixelTexture`, `windows::D3D11Texture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
 Apple Objective-C and Swift use `HUXPixelBufferTexture` and `HUXMetalTexture`, imported as `PixelBufferTexture` and `MetalTexture`; each object is itself an `ExternalTexture` capability rather than an owner exposing a second `.texture` value.
-Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple retains immutable `CVPixelBufferRef` frames or synchronously copies a completed `MTLTexture`; Windows and Linux copy borrowed `PixelFrame` rows; Web clones an open WebCodecs `VideoFrame` on the browser main thread.
+Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple retains immutable `CVPixelBufferRef` frames or synchronously copies a completed `MTLTexture`; Windows copies borrowed `PixelFrame` rows or a completed D3D11 texture; Linux copies borrowed `PixelFrame` rows; Web clones an open WebCodecs `VideoFrame` on the browser main thread.
 Retained Android Bitmap and Apple pixel-buffer storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after publication returns.
-Future GPU-native producers such as shared D3D, DMA-BUF, AHardwareBuffer, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
+Future GPU-native producers such as DMA-BUF, AHardwareBuffer, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
 
 Apple `MetalTexture::Publish()` accepts level zero of a non-framebuffer-only 2D BGRA8 or RGBA8 texture after producer writes have completed.
 It waits for an immutable GPU snapshot before advancing the texture revision, normalizes opaque or straight alpha with Metal Performance Shaders when required, and retains the previous frame if allocation, encoding, or execution fails.
@@ -1315,8 +1315,16 @@ This platform-private child does not become a PlatformView, public View, accessi
 Frames containing GPU texture children move the base Canvas slice from `onDraw()` into `dispatchDraw()` so all Canvas, GPU texture, and PlatformView content retains command order.
 Direct `AHardwareBuffer` import remains future work.
 The Linux implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into Cairo premultiplied ARGB32 storage, keeps one Cairo surface per active texture, and leaves DMA-BUF import and explicit synchronization as future renderer work.
-The Windows implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.
-It reuses the bitmap allocation while pixel dimensions remain unchanged and leaves shared D3D textures, keyed synchronization, and zero-copy video import as future renderer work.
+The Windows `PixelTexture` implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.
+It reuses the bitmap allocation while pixel dimensions remain unchanged.
+`D3D11Texture::Publish()` accepts a completed one-mip, one-slice, single-sampled BGRA8 default-usage texture, copies it once into a new HuxerUI-owned NT-handle shared resource, waits for that copy, and publishes only the immutable snapshot.
+The producer may reuse or release its source after publication returns, but it must submit writes first and externally serialize access to its immediate context.
+The renderer opens the snapshot on its own same-adapter D3D11 device and creates a Direct2D bitmap from that DXGI surface without a renderer-local texture copy or CPU readback.
+Every renderer precollects the snapshots used by a frame, acquires their keyed mutexes in stable resource order, submits all Direct2D reads with `EndDraw()`, and releases the mutexes in one cleanup path.
+A zero-timeout contention result abandons that render attempt and schedules a retry instead of blocking the UI thread; abandoned synchronization and adapter mismatch fail explicitly.
+Renderer-local device resource recreation discards only the opened resource, mutex, and Direct2D wrapper, then reopens the retained snapshot while its producer device remains valid.
+A removed producer device invalidates snapshots owned by that device, so the application must publish a replacement from a valid device before another render.
+The modern NT-handle path is unavailable in Windows 7 compatibility builds.
 The Web implementation accepts only open WebCodecs `VideoFrame` values, clones each publication synchronously, and leaves the caller responsible for closing its original value.
 Because `emscripten::val` is thread-affine, texture construction, publication, finish, and destruction remain on the browser main thread.
 The Canvas renderer clones the latest mailbox frame at most once per physical frame, shares that renderer-owned clone across every Canvas slice, maps logical crop coordinates through `displayWidth` and `displayHeight`, and closes replaced or inactive clones.
