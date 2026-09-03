@@ -1,7 +1,9 @@
 """Regression tests for host-tool CI selection, artifacts, and safe writeback."""
 
+import fnmatch
 import importlib.util
 from pathlib import Path
+import re
 import struct
 import subprocess
 import tempfile
@@ -29,6 +31,26 @@ def binary(package, marker=b"new"):
         data[:6] = b"\x7fELF\x02\x01"
         struct.pack_into("<H", data, 18, 62 if package.endswith("x86_64") else 183)
     return bytes(data) + marker
+
+
+class WorkflowPathTests(unittest.TestCase):
+    def test_push_paths_match_plan_inputs(self):
+        workflow = (SOURCE / ".github/workflows/update-host-tools.yml").read_text(encoding="utf-8")
+        push = workflow.split("  push:\n", 1)[1].split("  workflow_dispatch:\n", 1)[0]
+        patterns = re.findall(r"^      - '([^']+)'$", push, re.MULTILINE)
+        self.assertTrue(patterns)
+        tracked = host_tools.git(SOURCE, "ls-files", "-z").stdout.split(b"\0")
+        paths = {path.decode() for path in tracked if path} | host_tools.BUILD_FILES | host_tools.VALIDATION_FILES | {
+            "tools/codegen/nested/source.cpp", "tools/resource_compiler/nested/data.bin",
+            "tools/codegen/README.MD", "tools/codegen/nested/notes.Md",
+            "tools/resource_compiler/README.mD", "tools/resource_compiler/nested/notes.md",
+        }
+        for path in sorted(paths):
+            selected = False
+            for pattern in patterns:
+                if fnmatch.fnmatchcase(path, pattern.removeprefix("!")):
+                    selected = not pattern.startswith("!")
+            self.assertEqual(selected, host_tools.is_build_input(path) or host_tools.is_validation_input(path), path)
 
 
 class HostToolsTests(unittest.TestCase):

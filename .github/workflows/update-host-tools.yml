@@ -3,6 +3,20 @@ name: Update Host Tools
 on:
   push:
     branches: [main]
+    paths:
+      - 'tools/codegen/**'
+      - 'tools/resource_compiler/**'
+      - 'src/resource_format.h'
+      - 'src/vector_format.h'
+      - 'scripts/build_tools.sh'
+      - 'scripts/build_tools.ps1'
+      - '.github/workflows/update-host-tools.yml'
+      - '.github/workflows/scripts/host_tools.py'
+      - '.github/workflows/scripts/check_linux_binary_compatibility.sh'
+      - '.github/workflows/scripts/check_apple_deployment_target.sh'
+      - 'tests/scripts/host_tools_test.py'
+      - 'tests/scripts/build_tools_generator.sh'
+      - '!**.[mM][dD]'
   workflow_dispatch:
     inputs:
       update_prebuilts:
