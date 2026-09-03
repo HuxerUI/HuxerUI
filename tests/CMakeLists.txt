@@ -148,7 +148,10 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             "${HUXERUI_PROJECT_DIR}/examples/platform_module"
             "$<TARGET_PROPERTY:huxerui_core_objects,INCLUDE_DIRECTORIES>"
     )
-    target_link_libraries(huxerui_tests PRIVATE PkgConfig::HUXERUI_GIO)
+    target_link_libraries(huxerui_tests PRIVATE
+            PkgConfig::HUXERUI_GTK4
+            PkgConfig::HUXERUI_GIO
+    )
 endif ()
 
 if (EMSCRIPTEN)
