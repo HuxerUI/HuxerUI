@@ -750,7 +750,9 @@ Secure TextField creates grapheme boundaries from the platform text layout, then
 
 Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and native editable layouts.
 
-The TextField caches layout by text, font, available width, multiline configuration, and relevant style values.
+The TextField caches layout by text, font, available width, multiline configuration, resolved shaping options, and relevant style values.
+An empty shaping locale resolves from the mounted TextField's effective inherited Locale, while `TextField::Shaping()` preserves a non-empty explicit locale.
+The resolved shaping value is shared by the controlled value, label, placeholder, validation message, grapheme boundaries, selection and caret geometry, measurement, and every DrawText command so platform layout and renderer replay cannot diverge.
 
 Editor components can use TextMeasurer for exact-run metrics while retaining their own line, selection, and document models. They do not reuse TextField's internal editable layout.
 

@@ -169,15 +169,11 @@ void PaintLabelContent(
   if (!show_label || text_width <= 0.0F) {
     return;
   }
-  TextLayoutOptions options = node.properties.text_layout_options;
-  options.align = TextAlign::Leading;
-  options.vertical_align = TextVerticalAlign::Center;
-  options.wrap = TextWrap::NoWrap;
   context.DrawText(
       {leading + icon_width + spacing, content.y, text_width, content.height},
       node.text,
       text_style,
-      options
+      node.properties.text_layout_options
   );
 }
 
@@ -601,7 +597,10 @@ void HideRenderTree(MountedNode& node) {
   node.render_structure_dirty = false;
 }
 
-void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* extra_child = nullptr) {
+} // namespace
+
+void PaintNodeWithinClip(huxerui::MountedNode& mounted_node, const Rect& clip, const RenderNode* extra_child) {
+  auto& node = static_cast<detail::MountedNode&>(mounted_node);
   RenderNode& render_node = node.render_node;
   const Transform2D& local_transform = node.presentation.local_transform;
   const Transform2D children_transform = ResolveChildrenTransform(node);
@@ -625,7 +624,10 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
                                          std::max(0.0F, bounds.height - node.resolved_padding.Vertical()),
                                      }
                                    : bounds;
-    PaintContext content{render_node.content, canvas_bounds};
+    PaintContext content =
+        node.kind == NodeKind::Canvas
+            ? PaintContext(render_node.content, canvas_bounds, node.properties.text_layout_options.shaping.locale)
+            : PaintContext{render_node.content, canvas_bounds};
     std::optional<VisualFill> background = node.properties.background;
     TextStyle text_style = node.properties.text_style;
     if (node.applies_disabled_appearance) {
@@ -667,12 +669,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
           bounds,
           node.text,
           text_style,
-          TextLayoutOptions{
-              .shaping = {},
-              .align = TextAlign::Center,
-              .vertical_align = TextVerticalAlign::Center,
-              .wrap = TextWrap::NoWrap,
-          }
+          node.properties.text_layout_options
       );
     } else if ((node.kind == NodeKind::Checkbox || node.kind == NodeKind::RadioButton ||
                 node.kind == NodeKind::Switch) &&
@@ -721,7 +718,7 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   children.reserve(node.children.size());
   for (const auto& child : node.children) {
     if (child->participates_in_layout) {
-      PaintNodeWithinClip(*child, child_clip);
+      PaintNodeWithinClip(*child, child_clip, nullptr);
     } else {
       HideRenderTree(*child);
     }
@@ -771,8 +768,6 @@ void PaintNodeWithinClip(MountedNode& node, const Rect& clip, const RenderNode* 
   }
   node.render_structure_dirty = false;
 }
-
-} // namespace
 
 void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill, CornerRadii corner_radii,
                      float opacity) {

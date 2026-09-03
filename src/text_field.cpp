@@ -449,6 +449,8 @@ public:
         initialized_ && (configuration_.multiline != modifier.configuration.multiline ||
                          configuration_.secure != modifier.configuration.secure);
     const bool text_layout_options_changed = initialized_ && text_layout_options_ != modifier.text_layout_options;
+    const bool text_shaping_changed =
+        initialized_ && text_layout_options_.shaping != modifier.text_layout_options.shaping;
     const bool paragraph_layout_options_changed =
         initialized_ && !ParagraphLayoutOptionsEqual(text_layout_options_, modifier.text_layout_options);
     const bool authoritative_value_changed = initialized_ && modifier.value != authoritative_value_;
@@ -476,7 +478,8 @@ public:
     const TextFieldVariantStyle next_variant_style = detail::ResolveTextFieldVariantStyle(next_style, next_variant);
     next_style.text_style = node.properties.text_style;
     corner_radii_ = node.properties.corner_radii;
-    if (!initialized_ || text_layout_mode_changed || next_style.show_label != style_.show_label ||
+    if (!initialized_ || text_layout_mode_changed || text_shaping_changed ||
+        next_style.show_label != style_.show_label ||
         next_style.text_style.font != style_.text_style.font ||
         next_style.label_style.font != style_.label_style.font ||
         next_style.floating_label_style.font != style_.floating_label_style.font ||
@@ -747,7 +750,8 @@ public:
               size.height,
           },
           validation_.message,
-          std::move(validation_style)
+          std::move(validation_style),
+          TextLayoutOptions{.shaping = text_layout_options_.shaping, .wrap = TextWrap::Word}
       );
       context.PopClip();
     }
@@ -813,7 +817,12 @@ public:
           ResolveLabelColor(node, invalid, true),
           label_progress
       );
-      context.DrawText(AnimatedLabelBounds(node, label_progress), label_, std::move(animated_label_style));
+      context.DrawText(
+          AnimatedLabelBounds(node, label_progress),
+          label_,
+          std::move(animated_label_style),
+          TextLayoutOptions{.shaping = text_layout_options_.shaping, .wrap = TextWrap::NoWrap}
+      );
     }
   }
 
@@ -1348,7 +1357,7 @@ private:
       laid_out_label_.clear();
     } else if (!label_layout_ || !floating_label_layout_ || laid_out_label_ != label_) {
       const TextLayoutOptions label_options{
-          .shaping = {},
+          .shaping = text_layout_options_.shaping,
           .wrap = TextWrap::NoWrap,
       };
       label_layout_ = platform.CreateTextLayout(label_, style_.label_style, text_layout_width_, label_options);
@@ -1378,7 +1387,7 @@ private:
           validation_.message,
           style_.validation_text_style,
           validation_text_layout_width_,
-          TextLayoutOptions{.wrap = TextWrap::Word}
+          TextLayoutOptions{.shaping = text_layout_options_.shaping, .wrap = TextWrap::Word}
       );
       laid_out_validation_message_ = validation_.message;
       if (!validation_layout_) {
@@ -1692,7 +1701,7 @@ private:
         text,
         style_.text_style,
         std::numeric_limits<float>::infinity(),
-        TextLayoutOptions{.wrap = TextWrap::NoWrap}
+        TextLayoutOptions{.shaping = text_layout_options_.shaping, .wrap = TextWrap::NoWrap}
     );
     if (!layout) {
       throw std::logic_error("HuxerUI platform does not provide editable text layout");
@@ -2193,7 +2202,7 @@ private:
                     line,
                     style,
                     std::numeric_limits<float>::infinity(),
-                    TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                    TextLayoutOptions{.shaping = text_layout_options_.shaping, .wrap = TextWrap::NoWrap}
                 )
                 .size.width
         );
@@ -2476,6 +2485,9 @@ TextFieldModifier CompileTextFieldModifier(
   };
   compiled.leading_icon = compile_icon(declaration.leading_icon);
   compiled.trailing_icon = compile_icon(declaration.trailing_icon);
+  if (compiled.text_layout_options.shaping.locale.empty()) {
+    compiled.text_layout_options.shaping.locale = resource_locale().LanguageTag();
+  }
   return compiled;
 }
 
@@ -2589,6 +2601,12 @@ TextField TextField::LineLimits(TextFieldLineLimits value) && {
   return std::move(*this);
 }
 
+TextField TextField::Shaping(TextShapingOptions value) && {
+  text_shaping_ = std::move(value);
+  UpdateModifier();
+  return std::move(*this);
+}
+
 TextField TextField::Align(TextAlign value) && {
   text_align_ = value;
   UpdateModifier();
@@ -2632,7 +2650,7 @@ TextField TextField::InputConfiguration(TextInputConfiguration configuration) &&
 
 void TextField::UpdateModifier() {
   const TextLayoutOptions text_layout_options{
-      .shaping = {},
+      .shaping = text_shaping_,
       .align = text_align_,
       .vertical_align = text_vertical_align_.value_or(
           line_limits_.IsMultiline() ? TextVerticalAlign::Top : TextVerticalAlign::Center

@@ -155,6 +155,104 @@ int literal_tooltip_compositions = 0;
 int resource_tooltip_compositions = 0;
 State<bool> missing_text_field_placeholder;
 ImageAsset direct_image_asset;
+State<bool> alternate_nested_shaping_locale;
+int inherited_shaping_compositions = 0;
+int explicit_shaping_compositions = 0;
+int resource_explicit_shaping_compositions = 0;
+int nested_inherited_shaping_compositions = 0;
+int nested_explicit_shaping_compositions = 0;
+int shaping_unrelated_compositions = 0;
+int text_measurer_shaping_compositions = 0;
+
+class ShapingRecordingPlatform final : public TestPlatform {
+public:
+  struct Measurement {
+    std::string text;
+    TextLayoutOptions options;
+  };
+
+  TextLayoutMetrics MeasureText(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    measurements.push_back({std::string(text), options});
+    return TestPlatform::MeasureText(text, style, max_width, options);
+  }
+
+  std::vector<Measurement> measurements;
+};
+
+View InheritedShapingContent() {
+  ++inherited_shaping_compositions;
+  return Column {
+    Text("root inherited"),
+    Text(StringResource("test", "strings/shaped")),
+    Button("button inherited"),
+    Chip("chip inherited"),
+    RadioButton("radio inherited", false),
+    Switch("switch inherited", false),
+    Canvas([](PaintContext& paint, Size) {
+      const TextStyle style = TextStyle::Default();
+      paint.DrawText({0.0F, 0.0F, 120.0F, 20.0F}, "canvas paragraph", style);
+      paint.DrawTextRun({0.0F, 20.0F, 70.0F, 20.0F}, {0.0F, 35.0F}, "canvas run", style);
+      paint.DrawTextRuns({
+          TextRun{{0.0F, 40.0F, 80.0F, 20.0F}, {0.0F, 55.0F}, "canvas batch", style, {}},
+          TextRun{
+              {0.0F, 60.0F, 90.0F, 20.0F},
+              {0.0F, 75.0F},
+              "canvas explicit",
+              style,
+              {.locale = "ko-KR"},
+          },
+      });
+    }).With(huxerui::Frame{120.0F, 80.0F}),
+  };
+}
+
+View ExplicitShapingContent() {
+  ++explicit_shaping_compositions;
+  return Text("root explicit").Shaping({.direction = TextDirection::RightToLeft, .locale = "fa-IR"});
+}
+
+View ResourceExplicitShapingContent() {
+  ++resource_explicit_shaping_compositions;
+  return Text(StringResource("test", "strings/explicit_shaped")).Shaping({.locale = "fa-IR"});
+}
+
+View NestedInheritedShapingContent() {
+  ++nested_inherited_shaping_compositions;
+  auto alternate_nested = UseState(false);
+  alternate_nested_shaping_locale = alternate_nested;
+  const Locale locale = Locale::FromLanguageTag(alternate_nested.Get() ? "de-DE" : "ar-EG");
+  return ProvideEnvironment(locale, Text("nested inherited"));
+}
+
+View NestedExplicitShapingContent() {
+  ++nested_explicit_shaping_compositions;
+  return Text("nested explicit").Shaping({.locale = "ja-JP"});
+}
+
+View ShapingUnrelatedContent() {
+  ++shaping_unrelated_compositions;
+  return Spacer();
+}
+
+View ExplicitTextMeasurerContent() {
+  ++text_measurer_shaping_compositions;
+  static_cast<void>(UseTextMeasurer().MeasureText("explicit measurer", TextStyle::Default()));
+  return Spacer();
+}
+
+View InheritedTextShapingApp() {
+  return Column {
+    Scope(InheritedShapingContent),
+    Scope(ExplicitShapingContent),
+    Scope(ResourceExplicitShapingContent),
+    Scope(NestedInheritedShapingContent),
+    ProvideEnvironment(Locale::FromLanguageTag("ar-EG"), Scope(NestedExplicitShapingContent)),
+    Scope(ShapingUnrelatedContent),
+    Scope(ExplicitTextMeasurerContent),
+  };
+}
 
 View ResourceMenuApp() {
   auto menu = UseMenu();
@@ -223,7 +321,7 @@ View DensityImageResourceContent() {
 
 View DensityUnrelatedResourceContent() {
   ++density_unrelated_compositions;
-  return Text("unrelated");
+  return Text("unrelated").Shaping({.locale = "en-US"});
 }
 
 View ResourceConfigurationDependencyApp() {
@@ -237,7 +335,7 @@ View DirectLiteralResourceHelperApp() {
   ++direct_literal_resource_compositions;
   const detail::ResolvedImageAsset resolved = detail::UseImageVariant(ImageVariant{direct_image_asset});
   REQUIRE(std::get<ImageAsset>(resolved) == direct_image_asset);
-  return Text(UseString(StringVariant{"literal"}));
+  return Text(UseString(StringVariant{"literal"})).Shaping({.locale = "en-US"});
 }
 
 View VirtualDensityResourceContent() {
@@ -265,7 +363,7 @@ View LiteralTextFieldResourceDependencyApp() {
 
 View LiteralSemanticsResourceContent() {
   ++literal_semantics_compositions;
-  return Text("semantic").With(Semantics{.label = "literal"});
+  return Text("semantic").Shaping({.locale = "en-US"}).With(Semantics{.label = "literal"});
 }
 
 View LiteralSemanticsResourceDependencyApp() {
@@ -283,7 +381,7 @@ View ResourceSemanticsDependencyApp() {
 
 View LiteralTooltipContent() {
   ++literal_tooltip_compositions;
-  return Text("tooltip target").With(Tooltip("literal hint"));
+  return Text("tooltip target").Shaping({.locale = "en-US"}).With(Tooltip("literal hint"));
 }
 
 View LiteralTooltipDependencyApp() {
@@ -436,6 +534,198 @@ TEST_CASE("DirectLiteralResourceHelpersDoNotObserveResourceConfiguration") {
   runtime.UpdateResourceConfiguration(resources.configuration);
   runtime.BuildFrame();
   REQUIRE(direct_literal_resource_compositions == 1);
+}
+
+TEST_CASE("MountedTextAndCanvasInheritLocaleWithoutSubscribingExplicitShaping") {
+  inherited_shaping_compositions = 0;
+  explicit_shaping_compositions = 0;
+  resource_explicit_shaping_compositions = 0;
+  nested_inherited_shaping_compositions = 0;
+  nested_explicit_shaping_compositions = 0;
+  shaping_unrelated_compositions = 0;
+  text_measurer_shaping_compositions = 0;
+  TestResources resources;
+  resources.assets.emplace(
+      detail::resource_index_path,
+      EncodeIndex({
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/shaped",
+              .mime_type = "text/plain",
+              .value = "resource default",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/shaped",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "resource inherited",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/explicit_shaped",
+              .mime_type = "text/plain",
+              .value = "explicit resource default",
+          },
+          {
+              .kind = detail::ResourceEntryKind::String,
+              .key = "strings/explicit_shaped",
+              .mime_type = "text/plain",
+              .locale = "zh",
+              .value = "explicit resource localized",
+          },
+      })
+  );
+  ShapingRecordingPlatform platform;
+  platform.platform_resources = &resources;
+  Runtime runtime{InheritedTextShapingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {400.0F, 700.0F}});
+
+  const auto find_paragraph = [](const FlattenedScene& scene, std::string_view text) {
+    for (const PaintCommand& command : scene.Commands()) {
+      if (const auto* paragraph = std::get_if<DrawTextCommand>(&command);
+          paragraph != nullptr && paragraph->text == text) {
+        return paragraph;
+      }
+    }
+    return static_cast<const DrawTextCommand*>(nullptr);
+  };
+  const auto find_run = [](const FlattenedScene& scene, std::string_view text) {
+    for (const PaintCommand& command : scene.Commands()) {
+      if (const auto* batch = std::get_if<DrawTextRunsCommand>(&command)) {
+        const auto found = std::ranges::find(batch->runs, text, &TextRun::text);
+        if (found != batch->runs.end()) {
+          return &*found;
+        }
+      }
+    }
+    return static_cast<const TextRun*>(nullptr);
+  };
+  const auto last_measurement = [&platform](std::string_view text) {
+    const auto found = std::find_if(
+        platform.measurements.rbegin(),
+        platform.measurements.rend(),
+        [text](const ShapingRecordingPlatform::Measurement& measurement) {
+          return measurement.text == text;
+        }
+    );
+    return found == platform.measurements.rend() ? nullptr : &*found;
+  };
+  const auto require_measurement_matches = [&last_measurement](
+                                               std::string_view text,
+                                               const DrawTextCommand& command
+                                           ) {
+    const ShapingRecordingPlatform::Measurement* measurement = last_measurement(text);
+    REQUIRE(measurement != nullptr);
+    REQUIRE(measurement->options == command.options);
+  };
+
+  const FlattenedScene& initial = runtime.BuildFrame();
+  const DrawTextCommand* root_text = find_paragraph(initial, "root inherited");
+  const DrawTextCommand* resource_text = find_paragraph(initial, "resource inherited");
+  const DrawTextCommand* root_button = find_paragraph(initial, "button inherited");
+  const DrawTextCommand* root_chip = find_paragraph(initial, "chip inherited");
+  const DrawTextCommand* root_radio = find_paragraph(initial, "radio inherited");
+  const DrawTextCommand* root_switch = find_paragraph(initial, "switch inherited");
+  const DrawTextCommand* explicit_text = find_paragraph(initial, "root explicit");
+  const DrawTextCommand* explicit_resource_text = find_paragraph(initial, "explicit resource localized");
+  const DrawTextCommand* nested_text = find_paragraph(initial, "nested inherited");
+  const DrawTextCommand* nested_explicit = find_paragraph(initial, "nested explicit");
+  REQUIRE(root_text != nullptr);
+  REQUIRE(resource_text != nullptr);
+  REQUIRE(root_button != nullptr);
+  REQUIRE(root_chip != nullptr);
+  REQUIRE(root_radio != nullptr);
+  REQUIRE(root_switch != nullptr);
+  REQUIRE(explicit_text != nullptr);
+  REQUIRE(explicit_resource_text != nullptr);
+  REQUIRE(nested_text != nullptr);
+  REQUIRE(nested_explicit != nullptr);
+  const DrawTextCommand* canvas_paragraph = find_paragraph(initial, "canvas paragraph");
+  const TextRun* canvas_run = find_run(initial, "canvas run");
+  const TextRun* canvas_batch = find_run(initial, "canvas batch");
+  const TextRun* canvas_explicit = find_run(initial, "canvas explicit");
+  const ShapingRecordingPlatform::Measurement* root_measurement = last_measurement("root inherited");
+  const ShapingRecordingPlatform::Measurement* measurer_measurement = last_measurement("explicit measurer");
+  REQUIRE(canvas_paragraph != nullptr);
+  REQUIRE(canvas_run != nullptr);
+  REQUIRE(canvas_batch != nullptr);
+  REQUIRE(canvas_explicit != nullptr);
+  REQUIRE(root_measurement != nullptr);
+  REQUIRE(measurer_measurement != nullptr);
+  REQUIRE(root_text->options.shaping.locale == "zh-Hans-CN");
+  REQUIRE(resource_text->options.shaping.locale == "zh-Hans-CN");
+  REQUIRE(root_button->options.shaping.locale == "zh-Hans-CN");
+  REQUIRE(root_chip->options.shaping.locale == "zh-Hans-CN");
+  REQUIRE(root_radio->options.shaping.locale == "zh-Hans-CN");
+  REQUIRE(root_switch->options.shaping.locale == "zh-Hans-CN");
+  const TextShapingOptions explicit_options{.direction = TextDirection::RightToLeft, .locale = "fa-IR"};
+  REQUIRE(explicit_text->options.shaping == explicit_options);
+  REQUIRE(explicit_resource_text->options.shaping.locale == "fa-IR");
+  REQUIRE(nested_text->options.shaping.locale == "ar-EG");
+  REQUIRE(nested_explicit->options.shaping.locale == "ja-JP");
+  REQUIRE(canvas_paragraph->options.shaping.locale == "zh-Hans-CN");
+  REQUIRE(canvas_run->shaping.locale == "zh-Hans-CN");
+  REQUIRE(canvas_batch->shaping.locale == "zh-Hans-CN");
+  REQUIRE(canvas_explicit->shaping.locale == "ko-KR");
+  REQUIRE(root_measurement->options == root_text->options);
+  require_measurement_matches("button inherited", *root_button);
+  require_measurement_matches("chip inherited", *root_chip);
+  require_measurement_matches("radio inherited", *root_radio);
+  require_measurement_matches("switch inherited", *root_switch);
+  REQUIRE(measurer_measurement->options.shaping.locale.empty());
+  REQUIRE(inherited_shaping_compositions == 1);
+  REQUIRE(explicit_shaping_compositions == 1);
+  REQUIRE(resource_explicit_shaping_compositions == 1);
+  REQUIRE(nested_inherited_shaping_compositions == 1);
+  REQUIRE(nested_explicit_shaping_compositions == 1);
+  REQUIRE(shaping_unrelated_compositions == 1);
+  REQUIRE(text_measurer_shaping_compositions == 1);
+
+  resources.configuration.locale = Locale::FromLanguageTag("fr-FR");
+  runtime.UpdateResourceConfiguration(resources.configuration);
+  const FlattenedScene& root_updated = runtime.BuildFrame();
+  root_text = find_paragraph(root_updated, "root inherited");
+  resource_text = find_paragraph(root_updated, "resource default");
+  canvas_paragraph = find_paragraph(root_updated, "canvas paragraph");
+  explicit_text = find_paragraph(root_updated, "root explicit");
+  explicit_resource_text = find_paragraph(root_updated, "explicit resource default");
+  nested_text = find_paragraph(root_updated, "nested inherited");
+  REQUIRE(root_text != nullptr);
+  REQUIRE(resource_text != nullptr);
+  REQUIRE(canvas_paragraph != nullptr);
+  REQUIRE(explicit_text != nullptr);
+  REQUIRE(explicit_resource_text != nullptr);
+  REQUIRE(nested_text != nullptr);
+  REQUIRE(root_text->options.shaping.locale == "fr-FR");
+  REQUIRE(resource_text->options.shaping.locale == "fr-FR");
+  REQUIRE(canvas_paragraph->options.shaping.locale == "fr-FR");
+  REQUIRE(explicit_text->options.shaping.locale == "fa-IR");
+  REQUIRE(explicit_resource_text->options.shaping.locale == "fa-IR");
+  REQUIRE(nested_text->options.shaping.locale == "ar-EG");
+  REQUIRE(inherited_shaping_compositions == 2);
+  REQUIRE(explicit_shaping_compositions == 1);
+  REQUIRE(resource_explicit_shaping_compositions == 2);
+  REQUIRE(nested_inherited_shaping_compositions == 1);
+  REQUIRE(nested_explicit_shaping_compositions == 1);
+  REQUIRE(shaping_unrelated_compositions == 1);
+  REQUIRE(text_measurer_shaping_compositions == 1);
+
+  alternate_nested_shaping_locale = true;
+  const FlattenedScene& nested_updated = runtime.BuildFrame();
+  nested_text = find_paragraph(nested_updated, "nested inherited");
+  nested_explicit = find_paragraph(nested_updated, "nested explicit");
+  REQUIRE(nested_text != nullptr);
+  REQUIRE(nested_explicit != nullptr);
+  REQUIRE(nested_text->options.shaping.locale == "de-DE");
+  REQUIRE(nested_explicit->options.shaping.locale == "ja-JP");
+  REQUIRE(inherited_shaping_compositions == 2);
+  REQUIRE(explicit_shaping_compositions == 1);
+  REQUIRE(resource_explicit_shaping_compositions == 2);
+  REQUIRE(nested_inherited_shaping_compositions == 2);
+  REQUIRE(nested_explicit_shaping_compositions == 1);
+  REQUIRE(shaping_unrelated_compositions == 1);
+  REQUIRE(text_measurer_shaping_compositions == 1);
 }
 
 TEST_CASE("LiteralTextFieldsDoNotObserveResourceConfiguration") {

@@ -891,7 +891,7 @@ private:
     spec->properties.frame.min_height = std::max(0.0F, style.minimum_height);
     spec->properties.text_layout_options = {
         .shaping = {},
-        .align = TextAlign::Center,
+        .align = TextAlign::Leading,
         .vertical_align = TextVerticalAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
@@ -1908,7 +1908,7 @@ private:
     spec->properties.frame.min_height = std::max(0.0F, style.minimum_height);
     spec->properties.text_layout_options = {
         .shaping = {},
-        .align = TextAlign::Center,
+        .align = TextAlign::Leading,
         .vertical_align = TextVerticalAlign::Center,
         .wrap = TextWrap::NoWrap,
     };
@@ -1994,6 +1994,9 @@ void ApplyButtonDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Env
   spec.properties.background = style.background;
   spec.properties.disabled_background = style.disabled_background;
   spec.properties.text_style = style.label_style;
+  spec.properties.text_layout_options.align = TextAlign::Center;
+  spec.properties.text_layout_options.vertical_align = TextVerticalAlign::Center;
+  spec.properties.text_layout_options.wrap = TextWrap::NoWrap;
   spec.properties.disabled_foreground = style.disabled_label;
   spec.properties.corner_radii = style.corner_radius;
   spec.properties.frame.min_width = std::max(0.0F, style.minimum_width);
@@ -2012,6 +2015,9 @@ void ApplyIconButtonDefaults(detail::ViewSpec& spec, const std::shared_ptr<const
   const float state_layer_size = std::min(std::max(0.0F, style.state_layer_size), interactive_size);
   const float corner_radius = std::max(0.0F, style.corner_radius);
   spec.properties.text_style = TextStyle{Font::System(theme.typography.label_large), style.foreground};
+  spec.properties.text_layout_options.align = TextAlign::Leading;
+  spec.properties.text_layout_options.vertical_align = TextVerticalAlign::Center;
+  spec.properties.text_layout_options.wrap = TextWrap::NoWrap;
   spec.properties.disabled_foreground = style.disabled_foreground;
   spec.layout_values.insert_or_assign(
       typeid(detail::LabelContentMetrics),
@@ -2050,6 +2056,10 @@ void ApplyChipDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Envir
   };
   spec.properties.text_style = style.label_style;
   spec.properties.text_style.foreground = selected ? style.selected_label : style.label_style.foreground;
+  spec.properties.text_layout_options.align =
+      spec.image_properties.HasValue() ? TextAlign::Leading : TextAlign::Center;
+  spec.properties.text_layout_options.vertical_align = TextVerticalAlign::Center;
+  spec.properties.text_layout_options.wrap = TextWrap::NoWrap;
   spec.properties.disabled_foreground = selected ? style.disabled_selected_label : style.disabled_label;
   if (spec.image_properties.HasValue()) {
     spec.layout_values.insert_or_assign(
@@ -3444,6 +3454,26 @@ const detail::ModifierDescriptor& Grow::Descriptor() {
 }
 
 namespace detail {
+namespace {
+
+bool NeedsDefaultShapingLocale(const ViewSpec& spec) {
+  if (spec.kind == NodeKind::Canvas) {
+    return true;
+  }
+  switch (spec.kind) {
+  case NodeKind::Text:
+  case NodeKind::Button:
+  case NodeKind::Chip:
+  case NodeKind::Checkbox:
+  case NodeKind::RadioButton:
+  case NodeKind::Switch:
+    return !StringLiteral(spec.text).empty();
+  default:
+    return false;
+  }
+}
+
+} // namespace
 
 ViewSpec CompileViewSpec(
     const ViewSpec& declaration,
@@ -3521,6 +3551,10 @@ ViewSpec CompileViewSpec(
   }
   if (compiled.properties.disabled_background.has_value()) {
     compiled.properties.disabled_background = compile_fill(*compiled.properties.disabled_background);
+  }
+  TextShapingOptions& shaping = compiled.properties.text_layout_options.shaping;
+  if (shaping.locale.empty() && NeedsDefaultShapingLocale(compiled)) {
+    shaping.locale = resource_locale().LanguageTag();
   }
 
   return compiled;
@@ -3674,6 +3708,11 @@ void View::SetTextStyle(TextStyle style) {
   AddModifier(detail::MakeModifierSpec(TextStyleProperty{std::move(style)}));
 }
 
+void View::SetTextShaping(TextShapingOptions shaping) {
+  EnsureUniqueSpec();
+  spec_->properties.text_layout_options.shaping = std::move(shaping);
+}
+
 void View::SetTextAlign(TextAlign align) {
   EnsureUniqueSpec();
   spec_->properties.text_layout_options.align = align;
@@ -3769,6 +3808,11 @@ Text::Text(StringVariant value, TextRole role) : View(MakeTextSpec(std::move(val
 
 Text Text::Style(TextStyle style) && {
   SetTextStyle(std::move(style));
+  return std::move(*this);
+}
+
+Text Text::Shaping(TextShapingOptions shaping) && {
+  SetTextShaping(std::move(shaping));
   return std::move(*this);
 }
 

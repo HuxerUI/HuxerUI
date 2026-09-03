@@ -365,8 +365,7 @@ Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints con
 Size MeasureLabelContent(
     MountedNode& node,
     PlatformAdapter& platform,
-    const Constraints& constraints,
-    TextLayoutOptions text_options
+    const Constraints& constraints
 ) {
   const LabelContentMetrics metrics = node.LayoutValueOr<LabelContentMetrics>({});
   const Size icon_size{
@@ -380,7 +379,9 @@ Size MeasureLabelContent(
                                        : std::numeric_limits<float>::infinity();
   TextLayoutMetrics text;
   if (show_label) {
-    text = platform.MeasureText(node.text, node.properties.text_style, maximum_text_width, text_options);
+    text = platform.MeasureText(
+        node.text, node.properties.text_style, maximum_text_width, node.properties.text_layout_options
+    );
   }
   node.layout_cache.insert_or_assign(typeid(LabelLayoutCache), LabelLayoutCache{text});
   return {
@@ -531,8 +532,7 @@ Size MeasureNode(
       content_size = MeasureLabelContent(
           node,
           platform,
-          content_constraints,
-          TextLayoutOptions{.wrap = TextWrap::NoWrap}
+          content_constraints
       );
     } else {
       content_size = platform
@@ -551,7 +551,7 @@ Size MeasureNode(
                            node.text,
                            node.properties.text_style,
                            std::numeric_limits<float>::infinity(),
-                           TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                           node.properties.text_layout_options
                        )
                        .size;
     break;
@@ -559,8 +559,7 @@ Size MeasureNode(
     content_size = MeasureLabelContent(
         node,
         platform,
-        content_constraints,
-        TextLayoutOptions{.wrap = TextWrap::NoWrap}
+        content_constraints
     );
     break;
   case NodeKind::Chip:
@@ -568,8 +567,7 @@ Size MeasureNode(
       content_size = MeasureLabelContent(
           node,
           platform,
-          content_constraints,
-          TextLayoutOptions{.wrap = TextWrap::NoWrap}
+          content_constraints
       );
     } else {
       content_size = platform
@@ -577,7 +575,7 @@ Size MeasureNode(
                              node.text,
                              node.properties.text_style,
                              std::numeric_limits<float>::infinity(),
-                             TextLayoutOptions{.wrap = TextWrap::NoWrap}
+                             node.properties.text_layout_options
                          )
                          .size;
     }

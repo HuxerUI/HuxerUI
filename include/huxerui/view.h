@@ -184,6 +184,7 @@ protected:
   void AddModifier(detail::ModifierSpec modifier);
   void SetModifier(detail::ModifierSpec modifier);
   void SetTextStyle(TextStyle style);
+  void SetTextShaping(TextShapingOptions shaping);
   void SetTextAlign(TextAlign align);
   void SetTextVerticalAlign(TextVerticalAlign align);
   void SetImageFit(ImageFit fit);
@@ -681,6 +682,8 @@ public:
 
   /// Replaces the resolved typography for this Text declaration.
   Text Style(TextStyle style) &&;
+  /// Configures text direction and an optional locale override for this Text declaration.
+  Text Shaping(TextShapingOptions shaping) &&;
   /// Sets horizontal paragraph alignment inside the measured text bounds.
   Text Align(TextAlign align) &&;
   /// Sets vertical paragraph alignment when the Text receives extra height.
@@ -1017,6 +1020,8 @@ public:
   TextField Variant(TextFieldVariant value) &&;
   /// Configures single-line behavior or intrinsic multiline height limits.
   TextField LineLimits(TextFieldLineLimits value) &&;
+  /// Configures text direction and an optional locale override for editable text and supporting labels.
+  TextField Shaping(TextShapingOptions value) &&;
   /// Sets horizontal paragraph alignment inside the editor viewport.
   TextField Align(TextAlign value) &&;
   /// Sets vertical paragraph alignment inside the editor viewport.
@@ -1051,6 +1056,7 @@ private:
   std::optional<TextFieldVariant> variant_;
   TextInputConfiguration configuration_;
   TextFieldLineLimits line_limits_ = TextFieldLineLimits::SingleLine();
+  TextShapingOptions text_shaping_;
   TextAlign text_align_ = TextAlign::Leading;
   std::optional<TextVerticalAlign> text_vertical_align_;
   std::optional<std::size_t> max_length_;

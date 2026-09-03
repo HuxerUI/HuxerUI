@@ -164,6 +164,12 @@ void RequireGradientStops(const std::vector<GradientStop>& stops) {
 bool BrushUsesBounds(const Brush& brush) noexcept {
   return !std::holds_alternative<Color>(brush.Get());
 }
+
+void ApplyDefaultShapingLocale(TextShapingOptions& shaping, const std::string& default_locale) {
+  if (shaping.locale.empty()) {
+    shaping.locale = default_locale;
+  }
+}
 } // namespace
 
 void detail::ValidateColor(Color color, const char* message) {
@@ -256,7 +262,10 @@ Transform2D detail::ResolveGradientTransform(Rect rect, const RadialGradient& gr
   return ComposeTransform(destination, ComposeTransform(gradient.transform, ellipse));
 }
 
-PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : sequence_(sequence), bounds_(bounds) {
+PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : PaintContext(sequence, bounds, {}) {}
+
+PaintContext::PaintContext(PaintSequence& sequence, Rect bounds, std::string default_shaping_locale)
+    : sequence_(sequence), bounds_(bounds), default_shaping_locale_(std::move(default_shaping_locale)) {
   RequireRect(bounds);
   sequence_.commands_.clear();
   sequence_.bounds_ = {};
@@ -286,6 +295,7 @@ void PaintContext::DrawText(
   if (!IsFinite(paragraph_offset)) {
     throw std::invalid_argument("HuxerUI text paragraph offset must be finite");
   }
+  ApplyDefaultShapingLocale(options.shaping, default_shaping_locale_);
   sequence_.commands_.emplace_back(
       DrawTextCommand{rect, std::move(text), std::move(style), std::move(options), paragraph_offset}
   );
@@ -305,6 +315,7 @@ void PaintContext::DrawTextRun(
   if (text.empty() || bounds.IsEmpty()) {
     return;
   }
+  ApplyDefaultShapingLocale(shaping, default_shaping_locale_);
   TextRun run{bounds, baseline_origin, std::move(text), std::move(style), std::move(shaping)};
   if (!sequence_.commands_.empty()) {
     if (auto* command = std::get_if<DrawTextRunsCommand>(&sequence_.commands_.back())) {
@@ -329,6 +340,9 @@ void PaintContext::DrawTextRuns(std::vector<TextRun> runs) {
     }
     RequireTextStyle(run.style);
     RequireTextRun(run.text);
+  }
+  for (TextRun& run : runs) {
+    ApplyDefaultShapingLocale(run.shaping, default_shaping_locale_);
   }
   std::erase_if(runs, [](const TextRun& run) { return run.text.empty() || run.bounds.IsEmpty(); });
   if (runs.empty()) {

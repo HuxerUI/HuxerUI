@@ -1,7 +1,7 @@
 # Text and Font Design
 
 This document defines the shared text values, measurement boundary, paint commands, and platform resource ownership used by Text, TextField, Canvas, and text-oriented component libraries.
-Localized string resolution and the root Locale Environment are defined in [App Resources, Images, and Localization Design](resources.md); applying the inherited Locale automatically to otherwise-unspecified text shaping remains deferred.
+Localized string resolution and the root Locale Environment are defined in [App Resources, Images, and Localization Design](resources.md).
 
 ## Ownership
 
@@ -57,6 +57,16 @@ When the paragraph is taller than the rectangle, the remaining height is clamped
 
 `TextDirection::Auto` resolves from the first strong directional character and falls back to left-to-right when the text contains no strong character.
 Measurement and drawing use the same resolution rule on every platform.
+
+Mounted Text, built-in control labels, TextField, and Canvas text use the effective inherited `Locale` when their `TextShapingOptions::locale` is empty.
+`Text(...).Shaping(options)` and `TextField(...).Shaping(options)` provide complete component-local shaping overrides; a non-empty shaping locale wins without subscribing that declaration to the inherited Locale for shaping.
+TextField applies one resolved shaping value to its controlled value, label, placeholder, validation message, selection and caret geometry, secure grapheme processing, measurement, and retained drawing.
+The PaintContext passed to a Canvas fills an empty locale for `DrawText`, `DrawTextRun`, and each `DrawTextRuns` entry from that Canvas node while preserving every explicit run locale.
+An independently constructed PaintContext has no inherited Environment and therefore leaves empty shaping locales unchanged.
+
+Localized resource selection and text shaping remain separate concerns.
+An explicit shaping locale does not change which StringResource or ImageResource variant a declaration resolves, and a resource Locale change can still update resource-backed content whose shaping locale is explicit.
+TextMeasurer remains stateless and explicit: custom composition code reads `Locale` with `UseEnvironment<Locale>()` and passes its language tag when it wants inherited shaping.
 
 ## Measurement
 

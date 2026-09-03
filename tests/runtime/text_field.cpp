@@ -19,6 +19,7 @@ State<TextEditingValue> single_line_scroll_value;
 State<int> text_field_recompose_trigger;
 State<bool> text_field_offset;
 State<bool> text_field_dark_theme;
+State<bool> text_field_shaping_locale;
 TextInputAction submission_action = TextInputAction::Default;
 int first_action_submissions = 0;
 int second_action_submissions = 0;
@@ -106,6 +107,23 @@ public:
   float centered_layout_width = std::numeric_limits<float>::infinity();
 };
 
+class ShapingTextLayoutPlatform final : public TestPlatform {
+public:
+  struct LayoutRequest {
+    std::string text;
+    TextLayoutOptions options;
+  };
+
+  std::unique_ptr<detail::TextLayout> CreateTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
+  ) override {
+    requests.push_back({std::string(text), options});
+    return TestPlatform::CreateTextLayout(text, style, max_width, options);
+  }
+
+  std::vector<LayoutRequest> requests;
+};
+
 View TextFieldApp() {
   auto value = UseState(
       TextEditingValue::FromText(
@@ -129,6 +147,35 @@ View TextFieldApp() {
 View EmptyTextFieldApp() {
   return Stack {
       TextField(TextEditingValue::FromText("")).Placeholder("Name").With(huxerui::Frame{160.0F, 40.0F}),
+  };
+}
+
+View TextFieldShapingApp() {
+  auto alternate_locale = UseState(false);
+  text_field_shaping_locale = alternate_locale;
+  const Locale inherited_locale = Locale::FromLanguageTag(alternate_locale.Get() ? "de-DE" : "zh-Hant-TW");
+  return Column {
+    ProvideEnvironment(
+        inherited_locale,
+        Column {
+          TextField(TextEditingValue::FromText("inherited value"))
+              .Label("inherited label")
+              .Placeholder("inherited placeholder")
+              .Validation(ValidationResult::Invalid("inherited validation"))
+              .With(huxerui::Frame{260.0F, 96.0F}),
+          TextField(TextEditingValue::FromText(""))
+              .Placeholder("inherited painted placeholder")
+              .With(huxerui::Frame{260.0F, 72.0F}),
+        }
+    ),
+    ProvideEnvironment(
+        Locale::FromLanguageTag("ar-EG"),
+        TextField(TextEditingValue::FromText(""))
+            .Placeholder("explicit placeholder")
+            .Validation(ValidationResult::Invalid("explicit validation"))
+            .Shaping({.direction = TextDirection::RightToLeft, .locale = "fa-IR"})
+            .With(huxerui::Frame{260.0F, 96.0F})
+    ),
   };
 }
 
@@ -595,6 +642,7 @@ void ResetTextFieldState() {
   text_field_recompose_trigger = State<int>{};
   text_field_offset = State<bool>{};
   text_field_dark_theme = State<bool>{};
+  text_field_shaping_locale = State<bool>{};
   submission_action = TextInputAction::Default;
   first_action_submissions = 0;
   second_action_submissions = 0;
@@ -762,6 +810,71 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   REQUIRE(style.validation_border_width == 1.0F);
   REQUIRE(style.focused_validation_border_width == 2.0F);
   REQUIRE(style.filled.focused_border == material_theme.colors.primary);
+}
+
+TEST_CASE("TextFieldUsesOneInheritedOrExplicitShapingContractForEveryTextPath") {
+  ResetTextFieldState();
+  ShapingTextLayoutPlatform platform;
+  Runtime runtime{TextFieldShapingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {300.0F, 340.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+
+  const auto last_request = [&platform](std::string_view text) {
+    const auto found = std::find_if(
+        platform.requests.rbegin(),
+        platform.requests.rend(),
+        [text](const ShapingTextLayoutPlatform::LayoutRequest& request) {
+          return request.text == text;
+        }
+    );
+    return found == platform.requests.rend() ? nullptr : &*found;
+  };
+  const auto require_request = [&last_request](std::string_view text, const TextShapingOptions& shaping) {
+    const ShapingTextLayoutPlatform::LayoutRequest* request = last_request(text);
+    REQUIRE(request != nullptr);
+    REQUIRE(request->options.shaping == shaping);
+  };
+
+  const TextShapingOptions inherited{.locale = "zh-Hant-TW"};
+  const TextShapingOptions explicit_shaping{
+      .direction = TextDirection::RightToLeft,
+      .locale = "fa-IR",
+  };
+  require_request("inherited value", inherited);
+  require_request("inherited label", inherited);
+  require_request("inherited placeholder", inherited);
+  require_request("inherited validation", inherited);
+  require_request("inherited painted placeholder", inherited);
+  require_request("explicit placeholder", explicit_shaping);
+  require_request("explicit validation", explicit_shaping);
+
+  const auto require_paint = [](const FlattenedScene& frame, std::string_view text, const TextShapingOptions& shaping) {
+    const DrawTextCommand* command = FindText(frame, text);
+    REQUIRE(command != nullptr);
+    REQUIRE(command->options.shaping == shaping);
+  };
+  require_paint(scene, "inherited value", inherited);
+  require_paint(scene, "inherited label", inherited);
+  require_paint(scene, "inherited validation", inherited);
+  require_paint(scene, "inherited painted placeholder", inherited);
+  require_paint(scene, "explicit placeholder", explicit_shaping);
+  require_paint(scene, "explicit validation", explicit_shaping);
+
+  platform.requests.clear();
+  text_field_shaping_locale = true;
+  const FlattenedScene& updated_scene = runtime.BuildFrame();
+  const TextShapingOptions updated_inherited{.locale = "de-DE"};
+  require_request("inherited value", updated_inherited);
+  require_request("inherited label", updated_inherited);
+  require_request("inherited placeholder", updated_inherited);
+  require_request("inherited validation", updated_inherited);
+  require_request("inherited painted placeholder", updated_inherited);
+  require_paint(updated_scene, "inherited value", updated_inherited);
+  require_paint(updated_scene, "inherited label", updated_inherited);
+  require_paint(updated_scene, "inherited validation", updated_inherited);
+  require_paint(updated_scene, "inherited painted placeholder", updated_inherited);
+  require_paint(updated_scene, "explicit placeholder", explicit_shaping);
+  require_paint(updated_scene, "explicit validation", explicit_shaping);
 }
 
 TEST_CASE("TextFieldAlignmentUsesOneLayoutContractForPlaceholderGeometry") {

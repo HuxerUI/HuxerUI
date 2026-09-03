@@ -292,13 +292,14 @@ In particular, the Web entry integration loads the resource index and payload be
 Remote URLs remain application or library inputs and do not become package paths.
 
 When system locale or display scale changes, the platform integration calls `Runtime::UpdateResourceConfiguration()` with the new value.
-Runtime ignores an equal value; otherwise it updates AppResources and the inherited Locale, invalidates root composition, and requests a frame.
+Runtime ignores an equal value; otherwise it updates AppResources and the inherited Locale, notifies their recorded dependency readers, and requests a frame.
 `BuildFrame()` does not poll platform state.
-Resource configuration changes invalidate root composition, then normal reconciliation limits changed ImageAsset geometry and paint work to the affected nodes.
-Dependency-recorded resource reads and inherited Locale text shaping may later narrow the initial root invalidation without changing the public API.
+Normal reconciliation limits changed resource values, text layout, and paint work to affected scopes and nodes.
 
 An explicit Locale Environment value overrides the system locale for its subtree.
 Display scale remains a platform property.
+Mounted Text, built-in labels, TextField, and Canvas text use that effective Locale whenever their shaping locale is empty.
+Explicit non-empty shaping locales do not consult the Locale Environment, but localized StringVariant and ImageVariant resolution continues to use it independently.
 
 ## Resource variants
 
@@ -859,7 +860,7 @@ Resource reads participate in the existing dependency and invalidation model:
 - UseString, UseImage, and UseVectorImage resolve explicitly from the Runtime-owned service during composition without allocating state slots.
 - Text, controls, TextField, semantics, presentation values, VisualFill, and Image retain StringVariant or ImageVariant inputs until mounted reconciliation.
 - An Image constructed from ImageResource resolves that key to an immutable raster or vector asset before layout and paint.
-- ResourceConfiguration changes currently invalidate the root composition so locale and density variants are selected consistently.
+- Locale and display-scale readers subscribe only the composition scopes that resolve inherited shaping or resource variants from those values.
 - A visible selection overlay is repainted and remeasured when ResourceConfiguration changes because it is Runtime-owned rather than part of the application composition tree.
 - Reconciliation limits a changed image asset or intrinsic size to the affected node's measure, layout, and paint paths.
 - An unchanged image asset compares equal and preserves its recorded PaintSequence.
@@ -894,7 +895,6 @@ Resource compilation diagnostics are English and use the `hrc:` CLI prefix.
 ## Future work
 
 - Add localized image variants without introducing a second resource-selection mechanism.
-- Define inherited locale-aware shaping for ordinary text independently from localized string lookup.
 - Add explicit preload policy only for resources whose asynchronous platform preparation requires it.
 
 ## Validation
