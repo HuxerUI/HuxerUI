@@ -38,7 +38,7 @@ public:
 
   void Update(MountedNode&, const detail::SelectionAreaModifier&) {}
 
-  PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     return ResolveGeometry(static_cast<detail::MountedNode&>(node)) ? PaintInvalidation::Foreground
                                                                    : PaintInvalidation::None;
   }

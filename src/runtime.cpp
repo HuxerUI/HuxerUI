@@ -918,7 +918,7 @@ bool RefreshExtensionPresence(MountedNode& node) {
   return subtree_has_extensions;
 }
 
-void PrepareExtensionGeometry(MountedNode& node) {
+void PrepareExtensionGeometry(MountedNode& node, TextMeasurer& text_measurer) {
   if (!node.participates_in_layout) {
     return;
   }
@@ -936,7 +936,7 @@ void PrepareExtensionGeometry(MountedNode& node) {
     if (!entry.extension) {
       continue;
     }
-    switch (entry.extension->PrepareGeometry(node)) {
+    switch (entry.extension->PrepareGeometry(node, text_measurer)) {
     case NodeExtension::PaintInvalidation::None:
       break;
     case NodeExtension::PaintInvalidation::Content:
@@ -956,7 +956,7 @@ void PrepareExtensionGeometry(MountedNode& node) {
     node.foreground_paint_dirty = true;
   }
   for (const std::unique_ptr<MountedNode>& child : node.children) {
-    PrepareExtensionGeometry(*child);
+    PrepareExtensionGeometry(*child, text_measurer);
   }
 }
 
@@ -1618,9 +1618,9 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
   }
-  // Text input clients prepare node-local geometry after the final layout, then the runtime converts it to host-view
-  // coordinates while synchronizing the platform IME session.
-  PrepareExtensionGeometry(*state_->mounted_root_);
+  // Extensions prepare node-local geometry after the final layout. Text input geometry is then converted to host-view
+  // coordinates while the platform IME session is synchronized.
+  PrepareExtensionGeometry(*state_->mounted_root_, *state_->platform_);
   // Anchors can be nested inside other anchored layers. Settle the bounded dependency chain in this commit so a child
   // presentation does not retain geometry from its parent's previous placement.
   const detail::MountedNode* const committed_layer_stack = FindLayerStack(*state_->mounted_root_);
@@ -1640,7 +1640,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     );
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
-    PrepareExtensionGeometry(*state_->mounted_root_);
+    PrepareExtensionGeometry(*state_->mounted_root_, *state_->platform_);
   }
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();

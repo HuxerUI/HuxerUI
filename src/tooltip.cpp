@@ -495,7 +495,7 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node, huxerui::TextMeasurer&) override {
     const Rect bounds = node.PresentationBounds();
     if (target_->bounds == bounds) {
       return PaintInvalidation::None;

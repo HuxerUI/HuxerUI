@@ -533,14 +533,14 @@ enum class PaintInvalidation {
   Both,
 };
 
-virtual PaintInvalidation PrepareGeometry(MountedNode& node);
+virtual PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer);
 virtual void PaintBehindContent(const MountedNode& node, PaintContext& context);
 virtual void PaintAboveContent(const MountedNode& node, PaintContext& context);
 ```
 
 The existing foreground-only `Paint` callback becomes `PaintAboveContent`.
 
-`PrepareGeometry` publishes dynamic geometry such as `indication_bounds_override` and reports which retained sequence became dirty.
+`PrepareGeometry` receives the active borrowed text measurer, publishes dynamic geometry such as `indication_bounds_override`, and reports which retained sequence became dirty.
 
 Paint-visible retained state changes call `InvalidatePaint(PaintInvalidation)`, with Foreground as the default for extensions whose existing output remains in the foreground sequence.
 

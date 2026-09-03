@@ -116,7 +116,7 @@ public:
     InvalidatePaint(PaintInvalidation::Both);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;
@@ -269,7 +269,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;
@@ -445,7 +445,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;

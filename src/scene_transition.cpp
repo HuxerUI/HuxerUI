@@ -175,7 +175,7 @@ public:
     }
   }
 
-  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node, huxerui::TextMeasurer&) override {
     if (state_) {
       state_->UpdateBounds(node.PresentationBounds());
     }

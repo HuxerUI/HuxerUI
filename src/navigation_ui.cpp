@@ -354,7 +354,7 @@ public:
     events_ = modifier.events;
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     if (!reveal_selection_ || axis_ != Axis::Vertical || selected_index_ >= node.ChildCount() ||
         !scroll_controller_.IsConnected()) {
       return PaintInvalidation::None;

@@ -68,6 +68,10 @@ Use a retained modifier with `NodeExtension` when one mounted node needs lifecyc
 `NodeExtension` is not a general plugin registry.
 Update compatible declarative configuration without discarding retained state, request timing through `FrameResult`, and invalidate paint when paint-visible retained state changes.
 
+`PrepareGeometry(MountedNode&, TextMeasurer&)` runs after final presentation geometry is resolved and before paint recording.
+Use its borrowed measurer only for synchronous text-dependent retained geometry, and retain only the resulting value metrics.
+Return the exact `PaintInvalidation` phases whose recorded inputs changed; text that affects measurement belongs in `Layout` because this callback does not provide another layout pass.
+
 ## Paint commands
 
 Use `Canvas` and existing `PaintCommand` variants for custom drawing.

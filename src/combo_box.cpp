@@ -392,7 +392,7 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     if (!state_ || !state_->reveal_active || !state_->active_index.has_value() || node.ChildCount() == 0 ||
         !scroll_controller_.IsConnected()) {
       return PaintInvalidation::None;
@@ -677,7 +677,7 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     if (!session_) {
       return PaintInvalidation::None;
     }

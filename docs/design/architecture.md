@@ -283,7 +283,7 @@ public:
       MountedNode& node,
       const FrameInfo& frame);
 
-  virtual PaintInvalidation PrepareGeometry(MountedNode& node);
+  virtual PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer);
 
   virtual void OnInteraction(
       MountedNode& node,
@@ -333,7 +333,8 @@ protected:
 `NodeExtension` does not wrap measure, layout, or paint, and it has no `Next` continuations.
 Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
 
-`PrepareGeometry()` runs after final presentation transforms are resolved and before text services and paint consume geometry.
+`PrepareGeometry()` runs after final presentation transforms are resolved and before paint consumes geometry.
+It receives the active `TextMeasurer` as a callback-scoped borrowed reference so geometry-dependent extensions can measure labels without retaining a platform service.
 It reports exactly which retained paint sequence changed.
 This phase lets geometry-dependent extensions retain value snapshots without storing raw mounted-node references or forcing unrelated clean PaintSequences to rerecord.
 

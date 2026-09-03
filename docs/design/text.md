@@ -95,7 +95,8 @@ The active `PlatformAdapter` is exposed through a private root text-measurer ser
 Components can obtain it with `UseTextMeasurer()` without depending on PlatformAdapter or platform API types.
 Built-in layout and editing code use the same service contract directly through the host boundary.
 `TextMeasurer` calls occur synchronously on the Runtime and platform host thread.
-Callers may retain returned value metrics, but they must not retain the service reference beyond the active composition or layout operation.
+`NodeExtension::PrepareGeometry()` receives the same active measurer after final presentation geometry is resolved.
+Callers may retain returned value metrics, but they must not retain the service reference beyond the active composition, layout, or geometry-preparation operation.
 
 Measurement results are authoritative geometry.
 A caller that positions exact runs translates the returned run bounds to its chosen baseline and records both values.

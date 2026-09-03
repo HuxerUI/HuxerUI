@@ -20,6 +20,7 @@ class Environment;
 class PaintContext;
 class Runtime;
 class SemanticBuilder;
+class TextMeasurer;
 class TextInputClient;
 class TextSelectionClient;
 struct GestureSettings;
@@ -123,9 +124,11 @@ public:
 
   /// Updates geometry-dependent retained state after final presentation geometry is resolved.
   ///
-  /// Return every paint phase whose recorded inputs changed.
-  [[nodiscard]] virtual PaintInvalidation PrepareGeometry(MountedNode& node) {
+  /// The text measurer is borrowed for this callback and must not be retained. Return every paint phase whose recorded
+  /// inputs changed.
+  [[nodiscard]] virtual PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) {
     static_cast<void>(node);
+    static_cast<void>(text_measurer);
     return PaintInvalidation::None;
   }
 

@@ -25,15 +25,21 @@ State<bool> shadow_changed;
 State<bool> canvas_changed;
 State<bool> clip_children_enabled;
 State<bool> overflow_clip_enabled;
+State<bool> geometry_measurement_changed;
 std::shared_ptr<ExternalTexture> render_scene_external_texture;
 bool render_scene_external_texture_visible = true;
 int canvas_paint_count = 0;
 int clipped_child_clicks = 0;
 int overflowing_child_clicks = 0;
+TextMeasurer* expected_geometry_text_measurer = nullptr;
+bool geometry_used_expected_text_measurer = false;
+int geometry_text_measurement_count = 0;
+float geometry_measured_text_width = 0.0F;
 Shadow invalid_shadow;
 
 struct OverflowPaint;
 struct FramePaintInvalidation;
+struct GeometryMeasurement;
 
 class OverflowPaintExtension final : public NodeExtension {
 public:
@@ -74,6 +80,37 @@ struct FramePaintInvalidation {
   bool operator==(const FramePaintInvalidation&) const = default;
 };
 
+class GeometryMeasurementExtension final : public NodeExtension {
+public:
+  GeometryMeasurementExtension(MountedNode& node, const GeometryMeasurement& modifier);
+
+  void Update(MountedNode& node, const GeometryMeasurement& modifier);
+
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) override;
+
+  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override;
+
+private:
+  struct Input {
+    Rect bounds;
+    std::string text;
+
+    bool operator==(const Input&) const = default;
+  };
+
+  std::string text_;
+  std::optional<Input> prepared_input_;
+  float measured_width_ = 0.0F;
+};
+
+struct GeometryMeasurement {
+  using Extension = GeometryMeasurementExtension;
+
+  std::string text;
+
+  bool operator==(const GeometryMeasurement&) const = default;
+};
+
 FramePaintInvalidationExtension::FramePaintInvalidationExtension(
     MountedNode& node, const FramePaintInvalidation& modifier
 ) {
@@ -84,6 +121,36 @@ FramePaintInvalidationExtension::FramePaintInvalidationExtension(
 void FramePaintInvalidationExtension::Update(MountedNode& node, const FramePaintInvalidation& modifier) {
   static_cast<void>(node);
   static_cast<void>(modifier);
+}
+
+GeometryMeasurementExtension::GeometryMeasurementExtension(
+    MountedNode& node, const GeometryMeasurement& modifier
+) {
+  Update(node, modifier);
+}
+
+void GeometryMeasurementExtension::Update(MountedNode& node, const GeometryMeasurement& modifier) {
+  static_cast<void>(node);
+  text_ = modifier.text;
+}
+
+NodeExtension::PaintInvalidation
+GeometryMeasurementExtension::PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) {
+  geometry_used_expected_text_measurer = &text_measurer == expected_geometry_text_measurer;
+  Input input{node.Bounds(), text_};
+  if (prepared_input_ == input) {
+    return PaintInvalidation::None;
+  }
+  prepared_input_ = std::move(input);
+  measured_width_ = text_measurer.MeasureRun(text_, TextStyle::Default()).advance;
+  geometry_measured_text_width = measured_width_;
+  ++geometry_text_measurement_count;
+  return PaintInvalidation::Foreground;
+}
+
+void GeometryMeasurementExtension::PaintAboveContent(const MountedNode& node, PaintContext& context) const {
+  static_cast<void>(node);
+  context.DrawRect({0.0F, 0.0F, measured_width_, 2.0F}, Color::Black());
 }
 
 OverflowPaintExtension::OverflowPaintExtension(MountedNode& node, const OverflowPaint& modifier)
@@ -119,6 +186,12 @@ View ExternalTextureRenderApp() {
 
 View FramePaintInvalidationApp() {
   return Spacer().With(Frame{40.0F, 20.0F}, FramePaintInvalidation{});
+}
+
+View GeometryMeasurementApp() {
+  auto changed = UseState(false);
+  geometry_measurement_changed = changed;
+  return Spacer().With(Frame{80.0F, 20.0F}, GeometryMeasurement{changed.Get() ? "wide" : "a"});
 }
 
 View ShadowApp() {
@@ -672,6 +745,38 @@ TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {
   const FrameCommit& commit = runtime.BuildCommit();
 
   REQUIRE_FALSE(commit.next_frame_deadline.has_value());
+}
+
+TEST_CASE("ExtensionGeometryUsesBorrowedTextMeasurerAndInvalidatesOnlyWhenMeasurementInputsChange") {
+  geometry_used_expected_text_measurer = false;
+  geometry_text_measurement_count = 0;
+  geometry_measured_text_width = 0.0F;
+  TestPlatform platform;
+  expected_geometry_text_measurer = &platform;
+  Runtime runtime{GeometryMeasurementApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+
+  runtime.BuildRenderFrame();
+  const auto* mounted = runtime.RootNode();
+  REQUIRE(mounted != nullptr);
+  REQUIRE(geometry_used_expected_text_measurer);
+  REQUIRE(geometry_text_measurement_count == 1);
+  REQUIRE(geometry_measured_text_width == 10.0F);
+  const std::uint64_t initial_revision = mounted->render_node.foreground.Revision();
+  const std::uint64_t initial_content_revision = mounted->render_node.content.Revision();
+  const PaintCommand* initial_commands = mounted->render_node.foreground.Commands().data();
+
+  runtime.BuildRenderFrame();
+  REQUIRE(geometry_text_measurement_count == 1);
+  REQUIRE(mounted->render_node.foreground.Revision() == initial_revision);
+  REQUIRE(mounted->render_node.foreground.Commands().data() == initial_commands);
+
+  geometry_measurement_changed = true;
+  runtime.BuildRenderFrame();
+  REQUIRE(geometry_text_measurement_count == 2);
+  REQUIRE(geometry_measured_text_width == 40.0F);
+  REQUIRE(mounted->render_node.foreground.Revision() > initial_revision);
+  REQUIRE(mounted->render_node.content.Revision() == initial_content_revision);
 }
 
 TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {

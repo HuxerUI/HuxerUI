@@ -417,7 +417,7 @@ public:
     };
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!mounted.indication_bounds_override.has_value() && spec_.geometry.layer_size.has_value()) {
       const Size size = *spec_.geometry.layer_size;

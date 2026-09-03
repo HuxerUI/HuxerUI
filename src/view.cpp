@@ -524,7 +524,7 @@ public:
     };
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     std::optional<Rect> indication_bounds;
     if (kind_ == ToggleVisualKind::Switch) {
@@ -958,7 +958,7 @@ public:
     };
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
     if (selected_index_ >= node.ChildCount()) {
       return PaintInvalidation::None;
     }
