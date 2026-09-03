@@ -74,7 +74,39 @@ It does not derive release notes from commits or publish a draft.
 Before publishing, summarize the changes between the previous published tag and the current tag, paste the curated notes into the draft, and publish it manually.
 Rerunning CI preserves an existing release body and draft or published state while replacing its packaged assets.
 
-Rebuild repository host-tool packages with `scripts/build_tools.sh` or `scripts/build_tools.ps1`.
+## Host-tool updates
+
+The `Update Host Tools` workflow maintains the checked-in `hcg` and `hrc` packages independently of SDK releases.
+Each push to `main` runs a lightweight change-selection job; native builds run only when relevant inputs changed across the complete push.
+Tool sources and build configuration under `tools/codegen/` and `tools/resource_compiler/` (excluding Markdown), `src/resource_format.h`, `src/vector_format.h`, `scripts/build_tools.sh`, `scripts/build_tools.ps1`, the workflow itself, and its `host_tools.py` helper trigger rebuilding and writeback.
+Focused tool tests and platform validation scripts trigger validation only, without updating prebuilts.
+Ordinary framework changes, CLI changes, documentation, and generated prebuilts do not trigger tool builds.
+`platform/android/gradle.properties` is not inspected or watched; this workflow pins its Android NDK version explicitly.
+
+Use **Actions > Update Host Tools > Run workflow** on `main` to rebuild manually.
+Leave `update_prebuilts` enabled to publish validated tools, or disable it to build and validate without repository writes.
+Commit-message markers, tags, and scheduled runs are not used.
+
+Configure the repository Actions secret `HOST_TOOLS_PUSH_TOKEN` before enabling writeback.
+Use a fine-grained personal access token restricted to this repository with **Contents: Read and write**, owned by an account explicitly permitted to push through the `main` ruleset; any organization approval requirements also apply.
+The workflow does not change branch protection, grant bypass rights, or inherit the triggering administrator's permissions.
+Only the publication job receives this credential; missing credentials or rejected pushes fail explicitly, and validation-only runs need no write token.
+Rotate the credential before it expires.
+
+All six packages are built from the triggering commit into fresh output directories using the shared build scripts.
+Desktop jobs execute the new tools against code-generation, resource-compilation, and resource-merge smoke inputs; Windows additionally runs the transformer, resource compiler, and generated-runtime regression suites with the new tools.
+Linux retains the GLIBC 2.28 and static GNU C++ runtime checks, and macOS retains the macOS 12 deployment check.
+Android tools are cross-compiled and checked for their ELF architecture, Android interpreter, and absence of an unpackaged shared C++ runtime; they are not executed on the Linux runner.
+Archives record the source commit and SHA-256 checksums, remain available as Actions artifacts for seven days, and must form a complete matching set before publication.
+
+Publication creates a single `build(tools): refresh prebuilt host tools` commit containing only the twelve executables, with the source commit recorded in its body.
+Unix executable modes are restored explicitly; unchanged files do not produce an empty commit.
+The publisher preserves unrelated commits that arrive during the build and retries a racing fast-forward push up to three times without rebasing or force-pushing.
+If tool build inputs changed or another update already replaced prebuilts since the source commit, it skips the obsolete artifacts; newer source changes start their own build, while failed runs can be retried manually.
+Automatic binary-only commits do not select another tool build.
+Until a successful update completes, `main` can temporarily contain newer tool sources than prebuilts; SDK release jobs still rebuild from source and do not depend on this asynchronous update.
+
+For local development, rebuild a native package with `scripts/build_tools.sh` or `scripts/build_tools.ps1`.
 The scripts default to the current host and accept explicit platform, architecture, CMake toolchain, Android NDK, build-directory, and output-directory arguments.
 Android builds resolve the NDK automatically, while other cross-platform and non-native Linux builds require an explicit CMake toolchain.
 Short forms are available as `-p`, `-a`, `-t`, `-n`, `-b`, and `-o`; architecture is inferred by default and remains available only when selecting another supported architecture.

@@ -55,6 +55,8 @@ ctest --test-dir build --output-on-failure
 
 Run focused test executables directly when changing a narrow subsystem.
 Code-generation changes also require the codegen tests and updated required host tools.
+CI maintains all checked-in host packages through [Host-tool updates](sdk-packaging.md#host-tool-updates).
+When changing that workflow or its support script, run `python -B tests/scripts/host_tools_test.py`; it uses temporary Git repositories and requires only Python 3.12 or later and Git.
 
 ## Examples
 
