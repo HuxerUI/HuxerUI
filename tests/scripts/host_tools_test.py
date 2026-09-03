@@ -100,12 +100,18 @@ class HostToolsTests(unittest.TestCase):
             "src/layout.cpp", "include/huxerui/layout.h", "README.md", "tools/codegen/README.md",
             "tools/prebuilt/windows/x86_64/hcg.exe", "tools/huxerui_cli/main.cpp",
             "platform/android/gradle.properties", ".github/workflows/sdk-release.yml",
+            "tests/codegen/transform.cpp", "tests/resource_compiler/compiler.cpp",
+            "tests/cmake/resource_merge.cmake", "tests/support/runtime_test_support.h",
+            "tests/support/image_test_support.h", "tests/tests_main.cpp", "tests/CMakeLists.txt",
         ):
             self.assertFalse(host_tools.is_build_input(path) or host_tools.is_validation_input(path), path)
         self.push_plan("platform/android/gradle.properties", (False, False))
 
-    def test_test_changes_only_validate(self):
-        self.push_plan("tests/codegen/transform.cpp", (True, False))
+    def test_framework_regression_changes_do_not_trigger_builds(self):
+        self.push_plan("tests/codegen/transform.cpp", (False, False))
+
+    def test_workflow_support_changes_only_validate(self):
+        self.push_plan("tests/scripts/host_tools_test.py", (True, False))
 
     def test_manual_validation_and_update(self):
         for ref in ("main", "refs/heads/main"):

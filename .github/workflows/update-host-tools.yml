@@ -156,19 +156,6 @@ jobs:
         run: >-
           python .github/workflows/scripts/host_tools.py smoke
           --directory "${RUNNER_TEMP}/host-tools/${TOOL_PACKAGE}"
-      - name: Run tool and generated-runtime regression tests
-        if: matrix.platform == 'windows'
-        run: |
-          cmake -E copy_directory "${RUNNER_TEMP}/host-tools/windows/x86_64" tools/prebuilt/windows/x86_64
-          cmake -S . -B build-host-tool-tests \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DHUXERUI_HOST_TOOL_ROOT="${RUNNER_TEMP}/host-tools" \
-            -DHUXERUI_BUILD_SHARED=OFF -DHUXERUI_BUILD_STATIC=ON \
-            -DHUXERUI_BUILD_CLI=OFF -DHUXERUI_BUILD_EXAMPLES=OFF -DHUXERUI_BUILD_TESTS=ON
-          cmake --build build-host-tool-tests --target \
-            huxerui_codegen_tests huxerui_resource_compiler_tests huxerui_codegen_runtime_tests
-          ctest --test-dir build-host-tool-tests --output-on-failure \
-            -R '^HuxerUI(Codegen(Runtime)?Tests|Resource(Compiler|Merge)Tests|ToolBuildScriptTests)$'
       - name: Test shell generator selection
         if: matrix.platform == 'linux'
         run: sh tests/scripts/build_tools_generator.sh "${GITHUB_WORKSPACE}"

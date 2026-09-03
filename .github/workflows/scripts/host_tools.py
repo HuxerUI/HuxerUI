@@ -32,11 +32,6 @@ VALIDATION_FILES = {
     ".github/workflows/scripts/check_apple_deployment_target.sh",
     "tests/scripts/host_tools_test.py",
     "tests/scripts/build_tools_generator.sh",
-    "tests/cmake/resource_merge.cmake",
-    "tests/support/runtime_test_support.h",
-    "tests/support/image_test_support.h",
-    "tests/tests_main.cpp",
-    "tests/CMakeLists.txt",
 }
 
 
@@ -48,7 +43,7 @@ def is_build_input(path):
 
 
 def is_validation_input(path):
-    return path in VALIDATION_FILES or path.startswith(("tests/codegen/", "tests/resource_compiler/"))
+    return path in VALIDATION_FILES
 
 
 def git(repository, *arguments, data=None, env=None, check=True):

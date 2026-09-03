@@ -79,7 +79,8 @@ Rerunning CI preserves an existing release body and draft or published state whi
 The `Update Host Tools` workflow maintains the checked-in `hcg` and `hrc` packages independently of SDK releases.
 Each push to `main` runs a lightweight change-selection job; native builds run only when relevant inputs changed across the complete push.
 Tool sources and build configuration under `tools/codegen/` and `tools/resource_compiler/` (excluding Markdown), `src/resource_format.h`, `src/vector_format.h`, `scripts/build_tools.sh`, `scripts/build_tools.ps1`, the workflow itself, and its `host_tools.py` helper trigger rebuilding and writeback.
-Focused tool tests and platform validation scripts trigger validation only, without updating prebuilts.
+Workflow-support tests, shell build-script tests, and platform validation scripts trigger validation only, without updating prebuilts.
+Framework regression tests are not run by this workflow and do not select tool builds.
 Ordinary framework changes, CLI changes, documentation, and generated prebuilts do not trigger tool builds.
 `platform/android/gradle.properties` is not inspected or watched; this workflow pins its Android NDK version explicitly.
 
@@ -94,7 +95,7 @@ Only the publication job receives this credential; missing credentials or reject
 Rotate the credential before it expires.
 
 All six packages are built from the triggering commit into fresh output directories using the shared build scripts.
-Desktop jobs execute the new tools against code-generation, resource-compilation, and resource-merge smoke inputs; Windows additionally runs the transformer, resource compiler, and generated-runtime regression suites with the new tools.
+Desktop jobs execute the new tools against code-generation, resource-compilation, and resource-merge smoke inputs without configuring or building the framework.
 Linux retains the GLIBC 2.28 and static GNU C++ runtime checks, and macOS retains the macOS 12 deployment check.
 Android tools are cross-compiled and checked for their ELF architecture, Android interpreter, and absence of an unpackaged shared C++ runtime; they are not executed on the Linux runner.
 Archives record the source commit and SHA-256 checksums, remain available as Actions artifacts for seven days, and must form a complete matching set before publication.
