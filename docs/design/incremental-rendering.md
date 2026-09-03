@@ -104,7 +104,9 @@ New PlatformView candidates remain inactive until they enter the committed hiera
 
 The first contract accepts translation, axis-aligned bounds, rectangular clipping, and visibility around PlatformView.
 A scene that would require rotation, path clipping, a group-opacity boundary spanning PlatformView and HuxerUI content, a backdrop filter, or another unsupported offscreen effect is rejected rather than flattened into a foreground or background plane.
-ExternalTexture remains an ordinary drawing command and follows the existing retained PaintSequence and DamageRegion rules without introducing composition slices.
+ExternalTexture remains an ordinary drawing command and follows the existing retained PaintSequence and DamageRegion rules without introducing shared RenderComposition slices.
+Android GPU-backed ExternalTextures are a platform-private exception at presentation time: the Canvas renderer calls an internal TextureView child at the command's exact replay position while the current Canvas transform, clip, and save-layer state remains active.
+That child is reconciled from GPU command occurrences independently of shared RenderComposition layers and does not acquire PlatformView identity, interaction, focus, semantics, or the PlatformView transform restrictions above.
 
 There is one `RenderNode` per paintable mounted node.
 Non-painting structural nodes may either own an empty render node or be elided when doing so does not change clipping, transforms, opacity, hit testing, or stable scene identity.

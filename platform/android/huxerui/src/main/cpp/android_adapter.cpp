@@ -568,6 +568,20 @@ public:
     }
   }
 
+  void SetTextureLayerSurface(
+      JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height
+  ) {
+    if (platform_views_ != nullptr) {
+      platform_views_->SetTextureLayerSurface(environment, identity, surface, pixel_width, pixel_height);
+    }
+  }
+
+  void ClearTextureLayerSurface(std::uint64_t identity) noexcept {
+    if (platform_views_ != nullptr) {
+      platform_views_->ClearTextureLayerSurface(identity);
+    }
+  }
+
   void EndDraw() {
     if (const std::optional<double> deadline = frame_state_.EndPaint(view_ != nullptr)) {
       ScheduleFrame(*deadline);
@@ -1212,6 +1226,16 @@ public:
     platform_.DrawSlice(environment, canvas, first_command, command_count);
   }
 
+  void SetTextureLayerSurface(
+      JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height
+  ) {
+    platform_.SetTextureLayerSurface(environment, identity, surface, pixel_width, pixel_height);
+  }
+
+  void ClearTextureLayerSurface(std::uint64_t identity) noexcept {
+    platform_.ClearTextureLayerSurface(identity);
+  }
+
   void EndDraw() {
     platform_.EndDraw();
   }
@@ -1624,6 +1648,33 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeDrawSlice(
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeSetTextureLayerSurface(
+    JNIEnv* environment, jclass, jlong handle, jlong identity, jobject surface, jint pixel_width, jint pixel_height
+) {
+  try {
+    if (identity <= 0 || surface == nullptr || pixel_width <= 0 || pixel_height <= 0) {
+      throw std::invalid_argument("HuxerUI Android texture layer Surface arguments must be valid");
+    }
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->SetTextureLayerSurface(
+          environment, static_cast<std::uint64_t>(identity), surface, static_cast<int>(pixel_width),
+          static_cast<int>(pixel_height)
+      );
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_org_huxerui_HuxerUIView_nativeClearTextureLayerSurface(JNIEnv*, jclass, jlong handle, jlong identity) {
+  if (identity > 0) {
+    if (auto* session = huxerui::detail::Session(handle)) {
+      session->ClearTextureLayerSurface(static_cast<std::uint64_t>(identity));
+    }
   }
 }
 

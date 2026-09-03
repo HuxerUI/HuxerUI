@@ -26,6 +26,7 @@ add_subdirectory(image)
 add_subdirectory(window_chrome)
 add_subdirectory(files)
 add_subdirectory(platform_module)
+add_subdirectory(external_texture)
 
 if (WIN32 OR APPLE OR ANDROID OR EMSCRIPTEN)
     add_subdirectory(platform_view)

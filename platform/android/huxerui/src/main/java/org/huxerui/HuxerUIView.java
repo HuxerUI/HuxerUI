@@ -32,6 +32,7 @@ import android.util.SparseIntArray;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
+import android.view.Surface;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.ViewGroup;
@@ -169,6 +170,7 @@ public final class HuxerUIView extends ViewGroup {
     private final HuxerUIFilePicker filePicker;
     private final HuxerUIPermission permission;
     private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
+    private final LongSparseArray<HuxerUITextureLayer> textureLayers = new LongSparseArray<>();
     private final SparseIntArray pointerButtons = new SparseIntArray();
     private float density;
     private final ViewTreeObserver.OnPreDrawListener textInputGeometryListener = this::updateTextInputGeometry;
@@ -425,6 +427,9 @@ public final class HuxerUIView extends ViewGroup {
         for (int index = 0; index < platformViews.size(); ++index) {
             platformViews.valueAt(index).applyLayout();
         }
+        for (int index = 0; index < textureLayers.size(); ++index) {
+            textureLayers.valueAt(index).applyLayout();
+        }
         if (changed && inputConnection != null) {
             inputConnection.updateCursorAnchorPosition();
         }
@@ -437,6 +442,11 @@ public final class HuxerUIView extends ViewGroup {
             PlatformViewContainer container = platformViews.valueAt(index);
             container.measure(MeasureSpec.makeMeasureSpec(container.containerWidth, MeasureSpec.EXACTLY),
                     MeasureSpec.makeMeasureSpec(container.containerHeight, MeasureSpec.EXACTLY));
+        }
+        for (int index = 0; index < textureLayers.size(); ++index) {
+            HuxerUITextureLayer layer = textureLayers.valueAt(index);
+            layer.measure(MeasureSpec.makeMeasureSpec(layer.layerWidth(), MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(layer.layerHeight(), MeasureSpec.EXACTLY));
         }
     }
 
@@ -471,7 +481,7 @@ public final class HuxerUIView extends ViewGroup {
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
         canvas.drawColor(0xFFF7F8FA);
-        if (nativeHandle == 0L) {
+        if (nativeHandle == 0L || textureLayers.size() != 0) {
             return;
         }
         nativeBeginDraw(nativeHandle);
@@ -509,6 +519,15 @@ public final class HuxerUIView extends ViewGroup {
             if (!nativeDrawing) {
                 nativeBeginDraw(nativeHandle);
                 nativeDrawing = true;
+            }
+            if (textureLayers.size() != 0) {
+                if (!canvas.isHardwareAccelerated()) {
+                    throw new IllegalStateException("HuxerUI Android GPU textures require a hardware-accelerated host");
+                }
+                int saveCount = canvas.save();
+                canvas.scale(density, density);
+                nativeDrawBase(nativeHandle, canvas);
+                canvas.restoreToCount(saveCount);
             }
             long drawingTime = getDrawingTime();
             for (int index = 0; index < platformComposition.length; index += 3) {
@@ -1146,6 +1165,74 @@ public final class HuxerUIView extends ViewGroup {
         }
         synchronizePlatformViewOrder();
         invalidate();
+    }
+
+    private void commitTextureLayers(long[] identities, float[] logicalSizes) {
+        if (identities == null || logicalSizes == null || logicalSizes.length != identities.length * 2) {
+            throw new IllegalArgumentException("HuxerUI Android texture layer descriptor is invalid");
+        }
+        LongSparseArray<HuxerUITextureLayer> retained = new LongSparseArray<>(identities.length);
+        boolean structureChanged = false;
+        for (int index = 0; index < identities.length; ++index) {
+            long identity = identities[index];
+            HuxerUITextureLayer layer = textureLayers.get(identity);
+            if (layer == null) {
+                layer = new HuxerUITextureLayer(getContext(), this, identity);
+                addView(layer);
+                structureChanged = true;
+            }
+            int width = Math.max(1, Math.round(Math.max(0.0F, logicalSizes[index * 2]) * density));
+            int height = Math.max(1, Math.round(Math.max(0.0F, logicalSizes[index * 2 + 1]) * density));
+            layer.resize(width, height);
+            retained.put(identity, layer);
+        }
+        for (int index = 0; index < textureLayers.size(); ++index) {
+            long identity = textureLayers.keyAt(index);
+            if (retained.get(identity) == null) {
+                HuxerUITextureLayer layer = textureLayers.valueAt(index);
+                layer.detachLayer();
+                removeView(layer);
+                structureChanged = true;
+            }
+        }
+        textureLayers.clear();
+        for (int index = 0; index < retained.size(); ++index) {
+            textureLayers.put(retained.keyAt(index), retained.valueAt(index));
+        }
+        if (structureChanged) {
+            synchronizePlatformViewOrder();
+            requestLayout();
+        }
+        invalidate();
+    }
+
+    void textureLayerSurfaceAvailable(long identity, Surface surface, int width, int height) {
+        if (nativeHandle != 0L) {
+            nativeSetTextureLayerSurface(nativeHandle, identity, surface, width, height);
+            invalidate();
+        }
+    }
+
+    void textureLayerSurfaceDestroyed(long identity) {
+        if (nativeHandle != 0L) {
+            nativeClearTextureLayerSurface(nativeHandle, identity);
+        }
+    }
+
+    private void drawTextureLayer(Canvas canvas, long identity, float destinationX, float destinationY,
+            float destinationWidth, float destinationHeight, float opacity) {
+        HuxerUITextureLayer layer = textureLayers.get(identity);
+        if (layer == null || layer.getVisibility() != VISIBLE || destinationWidth <= 0.0F || destinationHeight <= 0.0F
+                || opacity <= 0.0F) {
+            return;
+        }
+        int saveCount = opacity >= 1.0F
+                ? canvas.save()
+                : canvas.saveLayerAlpha(null, Math.round(Math.max(0.0F, Math.min(opacity, 1.0F)) * 255.0F));
+        canvas.translate(destinationX, destinationY);
+        canvas.scale(destinationWidth / layer.layerWidth(), destinationHeight / layer.layerHeight());
+        drawChild(canvas, layer, getDrawingTime());
+        canvas.restoreToCount(saveCount);
     }
 
     private void synchronizePlatformViewOrder() {
@@ -2081,6 +2168,11 @@ public final class HuxerUIView extends ViewGroup {
     private static native void nativeDrawBase(long handle, Canvas canvas);
 
     private static native void nativeDrawSlice(long handle, Canvas canvas, long firstCommand, long commandCount);
+
+    private static native void nativeSetTextureLayerSurface(
+            long handle, long identity, Surface surface, int pixelWidth, int pixelHeight);
+
+    private static native void nativeClearTextureLayerSurface(long handle, long identity);
 
     private static native void nativeEndDraw(long handle);
 

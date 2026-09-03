@@ -13,9 +13,12 @@
 
 namespace huxerui::detail {
 
+class AndroidTextureLayers;
+
 class AndroidRenderer final {
 public:
   void Initialize(JNIEnv* environment, jclass view_class);
+  void SetTextureLayers(AndroidTextureLayers* texture_layers) noexcept;
   void BeginDraw();
   void DrawSlice(
       JNIEnv* environment,
@@ -29,20 +32,22 @@ public:
 private:
   struct CommandRange;
   struct CachedExternalTexture {
-    std::weak_ptr<android::BitmapTexture> texture;
-    std::shared_ptr<const AndroidBitmapFrame> frame;
+    std::weak_ptr<ExternalTexture> texture;
+    std::shared_ptr<const AndroidBitmapFrame> bitmap_frame;
+    std::shared_ptr<const AndroidGpuFrame> gpu_frame;
     std::uint64_t draw_epoch = 0;
   };
 
-  bool
-  RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, CommandRange* range);
+  bool RenderSequence(JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence,
+    std::uint64_t node_identity, bool foreground, CommandRange* range);
   bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range);
-  [[nodiscard]] const AndroidBitmapFrame* FrameFor(const std::shared_ptr<ExternalTexture>& texture);
+  [[nodiscard]] const AndroidBitmapFrame* BitmapFrameFor(const std::shared_ptr<ExternalTexture>& texture);
+  [[nodiscard]] std::shared_ptr<const AndroidGpuFrame> GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command);
-  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command, const AndroidTextureLayerKey& key);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawCircleCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawLineCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawArcCommand& command);
@@ -79,6 +84,7 @@ private:
   jmethodID push_transform_ = nullptr;
   jmethodID pop_transform_ = nullptr;
   std::vector<CachedExternalTexture> external_textures_;
+  AndroidTextureLayers* texture_layers_ = nullptr;
   std::uint64_t draw_epoch_ = 0;
 };
 

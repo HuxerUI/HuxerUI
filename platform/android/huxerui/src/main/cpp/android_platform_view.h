@@ -30,6 +30,10 @@ public:
   void Commit(JNIEnv* environment, const RenderFrame& frame);
   void DrawBase(JNIEnv* environment, jobject canvas);
   void DrawSlice(JNIEnv* environment, jobject canvas, std::size_t first_command, std::size_t command_count);
+  void SetTextureLayerSurface(
+      JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height
+  );
+  void ClearTextureLayerSurface(std::uint64_t identity) noexcept;
   [[nodiscard]] std::optional<std::uint64_t> HitTest(Point point) const;
   void SynchronizeFocus(std::optional<std::uint64_t> identity, bool focus_visible);
   [[nodiscard]] bool MoveFocus(std::uint64_t identity, bool reverse);

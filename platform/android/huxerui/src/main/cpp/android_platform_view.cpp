@@ -19,6 +19,7 @@
 #include <huxerui/android/jni.h>
 #include <huxerui/android/platform_registry.h>
 
+#include "android_external_texture_internal.h"
 #include "android_renderer.h"
 #include "internal.h"
 
@@ -89,6 +90,13 @@ struct AndroidPlatformViews::State {
       environment->DeleteGlobalRef(root);
       root = nullptr;
       throw std::runtime_error("HuxerUI Android PlatformView host methods do not match the platform backend");
+    }
+    try {
+      texture_layers = std::make_unique<AndroidTextureLayers>(environment, root, renderer_value);
+    } catch (...) {
+      environment->DeleteGlobalRef(root);
+      root = nullptr;
+      throw;
     }
   }
 
@@ -276,6 +284,7 @@ struct AndroidPlatformViews::State {
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedPlatformView>> hosted;
+  std::unique_ptr<AndroidTextureLayers> texture_layers;
   jmethodID validate_platform_view = nullptr;
   jmethodID mount_platform_view = nullptr;
   jmethodID place_platform_view = nullptr;
@@ -296,6 +305,7 @@ AndroidPlatformViews::~AndroidPlatformViews() {
 
 void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame) {
   RenderComposition composition = BuildRenderComposition(frame.scene);
+  state_->texture_layers->Commit(environment, frame);
   std::unordered_set<std::uint64_t> retained_identities;
   std::vector<std::pair<std::uint64_t, std::unique_ptr<HostedPlatformView>>> pending;
   try {
@@ -458,6 +468,20 @@ void AndroidPlatformViews::DrawSlice(
   }
 }
 
+void AndroidPlatformViews::SetTextureLayerSurface(
+    JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height
+) {
+  if (state_ && state_->texture_layers) {
+    state_->texture_layers->SetSurface(environment, identity, surface, pixel_width, pixel_height);
+  }
+}
+
+void AndroidPlatformViews::ClearTextureLayerSurface(std::uint64_t identity) noexcept {
+  if (state_ && state_->texture_layers) {
+    state_->texture_layers->ClearSurface(identity);
+  }
+}
+
 std::optional<std::uint64_t> AndroidPlatformViews::HitTest(Point point) const {
   return state_->runtime == nullptr ? std::nullopt : RuntimeAccess::HitTestPlatformView(*state_->runtime, point);
 }
@@ -484,6 +508,8 @@ void AndroidPlatformViews::Shutdown(JNIEnv* environment) {
     state_->Dispose(environment, identity, *hosted_view);
   }
   state_->hosted.clear();
+  state_->texture_layers->Shutdown(environment);
+  state_->texture_layers.reset();
   state_->frame = nullptr;
   state_->base_slice.reset();
   state_->runtime = nullptr;

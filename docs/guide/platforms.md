@@ -77,6 +77,36 @@ Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, an
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, and ExternalTexture are translated at the Android host boundary.
 Camera and microphone requests use the Activity launcher and require manifest declarations owned by the application.
 
+Android libraries include `<huxerui/android/external_texture.h>` and choose the producer that matches their source.
+`BitmapTexture` retains immutable `android.graphics.Bitmap` objects and remains on the Canvas path.
+`GlTexture` synchronously copies `GL_TEXTURE_2D` content from the EGL context current during `PublishCurrent()`; supply a native acquire-fence fd when producer work is asynchronous, or publication waits for current GL work.
+The producer may reuse or delete the source texture after `PublishCurrent()` returns.
+
+```cpp
+auto texture = std::make_shared<android::GlTexture>(Size{320.0F, 180.0F});
+texture->PublishCurrent({
+    .texture_name = texture_name,
+    .pixel_width = 1280,
+    .pixel_height = 720,
+    .acquire_fence_fd = fence_fd,
+    .origin = android::GlTexture::Origin::BottomLeft,
+    .alpha = android::GlTexture::Alpha::Opaque,
+});
+```
+
+`SurfaceStreamTexture` owns the SurfaceTexture/OES consumer and returns a local reference to a producer-facing `android.view.Surface` suitable for Camera or MediaCodec.
+Its logical intrinsic size remains fixed while `SetDefaultBufferSize()` may change the requested physical buffer size.
+Surface buffers follow Android's premultiplied-alpha convention, and `Finish()` releases the producer Surface and consumer while preserving the last latched frame.
+
+```cpp
+auto texture = android::SurfaceStreamTexture::Create(environment, Size{320.0F, 180.0F}, 1280, 720);
+auto producer_surface = texture->Surface(environment);
+camera->SetPreviewSurface(producer_surface.Get());
+```
+
+Applications pass all three concrete types to `Image` as `std::shared_ptr<ExternalTexture>`.
+GPU-backed textures require a hardware-accelerated host window; HuxerUI does not silently read them back to CPU memory.
+
 An Android arm64-v8a host SDK provides the `huxerui` CLI, `hcg`, and `hrc` as native Bionic executables for Termux.
 Termux Android builds target the local `arm64-v8a` ABI, use the Termux `aapt2` executable, and still require an Android SDK platform and NDK layout compatible with Gradle `externalNativeBuild` on Termux.
 The SDK installer does not install Java, Gradle dependencies, `aapt2`, the Android SDK, or the Android NDK; use `huxerui doctor android` to inspect those application-build prerequisites.

@@ -28,6 +28,23 @@ void DeleteGlobalReference(JavaVM* virtual_machine, jobject reference) noexcept 
   }
 }
 
+bool ClearPendingJavaException(JNIEnv* environment) noexcept {
+  if (environment == nullptr || !environment->ExceptionCheck()) {
+    return false;
+  }
+  environment->ExceptionClear();
+  return true;
+}
+
+jmethodID GetRequiredMethod(JNIEnv* environment, jclass type, const char* name, const char* signature) {
+  const jmethodID method = environment->GetMethodID(type, name, signature);
+  const bool lookup_failed = ClearPendingJavaException(environment);
+  if (method == nullptr || lookup_failed) {
+    throw std::runtime_error("HuxerUI android.graphics.Bitmap methods do not match the platform backend");
+  }
+  return method;
+}
+
 } // namespace
 
 AndroidBitmapFrame::AndroidBitmapFrame(
@@ -106,22 +123,31 @@ void BitmapTexture::InitializeJni(JNIEnv* environment) {
 
   jclass local_bitmap_class = environment->FindClass("android/graphics/Bitmap");
   if (local_bitmap_class == nullptr) {
+    huxerui::detail::ClearPendingJavaException(environment);
     throw std::runtime_error("HuxerUI could not resolve android.graphics.Bitmap");
   }
   jclass bitmap_class = static_cast<jclass>(environment->NewGlobalRef(local_bitmap_class));
   environment->DeleteLocalRef(local_bitmap_class);
-  if (bitmap_class == nullptr) {
+  const bool retain_class_failed = huxerui::detail::ClearPendingJavaException(environment);
+  if (bitmap_class == nullptr || retain_class_failed) {
+    if (bitmap_class != nullptr) {
+      environment->DeleteGlobalRef(bitmap_class);
+    }
     throw std::runtime_error("HuxerUI could not retain android.graphics.Bitmap");
   }
 
-  const jmethodID bitmap_get_width = environment->GetMethodID(bitmap_class, "getWidth", "()I");
-  const jmethodID bitmap_get_height = environment->GetMethodID(bitmap_class, "getHeight", "()I");
-  const jmethodID bitmap_get_generation = environment->GetMethodID(bitmap_class, "getGenerationId", "()I");
-  const jmethodID bitmap_is_recycled = environment->GetMethodID(bitmap_class, "isRecycled", "()Z");
-  if (bitmap_get_width == nullptr || bitmap_get_height == nullptr || bitmap_get_generation == nullptr ||
-      bitmap_is_recycled == nullptr) {
+  jmethodID bitmap_get_width = nullptr;
+  jmethodID bitmap_get_height = nullptr;
+  jmethodID bitmap_get_generation = nullptr;
+  jmethodID bitmap_is_recycled = nullptr;
+  try {
+    bitmap_get_width = huxerui::detail::GetRequiredMethod(environment, bitmap_class, "getWidth", "()I");
+    bitmap_get_height = huxerui::detail::GetRequiredMethod(environment, bitmap_class, "getHeight", "()I");
+    bitmap_get_generation = huxerui::detail::GetRequiredMethod(environment, bitmap_class, "getGenerationId", "()I");
+    bitmap_is_recycled = huxerui::detail::GetRequiredMethod(environment, bitmap_class, "isRecycled", "()Z");
+  } catch (...) {
     environment->DeleteGlobalRef(bitmap_class);
-    throw std::runtime_error("HuxerUI android.graphics.Bitmap methods do not match the platform backend");
+    throw;
   }
   storage_->bitmap_class = bitmap_class;
   storage_->bitmap_get_width = bitmap_get_width;
@@ -147,36 +173,40 @@ void BitmapTexture::Publish(JNIEnv* environment, jobject bitmap) {
     }
     InitializeJni(environment);
     const jboolean is_bitmap = environment->IsInstanceOf(bitmap, storage_->bitmap_class);
-    if (environment->ExceptionCheck()) {
+    if (huxerui::detail::ClearPendingJavaException(environment)) {
       throw std::runtime_error("HuxerUI could not inspect the Android external texture frame type");
     }
     if (is_bitmap != JNI_TRUE) {
       throw std::invalid_argument("HuxerUI Android external texture frame must be an android.graphics.Bitmap");
     }
     const jboolean recycled = environment->CallBooleanMethod(bitmap, storage_->bitmap_is_recycled);
-    if (environment->ExceptionCheck()) {
+    if (huxerui::detail::ClearPendingJavaException(environment)) {
       throw std::runtime_error("HuxerUI could not inspect the Android external texture Bitmap state");
     }
     if (recycled == JNI_TRUE) {
       throw std::invalid_argument("HuxerUI Android external texture Bitmap must not be recycled");
     }
     const jint pixel_width = environment->CallIntMethod(bitmap, storage_->bitmap_get_width);
-    if (environment->ExceptionCheck()) {
+    if (huxerui::detail::ClearPendingJavaException(environment)) {
       throw std::runtime_error("HuxerUI could not inspect the Android external texture Bitmap width");
     }
     const jint pixel_height = environment->CallIntMethod(bitmap, storage_->bitmap_get_height);
-    if (environment->ExceptionCheck()) {
+    if (huxerui::detail::ClearPendingJavaException(environment)) {
       throw std::runtime_error("HuxerUI could not inspect the Android external texture Bitmap height");
     }
     const jint generation = environment->CallIntMethod(bitmap, storage_->bitmap_get_generation);
-    if (environment->ExceptionCheck()) {
+    if (huxerui::detail::ClearPendingJavaException(environment)) {
       throw std::runtime_error("HuxerUI could not inspect the Android external texture Bitmap generation");
     }
     if (pixel_width <= 0 || pixel_height <= 0) {
       throw std::invalid_argument("HuxerUI Android external texture Bitmap dimensions must be positive");
     }
     jobject retained_bitmap = environment->NewGlobalRef(bitmap);
-    if (retained_bitmap == nullptr) {
+    const bool retain_bitmap_failed = huxerui::detail::ClearPendingJavaException(environment);
+    if (retained_bitmap == nullptr || retain_bitmap_failed) {
+      if (retained_bitmap != nullptr) {
+        environment->DeleteGlobalRef(retained_bitmap);
+      }
       throw std::runtime_error("HuxerUI could not retain the Android external texture Bitmap");
     }
     auto frame = std::make_shared<const huxerui::detail::AndroidBitmapFrame>(

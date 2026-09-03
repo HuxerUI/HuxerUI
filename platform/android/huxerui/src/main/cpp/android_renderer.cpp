@@ -189,6 +189,10 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   }
 }
 
+void AndroidRenderer::SetTextureLayers(AndroidTextureLayers* texture_layers) noexcept {
+  texture_layers_ = texture_layers;
+}
+
 void AndroidRenderer::BeginDraw() {
   if (draw_epoch_ == std::numeric_limits<std::uint64_t>::max()) {
     draw_epoch_ = 0;
@@ -198,7 +202,7 @@ void AndroidRenderer::BeginDraw() {
   }
   ++draw_epoch_;
   std::erase_if(external_textures_, [](const CachedExternalTexture& cached) {
-    const std::shared_ptr<android::BitmapTexture> texture = cached.texture.lock();
+    const std::shared_ptr<ExternalTexture> texture = cached.texture.lock();
     return !texture || !texture->IsActive();
   });
 }
@@ -210,11 +214,18 @@ struct AndroidRenderer::CommandRange {
 };
 
 bool AndroidRenderer::RenderSequence(
-    JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, CommandRange* range
+    JNIEnv* environment, jobject view, jobject canvas, const PaintSequence& sequence, std::uint64_t node_identity,
+    bool foreground, CommandRange* range
 ) {
+  std::size_t texture_ordinal = 0;
   for (const PaintCommand& command : sequence.Commands()) {
     if (std::holds_alternative<PlacePlatformViewCommand>(command)) {
       continue;
+    }
+    const auto* texture = std::get_if<DrawExternalTextureCommand>(&command);
+    const std::size_t current_texture_ordinal = texture_ordinal;
+    if (texture != nullptr) {
+      ++texture_ordinal;
     }
     const bool selected = range == nullptr || (range->cursor >= range->first && range->cursor < range->end);
     if (range != nullptr) {
@@ -223,10 +234,26 @@ bool AndroidRenderer::RenderSequence(
     if (!selected) {
       continue;
     }
-    std::visit(
-        [this, environment, view, canvas](const auto& value) { RenderCommand(environment, view, canvas, value); },
-        command
-    );
+    if (texture != nullptr) {
+      RenderCommand(
+          environment, view, canvas, *texture,
+          AndroidTextureLayerKey{
+              .node_identity = node_identity,
+              .texture_ordinal = current_texture_ordinal,
+              .foreground = foreground,
+          }
+      );
+    } else {
+      std::visit(
+          [this, environment, view, canvas](const auto& value) {
+            using Command = std::remove_cvref_t<decltype(value)>;
+            if constexpr (!std::same_as<Command, DrawExternalTextureCommand>) {
+              RenderCommand(environment, view, canvas, value);
+            }
+          },
+          command
+      );
+    }
     if (environment->ExceptionCheck()) {
       return false;
     }
@@ -261,7 +288,7 @@ bool AndroidRenderer::RenderSceneNode(
     }
   }
 
-  if (!RenderSequence(environment, view, canvas, node.content, range)) {
+  if (!RenderSequence(environment, view, canvas, node.content, node.id, false, range)) {
     return false;
   }
   for (const RenderClip& clip : node.child_clips) {
@@ -294,7 +321,7 @@ bool AndroidRenderer::RenderSceneNode(
       return false;
     }
   }
-  if (!RenderSequence(environment, view, canvas, node.foreground, range)) {
+  if (!RenderSequence(environment, view, canvas, node.foreground, node.id, true, range)) {
     return false;
   }
   if (translucent) {
@@ -488,55 +515,80 @@ void AndroidRenderer::RenderCommand(
 }
 
 void AndroidRenderer::RenderCommand(
-    JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command
+    JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command,
+    const AndroidTextureLayerKey& key
 ) {
-  const AndroidBitmapFrame* frame = FrameFor(command.texture);
-  if (frame == nullptr) {
+  if (std::dynamic_pointer_cast<android::BitmapTexture>(command.texture)) {
+    const AndroidBitmapFrame* frame = BitmapFrameFor(command.texture);
+    if (frame == nullptr) {
+      return;
+    }
+    const Size intrinsic_size = command.texture->IntrinsicSize();
+    const float scale_x = static_cast<float>(frame->PixelWidth()) / intrinsic_size.width;
+    const float scale_y = static_cast<float>(frame->PixelHeight()) / intrinsic_size.height;
+    environment->CallVoidMethod(
+        view, draw_external_texture_, canvas, frame->Bitmap(), command.source.x * scale_x, command.source.y * scale_y,
+        command.source.width * scale_x, command.source.height * scale_y, command.destination.x, command.destination.y,
+        command.destination.width, command.destination.height, command.opacity, frame->Generation(),
+        static_cast<jint>(command.sampling)
+    );
     return;
   }
-  const Size intrinsic_size = command.texture->IntrinsicSize();
-  const float scale_x = static_cast<float>(frame->PixelWidth()) / intrinsic_size.width;
-  const float scale_y = static_cast<float>(frame->PixelHeight()) / intrinsic_size.height;
-  environment->CallVoidMethod(
-      view,
-      draw_external_texture_,
-      canvas,
-      frame->Bitmap(),
-      command.source.x * scale_x,
-      command.source.y * scale_y,
-      command.source.width * scale_x,
-      command.source.height * scale_y,
-      command.destination.x,
-      command.destination.y,
-      command.destination.width,
-      command.destination.height,
-      command.opacity,
-      frame->Generation(),
-      static_cast<jint>(command.sampling)
-  );
+  std::shared_ptr<const AndroidGpuFrame> frame = GpuFrameFor(command.texture);
+  if (texture_layers_ == nullptr) {
+    throw std::logic_error("HuxerUI Android GPU texture layer host is unavailable");
+  }
+  texture_layers_->Draw(environment, canvas, key, command, frame);
 }
 
-const AndroidBitmapFrame* AndroidRenderer::FrameFor(const std::shared_ptr<ExternalTexture>& texture) {
+const AndroidBitmapFrame* AndroidRenderer::BitmapFrameFor(const std::shared_ptr<ExternalTexture>& texture) {
   const std::shared_ptr<android::BitmapTexture> bitmap_texture =
       std::dynamic_pointer_cast<android::BitmapTexture>(texture);
   if (!bitmap_texture) {
-    throw std::logic_error("HuxerUI external texture is incompatible with the Android renderer");
+    throw std::logic_error("HuxerUI external texture is incompatible with the Android Canvas renderer");
   }
   auto cached = std::ranges::find_if(external_textures_, [&bitmap_texture](const CachedExternalTexture& entry) {
     return entry.texture.lock() == bitmap_texture;
   });
   if (cached == external_textures_.end()) {
-    external_textures_.push_back(CachedExternalTexture{bitmap_texture, {}, std::numeric_limits<std::uint64_t>::max()});
+    external_textures_.push_back(
+        CachedExternalTexture{bitmap_texture, {}, {}, std::numeric_limits<std::uint64_t>::max()}
+    );
     cached = external_textures_.end() - 1;
   }
   if (cached->draw_epoch != draw_epoch_) {
     const std::shared_ptr<const AndroidBitmapFrame> frame = bitmap_texture->AcquireFrame();
     if (frame) {
-      cached->frame = frame;
+      cached->bitmap_frame = frame;
     }
     cached->draw_epoch = draw_epoch_;
   }
-  return cached->frame.get();
+  return cached->bitmap_frame.get();
+}
+
+std::shared_ptr<const AndroidGpuFrame> AndroidRenderer::GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture) {
+  auto cached = std::ranges::find_if(external_textures_, [&texture](const CachedExternalTexture& entry) {
+    return entry.texture.lock() == texture;
+  });
+  if (cached == external_textures_.end()) {
+    external_textures_.push_back(CachedExternalTexture{texture, {}, {}, std::numeric_limits<std::uint64_t>::max()});
+    cached = external_textures_.end() - 1;
+  }
+  if (cached->draw_epoch != draw_epoch_) {
+    std::shared_ptr<const AndroidGpuFrame> frame;
+    if (const auto gl_texture = std::dynamic_pointer_cast<android::GlTexture>(texture)) {
+      frame = gl_texture->AcquireFrame();
+    } else if (const auto stream_texture = std::dynamic_pointer_cast<android::SurfaceStreamTexture>(texture)) {
+      frame = stream_texture->AcquireFrame();
+    } else {
+      throw std::logic_error("HuxerUI external texture is incompatible with the Android renderer");
+    }
+    if (frame) {
+      cached->gpu_frame = std::move(frame);
+    }
+    cached->draw_epoch = draw_epoch_;
+  }
+  return cached->gpu_frame;
 }
 
 void AndroidRenderer::RenderCommand(

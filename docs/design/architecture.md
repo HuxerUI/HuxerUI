@@ -1239,11 +1239,11 @@ protected:
 };
 ```
 
-The implemented concrete producers are `android::BitmapTexture`, `ios::PixelBufferTexture`, `macos::PixelBufferTexture`, `windows::PixelTexture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
+The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `macos::PixelBufferTexture`, `windows::PixelTexture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
 Apple Objective-C and Swift use `HUXPixelBufferTexture`, imported as `PixelBufferTexture`, which is itself an `ExternalTexture` capability rather than an owner exposing a second `.texture` value.
-Android accepts a retained `android.graphics.Bitmap`, Apple accepts `CVPixelBufferRef`, Windows and Linux copy borrowed `PixelFrame` rows, and Web clones an open WebCodecs `VideoFrame` on the browser main thread.
-Retained Android and Apple frame storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after `Publish()` returns.
-Future GPU-native producers such as Android GL, Metal, D3D, DMA-BUF, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
+Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple accepts `CVPixelBufferRef`, Windows and Linux copy borrowed `PixelFrame` rows, and Web clones an open WebCodecs `VideoFrame` on the browser main thread.
+Retained Android Bitmap and Apple frame storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after publication returns.
+Future GPU-native producers such as Metal, shared D3D, DMA-BUF, AHardwareBuffer, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
 
 `PlatformPayloadKind::ExternalTexture` transports `std::shared_ptr<ExternalTexture>` only across a platform-language boundary, including when nested in lists and objects.
 The HUXP v1 bytes contain validated slots into a companion capability table; they never contain a process pointer or persistent identifier.
@@ -1295,11 +1295,19 @@ The same texture may be displayed by several Runtimes; unmounting one removes on
 
 Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
 The shared command retains only the abstract identity and immutable drawing data, while each renderer casts to its matching concrete platform type and uses that type's private mailbox interface.
-Each backend chooses a platform-specific zero-copy path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
+Each backend chooses a platform-specific direct-import path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
 The API promises no copy through shared Runtime; it does not claim universal zero-copy on the current CoreGraphics, Android Canvas, or Cairo backends.
 The Apple implementations accept `CVPixelBufferRef` and use Core Image conversion compatible with their existing renderers.
-The Android API 23 path accepts a retained `Bitmap`, keeps one imported frame per active texture, and draws it through the existing Canvas backend.
-Software and hardware-backed Bitmaps share that contract, but direct `AHardwareBuffer` import, synchronization fences, and a zero-copy graphics path remain future renderer work.
+The Android API 23 path keeps Canvas as the primary renderer and draws retained `Bitmap` frames directly.
+`GlTexture::PublishCurrent()` reads level-zero `GL_TEXTURE_2D` content from the current EGL context, duplicates an optional native acquire fence, and synchronously converts it once into a compositor-owned premultiplied 2D texture without CPU readback.
+Without an acquire fence the call waits for producer GL work; after `PublishCurrent()` returns, the source texture storage is no longer retained and may be reused or deleted.
+`SurfaceStreamTexture` creates a producer-facing `Surface`, latches its SurfaceTexture on the private EGL thread, applies the SurfaceTexture transform, and converts each ready OES image once into the same immutable internal representation.
+Revision advances only after that import completes, so Runtime never observes a revision whose frame is not drawable.
+Each GPU draw occurrence owns an internal non-interactive TextureView output while it remains in the committed scene.
+The Android renderer encounters that ordinary `DrawExternalTextureCommand` during Canvas replay, renders its selected source rectangle into the TextureView surface, and invokes `drawChild()` under the current Canvas transform, clip, and save-layer stack.
+This platform-private child does not become a PlatformView, public View, accessibility node, or shared RenderComposition layer.
+Frames containing GPU texture children move the base Canvas slice from `onDraw()` into `dispatchDraw()` so all Canvas, GPU texture, and PlatformView content retains command order.
+Direct `AHardwareBuffer` import remains future work.
 The Linux implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into Cairo premultiplied ARGB32 storage, keeps one Cairo surface per active texture, and leaves DMA-BUF import and explicit synchronization as future renderer work.
 The Windows implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.
 It reuses the bitmap allocation while pixel dimensions remain unchanged and leaves shared D3D textures, keyed synchronization, and zero-copy video import as future renderer work.
@@ -1307,6 +1315,9 @@ The Web implementation accepts only open WebCodecs `VideoFrame` values, clones e
 Because `emscripten::val` is thread-affine, texture construction, publication, finish, and destruction remain on the browser main thread.
 The Canvas renderer clones the latest mailbox frame at most once per physical frame, shares that renderer-owned clone across every Canvas slice, maps logical crop coordinates through `displayWidth` and `displayHeight`, and closes replaced or inactive clones.
 WebCodecs may share the clone's underlying media resource, but Canvas drawing and browser color conversion may still copy, so this backend does not claim zero-copy.
+
+GPU-native expansion remains backend-owned rather than copying Android's TextureView mechanism into shared Runtime.
+Each platform preserves its primary renderer and introduces native composition only when that renderer cannot import the producer inline.
 
 Payloads and retained PaintCommands share the same opaque texture lifetime without a registration record.
 Unmount first removes committed drawing references and visibility subscriptions.
