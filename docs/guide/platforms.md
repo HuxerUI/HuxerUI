@@ -43,6 +43,20 @@ System tray presentation uses an AppKit status item and platform menu.
 Camera and microphone permissions use AVFoundation and require the corresponding bundle usage descriptions.
 The installed SDK exposes AppKit PlatformModule, PlatformView, PlatformPayload, and ExternalTexture protocols to Objective-C and Swift through `HuxerUIPlatform`.
 
+Native libraries include `<huxerui/macos/external_texture.h>` for `macos::PixelBufferTexture` and `macos::MetalTexture`.
+`PixelBufferTexture` retains an immutable `CVPixelBufferRef`; publish a different buffer before mutating later content.
+`MetalTexture` synchronously copies level zero of a completed, non-framebuffer-only 2D BGRA8 or RGBA8 texture, so the producer may reuse or release its source after `Publish()` returns.
+
+```objective-c++
+auto texture = std::make_shared<huxerui::macos::MetalTexture>(huxerui::Size{320.0F, 180.0F});
+texture->Publish({producer_texture, huxerui::macos::MetalTexture::Origin::TopLeft,
+                  huxerui::macos::MetalTexture::Alpha::Premultiplied});
+```
+
+Finish producer command buffers before publication.
+Use `Origin::BottomLeft` only when row zero represents the logical bottom edge, `Alpha::Opaque` when stored alpha must be ignored, and `Alpha::Straight` when RGB has not been multiplied by alpha.
+Metal publication performs a GPU snapshot and is not a zero-copy handoff; rendering remains in the ordinary Image/Core Graphics path so transforms, clipping, opacity, overlays, scrolling, and multiple windows keep their normal semantics.
+
 ## Linux
 
 The Linux backend uses GTK 4 for the window and event loop, Pango for text, Cairo for rendering, `GtkIMContext` for composition, GIO for platform services, and libsoup 3 for HTTP.
@@ -128,6 +142,10 @@ Physical-device builds use Xcode signing settings owned by the generated project
 External files preserve security-scoped access when required.
 Camera and microphone permissions use AVFoundation, require native usage descriptions, and can open the application settings page through UIKit.
 The iOS XCFramework exposes UIKit PlatformModule, PlatformView, PlatformPayload, and ExternalTexture protocols to Objective-C and Swift through `HuxerUIPlatform`.
+
+Native libraries include `<huxerui/ios/external_texture.h>` for the iOS forms of `PixelBufferTexture` and `MetalTexture`.
+They have the same ownership, format, origin, alpha, synchronization, and Image rendering contract as their macOS counterparts; the C++ types remain in `huxerui::ios` rather than a shared Apple namespace.
+Objective-C and Swift import the concrete objects as `HUXPixelBufferTexture`/`PixelBufferTexture` and `HUXMetalTexture`/`MetalTexture`.
 
 ## Shared behavior
 

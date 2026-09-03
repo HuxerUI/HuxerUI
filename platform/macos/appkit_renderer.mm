@@ -532,9 +532,14 @@ struct AppKitRenderer::State {
   };
 
   struct CachedExternalTexture {
-    std::weak_ptr<macos::PixelBufferTexture> texture;
+    std::weak_ptr<ExternalTexture> texture;
     CFRef<CGImageRef> cg_image;
     std::uint64_t revision = std::numeric_limits<std::uint64_t>::max();
+  };
+
+  struct MetalImageContext {
+    __strong id<MTLDevice> device = nil;
+    __strong CIContext* context = nil;
   };
 
   State() : external_texture_context([CIContext contextWithOptions:nil]) {}
@@ -868,36 +873,74 @@ struct AppKitRenderer::State {
     return images.back().cg_image.Get();
   }
 
+  CIContext* MetalContextFor(id<MTLDevice> device) {
+    const auto found = std::ranges::find_if(metal_image_contexts, [device](const MetalImageContext& entry) {
+      return entry.device == device;
+    });
+    if (found != metal_image_contexts.end()) {
+      return found->context;
+    }
+    CIContext* context = [CIContext contextWithMTLDevice:device options:nil];
+    if (context != nil) {
+      metal_image_contexts.push_back({device, context});
+    }
+    return context;
+  }
+
   CGImageRef ImageFor(const std::shared_ptr<ExternalTexture>& texture) {
     const std::shared_ptr<macos::PixelBufferTexture> pixel_buffer_texture =
         std::dynamic_pointer_cast<macos::PixelBufferTexture>(texture);
-    if (!pixel_buffer_texture) {
+    const std::shared_ptr<macos::MetalTexture> metal_texture = std::dynamic_pointer_cast<macos::MetalTexture>(texture);
+    if (!pixel_buffer_texture && !metal_texture) {
       throw std::logic_error("HuxerUI external texture is incompatible with the macOS renderer");
     }
-    auto cached = std::ranges::find_if(external_textures, [&pixel_buffer_texture](const CachedExternalTexture& entry) {
-      return entry.texture.lock() == pixel_buffer_texture;
+    auto cached = std::ranges::find_if(external_textures, [&texture](const CachedExternalTexture& entry) {
+      return entry.texture.lock() == texture;
     });
     if (cached == external_textures.end()) {
-      external_textures.push_back(CachedExternalTexture{pixel_buffer_texture, CFRef<CGImageRef>{}});
+      external_textures.push_back(CachedExternalTexture{texture, CFRef<CGImageRef>{}});
       cached = external_textures.end() - 1;
     }
 
-    const std::uint64_t revision = pixel_buffer_texture->Revision();
+    const std::uint64_t revision = texture->Revision();
     if (cached->revision == revision) {
       return cached->cg_image.Get();
     }
     cached->revision = revision;
-    CVPixelBufferRef frame = pixel_buffer_texture->AcquireFrame();
-    if (frame == nullptr) {
+
+    __strong CIImage* image = nil;
+    __strong CIContext* image_context = external_texture_context;
+    if (pixel_buffer_texture) {
+      CVPixelBufferRef frame = pixel_buffer_texture->AcquireFrame();
+      if (frame == nullptr) {
+        return cached->cg_image.Get();
+      }
+      CFRef<CVPixelBufferRef> retained_frame{frame};
+      image = [CIImage imageWithCVPixelBuffer:retained_frame.Get()];
+    } else {
+      macos::MetalTexture::Origin origin = macos::MetalTexture::Origin::TopLeft;
+      id<MTLTexture> frame = metal_texture->AcquireFrame(origin);
+      if (frame == nil) {
+        return cached->cg_image.Get();
+      }
+      image = [CIImage imageWithMTLTexture:frame options:nil];
+      if (image == nil) {
+        return cached->cg_image.Get();
+      }
+      if (origin == macos::MetalTexture::Origin::BottomLeft) {
+        image = [image imageByApplyingTransform:CGAffineTransformMake(1.0, 0.0, 0.0, -1.0, 0.0,
+                                                                      CGRectGetHeight(image.extent))];
+      }
+      image_context = MetalContextFor(frame.device);
+    }
+    if (image == nil || image_context == nil) {
       return cached->cg_image.Get();
     }
-    CFRef<CVPixelBufferRef> retained_frame{frame};
-    CIImage* image = [CIImage imageWithCVPixelBuffer:retained_frame.Get()];
     const CGRect extent = image.extent;
     if (CGRectIsEmpty(extent) || CGRectIsInfinite(extent)) {
       return cached->cg_image.Get();
     }
-    CFRef<CGImageRef> cg_image{[external_texture_context createCGImage:image fromRect:extent]};
+    CFRef<CGImageRef> cg_image{[image_context createCGImage:image fromRect:extent]};
     if (cg_image.Get() != nullptr) {
       cached->cg_image = std::move(cg_image);
     }
@@ -906,7 +949,7 @@ struct AppKitRenderer::State {
 
   void PruneExternalTextures() {
     std::erase_if(external_textures, [](const CachedExternalTexture& entry) {
-      const std::shared_ptr<macos::PixelBufferTexture> texture = entry.texture.lock();
+      const std::shared_ptr<ExternalTexture> texture = entry.texture.lock();
       return !texture || !texture->IsActive();
     });
   }
@@ -917,6 +960,7 @@ struct AppKitRenderer::State {
   std::vector<CachedImage> images;
   std::size_t image_cache_bytes = 0;
   __strong CIContext* external_texture_context = nil;
+  std::vector<MetalImageContext> metal_image_contexts;
   std::vector<CachedExternalTexture> external_textures;
 };
 

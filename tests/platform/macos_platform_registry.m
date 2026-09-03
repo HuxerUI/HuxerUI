@@ -68,3 +68,12 @@
 }
 
 @end
+
+static void HuxerUITestMetalTextureDeclarations(void) {
+  HUXMetalTexture* texture = [[HUXMetalTexture alloc] initWithIntrinsicSize:CGSizeMake(16.0, 9.0)];
+  HUXMetalTextureOrigin origin = HUXMetalTextureOriginTopLeft;
+  HUXMetalTextureAlpha alpha = HUXMetalTextureAlphaPremultiplied;
+  (void)origin;
+  (void)alpha;
+  [texture finish];
+}

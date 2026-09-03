@@ -1239,11 +1239,17 @@ protected:
 };
 ```
 
-The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `macos::PixelBufferTexture`, `windows::PixelTexture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
-Apple Objective-C and Swift use `HUXPixelBufferTexture`, imported as `PixelBufferTexture`, which is itself an `ExternalTexture` capability rather than an owner exposing a second `.texture` value.
-Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple accepts `CVPixelBufferRef`, Windows and Linux copy borrowed `PixelFrame` rows, and Web clones an open WebCodecs `VideoFrame` on the browser main thread.
-Retained Android Bitmap and Apple frame storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after publication returns.
-Future GPU-native producers such as Metal, shared D3D, DMA-BUF, AHardwareBuffer, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
+The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `ios::MetalTexture`, `macos::PixelBufferTexture`, `macos::MetalTexture`, `windows::PixelTexture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
+Apple Objective-C and Swift use `HUXPixelBufferTexture` and `HUXMetalTexture`, imported as `PixelBufferTexture` and `MetalTexture`; each object is itself an `ExternalTexture` capability rather than an owner exposing a second `.texture` value.
+Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple retains immutable `CVPixelBufferRef` frames or synchronously copies a completed `MTLTexture`; Windows and Linux copy borrowed `PixelFrame` rows; Web clones an open WebCodecs `VideoFrame` on the browser main thread.
+Retained Android Bitmap and Apple pixel-buffer storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after publication returns.
+Future GPU-native producers such as shared D3D, DMA-BUF, AHardwareBuffer, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
+
+Apple `MetalTexture::Publish()` accepts level zero of a non-framebuffer-only 2D BGRA8 or RGBA8 texture after producer writes have completed.
+It waits for an immutable GPU snapshot before advancing the texture revision, normalizes opaque or straight alpha with Metal Performance Shaders when required, and retains the previous frame if allocation, encoding, or execution fails.
+The producer may reuse or release its source when the call returns.
+UIKit and AppKit keep Metal textures in the ordinary `DrawExternalTextureCommand` path: a renderer imports the snapshot through a `CIContext` for its `MTLDevice`, applies the declared vertical origin, creates its cached `CGImage`, and replays it through the existing Core Graphics transform, clip, sampling, and opacity state.
+The per-renderer device-to-context list is a native resource cache, not a shared service or texture registry.
 
 `PlatformPayloadKind::ExternalTexture` transports `std::shared_ptr<ExternalTexture>` only across a platform-language boundary, including when nested in lists and objects.
 The HUXP v1 bytes contain validated slots into a companion capability table; they never contain a process pointer or persistent identifier.

@@ -8,7 +8,9 @@ elseif (ANDROID)
 elseif (APPLE)
     target_sources(example_external_texture PRIVATE apple_texture_demo.mm)
     target_compile_options(example_external_texture PRIVATE "$<$<COMPILE_LANGUAGE:OBJCXX>:-fobjc-arc>")
-    target_link_libraries(example_external_texture PRIVATE "-framework CoreVideo" "-framework Foundation")
+    target_link_libraries(example_external_texture PRIVATE
+            "-framework CoreVideo" "-framework Foundation" "-framework Metal"
+    )
 elseif (EMSCRIPTEN)
     target_sources(example_external_texture PRIVATE web_texture_demo.cpp)
 else ()

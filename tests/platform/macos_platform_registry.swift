@@ -43,3 +43,9 @@ payload.validate(fields: ["enabled", "count"])
 
 let texture = PixelBufferTexture(intrinsicSize: CGSize(width: 16, height: 9))
 texture.finish()
+
+let metalTexture = MetalTexture(intrinsicSize: CGSize(width: 16, height: 9))
+let metalOrigin: MetalTexture.Origin = .topLeft
+let metalAlpha: MetalTexture.Alpha = .premultiplied
+_ = (metalOrigin, metalAlpha)
+metalTexture.finish()

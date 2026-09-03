@@ -107,6 +107,9 @@ A scene that would require rotation, path clipping, a group-opacity boundary spa
 ExternalTexture remains an ordinary drawing command and follows the existing retained PaintSequence and DamageRegion rules without introducing shared RenderComposition slices.
 Android GPU-backed ExternalTextures are a platform-private exception at presentation time: the Canvas renderer calls an internal TextureView child at the command's exact replay position while the current Canvas transform, clip, and save-layer state remains active.
 That child is reconciled from GPU command occurrences independently of shared RenderComposition layers and does not acquire PlatformView identity, interaction, focus, semantics, or the PlatformView transform restrictions above.
+Apple Metal-backed ExternalTextures remain ordinary raster commands rather than native-view slices.
+UIKit and AppKit import each new immutable Metal snapshot through a device-specific Core Image context, cache the resulting `CGImage` by texture identity and revision, and draw it through the same Core Graphics path as pixel-buffer textures.
+Pruning an invisible renderer cache does not clear the texture mailbox, so returning through scrolling or clipping regenerates the current frame instead of presenting a blank native layer.
 
 There is one `RenderNode` per paintable mounted node.
 Non-painting structural nodes may either own an empty render node or be elided when doing so does not change clipping, transforms, opacity, hit testing, or stable scene identity.

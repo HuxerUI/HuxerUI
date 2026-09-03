@@ -223,6 +223,38 @@ TEST_CASE("MacObjectiveCPixelBufferTextureUsesTheExistingMailbox") {
   }
 }
 
+TEST_CASE("MacObjectiveCMetalTextureUsesTheExistingMailbox") {
+  @autoreleasepool {
+    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
+    REQUIRE(device != nil);
+    MTLTextureDescriptor* descriptor =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                           width:2 height:2 mipmapped:NO];
+    descriptor.storageMode = MTLStorageModeShared;
+    id<MTLTexture> source = [device newTextureWithDescriptor:descriptor];
+    REQUIRE(source != nil);
+    HUXMetalTexture* texture = [[HUXMetalTexture alloc] initWithIntrinsicSize:CGSizeMake(2.0, 2.0)];
+    [texture publishTexture:source origin:HUXMetalTextureOriginTopLeft alpha:HUXMetalTextureAlphaOpaque];
+
+    HUXPlatformPayload* payload = [HUXPlatformPayload externalTextureValue:texture];
+    const std::shared_ptr<ExternalTexture> identity =
+        macos::detail::UnwrapExternalTexture(payload.externalTextureValue);
+    const std::shared_ptr<macos::MetalTexture> metal_texture =
+        std::dynamic_pointer_cast<macos::MetalTexture>(identity);
+    REQUIRE(metal_texture != nullptr);
+    REQUIRE(metal_texture->Revision() == 1);
+
+    [texture finish];
+    bool finished_source_rejected = false;
+    @try {
+      [texture publishTexture:source origin:HUXMetalTextureOriginTopLeft alpha:HUXMetalTextureAlphaOpaque];
+    } @catch (NSException*) {
+      finished_source_rejected = true;
+    }
+    REQUIRE(finished_source_rejected);
+  }
+}
+
 TEST_CASE("MacObjectiveCPlatformViewUsesOneEventAndChannelLifecycle") {
   @autoreleasepool {
     TestPlatform platform;

@@ -22,6 +22,8 @@ set(HUXERUI_PLATFORM_LINK_LIBRARIES
         "-framework CoreVideo"
         "-framework Foundation"
         "-framework ImageIO"
+        "-framework Metal"
+        "-framework MetalPerformanceShaders"
         "-framework MobileCoreServices"
         "-framework AVFoundation"
         "-framework QuartzCore"

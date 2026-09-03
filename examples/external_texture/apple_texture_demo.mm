@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -27,18 +28,45 @@ constexpr int texture_height = 180;
 class AppleTextureDemo final : public huxerui::example::TextureDemo,
                                public std::enable_shared_from_this<AppleTextureDemo> {
 public:
-  AppleTextureDemo()
-      : texture_(std::make_shared<platform_texture::PixelBufferTexture>(huxerui::Size{
-            static_cast<float>(texture_width), static_cast<float>(texture_height)})),
-        entries_{{
-            "PixelBufferTexture",
-            "Retained CVPixelBuffer frames produced on the platform main thread.",
-            texture_,
-        }} {}
+  AppleTextureDemo() {
+    const huxerui::Size intrinsic_size{static_cast<float>(texture_width), static_cast<float>(texture_height)};
+    pixel_buffer_texture_ = std::make_shared<platform_texture::PixelBufferTexture>(intrinsic_size);
+    entries_.push_back({
+        "PixelBufferTexture",
+        "Retained CVPixelBuffer frames produced on the platform main thread.",
+        pixel_buffer_texture_,
+    });
+
+    metal_device_ = MTLCreateSystemDefaultDevice();
+    metal_command_queue_ = [metal_device_ newCommandQueue];
+    if (metal_device_ == nil || metal_command_queue_ == nil) {
+      message_ = "Metal is unavailable on this device.";
+      return;
+    }
+    MTLTextureDescriptor* descriptor =
+        [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                           width:texture_width height:texture_height mipmapped:NO];
+    descriptor.storageMode = MTLStorageModePrivate;
+    descriptor.usage = MTLTextureUsageRenderTarget;
+    metal_source_ = [metal_device_ newTextureWithDescriptor:descriptor];
+    if (metal_source_ == nil) {
+      message_ = "The Metal render-target texture could not be created.";
+      return;
+    }
+    metal_texture_ = std::make_shared<platform_texture::MetalTexture>(intrinsic_size);
+    entries_.push_back({
+        "MetalTexture",
+        "GPU-rendered Metal frames copied into an immutable latest-frame snapshot.",
+        metal_texture_,
+    });
+  }
 
   ~AppleTextureDemo() override {
     Stop();
-    texture_->Finish();
+    pixel_buffer_texture_->Finish();
+    if (metal_texture_) {
+      metal_texture_->Finish();
+    }
   }
 
   [[nodiscard]] const std::vector<huxerui::example::TextureDemoEntry>& Entries() const noexcept override {
@@ -46,7 +74,7 @@ public:
   }
 
   [[nodiscard]] std::string_view Message() const noexcept override {
-    return {};
+    return message_;
   }
 
   void SetRunning(bool running) noexcept override {
@@ -80,6 +108,12 @@ private:
   }
 
   void PublishFrame() noexcept {
+    PublishPixelBuffer();
+    PublishMetal();
+    ++phase_;
+  }
+
+  void PublishPixelBuffer() noexcept {
     CVPixelBufferRef pixel_buffer = nullptr;
     if (CVPixelBufferCreate(
             kCFAllocatorDefault, texture_width, texture_height, kCVPixelFormatType_32BGRA, nullptr, &pixel_buffer
@@ -104,16 +138,52 @@ private:
     }
     CVPixelBufferUnlockBaseAddress(pixel_buffer, 0);
     try {
-      texture_->Publish(pixel_buffer);
+      pixel_buffer_texture_->Publish(pixel_buffer);
     } catch (...) {
     }
     CVPixelBufferRelease(pixel_buffer);
-    ++phase_;
   }
 
-  std::shared_ptr<platform_texture::PixelBufferTexture> texture_;
+  void PublishMetal() noexcept {
+    if (!metal_texture_ || metal_source_ == nil || metal_command_queue_ == nil) {
+      return;
+    }
+    id<MTLCommandBuffer> command_buffer = [metal_command_queue_ commandBuffer];
+    MTLRenderPassDescriptor* pass = [MTLRenderPassDescriptor renderPassDescriptor];
+    pass.colorAttachments[0].texture = metal_source_;
+    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+    const double red = static_cast<double>((phase_ * 7U) % 256U) / 255.0;
+    const double green = static_cast<double>((96U + phase_ * 3U) % 256U) / 255.0;
+    const double blue = static_cast<double>((224U + phase_ * 5U) % 256U) / 255.0;
+    pass.colorAttachments[0].clearColor = MTLClearColorMake(red, green, blue, 1.0);
+    id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:pass];
+    if (command_buffer == nil || encoder == nil) {
+      return;
+    }
+    [encoder endEncoding];
+    [command_buffer commit];
+    [command_buffer waitUntilCompleted];
+    if (command_buffer.status != MTLCommandBufferStatusCompleted) {
+      return;
+    }
+    try {
+      const platform_texture::MetalTexture::Frame frame{
+          metal_source_, platform_texture::MetalTexture::Origin::TopLeft,
+          platform_texture::MetalTexture::Alpha::Premultiplied};
+      metal_texture_->Publish(frame);
+    } catch (...) {
+    }
+  }
+
+  std::shared_ptr<platform_texture::PixelBufferTexture> pixel_buffer_texture_;
+  std::shared_ptr<platform_texture::MetalTexture> metal_texture_;
   std::vector<huxerui::example::TextureDemoEntry> entries_;
+  std::string message_;
   __strong NSTimer* timer_ = nil;
+  __strong id<MTLDevice> metal_device_ = nil;
+  __strong id<MTLCommandQueue> metal_command_queue_ = nil;
+  __strong id<MTLTexture> metal_source_ = nil;
   std::uint32_t phase_ = 0;
 };
 

@@ -37,6 +37,8 @@ xcrun --sdk macosx swiftc \
   -framework CoreVideo \
   -framework Foundation \
   -framework ImageIO \
+  -framework Metal \
+  -framework MetalPerformanceShaders \
   -framework QuartzCore \
   -Xlinker -weak_framework \
   -Xlinker UniformTypeIdentifiers \
