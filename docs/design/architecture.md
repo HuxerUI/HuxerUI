@@ -368,6 +368,7 @@ class MountedNode {
 public:
   Size LayoutSize() const;
   Rect Bounds() const;
+  Rect ContentBounds() const;
   Point LayoutOffset() const;
   Rect PresentationBounds() const;
   Point LocalToWindow(Point point) const;
@@ -389,7 +390,7 @@ public:
 };
 ```
 
-`Bounds()` has a zero origin and the node's layout size. `LayoutOffset()` is parent-relative. `PresentationBounds()` and the local/window conversion operations derive from the resolved ancestor transform chain for platform-boundary queries and diagnostics. Rectangle conversion returns a window-space axis-aligned bound, and inverse point conversion returns no value for a non-invertible transform. `PrepareGeometry()` observes the final resolved transform for the current frame; earlier extension callbacks may observe the previous resolution.
+`Bounds()` has a zero origin and the node's complete layout size, including Padding. `ContentBounds()` deflates that rectangle by the resolved Padding and clamps its dimensions to at least zero. `LayoutOffset()` is parent-relative. `PresentationBounds()` and the local/window conversion operations derive from the resolved ancestor transform chain for platform-boundary queries and diagnostics. Rectangle conversion returns a window-space axis-aligned bound, and inverse point conversion returns no value for a non-invertible transform. `PrepareGeometry()` observes the final resolved transform for the current frame; earlier extension callbacks may observe the previous resolution.
 
 It does not expose Runtime ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()` and uses its protected paint invalidation operation when retained visual state changes. General application-facing measure and layout invalidation APIs are deferred.
 

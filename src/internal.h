@@ -805,15 +805,6 @@ struct MountedNode final : public huxerui::MountedNode {
   bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;
 
-  [[nodiscard]] Rect ContentBounds() const noexcept {
-    return {
-        bounds.x + resolved_padding.left,
-        bounds.y + resolved_padding.top,
-        std::max(0.0F, bounds.width - resolved_padding.Horizontal()),
-        std::max(0.0F, bounds.height - resolved_padding.Vertical()),
-    };
-  }
-
 protected:
   [[nodiscard]] std::size_t ChildCountImpl() const noexcept override {
     return children.size();
@@ -833,6 +824,15 @@ protected:
 
   [[nodiscard]] Rect BoundsImpl() const noexcept override {
     return bounds;
+  }
+
+  [[nodiscard]] Rect ContentBoundsImpl() const noexcept override {
+    return {
+        bounds.x + resolved_padding.left,
+        bounds.y + resolved_padding.top,
+        std::max(0.0F, bounds.width - resolved_padding.Horizontal()),
+        std::max(0.0F, bounds.height - resolved_padding.Vertical()),
+    };
   }
 
   [[nodiscard]] Point LayoutOffsetImpl() const noexcept override {

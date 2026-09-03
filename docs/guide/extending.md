@@ -73,6 +73,7 @@ Use its borrowed measurer only for synchronous text-dependent retained geometry,
 Return the exact `PaintInvalidation` phases whose recorded inputs changed; text that affects measurement belongs in `Layout` because this callback does not provide another layout pass.
 This is also the phase for `MountedNode` local-to-window conversion when retained behavior must publish geometry to a window-owned service such as Popup placement.
 Paint callbacks continue to record node-local commands and do not use window coordinates to draw.
+Use `MountedNode::Bounds()` for the complete node rectangle and `ContentBounds()` when custom content should respect the node's resolved Padding.
 
 ## Paint commands
 

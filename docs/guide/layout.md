@@ -37,7 +37,9 @@ It affects participation in a compatible parent layout and propagates across tra
 
 ## Mounted coordinate spaces
 
-`MountedNode::Bounds()` uses node-local DIPs, `LayoutOffset()` is parent-relative, and `PresentationBounds()` is the node's transformed axis-aligned bound in window DIPs.
+`MountedNode::Bounds()` is the complete node-local layout rectangle in DIPs, including Padding.
+`ContentBounds()` is the same rectangle deflated by the resolved Padding and is useful for content drawing and padding-aware hit testing.
+`LayoutOffset()` is parent-relative, and `PresentationBounds()` is the node's transformed axis-aligned bound in window DIPs.
 Use `LocalToWindow()` and `WindowToLocal()` for point conversion; the inverse returns `std::nullopt` when the resolved presentation transform is not invertible.
 `LocalToWindowBounds()` transforms all four rectangle corners and returns their window-space axis-aligned bounds.
 

@@ -150,6 +150,7 @@ The public mounted-node geometry API should use unambiguous names:
 ```cpp
 Size LayoutSize() const;
 Rect Bounds() const;
+Rect ContentBounds() const;
 Point LayoutOffset() const;
 Rect PresentationBounds() const;
 Point LocalToWindow(Point point) const;
@@ -158,6 +159,7 @@ Rect LocalToWindowBounds(Rect bounds) const;
 ```
 
 `Bounds()` is local.
+`ContentBounds()` is the local rectangle remaining after resolved Padding is removed, with nonnegative dimensions.
 `LayoutOffset()` is parent-relative.
 `PresentationBounds()` is the transformed axis-aligned host-view logical bound intended for diagnostics and platform-boundary queries.
 `LocalToWindow()` and `WindowToLocal()` convert points through the same resolved transform, while `LocalToWindowBounds()` maps four corners and returns their axis-aligned host-view bound.

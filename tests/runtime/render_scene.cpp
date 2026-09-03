@@ -822,6 +822,20 @@ TEST_CASE("MountedNodeConvertsPointsAndAxisAlignedWindowBounds") {
   REQUIRE_FALSE(node.WindowToLocal({10.0F, 20.0F}).has_value());
 }
 
+TEST_CASE("MountedNodeExposesPaddingDeflatedContentBounds") {
+  detail::MountedNode mounted;
+  mounted.bounds = {0.0F, 0.0F, 100.0F, 60.0F};
+  const huxerui::MountedNode& node = mounted;
+
+  REQUIRE(node.ContentBounds() == node.Bounds());
+
+  mounted.resolved_padding = {.top = 10.0F, .right = 8.0F, .bottom = 12.0F, .left = 6.0F};
+  REQUIRE(node.ContentBounds() == Rect{6.0F, 10.0F, 86.0F, 38.0F});
+
+  mounted.resolved_padding = EdgeInsets::All(80.0F);
+  REQUIRE(node.ContentBounds() == Rect{80.0F, 80.0F, 0.0F, 0.0F});
+}
+
 TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
