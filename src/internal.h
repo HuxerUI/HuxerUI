@@ -843,6 +843,18 @@ protected:
     return TransformBounds(presentation.resolved_transform, bounds);
   }
 
+  [[nodiscard]] Point LocalToWindowImpl(Point point) const noexcept override {
+    return presentation.resolved_transform.Apply(point);
+  }
+
+  [[nodiscard]] std::optional<Point> WindowToLocalImpl(Point point) const noexcept override {
+    return presentation.resolved_transform.Inverse(point);
+  }
+
+  [[nodiscard]] Rect LocalToWindowBoundsImpl(Rect local_bounds) const noexcept override {
+    return TransformBounds(presentation.resolved_transform, local_bounds);
+  }
+
   [[nodiscard]] float PresentationOpacityImpl() const noexcept override {
     return presentation.resolved_opacity;
   }

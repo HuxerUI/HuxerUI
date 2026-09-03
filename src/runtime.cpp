@@ -266,7 +266,7 @@ void CollectWindowDragRegionBackground(
     }
   }
   if (node.properties.window_drag_region && node.presentation.resolved_opacity > 0.001F) {
-    const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
+    const Rect bounds = node.PresentationBounds();
     if (bounds.y < title_bar_height && bounds.y + bounds.height > 0.0F) {
       candidate = background;
     }
@@ -328,7 +328,7 @@ void CollectSystemBarCandidates(
     return;
   }
   if (node.presentation.resolved_opacity > 0.001F && node.properties.system_bars_appearance.has_value()) {
-    const Rect bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
+    const Rect bounds = node.PresentationBounds();
     const SystemBarsAppearance& appearance = *node.properties.system_bars_appearance;
     if (appearance.status_bar_background.alpha > 0.0F && bounds.y <= status_boundary + 0.5F &&
         bounds.y + bounds.height > status_boundary) {
@@ -824,7 +824,7 @@ std::vector<NodeExtensionHandle> HitTestHoverExtensions(const std::vector<Mounte
   }
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
     MountedNode& current = **node;
-    const auto local_position = current.presentation.resolved_transform.Inverse(position);
+    const auto local_position = current.WindowToLocal(position);
     if (!local_position.has_value()) {
       continue;
     }
@@ -853,7 +853,7 @@ std::vector<std::uint64_t> HitTestHoverEventNodes(const std::vector<MountedNode*
   }
   std::vector<std::uint64_t> nodes;
   for (const MountedNode* node : route) {
-    const std::optional<Point> local = node->presentation.resolved_transform.Inverse(window_position);
+    const std::optional<Point> local = node->WindowToLocal(window_position);
     const bool receives_hover = local.has_value() && node->bounds.Contains(*local) &&
                                 HasEventBinding<ViewEvents::Hover>(node->event_bindings);
     if (receives_hover) {
@@ -868,7 +868,7 @@ HoverEvent LocalHoverEvent(const MountedNode& node, const PointerHoverState& hov
       node.bounds.x + node.bounds.width * 0.5F,
       node.bounds.y + node.bounds.height * 0.5F,
   };
-  if (const std::optional<Point> local = node.presentation.resolved_transform.Inverse(hover.window_position)) {
+  if (const std::optional<Point> local = node.WindowToLocal(hover.window_position)) {
     position = *local;
   }
   return {

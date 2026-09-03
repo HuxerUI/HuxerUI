@@ -152,11 +152,16 @@ Size LayoutSize() const;
 Rect Bounds() const;
 Point LayoutOffset() const;
 Rect PresentationBounds() const;
+Point LocalToWindow(Point point) const;
+std::optional<Point> WindowToLocal(Point point) const;
+Rect LocalToWindowBounds(Rect bounds) const;
 ```
 
 `Bounds()` is local.
 `LayoutOffset()` is parent-relative.
 `PresentationBounds()` is the transformed axis-aligned host-view logical bound intended for diagnostics and platform-boundary queries.
+`LocalToWindow()` and `WindowToLocal()` convert points through the same resolved transform, while `LocalToWindowBounds()` maps four corners and returns their axis-aligned host-view bound.
+Inverse conversion returns no value for a non-invertible transform.
 The ambiguous absolute `Frame()` contract is removed rather than retained as an alias.
 
 ## Layout ownership and caching
@@ -365,6 +370,7 @@ Paint callbacks are pure:
 
 Geometry preparation that can change state occurs before paint.
 `NodeExtension::PrepareGeometry()` receives a borrowed `TextMeasurer` for synchronously preparing labels and other text-dependent retained geometry; extensions retain only the resulting value metrics.
+It may also convert local geometry through the final resolved transform when publishing a value snapshot to a window-owned boundary such as anchored-layer placement.
 For example, `TextField` resolves text layout, caret geometry, selection geometry, and horizontal scroll adjustment after layout and before paint recording.
 If preparation changes a visual value, it marks the relevant paint record dirty.
 Text-input geometry is then mapped to the platform coordinate system from the committed local geometry.

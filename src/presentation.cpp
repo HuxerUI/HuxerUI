@@ -515,8 +515,7 @@ public:
       pointer_id_.reset();
       return PointerResult::Ignored;
     }
-    const Point host_position =
-        static_cast<detail::MountedNode&>(node).presentation.resolved_transform.Apply(event.position);
+    const Point host_position = node.LocalToWindow(event.position);
     if (event.type == PointerEventType::Down) {
       pointer_id_ = event.pointer_id;
       pointer_origin_ = host_position.y;
@@ -1077,7 +1076,7 @@ LayerOptions DialogLayerOptions(DialogOptions options, Color scrim) {
   };
 }
 
-void ValidateAnchoredOptions(float gap, float viewport_margin, Point offset, const std::optional<Point>& point) {
+void ValidateAnchoredOptions(float gap, float viewport_margin, Point offset) {
   if (!std::isfinite(gap) || gap < 0.0F) {
     throw std::invalid_argument("HuxerUI anchored presentation gap must be finite and non-negative");
   }
@@ -1086,9 +1085,6 @@ void ValidateAnchoredOptions(float gap, float viewport_margin, Point offset, con
   }
   if (!std::isfinite(offset.x) || !std::isfinite(offset.y)) {
     throw std::invalid_argument("HuxerUI anchored presentation offset must be finite");
-  }
-  if (point.has_value() && (!std::isfinite(point->x) || !std::isfinite(point->y))) {
-    throw std::invalid_argument("HuxerUI anchored presentation point must be finite");
   }
 }
 
@@ -1482,6 +1478,34 @@ View DebugRibbon(State<bool> expanded, State<detail::DebugMetricsSnapshot> snaps
 
 namespace detail {
 
+enum class LayerAnchorMode {
+  NodeBounds,
+  LocalRect,
+  FixedWindowPoint,
+};
+
+struct LayerAnchorTarget {
+  LayerAnchorMode mode = LayerAnchorMode::NodeBounds;
+  Rect bounds;
+};
+
+void ValidateLayerAnchorTarget(const LayerAnchorTarget& target) {
+  if (target.mode == LayerAnchorMode::FixedWindowPoint) {
+    if (!std::isfinite(target.bounds.x) || !std::isfinite(target.bounds.y)) {
+      throw std::invalid_argument("HuxerUI anchored presentation point must be finite");
+    }
+    return;
+  }
+  if (target.mode == LayerAnchorMode::LocalRect &&
+      (!std::isfinite(target.bounds.x) || !std::isfinite(target.bounds.y) ||
+       !std::isfinite(target.bounds.width) || !std::isfinite(target.bounds.height) || target.bounds.width < 0.0F ||
+       target.bounds.height < 0.0F)) {
+    throw std::invalid_argument(
+        "HuxerUI local presentation anchor must have finite coordinates and finite non-negative dimensions"
+    );
+  }
+}
+
 struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   explicit LayerAnchorState(LayerController controller) : layers(std::move(controller)) {}
 
@@ -1496,39 +1520,59 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   void Unmount() {
     mounted = false;
     mounted_identity.reset();
-    bounds.reset();
-    const std::optional<LayerId> anchored_layer = follows_anchor ? active_layer : std::nullopt;
-    follows_anchor = false;
+    node_bounds.reset();
+    node_to_window.reset();
+    const std::optional<LayerId> anchored_layer =
+        active_target.mode == LayerAnchorMode::FixedWindowPoint ? std::nullopt : active_layer;
     if (anchored_layer.has_value()) {
       Dismiss(*anchored_layer);
     }
   }
 
-  void UpdateBounds(Rect next_bounds) {
-    if (bounds == next_bounds) {
+  void UpdateGeometry(Rect next_bounds, Transform2D next_node_to_window) {
+    node_bounds = next_bounds;
+    node_to_window = next_node_to_window;
+    if (!active_layer.has_value() || active_target.mode == LayerAnchorMode::FixedWindowPoint) {
       return;
     }
-    bounds = next_bounds;
-    if (active_layer.has_value() && follows_anchor) {
-      active_placement.anchor = next_bounds;
+    const Rect next_anchor = ResolveTarget(active_target);
+    if (active_placement.anchor != next_anchor) {
+      active_placement.anchor = next_anchor;
       layers.UpdatePlacement(*active_layer, active_placement);
     }
   }
 
-  [[nodiscard]] Rect RequireBounds() const {
-    if (!mounted || !bounds.has_value()) {
+  [[nodiscard]] Rect ResolveTarget(const LayerAnchorTarget& target) const {
+    if (target.mode == LayerAnchorMode::FixedWindowPoint) {
+      return target.bounds;
+    }
+    if (!mounted || !node_bounds.has_value() || !node_to_window.has_value()) {
       throw std::logic_error("HuxerUI anchored presentation requires a mounted anchor View");
     }
-    return *bounds;
+    if (target.mode == LayerAnchorMode::NodeBounds) {
+      return *node_bounds;
+    }
+    return TransformBounds(*node_to_window, target.bounds);
   }
 
-  void Bind(LayerId id, LayerPlacement placement, bool should_follow_anchor) {
+  void Bind(LayerId id, LayerPlacement placement, LayerAnchorTarget target) {
     if (active_layer.has_value() && *active_layer != id) {
       Dismiss(*active_layer);
     }
     active_layer = id;
     active_placement = std::move(placement);
-    follows_anchor = should_follow_anchor;
+    active_target = target;
+  }
+
+  bool UpdateLocalAnchor(LayerId id, Rect local_anchor) {
+    const LayerAnchorTarget next_target{LayerAnchorMode::LocalRect, local_anchor};
+    ValidateLayerAnchorTarget(next_target);
+    if (active_layer != id || active_target.mode != LayerAnchorMode::LocalRect) {
+      return false;
+    }
+    active_target = next_target;
+    active_placement.anchor = ResolveTarget(active_target);
+    return layers.UpdatePlacement(id, active_placement);
   }
 
   bool Dismiss(LayerId id) {
@@ -1542,7 +1586,6 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   bool DismissDirect(LayerId id) {
     if (active_layer == id) {
       active_layer.reset();
-      follows_anchor = false;
       dismiss_handler = {};
     }
     return layers.Dismiss(id);
@@ -1560,7 +1603,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   }
 
   LayerId AttachLayer(
-      std::optional<Point> point,
+      LayerAnchorTarget target,
       ViewFactory content,
       AnchorPlacement preferred_placement,
       float gap,
@@ -1572,8 +1615,9 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
       std::shared_ptr<LayerTransitionState> transition = {},
       std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group = {}
   ) {
-    ValidateAnchoredOptions(gap, viewport_margin, offset, point);
-    const Rect anchor_bounds = point.has_value() ? Rect{point->x, point->y, 0.0F, 0.0F} : RequireBounds();
+    ValidateAnchoredOptions(gap, viewport_margin, offset);
+    ValidateLayerAnchorTarget(target);
+    const Rect anchor_bounds = ResolveTarget(target);
     LayerPlacement placement = AnchoredPlacement(anchor_bounds, preferred_placement, gap, viewport_margin, offset);
     auto id = std::make_shared<LayerId>(0);
     if (!options.on_dismiss_request) {
@@ -1589,21 +1633,22 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
         retain_anchor_focus ? mounted_identity : std::nullopt
     );
     *id = attached;
-    Bind(attached, std::move(placement), !point.has_value());
+    Bind(attached, std::move(placement), target);
     return attached;
   }
 
   LayerController layers;
-  std::optional<Rect> bounds;
+  std::optional<Rect> node_bounds;
+  std::optional<Transform2D> node_to_window;
   std::optional<std::uint64_t> mounted_identity;
   // This identifies the layer currently owned by the anchor. It clears when dismissal begins even though the
   // LayerController may retain the same entry until its exit motion completes.
   std::optional<LayerId> active_layer;
   LayerPlacement active_placement;
+  LayerAnchorTarget active_target;
   // Menu installs a chain-aware command here; ordinary Popup dismissal continues directly to LayerController.
   std::function<bool(LayerId)> dismiss_handler;
   bool mounted = false;
-  bool follows_anchor = false;
 };
 
 struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
@@ -1736,14 +1781,14 @@ public:
 
   LayerId Show(
       const std::shared_ptr<LayerAnchorState>& anchor,
-      std::optional<Point> point,
+      LayerAnchorTarget target,
       ViewFactory content,
       PopupOptions options,
       std::shared_ptr<const Environment> environment
   );
   LayerId Show(
       const std::shared_ptr<LayerAnchorState>& anchor,
-      std::optional<Point> point,
+      LayerAnchorTarget target,
       PopupFactory content,
       PopupOptions options,
       std::shared_ptr<const Environment> environment
@@ -2176,7 +2221,8 @@ public:
 
   [[nodiscard]] PaintInvalidation PrepareGeometry(huxerui::MountedNode& node, huxerui::TextMeasurer&) override {
     if (state_) {
-      state_->UpdateBounds(node.PresentationBounds());
+      const auto& mounted = static_cast<const detail::MountedNode&>(node);
+      state_->UpdateGeometry(node.PresentationBounds(), mounted.presentation.resolved_transform);
     }
     return PaintInvalidation::None;
   }
@@ -2852,11 +2898,31 @@ LayerAnchor PopupHandle::Anchor() const {
 }
 
 LayerId PopupHandle::Show(ViewFactory content, PopupOptions options) const {
-  return service_->Show(anchor_, std::nullopt, std::move(content), std::move(options), environment_);
+  return service_->Show(anchor_, {}, std::move(content), std::move(options), environment_);
 }
 
 LayerId PopupHandle::Show(PopupFactory content, PopupOptions options) const {
-  return service_->Show(anchor_, std::nullopt, std::move(content), std::move(options), environment_);
+  return service_->Show(anchor_, {}, std::move(content), std::move(options), environment_);
+}
+
+LayerId PopupHandle::ShowAtAnchor(Rect local_anchor, ViewFactory content, PopupOptions options) const {
+  return service_->Show(
+      anchor_,
+      detail::LayerAnchorTarget{detail::LayerAnchorMode::LocalRect, local_anchor},
+      std::move(content),
+      std::move(options),
+      environment_
+  );
+}
+
+LayerId PopupHandle::ShowAtAnchor(Rect local_anchor, PopupFactory content, PopupOptions options) const {
+  return service_->Show(
+      anchor_,
+      detail::LayerAnchorTarget{detail::LayerAnchorMode::LocalRect, local_anchor},
+      std::move(content),
+      std::move(options),
+      environment_
+  );
 }
 
 bool PopupHandle::Update(LayerId id, ViewFactory content) const {
@@ -2867,12 +2933,34 @@ bool PopupHandle::Update(LayerId id, PopupFactory content) const {
   return service_->Update(anchor_, id, std::move(content), environment_);
 }
 
+bool PopupHandle::UpdateAnchor(LayerId id, Rect local_anchor) const {
+  return anchor_ && anchor_->UpdateLocalAnchor(id, local_anchor);
+}
+
 LayerId PopupHandle::ShowAt(Point point, ViewFactory content, PopupOptions options) const {
-  return service_->Show(anchor_, point, std::move(content), std::move(options), environment_);
+  return service_->Show(
+      anchor_,
+      detail::LayerAnchorTarget{
+          detail::LayerAnchorMode::FixedWindowPoint,
+          {point.x, point.y, 0.0F, 0.0F},
+      },
+      std::move(content),
+      std::move(options),
+      environment_
+  );
 }
 
 LayerId PopupHandle::ShowAt(Point point, PopupFactory content, PopupOptions options) const {
-  return service_->Show(anchor_, point, std::move(content), std::move(options), environment_);
+  return service_->Show(
+      anchor_,
+      detail::LayerAnchorTarget{
+          detail::LayerAnchorMode::FixedWindowPoint,
+          {point.x, point.y, 0.0F, 0.0F},
+      },
+      std::move(content),
+      std::move(options),
+      environment_
+  );
 }
 
 bool PopupHandle::Dismiss(LayerId id) const {
@@ -2881,7 +2969,7 @@ bool PopupHandle::Dismiss(LayerId id) const {
 
 LayerId detail::PopupService::Show(
     const std::shared_ptr<detail::LayerAnchorState>& anchor,
-    std::optional<Point> point,
+    LayerAnchorTarget target,
     ViewFactory content,
     PopupOptions options,
     std::shared_ptr<const Environment> environment
@@ -2895,7 +2983,7 @@ LayerId detail::PopupService::Show(
   const Point offset = options.offset;
   const bool retain_anchor_focus = options.retain_anchor_focus;
   return anchor->AttachLayer(
-      point,
+      target,
       std::move(content),
       preferred_placement,
       gap,
@@ -2909,7 +2997,7 @@ LayerId detail::PopupService::Show(
 
 LayerId detail::PopupService::Show(
     const std::shared_ptr<detail::LayerAnchorState>& anchor,
-    std::optional<Point> point,
+    LayerAnchorTarget target,
     PopupFactory content,
     PopupOptions options,
     std::shared_ptr<const Environment> environment
@@ -2920,7 +3008,7 @@ LayerId detail::PopupService::Show(
   auto id = std::make_shared<LayerId>(0);
   const LayerId attached = Show(
       anchor,
-      point,
+      target,
       [anchor, id, content = std::move(content)] { return content(PopupContext{anchor, *id}); },
       std::move(options),
       std::move(environment)
@@ -3025,8 +3113,15 @@ LayerId detail::MenuService::ShowLevel(
   if (submenu) {
     chain->DismissFrom(depth);
   }
+  LayerAnchorTarget target;
+  if (point.has_value()) {
+    target = {
+        LayerAnchorMode::FixedWindowPoint,
+        {point->x, point->y, 0.0F, 0.0F},
+    };
+  }
   const LayerId attached = anchor->AttachLayer(
-      point,
+      target,
       [entries = std::move(entries),
        style,
        width,

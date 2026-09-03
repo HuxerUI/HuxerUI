@@ -71,6 +71,8 @@ Update compatible declarative configuration without discarding retained state, r
 `PrepareGeometry(MountedNode&, TextMeasurer&)` runs after final presentation geometry is resolved and before paint recording.
 Use its borrowed measurer only for synchronous text-dependent retained geometry, and retain only the resulting value metrics.
 Return the exact `PaintInvalidation` phases whose recorded inputs changed; text that affects measurement belongs in `Layout` because this callback does not provide another layout pass.
+This is also the phase for `MountedNode` local-to-window conversion when retained behavior must publish geometry to a window-owned service such as Popup placement.
+Paint callbacks continue to record node-local commands and do not use window coordinates to draw.
 
 ## Paint commands
 

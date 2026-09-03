@@ -4,6 +4,7 @@
 #include <concepts>
 #include <cstddef>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <typeindex>
@@ -185,6 +186,21 @@ public:
     return PresentationBoundsImpl();
   }
 
+  /// Maps a node-local point into window logical coordinates using the resolved presentation transform.
+  [[nodiscard]] Point LocalToWindow(Point point) const noexcept {
+    return LocalToWindowImpl(point);
+  }
+
+  /// Maps a window-logical point into node-local coordinates when the resolved transform is invertible.
+  [[nodiscard]] std::optional<Point> WindowToLocal(Point point) const noexcept {
+    return WindowToLocalImpl(point);
+  }
+
+  /// Maps a node-local rectangle to its axis-aligned bounds in window logical coordinates.
+  [[nodiscard]] Rect LocalToWindowBounds(Rect bounds) const noexcept {
+    return LocalToWindowBoundsImpl(bounds);
+  }
+
   [[nodiscard]] float PresentationOpacity() const noexcept {
     return PresentationOpacityImpl();
   }
@@ -259,6 +275,9 @@ protected:
   virtual Rect BoundsImpl() const noexcept = 0;
   virtual Point LayoutOffsetImpl() const noexcept = 0;
   virtual Rect PresentationBoundsImpl() const noexcept = 0;
+  virtual Point LocalToWindowImpl(Point point) const noexcept = 0;
+  virtual std::optional<Point> WindowToLocalImpl(Point point) const noexcept = 0;
+  virtual Rect LocalToWindowBoundsImpl(Rect bounds) const noexcept = 0;
   virtual float PresentationOpacityImpl() const noexcept = 0;
   virtual bool IsEnabledImpl() const noexcept = 0;
   virtual bool IsFocusedImpl() const noexcept = 0;

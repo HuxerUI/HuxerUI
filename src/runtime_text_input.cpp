@@ -581,9 +581,9 @@ TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id,
     throw std::logic_error("HuxerUI text input client returned invalid geometry");
   }
   if (result.result_code == TextInputResultCode::Ok) {
-    result.caret = detail::TransformBounds(node->presentation.resolved_transform, result.caret);
+    result.caret = node->LocalToWindowBounds(result.caret);
     for (Rect& rect : result.range_rects) {
-      rect = detail::TransformBounds(node->presentation.resolved_transform, rect);
+      rect = node->LocalToWindowBounds(rect);
     }
     if (!IsValidGeometry(result, session_id)) {
       throw std::logic_error("HuxerUI text input geometry transform produced invalid geometry");
@@ -605,7 +605,7 @@ TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId sessi
 
   const detail::ActiveTextInputSession& active = *state_->text_input_session_;
   detail::MountedNode* node = state_->mounted_root_ ? FindNode(*state_->mounted_root_, active.node_identity) : nullptr;
-  const std::optional<Point> local = node ? node->presentation.resolved_transform.Inverse(point) : std::nullopt;
+  const std::optional<Point> local = node ? node->WindowToLocal(point) : std::nullopt;
   if (!local.has_value()) {
     TextInputPositionResult result;
     result.result_code = TextInputResultCode::Rejected;

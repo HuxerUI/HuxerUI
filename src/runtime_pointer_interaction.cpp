@@ -184,7 +184,7 @@ std::optional<float> EstimateScrollVelocity(const PointerSession& session, Axis 
 
 PointerEvent LocalPointerEvent(const MountedNode& node, const PointerEvent& event) {
   PointerEvent local = event;
-  if (const auto position = node.presentation.resolved_transform.Inverse(event.position)) {
+  if (const auto position = node.WindowToLocal(event.position)) {
     local.position = *position;
   } else {
     local.position = {
@@ -215,7 +215,7 @@ GestureRecognizerInput GestureInput(const DragSourceRecognitionState& retained, 
 
 DropEvent LocalDropEvent(const MountedNode& node, const DragEvent& drag) {
   Point local = drag.window_position;
-  if (const std::optional<Point> position = node.presentation.resolved_transform.Inverse(drag.window_position)) {
+  if (const std::optional<Point> position = node.WindowToLocal(drag.window_position)) {
     local = *position;
   }
   return {drag.pointer_id, drag.device_kind, local, drag.window_position};
@@ -703,8 +703,7 @@ void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& f
     if (!node->interaction.enabled || !IsScrollContainer(*node)) {
       continue;
     }
-    const std::optional<Point> local =
-        node->presentation.resolved_transform.Inverse(drag_drop.drag.window_position);
+    const std::optional<Point> local = node->WindowToLocal(drag_drop.drag.window_position);
     if (!local.has_value()) {
       continue;
     }
@@ -1176,9 +1175,7 @@ GestureDecision Runtime::UpdatePointerRecognition(PointerSession& session, std::
       NodeExtension* extension = FindExtension(*state_->mounted_root_, consumer.extension);
       detail::MountedNode* node = FindNode(*state_->mounted_root_, consumer.extension.node_identity);
       const bool remains_on_route = owner != route.end() && *owner == node;
-      const auto local_position = remains_on_route
-                                      ? node->presentation.resolved_transform.Inverse(event.position)
-                                      : std::nullopt;
+      const auto local_position = remains_on_route ? node->WindowToLocal(event.position) : std::nullopt;
       const bool valid = remains_on_route && node->interaction.enabled && extension &&
                          local_position.has_value() && extension->HitTest(**owner, *local_position);
       if (!valid && extension && node && consumer.recognizer) {
@@ -1585,7 +1582,7 @@ void Runtime::HandlePointerDown(const PointerEvent& event) {
         continue;
       }
       NodeExtensionEntry& entry = (*node)->extensions[index - 1];
-      const auto local_position = (*node)->presentation.resolved_transform.Inverse(event.position);
+      const auto local_position = (*node)->WindowToLocal(event.position);
       if (!entry.extension || !local_position.has_value() || !entry.extension->HitTest(**node, *local_position)) {
         continue;
       }

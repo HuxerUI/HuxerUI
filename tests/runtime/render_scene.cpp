@@ -35,6 +35,9 @@ TextMeasurer* expected_geometry_text_measurer = nullptr;
 bool geometry_used_expected_text_measurer = false;
 int geometry_text_measurement_count = 0;
 float geometry_measured_text_width = 0.0F;
+Point geometry_window_origin;
+std::optional<Point> geometry_local_origin;
+Rect geometry_window_bounds;
 Shadow invalid_shadow;
 
 struct OverflowPaint;
@@ -137,6 +140,9 @@ void GeometryMeasurementExtension::Update(MountedNode& node, const GeometryMeasu
 NodeExtension::PaintInvalidation
 GeometryMeasurementExtension::PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) {
   geometry_used_expected_text_measurer = &text_measurer == expected_geometry_text_measurer;
+  geometry_window_origin = node.LocalToWindow({});
+  geometry_local_origin = node.WindowToLocal(geometry_window_origin);
+  geometry_window_bounds = node.LocalToWindowBounds(node.Bounds());
   Input input{node.Bounds(), text_};
   if (prepared_input_ == input) {
     return PaintInvalidation::None;
@@ -191,7 +197,11 @@ View FramePaintInvalidationApp() {
 View GeometryMeasurementApp() {
   auto changed = UseState(false);
   geometry_measurement_changed = changed;
-  return Spacer().With(Frame{80.0F, 20.0F}, GeometryMeasurement{changed.Get() ? "wide" : "a"});
+  return Spacer().With(
+      Frame{80.0F, 20.0F},
+      Offset{Point{changed.Get() ? 30.0F : 0.0F, 0.0F}},
+      GeometryMeasurement{changed.Get() ? "wide" : "a"}
+  );
 }
 
 View ShadowApp() {
@@ -762,6 +772,8 @@ TEST_CASE("ExtensionGeometryUsesBorrowedTextMeasurerAndInvalidatesOnlyWhenMeasur
   REQUIRE(geometry_used_expected_text_measurer);
   REQUIRE(geometry_text_measurement_count == 1);
   REQUIRE(geometry_measured_text_width == 10.0F);
+  REQUIRE(geometry_local_origin == Point{});
+  REQUIRE(geometry_window_bounds == mounted->PresentationBounds());
   const std::uint64_t initial_revision = mounted->render_node.foreground.Revision();
   const std::uint64_t initial_content_revision = mounted->render_node.content.Revision();
   const PaintCommand* initial_commands = mounted->render_node.foreground.Commands().data();
@@ -775,8 +787,39 @@ TEST_CASE("ExtensionGeometryUsesBorrowedTextMeasurerAndInvalidatesOnlyWhenMeasur
   runtime.BuildRenderFrame();
   REQUIRE(geometry_text_measurement_count == 2);
   REQUIRE(geometry_measured_text_width == 40.0F);
+  REQUIRE(geometry_window_origin.x == 30.0F);
+  REQUIRE(geometry_local_origin == Point{});
+  REQUIRE(geometry_window_bounds == mounted->PresentationBounds());
   REQUIRE(mounted->render_node.foreground.Revision() > initial_revision);
   REQUIRE(mounted->render_node.content.Revision() == initial_content_revision);
+}
+
+TEST_CASE("MountedNodeConvertsPointsAndAxisAlignedWindowBounds") {
+  detail::MountedNode mounted;
+  mounted.presentation.resolved_transform = Transform2D{
+      .m11 = 0.0F,
+      .m12 = 2.0F,
+      .m21 = -3.0F,
+      .m22 = 0.0F,
+      .translate_x = 10.0F,
+      .translate_y = 20.0F,
+  };
+  const huxerui::MountedNode& node = mounted;
+
+  const Point window_point = node.LocalToWindow({1.0F, 2.0F});
+  REQUIRE(window_point == Point{4.0F, 22.0F});
+  REQUIRE(node.WindowToLocal(window_point) == Point{1.0F, 2.0F});
+  REQUIRE(node.LocalToWindowBounds({1.0F, 2.0F, 4.0F, 3.0F}) == Rect{-5.0F, 22.0F, 9.0F, 8.0F});
+
+  mounted.presentation.resolved_transform = Transform2D{
+      .m11 = 0.0F,
+      .m12 = 0.0F,
+      .m21 = 0.0F,
+      .m22 = 0.0F,
+      .translate_x = 10.0F,
+      .translate_y = 20.0F,
+  };
+  REQUIRE_FALSE(node.WindowToLocal({10.0F, 20.0F}).has_value());
 }
 
 TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {

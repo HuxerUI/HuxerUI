@@ -251,7 +251,7 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
   if (!node.participates_in_layout || !node.pointer_events_enabled) {
     return false;
   }
-  const auto local_position = node.presentation.resolved_transform.Inverse(position);
+  const auto local_position = node.WindowToLocal(position);
   if (!local_position.has_value()) {
     return false;
   }
@@ -293,7 +293,7 @@ WindowHitTarget HitTestWindowTarget(MountedNode& node, Point position) {
   if (!node.participates_in_layout || !node.pointer_events_enabled) {
     return WindowHitTarget::None;
   }
-  const auto local_position = node.presentation.resolved_transform.Inverse(position);
+  const auto local_position = node.WindowToLocal(position);
   if (!local_position.has_value()) {
     return WindowHitTarget::None;
   }
@@ -1028,7 +1028,7 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
   } else {
     moved.x -= applied;
   }
-  rect = TransformBounds(node.presentation.resolved_transform, moved);
+  rect = node.LocalToWindowBounds(moved);
   return true;
 }
 

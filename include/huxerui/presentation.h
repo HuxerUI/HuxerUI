@@ -784,16 +784,37 @@ public:
   LayerId Show(ViewFactory content, PopupOptions options = {}) const;
   /// Presents context-aware content relative to the tracked anchor and returns its LayerId.
   LayerId Show(PopupFactory content, PopupOptions options = {}) const;
+  /// Presents content relative to node-local bounds associated with the tracked anchor.
+  /// The bounds may extend outside the anchor View.
+  LayerId ShowAtAnchor(Rect local_anchor, ViewFactory content, PopupOptions options = {}) const;
+  /// Presents context-aware content relative to node-local bounds associated with the tracked anchor.
+  /// The bounds may extend outside the anchor View.
+  LayerId ShowAtAnchor(Rect local_anchor, PopupFactory content, PopupOptions options = {}) const;
   /// Replaces anchored Popup content and returns false for a stale identifier.
   bool Update(LayerId id, ViewFactory content) const;
   /// Replaces context-aware anchored Popup content and returns false for a stale identifier.
   bool Update(LayerId id, PopupFactory content) const;
+  /// Repositions a Popup shown by ShowAtAnchor() without replacing its layer or content, or returns false when stale.
+  bool UpdateAnchor(LayerId id, Rect local_anchor) const;
 
   /// Binds copyable factory arguments and presents content relative to the tracked anchor.
   template <class Factory, class... Arguments>
     requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
   LayerId Show(Factory&& content, Arguments&&... arguments) const {
     return Show(
+        detail::BindPresentationFactory<PopupContext>(
+            std::forward<Factory>(content),
+            std::forward<Arguments>(arguments)...
+        )
+    );
+  }
+
+  /// Binds copyable factory arguments and presents content relative to node-local anchor bounds.
+  template <class Factory, class... Arguments>
+    requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
+  LayerId ShowAtAnchor(Rect local_anchor, Factory&& content, Arguments&&... arguments) const {
+    return ShowAtAnchor(
+        local_anchor,
         detail::BindPresentationFactory<PopupContext>(
             std::forward<Factory>(content),
             std::forward<Arguments>(arguments)...

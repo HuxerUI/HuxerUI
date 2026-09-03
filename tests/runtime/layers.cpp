@@ -22,11 +22,13 @@ std::optional<DialogHandle> retained_environment_dialog;
 std::optional<LayerController> raw_layers;
 State<float> layer_anchor_offset;
 State<bool> layer_anchor_visible;
+State<bool> local_anchor_transform_changed;
 State<int> layer_environment_value;
 State<bool> layer_environment_provider_visible;
 int layer_app_compositions = 0;
 int layer_background_clicks = 0;
 int popup_focus_clicks = 0;
+int local_anchor_content_compositions = 0;
 int parent_menu_clicks = 0;
 int exiting_layer_clicks = 0;
 int exiting_layer_pointer_cancels = 0;
@@ -93,6 +95,20 @@ View LayerApp() {
 
 View MaterialLayerApp() {
   return huxerui::MaterialTheme {LayerApp()};
+}
+
+View LocalAnchorTransformApp() {
+  auto popup = UsePopup();
+  layer_popup = popup;
+  local_anchor_transform_changed = UseState(false);
+  const bool transformed = local_anchor_transform_changed.Get();
+  return Spacer().With(
+      huxerui::Frame{60.0F, 30.0F},
+      Scale{transformed ? 2.0F : 1.0F, huxerui::TransformOrigin{0.0F, 0.0F}},
+      Rotation{transformed ? 90.0F : 0.0F, huxerui::TransformOrigin{0.0F, 0.0F}},
+      Offset{Point{100.0F, 20.0F}},
+      popup.Anchor()
+  );
 }
 
 View SectionMenuLayerApp() {
@@ -448,6 +464,14 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
 
   const float infinity = std::numeric_limits<float>::infinity();
   REQUIRE_THROWS_AS(layer_popup->ShowAt({infinity, 0.0F}, [] { return Text("popup"); }), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      layer_popup->ShowAtAnchor({infinity, 0.0F, 10.0F, 10.0F}, [] { return Text("popup"); }),
+      std::invalid_argument
+  );
+  REQUIRE_THROWS_AS(
+      layer_popup->ShowAtAnchor({0.0F, 0.0F, -1.0F, 10.0F}, [] { return Text("popup"); }),
+      std::invalid_argument
+  );
   REQUIRE_THROWS_AS(layer_menu->ShowAt({0.0F, infinity}, TestMenu("menu")), std::invalid_argument);
   REQUIRE_THROWS_AS(
       layer_popup->ShowAt(
@@ -1234,6 +1258,99 @@ TEST_CASE("TestAnchoredPopupTracksPresentationBounds") {
   REQUIRE(!ContainsText(runtime.BuildFrame(), "anchored popup"));
 }
 
+TEST_CASE("TestPopupTracksAndUpdatesNodeLocalAnchorBoundsWithoutReplacingContent") {
+  layer_app_compositions = 0;
+  local_anchor_content_compositions = 0;
+  layer_popup.reset();
+
+  TestPlatform platform;
+  Runtime runtime{LayerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  constexpr Color popup_color = Color::Rgb(80, 120, 210);
+  const LayerId popup = layer_popup->ShowAtAnchor(
+      {10.0F, 5.0F, 20.0F, 10.0F},
+      [popup_color] {
+        ++local_anchor_content_compositions;
+        return Spacer().With(huxerui::Frame{20.0F, 10.0F}, huxerui::Background{popup_color});
+      },
+      PopupOptions{
+          .placement = AnchorPlacement{.side = AnchorSide::Below, .alignment = AnchorAlignment::Start},
+          .viewport_margin = 0.0F,
+      }
+  );
+  const std::optional<Rect> initial_bounds = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
+  REQUIRE(initial_bounds == Rect{30.0F, 19.0F, 20.0F, 10.0F});
+  REQUIRE(local_anchor_content_compositions == 1);
+
+  REQUIRE(layer_popup->UpdateAnchor(popup, {30.0F, 15.0F, 10.0F, 5.0F}));
+  const std::optional<Rect> updated_bounds = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
+  REQUIRE(updated_bounds == Rect{50.0F, 24.0F, 20.0F, 10.0F});
+  REQUIRE(local_anchor_content_compositions == 1);
+  REQUIRE(layer_app_compositions == 1);
+
+  layer_anchor_offset = 50.0F;
+  const std::optional<Rect> moved_bounds = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
+  REQUIRE(moved_bounds == Rect{80.0F, 24.0F, 20.0F, 10.0F});
+  REQUIRE(local_anchor_content_compositions == 1);
+  REQUIRE_FALSE(layer_popup->UpdateAnchor(popup + 1000, {0.0F, 0.0F, 1.0F, 1.0F}));
+
+  REQUIRE(layer_popup->Dismiss(popup));
+  const LayerId full_anchor = layer_popup->Show([] { return Text("full anchor"); });
+  REQUIRE_FALSE(layer_popup->UpdateAnchor(full_anchor, {0.0F, 0.0F, 1.0F, 1.0F}));
+  REQUIRE(layer_popup->Dismiss(full_anchor));
+  const LayerId fixed_anchor = layer_popup->ShowAt({40.0F, 20.0F}, [] { return Text("fixed anchor"); });
+  REQUIRE_FALSE(layer_popup->UpdateAnchor(fixed_anchor, {0.0F, 0.0F, 1.0F, 1.0F}));
+  REQUIRE(layer_popup->Dismiss(fixed_anchor));
+
+  const LayerId bound_factory = layer_popup->ShowAtAnchor(
+      {0.0F, 0.0F, 1.0F, 1.0F},
+      ParameterizedPopupContent,
+      std::string{"local popup"},
+      7
+  );
+  REQUIRE(ContainsText(runtime.BuildFrame(), "local popup 7"));
+  REQUIRE(layer_popup->Dismiss(bound_factory));
+}
+
+TEST_CASE("TestPopupLocalAnchorFollowsTheCurrentResolvedTransform") {
+  layer_popup.reset();
+
+  TestPlatform platform;
+  Runtime runtime{LocalAnchorTransformApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  constexpr Rect local_anchor{10.0F, 5.0F, 20.0F, 10.0F};
+  constexpr Color popup_color = Color::Rgb(120, 80, 210);
+  layer_popup->ShowAtAnchor(
+      local_anchor,
+      [popup_color] {
+        return Spacer().With(huxerui::Frame{10.0F, 10.0F}, huxerui::Background{popup_color});
+      },
+      PopupOptions{
+          .placement = AnchorPlacement{.side = AnchorSide::Below, .alignment = AnchorAlignment::Start},
+          .gap = 0.0F,
+          .viewport_margin = 0.0F,
+      }
+  );
+  const std::optional<Rect> initial_popup = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
+  const detail::MountedNode* mounted_anchor = runtime.RootNode();
+  REQUIRE(mounted_anchor != nullptr);
+  const Rect initial_anchor = mounted_anchor->LocalToWindowBounds(local_anchor);
+  REQUIRE(initial_popup == Rect{initial_anchor.x, initial_anchor.y + initial_anchor.height, 10.0F, 10.0F});
+
+  local_anchor_transform_changed = true;
+  const std::optional<Rect> transformed_popup = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
+  const Rect transformed_anchor = mounted_anchor->LocalToWindowBounds(local_anchor);
+  REQUIRE(transformed_anchor != initial_anchor);
+  REQUIRE(
+      transformed_popup ==
+      Rect{transformed_anchor.x, transformed_anchor.y + transformed_anchor.height, 10.0F, 10.0F}
+  );
+}
+
 TEST_CASE("TestAnchoredPresentationDismissesWhenAnchorUnmounts") {
   layer_popup.reset();
 
@@ -1247,6 +1364,23 @@ TEST_CASE("TestAnchoredPresentationDismissesWhenAnchorUnmounts") {
 
   layer_anchor_visible = false;
   REQUIRE(!ContainsText(runtime.BuildFrame(), "attached popup"));
+  REQUIRE(!layer_popup->Dismiss(popup));
+}
+
+TEST_CASE("TestLocalAnchoredPresentationDismissesWhenAnchorUnmounts") {
+  layer_popup.reset();
+
+  TestPlatform platform;
+  Runtime runtime{RemovableAnchorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  const LayerId popup =
+      layer_popup->ShowAtAnchor({5.0F, 5.0F, 20.0F, 10.0F}, [] { return Text("local attached popup"); });
+  REQUIRE(ContainsText(runtime.BuildFrame(), "local attached popup"));
+
+  layer_anchor_visible = false;
+  REQUIRE(!ContainsText(runtime.BuildFrame(), "local attached popup"));
   REQUIRE(!layer_popup->Dismiss(popup));
 }
 

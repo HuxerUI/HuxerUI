@@ -143,7 +143,7 @@ bool Runtime::SelectFocusedTextWord(Point position, bool show_overlay) {
     return false;
   }
   TextSelectionClient* client = detail::FindTextSelectionClient(*focused);
-  const std::optional<Point> local = client ? focused->presentation.resolved_transform.Inverse(position) : std::nullopt;
+  const std::optional<Point> local = client ? focused->WindowToLocal(position) : std::nullopt;
   const bool changed = local.has_value() && client->SelectWord(*local);
   if (changed) {
     focused->foreground_paint_dirty = true;
@@ -172,7 +172,7 @@ bool Runtime::ExtendFocusedTextSelection(Point position, bool start_handle) {
     return false;
   }
   TextSelectionClient* client = detail::FindTextSelectionClient(*focused);
-  const std::optional<Point> local = client ? focused->presentation.resolved_transform.Inverse(position) : std::nullopt;
+  const std::optional<Point> local = client ? focused->WindowToLocal(position) : std::nullopt;
   const bool changed = local.has_value() && client->ExtendSelection(*local, start_handle);
   if (changed) {
     focused->foreground_paint_dirty = true;
@@ -195,8 +195,8 @@ bool Runtime::QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const {
   if (!client || !client->QuerySelectionGeometry(start, end)) {
     return false;
   }
-  start = detail::TransformBounds(focused->presentation.resolved_transform, start);
-  end = detail::TransformBounds(focused->presentation.resolved_transform, end);
+  start = focused->LocalToWindowBounds(start);
+  end = focused->LocalToWindowBounds(end);
   return true;
 }
 

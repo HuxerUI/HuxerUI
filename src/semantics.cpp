@@ -243,11 +243,11 @@ ScrollMetrics MountedScrollMetrics(const detail::MountedNode& node) {
 
 Rect DescendantSemanticClip(const detail::MountedNode& node, Rect inherited) {
   if (node.properties.clip_children) {
-    inherited = inherited.Intersection(detail::TransformBounds(node.presentation.resolved_transform, node.bounds));
+    inherited = inherited.Intersection(node.PresentationBounds());
   }
   if (node.scroll_state) {
     inherited = inherited.Intersection(
-        detail::TransformBounds(node.presentation.resolved_transform, detail::ScrollViewport(node))
+        node.LocalToWindowBounds(detail::ScrollViewport(node))
     );
   }
   return inherited;
@@ -673,7 +673,7 @@ void Runtime::BuildSemantics() {
           id = state_->next_semantic_identity_++;
         }
         const Rect local_bounds = item.local_bounds.value_or(mounted.bounds);
-        const Rect child_bounds = detail::TransformBounds(mounted.presentation.resolved_transform, local_bounds);
+        const Rect child_bounds = mounted.LocalToWindowBounds(local_bounds);
         SemanticNode child = MakeSemanticNode(
             id,
             child_parent,

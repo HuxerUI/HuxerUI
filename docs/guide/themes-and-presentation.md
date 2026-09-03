@@ -98,6 +98,9 @@ Application code owns controlled values and action outcomes.
 
 Popups are anchored non-modal layers with typed placement and dismissal policy.
 Menus build on the same anchor and layer infrastructure while adding items, sections, keyboard navigation, semantic roles, and submenus.
+`PopupHandle::Show` follows the complete bounds of the View carrying `Anchor()`, while `ShowAtAnchor` follows a node-local rectangle inside that View through layout, scrolling, and presentation transforms.
+`PopupHandle::UpdateAnchor` moves a Popup created by `ShowAtAnchor` without changing its layer id or recreating its content; it returns false for a stale id or another anchor mode.
+`ShowAt` remains the fixed window-point path for context menus and pointer-position Popups.
 `PopupHandle::Update` replaces an existing popup's content factory and captured Environment while retaining its layer id, anchor, placement, and dismissal policy.
 Set `PopupOptions::retain_anchor_focus` when non-focusable popup content must accept pointer input without ending the anchor's editing or keyboard session; a focusable popup descendant still receives focus normally.
 

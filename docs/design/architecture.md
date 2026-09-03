@@ -370,6 +370,9 @@ public:
   Rect Bounds() const;
   Point LayoutOffset() const;
   Rect PresentationBounds() const;
+  Point LocalToWindow(Point point) const;
+  std::optional<Point> WindowToLocal(Point point) const;
+  Rect LocalToWindowBounds(Rect bounds) const;
   float PresentationOpacity() const;
   bool IsEnabled() const;
   bool IsFocused() const;
@@ -386,7 +389,7 @@ public:
 };
 ```
 
-`Bounds()` has a zero origin and the node's layout size. `LayoutOffset()` is parent-relative. `PresentationBounds()` is derived from the committed ancestor transform chain for platform-boundary queries and diagnostics.
+`Bounds()` has a zero origin and the node's layout size. `LayoutOffset()` is parent-relative. `PresentationBounds()` and the local/window conversion operations derive from the resolved ancestor transform chain for platform-boundary queries and diagnostics. Rectangle conversion returns a window-space axis-aligned bound, and inverse point conversion returns no value for a non-invertible transform. `PrepareGeometry()` observes the final resolved transform for the current frame; earlier extension callbacks may observe the previous resolution.
 
 It does not expose Runtime ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()` and uses its protected paint invalidation operation when retained visual state changes. General application-facing measure and layout invalidation APIs are deferred.
 
@@ -1736,7 +1739,7 @@ return Button("More")
     });
 ```
 
-The anchor modifier records final PresentationBounds without creating a layer. `Show()` attaches the entry and follows those bounds. `ShowAt()` supports context menus and pointer-position popups. `PopupHandle::Update()` replaces content and its captured Environment without changing the active layer id, anchor placement, or dismissal options. `retain_anchor_focus` snapshots the mounted anchor identity into the layer entry; pointer focus resolution keeps that anchor only when popup content has no focusable target and the anchor still owns focus. Each Popup or Menu handle retains at most one active entry; presenting through it again dismisses the previous entry before attaching the replacement. `PopupContext` dismisses arbitrary popup content directly, while Menu leaf actions dismiss the complete open menu chain automatically. Anchor movement invalidates only the corresponding layer entry placement, settles that layout path before the current frame commit, and damages the old and new bounds; anchor removal dismisses the entry. Placement combines a preferred side, cross-axis alignment, gap, offset, viewport margin, opposite-side fallback, and final clamping without introducing a general cross-tree layout dependency.
+The anchor modifier records final presentation geometry without creating a layer. `Show()` attaches the entry and follows the complete node bounds, `ShowAtAnchor()` follows a validated node-local rectangle, and `ShowAt()` uses a fixed window point. The retained anchor stores only the local rectangle and latest resolved transform values; `PopupHandle::UpdateAnchor()` updates a LocalRect entry without changing its layer id or content instance and rejects stale identifiers or other anchor modes. `PopupHandle::Update()` replaces content and its captured Environment without changing the active layer id, anchor placement, or dismissal options. `retain_anchor_focus` snapshots the mounted anchor identity into the layer entry; pointer focus resolution keeps that anchor only when popup content has no focusable target and the anchor still owns focus. Each Popup or Menu handle retains at most one active entry; presenting through it again dismisses the previous entry before attaching the replacement. `PopupContext` dismisses arbitrary popup content directly, while Menu leaf actions dismiss the complete open menu chain automatically. Anchor movement invalidates only the corresponding layer entry placement, settles that layout path before the current frame commit, and damages the old and new bounds; anchor removal dismisses node-bound and local-rectangle entries while fixed-window entries remain independent. Placement combines a preferred side, cross-axis alignment, gap, offset, viewport margin, opposite-side fallback, and final clamping without introducing a general cross-tree layout dependency.
 
 Menu is structurally distinct from Popup. Its public input is a recursive sequence of `MenuEntry` values created implicitly from `MenuItem` and `MenuSection`. Menu items directly contain either an action or another entry sequence, while `MenuSection{}` is a non-interactive logical boundary whose visual treatment belongs to the theme. Items retain resource identifiers and image assets as semantic values; the presentation service resolves resources from the captured Environment and composes themed surfaces and interaction. The root menu owns the transparent outside-press barrier. Submenus are content-only anchored layers, so their parent menu remains interactive; Back closes the deepest open level, the default outside-press behavior closes the complete chain, and opening another submenu replaces only that level and its descendants. Arbitrary custom anchored content remains a Popup responsibility.
 

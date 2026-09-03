@@ -35,6 +35,15 @@ return Column {
 `Grow()` is parent-child layout metadata.
 It affects participation in a compatible parent layout and propagates across transparent composition boundaries such as scopes and Environment providers.
 
+## Mounted coordinate spaces
+
+`MountedNode::Bounds()` uses node-local DIPs, `LayoutOffset()` is parent-relative, and `PresentationBounds()` is the node's transformed axis-aligned bound in window DIPs.
+Use `LocalToWindow()` and `WindowToLocal()` for point conversion; the inverse returns `std::nullopt` when the resolved presentation transform is not invertible.
+`LocalToWindowBounds()` transforms all four rectangle corners and returns their window-space axis-aligned bounds.
+
+The final transform for the current frame is available to `NodeExtension::PrepareGeometry()`.
+Earlier extension callbacks may still observe the previously resolved transform, and paint commands remain node-local even when geometry preparation retains a window-space value for a presentation boundary.
+
 ## Responsive composition
 
 `UseViewportClass()` exposes the current compact, medium, or expanded width class.
