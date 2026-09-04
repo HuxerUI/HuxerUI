@@ -12,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -30,6 +31,27 @@ static_assert(!std::is_copy_constructible_v<linux::PixelTexture>);
 static_assert(!std::is_copy_assignable_v<linux::PixelTexture>);
 static_assert(!std::is_move_constructible_v<linux::PixelTexture>);
 static_assert(!std::is_move_assignable_v<linux::PixelTexture>);
+static_assert(!std::is_copy_constructible_v<linux::GdkTexture>);
+static_assert(!std::is_copy_assignable_v<linux::GdkTexture>);
+static_assert(!std::is_move_constructible_v<linux::GdkTexture>);
+static_assert(!std::is_move_assignable_v<linux::GdkTexture>);
+
+::GdkTexture* CreateMemoryTexture(int width, int height, std::span<const std::byte> pixels) {
+  GBytes* bytes = g_bytes_new(pixels.data(), pixels.size());
+  ::GdkTexture* texture = gdk_memory_texture_new(width, height, GDK_MEMORY_R8G8B8A8_PREMULTIPLIED, bytes, width * 4U);
+  g_bytes_unref(bytes);
+  return texture;
+}
+
+struct ReentrantReleaseProbe {
+  linux::GdkTexture* texture = nullptr;
+  bool released = false;
+};
+
+void AcquireReplacementOnRelease(gpointer data) {
+  auto& probe = *static_cast<ReentrantReleaseProbe*>(data);
+  probe.released = detail::GetGdkTextureFrame(*probe.texture) != nullptr;
+}
 
 std::uint32_t PixelAt(const detail::LinuxPixelFrame& frame, int x, int y) {
   std::uint32_t pixel = 0;
@@ -84,6 +106,89 @@ std::array<std::uint32_t, 20> RenderPixels(detail::LinuxRenderer& renderer, cons
   cairo_destroy(context);
   cairo_surface_destroy(surface);
   return pixels;
+}
+
+std::array<std::uint32_t, 20> RenderSnapshotPixels(detail::LinuxRenderer& renderer, const RenderFrame& frame) {
+  GtkSnapshot* snapshot = gtk_snapshot_new();
+  renderer.Snapshot(snapshot, frame);
+  GskRenderNode* node = gtk_snapshot_free_to_node(snapshot);
+  REQUIRE(node != nullptr);
+
+  std::array<std::uint32_t, 20> pixels{};
+  cairo_surface_t* surface = cairo_image_surface_create_for_data(
+      reinterpret_cast<unsigned char*>(pixels.data()),
+      CAIRO_FORMAT_ARGB32,
+      5,
+      4,
+      5 * 4
+  );
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  cairo_t* context = cairo_create(surface);
+  REQUIRE(cairo_status(context) == CAIRO_STATUS_SUCCESS);
+  gsk_render_node_draw(node, context);
+  cairo_surface_flush(surface);
+  cairo_destroy(context);
+  cairo_surface_destroy(surface);
+  gsk_render_node_unref(node);
+  return pixels;
+}
+
+TEST_CASE("LinuxGdkTextureRetainsTheLatestImmutableFrame") {
+  const auto texture = std::make_shared<linux::GdkTexture>(Size{16.0F, 9.0F});
+  const std::array<std::byte, 4> red{std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
+  const std::array<std::byte, 4> blue{std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}};
+  ::GdkTexture* first = CreateMemoryTexture(1, 1, red);
+  ::GdkTexture* second = CreateMemoryTexture(1, 1, blue);
+
+  texture->Publish(first);
+  g_object_unref(first);
+  const std::shared_ptr<const detail::LinuxGdkTextureFrame> first_frame = detail::GetGdkTextureFrame(*texture);
+  REQUIRE(first_frame != nullptr);
+  REQUIRE(first_frame->Texture() == first);
+  REQUIRE(texture->Revision() == 1);
+
+  std::thread producer([&] { texture->Publish(second); });
+  producer.join();
+  g_object_unref(second);
+  const std::shared_ptr<const detail::LinuxGdkTextureFrame> second_frame = detail::GetGdkTextureFrame(*texture);
+  REQUIRE(second_frame != nullptr);
+  REQUIRE(second_frame->Texture() == second);
+  REQUIRE(second_frame != first_frame);
+  REQUIRE(texture->Revision() == 2);
+}
+
+TEST_CASE("LinuxGdkTextureValidatesNullAndFinishedPublication") {
+  const auto texture = std::make_shared<linux::GdkTexture>(Size{1.0F, 1.0F});
+  const std::array<std::byte, 4> pixel{};
+  ::GdkTexture* frame = CreateMemoryTexture(1, 1, pixel);
+
+  REQUIRE_THROWS_AS(texture->Publish(nullptr), std::invalid_argument);
+  texture->Publish(frame);
+  texture->Finish();
+  REQUIRE(detail::GetGdkTextureFrame(*texture)->Texture() == frame);
+  REQUIRE_THROWS_AS(texture->Publish(frame), std::logic_error);
+  texture->Finish();
+  g_object_unref(frame);
+}
+
+TEST_CASE("LinuxGdkTextureReleasesReplacedFramesOutsideTheMailboxLock") {
+  const auto texture = std::make_shared<linux::GdkTexture>(Size{1.0F, 1.0F});
+  const std::array<std::byte, 4> first_pixel{std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255}};
+  const std::array<std::byte, 4> second_pixel{std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}};
+  ReentrantReleaseProbe probe{.texture = texture.get()};
+  GBytes* first_bytes =
+      g_bytes_new_with_free_func(first_pixel.data(), first_pixel.size(), AcquireReplacementOnRelease, &probe);
+  ::GdkTexture* first = gdk_memory_texture_new(1, 1, GDK_MEMORY_R8G8B8A8_PREMULTIPLIED, first_bytes, 4);
+  g_bytes_unref(first_bytes);
+  texture->Publish(first);
+  g_object_unref(first);
+
+  ::GdkTexture* second = CreateMemoryTexture(1, 1, second_pixel);
+  texture->Publish(second);
+  g_object_unref(second);
+
+  REQUIRE(probe.released);
+  REQUIRE(detail::GetGdkTextureFrame(*texture)->Texture() == second);
 }
 
 TEST_CASE("LinuxExternalTextureCopiesAndConvertsTheLatestPixelFrame") {
@@ -183,7 +288,107 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
 
   const std::array<std::uint32_t, 20> retained = RenderPixels(renderer, frame);
   REQUIRE(retained == updated);
+  REQUIRE(RenderSnapshotPixels(renderer, frame) == updated);
   renderer.Discard();
+}
+
+TEST_CASE("LinuxGdkTextureRendersCropDestinationOpacityAndRetainedFramesThroughGtkSnapshot") {
+  const auto texture = std::make_shared<linux::GdkTexture>(Size{2.0F, 1.0F});
+  rendered_texture = texture;
+  const std::array<std::byte, 8> red_green{
+      std::byte{255},
+      std::byte{0},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+  };
+  ::GdkTexture* first_frame = CreateMemoryTexture(2, 1, red_green);
+  texture->Publish(first_frame);
+  g_object_unref(first_frame);
+
+  TestPlatform platform;
+  Runtime runtime{LinuxExternalTextureRenderApp, platform};
+  runtime.SetWindowMetrics({.viewport = {5.0F, 4.0F}});
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  detail::LinuxRenderer renderer;
+
+  const std::array<std::uint32_t, 20> first = RenderSnapshotPixels(renderer, frame);
+  REQUIRE(first[0] == 0U);
+  REQUIRE(first[1U * 5U + 1U] == 0U);
+  REQUIRE(first[1U * 5U + 2U] == 0xFF00FF00U);
+  REQUIRE(first[2U * 5U + 3U] == 0xFF00FF00U);
+  REQUIRE(first[3U * 5U] == 0x80800000U);
+  REQUIRE(first[3U * 5U + 1U] == 0U);
+
+  const std::array<std::byte, 8> blue_yellow{
+      std::byte{0},
+      std::byte{0},
+      std::byte{255},
+      std::byte{255},
+      std::byte{255},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+  };
+  ::GdkTexture* second_frame = CreateMemoryTexture(2, 1, blue_yellow);
+  texture->Publish(second_frame);
+  g_object_unref(second_frame);
+  const std::array<std::uint32_t, 20> updated = RenderSnapshotPixels(renderer, frame);
+  REQUIRE(updated[1U * 5U + 2U] == 0xFFFFFF00U);
+  REQUIRE(updated[3U * 5U] == 0x80000080U);
+  REQUIRE(RenderSnapshotPixels(renderer, frame) == updated);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxGtkSnapshotPreservesExternalTexturePaintOrderTransformPathClipAndNodeOpacity") {
+  const auto texture = std::make_shared<linux::GdkTexture>(Size{2.0F, 2.0F});
+  const std::array<std::byte, 16> green{
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+      std::byte{0},
+      std::byte{255},
+  };
+  ::GdkTexture* frame_texture = CreateMemoryTexture(2, 2, green);
+  texture->Publish(frame_texture);
+  g_object_unref(frame_texture);
+
+  RenderNode root;
+  root.opacity = 0.5F;
+  PaintContext paint(root.content, {0.0F, 0.0F, 5.0F, 4.0F});
+  paint.DrawRect({0.0F, 0.0F, 5.0F, 4.0F}, Color::Rgb(255, 0, 0));
+  paint.PushPathClip(
+      Path{}.MoveTo({0.0F, 0.0F}).LineTo({2.5F, 0.0F}).LineTo({2.5F, 4.0F}).LineTo({0.0F, 4.0F}).Close()
+  );
+  paint.PushTransform(Transform2D{1.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F});
+  paint.DrawImage(texture, {0.0F, 0.0F, 2.0F, 2.0F}, ImageSampling::Nearest);
+  paint.PopTransform();
+  paint.PopClip();
+  paint.DrawRect({0.0F, 0.0F, 1.0F, 1.0F}, Color::Rgb(0, 0, 255));
+  paint.Finish();
+  const RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+  detail::LinuxRenderer renderer;
+
+  const std::array<std::uint32_t, 20> pixels = RenderSnapshotPixels(renderer, frame);
+  REQUIRE(pixels[4] == 0x80800000U);
+  REQUIRE(pixels[0] == 0x80000080U);
+  REQUIRE((pixels[1U * 5U + 1U] >> 24U) == 0x80U);
+  REQUIRE(pixels[1U * 5U + 1U] != 0x80800000U);
+  REQUIRE(pixels[2U * 5U + 3U] == 0x80800000U);
 }
 
 TEST_CASE("LinuxExternalTextureValidatesPixelFramesAndFinishedTextures") {
@@ -244,6 +449,28 @@ TEST_CASE("LinuxExternalTexturePublicationSchedulesDamageThroughItsBoundRuntime"
   const int requests_before_publish = platform.requested_frames;
   const std::array<std::byte, 16> pixels{};
   texture->Publish({2, 2, 8, linux::PixelFormat::Rgba8888, pixels});
+  REQUIRE(platform.requested_frames == requests_before_publish);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(platform.requested_frames == requests_before_publish + 1);
+
+  const RenderFrame& frame = runtime.BuildRenderFrame();
+  REQUIRE_FALSE(frame.damage.full);
+  REQUIRE(frame.damage.rects == std::vector<Rect>{{0.0F, 0.0F, 2.0F, 2.0F}});
+}
+
+TEST_CASE("LinuxGdkTexturePublicationSchedulesDamageThroughItsBoundRuntime") {
+  const auto texture = std::make_shared<linux::GdkTexture>(Size{2.0F, 2.0F});
+  scheduled_texture = texture;
+  TestPlatform platform;
+  Runtime runtime{LinuxExternalTextureApp, platform};
+  runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
+  static_cast<void>(runtime.BuildRenderFrame());
+
+  const int requests_before_publish = platform.requested_frames;
+  const std::array<std::byte, 16> pixels{};
+  ::GdkTexture* frame_texture = CreateMemoryTexture(2, 2, pixels);
+  texture->Publish(frame_texture);
+  g_object_unref(frame_texture);
   REQUIRE(platform.requested_frames == requests_before_publish);
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.requested_frames == requests_before_publish + 1);

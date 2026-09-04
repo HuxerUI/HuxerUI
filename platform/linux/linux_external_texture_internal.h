@@ -5,9 +5,30 @@
 #include <utility>
 #include <vector>
 
+#include <gdk/gdk.h>
+
 #include <huxerui/linux/external_texture.h>
 
 namespace huxerui::detail {
+
+class LinuxGdkTextureFrame final {
+public:
+  explicit LinuxGdkTextureFrame(::GdkTexture* texture) : texture_(GDK_TEXTURE(g_object_ref(texture))) {}
+
+  ~LinuxGdkTextureFrame() {
+    g_object_unref(texture_);
+  }
+
+  LinuxGdkTextureFrame(const LinuxGdkTextureFrame&) = delete;
+  LinuxGdkTextureFrame& operator=(const LinuxGdkTextureFrame&) = delete;
+
+  [[nodiscard]] ::GdkTexture* Texture() const noexcept {
+    return texture_;
+  }
+
+private:
+  ::GdkTexture* texture_ = nullptr;
+};
 
 class LinuxPixelFrame final {
 public:

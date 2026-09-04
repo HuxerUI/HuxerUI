@@ -3,7 +3,10 @@ find_package(PkgConfig REQUIRED)
 # GTK owns the native display connection, X11/Wayland selection, event loop,
 # input method integration, clipboard, and presentation
 # surface. Pango and Cairo arrive through GTK's public pkg-config closure.
-pkg_check_modules(HUXERUI_GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.6)
+pkg_check_modules(HUXERUI_GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.22)
+if (HUXERUI_BUILD_EXAMPLES)
+    pkg_check_modules(HUXERUI_EPOXY REQUIRED IMPORTED_TARGET epoxy>=1.5)
+endif ()
 pkg_check_modules(HUXERUI_GIO REQUIRED IMPORTED_TARGET gio-2.0)
 pkg_check_modules(HUXERUI_LIBSOUP QUIET IMPORTED_TARGET libsoup-3.0>=3.0)
 if (NOT TARGET PkgConfig::HUXERUI_LIBSOUP)

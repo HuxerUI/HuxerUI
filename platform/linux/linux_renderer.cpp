@@ -1,3 +1,5 @@
+#include "linux_internal.h"
+
 #include "linux_renderer.h"
 
 #include <gtk/gtk.h>
@@ -506,8 +508,10 @@ struct LinuxRenderer::State {
   struct CachedExternalTexture {
     std::weak_ptr<linux::PixelTexture> texture;
     std::shared_ptr<const LinuxPixelFrame> frame;
+    std::shared_ptr<const LinuxPixelFrame> gdk_frame;
     std::vector<std::byte> pixels;
     cairo_surface_t* surface = nullptr;
+    ::GdkTexture* gdk_texture = nullptr;
   };
 
   struct ShadowMaskKey {
@@ -554,6 +558,9 @@ struct LinuxRenderer::State {
     for (CachedExternalTexture& texture : external_textures) {
       if (texture.surface != nullptr) {
         cairo_surface_destroy(texture.surface);
+      }
+      if (texture.gdk_texture != nullptr) {
+        g_object_unref(texture.gdk_texture);
       }
     }
     for (ShadowMaskEntry& shadow : shadow_masks) {
@@ -622,6 +629,9 @@ struct LinuxRenderer::State {
       if (iterator->surface != nullptr) {
         cairo_surface_destroy(iterator->surface);
       }
+      if (iterator->gdk_texture != nullptr) {
+        g_object_unref(iterator->gdk_texture);
+      }
       iterator = external_textures.erase(iterator);
     }
     auto entry = std::find_if(
@@ -632,7 +642,14 @@ struct LinuxRenderer::State {
     if (entry == external_textures.end()) {
       entry = external_textures.insert(
           external_textures.end(),
-          CachedExternalTexture{.texture = pixel_texture, .frame = {}, .pixels = {}, .surface = nullptr}
+          CachedExternalTexture{
+              .texture = pixel_texture,
+              .frame = {},
+              .gdk_frame = {},
+              .pixels = {},
+              .surface = nullptr,
+              .gdk_texture = nullptr,
+          }
       );
     }
     const std::shared_ptr<const LinuxPixelFrame> frame = GetPixelFrame(*pixel_texture);
@@ -651,6 +668,73 @@ struct LinuxRenderer::State {
       );
     }
     return entry->surface;
+  }
+
+  ::GdkTexture* AcquireSnapshotTexture(const std::shared_ptr<ExternalTexture>& texture) {
+    const std::shared_ptr<linux::GdkTexture> gdk_texture = std::dynamic_pointer_cast<linux::GdkTexture>(texture);
+    if (gdk_texture) {
+      const std::shared_ptr<const LinuxGdkTextureFrame> frame = GetGdkTextureFrame(*gdk_texture);
+      return frame ? GDK_TEXTURE(g_object_ref(frame->Texture())) : nullptr;
+    }
+
+    const std::shared_ptr<linux::PixelTexture> pixel_texture = std::dynamic_pointer_cast<linux::PixelTexture>(texture);
+    if (!pixel_texture) {
+      throw std::logic_error("HuxerUI external texture is incompatible with the Linux renderer");
+    }
+    for (auto iterator = external_textures.begin(); iterator != external_textures.end();) {
+      const std::shared_ptr<linux::PixelTexture> retained = iterator->texture.lock();
+      if (retained && retained->IsActive()) {
+        ++iterator;
+        continue;
+      }
+      if (iterator->surface != nullptr) {
+        cairo_surface_destroy(iterator->surface);
+      }
+      if (iterator->gdk_texture != nullptr) {
+        g_object_unref(iterator->gdk_texture);
+      }
+      iterator = external_textures.erase(iterator);
+    }
+    auto entry =
+        std::find_if(external_textures.begin(), external_textures.end(), [&pixel_texture](const auto& candidate) {
+          return candidate.texture.lock() == pixel_texture;
+        });
+    if (entry == external_textures.end()) {
+      entry = external_textures.insert(
+          external_textures.end(),
+          CachedExternalTexture{
+              .texture = pixel_texture,
+              .frame = {},
+              .gdk_frame = {},
+              .pixels = {},
+              .surface = nullptr,
+              .gdk_texture = nullptr,
+          }
+      );
+    }
+    const std::shared_ptr<const LinuxPixelFrame> frame = GetPixelFrame(*pixel_texture);
+    if (frame && frame != entry->gdk_frame) {
+      entry->gdk_frame = frame;
+      if (entry->gdk_texture != nullptr) {
+        g_object_unref(entry->gdk_texture);
+      }
+      auto* retained_frame = new std::shared_ptr<const LinuxPixelFrame>(frame);
+      GBytes* bytes = g_bytes_new_with_free_func(
+          frame->Pixels().data(),
+          frame->Pixels().size(),
+          [](gpointer data) { delete static_cast<std::shared_ptr<const LinuxPixelFrame>*>(data); },
+          retained_frame
+      );
+#if G_BYTE_ORDER == G_LITTLE_ENDIAN
+      constexpr GdkMemoryFormat format = GDK_MEMORY_B8G8R8A8_PREMULTIPLIED;
+#else
+      constexpr GdkMemoryFormat format = GDK_MEMORY_A8R8G8B8_PREMULTIPLIED;
+#endif
+      entry->gdk_texture =
+          gdk_memory_texture_new(frame->PixelWidth(), frame->PixelHeight(), format, bytes, frame->BytesPerRow());
+      g_bytes_unref(bytes);
+    }
+    return entry->gdk_texture != nullptr ? GDK_TEXTURE(g_object_ref(entry->gdk_texture)) : nullptr;
   }
 
   PangoContext* context = nullptr;
@@ -692,6 +776,10 @@ public:
     if (scene.root != nullptr) {
       DrawNode(*scene.root);
     }
+  }
+
+  void Draw(const PaintCommand& command) {
+    std::visit([this](const auto& value) { DrawCommand(value); }, command);
   }
 
 private:
@@ -1304,6 +1392,334 @@ private:
   float device_scale_ = 1.0F;
 };
 
+graphene_rect_t GrapheneRect(Rect rect) noexcept {
+  graphene_rect_t result;
+  graphene_rect_init(&result, rect.x, rect.y, rect.width, rect.height);
+  return result;
+}
+
+Rect ExpandRect(Rect rect, float amount) noexcept {
+  return {
+      rect.x - amount,
+      rect.y - amount,
+      rect.width + amount * 2.0F,
+      rect.height + amount * 2.0F,
+  };
+}
+
+Rect UnionRect(Rect first, Rect second) noexcept {
+  if (first.IsEmpty()) {
+    return second;
+  }
+  if (second.IsEmpty()) {
+    return first;
+  }
+  const float left = std::min(first.x, second.x);
+  const float top = std::min(first.y, second.y);
+  const float right = std::max(first.x + first.width, second.x + second.width);
+  const float bottom = std::max(first.y + first.height, second.y + second.height);
+  return {left, top, right - left, bottom - top};
+}
+
+template <class Command>
+concept CairoPaintCommand =
+    std::same_as<Command, DrawRectCommand> || std::same_as<Command, DrawTextCommand> ||
+    std::same_as<Command, DrawTextRunsCommand> || std::same_as<Command, DrawImageCommand> ||
+    std::same_as<Command, DrawCircleCommand> || std::same_as<Command, DrawLineCommand> ||
+    std::same_as<Command, DrawArcCommand> || std::same_as<Command, DrawBorderCommand> ||
+    std::same_as<Command, DrawShadowCommand> || std::same_as<Command, FillPathCommand> ||
+    std::same_as<Command, StrokePathCommand> || std::same_as<Command, DrawPathShadowCommand>;
+
+template <CairoPaintCommand Command> Rect CairoCommandBounds(const Command& command) noexcept {
+  if constexpr (std::same_as<Command, DrawRectCommand>) {
+    return command.rect;
+  } else if constexpr (std::same_as<Command, DrawTextCommand>) {
+    return command.rect;
+  } else if constexpr (std::same_as<Command, DrawTextRunsCommand>) {
+    Rect result;
+    for (const TextRun& run : command.runs) {
+      result = UnionRect(result, run.bounds);
+    }
+    return result;
+  } else if constexpr (std::same_as<Command, DrawImageCommand>) {
+    return command.destination;
+  } else if constexpr (std::same_as<Command, DrawCircleCommand>) {
+    return {
+        command.center.x - command.radius,
+        command.center.y - command.radius,
+        command.radius * 2.0F,
+        command.radius * 2.0F
+    };
+  } else if constexpr (std::same_as<Command, DrawLineCommand>) {
+    const float amount = command.style.width;
+    return ExpandRect(
+        {std::min(command.start.x, command.end.x),
+         std::min(command.start.y, command.end.y),
+         std::abs(command.end.x - command.start.x),
+         std::abs(command.end.y - command.start.y)},
+        amount
+    );
+  } else if constexpr (std::same_as<Command, DrawArcCommand>) {
+    return ExpandRect(
+        {command.center.x - command.radius,
+         command.center.y - command.radius,
+         command.radius * 2.0F,
+         command.radius * 2.0F},
+        command.style.width
+    );
+  } else if constexpr (std::same_as<Command, DrawBorderCommand>) {
+    return command.rect;
+  } else if constexpr (std::same_as<Command, DrawShadowCommand>) {
+    return ResolveShadow(command).bounds;
+  } else if constexpr (std::same_as<Command, FillPathCommand>) {
+    return command.path.Bounds();
+  } else if constexpr (std::same_as<Command, StrokePathCommand>) {
+    return ExpandRect(command.path.Bounds(), command.style.width * std::max(1.0F, command.style.miter_limit));
+  } else {
+    static_assert(std::same_as<Command, DrawPathShadowCommand>);
+    const Rect bounds = command.path.Bounds();
+    return {
+        bounds.x + command.offset.x - command.blur_radius,
+        bounds.y + command.offset.y - command.blur_radius,
+        bounds.width + command.blur_radius * 2.0F,
+        bounds.height + command.blur_radius * 2.0F,
+    };
+  }
+}
+
+void ApplySnapshotTransform(GtkSnapshot* snapshot, const Transform2D& transform) {
+  if (transform.IsIdentity()) {
+    return;
+  }
+  graphene_matrix_t matrix;
+  graphene_matrix_init_from_2d(
+      &matrix,
+      transform.m11,
+      transform.m12,
+      transform.m21,
+      transform.m22,
+      transform.translate_x,
+      transform.translate_y
+  );
+  gtk_snapshot_transform_matrix(snapshot, &matrix);
+}
+
+GskPath* CreateGskPath(const Path& path) {
+  GskPathBuilder* builder = gsk_path_builder_new();
+  for (const PathElement& element : PathAccess::Elements(path)) {
+    switch (element.verb) {
+    case PathVerb::MoveTo:
+      gsk_path_builder_move_to(builder, element.points[0].x, element.points[0].y);
+      break;
+    case PathVerb::LineTo:
+      gsk_path_builder_line_to(builder, element.points[0].x, element.points[0].y);
+      break;
+    case PathVerb::QuadraticTo:
+      gsk_path_builder_quad_to(
+          builder,
+          element.points[0].x,
+          element.points[0].y,
+          element.points[1].x,
+          element.points[1].y
+      );
+      break;
+    case PathVerb::CubicTo:
+      gsk_path_builder_cubic_to(
+          builder,
+          element.points[0].x,
+          element.points[0].y,
+          element.points[1].x,
+          element.points[1].y,
+          element.points[2].x,
+          element.points[2].y
+      );
+      break;
+    case PathVerb::Close:
+      gsk_path_builder_close(builder);
+      break;
+    }
+  }
+  return gsk_path_builder_free_to_path(builder);
+}
+
+class SnapshotScenePainter final {
+public:
+  SnapshotScenePainter(LinuxRenderer::State& state, GtkSnapshot* snapshot) : state_(state), snapshot_(snapshot) {}
+
+  void Draw(const RenderScene& scene) {
+    if (scene.root != nullptr) {
+      DrawNode(*scene.root);
+    }
+  }
+
+private:
+  struct CairoBatch {
+    std::vector<const PaintCommand*> commands;
+    Rect bounds;
+  };
+
+  void DrawNode(const RenderNode& node) {
+    const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
+    if (!node.visible || opacity <= 0.0F) {
+      return;
+    }
+    gtk_snapshot_save(snapshot_);
+    graphene_point_t offset;
+    graphene_point_init(&offset, node.offset.x, node.offset.y);
+    gtk_snapshot_translate(snapshot_, &offset);
+    ApplySnapshotTransform(snapshot_, node.transform);
+    if (opacity < 1.0F) {
+      gtk_snapshot_push_opacity(snapshot_, opacity);
+    }
+    DrawSequence(node.content);
+    for (const RenderClip& clip : node.child_clips) {
+      std::visit([this](const auto& value) { PushClip(value); }, clip);
+    }
+    gtk_snapshot_save(snapshot_);
+    ApplySnapshotTransform(snapshot_, node.children_transform);
+    for (const RenderNode* child : node.children) {
+      if (child != nullptr) {
+        DrawNode(*child);
+      }
+    }
+    gtk_snapshot_restore(snapshot_);
+    for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
+      gtk_snapshot_pop(snapshot_);
+    }
+    DrawSequence(node.foreground);
+    if (opacity < 1.0F) {
+      gtk_snapshot_pop(snapshot_);
+    }
+    gtk_snapshot_restore(snapshot_);
+  }
+
+  void DrawSequence(const PaintSequence& sequence) {
+    CairoBatch batch;
+    batch.commands.reserve(sequence.Commands().size());
+    for (const PaintCommand& command : sequence.Commands()) {
+      std::visit([this, &batch, &command](const auto& value) { DrawCommand(batch, command, value); }, command);
+    }
+    Flush(batch);
+  }
+
+  template <CairoPaintCommand Command>
+  void DrawCommand(CairoBatch& batch, const PaintCommand& command, const Command& value) {
+    const Rect bounds = CairoCommandBounds(value);
+    if (bounds.IsEmpty()) {
+      return;
+    }
+    batch.bounds = UnionRect(batch.bounds, bounds);
+    batch.commands.push_back(&command);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const DrawExternalTextureCommand& command) {
+    Flush(batch);
+    if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
+      return;
+    }
+    ::GdkTexture* texture = state_.AcquireSnapshotTexture(command.texture);
+    if (texture == nullptr) {
+      return;
+    }
+    const Size intrinsic = command.texture->IntrinsicSize();
+    const float scale_x = command.destination.width / command.source.width;
+    const float scale_y = command.destination.height / command.source.height;
+    const Rect texture_bounds{
+        command.destination.x - command.source.x * scale_x,
+        command.destination.y - command.source.y * scale_y,
+        intrinsic.width * scale_x,
+        intrinsic.height * scale_y,
+    };
+    const graphene_rect_t clip = GrapheneRect(command.destination);
+    const graphene_rect_t bounds = GrapheneRect(texture_bounds);
+    gtk_snapshot_push_clip(snapshot_, &clip);
+    if (command.opacity < 1.0F) {
+      gtk_snapshot_push_opacity(snapshot_, std::clamp(command.opacity, 0.0F, 1.0F));
+    }
+    gtk_snapshot_append_scaled_texture(
+        snapshot_,
+        texture,
+        command.sampling == ImageSampling::Nearest ? GSK_SCALING_FILTER_NEAREST : GSK_SCALING_FILTER_LINEAR,
+        &bounds
+    );
+    if (command.opacity < 1.0F) {
+      gtk_snapshot_pop(snapshot_);
+    }
+    gtk_snapshot_pop(snapshot_);
+    g_object_unref(texture);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PushClipCommand& command) {
+    Flush(batch);
+    PushClip(command);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PushPathClipCommand& command) {
+    Flush(batch);
+    PushClip(command);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PopClipCommand&) {
+    Flush(batch);
+    gtk_snapshot_pop(snapshot_);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PushTransformCommand& command) {
+    Flush(batch);
+    gtk_snapshot_save(snapshot_);
+    ApplySnapshotTransform(snapshot_, command.transform);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PopTransformCommand&) {
+    Flush(batch);
+    gtk_snapshot_restore(snapshot_);
+  }
+
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PlacePlatformViewCommand&) {
+    Flush(batch);
+    throw std::logic_error("HuxerUI Linux adapter does not support PlatformView composition yet");
+  }
+
+  void Flush(CairoBatch& batch) {
+    if (batch.commands.empty()) {
+      return;
+    }
+    const graphene_rect_t cairo_bounds = GrapheneRect(batch.bounds);
+    cairo_t* context = gtk_snapshot_append_cairo(snapshot_, &cairo_bounds);
+    ScenePainter painter(state_, context);
+    for (const PaintCommand* command : batch.commands) {
+      painter.Draw(*command);
+    }
+    cairo_destroy(context);
+    batch.commands.clear();
+    batch.bounds = {};
+  }
+
+  void PushClip(const PushClipCommand& command) {
+    const graphene_rect_t rect = GrapheneRect(command.rect);
+    if (command.corner_radius <= 0.0F) {
+      gtk_snapshot_push_clip(snapshot_, &rect);
+      return;
+    }
+    GskRoundedRect rounded;
+    gsk_rounded_rect_init_from_rect(&rounded, &rect, command.corner_radius);
+    gtk_snapshot_push_rounded_clip(snapshot_, &rounded);
+  }
+
+  void PushClip(const PushPathClipCommand& command) {
+    GskPath* path = CreateGskPath(command.path);
+    gtk_snapshot_push_fill(
+        snapshot_,
+        path,
+        command.fill_rule == PathFillRule::EvenOdd ? GSK_FILL_RULE_EVEN_ODD : GSK_FILL_RULE_WINDING
+    );
+    gsk_path_unref(path);
+  }
+
+  LinuxRenderer::State& state_;
+  GtkSnapshot* snapshot_ = nullptr;
+};
+
 } // namespace
 
 LinuxRenderer::LinuxRenderer() : state_(std::make_unique<State>()) {}
@@ -1394,6 +1810,13 @@ void LinuxRenderer::Draw(cairo_t* context, const RenderFrame& frame) {
     throw std::invalid_argument("HuxerUI Linux renderer requires a Cairo context");
   }
   ScenePainter(*state_, context).Draw(frame.scene);
+}
+
+void LinuxRenderer::Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame) {
+  if (snapshot == nullptr) {
+    throw std::invalid_argument("HuxerUI Linux renderer requires a GTK snapshot");
+  }
+  SnapshotScenePainter(*state_, snapshot).Draw(frame.scene);
 }
 
 } // namespace huxerui::detail

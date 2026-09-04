@@ -81,6 +81,46 @@ LinuxPixelFrame CopyFrame(const linux::PixelFrame& frame) {
 
 namespace huxerui::linux {
 
+struct GdkTexture::Storage {
+  std::mutex mutex;
+  std::shared_ptr<const detail::LinuxGdkTextureFrame> frame;
+  bool finished = false;
+};
+
+GdkTexture::GdkTexture(Size intrinsic_size)
+    : huxerui::ExternalTexture(intrinsic_size), storage_(std::make_unique<Storage>()) {}
+
+GdkTexture::~GdkTexture() {
+  Finish();
+}
+
+void GdkTexture::Publish(::GdkTexture* frame) {
+  if (frame == nullptr) {
+    throw std::invalid_argument("HuxerUI Linux external GDK texture frame must not be null");
+  }
+  auto retained = std::make_shared<const detail::LinuxGdkTextureFrame>(frame);
+  std::shared_ptr<const detail::LinuxGdkTextureFrame> retired;
+  {
+    std::lock_guard lock(storage_->mutex);
+    if (storage_->finished) {
+      throw std::logic_error("HuxerUI Linux external GDK texture is finished");
+    }
+    retired = std::exchange(storage_->frame, std::move(retained));
+  }
+  NotifyFrameAvailable();
+  retired.reset();
+}
+
+void GdkTexture::Finish() noexcept {
+  std::lock_guard lock(storage_->mutex);
+  storage_->finished = true;
+}
+
+std::shared_ptr<const detail::LinuxGdkTextureFrame> GdkTexture::AcquireFrame() const noexcept {
+  std::lock_guard lock(storage_->mutex);
+  return storage_->frame;
+}
+
 struct PixelTexture::Storage {
   std::mutex mutex;
   std::shared_ptr<const detail::LinuxPixelFrame> frame;
@@ -119,6 +159,10 @@ std::shared_ptr<const detail::LinuxPixelFrame> PixelTexture::AcquireFrame() cons
 } // namespace huxerui::linux
 
 namespace huxerui::detail {
+
+std::shared_ptr<const LinuxGdkTextureFrame> GetGdkTextureFrame(const linux::GdkTexture& texture) noexcept {
+  return texture.AcquireFrame();
+}
 
 std::shared_ptr<const LinuxPixelFrame> GetPixelFrame(const linux::PixelTexture& texture) noexcept {
   return texture.AcquireFrame();

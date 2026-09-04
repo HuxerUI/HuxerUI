@@ -9,7 +9,7 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 |---|---|---:|---:|---:|---:|---:|---:|
 | Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | AppCapability | Yes |
 | macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Camera and microphone | Yes |
-| Linux | Cairo and Pango | Yes | Not implemented | No | Yes | Unavailable | StatusNotifierItem host |
+| Linux | GSK, Cairo, and Pango | Yes | Not implemented | No | Yes | Unavailable | StatusNotifierItem host |
 | Web | Canvas 2D and browser text metrics | Yes | Not implemented | Yes | Yes | Query only | No |
 | Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | Camera and microphone | No |
 | iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Camera and microphone | No |
@@ -77,7 +77,8 @@ Metal publication performs a GPU snapshot and is not a zero-copy handoff; render
 
 ## Linux
 
-The Linux backend uses GTK 4 for the window and event loop, Pango for text, Cairo for rendering, `GtkIMContext` for composition, GIO for platform services, and libsoup 3 for HTTP.
+The Linux backend requires GTK 4.22 or later and uses GTK for the window, event loop, GSK presentation, `GtkIMContext`, and backend selection.
+Pango provides text layout, Cairo records ordinary drawing nodes, GIO provides platform services, and libsoup 3 provides HTTP.
 
 Install the corresponding development packages before configuring CMake.
 The SDK archive does not bundle distribution-owned GTK, Pango, Cairo, GIO, or libsoup libraries.
@@ -86,6 +87,31 @@ Official Linux SDK binaries require glibc 2.35 or later.
 Linux builds are provided for x86_64 and aarch64 hosts.
 PlatformView and a platform accessibility bridge are not implemented.
 System tray presentation requires an active StatusNotifierItem watcher and host; `IsAvailable()` tracks hosts appearing or disappearing at runtime.
+
+Native libraries include `<huxerui/linux/external_texture.h>` for `linux::PixelTexture` and `linux::GdkTexture`.
+`PixelTexture` copies straight-alpha RGBA8888 or BGRA8888 rows and remains available to CPU producers.
+`GdkTexture` retains the latest immutable `::GdkTexture` without downloading its pixels:
+
+```cpp
+#include <gdk/gdk.h>
+#include <huxerui/linux/external_texture.h>
+
+auto texture = std::make_shared<huxerui::linux::GdkTexture>(huxerui::Size{320.0F, 180.0F});
+texture->Publish(frame);
+g_object_unref(frame);
+```
+
+The producer creates `frame` with `GdkGLTextureBuilder`, `GdkDmabufTextureBuilder`, `GdkMemoryTexture`, or another immutable GDK texture implementation.
+`Publish()` retains the frame, may run on a producer thread, and advances the shared ExternalTexture revision only after the complete texture is in the latest-wins mailbox.
+The producer must not modify GL storage retained by a `GdkGLTexture`, and its builder destroy callback releases the GL texture and optional sync object after GDK releases the frame.
+Replacing a frame may invoke the previous texture's destroy callback on the publishing thread; callbacks that own a thread-affine GL context dispatch cleanup to that context's thread or preserve and restore the current context.
+DMA-BUF producers keep every plane fd valid for the `GdkDmabufTexture` lifetime and use formats advertised by the target `GdkDisplay`.
+When an explicit producer fence is not directly carried by the texture builder, import its sync file into the DMA-BUF reservation before publication so GDK's implicit consumer synchronization observes completed writes.
+
+The GTK Snapshot renderer inserts GDK texture nodes at the exact `DrawExternalTextureCommand` position among Cairo nodes.
+Source crop, destination mapping, nearest or linear sampling, transforms, rectangular and path clips, node opacity, foreground drawing, and multiple windows retain the ordinary Image semantics.
+HuxerUI performs no CPU readback on this path, but the active GSK renderer and graphics driver decide whether a concrete texture is imported directly or converted.
+The `example_external_texture` Linux target uses libepoxy to publish fenced OpenGL texture snapshots through `GdkGLTextureBuilder`.
 
 ## Web
 
