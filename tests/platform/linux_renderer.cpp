@@ -159,7 +159,7 @@ TEST_CASE("LinuxRendererDrawsDirectedDashedLines") {
   renderer.Discard();
 }
 
-TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
+TEST_CASE("LinuxRendererArcStartsANewCairoPath") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
 
@@ -171,11 +171,7 @@ TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  cairo_move_to(context, 0.0, 0.0);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE(pixels[12 * 32 + 14] == 0U);
@@ -183,7 +179,7 @@ TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
   renderer.Discard();
 }
 
-TEST_CASE("LinuxRendererBorderDoesNotStrokeAnExistingCairoPath") {
+TEST_CASE("LinuxRendererBorderStartsANewCairoPath") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
 
@@ -195,12 +191,7 @@ TEST_CASE("LinuxRendererBorderDoesNotStrokeAnExistingCairoPath") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  cairo_move_to(context, 2.0, 2.0);
-  cairo_line_to(context, 12.0, 12.0);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE(pixels[7 * 32 + 7] == 0U);

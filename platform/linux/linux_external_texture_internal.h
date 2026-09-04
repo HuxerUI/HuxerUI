@@ -11,9 +11,14 @@
 
 namespace huxerui::detail {
 
+[[nodiscard]] bool SupportsLinuxGlVersion(GdkGLAPI api, int major, int minor) noexcept;
+
 class LinuxGdkTextureFrame final {
 public:
-  explicit LinuxGdkTextureFrame(::GdkTexture* texture) : texture_(GDK_TEXTURE(g_object_ref(texture))) {}
+  explicit LinuxGdkTextureFrame(
+      ::GdkTexture* texture, linux::GlTexture::Origin origin = linux::GlTexture::Origin::TopLeft
+  )
+      : texture_(GDK_TEXTURE(g_object_ref(texture))), origin_(origin) {}
 
   ~LinuxGdkTextureFrame() {
     g_object_unref(texture_);
@@ -26,33 +31,13 @@ public:
     return texture_;
   }
 
-private:
-  ::GdkTexture* texture_ = nullptr;
-};
-
-class LinuxGlFrame final {
-public:
-  LinuxGlFrame(::GdkTexture* texture, linux::GlTexture::Origin origin)
-      : texture_(GDK_TEXTURE(g_object_ref(texture))), origin_(origin) {}
-
-  ~LinuxGlFrame() {
-    g_object_unref(texture_);
-  }
-
-  LinuxGlFrame(const LinuxGlFrame&) = delete;
-  LinuxGlFrame& operator=(const LinuxGlFrame&) = delete;
-
-  [[nodiscard]] ::GdkTexture* Texture() const noexcept {
-    return texture_;
-  }
-
-  [[nodiscard]] linux::GlTexture::Origin Origin() const noexcept {
+  [[nodiscard]] linux::GlTexture::Origin TextureOrigin() const noexcept {
     return origin_;
   }
 
 private:
   ::GdkTexture* texture_ = nullptr;
-  linux::GlTexture::Origin origin_ = linux::GlTexture::Origin::BottomLeft;
+  linux::GlTexture::Origin origin_ = linux::GlTexture::Origin::TopLeft;
 };
 
 class LinuxPixelFrame final {

@@ -18,6 +18,17 @@
 #include "linux_external_texture_internal.h"
 
 namespace huxerui::detail {
+
+bool SupportsLinuxGlVersion(GdkGLAPI api, int major, int minor) noexcept {
+  if (api == GDK_GL_API_GL) {
+    return major > 3 || (major == 3 && minor >= 2);
+  }
+  if (api == GDK_GL_API_GLES) {
+    return major > 3 || (major == 3 && minor >= 1);
+  }
+  return false;
+}
+
 namespace {
 
 class CurrentGlContextScope final {
@@ -81,6 +92,7 @@ class GlStateScope final {
 public:
   GlStateScope() {
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture_);
+    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &pixel_unpack_buffer_);
     glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_framebuffer_);
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_framebuffer_);
     glGetBooleanv(GL_COLOR_WRITEMASK, color_mask_);
@@ -90,6 +102,7 @@ public:
 
   ~GlStateScope() {
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture_));
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(pixel_unpack_buffer_));
     glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(read_framebuffer_));
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(draw_framebuffer_));
     glColorMask(color_mask_[0], color_mask_[1], color_mask_[2], color_mask_[3]);
@@ -106,6 +119,7 @@ public:
 
 private:
   GLint texture_ = 0;
+  GLint pixel_unpack_buffer_ = 0;
   GLint read_framebuffer_ = 0;
   GLint draw_framebuffer_ = 0;
   GLboolean color_mask_[4]{GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
@@ -157,7 +171,7 @@ std::shared_ptr<LinuxGlReleaseContext> CreateReleaseContext(GdkGLContext* produc
     const GdkGLAPI api = gdk_gl_context_get_api(producer_context);
     gdk_gl_context_set_allowed_apis(context, api);
     if ((api & GDK_GL_API_GLES) != 0) {
-      gdk_gl_context_set_required_version(context, 3, 0);
+      gdk_gl_context_set_required_version(context, 3, 1);
     } else {
       gdk_gl_context_set_required_version(context, 3, 2);
     }
@@ -184,7 +198,7 @@ std::shared_ptr<LinuxGlReleaseContext> CreateReleaseContext(GdkGLContext* produc
   return result;
 }
 
-std::shared_ptr<const LinuxGlFrame>
+std::shared_ptr<const LinuxGdkTextureFrame>
 CopyGlFrame(const linux::GlTexture::Frame& frame, std::shared_ptr<LinuxGlReleaseContext>& release_context) {
   if (frame.texture_name == 0) {
     throw std::invalid_argument("HuxerUI Linux GL texture name must not be zero");
@@ -198,6 +212,13 @@ CopyGlFrame(const linux::GlTexture::Frame& frame, std::shared_ptr<LinuxGlRelease
   GdkGLContext* producer_context = gdk_gl_context_get_current();
   if (producer_context == nullptr) {
     throw std::invalid_argument("HuxerUI Linux GL texture publication requires a current GdkGLContext");
+  }
+  int context_major = 0;
+  int context_minor = 0;
+  const GdkGLAPI context_api = gdk_gl_context_get_api(producer_context);
+  gdk_gl_context_get_version(producer_context, &context_major, &context_minor);
+  if (!SupportsLinuxGlVersion(context_api, context_major, context_minor)) {
+    throw std::runtime_error("HuxerUI Linux GL texture publication requires OpenGL 3.2 or OpenGL ES 3.1");
   }
   if (release_context == nullptr) {
     release_context = CreateReleaseContext(producer_context);
@@ -240,6 +261,7 @@ CopyGlFrame(const linux::GlTexture::Frame& frame, std::shared_ptr<LinuxGlRelease
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   glTexImage2D(
       GL_TEXTURE_2D,
       0,
@@ -314,7 +336,7 @@ CopyGlFrame(const linux::GlTexture::Frame& frame, std::shared_ptr<LinuxGlRelease
   static_cast<void>(resources.release());
   objects.texture = 0;
   objects.sync = nullptr;
-  auto result = std::make_shared<const LinuxGlFrame>(texture, frame.origin);
+  auto result = std::make_shared<const LinuxGdkTextureFrame>(texture, frame.origin);
   g_object_unref(texture);
   return result;
 }
@@ -428,7 +450,7 @@ struct GlTexture::Storage {
   std::mutex publish_mutex;
   std::mutex frame_mutex;
   std::shared_ptr<detail::LinuxGlReleaseContext> release_context;
-  std::shared_ptr<const detail::LinuxGlFrame> frame;
+  std::shared_ptr<const detail::LinuxGdkTextureFrame> frame;
   bool finished = false;
 };
 
@@ -437,7 +459,7 @@ GlTexture::GlTexture(Size intrinsic_size)
 
 GlTexture::~GlTexture() {
   std::unique_lock publish_lock(storage_->publish_mutex);
-  std::shared_ptr<const detail::LinuxGlFrame> frame;
+  std::shared_ptr<const detail::LinuxGdkTextureFrame> frame;
   {
     std::lock_guard frame_lock(storage_->frame_mutex);
     storage_->finished = true;
@@ -455,8 +477,8 @@ void GlTexture::PublishCurrent(Frame frame) {
       throw std::logic_error("HuxerUI Linux GL texture is finished");
     }
   }
-  std::shared_ptr<const detail::LinuxGlFrame> imported = detail::CopyGlFrame(frame, storage_->release_context);
-  std::shared_ptr<const detail::LinuxGlFrame> replaced;
+  std::shared_ptr<const detail::LinuxGdkTextureFrame> imported = detail::CopyGlFrame(frame, storage_->release_context);
+  std::shared_ptr<const detail::LinuxGdkTextureFrame> replaced;
   {
     std::lock_guard frame_lock(storage_->frame_mutex);
     replaced = std::exchange(storage_->frame, std::move(imported));
@@ -472,7 +494,7 @@ void GlTexture::Finish() noexcept {
   storage_->finished = true;
 }
 
-std::shared_ptr<const detail::LinuxGlFrame> GlTexture::AcquireFrame() const noexcept {
+std::shared_ptr<const detail::LinuxGdkTextureFrame> GlTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->frame_mutex);
   return storage_->frame;
 }
@@ -520,7 +542,7 @@ std::shared_ptr<const LinuxGdkTextureFrame> GetGdkTextureFrame(const linux::GdkT
   return texture.AcquireFrame();
 }
 
-std::shared_ptr<const LinuxGlFrame> GetGlFrame(const linux::GlTexture& texture) noexcept {
+std::shared_ptr<const LinuxGdkTextureFrame> GetGlFrame(const linux::GlTexture& texture) noexcept {
   return texture.AcquireFrame();
 }
 

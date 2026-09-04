@@ -1340,6 +1340,7 @@ HuxerUI constructs the `GdkGLTexture`, attaches the completion fence, retains or
 The synchronous copy commits before revision publication, restores the producer context before returning, and allows the producer to update or delete its mutable source immediately.
 The Linux `GdkTexture` implementation remains the advanced path that retains one already immutable GDK frame in its latest-wins mailbox, so producers may publish `GdkDmabufTexture` or another GDK-owned texture without HuxerUI downloading pixels.
 The custom GTK widget snapshots ordinary PaintCommands as ordered Cairo nodes and ExternalTexture commands as ordered GDK texture nodes under the same transform, clip, path-fill, opacity, content, child, and foreground structure.
+GTK 4.14 is the minimum because path clips use the 4.14 Snapshot fill API; the GDK GL texture builder used for GPU frames is available from GTK 4.12.
 GDK owns final GL and DMA-BUF presentation import and format negotiation; the concrete Linux ExternalTexture owns its appropriate synchronization and native resource lifetime.
 HuxerUI does not expose file descriptors, GL names, EGL objects, Vulkan objects, or display-server handles in Runtime or PaintCommand.
 The Windows `PixelTexture` implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.

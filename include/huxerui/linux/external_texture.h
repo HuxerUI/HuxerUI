@@ -20,10 +20,9 @@ class PixelTexture;
 
 namespace detail {
 class LinuxGdkTextureFrame;
-class LinuxGlFrame;
 class LinuxPixelFrame;
 std::shared_ptr<const LinuxGdkTextureFrame> GetGdkTextureFrame(const linux::GdkTexture& texture) noexcept;
-std::shared_ptr<const LinuxGlFrame> GetGlFrame(const linux::GlTexture& texture) noexcept;
+std::shared_ptr<const LinuxGdkTextureFrame> GetGlFrame(const linux::GlTexture& texture) noexcept;
 std::shared_ptr<const LinuxPixelFrame> GetPixelFrame(const linux::PixelTexture& texture) noexcept;
 } // namespace detail
 
@@ -130,9 +129,10 @@ public:
   /// Copies frame from the GdkGLContext current on the calling thread and publishes an immutable internal snapshot.
   ///
   /// The source must have level-zero GL_RGBA8 storage in GL_TEXTURE_2D. Producer writes must precede this call in the
-  /// current context, and calls for the same GlTexture must not overlap. Calling code must obey GdkGLContext thread
-  /// affinity, including for the final GlTexture release. Invalid inputs throw std::invalid_argument, platform or GL
-  /// failures throw std::runtime_error, and publication after Finish() throws std::logic_error.
+  /// current OpenGL 3.2 or OpenGL ES 3.1 context, and calls for the same GlTexture must not overlap. Calling code must
+  /// obey GdkGLContext thread affinity, including for the final GlTexture release. Invalid inputs throw
+  /// std::invalid_argument, platform or GL failures throw std::runtime_error, and publication after Finish() throws
+  /// std::logic_error.
   void PublishCurrent(Frame frame);
   /// Idempotently stops publication while preserving the last successfully imported frame.
   void Finish() noexcept;
@@ -140,11 +140,11 @@ public:
 private:
   struct Storage;
 
-  [[nodiscard]] std::shared_ptr<const huxerui::detail::LinuxGlFrame> AcquireFrame() const noexcept;
+  [[nodiscard]] std::shared_ptr<const huxerui::detail::LinuxGdkTextureFrame> AcquireFrame() const noexcept;
 
   std::unique_ptr<Storage> storage_;
 
-  friend std::shared_ptr<const huxerui::detail::LinuxGlFrame>
+  friend std::shared_ptr<const huxerui::detail::LinuxGdkTextureFrame>
   huxerui::detail::GetGlFrame(const GlTexture& texture) noexcept;
 };
 

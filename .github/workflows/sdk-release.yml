@@ -426,7 +426,7 @@ jobs:
             architecture: aarch64
             parallel_jobs: 4
     runs-on: ${{ matrix.runner }}
-    container: ubuntu:22.04
+    container: ubuntu:24.04
     env:
       CC: gcc-14
       CXX: g++-14
@@ -453,12 +453,12 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates fontconfig fonts-dejavu-core gdb git libgtk-4-dev \
+            binutils ca-certificates fontconfig fonts-dejavu-core gdb git libepoxy-dev libgtk-4-dev \
             libsoup-3.0-dev ninja-build pkg-config python3-pip software-properties-common
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
-          python3 -m pip install cmake==3.31.10
+          python3 -m pip install --break-system-packages cmake==3.31.10
       - name: Prepare executables
         run: >-
           chmod +x

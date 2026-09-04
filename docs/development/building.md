@@ -10,7 +10,7 @@ Application developers using a released SDK should follow [Getting Started](../g
 - A C++20 compiler
 - The required platform SDK and dependencies
 
-Linux additionally requires GTK 4.22 or later, libepoxy, Pango, Cairo, GIO, and libsoup 3 development packages discoverable through pkg-config.
+Linux additionally requires GTK 4.14 or later, libepoxy, Pango, Cairo, GIO, and libsoup 3 development packages discoverable through pkg-config.
 
 Debian or Ubuntu:
 

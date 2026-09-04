@@ -77,7 +77,7 @@ Metal publication performs a GPU snapshot and is not a zero-copy handoff; render
 
 ## Linux
 
-The Linux backend requires GTK 4.22 or later and uses GTK for the window, event loop, GSK presentation, `GtkIMContext`, and backend selection.
+The Linux backend requires GTK 4.14 or later and uses GTK for the window, event loop, GSK presentation, `GtkIMContext`, and backend selection.
 Libepoxy provides OpenGL dispatch, Pango provides text layout, Cairo records ordinary drawing nodes, GIO provides platform services, and libsoup 3 provides HTTP.
 
 Install the corresponding development packages before configuring CMake.

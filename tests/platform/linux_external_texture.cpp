@@ -98,25 +98,6 @@ View LinuxGlTextureRenderApp() {
   return Image(rendered_texture).Fit(ImageFit::Fill).With(Frame{2.0F, 2.0F});
 }
 
-std::array<std::uint32_t, 20> RenderPixels(detail::LinuxRenderer& renderer, const RenderFrame& frame) {
-  std::array<std::uint32_t, 20> pixels{};
-  cairo_surface_t* surface = cairo_image_surface_create_for_data(
-      reinterpret_cast<unsigned char*>(pixels.data()),
-      CAIRO_FORMAT_ARGB32,
-      5,
-      4,
-      5 * 4
-  );
-  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  REQUIRE(cairo_status(context) == CAIRO_STATUS_SUCCESS);
-  renderer.Draw(context, frame);
-  cairo_surface_flush(surface);
-  cairo_destroy(context);
-  cairo_surface_destroy(surface);
-  return pixels;
-}
-
 std::array<std::uint32_t, 20> RenderSnapshotPixels(detail::LinuxRenderer& renderer, const RenderFrame& frame) {
   GtkSnapshot* snapshot = gtk_snapshot_new();
   renderer.Snapshot(snapshot, frame);
@@ -278,6 +259,16 @@ TEST_CASE("LinuxGlTextureValidatesPublicationBeforeUsingAContext") {
   texture->Finish();
 }
 
+TEST_CASE("LinuxGlTextureDefinesItsDesktopAndEmbeddedContextMinimums") {
+  REQUIRE_FALSE(detail::SupportsLinuxGlVersion(GDK_GL_API_GL, 3, 1));
+  REQUIRE(detail::SupportsLinuxGlVersion(GDK_GL_API_GL, 3, 2));
+  REQUIRE(detail::SupportsLinuxGlVersion(GDK_GL_API_GL, 4, 0));
+  REQUIRE_FALSE(detail::SupportsLinuxGlVersion(GDK_GL_API_GLES, 3, 0));
+  REQUIRE(detail::SupportsLinuxGlVersion(GDK_GL_API_GLES, 3, 1));
+  REQUIRE(detail::SupportsLinuxGlVersion(GDK_GL_API_GLES, 3, 2));
+  REQUIRE_FALSE(detail::SupportsLinuxGlVersion(static_cast<GdkGLAPI>(0), 4, 6));
+}
+
 TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
   GdkGLContext* context = CreateTestGlContext();
   if (context == nullptr) {
@@ -311,6 +302,12 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, source_pixels.data());
   REQUIRE(glGetError() == GL_NO_ERROR);
 
+  GLuint pixel_unpack_buffer = 0;
+  glGenBuffers(1, &pixel_unpack_buffer);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pixel_unpack_buffer);
+  const std::uint8_t undersized_upload = 0;
+  glBufferData(GL_PIXEL_UNPACK_BUFFER, 1, &undersized_upload, GL_STATIC_DRAW);
+
   const auto texture = std::make_shared<linux::GlTexture>(Size{2.0F, 2.0F});
   texture->PublishCurrent({
       .texture_name = source,
@@ -322,6 +319,9 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
   REQUIRE(gdk_gl_context_get_current() == context);
   REQUIRE(texture->Revision() == 1);
   REQUIRE(detail::GetGlFrame(*texture) != nullptr);
+  GLint restored_pixel_unpack_buffer = 0;
+  glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &restored_pixel_unpack_buffer);
+  REQUIRE(restored_pixel_unpack_buffer == static_cast<GLint>(pixel_unpack_buffer));
 
   const auto top_left_texture = std::make_shared<linux::GlTexture>(Size{2.0F, 2.0F});
   top_left_texture->PublishCurrent({
@@ -331,6 +331,9 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
       .origin = linux::GlTexture::Origin::TopLeft,
       .alpha = linux::GlTexture::Alpha::Opaque,
   });
+
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  glDeleteBuffers(1, &pixel_unpack_buffer);
 
   constexpr std::array<std::uint32_t, 4> replacement_pixels{
       0xFFFFFFFFU,
@@ -423,7 +426,7 @@ TEST_CASE("LinuxExternalTextureUsesALatestWinsMailboxAndAcceptsBgra") {
   REQUIRE(detail::GetPixelFrame(*texture) == frame);
 }
 
-TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThroughCairo") {
+TEST_CASE("LinuxPixelTextureRendersCropDestinationOpacityAndRetainedFramesThroughGtkSnapshot") {
   const auto texture = std::make_shared<linux::PixelTexture>(Size{2.0F, 1.0F});
   rendered_texture = texture;
   const std::array<std::byte, 8> red_green{
@@ -444,7 +447,7 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
   const RenderFrame& frame = runtime.BuildRenderFrame();
   detail::LinuxRenderer renderer;
 
-  const std::array<std::uint32_t, 20> first = RenderPixels(renderer, frame);
+  const std::array<std::uint32_t, 20> first = RenderSnapshotPixels(renderer, frame);
   REQUIRE(first[0] == 0U);
   REQUIRE(first[1U * 5U + 1U] == 0U);
   REQUIRE(first[1U * 5U + 2U] == 0xFF00FF00U);
@@ -463,13 +466,12 @@ TEST_CASE("LinuxExternalTextureRendersCropDestinationOpacityAndRetainedFramesThr
       std::byte{255},
   };
   texture->Publish({2, 1, 8, linux::PixelFormat::Rgba8888, blue_yellow});
-  const std::array<std::uint32_t, 20> updated = RenderPixels(renderer, frame);
+  const std::array<std::uint32_t, 20> updated = RenderSnapshotPixels(renderer, frame);
   REQUIRE(updated[1U * 5U + 2U] == 0xFFFFFF00U);
   REQUIRE(updated[3U * 5U] == 0x80000080U);
 
-  const std::array<std::uint32_t, 20> retained = RenderPixels(renderer, frame);
+  const std::array<std::uint32_t, 20> retained = RenderSnapshotPixels(renderer, frame);
   REQUIRE(retained == updated);
-  REQUIRE(RenderSnapshotPixels(renderer, frame) == updated);
   renderer.Discard();
 }
 

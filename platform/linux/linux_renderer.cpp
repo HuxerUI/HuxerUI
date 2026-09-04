@@ -482,20 +482,6 @@ struct CairoSurfaceHandle {
   cairo_surface_t* surface = nullptr;
 };
 
-void ApplyTransform(cairo_t* context, const Transform2D& transform) {
-  cairo_matrix_t matrix{};
-  cairo_matrix_init(
-      &matrix,
-      transform.m11,
-      transform.m12,
-      transform.m21,
-      transform.m22,
-      transform.translate_x,
-      transform.translate_y
-  );
-  cairo_transform(context, &matrix);
-}
-
 } // namespace
 
 struct LinuxRenderer::State {
@@ -513,9 +499,6 @@ struct LinuxRenderer::State {
   struct CachedExternalTexture {
     std::weak_ptr<linux::PixelTexture> texture;
     std::shared_ptr<const LinuxPixelFrame> frame;
-    std::shared_ptr<const LinuxPixelFrame> gdk_frame;
-    std::vector<std::byte> pixels;
-    cairo_surface_t* surface = nullptr;
     ::GdkTexture* gdk_texture = nullptr;
   };
 
@@ -561,9 +544,6 @@ struct LinuxRenderer::State {
       g_object_unref(image.pixbuf);
     }
     for (CachedExternalTexture& texture : external_textures) {
-      if (texture.surface != nullptr) {
-        cairo_surface_destroy(texture.surface);
-      }
       if (texture.gdk_texture != nullptr) {
         g_object_unref(texture.gdk_texture);
       }
@@ -619,62 +599,6 @@ struct LinuxRenderer::State {
     return pixbuf;
   }
 
-  cairo_surface_t* ExternalTextureFor(const std::shared_ptr<ExternalTexture>& texture) {
-    const std::shared_ptr<linux::PixelTexture> pixel_texture =
-        std::dynamic_pointer_cast<linux::PixelTexture>(texture);
-    if (!pixel_texture) {
-      throw std::logic_error("HuxerUI external texture is incompatible with the Linux renderer");
-    }
-    for (auto iterator = external_textures.begin(); iterator != external_textures.end();) {
-      const std::shared_ptr<linux::PixelTexture> retained = iterator->texture.lock();
-      if (retained && retained->IsActive()) {
-        ++iterator;
-        continue;
-      }
-      if (iterator->surface != nullptr) {
-        cairo_surface_destroy(iterator->surface);
-      }
-      if (iterator->gdk_texture != nullptr) {
-        g_object_unref(iterator->gdk_texture);
-      }
-      iterator = external_textures.erase(iterator);
-    }
-    auto entry = std::find_if(
-        external_textures.begin(), external_textures.end(), [&pixel_texture](const auto& candidate) {
-          return candidate.texture.lock() == pixel_texture;
-        }
-    );
-    if (entry == external_textures.end()) {
-      entry = external_textures.insert(
-          external_textures.end(),
-          CachedExternalTexture{
-              .texture = pixel_texture,
-              .frame = {},
-              .gdk_frame = {},
-              .pixels = {},
-              .surface = nullptr,
-              .gdk_texture = nullptr,
-          }
-      );
-    }
-    const std::shared_ptr<const LinuxPixelFrame> frame = GetPixelFrame(*pixel_texture);
-    if (frame && frame != entry->frame) {
-      if (entry->surface != nullptr) {
-        cairo_surface_destroy(entry->surface);
-      }
-      entry->frame = frame;
-      entry->pixels.assign(frame->Pixels().begin(), frame->Pixels().end());
-      entry->surface = cairo_image_surface_create_for_data(
-          reinterpret_cast<unsigned char*>(entry->pixels.data()),
-          CAIRO_FORMAT_ARGB32,
-          frame->PixelWidth(),
-          frame->PixelHeight(),
-          static_cast<int>(frame->BytesPerRow())
-      );
-    }
-    return entry->surface;
-  }
-
   SnapshotTexture AcquireSnapshotTexture(const std::shared_ptr<ExternalTexture>& texture) {
     const std::shared_ptr<linux::GdkTexture> gdk_texture = std::dynamic_pointer_cast<linux::GdkTexture>(texture);
     if (gdk_texture) {
@@ -684,10 +608,10 @@ struct LinuxRenderer::State {
 
     const std::shared_ptr<linux::GlTexture> gl_texture = std::dynamic_pointer_cast<linux::GlTexture>(texture);
     if (gl_texture) {
-      const std::shared_ptr<const LinuxGlFrame> frame = GetGlFrame(*gl_texture);
+      const std::shared_ptr<const LinuxGdkTextureFrame> frame = GetGlFrame(*gl_texture);
       return {
           frame ? GDK_TEXTURE(g_object_ref(frame->Texture())) : nullptr,
-          frame && frame->Origin() == linux::GlTexture::Origin::BottomLeft,
+          frame && frame->TextureOrigin() == linux::GlTexture::Origin::BottomLeft,
       };
     }
 
@@ -700,9 +624,6 @@ struct LinuxRenderer::State {
       if (retained && retained->IsActive()) {
         ++iterator;
         continue;
-      }
-      if (iterator->surface != nullptr) {
-        cairo_surface_destroy(iterator->surface);
       }
       if (iterator->gdk_texture != nullptr) {
         g_object_unref(iterator->gdk_texture);
@@ -719,16 +640,13 @@ struct LinuxRenderer::State {
           CachedExternalTexture{
               .texture = pixel_texture,
               .frame = {},
-              .gdk_frame = {},
-              .pixels = {},
-              .surface = nullptr,
               .gdk_texture = nullptr,
           }
       );
     }
     const std::shared_ptr<const LinuxPixelFrame> frame = GetPixelFrame(*pixel_texture);
-    if (frame && frame != entry->gdk_frame) {
-      entry->gdk_frame = frame;
+    if (frame && frame != entry->frame) {
+      entry->frame = frame;
       if (entry->gdk_texture != nullptr) {
         g_object_unref(entry->gdk_texture);
       }
@@ -770,9 +688,17 @@ struct LinuxRenderer::State {
 
 namespace {
 
-class ScenePainter final {
+template <class Command>
+concept CairoPaintCommand = std::same_as<Command, DrawRectCommand> || std::same_as<Command, DrawTextCommand> ||
+                            std::same_as<Command, DrawTextRunsCommand> || std::same_as<Command, DrawImageCommand> ||
+                            std::same_as<Command, DrawCircleCommand> || std::same_as<Command, DrawLineCommand> ||
+                            std::same_as<Command, DrawArcCommand> || std::same_as<Command, DrawBorderCommand> ||
+                            std::same_as<Command, DrawShadowCommand> || std::same_as<Command, FillPathCommand> ||
+                            std::same_as<Command, StrokePathCommand> || std::same_as<Command, DrawPathShadowCommand>;
+
+class CairoCommandPainter final {
 public:
-  ScenePainter(LinuxRenderer::State& state, cairo_t* context) : state_(state), context_(context) {
+  CairoCommandPainter(LinuxRenderer::State& state, cairo_t* context) : state_(state), context_(context) {
     double horizontal_x = 1.0;
     double horizontal_y = 0.0;
     double vertical_x = 0.0;
@@ -786,14 +712,8 @@ public:
     device_scale_ = std::max(device_scale_, 0.001F);
   }
 
-  void Draw(const RenderScene& scene) {
-    if (scene.root != nullptr) {
-      DrawNode(*scene.root);
-    }
-  }
-
-  void Draw(const PaintCommand& command) {
-    std::visit([this](const auto& value) { DrawCommand(value); }, command);
+  template <CairoPaintCommand Command> void Draw(const Command& command) {
+    DrawCommand(command);
   }
 
 private:
@@ -803,46 +723,6 @@ private:
       return 0;
     }
     return std::max(1, static_cast<int>(pixels));
-  }
-
-  void DrawNode(const RenderNode& node) {
-    const float opacity = std::clamp(node.opacity, 0.0F, 1.0F);
-    if (!node.visible || opacity <= 0.0F) {
-      return;
-    }
-    cairo_save(context_);
-    cairo_translate(context_, node.offset.x, node.offset.y);
-    ApplyTransform(context_, node.transform);
-    if (opacity < 1.0F) {
-      cairo_push_group(context_);
-    }
-    DrawSequence(node.content);
-    for (const RenderClip& clip : node.child_clips) {
-      std::visit([this](const auto& value) { DrawCommand(value); }, clip);
-    }
-    cairo_save(context_);
-    ApplyTransform(context_, node.children_transform);
-    for (const RenderNode* child : node.children) {
-      if (child != nullptr) {
-        DrawNode(*child);
-      }
-    }
-    cairo_restore(context_);
-    for (std::size_t index = 0; index < node.child_clips.size(); ++index) {
-      cairo_restore(context_);
-    }
-    DrawSequence(node.foreground);
-    if (opacity < 1.0F) {
-      cairo_pop_group_to_source(context_);
-      cairo_paint_with_alpha(context_, opacity);
-    }
-    cairo_restore(context_);
-  }
-
-  void DrawSequence(const PaintSequence& sequence) {
-    for (const PaintCommand& command : sequence.Commands()) {
-      std::visit([this](const auto& value) { DrawCommand(value); }, command);
-    }
   }
 
   static void AddStops(cairo_pattern_t* pattern, const std::vector<GradientStop>& stops) {
@@ -981,48 +861,6 @@ private:
         command.sampling == ImageSampling::Nearest ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR
     );
     cairo_paint_with_alpha(context_, std::clamp(command.opacity, 0.0F, 1.0F));
-    cairo_restore(context_);
-  }
-
-  void DrawCommand(const DrawExternalTextureCommand& command) {
-    if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
-      return;
-    }
-    cairo_surface_t* surface = state_.ExternalTextureFor(command.texture);
-    if (surface == nullptr) {
-      return;
-    }
-    const Size intrinsic = command.texture->IntrinsicSize();
-    const double source_scale_x = cairo_image_surface_get_width(surface) / std::max(0.001F, intrinsic.width);
-    const double source_scale_y = cairo_image_surface_get_height(surface) / std::max(0.001F, intrinsic.height);
-    const double source_x = command.source.x * source_scale_x;
-    const double source_y = command.source.y * source_scale_y;
-    const double source_width = command.source.width * source_scale_x;
-    const double source_height = command.source.height * source_scale_y;
-    cairo_save(context_);
-    cairo_new_path(context_);
-    cairo_rectangle(
-        context_, command.destination.x, command.destination.y, command.destination.width, command.destination.height
-    );
-    cairo_clip(context_);
-    cairo_pattern_t* pattern = cairo_pattern_create_for_surface(surface);
-    cairo_matrix_t matrix{};
-    cairo_matrix_init(
-        &matrix,
-        source_width / command.destination.width,
-        0.0,
-        0.0,
-        source_height / command.destination.height,
-        source_x - command.destination.x * source_width / command.destination.width,
-        source_y - command.destination.y * source_height / command.destination.height
-    );
-    cairo_pattern_set_matrix(pattern, &matrix);
-    cairo_pattern_set_filter(
-        pattern, command.sampling == ImageSampling::Nearest ? CAIRO_FILTER_NEAREST : CAIRO_FILTER_BILINEAR
-    );
-    cairo_set_source(context_, pattern);
-    cairo_paint_with_alpha(context_, std::clamp(command.opacity, 0.0F, 1.0F));
-    cairo_pattern_destroy(pattern);
     cairo_restore(context_);
   }
 
@@ -1368,39 +1206,6 @@ private:
     return blurred;
   }
 
-  void DrawCommand(const PushClipCommand& command) {
-    cairo_save(context_);
-    cairo_new_path(context_);
-    AddRoundedRect(context_, command.rect, command.corner_radius);
-    cairo_clip(context_);
-  }
-
-  void DrawCommand(const PushPathClipCommand& command) {
-    cairo_save(context_);
-    AppendPath(context_, command.path);
-    cairo_set_fill_rule(
-        context_, command.fill_rule == PathFillRule::EvenOdd ? CAIRO_FILL_RULE_EVEN_ODD : CAIRO_FILL_RULE_WINDING
-    );
-    cairo_clip(context_);
-  }
-
-  void DrawCommand(const PopClipCommand&) {
-    cairo_restore(context_);
-  }
-
-  void DrawCommand(const PushTransformCommand& command) {
-    cairo_save(context_);
-    ApplyTransform(context_, command.transform);
-  }
-
-  void DrawCommand(const PopTransformCommand&) {
-    cairo_restore(context_);
-  }
-
-  void DrawCommand(const PlacePlatformViewCommand&) {
-    throw std::logic_error("HuxerUI Linux adapter does not support PlatformView composition yet");
-  }
-
   LinuxRenderer::State& state_;
   cairo_t* context_;
   float device_scale_ = 1.0F;
@@ -1434,15 +1239,6 @@ Rect UnionRect(Rect first, Rect second) noexcept {
   const float bottom = std::max(first.y + first.height, second.y + second.height);
   return {left, top, right - left, bottom - top};
 }
-
-template <class Command>
-concept CairoPaintCommand =
-    std::same_as<Command, DrawRectCommand> || std::same_as<Command, DrawTextCommand> ||
-    std::same_as<Command, DrawTextRunsCommand> || std::same_as<Command, DrawImageCommand> ||
-    std::same_as<Command, DrawCircleCommand> || std::same_as<Command, DrawLineCommand> ||
-    std::same_as<Command, DrawArcCommand> || std::same_as<Command, DrawBorderCommand> ||
-    std::same_as<Command, DrawShadowCommand> || std::same_as<Command, FillPathCommand> ||
-    std::same_as<Command, StrokePathCommand> || std::same_as<Command, DrawPathShadowCommand>;
 
 template <CairoPaintCommand Command> Rect CairoCommandBounds(const Command& command) noexcept {
   if constexpr (std::same_as<Command, DrawRectCommand>) {
@@ -1710,9 +1506,19 @@ private:
     }
     const graphene_rect_t cairo_bounds = GrapheneRect(batch.bounds);
     cairo_t* context = gtk_snapshot_append_cairo(snapshot_, &cairo_bounds);
-    ScenePainter painter(state_, context);
+    CairoCommandPainter painter(state_, context);
     for (const PaintCommand* command : batch.commands) {
-      painter.Draw(*command);
+      std::visit(
+          [&painter](const auto& value) {
+            using Value = std::decay_t<decltype(value)>;
+            if constexpr (CairoPaintCommand<Value>) {
+              painter.Draw(value);
+            } else {
+              throw std::logic_error("HuxerUI GTK snapshot contains a non-Cairo command in a Cairo batch");
+            }
+          },
+          *command
+      );
     }
     cairo_destroy(context);
     batch.commands.clear();
@@ -1827,13 +1633,6 @@ std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(
     std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
 ) {
   return std::make_unique<PangoTextLayout>(state_->context, text, style, max_width, options);
-}
-
-void LinuxRenderer::Draw(cairo_t* context, const RenderFrame& frame) {
-  if (context == nullptr) {
-    throw std::invalid_argument("HuxerUI Linux renderer requires a Cairo context");
-  }
-  ScenePainter(*state_, context).Draw(frame.scene);
 }
 
 void LinuxRenderer::Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame) {

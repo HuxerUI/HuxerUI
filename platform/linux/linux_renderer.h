@@ -3,7 +3,6 @@
 #include <memory>
 #include <string_view>
 
-#include <cairo/cairo.h>
 #include <gtk/gtk.h>
 
 #include <huxerui/render_scene.h>
@@ -34,7 +33,6 @@ public:
   [[nodiscard]] std::unique_ptr<TextLayout>
   CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
 
-  void Draw(cairo_t* context, const RenderFrame& frame);
   void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame);
 
 public:

@@ -1782,8 +1782,16 @@ TEST_CASE("HuxerUICliPlatformEnvironmentDiagnosisOwnsHostAndToolChecks") {
     };
     REQUIRE(has_linux_diagnostic("pkg-config"));
     REQUIRE(has_linux_diagnostic("pkg:gtk4"));
+    REQUIRE(has_linux_diagnostic("pkg:epoxy"));
     REQUIRE(has_linux_diagnostic("pkg:gio-2.0"));
     REQUIRE(has_linux_diagnostic("pkg:libsoup-3.0"));
+    const auto gtk_diagnostic = std::find_if(
+        linux_diagnostics.begin(),
+        linux_diagnostics.end(),
+        [](const huxerui::cli::EnvironmentDiagnostic& diagnostic) { return diagnostic.id == "pkg:gtk4"; }
+    );
+    REQUIRE(gtk_diagnostic != linux_diagnostics.end());
+    REQUIRE(gtk_diagnostic->label.find("gtk4 >= 4.14") != std::string::npos);
     REQUIRE_FALSE(has_linux_diagnostic("pkg:x11"));
     REQUIRE_FALSE(has_linux_diagnostic("pkg:egl"));
     REQUIRE_FALSE(has_linux_diagnostic("pkg:glesv2"));
