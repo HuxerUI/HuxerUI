@@ -159,11 +159,11 @@ public:
     stopping_ = true;
     if (listen_socket_ >= 0) {
       shutdown(listen_socket_, SHUT_RDWR);
-      CloseSocket(std::exchange(listen_socket_, -1));
     }
     if (thread_.joinable()) {
       thread_.join();
     }
+    CloseSocket(std::exchange(listen_socket_, -1));
   }
 
   [[nodiscard]] std::string Url(std::string_view path) const {

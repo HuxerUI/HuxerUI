@@ -865,6 +865,32 @@ TEST_CASE("LinuxFilePickerCompletesAnActiveRequestWhenThePortalDisappears") {
   cancel();
 }
 
+TEST_CASE("LinuxFilePickerCanReleaseItsTransportFromAPortalCompletion") {
+  FakePortal portal;
+  portal.SetScenario({.response = 1});
+  std::shared_ptr<detail::FilePickerTransport> transport =
+      detail::CreateLinuxFilePickerTransport([] { return 0UL; }, portal.Address());
+  REQUIRE(transport);
+
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool completed = false;
+  std::function<void()> cancel = transport->OpenFiles({}, false, [&](std::vector<FileReference> references) {
+    transport.reset();
+    {
+      std::scoped_lock lock(mutex);
+      completed = references.empty();
+    }
+    condition.notify_all();
+  });
+  {
+    std::unique_lock lock(mutex);
+    REQUIRE(condition.wait_for(lock, std::chrono::seconds(5), [&] { return completed; }));
+  }
+  REQUIRE_FALSE(transport);
+  cancel();
+}
+
 TEST_CASE("LinuxFilePickerHandlesEmptyFiltersPortalFailuresAndInvalidUris") {
   FakePortal portal;
   TemporaryDirectory temporary;
