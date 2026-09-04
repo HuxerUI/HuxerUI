@@ -938,6 +938,16 @@ void CheckReferenceIo(bool succeeded) {
   }
 }
 
+void CheckReferenceStatus(NTSTATUS status) {
+  if (status >= 0) {
+    return;
+  }
+  static const auto status_to_error = reinterpret_cast<decltype(&RtlNtStatusToDosError)>(
+      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
+  CheckReference(status_to_error != nullptr, FileErrorCode::Unsupported);
+  throw ReferenceFailure(ErrorCode(std::error_code(status_to_error(status), std::system_category())));
+}
+
 class ReferenceHandle final {
 public:
   explicit ReferenceHandle(HANDLE value = INVALID_HANDLE_VALUE) : value_(value) {}
@@ -970,21 +980,11 @@ void CheckReferenceDirectory(HANDLE handle) {
   CheckReference(!ReferenceIsLink(handle, info.dwFileAttributes), FileErrorCode::Unsupported);
 }
 
-// Resolve exactly one child against an already opened directory, never its reconstructed path.
-// FILE_OPEN_REPARSE_POINT leaves a junction/symlink as an object we can reject before traversing it.
-// A changed directory name or reparse tag cannot make a later child open restart at the old path.
-ReferenceHandle OpenReferenceChild(HANDLE parent, std::wstring_view name, ACCESS_MASK access,
-                                   ULONG disposition = FILE_OPEN, ULONG options = 0, bool* created = nullptr) {
-  CheckReferenceDirectory(parent);
-  CheckReference(!name.empty() && name != L"." && name != L".." &&
-                     name.find_first_of(L"/\\:") == std::wstring_view::npos &&
-                     name.find(L'\0') == std::wstring_view::npos &&
-                     name.size() <= std::numeric_limits<USHORT>::max() / sizeof(wchar_t), FileErrorCode::Unsupported);
+ReferenceHandle OpenReference(HANDLE parent, std::wstring_view name, ACCESS_MASK access,
+                              ULONG disposition = FILE_OPEN, ULONG options = 0, bool* created = nullptr) {
   static const auto create_file = reinterpret_cast<decltype(&NtCreateFile)>(
       GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtCreateFile"));
-  static const auto status_to_error = reinterpret_cast<decltype(&RtlNtStatusToDosError)>(
-      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
-  CheckReference(create_file && status_to_error, FileErrorCode::Unsupported);
+  CheckReference(create_file != nullptr, FileErrorCode::Unsupported);
   UNICODE_STRING child{};
   child.Buffer = const_cast<PWSTR>(name.data());
   child.Length = child.MaximumLength = static_cast<USHORT>(name.size() * sizeof(wchar_t));
@@ -999,18 +999,27 @@ ReferenceHandle OpenReferenceChild(HANDLE parent, std::wstring_view name, ACCESS
                                      FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                      disposition, options | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
                                      nullptr, 0);
-  if (status < 0) {
-    throw ReferenceFailure(ErrorCode(std::error_code(status_to_error(status), std::system_category())));
-  }
+  CheckReferenceStatus(status);
   if (created) { *created = io.Information == FILE_CREATED; }
   return ReferenceHandle(raw);
 }
 
+// Resolve exactly one child against an already opened directory, never its reconstructed path.
+// FILE_OPEN_REPARSE_POINT leaves a junction/symlink as an object we can reject before traversing it.
+// A changed directory name or reparse tag cannot make a later child open restart at the old path.
+ReferenceHandle OpenReferenceChild(HANDLE parent, std::wstring_view name, ACCESS_MASK access,
+                                   ULONG disposition = FILE_OPEN, ULONG options = 0, bool* created = nullptr) {
+  CheckReferenceDirectory(parent);
+  CheckReference(!name.empty() && name != L"." && name != L".." &&
+                     name.find_first_of(L"/\\:") == std::wstring_view::npos &&
+                     name.find(L'\0') == std::wstring_view::npos &&
+                     name.size() <= std::numeric_limits<USHORT>::max() / sizeof(wchar_t), FileErrorCode::Unsupported);
+  return OpenReference(parent, name, access, disposition, options, created);
+}
+
 ReferenceHandle ReopenReference(HANDLE handle, ACCESS_MASK access) {
-  ReferenceHandle result(ReOpenFile(handle, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT));
-  CheckReferenceIo(result.Get() != INVALID_HANDLE_VALUE);
-  return result;
+  // An empty relative name reopens the retained object, including directories, with an independent cursor.
+  return OpenReference(handle, L"", access);
 }
 
 int ReferenceFileDescriptor(ReferenceHandle handle, bool writing) {
@@ -1038,10 +1047,13 @@ std::wstring ReferencePath(HANDLE handle) {
 }
 
 void RenameReference(HANDLE file, HANDLE parent, std::wstring_view name) {
-  ReferenceHandle target = OpenReferenceChild(parent, name, FILE_READ_ATTRIBUTES);
-  const auto attributes = ReferenceInformation(target.Get()).dwFileAttributes;
-  CheckReference(!(attributes & FILE_ATTRIBUTE_DIRECTORY) && !ReferenceIsLink(target.Get(), attributes),
-                 FileErrorCode::AlreadyExists);
+  {
+    ReferenceHandle target = OpenReferenceChild(parent, name, FILE_READ_ATTRIBUTES);
+    const auto attributes = ReferenceInformation(target.Get()).dwFileAttributes;
+    CheckReference(!(attributes & FILE_ATTRIBUTE_DIRECTORY) && !ReferenceIsLink(target.Get(), attributes),
+                   FileErrorCode::AlreadyExists);
+  }
+  // Windows can reject replacement while the target's inspection handle remains open.
   const std::size_t size = sizeof(FILE_RENAME_INFO) + name.size() * sizeof(wchar_t);
   std::vector<std::byte> buffer(size);
   auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
@@ -1049,7 +1061,14 @@ void RenameReference(HANDLE file, HANDLE parent, std::wstring_view name) {
   info->RootDirectory = parent;
   info->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
   std::memcpy(info->FileName, name.data(), info->FileNameLength);
-  CheckReferenceIo(SetFileInformationByHandle(file, FileRenameInfo, info, static_cast<DWORD>(size)));
+  // Use the native rename class to keep the destination relative to the retained directory handle.
+  using SetInformationFile = NTSTATUS(NTAPI*)(HANDLE, PIO_STATUS_BLOCK, PVOID, ULONG, FILE_INFORMATION_CLASS);
+  static const auto set_information = reinterpret_cast<SetInformationFile>(
+      GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationFile"));
+  CheckReference(set_information != nullptr, FileErrorCode::Unsupported);
+  constexpr auto rename_information = static_cast<FILE_INFORMATION_CLASS>(10);
+  IO_STATUS_BLOCK io{};
+  CheckReferenceStatus(set_information(file, &io, info, static_cast<ULONG>(size), rename_information));
 }
 #endif
 
@@ -1132,7 +1151,7 @@ LocalFileReferenceState::LocalFileReferenceState(File file, bool writable, FileR
   file_ = File(PublicPath(canonical));
 #if defined(_WIN32)
   // A metadata-only anchor preserves the selected object, including an individually selected file,
-  // without retaining ancestor locks or requiring parent enumeration/creation rights.
+  // without requiring parent enumeration/creation rights. Its lifetime can still block ancestor renames.
   anchor_ = std::make_shared<Anchor>(file_);
 #else
   const bool directory = fs::is_directory(canonical);
@@ -1247,11 +1266,13 @@ FileReferenceMetadata LocalFileReferenceState::Metadata(std::string* identity, i
   result.can_write = writable_ && result.type != FileType::Other &&
                      (result.type == FileType::Directory || !(info.dwFileAttributes & FILE_ATTRIBUTE_READONLY));
   if (result.can_write) {
-    ReferenceHandle writable(ReOpenFile(handle.Get(),
-        result.type == FileType::Directory ? FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY : FILE_WRITE_DATA,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT));
-    result.can_write = writable.Get() != INVALID_HANDLE_VALUE;
+    try {
+      const auto writable = ReopenReference(handle.Get(),
+          result.type == FileType::Directory ? FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY : FILE_WRITE_DATA);
+      result.can_write = writable.Get() != INVALID_HANDLE_VALUE;
+    } catch (const ReferenceFailure&) {
+      result.can_write = false;
+    }
   }
   if (result.type == FileType::File) {
     result.size = (static_cast<std::uint64_t>(info.nFileSizeHigh) << 32) | info.nFileSizeLow;

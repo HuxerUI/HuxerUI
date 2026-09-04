@@ -400,7 +400,7 @@ Code uses `std::optional<FileReference>` when absence is meaningful.
 `AsFile()` synchronously returns the backend's stored local path, or `std::nullopt` when no local path is available; it does not perform I/O, copy contents, activate permission, or refresh a moved or deleted entry.
 Windows, macOS, and Linux local references support it, including files, directories, and derived children; path-backed iOS references use the same behavior, while Android document URIs and Web browser handles return no path.
 The decision belongs to the existing reference backend, not a shared platform-name switch: the private state defaults to no path, and the shared local state returns its existing `File` even when a coordination callback is present.
-The returned `File` does not retain the grant or temporary-file owner; application code must keep a reference alive for the whole path-based operation or project session, including asynchronous work.
+The returned `File` does not retain the grant or temporary-file owner; application code must keep a reference alive for the whole path-based operation or project session when access depends on those resources, including asynchronous work.
 Path-based operations use ordinary system permissions and do not inherit `CanWrite()` restrictions, coordinated access, or handle-relative identity and containment guarantees; the original reference and its I/O contract remain unchanged.
 `AsFile()` is an explicit path interoperability operation, not an existence/access check or a persistent grant; use reference I/O when its authorization or coordination behavior is required.
 
@@ -646,10 +646,13 @@ Windows uses the application's Local App Data identity for durable data, applica
 Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection, adding `FOS_PICKFOLDERS` for a single directory.
 Filters map extension values directly and exact MIME types through the Windows registry; wildcard or unknown MIME mappings deliberately widen the system filter rather than excluding valid documents.
 Selected filesystem paths are available explicitly through `FileReference::AsFile()`, while metadata reports the filename, size, registered MIME type when available, and basic write capability.
-File and directory grants retain a metadata-only handle without locking idle ancestors; descendant access opens one child at a time with `NtCreateFile` relative to its parent's handle and rejects traversal-changing reparse points.
-`ReOpenFile` obtains operation-specific access and independent enumeration cursors from retained objects; enumeration, creation, overwrite finalization, and temporary-file cleanup use handles rather than reconstructed paths.
+File and directory grants retain a metadata-only handle with read, write, and delete sharing; descendant access opens one child at a time with `NtCreateFile` relative to its parent's handle and rejects traversal-changing reparse points.
+`NtCreateFile` with an empty relative name reopens the retained object for operation-specific access and an independent enumeration cursor; the same primitive probes write access without creating entries.
+Enumeration, creation, overwrite finalization, and temporary-file cleanup use handles rather than reconstructed paths.
 Normalized names queried from those handles are used only for metadata and root-containment checks, never to reopen or mutate an entry.
-If a grant or ancestor is renamed, access remains bound to the original object or fails; a replacement at the old path does not acquire the grant, and retaining a reference does not freeze the surrounding namespace.
+Retained handles can prevent ancestor directories from being renamed, even between operations; shared-delete access does not remove every filesystem restriction on renaming ancestors.
+Applications needing ordinary Windows path semantics may keep `AsFile()` and release the reference; the native anchor closes after all sharing references, derived children, and pending operations release it.
+If a grant or ancestor is successfully renamed, access remains bound to the original object or fails; a replacement at the old path does not acquire the grant.
 All Windows picker references use this native backend; a foreign source that only supports path-based import is unsupported because handing it a reconstructed destination path would bypass the retained directory authority.
 Reads, imports, replacements, and save copies reuse the shared core worker executor while dialog presentation and cancellation stay on the existing UI dispatcher.
 The adapter does not request persistent grants, expose platform paths publicly, or add a second Windows-specific file abstraction.

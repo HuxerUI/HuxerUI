@@ -449,9 +449,11 @@ public:
   /// the stored path. Success does not guarantee the entry still exists or is accessible; renaming does not
   /// update the returned File or make it follow the reference's retained native identity.
   /// @warning File does not retain this reference's grant or temporary-file owner. Keep a FileReference alive
-  /// throughout all path-based use, including asynchronous work or an IDE project session. File operations use
-  /// ordinary system permissions, not CanWrite(), and do not inherit reference coordination or grant-relative
-  /// access. Continue using FileReference I/O when those semantics are required.
+  /// throughout path-based use when access depends on those resources, such as Apple security-scoped selections.
+  /// Windows local paths may outlive the reference; retained native handles can prevent ancestor renaming until
+  /// all sharing references and pending operations release them. AsFile() itself does not release any handles.
+  /// File operations use ordinary system permissions, not CanWrite(), and do not inherit reference coordination
+  /// or grant-relative access. Continue using FileReference I/O when those semantics are required.
   /// @code{.cpp}
   /// Task<bool> WriteProjectSettings(FileReference project) {
   ///   auto directory = project.AsFile();

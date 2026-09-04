@@ -109,8 +109,12 @@ Task<bool> WriteProjectSettings(FileReference project, std::string json) {
 ```
 
 `File` remains a path value: it does not retain a security scope or temporary-file owner, enforce the reference's `CanWrite()` restriction, coordinate document access, or preserve native identity after path replacement.
-Keep the original reference or a copy alive throughout path-based use, especially for macOS security-scoped selections and iOS temporary activation copies.
+Keep the original reference or a copy alive throughout path-based use when access depends on retained resources, such as macOS security-scoped selections and iOS temporary activation copies.
 Actual operations still require system permission; continue using `FileReference` I/O when its grant restrictions or coordination are needed.
+
+On Windows, an application needing only ordinary local-path behavior may keep the returned `File` and discard the `FileReference`.
+Retained native handles can prevent ancestor directories from being renamed; `AsFile()` does not release them, and all references sharing the grant, including derived children and pending operations, must release it before the handle closes.
+After release, the `File` remains a path value: moving the directory can invalidate that path, and replacing it makes subsequent path-based operations target the replacement rather than the previously selected object.
 
 ## FilePicker
 

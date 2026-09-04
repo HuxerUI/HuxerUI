@@ -787,7 +787,124 @@ TEST_CASE("FileReferencesAccessTheSelectedFileWithoutParentReadOrWritePermission
 #endif
 
 #if defined(_WIN32)
-TEST_CASE("WindowsDirectoryGrantsDoNotLockIdleAncestorsOrFollowReplacedRoots") {
+TEST_CASE("WindowsDirectoryReferencesProbeWriteAccessWithoutChangingTheDirectory") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Paths());
+  Runtime runtime(FileApp, platform);
+  runtime.BuildFrame();
+  const File directory = file_system->Directories().temporary_directory.Child("selected");
+  REQUIRE(directory.CreateDirectory());
+  bool writable = true;
+  bool expected_write = true;
+  std::unique_ptr<void, decltype(&CloseHandle)> blocker{nullptr, CloseHandle};
+  SECTION("A writable selection reports child creation access") {}
+  SECTION("A read-only selection preserves its grant restriction") {
+    writable = false;
+    expected_write = false;
+  }
+  SECTION("Unavailable write access does not prevent reading the directory") {
+    const HANDLE handle = CreateFileW(fs::u8path(directory.Path()).c_str(), FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    REQUIRE(handle != INVALID_HANDLE_VALUE);
+    blocker.reset(handle);
+    expected_write = false;
+  }
+  std::optional<FileReference> reference;
+  REQUIRE_NOTHROW(reference = detail::MakeLocalFileReference(directory, writable));
+  REQUIRE(reference->Type() == FileType::Directory);
+  REQUIRE(reference->CanWrite() == expected_write);
+  REQUIRE(reference->AsFile() == directory);
+  const auto entries = directory.ListChildren();
+  REQUIRE(entries.Succeeded());
+  REQUIRE(entries.Value().empty());
+  std::optional<FileResult<std::vector<FileReference>>> children;
+  std::optional<FileResult<FileReference>> created;
+  file_tasks.Launch([&]() -> Task<void> {
+    children = co_await reference->ListChildrenAsync();
+    created = co_await reference->CreateDirectoryAsync("child");
+    file_task_complete = true;
+  });
+  platform.RunUntil([] { return file_task_complete; });
+  REQUIRE(children.has_value());
+  REQUIRE(children->Succeeded());
+  REQUIRE(children->Value().empty());
+  REQUIRE(created.has_value());
+  REQUIRE(created->Succeeded() == expected_write);
+  REQUIRE(directory.Child("child").Exists() == expected_write);
+  if (!expected_write) {
+    REQUIRE(created->Error().code == FileErrorCode::PermissionDenied);
+  }
+}
+
+TEST_CASE("WindowsDirectoryReferencePathsRemainUsableAfterReleasingNativeHandles") {
+  TemporaryDirectory temporary;
+  const File root(temporary.Paths().temporary_directory);
+  const File parent = root.Child("parent");
+  const File selected = parent.Child("selected");
+  const File moved = root.Child("moved");
+  REQUIRE(selected.CreateDirectories());
+  REQUIRE(selected.Child("value.txt").WriteString("original"));
+  std::optional<File> path;
+  {
+    auto reference = detail::MakeLocalFileReference(selected, false);
+    auto copy = reference;
+    path = copy.AsFile();
+    REQUIRE(path == selected);
+  }
+  REQUIRE(parent.MoveTo(moved));
+  REQUIRE_FALSE(path->Exists());
+  REQUIRE(moved.Child("selected").Child("value.txt").ReadString().Value() == "original");
+  REQUIRE(path->CreateDirectories());
+  REQUIRE(path->Child("value.txt").WriteString("unrelated"));
+  REQUIRE(path->Child("value.txt").ReadString().Value() == "unrelated");
+  REQUIRE(moved.Child("selected").Child("value.txt").ReadString().Value() == "original");
+}
+
+TEST_CASE("WindowsDirectoryOverwritesPreserveOriginalsAndCleanUpFailedStagingFiles") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Paths());
+  Runtime runtime(FileApp, platform);
+  runtime.BuildFrame();
+  const File root = file_system->Directories().temporary_directory;
+  const File directory = root.Child("selected");
+  const File target = directory.Child("value.txt");
+  const File source = root.Child("source.txt");
+  REQUIRE(directory.CreateDirectory());
+  REQUIRE(target.WriteString("original"));
+  REQUIRE(source.WriteString("replacement"));
+  auto reference = detail::MakeLocalFileReference(directory, true);
+  const HANDLE handle = CreateFileW(fs::u8path(target.Path()).c_str(), FILE_READ_DATA,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  REQUIRE(handle != INVALID_HANDLE_VALUE);
+  std::unique_ptr<void, decltype(&CloseHandle)> blocker{handle, CloseHandle};
+  std::optional<FileResult<FileReference>> result;
+  const auto copy = [&] {
+    file_task_complete = false;
+    result.reset();
+    file_tasks.Launch([&]() -> Task<void> {
+      result = co_await reference.CopyFileFromAsync(source, "value.txt", true);
+      file_task_complete = true;
+    });
+    platform.RunUntil([] { return file_task_complete; });
+    REQUIRE(result.has_value());
+  };
+  copy();
+  REQUIRE_FALSE(result->Succeeded());
+  REQUIRE(target.ReadString().Value() == "original");
+  REQUIRE(directory.ListChildren().Value() == std::vector<File>{target});
+  blocker.reset();
+  copy();
+  REQUIRE(result->Succeeded());
+  REQUIRE(result->Value().AsFile() == target);
+  REQUIRE(target.ReadString().Value() == "replacement");
+  REQUIRE(directory.ListChildren().Value() == std::vector<File>{target});
+  REQUIRE(source.ReadString().Value() == "replacement");
+}
+
+TEST_CASE("WindowsDirectoryGrantsDoNotFollowReplacedRoots") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Paths());
@@ -810,16 +927,7 @@ TEST_CASE("WindowsDirectoryGrantsDoNotLockIdleAncestorsOrFollowReplacedRoots") {
   });
   platform.RunUntil([] { return file_task_complete; });
   REQUIRE(child.has_value());
-  std::error_code error;
-  File actual = moved;
-  SECTION("The selected root can be renamed while idle") {
-    fs::rename(fs::u8path(selected.Path()), fs::u8path(moved.Path()), error);
-  }
-  SECTION("An ancestor can be renamed while idle") {
-    fs::rename(fs::u8path(parent.Path()), fs::u8path(moved.Path()), error);
-    actual = moved.Child("selected");
-  }
-  REQUIRE_FALSE(error);
+  REQUIRE(selected.MoveTo(moved));
   REQUIRE(selected.CreateDirectories());
   REQUIRE(selected.Child("value.txt").WriteString("unrelated"));
   std::string contents;
@@ -851,9 +959,9 @@ TEST_CASE("WindowsDirectoryGrantsDoNotLockIdleAncestorsOrFollowReplacedRoots") {
   REQUIRE(copy_succeeded);
   REQUIRE(overwrite_succeeded);
   REQUIRE(tree_copy_succeeded);
-  REQUIRE(actual.Child("value.txt").ReadString().Value() == "replacement");
-  REQUIRE(actual.Child("copy.txt").ReadString().Value() == "replacement");
-  REQUIRE(actual.Child("new").IsDirectory());
+  REQUIRE(moved.Child("value.txt").ReadString().Value() == "replacement");
+  REQUIRE(moved.Child("copy.txt").ReadString().Value() == "replacement");
+  REQUIRE(moved.Child("new").IsDirectory());
   REQUIRE(output.Child("value.txt").ReadString().Value() == "replacement");
   REQUIRE(output.Child("copy.txt").ReadString().Value() == "replacement");
   REQUIRE(output.Child("new").IsDirectory());
