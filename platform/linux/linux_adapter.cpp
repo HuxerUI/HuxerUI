@@ -335,6 +335,40 @@ std::shared_ptr<LinuxUIThreadDispatcher> InitializeGtk() {
   return std::make_shared<LinuxUIThreadDispatcher>();
 }
 
+using HuxerUICanvasSnapshot = void (*)(GtkSnapshot* snapshot, int width, int height, gpointer data);
+
+struct HuxerUICanvas {
+  GtkWidget parent_instance;
+  HuxerUICanvasSnapshot snapshot = nullptr;
+  gpointer data = nullptr;
+};
+
+struct HuxerUICanvasClass {
+  GtkWidgetClass parent_class;
+};
+
+G_DEFINE_TYPE(HuxerUICanvas, huxerui_canvas, GTK_TYPE_WIDGET)
+
+void HuxerUICanvasSnapshotFrame(GtkWidget* widget, GtkSnapshot* snapshot) {
+  auto* canvas = reinterpret_cast<HuxerUICanvas*>(widget);
+  if (canvas->snapshot != nullptr) {
+    canvas->snapshot(snapshot, gtk_widget_get_width(widget), gtk_widget_get_height(widget), canvas->data);
+  }
+}
+
+void huxerui_canvas_class_init(HuxerUICanvasClass* canvas_class) {
+  GTK_WIDGET_CLASS(canvas_class)->snapshot = HuxerUICanvasSnapshotFrame;
+}
+
+void huxerui_canvas_init(HuxerUICanvas*) {}
+
+GtkWidget* CreateHuxerUICanvas(HuxerUICanvasSnapshot snapshot, gpointer data) {
+  auto* canvas = static_cast<HuxerUICanvas*>(g_object_new(huxerui_canvas_get_type(), nullptr));
+  canvas->snapshot = snapshot;
+  canvas->data = data;
+  return GTK_WIDGET(canvas);
+}
+
 } // namespace
 
 class LinuxPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
@@ -647,7 +681,7 @@ private:
     );
     gtk_window_set_decorated(window_, !custom_chrome_);
 
-    drawing_area_ = GTK_DRAWING_AREA(gtk_drawing_area_new());
+    drawing_area_ = CreateHuxerUICanvas(Snapshot, this);
     if (options.minimum_size.has_value()) {
       gtk_widget_set_size_request(
           GTK_WIDGET(drawing_area_),
@@ -656,7 +690,6 @@ private:
       );
     }
     gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
-    gtk_drawing_area_set_draw_func(drawing_area_, Draw, this, nullptr);
     gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));
     g_signal_connect(drawing_area_, "destroy", G_CALLBACK(ClientWidgetDestroyed), this);
     text_input_.SetClientWidget(GTK_WIDGET(drawing_area_));
@@ -739,13 +772,13 @@ private:
     }
   }
 
-  void DrawFrame(cairo_t* context) {
+  void DrawFrame(GtkSnapshot* snapshot) {
     if (committed_frame_ == nullptr) {
       return;
     }
     frame_state_.BeginPaint();
     try {
-      renderer_.Draw(context, *committed_frame_);
+      renderer_.Snapshot(snapshot, *committed_frame_);
     } catch (...) {
       if (!failure_) {
         failure_ = std::current_exception();
@@ -933,10 +966,10 @@ private:
     return G_SOURCE_REMOVE;
   }
 
-  static void Draw(GtkDrawingArea*, cairo_t* context, int width, int height, gpointer data) {
+  static void Snapshot(GtkSnapshot* snapshot, int width, int height, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
     self.UpdateRuntimeViewport({static_cast<float>(width), static_cast<float>(height)});
-    self.DrawFrame(context);
+    self.DrawFrame(snapshot);
   }
 
   static gboolean CloseRequested(GtkWindow*, gpointer data) {
@@ -1164,7 +1197,7 @@ private:
   std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
   Runtime* runtime_ = nullptr;
   GtkWindow* window_ = nullptr;
-  GtkDrawingArea* drawing_area_ = nullptr;
+  GtkWidget* drawing_area_ = nullptr;
   GdkToplevel* toplevel_ = nullptr;
   gulong toplevel_state_handler_ = 0;
   LinuxRenderer renderer_;

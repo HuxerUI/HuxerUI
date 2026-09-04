@@ -47,22 +47,38 @@ public:
     if (!SupportsCurrentHost() || !FindExecutable("pkg-config")) {
       return diagnostics;
     }
-    static constexpr std::array packages{
-        std::string_view{"gtk4"},
-        std::string_view{"gio-2.0"},
-        std::string_view{"libsoup-3.0"},
+    struct PackageRequirement {
+      std::string_view name;
+      std::string_view minimum_version;
     };
-    for (const std::string_view package : packages) {
-      const ProcessResult result = RunProcessCapture({"pkg-config", {"--modversion", std::string(package)}, {}});
-      std::string version = result.output;
+    static constexpr std::array packages{
+        PackageRequirement{"gtk4", "4.14"},
+        PackageRequirement{"epoxy", "1.5"},
+        PackageRequirement{"gio-2.0", {}},
+        PackageRequirement{"libsoup-3.0", "3.0"},
+    };
+    for (const PackageRequirement& package : packages) {
+      const ProcessResult version_result =
+          RunProcessCapture({"pkg-config", {"--modversion", std::string(package.name)}, {}});
+      std::string version = version_result.output;
       while (!version.empty() && std::isspace(static_cast<unsigned char>(version.back()))) {
         version.pop_back();
       }
+      bool ready = version_result.exit_code == 0;
+      if (ready && !package.minimum_version.empty()) {
+        const ProcessResult requirement_result = RunProcessCapture(
+            {"pkg-config", {"--atleast-version=" + std::string(package.minimum_version), std::string(package.name)}, {}}
+        );
+        ready = requirement_result.exit_code == 0;
+      }
+      const std::string requirement = package.minimum_version.empty()
+                                          ? std::string(package.name)
+                                          : std::string(package.name) + " >= " + std::string(package.minimum_version);
       diagnostics.push_back({
-          result.exit_code == 0 ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
-          "pkg:" + std::string(package),
-          std::string(package) + " development package",
-          result.exit_code == 0 ? std::move(version) : std::string{},
+          ready ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
+          "pkg:" + std::string(package.name),
+          requirement + " development package",
+          version_result.exit_code == 0 ? std::move(version) : std::string{},
       });
     }
     return diagnostics;
@@ -86,7 +102,7 @@ public:
     }
     if (missing_package) {
       actions.push_back({
-          "Install the required GTK 4, GIO, and libsoup 3 development packages",
+          "Install the required GTK 4.14, libepoxy, GIO, and libsoup 3 development packages",
           std::nullopt,
       });
     }

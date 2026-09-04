@@ -5,9 +5,40 @@
 #include <utility>
 #include <vector>
 
+#include <gdk/gdk.h>
+
 #include <huxerui/linux/external_texture.h>
 
 namespace huxerui::detail {
+
+[[nodiscard]] bool SupportsLinuxGlVersion(GdkGLAPI api, int major, int minor) noexcept;
+
+class LinuxGdkTextureFrame final {
+public:
+  explicit LinuxGdkTextureFrame(
+      ::GdkTexture* texture, linux::GlTexture::Origin origin = linux::GlTexture::Origin::TopLeft
+  )
+      : texture_(GDK_TEXTURE(g_object_ref(texture))), origin_(origin) {}
+
+  ~LinuxGdkTextureFrame() {
+    g_object_unref(texture_);
+  }
+
+  LinuxGdkTextureFrame(const LinuxGdkTextureFrame&) = delete;
+  LinuxGdkTextureFrame& operator=(const LinuxGdkTextureFrame&) = delete;
+
+  [[nodiscard]] ::GdkTexture* Texture() const noexcept {
+    return texture_;
+  }
+
+  [[nodiscard]] linux::GlTexture::Origin TextureOrigin() const noexcept {
+    return origin_;
+  }
+
+private:
+  ::GdkTexture* texture_ = nullptr;
+  linux::GlTexture::Origin origin_ = linux::GlTexture::Origin::TopLeft;
+};
 
 class LinuxPixelFrame final {
 public:

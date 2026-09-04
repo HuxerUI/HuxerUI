@@ -3,7 +3,7 @@
 #include <memory>
 #include <string_view>
 
-#include <cairo/cairo.h>
+#include <gtk/gtk.h>
 
 #include <huxerui/render_scene.h>
 #include <huxerui/text.h>
@@ -12,8 +12,8 @@ namespace huxerui::detail {
 
 class TextLayout;
 
-// Replays the platform-neutral scene into a GTK-owned Cairo context. Window
-// surfaces, invalidation, and frame scheduling remain owned by the GTK host.
+// Records the platform-neutral scene into GTK Snapshot nodes, using Cairo nodes
+// for ordinary drawing and texture nodes for GPU-backed external frames.
 class LinuxRenderer final {
 public:
   LinuxRenderer();
@@ -33,7 +33,7 @@ public:
   [[nodiscard]] std::unique_ptr<TextLayout>
   CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
 
-  void Draw(cairo_t* context, const RenderFrame& frame);
+  void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame);
 
 public:
   struct State;

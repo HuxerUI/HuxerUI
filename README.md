@@ -88,7 +88,7 @@ const Application application{
 |---|---|---|
 | Windows | Win32 | Direct2D and DirectWrite |
 | macOS | AppKit | Core Graphics and Core Text |
-| Linux | GTK 4 | Cairo and Pango |
+| Linux | GTK 4.14 | GSK, Cairo, and Pango |
 | Web | Emscripten and browser APIs | Canvas 2D |
 | Android | Android View and InputConnection | Android Canvas |
 | iOS | UIKit and UITextInput | Core Graphics and Core Text |

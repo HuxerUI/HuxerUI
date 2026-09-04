@@ -1,5 +1,7 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <gtk/gtk.h>
+
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -12,8 +14,29 @@
 #include "text_layout_internal.h"
 
 namespace huxerui::test {
+namespace {
 
-TEST_CASE("LinuxRendererReplaysPaintCommandsIntoCairoSurface") {
+GskRenderNode* Snapshot(detail::LinuxRenderer& renderer, const RenderFrame& frame) {
+  GtkSnapshot* snapshot = gtk_snapshot_new();
+  renderer.Snapshot(snapshot, frame);
+  GskRenderNode* node = gtk_snapshot_free_to_node(snapshot);
+  REQUIRE(node != nullptr);
+  return node;
+}
+
+void RenderSnapshot(detail::LinuxRenderer& renderer, const RenderFrame& frame, cairo_surface_t* surface) {
+  GskRenderNode* node = Snapshot(renderer, frame);
+  cairo_t* context = cairo_create(surface);
+  REQUIRE(cairo_status(context) == CAIRO_STATUS_SUCCESS);
+  gsk_render_node_draw(node, context);
+  cairo_destroy(context);
+  gsk_render_node_unref(node);
+  cairo_surface_flush(surface);
+}
+
+} // namespace
+
+TEST_CASE("LinuxRendererSnapshotsPaintCommandsIntoGskNodes") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
 
@@ -25,10 +48,7 @@ TEST_CASE("LinuxRendererReplaysPaintCommandsIntoCairoSurface") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 8, 8);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE(pixels[4 * 8 + 4] == 0xFFFF0000U);
@@ -66,10 +86,7 @@ TEST_CASE("LinuxRendererTransformsLinearAndRadialGradientSamplingWithoutTransfor
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 44, 20);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   const std::uint32_t linear_top = pixels[2 * 44 + 10];
@@ -106,10 +123,7 @@ TEST_CASE("LinuxRendererStrokesPathsWithLinearAndRadialGradients") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 48, 24);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   const std::uint32_t linear_top = pixels[2 * 48 + 11];
@@ -136,10 +150,7 @@ TEST_CASE("LinuxRendererDrawsDirectedDashedLines") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 40, 16);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE((pixels[8 * 40 + 5] >> 24U) > 0U);
@@ -148,7 +159,7 @@ TEST_CASE("LinuxRendererDrawsDirectedDashedLines") {
   renderer.Discard();
 }
 
-TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
+TEST_CASE("LinuxRendererArcStartsANewCairoPath") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
 
@@ -160,11 +171,7 @@ TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  cairo_move_to(context, 0.0, 0.0);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE(pixels[12 * 32 + 14] == 0U);
@@ -172,7 +179,7 @@ TEST_CASE("LinuxRendererArcDoesNotJoinAnExistingCairoPath") {
   renderer.Discard();
 }
 
-TEST_CASE("LinuxRendererBorderDoesNotStrokeAnExistingCairoPath") {
+TEST_CASE("LinuxRendererBorderStartsANewCairoPath") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
 
@@ -184,12 +191,7 @@ TEST_CASE("LinuxRendererBorderDoesNotStrokeAnExistingCairoPath") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  cairo_move_to(context, 2.0, 2.0);
-  cairo_line_to(context, 12.0, 12.0);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE(pixels[7 * 32 + 7] == 0U);
@@ -210,10 +212,7 @@ TEST_CASE("LinuxRendererDrawsNegativeArcSweepCounterclockwise") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 32, 32);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE((pixels[10 * 32 + 22] >> 24U) > 0U);
@@ -234,10 +233,7 @@ TEST_CASE("LinuxRendererBlurredRectShadowExcludesTheCasterInterior") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 40, 40);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE((pixels[20 * 40 + 10] >> 24U) > 0U);
@@ -265,16 +261,29 @@ TEST_CASE("LinuxRendererBlurredPathShadowExcludesTheShiftedCasterInterior") {
 
   cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 48, 40);
   REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
-  cairo_t* context = cairo_create(surface);
-  renderer.Draw(context, frame);
-  cairo_destroy(context);
-  cairo_surface_flush(surface);
+  RenderSnapshot(renderer, frame, surface);
 
   const auto* pixels = reinterpret_cast<const std::uint32_t*>(cairo_image_surface_get_data(surface));
   REQUIRE((pixels[20 * 48 + 14] >> 24U) > 0U);
   REQUIRE(pixels[20 * 48 + 20] == 0U);
   REQUIRE(pixels[0] == 0U);
   cairo_surface_destroy(surface);
+  renderer.Discard();
+}
+
+TEST_CASE("LinuxRendererBatchesAdjacentCairoCommandsIntoOneGskNode") {
+  detail::LinuxRenderer renderer;
+  RenderNode root;
+  PaintContext paint(root.content, {0.0F, 0.0F, 20.0F, 20.0F});
+  paint.DrawRect({0.0F, 0.0F, 8.0F, 8.0F}, Color::Rgb(255, 0, 0));
+  paint.DrawCircle({10.0F, 10.0F}, 4.0F, Color::Rgb(0, 255, 0));
+  paint.DrawLine({2.0F, 18.0F}, {18.0F, 18.0F}, Color::Rgb(0, 0, 255), StrokeStyle{.width = 2.0F});
+  paint.Finish();
+  const RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+
+  GskRenderNode* node = Snapshot(renderer, frame);
+  REQUIRE(gsk_render_node_get_node_type(node) == GSK_CAIRO_NODE);
+  gsk_render_node_unref(node);
   renderer.Discard();
 }
 
