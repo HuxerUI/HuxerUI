@@ -129,6 +129,8 @@ xcrun --sdk iphonesimulator swiftc \
   -framework CoreVideo \
   -framework Foundation \
   -framework ImageIO \
+  -framework Metal \
+  -framework MetalPerformanceShaders \
   -framework MobileCoreServices \
   -framework QuartzCore \
   -framework UIKit \

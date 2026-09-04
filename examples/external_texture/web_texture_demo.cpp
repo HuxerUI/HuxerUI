@@ -43,15 +43,39 @@ public:
       return;
     }
     entries_.push_back({
-        "VideoFrameTexture",
-        "Cloned WebCodecs VideoFrame objects produced from an offscreen Canvas.",
+        "VideoFrameTexture / Canvas2D",
+        "Canvas2D frames use the same VideoFrameTexture publication and Image rendering path.",
         texture_,
+    });
+    gpu_canvas_ = val::global("document").call<val>("createElement", std::string("canvas"));
+    gpu_canvas_.set("width", 320);
+    gpu_canvas_.set("height", 180);
+    gpu_context_ = gpu_canvas_.call<val>("getContext", std::string("webgl2"));
+    if (gpu_context_.isNull() || gpu_context_.isUndefined()) {
+      entries_.front().description += " WebGL2 is unavailable in this browser.";
+      return;
+    }
+    gpu_texture_ = std::make_shared<huxerui::web::VideoFrameTexture>(huxerui::Size{320.0F, 180.0F});
+    entries_.push_back({
+        "VideoFrameTexture / WebGL2",
+        "GPU-generated Canvas frames are published without application-side pixel readback.",
+        gpu_texture_,
     });
   }
 
   ~WebTextureDemo() override {
     Stop();
     texture_->Finish();
+    if (gpu_texture_) {
+      gpu_texture_->Finish();
+      try {
+        val extension = gpu_context_.call<val>("getExtension", std::string("WEBGL_lose_context"));
+        if (!extension.isNull() && !extension.isUndefined()) {
+          extension.call<void>("loseContext");
+        }
+      } catch (...) {
+      }
+    }
   }
 
   [[nodiscard]] const std::vector<huxerui::example::TextureDemoEntry>& Entries() const noexcept override {
@@ -75,8 +99,8 @@ private:
     if (timer_ != 0) {
       return;
     }
-    PublishFrame();
     timer_ = emscripten_set_interval(TimerCallback, 1000.0 / 20.0, this);
+    PublishFrame();
   }
 
   void Stop() noexcept {
@@ -94,21 +118,42 @@ private:
       context_.call<void>("fillRect", 0, 0, 320, 180);
       context_.set("fillStyle", std::string("rgba(255, 255, 255, 0.35)"));
       context_.call<void>("fillRect", static_cast<int>(phase_ % 320U), 0, 48, 180);
+      PublishCanvas(texture_, canvas_);
 
-      val options = val::object();
-      options.set("timestamp", static_cast<double>(phase_) * 50000.0);
-      val frame = val::global("VideoFrame").new_(canvas_, options);
-      try {
-        texture_->Publish(frame);
-      } catch (...) {
-        CloseVideoFrame(frame);
-        throw;
+      if (gpu_texture_ && !gpu_context_.call<bool>("isContextLost")) {
+        const unsigned int color_buffer_bit = gpu_context_["COLOR_BUFFER_BIT"].as<unsigned int>();
+        const unsigned int scissor_test = gpu_context_["SCISSOR_TEST"].as<unsigned int>();
+        gpu_context_.call<void>("disable", scissor_test);
+        gpu_context_.call<void>("clearColor", red / 255.0, 0.28, blue / 255.0, 1.0);
+        gpu_context_.call<void>("clear", color_buffer_bit);
+        gpu_context_.call<void>("enable", scissor_test);
+        gpu_context_.call<void>("scissor", static_cast<int>(phase_ % 320U), 0, 48, 180);
+        gpu_context_.call<void>("clearColor", 0.35 + red / 255.0 * 0.65, 0.532, 0.35 + blue / 255.0 * 0.65, 1.0);
+        gpu_context_.call<void>("clear", color_buffer_bit);
+        gpu_context_.call<void>("scissor", 0, 156, 48, 24);
+        gpu_context_.call<void>("clearColor", 0.0, 1.0, 0.5, 1.0);
+        gpu_context_.call<void>("clear", color_buffer_bit);
+        gpu_context_.call<void>("disable", scissor_test);
+        // Snapshot in the drawing callback before the browser may discard the WebGL drawing buffer.
+        PublishCanvas(gpu_texture_, gpu_canvas_);
       }
-      CloseVideoFrame(frame);
       ++phase_;
     } catch (...) {
       Stop();
     }
+  }
+
+  void PublishCanvas(const std::shared_ptr<huxerui::web::VideoFrameTexture>& texture, const val& canvas) {
+    val options = val::object();
+    options.set("timestamp", static_cast<double>(phase_) * 50000.0);
+    val frame = val::global("VideoFrame").new_(canvas, options);
+    try {
+      texture->Publish(frame);
+    } catch (...) {
+      CloseVideoFrame(frame);
+      throw;
+    }
+    CloseVideoFrame(frame);
   }
 
   static void TimerCallback(void* context) noexcept {
@@ -116,10 +161,13 @@ private:
   }
 
   std::shared_ptr<huxerui::web::VideoFrameTexture> texture_;
+  std::shared_ptr<huxerui::web::VideoFrameTexture> gpu_texture_;
   std::vector<huxerui::example::TextureDemoEntry> entries_;
   std::string message_;
   val canvas_;
   val context_ = val::undefined();
+  val gpu_canvas_ = val::undefined();
+  val gpu_context_ = val::undefined();
   int timer_ = 0;
   std::uint32_t phase_ = 0;
 };

@@ -47,6 +47,8 @@ if (IOS)
                 "-framework CoreVideo"
                 "-framework Foundation"
                 "-framework ImageIO"
+                "-framework Metal"
+                "-framework MetalPerformanceShaders"
                 "-framework MobileCoreServices"
                 "-framework QuartzCore"
                 "-framework UIKit"

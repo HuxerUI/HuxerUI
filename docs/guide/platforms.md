@@ -96,6 +96,14 @@ Run the generated output through `huxerui run web` or another HTTP server; loadi
 On Termux, `huxerui run web` starts a Python standard-library server on an available loopback port and passes the generated entry URL to `termux-open`; it does not use ADB or Emscripten's Android-device mode.
 The pinned Emscripten tools, Python, and `termux-open` must be available on `PATH`.
 
+Web libraries include `<huxerui/web/external_texture.h>` and publish open WebCodecs `VideoFrame` objects through `web::VideoFrameTexture`.
+Pass the same shared texture to `Image`; `Publish()` clones the frame, so the caller may close its original immediately, and `Finish()` preserves the last published image while rejecting later publication.
+Construction, publication, finish, and destruction run on the browser main thread.
+Canvas2D and WebGL2 producers can both create frames with `new VideoFrame(canvas, {timestamp})`; capture a WebGL canvas in the drawing callback before its drawing buffer may be discarded.
+Raw `WebGLTexture` and `GPUTexture` objects are not accepted: render their content into a supported Canvas image source first.
+The framework does not require application-side pixel readback, but browser snapshotting, import, and color conversion may copy, so this path does not promise end-to-end zero-copy.
+The `example_external_texture` Web build demonstrates Canvas2D and WebGL2 producers using the same texture API, overlay, clipping, and pause controls; it retains the Canvas2D example when WebGL2 is unavailable and reports missing `VideoFrame` support.
+
 Typed routed navigation can bind the authoritative `NavigationPath` to browser URL and history state.
 Browser restrictions still govern clipboard, file pickers, autoplay, cross-origin requests, and storage persistence.
 Camera and microphone permission state is queried through the Permissions API when supported; requesting access remains coupled to browser media acquisition and is not emulated by the shared permission API.

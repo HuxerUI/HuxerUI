@@ -141,6 +141,11 @@ A newer publication closes and replaces the previous pending clone.
 The clone may share its underlying media resource according to WebCodecs lifetime rules, but Canvas import or browser color conversion may copy; the backend does not promise zero-copy.
 Because `emscripten::val` is thread-affine, texture construction, publication, finish, and destruction are browser-main-thread operations rather than worker-safe producer APIs.
 
+Canvas2D and WebGL2 producers use the same `VideoFrameTexture` contract; GPU production does not require a separate public texture type or additional DOM composition slices.
+A WebGL producer snapshots its Canvas into a `VideoFrame` in the same drawing callback, before the browser may discard the drawing buffer, without application-side `readPixels()`.
+Direct import of raw `WebGLTexture` or `GPUTexture` handles is unsupported; the producer first renders into a browser-supported Canvas image source.
+The `example_external_texture` Web producer keeps Canvas2D available independently of WebGL2, preserves published frames while paused, and stops its timer and releases its WebGL context on disposal.
+
 At the start of each browser animation-frame commit, WebRenderer advances one external-texture acquisition epoch and drops caches whose textures are no longer committed as active.
 The first draw of a texture during that epoch clones its latest mailbox frame, closes the replaced renderer-owned clone, and retains the new frame for later redraws.
 All Canvas slices in one `RenderComposition` share the same epoch, so content split around PlatformViews cannot display different producer frames in one physical presentation.
