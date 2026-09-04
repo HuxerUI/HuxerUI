@@ -1402,6 +1402,7 @@ struct Runtime::State {
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   std::unordered_map<SemanticNodeId, detail::SemanticActionRoute> semantic_action_routes_;
   std::unordered_map<std::int64_t, detail::PointerSession> pointer_sessions_;
+  std::shared_ptr<detail::FileDropState> file_drop_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;

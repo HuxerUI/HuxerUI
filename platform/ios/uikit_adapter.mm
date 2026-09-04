@@ -871,6 +871,7 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
   self.contentMode = UIViewContentModeRedraw;
   huxeruiTouches = [[NSMutableSet alloc] init];
   huxeruiPointerButtons = [[NSMutableDictionary alloc] init];
+  huxerui::detail::InstallIosFileDrop(self);
   return self;
 }
 

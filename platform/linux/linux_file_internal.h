@@ -7,13 +7,30 @@
 #include <string>
 #include <string_view>
 
+#include <huxerui/platform_adapter.h>
+
+typedef struct _GtkWidget GtkWidget;
+
 namespace huxerui {
 
 class FileSystem;
+class Runtime;
 
 namespace detail {
 
 struct FileSystemPaths;
+
+class LinuxFileDrop final {
+public:
+  LinuxFileDrop(GtkWidget* widget, Runtime& runtime, UIThreadDispatcher dispatcher);
+  ~LinuxFileDrop();
+  LinuxFileDrop(const LinuxFileDrop&) = delete;
+  LinuxFileDrop& operator=(const LinuxFileDrop&) = delete;
+
+private:
+  struct State;
+  std::unique_ptr<State> state_;
+};
 
 struct LinuxFileSystemEnvironment {
   std::optional<std::string> home_directory;

@@ -1,4 +1,4 @@
-# Gestures and Typed Drag-and-Drop
+# Gestures and Drag-and-Drop
 
 Use the recognizers in `<huxerui/gesture.h>` instead of rebuilding gesture state from raw pointer events.
 Ordinary activation remains `.OnClick(...)` because Click also covers keyboard and accessibility invocation.
@@ -151,6 +151,18 @@ The source receives `DragSourceEvents::Ended` with `DragDropResult::dropped`, or
 Compatible targets inside scroll content enable edge auto-scroll through the existing scroll hierarchy.
 This contract is in-process only: it does not implicitly transfer files, text, URLs, platform drag-session values, or input ownership to a `PlatformView`.
 Provide equivalent keyboard or semantic actions when drag-and-drop performs an essential operation.
+
+## External file reception
+
+Use `FileDropTarget` from `<huxerui/file_drop.h>` for ordinary files dragged from another application, not `DropTarget::Accepts<FileReference>()` or a custom raw-pointer recognizer. Confirm that the active SDK exposes this header before relying on it.
+
+Attach `.With(FileDropTarget::Accepts(options))` and bind `FileDropEvents` through `.On<Key>()`. `FileDropOptions` combines filename suffixes and MIME types as alternatives; empty filters accept any ordinary file. Matching ignores ASCII case, supports compound suffixes and MIME wildcards, and validates the complete batch. Directories, empty batches, or a batch containing an ineligible file are not partially delivered. `allows_multiple = false` rejects multiple-file batches.
+
+An optional `Accepts(options, predicate)` receives `FileDropOffer` with an optional count and possibly incomplete MIME types. Keep the predicate quick and side-effect-free, without I/O or permission requests; hover acceptance is provisional, and metadata filtering does not validate file contents.
+
+Use `Entered`, `Moved`, and `Exited` for hover feedback. Physical drop sends `Exited` before deferred `Dropped` or `Failed`; Exited alone does not mean cancellation. Dropped supplies a borrowed `const std::vector<FileReference>&`, while Failed supplies `FileError`. Copy references to retain access, and distinguish successful reception from subsequent application I/O. Events use the Runtime UI thread and retain the target-local and window DIP coordinates from physical drop. Unmount cancels pending delivery; separate accepted drops may finish independently.
+
+Reception negotiates Copy only and does not automatically read, import, or write files. Dropped references are read-only through reference operations; provider temporary files may need reference-owned storage. Native `PlatformView` regions own their own drops. Android reception requires API 24 and a host permission lease; `HuxerUIActivity` supplies the hook, while custom hosts must follow `HuxerUIView.setFileDropPermissionRequester` and Activity lifetime rules. Provide an equivalent FilePicker action for keyboard, touch, accessibility, and unsupported hosts. See [files and references](resources-files-network.md#references-and-local-paths) for later I/O and optional path access.
 
 ## Configuration and ownership
 

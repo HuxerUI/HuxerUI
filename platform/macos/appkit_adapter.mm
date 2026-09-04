@@ -120,6 +120,8 @@ NSCursor* MacPointerCursor(huxerui::PointerCursorKind kind) {
   NSTrackingArea* huxeruiTrackingArea;
   std::uint8_t huxeruiModifierKeys;
   __strong NSCursor* huxeruiPointerCursor;
+  std::uint64_t huxeruiFileDropSession;
+  BOOL huxeruiFileDropHover;
 }
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type;
 - (BOOL)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type;
@@ -299,6 +301,7 @@ public:
       view_ = [[HuxerUIView alloc] initWithFrame:frame];
       view_->huxeruiRuntime = runtime_;
       view_->huxeruiAdapter = this;
+      [view_ registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
       [NSNotificationCenter.defaultCenter addObserver:view_
                                              selector:@selector(resourceConfigurationDidChange:)
                                                  name:NSCurrentLocaleDidChangeNotification
@@ -321,6 +324,8 @@ public:
       RequestFrameAt(Now());
       [application run];
       [NSNotificationCenter.defaultCenter removeObserver:view_ name:NSCurrentLocaleDidChangeNotification object:nil];
+      [view_ unregisterDraggedTypes];
+      [view_ draggingExited:nil];
       view_->huxeruiRuntime = nullptr;
       view_->huxeruiAdapter = nullptr;
       delegate_->huxeruiAdapter = nullptr;
@@ -929,6 +934,79 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 @end
 
 @implementation HuxerUIView
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
+  [self draggingExited:nil];
+  if (huxeruiRuntime == nullptr || !(sender.draggingSourceOperationMask & NSDragOperationCopy)) {
+    return NSDragOperationNone;
+  }
+  const NSPoint position = [self convertPoint:sender.draggingLocation fromView:nil];
+  huxeruiFileDropHover = YES;
+  ++huxeruiFileDropSession;
+  try {
+    const bool accepted = huxeruiRuntime->HandleFileDragEntered(
+        huxeruiFileDropSession, {}, {static_cast<float>(position.x), static_cast<float>(position.y)}
+    );
+    return accepted ? NSDragOperationCopy : NSDragOperationNone;
+  } catch (...) {
+    [self draggingExited:nil];
+    return NSDragOperationNone;
+  }
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
+  if (!(sender.draggingSourceOperationMask & NSDragOperationCopy)) {
+    [self draggingExited:nil];
+    return NSDragOperationNone;
+  }
+  if (!huxeruiFileDropHover) {
+    return [self draggingEntered:sender];
+  }
+  const NSPoint position = [self convertPoint:sender.draggingLocation fromView:nil];
+  try {
+    return huxeruiRuntime != nullptr && huxeruiRuntime->HandleFileDragMoved(
+        huxeruiFileDropSession, {}, {static_cast<float>(position.x), static_cast<float>(position.y)}
+    ) ? NSDragOperationCopy : NSDragOperationNone;
+  } catch (...) {
+    [self draggingExited:nil];
+    return NSDragOperationNone;
+  }
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)sender {
+  static_cast<void>(sender);
+  if (huxeruiFileDropHover && huxeruiRuntime != nullptr) {
+    huxeruiFileDropHover = NO;
+    try {
+      huxeruiRuntime->HandleFileDragExited(huxeruiFileDropSession);
+    } catch (...) {
+    }
+  }
+}
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
+  if (huxeruiRuntime == nullptr || !huxeruiFileDropHover ||
+      !(sender.draggingSourceOperationMask & NSDragOperationCopy)) {
+    [self draggingExited:nil];
+    return NO;
+  }
+  const NSPoint position = [self convertPoint:sender.draggingLocation fromView:nil];
+  try {
+    const bool accepted = huxeruiRuntime->HandleFileDrop(
+        huxeruiFileDropSession, {}, {static_cast<float>(position.x), static_cast<float>(position.y)},
+        huxerui::detail::CaptureMacFileDrop(sender.draggingPasteboard)
+    );
+    [self draggingExited:nil];
+    return accepted;
+  } catch (...) {
+    [self draggingExited:nil];
+    return NO;
+  }
+}
+
+- (void)draggingEnded:(id<NSDraggingInfo>)sender {
+  [self draggingExited:sender];
+}
 
 - (BOOL)isFlipped {
   return YES;

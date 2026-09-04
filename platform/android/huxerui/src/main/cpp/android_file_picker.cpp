@@ -17,6 +17,7 @@
 #include <vector>
 
 #include <huxerui/android/jni.h>
+#include <huxerui/file_drop.h>
 
 #include "file_internal.h"
 
@@ -307,8 +308,9 @@ using AndroidReferenceControlHandle = std::shared_ptr<AndroidReferenceOperationC
 // The Context and bridge outlive the picker whenever a reference or operation still holds them.
 class AndroidFileReferenceBridge final {
 public:
-  AndroidFileReferenceBridge(JavaVM* virtual_machine, JNIEnv* environment, jobject context)
-      : virtual_machine_(virtual_machine) {
+  AndroidFileReferenceBridge(JavaVM* virtual_machine, JNIEnv* environment, jobject context,
+                            std::shared_ptr<void> retained_access = {})
+      : virtual_machine_(virtual_machine), retained_access_(std::move(retained_access)) {
     if (virtual_machine_ == nullptr || environment == nullptr || context == nullptr) {
       throw std::invalid_argument("HuxerUI Android file reference requires a Java VM, JNI environment, and Context");
     }
@@ -462,6 +464,7 @@ private:
 
   JavaVM* virtual_machine_ = nullptr;
   jobject context_ = nullptr;
+  std::shared_ptr<void> retained_access_;
   jclass metadata_class_ = nullptr;
   jfieldID metadata_uri_ = nullptr;
   jfieldID metadata_name_ = nullptr;
@@ -919,6 +922,154 @@ private:
 
 using AndroidPickerControlHandle = std::shared_ptr<AndroidPickerOperationControl>;
 
+class AndroidDropAccess final {
+public:
+  AndroidDropAccess(JavaVM* virtual_machine, JNIEnv* environment, jobject access)
+      : virtual_machine_(virtual_machine), access_(environment->NewGlobalRef(access)) {
+    android::LocalRef<jclass> type(environment, environment->GetObjectClass(access));
+    close_ = type ? environment->GetMethodID(type.Get(), "close", "()V") : nullptr;
+    if (!access_ || !close_ || environment->ExceptionCheck()) {
+      if (access_) {
+        environment->DeleteGlobalRef(access_);
+      }
+      throw std::runtime_error("HuxerUI Android drop grant could not be retained");
+    }
+  }
+
+  ~AndroidDropAccess() {
+    JniEnvironment attached(virtual_machine_);
+    if (JNIEnv* environment = attached.Get()) {
+      android::LocalRef<jthrowable> pending(environment, environment->ExceptionOccurred());
+      environment->ExceptionClear();
+      environment->CallVoidMethod(access_, close_);
+      ClearJavaException(environment);
+      environment->DeleteGlobalRef(access_);
+      if (pending) {
+        environment->Throw(pending.Get());
+      }
+    }
+  }
+
+private:
+  JavaVM* virtual_machine_;
+  jobject access_;
+  jmethodID close_ = nullptr;
+};
+
+class AndroidDropCapture final : public std::enable_shared_from_this<AndroidDropCapture> {
+public:
+  AndroidDropCapture(JNIEnv* environment, jobject operation) {
+    if (!operation || environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
+      throw std::invalid_argument("HuxerUI Android drop requires an operation and Java VM");
+    }
+    android::LocalRef<jclass> type(environment, environment->GetObjectClass(operation));
+    if (!type) {
+      throw std::runtime_error("HuxerUI Android drop operation is unavailable");
+    }
+    const jfieldID context_field = environment->GetFieldID(type.Get(), "context", "Landroid/content/Context;");
+    const jfieldID access_field = environment->GetFieldID(type.Get(), "access", "Lorg/huxerui/HuxerUIFileDrop$Access;");
+    native_handle_ = environment->GetFieldID(type.Get(), "nativeHandle", "J");
+    start_ = environment->GetMethodID(type.Get(), "start", "()V");
+    cancel_ = environment->GetMethodID(type.Get(), "cancel", "()V");
+    if (!context_field || !access_field || !native_handle_ || !start_ || !cancel_ || environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android drop operation does not match the native backend");
+    }
+    android::LocalRef<jobject> context(environment, environment->GetObjectField(operation, context_field));
+    android::LocalRef<jobject> access(environment, environment->GetObjectField(operation, access_field));
+    if (!context || !access || environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android drop has no retained access grant");
+    }
+    bridge_ = std::make_shared<AndroidFileReferenceBridge>(
+        virtual_machine_, environment, context.Get(),
+        std::make_shared<AndroidDropAccess>(virtual_machine_, environment, access.Get())
+    );
+    operation_ = environment->NewGlobalRef(operation);
+    if (!operation_) {
+      throw std::runtime_error("HuxerUI Android drop operation could not be retained");
+    }
+  }
+
+  ~AndroidDropCapture() {
+    JniEnvironment attached(virtual_machine_);
+    if (JNIEnv* environment = attached.Get(); environment && operation_) {
+      environment->DeleteGlobalRef(operation_);
+    }
+  }
+
+  std::function<void()> Start(FileDropCompletion completion) {
+    completion_ = std::move(completion);
+    JniEnvironment attached(virtual_machine_);
+    JNIEnv* environment = attached.Get();
+    if (!environment) {
+      Complete(nullptr, nullptr, static_cast<jint>(AndroidFileError::Io));
+      return {};
+    }
+    auto token = std::make_unique<std::weak_ptr<AndroidDropCapture>>(shared_from_this());
+    environment->SetLongField(operation_, native_handle_,
+                              static_cast<jlong>(reinterpret_cast<std::uintptr_t>(token.get())));
+    if (environment->ExceptionCheck()) {
+      ClearJavaException(environment);
+      Complete(environment, nullptr, static_cast<jint>(AndroidFileError::Io));
+      return {};
+    }
+    // Java now owns the one-shot holder, including cancellation before worker submission.
+    token.release();
+    environment->CallVoidMethod(operation_, start_);
+    if (environment->ExceptionCheck()) {
+      ClearJavaException(environment);
+      Complete(environment, nullptr, static_cast<jint>(AndroidFileError::Io));
+      Cancel();
+    }
+    return [self = shared_from_this()] { self->Cancel(); };
+  }
+
+  void Complete(JNIEnv* environment, jobjectArray references, jint error_code) noexcept {
+    FileDropCompletion completion;
+    {
+      std::scoped_lock lock(mutex_);
+      completion = std::move(completion_);
+    }
+    if (!completion) {
+      return;
+    }
+    auto result = FileResult<std::vector<FileReference>>(
+        FileError{ToFileErrorCode(error_code), "HuxerUI could not prepare the complete Android dropped file batch"}
+    );
+    if (environment && references) {
+      try {
+        result = FileResult<std::vector<FileReference>>(
+            AndroidFileReferenceBridge::DecodeReferences(bridge_, environment, references)
+        );
+      } catch (...) {
+        ClearJavaException(environment);
+      }
+    }
+    completion(std::move(result));
+  }
+
+  void Cancel() {
+    {
+      std::scoped_lock lock(mutex_);
+      completion_ = {};
+    }
+    JniEnvironment attached(virtual_machine_);
+    if (JNIEnv* environment = attached.Get()) {
+      environment->CallVoidMethod(operation_, cancel_);
+      ClearJavaException(environment);
+    }
+  }
+
+private:
+  JavaVM* virtual_machine_ = nullptr;
+  jobject operation_ = nullptr;
+  jfieldID native_handle_ = nullptr;
+  jmethodID start_ = nullptr;
+  jmethodID cancel_ = nullptr;
+  std::shared_ptr<AndroidFileReferenceBridge> bridge_;
+  std::mutex mutex_;
+  FileDropCompletion completion_;
+};
+
 class AndroidFilePickerTransport final : public FilePickerTransport {
 public:
   AndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view, jobject context)
@@ -1170,6 +1321,11 @@ FileReference CreateAndroidFileReference(
   return MakeFileReference(std::move(metadata), std::move(state));
 }
 
+FileDropPreparation CaptureAndroidFileDrop(JNIEnv* environment, jobject operation) {
+  auto captured = std::make_shared<AndroidDropCapture>(environment, operation);
+  return {[captured](FileDropCompletion completion) { return captured->Start(std::move(completion)); }};
+}
+
 std::shared_ptr<FilePickerTransport>
 CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view, jobject context) {
   return std::make_shared<AndroidFilePickerTransport>(virtual_machine, environment, view, context);
@@ -1196,5 +1352,16 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIFilePicker_nativeCompl
   std::unique_ptr<Handle> owner(reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle)));
   if (owner && *owner) {
     (*owner)->Complete(environment, saved == JNI_TRUE, references);
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIFileDrop_nativeComplete(
+    JNIEnv* environment, jclass, jlong native_handle, jobjectArray references, jint error_code) {
+  using Handle = std::weak_ptr<huxerui::detail::AndroidDropCapture>;
+  std::unique_ptr<Handle> owner(reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle)));
+  if (owner) {
+    if (const auto active = owner->lock()) {
+      active->Complete(environment, references, error_code);
+    }
   }
 }

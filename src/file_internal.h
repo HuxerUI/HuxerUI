@@ -106,6 +106,7 @@ struct FileSystemPaths {
 MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
 [[nodiscard]] FileResult<std::string> DecodeFileUtf8(FileResult<Bytes> bytes);
 [[nodiscard]] bool IsValidFileUtf8(std::string_view text) noexcept;
+void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const std::vector<std::string>& content_types);
 [[nodiscard]] bool IsValidReferenceChildName(std::string_view name) noexcept;
 [[nodiscard]] FileReference MakeLocalFileReference(File file, bool writable,
                                                    std::optional<std::string> content_type = {},

@@ -260,8 +260,8 @@ A sequence owned by PlatformView never creates a HuxerUI DragSource, and an acce
 PlatformView is not a DropTarget in this phase.
 An application that needs a native destination exposes the transfer through a HuxerUI DropTarget or a future platform-transfer contract rather than treating the native view itself as a typed target.
 
-Cross-application files, text, URLs, MIME values, UTTypes, ClipData, and host drag sessions require a separate platform transfer design.
-They must not reinterpret an arbitrary in-memory DragSource payload or make serialization implicit.
+[External File Drop](file-drop.md) receives native ordinary files as `FileReference` values through an independent host-owned lifecycle.
+It does not reinterpret an in-memory DragSource payload or make serialization implicit; general text, URL, and MIME transfers remain unsupported.
 
 ## Accessibility
 

@@ -10,7 +10,7 @@ An app-side modifier spec exposes a nested `Extension` type. The extension must 
 - `Update`: accept a compatible declarative spec without resetting unrelated retained state.
 - Equality-comparable specs allow reconciliation to skip redundant updates.
 - `OnFrame`: advance retained animation and return `FrameResult`; use `wake_after` for a timed wakeup.
-- `PrepareGeometry`: observe final presentation geometry and report which retained paint phase changed.
+- `PrepareGeometry(MountedNode&, TextMeasurer&)`: observe final presentation geometry and report which retained paint phase changed.
 - `PaintBehindContent` and `PaintAboveContent`: emit platform-neutral paint in node-local coordinates.
 - `OnInteraction`, hit testing, pointer, hover, focus, key, Back, and scroll hooks: implement only the behavior the modifier owns.
 - `BuildSemantics` and `OnSemanticAction`: expose and handle accessibility behavior.
@@ -24,6 +24,18 @@ Override `HoverWhenDisabled` only when that affordance intentionally remains act
 Return `true` only when the extension consumed it; Runtime then skips the public target event and later defaults.
 
 Do not retain raw `MountedNode*`, child references, or platform objects across reconciliation. Visible retained-state changes call protected `InvalidatePaint`; semantic changes call `InvalidateSemantics`. Returning `needs_frame` schedules work but does not itself invalidate an already cached paint sequence.
+
+## Typed output
+
+Use protected `EmitEvent<Key>(...)` to reach `.On<Key>()` on the View carrying the extension. It reads the current binding after recomposition, does not bubble, and does not need `UseEvents()` or an extra composition scope. Notifications return void; value-returning events return `std::optional<Result>`, empty without a handler. Handler exceptions propagate.
+
+Emit synchronously on the owning UI thread from mounted input, semantic actions, or frame updates, not construction, Update, destruction, hit testing, geometry preparation, or paint recording. Emission neither queues work nor extends the extension's lifetime. When an internal child must emit an outer component's event, explicitly pass that component's `EventEmitter` instead. Presentation handles remain explicit dependencies, not additional extension methods.
+
+## Geometry and semantics
+
+`PrepareGeometry` runs after final presentation transforms and before paint recording. Borrow its TextMeasurer only for synchronous retained geometry; store resulting metrics rather than the measurer. Return the exact changed `PaintInvalidation` phases. Text affecting measurement belongs in Layout because this callback does not trigger another layout pass.
+
+Use the [mounted coordinate APIs](layout-and-ui.md#mounted-coordinate-spaces) for window-service geometry and padding-aware content bounds; paint callbacks still record node-local commands. For a self-drawn control with virtual accessible children, follow the [SemanticBuilder availability rules](text-input-and-semantics.md#semantics) rather than creating hidden Views solely for accessibility.
 
 ## Choose a simpler mechanism when possible
 

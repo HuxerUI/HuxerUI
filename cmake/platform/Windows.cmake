@@ -17,6 +17,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_application.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_external_texture.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file.cpp"
+        "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file_drop.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_file_picker.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_http.cpp"
         "${HUXERUI_PROJECT_DIR}/platform/windows/win32_platform_view.cpp"

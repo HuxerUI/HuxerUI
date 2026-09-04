@@ -735,6 +735,7 @@ private:
     g_signal_connect(focus, "enter", G_CALLBACK(FocusEntered), this);
     g_signal_connect(focus, "leave", G_CALLBACK(FocusLeft), this);
     gtk_widget_add_controller(GTK_WIDGET(drawing_area_), focus);
+    file_drop_ = std::make_unique<LinuxFileDrop>(GTK_WIDGET(drawing_area_), *runtime_, ui_dispatcher_->Bind());
   }
 
   void ScheduleFrame(double deadline) {
@@ -944,6 +945,7 @@ private:
   }
 
   void Cleanup() noexcept {
+    file_drop_.reset();
     if (frame_source_ != 0) {
       g_source_remove(frame_source_);
       frame_source_ = 0;
@@ -1202,6 +1204,7 @@ private:
   gulong toplevel_state_handler_ = 0;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
+  std::unique_ptr<LinuxFileDrop> file_drop_;
   PlatformFrameState frame_state_;
   const RenderFrame* committed_frame_ = nullptr;
   guint frame_source_ = 0;

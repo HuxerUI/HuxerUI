@@ -64,6 +64,8 @@ Use `Event<void(Arguments...)>` for notifications.
 A value-returning event is a synchronous decision owned by its key, and `Emit<Key>(...)` returns `std::optional<Result>` so the caller must choose the fallback for a missing binding.
 Do not add `VoidEvent`, result-event aliases, a second registration method, or a parallel callback convention.
 
+For an existing retained modifier, use `NodeExtension::EmitEvent<Key>(...)` to emit through its owning View's current binding; use an explicitly supplied EventEmitter for an outer component's event. See [typed extension output](node-extensions.md#typed-output) for allowed callback phases and lifetime constraints.
+
 ### Keyboard routing
 
 Use `ViewEvents::KeyDown` and `KeyUp` for focused-View behavior after built-in component handling, and return `true` only when the application consumed the event.

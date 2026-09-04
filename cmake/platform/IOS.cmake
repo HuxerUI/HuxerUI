@@ -3,6 +3,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_external_texture.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file_picker.mm"
+        "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file_drop.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_http.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_platform_registry.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_accessibility.mm"

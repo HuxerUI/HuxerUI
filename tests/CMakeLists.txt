@@ -35,6 +35,7 @@ add_executable(huxerui_tests
         runtime/composition.cpp
         runtime/file.cpp
         runtime/file_picker.cpp
+        runtime/file_drop.cpp
         runtime/gestures.cpp
         runtime/http.cpp
         runtime/interaction.cpp
@@ -212,6 +213,7 @@ set(HUXERUI_PUBLIC_HEADERS
         event.h
         external_texture.h
         file.h
+        file_drop.h
         geometry.h
         gesture.h
         http.h

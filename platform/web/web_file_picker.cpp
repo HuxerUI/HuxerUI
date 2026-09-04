@@ -1,5 +1,6 @@
 #include "web_file.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -437,6 +438,32 @@ EM_JS(void, CancelWebPickerOperation, (emscripten::EM_VAL operation_handle), {
     operation.writable.abort().catch(() => {});
   }
 });
+
+EM_JS(emscripten::EM_VAL, CaptureWebDroppedFiles, (emscripten::EM_VAL transfer_handle), {
+  const transfer = Emval.toValue(transfer_handle);
+  const files = [];
+  try {
+    const items = Array.from(transfer.items || []).filter((item) => item.kind === "file");
+    if (!items.length) {
+      return Emval.toHandle({files, error: true});
+    }
+    for (const item of items) {
+      // A browser File alone cannot distinguish an unsupported directory-shaped drop from an ordinary file.
+      const entry = typeof item.webkitGetAsEntry === "function" ? item.webkitGetAsEntry() : null;
+      if (!entry || !entry.isFile) {
+        return Emval.toHandle({files: [], error: true});
+      }
+      const file = item.getAsFile();
+      if (!(file instanceof File)) {
+        return Emval.toHandle({files: [], error: true});
+      }
+      files.push(file);
+    }
+    return Emval.toHandle({files, error: false});
+  } catch (_) {
+    return Emval.toHandle({files: [], error: true});
+  }
+});
 // clang-format on
 
 FileErrorCode ToFileErrorCode(int code) noexcept {
@@ -759,6 +786,22 @@ FileReference MakeWebFileReference(const val& reference) {
   return MakeFileReference(std::move(metadata), std::make_shared<WebFileReferenceState>(std::move(source)));
 }
 
+FileReference MakeWebFileReferenceFromFile(const val& file) {
+  val source = val::object();
+  source.set("handle", val::null());
+  source.set("file", file);
+  source.set("writable", false);
+  source.set("identity", std::string{});
+  val reference = val::object();
+  reference.set("source", source);
+  reference.set("name", file["name"]);
+  reference.set("type", 0);
+  reference.set("size", file["size"]);
+  reference.set("contentType", file["type"].as<std::string>().empty() ? val::null() : file["type"]);
+  reference.set("canWrite", false);
+  return MakeWebFileReference(reference);
+}
+
 class WebPickerOperation final : public std::enable_shared_from_this<WebPickerOperation> {
 public:
   static std::function<void()> Open(FilePickerFilter filter, bool multiple, FilePickerOpenCompletion completion) {
@@ -908,6 +951,51 @@ huxerui_web_file_picker_complete(std::uintptr_t native_handle, emscripten::EM_VA
 
 std::shared_ptr<FilePickerTransport> CreateWebFilePickerTransport() {
   return std::make_shared<WebFilePickerTransport>();
+}
+
+FileDropOffer ReadWebFileDropOffer(const val& transfer) {
+  FileDropOffer offer;
+  const auto items = transfer["items"];
+  if (items.isNull() || items.isUndefined()) {
+    return offer;
+  }
+  const auto length = items["length"].as<unsigned>();
+  std::size_t count = 0;
+  for (unsigned index = 0; index < length; ++index) {
+    if (items[index]["kind"].as<std::string>() != "file") {
+      continue;
+    }
+    ++count;
+    const auto mime = items[index]["type"].as<std::string>();
+    if (!mime.empty() && std::ranges::find(offer.content_types, mime) == offer.content_types.end()) {
+      offer.content_types.push_back(mime);
+    }
+  }
+  if (count != 0) {
+    offer.item_count = count;
+  }
+  return offer;
+}
+
+FileDropPreparation CaptureWebFileDrop(const val& transfer) {
+  const auto captured = val::take_ownership(CaptureWebDroppedFiles(transfer.as_handle()));
+  return [captured](FileDropCompletion completion) {
+    if (captured["error"].as<bool>()) {
+      completion(FileResult<std::vector<FileReference>>(
+          FileError{FileErrorCode::Unsupported, "HuxerUI browser drop requires identifiable ordinary files"}
+      ));
+    } else {
+      std::vector<FileReference> files;
+      const auto values = captured["files"];
+      const auto length = values["length"].as<unsigned>();
+      files.reserve(length);
+      for (unsigned index = 0; index < length; ++index) {
+        files.push_back(MakeWebFileReferenceFromFile(values[index]));
+      }
+      completion(FileResult<std::vector<FileReference>>(std::move(files)));
+    }
+    return std::function<void()>{};
+  };
 }
 
 } // namespace huxerui::detail

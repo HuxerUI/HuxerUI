@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <objbase.h>
+#include <ole2.h>
 #include <psapi.h>
 
 #include <algorithm>
@@ -385,16 +386,16 @@ std::string TranslateKeyText(WPARAM virtual_key, LPARAM key_data) {
 class Win32COMApartment final {
 public:
   Win32COMApartment() {
-    const HRESULT result = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    if (FAILED(result) && result != RPC_E_CHANGED_MODE) {
-      throw std::runtime_error("HuxerUI could not initialize Windows COM services");
+    const HRESULT result = OleInitialize(nullptr);
+    if (FAILED(result)) {
+      throw std::runtime_error("HuxerUI could not initialize Windows OLE services on its UI thread");
     }
     initialized_ = SUCCEEDED(result);
   }
 
   ~Win32COMApartment() {
     if (initialized_) {
-      CoUninitialize();
+      OleUninitialize();
     }
   }
 
@@ -801,9 +802,11 @@ private:
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     accessibility_.SetDpiScale(DpiScale());
+    file_drop_ = std::make_unique<Win32FileDrop>(window_, *runtime_, [this] { return DpiScale(); });
   }
 
   void Cleanup() noexcept {
+    file_drop_.reset();
     ui_dispatcher_.Shutdown();
     text_input_.Reset();
     committed_frame_ = nullptr;
@@ -1303,6 +1306,7 @@ private:
       text_input_.SetDpiScale(DpiScale());
       return 0;
     case WM_DESTROY:
+      file_drop_.reset();
       if (system_tray_) {
         system_tray_->SetWindow(nullptr);
       }
@@ -1593,6 +1597,7 @@ private:
   Win32Api win32_api_;
   Win32Renderer renderer_;
   std::unique_ptr<Win32PlatformViews> platform_views_;
+  std::unique_ptr<Win32FileDrop> file_drop_;
   std::shared_ptr<Win32SystemTrayTransport> system_tray_;
 };
 

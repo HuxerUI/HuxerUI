@@ -1179,6 +1179,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
 }
 
 Runtime::~Runtime() {
+  DisconnectFileDrop();
   try {
     StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
   } catch (...) {
@@ -1556,6 +1557,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     UpdatePointerCursor(hover_position);
     RefreshHover(false);
     RefreshInteractionTree();
+    AdvanceFileDrop(frame);
     RefreshTextInputSession();
     BuildSemantics();
     state_->frame_commit_.render_frame.scene.root = nullptr;
@@ -1652,6 +1654,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   RefreshTextInputSession();
   AdvancePointerRecognition(frame.timestamp);
   AdvanceDragDrop(frame);
+  AdvanceFileDrop(frame);
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
   AdvanceTextSelectionLongPress(frame.timestamp);

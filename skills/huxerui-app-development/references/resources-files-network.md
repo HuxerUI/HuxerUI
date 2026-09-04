@@ -34,6 +34,10 @@ Pass resource values directly to components and `VisualFill` when their public o
 
 Keep resource identifiers and namespace consistent with generated CMake. Do not open `resources.bin` directly.
 
+### Locale and text shaping
+
+Text, built-in labels, TextField, and Canvas text inherit the effective `Locale` when their shaping locale is empty. Use `.Shaping(TextShapingOptions{...})` on Text or TextField for a local direction or locale override; it does not change resource lookup. A `TextMeasurer` does not look up Environment implicitly, so pass the effective locale explicitly when measuring custom text. Picker labels, week starts, and 12/24-hour presentation also follow Locale rather than application-authored locale tables.
+
 ## Files and directories
 
 Obtain the runtime-installed services during composition with `UseService<FileSystem>()`, `UseService<FilePicker>()`, and `UseService<HttpClient>()`. These return shared service handles; their public constructors are not application construction APIs. Store the required handle before launching a lifetime-bound task, then capture that handle into the task rather than looking up a composition service after suspension.
@@ -44,15 +48,35 @@ Obtain the runtime-installed services during composition with `UseService<FileSy
 
 `File` represents an application-visible path and offers synchronous and asynchronous stat, read, write, append, list, create, delete, copy, and move operations. Byte reads return `FileResult<Bytes>`; synchronous byte writes borrow a span for the call, while asynchronous byte writes take `Bytes` by value so storage remains owned across suspension. Handle `FileResult<T>` and `FileErrorCode`; do not assume every platform permits every path.
 
-Use `File(const Uri&)` and `File::ToUri()` only for supported local `file:` URI conversion. Preserve `FileReference` as the platform-granted capability for Android content URIs, Apple security-scoped URLs, browser handles, and other external files; do not project it into a local path or generic URI.
+Use `File(const Uri&)` and `File::ToUri()` only for supported local `file:` URI conversion. `FileReference` retains access to an external file or directory; do not reconstruct a path from its display name, an Android content URI, or a browser handle.
 
 `FileSystem::Directories()` provides application data, cache, temporary, and optional executable directories. Use those instead of hardcoded OS paths.
 
 Destructive file operations require the user's intended scope. Prefer non-recursive operations unless recursive deletion is explicitly needed and the exact target is validated.
 
+### References and local paths
+
+`FileReference::AsFile()` returns an optional local `File` without I/O or import. Path-backed selections support it; Android document URIs and browser handles do not. The result is a stored path, not a fresh permission check or an identity that follows renaming.
+
+The returned `File` does not retain the reference's grant or temporary-file owner, enforce `CanWrite()`, or inherit document coordination. Keep a reference alive throughout path-based use when access depends on those resources; use reference I/O when its grant restrictions or coordination matter. On Windows, ordinary local-path use may outlive the reference, but `AsFile()` does not release native handles: all sharing references and pending operations must release them before their rename restrictions end.
+
+`Type()`, `Size()`, `ContentType()`, and `CanWrite()` are captured metadata, not refreshed storage state. `ListChildrenAsync()` lists direct directory children, whose retained access survives destruction of the parent value without upgrading its grant. Directory references cannot use single-file read, import, or replacement operations.
+
 ## File picker
 
 `OpenFileAsync` and `OpenFilesAsync` return `FileReference` values rather than unrestricted paths. Use their read/import/replace operations and preserve the capability boundary on sandboxed and Web platforms. `SaveFileAsync` instead receives an application `File` plus `SaveFileOptions` and reports success as `bool`. Check `CanOpenFiles` and `CanSaveFiles` before presenting unavailable actions.
+
+Use `CanOpenDirectories(writable)` and `OpenDirectoryAsync(writable = false)` to select an existing directory without file filters. The default grant is read-only through reference operations; `true` requests writable access without silently downgrading it. Directory `CanWrite()` describes child creation, not permission to overwrite every child. Picker empty/false results cover cancellation and unsuccessful presentation; filters are platform hints, not content validation.
+
+Web directory selection requires a live browser directory capability. Start each picker from a user action without preceding asynchronous work consuming transient activation; an uploaded directory listing is not a replacement grant.
+
+### Directory copying
+
+Use `CreateDirectoryAsync(name)` and `CopyFileFromAsync(source, name, overwrite)` for named children of a writable directory reference. Names are single path segments, not relative paths.
+
+`CopyDirectoryContentsToAsync(destination, overwrite = false)` copies into an existing local `File` directory or writable directory reference. It copies the contents, not an extra source-root folder; existing directories merge and destination-only entries remain. Existing files require explicit overwrite. Inspect the `FileResult<DirectoryCopySummary>`: failure or cancellation may leave completed output, with no tree transaction or rollback. Links, cycles, overlapping roots, and relationships that cannot be established safely are rejected; do not assume snapshot isolation or atomic exclusion of concurrent provider writes.
+
+For external file reception, use the separate [file-drop contract](gestures-and-drag-drop.md#external-file-reception), then choose which reference operations the application needs.
 
 ## HTTP
 

@@ -29,6 +29,7 @@ struct SemanticAction;
 namespace detail {
 struct DragSourceCapability;
 struct DropTargetCapability;
+struct FileDropTargetCapability;
 class GestureRecognizer;
 }
 
@@ -340,6 +341,8 @@ private:
   [[nodiscard]] virtual const detail::DragSourceCapability* GetDragSourceCapability() const noexcept;
 
   [[nodiscard]] virtual const detail::DropTargetCapability* GetDropTargetCapability() const noexcept;
+
+  [[nodiscard]] virtual const detail::FileDropTargetCapability* GetFileDropTargetCapability() const noexcept;
 
   void BindEvents(const detail::EventBindings& bindings) {
     event_bindings_ = &bindings;

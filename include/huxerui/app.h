@@ -19,6 +19,7 @@
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
 #include <huxerui/file.h>
+#include <huxerui/file_drop.h>
 #include <huxerui/layer.h>
 #include <huxerui/lifecycle.h>
 #include <huxerui/platform_adapter.h>
@@ -340,6 +341,7 @@ struct NodeExtensionHandle;
 struct ActiveDropTarget;
 struct ContextMenuRecognitionState;
 struct DragDropSession;
+struct FileDropState;
 struct DragSourceRecognitionState;
 struct MountedNode;
 struct PointerRecognition;
@@ -395,6 +397,17 @@ public:
   const FrameCommit& BuildFrame();
   /// Delivers one normalized pointer event in logical window-local coordinates.
   void HandlePointerEvent(const PointerEvent& event);
+  /// Starts a host-owned file drag. Session identifiers must be nonzero and increase within this Runtime.
+  /// Positions are host-local DIPs. The result indicates provisional Copy eligibility, not completed file reception.
+  [[nodiscard]] bool HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position);
+  /// Updates the active host file drag; stale session identifiers are ignored.
+  [[nodiscard]] bool HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position);
+  /// Ends matching host hover without canceling previously accepted asynchronous deliveries.
+  void HandleFileDragExited(std::uint64_t session);
+  /// Accepts a host drop and begins private platform preparation after committing the target and ending hover.
+  /// Platform implementations provide the source through the private file-drop boundary; applications use events.
+  [[nodiscard]] bool HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position,
+                                    detail::FileDropPreparation prepare);
   /// Returns whether the window-local position has a HuxerUI context-menu handler.
   /// Platform hosts use this to preserve their native context menu outside claimed HuxerUI content.
   [[nodiscard]] bool HasContextMenuHandler(Point position) const;
@@ -478,6 +491,11 @@ private:
   void CancelDragDrop(detail::PointerSession& session, const DragEvent& drag);
   void AdvanceDragDrop(const FrameInfo& frame);
   void AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& frame);
+  void AdvanceFileDrop(const FrameInfo& frame);
+  void DisconnectFileDrop() noexcept;
+  void RefreshFileDropTarget(bool emit_moved);
+  void FinishFileDrop(std::uint64_t operation, FileResult<std::vector<FileReference>> result);
+  void AutoScrollDropTarget(std::uint64_t target_identity, Point window_position, const FrameInfo& frame);
   [[nodiscard]] std::optional<detail::ActiveDropTarget>
   ResolveDropTarget(const detail::DragDropSession& session, Point window_position) const;
   [[nodiscard]] bool ResolveSharedGestureRecognition(const std::shared_ptr<detail::GestureRecognizer>& recognizer,

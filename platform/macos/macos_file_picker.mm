@@ -3,6 +3,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <dispatch/dispatch.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstring>
 #include <functional>
@@ -528,6 +529,53 @@ FileReference MakeMacFileReference(NSURL* url, bool writable) {
     throw std::logic_error("HuxerUI macOS file reference requires a file URL");
   }
   return MakeMacReference(url, writable, std::make_shared<MacFileAccess>(url));
+}
+
+FileDropPreparation CaptureMacFileDrop(NSPasteboard* pasteboard) {
+  NSArray<NSURL*>* urls = [pasteboard readObjectsForClasses:@[NSURL.class]
+                                                  options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+  const bool complete = urls.count > 0 && urls.count == pasteboard.pasteboardItems.count;
+  std::vector<std::shared_ptr<MacFileAccess>> access;
+  if (complete) {
+    access.reserve(urls.count);
+    // Capture grants before the native callback returns; each reference retains the same access owner.
+    for (NSURL* url in urls) {
+      access.push_back(std::make_shared<MacFileAccess>(url));
+    }
+  }
+  return [urls, complete, access = std::move(access)](FileDropCompletion completion) {
+    auto canceled = std::make_shared<std::atomic<bool>>(false);
+    EnqueueFileOperation([urls, complete, access, canceled, completion = std::move(completion)] {
+      @autoreleasepool {
+        try {
+          if (!complete) {
+            completion(FileResult<std::vector<FileReference>>(
+                FileError{FileErrorCode::Unsupported, "HuxerUI file drop requires a complete batch of file URLs"}
+            ));
+            return;
+          }
+          std::vector<FileReference> files;
+          files.reserve(access.size());
+          for (std::size_t index = 0; index < access.size(); ++index) {
+            if (*canceled) {
+              return;
+            }
+            files.push_back(MakeMacReference(urls[index], false, access[index]));
+          }
+          if (!*canceled) {
+            completion(FileResult<std::vector<FileReference>>(std::move(files)));
+          }
+        } catch (...) {
+          if (!*canceled) {
+            completion(FileResult<std::vector<FileReference>>(
+                FileError{FileErrorCode::Io, "HuxerUI could not retain the macOS dropped files"}
+            ));
+          }
+        }
+      }
+    });
+    return [canceled] { *canceled = true; };
+  };
 }
 
 std::shared_ptr<FilePickerTransport> CreateMacFilePickerTransport(std::function<NSWindow*()> window_provider) {

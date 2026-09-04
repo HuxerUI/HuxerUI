@@ -1286,6 +1286,22 @@ public:
     return consumed.x != 0.0F || consumed.y != 0.0F;
   }
 
+  bool FileDrag(std::uint64_t session, int phase, Point position, FileDropOffer offer, FileDropPreparation source) {
+    switch (phase) {
+    case 0:
+      return runtime_.HandleFileDragEntered(session, std::move(offer), position);
+    case 1:
+      return runtime_.HandleFileDragMoved(session, std::move(offer), position);
+    case 2:
+      runtime_.HandleFileDragExited(session);
+      return false;
+    case 3:
+      return runtime_.HandleFileDrop(session, std::move(offer), position, std::move(source));
+    default:
+      return false;
+    }
+  }
+
   bool KeyEvent(KeyEventType type, jint key_code, std::string text, KeyModifiers modifiers, bool repeat) {
     return runtime_.HandleKeyEvent({
         type,
@@ -1771,6 +1787,34 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativePointer(
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
   }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeFileDrag(
+    JNIEnv* environment, jclass, jlong handle, jlong drag, jint phase, jfloat x, jfloat y,
+    jobjectArray content_types, jobject operation) {
+  try {
+    if (auto* session = huxerui::detail::Session(handle); session && drag > 0) {
+      huxerui::FileDropOffer offer;
+      const jsize count = content_types ? environment->GetArrayLength(content_types) : 0;
+      for (jsize index = 0; index < count; ++index) {
+        huxerui::android::LocalRef<jstring> type(
+            environment, static_cast<jstring>(environment->GetObjectArrayElement(content_types, index))
+        );
+        if (type) {
+          offer.content_types.push_back(huxerui::android::JavaStringToUtf8(environment, type.Get()));
+        }
+      }
+      huxerui::detail::FileDropPreparation source;
+      if (phase == 3 && operation) {
+        source = huxerui::detail::CaptureAndroidFileDrop(environment, operation);
+      }
+      return session->FileDrag(static_cast<std::uint64_t>(drag), phase, {x, y}, std::move(offer), std::move(source))
+                 ? JNI_TRUE : JNI_FALSE;
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+  return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeScroll(

@@ -1,3 +1,4 @@
+#import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
 #import <dispatch/dispatch.h>
 
@@ -5,10 +6,12 @@
 
 #include <chrono>
 #include <functional>
+#include <future>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "file_internal.h"
 #include "macos_file_internal.h"
@@ -188,6 +191,48 @@ TEST_CASE("MacDirectoryReferencesExposeProjectPathsForDirectFileOperations") {
     const auto children = project->ListChildren();
     REQUIRE(children.Succeeded());
     REQUIRE(children.Value().size() == 2);
+  }
+}
+
+TEST_CASE("MacFileDropRetainsReadOnlyReferencesAfterPasteboardAndPreparationRelease") {
+  @autoreleasepool {
+    ResetMacFileReferenceState();
+    TemporaryDirectory temporary;
+    REQUIRE(temporary.Child("dropped.txt").WriteString("payload"));
+
+    NSPasteboard* pasteboard = [NSPasteboard pasteboardWithUniqueName];
+    const bool written = [pasteboard writeObjects:@[temporary.ChildURL(@"dropped.txt")]];
+    auto preparation = detail::CaptureMacFileDrop(pasteboard);
+    [pasteboard clearContents];
+    [pasteboard releaseGlobally];
+    REQUIRE(written);
+
+    auto completion = std::make_shared<std::promise<FileResult<std::vector<FileReference>>>>();
+    auto ready = completion->get_future();
+    auto cancel = preparation([completion](FileResult<std::vector<FileReference>> result) {
+      completion->set_value(std::move(result));
+    });
+    preparation = {};
+    REQUIRE(ready.wait_for(3s) == std::future_status::ready);
+    auto result = ready.get();
+    cancel = {};
+    REQUIRE(result.Succeeded());
+    REQUIRE(result.Value().size() == 1);
+    const FileReference reference = result.Value().front();
+    REQUIRE(reference.Name() == "dropped.txt");
+    REQUIRE_FALSE(reference.CanWrite());
+
+    TestPlatform platform(DispatchToMainQueue);
+    Runtime runtime(MacFileReferenceApp, platform);
+    runtime.BuildFrame();
+    mac_file_reference_tasks.Launch([reference]() -> Task<void> {
+      mac_file_reference_text = co_await reference.ReadStringAsync();
+      mac_file_reference_completed = true;
+    });
+    REQUIRE(RunMainLoopUntil([] { return mac_file_reference_completed; }));
+    REQUIRE(mac_file_reference_text.has_value());
+    REQUIRE(mac_file_reference_text->Succeeded());
+    REQUIRE(mac_file_reference_text->Value() == "payload");
   }
 }
 

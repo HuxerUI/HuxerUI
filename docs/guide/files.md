@@ -131,6 +131,50 @@ Passing `true` requests read/write access and never silently returns a read-only
 `CanWrite()` on the returned directory advertises child creation, not permission to overwrite every existing child.
 Directory, file-open, and save requests share the same per-Runtime presentation queue.
 
+## Receiving dropped files
+
+Use `FileDropTarget` from `<huxerui/file_drop.h>` to receive ordinary files from another application.
+Attach it to the receiving view with `.With(...)` and handle typed `FileDropEvents`:
+
+```cpp
+return Text("Drop images here")
+    .With(FileDropTarget::Accepts({.extensions = {"png", "jpg"}, .content_types = {"image/*"}}))
+    .On<FileDropEvents::Dropped>([](const std::vector<FileReference>& files, const FileDropEvent&) {
+      OpenImages(files);
+    });
+```
+
+The example's `OpenImages` is application code: receiving files does not automatically read, import, or write them.
+Copy `FileReference` values to retain their access, then use their existing operations or explicitly import them into application storage.
+The [Files example](../../examples/files/main.cpp) retains references through either a drop or its equivalent picker button.
+
+`FileDropOptions` accepts filename suffixes without a leading dot, MIME types, and `allows_multiple` (true by default).
+Suffixes and MIME types are alternatives; empty lists accept any ordinary file.
+Matching ignores ASCII case, supports compound suffixes such as `tar.gz`, and supports `type/*` or `*/*` MIME patterns.
+Every file must pass final validation; directories, empty batches, and mixed eligible/ineligible batches are rejected without partial delivery.
+Metadata filtering is not content validation: still validate bytes before parsing them.
+
+An optional `Accepts(options, predicate)` predicate receives a `FileDropOffer` with an optional count and possibly incomplete advertised MIME types.
+Unknown metadata is not a proven match; hover acceptance is provisional until the actual references are prepared.
+Keep predicates fast and free of side effects, file I/O, and permission requests.
+
+Use `Entered` and `Exited` to drive hover feedback; `Moved` reports position updates.
+Physical drop ends hover with `Exited` immediately, followed by deferred `Dropped` or `Failed` once preparation and final validation complete.
+`Failed` receives a `FileError` and never delivers a partial batch.
+Events run on the UI thread, and `Dropped`/`Failed` retain the target-local and window-local DIP coordinates from physical drop.
+Several accepted drops may complete independently; compatible recomposition uses the current handlers, while unmounting cancels pending delivery.
+
+Reception negotiates Copy, not Move or Link, and returns references restricted to reading through `FileReference` operations.
+It supports shell file lists on Windows, file URLs on macOS, file representations on iOS, content URIs on Android, GTK file lists with local capabilities on Linux, and identifiable ordinary browser files on Web.
+Provider temporary files may need a reference-owned copy; other files are not imported merely because they were dropped.
+Web reception requires the browser to distinguish file entries from directories during the native drop event.
+Native `PlatformView` regions retain ownership of their own drops.
+
+Android external drag permissions require API 24 or later and remain bounded by the granting Activity's lifetime.
+`HuxerUIActivity` installs the permission hook; custom hosts install `HuxerUIView.setFileDropPermissionRequester`, returning an `AutoCloseable` lease for the platform grant, and clear the hook during teardown.
+Android API 23 and hosts without this integration still use `FilePicker` normally.
+Provide a picker action for keyboard, touch, accessibility, and unsupported hosts; physical dragging must not be the only way to open files.
+
 ## Copying directory contents
 
 Use `CreateDirectoryAsync(name)` on a writable directory reference to create one child or obtain an existing child directory.

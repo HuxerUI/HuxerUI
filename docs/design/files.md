@@ -21,8 +21,8 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, or a document-provider abstraction.
 Directory copying does not add multi-directory selection, mixed file/directory selection, recursive deletion of grants, mirroring, moves, metadata preservation, transactions, rollback, resumability, or a progress-controller API.
 
-It also does not persist picker grants across process launches or add drag-and-drop, clipboard, recent-file, or share-sheet APIs.
-Those capabilities may reuse `FileReference` later without expanding the initial picker contract.
+It also does not persist picker grants across process launches or add clipboard, recent-file, or share-sheet APIs.
+[External File Drop](file-drop.md) reuses `FileReference` independently of picker presentation and does not expand the picker contract.
 
 Open With, platform file associations, share intents, application activation, window selection, and multi-window document routing are outside this design.
 They require one application-level activation contract rather than a file-specific View event.

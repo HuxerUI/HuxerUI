@@ -81,6 +81,21 @@ Place the entire View with `MainAlign`/`CrossAlign` on a linear parent or `.With
 
 Layouts measure through `LayoutContext`, obey incoming constraints, and return a constrained size plus valid placements. Do not solve a constraint problem with an unrelated wrapper. A vertical `Divider` needs bounded height. `PlatformView` has no portable intrinsic size; assign it parent constraints or a `Frame`.
 
+## Mounted coordinate spaces
+
+For custom layouts and retained behavior, use MountedNode's public geometry instead of manually adding offsets or reconstructing transforms:
+
+| API | Meaning |
+| --- | --- |
+| `Bounds()` | Full node-local rectangle, zero origin, including Padding. |
+| `ContentBounds()` | Bounds inset by resolved Padding, including consumed SafeAreaPadding; nonzero origin is possible and dimensions clamp to zero. It does not subtract Border or describe a clip or child union. |
+| `LayoutOffset()` | Parent-local layout origin before presentation transforms. |
+| `PresentationBounds()` | Transformed axis-aligned full-node bounds in window DIPs, not clipped visibility. |
+| `LocalToWindow(point)` / `WindowToLocal(point)` | Point conversion through the resolved transform; the inverse returns an empty optional when non-invertible. |
+| `LocalToWindowBounds(rect)` | Window-axis-aligned bounds of all four transformed corners, without clipping. |
+
+These are logical coordinates, not screen coordinates or physical pixels. The current frame's final transform is available in `NodeExtension::PrepareGeometry`; earlier callbacks can observe the previous transform. Drawing remains node-local. Layout measurement already receives content constraints and places children relative to the content origin, so do not add or subtract the owning node's Padding again in a custom layout policy.
+
 ## Scrolling
 
 Use `ScrollView` for a conventional content subtree and `VirtualList`/`VirtualGrid` for large item sets. A scrollable needs a bounded viewport and content that can exceed it. Avoid nesting same-axis scrolling unless ownership is intentional.

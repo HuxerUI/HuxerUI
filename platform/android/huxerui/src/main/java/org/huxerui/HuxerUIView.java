@@ -1,6 +1,7 @@
 package org.huxerui;
 
 import android.content.ClipData;
+import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
@@ -30,6 +31,7 @@ import android.util.LongSparseArray;
 import android.util.LruCache;
 import android.util.SparseIntArray;
 import android.view.KeyEvent;
+import android.view.DragEvent;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.Surface;
@@ -129,6 +131,12 @@ public final class HuxerUIView extends ViewGroup {
         void cancel(int requestCode);
     }
 
+    /** Supplies a drag grant from the owning Activity without assuming the View's Context is an Activity. */
+    public interface FileDropPermissionRequester {
+        /** Returns an owned grant to close after its last file reference, or null when access is unavailable. */
+        AutoCloseable request(DragEvent event);
+    }
+
     public interface PermissionLauncher {
         void request(String permission, int requestCode);
 
@@ -214,6 +222,11 @@ public final class HuxerUIView extends ViewGroup {
     private int safeInsetBottom;
     private SystemBarsController systemBarsController;
     private FilePickerLauncher filePickerLauncher;
+    private FileDropPermissionRequester fileDropPermissionRequester;
+    private long fileDropSession;
+    private boolean fileDropStarted;
+    private boolean fileDropHover;
+    private String[] fileDropTypes = new String[0];
     private PermissionLauncher permissionLauncher;
     private long[] platformComposition = EMPTY_PLATFORM_COMPOSITION;
     private boolean nativeDrawing;
@@ -254,6 +267,98 @@ public final class HuxerUIView extends ViewGroup {
 
     void setSystemBarsController(SystemBarsController controller) {
         systemBarsController = controller;
+    }
+
+    /** Installs the Activity-owned external file drop permission hook; null disables new external file drags. */
+    public void setFileDropPermissionRequester(FileDropPermissionRequester requester) {
+        endFileDropHover();
+        fileDropStarted = false;
+        fileDropPermissionRequester = requester;
+    }
+
+    private void endFileDropHover() {
+        if (fileDropHover) {
+            fileDropHover = false;
+            if (nativeHandle != 0L) {
+                try {
+                    nativeFileDrag(nativeHandle, fileDropSession, 2, 0, 0, null, null);
+                } catch (RuntimeException ignored) {
+                }
+            }
+        }
+    }
+
+    private boolean updateFileDropHover(DragEvent event) {
+        int phase = fileDropHover ? 1 : 0;
+        if (!fileDropHover) {
+            ++fileDropSession;
+            fileDropHover = true;
+        }
+        return nativeFileDrag(nativeHandle, fileDropSession, phase,
+                event.getX() / density, event.getY() / density, fileDropTypes, null);
+    }
+
+    @Override
+    public boolean onDragEvent(DragEvent event) {
+        if (Build.VERSION.SDK_INT < 24 || nativeHandle == 0L || fileDropPermissionRequester == null) {
+            return false;
+        }
+        try {
+            switch (event.getAction()) {
+                case DragEvent.ACTION_DRAG_STARTED:
+                    endFileDropHover();
+                    ClipDescription description = event.getClipDescription();
+                    fileDropStarted = description != null && description.getMimeTypeCount() > 0;
+                    if (fileDropStarted) {
+                        fileDropTypes = new String[description.getMimeTypeCount()];
+                        for (int index = 0; index < fileDropTypes.length; ++index) {
+                            fileDropTypes[index] = description.getMimeType(index);
+                        }
+                    }
+                    return fileDropStarted;
+                case DragEvent.ACTION_DRAG_ENTERED:
+                case DragEvent.ACTION_DRAG_LOCATION:
+                    return fileDropStarted && updateFileDropHover(event);
+                case DragEvent.ACTION_DRAG_EXITED:
+                    endFileDropHover();
+                    return fileDropStarted;
+                case DragEvent.ACTION_DROP:
+                    if (!fileDropStarted || !updateFileDropHover(event)) {
+                        endFileDropHover();
+                        return false;
+                    }
+                    AutoCloseable permission = fileDropPermissionRequester.request(event);
+                    if (permission == null) {
+                        endFileDropHover();
+                        return false;
+                    }
+                    HuxerUIFileDrop.Access access = new HuxerUIFileDrop.Access(permission);
+                    boolean accepted = false;
+                    try {
+                        HuxerUIFileDrop.Operation operation =
+                                new HuxerUIFileDrop.Operation(getContext(), event.getClipData(), access);
+                        accepted = nativeFileDrag(nativeHandle, fileDropSession, 3,
+                                event.getX() / density, event.getY() / density, fileDropTypes, operation);
+                        return accepted;
+                    } finally {
+                        endFileDropHover();
+                        if (!accepted) {
+                            access.close();
+                        }
+                    }
+                case DragEvent.ACTION_DRAG_ENDED:
+                    endFileDropHover();
+                    fileDropStarted = false;
+                    fileDropTypes = new String[0];
+                    return true;
+                default:
+                    return false;
+            }
+        } catch (RuntimeException exception) {
+            endFileDropHover();
+            fileDropStarted = false;
+            return false;
+        }
     }
 
     public void setFilePickerLauncher(FilePickerLauncher launcher) {
@@ -375,6 +480,8 @@ public final class HuxerUIView extends ViewGroup {
 
     @Override
     protected void onDetachedFromWindow() {
+        endFileDropHover();
+        fileDropStarted = false;
         ViewTreeObserver observer = getViewTreeObserver();
         if (observer.isAlive()) {
             observer.removeOnPreDrawListener(textInputGeometryListener);
@@ -2187,6 +2294,9 @@ public final class HuxerUIView extends ViewGroup {
     private static native void nativeSynchronizePlatformViewFocus(long handle, long identity, boolean focusVisible);
 
     private static native boolean nativeMoveFocusFromPlatformView(long handle, long identity, boolean reverse);
+
+    private static native boolean nativeFileDrag(long handle, long session, int phase, float x, float y,
+            String[] contentTypes, HuxerUIFileDrop.Operation operation);
 
     private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y,
             int changedButton, int pressedButtons);

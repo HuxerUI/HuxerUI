@@ -36,6 +36,8 @@ return MaterialTheme(theme, AppContent());
 
 For a branded dark Material theme, customize `MaterialDarkThemeSpec()` and still pass it to `MaterialTheme`. The `MaterialDarkTheme` convenience is for the unmodified built-in dark definition. Flat follows the same pattern.
 
+`primary_container`/`on_primary_container` and `tertiary_container`/`on_tertiary_container` are tonal surface/foreground pairs, distinct from the stronger primary and tertiary pairs. Customize both sides together to preserve contrast in light and dark themes.
+
 ## Typed style catalog
 
 Component styles are typed Environment values. Verify their current fields in the active SDK headers before constructing a replacement.
@@ -43,6 +45,7 @@ Component styles are typed Environment values. Verify their current fields in th
 | Area | Typed styles | Public header |
 | --- | --- | --- |
 | Text and controls | `TextStyle`, `ButtonStyle`, `IconButtonStyle`, `ChipStyle`, `DividerStyle`, `SegmentedButtonStyle`, `TabsStyle`, `SelectStyle`, `TextFieldStyle`, `ComboBoxStyle`, `CheckboxStyle`, `RadioButtonStyle`, `SwitchStyle`, `ProgressCircleStyle`, `ProgressBarStyle`, `SliderStyle` | `text.h`, `theme.h` |
+| Date and time | `DatePickerStyle`, `TimePickerStyle` | `theme.h` |
 | Scrolling | `ScrollBarStyle` | `modifier.h` |
 | Navigation | `NavigationStyle`, `TopAppBarStyle`, `NavigationBarStyle`, `NavigationPaneStyle`, `DrawerStyle` | `navigation.h` |
 | Presentation | `ToastStyle`, `TooltipStyle`, `DialogStyle`, `BottomSheetStyle`, `MenuStyle` | `presentation.h` |
@@ -51,6 +54,8 @@ Component styles are typed Environment values. Verify their current fields in th
 These values own component-specific geometry, color, typography, indication, disabled state, and motion as appropriate. Prefer them to copying a built-in component or hardcoding a parallel visual implementation.
 
 `TextFieldVariantStyle` is nested configuration inside `TextFieldStyle`; it is not a separate Theme override key.
+
+Flat pickers use compact outlined geometry and rounded-square date selections; Material pickers use larger tonal surfaces and circular date selections. TimePicker distinguishes active-field, AM/PM-period, and dial selection colors. Preserve these separate roles when overriding its style instead of applying one selection background everywhere.
 
 ## Override component styles
 
@@ -123,5 +128,7 @@ Reduced motion is handled by the resolved handle; still keep the mutation correc
 
 Layer content is outside the ordinary application subtree but captures its environment. Keep modal dismissal, focus trapping, and owner state explicit. Do not retain a presentation context after its layer is dismissed.
 Set `PopupOptions::retain_anchor_focus` only when pointer interaction with non-focusable popup content must keep an editor or other keyboard session on its mounted anchor; focusable popup descendants still receive focus.
+
+With `popup.Anchor()` attached to a View, `Show` follows that View's full bounds, while `ShowAtAnchor(local_bounds, ...)` follows a node-local rectangle through layout, scrolling, and presentation transforms. Use `UpdateAnchor(id, local_bounds)` to move the latter without replacing its layer or content; false means a stale id or another anchor mode. `ShowAt(window_point, ...)` remains a fixed window-DIP position. Choose the anchor mode directly instead of manually tracking transforms or dismissing and recreating a popup to reposition it.
 
 Prefer theme style overrides (`ToastStyle`, `DialogStyle`, `BottomSheetStyle`, `MenuStyle`, `TooltipStyle`) over copying built-in presentation implementations.

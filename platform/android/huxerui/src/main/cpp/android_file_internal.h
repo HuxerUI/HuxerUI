@@ -5,6 +5,8 @@
 #include <memory>
 #include <string_view>
 
+#include <huxerui/file_drop.h>
+
 namespace huxerui {
 class FileReference;
 class FileSystem;
@@ -14,6 +16,8 @@ namespace huxerui::detail {
 
 class FilePickerTransport;
 struct FileReferenceMetadata;
+
+[[nodiscard]] FileDropPreparation CaptureAndroidFileDrop(JNIEnv* environment, jobject operation);
 
 [[nodiscard]] std::shared_ptr<FileSystem> CreateAndroidFileSystem(JNIEnv* environment, jobject context);
 [[nodiscard]] std::shared_ptr<FilePickerTransport>

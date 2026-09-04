@@ -431,7 +431,8 @@ return CardView(card)
 ```
 
 Use a long-press DragGesture configuration for reorder behavior inside scrolling content.
-Drag-and-drop is in-process; native files, URLs, and PlatformView targets are not inferred from an application payload.
+Typed DragSource/DropTarget transfers are in-process; native files, URLs, and PlatformView targets are not inferred from an application payload.
+Use [FileDropTarget](files.md#receiving-dropped-files) to receive external ordinary files through the separate host-owned file-drop lifecycle.
 See [Typed Drag-and-Drop Design](../design/drag-drop.md) for ownership, target selection, preview, and auto-scroll behavior.
 
 ## TextField

@@ -16,6 +16,7 @@ class IosPlatformAdapter;
   huxerui::detail::IosPlatformAdapter* huxeruiAdapter;
   __strong NSMutableSet<UITouch*>* huxeruiTouches;
   __strong NSMutableDictionary<NSNumber*, NSNumber*>* huxeruiPointerButtons;
+  __strong id<UIDropInteractionDelegate> huxeruiFileDropDelegate;
 }
 - (void)commitHuxerUIFrame;
 - (void)cancelHuxerUITouches;

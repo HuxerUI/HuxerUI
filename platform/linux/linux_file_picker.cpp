@@ -583,19 +583,6 @@ std::optional<std::string> ContentType(const File& file) {
   return std::string(mime);
 }
 
-std::optional<FileReference> MakeLinuxFileReference(const File& file, bool directory = false, bool writable = true) {
-  try {
-    auto reference = MakeLocalFileReference(file, writable, ContentType(file));
-    if (reference.Type() != (directory ? FileType::Directory : FileType::File) ||
-        (directory && writable && !reference.CanWrite())) {
-      return std::nullopt;
-    }
-    return reference;
-  } catch (...) {
-    return std::nullopt;
-  }
-}
-
 std::vector<std::string> ResponseUris(GVariant* results) {
   std::vector<std::string> uris;
   VariantHandle values(g_variant_lookup_value(results, "uris", G_VARIANT_TYPE("as")));
@@ -1090,6 +1077,19 @@ std::string LinuxPortalParentWindow(unsigned long window) {
     return {};
   }
   return "x11:" + std::string(buffer.data(), end);
+}
+
+std::optional<FileReference> MakeLinuxFileReference(const File& file, bool directory, bool writable) {
+  try {
+    auto reference = MakeLocalFileReference(file, writable, ContentType(file));
+    if (reference.Type() != (directory ? FileType::Directory : FileType::File) ||
+        (directory && writable && !reference.CanWrite())) {
+      return std::nullopt;
+    }
+    return reference;
+  } catch (...) {
+    return std::nullopt;
+  }
 }
 
 std::shared_ptr<FilePickerTransport>

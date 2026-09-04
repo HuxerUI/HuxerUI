@@ -669,8 +669,6 @@ void Runtime::AdvanceDragDrop(const FrameInfo& frame) {
 }
 
 void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& frame) {
-  constexpr float edge_extent = 32.0F;
-  constexpr float maximum_speed = 640.0F;
   auto found = state_->pointer_sessions_.find(pointer_id);
   if (found == state_->pointer_sessions_.end()) {
     return;
@@ -686,15 +684,19 @@ void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& f
       !found->second.drag_drop.has_value() || !found->second.drag_drop->target.has_value()) {
     return;
   }
-  DragDropSession& drag_drop = *found->second.drag_drop;
+  const DragDropSession& drag_drop = *found->second.drag_drop;
+  AutoScrollDropTarget(drag_drop.target->extension.node_identity, drag_drop.drag.window_position, frame);
+}
 
+void Runtime::AutoScrollDropTarget(std::uint64_t target_identity, Point window_position, const FrameInfo& frame) {
+  constexpr float edge_extent = 32.0F;
+  constexpr float maximum_speed = 640.0F;
   std::vector<detail::MountedNode*> route;
-  const bool has_route = BuildPointerRoute(*state_->mounted_root_, drag_drop.drag.window_position, route);
+  const bool has_route = state_->mounted_root_ && BuildPointerRoute(*state_->mounted_root_, window_position, route);
   if (!has_route) {
     return;
   }
-  const auto target = std::ranges::find(route, drag_drop.target->extension.node_identity,
-                                        &detail::MountedNode::identity);
+  const auto target = std::ranges::find(route, target_identity, &detail::MountedNode::identity);
   if (target == route.end()) {
     return;
   }
@@ -703,7 +705,7 @@ void Runtime::AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& f
     if (!node->interaction.enabled || !IsScrollContainer(*node)) {
       continue;
     }
-    const std::optional<Point> local = node->WindowToLocal(drag_drop.drag.window_position);
+    const std::optional<Point> local = node->WindowToLocal(window_position);
     if (!local.has_value()) {
       continue;
     }

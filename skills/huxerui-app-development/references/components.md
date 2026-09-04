@@ -6,7 +6,7 @@ This is a decision-oriented catalog, not a replacement for the active SDK's publ
 
 | Component | Important contract |
 | --- | --- |
-| `Text` | Takes `StringVariant` and optional `TextRole`; `.Style(TextStyle)` overrides text styling. `.Align(TextAlign)` and `.VerticalAlign(TextVerticalAlign)` place the paragraph inside its text rectangle. `Text::Format` supports literal and resource formats. |
+| `Text` | Takes `StringVariant` and optional `TextRole`; `.Style(TextStyle)` overrides text styling and `.Shaping(TextShapingOptions)` overrides shaping direction or locale. `.Align(TextAlign)` and `.VerticalAlign(TextVerticalAlign)` place the paragraph inside its text rectangle. `Text::Format` supports literal and resource formats. |
 | `Image` | Takes `ImageVariant` or `std::shared_ptr<ExternalTexture>`; `.Fit`, `.Align`, `.Sampling`, and `.Tint` are component-specific. |
 | `Canvas` | Takes a `CanvasPainter` and paints in the size assigned by layout. |
 | `Divider` | Horizontal by default; pass `Axis::Vertical` only when height is bounded. |
@@ -29,6 +29,8 @@ Use the complete container, scrolling, virtualization, navigation-shell, and res
 | `ComboBox(value, suggestions[, text, content])` | Controlled `TextEditingValue` with application-owned suggestions; `.OnChanged` requests direct edits and `.OnSelected` proposes accepted text. |
 | `Tabs(items, selected_index)` | Controlled index; `TabItem::Enabled` disables individual destinations. Page content is separately owned. |
 | `Slider(value)` | Controlled `float`; configure `.Range` and optional `.Step`, then write `.OnChanged` values back. |
+| `DatePicker(value)` | Controlled `std::chrono::year_month_day`; `.OnChanged` proposes a new date. |
+| `TimePicker(value)` | Controlled `std::chrono::minutes` since midnight; `.OnChanged` proposes a new time of day. |
 
 Do not rely on constructor overloads that accept `State<T>` to mutate state automatically; they read the current value. Bind `OnChanged` explicitly.
 
@@ -58,9 +60,21 @@ Use `.EmptyContent(...)` for non-interactive loading or no-result content; witho
 Suggestion roots may use `Enabled{false}`, but suggestion and empty-state content cannot contain another pointer action or focusable control.
 Do not intercept composition or modified editing keys except for ComboBox-owned Alt+Up/Down popup control, and do not rebuild this behavior from TextField plus an app-owned Popup.
 
+## DatePicker and TimePicker
+
+Use these built-in inline controls before creating a calendar or clock from Canvas or a custom layout. They are not platform-native dialogs; compose them with presentation services when the application needs a dialog.
+
+DatePicker's `.Range`, `.Minimum`, and `.Maximum` use inclusive endpoints. The controlled date must be valid and within the configured range. `.DisabledDates` limits user proposals without correcting application state; `.Validation` reports application-owned domain feedback.
+
+TimePicker accepts minutes in `[0, 1440)`, not seconds or a timestamp. `.Step` is a positive minute interval no greater than 60 that divides 60 exactly, and the controlled value must align with it. Use `.DisabledTimes` for availability, split shifts, or overnight rules; there is no time `Range`, `Minimum`, or `Maximum`. Both pickers take `.Label` and require explicit `.OnChanged` binding even when constructed with State.
+
+Locale supplies localized labels, reading direction, calendar week starts, and 12/24-hour presentation. Neither picker owns a time zone or combines the date and time into an instant. Applications that need an instant must resolve their selected date, time, and zone together and handle nonexistent or ambiguous local times; picker validity alone does not establish that a zoned time exists.
+
+Use `DatePickerStyle` and `TimePickerStyle` from the active Flat or Material theme rather than reproducing a single visual system. See [theme customization](theme-animation-presentation.md) and [locale and shaping](resources-files-network.md#locale-and-text-shaping).
+
 ## Input and progress
 
-- `TextField(TextEditingValue)` is controlled by the complete editing value. Configure `.Label`, `.Placeholder`, icons, `.Variant`, `.LineLimits`, `.MaxLength`, `.Validation`, `.Secure`, `.Align(TextAlign)`, `.VerticalAlign(TextVerticalAlign)`, and `.InputConfiguration`, then handle `.OnChanged` and optionally `.OnSubmitted`. Alignment applies to the editable paragraph, not the TextField View's placement.
+- `TextField(TextEditingValue)` is controlled by the complete editing value. Configure `.Label`, `.Placeholder`, icons, `.Variant`, `.LineLimits`, `.MaxLength`, `.Validation`, `.Secure`, `.Shaping(TextShapingOptions)`, `.Align(TextAlign)`, `.VerticalAlign(TextVerticalAlign)`, and `.InputConfiguration`, then handle `.OnChanged` and optionally `.OnSubmitted`. Alignment applies to the editable paragraph, not the TextField View's placement.
 - `TextFieldVariant` currently contains `Filled`, `Outlined`, and `Standard`.
 - `ComboBox` supports the single-line, non-secure, editable subset of `TextInputConfiguration`; use `Select` for read-only finite choices.
 - `ProgressCircle()` and `ProgressBar()` are indeterminate. Their `float` constructors are determinate.

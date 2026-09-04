@@ -24,16 +24,6 @@ namespace huxerui::detail {
 
 namespace {
 
-void InvokeCancellation(std::function<void()> cancellation) noexcept {
-  if (!cancellation) {
-    return;
-  }
-  try {
-    cancellation();
-  } catch (...) {
-  }
-}
-
 bool IsMimeTokenCharacter(unsigned char value) noexcept {
   if ((value >= '0' && value <= '9') || (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z')) {
     return true;
@@ -64,7 +54,7 @@ bool IsValidMimeToken(std::string_view value) noexcept {
   return !value.empty() && std::all_of(value.begin(), value.end(), IsMimeTokenCharacter);
 }
 
-bool IsValidContentType(std::string_view value, bool allow_wildcard) noexcept {
+bool IsValidFileContentType(std::string_view value, bool allow_wildcard) noexcept {
   const std::size_t slash = value.find('/');
   if (slash == 0 || slash == std::string_view::npos || slash + 1 == value.size() ||
       value.find('/', slash + 1) != std::string_view::npos) {
@@ -73,10 +63,42 @@ bool IsValidContentType(std::string_view value, bool allow_wildcard) noexcept {
   const std::string_view type = value.substr(0, slash);
   const std::string_view subtype = value.substr(slash + 1);
   if (type == "*" || subtype == "*") {
-    return allow_wildcard && subtype == "*" && (type == "*" || IsValidMimeToken(type));
+    return allow_wildcard && subtype == "*" &&
+           (type == "*" || (type.find('*') == std::string_view::npos && IsValidMimeToken(type)));
   }
   return type.find('*') == std::string_view::npos && subtype.find('*') == std::string_view::npos &&
          IsValidMimeToken(type) && IsValidMimeToken(subtype);
+}
+
+} // namespace
+
+void ValidateFileTypeFilter(const std::vector<std::string>& extensions,
+                            const std::vector<std::string>& content_types) {
+  for (const std::string& extension : extensions) {
+    if (extension.empty() || extension.front() == '.' || !IsValidFileUtf8(extension) ||
+        extension.find_first_of(std::string_view{"\0/\\;*?", 6}) != std::string::npos) {
+      throw std::invalid_argument(
+          "HuxerUI file extension must be valid UTF-8 without a leading dot, path separator, or wildcard"
+      );
+    }
+  }
+  for (const std::string& content_type : content_types) {
+    if (!IsValidFileContentType(content_type, true)) {
+      throw std::invalid_argument("HuxerUI file content type must be a valid MIME type or wildcard");
+    }
+  }
+}
+
+namespace {
+
+void InvokeCancellation(std::function<void()> cancellation) noexcept {
+  if (!cancellation) {
+    return;
+  }
+  try {
+    cancellation();
+  } catch (...) {
+  }
 }
 
 void ValidateFilter(const FilePickerFilter& filter) {
@@ -89,21 +111,7 @@ void ValidateFilter(const FilePickerFilter& filter) {
   if (filter.extensions.empty() && filter.content_types.empty()) {
     throw std::invalid_argument("HuxerUI file picker filter must contain an extension or content type");
   }
-  for (const std::string& extension : filter.extensions) {
-    if (extension.empty() || extension.front() == '.' || !IsValidFileUtf8(extension) ||
-        extension.find('\0') != std::string::npos || extension.find('/') != std::string::npos ||
-        extension.find('\\') != std::string::npos || extension.find(';') != std::string::npos ||
-        extension.find('*') != std::string::npos || extension.find('?') != std::string::npos) {
-      throw std::invalid_argument(
-          "HuxerUI file picker extension must be valid UTF-8 without a leading dot, path separator, or wildcard"
-      );
-    }
-  }
-  for (const std::string& content_type : filter.content_types) {
-    if (!IsValidContentType(content_type, true)) {
-      throw std::invalid_argument("HuxerUI file picker content type must be a valid MIME type or wildcard");
-    }
-  }
+  ValidateFileTypeFilter(filter.extensions, filter.content_types);
 }
 
 void ValidateSaveOptions(const SaveFileOptions& options) {
@@ -889,7 +897,7 @@ FileReference MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<
     metadata.size.reset();
     metadata.content_type.reset();
   }
-  if (metadata.content_type.has_value() && !IsValidContentType(*metadata.content_type, false)) {
+  if (metadata.content_type.has_value() && !IsValidFileContentType(*metadata.content_type, false)) {
     throw std::logic_error("HuxerUI platform file reference content type must be a valid MIME type");
   }
   return FileReference(std::move(metadata), std::move(state));

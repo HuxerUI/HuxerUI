@@ -16,6 +16,24 @@ function embedded(name, parameters) {
   return new Function(...parameters, source.slice(start, end));
 }
 
+const captureDrop = embedded("CaptureWebDroppedFiles", ["transfer_handle"]);
+const droppedFile = new File(["payload"], "example.txt", { type: "text/plain" });
+const fileItem = {
+  kind: "file", webkitGetAsEntry: () => ({ isFile: true }), getAsFile: () => droppedFile,
+};
+const capturedDrop = captureDrop({ items: [fileItem] });
+assert.equal(capturedDrop.error, false);
+assert.equal(capturedDrop.files[0], droppedFile);
+assert.equal(captureDrop({ items: [] }).error, true);
+assert.equal(captureDrop({ items: [{ kind: "string" }] }).error, true);
+assert.equal(captureDrop({ items: [{ ...fileItem, webkitGetAsEntry: undefined }] }).error, true);
+assert.equal(captureDrop({ items: [{ ...fileItem, getAsFile: () => null }] }).error, true);
+const rejectedDrop = captureDrop({ items: [fileItem, {
+  ...fileItem, webkitGetAsEntry: () => ({ isFile: false, isDirectory: true }),
+}] });
+assert.equal(rejectedDrop.error, true);
+assert.equal(rejectedDrop.files.length, 0);
+
 const helpers = embedded("CreateWebFileHelpers", [])();
 const create = embedded("CreateWebReferenceOperation", ["source_handle"]);
 const start = embedded("StartWebReferenceOperation", ["operation_handle", "request_handle", "native_handle", "helper_handle"]);

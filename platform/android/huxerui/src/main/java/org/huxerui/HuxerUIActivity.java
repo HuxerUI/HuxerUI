@@ -8,6 +8,8 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
+import android.view.DragAndDropPermissions;
+import android.view.DragEvent;
 import android.view.Window;
 import android.view.WindowInsetsController;
 import android.window.BackEvent;
@@ -31,6 +33,9 @@ public class HuxerUIActivity extends Activity {
         contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
         contentView.setStartupApplicationIntent(getIntent());
         contentView.setSystemBarsController(this::setSystemBarsContentBrightness);
+        if (Build.VERSION.SDK_INT >= 24) {
+            contentView.setFileDropPermissionRequester(event -> Api24.requestFileDropPermission(this, event));
+        }
         contentView.setFilePickerLauncher(new HuxerUIView.FilePickerLauncher() {
             @SuppressWarnings("deprecation")
             @Override
@@ -150,6 +155,7 @@ public class HuxerUIActivity extends Activity {
         }
         if (contentView != null) {
             contentView.setFilePickerLauncher(null);
+            contentView.setFileDropPermissionRequester(null);
             contentView.setPermissionLauncher(null);
             contentView.setSystemBarsController(null);
         }
@@ -160,6 +166,13 @@ public class HuxerUIActivity extends Activity {
     private void dispatchBack() {
         if (contentView == null || !contentView.handleBack()) {
             onUnhandledBack();
+        }
+    }
+
+    private static final class Api24 {
+        static AutoCloseable requestFileDropPermission(Activity activity, DragEvent event) {
+            DragAndDropPermissions permissions = activity.requestDragAndDropPermissions(event);
+            return permissions == null ? null : permissions::release;
         }
     }
 

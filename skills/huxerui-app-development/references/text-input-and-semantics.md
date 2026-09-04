@@ -23,6 +23,8 @@ return TextField(value)
 
 Choose `TextInputType`, capitalization, action, multiline, secure, autocorrect, and read-only behavior through `TextInputConfiguration`. Handle `.OnSubmitted` for semantic completion, not every raw key.
 
+TextField's `.Shaping(TextShapingOptions)` controls direction and locale separately from input configuration and resource lookup; see [locale and text shaping](resources-files-network.md#locale-and-text-shaping).
+
 ## Semantics
 
 Use the public `Semantics` modifier and typed semantic actions. Supply accessible labels for icon-only controls and meaningful roles/state for custom controls. Built-in controls already provide their normal semantics; add metadata only when application meaning is missing.
@@ -30,6 +32,8 @@ Use the public `Semantics` modifier and typed semantic actions. Supply accessibl
 For collections, expose stable collection/item metadata when building a custom virtual layout. Disabled, checked, selected, expanded, value, range, and text-editing semantics should match the controlled UI value.
 
 Custom `NodeExtension` semantics call `InvalidateSemantics()` after retained semantic state changes and handle only the local actions they declare.
+
+In `BuildSemantics`, use `SemanticBuilder::AddChild(local_id, local_bounds, semantics, enabled)` for virtual parts of a self-drawn control. IDs are stable, nonzero, and unique within the extension; bounds are owner-local DIPs. Add standard or custom actions with `AddAction` or `AddCustomAction`. Child availability is combined with the mounted owner's Enabled state: disabled children remain discoverable but expose no executable actions. Reuse the real input availability predicate and invalidate semantics when it changes; semantic declarations do not disable pointer or keyboard handlers themselves.
 
 ## Review checklist
 

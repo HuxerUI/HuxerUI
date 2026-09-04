@@ -14,6 +14,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 - [Scrolling](scrolling.md): input consumption, nested coordination, offsets, momentum, overscroll, and observation.
 - [RefreshBox](refresh-box.md): controlled refresh requests, overscroll handoff, retained presentation, and semantics.
 - [Typed Drag-and-Drop](drag-drop.md): typed payloads, targets, previews, auto-scroll, and cancellation.
+- [External File Drop](file-drop.md): host file offers, hover targets, asynchronous delivery, and retained file access.
 - [Animation and Scene Transitions](animation.md): timing, controllers, synchronized transitions, and frozen scenes.
 
 ## Application structure

@@ -293,6 +293,69 @@ EM_JS(
           );
         };
 
+        let fileDrag = 0;
+        let fileDragSequence = 0;
+        let fileDragDepth = 0;
+        const leaveFiles = () => {
+          if (fileDrag) {
+            const previous = fileDrag;
+            fileDrag = 0;
+            Module._huxerui_web_file_drag(session_id, previous, 2, 0, 0, Emval.toHandle(null));
+          }
+        };
+        const offerFiles = (event) => {
+          const transfer = event.dataTransfer;
+          const point = position(event);
+          const token = platformToken(event.target);
+          const allowed = transfer && (transfer.effectAllowed === "all" || transfer.effectAllowed === "uninitialized" ||
+              transfer.effectAllowed.toLowerCase().includes("copy"));
+          if (!allowed || !Array.from(transfer.types || []).includes("Files") ||
+              (token && platformViewWins(token, point))) {
+            leaveFiles();
+            return false;
+          }
+          const phase = fileDrag ? 1 : 0;
+          if (!fileDrag) {
+            fileDrag = ++fileDragSequence;
+          }
+          return Module._huxerui_web_file_drag(
+              session_id, fileDrag, phase, point[0], point[1], Emval.toHandle(transfer)
+          );
+        };
+        listen(root, "dragenter", (event) => {
+          ++fileDragDepth;
+          if (offerFiles(event)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }
+        });
+        listen(root, "dragover", (event) => {
+          if (offerFiles(event)) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }
+        });
+        listen(root, "dragleave", (event) => {
+          fileDragDepth = Math.max(0, fileDragDepth - 1);
+          if (!fileDragDepth && !(event.relatedTarget instanceof Node && root.contains(event.relatedTarget))) {
+            leaveFiles();
+          }
+        });
+        listen(root, "drop", (event) => {
+          if (offerFiles(event)) {
+            const point = position(event);
+            event.preventDefault();
+            const accepted = Module._huxerui_web_file_drag(
+                session_id, fileDrag, 3, point[0], point[1], Emval.toHandle(event.dataTransfer)
+            );
+            event.dataTransfer.dropEffect = accepted ? "copy" : "none";
+          }
+          fileDragDepth = 0;
+          leaveFiles();
+        });
+        listen(window, "dragend", () => { fileDragDepth = 0; leaveFiles(); });
+        listen(window, "blur", () => { fileDragDepth = 0; leaveFiles(); });
+
         listen(
             root,
             "pointerdown",
@@ -947,6 +1010,30 @@ public:
     }
   }
 
+  bool HandleFileDrag(std::uint32_t session, int phase, Point position, const val& transfer) {
+    if (runtime_ == nullptr) {
+      return false;
+    }
+    if (phase == 2) {
+      runtime_->HandleFileDragExited(session);
+      return false;
+    }
+    if (transfer.isNull() || transfer.isUndefined()) {
+      return false;
+    }
+    auto offer = ReadWebFileDropOffer(transfer);
+    switch (phase) {
+    case 0:
+      return runtime_->HandleFileDragEntered(session, std::move(offer), position);
+    case 1:
+      return runtime_->HandleFileDragMoved(session, std::move(offer), position);
+    case 3:
+      return runtime_->HandleFileDrop(session, std::move(offer), position, CaptureWebFileDrop(transfer));
+    default:
+      return false;
+    }
+  }
+
   bool HandleWheel(ScrollInputEvent event) {
     const Point consumed = runtime_ != nullptr ? runtime_->HandleScrollInput(event) : Point{};
     return consumed.x != 0.0F || consumed.y != 0.0F;
@@ -1230,6 +1317,16 @@ EMSCRIPTEN_KEEPALIVE bool huxerui_web_wheel(std::uintptr_t session_id, float x, 
     handled = platform.HandleWheel({{x, y}, delta_x, delta_y, {shift, control, alt, meta}});
   });
   return handled;
+}
+
+EMSCRIPTEN_KEEPALIVE bool huxerui_web_file_drag(std::uintptr_t session_id, std::uint32_t drag, int phase,
+                                              float x, float y, emscripten::EM_VAL transfer_handle) {
+  const auto transfer = emscripten::val::take_ownership(transfer_handle);
+  bool accepted = false;
+  huxerui::detail::DispatchWebSession(session_id, "file drop", [&](auto& platform) {
+    accepted = platform.HandleFileDrag(drag, phase, {x, y}, transfer);
+  });
+  return accepted;
 }
 
 EMSCRIPTEN_KEEPALIVE bool huxerui_web_key(
