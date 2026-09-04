@@ -21,10 +21,14 @@ namespace huxerui {
 struct ColorScheme {
   Color primary = Color::Rgb(31, 111, 235);
   Color on_primary = Color::White();
+  Color primary_container = Color::Rgb(221, 235, 255);
+  Color on_primary_container = Color::Rgb(12, 65, 128);
   Color secondary = Color::Rgb(87, 96, 106);
   Color on_secondary = Color::White();
   Color secondary_container = Color::Rgb(218, 225, 232);
   Color on_secondary_container = Color::Rgb(31, 35, 40);
+  Color tertiary_container = Color::Rgb(236, 226, 247);
+  Color on_tertiary_container = Color::Rgb(74, 45, 98);
   Color background = Color::Rgb(246, 248, 250);
   Color surface = Color::White();
   Color surface_container_low = Color::White();
@@ -262,6 +266,83 @@ struct SelectStyle {
   static SelectStyle Default();
 
   bool operator==(const SelectStyle&) const = default;
+};
+
+struct DatePickerStyle {
+  Color background = Color::White();
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color secondary_foreground = Color::Rgb(87, 96, 106);
+  Color disabled_foreground = Color::Rgb(31, 35, 40, 0.38F);
+  Color selected_background = Color::Rgb(31, 111, 235);
+  Color selected_foreground = Color::White();
+  Color hover_background = Color::Rgb(31, 111, 235, 0.08F);
+  Color border = Color::Rgb(31, 35, 40, 0.18F);
+  Color validation_error = Color::Rgb(207, 34, 46);
+  TextStyle title_style{Font::System(16.0F).WithWeight(FontWeight::Medium), Color::Rgb(31, 35, 40)};
+  TextStyle weekday_style{Font::System(12.0F), Color::Rgb(87, 96, 106)};
+  TextStyle day_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  TextStyle label_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  TextStyle validation_text_style{Font::System(12.0F), Color::Rgb(207, 34, 46)};
+  EdgeInsets padding = EdgeInsets::All(8.0F);
+  float cell_size = 32.0F;
+  float column_spacing = 2.0F;
+  float row_spacing = 2.0F;
+  float header_height = 44.0F;
+  float corner_radius = 8.0F;
+  float selection_corner_radius = 4.0F;
+  float border_width = 1.0F;
+  float label_spacing = 6.0F;
+  float validation_spacing = 4.0F;
+
+  static DatePickerStyle Default();
+
+  bool operator==(const DatePickerStyle&) const = default;
+};
+
+struct TimePickerStyle {
+  Color background = Color::White();
+  Color dial_background = Color::Rgb(239, 241, 243);
+  Color foreground = Color::Rgb(31, 35, 40);
+  Color disabled_foreground = Color::Rgb(31, 35, 40, 0.38F);
+  Color selected_background = Color::Rgb(31, 111, 235);
+  Color selected_foreground = Color::White();
+  /// Background of the inactive hour or minute field.
+  Color field_background = Color::Rgb(239, 241, 243);
+  Color selected_field_background = Color::Rgb(221, 235, 255);
+  Color selected_field_foreground = Color::Rgb(12, 65, 128);
+  Color selected_period_background = Color::Rgb(221, 235, 255);
+  Color selected_period_foreground = Color::Rgb(12, 65, 128);
+  Color period_border = Color::Rgb(31, 35, 40, 0.18F);
+  Color hand = Color::Rgb(31, 111, 235);
+  Color border = Color::Rgb(31, 35, 40, 0.18F);
+  Color validation_error = Color::Rgb(207, 34, 46);
+  TextStyle header_style{Font::System(32.0F), Color::Rgb(31, 35, 40)};
+  TextStyle period_style{Font::System(12.0F).WithWeight(FontWeight::Medium), Color::Rgb(87, 96, 106)};
+  TextStyle dial_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  TextStyle label_style{Font::System(14.0F), Color::Rgb(31, 35, 40)};
+  TextStyle validation_text_style{Font::System(12.0F), Color::Rgb(207, 34, 46)};
+  EdgeInsets padding = EdgeInsets::All(12.0F);
+  float dial_size = 208.0F;
+  float header_height = 52.0F;
+  float field_width = 64.0F;
+  float separator_width = 16.0F;
+  float field_corner_radius = 4.0F;
+  /// AM/PM is one outlined group, omitted entirely for a 24-hour locale.
+  float period_width = 44.0F;
+  float period_spacing = 8.0F;
+  float period_corner_radius = 4.0F;
+  float period_border_width = 1.0F;
+  float content_spacing = 16.0F;
+  float selection_radius = 16.0F;
+  float hand_width = 2.0F;
+  float corner_radius = 8.0F;
+  float border_width = 1.0F;
+  float label_spacing = 6.0F;
+  float validation_spacing = 4.0F;
+
+  static TimePickerStyle Default();
+
+  bool operator==(const TimePickerStyle&) const = default;
 };
 
 struct TextFieldVariantStyle {
@@ -604,6 +685,8 @@ DividerStyle DefaultDividerStyle(const ThemeSpec& theme);
 SegmentedButtonStyle DefaultSegmentedButtonStyle(const ThemeSpec& theme);
 TabsStyle DefaultTabsStyle(const ThemeSpec& theme);
 SelectStyle DefaultSelectStyle(const ThemeSpec& theme);
+DatePickerStyle DefaultDatePickerStyle(const ThemeSpec& theme);
+TimePickerStyle DefaultTimePickerStyle(const ThemeSpec& theme);
 TextFieldStyle DefaultTextFieldStyle(const ThemeSpec& theme);
 ComboBoxStyle DefaultComboBoxStyle(const ThemeSpec& theme);
 CheckboxStyle DefaultCheckboxStyle(const ThemeSpec& theme);

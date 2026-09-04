@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -582,6 +583,18 @@ struct RefreshEvents {
 struct SelectEvents {
   /// Requests selection of the option at the supplied zero-based index.
   struct Changed : Event<void(std::size_t)> {};
+};
+
+/// Event keys emitted by DatePicker.
+struct DatePickerEvents {
+  /// Requests a new controlled calendar date.
+  struct Changed : Event<void(std::chrono::year_month_day)> {};
+};
+
+/// Event keys emitted by TimePicker.
+struct TimePickerEvents {
+  /// Requests a new controlled local time expressed as minutes since midnight.
+  struct Changed : Event<void(std::chrono::minutes)> {};
 };
 
 /// Event keys shared by controlled navigation-selection components.

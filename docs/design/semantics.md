@@ -300,7 +300,8 @@ public:
   void AddChild(
       std::uint64_t local_id,
       Rect local_bounds,
-      Semantics semantics
+      Semantics semantics,
+      bool enabled
   );
   void AddAction(
       std::uint64_t local_id,
@@ -316,7 +317,11 @@ public:
 
 The builder is valid only for the duration of `BuildSemantics()` and cannot be copied, moved, or retained.
 SetOwner applies dynamic properties to the mounted owner's declaration.
-AddChild creates one flat virtual child with owner-local bounds.
+AddChild creates one flat virtual child with owner-local bounds and explicit component-owned availability.
+Runtime combines that availability with the mounted owner's enabled state; a virtual child cannot enable a disabled subtree.
+Disabled virtual children remain in the semantic tree with stable identities and `enabled = false`, but publish no standard or custom actions and have no executable action routes.
+The enabled argument does not modify the owner's input behavior and is not a general `Semantics` override.
+Extensions use the same availability predicate for actual input and semantic declarations, and invalidate semantics when that state changes.
 The action operations require an existing owner or child local ID and do not accept callbacks.
 It cannot publish a frame, insert platform objects, or retain a MountedNode pointer.
 

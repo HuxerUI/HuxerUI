@@ -3,6 +3,7 @@
 #include <wrl/client.h>
 
 #include <array>
+#include <chrono>
 #include <memory>
 #include <ranges>
 #include <string>
@@ -17,6 +18,8 @@ int accessibility_clicks = 0;
 State<float> accessibility_slider_value;
 State<TextEditingValue> accessibility_text_value;
 State<TextEditingValue> accessibility_combo_value;
+State<bool> accessibility_date_available;
+int accessibility_date_changes = 0;
 
 View WindowsAccessibilityApp() {
   auto slider = UseState(2.0F);
@@ -34,6 +37,17 @@ View WindowsAccessibilityApp() {
           .OnChanged([combo](const TextEditingValue& value) mutable { combo = value; }),
       TextField(text).Label("Editor").OnChanged([text](const TextEditingValue& value) mutable { text = value; }),
   };
+}
+
+View WindowsAccessibleDatePickerApp() {
+  using Date = std::chrono::year_month_day;
+  accessibility_date_available = UseState(false);
+  const bool available = accessibility_date_available.Get();
+  return huxerui::DatePicker(Date{std::chrono::year{2024}, std::chrono::March, std::chrono::day{16}})
+      .DisabledDates([available](Date value) {
+        return !available && value == Date{std::chrono::year{2024}, std::chrono::March, std::chrono::day{17}};
+      })
+      .OnChanged([](Date) { ++accessibility_date_changes; });
 }
 
 const SemanticNode& FindNode(const SemanticFrame& frame, SemanticRole role) {
@@ -134,6 +148,40 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
   REQUIRE(runtime_id != nullptr);
   REQUIRE(runtime_id->rgsabound[0].cElements == 3);
   SafeArrayDestroy(runtime_id);
+}
+
+TEST_CASE("Windows accessibility tracks virtual date availability through retained providers") {
+  accessibility_date_changes = 0;
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime runtime(WindowsAccessibleDatePickerApp, platform);
+  runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
+  const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
+  const SemanticNodeId date_id = FindNode(*initial, SemanticRole::GridCell, "March 17, 2024").id;
+
+  detail::Win32Accessibility accessibility;
+  accessibility.SetRuntime(&runtime.CoreRuntime());
+  accessibility.Commit(initial, nullptr);
+  Microsoft::WRL::ComPtr<IRawElementProviderSimple> date;
+  REQUIRE(accessibility.ProviderForNode(date_id, &date) == S_OK);
+  Microsoft::WRL::ComPtr<ISelectionItemProvider> selection;
+  REQUIRE(date.As(&selection) == S_OK);
+
+  int expected_changes = 0;
+  for (const bool available : {false, true, false}) {
+    accessibility_date_available = available;
+    const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
+    REQUIRE(FindNode(*frame, SemanticRole::GridCell, "March 17, 2024").id == date_id);
+    accessibility.Commit(frame, nullptr);
+
+    VARIANT enabled{};
+    REQUIRE(date->GetPropertyValue(UIA_IsEnabledPropertyId, &enabled) == S_OK);
+    REQUIRE(enabled.vt == VT_BOOL);
+    REQUIRE(enabled.boolVal == (available ? VARIANT_TRUE : VARIANT_FALSE));
+    VariantClear(&enabled);
+    REQUIRE(selection->Select() == (available ? S_OK : UIA_E_NOTSUPPORTED));
+    expected_changes += available ? 1 : 0;
+    REQUIRE(accessibility_date_changes == expected_changes);
+  }
 }
 
 TEST_CASE("Windows accessibility exposes semantic Lists with selected children as single-selection containers") {

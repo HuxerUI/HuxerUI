@@ -1,6 +1,8 @@
 #include "runtime_test_support.h"
 
+#include <array>
 #include <type_traits>
+#include <utility>
 
 namespace huxerui::test {
 
@@ -13,10 +15,13 @@ int semantic_segmented_button_changes = 0;
 int semantic_virtual_list_clicks = 0;
 int semantic_virtual_list_factory_calls = 0;
 int virtual_semantic_activations = 0;
+int virtual_semantic_custom_actions = 0;
 State<float> semantic_slider_value;
 State<bool> semantic_alternate_content;
 State<bool> semantic_alternate_label;
 State<bool> semantic_virtual_visible;
+State<bool> semantic_virtual_enabled;
+State<bool> semantic_virtual_owner_enabled;
 State<std::size_t> semantic_segmented_button_selection;
 State<std::size_t> semantic_tabs_selection;
 State<std::size_t> semantic_navigation_selection;
@@ -27,7 +32,15 @@ State<TextEditingValue> semantic_secure_text_field_value;
 static_assert(!std::is_copy_constructible_v<SemanticBuilder>);
 static_assert(!std::is_move_constructible_v<SemanticBuilder>);
 
-struct VirtualSemantics;
+class VirtualSemanticsExtension;
+
+struct VirtualSemantics {
+  using Extension = VirtualSemanticsExtension;
+
+  bool enabled = true;
+
+  bool operator==(const VirtualSemantics&) const = default;
+};
 
 class VirtualSemanticsExtension final : public NodeExtension {
 public:
@@ -37,7 +50,10 @@ public:
 
   void Update(MountedNode& node, const VirtualSemantics& modifier) {
     static_cast<void>(node);
-    static_cast<void>(modifier);
+    if (enabled_ != modifier.enabled) {
+      enabled_ = modifier.enabled;
+      InvalidateSemantics();
+    }
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {
@@ -48,24 +64,30 @@ public:
         Semantics{
             .role = SemanticRole::Button,
             .label = "April",
-        }
+        },
+        enabled_
     );
     builder.AddAction(7, SemanticActionKind::Activate);
+    builder.AddCustomAction(7, 31, "Inspect");
   }
 
   bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
-    if (local_id != 7 || action.kind != SemanticActionKind::Activate) {
+    if (local_id != 7) {
       return false;
     }
-    ++virtual_semantic_activations;
-    return true;
+    if (action.kind == SemanticActionKind::Activate) {
+      ++virtual_semantic_activations;
+      return true;
+    }
+    if (action.kind == SemanticActionKind::Custom && std::get<std::uint64_t>(action.value) == 31) {
+      ++virtual_semantic_custom_actions;
+      return true;
+    }
+    return false;
   }
-};
 
-struct VirtualSemantics {
-  using Extension = VirtualSemanticsExtension;
-
-  bool operator==(const VirtualSemantics&) const = default;
+private:
+  bool enabled_ = true;
 };
 
 VectorAsset SemanticActionIcon() {
@@ -145,6 +167,15 @@ View ReadOnlySemanticTextFieldApp() {
 
 View VirtualSemanticApp() {
   return Canvas([](PaintContext&, Size) {}).With(VirtualSemantics{});
+}
+
+View VirtualSemanticAvailabilityApp() {
+  semantic_virtual_enabled = UseState(false);
+  semantic_virtual_owner_enabled = UseState(true);
+  return Canvas([](PaintContext&, Size) {}).With(
+      VirtualSemantics{semantic_virtual_enabled.Get()},
+      Enabled{semantic_virtual_owner_enabled.Get()}
+  );
 }
 
 View VirtualSemanticLifecycleApp() {
@@ -988,6 +1019,66 @@ TEST_CASE("SemanticBuilderPublishesStableVirtualChildrenAndRoutesActions") {
   REQUIRE(stable_child.id == child_id);
 }
 
+TEST_CASE("VirtualSemanticAvailabilityPreservesIdentityAndGatesAllActions") {
+  virtual_semantic_activations = 0;
+  virtual_semantic_custom_actions = 0;
+  TestPlatform platform;
+  Runtime runtime(VirtualSemanticAvailabilityApp, platform);
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+
+  const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
+  const SemanticNode& initial_child = FindSemanticNode(*initial, "April");
+  const SemanticNodeId child_id = initial_child.id;
+  const SemanticNodeId owner_id = FindSemanticNode(*initial, "Chart").id;
+  REQUIRE_FALSE(initial_child.enabled);
+  REQUIRE(initial_child.actions == 0);
+  REQUIRE(initial_child.custom_actions.empty());
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
+      child_id, {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
+      child_id, {SemanticActionKind::Custom, std::uint64_t{31}}
+  ));
+
+  int expected_actions = 0;
+  for (const auto [owner_enabled, child_enabled] : std::array{
+           std::pair{true, true}, std::pair{true, false}, std::pair{false, true},
+           std::pair{false, false}, std::pair{true, true},
+       }) {
+    semantic_virtual_owner_enabled = owner_enabled;
+    semantic_virtual_enabled = child_enabled;
+    const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
+    const SemanticNode& owner = FindSemanticNode(*frame, "Chart");
+    const SemanticNode& child = FindSemanticNode(*frame, "April");
+    const bool enabled = owner_enabled && child_enabled;
+    REQUIRE(owner.id == owner_id);
+    REQUIRE(owner.enabled == owner_enabled);
+    REQUIRE(owner.children == std::vector<SemanticNodeId>{child_id});
+    REQUIRE(child.id == child_id);
+    REQUIRE(child.parent == owner_id);
+    REQUIRE(child.enabled == enabled);
+    if (enabled) {
+      REQUIRE(child.actions == (SemanticActionMask(SemanticActionKind::Activate) |
+                                SemanticActionMask(SemanticActionKind::Custom)));
+      REQUIRE(child.custom_actions.size() == 1);
+      REQUIRE(child.custom_actions.front().first == 31);
+      REQUIRE(child.custom_actions.front().second == "Inspect");
+      ++expected_actions;
+    } else {
+      REQUIRE(child.actions == 0);
+      REQUIRE(child.custom_actions.empty());
+    }
+    REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+        child_id, {SemanticActionKind::Activate, std::monostate{}}
+    ) == enabled);
+    REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
+        child_id, {SemanticActionKind::Custom, std::uint64_t{31}}
+    ) == enabled);
+    REQUIRE(virtual_semantic_activations == expected_actions);
+    REQUIRE(virtual_semantic_custom_actions == expected_actions);
+  }
+}
+
 TEST_CASE("ReplacingSemanticExtensionInvalidatesVirtualIdentityAndActionRoute") {
   virtual_semantic_activations = 0;
   TestPlatform platform;
@@ -1001,6 +1092,9 @@ TEST_CASE("ReplacingSemanticExtensionInvalidatesVirtualIdentityAndActionRoute") 
   REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
       first_id,
       {SemanticActionKind::Activate, std::monostate{}}
+  ));
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(
+      first_id, {SemanticActionKind::Custom, std::uint64_t{31}}
   ));
 
   semantic_virtual_visible = true;

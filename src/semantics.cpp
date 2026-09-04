@@ -374,7 +374,7 @@ void SemanticBuilder::SetOwner(Semantics semantics) {
   detail::ApplySemantics(found->semantics, detail::ResolveSemantics(semantics, state_->environment, resources));
 }
 
-void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semantics semantics) {
+void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semantics semantics, bool enabled) {
   if (local_id == 0) {
     throw std::invalid_argument("HuxerUI virtual semantic child local id must be nonzero");
   }
@@ -391,6 +391,7 @@ void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semant
       .semantics = detail::ResolveSemantics(
           semantics, state_->environment, detail::RequireResources(*state_)
       ),
+      .enabled = enabled,
   });
 }
 
@@ -674,27 +675,28 @@ void Runtime::BuildSemantics() {
         }
         const Rect local_bounds = item.local_bounds.value_or(mounted.bounds);
         const Rect child_bounds = mounted.LocalToWindowBounds(local_bounds);
+        const bool enabled = mounted.interaction.enabled && item.enabled;
         SemanticNode child = MakeSemanticNode(
             id,
             child_parent,
             item.semantics,
-            mounted.interaction.enabled,
+            enabled,
             false,
             child_bounds,
             !child_bounds.Intersects(descendant_visible_bounds)
         );
-        child.actions = mounted.interaction.enabled ? item.actions : 0;
-        child.custom_actions = item.custom_actions;
-        next.nodes.push_back(std::move(child));
-        children.push_back(id);
-        detail::SemanticActionRoute& route = routes[id];
-        route.node_identity = mounted.identity;
-        if (mounted.interaction.enabled) {
+        if (enabled) {
+          child.actions = item.actions;
+          child.custom_actions = item.custom_actions;
+          detail::SemanticActionRoute& route = routes[id];
+          route.node_identity = mounted.identity;
           BindExtensionActions(route, item.actions, {handle, item.local_id});
           for (const auto& custom : item.custom_actions) {
             route.custom_actions.insert_or_assign(custom.first, detail::SemanticExtensionRoute{handle, item.local_id});
           }
         }
+        next.nodes.push_back(std::move(child));
+        children.push_back(id);
       }
     }
 

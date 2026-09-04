@@ -17,7 +17,8 @@ The implementation uses typed keys, exact generated namespaces, ordered package 
 
 ## Non-goals
 
-The resource API does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, date or currency formatting, plural rules, resource hot reload, or a runtime library registry.
+The resource API does not provide network loading, URI loading, animated images, runtime SVG DOM decoding, image filters, editable pixel buffers, a general-purpose date or currency formatter, plural rules, resource hot reload, or a runtime library registry.
+DatePicker and TimePicker resolve their own bounded component labels and locale presentation profile without exposing that implementation as an application formatting API.
 
 Network and platform picker libraries may produce encoded bytes and construct an ImageAsset.
 Android `content://` values, Apple security-scoped URLs, and other platform handles remain platform-service concerns rather than cross-platform file paths.
@@ -820,7 +821,8 @@ StringVariant::Format retains the resource identity and formatted arguments unti
 
 Plural and select messages require real locale rules and are not approximated with an English singular-versus-plural branch.
 
-CLDR-backed plural, number, date, currency, and select instructions are not supported.
+CLDR-backed plural, number, general-purpose date, currency, and select instructions are not supported.
+The picker-specific month, weekday, period, first-weekday, and hour-cycle data remains an internal component contract.
 
 ## Framework strings
 
@@ -842,6 +844,8 @@ huxerui:strings/validation_email
 ```
 
 The framework bundle provides the default English catalog plus `ar`, `bn`, `cs`, `da`, `de`, `el`, `es`, `fa`, `fi`, `fil`, `fr`, `he`, `hi`, `hu`, `id`, `it`, `ja`, `ko`, `ms`, `nb`, `nl`, `no`, `pl`, `pt`, `pt-BR`, `pt-PT`, `ro`, `ru`, `sv`, `th`, `tr`, `uk`, `ur`, `vi`, `zh`, `zh-HK`, `zh-MO`, and `zh-TW` catalogs.
+Each framework string catalog supplies the complete default key set, including DatePicker navigation, month and weekday names, and TimePicker field and period labels.
+Resource tests check the compiled variants directly for complete, non-blank keys so locale fallback cannot hide omissions in the framework catalogs; application catalogs may still rely on ordinary fallback.
 Its precompiled package is the first merge input registered by `huxerui_add_app`, so a later application root may intentionally replace any matching `huxerui` variant by using `NAMESPACE huxerui`.
 The framework does not require a separate override manifest or public resource-bundle API.
 

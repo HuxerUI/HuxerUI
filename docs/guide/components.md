@@ -83,6 +83,8 @@ Use `DrawBorder()` to stroke rectangle geometry; `DrawRect()` intentionally rema
 - `SegmentedButton` receives items and a controlled selected index.
 - `Select` receives a finite item range and a controlled selected index.
 - `ComboBox` receives a controlled editing value and an application-provided suggestion range.
+- `DatePicker` receives a controlled `std::chrono::year_month_day`.
+- `TimePicker` receives controlled minutes since midnight.
 - `Slider` receives a controlled value and can define range and step.
 - `ProgressCircle` and `ProgressBar` support determinate and indeterminate presentation.
 
@@ -231,6 +233,70 @@ Explicit dismissal suppresses reopening for the current query, while a later edi
 `TextFieldStyle` continues to own the editor visuals, label, validation, icons, and input states.
 `ComboBoxStyle` owns only the popup surface, item geometry, active background, indication, and height limit.
 `TrailingIcon(...)` replaces the built-in dropdown indicator; either icon is decorative and does not introduce a second interaction target.
+
+## DatePicker and TimePicker
+
+`DatePicker` and `TimePicker` use standard chrono values rather than framework date or time value classes.
+Both controls are inline and controlled: interaction emits `OnChanged`, and the application writes the proposal back when it accepts the change.
+
+```cpp
+[[huxerui::composable]]
+View ScheduleFields() {
+  using namespace std::chrono;
+  auto date = UseState(year_month_day{year{2026}, September, day{4}});
+  auto time = UseState(minutes{13 * 60 + 30});
+
+  return Row {
+    DatePicker(date)
+        .Range(
+            year_month_day{year{2026}, January, day{1}},
+            year_month_day{year{2026}, December, day{31}}
+        )
+        .DisabledDates([](year_month_day value) {
+          const weekday day_of_week{sys_days{value}};
+          return day_of_week == Saturday || day_of_week == Sunday;
+        })
+        .Label("Travel date")
+        .OnChanged([date](year_month_day value) { date = value; }),
+    TimePicker(time)
+        .Step(minutes{5})
+        .DisabledTimes([](minutes value) { return value >= hours{12} && value < hours{13}; })
+        .Label("Departure time")
+        .OnChanged([time](minutes value) { time = value; }),
+  }.With(Spacing(16.0F));
+}
+```
+
+Date range endpoints are inclusive.
+`Minimum` and `Maximum` configure one endpoint, while `Range` configures both together.
+The controlled date must be valid and inside the configured range.
+Updating the range keeps browsing within its new boundaries without changing the controlled selection.
+`DisabledDates` prevents user proposals but may still describe the current controlled value; use `Validation` for application-owned domain feedback.
+
+Time values are `std::chrono::minutes` in the half-open interval from midnight through the minute before the next midnight.
+`Step` defaults to one minute, must be no greater than one hour, and must divide one hour exactly.
+The controlled value must align with the step.
+`DisabledTimes` is the availability policy.
+TimePicker deliberately has no `Range`, `Minimum`, or `Maximum`; a time-of-day window, split shift, or overnight rule is expressed by the predicate without creating ambiguous wraparound range semantics.
+
+The effective `Locale` selects calendar labels, first weekday, reading direction, and 12- or 24-hour presentation.
+Picker strings cover every built-in framework language and region, including Traditional Chinese and regional Portuguese; other locale tags use the ordinary resource fallback chain.
+DatePicker keeps a fixed six-week grid and allows adjacent-month cells to be selected when they pass the same range and disabled-date checks.
+Its title switches to a year grid without committing a new date.
+TimePicker uses a single ring in 12-hour presentation, inner and outer hour rings in 24-hour presentation, and a 60-position minute dial whose visible labels occur every five minutes.
+AM/PM preserves the twelve-hour position and selects the nearest available minute in the corresponding hour; a period is disabled when that hour has no selectable minute.
+
+DatePicker supports arrow, week-edge, month, year, Enter, Space, and Escape navigation.
+TimePicker supports arrows, direct digits, Enter, Space, Home, End, and Escape.
+Pointer, touch, keyboard, and accessibility actions all emit the same typed controlled-change events.
+Neither component owns a time zone, combines date and time, opens a platform-native picker, or stores an authoritative selected value.
+
+`DatePickerStyle` and `TimePickerStyle` control the inline surfaces independently of the selected values.
+TimePicker separates the active field (`selected_field_background` and `selected_field_foreground`), AM/PM selection (`selected_period_background` and `selected_period_foreground`), and dial handle (`selected_background` and `selected_foreground`).
+The inactive field uses `field_background` and `header_style`; the AM/PM group uses `period_style`, `period_border`, and its own border width and corner radius.
+Its preferred width fits both the dial and the complete header; 24-hour locales omit the period group and its spacing.
+
+See [Date and Time Pickers Design](../design/date-time-pickers.md) for retained browsing state, localization, clock geometry, and accessibility invariants.
 
 ## Tabs and indexed pages
 

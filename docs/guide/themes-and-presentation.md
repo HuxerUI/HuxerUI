@@ -20,6 +20,10 @@ return FlatDarkTheme {
 Pass a customized `ThemeSpec` when an application needs different tokens while preserving the selected theme system.
 Nested themes affect only their subtree.
 
+`ColorScheme::primary_container` and `on_primary_container` describe a tonal primary surface and its foreground; they are distinct from the stronger `primary` and `on_primary` pair.
+`tertiary_container` and `on_tertiary_container` provide a contrasting tonal accent, used by the Material TimePicker's AM/PM selection.
+Customize each container and its foreground together to preserve readable contrast in light and dark themes.
+
 ## Component styles
 
 Each built-in component resolves its typed style from the closest Theme.
@@ -27,6 +31,7 @@ Styles cover geometry, color, typography, indication, and motion owned by that c
 
 Flat and Material are independent systems, not a shared style with a few color substitutions.
 For example, a Flat `TextFieldStyle` can use an outlined surface without a visible floating label while keeping the label in semantics.
+Flat pickers use compact geometry, restrained outlines, and rounded-square date selections; Material pickers use larger tonal surfaces, circular date selections, and separate time-field, period-group, and dial selection colors.
 
 ## Interaction indication
 

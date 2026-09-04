@@ -2,6 +2,7 @@
 
 #include <any>
 #include <array>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -532,6 +533,8 @@ namespace detail {
 std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& layout, ViewItemSource source);
 std::shared_ptr<ViewSpec> MakeSelectSpec(ViewItemSource source, std::size_t selected_index);
 std::shared_ptr<ViewSpec> MakeComboBoxSpec(ComboBoxSuggestionSource source, TextEditingValue value);
+std::shared_ptr<ViewSpec> MakeDatePickerSpec(std::chrono::year_month_day value);
+std::shared_ptr<ViewSpec> MakeTimePickerSpec(std::chrono::minutes value);
 
 template <class Derived> class TypedView : public View {
 public:
@@ -908,6 +911,76 @@ private:
 
   detail::ViewItemSource source_;
   std::size_t selected_index_ = 0;
+  StringVariant label_;
+  ValidationResult validation_;
+};
+
+/// Presents a controlled, localized calendar date selector.
+///
+/// Range endpoints are inclusive. DisabledDates affects user proposals but does not replace application-owned
+/// validation or mutate the controlled value.
+class DatePicker final : public detail::TypedView<DatePicker> {
+public:
+  explicit DatePicker(std::chrono::year_month_day value);
+  explicit DatePicker(const State<std::chrono::year_month_day>& value) : DatePicker(value.Get()) {}
+
+  /// Handles a requested controlled date change.
+  template <class Function> DatePicker OnChanged(Function&& function) && {
+    return std::move(*this).On<DatePickerEvents::Changed>(std::forward<Function>(function));
+  }
+
+  /// Restricts selectable dates to an inclusive range.
+  DatePicker Range(std::chrono::year_month_day minimum, std::chrono::year_month_day maximum) &&;
+  /// Sets the inclusive minimum selectable date.
+  DatePicker Minimum(std::chrono::year_month_day value) &&;
+  /// Sets the inclusive maximum selectable date.
+  DatePicker Maximum(std::chrono::year_month_day value) &&;
+  /// Supplies a predicate that returns true for dates that cannot be selected.
+  DatePicker DisabledDates(std::function<bool(std::chrono::year_month_day)> predicate) &&;
+  /// Sets the visible field label and accessible name.
+  DatePicker Label(StringVariant value) &&;
+  /// Presents application-owned validation state without changing selection rules.
+  DatePicker Validation(ValidationResult value) &&;
+
+private:
+  void UpdateModifier();
+
+  std::chrono::year_month_day value_;
+  std::optional<std::chrono::year_month_day> minimum_;
+  std::optional<std::chrono::year_month_day> maximum_;
+  std::function<bool(std::chrono::year_month_day)> disabled_dates_;
+  StringVariant label_;
+  ValidationResult validation_;
+};
+
+/// Presents a controlled, localized clock-face selector for a local time of day.
+///
+/// Values are minutes since midnight in the half-open interval [0h, 24h). Step must divide one hour exactly.
+class TimePicker final : public detail::TypedView<TimePicker> {
+public:
+  explicit TimePicker(std::chrono::minutes value);
+  explicit TimePicker(const State<std::chrono::minutes>& value) : TimePicker(value.Get()) {}
+
+  /// Handles a requested controlled time change.
+  template <class Function> TimePicker OnChanged(Function&& function) && {
+    return std::move(*this).On<TimePickerEvents::Changed>(std::forward<Function>(function));
+  }
+
+  /// Sets the selectable minute interval.
+  TimePicker Step(std::chrono::minutes value) &&;
+  /// Supplies a predicate that returns true for times that cannot be selected.
+  TimePicker DisabledTimes(std::function<bool(std::chrono::minutes)> predicate) &&;
+  /// Sets the visible field label and accessible name.
+  TimePicker Label(StringVariant value) &&;
+  /// Presents application-owned validation state without changing selection rules.
+  TimePicker Validation(ValidationResult value) &&;
+
+private:
+  void UpdateModifier();
+
+  std::chrono::minutes value_;
+  std::chrono::minutes step_{1};
+  std::function<bool(std::chrono::minutes)> disabled_times_;
   StringVariant label_;
   ValidationResult validation_;
 };

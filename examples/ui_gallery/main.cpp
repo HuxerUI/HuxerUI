@@ -3,6 +3,7 @@
 #include <ui_gallery_resources.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <iterator>
@@ -16,12 +17,13 @@ using namespace huxerui;
 
 constexpr std::size_t actions_page = 0;
 constexpr std::size_t selection_page = 1;
-constexpr std::size_t text_input_page = 2;
-constexpr std::size_t feedback_page = 3;
-constexpr std::size_t navigation_page = 4;
-constexpr std::size_t content_page = 5;
-constexpr std::size_t layout_page = 6;
-constexpr std::size_t motion_page = 7;
+constexpr std::size_t pickers_page = 2;
+constexpr std::size_t text_input_page = 3;
+constexpr std::size_t feedback_page = 4;
+constexpr std::size_t navigation_page = 5;
+constexpr std::size_t content_page = 6;
+constexpr std::size_t layout_page = 7;
+constexpr std::size_t motion_page = 8;
 
 const char* PageName(std::size_t page) {
   switch (page) {
@@ -29,6 +31,8 @@ const char* PageName(std::size_t page) {
     return "Actions";
   case selection_page:
     return "Selection";
+  case pickers_page:
+    return "Pickers";
   case text_input_page:
     return "Text input";
   case feedback_page:
@@ -458,6 +462,75 @@ View SelectionDemo() {
           Slider(value).Step(0.05F).OnChanged([value](float next) { value = next; }),
           Text::Format("{}%", static_cast<int>(value * 100.0F)),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Center))
+    ),
+  }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+[[huxerui::composable]]
+View PickersDemo() {
+  const ThemeSpec& theme = UseTheme();
+  auto date = UseState(
+      std::chrono::year_month_day{std::chrono::year{2026}, std::chrono::September, std::chrono::day{4}}
+  );
+  auto time = UseState(std::chrono::minutes{13 * 60 + 30});
+
+  return Column {
+    GallerySection(
+        "Date and time",
+        "DatePicker localizes its calendar and range while TimePicker presents the same controlled time on a clock "
+        "face without a time-zone policy.",
+        Flow {
+          ProvideEnvironment(
+              Locale::FromLanguageTag("en-US"),
+              Column {
+                Text("English (United States)", TextRole::Label),
+                DatePicker(date)
+                    .Range(
+                        std::chrono::year_month_day{
+                            std::chrono::year{2026},
+                            std::chrono::January,
+                            std::chrono::day{1},
+                        },
+                        std::chrono::year_month_day{
+                            std::chrono::year{2026},
+                            std::chrono::December,
+                            std::chrono::day{31},
+                        }
+                    )
+                    .Label("Travel date")
+                    .OnChanged([date](std::chrono::year_month_day next) { date = next; }),
+                TimePicker(time)
+                    .Step(std::chrono::minutes{5})
+                    .Label("Departure time")
+                    .OnChanged([time](std::chrono::minutes next) { time = next; }),
+              }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+          ),
+          ProvideEnvironment(
+              Locale::FromLanguageTag("zh-CN"),
+              Column {
+                Text("\xE7\xAE\x80\xE4\xBD\x93\xE4\xB8\xAD\xE6\x96\x87", TextRole::Label),
+                DatePicker(date)
+                    .Range(
+                        std::chrono::year_month_day{
+                            std::chrono::year{2026},
+                            std::chrono::January,
+                            std::chrono::day{1},
+                        },
+                        std::chrono::year_month_day{
+                            std::chrono::year{2026},
+                            std::chrono::December,
+                            std::chrono::day{31},
+                        }
+                    )
+                    .Label("\xE5\x87\xBA\xE8\xA1\x8C\xE6\x97\xA5\xE6\x9C\x9F")
+                    .OnChanged([date](std::chrono::year_month_day next) { date = next; }),
+                TimePicker(time)
+                    .Step(std::chrono::minutes{5})
+                    .Label("\xE5\x87\xBA\xE5\x8F\x91\xE6\x97\xB6\xE9\x97\xB4")
+                    .OnChanged([time](std::chrono::minutes next) { time = next; }),
+              }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Start))
+          ),
+        }.With(Spacing(theme.spacing.large), CrossAlign(CrossAxisAlignment::Start))
     ),
   }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
 }
@@ -1049,6 +1122,8 @@ View GalleryNavigation(State<std::size_t> selected_page, State<bool> start_open)
                 .SelectedIcon(ui_gallery::images::actions_selected),
             NavigationItem(ui_gallery::images::selection, "Selection")
                 .SelectedIcon(ui_gallery::images::selection_selected),
+            NavigationItem(ui_gallery::images::pickers, "Pickers")
+                .SelectedIcon(ui_gallery::images::pickers_selected),
             NavigationItem(ui_gallery::images::text_input, "Text input")
                 .SelectedIcon(ui_gallery::images::text_input_selected),
             NavigationItem(ui_gallery::images::feedback, "Feedback")
@@ -1155,6 +1230,11 @@ View GalleryMain(
             GalleryPage(
                 "Boolean, exclusive, grouped, tabbed, and continuous controlled selection.",
                 SelectionDemo(),
+                theme.spacing.large
+            ),
+            GalleryPage(
+                "Localized date and time selection with shared controlled values, ranges, and minute steps.",
+                PickersDemo(),
                 theme.spacing.large
             ),
             GalleryPage(

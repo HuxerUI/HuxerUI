@@ -70,6 +70,25 @@ TEST_CASE("Android semantic frames encode the ComboBox role") {
   REQUIRE(ReadUint32(encoded, 33) == 24U);
 }
 
+TEST_CASE("Android semantic frames preserve disabled nodes and their enabled flag") {
+  SemanticNode node;
+  node.id = 27;
+  node.role = SemanticRole::GridCell;
+  node.label = "Unavailable date";
+  node.enabled = false;
+
+  const std::vector<std::uint8_t> disabled = EncodeAndroidSemanticFrame({1, 27, {node}});
+  REQUIRE(ReadUint32(disabled, 20) == 1U);
+  REQUIRE(ReadUint32(disabled, 24) == 27U);
+  REQUIRE(ReadUint64(disabled, 41) == 0U);
+  REQUIRE((disabled.at(49) & 1U) == 0U);
+
+  node.enabled = true;
+  const std::vector<std::uint8_t> enabled = EncodeAndroidSemanticFrame({2, 27, {node}});
+  REQUIRE(ReadUint32(enabled, 24) == 27U);
+  REQUIRE((enabled.at(49) & 1U) != 0U);
+}
+
 TEST_CASE("Android semantic frames encode PlatformView anchors without changing the protocol version") {
   SemanticNode root;
   root.platform_view_identity = 0x0102030405060708ULL;

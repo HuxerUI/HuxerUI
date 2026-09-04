@@ -117,6 +117,11 @@ This is also the phase for `MountedNode` local-to-window conversion when retaine
 Paint callbacks continue to record node-local commands and do not use window coordinates to draw.
 Use `MountedNode::Bounds()` for the complete node rectangle and `ContentBounds()` when custom content should respect the node's resolved Padding.
 
+For self-drawn controls, `BuildSemantics(SemanticBuilder&)` can publish virtual children with `AddChild(local_id, bounds, semantics, enabled)` and declare their actions through `AddAction` or `AddCustomAction`.
+Keep local IDs stable and use the same availability predicate as actual input.
+Runtime combines each child's availability with the mounted owner's `Enabled` state: disabled children remain discoverable but have no executable standard or custom actions.
+Call `InvalidateSemantics()` when retained availability changes; this does not replace the control's pointer or keyboard checks.
+
 ## Paint commands
 
 Use `Canvas` and existing `PaintCommand` variants for custom drawing.

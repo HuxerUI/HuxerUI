@@ -35,6 +35,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 - [Text Input and TextField](text-input.md): editing values, sessions, geometry, IME, and secure input.
 - [Select](select.md): controlled finite choices, popup ownership, item identity, focus, and semantics.
 - [ComboBox](combo-box.md): controlled editable suggestions, TextField reuse, popup coordination, and semantics.
+- [Date and Time Pickers](date-time-pickers.md): chrono values, localized calendar and clock presentation, retained browsing, and semantics.
 - [Canvas and Path](canvas.md): vector paths, drawing, retention, and renderer mapping.
 - [Resources, Images, and Localization](resources.md): typed resources, packages, variants, and locale.
 - [Semantics and Accessibility](semantics.md): semantic frames, actions, identity, and platform bridges.

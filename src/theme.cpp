@@ -463,6 +463,92 @@ SelectStyle MaterialSelectStyle(const ThemeSpec& theme) {
   };
 }
 
+DatePickerStyle MaterialDatePickerStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  Color hover = theme.colors.primary;
+  hover.alpha *= 0.08F;
+  return {
+      .background = theme.colors.surface_container_high,
+      .foreground = theme.colors.on_surface,
+      .secondary_foreground = theme.colors.on_surface_variant,
+      .disabled_foreground = disabled,
+      .selected_background = theme.colors.primary,
+      .selected_foreground = theme.colors.on_primary,
+      .hover_background = hover,
+      .border = theme.colors.outline,
+      .validation_error = theme.colors.error,
+      .title_style = TextStyle{
+          Font::System(theme.typography.body_large).WithWeight(FontWeight::Medium),
+          theme.colors.on_surface,
+      },
+      .weekday_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface_variant},
+      .day_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .label_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .validation_text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.error},
+      .padding = EdgeInsets::All(theme.spacing.small + theme.spacing.extra_small),
+      .cell_size = 40.0F,
+      .column_spacing = 4.0F,
+      .row_spacing = 4.0F,
+      .header_height = 48.0F,
+      .corner_radius = theme.shapes.extra_large,
+      .selection_corner_radius = theme.shapes.full,
+      .border_width = 0.0F,
+      .label_spacing = theme.spacing.small,
+      .validation_spacing = theme.spacing.extra_small,
+  };
+}
+
+TimePickerStyle MaterialTimePickerStyle(const ThemeSpec& theme) {
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .background = theme.colors.surface_container_high,
+      .dial_background = theme.colors.surface_container_highest,
+      .foreground = theme.colors.on_surface,
+      .disabled_foreground = disabled,
+      .selected_background = theme.colors.primary,
+      .selected_foreground = theme.colors.on_primary,
+      .field_background = theme.colors.surface_container_highest,
+      .selected_field_background = theme.colors.primary_container,
+      .selected_field_foreground = theme.colors.on_primary_container,
+      .selected_period_background = theme.colors.tertiary_container,
+      .selected_period_foreground = theme.colors.on_tertiary_container,
+      .period_border = theme.colors.outline,
+      .hand = theme.colors.primary,
+      .border = theme.colors.outline,
+      .validation_error = theme.colors.error,
+      .header_style = TextStyle{
+          Font::System(56.0F),
+          theme.colors.on_surface,
+      },
+      .period_style = TextStyle{
+          Font::System(theme.typography.body_large).WithWeight(FontWeight::Medium),
+          theme.colors.on_surface_variant,
+      },
+      .dial_style = TextStyle{Font::System(theme.typography.body_large), theme.colors.on_surface},
+      .label_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .validation_text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.error},
+      .padding = EdgeInsets::All(theme.spacing.large),
+      .dial_size = 256.0F,
+      .header_height = 80.0F,
+      .field_width = 96.0F,
+      .separator_width = 24.0F,
+      .field_corner_radius = theme.shapes.small,
+      .period_width = 52.0F,
+      .period_spacing = theme.spacing.small + theme.spacing.extra_small,
+      .period_corner_radius = theme.shapes.small,
+      .period_border_width = 1.0F,
+      .content_spacing = theme.spacing.large,
+      .selection_radius = 20.0F,
+      .hand_width = 2.0F,
+      .corner_radius = theme.shapes.extra_large,
+      .border_width = 0.0F,
+      .label_spacing = theme.spacing.small,
+      .validation_spacing = theme.spacing.extra_small,
+  };
+}
+
 DividerStyle MaterialDividerStyle(const ThemeSpec& theme) {
   Color color = theme.colors.outline;
   color.alpha *= 0.4F;
@@ -990,6 +1076,8 @@ ThemeDefinition MaterialDefinition(ThemeSpec theme) {
   definition.Set(MaterialSegmentedButtonStyle(theme));
   definition.Set(MaterialTabsStyle(theme));
   definition.Set(MaterialSelectStyle(theme));
+  definition.Set(MaterialDatePickerStyle(theme));
+  definition.Set(MaterialTimePickerStyle(theme));
   definition.Set(MaterialDividerStyle(theme));
   definition.Set(MaterialTextFieldStyle(theme));
   definition.Set(MaterialComboBoxStyle(theme));
@@ -1244,6 +1332,96 @@ SelectStyle DefaultSelectStyle(const ThemeSpec& theme) {
       .border_width = 1.0F,
       .indication = std::nullopt,
       .item_indication = std::nullopt,
+  };
+}
+
+DatePickerStyle DefaultDatePickerStyle(const ThemeSpec& theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.18F;
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  Color hover = theme.colors.primary;
+  hover.alpha *= 0.08F;
+  return {
+      .background = theme.colors.surface,
+      .foreground = theme.colors.on_surface,
+      .secondary_foreground = theme.colors.on_surface_variant,
+      .disabled_foreground = disabled,
+      .selected_background = theme.colors.primary,
+      .selected_foreground = theme.colors.on_primary,
+      .hover_background = hover,
+      .border = border,
+      .validation_error = theme.colors.error,
+      .title_style = TextStyle{
+          Font::System(theme.typography.body_large).WithWeight(FontWeight::Medium),
+          theme.colors.on_surface,
+      },
+      .weekday_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.on_surface_variant},
+      .day_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .label_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .validation_text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.error},
+      .padding = EdgeInsets::All(theme.spacing.small),
+      .cell_size = 32.0F,
+      .column_spacing = 2.0F,
+      .row_spacing = 2.0F,
+      .header_height = 44.0F,
+      .corner_radius = theme.shapes.small,
+      .selection_corner_radius = theme.shapes.extra_small,
+      .border_width = 1.0F,
+      .label_spacing = theme.spacing.small,
+      .validation_spacing = theme.spacing.extra_small,
+  };
+}
+
+TimePickerStyle DefaultTimePickerStyle(const ThemeSpec& theme) {
+  Color border = theme.colors.on_surface;
+  border.alpha *= 0.18F;
+  Color disabled = theme.colors.on_surface;
+  disabled.alpha *= theme.interactions.disabled_opacity;
+  return {
+      .background = theme.colors.surface,
+      .dial_background = theme.colors.surface_container_highest,
+      .foreground = theme.colors.on_surface,
+      .disabled_foreground = disabled,
+      .selected_background = theme.colors.primary,
+      .selected_foreground = theme.colors.on_primary,
+      .field_background = theme.colors.surface_container_highest,
+      .selected_field_background = theme.colors.primary_container,
+      .selected_field_foreground = theme.colors.on_primary_container,
+      .selected_period_background = theme.colors.primary_container,
+      .selected_period_foreground = theme.colors.on_primary_container,
+      .period_border = border,
+      .hand = theme.colors.primary,
+      .border = border,
+      .validation_error = theme.colors.error,
+      .header_style = TextStyle{
+          Font::System(32.0F),
+          theme.colors.on_surface,
+      },
+      .period_style = TextStyle{
+          Font::System(theme.typography.body_small).WithWeight(FontWeight::Medium),
+          theme.colors.on_surface_variant,
+      },
+      .dial_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .label_style = TextStyle{Font::System(theme.typography.body_medium), theme.colors.on_surface},
+      .validation_text_style = TextStyle{Font::System(theme.typography.body_small), theme.colors.error},
+      .padding = EdgeInsets::All(theme.spacing.small + theme.spacing.extra_small),
+      .dial_size = 208.0F,
+      .header_height = 52.0F,
+      .field_width = 64.0F,
+      .separator_width = 16.0F,
+      .field_corner_radius = theme.shapes.extra_small,
+      .period_width = 44.0F,
+      .period_spacing = theme.spacing.small,
+      .period_corner_radius = theme.shapes.extra_small,
+      .period_border_width = 1.0F,
+      .content_spacing = theme.spacing.medium,
+      .selection_radius = 16.0F,
+      .hand_width = 2.0F,
+      .corner_radius = theme.shapes.small,
+      .border_width = 1.0F,
+      .label_spacing = theme.spacing.small,
+      .validation_spacing = theme.spacing.extra_small,
   };
 }
 
@@ -1553,6 +1731,14 @@ SelectStyle SelectStyle::Default() {
   return detail::DefaultSelectStyle(ThemeSpec::Default());
 }
 
+DatePickerStyle DatePickerStyle::Default() {
+  return detail::DefaultDatePickerStyle(ThemeSpec::Default());
+}
+
+TimePickerStyle TimePickerStyle::Default() {
+  return detail::DefaultTimePickerStyle(ThemeSpec::Default());
+}
+
 DividerStyle DividerStyle::Default() {
   return detail::DefaultDividerStyle(ThemeSpec::Default());
 }
@@ -1634,10 +1820,14 @@ ThemeSpec FlatDarkThemeSpec() {
   theme.colors = {
       .primary = Color::Rgb(88, 166, 255),
       .on_primary = Color::Rgb(13, 17, 23),
+      .primary_container = Color::Rgb(25, 53, 85),
+      .on_primary_container = Color::Rgb(202, 225, 255),
       .secondary = Color::Rgb(139, 148, 158),
       .on_secondary = Color::Rgb(13, 17, 23),
       .secondary_container = Color::Rgb(48, 54, 61),
       .on_secondary_container = Color::Rgb(230, 237, 243),
+      .tertiary_container = Color::Rgb(67, 47, 84),
+      .on_tertiary_container = Color::Rgb(236, 216, 255),
       .background = Color::Rgb(13, 17, 23),
       .surface = Color::Rgb(22, 27, 34),
       .surface_container_low = Color::Rgb(22, 27, 34),
@@ -1677,10 +1867,14 @@ ThemeSpec MaterialLightThemeSpec() {
   theme.colors = {
       .primary = Color::Rgb(103, 80, 164),
       .on_primary = Color::White(),
+      .primary_container = Color::Rgb(234, 221, 255),
+      .on_primary_container = Color::Rgb(33, 0, 93),
       .secondary = Color::Rgb(98, 91, 113),
       .on_secondary = Color::White(),
       .secondary_container = Color::Rgb(232, 222, 248),
       .on_secondary_container = Color::Rgb(29, 25, 43),
+      .tertiary_container = Color::Rgb(255, 216, 228),
+      .on_tertiary_container = Color::Rgb(49, 17, 29),
       .background = Color::Rgb(255, 251, 254),
       .surface = Color::Rgb(255, 251, 254),
       .surface_container_low = Color::Rgb(247, 242, 250),
@@ -1734,10 +1928,14 @@ ThemeSpec MaterialDarkThemeSpec() {
   theme.colors = {
       .primary = Color::Rgb(208, 188, 255),
       .on_primary = Color::Rgb(56, 30, 114),
+      .primary_container = Color::Rgb(79, 55, 139),
+      .on_primary_container = Color::Rgb(234, 221, 255),
       .secondary = Color::Rgb(204, 194, 220),
       .on_secondary = Color::Rgb(51, 45, 65),
       .secondary_container = Color::Rgb(74, 68, 88),
       .on_secondary_container = Color::Rgb(232, 222, 248),
+      .tertiary_container = Color::Rgb(99, 59, 72),
+      .on_tertiary_container = Color::Rgb(255, 216, 228),
       .background = Color::Rgb(28, 27, 31),
       .surface = Color::Rgb(28, 27, 31),
       .surface_container_low = Color::Rgb(29, 27, 32),

@@ -62,6 +62,7 @@ struct SemanticBuilderItem {
   std::uint64_t local_id = 0;
   std::optional<Rect> local_bounds;
   SemanticPatch semantics;
+  bool enabled = true;
   std::uint64_t actions = 0;
   std::vector<std::pair<std::uint64_t, std::string>> custom_actions;
 };

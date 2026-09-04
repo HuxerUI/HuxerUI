@@ -4,7 +4,9 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -398,6 +400,27 @@ View ResourceTooltipDependencyApp() {
 }
 
 } // namespace
+
+TEST_CASE("BuiltinStringCatalogsContainEveryDefaultKeyWithoutFallback") {
+  const auto entries = detail::ParseResourceIndex(BuiltinTestResources()->Read(detail::resource_index_path));
+  std::map<std::string, std::set<std::string>> catalogs;
+  for (const auto& entry : entries) {
+    if (entry.kind != detail::ResourceEntryKind::String || entry.id.Domain() != "huxerui") {
+      continue;
+    }
+    CAPTURE(entry.locale, entry.id.Key());
+    REQUIRE(entry.value.find_first_not_of(" \t\r\n") != std::string::npos);
+    REQUIRE(catalogs[entry.locale].emplace(entry.id.Key()).second);
+  }
+  REQUIRE(catalogs.contains(""));
+  REQUIRE(catalogs.size() > 1);
+  const auto& default_keys = catalogs.at("");
+  REQUIRE_FALSE(default_keys.empty());
+  for (const auto& [locale, keys] : catalogs) {
+    CAPTURE(locale);
+    REQUIRE(keys == default_keys);
+  }
+}
 
 TEST_CASE("AppResourcesResolveLocaleScaleAndRawPayloads") {
   TestResources resources;

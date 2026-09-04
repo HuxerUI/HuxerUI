@@ -26,6 +26,7 @@ User guides describe the current public SDK, development guides cover this repos
 
 [Design Documents](design/README.md) indexes the internal contracts by subsystem.
 [Scrolling](design/scrolling.md) defines input normalization, nested consumption, offset ownership, momentum, and overscroll.
+[Date and Time Pickers](design/date-time-pickers.md) defines localized chrono-based calendar and clock controls.
 Design documents are implementation references, not a public API stability guarantee.
 
 ## Scope
