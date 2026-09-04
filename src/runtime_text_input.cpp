@@ -1,4 +1,5 @@
-#include "internal.h"
+#include "runtime_internal.h"
+#include "runtime_text_internal.h"
 #include "text_input_internal.h"
 
 #include <algorithm>
@@ -245,14 +246,84 @@ TextInputPositionResult SessionMismatchPosition(TextInputSessionId session_id) {
 
 } // namespace
 
-bool Runtime::BringTextInputIntoView() {
-  if (!state_->mounted_root_ || !state_->text_input_session_.has_value()) {
+bool detail::TextInteraction::HasSession() const noexcept {
+  return text_input_session_.has_value();
+}
+
+void detail::TextInteraction::RequestShowForNode(std::uint64_t node) {
+  if (runtime_state_.focused_node_identity_ != node || !text_input_session_ ||
+      text_input_session_->node_identity != node) {
+    return;
+  }
+  if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
+    text_input->RequestShow(text_input_session_->session_id);
+  }
+}
+
+bool detail::TextInteraction::PerformSemanticTextAction(
+    std::uint64_t node, NodeExtension& extension, std::uint64_t local_id, const SemanticAction& action
+) {
+  const std::shared_ptr<TextInputClient> client = extension.GetTextInputClient();
+  const std::optional<TextInputState> previous = client ? std::optional{client->State()} : std::nullopt;
+  if (!extension.OnSemanticAction(local_id, action)) {
+    return false;
+  }
+  if (client) {
+    const TextInputState current = client->State();
+    if (!IsValidTextInputState(current, previous->session_id) || !IsValidTextInputStateTransition(*previous, current)) {
+      throw std::logic_error("HuxerUI text input client returned invalid state after a semantic action");
+    }
+    InvalidateTextInputStateChange(node, *previous, current);
+    RefreshTextInputSession();
+  }
+  return true;
+}
+
+bool detail::TextInteraction::SessionBelongsTo(const detail::MountedNode& root) const {
+  return text_input_session_ && ContainsNodeIdentity(root, text_input_session_->node_identity);
+}
+
+void detail::TextInteraction::NotifyScrollActivity(detail::MountedNode& node, const ScrollActivity& activity) {
+  if (activity.source != ScrollSource::FocusReveal && text_input_session_ &&
+      text_input_session_->node_identity != node.identity && FindNode(node, text_input_session_->node_identity)) {
+    text_input_session_->client->ViewportScrolled();
+  }
+  InvalidateOverlay();
+}
+
+bool detail::TextInteraction::OverlayVisible() const noexcept {
+  return text_selection_overlay_.state.visible;
+}
+
+void detail::TextInteraction::InvalidateOverlay() noexcept {
+  if (OverlayVisible()) {
+    text_selection_overlay_.state.paint_dirty = true;
+  }
+}
+
+const RenderNode& detail::TextInteraction::Overlay() const noexcept {
+  return text_selection_overlay_.render_node;
+}
+
+void detail::TextInteraction::ResetSelectionGesture() noexcept {
+  text_selection_gesture_ = {};
+}
+
+void detail::TextInteraction::RememberSelectionTap(const PointerEvent& event, std::uint64_t node, double timestamp) {
+  text_selection_gesture_.previous_tap_time = timestamp;
+  text_selection_gesture_.previous_tap_position = event.position;
+  text_selection_gesture_.previous_tap_node = node;
+  text_selection_gesture_.previous_tap_device = event.device_kind;
+}
+
+bool detail::TextInteraction::BringTextInputIntoView() {
+  if (!runtime_state_.mounted_root_ || !text_input_session_.has_value()) {
     return false;
   }
 
-  detail::ActiveTextInputSession& session = *state_->text_input_session_;
+  detail::ActiveTextInputSession& session = *text_input_session_;
   std::vector<detail::MountedNode*> path;
-  if (!FindNodePath(*state_->mounted_root_, session.node_identity, path)) {
+  if (!FindNodePath(*runtime_state_.mounted_root_, session.node_identity, path)) {
     return false;
   }
 
@@ -292,13 +363,13 @@ bool Runtime::BringTextInputIntoView() {
   return changed;
 }
 
-void Runtime::StopTextInputSession(TextInputEndReason reason) {
-  if (!state_->text_input_session_.has_value()) {
+void detail::TextInteraction::StopTextInputSession(TextInputEndReason reason) {
+  if (!text_input_session_.has_value()) {
     return;
   }
 
-  detail::ActiveTextInputSession session = std::move(*state_->text_input_session_);
-  state_->text_input_session_.reset();
+  detail::ActiveTextInputSession session = std::move(*text_input_session_);
+  text_input_session_.reset();
 
   std::exception_ptr failure;
   try {
@@ -307,7 +378,7 @@ void Runtime::StopTextInputSession(TextInputEndReason reason) {
     failure = std::current_exception();
   }
 
-  if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
+  if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
     try {
       text_input->Stop(session.session_id);
     } catch (...) {
@@ -322,20 +393,20 @@ void Runtime::StopTextInputSession(TextInputEndReason reason) {
   }
 }
 
-void Runtime::RefreshTextInputSession() {
+void detail::TextInteraction::RefreshTextInputSession() {
   // Callers that build a frame invoke this after layout and presentation have settled. Event handlers may also invoke
   // it immediately to keep native editing state synchronized without waiting for the next frame.
   detail::MountedNode* focused = nullptr;
   std::shared_ptr<TextInputClient> client;
-  if (state_->mounted_root_ && state_->focused_node_identity_.has_value()) {
-    focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  if (runtime_state_.mounted_root_ && runtime_state_.focused_node_identity_.has_value()) {
+    focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     if (focused && focused->interaction.enabled && focused->focusable) {
       client = FindTextInputClient(*focused);
     }
   }
 
-  if (state_->text_input_session_.has_value()) {
-    detail::ActiveTextInputSession& active = *state_->text_input_session_;
+  if (text_input_session_.has_value()) {
+    detail::ActiveTextInputSession& active = *text_input_session_;
     if (focused && focused->identity == active.node_identity && client == active.client) {
       const TextInputConfiguration configuration = active.client->Configuration();
       const TextInputState current = active.client->State();
@@ -347,8 +418,8 @@ void Runtime::RefreshTextInputSession() {
         StopTextInputSession(TextInputEndReason::ReadOnly);
         return;
       }
-      if (state_->text_selection_overlay_.state.visible && !state_->text_selection_overlay_.state.dismissing &&
-          current.selection.IsCollapsed() && state_->text_selection_overlay_.state.show_handles) {
+      if (text_selection_overlay_.state.visible && !text_selection_overlay_.state.dismissing &&
+          current.selection.IsCollapsed() && text_selection_overlay_.state.show_handles) {
         HideTextSelectionOverlay();
       }
 
@@ -365,7 +436,7 @@ void Runtime::RefreshTextInputSession() {
           !active.published_geometry.has_value() || resolved.snapshot->geometry != active.published_geometry->geometry;
       active.configuration = configuration;
       active.state = current;
-      if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
+      if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
         if (restart) {
           text_input->Restart(active.session_id, active.configuration, active.state, resolved.snapshot->geometry);
         } else if (state_changed || geometry_changed) {
@@ -377,8 +448,9 @@ void Runtime::RefreshTextInputSession() {
     }
 
     TextInputEndReason reason = TextInputEndReason::FocusLost;
-    detail::MountedNode* previous =
-        state_->mounted_root_ ? FindNode(*state_->mounted_root_, state_->text_input_session_->node_identity) : nullptr;
+    detail::MountedNode* previous = runtime_state_.mounted_root_
+                                       ? FindNode(*runtime_state_.mounted_root_, text_input_session_->node_identity)
+                                       : nullptr;
     if (!previous) {
       reason = TextInputEndReason::ClientRemoved;
     } else if (!previous->interaction.enabled) {
@@ -400,17 +472,17 @@ void Runtime::RefreshTextInputSession() {
   if (configuration.read_only) {
     return;
   }
-  if (state_->next_text_input_session_id_ == std::numeric_limits<TextInputSessionId>::max()) {
+  if (next_text_input_session_id_ == std::numeric_limits<TextInputSessionId>::max()) {
     throw std::overflow_error("HuxerUI text input session identity overflow");
   }
-  const TextInputSessionId session_id = state_->next_text_input_session_id_++;
+  const TextInputSessionId session_id = next_text_input_session_id_++;
   const TextInputState initial = client->BeginTextInput(session_id);
   if (!detail::IsValidTextInputState(initial, session_id)) {
     client->EndTextInput(session_id, TextInputEndReason::ClientRemoved);
     throw std::logic_error("HuxerUI text input client returned invalid initial state");
   }
 
-  state_->text_input_session_ = detail::ActiveTextInputSession{
+  text_input_session_ = detail::ActiveTextInputSession{
       focused->identity,
       session_id,
       client,
@@ -421,26 +493,26 @@ void Runtime::RefreshTextInputSession() {
   };
   try {
     TextInputGeometry geometry = QueryTextInputGeometry(session_id, initial.selection.Range());
-    if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
+    if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
       text_input->Start(session_id, configuration, initial, geometry);
     }
-    state_->text_input_session_->published_geometry = MakeGeometrySnapshot(initial, *focused, std::move(geometry));
+    text_input_session_->published_geometry = MakeGeometrySnapshot(initial, *focused, std::move(geometry));
   } catch (...) {
-    state_->text_input_session_.reset();
+    text_input_session_.reset();
     client->EndTextInput(session_id, TextInputEndReason::ClientRemoved);
     throw;
   }
 }
 
-TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatch& batch) {
-  if (!state_->text_input_session_.has_value() || batch.session_id != state_->text_input_session_->session_id) {
+TextInputApplyResult detail::TextInteraction::HandleTextInputCommands(const TextInputCommandBatch& batch) {
+  if (!text_input_session_.has_value() || batch.session_id != text_input_session_->session_id) {
     return {
         TextInputResultCode::SessionMismatch,
         TextInputSyncAction::None,
     };
   }
 
-  detail::ActiveTextInputSession& active = *state_->text_input_session_;
+  detail::ActiveTextInputSession& active = *text_input_session_;
   const TextInputState previous = active.state;
   TextInputApplyResult result = active.client->ApplyTextInput(batch);
   if (!IsKnown(result.result_code) || !IsKnown(result.sync_action) ||
@@ -466,7 +538,8 @@ TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatc
   const bool state_changed = current.revision != previous.revision;
   const bool restart = result.sync_action == TextInputSyncAction::Restart || configuration != active.configuration;
   const bool update = result.sync_action == TextInputSyncAction::Update || state_changed;
-  detail::MountedNode* node = state_->mounted_root_ ? FindNode(*state_->mounted_root_, active.node_identity) : nullptr;
+  detail::MountedNode* node =
+      runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, active.node_identity) : nullptr;
   std::optional<ResolvedGeometrySnapshot> resolved;
   std::optional<TextInputGeometry> uncached_geometry;
   if (node != nullptr) {
@@ -482,7 +555,7 @@ TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatc
   active.configuration = configuration;
   active.state = current;
 
-  if (PlatformTextInput* text_input = state_->platform_->TextInput()) {
+  if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
     if (restart) {
       text_input->Restart(active.session_id, active.configuration, active.state, geometry);
     } else if (update || geometry_changed) {
@@ -498,33 +571,34 @@ TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatc
   return result;
 }
 
-void Runtime::InvalidateTextInputStateChange(
+void detail::TextInteraction::InvalidateTextInputStateChange(
     std::uint64_t node_identity, const TextInputState& previous, const TextInputState& current
 ) {
   if (current.revision == previous.revision) {
     return;
   }
-  if (state_->text_selection_overlay_.state.visible) {
-    state_->text_selection_overlay_.state.paint_dirty = true;
+  if (text_selection_overlay_.state.visible) {
+    text_selection_overlay_.state.paint_dirty = true;
   }
-  detail::MountedNode* node = state_->mounted_root_ ? FindNode(*state_->mounted_root_, node_identity) : nullptr;
+  detail::MountedNode* node =
+      runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, node_identity) : nullptr;
   if (!node) {
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return;
   }
   node->foreground_paint_dirty = true;
   if (current.content_revision != previous.content_revision) {
-    InvalidateLayout(*node);
+    runtime_state_.owner_.InvalidateLayout(*node);
   } else {
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
   }
 }
 
-bool Runtime::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
-  if (!IsKnown(action) || !state_->text_input_session_.has_value()) {
+bool detail::TextInteraction::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
+  if (!IsKnown(action) || !text_input_session_.has_value()) {
     return false;
   }
-  const detail::ActiveTextInputSession& active = *state_->text_input_session_;
+  const detail::ActiveTextInputSession& active = *text_input_session_;
   if (session_id != active.session_id || !MatchesConfiguredAction(active.configuration, action)) {
     return false;
   }
@@ -537,9 +611,10 @@ bool Runtime::PerformTextInputAction(TextInputSessionId session_id, TextInputAct
   });
 }
 
-TextInputContext
-Runtime::QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
-  if (!state_->text_input_session_.has_value() || session_id != state_->text_input_session_->session_id) {
+TextInputContext detail::TextInteraction::QueryTextInputContext(
+    TextInputSessionId session_id, TextOffset start, TextOffset length
+) const {
+  if (!text_input_session_.has_value() || session_id != text_input_session_->session_id) {
     return SessionMismatchContext(session_id);
   }
   if (start < 0 || length < 0) {
@@ -549,15 +624,16 @@ Runtime::QueryTextInputContext(TextInputSessionId session_id, TextOffset start, 
     return result;
   }
 
-  const TextInputContext result = state_->text_input_session_->client->QueryTextInputContext(session_id, start, length);
+  const TextInputContext result = text_input_session_->client->QueryTextInputContext(session_id, start, length);
   if (!IsValidContext(result, session_id)) {
     throw std::logic_error("HuxerUI text input client returned invalid context");
   }
   return result;
 }
 
-TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
-  if (!state_->text_input_session_.has_value() || session_id != state_->text_input_session_->session_id) {
+TextInputGeometry
+detail::TextInteraction::QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
+  if (!text_input_session_.has_value() || session_id != text_input_session_->session_id) {
     return SessionMismatchGeometry(session_id);
   }
   if (!range.IsValid()) {
@@ -567,8 +643,9 @@ TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id,
     return result;
   }
 
-  const detail::ActiveTextInputSession& active = *state_->text_input_session_;
-  detail::MountedNode* node = state_->mounted_root_ ? FindNode(*state_->mounted_root_, active.node_identity) : nullptr;
+  const detail::ActiveTextInputSession& active = *text_input_session_;
+  detail::MountedNode* node =
+      runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, active.node_identity) : nullptr;
   if (!node) {
     TextInputGeometry result;
     result.result_code = TextInputResultCode::Rejected;
@@ -592,8 +669,9 @@ TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id,
   return result;
 }
 
-TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
-  if (!state_->text_input_session_.has_value() || session_id != state_->text_input_session_->session_id) {
+TextInputPositionResult
+detail::TextInteraction::QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
+  if (!text_input_session_.has_value() || session_id != text_input_session_->session_id) {
     return SessionMismatchPosition(session_id);
   }
   if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
@@ -603,8 +681,9 @@ TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId sessi
     return result;
   }
 
-  const detail::ActiveTextInputSession& active = *state_->text_input_session_;
-  detail::MountedNode* node = state_->mounted_root_ ? FindNode(*state_->mounted_root_, active.node_identity) : nullptr;
+  const detail::ActiveTextInputSession& active = *text_input_session_;
+  detail::MountedNode* node =
+      runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, active.node_identity) : nullptr;
   const std::optional<Point> local = node ? node->WindowToLocal(point) : std::nullopt;
   if (!local.has_value()) {
     TextInputPositionResult result;
@@ -620,6 +699,42 @@ TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId sessi
     throw std::logic_error("HuxerUI text input client returned an invalid position result");
   }
   return result;
+}
+
+bool detail::TextInteraction::HandleFocusedTextInputKey(const KeyEvent& event) {
+  if (!text_input_session_.has_value() || !runtime_state_.focused_node_identity_.has_value()) {
+    return false;
+  }
+  const detail::ActiveTextInputSession& active = *text_input_session_;
+  if (active.node_identity != *runtime_state_.focused_node_identity_) {
+    return false;
+  }
+  const std::uint64_t node_identity = active.node_identity;
+  const TextInputSessionId session_id = active.session_id;
+  const std::shared_ptr<TextInputClient> client = active.client;
+  const TextInputState previous = active.state;
+
+  const bool next_action = event.type == KeyEventType::Down && event.key == Key::Enter && !event.modifiers.shift &&
+                           !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta &&
+                           active.configuration.action == TextInputAction::Next;
+  if (next_action && event.repeat) {
+    return true;
+  }
+  if (client->HandleTextKey(event) != TextInputKeyResult::Handled) {
+    return false;
+  }
+
+  const TextInputState current = client->State();
+  if (!detail::IsValidTextInputState(current, session_id) ||
+      !detail::IsValidTextInputStateTransition(previous, current)) {
+    throw std::logic_error("HuxerUI text input client returned invalid state after handling a key event");
+  }
+  InvalidateTextInputStateChange(node_identity, previous, current);
+  if (next_action) {
+    runtime_state_.owner_.MoveFocus(false, false);
+  }
+  RefreshTextInputSession();
+  return true;
 }
 
 } // namespace huxerui

@@ -6,7 +6,7 @@
 
 #include <huxerui/root.h>
 
-#include "internal.h"
+#include "view_internal.h"
 
 namespace huxerui {
 namespace {

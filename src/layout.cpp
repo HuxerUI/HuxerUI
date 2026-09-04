@@ -1,4 +1,4 @@
-#include "internal.h"
+#include "runtime_internal.h"
 
 #include <algorithm>
 #include <cmath>

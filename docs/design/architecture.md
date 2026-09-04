@@ -58,6 +58,37 @@ frame, measure, layout, hit testing, and paint
 RenderScene
 ```
 
+## Runtime subsystem ownership
+
+Runtime is the lifetime owner and frame-transaction coordinator of one mounted surface, not the implementation of every surface-wide behavior. Its host-facing input methods remain the platform boundary; their presence does not require the receiving subsystem's state or algorithms to be members of Runtime.
+
+| Owner | State and behavior |
+| --- | --- |
+| Runtime | Root Environment and services, composition and reconciliation, mounted-node and scope identity, focus and focus traps, keyboard and Back ordering, frame scheduling, commit and teardown order |
+| PointerInteraction | Physical pointer sessions, raw delivery and capture, hover and cursor, recognition arbitration, and in-process drag-and-drop |
+| TextInteraction | Logical IME sessions, protocol validation and geometry synchronization, editing actions, selection behavior, and the selection overlay |
+| FileDropReceiver | External hover, target eligibility, independently accepted pending deliveries, completion and cancellation |
+| SemanticTree | Semantic identity allocation, committed semantic output, and action routes; node-associated identities remain on MountedNode |
+| SceneTransitionService | Frozen scenes, active transition state, animation advancement, and scene composition |
+
+These are private concrete collaborators, not Runtime subclasses, application Root Services, or a dynamically registered behavior pipeline. SceneTransitionService retains its existing handle-facing service role. Node-local retained behavior continues to use NodeExtension and existing text and gesture capabilities. TextField and other clients retain their own controlled editing state; TextInteraction does not mirror documents.
+
+Composition, reconciliation, and lifecycle retirement share the mounted-tree transaction and remain in Runtime. Layout, rendering, hit-route construction, coordinate conversion, and scrolling reuse their existing algorithms rather than acquiring parallel manager classes. FileDropReceiver and PointerInteraction share route and edge-scroll operations, not session ownership: an external drag has no local recognizer, source, or preview.
+
+Runtime::State is the single shared internal context for Runtime and its collaborators. Each collaborator receives that context directly rather than retaining a separate list of platform, mounted-tree, focus, Environment, resource, and peer references. It reads shared runtime data and calls peer operations through the context, while pointer sessions, IME sessions, semantic routes, and active transition data remain private to their responsible subsystem. Focus changes, invalidation, and frame requests still invoke Runtime operations through the context's owner; assigning fields is not a substitute for those coordinated operations.
+
+Stable node identities and NodeExtensionHandle values cross callbacks and frames; raw mounted references are temporary and must be resolved again after callbacks that can invalidate their owners. Cooperation uses ordinary methods without a second Context wrapper, callback registration layer, or service locator.
+
+Private collaborators store ordinary state directly; implementation hiding is not a separate ownership boundary. Runtime keeps its public-header PImpl and owns the shared context for the entire mounted lifetime. Ordinary collaborators hold a non-owning context reference; the handle-retainable SceneTransitionService holds a pointer cleared on disconnect. Asynchronous file deliveries capture a dispatcher copy and weak pending-operation state, never the shared Runtime context.
+
+Private implementation layering progresses from View declarations to retained nodes and then Runtime coordination: `view_internal.h` owns declarations and component-construction support, `mounted_node_internal.h` adds retained node state and node operations, and `runtime_internal.h` adds composition and per-window coordination. Include dependencies point only toward the lower layer: Runtime may include the mounted-node header, and the mounted-node header may include the View header. Feature contracts such as pointer, text, semantics, and file drop remain focused headers and do not create a second umbrella include.
+
+Runtime preserves explicit ordering at input, tree-update, geometry, frame, and shutdown boundaries. Focus has one authoritative owner; text and pointer code request transitions rather than keeping synchronized focus copies. Text input synchronization after an event remains immediate when required, while published layout geometry waits for final layout and presentation transforms, including caret reveal and anchored-layer settlement. Time-dependent collaborators contribute frame requests through the existing scheduler; BuildFrame never directly arms the platform scheduler.
+
+Pointer ownership is committed before competing recognizers are canceled and before accepted output reaches application code. Recognition decisions do not publish accepted behavior. Text selection uses the same ownership boundary; its overlay may consume a sequence without entering node recognition, but PointerInteraction remains responsible for that physical sequence and its terminal cancellation. Multi-pointer acceptance commits every participating owner before callbacks run. Failed input is quarantined rather than retried against a partially changed route.
+
+External completion first commits or removes its pending operation, then validates the receiving identity and invokes current event bindings. Shutdown disconnects external callbacks and ends active input before destroying the mounted tree. Retired Lifecycle cleanup precedes TaskScope closure, and services remain alive until mounted cleanup has completed. Subsystem destruction must not make this order depend on incidental field declaration order.
+
 ## Public View surface
 
 The current `View` API has four primary extension points:

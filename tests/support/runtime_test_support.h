@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "application_internal.h"
-#include "internal.h"
+#include "runtime_internal.h"
 #include "system_tray_internal.h"
 #include "text_layout_internal.h"
 

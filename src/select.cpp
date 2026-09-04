@@ -21,7 +21,7 @@
 #include <huxerui/theme.h>
 
 #include "huxerui_builtin_resources.h"
-#include "internal.h"
+#include "mounted_node_internal.h"
 #include "indication_internal.h"
 
 namespace huxerui {

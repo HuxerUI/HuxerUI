@@ -1,21 +1,54 @@
 #pragma once
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
+#include <unordered_map>
 #include <vector>
 
+#include <huxerui/app.h>
 #include <huxerui/environment.h>
+#include <huxerui/modifier.h>
 #include <huxerui/semantics.h>
 
 namespace huxerui::detail {
 
 class AppResources;
-struct ModifierDescriptor;
+struct MountedNode;
+
+struct SemanticExtensionRoute {
+  NodeExtensionHandle extension;
+  std::uint64_t local_id = 0;
+};
+
+inline constexpr std::size_t semantic_standard_action_count = static_cast<std::size_t>(SemanticActionKind::Custom);
+
+struct SemanticActionRoute {
+  std::uint64_t node_identity = 0;
+  std::array<std::optional<SemanticExtensionRoute>, semantic_standard_action_count> extension_actions;
+  std::unordered_map<std::uint64_t, SemanticExtensionRoute> custom_actions;
+};
+
+class SemanticTree final {
+public:
+  explicit SemanticTree(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
+  void BuildSemantics();
+  bool PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action);
+  const std::shared_ptr<const SemanticFrame>& Frame() const noexcept { return frame_; }
+
+private:
+  Runtime::State& runtime_state_;
+  std::shared_ptr<const SemanticFrame> frame_;
+  SemanticNodeId next_semantic_identity_ = 1;
+  SemanticNodeId semantic_root_identity_ = 0;
+  std::uint64_t semantic_revision_ = 0;
+  std::unordered_map<SemanticNodeId, SemanticActionRoute> semantic_action_routes_;
+};
 
 struct SemanticPatch {
   std::optional<SemanticRole> role;

@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "geometry_internal.h"
-#include "internal.h"
+#include "mounted_node_internal.h"
 #include "platform_registry_internal.h"
 
 namespace huxerui {

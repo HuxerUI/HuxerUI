@@ -1,4 +1,5 @@
-#include "internal.h"
+#include "runtime_internal.h"
+#include "runtime_text_internal.h"
 #include "text_input_internal.h"
 
 #include <memory>
@@ -31,28 +32,29 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
 
 } // namespace detail
 
-bool Runtime::CanPerformTextEditingAction(TextEditingAction action) const {
-  if (!state_->text_input_session_.has_value()) {
-    if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
+  if (!text_input_session_.has_value()) {
+    if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
     }
-    detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+    detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    return client && client->CanPerformTextEditingAction(action, state_->platform_->Clipboard());
+    return client && client->CanPerformTextEditingAction(action, runtime_state_.platform_->Clipboard());
   }
-  const detail::ActiveTextInputSession& session = *state_->text_input_session_;
+  const detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
   switch (action) {
   case TextEditingAction::Cut:
     return !session.configuration.read_only && !session.configuration.secure && !selection.IsCollapsed() &&
-           state_->platform_->Clipboard() != nullptr;
+           runtime_state_.platform_->Clipboard() != nullptr;
   case TextEditingAction::Copy:
-    return !session.configuration.secure && !selection.IsCollapsed() && state_->platform_->Clipboard() != nullptr;
+    return !session.configuration.secure && !selection.IsCollapsed() &&
+           runtime_state_.platform_->Clipboard() != nullptr;
   case TextEditingAction::Paste: {
     if (session.configuration.read_only) {
       return false;
     }
-    PlatformClipboard* clipboard = state_->platform_->Clipboard();
+    PlatformClipboard* clipboard = runtime_state_.platform_->Clipboard();
     return clipboard != nullptr && clipboard->ReadText().has_value();
   }
   case TextEditingAction::SelectAll: {
@@ -64,22 +66,22 @@ bool Runtime::CanPerformTextEditingAction(TextEditingAction action) const {
   return false;
 }
 
-bool Runtime::PerformTextEditingAction(TextEditingAction action) {
-  if (!state_->text_input_session_.has_value()) {
-    if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action) {
+  if (!text_input_session_.has_value()) {
+    if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
     }
-    detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+    detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    if (!client || !client->PerformTextEditingAction(action, state_->platform_->Clipboard())) {
+    if (!client || !client->PerformTextEditingAction(action, runtime_state_.platform_->Clipboard())) {
       return false;
     }
     focused->foreground_paint_dirty = true;
     return true;
   }
-  detail::ActiveTextInputSession& session = *state_->text_input_session_;
+  detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
-  PlatformClipboard* clipboard = state_->platform_->Clipboard();
+  PlatformClipboard* clipboard = runtime_state_.platform_->Clipboard();
 
   if (action == TextEditingAction::Copy || action == TextEditingAction::Cut) {
     if (!CanPerformTextEditingAction(action) || clipboard == nullptr) {
@@ -134,40 +136,47 @@ bool Runtime::PerformTextEditingAction(TextEditingAction action) {
   return result.result_code == TextInputResultCode::Ok;
 }
 
-bool Runtime::SelectFocusedTextWord(Point position, bool show_overlay) {
-  if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+bool detail::TextInteraction::SelectTextWord(std::uint64_t node, Point position, bool show_overlay) {
+  if (!runtime_state_.mounted_root_ || runtime_state_.focused_node_identity_ != node) {
     return false;
   }
-  detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
-  if (!focused) {
+  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, node);
+  if (!focused || !focused->interaction.enabled) {
     return false;
   }
   TextSelectionClient* client = detail::FindTextSelectionClient(*focused);
   const std::optional<Point> local = client ? focused->WindowToLocal(position) : std::nullopt;
   const bool changed = local.has_value() && client->SelectWord(*local);
+  focused = runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, node) : nullptr;
+  if (!focused || !focused->interaction.enabled || runtime_state_.focused_node_identity_ != node) {
+    return changed;
+  }
   if (changed) {
     focused->foreground_paint_dirty = true;
     RefreshTextInputSession();
-    state_->text_selection_overlay_.state.paint_dirty = true;
+    if (runtime_state_.focused_node_identity_ != node) {
+      return true;
+    }
+    text_selection_overlay_.state.paint_dirty = true;
     if (show_overlay) {
       ShowTextSelectionOverlay(true);
     }
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
   if (show_overlay && client && CanPerformTextEditingAction(TextEditingAction::Paste)) {
     ShowTextSelectionOverlay(false);
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
   return false;
 }
 
-bool Runtime::ExtendFocusedTextSelection(Point position, bool start_handle) {
-  if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+bool detail::TextInteraction::ExtendFocusedTextSelection(Point position, bool start_handle) {
+  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
     return false;
   }
-  detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (!focused) {
     return false;
   }
@@ -177,17 +186,17 @@ bool Runtime::ExtendFocusedTextSelection(Point position, bool start_handle) {
   if (changed) {
     focused->foreground_paint_dirty = true;
     RefreshTextInputSession();
-    state_->text_selection_overlay_.state.paint_dirty = true;
-    RequestFrame();
+    text_selection_overlay_.state.paint_dirty = true;
+    runtime_state_.owner_.RequestFrame();
   }
   return changed;
 }
 
-bool Runtime::QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const {
-  if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+bool detail::TextInteraction::QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const {
+  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
     return false;
   }
-  detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (!focused) {
     return false;
   }

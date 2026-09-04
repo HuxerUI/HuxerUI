@@ -20,6 +20,7 @@ class Runtime;
 namespace detail {
 struct ModifierDescriptor;
 struct SemanticBuilderState;
+class SemanticTree;
 } // namespace detail
 
 /// Identifies a Runtime-owned semantic entity; zero is invalid.
@@ -475,7 +476,7 @@ private:
 
   detail::SemanticBuilderState* state_;
 
-  friend class Runtime;
+  friend class detail::SemanticTree;
 };
 
 } // namespace huxerui

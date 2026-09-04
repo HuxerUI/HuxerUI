@@ -7,7 +7,7 @@
 #include <huxerui/theme.h>
 
 #include "indication_internal.h"
-#include "internal.h"
+#include "mounted_node_internal.h"
 #include "paint_internal.h"
 #include "resource_internal.h"
 

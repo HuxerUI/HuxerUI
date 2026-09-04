@@ -53,7 +53,7 @@ Runtime destruction cancels all pending work, and late completions cannot access
 ## Shared ownership
 
 FileDropTarget is a retained modifier exposing a private NodeExtension capability.
-Runtime selects one target using the existing committed pointer hit route, deepest node first and reverse modifier order within a node.
+Runtime forwards normalized host input to its private FileDropReceiver, which owns hover and pending delivery and selects one target using the existing committed pointer hit route, deepest node first and reverse modifier order within a node.
 Layer ordering, clipping, pointer participation, enabled state, and presentation transforms keep their existing meaning.
 Native PlatformView regions retain native ownership rather than falling through to an ancestor file target.
 Coordinate conversion uses Node APIs.
@@ -92,7 +92,7 @@ Existing typed drag-and-drop and scrolling tests remain regression coverage rath
 ## Implementation boundaries
 
 The public file-drop header owns the receiving modifier and typed events.
-`runtime_file_drop.cpp` contains the modifier implementation, private capability, metadata filtering, hover routing, and pending delivery, without a separate internal header, service, or transfer controller.
+`runtime_file_drop.cpp` contains the modifier implementation, private capability, metadata filtering, and FileDropReceiver implementation. Its small collaborator declaration belongs to the existing `file_internal.h`; pending-operation state remains private to the implementation. There is no separate file-drop internal header, root service, or transfer controller.
 Tests verify filtering through delivered or failed events rather than exposing private validation functions.
 Platform declarations remain in existing file-integration headers; native implementations own only host callbacks, grants, and preparation.
 macOS and Web capture file capabilities alongside their existing file-reference implementations, while host event callbacks remain in the adapters.

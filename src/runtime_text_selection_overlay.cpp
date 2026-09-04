@@ -1,7 +1,8 @@
 #include "huxerui_builtin_resources.h"
-#include "internal.h"
+#include "runtime_internal.h"
 #include "indication_internal.h"
 #include "resource_internal.h"
+#include "runtime_text_internal.h"
 #include "window_internal.h"
 
 #include <algorithm>
@@ -89,9 +90,9 @@ std::string_view LabelForAction(const TextSelectionMenuLabels& labels, TextEditi
 
 } // namespace
 
-void Runtime::ShowTextSelectionOverlay(bool show_handles) {
-  detail::TextSelectionGestureState& gesture = state_->text_selection_gesture_;
-  detail::TextSelectionOverlayState& overlay = state_->text_selection_overlay_.state;
+void detail::TextInteraction::ShowTextSelectionOverlay(bool show_handles) {
+  detail::TextSelectionGestureState& gesture = text_selection_gesture_;
+  detail::TextSelectionOverlayState& overlay = text_selection_overlay_.state;
   overlay.visible = true;
   overlay.paint_dirty = true;
   overlay.indication_frame_active = false;
@@ -112,13 +113,13 @@ void Runtime::ShowTextSelectionOverlay(bool show_handles) {
   overlay.action_indications.clear();
 }
 
-void Runtime::HideTextSelectionOverlay() {
-  state_->text_selection_gesture_ = {};
-  state_->text_selection_overlay_.state = {};
+void detail::TextInteraction::HideTextSelectionOverlay() {
+  text_selection_gesture_ = {};
+  text_selection_overlay_.state = {};
 }
 
-void Runtime::AdvanceTextSelectionOverlay(const FrameInfo& frame) {
-  detail::TextSelectionOverlayState& overlay = state_->text_selection_overlay_.state;
+void detail::TextInteraction::AdvanceTextSelectionOverlay(const FrameInfo& frame) {
+  detail::TextSelectionOverlayState& overlay = text_selection_overlay_.state;
   if (!overlay.visible) {
     return;
   }
@@ -143,14 +144,14 @@ void Runtime::AdvanceTextSelectionOverlay(const FrameInfo& frame) {
   }
   overlay.indication_frame_active = needs_frame;
   if (needs_frame) {
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
   } else if (wake_after.has_value()) {
-    RequestFrameAfter(*wake_after);
+    runtime_state_.owner_.RequestFrameAfter(*wake_after);
   }
 }
 
-bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
-  detail::TextSelectionOverlayState& overlay = state_->text_selection_overlay_.state;
+bool detail::TextInteraction::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
+  detail::TextSelectionOverlayState& overlay = text_selection_overlay_.state;
   if (!overlay.visible) {
     return false;
   }
@@ -171,7 +172,7 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
                                                           overlay.action_rects[index]);
       }
     }
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
   };
 
   if (overlay.pointer_id.has_value()) {
@@ -208,7 +209,7 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       overlay.dragging = false;
       overlay.paint_dirty = true;
       update_hover(std::nullopt);
-      RequestFrame();
+      runtime_state_.owner_.RequestFrame();
       return true;
     }
     if (event.type != PointerEventType::Up) {
@@ -220,7 +221,7 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       overlay.pointer_id.reset();
       overlay.dragging = false;
       overlay.paint_dirty = true;
-      RequestFrame();
+      runtime_state_.owner_.RequestFrame();
       return true;
     }
 
@@ -257,15 +258,15 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       if (*action == TextEditingAction::SelectAll && performed) {
         overlay.show_handles = true;
         overlay.has_painted_geometry = false;
-        RequestFrame();
+        runtime_state_.owner_.RequestFrame();
         return true;
       }
       overlay.dismissing = true;
       overlay.show_handles = false;
-      RequestFrame();
+      runtime_state_.owner_.RequestFrame();
       return true;
     }
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
 
@@ -290,7 +291,7 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       continue;
     }
     overlay.pointer_id = event.pointer_id;
-    overlay.press_id = state_->next_press_id_++;
+    overlay.press_id = runtime_state_.next_press_id_++;
     overlay.pressed_action = index;
     update_hover(index);
     if (index < overlay.action_indications.size() && index < overlay.action_interactions.size() &&
@@ -308,7 +309,7 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       );
     }
     overlay.paint_dirty = true;
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
 
@@ -330,22 +331,23 @@ bool Runtime::HandleTextSelectionOverlayPointer(const PointerEvent& event) {
       overlay.dragging_start_handle = start_hit;
     }
     overlay.pressed_action.reset();
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
 
   HideTextSelectionOverlay();
-  RequestFrame();
+  runtime_state_.owner_.RequestFrame();
   return false;
 }
 
-void Runtime::PaintTextSelectionOverlay() {
+void detail::TextInteraction::PaintTextSelectionOverlay() {
   // Selection handles and the editing toolbar use a root-level RenderNode in host-view coordinates. This keeps the
   // shared, themed UI above application layers and outside the focused node's ancestor clips and transforms.
-  detail::TextSelectionOverlayState& overlay = state_->text_selection_overlay_.state;
-  RenderNode& render_node = state_->text_selection_overlay_.render_node;
+  detail::TextSelectionOverlayState& overlay = text_selection_overlay_.state;
+  RenderNode& render_node = text_selection_overlay_.render_node;
   std::optional<std::pair<Rect, Rect>> selection_geometry;
-  if (overlay.visible && !overlay.dismissing && state_->mounted_root_ && state_->focused_node_identity_.has_value()) {
+  if (overlay.visible && !overlay.dismissing && runtime_state_.mounted_root_ &&
+      runtime_state_.focused_node_identity_.has_value()) {
     Rect start;
     Rect end;
     if (QueryFocusedTextSelectionGeometry(start, end)) {
@@ -373,8 +375,8 @@ void Runtime::PaintTextSelectionOverlay() {
   const Rect viewport{
       0.0F,
       0.0F,
-      state_->window_->metrics.viewport.width,
-      state_->window_->metrics.viewport.height,
+      runtime_state_.window_->metrics.viewport.width,
+      runtime_state_.window_->metrics.viewport.height,
   };
   PaintContext context{render_node.content, viewport};
   PaintContext foreground{render_node.foreground, viewport};
@@ -449,7 +451,7 @@ void Runtime::PaintTextSelectionOverlay() {
     finish();
     return;
   }
-  if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
+  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
     HideTextSelectionOverlay();
     overlay.paint_dirty = false;
     overlay.has_painted_geometry = false;
@@ -458,7 +460,7 @@ void Runtime::PaintTextSelectionOverlay() {
     return;
   }
 
-  detail::MountedNode* focused = FindNode(*state_->mounted_root_, *state_->focused_node_identity_);
+  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (!focused || !selection_geometry.has_value()) {
     HideTextSelectionOverlay();
     overlay.paint_dirty = false;
@@ -540,7 +542,7 @@ void Runtime::PaintTextSelectionOverlay() {
   const ThemeSpec& theme = detail::ResolveThemeSpec(focused->environment);
   const MenuStyle menu_style = ResolveSelectionMenuStyle(*focused);
   const Locale& locale = ResolveSelectionLocale(*focused);
-  const TextSelectionMenuLabels labels = ResolveSelectionMenuLabels(*focused, *state_->app_resources_, locale);
+  const TextSelectionMenuLabels labels = ResolveSelectionMenuLabels(*focused, *runtime_state_.app_resources_, locale);
   if (overlay.actions != available_actions) {
     overlay.actions = std::move(available_actions);
     overlay.action_interactions.assign(overlay.actions.size(), InteractionState{});
@@ -565,7 +567,7 @@ void Runtime::PaintTextSelectionOverlay() {
   const TextStyle toolbar_text_style{Font::System(font_size), menu_style.foreground};
   const TextShapingOptions toolbar_text_shaping{.locale = std::string(locale.LanguageTag())};
   constexpr float viewport_padding = 8.0F;
-  const EdgeInsets safe_area = state_->window_->metrics.safe_area;
+  const EdgeInsets safe_area = runtime_state_.window_->metrics.safe_area;
   const float minimum_toolbar_x = safe_area.left + viewport_padding;
   const float minimum_toolbar_y = safe_area.top + viewport_padding;
   float toolbar_width = 0.0F;
@@ -577,7 +579,7 @@ void Runtime::PaintTextSelectionOverlay() {
   for (TextEditingAction action : overlay.actions) {
     const std::string_view label = LabelForAction(labels, action);
     overlay.action_labels.emplace_back(label);
-    const Size label_size = state_->platform_
+    const Size label_size = runtime_state_.platform_
                                 ->MeasureText(
                                     label,
                                     toolbar_text_style,
@@ -595,7 +597,7 @@ void Runtime::PaintTextSelectionOverlay() {
   }
   const float maximum_width = std::max(
       0.0F,
-      state_->window_->metrics.viewport.width - safe_area.Horizontal() - viewport_padding * 2.0F
+      runtime_state_.window_->metrics.viewport.width - safe_area.Horizontal() - viewport_padding * 2.0F
   );
   if (toolbar_width > maximum_width && toolbar_width > 0.0F) {
     const float scale = maximum_width / toolbar_width;
@@ -612,7 +614,7 @@ void Runtime::PaintTextSelectionOverlay() {
       minimum_toolbar_x,
       std::max(
           minimum_toolbar_x,
-          state_->window_->metrics.viewport.width - safe_area.right - viewport_padding - toolbar_width
+          runtime_state_.window_->metrics.viewport.width - safe_area.right - viewport_padding - toolbar_width
       )
   );
   const float selection_top = std::min(start.y, end.y);
@@ -620,7 +622,7 @@ void Runtime::PaintTextSelectionOverlay() {
   const float maximum_toolbar_y =
       std::max(
           minimum_toolbar_y,
-          state_->window_->metrics.viewport.height - safe_area.bottom - viewport_padding - toolbar_height
+          runtime_state_.window_->metrics.viewport.height - safe_area.bottom - viewport_padding - toolbar_height
       );
   const float above_y = std::clamp(selection_top - toolbar_height - 10.0F, minimum_toolbar_y, maximum_toolbar_y);
   const float handle_extent = overlay.show_handles ? handle_radius * 2.0F : 0.0F;

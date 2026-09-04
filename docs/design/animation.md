@@ -151,13 +151,15 @@ Whole-scene transitions are one-shot. Their public descriptions expose an option
 
 ### FrozenScene
 
-`FrozenScene` is private Runtime-owned render data. It deep-copies the committed `RenderNode` hierarchy and each `PaintSequence`, assigns independent node identities, and keeps immutable Image and vector resource ownership shared. It contains no mounted nodes, scopes, Environment, event handlers, semantics, text-input clients, or platform objects.
+`FrozenScene` is private render data retained by Runtime's SceneTransitionService. It deep-copies the committed `RenderNode` hierarchy and each `PaintSequence`, assigns independent node identities, and keeps immutable Image and vector resource ownership shared. It contains no mounted nodes, scopes, Environment, event handlers, semantics, text-input clients, or platform objects.
 
 `DrawExternalTextureCommand` retains its producer, so frozen geometry can continue to display the producer's newest pixels. `PlacePlatformViewCommand` is not copied into a frozen scene. A PlatformView remains live in the new tree and does not participate in group opacity or circular clipping. When a live scene contains a PlatformView, both transition kinds therefore degrade to fading the frozen render scene over the unmodified live scene. A PlatformView removed by the mutation disappears immediately because stale platform handles are never retained or simulated.
 
 The existing damage snapshot is renamed `RenderDamageSnapshot`. It remains lightweight metadata for comparing committed render revisions and is not a visual snapshot.
 
 ### Scene composition
+
+SceneTransitionService owns the active snapshot, motion controller, and synthetic render wrappers as one optional active transition, without a separate implementation-state allocation. It reads the committed render frame and window through the shared Runtime::State context. Runtime advances the service at the scene-composition boundary and combines its scheduling result with the rest of the frame. Disconnecting the service clears its context pointer, releases active transition data, and rejects subsequent requests from retained handles.
 
 A fade scene transition without a PlatformView uses two synthetic render wrappers: old opacity is `1 - progress`, new opacity is `progress`. A circular reveal draws the old frozen composite normally and places the live composite beneath one circular child clip on an otherwise empty wrapper. It does not require a separate whole-subtree clip primitive or inverse and even-odd clipping.
 

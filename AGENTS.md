@@ -121,7 +121,7 @@ Public headers live in `include/huxerui`; implementation-only headers live in `s
 - Starts with `#pragma once`.
 - Compiles when included by itself.
 - Directly includes every dependency required by its declarations and templates.
-- Does not depend on `<huxerui/huxerui.h>`, transitive includes, `src/internal.h`, or another private header.
+- Does not depend on `<huxerui/huxerui.h>`, transitive includes, or a private header.
 - Keeps public declarations in `huxerui` and internals in `huxerui::detail`.
 - Contains no `using namespace` directive.
 
@@ -129,7 +129,7 @@ Use forward declarations only when a complete type is unnecessary. Keep include 
 
 Do not create a public header per trivial control or grow `view.h` with unrelated services, platform types, or rendering machinery. A new cross-platform public header updates `<huxerui/huxerui.h>`, public header checks, packaging metadata when applicable, and public documentation. Platform-specific public headers remain explicit includes and update their available-host header checks, packaging metadata when applicable, and public documentation.
 
-Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep a type in `src/internal.h` only when Runtime subsystems genuinely share it.
+Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep declaration and component-construction support in `view_internal.h`, retained node types and operations in `mounted_node_internal.h`, and Runtime state and coordination in `runtime_internal.h`. Runtime may include the mounted-node header and the mounted-node header may include the View header; reverse dependencies are not allowed.
 
 ## Public API and state
 

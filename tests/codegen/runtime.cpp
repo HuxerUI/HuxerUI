@@ -8,7 +8,7 @@
 #include <string_view>
 #include <variant>
 
-#include "internal.h"
+#include "runtime_internal.h"
 
 namespace {
 

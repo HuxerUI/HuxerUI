@@ -4,7 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "internal.h"
+#include "mounted_node_internal.h"
 
 namespace huxerui::detail {
 

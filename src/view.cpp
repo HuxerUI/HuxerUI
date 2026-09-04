@@ -10,7 +10,7 @@
 #include <huxerui/theme.h>
 
 #include "huxerui_builtin_resources.h"
-#include "internal.h"
+#include "runtime_internal.h"
 #include "paint_internal.h"
 #include "resource_internal.h"
 #include "indication_internal.h"

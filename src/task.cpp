@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "internal.h"
+#include "runtime_internal.h"
 #include "task_internal.h"
 
 namespace huxerui::detail {

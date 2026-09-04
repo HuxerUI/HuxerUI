@@ -8,7 +8,7 @@
 #include <huxerui/modifier.h>
 
 #include "huxerui_builtin_resources.h"
-#include "internal.h"
+#include "runtime_internal.h"
 #include "window_internal.h"
 
 namespace huxerui {

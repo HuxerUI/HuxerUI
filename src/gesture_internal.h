@@ -17,6 +17,16 @@
 
 namespace huxerui::detail {
 
+struct MountedNode;
+
+struct PointerHoverState {
+  std::int64_t pointer_id = 0;
+  PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
+  Point window_position;
+  std::vector<std::uint64_t> event_nodes;
+  std::vector<NodeExtensionHandle> extensions;
+};
+
 enum class GestureDecision {
   // Keep recognition pending and deliver later pointer or deadline updates.
   Continue,
@@ -169,10 +179,8 @@ struct ContextMenuRecognitionState {
 
 struct TextSelectionRecognitionState {
   std::uint64_t node_identity = 0;
-  Point tap_position;
-  double long_press_deadline = 0.0;
-  bool double_tap_pending = false;
-  bool long_press_pending = false;
+  // Text recognition uses the common protocol but resolves after deferred touch focus and before overlay geometry.
+  std::shared_ptr<GestureRecognizer> recognizer;
 };
 
 // Mutable overlay drag state stays in the text-selection subsystem; this marker only identifies its pre-route owner.
@@ -190,7 +198,8 @@ using PointerRecognitionState = std::variant<
 
 struct PointerRecognition {
   PointerRecognitionState state;
-  bool started = false;
+  // Active recognitions still receive updates, either as pending candidates or as the session owner.
+  bool active = false;
 };
 
 // An index owns one entry in PointerSession::recognitions; the overlay owns the sequence without entering recognition.

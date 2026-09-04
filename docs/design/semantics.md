@@ -31,7 +31,7 @@ A PlatformView supplies or bridges its platform accessibility subtree and suppre
 |---|---|
 | Components and application Views | Declare platform-neutral semantic properties |
 | NodeExtension | Contribute retained state, virtual semantic children, and semantic-only behavior |
-| Runtime | Resolve the hierarchy, identity, hard state, geometry, secure-data policy, and actions |
+| Runtime-owned SemanticTree | Resolve the hierarchy, identity, hard state, geometry, secure-data policy, and actions |
 | Platform accessibility adapter | Retain `SemanticFrame`, expose platform objects, translate platform actions, and issue platform notifications |
 | Renderer | Render `RenderScene`; it does not construct semantics |
 
@@ -49,6 +49,8 @@ component defaults
 ```
 
 There is no platform Runtime variant and no concrete-component switch in a platform adapter.
+
+The private SemanticTree owns identity allocation, action routes, and the immutable frame. Runtime invokes it after interaction and geometry synchronization and publishes its output in FrameCommit. Focus remains Runtime-owned; editing actions cooperate with TextInteraction without reading its session state. MountedNode retains node-associated semantic identities across compatible reconciliation.
 
 Runtime retains one internal semantic patch for component meaning and an optional patch for author declarations.
 The optional patch's presence preserves an explicit empty `Semantics{}` without a separate declaration flag or wrapper type.

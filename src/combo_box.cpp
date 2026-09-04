@@ -22,7 +22,7 @@
 
 #include "huxerui_builtin_resources.h"
 #include "indication_internal.h"
-#include "internal.h"
+#include "mounted_node_internal.h"
 #include "resource_internal.h"
 #include "semantics_internal.h"
 #include "text_input_internal.h"

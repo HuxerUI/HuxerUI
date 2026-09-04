@@ -10,7 +10,7 @@
 #include <huxerui/state.h>
 #include <huxerui/theme.h>
 
-#include "internal.h"
+#include "runtime_internal.h"
 #include "window_internal.h"
 
 namespace huxerui::detail {
@@ -68,10 +68,12 @@ void ResetSceneTransitionNode(RenderNode& node, std::uint64_t identity) {
 
 } // namespace
 
-const RenderNode* ComposeSceneTransition(
-    ActiveSceneTransition& transition, const RenderNode* live_root, float progress
-) {
-  progress = std::clamp(progress, 0.0F, 1.0F);
+const RenderNode* SceneTransitionService::Compose(const RenderNode* live_root) {
+  if (!active_) {
+    return live_root;
+  }
+  ActiveTransition& transition = *active_;
+  const float progress = std::clamp(transition.progress.Value(), 0.0F, 1.0F);
   ResetSceneTransitionNode(transition.composite, std::numeric_limits<std::uint64_t>::max());
   ResetSceneTransitionNode(transition.old_wrapper, std::numeric_limits<std::uint64_t>::max() - 1);
   ResetSceneTransitionNode(transition.new_wrapper, std::numeric_limits<std::uint64_t>::max() - 2);
@@ -133,20 +135,64 @@ std::shared_ptr<SceneTransitionAnchorState> SceneTransitionService::CreateAnchor
 }
 
 std::optional<Point> SceneTransitionService::CurrentInteractionOrigin() const noexcept {
-  return runtime_ == nullptr ? std::nullopt : runtime_->CurrentInteractionOrigin();
+  return runtime_state_ == nullptr ? std::nullopt : runtime_state_->current_interaction_origin_;
 }
 
 void SceneTransitionService::Run(
     SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion
-) const {
-  if (runtime_ == nullptr) {
+) {
+  if (runtime_state_ == nullptr) {
     throw std::logic_error("HuxerUI scene transition service is disconnected");
   }
-  runtime_->BeginSceneTransition(std::move(request), std::move(mutation), reduced_motion);
+  if (!mutation) {
+    throw std::invalid_argument("HuxerUI scene transition mutation must not be empty");
+  }
+  if (const auto* spring = std::get_if<SpringSpec>(&request.animation); spring && spring->damping_ratio == 0.0F) {
+    throw std::invalid_argument("HuxerUI scene transition spring damping ratio must be positive");
+  }
+
+  MotionController progress{0.0F};
+  progress.AnimateTo(1.0F, request.animation, AnimationPlayback{.delay = request.delay});
+  const RenderNode* const committed_root = runtime_state_->frame_commit_.render_frame.scene.root;
+  if (reduced_motion || committed_root == nullptr) {
+    mutation();
+    return;
+  }
+
+  std::shared_ptr<FrozenScene> frozen = FreezeRenderScene(committed_root);
+  mutation();
+  ActiveTransition transition;
+  transition.request = std::move(request);
+  transition.frozen = std::move(frozen);
+  transition.progress = std::move(progress);
+  transition.viewport = runtime_state_->window_->metrics.viewport;
+  active_ = std::move(transition);
+  runtime_state_->owner_.RequestFrame();
+}
+
+bool SceneTransitionService::IsActive() const noexcept {
+  return active_.has_value();
+}
+
+MotionAdvanceResult SceneTransitionService::Advance(const FrameInfo& frame) {
+  if (!active_) {
+    return {};
+  }
+  ActiveTransition& transition = *active_;
+  if (transition.viewport != runtime_state_->window_->metrics.viewport) {
+    active_.reset();
+    return {};
+  }
+  const MotionAdvanceResult result = transition.progress.Advance(frame);
+  if (!transition.progress.IsRunning()) {
+    active_.reset();
+  }
+  return result;
 }
 
 void SceneTransitionService::Disconnect() noexcept {
-  runtime_ = nullptr;
+  runtime_state_ = nullptr;
+  active_.reset();
 }
 
 class SceneTransitionAnchorExtension final : public NodeExtension {
@@ -189,39 +235,6 @@ private:
 } // namespace huxerui::detail
 
 namespace huxerui {
-
-void Runtime::BeginSceneTransition(
-    detail::SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion
-) {
-  if (!mutation) {
-    throw std::invalid_argument("HuxerUI scene transition mutation must not be empty");
-  }
-  if (const auto* spring = std::get_if<SpringSpec>(&request.animation); spring && spring->damping_ratio == 0.0F) {
-    throw std::invalid_argument("HuxerUI scene transition spring damping ratio must be positive");
-  }
-
-  MotionController progress{0.0F};
-  progress.AnimateTo(1.0F, request.animation, AnimationPlayback{.delay = request.delay});
-  const RenderNode* const committed_root = state_->frame_commit_.render_frame.scene.root;
-  if (reduced_motion || committed_root == nullptr) {
-    mutation();
-    return;
-  }
-
-  std::shared_ptr<detail::FrozenScene> frozen = detail::FreezeRenderScene(committed_root);
-  mutation();
-  detail::ActiveSceneTransition transition;
-  transition.request = std::move(request);
-  transition.frozen = std::move(frozen);
-  transition.progress = std::move(progress);
-  transition.viewport = state_->window_->metrics.viewport;
-  state_->scene_transition_ = std::move(transition);
-  RequestFrame();
-}
-
-std::optional<Point> Runtime::CurrentInteractionOrigin() const noexcept {
-  return state_->current_interaction_origin_;
-}
 
 SceneTransitionAnchor SceneTransitionHandle::Anchor() const {
   return SceneTransitionAnchor{anchor_};

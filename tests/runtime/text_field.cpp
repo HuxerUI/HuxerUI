@@ -36,6 +36,9 @@ public:
     started_configurations.push_back(configuration);
     started_states.push_back(state);
     started_geometry.push_back(geometry);
+    if (on_start) {
+      on_start();
+    }
   }
 
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
@@ -77,6 +80,7 @@ public:
   std::vector<TextInputGeometry> restarted_geometry;
   std::vector<TextInputSessionId> stopped_sessions;
   std::vector<TextInputSessionId> show_requests;
+  std::function<void()> on_start;
 };
 
 class TextFieldClipboard final : public PlatformClipboard {
@@ -1594,6 +1598,26 @@ TEST_CASE("TestTextFieldPointerSelectionPrecedesPlatformStart") {
       runtime.QueryTextInputGeometry(1, text_input.started_states.front().selection.Range())
   );
   REQUIRE(text_field_value.Get().selection == TextSelection{3, 3});
+}
+
+TEST_CASE("TestAccessibleTextFieldEditingDoesNotRequireFocusOrANativeSession") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  Runtime runtime{TextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  const auto frame = runtime.BuildCommit().semantic_frame;
+  const auto field = std::ranges::find(frame->nodes, SemanticRole::TextField, &SemanticNode::role);
+  REQUIRE(field != frame->nodes.end());
+
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(field->id, {SemanticActionKind::SetText, std::string("updated")}));
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(field->id, {SemanticActionKind::SetSelection, TextRange{1, 4}}));
+  REQUIRE(text_field_value.Get().text == "updated");
+  REQUIRE(text_field_value.Get().selection == TextSelection{1, 4});
+  REQUIRE(text_input.started_sessions.empty());
+  REQUIRE(text_input.updated_sessions.empty());
+  REQUIRE(text_input.show_requests.empty());
 }
 
 TEST_CASE("TestAccessibleTextFieldEditingSynchronizesAnActivePlatformSession") {
@@ -3182,6 +3206,210 @@ TEST_CASE("TestMaterialTextSelectionMenuKeepsRippleThroughDismissal") {
 
   platform.AdvanceTime(0.3);
   REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+}
+
+TEST_CASE("TestTextSelectionCanceledLongPressCannotFocusOrPublishAnOverlay") {
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  TextFieldClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  platform.platform_clipboard = &clipboard;
+  platform.platform_resources = BuiltinTestResources();
+  Runtime runtime{TextSelectionOverlayApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  SECTION("Platform cancellation removes the pending recognizer") {
+    runtime.HandlePointerEvent({PointerEventType::Cancel, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  }
+  SECTION("Movement beyond slop removes the pending deadline") {
+    runtime.HandlePointerEvent({PointerEventType::Move, 707, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+  }
+  platform.AdvanceTime(0.6);
+  REQUIRE(FindText(runtime.BuildFrame(), "复制") == nullptr);
+  REQUIRE(text_input.started_sessions.empty());
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 707, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.6);
+  REQUIRE(FindText(runtime.BuildFrame(), "复制") != nullptr);
+  REQUIRE(text_input.started_sessions.size() == 1);
+  REQUIRE(runtime.QueryTextInputContext(1, 0, 10).selection == TextSelection{0, 5});
+}
+
+TEST_CASE("TestTextSelectionLongPressRevalidatesAfterStartingNativeInput") {
+  TextFieldPlatformInput text_input;
+  TextFieldClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  platform.platform_clipboard = &clipboard;
+  Runtime runtime{TextSelectionOverlayApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  runtime.BuildFrame();
+  bool reuse_pointer = false;
+  SECTION("The native callback cancels the pending sequence") {}
+  SECTION("The native callback replaces the sequence with the same pointer id") {
+    reuse_pointer = true;
+  }
+  text_input.on_start = [&] {
+    runtime.HandlePointerEvent({PointerEventType::Cancel, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+    if (reuse_pointer) {
+      runtime.HandlePointerEvent({PointerEventType::Down, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+    }
+  };
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.6);
+  REQUIRE(FindText(runtime.BuildFrame(), "复制") == nullptr);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE(runtime.QueryTextInputContext(1, 0, 10).selection.IsCollapsed());
+  if (reuse_pointer) {
+    platform.AdvanceTime(0.6);
+    REQUIRE(FindText(runtime.BuildFrame(), "复制") != nullptr);
+    REQUIRE(runtime.QueryTextInputContext(1, 0, 10).selection == TextSelection{0, 5});
+  }
+}
+
+TEST_CASE("TestTextSelectionAcceptanceRevalidatesAfterCancelingCompetitors") {
+  auto on_cancel = std::make_shared<std::function<void()>>();
+  TestPlatform platform;
+  TextFieldClipboard clipboard;
+  platform.platform_clipboard = &clipboard;
+  platform.platform_resources = BuiltinTestResources();
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([on_cancel](RootContext& root) { root.Provide(on_cancel); });
+  Runtime runtime{
+      []() -> View {
+        const auto callback = UseService<std::function<void()>>();
+        return Column {
+          TextField(TextEditingValue::FromText("alpha beta"))
+              .With(huxerui::Frame{180.0F, 40.0F})
+              .On<ViewEvents::PointerIntercept>([callback](const PointerEvent& event) {
+                if (event.type == PointerEventType::Cancel) {
+                  if (auto action = std::exchange(*callback, {})) {
+                    action();
+                  }
+                }
+                return false;
+              })
+              .On<ViewEvents::Pointer>([callback](const PointerEvent& event) {
+                if (event.type == PointerEventType::Cancel) {
+                  if (auto action = std::exchange(*callback, {})) {
+                    action();
+                  }
+                }
+              }),
+          TextField(TextEditingValue::FromText("second field")).With(huxerui::Frame{180.0F, 40.0F}),
+        };
+      },
+      platform,
+      std::move(options),
+  };
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+  bool canceled = false;
+  bool double_tap = false;
+  TextInputSessionId expected_session = 1;
+  SECTION("A cancellation callback redirects focus") {
+    expected_session = 2;
+    *on_cancel = [&] {
+      canceled = true;
+      runtime.HandleKeyEvent({KeyEventType::Down, Key::Tab});
+    };
+  }
+  SECTION("A cancellation callback ends the pointer sequence") {
+    SECTION("Long press") {}
+    SECTION("Double tap") {
+      double_tap = true;
+    }
+    *on_cancel = [&] {
+      canceled = true;
+      runtime.HandlePointerEvent({PointerEventType::Cancel, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+    };
+  }
+
+  if (double_tap) {
+    runtime.HandlePointerEvent({PointerEventType::Down, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+    runtime.HandlePointerEvent({PointerEventType::Up, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+    platform.AdvanceTime(0.2);
+  }
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  if (double_tap) {
+    runtime.HandlePointerEvent({PointerEventType::Up, 707, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  } else {
+    platform.AdvanceTime(0.6);
+  }
+  REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+  REQUIRE(canceled);
+  const TextInputContext context = runtime.QueryTextInputContext(expected_session, 0, 12);
+  REQUIRE(context.result_code == TextInputResultCode::Ok);
+  REQUIRE(context.selection.IsCollapsed());
+}
+
+TEST_CASE("TestTextSelectionCanceledDoubleTapRetiresOnlyReleasedSequences") {
+  std::optional<LayerController> layers;
+  auto clicks = std::make_shared<int>(0);
+  std::function<void()> on_cancel;
+  AppOptions options{.show_debug_overlay = false};
+  options.root_hooks.push_back([&layers, clicks](RootContext& root) {
+    layers = root.Layers();
+    root.Provide(clicks);
+  });
+  TestPlatform platform;
+  Runtime runtime{
+      []() -> View {
+        const auto count = UseService<int>();
+        return Button("Background").OnClick([count] { ++*count; }).With(huxerui::Frame{180.0F, 40.0F});
+      },
+      platform,
+      std::move(options),
+  };
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+  REQUIRE(layers.has_value());
+  const LayerId layer = layers->Attach({}, [&on_cancel] {
+    return TextField(TextEditingValue::FromText("alpha beta"))
+        .With(huxerui::Frame{180.0F, 40.0F})
+        .On<ViewEvents::Pointer>([&on_cancel](const PointerEvent& event) {
+          if (event.type == PointerEventType::Cancel) {
+            if (auto action = std::exchange(on_cancel, {})) {
+              action();
+            }
+          }
+        });
+  });
+  runtime.BuildFrame();
+  constexpr Point position{20.0F, 20.0F};
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, position, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 707, position, PointerDeviceKind::Touch});
+  platform.AdvanceTime(0.2);
+
+  bool replaced = false;
+  SECTION("Layer dismissal retires the released sequence") {}
+  SECTION("A replacement Down with the same pointer id stays active") {
+    replaced = true;
+  }
+  bool dismissed = false;
+  on_cancel = [&] {
+    dismissed = layers->Dismiss(layer);
+    if (replaced) {
+      runtime.HandlePointerEvent({PointerEventType::Cancel, 707, position, PointerDeviceKind::Touch});
+      runtime.BuildFrame();
+      runtime.HandlePointerEvent({PointerEventType::Down, 707, position, PointerDeviceKind::Touch});
+    }
+  };
+  runtime.HandlePointerEvent({PointerEventType::Down, 707, position, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 707, position, PointerDeviceKind::Touch});
+  REQUIRE(dismissed);
+  REQUIRE(*clicks == 0);
+  runtime.BuildFrame();
+  if (!replaced) {
+    runtime.HandlePointerEvent({PointerEventType::Down, 707, position, PointerDeviceKind::Touch});
+  }
+  runtime.HandlePointerEvent({PointerEventType::Up, 707, position, PointerDeviceKind::Touch});
+  REQUIRE(*clicks == 1);
 }
 
 TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {

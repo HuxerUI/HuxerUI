@@ -1,4 +1,4 @@
-#include "internal.h"
+#include "runtime_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -129,8 +129,8 @@ struct PendingFileDrop {
 
 } // namespace
 
-struct FileDropState {
-  Runtime* runtime = nullptr;
+struct FileDropReceiver::State {
+  FileDropReceiver* receiver = nullptr;
   std::uint64_t last_session = 0;
   std::uint64_t next_operation = 1;
   std::optional<FileDropHover> hover;
@@ -162,12 +162,16 @@ const detail::ModifierDescriptor& FileDropTarget::Descriptor() {
   return detail::ModifierDescriptorFor<FileDropTarget, detail::FileDropTargetExtension>();
 }
 
-bool Runtime::HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position) {
-  if (!state_->file_drop_) {
-    state_->file_drop_ = std::make_shared<FileDropState>();
-    state_->file_drop_->runtime = this;
+detail::FileDropReceiver::~FileDropReceiver() {
+  DisconnectFileDrop();
+}
+
+bool detail::FileDropReceiver::HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position) {
+  if (!state_) {
+    state_ = std::make_shared<State>();
+    state_->receiver = this;
   }
-  auto& drop = *state_->file_drop_;
+  auto& drop = *state_;
   if (session == 0 || session <= drop.last_session) {
     return false;
   }
@@ -187,14 +191,14 @@ bool Runtime::HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, 
     std::rethrow_exception(error);
   }
   if (drop.hover && drop.hover->session == session && drop.hover->target) {
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
   return false;
 }
 
-bool Runtime::HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position) {
-  const auto drop = state_->file_drop_;
+bool detail::FileDropReceiver::HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position) {
+  const auto drop = state_;
   if (!drop || !drop->hover || drop->hover->session != session) {
     return false;
   }
@@ -211,30 +215,30 @@ bool Runtime::HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Po
     std::rethrow_exception(error);
   }
   if (drop->hover && drop->hover->session == session && drop->hover->target) {
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
   return false;
 }
 
-void Runtime::HandleFileDragExited(std::uint64_t session) {
-  const auto drop = state_->file_drop_;
+void detail::FileDropReceiver::HandleFileDragExited(std::uint64_t session) {
+  const auto drop = state_;
   if (!drop || !drop->hover || drop->hover->session != session) {
     return;
   }
   const auto previous = std::move(*drop->hover);
   drop->hover.reset();
-  if (previous.target && state_->mounted_root_ &&
-      FindExtension(*state_->mounted_root_, previous.target->extension)) {
-    if (auto* node = FindNode(*state_->mounted_root_, previous.target->extension.node_identity)) {
+  if (previous.target && runtime_state_.mounted_root_ &&
+      FindExtension(*runtime_state_.mounted_root_, previous.target->extension)) {
+    if (auto* node = FindNode(*runtime_state_.mounted_root_, previous.target->extension.node_identity)) {
       const auto bindings = node->event_bindings;
       EmitEvent<FileDropEvents::Exited>(bindings, previous.offer, previous.target->event);
     }
   }
 }
 
-void Runtime::RefreshFileDropTarget(bool emit_moved) {
-  const auto drop = state_->file_drop_;
+void detail::FileDropReceiver::RefreshFileDropTarget(bool emit_moved) {
+  const auto drop = state_;
   if (!drop || !drop->hover) {
     return;
   }
@@ -244,8 +248,9 @@ void Runtime::RefreshFileDropTarget(bool emit_moved) {
   const auto previous = drop->hover->target;
   std::optional<FileDropTargetState> next;
   std::vector<detail::MountedNode*> route;
-  if (std::isfinite(position.x) && std::isfinite(position.y) && state_->mounted_root_ &&
-      !HitTestPlatformView(position) && BuildPointerRoute(*state_->mounted_root_, position, route)) {
+  if (std::isfinite(position.x) && std::isfinite(position.y) && runtime_state_.mounted_root_ &&
+      !runtime_state_.owner_.HitTestPlatformView(position) &&
+      BuildPointerRoute(*runtime_state_.mounted_root_, position, route)) {
     for (auto node = route.rbegin(); node != route.rend() && !next; ++node) {
       if (!(*node)->interaction.enabled) {
         continue;
@@ -269,9 +274,9 @@ void Runtime::RefreshFileDropTarget(bool emit_moved) {
   }
   const bool same = previous && next && previous->extension == next->extension;
   drop->hover->target = same ? next : std::nullopt;
-  if (previous && !same && state_->mounted_root_ &&
-      FindExtension(*state_->mounted_root_, previous->extension)) {
-    if (auto* node = FindNode(*state_->mounted_root_, previous->extension.node_identity)) {
+  if (previous && !same && runtime_state_.mounted_root_ &&
+      FindExtension(*runtime_state_.mounted_root_, previous->extension)) {
+    if (auto* node = FindNode(*runtime_state_.mounted_root_, previous->extension.node_identity)) {
       auto event = previous->event;
       event.window_position = position;
       event.position = node->WindowToLocal(position).value_or(event.position);
@@ -279,11 +284,11 @@ void Runtime::RefreshFileDropTarget(bool emit_moved) {
       EmitEvent<FileDropEvents::Exited>(bindings, offer, event);
     }
   }
-  if (!next || !drop->hover || drop->hover->session != session || !state_->mounted_root_ ||
-      !FindExtension(*state_->mounted_root_, next->extension)) {
+  if (!next || !drop->hover || drop->hover->session != session || !runtime_state_.mounted_root_ ||
+      !FindExtension(*runtime_state_.mounted_root_, next->extension)) {
     return;
   }
-  auto* node = FindNode(*state_->mounted_root_, next->extension.node_identity);
+  auto* node = FindNode(*runtime_state_.mounted_root_, next->extension.node_identity);
   if (!node) {
     return;
   }
@@ -296,8 +301,10 @@ void Runtime::RefreshFileDropTarget(bool emit_moved) {
   }
 }
 
-bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position, FileDropPreparation prepare) {
-  const auto drop = state_->file_drop_;
+bool detail::FileDropReceiver::HandleFileDrop(
+    std::uint64_t session, FileDropOffer offer, Point position, FileDropPreparation prepare
+) {
+  const auto drop = state_;
   if (!drop || !drop->hover || drop->hover->session != session) {
     return false;
   }
@@ -306,7 +313,7 @@ bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point p
     return false;
   }
   const auto target = *drop->hover->target;
-  const auto* extension = FindExtension(*state_->mounted_root_, target.extension);
+  const auto* extension = FindExtension(*runtime_state_.mounted_root_, target.extension);
   const auto* capability = extension ? extension->GetFileDropTargetCapability() : nullptr;
   if (!capability) {
     HandleFileDragExited(session);
@@ -324,14 +331,15 @@ bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point p
     pending->Cancel();
     throw;
   }
-  if (!state_->mounted_root_ || !FindExtension(*state_->mounted_root_, target.extension) || pending->canceled) {
+  if (!runtime_state_.mounted_root_ || !FindExtension(*runtime_state_.mounted_root_, target.extension) ||
+      pending->canceled) {
     drop->pending.erase(operation);
     pending->Cancel();
     return false;
   }
-  const std::weak_ptr<FileDropState> weak_drop = drop;
+  const std::weak_ptr<State> weak_drop = drop;
   const std::weak_ptr<PendingFileDrop> weak_pending = pending;
-  const auto dispatcher = state_->platform_->ui_thread_dispatcher_;
+  const auto dispatcher = runtime_state_.ui_thread_dispatcher_;
   if (!dispatcher) {
     drop->pending.erase(operation);
     pending->Cancel();
@@ -345,10 +353,10 @@ bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point p
     dispatcher([weak_drop, weak_pending, operation, result = std::move(result)]() mutable {
       const auto active = weak_pending.lock();
       const auto owner = weak_drop.lock();
-      if (!active || active->canceled || !owner || !owner->runtime) {
+      if (!active || active->canceled || !owner || !owner->receiver) {
         return;
       }
-      owner->runtime->FinishFileDrop(operation, std::move(result));
+      owner->receiver->FinishFileDrop(operation, std::move(result));
     });
   };
   try {
@@ -364,8 +372,8 @@ bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point p
   return true;
 }
 
-void Runtime::FinishFileDrop(std::uint64_t operation, FileResult<std::vector<FileReference>> result) {
-  const auto drop = state_->file_drop_;
+void detail::FileDropReceiver::FinishFileDrop(std::uint64_t operation, FileResult<std::vector<FileReference>> result) {
+  const auto drop = state_;
   if (!drop) {
     return;
   }
@@ -376,11 +384,11 @@ void Runtime::FinishFileDrop(std::uint64_t operation, FileResult<std::vector<Fil
   const auto pending = found->second;
   drop->pending.erase(found);
   pending->cancellation = {};
-  if (pending->canceled || !state_->mounted_root_ ||
-      !FindExtension(*state_->mounted_root_, pending->target.extension)) {
+  if (pending->canceled || !runtime_state_.mounted_root_ ||
+      !FindExtension(*runtime_state_.mounted_root_, pending->target.extension)) {
     return;
   }
-  auto* node = FindNode(*state_->mounted_root_, pending->target.extension.node_identity);
+  auto* node = FindNode(*runtime_state_.mounted_root_, pending->target.extension.node_identity);
   if (!node) {
     return;
   }
@@ -397,14 +405,14 @@ void Runtime::FinishFileDrop(std::uint64_t operation, FileResult<std::vector<Fil
   }
 }
 
-void Runtime::AdvanceFileDrop(const FrameInfo& frame) {
-  const auto drop = state_->file_drop_;
+void detail::FileDropReceiver::AdvanceFileDrop(const FrameInfo& frame) {
+  const auto drop = state_;
   if (!drop) {
     return;
   }
   std::vector<std::shared_ptr<PendingFileDrop>> canceled;
   for (auto it = drop->pending.begin(); it != drop->pending.end();) {
-    if (!state_->mounted_root_ || !FindExtension(*state_->mounted_root_, it->second->target.extension)) {
+    if (!runtime_state_.mounted_root_ || !FindExtension(*runtime_state_.mounted_root_, it->second->target.extension)) {
       canceled.push_back(it->second);
       it = drop->pending.erase(it);
     } else {
@@ -417,7 +425,8 @@ void Runtime::AdvanceFileDrop(const FrameInfo& frame) {
   try {
     RefreshFileDropTarget(false);
     if (drop->hover && drop->hover->target) {
-      AutoScrollDropTarget(drop->hover->target->extension.node_identity, drop->hover->position, frame);
+      AutoScrollDropTarget(runtime_state_.owner_, runtime_state_.mounted_root_,
+                           drop->hover->target->extension.node_identity, drop->hover->position, frame);
       RefreshFileDropTarget(false);
     }
   } catch (...) {
@@ -432,12 +441,12 @@ void Runtime::AdvanceFileDrop(const FrameInfo& frame) {
   }
 }
 
-void Runtime::DisconnectFileDrop() noexcept {
-  auto drop = std::move(state_->file_drop_);
+void detail::FileDropReceiver::DisconnectFileDrop() noexcept {
+  auto drop = std::move(state_);
   if (!drop) {
     return;
   }
-  drop->runtime = nullptr;
+  drop->receiver = nullptr;
   drop->hover.reset();
   auto pending = std::move(drop->pending);
   for (const auto& [operation, item] : pending) {

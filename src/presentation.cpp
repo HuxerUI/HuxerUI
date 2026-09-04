@@ -15,7 +15,7 @@
 #include <huxerui/window.h>
 
 #include "huxerui_builtin_resources.h"
-#include "internal.h"
+#include "runtime_internal.h"
 #include "resource_internal.h"
 #include "tooltip_internal.h"
 

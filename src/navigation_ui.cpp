@@ -12,7 +12,7 @@
 #include <huxerui/semantics.h>
 #include <huxerui/theme.h>
 
-#include "internal.h"
+#include "mounted_node_internal.h"
 #include "resource_internal.h"
 
 namespace huxerui::detail {

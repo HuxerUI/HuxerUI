@@ -1,6 +1,6 @@
 #pragma once
 
-#include "internal.h"
+#include "mounted_node_internal.h"
 
 namespace huxerui::detail {
 

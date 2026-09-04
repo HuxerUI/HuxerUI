@@ -139,6 +139,47 @@ TEST_CASE("SceneTransitionRequiresASynchronousInteractionForImplicitOrigin") {
   );
 }
 
+TEST_CASE("SceneTransitionReplacementKeepsTheNewTreeAuthoritative") {
+  TestPlatform platform;
+  Runtime runtime{SceneTransitionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  const std::uint64_t live_root_identity = runtime.BuildRenderFrame().scene.root->id;
+
+  ClickAt(runtime, {20.0F, 20.0F});
+  runtime.BuildRenderFrame();
+  platform.AdvanceTime(0.1);
+  runtime.BuildRenderFrame();
+  REQUIRE(interaction_scene_transition.has_value());
+  interaction_scene_transition->Run(FadeSceneTransition{}, [] { scene_transition_changed = false; });
+  const RenderFrame& replacement = runtime.BuildRenderFrame();
+  REQUIRE(replacement.damage.full);
+  REQUIRE(replacement.scene.root->children.size() == 2);
+  REQUIRE_FALSE(scene_transition_changed.Get());
+
+  platform.AdvanceTime(0.5);
+  REQUIRE(runtime.BuildRenderFrame().scene.root->id == live_root_identity);
+  REQUIRE(FindText(runtime.BuildFrame(), "old") != nullptr);
+  REQUIRE(FindText(runtime.BuildFrame(), "new") == nullptr);
+}
+
+TEST_CASE("SceneTransitionRetainedHandleRejectsRequestsAfterRuntimeDestruction") {
+  TestPlatform platform;
+  {
+    Runtime runtime{SceneTransitionApp, platform};
+    runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+    runtime.BuildRenderFrame();
+    ClickAt(runtime, {20.0F, 20.0F});
+    runtime.BuildRenderFrame();
+  }
+
+  REQUIRE(interaction_scene_transition.has_value());
+  bool mutated = false;
+  REQUIRE_THROWS_AS(
+      interaction_scene_transition->Run(FadeSceneTransition{}, [&] { mutated = true; }), std::logic_error
+  );
+  REQUIRE_FALSE(mutated);
+}
+
 TEST_CASE("SceneTransitionCancelsWhenViewportChanges") {
   TestPlatform platform;
   Runtime runtime{SceneTransitionApp, platform};

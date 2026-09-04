@@ -20,7 +20,7 @@
 
 #include <huxerui/web/platform_registry.h>
 
-#include "internal.h"
+#include "runtime_internal.h"
 #include "web_renderer.h"
 
 namespace huxerui::detail {

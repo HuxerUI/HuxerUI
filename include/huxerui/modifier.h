@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <concepts>
 #include <functional>
 #include <memory>
@@ -31,6 +33,8 @@ struct DragSourceCapability;
 struct DropTargetCapability;
 struct FileDropTargetCapability;
 class GestureRecognizer;
+class PointerInteraction;
+class FileDropReceiver;
 }
 
 /// Describes the timing and accessibility policy for one extension frame callback.
@@ -362,6 +366,8 @@ private:
   std::function<void()> invalidate_semantics_;
 
   friend class Runtime;
+  friend class detail::PointerInteraction;
+  friend class detail::FileDropReceiver;
 };
 
 namespace detail {
@@ -369,6 +375,14 @@ namespace detail {
 class AppResources;
 struct ViewSpec;
 struct ModifierDescriptor;
+
+struct NodeExtensionHandle {
+  std::uint64_t node_identity = 0;
+  std::size_t extension_index = 0;
+  const ModifierDescriptor* descriptor = nullptr;
+
+  bool operator==(const NodeExtensionHandle&) const = default;
+};
 
 struct ModifierSpec {
   const ModifierDescriptor* descriptor = nullptr;

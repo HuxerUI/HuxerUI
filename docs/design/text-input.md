@@ -1206,7 +1206,7 @@ The implementation should preserve these constraints:
 - `TextEditingValue` is the declarative value of TextField, not the universal platform mutation protocol.
 - Native text mutation uses typed ordered command batches.
 - One native callback produces one atomic client mutation.
-- Runtime owns focus and logical input session identity.
+- Runtime owns focus; its private TextInteraction owns logical input session identity, protocol validation, geometry synchronization, editing actions, and the selection overlay.
 - PlatformAdapter owns native input connections and coordinate conversion.
 - Editable clients own text, selection, composition, and editing semantics.
 - Runtime and PlatformAdapter do not mirror complete editor documents.
@@ -1220,3 +1220,7 @@ The implementation should preserve these constraints:
 - PlatformView focus transfers IME ownership instead of creating two active clients.
 - Text input protocol types remain concentrated in `text_input.h`; TextField, its events, and its style follow the ownership of existing built-in controls.
 - TextField supports reliable single-line and multiline editing without becoming a document-editor abstraction.
+
+TextInteraction creates text-selection recognizers using the existing GestureRecognizer decision and deadline protocol. PointerInteraction retains their physical sequence and applies selection only through successful ownership acceptance, after revalidating the original target and any focus, IME, or competing-recognizer callbacks. Double-tap history belongs to TextInteraction, while the pointer owner and candidate binding belong to PointerInteraction. TextInteraction never reads PointerSession state. Touch focus and text recognition keep their explicit order before overlay geometry is published.
+
+PointerInteraction requests keyboard presentation by node identity without obtaining native session IDs. SemanticTree routes text actions to TextInteraction, which invokes the original extension action, validates the client's resulting state, and synchronizes any active session. Semantic editing does not require the target to own focus or an active native session.

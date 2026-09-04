@@ -8,9 +8,9 @@
 #include <unordered_set>
 #include <variant>
 
-#include "internal.h"
+#include "runtime_internal.h"
 #include "resource_internal.h"
-#include "text_input_internal.h"
+#include "runtime_text_internal.h"
 #include "window_internal.h"
 
 namespace huxerui::detail {
@@ -424,18 +424,18 @@ void SemanticBuilder::AddCustomAction(std::uint64_t local_id, std::uint64_t acti
   item.custom_actions.emplace_back(action_id, std::move(resolved));
 }
 
-void Runtime::BuildSemantics() {
-  if (state_->semantic_root_identity_ == 0) {
-    state_->semantic_root_identity_ = state_->next_semantic_identity_++;
+void detail::SemanticTree::BuildSemantics() {
+  if (semantic_root_identity_ == 0) {
+    semantic_root_identity_ = next_semantic_identity_++;
   }
 
   SemanticFrame next;
-  next.root = state_->semantic_root_identity_;
+  next.root = semantic_root_identity_;
   const Rect viewport{
       0.0F,
       0.0F,
-      std::max(0.0F, state_->window_->metrics.viewport.width),
-      std::max(0.0F, state_->window_->metrics.viewport.height),
+      std::max(0.0F, runtime_state_.window_->metrics.viewport.width),
+      std::max(0.0F, runtime_state_.window_->metrics.viewport.height),
   };
   next.nodes.push_back({
       .id = next.root,
@@ -502,7 +502,7 @@ void Runtime::BuildSemantics() {
           .index = index,
           .state = {
               .environment = mounted.environment,
-              .resources = state_->app_resources_.get(),
+              .resources = runtime_state_.app_resources_.get(),
           },
       };
       SemanticBuilder builder(contribution.state);
@@ -576,7 +576,7 @@ void Runtime::BuildSemantics() {
         return SemanticNodeId{0};
       }
       if (mounted.semantic_identity == 0) {
-        mounted.semantic_identity = state_->next_semantic_identity_++;
+        mounted.semantic_identity = next_semantic_identity_++;
       }
       return mounted.semantic_identity;
     }();
@@ -671,7 +671,7 @@ void Runtime::BuildSemantics() {
         const detail::VirtualSemanticKey key{contribution.index, item.local_id};
         SemanticNodeId& id = mounted.virtual_semantic_identities[key];
         if (id == 0) {
-          id = state_->next_semantic_identity_++;
+          id = next_semantic_identity_++;
         }
         const Rect local_bounds = item.local_bounds.value_or(mounted.bounds);
         const Rect child_bounds = mounted.LocalToWindowBounds(local_bounds);
@@ -707,7 +707,7 @@ void Runtime::BuildSemantics() {
     return children;
   };
 
-  if (state_->mounted_root_ && !viewport.IsEmpty()) {
+  if (runtime_state_.mounted_root_ && !viewport.IsEmpty()) {
     // An exiting modal still blocks input until removal, but accessibility advances to the next active focus region.
     const auto semantic_focus_trap = [&](auto&& self, detail::MountedNode& node) -> detail::MountedNode* {
       if (!node.interaction.enabled || layer_is_exiting(node)) {
@@ -720,9 +720,9 @@ void Runtime::BuildSemantics() {
       }
       return node.trap_focus ? &node : nullptr;
     };
-    detail::MountedNode* focus_trap = semantic_focus_trap(semantic_focus_trap, *state_->mounted_root_);
+    detail::MountedNode* focus_trap = semantic_focus_trap(semantic_focus_trap, *runtime_state_.mounted_root_);
     if (focus_trap == nullptr) {
-      next.nodes.front().children = visit(visit, *state_->mounted_root_, next.root, viewport, false, nullptr);
+      next.nodes.front().children = visit(visit, *runtime_state_.mounted_root_, next.root, viewport, false, nullptr);
     } else {
       const auto contains = [](auto&& self, const detail::MountedNode& root, std::uint64_t identity) -> bool {
         if (root.identity == identity) {
@@ -734,7 +734,7 @@ void Runtime::BuildSemantics() {
       };
       detail::MountedNode* layer_stack = nullptr;
       detail::MountedNode* active_layer = nullptr;
-      for (const std::unique_ptr<detail::MountedNode>& root_child : state_->mounted_root_->children) {
+      for (const std::unique_ptr<detail::MountedNode>& root_child : runtime_state_.mounted_root_->children) {
         if (!root_child) {
           continue;
         }
@@ -784,29 +784,28 @@ void Runtime::BuildSemantics() {
     }
   }
 
-  bool changed = !state_->frame_commit_.semantic_frame || state_->frame_commit_.semantic_frame->root != next.root ||
-                 state_->frame_commit_.semantic_frame->nodes != next.nodes;
+  const bool changed = !frame_ || frame_->root != next.root || frame_->nodes != next.nodes;
   if (changed) {
-    next.revision = ++state_->semantic_revision_;
-    state_->frame_commit_.semantic_frame = std::make_shared<const SemanticFrame>(std::move(next));
+    next.revision = ++semantic_revision_;
+    frame_ = std::make_shared<const SemanticFrame>(std::move(next));
   }
-  state_->semantic_action_routes_ = std::move(routes);
+  semantic_action_routes_ = std::move(routes);
 }
 
-bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action) {
-  if (!HasValidPayload(action) || !state_->frame_commit_.semantic_frame) {
+bool detail::SemanticTree::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action) {
+  if (!HasValidPayload(action) || !frame_) {
     return false;
   }
-  const auto node = std::ranges::find(state_->frame_commit_.semantic_frame->nodes, node_id, &SemanticNode::id);
-  if (node == state_->frame_commit_.semantic_frame->nodes.end() || !node->enabled ||
+  const auto node = std::ranges::find(frame_->nodes, node_id, &SemanticNode::id);
+  if (node == frame_->nodes.end() || !node->enabled ||
       (node->actions & SemanticActionMask(action.kind)) == 0) {
     return false;
   }
-  const auto route = state_->semantic_action_routes_.find(node_id);
-  if (route == state_->semantic_action_routes_.end() || !state_->mounted_root_) {
+  const auto route = semantic_action_routes_.find(node_id);
+  if (route == semantic_action_routes_.end() || !runtime_state_.mounted_root_) {
     return false;
   }
-  detail::MountedNode* owner = FindNode(*state_->mounted_root_, route->second.node_identity);
+  detail::MountedNode* owner = FindNode(*runtime_state_.mounted_root_, route->second.node_identity);
   if (owner == nullptr || !owner->interaction.enabled) {
     return false;
   }
@@ -815,7 +814,7 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
       owner_bounds.x + owner_bounds.width * 0.5F,
       owner_bounds.y + owner_bounds.height * 0.5F,
   };
-  detail::InteractionOriginScope interaction_origin(state_->current_interaction_origin_, owner_origin, false);
+  auto interaction_origin = InteractionOriginScope(runtime_state_.current_interaction_origin_, owner_origin, false);
   std::optional<detail::SemanticExtensionRoute> extension_route;
   if (action.kind == SemanticActionKind::Custom) {
     const std::uint64_t action_id = std::get<std::uint64_t>(action.value);
@@ -831,27 +830,21 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
     }
   }
   if (extension_route.has_value()) {
-    NodeExtension* extension = FindExtension(*state_->mounted_root_, extension_route->extension);
+    NodeExtension* extension = FindExtension(*runtime_state_.mounted_root_, extension_route->extension);
     if (extension == nullptr) {
       return false;
     }
     const bool text_action =
         action.kind == SemanticActionKind::SetText || action.kind == SemanticActionKind::SetSelection;
-    const std::shared_ptr<TextInputClient> text_client = text_action ? extension->GetTextInputClient() : nullptr;
-    const std::optional<TextInputState> previous = text_client ? std::optional{text_client->State()} : std::nullopt;
-    if (!extension->OnSemanticAction(extension_route->local_id, action)) {
+    const bool handled = text_action
+                             ? runtime_state_.text_->PerformSemanticTextAction(
+                                   owner->identity, *extension, extension_route->local_id, action
+                               )
+                             : extension->OnSemanticAction(extension_route->local_id, action);
+    if (!handled) {
       return false;
     }
-    if (text_client) {
-      const TextInputState current = text_client->State();
-      if (!detail::IsValidTextInputState(current, previous->session_id) ||
-          !detail::IsValidTextInputStateTransition(*previous, current)) {
-        throw std::logic_error("HuxerUI text input client returned invalid state after a semantic action");
-      }
-      InvalidateTextInputStateChange(owner->identity, *previous, current);
-      RefreshTextInputSession();
-    }
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
   if (action.kind == SemanticActionKind::Scroll) {
@@ -888,16 +881,16 @@ bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction
       }
       return false;
     };
-    return reveal(reveal, *state_->mounted_root_) && (scrolled || !node->offscreen);
+    return reveal(reveal, *runtime_state_.mounted_root_) && (scrolled || !node->offscreen);
   }
   if (action.kind == SemanticActionKind::Activate) {
     ActivateNode(*owner);
-    RequestFrame();
+    runtime_state_.owner_.RequestFrame();
     return true;
   }
   if (action.kind == SemanticActionKind::Focus) {
-    SetFocusedNode(owner->identity, true);
-    return state_->focused_node_identity_ == owner->identity;
+    runtime_state_.owner_.SetFocusedNode(owner->identity, true);
+    return runtime_state_.focused_node_identity_ == owner->identity;
   }
   return false;
 }

@@ -10,7 +10,8 @@
 
 #include <huxerui/theme.h>
 
-#include "internal.h"
+#include "gesture_internal.h"
+#include "runtime_internal.h"
 #include "resource_internal.h"
 #include "tooltip_internal.h"
 

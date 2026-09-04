@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "internal.h"
+#include "runtime_internal.h"
 
 namespace huxerui {
 

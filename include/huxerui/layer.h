@@ -15,6 +15,7 @@ class Runtime;
 class Environment;
 
 namespace detail {
+class PointerInteraction;
 struct LayerAnchorState;
 struct SemanticModalGroupToken;
 struct LayerTransitionState;
@@ -205,6 +206,7 @@ private:
   std::shared_ptr<State> state_;
 
   friend class Runtime;
+  friend class detail::PointerInteraction;
   friend class detail::BottomSheetService;
   friend class detail::DebugOverlayInstaller;
   friend class detail::DialogService;

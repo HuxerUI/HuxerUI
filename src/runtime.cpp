@@ -1,7 +1,10 @@
-#include "internal.h"
+#include "runtime_internal.h"
 #include "application_internal.h"
 #include "external_texture_internal.h"
+#include "file_internal.h"
 #include "resource_internal.h"
+#include "runtime_pointer_internal.h"
+#include "runtime_text_internal.h"
 #include "system_tray_internal.h"
 #include "task_internal.h"
 #include "text_input_internal.h"
@@ -818,68 +821,6 @@ ModifierChanges ReconcileNodeExtensions(
   return changes;
 }
 
-std::vector<NodeExtensionHandle> HitTestHoverExtensions(const std::vector<MountedNode*>& route, Point position) {
-  if (route.empty() || route.back()->kind == NodeKind::PlatformView) {
-    return {};
-  }
-  for (auto node = route.rbegin(); node != route.rend(); ++node) {
-    MountedNode& current = **node;
-    const auto local_position = current.WindowToLocal(position);
-    if (!local_position.has_value()) {
-      continue;
-    }
-    std::vector<NodeExtensionHandle> matches;
-    for (std::size_t index = 0; index < current.extensions.size(); ++index) {
-      NodeExtensionEntry& entry = current.extensions[index];
-      if (entry.extension && (current.interaction.enabled || entry.extension->HoverWhenDisabled()) &&
-          entry.extension->HoverHitTest(current, *local_position)) {
-        matches.push_back(NodeExtensionHandle{
-            current.identity,
-            index,
-            entry.descriptor,
-        });
-      }
-    }
-    if (!matches.empty()) {
-      return matches;
-    }
-  }
-  return {};
-}
-
-std::vector<std::uint64_t> HitTestHoverEventNodes(const std::vector<MountedNode*>& route, Point window_position) {
-  if (route.empty() || route.back()->kind == NodeKind::PlatformView) {
-    return {};
-  }
-  std::vector<std::uint64_t> nodes;
-  for (const MountedNode* node : route) {
-    const std::optional<Point> local = node->WindowToLocal(window_position);
-    const bool receives_hover = local.has_value() && node->bounds.Contains(*local) &&
-                                HasEventBinding<ViewEvents::Hover>(node->event_bindings);
-    if (receives_hover) {
-      nodes.push_back(node->identity);
-    }
-  }
-  return nodes;
-}
-
-HoverEvent LocalHoverEvent(const MountedNode& node, const PointerHoverState& hover, HoverEventType type) {
-  Point position{
-      node.bounds.x + node.bounds.width * 0.5F,
-      node.bounds.y + node.bounds.height * 0.5F,
-  };
-  if (const std::optional<Point> local = node.WindowToLocal(hover.window_position)) {
-    position = *local;
-  }
-  return {
-      type,
-      hover.pointer_id,
-      hover.device_kind,
-      position,
-      hover.window_position,
-  };
-}
-
 void DispatchScrollActivity(MountedNode& node, const ScrollActivity& activity) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (entry.extension) {
@@ -989,20 +930,6 @@ void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
   }
 }
 
-std::optional<bool> DeclaredEnabled(const MountedNode& node, std::uint64_t identity, bool parent_enabled = true) {
-  const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled;
-  if (node.identity == identity) {
-    return enabled;
-  }
-  for (const auto& child : node.children) {
-    if (const std::optional<bool> child_enabled = DeclaredEnabled(*child, identity, enabled);
-        child_enabled.has_value()) {
-      return child_enabled;
-    }
-  }
-  return std::nullopt;
-}
-
 void ResolveFocusedFlags(MountedNode& node, const std::optional<std::uint64_t>& focused_identity, bool focus_visible) {
   const bool focused = focused_identity.has_value() && node.identity == *focused_identity;
   const bool resolved_focus_visible = focused && focus_visible;
@@ -1039,21 +966,6 @@ MountedNode* FindTopmostFocusTrap(MountedNode& node) {
   return node.trap_focus ? &node : nullptr;
 }
 
-bool ContainsNodeIdentity(const MountedNode& node, std::uint64_t identity) {
-  if (node.identity == identity) {
-    return true;
-  }
-  return std::ranges::any_of(node.children, [identity](const auto& child) {
-    return ContainsNodeIdentity(*child, identity);
-  });
-}
-
-bool PointerSessionReferencesNode(const PointerSession& session, const MountedNode& root) {
-  return std::ranges::any_of(session.route, [&root](std::uint64_t identity) {
-    return ContainsNodeIdentity(root, identity);
-  });
-}
-
 bool RouteBackTarget(MountedNode& node, const BackEvent& event, BackTarget& target, bool& already_dispatched) {
   if (!node.interaction.enabled) {
     return false;
@@ -1086,6 +998,29 @@ bool IsActivatable(const MountedNode& node) {
 
 } // namespace
 
+bool ContainsNodeIdentity(const MountedNode& node, std::uint64_t identity) {
+  if (node.identity == identity) {
+    return true;
+  }
+  return std::ranges::any_of(node.children, [identity](const auto& child) {
+    return ContainsNodeIdentity(*child, identity);
+  });
+}
+
+std::optional<bool> DeclaredEnabled(const MountedNode& node, std::uint64_t identity, bool parent_enabled) {
+  const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled;
+  if (node.identity == identity) {
+    return enabled;
+  }
+  for (const auto& child : node.children) {
+    if (const std::optional<bool> child_enabled = DeclaredEnabled(*child, identity, enabled);
+        child_enabled.has_value()) {
+      return child_enabled;
+    }
+  }
+  return std::nullopt;
+}
+
 bool IsVirtualLayoutNode(const MountedNode& node) noexcept {
   return node.kind == NodeKind::VirtualLayout;
 }
@@ -1095,6 +1030,15 @@ bool IsVirtualLayoutNode(const MountedNode& node) noexcept {
 namespace huxerui {
 
 using namespace detail;
+
+Runtime::State::State(Runtime& owner, const Application& application, PlatformAdapter& platform)
+    : owner_(owner), root_factory_(application.root_factory), platform_(&platform),
+      ui_thread_dispatcher_(platform.ui_thread_dispatcher_),
+      viewport_breakpoints_(application.options.viewport_breakpoints),
+      window_(std::make_shared<WindowState>(application.options.window)),
+      root_scope_(std::make_shared<RecomposeScope>(owner, 1)), layer_controller_(owner) {}
+
+Runtime::State::~State() = default;
 
 Runtime::Runtime(const Application& application, PlatformAdapter& platform, ApplicationActivation startup_activation) {
   ValidateViewportBreakpoints(application.options.viewport_breakpoints);
@@ -1123,15 +1067,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   if (!std::isfinite(window_options.title_bar_height) || window_options.title_bar_height <= 0.0F) {
     throw std::invalid_argument("HuxerUI window title-bar height must be finite and positive");
   }
-  auto window = std::make_shared<WindowState>(window_options);
-  state_ = std::make_unique<State>(
-      application.root_factory,
-      &platform,
-      std::make_shared<RecomposeScope>(*this, 1),
-      LayerController(*this),
-      application.options.viewport_breakpoints,
-      std::move(window)
-  );
+  state_ = std::make_unique<State>(*this, application, platform);
   state_->gesture_settings_ = gesture_settings;
   state_->default_scroll_physics_ = scroll_physics;
   state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
@@ -1142,6 +1078,10 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
       state_->root_service_types_, state_->root_services_,
   };
   state_->app_resources_ = std::make_shared<AppResources>(platform.Resources());
+  state_->text_ = std::make_unique<TextInteraction>(*state_);
+  state_->pointer_ = std::make_unique<PointerInteraction>(*state_);
+  state_->file_drop_ = std::make_unique<FileDropReceiver>(*state_);
+  state_->semantics_ = std::make_unique<SemanticTree>(*state_);
   const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
   state_->root_environment_->Set(resource_configuration.locale);
   root.Provide(state_->app_resources_);
@@ -1155,7 +1095,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
-  state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*this);
+  state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*state_);
   root.Provide(state_->scene_transition_service_);
   if (std::shared_ptr<FileSystem> file_system = platform.CreateFileSystem()) {
     root.Provide(std::move(file_system));
@@ -1179,16 +1119,15 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
 }
 
 Runtime::~Runtime() {
-  DisconnectFileDrop();
+  state_->file_drop_->DisconnectFileDrop();
   try {
-    StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
+    state_->text_->StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
   } catch (...) {
   }
   DeactivateExternalTextures(
       state_->committed_scene_snapshot_, state_->platform_->external_texture_frame_requester_
   );
-  state_->pointer_sessions_.clear();
-  state_->pointer_hover_.reset();
+  state_->pointer_->Disconnect();
   state_->layer_controller_.Disconnect();
   state_->application_service_->Disconnect();
   state_->window_service_->Disconnect();
@@ -1206,6 +1145,90 @@ Runtime::~Runtime() {
     service->reset();
   }
   state_->root_services_.clear();
+}
+
+TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatch& batch) {
+  return state_->text_->HandleTextInputCommands(batch);
+}
+
+bool Runtime::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
+  return state_->text_->PerformTextInputAction(session_id, action);
+}
+
+TextInputContext
+Runtime::QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
+  return state_->text_->QueryTextInputContext(session_id, start, length);
+}
+
+TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
+  return state_->text_->QueryTextInputGeometry(session_id, range);
+}
+
+TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
+  return state_->text_->QueryTextInputPosition(session_id, point);
+}
+
+bool Runtime::CanPerformTextEditingAction(TextEditingAction action) const {
+  return state_->text_->CanPerformTextEditingAction(action);
+}
+
+bool Runtime::PerformTextEditingAction(TextEditingAction action) {
+  return state_->text_->PerformTextEditingAction(action);
+}
+
+std::uint64_t Runtime::BeginInteraction(detail::MountedNode& node, InteractionEvent::Source source,
+                                        std::optional<Point> position) {
+  const std::uint64_t press_id = state_->next_press_id_++;
+  ++node.active_press_count;
+  InteractionState interaction = node.interaction;
+  interaction.pressed = true;
+  UpdateInteraction(node, interaction, InteractionEvent{InteractionEvent::Type::Press, source, press_id, position});
+  return press_id;
+}
+
+void Runtime::EndInteraction(detail::MountedNode& node, InteractionEvent::Type type,
+                             InteractionEvent::Source source, std::uint64_t press_id,
+                             std::optional<Point> position) {
+  if (node.active_press_count > 0) {
+    --node.active_press_count;
+  }
+  InteractionState interaction = node.interaction;
+  interaction.pressed = node.active_press_count != 0;
+  UpdateInteraction(node, interaction, InteractionEvent{type, source, press_id, position});
+}
+
+void Runtime::HandlePointerEvent(const PointerEvent& event) {
+  state_->pointer_->HandlePointerEvent(event);
+}
+
+bool Runtime::HasContextMenuHandler(Point position) const {
+  return state_->pointer_->HasContextMenuHandler(position);
+}
+
+bool Runtime::HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position) {
+  return state_->file_drop_->HandleFileDragEntered(session, std::move(offer), position);
+}
+
+bool Runtime::HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position) {
+  return state_->file_drop_->HandleFileDragMoved(session, std::move(offer), position);
+}
+
+void Runtime::HandleFileDragExited(std::uint64_t session) {
+  state_->file_drop_->HandleFileDragExited(session);
+}
+
+bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position,
+                             detail::FileDropPreparation prepare) {
+  return state_->file_drop_->HandleFileDrop(session, std::move(offer), position, std::move(prepare));
+}
+
+void Runtime::BuildSemantics() {
+  state_->semantics_->BuildSemantics();
+  state_->frame_commit_.semantic_frame = state_->semantics_->Frame();
+}
+
+bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action) {
+  return state_->semantics_->PerformSemanticAction(node_id, action);
 }
 
 void Runtime::RequestApplicationQuit() {
@@ -1327,9 +1350,7 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
       backplane->content_paint_dirty = true;
     }
   }
-  if (state_->text_selection_overlay_.state.visible) {
-    state_->text_selection_overlay_.state.paint_dirty = true;
-  }
+  state_->text_->InvalidateOverlay();
   const ViewportClass viewport_class = ResolveViewportClass(metrics.viewport.width, state_->viewport_breakpoints_);
   if (viewport_class != state_->viewport_class_) {
     state_->viewport_class_ = viewport_class;
@@ -1473,16 +1494,7 @@ void Runtime::RequestFrameAfter(double delay_seconds) {
 
 void Runtime::NotifyScrollActivity(detail::MountedNode& node, const ScrollActivity& activity) {
   DispatchScrollActivity(node, activity);
-  if (activity.source != ScrollSource::FocusReveal && state_->text_input_session_.has_value() &&
-      state_->text_input_session_->node_identity != node.identity) {
-    // Ancestor scrolling may move a focused editor off screen; later editing explicitly requests caret reveal again.
-    if (FindNode(node, state_->text_input_session_->node_identity)) {
-      state_->text_input_session_->client->ViewportScrolled();
-    }
-  }
-  if (state_->text_selection_overlay_.state.visible) {
-    state_->text_selection_overlay_.state.paint_dirty = true;
-  }
+  state_->text_->NotifyScrollActivity(node, activity);
   RequestFrame();
 }
 
@@ -1509,9 +1521,7 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   state_->app_resources_->UpdateConfiguration(configuration);
   static_cast<void>(state_->root_environment_->Update(configuration.locale));
   ReconcileWindowControls();
-  if (state_->text_selection_overlay_.state.visible) {
-    state_->text_selection_overlay_.state.paint_dirty = true;
-  }
+  state_->text_->InvalidateOverlay();
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
@@ -1552,13 +1562,11 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   if (!state_->mounted_root_ || state_->window_->metrics.viewport.width <= 0.0F ||
       state_->window_->metrics.viewport.height <= 0.0F) {
-    const std::optional<Point> hover_position =
-        state_->pointer_hover_ ? std::optional{state_->pointer_hover_->window_position} : std::nullopt;
-    UpdatePointerCursor(hover_position);
-    RefreshHover(false);
+    state_->pointer_->RefreshCursor();
+    state_->pointer_->RefreshHover(false);
     RefreshInteractionTree();
-    AdvanceFileDrop(frame);
-    RefreshTextInputSession();
+    state_->file_drop_->AdvanceFileDrop(frame);
+    state_->text_->RefreshTextInputSession();
     BuildSemantics();
     state_->frame_commit_.render_frame.scene.root = nullptr;
     state_->frame_commit_.render_frame.damage = {};
@@ -1606,7 +1614,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   // The first layout establishes resolved caret geometry. Revealing that caret can change ancestor scroll offsets and
   // virtual realization, so the incremental layout pipeline must settle those changes before geometry is published.
-  if (BringTextInputIntoView()) {
+  if (state_->text_->BringTextInputIntoView()) {
     if (PropagateVirtualLayoutInvalidation(*state_->mounted_root_)) {
       MeasureNode(
           *state_->mounted_root_,
@@ -1647,46 +1655,34 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();
   }
-  const std::optional<Point> hover_position =
-      state_->pointer_hover_ ? std::optional{state_->pointer_hover_->window_position} : std::nullopt;
-  UpdatePointerCursor(hover_position);
-  RefreshHover(false);
-  RefreshTextInputSession();
-  AdvancePointerRecognition(frame.timestamp);
-  AdvanceDragDrop(frame);
-  AdvanceFileDrop(frame);
+  state_->pointer_->RefreshCursor();
+  state_->pointer_->RefreshHover(false);
+  state_->text_->RefreshTextInputSession();
+  state_->pointer_->AdvancePointerRecognition(frame.timestamp);
+  state_->pointer_->AdvanceDragDrop(frame);
+  state_->file_drop_->AdvanceFileDrop(frame);
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
-  AdvanceTextSelectionLongPress(frame.timestamp);
+  state_->pointer_->AdvanceTextSelectionLongPress(frame.timestamp);
   BuildSemantics();
 
-  AdvanceTextSelectionOverlay(frame);
-  PaintTextSelectionOverlay();
+  state_->text_->AdvanceTextSelectionOverlay(frame);
+  state_->text_->PaintTextSelectionOverlay();
   CommitWindowAppearance();
   UpdateRenderScene(
       *state_->mounted_root_,
       state_->mounted_root_->bounds,
-      &state_->text_selection_overlay_.render_node
+      &state_->text_->Overlay()
   );
   const RenderNode* scene_root = &state_->mounted_root_->render_node;
-  const bool scene_transition_was_active = state_->scene_transition_.has_value();
-  if (state_->scene_transition_.has_value()) {
-    ActiveSceneTransition& transition = *state_->scene_transition_;
-    if (transition.viewport != state_->window_->metrics.viewport) {
-      state_->scene_transition_.reset();
-    } else {
-      const MotionAdvanceResult result = transition.progress.Advance(frame);
-      needs_frame = needs_frame || result.needs_frame;
-      if (result.wake_after.has_value() && (!next_wakeup.has_value() || *result.wake_after < *next_wakeup)) {
-        next_wakeup = result.wake_after;
-      }
-      if (!transition.progress.IsRunning()) {
-        state_->scene_transition_.reset();
-      } else {
-        scene_root = ComposeSceneTransition(transition, scene_root, transition.progress.Value());
-      }
-    }
+  const bool scene_transition_was_active = state_->scene_transition_service_->IsActive();
+  const MotionAdvanceResult transition_result = state_->scene_transition_service_->Advance(frame);
+  needs_frame = needs_frame || transition_result.needs_frame;
+  if (transition_result.wake_after.has_value() &&
+      (!next_wakeup.has_value() || *transition_result.wake_after < *next_wakeup)) {
+    next_wakeup = transition_result.wake_after;
   }
+  scene_root = state_->scene_transition_service_->Compose(scene_root);
   state_->frame_commit_.render_frame.scene.root = scene_root;
   state_->frame_commit_.render_frame.damage = ComputeDamageRegion(
       state_->frame_commit_.render_frame.scene.root,
@@ -1734,198 +1730,17 @@ const detail::MountedNode* Runtime::RootNode() const noexcept {
   return FindApplicationRoot(*state_->mounted_root_);
 }
 
-bool Runtime::TrackHoverPointer(const PointerEvent& event) {
-  if (state_->pointer_hover_ &&
-      (state_->pointer_hover_->pointer_id != event.pointer_id ||
-       state_->pointer_hover_->device_kind != event.device_kind)) {
-    ClearHover();
-  }
-  const bool moved = state_->pointer_hover_ && state_->pointer_hover_->window_position != event.position;
-  if (!state_->pointer_hover_) {
-    state_->pointer_hover_.emplace();
-  }
-  state_->pointer_hover_->pointer_id = event.pointer_id;
-  state_->pointer_hover_->device_kind = event.device_kind;
-  state_->pointer_hover_->window_position = event.position;
-  UpdatePointerCursor(event.position);
-  return moved;
-}
-
-void Runtime::RefreshHover(bool moved) {
-  if (!state_->pointer_hover_ || state_->pointer_sessions_.contains(state_->pointer_hover_->pointer_id)) {
-    return;
-  }
-
-  detail::PointerHoverState next = *state_->pointer_hover_;
-  std::vector<detail::MountedNode*> route;
-  if (state_->mounted_root_ && state_->window_->metrics.viewport.width > 0.0F &&
-      state_->window_->metrics.viewport.height > 0.0F &&
-      BuildHoverRoute(*state_->mounted_root_, next.window_position, route)) {
-    next.event_nodes = HitTestHoverEventNodes(route, next.window_position);
-    next.extensions = HitTestHoverExtensions(route, next.window_position);
-  } else {
-    next.event_nodes.clear();
-    next.extensions.clear();
-  }
-  UpdateHoverRoute(std::move(next), moved);
-}
-
-void Runtime::UpdateHoverRoute(detail::PointerHoverState next, bool moved) {
-  if (!state_->pointer_hover_) {
-    return;
-  }
-  detail::PointerHoverState previous = std::move(*state_->pointer_hover_);
-  const detail::PointerHoverState current = std::move(next);
-  *state_->pointer_hover_ = current;
-  if (previous.event_nodes == current.event_nodes && previous.extensions == current.extensions && !moved) {
-    return;
-  }
-  if (!state_->mounted_root_) {
-    return;
-  }
-
-  for (const NodeExtensionHandle& handle : previous.extensions) {
-    if (std::ranges::find(current.extensions, handle) != current.extensions.end()) {
-      continue;
-    }
-    if (NodeExtension* extension = FindExtension(*state_->mounted_root_, handle)) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, handle.node_identity)) {
-        extension->OnHover(*node, LocalHoverEvent(*node, previous, HoverEventType::Leave));
-      }
-    }
-    const bool node_remains_hovered = std::ranges::any_of(current.extensions, [&](const NodeExtensionHandle& next) {
-      return next.node_identity == handle.node_identity;
-    });
-    if (!node_remains_hovered) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, handle.node_identity)) {
-        InteractionState interaction = node->interaction;
-        interaction.hovered = false;
-        UpdateInteraction(*node, interaction);
-      }
-    }
-  }
-
-  for (const NodeExtensionHandle& handle : current.extensions) {
-    const bool entered = std::ranges::find(previous.extensions, handle) == previous.extensions.end();
-    if (entered || moved) {
-      if (NodeExtension* extension = FindExtension(*state_->mounted_root_, handle)) {
-        if (detail::MountedNode* node = FindNode(*state_->mounted_root_, handle.node_identity)) {
-          const HoverEventType event_type = entered ? HoverEventType::Enter : HoverEventType::Move;
-          extension->OnHover(*node, LocalHoverEvent(*node, current, event_type));
-        }
-      }
-    }
-    const bool node_was_hovered = std::ranges::any_of(previous.extensions, [&](const NodeExtensionHandle& old) {
-      return old.node_identity == handle.node_identity;
-    });
-    if (entered && !node_was_hovered) {
-      if (detail::MountedNode* node = FindNode(*state_->mounted_root_, handle.node_identity)) {
-        InteractionState interaction = node->interaction;
-        interaction.hovered = true;
-        UpdateInteraction(*node, interaction);
-      }
-    }
-  }
-
-  for (auto node = previous.event_nodes.rbegin(); node != previous.event_nodes.rend(); ++node) {
-    if (std::ranges::find(current.event_nodes, *node) != current.event_nodes.end()) {
-      continue;
-    }
-    if (detail::MountedNode* mounted = FindNode(*state_->mounted_root_, *node)) {
-      EmitEvent<ViewEvents::Hover>(mounted->event_bindings,
-                                   LocalHoverEvent(*mounted, previous, HoverEventType::Leave));
-    }
-  }
-  for (const std::uint64_t node : current.event_nodes) {
-    const bool entered = std::ranges::find(previous.event_nodes, node) == previous.event_nodes.end();
-    if (entered || moved) {
-      if (detail::MountedNode* mounted = FindNode(*state_->mounted_root_, node)) {
-        const HoverEventType event_type = entered ? HoverEventType::Enter : HoverEventType::Move;
-        EmitEvent<ViewEvents::Hover>(mounted->event_bindings, LocalHoverEvent(*mounted, current, event_type));
-      }
-    }
-  }
-
-  if (previous.extensions != current.extensions || (moved && !current.extensions.empty())) {
-    RequestFrame();
-  }
-}
-
-void Runtime::ClearHover() {
-  if (!state_->pointer_hover_) {
-    return;
-  }
-  detail::PointerHoverState next = *state_->pointer_hover_;
-  next.event_nodes.clear();
-  next.extensions.clear();
-  UpdateHoverRoute(std::move(next), false);
-  state_->pointer_hover_.reset();
-}
-
 void Runtime::RefreshInteractionTree() {
   if (!state_->mounted_root_) {
     state_->focused_node_identity_.reset();
     state_->focus_visible_ = false;
     state_->keyboard_activation_identity_.reset();
     state_->keyboard_press_id_.reset();
-    if (state_->pointer_hover_) {
-      state_->pointer_hover_->event_nodes.clear();
-      state_->pointer_hover_->extensions.clear();
-    }
+    state_->pointer_->ValidateTargets();
     return;
   }
 
-  std::vector<PointerEvent> cancellations;
-  for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
-    const bool references_inactive = std::ranges::any_of(session.route, [this](std::uint64_t identity) {
-      return !DeclaredEnabled(*state_->mounted_root_, identity).value_or(false);
-    });
-    const bool recognition_removed =
-        std::ranges::any_of(session.recognitions, [this](const PointerRecognition& recognition) {
-          if (!recognition.started) {
-            return false;
-          }
-          if (const auto* intercept = std::get_if<PointerInterceptRecognitionState>(&recognition.state)) {
-            const detail::MountedNode* node = FindNode(*state_->mounted_root_, intercept->node_identity);
-            return node == nullptr || !HasEventBinding<ViewEvents::PointerIntercept>(node->event_bindings);
-          }
-          if (const auto* extension = std::get_if<ExtensionRecognitionState>(&recognition.state)) {
-            return FindExtension(*state_->mounted_root_, extension->extension) == nullptr;
-          }
-          if (const auto* gesture = std::get_if<GestureRecognitionState>(&recognition.state)) {
-            return FindExtension(*state_->mounted_root_, gesture->extension) == nullptr;
-          }
-          if (const auto* source = std::get_if<DragSourceRecognitionState>(&recognition.state)) {
-            return FindExtension(*state_->mounted_root_, source->extension) == nullptr;
-          }
-          if (const auto* tap = std::get_if<TapRecognitionState>(&recognition.state)) {
-            return std::ranges::any_of(
-                tap->consumers,
-                [this](const GestureRecognitionState& consumer) {
-                  return FindExtension(*state_->mounted_root_, consumer.extension) == nullptr;
-                }
-            );
-          }
-          if (const auto* selection = std::get_if<TextSelectionRecognitionState>(&recognition.state)) {
-            detail::MountedNode* node = FindNode(*state_->mounted_root_, selection->node_identity);
-            return node == nullptr || FindTextSelectionClient(*node) == nullptr;
-          }
-          return false;
-        });
-    if (!session.quarantined && (references_inactive || recognition_removed)) {
-      cancellations.push_back(
-          PointerEvent{
-              PointerEventType::Cancel,
-              pointer_id,
-              session.last_position,
-              session.device_kind,
-          }
-      );
-    }
-  }
-  for (const PointerEvent& cancellation : cancellations) {
-    QuarantinePointerSession(cancellation.pointer_id, cancellation);
-  }
+  state_->pointer_->ValidateTargets();
   if (state_->keyboard_activation_identity_.has_value() && state_->keyboard_press_id_.has_value()) {
     const std::optional<bool> enabled =
         DeclaredEnabled(*state_->mounted_root_, *state_->keyboard_activation_identity_);
@@ -2038,7 +1853,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
     switch (target.kind) {
     case detail::BackTargetKind::SelectionOverlay:
       if (event.phase == BackPhase::Commit) {
-        HideTextSelectionOverlay();
+        state_->text_->HideTextSelectionOverlay();
       }
       return true;
     case detail::BackTargetKind::Layer: {
@@ -2115,7 +1930,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
 
   detail::BackTarget target;
   bool already_dispatched = false;
-  if (state_->text_selection_overlay_.state.visible) {
+  if (state_->text_->OverlayVisible()) {
     target.kind = detail::BackTargetKind::SelectionOverlay;
   } else {
     const LayerEntry* topmost = nullptr;
@@ -2179,7 +1994,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
     return;
   }
 
-  HideTextSelectionOverlay();
+  state_->text_->HideTextSelectionOverlay();
   if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
     if (detail::MountedNode* previous = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
       InteractionState interaction = previous->interaction;
@@ -2372,42 +2187,6 @@ Point Runtime::HandleScrollInput(const ScrollInputEvent& event) {
   return consumed;
 }
 
-bool Runtime::HandleFocusedTextInputKey(const KeyEvent& event) {
-  if (!state_->text_input_session_.has_value() || !state_->focused_node_identity_.has_value()) {
-    return false;
-  }
-  const detail::ActiveTextInputSession& active = *state_->text_input_session_;
-  if (active.node_identity != *state_->focused_node_identity_) {
-    return false;
-  }
-  const std::uint64_t node_identity = active.node_identity;
-  const TextInputSessionId session_id = active.session_id;
-  const std::shared_ptr<TextInputClient> client = active.client;
-  const TextInputState previous = active.state;
-
-  const bool next_action = event.type == KeyEventType::Down && event.key == Key::Enter && !event.modifiers.shift &&
-                           !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta &&
-                           active.configuration.action == TextInputAction::Next;
-  if (next_action && event.repeat) {
-    return true;
-  }
-  if (client->HandleTextKey(event) != TextInputKeyResult::Handled) {
-    return false;
-  }
-
-  const TextInputState current = client->State();
-  if (!detail::IsValidTextInputState(current, session_id) ||
-      !detail::IsValidTextInputStateTransition(previous, current)) {
-    throw std::logic_error("HuxerUI text input client returned invalid state after handling a key event");
-  }
-  InvalidateTextInputStateChange(node_identity, previous, current);
-  if (next_action) {
-    MoveFocus(false, false);
-  }
-  RefreshTextInputSession();
-  return true;
-}
-
 bool Runtime::HandleKeyEvent(const KeyEvent& event) {
   if (!state_->mounted_root_) {
     return false;
@@ -2419,7 +2198,7 @@ bool Runtime::HandleKeyEvent(const KeyEvent& event) {
   }
   if (focused && (!focused->interaction.enabled || !focused->focusable)) {
     SetFocusedNode(std::nullopt);
-    RefreshTextInputSession();
+    state_->text_->RefreshTextInputSession();
     focused = nullptr;
   }
 
@@ -2459,7 +2238,7 @@ bool Runtime::HandleKeyEvent(const KeyEvent& event) {
   const auto finish_handled = [this, &cancel_keyboard_activation] {
     cancel_keyboard_activation();
     RequestFrame();
-    RefreshTextInputSession();
+    state_->text_->RefreshTextInputSession();
     return true;
   };
 
@@ -2500,12 +2279,12 @@ bool Runtime::HandleKeyEvent(const KeyEvent& event) {
     default:
       break;
     }
-    if (action.has_value() && (state_->text_input_session_.has_value() || CanPerformTextEditingAction(*action))) {
+    if (action.has_value() && (state_->text_->HasSession() || CanPerformTextEditingAction(*action))) {
       PerformTextEditingAction(*action);
       return finish_handled();
     }
   }
-  if (focused && HandleFocusedTextInputKey(event)) {
+  if (focused && state_->text_->HandleFocusedTextInputKey(event)) {
     return finish_handled();
   }
   if (focused && detail::DispatchKey(*focused, event)) {
@@ -2615,38 +2394,15 @@ void Runtime::DeactivateLayerInput(LayerId id) {
     return;
   }
 
-  std::vector<PointerEvent> cancellations;
-  for (const auto& [pointer_id, session] : state_->pointer_sessions_) {
-    if (PointerSessionReferencesNode(session, *layer)) {
-      cancellations.push_back(PointerEvent{
-          PointerEventType::Cancel,
-          pointer_id,
-          session.last_position,
-          session.device_kind,
-      });
-    }
-  }
-  for (const PointerEvent& cancellation : cancellations) {
-    QuarantinePointerSession(cancellation.pointer_id, cancellation);
-  }
-
-  if (state_->pointer_hover_) {
-    detail::PointerHoverState next = *state_->pointer_hover_;
-    std::erase_if(next.event_nodes, [&](std::uint64_t node) { return ContainsNodeIdentity(*layer, node); });
-    std::erase_if(next.extensions, [&](const NodeExtensionHandle& extension) {
-      return ContainsNodeIdentity(*layer, extension.node_identity);
-    });
-    UpdateHoverRoute(std::move(next), false);
-  }
+  state_->pointer_->DeactivateSubtree(*layer);
 
   const bool text_input_belongs_to_layer =
-      state_->text_input_session_.has_value() &&
-      ContainsNodeIdentity(*layer, state_->text_input_session_->node_identity);
+      state_->text_->SessionBelongsTo(*layer);
   if (state_->focused_node_identity_.has_value() && ContainsNodeIdentity(*layer, *state_->focused_node_identity_)) {
     SetFocusedNode(std::nullopt);
   }
   if (text_input_belongs_to_layer) {
-    StopTextInputSession(TextInputEndReason::FocusLost);
+    state_->text_->StopTextInputSession(TextInputEndReason::FocusLost);
   }
 }
 
@@ -2991,9 +2747,7 @@ bool Runtime::ComposeScope(detail::MountedNode& mounted) {
 
 bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming,
                         const std::shared_ptr<const Environment>& environment) {
-  if (state_->text_selection_overlay_.state.visible) {
-    state_->text_selection_overlay_.state.paint_dirty = true;
-  }
+  state_->text_->InvalidateOverlay();
   const bool compatible = mounted && IsCompatibleNode(*mounted, *incoming) && mounted->key == incoming->key;
   if (!compatible) {
     state_->extension_tree_dirty_ = true;

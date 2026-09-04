@@ -9,7 +9,8 @@
 #include <utility>
 #include <vector>
 
-#include "internal.h"
+#include "gesture_internal.h"
+#include "mounted_node_internal.h"
 
 namespace huxerui {
 namespace {

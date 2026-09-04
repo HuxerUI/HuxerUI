@@ -6,7 +6,7 @@
 #include <huxerui/navigation.h>
 #include <huxerui/presentation.h>
 
-#include "internal.h"
+#include "view_internal.h"
 
 namespace huxerui {
 

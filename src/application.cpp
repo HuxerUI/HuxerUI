@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "application_internal.h"
-#include "internal.h"
+#include "runtime_internal.h"
 #include "system_tray_internal.h"
 #include "task_internal.h"
 

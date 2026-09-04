@@ -15,7 +15,7 @@
 #include <huxerui/theme.h>
 
 #include "geometry_internal.h"
-#include "internal.h"
+#include "mounted_node_internal.h"
 
 namespace huxerui::detail {
 

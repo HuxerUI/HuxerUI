@@ -6,6 +6,8 @@
 #include <utility>
 #include <vector>
 
+#include "platform_registry_internal.h"
+
 namespace huxerui::test {
 namespace {
 
