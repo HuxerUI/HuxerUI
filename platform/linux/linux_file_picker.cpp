@@ -253,13 +253,23 @@ public:
 
   void Stop() noexcept {
     std::thread thread;
+    bool stop_on_portal_thread = false;
     {
       std::scoped_lock lock(mutex_);
       if (!thread_.joinable()) {
         return;
       }
       stopping_ = true;
-      thread = std::move(thread_);
+      if (thread_.get_id() == std::this_thread::get_id()) {
+        thread_.detach();
+        stop_on_portal_thread = true;
+      } else {
+        thread = std::move(thread_);
+      }
+    }
+    if (stop_on_portal_thread) {
+      RequestStop();
+      return;
     }
     g_main_context_invoke_full(
         context_,
@@ -296,7 +306,10 @@ private:
   }
 
   bool Start() {
-    thread_ = std::thread([this] { Run(); });
+    // A portal completion can release the last transport on this thread. Retain the connection
+    // until Run() has left the GLib context so same-thread shutdown cannot destroy live GLib state.
+    const std::shared_ptr<PortalConnection> self = shared_from_this();
+    thread_ = std::thread([self] { self->Run(); });
     std::unique_lock lock(mutex_);
     ready_condition_.wait(lock, [this] { return ready_; });
     if (Available()) {
