@@ -2301,11 +2301,12 @@ bool Runtime::UpdateNodeExtensions(
   return node.subtree_has_extensions;
 }
 
-void Runtime::BindExtensionInvalidation(detail::MountedNode& node) {
+void Runtime::BindExtensions(detail::MountedNode& node) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (!entry.extension) {
       continue;
     }
+    entry.extension->BindEvents(node.event_bindings);
     entry.extension->BindPaintInvalidation([this, owner = &node](NodeExtension::PaintInvalidation invalidation) {
       if (invalidation == NodeExtension::PaintInvalidation::Content ||
           invalidation == NodeExtension::PaintInvalidation::Both) {
@@ -3043,7 +3044,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
         }
     );
     state_->extension_tree_dirty_ = true;
-    BindExtensionInvalidation(*mounted);
+    BindExtensions(*mounted);
   }
   if (mounted->kind == NodeKind::Scope) {
     layout_changed = ComposeScope(*mounted) || layout_changed;
@@ -3091,7 +3092,7 @@ Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<
     mounted->scroll_state = std::make_unique<ScrollNodeState>();
   }
   static_cast<void>(ReconcileNodeExtensions(*mounted, compiled.modifiers, false));
-  BindExtensionInvalidation(*mounted);
+  BindExtensions(*mounted);
   if (mounted->kind == NodeKind::Scope) {
     static_cast<void>(ComposeScope(*mounted));
   } else if (IsVirtualLayoutNode(*mounted)) {

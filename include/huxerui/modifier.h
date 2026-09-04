@@ -284,6 +284,39 @@ public:
   }
 
 protected:
+  /// Emits a typed event through the owning node's current handler binding.
+  ///
+  /// Runtime connects the extension after construction. Events target only `.On<Key>()` on the owning View; they do
+  /// not bubble to ancestors or target an enclosing composition scope. Use an explicitly supplied EventEmitter when
+  /// the event belongs to an outer component instead.
+  ///
+  /// Call on the owning UI thread from mounted behavior such as input, semantic actions, or frame updates. Do not
+  /// emit from construction, Update(), destruction, hit testing, geometry preparation, or paint recording. This
+  /// operation does not queue work or extend the extension's lifetime.
+  /// @tparam Key An event key derived from Event<Result(Arguments...)>.
+  /// @param arguments Arguments forwarded to the handler, matching the event key's signature.
+  /// @return `void` for a notification, or `std::optional<Result>` for a value-returning event. An unconnected
+  /// extension or an absent handler produces no notification or an empty optional. Handler exceptions propagate.
+  /// @code
+  /// EmitEvent<SliderEvents::Changed>(requested_value);
+  /// const bool accepted = EmitEvent<NavigationRequested>(destination).value_or(false);
+  /// @endcode
+  template <class Key, class... Arguments>
+    requires detail::EventKey<Key> && std::invocable<std::function<typename Key::Signature>&, Arguments...>
+  auto EmitEvent(Arguments&&... arguments) const {
+    using Result = detail::EventResult<Key>;
+    if constexpr (std::is_void_v<Result>) {
+      if (event_bindings_) {
+        static_cast<void>(detail::EmitEvent<Key>(*event_bindings_, std::forward<Arguments>(arguments)...));
+      }
+    } else {
+      if (event_bindings_) {
+        return detail::EmitEvent<Key>(*event_bindings_, std::forward<Arguments>(arguments)...);
+      }
+      return std::optional<Result>{};
+    }
+  }
+
   /// Invalidates retained paint output after extension-owned visual state changes.
   void InvalidatePaint(PaintInvalidation invalidation = PaintInvalidation::Foreground) {
     if (invalidation != PaintInvalidation::None && invalidate_paint_) {
@@ -308,6 +341,10 @@ private:
 
   [[nodiscard]] virtual const detail::DropTargetCapability* GetDropTargetCapability() const noexcept;
 
+  void BindEvents(const detail::EventBindings& bindings) {
+    event_bindings_ = &bindings;
+  }
+
   void BindPaintInvalidation(std::function<void(PaintInvalidation)> callback) {
     invalidate_paint_ = std::move(callback);
   }
@@ -316,6 +353,8 @@ private:
     invalidate_semantics_ = std::move(callback);
   }
 
+  // The owner outlives its extensions; reconciliation replaces the map's contents, not the map itself.
+  const detail::EventBindings* event_bindings_ = nullptr;
   std::function<void(PaintInvalidation)> invalidate_paint_;
   std::function<void()> invalidate_semantics_;
 

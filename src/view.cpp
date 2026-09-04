@@ -1438,7 +1438,6 @@ public:
     maximum_ = modifier.maximum;
     step_ = modifier.step;
     last_emitted_value_ = value_;
-    event_bindings_ = static_cast<detail::MountedNode&>(node).event_bindings;
     UpdateThumbSize(node.IsEnabled());
   }
 
@@ -1478,7 +1477,7 @@ public:
     const float snapped = Snap(requested);
     if (snapped != last_emitted_value_) {
       last_emitted_value_ = snapped;
-      detail::EmitEvent<SliderEvents::Changed>(event_bindings_, snapped);
+      EmitEvent<SliderEvents::Changed>(snapped);
     }
     return true;
   }
@@ -1525,7 +1524,7 @@ public:
     UpdateThumbSize(node.IsEnabled());
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(MountedNode&, const KeyEvent& event) override {
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
     }
@@ -1533,17 +1532,17 @@ public:
     switch (event.key) {
     case Key::ArrowLeft:
     case Key::ArrowDown:
-      EmitValue(node, last_emitted_value_ - increment);
+      EmitValue(last_emitted_value_ - increment);
       return true;
     case Key::ArrowRight:
     case Key::ArrowUp:
-      EmitValue(node, last_emitted_value_ + increment);
+      EmitValue(last_emitted_value_ + increment);
       return true;
     case Key::Home:
-      EmitValue(node, minimum_);
+      EmitValue(minimum_);
       return true;
     case Key::End:
-      EmitValue(node, maximum_);
+      EmitValue(maximum_);
       return true;
     default:
       return false;
@@ -1720,7 +1719,7 @@ private:
   void EmitPointerValue(MountedNode& node, float pointer_x) {
     const Rect track = ResolveTrackBounds(node);
     const float progress = track.width > 0.0F ? std::clamp((pointer_x - track.x) / track.width, 0.0F, 1.0F) : 0.0F;
-    EmitValue(node, minimum_ + (maximum_ - minimum_) * progress);
+    EmitValue(minimum_ + (maximum_ - minimum_) * progress);
   }
 
   [[nodiscard]] Rect ResolveTrackBounds(const MountedNode& node) const {
@@ -1737,13 +1736,13 @@ private:
     };
   }
 
-  void EmitValue(MountedNode& node, float value) {
+  void EmitValue(float value) {
     const float snapped = Snap(value);
     if (snapped == last_emitted_value_) {
       return;
     }
     last_emitted_value_ = snapped;
-    detail::EmitEvent<SliderEvents::Changed>(static_cast<detail::MountedNode&>(node).event_bindings, snapped);
+    EmitEvent<SliderEvents::Changed>(snapped);
   }
 
   void UpdateThumbSize(bool enabled) {
@@ -1770,7 +1769,6 @@ private:
   }
 
   SliderStyle style_;
-  detail::EventBindings event_bindings_;
   MotionController thumb_width_;
   MotionController thumb_height_;
   std::optional<std::int64_t> pointer_id_;
@@ -2970,7 +2968,7 @@ public:
         proposal_emitted_ = true;
         UpdateAllowedSources(mounted);
         if (proposal != displayed_index_) {
-          detail::EmitEvent<PagerEvents::Changed>(mounted.event_bindings, proposal);
+          EmitEvent<PagerEvents::Changed>(proposal);
         }
         return {.needs_frame = true};
       }
@@ -3063,7 +3061,7 @@ public:
     if (!target.has_value()) {
       return false;
     }
-    detail::EmitEvent<PagerEvents::Changed>(event_bindings_, *target);
+    EmitEvent<PagerEvents::Changed>(*target);
     return true;
   }
 
@@ -3172,7 +3170,6 @@ private:
     node.scroll_state->allows_leading_overscroll = false;
     node.scroll_state->allows_trailing_overscroll = false;
     node.scroll_state->overscroll_offset = 0.0F;
-    event_bindings_ = node.event_bindings;
   }
 
   void UpdateAllowedSources(detail::MountedNode& node) const {
@@ -3241,7 +3238,6 @@ private:
   }
 
   PagerBehavior behavior_;
-  detail::EventBindings event_bindings_;
   MotionController progress_;
   std::size_t displayed_index_ = 0;
   std::size_t animation_target_index_ = 0;

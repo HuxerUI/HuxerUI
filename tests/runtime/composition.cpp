@@ -4,6 +4,67 @@ namespace huxerui::test {
 
 struct SearchSubmitted : Event<void(std::string)> {};
 struct SearchAccepted : Event<bool(std::string_view)> {};
+struct NodeEventTransfer : Event<std::unique_ptr<int>(std::unique_ptr<int>)> {};
+
+struct NodeEventProbe {
+  class Extension;
+  int* destructions = nullptr;
+
+  bool operator==(const NodeEventProbe&) const = default;
+};
+
+class NodeEventProbe::Extension final : public NodeExtension {
+public:
+  Extension() = default;
+  Extension(MountedNode& node, const NodeEventProbe& modifier) { Update(node, modifier); }
+  ~Extension() override {
+    if (destructions_) {
+      ++*destructions_;
+    }
+  }
+
+  using NodeExtension::EmitEvent;
+
+  void Update(MountedNode&, const NodeEventProbe& modifier) { destructions_ = modifier.destructions; }
+
+  bool HitTest(MountedNode& node, Point position) const override { return node.Bounds().Contains(position); }
+
+  PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+    if (event.type == PointerEventType::Up) {
+      EmitEvent<SearchSubmitted>("pointer");
+    }
+    return event.type == PointerEventType::Down ? PointerResult::Capture : PointerResult::Handled;
+  }
+
+  void BuildSemantics(SemanticBuilder& builder) const override {
+    builder.SetOwner(Semantics{.role = SemanticRole::Button});
+    builder.AddAction(0, SemanticActionKind::Activate);
+  }
+
+  bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
+    if (local_id != 0 || action.kind != SemanticActionKind::Activate) {
+      return false;
+    }
+    EmitEvent<SearchSubmitted>("semantic");
+    return true;
+  }
+
+private:
+  int* destructions_ = nullptr;
+};
+
+template <class Key, class... Arguments>
+concept ExtensionCanEmit = requires(const NodeEventProbe::Extension& extension, Arguments&&... arguments) {
+  extension.template EmitEvent<Key>(std::forward<Arguments>(arguments)...);
+};
+
+static_assert(ExtensionCanEmit<SearchSubmitted, std::string>);
+static_assert(!ExtensionCanEmit<SearchSubmitted, int>);
+static_assert(!ExtensionCanEmit<int>);
+static_assert(std::same_as<
+    decltype(std::declval<const NodeEventProbe::Extension&>().EmitEvent<SearchSubmitted>("")), void>);
+static_assert(std::same_as<
+    decltype(std::declval<const NodeEventProbe::Extension&>().EmitEvent<SearchAccepted>("")), std::optional<bool>>);
 
 State<int> event_mode;
 
@@ -1519,6 +1580,184 @@ TEST_CASE("TestTypedScopeEvents") {
   saved_event_emitter.Emit<SearchSubmitted>("ignored");
   REQUIRE_FALSE(saved_event_emitter.Emit<SearchAccepted>("query").has_value());
   REQUIRE(received_event == "second:query");
+}
+
+TEST_CASE("NodeExtensionsEmitThroughCurrentOwnerBindings") {
+  NodeEventProbe::Extension disconnected;
+  disconnected.EmitEvent<SearchSubmitted>("ignored");
+  REQUIRE_FALSE(disconnected.EmitEvent<SearchAccepted>("accept").has_value());
+
+  static int mode;
+  static std::string received;
+  static std::weak_ptr<int> handler_lifetime;
+  mode = 0;
+  received.clear();
+  handler_lifetime.reset();
+  TestPlatform platform;
+  Runtime runtime{[]() -> View {
+    View view = Text("source").With(NodeEventProbe{});
+    if (mode == 2) {
+      return view;
+    }
+    const auto token = std::make_shared<int>(mode);
+    handler_lifetime = token;
+    return std::move(view)
+        .On<SearchSubmitted>([token](std::string value) { received = std::to_string(*token) + ":" + value; })
+        .On<SearchAccepted>([](std::string_view value) {
+          if (value == "throw") {
+            throw std::runtime_error("event decision failed");
+          }
+          return value == "accept";
+        })
+        .On<NodeEventTransfer>([](std::unique_ptr<int> value) { return value; });
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const auto* extension = static_cast<const NodeEventProbe::Extension*>(
+      runtime.RootNode()->extensions[0].extension.get());
+  extension->EmitEvent<SearchSubmitted>("first");
+  REQUIRE(received == "0:first");
+  REQUIRE(extension->EmitEvent<SearchAccepted>("accept") == std::optional{true});
+  REQUIRE(extension->EmitEvent<SearchAccepted>("reject") == std::optional{false});
+  REQUIRE_THROWS_AS(extension->EmitEvent<SearchAccepted>("throw"), std::runtime_error);
+  auto value = std::make_unique<int>(42);
+  auto transferred = extension->EmitEvent<NodeEventTransfer>(std::move(value));
+  REQUIRE(value == nullptr);
+  REQUIRE(transferred.has_value());
+  REQUIRE(**transferred == 42);
+
+  const std::weak_ptr<int> previous_handler = handler_lifetime;
+  mode = 1;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->extensions[0].extension.get() == extension);
+  REQUIRE(previous_handler.expired());
+  extension->EmitEvent<SearchSubmitted>("latest");
+  REQUIRE(received == "1:latest");
+
+  mode = 2;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->extensions[0].extension.get() == extension);
+  REQUIRE(handler_lifetime.expired());
+  extension->EmitEvent<SearchSubmitted>("ignored");
+  REQUIRE(received == "1:latest");
+  REQUIRE_FALSE(extension->EmitEvent<SearchAccepted>("accept").has_value());
+}
+
+TEST_CASE("NodeExtensionEventsStayWithKeyedNodesAndRebindAfterReplacement") {
+  static int mode;
+  static int destructions;
+  static std::string received;
+  mode = 0;
+  destructions = 0;
+  received.clear();
+  TestPlatform platform;
+  {
+    Runtime runtime{[]() -> View {
+      const auto item = [](int key) -> View {
+        View view = Text("item").Key(key).On<SearchSubmitted>([key, revision = mode](std::string) {
+          received = std::to_string(key) + ":" + std::to_string(revision);
+        });
+        if (mode != 3) {
+          view = std::move(view).With(NodeEventProbe{&destructions});
+        }
+        return view;
+      };
+      return mode == 0 ? Column {item(1), item(2)} : Column {item(2), item(mode == 1 ? 1 : 3)};
+    }, platform};
+    runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+    runtime.BuildFrame();
+    const auto* first = static_cast<const NodeEventProbe::Extension*>(
+        runtime.RootNode()->children[0]->extensions[0].extension.get());
+    const auto* second = static_cast<const NodeEventProbe::Extension*>(
+        runtime.RootNode()->children[1]->extensions[0].extension.get());
+
+    mode = 1;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+    REQUIRE(runtime.RootNode()->children[1]->extensions[0].extension.get() == first);
+    REQUIRE(runtime.RootNode()->children[0]->extensions[0].extension.get() == second);
+    first->EmitEvent<SearchSubmitted>("");
+    REQUIRE(received == "1:1");
+    second->EmitEvent<SearchSubmitted>("");
+    REQUIRE(received == "2:1");
+    REQUIRE(destructions == 0);
+
+    mode = 2;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+    REQUIRE(destructions == 1);
+    const auto* replacement = static_cast<const NodeEventProbe::Extension*>(
+        runtime.RootNode()->children[1]->extensions[0].extension.get());
+    replacement->EmitEvent<SearchSubmitted>("");
+    REQUIRE(received == "3:2");
+
+    mode = 3;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+    REQUIRE(destructions == 3);
+    REQUIRE(runtime.RootNode()->children[0]->extensions.empty());
+    REQUIRE(runtime.RootNode()->children[1]->extensions.empty());
+
+    mode = 4;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+    const auto* reattached = static_cast<const NodeEventProbe::Extension*>(
+        runtime.RootNode()->children[0]->extensions[0].extension.get());
+    reattached->EmitEvent<SearchSubmitted>("");
+    REQUIRE(received == "2:4");
+  }
+  REQUIRE(destructions == 5);
+}
+
+TEST_CASE("NodeExtensionEventsUseInputAndSemanticCallbacksWithoutBubbling") {
+  static int received;
+  static int parent_received;
+  static bool enabled;
+  static bool bind_handler;
+  received = 0;
+  parent_received = 0;
+  enabled = true;
+  bind_handler = true;
+  TestPlatform platform;
+  Runtime runtime{[]() -> View {
+    View target = Text("source").With(Frame{100.0F, 40.0F}, Enabled{enabled}, NodeEventProbe{});
+    if (bind_handler) {
+      target = std::move(target).On<SearchSubmitted>([](std::string) { ++received; });
+    }
+    return Column {std::move(target)}.On<SearchSubmitted>([](std::string) { ++parent_received; });
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {10.0F, 10.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 1, {10.0F, 10.0F}});
+  REQUIRE(received == 0);
+  runtime.HandlePointerEvent({PointerEventType::Down, 2, {10.0F, 10.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 2, {10.0F, 10.0F}});
+  REQUIRE(received == 1);
+  const SemanticNodeId target = runtime.RootNode()->children[0]->semantic_identity;
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(target, {.kind = SemanticActionKind::Activate}));
+  REQUIRE(received == 2);
+  REQUIRE(parent_received == 0);
+
+  bind_handler = false;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(target, {.kind = SemanticActionKind::Activate}));
+  REQUIRE(received == 2);
+  REQUIRE(parent_received == 0);
+
+  enabled = false;
+  bind_handler = true;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Down, 3, {10.0F, 10.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 3, {10.0F, 10.0F}});
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(target, {.kind = SemanticActionKind::Activate}));
+  REQUIRE(received == 2);
+  REQUIRE(parent_received == 0);
 }
 
 TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {

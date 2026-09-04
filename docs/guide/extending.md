@@ -68,6 +68,48 @@ Use a retained modifier with `NodeExtension` when one mounted node needs lifecyc
 `NodeExtension` is not a general plugin registry.
 Update compatible declarative configuration without discarding retained state, request timing through `FrameResult`, and invalidate paint when paint-visible retained state changes.
 
+Use the protected `EmitEvent<Key>(...)` operation to report semantic output to `.On<Key>()` on the View carrying the extension.
+It uses the node's latest handlers after recomposition and does not bubble to ancestors or emit through an enclosing component's scope.
+Notifications return `void`; value-returning events return `std::optional<Result>`, with an empty optional when no handler is bound.
+Handler exceptions propagate to the caller.
+
+```cpp
+struct Submitted : Event<void()> {};
+
+struct SubmitOnEnter {
+  class Extension;
+  bool operator==(const SubmitOnEnter&) const = default;
+};
+
+class SubmitOnEnter::Extension final : public NodeExtension {
+public:
+  Extension(MountedNode&, const SubmitOnEnter&) {}
+  void Update(MountedNode&, const SubmitOnEnter&) {}
+
+  bool OnKey(MountedNode&, const KeyEvent& event) override {
+    if (event.type != KeyEventType::Down || event.key != Key::Enter) {
+      return false;
+    }
+    EmitEvent<Submitted>();
+    return true;
+  }
+};
+
+View App() {
+  auto submitted = UseState(false);
+  return Text(submitted.Get() ? "Submitted" : "Press Enter")
+      .With(Focusable{}, SubmitOnEnter{})
+      .On<Submitted>([submitted] { submitted = true; });
+}
+```
+
+This modifier needs neither `UseEvents()` nor its own composition scope.
+Runtime connects the event binding after construction; call `EmitEvent()` only on the owning UI thread from mounted behavior such as input, semantic actions, or frame updates.
+Do not emit while constructing, updating, destroying, hit testing, preparing geometry, or recording paint.
+Emission is synchronous and does not extend the extension's lifetime; do not retain the extension in a deferred callback.
+When an internal child must emit an outer component's event, continue to pass the `EventEmitter` returned by that component's `UseEvents()` explicitly.
+Presentation handles such as `PopupHandle` and `DialogHandle` also remain explicit dependencies rather than additional NodeExtension methods.
+
 `PrepareGeometry(MountedNode&, TextMeasurer&)` runs after final presentation geometry is resolved and before paint recording.
 Use its borrowed measurer only for synchronous text-dependent retained geometry, and retain only the resulting value metrics.
 Return the exact `PaintInvalidation` phases whose recorded inputs changed; text that affects measurement belongs in `Layout` because this callback does not provide another layout pass.

@@ -323,6 +323,10 @@ public:
       PaintContext& context) const;
 
 protected:
+  template <class Key, class... Arguments>
+    requires detail::EventKey<Key> && std::invocable<std::function<typename Key::Signature>&, Arguments...>
+  auto EmitEvent(Arguments&&... arguments) const;
+
   void InvalidatePaint(
       PaintInvalidation invalidation = PaintInvalidation::Foreground);
 };
@@ -332,6 +336,17 @@ protected:
 `PaintAboveContent()` records after node content and descendants, before the framework-owned focus ring.
 `NodeExtension` does not wrap measure, layout, or paint, and it has no `Next` continuations.
 Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
+
+`NodeExtension::EmitEvent<Key>()` synchronously dispatches through the owning node's current typed event binding.
+Runtime binds a non-owning reference to the existing `MountedNode::event_bindings` map after extension construction and before mounted callbacks; compatible reconciliation replaces the map's contents without changing its address.
+Extensions are destroyed before their owner's bindings, and keyed movement preserves the same owner association.
+No per-extension binding map, EventHub, scope, or event registry is created.
+The operation reuses `detail::EmitEvent()` while matching `EventEmitter::Emit()` public return semantics: `void` for notifications and `std::optional<Result>` for decisions, with no notification or an empty optional when unconnected or unhandled.
+Handler exceptions propagate without translation.
+Events do not bubble or automatically target an enclosing composition scope; `UseEvents()` remains the explicit route for an internal child to emit its outer component's events.
+Emission belongs to mounted behavior on the owning UI thread, including input, semantic actions, and frame updates, not construction, declarative Update, destruction, hit testing, geometry preparation, or paint recording.
+It neither queues work nor creates an emitter that may outlive the extension.
+Popup, Dialog, and other window services remain explicit typed-handle dependencies.
 
 `PrepareGeometry()` runs after final presentation transforms are resolved and before paint consumes geometry.
 It receives the active `TextMeasurer` as a callback-scoped borrowed reference so geometry-dependent extensions can measure labels without retaining a platform service.
@@ -2118,7 +2133,7 @@ The current extension points are:
 | --- | --- |
 | Custom layout | `Layout<Derived>`, `LayoutContext`, `LayoutResult` |
 | Custom virtual container | `VirtualLayout<Derived>` and `VirtualLayoutContext` |
-| Custom event | `Event<Result(Arguments...)>`, `On<Key>()`, `UseEvents()`, and `Emit<Key>()` |
+| Custom event | `Event<Result(Arguments...)>`, `On<Key>()`, `UseEvents().Emit<Key>()`, and `NodeExtension::EmitEvent<Key>()` |
 | Component external resource lifetime | `Lifecycle(setup, dependencies...)` |
 | Composition-owned asynchronous work | `Task<T>`, `UseTaskScope()`, `TaskScope::Launch()`, `RunWorker()`, and `WorkerSequence` |
 | External-thread UI handoff | Lifecycle-bound `TaskScope::Post()` |

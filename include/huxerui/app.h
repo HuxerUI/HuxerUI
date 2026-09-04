@@ -532,7 +532,7 @@ private:
       std::optional<double>& next_wakeup,
       bool rebuild_cache
   );
-  void BindExtensionInvalidation(detail::MountedNode& node);
+  void BindExtensions(detail::MountedNode& node);
   void BuildSemantics();
   const FrameCommit& BuildFrame(FrameInfo frame);
   void InvalidateRoot();
