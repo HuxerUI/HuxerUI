@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <exception>
+#include <system_error>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -83,14 +85,6 @@ FileErrorCode FileErrorCodeFor(NSError* error) noexcept {
   return FileErrorCode::Io;
 }
 
-FileError FileFailure(NSError* error, std::string_view fallback) {
-  std::string message = MakeString(error.localizedDescription);
-  return {
-      FileErrorCodeFor(error),
-      message.empty() ? std::string(fallback) : std::string(fallback) + ": " + message,
-  };
-}
-
 NSURL* FileURL(const File& file) {
   NSString* path = MakeString(file.Path());
   return path == nil ? nil : [NSURL fileURLWithPath:path isDirectory:NO];
@@ -98,34 +92,6 @@ NSURL* FileURL(const File& file) {
 
 bool SameFileURL(NSURL* first, NSURL* second) {
   return first != nil && second != nil && [first.URLByStandardizingPath isEqual:second.URLByStandardizingPath];
-}
-
-FileResult<Bytes> ReadFile(NSURL* url) {
-  __block std::optional<FileResult<Bytes>> result;
-  NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-  NSError* coordination_error = nil;
-  [coordinator coordinateReadingItemAtURL:url
-                                  options:0
-                                    error:&coordination_error
-                               byAccessor:^(NSURL* coordinated_url) {
-                                 NSError* error = nil;
-                                 NSData* data = [NSData dataWithContentsOfURL:coordinated_url
-                                                                      options:NSDataReadingMappedIfSafe
-                                                                        error:&error];
-                                 if (data == nil) {
-                                   result.emplace(FileFailure(error, "HuxerUI external file read failed"));
-                                   return;
-                                 }
-                                 Bytes bytes(data.length);
-                                 if (data.length != 0) {
-                                   std::memcpy(bytes.data(), data.bytes, data.length);
-                                 }
-                                 result.emplace(std::move(bytes));
-                               }];
-  if (result.has_value()) {
-    return std::move(*result);
-  }
-  return FileResult<Bytes>(FileFailure(coordination_error, "HuxerUI external file coordination failed"));
 }
 
 bool CopyFile(NSURL* source, NSURL* destination, bool overwrite) {
@@ -179,33 +145,6 @@ bool CopyCoordinatedFile(NSURL* source, NSURL* destination, bool overwrite) {
                                     error:&error
                                byAccessor:^(NSURL* coordinated_url) {
                                  succeeded = CopyFile(coordinated_url, destination, overwrite);
-                               }];
-  return error == nil && succeeded;
-}
-
-bool ImportFile(NSURL* source, const File& destination, bool overwrite) {
-  NSURL* destination_url = FileURL(destination);
-  if (destination_url == nil) {
-    return false;
-  }
-  return CopyCoordinatedFile(source, destination_url, overwrite);
-}
-
-bool ReplaceFile(NSURL* destination, const File& source) {
-  NSURL* source_url = FileURL(source);
-  if (source_url == nil) {
-    return false;
-  }
-  __block bool succeeded = false;
-  NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-  NSError* error = nil;
-  const NSFileCoordinatorWritingOptions options =
-      [NSFileManager.defaultManager fileExistsAtPath:destination.path] ? NSFileCoordinatorWritingForReplacing : 0;
-  [coordinator coordinateWritingItemAtURL:destination
-                                  options:options
-                                    error:&error
-                               byAccessor:^(NSURL* coordinated_url) {
-                                 succeeded = CopyFile(source_url, coordinated_url, true);
                                }];
   return error == nil && succeeded;
 }
@@ -335,39 +274,13 @@ UIDocumentPickerViewController* ExportPicker(NSURL* url) {
 #pragma clang diagnostic pop
 }
 
-FileReferenceMetadata ReferenceMetadata(NSURL* url) {
-  FileReferenceMetadata metadata{.name = MakeString(url.lastPathComponent)};
-  NSNumber* size = nil;
-  if ([url getResourceValue:&size forKey:NSURLFileSizeKey error:nil] && size != nil && size.longLongValue >= 0) {
-    metadata.size = static_cast<std::uint64_t>(size.unsignedLongLongValue);
+std::optional<std::string> ReferenceContentType(NSURL* url) {
+  UTType* type = nil;
+  if ([url getResourceValue:&type forKey:NSURLContentTypeKey error:nil] && type != nil) {
+    std::string content_type = MakeString(type.preferredMIMEType);
+    if (!content_type.empty()) { return content_type; }
   }
-  NSNumber* writable = nil;
-  if ([url getResourceValue:&writable forKey:NSURLIsWritableKey error:nil] && writable != nil) {
-    metadata.can_write = writable.boolValue;
-  }
-  if (@available(iOS 14.0, *)) {
-    UTType* type = nil;
-    if ([url getResourceValue:&type forKey:NSURLContentTypeKey error:nil] && type != nil) {
-      std::string content_type = MakeString(type.preferredMIMEType);
-      if (!content_type.empty()) {
-        metadata.content_type = std::move(content_type);
-      }
-    }
-  } else {
-    NSString* identifier = nil;
-    if ([url getResourceValue:&identifier forKey:NSURLTypeIdentifierKey error:nil] && identifier != nil) {
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-      NSString* mime_type =
-          CFBridgingRelease(UTTypeCopyPreferredTagWithClass((__bridge CFStringRef)identifier, kUTTagClassMIMEType));
-#pragma clang diagnostic pop
-      std::string content_type = MakeString(mime_type);
-      if (!content_type.empty()) {
-        metadata.content_type = std::move(content_type);
-      }
-    }
-  }
-  return metadata;
+  return std::nullopt;
 }
 
 UIViewController* VisiblePresenter(UIViewController* owner) {
@@ -379,6 +292,8 @@ UIViewController* VisiblePresenter(UIViewController* owner) {
 }
 
 HuxerUIIOSExportPreparation* PrepareExport(const File& source, std::string_view suggested_name) {
+  // The export picker copies an existing URL and uses its filename. Stage only when the requested
+  // name differs, so changing the export name neither renames the source nor stages every file read.
   NSURL* source_url = FileURL(source);
   BOOL is_directory = NO;
   if (source_url == nil || ![NSFileManager.defaultManager fileExistsAtPath:source_url.path isDirectory:&is_directory] ||
@@ -426,6 +341,8 @@ void CleanupExport(HuxerUIIOSExportPreparation* preparation) {
 }
 
 template <class Completion> void DismissPicker(UIDocumentPickerViewController* picker, Completion completion) {
+  // The shared controller may present its next request as soon as completion runs. Wait for UIKit's
+  // dismissal completion so the old document picker no longer occupies the presentation hierarchy.
   if (picker == nil || picker.presentingViewController == nil) {
     completion();
     return;
@@ -437,14 +354,15 @@ template <class Completion> void DismissPicker(UIDocumentPickerViewController* p
                              }];
 }
 
-class IosFileReferenceState final : public FileReferenceState,
-                                    public std::enable_shared_from_this<IosFileReferenceState> {
+// Shared local-reference coordination retains this owner beyond the picker and parent reference.
+// Normal references balance security-scoped access; copied activation files instead own a temporary
+// directory whose cleanup waits until the last reference or pending operation releases it.
+class IosFileAccess final {
 public:
-  explicit IosFileReferenceState(NSURL* url) : url_(url), accessing_([url startAccessingSecurityScopedResource]) {}
-
-  IosFileReferenceState(NSURL* url, NSURL* cleanup_directory) : url_(url), cleanup_directory_(cleanup_directory) {}
-
-  ~IosFileReferenceState() override {
+  explicit IosFileAccess(NSURL* url, NSURL* cleanup = nil)
+      : url_(url), cleanup_directory_(cleanup),
+        accessing_(cleanup == nil && [url startAccessingSecurityScopedResource]) {}
+  ~IosFileAccess() {
     if (accessing_) {
       [url_ stopAccessingSecurityScopedResource];
     }
@@ -458,79 +376,93 @@ public:
     }
   }
 
-  std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
-    std::shared_ptr<IosFileReferenceState> self = shared_from_this();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-      @autoreleasepool {
-        try {
-          completion(ReadFile(self->url_));
-        } catch (...) {
-          completion(FileResult<Bytes>(FileError{
-              FileErrorCode::Io,
-              "HuxerUI external file read failed",
-          }));
+private:
+  __strong NSURL* url_;
+  __strong NSURL* cleanup_directory_;
+  bool accessing_;
+};
+
+FileReference MakeIosReference(NSURL* url, bool writable, std::shared_ptr<IosFileAccess> access) {
+  return MakeLocalFileReference(
+      File(MakeString(url.path)), writable, ReferenceContentType(url),
+      [access = std::move(access)](const File* reading, const File* writing, const std::function<void()>& operation) {
+        static_cast<void>(access);
+        @autoreleasepool {
+          // A coordinator belongs to this operation, while the grant owner is shared with descendants.
+          // Coordinate both sides of a copy together without serializing unrelated operations here.
+          NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
+          NSError* error = nil;
+          __block bool accessed = false;
+          __block std::exception_ptr exception;
+          void (^accessor)(NSURL*, NSURL*) = ^(NSURL* read_url, NSURL* write_url) {
+            try {
+              // Keep the coordinated URLs consistent with the existing local path/anchor. Capture C++
+              // failures inside the accessor and rethrow after coordination returns to the file worker.
+              if ((reading &&
+                   ![read_url.URLByResolvingSymlinksInPath isEqual:FileURL(*reading).URLByResolvingSymlinksInPath]) ||
+                  (writing &&
+                   ![write_url.URLByResolvingSymlinksInPath isEqual:FileURL(*writing).URLByResolvingSymlinksInPath])) {
+                throw std::system_error(std::make_error_code(std::errc::operation_not_supported));
+              }
+              operation();
+              accessed = true;
+            } catch (...) {
+              exception = std::current_exception();
+            }
+          };
+          if (reading && writing) {
+            [coordinator coordinateReadingItemAtURL:FileURL(*reading)
+                                            options:0
+                                   writingItemAtURL:FileURL(*writing)
+                                            options:0
+                                              error:&error
+                                         byAccessor:accessor];
+          } else if (writing) {
+            [coordinator coordinateWritingItemAtURL:FileURL(*writing)
+                                            options:0
+                                              error:&error
+                                         byAccessor:^(NSURL* url) {
+                                           accessor(nil, url);
+                                         }];
+          } else {
+            [coordinator coordinateReadingItemAtURL:FileURL(*reading)
+                                            options:0
+                                              error:&error
+                                         byAccessor:^(NSURL* url) {
+                                           accessor(url, nil);
+                                         }];
+          }
+          if (exception) {
+            std::rethrow_exception(exception);
+          }
+          if (!accessed || error) {
+            throw std::system_error(std::make_error_code(FileErrorCodeFor(error) == FileErrorCode::PermissionDenied
+                                                             ? std::errc::permission_denied
+                                                             : std::errc::io_error));
+          }
         }
-      }
-    });
-    return {};
-  }
-
-  std::function<void()> ImportTo(File destination, bool overwrite, FileReferenceBoolCompletion completion) override {
-    std::shared_ptr<IosFileReferenceState> self = shared_from_this();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-      @autoreleasepool {
-        completion(ImportFile(self->url_, destination, overwrite));
-      }
-    });
-    return {};
-  }
-
-  std::function<void()> ReplaceWith(File source, FileReferenceBoolCompletion completion) override {
-    std::shared_ptr<IosFileReferenceState> self = shared_from_this();
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-      @autoreleasepool {
-        completion(ReplaceFile(self->url_, source));
-      }
-    });
-    return {};
-  }
-
-private:
-  __strong NSURL* url_;
-  __strong NSURL* cleanup_directory_ = nil;
-  bool accessing_ = false;
-};
-
-class SecurityScopedAccess final {
-public:
-  explicit SecurityScopedAccess(NSURL* url) : url_(url), accessing_([url startAccessingSecurityScopedResource]) {}
-
-  ~SecurityScopedAccess() {
-    if (accessing_) {
-      [url_ stopAccessingSecurityScopedResource];
-    }
-  }
-
-  SecurityScopedAccess(const SecurityScopedAccess&) = delete;
-  SecurityScopedAccess& operator=(const SecurityScopedAccess&) = delete;
-
-private:
-  __strong NSURL* url_;
-  bool accessing_ = false;
-};
+      });
+}
 
 class IosOpenPickerOperation final : public std::enable_shared_from_this<IosOpenPickerOperation> {
 public:
   explicit IosOpenPickerOperation(FilePickerOpenCompletion completion) : completion_(std::move(completion)) {}
 
-  void Start(FilePickerFilter filter, bool multiple, UIViewController* owner) {
+  void Start(FilePickerFilter filter, bool multiple, UIViewController* owner, bool directory = false,
+             bool writable = true) {
+    writable_ = writable;
     UIViewController* presenter = VisiblePresenter(owner);
     if (presenter == nil) {
       Complete({});
       return;
     }
 
-    UIDocumentPickerViewController* picker = OpenPicker(filter, multiple);
+    UIDocumentPickerViewController* picker =
+        directory ? [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[ UTTypeFolder ] asCopy:NO]
+                  : OpenPicker(filter, multiple);
+    if (directory) {
+      picker.allowsMultipleSelection = NO;
+    }
     if (picker == nil) {
       Complete({});
       return;
@@ -559,16 +491,29 @@ public:
 
 private:
   void Selected(NSArray<NSURL*>* urls) noexcept {
-    std::vector<FileReference> references;
+    // NSURL retention crosses the worker hop. Metadata and anchor creation can block, whereas picker
+    // dismissal and completion must return to the main queue even if cancellation races this work.
+    auto self = shared_from_this();
+    const bool writable = writable_;
     try {
-      references.reserve(urls.count);
-      for (NSURL* url in urls) {
-        references.push_back(MakeIosFileReference(url));
-      }
+      EnqueueFileOperation([self, urls, writable] {
+        @autoreleasepool {
+          std::vector<FileReference> references;
+          try {
+            for (NSURL* url in urls) {
+              references.push_back(MakeIosFileReference(url, writable));
+            }
+          } catch (...) {
+            references.clear();
+          }
+          dispatch_async(dispatch_get_main_queue(), ^{
+            self->Complete(std::move(references));
+          });
+        }
+      });
     } catch (...) {
-      references.clear();
+      Complete({});
     }
-    Complete(std::move(references));
   }
 
   void Complete(std::vector<FileReference> references) noexcept {
@@ -596,6 +541,7 @@ private:
   __strong UIDocumentPickerViewController* picker_ = nil;
   __strong HuxerUIIOSDocumentPickerDelegate* delegate_ = nil;
   FilePickerOpenCompletion completion_;
+  bool writable_ = true;
   bool finished_ = false;
 };
 
@@ -721,6 +667,16 @@ public:
     return true;
   }
 
+  bool CanOpenDirectories(bool) const noexcept override {
+    return true;
+  }
+
+  std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) override {
+    auto operation = std::make_shared<IosOpenPickerOperation>(std::move(completion));
+    operation->Start({}, false, presenter_provider_ ? presenter_provider_() : nil, true, writable);
+    return [operation] { operation->Cancel(); };
+  }
+
   std::function<void()>
   OpenFiles(FilePickerFilter filter, bool multiple, FilePickerOpenCompletion completion) override {
     auto operation = std::make_shared<IosOpenPickerOperation>(std::move(completion));
@@ -740,12 +696,11 @@ private:
 
 } // namespace
 
-FileReference MakeIosFileReference(NSURL* url) {
+FileReference MakeIosFileReference(NSURL* url, bool writable) {
   if (url == nil || !url.isFileURL) {
     throw std::logic_error("HuxerUI iOS file reference requires a file URL");
   }
-  auto state = std::make_shared<IosFileReferenceState>(url);
-  return MakeFileReference(ReferenceMetadata(url), std::move(state));
+  return MakeIosReference(url, writable, std::make_shared<IosFileAccess>(url));
 }
 
 FileReference MakeCopiedIosFileReference(NSURL* url) {
@@ -753,10 +708,9 @@ FileReference MakeCopiedIosFileReference(NSURL* url) {
     throw std::logic_error("HuxerUI copied iOS file reference requires a file URL");
   }
 
-  SecurityScopedAccess access(url);
+  IosFileAccess access(url);
   __strong NSURL* directory = nil;
   try {
-    FileReferenceMetadata metadata = ReferenceMetadata(url);
     NSURL* temporary_root = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     NSString* directory_name = [@"huxerui-activation-" stringByAppendingString:NSUUID.UUID.UUIDString];
     directory = [temporary_root URLByAppendingPathComponent:directory_name isDirectory:YES];
@@ -771,9 +725,7 @@ FileReference MakeCopiedIosFileReference(NSURL* url) {
       throw std::runtime_error("HuxerUI could not copy the temporary iOS document activation");
     }
 
-    metadata.can_write = false;
-    auto state = std::make_shared<IosFileReferenceState>(copied_url, directory);
-    return MakeFileReference(std::move(metadata), std::move(state));
+    return MakeIosReference(copied_url, false, std::make_shared<IosFileAccess>(copied_url, directory));
   } catch (...) {
     if (directory != nil) {
       [NSFileManager.defaultManager removeItemAtURL:directory error:nil];

@@ -37,10 +37,11 @@ public:
   }
 
   std::function<void()>
-  ImportTo(File destination, bool overwrite, detail::FileReferenceBoolCompletion completion) override {
+  ImportTo(File destination, bool overwrite, detail::FileReferenceCompletion<std::uint64_t> completion) override {
     imported_to = std::move(destination);
     imported_with_overwrite = overwrite;
-    completion(import_succeeds);
+    completion(import_succeeds ? FileResult<std::uint64_t>(bytes.size()) :
+                                 FileResult<std::uint64_t>(FileError{FileErrorCode::Io, "HuxerUI test import failed"}));
     return {};
   }
 
@@ -124,6 +125,15 @@ public:
 
   bool can_open_files = true;
   bool can_save_files = true;
+  bool can_open_directories = true;
+  std::vector<bool> directory_requests;
+
+  bool CanOpenDirectories(bool) const noexcept override { return can_open_directories; }
+
+  std::function<void()> OpenDirectory(bool writable, detail::FilePickerOpenCompletion completion) override {
+    directory_requests.push_back(writable);
+    return OpenFiles({}, false, std::move(completion));
+  }
   std::vector<OpenCall> open_calls;
   std::vector<SaveCall> save_calls;
 };
@@ -391,6 +401,47 @@ TEST_CASE("CancelingFilePickerRequestsPreservesPlatformPresentationOrder") {
   REQUIRE(opened_references.size() == 2);
   REQUIRE(opened_references[0].Name() == "first.txt");
   REQUIRE(opened_references[1].Name() == "second.txt");
+}
+
+TEST_CASE("FilePickerDirectoriesShareThePresentationQueueAndRejectWrongResults") {
+  ResetFilePickerState();
+  FilePickerTestPlatform platform;
+  Runtime runtime(FilePickerApp, platform);
+  runtime.BuildFrame();
+  REQUIRE(file_picker->CanOpenDirectories());
+  REQUIRE(file_picker->CanOpenDirectories(true));
+  bool completed = false;
+  file_picker_tasks.Launch([&]() -> Task<void> {
+    opened_reference = co_await file_picker->OpenDirectoryAsync();
+    completed = true;
+  });
+  file_picker_tasks.Launch(CaptureOpenedFiles(file_picker));
+  platform.RunPlatformModuleTasks();
+  REQUIRE((platform.transport->directory_requests == std::vector<bool>{false}));
+  REQUIRE(platform.transport->open_calls.size() == 1);
+  REQUIRE_FALSE(platform.transport->open_calls.front().multiple);
+  platform.transport->CompleteOpen(0, {MakeReference()});
+  platform.RunPlatformModuleTasks();
+  REQUIRE(completed);
+  REQUIRE_FALSE(opened_reference);
+  REQUIRE(platform.transport->open_calls.size() == 2);
+  platform.transport->CompleteOpen(1, {});
+  platform.RunPlatformModuleTasks();
+  completed = false;
+  file_picker_tasks.Launch([&]() -> Task<void> {
+    opened_reference = co_await file_picker->OpenDirectoryAsync(true);
+    completed = true;
+  });
+  platform.RunPlatformModuleTasks();
+  auto readonly = detail::MakeFileReference({.name = "directory", .can_write = false, .type = FileType::Directory},
+      std::make_shared<TestFileReferenceState>(Bytes{}));
+  platform.transport->CompleteOpen(2, {readonly});
+  platform.RunPlatformModuleTasks();
+  REQUIRE(completed);
+  REQUIRE_FALSE(opened_reference);
+  REQUIRE(platform.transport->directory_requests.back());
+  platform.transport->can_open_directories = false;
+  REQUIRE_FALSE(file_picker->CanOpenDirectories());
 }
 
 } // namespace huxerui::test

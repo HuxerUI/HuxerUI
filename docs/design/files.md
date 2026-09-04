@@ -18,7 +18,8 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 
 ## Non-goals
 
-The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, directory pickers, or a document-provider abstraction.
+The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, streaming I/O, or a document-provider abstraction.
+Directory copying does not add multi-directory selection, mixed file/directory selection, recursive deletion of grants, mirroring, moves, metadata preservation, transactions, rollback, resumability, or a progress-controller API.
 
 It also does not persist picker grants across process launches or add drag-and-drop, clipboard, recent-file, or share-sheet APIs.
 Those capabilities may reuse `FileReference` later without expanding the initial picker contract.
@@ -44,8 +45,8 @@ The public model consists of:
 - `FileError` and `FileResult<T>`, used only where a legitimate empty value must remain distinct from failure.
 - `AppDirectories`, immutable application-owned locations represented as `File` values.
 - `FileSystem`, the Runtime-installed Root Service that exposes application and process directories.
-- `FileReference`, an immutable handle to one platform-granted external file.
-- `FilePicker`, the Runtime-installed Root Service for opening and saving user-visible files.
+- `FileReference`, an immutable capability for one platform-granted external file or directory.
+- `FilePicker`, the Runtime-installed Root Service for opening files, selecting a directory, and saving user-visible files.
 
 `File` does not have an empty state and does not provide `HasValue()`.
 Code uses `std::optional<File>` when absence is meaningful.
@@ -175,6 +176,7 @@ enum class FileErrorCode {
   InvalidEncoding,
   Unsupported,
   Io,
+  AlreadyExists,
 };
 
 struct FileError {
@@ -201,7 +203,8 @@ public:
 ```
 
 The public API has no `FileResult<void>` specialization.
-Mutating operations return `bool`; `FileResult<T>` remains limited to metadata, enumeration, and reads where empty output is valid and cannot represent failure.
+Existing simple mutating operations return `bool`.
+Directory-reference creation and copying return `FileResult<T>` containing the resulting reference or copy summary, preserving conflict and provider errors without introducing a second result system.
 
 Calling `Value()` on an error or `Error()` on a value throws `std::logic_error`.
 Operational failures never escape these result-returning methods as filesystem exceptions.
@@ -303,7 +306,7 @@ The single Boolean argument directly expresses whether an existing destination m
 The API does not introduce an `ExistingFilePolicy` enum for that binary choice.
 
 The initial `CopyTo()` copies one ordinary file and does not recursively copy directories.
-Directory copy is not supported because the current copy operation must not hide an unbounded traversal.
+Recursive copying uses the explicitly named `FileReference::CopyDirectoryContentsToAsync()` rather than hiding an unbounded traversal in the existing single-file operation.
 
 `MoveTo()` uses the local filesystem's platform move operation and returns `false` when it cannot complete that operation.
 It does not silently turn a cross-device move into copy followed by deletion.
@@ -356,7 +359,7 @@ User-visible documents and granted external locations use the separate `FileRefe
 
 ## External file references
 
-`FileReference` represents permission to access one external file selected by the user or supplied to the application by the platform:
+`FileReference` represents permission to access one external file or directory selected by the user or supplied to the application by the platform:
 
 ```cpp
 class FileReference final {
@@ -371,11 +374,19 @@ public:
   [[nodiscard]] std::optional<std::uint64_t> Size() const;
   [[nodiscard]] std::optional<std::string> ContentType() const;
   [[nodiscard]] bool CanWrite() const noexcept;
+  [[nodiscard]] FileType Type() const noexcept;
 
   [[nodiscard]] Task<FileResult<Bytes>> ReadBytesAsync() const;
   [[nodiscard]] Task<FileResult<std::string>> ReadStringAsync() const;
   [[nodiscard]] Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
   [[nodiscard]] Task<bool> ReplaceWithAsync(File source) const;
+
+  [[nodiscard]] Task<FileResult<std::vector<FileReference>>> ListChildrenAsync() const;
+  [[nodiscard]] Task<FileResult<FileReference>> CreateDirectoryAsync(std::string name) const;
+  [[nodiscard]] Task<FileResult<FileReference>> CopyFileFromAsync(File source, std::string name, bool overwrite = false) const;
+  [[nodiscard]] Task<FileResult<FileReference>> CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
+  [[nodiscard]] Task<FileResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
+  [[nodiscard]] Task<FileResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(FileReference destination, bool overwrite = false) const;
 };
 ```
 
@@ -397,6 +408,70 @@ Neither operation exposes a platform path or silently grants broader access.
 Each value retains shared private platform state.
 Copying a value retains the grant, and destruction of the last copy releases process-scoped resources such as Apple security-scope access, Android provider state, or a browser handle.
 The public API does not serialize references or promise that a grant remains valid after application restart.
+
+### Directory capabilities and copying
+
+`Type()` is creation-time metadata obtained from authoritative platform item information, including Android's `MIME_TYPE_DIR`, not guessed from a display name or file extension.
+Directory size and content type are absent; no recursive metadata scan is implied.
+Operations recheck current item state because deletion, replacement, and permission revocation can occur after selection.
+Directory reads fail with `IsDirectory`, and existing Boolean import/replacement operations return `false` without traversing.
+Unsupported item kinds use `FileType::Other` and fail with `Unsupported` rather than being followed or silently skipped.
+
+`ListChildrenAsync()` returns all immediate children or an error, with no sorting, hidden-item filtering, or file reads.
+Each child retains its own item identity and shares the selected root's grant owner; parent destruction does not invalidate retained children or active I/O.
+The effective write restriction cannot increase when a child is derived, and selecting the same location again does not upgrade an earlier read-only capability.
+`CanWrite()` on a directory advertises child creation, not blanket authority to replace its existing files.
+
+`CreateDirectoryAsync(name)` creates one direct child or returns the existing directory of that name; another item kind produces `AlreadyExists`.
+`CopyFileFromAsync(source, name, overwrite)` accepts an ordinary local file or file reference and returns the destination reference only after streamed output is finalized.
+Both require a writable directory receiver and never create intermediate directories implicitly.
+Caller names are valid UTF-8 single segments excluding empty names, `.`, `..`, NUL, and either slash; invalid names throw `std::invalid_argument` before the lazy Task is returned.
+Unrepresentable provider names and destination restrictions are operational errors, not caller exceptions.
+Creation verifies the requested name rather than accepting provider-added extensions, normalization, or duplicate suffixes; cleanup is limited to an item known to have been newly created by that operation.
+
+```cpp
+struct DirectoryCopySummary {
+  std::uint64_t files_copied = 0;
+  std::uint64_t directories_created = 0;
+  std::uint64_t bytes_copied = 0;
+
+  bool operator==(const DirectoryCopySummary&) const = default;
+};
+```
+
+`CopyDirectoryContentsToAsync()` copies source children into an existing local or granted directory without adding the source root's name.
+It preserves names, relative hierarchy, hidden files, empty directories, and file bytes; existing directories merge and destination-only items survive.
+Existing files produce `AlreadyExists` unless `overwrite` is true, while kind conflicts and distinct source names resolving to the same destination entry always fail.
+Native exclusive-create primitives are used where available, but the shared contract does not promise atomic no-overwrite against external concurrent namespace changes on providers or browsers that lack them.
+The copy is neither an externally isolated operation nor a point-in-time snapshot; no global locking or transaction protocol is introduced to simulate one.
+
+Identity and containment checks reject identical or overlapping roots in either direction before writes, including local/reference aliases when the platform exposes them.
+Potentially related locations without a reliable containment check fail with `Unsupported` before copying.
+Do not infer independence from display names or URI prefixes, follow identifiable traversal-changing links, or recurse into repeated ancestor identities.
+Descendant operations stay bound to their granted authority using native handles or equivalently constrained provider operations; platform authorities remain the boundary for indirections they do not expose.
+
+Shared code owns validation, traversal, collision policy, counters, diagnostics, and Task integration through the existing private `FileReferenceState` boundary.
+Platforms own enumeration, creation, native identities, authorization, and single-file transfer/finalization; a data block need not cross JNI or resume a shared coroutine merely to unify byte-copy loops.
+The shared write path passes the preceding child lookup to the destination operation; this operation-local result avoids a second provider directory scan, but does not replace final authorization, type, or native exclusive-create checks.
+Backends whose child lookup is an exact display-name listing scan opt into one destination-name index per active copy frame, avoiding repeated scans as output grows.
+The index preserves duplicate-name ambiguity, is updated after successful writes, and is discarded with the frame; later copies enumerate again, and native filename resolution remains authoritative for other backends.
+The destination state returns the written reference, actual byte count, and creation status directly.
+Local directory frames retain their destination state; supported provider-to-local copies use the source's streaming import and then confirm the finalized local reference on the file worker, preserving import and metadata errors.
+Local paths and path-backed grants share one implementation-only final state in `src/file.cpp`; Windows and Linux use it directly, while Apple supplies retained access and coordinated-operation callbacks.
+Local destinations use this same state without manufacturing a public reference or adding a filesystem, service, registry, or storage backend.
+A selected file does not require opening or modifying its parent directory; directory-derived references share a root directory anchor and resolve descendants without following traversal-changing links.
+Each native enumeration opens an independent directory description rather than duplicating a shared enumeration cursor.
+Single-file import and directory copying share the same bounded transfer primitive and report its actual byte count; Java and JavaScript keep this primitive within their existing platform bridge.
+Android picker and reference operations return the same metadata objects through JNI, decoded with cached field identifiers in the existing bridge.
+Web picker and reference operations share stateless description and transfer functions while retaining separate cancellation and stream state.
+Traversal retains the active directory stack and sibling collision state rather than materializing the whole tree; transfers use bounded buffers and never stage a complete external tree locally.
+Native blocking work uses the existing worker facilities, Android retains its existing bounded Java executor, and Web uses its event loop and persistence queue.
+
+Success counts finalized files, directories newly created below the destination root, and actual bytes transferred; merged directories and roots are not counted as created.
+The first failure returns a `FileError` whose English diagnostic begins with `HuxerUI` and identifies the operation stage, side, and escaped source-relative path without exposing native paths or capability URIs.
+Failure and cancellation retain completed output and may leave a partial current file; no success summary or recursive rollback is produced.
+Cancellation stops subsequent work, closes owned I/O where safe, and suppresses late application continuations while uninterruptible platform operations may finish.
+Successful persistent Web output also waits for synchronization; partial mutations still honor the existing persistence and queue-completion contract.
 
 ## File picker
 
@@ -425,10 +500,12 @@ public:
 
   [[nodiscard]] bool CanOpenFiles() const noexcept;
   [[nodiscard]] bool CanSaveFiles() const noexcept;
+  [[nodiscard]] bool CanOpenDirectories(bool writable = false) const noexcept;
 
   [[nodiscard]] Task<std::optional<FileReference>> OpenFileAsync(FilePickerFilter filter = {}) const;
   [[nodiscard]] Task<std::vector<FileReference>> OpenFilesAsync(FilePickerFilter filter = {}) const;
   [[nodiscard]] Task<bool> SaveFileAsync(File source, SaveFileOptions options = {}) const;
+  [[nodiscard]] Task<std::optional<FileReference>> OpenDirectoryAsync(bool writable = false) const;
 };
 ```
 
@@ -451,6 +528,10 @@ Saving bytes or strings directly is outside the public surface; code may write a
 
 Only one picker presentation may be active for a Runtime.
 Concurrent requests are serialized in call order.
+Directory requests use this same queue and select exactly one existing directory without file filters.
+`writable = false` restricts the returned reference and descendants to read access even if the platform account has broader rights.
+`writable = true` requests read/write access and returns no selection if that access cannot be obtained; it never silently downgrades the request.
+`CanOpenDirectories(writable)` checks host support without UI or probe-file creation and does not promise that the user or a selected provider will grant access.
 Task cancellation attempts to dismiss the platform picker when supported and otherwise detaches the continuation; Runtime destruction cancels queued requests and releases their retained state.
 
 ## Application activation boundary
@@ -523,14 +604,15 @@ Filesystem-specific case folding, symbolic-link resolution, and permission check
 ## Platform mapping
 
 macOS maps durable data to Application Support, cache data to Caches, temporary data to the platform temporary directory, and the executable location to the application executable directory.
-Its picker transport presents `NSOpenPanel` and `NSSavePanel`, maps the union filter through UTType where possible, and retains security-scoped URL access inside `FileReference` when required.
+Its picker transport selects folders with `NSOpenPanel.canChooseDirectories` and otherwise presents `NSOpenPanel` and `NSSavePanel`, maps the union filter through UTType where possible, and retains security-scoped URL access inside `FileReference` when required.
 Reads, imports, and replacements use coordinated file access off the UI thread, while cancellation dismisses active panels and detaches work that cannot be interrupted safely.
 
 iOS independently maps durable data to Application Support, cache data to Caches, and temporary data to the application temporary directory.
 Its executable directory is read-only and is never used as a replacement for packaged HuxerUI resources.
 Its picker transport presents `UIDocumentPickerViewController`, maps union filters through `UTType`, and retains security-scoped URLs inside `FileReference`.
 Application document activations use the same retained capability for open-in-place URLs. When UIKit marks a delivery as copy-before-use, the application adapter copies it into a private read-only temporary snapshot before returning from the native callback, and the shared `FileReference` state removes that snapshot after its last owner releases it.
-External reads, imports, and replacements use coordinated file access off the main thread.
+Directory selection requests `UTTypeFolder` in open-in-place mode rather than importing a temporary directory snapshot.
+External reads, imports, replacements, and directory operations use coordinated file access off the main thread; a copy coordinates its read and write locations together.
 Saving exports a copy of the local source, stages a temporary copy only when the suggested filename differs, and removes that staging directory after completion or cancellation.
 
 Android obtains the durable and cache roots from the application Context, creates an application-owned temporary child under the cache root, and exposes the packaged C++ library directory as a read-only executable location.
@@ -539,6 +621,13 @@ Its picker transport uses `ACTION_OPEN_DOCUMENT` for single and multiple selecti
 Extensions are mapped through `MimeTypeMap` when possible; an unrecognized extension deliberately widens the advisory filter rather than hiding a valid document.
 The returned `content://` grant remains private to `FileReference`, while display name, size, MIME type, and provider write support populate its public metadata.
 Reads, imports, replacements, and save copies use a bounded Java worker executor, close active streams during cancellation, and atomically replace an existing local import destination within its parent directory.
+Directory selection uses `ACTION_OPEN_DOCUMENT_TREE`, retains the returned tree authority, and derives children through `DocumentsContract` rather than reconstructing local paths.
+Read-only selection masks write access for every derived reference; writable selection additionally requires `FLAG_DIR_SUPPORTS_CREATE`, while an existing file requires its own write support.
+The retained write-grant restriction is carried separately from each metadata snapshot's write capability, so a child directory without creation support does not make its independently writable existing files read-only.
+For two selected trees, containment checks require the same provider authority, Android API 29 or later, and working `isChildDocument()` checks in both directions.
+Different authorities or unavailable containment checks return `Unsupported`; they are not assumed independent.
+Copying a selected tree into a local `File` is supported when the destination is inside application-private data and the provider belongs to a different UID; other local destinations remain unsupported when their independence cannot be established.
+Incomplete provider listings and virtual documents without an ordinary byte stream are unsupported rather than silently omitted or converted.
 The initial adapter retains process-scoped URI access only and does not call `takePersistableUriPermission()`.
 
 `HuxerUIActivity` installs the SAF launcher and forwards Activity results automatically.
@@ -546,9 +635,14 @@ An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its o
 Without that host capability, `CanOpenFiles()` and `CanSaveFiles()` return `false` while local `FileSystem` access remains available.
 
 Windows uses the application's Local App Data identity for durable data, application-specific cache and temporary children, and the directory containing the process executable.
-Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection.
+Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection, adding `FOS_PICKFOLDERS` for a single directory.
 Filters map extension values directly and exact MIME types through the Windows registry; wildcard or unknown MIME mappings deliberately widen the system filter rather than excluding valid documents.
 Selected filesystem paths remain private to `FileReference`, and metadata reports the filename, size, registered MIME type when available, and basic write capability.
+File and directory grants retain a metadata-only handle without locking idle ancestors; descendant access opens one child at a time with `NtCreateFile` relative to its parent's handle and rejects traversal-changing reparse points.
+`ReOpenFile` obtains operation-specific access and independent enumeration cursors from retained objects; enumeration, creation, overwrite finalization, and temporary-file cleanup use handles rather than reconstructed paths.
+Normalized names queried from those handles are used only for metadata and root-containment checks, never to reopen or mutate an entry.
+If a grant or ancestor is renamed, access remains bound to the original object or fails; a replacement at the old path does not acquire the grant, and retaining a reference does not freeze the surrounding namespace.
+All Windows picker references use this native backend; a foreign source that only supports path-based import is unsupported because handing it a reconstructed destination path would bypass the retained directory authority.
 Reads, imports, replacements, and save copies reuse the shared core worker executor while dialog presentation and cancellation stay on the existing UI dispatcher.
 The adapter does not request persistent grants, expose platform paths publicly, or add a second Windows-specific file abstraction.
 
@@ -566,7 +660,8 @@ Task cancellation completes the transport operation immediately and closes the p
 Filters map extensions to glob rules and MIME values to MIME rules inside one union filter.
 Successful `file://` results remain private Linux `FileReference` state; metadata reflects the selected file, while reads, imports, replacements, and save copies reuse the shared core worker executor.
 Saving reports success only after the source file has been copied over the portal-confirmed destination.
-This implementation does not add GTK or Qt fallback dialogs, Wayland parent handles, directory selection, or persistent grants.
+Directory mode uses `directory = true` and `multiple = false` only when the FileChooser interface advertises version 3 or later.
+This implementation does not add GTK or Qt fallback dialogs, Wayland parent handles, or persistent grants.
 
 Web maps application-private storage through the browser filesystem design below and has no executable directory.
 Its picker transport uses browser file handles when available and an input-element fallback for opening; unsupported save capabilities remain visible through the capability contract.
@@ -586,9 +681,13 @@ Both paths support single and multiple selection, metadata, asynchronous reads, 
 `CanSaveFiles()` is true only when `showSaveFilePicker()` and writable file handles are available.
 The adapter does not treat an anchor download as successful picker output because a download cannot report platform cancellation, overwrite choice, or completed replacement through the shared `bool` result.
 Saving streams the selected local Emscripten file only after the browser returns a destination handle and reports success after the writable stream closes.
+Read, import, replacement, and directory operations use one private operation owner; import, replacement, save, and directory copy reuse one transfer loop.
+External file reads for copying use explicit 64 KiB Blob slices rather than assuming browser-provided stream chunks have a fixed bound.
 
 Browser picker presentation requires transient user activation.
-Application code starts the picker directly from a click or equivalent event and does not place `Delay()`, HTTP work, or another suspension before `OpenFileAsync()`, `OpenFilesAsync()`, or `SaveFileAsync()`.
+Directory selection uses `showDirectoryPicker()` with `read` or `readwrite` access and does not substitute an uploaded `webkitdirectory` file list for a live grant.
+Source and destination directory selection start from separate user actions rather than chaining dialogs after asynchronous work.
+Application code starts the picker directly from a click or equivalent event and does not place `Delay()`, HTTP work, or another suspension before `OpenFileAsync()`, `OpenFilesAsync()`, `OpenDirectoryAsync()`, or `SaveFileAsync()`.
 A browser dialog cannot generally be dismissed by script, so Task cancellation detaches the HuxerUI continuation while the transport waits for the platform picker to settle before advancing the shared presentation queue.
 
 Handle and browser `File` lifetimes follow the corresponding `FileReference` and remain session scoped.
@@ -653,6 +752,7 @@ It preserves the existing `bool` contract: success is never reported before Inde
 Web does not enable Emscripten pthreads, create a worker-backed filesystem, or require cross-origin isolation for local file operations.
 It replaces the platform filesystem executor with one module-owned serial queue scheduled through the browser event loop.
 Virtual filesystem access still runs on the browser main thread and may briefly occupy that thread; documentation must not claim that Web file work executes on a background thread.
+Bounded transfer buffers do not imply bounded total storage memory: local MEMFS/IDBFS file contents remain memory-resident, including when a directory copy targets a local `File`.
 
 An asynchronous persistent mutation performs the virtual filesystem operation and then explicitly calls `FS.syncfs(false)`.
 Its Task completes with `true` only after both stages succeed.

@@ -22,7 +22,7 @@ class FilePickerTransport;
 #ifdef __OBJC__
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateMacFilePickerTransport(std::function<NSWindow*()> window_provider);
-[[nodiscard]] FileReference MakeMacFileReference(NSURL* url);
+[[nodiscard]] FileReference MakeMacFileReference(NSURL* url, bool writable = true);
 #endif
 
 } // namespace huxerui::detail

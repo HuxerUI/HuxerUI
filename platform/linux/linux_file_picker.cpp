@@ -150,6 +150,9 @@ bool StartService(GDBusConnection* connection, std::string_view name) {
   return reply.Get() != nullptr;
 }
 
+// Owns the D-Bus context and request subscriptions, not file access after selection. Portal work runs
+// on this context, blocking metadata/copy work runs on file workers, and shared Task delivery returns
+// to the Runtime thread. Shutdown must account for outstanding method replies as well as signals.
 class PortalConnection final : public std::enable_shared_from_this<PortalConnection> {
 public:
   static std::shared_ptr<PortalConnection> Create(std::optional<std::string> bus_address) {
@@ -179,6 +182,11 @@ public:
 
   [[nodiscard]] bool Available() const noexcept {
     return available_.load(std::memory_order_acquire);
+  }
+
+  [[nodiscard]] bool CanOpenDirectories() const noexcept {
+    // Directory selection is a versioned FileChooser capability, not implied by portal availability.
+    return Available() && chooser_version_.load() >= 3;
   }
 
   [[nodiscard]] std::uint64_t ObserveUnavailable(std::function<void()> callback) {
@@ -270,6 +278,23 @@ private:
   explicit PortalConnection(std::optional<std::string> bus_address)
       : bus_address_(std::move(bus_address)), context_(g_main_context_new()), loop_(g_main_loop_new(context_, false)) {}
 
+  void ReadChooserVersion() {
+    VariantHandle reply(g_dbus_connection_call_sync(
+        connection_, kPortalService, kPortalObject, "org.freedesktop.DBus.Properties", "Get",
+        g_variant_new("(ss)", kFileChooserInterface, "version"), G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE,
+        kPortalCallTimeoutMs, nullptr, nullptr));
+    guint32 version = 0;
+    if (reply.Get()) {
+      GVariant* boxed = nullptr;
+      g_variant_get(reply.Get(), "(v)", &boxed);
+      VariantHandle value(boxed);
+      if (value.Get() && g_variant_is_of_type(value.Get(), G_VARIANT_TYPE_UINT32)) {
+        version = g_variant_get_uint32(value.Get());
+      }
+    }
+    chooser_version_.store(version);
+  }
+
   bool Start() {
     thread_ = std::thread([this] { Run(); });
     std::unique_lock lock(mutex_);
@@ -339,6 +364,9 @@ private:
               (NameHasOwner(connection_, kPortalService) || StartService(connection_, kPortalService)),
           std::memory_order_release
       );
+      if (Available()) {
+        ReadChooserVersion();
+      }
     } catch (...) {
       available_.store(false, std::memory_order_release);
     }
@@ -384,6 +412,7 @@ private:
 
   void PortalOwnerChanged(const char* new_owner) noexcept {
     if (new_owner != nullptr && new_owner[0] != '\0') {
+      ReadChooserVersion();
       available_.store(true, std::memory_order_release);
       return;
     }
@@ -432,6 +461,7 @@ private:
   std::uint64_t next_observer_identifier_ = 1;
   std::size_t pending_method_calls_ = 0;
   std::atomic<bool> available_ = false;
+  std::atomic<guint32> chooser_version_ = 0;
   bool ready_ = false;
   bool running_ = false;
   bool stopping_ = false;
@@ -469,12 +499,15 @@ GVariant* PickerFilterVariant(const FilePickerFilter& filter) {
   return g_variant_new("(s@a(us))", filter.name.c_str(), g_variant_builder_end(&rules));
 }
 
-GVariant* OpenOptions(const FilePickerFilter& filter, bool multiple, std::string_view token) {
+GVariant* OpenOptions(const FilePickerFilter& filter, bool multiple, std::string_view token, bool directory) {
   GVariantBuilder options;
   g_variant_builder_init(&options, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_add(&options, "{sv}", "handle_token", g_variant_new_string(std::string(token).c_str()));
   g_variant_builder_add(&options, "{sv}", "modal", g_variant_new_boolean(true));
-  g_variant_builder_add(&options, "{sv}", "multiple", g_variant_new_boolean(multiple));
+  g_variant_builder_add(&options, "{sv}", "multiple", g_variant_new_boolean(multiple && !directory));
+  if (directory) {
+    g_variant_builder_add(&options, "{sv}", "directory", g_variant_new_boolean(true));
+  }
   if (!filter.name.empty()) {
     GVariantBuilder filters;
     g_variant_builder_init(&filters, G_VARIANT_TYPE("a(sa(us))"));
@@ -537,78 +570,14 @@ std::optional<std::string> ContentType(const File& file) {
   return std::string(mime);
 }
 
-class LinuxFileReferenceState final : public FileReferenceState {
-public:
-  explicit LinuxFileReferenceState(File file) : file_(std::move(file)) {}
-
-  std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
-    const File file = file_;
-    EnqueueFileOperation([file, completion = std::move(completion)]() mutable {
-      FileResult<Bytes> result = [&] {
-        try {
-          return file.ReadBytes();
-        } catch (...) {
-          return FileResult<Bytes>(FileError{
-              FileErrorCode::Io,
-              "HuxerUI Linux external file read failed",
-          });
-        }
-      }();
-      completion(std::move(result));
-    });
-    return {};
-  }
-
-  std::function<void()> ImportTo(File destination, bool overwrite, FileReferenceBoolCompletion completion) override {
-    const File file = file_;
-    EnqueueFileOperation(
-        [file, destination = std::move(destination), overwrite, completion = std::move(completion)]() mutable {
-          try {
-            completion(file.CopyTo(destination, overwrite));
-          } catch (...) {
-            completion(false);
-          }
-        }
-    );
-    return {};
-  }
-
-  std::function<void()> ReplaceWith(File source, FileReferenceBoolCompletion completion) override {
-    const File destination = file_;
-    EnqueueFileOperation([source = std::move(source), destination, completion = std::move(completion)]() mutable {
-      try {
-        completion(source.CopyTo(destination, true));
-      } catch (...) {
-        completion(false);
-      }
-    });
-    return {};
-  }
-
-private:
-  File file_;
-};
-
-std::optional<FileReference> MakeLinuxFileReference(const File& file) {
-  FileReferenceMetadata metadata{
-      .name = file.Name(),
-      .size = std::nullopt,
-      .content_type = std::nullopt,
-      .can_write = false,
-  };
-  const FileResult<FileInfo> info = file.Stat();
-  if (info.Succeeded()) {
-    if (info.Value().type == FileType::Directory) {
+std::optional<FileReference> MakeLinuxFileReference(const File& file, bool directory = false, bool writable = true) {
+  try {
+    auto reference = MakeLocalFileReference(file, writable, ContentType(file));
+    if (reference.Type() != (directory ? FileType::Directory : FileType::File) ||
+        (directory && writable && !reference.CanWrite())) {
       return std::nullopt;
     }
-    if (info.Value().type == FileType::File) {
-      metadata.size = info.Value().size;
-    }
-  }
-  metadata.content_type = ContentType(file);
-  metadata.can_write = access(file.Path().c_str(), W_OK) == 0;
-  try {
-    return MakeFileReference(std::move(metadata), std::make_shared<LinuxFileReferenceState>(file));
+    return reference;
   } catch (...) {
     return std::nullopt;
   }
@@ -631,7 +600,7 @@ std::vector<std::string> ResponseUris(GVariant* results) {
   return uris;
 }
 
-std::vector<FileReference> ReferencesFromUris(const std::vector<std::string>& uris) {
+std::vector<FileReference> ReferencesFromUris(const std::vector<std::string>& uris, bool directory, bool writable) {
   std::vector<FileReference> references;
   references.reserve(uris.size());
   for (const std::string& uri : uris) {
@@ -639,7 +608,7 @@ std::vector<FileReference> ReferencesFromUris(const std::vector<std::string>& ur
     if (!file.has_value()) {
       continue;
     }
-    std::optional<FileReference> reference = MakeLinuxFileReference(*file);
+    std::optional<FileReference> reference = MakeLinuxFileReference(*file, directory, writable);
     if (reference.has_value()) {
       references.push_back(std::move(*reference));
     }
@@ -649,15 +618,11 @@ std::vector<FileReference> ReferencesFromUris(const std::vector<std::string>& ur
 
 class PortalPickerOperation final : public std::enable_shared_from_this<PortalPickerOperation> {
 public:
-  PortalPickerOperation(
-      std::shared_ptr<PortalConnection> portal,
-      std::string parent_window,
-      FilePickerFilter filter,
-      bool multiple,
-      FilePickerOpenCompletion completion
-  )
+  PortalPickerOperation(std::shared_ptr<PortalConnection> portal, std::string parent_window, FilePickerFilter filter,
+                        bool multiple, FilePickerOpenCompletion completion, bool directory = false,
+                        bool writable = true)
       : portal_(std::move(portal)), parent_window_(std::move(parent_window)), filter_(std::move(filter)),
-        multiple_(multiple), open_completion_(std::move(completion)) {}
+        multiple_(multiple), directory_(directory), writable_(writable), open_completion_(std::move(completion)) {}
 
   PortalPickerOperation(
       std::shared_ptr<PortalConnection> portal,
@@ -733,17 +698,17 @@ private:
       std::scoped_lock lock(mutex_);
       request_path_ = expected_path;
     }
+    // Listen before issuing the method: a fast Response can precede the method reply. The reply may
+    // still supply another path, which MethodFinishedOnPortalThread must subscribe to or close.
     Subscribe(expected_path);
 
-    GVariant* options = save_
-                            ? SaveOptionsVariant(
-                                  save_options_,
-                                  save_options_.suggested_name.empty() ? source_->Name() : save_options_.suggested_name,
-                                  token
-                              )
-                            : OpenOptions(filter_, multiple_, token);
+    GVariant* options = save_ ? SaveOptionsVariant(save_options_,
+                                                   save_options_.suggested_name.empty() ? source_->Name()
+                                                                                        : save_options_.suggested_name,
+                                                   token)
+                              : OpenOptions(filter_, multiple_, token, directory_);
     const char* method = save_ ? "SaveFile" : "OpenFile";
-    const char* title = save_ ? "Save File" : (multiple_ ? "Open Files" : "Open File");
+    const char* title = save_ ? "Save File" : directory_ ? "Open Directory" : (multiple_ ? "Open Files" : "Open File");
     auto* operation = new std::shared_ptr<PortalPickerOperation>(shared_from_this());
     portal_->BeginMethodCall();
     g_dbus_connection_call(
@@ -874,6 +839,8 @@ private:
     }
     if (finished) {
       if (close_returned_path) {
+        // Cancellation may have closed only the predicted path. Close the actual request returned by
+        // the late method reply as well, without delivering a second application completion.
         CloseRequest(request_path_);
       }
       CleanupPortalSubscriptions();
@@ -908,6 +875,8 @@ private:
       return;
     }
     const std::vector<std::string> uris = ResponseUris(results);
+    // Portal success means the user selected a location, not that I/O succeeded. Resolve only supported
+    // local file URIs and build references or finish exporting on a worker before reporting success.
     if (save_) {
       if (uris.size() != 1) {
         FinishSave(false);
@@ -933,7 +902,7 @@ private:
     try {
       EnqueueFileOperation([self, uris] {
         try {
-          self->FinishOpen(ReferencesFromUris(uris));
+          self->FinishOpen(ReferencesFromUris(uris, self->directory_, self->writable_));
         } catch (...) {
           self->FinishOpen({});
         }
@@ -1001,6 +970,8 @@ private:
   std::string parent_window_;
   FilePickerFilter filter_;
   bool multiple_ = false;
+  bool directory_ = false;
+  bool writable_ = true;
   std::optional<File> source_;
   SaveFileOptions save_options_;
   mutable std::mutex mutex_;
@@ -1041,6 +1012,23 @@ public:
         multiple,
         std::move(completion)
     );
+    if (!portal_->Invoke([operation] { operation->Start(); })) {
+      operation->Cancel();
+    }
+    return [operation] { operation->Cancel(); };
+  }
+
+  bool CanOpenDirectories(bool) const noexcept override {
+    return portal_->CanOpenDirectories();
+  }
+
+  std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) override {
+    if (!CanOpenDirectories(writable)) {
+      completion({});
+      return {};
+    }
+    auto operation = std::make_shared<PortalPickerOperation>(portal_, ParentWindow(), FilePickerFilter{}, false,
+                                                             std::move(completion), true, writable);
     if (!portal_->Invoke([operation] { operation->Start(); })) {
       operation->Cancel();
     }

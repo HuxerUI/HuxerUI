@@ -331,6 +331,10 @@ public final class HuxerUIView extends ViewGroup {
         return permission.openSettings(permissionKind);
     }
 
+    HuxerUIFilePicker.Operation prepareOpenDirectory(long nativeHandle, boolean writable) {
+        return filePicker.prepareDirectory(nativeHandle, writable);
+    }
+
     boolean canOpenFiles() {
         return filePickerLauncher != null;
     }

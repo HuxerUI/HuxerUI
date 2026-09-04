@@ -21,9 +21,7 @@ namespace {
 
 using emscripten::val;
 
-constexpr int web_file_result_bytes = 0;
 constexpr int web_file_result_true = 1;
-constexpr int web_file_result_error = 3;
 
 constexpr int web_file_error_not_found = 0;
 constexpr int web_file_error_permission_denied = 1;
@@ -48,251 +46,214 @@ EM_JS(bool, WebCanSaveFiles, (), {
       typeof FileSystemFileHandle.prototype.createWritable === "function";
 });
 
+EM_JS(bool, WebCanOpenDirectories, (bool writable), {
+  return typeof window !== "undefined" && window.isSecureContext &&
+      typeof window.showDirectoryPicker === "function" && (!writable ||
+          (typeof FileSystemFileHandle !== "undefined" &&
+           typeof FileSystemFileHandle.prototype.createWritable === "function"));
+});
+
+EM_JS(emscripten::EM_VAL, CreateWebFileHelpers, (), {
+  // Share functions, not mutable operation state. Picker export and reference I/O each supply their
+  // own cancellation flag and writable stream, so canceling one transfer cannot abort another.
+  const describe = async (handle, file, writable, parentIdentity = "") => {
+    // A retained handle can obtain current file contents; input uploads only retain a File snapshot.
+    // Keep that distinction in private state and never advertise write-back for an upload-only File.
+    const directory = handle && handle.kind === "directory";
+    if (!directory && !file) { file = await handle.getFile(); }
+    const name = handle ? handle.name : file.name;
+    return {
+      source: {handle, file: handle ? null : file, writable,
+        identity: parentIdentity ? parentIdentity + "/" + encodeURIComponent(name) : ""},
+      name, type: directory ? 1 : 0, size: directory ? null : file.size,
+      contentType: directory ? null : file.type || null,
+      canWrite: writable && !!handle
+    };
+  };
+  const transfer = async (source, destination, overwrite, state) => {
+    // External handles and local Emscripten paths meet here without whole-file arrayBuffer reads.
+    // Bounded chunks limit transfer scratch space, not MEMFS/IDBFS memory used to retain local output.
+    let input = null;
+    let file = null;
+    let output = null;
+    let temporary = "";
+    let bytes = 0;
+    try {
+      if (source.path) {
+        if (!FS.isFile(FS.lstat(source.path).mode)) {
+          throw {fileCode: 6};
+        }
+        input = FS.open(source.path, "r");
+      } else {
+        if (source.handle && source.handle.kind !== "file") { throw {fileCode: 5}; }
+        file = source.handle ? await source.handle.getFile() : source.file;
+      }
+      if (destination.path) {
+        const existing = FS.analyzePath(destination.path).exists;
+        if (existing && (!overwrite || !FS.isFile(FS.lstat(destination.path).mode))) {
+          throw {fileCode: 7};
+        }
+        const separator = destination.path.lastIndexOf("/");
+        const prefix = destination.path.slice(0, separator + 1) + ".huxerui-" + Date.now() + "-";
+        let suffix = 0;
+        do { temporary = prefix + suffix++; } while (FS.analyzePath(temporary).exists);
+        output = FS.open(temporary, "w");
+      } else {
+        state.writable = await destination.handle.createWritable();
+      }
+      const buffer = input ? new Uint8Array(64 * 1024) : null;
+      while (!state.canceled) {
+        let chunk;
+        if (input) {
+          const count = FS.read(input, buffer, 0, buffer.byteLength, bytes);
+          if (!count) { break; }
+          chunk = buffer.subarray(0, count);
+        } else {
+          if (bytes >= file.size) { break; }
+          chunk = new Uint8Array(await file.slice(bytes, bytes + 64 * 1024).arrayBuffer());
+          if (!chunk.byteLength) { throw {fileCode: 3}; }
+        }
+        if (state.canceled) { throw {fileCode: 3}; }
+        if (output) {
+          let offset = 0;
+          while (offset < chunk.byteLength) {
+            const count = FS.write(output, chunk, offset, chunk.byteLength - offset, bytes + offset);
+            if (!count) { throw {fileCode: 3}; }
+            offset += count;
+          }
+        } else {
+          await state.writable.write(chunk);
+        }
+        bytes += chunk.byteLength;
+        if (!Number.isSafeInteger(bytes)) { throw {fileCode: 2}; }
+      }
+      if (state.canceled) { throw {fileCode: 3}; }
+      if (output) {
+        // Finalize before reporting bytes: local output is renamed from a sibling temporary, while
+        // external writable output commits on close. Persistent local output still needs C++ syncfs.
+        FS.close(output);
+        output = null;
+        FS.rename(temporary, destination.path);
+        temporary = "";
+      } else {
+        await state.writable.close();
+        state.writable = null;
+      }
+      return bytes;
+    } finally {
+      if (input) { FS.close(input); }
+      if (output) { try { FS.close(output); } catch (_) {} }
+      if (temporary) { try { FS.unlink(temporary); } catch (_) {} }
+      if (state.writable) {
+        try { await state.writable.abort(); } catch (_) {}
+        state.writable = null;
+      }
+    }
+  };
+  return Emval.toHandle({describe, transfer});
+});
+
+const val& WebFileHelpers() {
+  thread_local const val helpers = val::take_ownership(CreateWebFileHelpers());
+  return helpers;
+}
+
 EM_JS(emscripten::EM_VAL, CreateWebReferenceOperation, (emscripten::EM_VAL source_handle), {
-  const operation = {
-    source: Emval.toValue(source_handle),
-    nativeHandle: 0,
-    reader: null,
-    stream: null,
-    temporaryPath: "",
-    writable: null,
-    finished: false,
-    canceled: false,
-    finish: null,
-  };
-  operation.failure = (error) => {
-    const name = error && typeof error.name === "string" ? error.name : "";
-    let code = 3;
-    if (name === "NotFoundError") {
-      code = 0;
-    } else if (name === "NotAllowedError" || name === "SecurityError") {
-      code = 1;
-    } else if (name === "QuotaExceededError" || name === "RangeError") {
-      code = 2;
-    }
-    const detail = error instanceof Error && error.message ? ": " + error.message : "";
-    return {kind: 3, errorCode: code, message: "HuxerUI external file operation failed" + detail};
-  };
-  return Emval.toHandle(operation);
+  return Emval.toHandle({source: Emval.toValue(source_handle), writable: null, canceled: false});
 });
 
-EM_JS(void, StartWebReferenceRead, (emscripten::EM_VAL operation_handle, std::uintptr_t native_handle), {
+EM_JS(void, StartWebReferenceOperation,
+    (emscripten::EM_VAL operation_handle, emscripten::EM_VAL request_handle, std::uintptr_t native_handle,
+     emscripten::EM_VAL helper_handle), {
+  const helper = Emval.toValue(helper_handle);
   const operation = Emval.toValue(operation_handle);
-  if (!operation || operation.finished || operation.nativeHandle) {
-    return;
-  }
-  operation.nativeHandle = native_handle;
-  operation.finish = (result) => {
-    if (operation.finished) {
-      return;
+  const request = Emval.toValue(request_handle);
+  const source = operation.source;
+  const fail = (code) => { throw {fileCode: code}; };
+  const lookup = async (name) => {
+    try {
+      return await source.handle.getFileHandle(name);
+    } catch (error) {
+      if (error.name === "NotFoundError") { return null; }
+      if (error.name !== "TypeMismatchError") { throw error; }
+      return await source.handle.getDirectoryHandle(name);
     }
-    operation.finished = true;
-    const callbackHandle = operation.nativeHandle;
-    operation.nativeHandle = 0;
-    operation.source = null;
-    if (operation.canceled) {
-      result = {kind: 4, errorCode: 3, message: "HuxerUI external file operation was canceled"};
-    }
-    Module._huxerui_web_file_reference_complete(callbackHandle, Emval.toHandle(result));
   };
-
-  Promise.resolve()
-      .then(async () => {
-        const source = operation.source;
-        const file = source.handle ? await source.handle.getFile() : source.file;
-        if (!(file instanceof File)) {
-          throw new DOMException("External file is unavailable", "NotFoundError");
-        }
-        return new Uint8Array(await file.arrayBuffer());
-      })
-      .then(
-          (bytes) => operation.finish({kind: 0, bytes}),
-          (error) => operation.finish(operation.failure(error)));
-});
-
-EM_JS(void, StartWebReferenceReplace,
-    (emscripten::EM_VAL operation_handle, const char* source_path, std::uintptr_t native_handle), {
-  const operation = Emval.toValue(operation_handle);
-  if (!operation || operation.finished || operation.nativeHandle) {
-    return;
-  }
-  operation.nativeHandle = native_handle;
-  const sourcePath = UTF8ToString(source_path);
-  operation.finish = (result) => {
-    if (operation.finished) {
-      return;
+  const describe = (handle) => helper.describe(handle, null, source.writable, source.identity);
+  Promise.resolve().then(async () => {
+    if (operation.canceled) { fail(3); }
+    if (request.kind === "read") {
+      if (source.handle && source.handle.kind !== "file") { fail(5); }
+      const file = source.handle ? await source.handle.getFile() : source.file;
+      return new Uint8Array(await file.arrayBuffer());
     }
-    operation.finished = true;
-    const callbackHandle = operation.nativeHandle;
-    operation.nativeHandle = 0;
-    operation.source = null;
-    operation.writable = null;
-    const finalResult = operation.canceled ? {kind: 4} : result;
-    Module._huxerui_web_file_reference_complete(callbackHandle, Emval.toHandle(finalResult));
-  };
-
-  Promise.resolve()
-      .then(async () => {
-        const handle = operation.source.handle;
-        if (!handle || typeof handle.createWritable !== "function") {
-          return false;
-        }
-        let stream = null;
-        try {
-          stream = FS.open(sourcePath, "r");
-          operation.writable = await handle.createWritable();
-          const buffer = new Uint8Array(64 * 1024);
-          let position = 0;
-          while (!operation.canceled) {
-            const count = FS.read(stream, buffer, 0, buffer.byteLength, position);
-            if (count === 0) {
-              break;
-            }
-            await operation.writable.write(buffer.subarray(0, count));
-            position += count;
-          }
-          if (operation.canceled) {
-            await operation.writable.abort();
-            operation.writable = null;
-            return false;
-          }
-          await operation.writable.close();
-          operation.writable = null;
-          return true;
-        } catch (error) {
-          if (operation.writable) {
-            try {
-              await operation.writable.abort();
-            } catch (_) {
-            }
-            operation.writable = null;
-          }
-          throw error;
-        } finally {
-          if (stream) {
-            FS.close(stream);
-          }
-        }
-      })
-      .then(
-          (succeeded) => operation.finish({kind: succeeded ? 1 : 2}),
-          (error) => operation.finish(operation.failure(error)));
-});
-
-EM_JS(void, StartWebReferenceImport,
-    (emscripten::EM_VAL operation_handle, const char* destination, bool overwrite, std::uintptr_t native_handle), {
-  const operation = Emval.toValue(operation_handle);
-  if (!operation || operation.finished || operation.nativeHandle) {
-    return;
-  }
-  operation.nativeHandle = native_handle;
-  const destinationPath = UTF8ToString(destination);
-  operation.finish = (result) => {
-    if (operation.finished) {
-      return;
+    if (request.kind === "import") {
+      return await helper.transfer(source, {path: request.path}, request.overwrite, operation);
     }
-    operation.finished = true;
-    const callbackHandle = operation.nativeHandle;
-    operation.nativeHandle = 0;
-    operation.source = null;
-    operation.reader = null;
-    operation.stream = null;
-    operation.temporaryPath = "";
-    const finalResult = operation.canceled ? {kind: 4} : result;
-    Module._huxerui_web_file_reference_complete(callbackHandle, Emval.toHandle(finalResult));
-  };
-
-  Promise.resolve()
-      .then(async () => {
-        try {
-          const source = operation.source;
-          const file = source.handle ? await source.handle.getFile() : source.file;
-          if (!(file instanceof File)) {
-            throw new DOMException("External file is unavailable", "NotFoundError");
-          }
-          if (operation.canceled) {
-            throw new DOMException("External file import was canceled", "AbortError");
-          }
-
-          const separator = destinationPath.lastIndexOf("/");
-          if (separator < 0) {
-            return false;
-          }
-          const parentPath = separator === 0 ? "/" : destinationPath.substring(0, separator);
-          const parent = FS.analyzePath(parentPath);
-          if (!parent.exists || !FS.isDir(parent.object.mode)) {
-            return false;
-          }
-          const destinationInfo = FS.analyzePath(destinationPath);
-          if (destinationInfo.exists && (FS.isDir(destinationInfo.object.mode) || !overwrite)) {
-            return false;
-          }
-
-          Module.huxerUIExternalFileId = (Module.huxerUIExternalFileId || 0) + 1;
-          do {
-            operation.temporaryPath = (parentPath === "/" ? "" : parentPath) + "/.huxerui-import-" +
-                Module.huxerUIExternalFileId++ + ".tmp";
-          } while (FS.analyzePath(operation.temporaryPath).exists);
-
-          operation.stream = FS.open(operation.temporaryPath, "w");
-          operation.reader = file.stream().getReader();
-          let position = 0;
-          while (true) {
-            const {done, value} = await operation.reader.read();
-            if (done) {
-              break;
-            }
-            if (operation.canceled) {
-              throw new DOMException("External file import was canceled", "AbortError");
-            }
-            FS.write(operation.stream, value, 0, value.byteLength, position);
-            position += value.byteLength;
-          }
-          if (operation.canceled) {
-            throw new DOMException("External file import was canceled", "AbortError");
-          }
-          FS.close(operation.stream);
-          operation.stream = null;
-          FS.rename(operation.temporaryPath, destinationPath);
-          operation.temporaryPath = "";
-          return true;
-        } finally {
-          operation.reader = null;
-          if (operation.stream) {
-            try {
-              FS.close(operation.stream);
-            } catch (_) {
-            }
-            operation.stream = null;
-          }
-          if (operation.temporaryPath) {
-            try {
-              if (FS.analyzePath(operation.temporaryPath).exists) {
-                FS.unlink(operation.temporaryPath);
-              }
-            } catch (_) {
-            }
-            operation.temporaryPath = "";
-          }
-        }
-      })
-      .then(
-          (succeeded) => operation.finish({kind: succeeded ? 1 : 2}),
-          (error) => operation.finish(operation.failure(error)));
+    if (request.kind === "replace") {
+      if (!source.writable) { fail(1); }
+      await helper.transfer({path: request.path}, source, true, operation);
+      return true;
+    }
+    if (!source.handle || source.handle.kind !== "directory") { fail(4); }
+    if (request.kind === "check") {
+      // Local File paths live in the separate virtual filesystem. Two external grants instead need
+      // handle-based identity and bidirectional containment checks, never names or synthetic IDs.
+      if (request.target.path) { return true; }
+      const target = request.target.handle;
+      if (!target || target.kind !== "directory") { fail(4); }
+      if (await source.handle.isSameEntry(target)) { return false; }
+      return await source.handle.resolve(target) === null && await target.resolve(source.handle) === null;
+    }
+    if (request.kind === "list") {
+      const children = [];
+      for await (const child of source.handle.values()) {
+        if (operation.canceled) { fail(3); }
+        children.push(await describe(child));
+      }
+      return children;
+    }
+    const name = request.name;
+    if (!name || name === "." || name === ".." || Array.from(name).some((character) => [0, 47, 92].includes(character.charCodeAt(0)))) { fail(6); }
+    // Browser creation has no exclusive-create option. Check current collisions and returned names,
+    // but do not promise atomic no-overwrite against changes made outside this operation.
+    const existing = await lookup(name);
+    if (request.kind === "find") { return existing ? await describe(existing) : null; }
+    if (!source.writable) { fail(1); }
+    if (operation.canceled) { fail(3); }
+    if (request.kind === "create") {
+      if (existing && existing.kind !== "directory") { fail(7); }
+      const handle = existing || await source.handle.getDirectoryHandle(name, {create: true});
+      if (handle.name !== name) { fail(6); }
+      return {reference: await describe(handle), bytes: 0, created: !existing};
+    }
+    if (request.kind === "copy") {
+      if (existing && (existing.kind !== "file" || !request.overwrite)) { fail(7); }
+      if (existing && request.input.handle && await existing.isSameEntry(request.input.handle)) { fail(6); }
+      const handle = existing || await source.handle.getFileHandle(name, {create: true});
+      if (handle.name !== name) { fail(6); }
+      const bytes = await helper.transfer(request.input, {handle}, request.overwrite, operation);
+      return {reference: await describe(handle), bytes, created: !existing};
+    }
+    fail(6);
+  }).then(
+    (value) => ({kind: 1, value}),
+    (error) => {
+      let code = error.fileCode;
+      if (code === undefined) {
+        code = ({NotFoundError: 0, NotAllowedError: 1, SecurityError: 1, QuotaExceededError: 2,
+          RangeError: 2, TypeMismatchError: 7, NotSupportedError: 6})[error.name] ?? 3;
+      }
+      return {kind: 3, errorCode: code, message: "HuxerUI external file operation failed"};
+    }
+  ).then((result) => Module._huxerui_web_file_reference_complete(native_handle, Emval.toHandle(result)));
 });
 
 EM_JS(void, CancelWebReferenceOperation, (emscripten::EM_VAL operation_handle), {
   const operation = Emval.toValue(operation_handle);
-  if (!operation || operation.finished) {
-    return;
-  }
+  if (!operation) { return; }
   operation.canceled = true;
-  if (operation.reader && typeof operation.reader.cancel === "function") {
-    operation.reader.cancel().catch(() => {});
-  }
-  if (operation.writable && typeof operation.writable.abort === "function") {
-    operation.writable.abort().catch(() => {});
-  }
+  if (operation.writable) { operation.writable.abort().catch(() => {}); }
 });
 
 EM_JS(emscripten::EM_VAL, CreateWebPickerOperation, (emscripten::EM_VAL request_handle), {
@@ -307,7 +268,8 @@ EM_JS(emscripten::EM_VAL, CreateWebPickerOperation, (emscripten::EM_VAL request_
   });
 });
 
-EM_JS(void, StartWebPickerOperation, (emscripten::EM_VAL operation_handle, std::uintptr_t native_handle), {
+EM_JS(void, StartWebPickerOperation, (emscripten::EM_VAL operation_handle, std::uintptr_t native_handle, emscripten::EM_VAL helper_handle), {
+  const helper = Emval.toValue(helper_handle);
   const operation = Emval.toValue(operation_handle);
   if (!operation || operation.finished || operation.nativeHandle) {
     return;
@@ -373,18 +335,20 @@ EM_JS(void, StartWebPickerOperation, (emscripten::EM_VAL operation_handle, std::
     }
     return [{description: operation.request.filterName, accept}];
   };
-  const reference = async (handle, file) => {
-    if (!file) {
-      file = await handle.getFile();
-    }
-    return {
-      source: {handle, file: handle ? null : file},
-      name: file.name,
-      size: file.size,
-      contentType: file.type || null,
-      canWrite: !!handle && typeof handle.createWritable === "function",
-    };
-  };
+  const reference = (handle, file) => helper.describe(handle, file, true);
+  if (operation.request.mode === "directory") {
+    // A directory needs a live grant, not an uploaded list of files. Request access in the picker
+    // itself and reject an ungranted read/write request instead of returning a read-only substitute.
+    window.showDirectoryPicker({mode: operation.request.writable ? "readwrite" : "read"})
+      .then(async (handle) => {
+        const writable = operation.request.writable;
+        if (writable && await handle.queryPermission({mode: "readwrite"}) !== "granted") {
+          throw new DOMException("Directory write access was not granted", "NotAllowedError");
+        }
+        operation.finish({kind: 0, references: [await helper.describe(handle, null, writable)]});
+      }).catch((error) => operation.finish(failure(error)));
+    return;
+  }
 
   if (operation.request.mode === "open") {
     if (window.isSecureContext && typeof window.showOpenFilePicker === "function") {
@@ -453,42 +417,8 @@ EM_JS(void, StartWebPickerOperation, (emscripten::EM_VAL operation_handle, std::
         if (operation.canceled) {
           return false;
         }
-        let stream = null;
-        try {
-          stream = FS.open(operation.request.sourcePath, "r");
-          operation.writable = await handle.createWritable();
-          const buffer = new Uint8Array(64 * 1024);
-          let position = 0;
-          while (!operation.canceled) {
-            const count = FS.read(stream, buffer, 0, buffer.byteLength, position);
-            if (count === 0) {
-              break;
-            }
-            await operation.writable.write(buffer.subarray(0, count));
-            position += count;
-          }
-          if (operation.canceled) {
-            await operation.writable.abort();
-            operation.writable = null;
-            return false;
-          }
-          await operation.writable.close();
-          operation.writable = null;
-          return true;
-        } catch (error) {
-          if (operation.writable) {
-            try {
-              await operation.writable.abort();
-            } catch (_) {
-            }
-            operation.writable = null;
-          }
-          throw error;
-        } finally {
-          if (stream) {
-            FS.close(stream);
-          }
-        }
+        await helper.transfer({path: operation.request.sourcePath}, {handle}, true, operation);
+        return true;
       })
       .then(
           (saved) => operation.finish({kind: saved ? 1 : 2}),
@@ -496,6 +426,8 @@ EM_JS(void, StartWebPickerOperation, (emscripten::EM_VAL operation_handle, std::
 });
 
 EM_JS(void, CancelWebPickerOperation, (emscripten::EM_VAL operation_handle), {
+  // Browser picker dialogs have no general programmatic close operation. Retire delivery and abort
+  // an active writer, but let the original Promise settle before releasing the shared picker slot.
   const operation = Emval.toValue(operation_handle);
   if (!operation || operation.finished) {
     return;
@@ -517,20 +449,17 @@ FileErrorCode ToFileErrorCode(int code) noexcept {
     return FileErrorCode::TooLarge;
   case web_file_error_io:
     return FileErrorCode::Io;
+  case 4:
+    return FileErrorCode::NotDirectory;
+  case 5:
+    return FileErrorCode::IsDirectory;
+  case 6:
+    return FileErrorCode::Unsupported;
+  case 7:
+    return FileErrorCode::AlreadyExists;
   default:
     return FileErrorCode::Io;
   }
-}
-
-std::string ErrorMessage(const val& result) {
-  const val message = result["message"];
-  if (!message.isUndefined() && !message.isNull()) {
-    const std::string value = message.as<std::string>();
-    if (!value.empty()) {
-      return value;
-    }
-  }
-  return "HuxerUI external file operation failed";
 }
 
 val MakeStringArray(const std::vector<std::string>& values) {
@@ -562,298 +491,272 @@ val MakePickerRequest(const File& source, const SaveFileOptions& options) {
   return request;
 }
 
+// Owns one JS operation through Promise completion and optional persistence. serialize borrows the
+// local file queue across asynchronous work; this queue is separate from system-picker presentation.
 class WebReferenceOperation final : public std::enable_shared_from_this<WebReferenceOperation> {
 public:
-  static std::function<void()> Read(val source, FileReferenceBytesCompletion completion) {
-    auto operation = std::shared_ptr<WebReferenceOperation>(new WebReferenceOperation(std::move(completion)));
-    operation->StartRead(std::move(source));
-    return [operation] { operation->Cancel(); };
-  }
-
-  static std::function<void()> Replace(val target, const File& source, FileReferenceBoolCompletion completion) {
-    auto operation = std::shared_ptr<WebReferenceOperation>(new WebReferenceOperation(std::move(completion)));
-    operation->StartReplace(std::move(target), source);
-    return [operation] { operation->Cancel(); };
-  }
-
-  static std::function<void()>
-  Import(val source, const File& destination, bool overwrite, FileReferenceBoolCompletion completion) {
-    auto operation = std::shared_ptr<WebReferenceOperation>(new WebReferenceOperation(std::move(completion)));
-    operation->StartImport(std::move(source), destination, overwrite);
-    return [operation] { operation->Cancel(); };
-  }
-
-  void Complete(val result) noexcept {
-    if (finished_) {
-      return;
+  static std::function<void()> Start(val source, val request, std::function<void(val)> completion,
+                                     bool serialize = false, bool persist = false) {
+    auto operation = std::shared_ptr<WebReferenceOperation>(
+        new WebReferenceOperation(std::move(source), std::move(request), std::move(completion), persist));
+    if (serialize) {
+      EnqueueWebFileOperation([operation](std::function<void()> done) {
+        operation->queue_completion_ = std::move(done);
+        operation->Run();
+      });
+    } else {
+      operation->Run();
     }
-    finished_ = true;
+    return [operation] { operation->Cancel(); };
+  }
+
+  void Complete(val result) {
     operation_ = val::undefined();
-    FileReferenceBytesCompletion bytes_completion = std::move(bytes_completion_);
-    FileReferenceBoolCompletion bool_completion = std::move(bool_completion_);
-
-    if (canceled_) {
-      if (bytes_completion) {
-        bytes_completion(FileResult<Bytes>(FileError{
-            FileErrorCode::Io,
-            "HuxerUI external file operation was canceled",
-        }));
-      } else if (bool_completion) {
-        bool_completion(false);
-      }
-      return;
-    }
-
-    try {
-      const int kind = result["kind"].as<int>();
-      if (bytes_completion) {
-        if (kind == web_file_result_bytes) {
-          const val bytes = result["bytes"];
-          const std::size_t size = bytes["byteLength"].as<std::size_t>();
-          Bytes value(size);
-          if (size != 0) {
-            val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(value.data())))
-                .call<void>("set", bytes);
-          }
-          bytes_completion(FileResult<Bytes>(std::move(value)));
-          return;
+    if (persist_) {
+      // A failed or canceled transfer can still have mutated local storage. Synchronize before Finish
+      // releases the queue slot, and never report success when browser persistence failed.
+      auto self = shared_from_this();
+      PersistWebFileSystem([self, result = std::move(result)](bool persisted) mutable {
+        if (!persisted) {
+          result.set("kind", 3);
+          result.set("errorCode", web_file_error_io);
         }
-        const int error_code = kind == web_file_result_error ? result["errorCode"].as<int>() : web_file_error_io;
-        bytes_completion(FileResult<Bytes>(FileError{
-            ToFileErrorCode(error_code),
-            ErrorMessage(result),
-        }));
-        return;
-      }
-      if (bool_completion) {
-        bool_completion(kind == web_file_result_true);
-      }
-    } catch (...) {
-      if (bytes_completion) {
-        bytes_completion(FileResult<Bytes>(FileError{
-            FileErrorCode::Io,
-            "HuxerUI external file result is invalid",
-        }));
-      } else if (bool_completion) {
-        bool_completion(false);
-      }
+        self->Finish(std::move(result));
+      });
+    } else {
+      Finish(std::move(result));
     }
   }
 
 private:
-  explicit WebReferenceOperation(FileReferenceBytesCompletion completion) : bytes_completion_(std::move(completion)) {}
+  WebReferenceOperation(val source, val request, std::function<void(val)> completion, bool persist)
+      : source_(std::move(source)), request_(std::move(request)), completion_(std::move(completion)),
+        persist_(persist) {}
 
-  explicit WebReferenceOperation(FileReferenceBoolCompletion completion) : bool_completion_(std::move(completion)) {}
-
-  void StartRead(val source) {
-    operation_ = val::take_ownership(CreateWebReferenceOperation(source.as_handle()));
-    auto callback = std::make_unique<std::shared_ptr<WebReferenceOperation>>(shared_from_this());
-    const std::uintptr_t native_handle = reinterpret_cast<std::uintptr_t>(callback.get());
-    static_cast<void>(callback.release());
-    StartWebReferenceRead(operation_.as_handle(), native_handle);
-  }
-
-  void StartReplace(val target, const File& source) {
-    operation_ = val::take_ownership(CreateWebReferenceOperation(target.as_handle()));
-    auto callback = std::make_unique<std::shared_ptr<WebReferenceOperation>>(shared_from_this());
-    const std::uintptr_t native_handle = reinterpret_cast<std::uintptr_t>(callback.get());
-    const std::string path = source.Path();
-    static_cast<void>(callback.release());
-    StartWebReferenceReplace(operation_.as_handle(), path.c_str(), native_handle);
-  }
-
-  void StartImport(val source, const File& destination, bool overwrite) {
-    operation_ = val::take_ownership(CreateWebReferenceOperation(source.as_handle()));
-    auto callback = std::make_unique<std::shared_ptr<WebReferenceOperation>>(shared_from_this());
-    const std::uintptr_t native_handle = reinterpret_cast<std::uintptr_t>(callback.get());
-    const std::string path = destination.Path();
-    static_cast<void>(callback.release());
-    StartWebReferenceImport(operation_.as_handle(), path.c_str(), overwrite, native_handle);
-  }
-
-  void Cancel() noexcept {
-    if (finished_ || canceled_) {
-      return;
-    }
-    canceled_ = true;
-    CancelWebReferenceOperation(operation_.as_handle());
-  }
-
-  val operation_ = val::undefined();
-  FileReferenceBytesCompletion bytes_completion_;
-  FileReferenceBoolCompletion bool_completion_;
-  bool finished_ = false;
-  bool canceled_ = false;
-};
-
-class WebImportOperation final : public std::enable_shared_from_this<WebImportOperation> {
-public:
-  static std::function<void()>
-  Start(val source, File destination, bool overwrite, FileReferenceBoolCompletion completion) {
-    auto operation = std::shared_ptr<WebImportOperation>(
-        new WebImportOperation(std::move(source), std::move(destination), overwrite, std::move(completion))
-    );
-    const std::shared_ptr<WebImportOperation> self = operation;
-    EnqueueWebFileOperation([self](std::function<void()> queue_completion) { self->Run(std::move(queue_completion)); });
-    return [operation] { operation->Cancel(); };
-  }
-
-private:
-  WebImportOperation(val source, File destination, bool overwrite, FileReferenceBoolCompletion completion)
-      : source_(std::move(source)), destination_(std::move(destination)), overwrite_(overwrite),
-        completion_(std::move(completion)) {}
-
-  void Run(std::function<void()> queue_completion) {
-    queue_completion_ = std::move(queue_completion);
+  void Run() {
     if (canceled_) {
-      Complete(false);
+      Finish(val::object());
       return;
     }
-    const std::shared_ptr<WebImportOperation> self = shared_from_this();
-    cancellation_ = WebReferenceOperation::Import(source_, destination_, overwrite_, [self](bool result) {
-      self->ImportComplete(result);
-    });
+    operation_ = val::take_ownership(CreateWebReferenceOperation(source_.as_handle()));
+    auto callback = std::make_unique<std::shared_ptr<WebReferenceOperation>>(shared_from_this());
+    const auto handle = reinterpret_cast<std::uintptr_t>(callback.release());
+    StartWebReferenceOperation(operation_.as_handle(), request_.as_handle(), handle, WebFileHelpers().as_handle());
   }
 
-  void ImportComplete(bool result) {
-    cancellation_ = {};
-    if (!result || !IsWebPersistentFilePath(destination_.Path())) {
-      Complete(result);
-      return;
+  void Finish(val result) {
+    if (canceled_) {
+      result.set("kind", 3);
+      result.set("errorCode", web_file_error_io);
     }
-    const std::shared_ptr<WebImportOperation> self = shared_from_this();
-    PersistWebFileSystem([self](bool persisted) { self->Complete(persisted); });
-  }
-
-  void Cancel() noexcept {
-    if (finished_ || canceled_) {
-      return;
-    }
-    canceled_ = true;
-    if (cancellation_) {
-      cancellation_();
-    }
-  }
-
-  void Complete(bool result) noexcept {
-    if (finished_) {
-      return;
-    }
-    finished_ = true;
-    cancellation_ = {};
-    FileReferenceBoolCompletion completion = std::move(completion_);
-    std::function<void()> queue_completion = std::move(queue_completion_);
+    auto completion = std::move(completion_);
+    auto done = std::move(queue_completion_);
     if (completion) {
-      completion(canceled_ ? false : result);
+      completion(std::move(result));
     }
-    if (queue_completion) {
-      queue_completion();
+    if (done) {
+      done();
+    }
+  }
+
+  void Cancel() {
+    canceled_ = true;
+    if (!operation_.isUndefined()) {
+      CancelWebReferenceOperation(operation_.as_handle());
     }
   }
 
   val source_;
-  File destination_;
-  bool overwrite_ = false;
-  FileReferenceBoolCompletion completion_;
-  std::function<void()> cancellation_;
+  val request_;
+  val operation_ = val::undefined();
+  std::function<void(val)> completion_;
   std::function<void()> queue_completion_;
-  bool finished_ = false;
+  bool persist_ = false;
   bool canceled_ = false;
 };
 
-class WebReplaceOperation final : public std::enable_shared_from_this<WebReplaceOperation> {
-public:
-  static std::function<void()> Start(val target, File source, FileReferenceBoolCompletion completion) {
-    auto operation = std::shared_ptr<WebReplaceOperation>(
-        new WebReplaceOperation(std::move(target), std::move(source), std::move(completion))
-    );
-    const std::shared_ptr<WebReplaceOperation> self = operation;
-    EnqueueWebFileOperation([self](std::function<void()> queue_completion) { self->Run(std::move(queue_completion)); });
-    return [operation] { operation->Cancel(); };
-  }
+template <class T, class Decode>
+std::function<void()> RunWebReference(val source, val request, FileReferenceCompletion<T> completion, Decode decode,
+                                      bool serialize = false, bool persist = false) {
+  return WebReferenceOperation::Start(
+      std::move(source), std::move(request),
+      [completion = std::move(completion), decode = std::move(decode)](val result) mutable {
+        FileResult<T> value(FileError{FileErrorCode::Io, "HuxerUI external file operation failed"});
+        try {
+          if (result["kind"].as<int>() == web_file_result_true) {
+            value = FileResult<T>(decode(result["value"]));
+          } else {
+            value = FileResult<T>(
+                FileError{ToFileErrorCode(result["errorCode"].as<int>()), "HuxerUI external file operation failed"});
+          }
+        } catch (...) {
+        }
+        completion(std::move(value));
+      },
+      serialize, persist);
+}
 
-private:
-  WebReplaceOperation(val target, File source, FileReferenceBoolCompletion completion)
-      : target_(std::move(target)), source_(std::move(source)), completion_(std::move(completion)) {}
+val ReferenceRequest(std::string kind) {
+  val request = val::object();
+  request.set("kind", std::move(kind));
+  return request;
+}
 
-  void Run(std::function<void()> queue_completion) {
-    queue_completion_ = std::move(queue_completion);
-    if (canceled_ || !source_.IsFile()) {
-      Complete(false);
-      return;
-    }
-    const std::shared_ptr<WebReplaceOperation> self = shared_from_this();
-    cancellation_ = WebReferenceOperation::Replace(target_, source_, [self](bool result) { self->Complete(result); });
-  }
-
-  void Cancel() noexcept {
-    if (finished_ || canceled_) {
-      return;
-    }
-    canceled_ = true;
-    if (cancellation_) {
-      cancellation_();
-    }
-  }
-
-  void Complete(bool result) noexcept {
-    if (finished_) {
-      return;
-    }
-    finished_ = true;
-    cancellation_ = {};
-    FileReferenceBoolCompletion completion = std::move(completion_);
-    std::function<void()> queue_completion = std::move(queue_completion_);
-    if (completion) {
-      completion(canceled_ ? false : result);
-    }
-    if (queue_completion) {
-      queue_completion();
-    }
-  }
-
-  val target_;
-  File source_;
-  FileReferenceBoolCompletion completion_;
-  std::function<void()> cancellation_;
-  std::function<void()> queue_completion_;
-  bool finished_ = false;
-  bool canceled_ = false;
-};
+FileReference MakeWebFileReference(const val& reference);
 
 class WebFileReferenceState final : public FileReferenceState {
 public:
   explicit WebFileReferenceState(val source) : source_(std::move(source)) {}
 
-  std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
-    return WebReferenceOperation::Read(source_, std::move(completion));
+  std::string Identity() const override {
+    return source_["identity"].as<std::string>();
   }
 
-  std::function<void()> ImportTo(File destination, bool overwrite, FileReferenceBoolCompletion completion) override {
-    return WebImportOperation::Start(source_, std::move(destination), overwrite, std::move(completion));
+  std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
+    // Public reads return owned WASM Bytes, so the JS array is copied in full. Streaming imports and
+    // directory copies bypass this path and transfer their chunks inside the shared JS helper.
+    return RunWebReference<Bytes>(source_, ReferenceRequest("read"), std::move(completion), [](const val& bytes) {
+      const auto size = bytes["byteLength"].as<std::size_t>();
+      Bytes result(size);
+      if (size) {
+        val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(result.data())))
+            .call<void>("set", bytes);
+      }
+      return result;
+    });
+  }
+
+  std::function<void()> ImportTo(File destination, bool overwrite,
+                                 FileReferenceCompletion<std::uint64_t> completion) override {
+    auto request = ReferenceRequest("import");
+    request.set("path", destination.Path());
+    request.set("overwrite", overwrite);
+    return RunWebReference<std::uint64_t>(
+        source_, std::move(request), std::move(completion),
+        [](const val& result) { return static_cast<std::uint64_t>(result.as<double>()); }, true,
+        IsWebPersistentFilePath(destination.Path()));
   }
 
   std::function<void()> ReplaceWith(File source, FileReferenceBoolCompletion completion) override {
-    return WebReplaceOperation::Start(source_, std::move(source), std::move(completion));
+    auto request = ReferenceRequest("replace");
+    request.set("path", source.Path());
+    return RunWebReference<bool>(
+        source_, std::move(request),
+        [completion = std::move(completion)](auto result) { completion(result.Succeeded() && result.Value()); },
+        [](const val& result) { return result.as<bool>(); }, true);
+  }
+
+  std::function<void()> ListChildren(FileReferenceCompletion<std::vector<FileReference>> completion) override {
+    return RunWebReference<std::vector<FileReference>>(source_, ReferenceRequest("list"), std::move(completion),
+                                                       [](const val& entries) {
+                                                         std::vector<FileReference> result;
+                                                         const auto count = entries["length"].as<std::size_t>();
+                                                         result.reserve(count);
+                                                         for (std::size_t index = 0; index < count; ++index) {
+                                                           result.push_back(MakeWebFileReference(entries[index]));
+                                                         }
+                                                         return result;
+                                                       });
+  }
+
+  std::function<void()> FindChild(std::string name,
+                                  FileReferenceCompletion<std::optional<FileReference>> completion) override {
+    auto request = ReferenceRequest("find");
+    request.set("name", std::move(name));
+    return RunWebReference<std::optional<FileReference>>(source_, std::move(request), std::move(completion),
+                                                         [](const val& result) -> std::optional<FileReference> {
+                                                           if (result.isNull()) {
+                                                             return std::nullopt;
+                                                           }
+                                                           return MakeWebFileReference(result);
+                                                         });
+  }
+
+  std::function<void()> CreateDirectory(std::string name, std::optional<FileReference>,
+                                        FileReferenceCompletion<FileReferenceWriteResult> completion) override {
+    auto request = ReferenceRequest("create");
+    request.set("name", std::move(name));
+    return RunWebReference<FileReferenceWriteResult>(source_, std::move(request), std::move(completion), DecodeWrite);
+  }
+
+  std::function<void()> CopyFileFrom(FileReferenceSource source, std::string name, bool overwrite,
+                                     std::optional<FileReference>,
+                                     FileReferenceCompletion<FileReferenceWriteResult> completion) override {
+    auto input = Source(source);
+    if (input.isUndefined()) {
+      completion(FileResult<FileReferenceWriteResult>(
+          FileError{FileErrorCode::Unsupported, "HuxerUI file source is unsupported"}));
+      return {};
+    }
+    auto request = ReferenceRequest("copy");
+    request.set("input", input);
+    request.set("name", std::move(name));
+    request.set("overwrite", overwrite);
+    return RunWebReference<FileReferenceWriteResult>(source_, std::move(request), std::move(completion), DecodeWrite,
+                                                     std::holds_alternative<File>(source));
+  }
+
+  std::function<void()> CheckCopyDestination(FileReferenceSource destination,
+                                             FileReferenceCompletion<bool> completion) override {
+    auto target = Source(destination);
+    if (target.isUndefined()) {
+      completion(
+          FileResult<bool>(FileError{FileErrorCode::Unsupported, "HuxerUI directory containment is unavailable"}));
+      return {};
+    }
+    auto request = ReferenceRequest("check");
+    request.set("target", target);
+    return RunWebReference<bool>(source_, std::move(request), std::move(completion),
+                                 [](const val& result) { return result.as<bool>(); });
   }
 
 private:
+  static val Source(const FileReferenceSource& source) {
+    if (const auto* file = std::get_if<File>(&source)) {
+      auto value = val::object();
+      value.set("path", file->Path());
+      return value;
+    }
+    if (auto reference = std::dynamic_pointer_cast<WebFileReferenceState>(std::get<1>(source))) {
+      return reference->source_;
+    }
+    return val::undefined();
+  }
+
+  static FileReferenceWriteResult DecodeWrite(const val& value) {
+    return {MakeWebFileReference(value["reference"]), static_cast<std::uint64_t>(value["bytes"].as<double>()),
+            value["created"].as<bool>()};
+  }
+
   val source_;
 };
 
 FileReference MakeWebFileReference(const val& reference) {
-  const double size = reference["size"].as<double>();
+  const auto type = reference["type"].as<int>() == 1 ? FileType::Directory : FileType::File;
+  const val size = reference["size"];
   const val content_type = reference["contentType"];
   FileReferenceMetadata metadata{
       .name = reference["name"].as<std::string>(),
-      .size = std::isfinite(size) && size >= 0.0 ? std::optional<std::uint64_t>{static_cast<std::uint64_t>(size)}
-                                                 : std::nullopt,
-      .content_type = !content_type.isNull() && !content_type.isUndefined() && !content_type.as<std::string>().empty()
-                          ? std::optional<std::string>{content_type.as<std::string>()}
-                          : std::nullopt,
       .can_write = reference["canWrite"].as<bool>(),
+      .type = type,
   };
-  return MakeFileReference(std::move(metadata), std::make_shared<WebFileReferenceState>(reference["source"]));
+  if (type == FileType::File) {
+    if (!size.isNull() && !size.isUndefined()) {
+      const double count = size.as<double>();
+      if (std::isfinite(count) && count >= 0 && count <= 9007199254740991.0) {
+        metadata.size = static_cast<std::uint64_t>(count);
+      }
+    }
+    if (!content_type.isNull() && !content_type.isUndefined()) {
+      metadata.content_type = content_type.as<std::string>();
+    }
+  }
+  static std::uint64_t next_identity = 0;
+  val source = reference["source"];
+  if (source["identity"].as<std::string>().empty()) {
+    source.set("identity", "web:" + std::to_string(++next_identity));
+  }
+  return MakeFileReference(std::move(metadata), std::make_shared<WebFileReferenceState>(std::move(source)));
 }
 
 class WebPickerOperation final : public std::enable_shared_from_this<WebPickerOperation> {
@@ -861,6 +764,15 @@ public:
   static std::function<void()> Open(FilePickerFilter filter, bool multiple, FilePickerOpenCompletion completion) {
     auto operation = std::shared_ptr<WebPickerOperation>(new WebPickerOperation(std::move(completion)));
     operation->Start(MakePickerRequest(filter, multiple));
+    return [operation] { operation->Cancel(); };
+  }
+
+  static std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) {
+    auto operation = std::shared_ptr<WebPickerOperation>(new WebPickerOperation(std::move(completion)));
+    auto request = MakePickerRequest(FilePickerFilter{}, false);
+    request.set("mode", std::string("directory"));
+    request.set("writable", writable);
+    operation->Start(std::move(request));
     return [operation] { operation->Cancel(); };
   }
 
@@ -922,7 +834,7 @@ private:
     auto callback = std::make_unique<std::shared_ptr<WebPickerOperation>>(shared_from_this());
     const std::uintptr_t native_handle = reinterpret_cast<std::uintptr_t>(callback.get());
     static_cast<void>(callback.release());
-    StartWebPickerOperation(operation_.as_handle(), native_handle);
+    StartWebPickerOperation(operation_.as_handle(), native_handle, WebFileHelpers().as_handle());
   }
 
   void Cancel() noexcept {
@@ -953,6 +865,18 @@ public:
   std::function<void()>
   OpenFiles(FilePickerFilter filter, bool multiple, FilePickerOpenCompletion completion) override {
     return WebPickerOperation::Open(std::move(filter), multiple, std::move(completion));
+  }
+
+  bool CanOpenDirectories(bool writable) const noexcept override {
+    return WebCanOpenDirectories(writable);
+  }
+
+  std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) override {
+    if (!CanOpenDirectories(writable)) {
+      completion({});
+      return {};
+    }
+    return WebPickerOperation::OpenDirectory(writable, std::move(completion));
   }
 
   std::function<void()> SaveFile(File source, SaveFileOptions options, FilePickerSaveCompletion completion) override {

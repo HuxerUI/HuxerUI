@@ -26,6 +26,7 @@ add_subdirectory(visual_effects)
 add_subdirectory(image)
 add_subdirectory(window_chrome)
 add_subdirectory(files)
+add_subdirectory(directory_copy)
 add_subdirectory(platform_module)
 add_subdirectory(external_texture)
 

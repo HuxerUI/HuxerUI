@@ -22,7 +22,7 @@ class FilePickerTransport;
 #ifdef __OBJC__
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateIosFilePickerTransport(std::function<UIViewController*()> presenter_provider);
-[[nodiscard]] FileReference MakeIosFileReference(NSURL* url);
+[[nodiscard]] FileReference MakeIosFileReference(NSURL* url, bool writable = true);
 [[nodiscard]] FileReference MakeCopiedIosFileReference(NSURL* url);
 #endif
 

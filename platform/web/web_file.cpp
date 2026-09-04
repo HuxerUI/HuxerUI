@@ -20,6 +20,8 @@ namespace {
 
 using emscripten::val;
 
+// Serializes scheduled local file work through its asynchronous persistence boundary. This runs on
+// the Web event loop, not a background worker; it is unrelated to the system-picker UI queue.
 struct WebFileQueue {
   std::deque<std::function<void(std::function<void()>)>> operations;
   bool active = false;
@@ -47,6 +49,8 @@ void RunWebFileOperation(void* context) noexcept {
   using Operation = std::function<void(std::function<void()>)>;
   std::unique_ptr<Operation> operation(static_cast<Operation*>(context));
   const std::shared_ptr<bool> completed = std::make_shared<bool>(false);
+  // The operation calls done after all asynchronous work, including syncfs. A canceled Task must
+  // still release this slot; returning from the operation's initial call is not sufficient.
   (*operation)([completed] {
     if (std::exchange(*completed, true)) {
       return;
@@ -94,6 +98,8 @@ EM_JS(void, PersistWebFileSystemJs, (std::uintptr_t context), {
 } // namespace
 
 std::shared_ptr<FileSystem> CreateWebFileSystem() {
+  // web_file.js mounts IDBFS and restores it before application startup. Reuse those ready directories
+  // rather than exposing a FileSystem while its persisted contents are still being restored.
   val state = val::take_ownership(WebFileSystemState());
   if (state.isNull() || state.isUndefined()) {
     throw std::runtime_error("HuxerUI Web file storage was not initialized");

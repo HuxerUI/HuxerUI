@@ -170,6 +170,11 @@ if (EMSCRIPTEN)
                     "${CMAKE_CURRENT_SOURCE_DIR}/platform/web_platform_registry.js"
                     "${HUXERUI_PROJECT_DIR}/platform/web/web_platform_registry.js"
     )
+    add_test(NAME HuxerUIWebFilePickerTests
+            COMMAND ${HUXERUI_WEB_TEST_COMMAND}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/platform/web_file_picker.js"
+                    "${HUXERUI_PROJECT_DIR}/platform/web/web_file_picker.cpp"
+    )
 endif ()
 
 target_include_directories(huxerui_tests PRIVATE

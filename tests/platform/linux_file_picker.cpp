@@ -44,6 +44,7 @@ constexpr const char* kRequestInterface = "org.freedesktop.portal.Request";
 constexpr const char* kPortalXml = R"xml(
 <node>
   <interface name="org.freedesktop.portal.FileChooser">
+    <property name="version" type="u" access="read"/>
     <method name="OpenFile">
       <arg type="s" direction="in"/>
       <arg type="s" direction="in"/>
@@ -135,6 +136,7 @@ struct PortalCall {
   std::vector<PortalRule> rules;
   std::string current_name;
   bool multiple = false;
+  bool directory = false;
   bool has_current_filter = false;
 };
 
@@ -256,8 +258,8 @@ private:
 
 class FakePortal final {
 public:
-  FakePortal()
-      : address_(bus_.Address()), context_(g_main_context_new()), loop_(g_main_loop_new(context_, false)) {
+  explicit FakePortal(guint32 version = 3)
+      : address_(bus_.Address()), context_(g_main_context_new()), loop_(g_main_loop_new(context_, false)), version_(version) {
     thread_ = std::thread([this] { Run(); });
     std::unique_lock lock(mutex_);
     ready_condition_.wait(lock, [this] { return ready_; });
@@ -411,7 +413,10 @@ private:
   static const GDBusInterfaceVTable& VTable() {
     static const GDBusInterfaceVTable table{
         .method_call = HandleMethodCall,
-        .get_property = nullptr,
+        .get_property = [](GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
+                            GError**, gpointer data) -> GVariant* {
+          return g_variant_new_uint32(static_cast<FakePortal*>(data)->version_);
+        },
         .set_property = nullptr,
         .padding = {},
     };
@@ -516,6 +521,8 @@ private:
     if (g_variant_lookup(options, "multiple", "b", &multiple)) {
       call.multiple = multiple;
     }
+    gboolean directory = false;
+    if (g_variant_lookup(options, "directory", "b", &directory)) { call.directory = directory; }
     const char* current_name = nullptr;
     if (g_variant_lookup(options, "current_name", "&s", &current_name) && current_name != nullptr) {
       call.current_name = current_name;
@@ -700,6 +707,7 @@ private:
   std::size_t response_count_ = 0;
   bool ready_ = false;
   std::string failure_;
+  guint32 version_;
 };
 
 template <class Value> Value WaitFor(std::function<void(std::function<void(Value)>)> start) {
@@ -794,6 +802,34 @@ TEST_CASE("LinuxFilePickerFormatsX11ParentAndRejectsAnUnavailablePortal") {
 
   PrivateSessionBus bus;
   REQUIRE_FALSE(detail::CreateLinuxFilePickerTransport([] { return 0UL; }, bus.Address()));
+}
+
+
+TEST_CASE("LinuxFilePickerDirectorySelectionChecksVersionAndUsesReadOnlyGrants") {
+  TemporaryDirectory temporary;
+  const File selected = temporary.Child("selected");
+  REQUIRE(selected.CreateDirectory());
+  for (guint32 version : {2U, 3U}) {
+    FakePortal portal(version);
+    auto transport = detail::CreateLinuxFilePickerTransport([] { return 0UL; }, portal.Address());
+    REQUIRE(transport);
+    REQUIRE(transport->CanOpenDirectories(false) == (version >= 3));
+    portal.SetScenario({.uris = {FileUri(selected)}});
+    auto references = WaitFor<std::vector<FileReference>>([&](auto completion) {
+      static_cast<void>(transport->OpenDirectory(false, std::move(completion)));
+    });
+    if (version < 3) {
+      REQUIRE(references.empty());
+    } else {
+      REQUIRE(references.size() == 1);
+      REQUIRE(references.front().Type() == FileType::Directory);
+      REQUIRE_FALSE(references.front().CanWrite());
+      const auto call = portal.WaitForCall(1);
+      REQUIRE(call.directory);
+      REQUIRE_FALSE(call.multiple);
+      REQUIRE(call.rules.empty());
+    }
+  }
 }
 
 TEST_CASE("LinuxFilePickerCompletesAnActiveRequestWhenThePortalDisappears") {

@@ -190,93 +190,22 @@ struct PlatformDialogFilter {
   bool configured = false;
 };
 
-FileError ReferenceReadFailure() {
-  return {
-      FileErrorCode::Io,
-      "HuxerUI external file read failed",
-  };
-}
-
-class Win32FileReferenceState final : public FileReferenceState,
-                                      public std::enable_shared_from_this<Win32FileReferenceState> {
-public:
-  explicit Win32FileReferenceState(File file) : file_(std::move(file)) {}
-
-  std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
-    const std::shared_ptr<Win32FileReferenceState> self = shared_from_this();
-    auto retained_completion = std::make_shared<FileReferenceBytesCompletion>(std::move(completion));
-    try {
-      EnqueueFileOperation([self, retained_completion] {
-        FileResult<Bytes> result(ReferenceReadFailure());
-        try {
-          result = self->file_.ReadBytes();
-        } catch (...) {
-        }
-        (*retained_completion)(std::move(result));
-      });
-    } catch (...) {
-      (*retained_completion)(FileResult<Bytes>(ReferenceReadFailure()));
+std::optional<FileReference> MakeWin32FileReferenceInternal(std::wstring_view platform_path, bool directory = false,
+                                                            bool writable = true) {
+  try {
+    auto file = FileFromPlatformPath(platform_path);
+    if (!file) {
+      return std::nullopt;
     }
-    return {};
-  }
-
-  std::function<void()> ImportTo(File destination, bool overwrite, FileReferenceBoolCompletion completion) override {
-    const std::shared_ptr<Win32FileReferenceState> self = shared_from_this();
-    auto retained_completion = std::make_shared<FileReferenceBoolCompletion>(std::move(completion));
-    try {
-      EnqueueFileOperation([self, destination = std::move(destination), overwrite, retained_completion]() mutable {
-        bool succeeded = false;
-        try {
-          succeeded = self->file_ == destination || self->file_.CopyTo(destination, overwrite);
-        } catch (...) {
-        }
-        (*retained_completion)(succeeded);
-      });
-    } catch (...) {
-      (*retained_completion)(false);
+    auto reference = MakeLocalFileReference(*file, writable, ContentTypeForExtension(file->Extension()));
+    if (reference.Type() != (directory ? FileType::Directory : FileType::File) ||
+        (directory && writable && !reference.CanWrite())) {
+      return std::nullopt;
     }
-    return {};
-  }
-
-  std::function<void()> ReplaceWith(File source, FileReferenceBoolCompletion completion) override {
-    const std::shared_ptr<Win32FileReferenceState> self = shared_from_this();
-    auto retained_completion = std::make_shared<FileReferenceBoolCompletion>(std::move(completion));
-    try {
-      EnqueueFileOperation([self, source = std::move(source), retained_completion]() mutable {
-        bool succeeded = false;
-        try {
-          succeeded = source == self->file_ || source.CopyTo(self->file_, true);
-        } catch (...) {
-        }
-        (*retained_completion)(succeeded);
-      });
-    } catch (...) {
-      (*retained_completion)(false);
-    }
-    return {};
-  }
-
-private:
-  File file_;
-};
-
-std::optional<FileReference> MakeWin32FileReferenceInternal(std::wstring_view platform_path) {
-  std::optional<File> file = FileFromPlatformPath(platform_path);
-  if (!file.has_value() || !file->IsFile()) {
+    return reference;
+  } catch (...) {
     return std::nullopt;
   }
-
-  FileReferenceMetadata metadata{.name = file->Name()};
-  FileResult<FileInfo> info = file->Stat();
-  if (info.Succeeded()) {
-    metadata.size = info.Value().size;
-  }
-  metadata.content_type = ContentTypeForExtension(file->Extension());
-
-  const DWORD attributes = GetFileAttributesW(std::wstring(platform_path).c_str());
-  metadata.can_write = attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
-                       (attributes & FILE_ATTRIBUTE_READONLY) == 0;
-  return MakeFileReference(metadata, std::make_shared<Win32FileReferenceState>(std::move(*file)));
 }
 
 void ConfigureDialog(IFileDialog* dialog, const PlatformDialogFilter& filter, FILEOPENDIALOGOPTIONS options) {
@@ -289,11 +218,13 @@ void ConfigureDialog(IFileDialog* dialog, const PlatformDialogFilter& filter, FI
 
 class Win32OpenPickerOperation final : public std::enable_shared_from_this<Win32OpenPickerOperation> {
 public:
-  explicit Win32OpenPickerOperation(FilePickerOpenCompletion completion) : completion_(std::move(completion)) {}
+  Win32OpenPickerOperation(FilePickerOpenCompletion completion, UIThreadDispatcher dispatcher)
+      : completion_(std::move(completion)), dispatcher_(std::move(dispatcher)) {}
 
-  void Start(FilePickerFilter filter, bool multiple, HWND owner) noexcept {
+  void Start(FilePickerFilter filter, bool multiple, HWND owner, bool directory = false,
+             bool writable = true) noexcept {
     try {
-      StartImpl(std::move(filter), multiple, owner);
+      StartImpl(std::move(filter), multiple, owner, directory, writable);
     } catch (...) {
       Finish({});
     }
@@ -312,7 +243,7 @@ public:
   }
 
 private:
-  void StartImpl(FilePickerFilter filter, bool multiple, HWND owner) {
+  void StartImpl(FilePickerFilter filter, bool multiple, HWND owner, bool directory, bool writable) {
     if (finished_ || canceled_) {
       Finish({});
       return;
@@ -323,8 +254,13 @@ private:
       return;
     }
     const PlatformDialogFilter platform_filter(filter);
+    // This backend creates path-backed references, so virtual Shell items without a filesystem path
+    // cannot be accepted. Actual type and write access are checked when the local state is constructed.
     FILEOPENDIALOGOPTIONS options = FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM;
-    if (multiple) {
+    if (directory) {
+      options |= FOS_PICKFOLDERS;
+    }
+    if (multiple && !directory) {
       options |= FOS_ALLOWMULTISELECT;
     }
     ConfigureDialog(dialog.Get(), platform_filter, options);
@@ -346,23 +282,35 @@ private:
       Finish({});
       return;
     }
-    std::vector<FileReference> references;
-    references.reserve(count);
+    std::vector<std::wstring> paths;
     for (DWORD index = 0; index < count; ++index) {
       ComPtr<IShellItem> item;
       if (FAILED(items->GetItemAt(index, &item))) {
         Finish({});
         return;
       }
-      const std::optional<std::wstring> path = ShellItemPath(item.Get());
-      std::optional<FileReference> reference = path ? MakeWin32FileReferenceInternal(*path) : std::nullopt;
-      if (!reference.has_value()) {
+      auto path = ShellItemPath(item.Get());
+      if (!path) {
         Finish({});
         return;
       }
-      references.push_back(std::move(*reference));
+      paths.push_back(std::move(*path));
     }
-    Finish(std::move(references));
+    // Extract paths while COM dialog objects remain on the UI thread. Metadata and directory locks
+    // are built on the file worker, then Finish returns through the same dispatcher used by Cancel.
+    auto self = shared_from_this();
+    EnqueueFileOperation([self, paths = std::move(paths), directory, writable] {
+      std::vector<FileReference> references;
+      for (const auto& path : paths) {
+        auto reference = MakeWin32FileReferenceInternal(path, directory, writable);
+        if (!reference) {
+          references.clear();
+          break;
+        }
+        references.push_back(std::move(*reference));
+      }
+      self->dispatcher_([self, references = std::move(references)]() mutable { self->Finish(std::move(references)); });
+    });
   }
 
   void Finish(std::vector<FileReference> references) noexcept {
@@ -378,6 +326,7 @@ private:
 
   ComPtr<IFileOpenDialog> dialog_;
   FilePickerOpenCompletion completion_;
+  UIThreadDispatcher dispatcher_;
   // Open dialog state stays on the UI thread because both Start() and Cancel() use the same dispatcher.
   bool canceled_ = false;
   bool finished_ = false;
@@ -457,6 +406,8 @@ private:
 
     const std::shared_ptr<Win32SavePickerOperation> self = shared_from_this();
     try {
+      // The dialog only chose the export destination. Success waits for the local copy, which is
+      // synchronous on this worker and may finish even if its application Task has been canceled.
       EnqueueFileOperation([self, destination = std::move(*destination)]() mutable {
         bool succeeded = false;
         try {
@@ -525,12 +476,26 @@ public:
 
   std::function<void()>
   OpenFiles(FilePickerFilter filter, bool multiple, FilePickerOpenCompletion completion) override {
-    auto operation = std::make_shared<Win32OpenPickerOperation>(std::move(completion));
+    auto operation = std::make_shared<Win32OpenPickerOperation>(std::move(completion), dispatch_to_ui_thread_);
     const std::function<HWND()> window_provider = window_provider_;
     dispatch_to_ui_thread_([operation, window_provider, filter = std::move(filter), multiple]() mutable {
       operation->Start(std::move(filter), multiple, window_provider ? window_provider() : nullptr);
     });
     const UIThreadDispatcher dispatcher = dispatch_to_ui_thread_;
+    return [operation, dispatcher] { DispatchNoThrow(dispatcher, [operation] { operation->Cancel(); }); };
+  }
+
+  bool CanOpenDirectories(bool) const noexcept override {
+    return true;
+  }
+
+  std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) override {
+    auto operation = std::make_shared<Win32OpenPickerOperation>(std::move(completion), dispatch_to_ui_thread_);
+    const auto window_provider = window_provider_;
+    dispatch_to_ui_thread_([operation, window_provider, writable] {
+      operation->Start({}, false, window_provider ? window_provider() : nullptr, true, writable);
+    });
+    const auto dispatcher = dispatch_to_ui_thread_;
     return [operation, dispatcher] { DispatchNoThrow(dispatcher, [operation] { operation->Cancel(); }); };
   }
 

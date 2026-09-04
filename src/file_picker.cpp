@@ -6,12 +6,15 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "file_internal.h"
@@ -114,6 +117,8 @@ void ValidateSaveOptions(const SaveFileOptions& options) {
   ValidateFilter(options.filter);
 }
 
+// Bridges provider callbacks to the owning TaskExecution without involving the picker queue. The
+// awaiter owns this state; weak callbacks cannot resurrect a canceled or destroyed coroutine.
 template <class Result>
 class CallbackOperationState final : public std::enable_shared_from_this<CallbackOperationState<Result>> {
 public:
@@ -145,6 +150,8 @@ public:
       return;
     }
 
+    // A starter can complete inline or race cancellation before returning its cancellation function.
+    // Publish that function only while pending, or cancel the newly started operation outside the lock.
     bool cancel_started_operation = false;
     {
       std::scoped_lock lock(mutex_);
@@ -243,7 +250,12 @@ Task<Result> RunCallbackOperation(typename CallbackOperationState<Result>::Start
   co_return co_await CallbackOperationAwaiter<Result>(std::move(starter), std::move(failure));
 }
 
-Task<FileResult<Bytes>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state) {
+Task<FileResult<Bytes>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state, FileType type) {
+  if (type != FileType::File) {
+    co_return FileResult<Bytes>(
+        FileError{type == FileType::Directory ? FileErrorCode::IsDirectory : FileErrorCode::Unsupported,
+                  "HuxerUI external item is not an ordinary file"});
+  }
   co_return co_await RunCallbackOperation<FileResult<Bytes>>(
       [state = std::move(state)](FileReferenceBytesCompletion completion) {
         return state->ReadBytes(std::move(completion));
@@ -255,16 +267,22 @@ Task<FileResult<Bytes>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> s
   );
 }
 
-Task<FileResult<std::string>> ReadReferenceString(std::shared_ptr<FileReferenceState> state) {
-  co_return DecodeFileUtf8(co_await ReadReferenceBytes(std::move(state)));
+Task<FileResult<std::string>> ReadReferenceString(std::shared_ptr<FileReferenceState> state, FileType type) {
+  // This is a whole-file read. Decoding runs after resumption on the owning Runtime thread, unlike
+  // File::ReadStringAsync(), which decodes inside its scheduled file operation.
+  co_return DecodeFileUtf8(co_await ReadReferenceBytes(std::move(state), type));
 }
 
-Task<bool> ImportReference(std::shared_ptr<FileReferenceState> state, File destination, bool overwrite) {
-  co_return co_await RunCallbackOperation<bool>(
-      [state = std::move(state), destination = std::move(destination), overwrite](FileReferenceBoolCompletion completion
-      ) { return state->ImportTo(destination, overwrite, std::move(completion)); },
-      false
-  );
+Task<bool> ImportReference(std::shared_ptr<FileReferenceState> state, File destination, bool overwrite, FileType type) {
+  if (type != FileType::File) {
+    co_return false;
+  }
+  auto result = co_await RunCallbackOperation<FileResult<std::uint64_t>>(
+      [state = std::move(state), destination = std::move(destination), overwrite](auto completion) {
+        return state->ImportTo(destination, overwrite, std::move(completion));
+      },
+      FileResult<std::uint64_t>(FileError{FileErrorCode::Io, "HuxerUI external file import failed"}));
+  co_return result.Succeeded();
 }
 
 Task<bool> ReplaceReference(std::shared_ptr<FileReferenceState> state, File source, bool can_write) {
@@ -277,6 +295,253 @@ Task<bool> ReplaceReference(std::shared_ptr<FileReferenceState> state, File sour
       },
       false
   );
+}
+
+FileError ReferenceError(FileErrorCode code, std::string_view operation) {
+  return {code, "HuxerUI external " + std::string(operation) + " failed"};
+}
+
+template <class T, class Starter> Task<FileResult<T>> RunReferenceOperation(Starter starter) {
+  return RunCallbackOperation<FileResult<T>>(std::move(starter),
+                                             FileResult<T>(ReferenceError(FileErrorCode::Io, "directory operation")));
+}
+
+std::optional<FileError> DirectoryError(const FileReference& reference, bool writing) {
+  if (reference.Type() != FileType::Directory) {
+    return ReferenceError(reference.Type() == FileType::File ? FileErrorCode::NotDirectory : FileErrorCode::Unsupported,
+                          "directory access");
+  }
+  if (writing && !reference.CanWrite()) {
+    return ReferenceError(FileErrorCode::PermissionDenied, "directory write");
+  }
+  return std::nullopt;
+}
+
+Task<FileResult<std::vector<FileReference>>> ListReferenceChildren(FileReference reference) {
+  if (auto error = DirectoryError(reference, false)) {
+    co_return FileResult<std::vector<FileReference>>(*error);
+  }
+  co_return co_await RunReferenceOperation<std::vector<FileReference>>(
+      [state = FileReferenceState::Of(reference)](auto completion) {
+        return state->ListChildren(std::move(completion));
+      });
+}
+
+template <class Starter>
+Task<FileResult<FileReference>> WriteReference(FileReference directory, std::string name, Starter starter) {
+  if (auto error = DirectoryError(directory, true)) {
+    co_return FileResult<FileReference>(*error);
+  }
+  auto state = FileReferenceState::Of(directory);
+  // Carry the child lookup into the write so providers can reuse its identity. Native and Web writes
+  // may still perform their own lookup; this result is neither a reservation nor a permission grant.
+  auto existing = co_await RunReferenceOperation<std::optional<FileReference>>(
+      [state, name](auto completion) { return state->FindChild(name, std::move(completion)); });
+  if (!existing.Succeeded()) {
+    co_return FileResult<FileReference>(existing.Error());
+  }
+  co_return co_await RunReferenceOperation<FileReference>([state, existing = std::move(existing.Value()),
+                                                           starter = std::move(starter)](auto completion) mutable {
+    return starter(*state, std::move(existing),
+                   [completion = std::move(completion)](FileResult<FileReferenceWriteResult> result) mutable {
+                     completion(result.Succeeded() ? FileResult<FileReference>(std::move(result.Value().reference))
+                                                   : FileResult<FileReference>(result.Error()));
+                   });
+  });
+}
+
+// Report the source-relative stage without leaking provider URIs or native paths. Escape untrusted
+// names so a newline or quote in a filename cannot disguise the entry that failed.
+FileError DirectoryCopyError(FileErrorCode code, std::string_view stage, std::string_view path) {
+  std::string escaped;
+  for (unsigned char character : path) {
+    if (character < 0x20 || character == 0x7f || character == '"' || character == '\\') {
+      constexpr char hex[] = "0123456789abcdef";
+      escaped += "\\x";
+      escaped += hex[character >> 4];
+      escaped += hex[character & 15];
+    } else {
+      escaped += static_cast<char>(character);
+    }
+  }
+  return {code, "HuxerUI directory copy " + std::string(stage) + " failed at \"" + escaped + "\""};
+}
+
+Task<FileResult<DirectoryCopySummary>> CopyDirectoryContents(
+    FileReference source, std::variant<File, FileReference> destination, bool overwrite) {
+  if (auto error = DirectoryError(source, false)) {
+    co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(error->code, "source access", ""));
+  }
+  std::shared_ptr<FileReferenceState> target;
+  FileReferenceSource target_location{target};
+  if (auto* file = std::get_if<File>(&destination)) {
+    // Keep one destination-state path through the traversal. A local root needs no public reference,
+    // but retains its File identity for the source platform's root-containment check.
+    auto local = co_await MakeLocalDirectoryState(*file);
+    if (!local.Succeeded()) {
+      co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(local.Error().code, "destination access", ""));
+    }
+    target = std::move(local.Value());
+    target_location = *file;
+  } else {
+    const auto& reference = std::get<1>(destination);
+    if (auto error = DirectoryError(reference, true)) {
+      co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(error->code, "destination access", ""));
+    }
+    target = FileReferenceState::Of(reference);
+    target_location = target;
+  }
+  // Establish independence before any write. Display names and URI prefixes cannot prove that two
+  // grants are disjoint; an unavailable containment check must fail rather than risk copying into self.
+  auto independent =
+      co_await RunReferenceOperation<bool>([state = FileReferenceState::Of(source), target_location](auto completion) {
+        return state->CheckCopyDestination(target_location, std::move(completion));
+      });
+  if (!independent.Succeeded() || !independent.Value()) {
+    co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(
+        independent.Succeeded() ? FileErrorCode::Unsupported : independent.Error().code, "root containment", ""));
+  }
+
+  // Retain only active directory frames and their sibling lists, not the complete source tree.
+  // outputs detects different source names resolving to one destination entry; ancestors below tracks
+  // cycles on the current source path. The temporary names set checks duplicates within one listing.
+  struct DirectoryFrame {
+    FileReference source;
+    std::shared_ptr<FileReferenceState> destination;
+    std::string path;
+    std::vector<FileReference> children;
+    std::unordered_set<std::string> outputs;
+    std::size_t next = 0;
+    bool listed = false;
+    std::optional<std::unordered_multimap<std::string, FileReference>> destination_children;
+  };
+  std::vector<DirectoryFrame> stack;
+  stack.push_back({source, target, {}, {}, {}});
+  std::unordered_set<std::string> ancestors;
+  DirectoryCopySummary summary;
+  while (!stack.empty()) {
+    DirectoryFrame& frame = stack.back();
+    if (!frame.listed) {
+      const std::string identity = FileReferenceState::Of(frame.source)->Identity();
+      if (identity.empty() || !ancestors.insert(identity).second) {
+        co_return FileResult<DirectoryCopySummary>(
+            DirectoryCopyError(FileErrorCode::Unsupported, "source ancestry", frame.path));
+      }
+      auto children = co_await ListReferenceChildren(frame.source);
+      if (!children.Succeeded()) {
+        co_return FileResult<DirectoryCopySummary>(
+            DirectoryCopyError(children.Error().code, "source enumeration", frame.path));
+      }
+      frame.children = std::move(children.Value());
+      frame.listed = true;
+      std::unordered_set<std::string> names;
+      for (const FileReference& child : frame.children) {
+        const std::string name = child.Name();
+        const std::string path = frame.path.empty() ? name : frame.path + "/" + name;
+        if (!IsValidReferenceChildName(name)) {
+          co_return FileResult<DirectoryCopySummary>(
+              DirectoryCopyError(FileErrorCode::Unsupported, "source name", path));
+        }
+        if (!names.insert(name).second) {
+          co_return FileResult<DirectoryCopySummary>(
+              DirectoryCopyError(FileErrorCode::AlreadyExists, "source name", path));
+        }
+      }
+      if (!frame.children.empty() && frame.destination->NeedsChildListingForLookup()) {
+        auto targets = co_await RunReferenceOperation<std::vector<FileReference>>(
+            [state = frame.destination](auto completion) { return state->ListChildren(std::move(completion)); });
+        if (!targets.Succeeded()) {
+          co_return FileResult<DirectoryCopySummary>(
+              DirectoryCopyError(targets.Error().code, "destination enumeration", frame.path));
+        }
+        // Retain duplicates so ambiguity is rejected only if the copy addresses that name. This
+        // index lives in one active frame, never on a reusable grant or across separate copy tasks.
+        frame.destination_children.emplace();
+        for (auto& entry : targets.Value()) {
+          const std::string name = entry.Name();
+          frame.destination_children->emplace(name, std::move(entry));
+        }
+      }
+    }
+    if (frame.next == frame.children.size()) {
+      ancestors.erase(FileReferenceState::Of(frame.source)->Identity());
+      stack.pop_back();
+      continue;
+    }
+    const FileReference child = frame.children[frame.next++];
+    const std::string name = child.Name();
+    const std::string path = frame.path.empty() ? name : frame.path + "/" + name;
+    if (child.Type() == FileType::Other) {
+      co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(FileErrorCode::Unsupported, "source type", path));
+    }
+    std::optional<FileReference> existing;
+    if (frame.destination_children) {
+      const auto [first, last] = frame.destination_children->equal_range(name);
+      if (first != last) {
+        auto next = first;
+        if (++next != last) {
+          co_return FileResult<DirectoryCopySummary>(
+              DirectoryCopyError(FileErrorCode::AlreadyExists, "destination lookup", path));
+        }
+        existing = first->second;
+      }
+    } else {
+      auto found = co_await RunReferenceOperation<std::optional<FileReference>>(
+          [state = frame.destination, name](auto completion) { return state->FindChild(name, std::move(completion)); });
+      if (!found.Succeeded()) {
+        co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(found.Error().code, "destination lookup", path));
+      }
+      existing = std::move(found.Value());
+    }
+    if (existing) {
+      const FileReference& target = *existing;
+      const std::string identity = FileReferenceState::Of(target)->Identity();
+      if (identity.empty()) {
+        co_return FileResult<DirectoryCopySummary>(
+            DirectoryCopyError(FileErrorCode::Unsupported, "destination identity", path));
+      }
+      if (frame.outputs.contains(identity) || target.Type() != child.Type() ||
+          (child.Type() == FileType::File && !overwrite)) {
+        co_return FileResult<DirectoryCopySummary>(
+            DirectoryCopyError(FileErrorCode::AlreadyExists, "destination collision", path));
+      }
+    }
+    // The destination owns creation, transfer, and finalization. Shared traversal does not read file
+    // contents into Bytes, and it counts an entry only after the platform has completed that write.
+    auto output = co_await RunReferenceOperation<FileReferenceWriteResult>(
+        [state = frame.destination, child, name, overwrite, existing = std::move(existing)](auto completion) {
+          if (child.Type() == FileType::Directory) {
+            return state->CreateDirectory(name, existing, std::move(completion));
+          }
+          return state->CopyFileFrom(FileReferenceState::Of(child), name, overwrite, existing, std::move(completion));
+        });
+    if (!output.Succeeded()) {
+      co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(output.Error().code, "entry transfer", path));
+    }
+    FileReferenceWriteResult written = std::move(output.Value());
+    const std::string identity = FileReferenceState::Of(written.reference)->Identity();
+    if (identity.empty() || !frame.outputs.insert(identity).second) {
+      co_return FileResult<DirectoryCopySummary>(
+          DirectoryCopyError(FileErrorCode::Unsupported, "destination identity", path));
+    }
+    if (frame.destination_children) {
+      frame.destination_children->erase(name);
+      frame.destination_children->emplace(name, written.reference);
+    }
+    if (child.Type() == FileType::Directory) {
+      summary.directories_created += written.created ? 1 : 0;
+      stack.push_back({child, FileReferenceState::Of(written.reference), path, {}, {}});
+    } else {
+      if (written.bytes_copied > std::numeric_limits<std::uint64_t>::max() - summary.bytes_copied) {
+        co_return FileResult<DirectoryCopySummary>(DirectoryCopyError(FileErrorCode::TooLarge, "byte count", path));
+      }
+      ++summary.files_copied;
+      summary.bytes_copied += written.bytes_copied;
+    }
+  }
+  // Only complete success returns a summary. Earlier output survives errors or Task cancellation;
+  // this traversal is not a snapshot, an externally isolated transaction, or a rollback mechanism.
+  co_return FileResult<DirectoryCopySummary>(summary);
 }
 
 class PickerRequestBase {
@@ -294,6 +559,8 @@ public:
 
 } // namespace
 
+// Serializes file-open, directory-open, and export presentation for one Runtime. Queue mutation is
+// confined to its UI thread; reference I/O uses its own callback bridge and never enters this queue.
 class FilePickerController final : public std::enable_shared_from_this<FilePickerController> {
 public:
   FilePickerController(
@@ -323,6 +590,10 @@ public:
     return transport_ && transport_->CanSaveFiles();
   }
 
+  [[nodiscard]] bool CanOpenDirectories(bool writable) const noexcept {
+    return transport_ && transport_->CanOpenDirectories(writable);
+  }
+
   void Submit(const std::shared_ptr<PickerRequestBase>& request) {
     request->BindController(weak_from_this());
     queued_.push_back(request);
@@ -332,6 +603,8 @@ public:
   void Cancel(const std::shared_ptr<PickerRequestBase>& request) noexcept {
     request->Detach();
     if (active_ == request) {
+      // Cancellation retires the coroutine, not necessarily the native dialog. Keep the slot occupied
+      // until the platform completion reaches Finish(), otherwise two system pickers could overlap.
       InvokeCancellation(request->TakeCancellation());
       return;
     }
@@ -407,6 +680,8 @@ public:
       return;
     }
     std::weak_ptr<PickerRequest> weak = this->shared_from_this();
+    // Platform completion may arrive from a worker. Both queue release and result delivery go through
+    // the UI dispatcher; a detached request still releases its slot without resuming application code.
     std::function<void()> cancellation = starter_(*transport, [weak, controller](Result result) mutable {
       if (auto owner = controller.lock()) {
         owner->Post([weak, controller, result = std::move(result)]() mutable {
@@ -533,6 +808,25 @@ RunPickerRequest(std::shared_ptr<FilePickerController> controller, typename Pick
 
 using SingleFileCompletion = std::function<void(std::optional<FileReference>)>;
 
+Task<std::optional<FileReference>> OpenSingleDirectory(std::shared_ptr<FilePickerController> controller,
+                                                       bool writable) {
+  if (!controller->CanOpenDirectories(writable)) {
+    co_return std::nullopt;
+  }
+  co_return co_await RunPickerRequest<std::optional<FileReference>>(
+      std::move(controller), [writable](FilePickerTransport& transport, SingleFileCompletion completion) {
+        return transport.OpenDirectory(
+            writable, [writable, completion = std::move(completion)](std::vector<FileReference> references) mutable {
+              if (references.size() != 1 || references.front().Type() != FileType::Directory ||
+                  (writable && !references.front().CanWrite())) {
+                completion(std::nullopt);
+              } else {
+                completion(std::move(references.front()));
+              }
+            });
+      });
+}
+
 Task<std::optional<FileReference>>
 OpenSingleFile(std::shared_ptr<FilePickerController> controller, FilePickerFilter filter) {
   if (!controller->CanOpenFiles()) {
@@ -591,19 +885,83 @@ FileReference MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<
   if (metadata.name.empty() || !IsValidFileUtf8(metadata.name) || metadata.name.find('\0') != std::string::npos) {
     throw std::logic_error("HuxerUI platform file reference name must contain non-empty valid UTF-8");
   }
+  if (metadata.type != FileType::File) {
+    metadata.size.reset();
+    metadata.content_type.reset();
+  }
   if (metadata.content_type.has_value() && !IsValidContentType(*metadata.content_type, false)) {
     throw std::logic_error("HuxerUI platform file reference content type must be a valid MIME type");
   }
   return FileReference(std::move(metadata), std::move(state));
 }
 
+bool IsValidReferenceChildName(std::string_view name) noexcept {
+  return !name.empty() && name != "." && name != ".." && IsValidFileUtf8(name) &&
+         name.find('\0') == std::string_view::npos && name.find('/') == std::string_view::npos &&
+         name.find('\\') == std::string_view::npos;
+}
+
+void ValidateReferenceChildName(std::string_view name) {
+  if (!IsValidReferenceChildName(name)) {
+    throw std::invalid_argument("HuxerUI directory child name must be one non-empty valid UTF-8 segment");
+  }
+}
+
+std::shared_ptr<FileReferenceState> FileReferenceState::Of(const FileReference& reference) {
+  return reference.state_;
+}
+std::string FileReferenceState::Identity() const {
+  return {};
+}
+
+std::function<void()> FileReferenceState::ListChildren(FileReferenceCompletion<std::vector<FileReference>> completion) {
+  completion(FileResult<std::vector<FileReference>>(ReferenceError(FileErrorCode::Unsupported, "enumeration")));
+  return {};
+}
+
+std::function<void()> FileReferenceState::FindChild(std::string,
+                                                    FileReferenceCompletion<std::optional<FileReference>> completion) {
+  completion(FileResult<std::optional<FileReference>>(ReferenceError(FileErrorCode::Unsupported, "child lookup")));
+  return {};
+}
+
+std::function<void()>
+FileReferenceState::CreateDirectory(std::string, std::optional<FileReference>,
+                                    FileReferenceCompletion<FileReferenceWriteResult> completion) {
+  completion(FileResult<FileReferenceWriteResult>(ReferenceError(FileErrorCode::Unsupported, "directory creation")));
+  return {};
+}
+
+std::function<void()> FileReferenceState::CopyFileFrom(
+    FileReferenceSource, std::string, bool, std::optional<FileReference>,
+    FileReferenceCompletion<FileReferenceWriteResult> completion) {
+  completion(FileResult<FileReferenceWriteResult>(ReferenceError(FileErrorCode::Unsupported, "file copy")));
+  return {};
+}
+
+std::function<void()> FileReferenceState::CheckCopyDestination(FileReferenceSource,
+                                                               FileReferenceCompletion<bool> completion) {
+  completion(FileResult<bool>(ReferenceError(FileErrorCode::Unsupported, "containment check")));
+  return {};
+}
+
+bool FilePickerTransport::CanOpenDirectories(bool) const noexcept {
+  return false;
+}
+std::function<void()> FilePickerTransport::OpenDirectory(bool, FilePickerOpenCompletion completion) {
+  completion({});
+  return {};
+}
+
 } // namespace huxerui::detail
 
 namespace huxerui {
 
+// Value copies share access, not live metadata. Replacing content does not update the saved size/type;
+// retained child references and pending operations keep their own shared platform state alive.
 FileReference::FileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceState> state)
     : name_(std::move(metadata.name)), size_(metadata.size), content_type_(std::move(metadata.content_type)),
-      can_write_(metadata.can_write), state_(std::move(state)) {}
+      can_write_(metadata.can_write), type_(metadata.type), state_(std::move(state)) {}
 
 FileReference::~FileReference() = default;
 
@@ -623,20 +981,66 @@ bool FileReference::CanWrite() const noexcept {
   return can_write_;
 }
 
+FileType FileReference::Type() const noexcept {
+  return type_;
+}
+
 Task<FileResult<Bytes>> FileReference::ReadBytesAsync() const {
-  return detail::ReadReferenceBytes(state_);
+  return detail::ReadReferenceBytes(state_, type_);
 }
 
 Task<FileResult<std::string>> FileReference::ReadStringAsync() const {
-  return detail::ReadReferenceString(state_);
+  return detail::ReadReferenceString(state_, type_);
 }
 
 Task<bool> FileReference::ImportToAsync(File destination, bool overwrite) const {
-  return detail::ImportReference(state_, std::move(destination), overwrite);
+  return detail::ImportReference(state_, std::move(destination), overwrite, type_);
 }
 
 Task<bool> FileReference::ReplaceWithAsync(File source) const {
-  return detail::ReplaceReference(state_, std::move(source), can_write_);
+  return detail::ReplaceReference(state_, std::move(source), can_write_ && type_ == FileType::File);
+}
+
+Task<FileResult<std::vector<FileReference>>> FileReference::ListChildrenAsync() const {
+  return detail::ListReferenceChildren(*this);
+}
+
+Task<FileResult<FileReference>> FileReference::CreateDirectoryAsync(std::string name) const {
+  // Validate caller input before returning the lazy Task. Provider-reported name restrictions instead
+  // become FileErrors during execution; they must not silently rename the requested child.
+  detail::ValidateReferenceChildName(name);
+  return detail::WriteReference(*this, name, [name](auto& state, auto existing, auto completion) mutable {
+    return state.CreateDirectory(std::move(name), std::move(existing), std::move(completion));
+  });
+}
+
+Task<FileResult<FileReference>> FileReference::CopyFileFromAsync(File source, std::string name, bool overwrite) const {
+  detail::ValidateReferenceChildName(name);
+  return detail::WriteReference(
+      *this, name, [name, source = std::move(source), overwrite](auto& state, auto existing, auto completion) mutable {
+        return state.CopyFileFrom(std::move(source), std::move(name), overwrite, std::move(existing),
+                                  std::move(completion));
+      });
+}
+
+Task<FileResult<FileReference>> FileReference::CopyFileFromAsync(FileReference source, std::string name,
+                                                                 bool overwrite) const {
+  detail::ValidateReferenceChildName(name);
+  return detail::WriteReference(
+      *this, name, [name, source = source.state_, overwrite](auto& state, auto existing, auto completion) mutable {
+        return state.CopyFileFrom(std::move(source), std::move(name), overwrite, std::move(existing),
+                                  std::move(completion));
+      });
+}
+
+Task<FileResult<DirectoryCopySummary>> FileReference::CopyDirectoryContentsToAsync(File destination,
+                                                                                   bool overwrite) const {
+  return detail::CopyDirectoryContents(*this, std::move(destination), overwrite);
+}
+
+Task<FileResult<DirectoryCopySummary>> FileReference::CopyDirectoryContentsToAsync(FileReference destination,
+                                                                                   bool overwrite) const {
+  return detail::CopyDirectoryContents(*this, std::move(destination), overwrite);
 }
 
 FilePicker::FilePicker(
@@ -652,6 +1056,14 @@ bool FilePicker::CanOpenFiles() const noexcept {
 
 bool FilePicker::CanSaveFiles() const noexcept {
   return controller_->CanSaveFiles();
+}
+
+bool FilePicker::CanOpenDirectories(bool writable) const noexcept {
+  return controller_->CanOpenDirectories(writable);
+}
+
+Task<std::optional<FileReference>> FilePicker::OpenDirectoryAsync(bool writable) const {
+  return detail::OpenSingleDirectory(controller_, writable);
 }
 
 Task<std::optional<FileReference>> FilePicker::OpenFileAsync(FilePickerFilter filter) const {

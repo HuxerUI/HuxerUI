@@ -6,6 +6,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.webkit.MimeTypeMap;
 
 import java.io.File;
@@ -42,6 +43,13 @@ final class HuxerUIFilePicker {
         return new Operation(nativeHandle, sourcePath, suggestedName, extensions, contentTypes, false);
     }
 
+    Operation prepareDirectory(long nativeHandle, boolean writable) {
+        Operation operation = new Operation(nativeHandle, null, null, new String[0], new String[0], false);
+        operation.directory = true;
+        operation.writable = writable;
+        return operation;
+    }
+
     boolean dispatchResult(int requestCode, int resultCode, Intent data) {
         Operation operation = active;
         return operation != null && operation.dispatchResult(requestCode, resultCode, data);
@@ -71,12 +79,16 @@ final class HuxerUIFilePicker {
     }
 
     final class Operation {
+        // This request remains active through metadata loading or export, not just until Activity result.
+        // The terminal callback releases the native holder and the shared picker's presentation slot.
         private final long nativeHandle;
         private final String sourcePath;
         private final String suggestedName;
         private final String[] extensions;
         private final String[] contentTypes;
         private final boolean multiple;
+        private boolean directory;
+        private boolean writable;
         private final int requestCode = requestCode();
         private final AtomicBoolean finished = new AtomicBoolean();
         private final HuxerUIFileReference.CopyState copyState = new HuxerUIFileReference.CopyState();
@@ -123,7 +135,7 @@ final class HuxerUIFilePicker {
                 } catch (RuntimeException ignored) {
                 }
             }
-            nativeComplete(nativeHandle, false, null, null, null, null, null);
+            nativeComplete(nativeHandle, false, null);
         }
 
         boolean dispatchResult(int resultRequestCode, int resultCode, Intent data) {
@@ -141,11 +153,27 @@ final class HuxerUIFilePicker {
                     return true;
                 }
                 int grantFlags = data.getFlags();
+                // A read-only selection must not inherit broader OS write rights. Derived references
+                // carry this effective restriction even if the same tree is later selected writable.
+                if (directory && !writable) { grantFlags &= ~Intent.FLAG_GRANT_WRITE_URI_PERMISSION; }
+                final int effectiveFlags = grantFlags;
                 try {
                     worker = HuxerUIFileReference.submit(() -> {
                         HuxerUIFileReference.Metadata[] selected = null;
                         try {
-                            selected = references(uris, grantFlags);
+                            if (directory) {
+                                if (uris.size() != 1) { throw new IllegalArgumentException(); }
+                                Uri tree = uris.get(0);
+                                // Keep the tree grant while addressing its root document. File operations
+                                // must use document URIs under that grant, not filesystem paths guessed from IDs.
+                                Uri document = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
+                                HuxerUIFileReference.Metadata item = HuxerUIFileReference.describe(resolver, document, effectiveFlags);
+                                if (!DocumentsContract.Document.MIME_TYPE_DIR.equals(item.contentType)
+                                        || (writable && !item.writable)) { throw new SecurityException(); }
+                                selected = new HuxerUIFileReference.Metadata[] {item};
+                            } else {
+                                selected = references(uris, effectiveFlags);
+                            }
                         } catch (RuntimeException ignored) {
                         }
                         complete(false, selected);
@@ -155,6 +183,8 @@ final class HuxerUIFilePicker {
                 }
             } else {
                 Uri destination = data.getData();
+                // Save exports the existing local source into the chosen document. Merely receiving a
+                // destination URI is not success; completion waits for streaming output to close.
                 if (destination == null) {
                     complete(false, null);
                     return true;
@@ -177,6 +207,12 @@ final class HuxerUIFilePicker {
         }
 
         private Intent openIntent() {
+            if (directory) {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                if (writable) { intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION); }
+                return intent;
+            }
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             configureMimeTypes(intent, resolvedMimeTypes(extensions, contentTypes));
@@ -205,24 +241,7 @@ final class HuxerUIFilePicker {
                 return;
             }
             clear(this);
-            if (references == null) {
-                nativeComplete(nativeHandle, saved, null, null, null, null, null);
-                return;
-            }
-            String[] uris = new String[references.length];
-            String[] names = new String[references.length];
-            long[] sizes = new long[references.length];
-            String[] types = new String[references.length];
-            boolean[] writable = new boolean[references.length];
-            for (int index = 0; index < references.length; ++index) {
-                HuxerUIFileReference.Metadata reference = references[index];
-                uris[index] = reference.uri.toString();
-                names[index] = reference.name;
-                sizes[index] = reference.size;
-                types[index] = reference.contentType;
-                writable[index] = reference.writable;
-            }
-            nativeComplete(nativeHandle, false, uris, names, sizes, types, writable);
+            nativeComplete(nativeHandle, saved, references);
         }
     }
 
@@ -307,6 +326,6 @@ final class HuxerUIFilePicker {
         return "application/octet-stream";
     }
 
-    private static native void nativeComplete(long nativeHandle, boolean saved, String[] uris, String[] names,
-            long[] sizes, String[] contentTypes, boolean[] writable);
+    private static native void nativeComplete(long nativeHandle, boolean saved,
+            HuxerUIFileReference.Metadata[] references);
 }
