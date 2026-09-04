@@ -5,9 +5,55 @@
 #include <utility>
 #include <vector>
 
+#include <gdk/gdk.h>
+
 #include <huxerui/linux/external_texture.h>
 
 namespace huxerui::detail {
+
+class LinuxGdkTextureFrame final {
+public:
+  explicit LinuxGdkTextureFrame(::GdkTexture* texture) : texture_(GDK_TEXTURE(g_object_ref(texture))) {}
+
+  ~LinuxGdkTextureFrame() {
+    g_object_unref(texture_);
+  }
+
+  LinuxGdkTextureFrame(const LinuxGdkTextureFrame&) = delete;
+  LinuxGdkTextureFrame& operator=(const LinuxGdkTextureFrame&) = delete;
+
+  [[nodiscard]] ::GdkTexture* Texture() const noexcept {
+    return texture_;
+  }
+
+private:
+  ::GdkTexture* texture_ = nullptr;
+};
+
+class LinuxGlFrame final {
+public:
+  LinuxGlFrame(::GdkTexture* texture, linux::GlTexture::Origin origin)
+      : texture_(GDK_TEXTURE(g_object_ref(texture))), origin_(origin) {}
+
+  ~LinuxGlFrame() {
+    g_object_unref(texture_);
+  }
+
+  LinuxGlFrame(const LinuxGlFrame&) = delete;
+  LinuxGlFrame& operator=(const LinuxGlFrame&) = delete;
+
+  [[nodiscard]] ::GdkTexture* Texture() const noexcept {
+    return texture_;
+  }
+
+  [[nodiscard]] linux::GlTexture::Origin Origin() const noexcept {
+    return origin_;
+  }
+
+private:
+  ::GdkTexture* texture_ = nullptr;
+  linux::GlTexture::Origin origin_ = linux::GlTexture::Origin::BottomLeft;
+};
 
 class LinuxPixelFrame final {
 public:

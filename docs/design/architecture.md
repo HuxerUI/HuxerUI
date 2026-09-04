@@ -1259,11 +1259,11 @@ protected:
 };
 ```
 
-The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `ios::MetalTexture`, `macos::PixelBufferTexture`, `macos::MetalTexture`, `windows::PixelTexture`, `windows::D3D11Texture`, `linux::PixelTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
+The implemented concrete producers are `android::BitmapTexture`, `android::GlTexture`, `android::SurfaceStreamTexture`, `ios::PixelBufferTexture`, `ios::MetalTexture`, `macos::PixelBufferTexture`, `macos::MetalTexture`, `windows::PixelTexture`, `windows::D3D11Texture`, `linux::PixelTexture`, `linux::GlTexture`, `linux::GdkTexture`, and `web::VideoFrameTexture` in their explicit platform headers.
 Apple Objective-C and Swift use `HUXPixelBufferTexture` and `HUXMetalTexture`, imported as `PixelBufferTexture` and `MetalTexture`; each object is itself an `ExternalTexture` capability rather than an owner exposing a second `.texture` value.
-Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple retains immutable `CVPixelBufferRef` frames or synchronously copies a completed `MTLTexture`; Windows copies borrowed `PixelFrame` rows or a completed D3D11 texture; Linux copies borrowed `PixelFrame` rows; Web clones an open WebCodecs `VideoFrame` on the browser main thread.
+Android accepts a retained `android.graphics.Bitmap`, synchronously copies current `GL_TEXTURE_2D` content through EGLImage, or owns a SurfaceTexture/OES consumer behind a producer-facing `android.view.Surface`; Apple retains immutable `CVPixelBufferRef` frames or synchronously copies a completed `MTLTexture`; Windows copies borrowed `PixelFrame` rows or a completed D3D11 texture; Linux copies borrowed `PixelFrame` rows or current `GL_TEXTURE_2D` content and can retain an advanced immutable `GdkTexture`; Web clones an open WebCodecs `VideoFrame` on the browser main thread.
 Retained Android Bitmap and Apple pixel-buffer storage remains immutable while HuxerUI may render it; copied and cloned inputs may be reused or released after publication returns.
-Future GPU-native producers such as DMA-BUF, AHardwareBuffer, or WebGPU textures require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on the current CPU-backed types.
+Future GPU-native producers that cannot be represented by an existing platform texture contract, such as direct AHardwareBuffer or WebGPU textures, require matching renderer import and synchronization support; they are added as new platform subclasses rather than optional fields or fake handles on current types.
 
 Apple `MetalTexture::Publish()` accepts level zero of a non-framebuffer-only 2D BGRA8 or RGBA8 texture after producer writes have completed.
 It waits for an immutable GPU snapshot before advancing the texture revision, normalizes opaque or straight alpha with Metal Performance Shaders when required, and retains the previous frame if allocation, encoding, or execution fails.
@@ -1322,7 +1322,7 @@ The same texture may be displayed by several Runtimes; unmounting one removes on
 Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
 The shared command retains only the abstract identity and immutable drawing data, while each renderer casts to its matching concrete platform type and uses that type's private mailbox interface.
 Each backend chooses a platform-specific direct-import path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
-The API promises no copy through shared Runtime; it does not claim universal zero-copy on the current CoreGraphics, Android Canvas, or Cairo backends.
+The API promises no copy through shared Runtime; it does not claim universal zero-copy on CoreGraphics, Android Canvas, or a GSK renderer that must convert an incompatible GDK texture.
 The Apple implementations accept `CVPixelBufferRef` and use Core Image conversion compatible with their existing renderers.
 The Android API 23 path keeps Canvas as the primary renderer and draws retained `Bitmap` frames directly.
 `GlTexture::PublishCurrent()` reads level-zero `GL_TEXTURE_2D` content from the current EGL context, duplicates an optional native acquire fence, and synchronously converts it once into a compositor-owned premultiplied 2D texture without CPU readback.
@@ -1334,7 +1334,14 @@ The Android renderer encounters that ordinary `DrawExternalTextureCommand` durin
 This platform-private child does not become a PlatformView, public View, accessibility node, or shared RenderComposition layer.
 Frames containing GPU texture children move the base Canvas slice from `onDraw()` into `dispatchDraw()` so all Canvas, GPU texture, and PlatformView content retains command order.
 Direct `AHardwareBuffer` import remains future work.
-The Linux implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into Cairo premultiplied ARGB32 storage, keeps one Cairo surface per active texture, and leaves DMA-BUF import and explicit synchronization as future renderer work.
+The Linux `PixelTexture` implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into premultiplied storage and wraps each acquired frame in a `GdkMemoryTexture` for GTK Snapshot composition.
+`linux::GlTexture::PublishCurrent()` validates level-zero `GL_RGBA8` storage in the current producer `GdkGLContext`, then completes a GPU copy into a new immutable texture managed through a private HuxerUI context in the same GL share group.
+HuxerUI constructs the `GdkGLTexture`, attaches the completion fence, retains origin and alpha metadata, and deletes the copied GL texture and fence after the final GDK reference is released.
+The synchronous copy commits before revision publication, restores the producer context before returning, and allows the producer to update or delete its mutable source immediately.
+The Linux `GdkTexture` implementation remains the advanced path that retains one already immutable GDK frame in its latest-wins mailbox, so producers may publish `GdkDmabufTexture` or another GDK-owned texture without HuxerUI downloading pixels.
+The custom GTK widget snapshots ordinary PaintCommands as ordered Cairo nodes and ExternalTexture commands as ordered GDK texture nodes under the same transform, clip, path-fill, opacity, content, child, and foreground structure.
+GDK owns final GL and DMA-BUF presentation import and format negotiation; the concrete Linux ExternalTexture owns its appropriate synchronization and native resource lifetime.
+HuxerUI does not expose file descriptors, GL names, EGL objects, Vulkan objects, or display-server handles in Runtime or PaintCommand.
 The Windows `PixelTexture` implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.
 It reuses the bitmap allocation while pixel dimensions remain unchanged.
 `D3D11Texture::Publish()` accepts a completed one-mip, one-slice, single-sampled BGRA8 default-usage texture, copies it once into a new HuxerUI-owned NT-handle shared resource, waits for that copy, and publishes only the immutable snapshot.

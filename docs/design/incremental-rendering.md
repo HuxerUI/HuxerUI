@@ -524,7 +524,7 @@ Shadow commands include their resolved caster and complete blur overflow.
 Unknown or renderer-dependent overflow falls back to the host viewport.
 
 The Android View backend currently ignores regional damage at the platform invalidation boundary and redraws the full surface.
-The Linux GTK backend currently lets GTK coalesce invalidation and replays the committed RenderScene for each Cairo draw.
+The Linux GTK backend currently lets GTK coalesce invalidation and snapshots the committed RenderScene into ordered Cairo and GDK texture nodes for each widget draw.
 Other future platform implementations may initially redraw the full surface.
 The shared runtime must still calculate and test damage correctly so a renderer can adopt partial redraw without changing component behavior.
 
