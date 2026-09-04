@@ -1057,7 +1057,7 @@ void RenameReference(HANDLE file, HANDLE parent, std::wstring_view name) {
 
 // Path-backed grants and application-local copy destinations share this implementation. Apple access
 // owners are retained by coordination_; directory children share anchor_ and the original write limit.
-// file_ stays private: exposing it would let callers bypass coordination and grant-relative access.
+// AsFile exposes only the stored path; reference I/O still uses coordination and grant-relative access.
 class LocalFileReferenceState final : public FileReferenceState,
                                       public std::enable_shared_from_this<LocalFileReferenceState> {
 public:
@@ -1066,6 +1066,7 @@ public:
   [[nodiscard]] FileReference Reference(std::optional<std::string> content_type = {});
   [[nodiscard]] FileReferenceMetadata Metadata(std::string* identity = nullptr, int parent_descriptor = -1) const;
   [[nodiscard]] std::string Identity() const override;
+  [[nodiscard]] std::optional<File> AsFile() const override;
   std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override;
   std::function<void()> ImportTo(File destination, bool overwrite,
                                  FileReferenceCompletion<std::uint64_t> completion) override;
@@ -1155,6 +1156,9 @@ LocalFileReferenceState::LocalFileReferenceState(const LocalFileReferenceState& 
 LocalFileReferenceState::~LocalFileReferenceState() = default;
 std::string LocalFileReferenceState::Identity() const {
   return identity_;
+}
+std::optional<File> LocalFileReferenceState::AsFile() const {
+  return file_;
 }
 void LocalFileReferenceState::Coordinate(const File& item, bool writing, const std::function<void()>& operation) {
   if (coordination_) {

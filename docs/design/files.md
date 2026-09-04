@@ -27,8 +27,8 @@ Those capabilities may reuse `FileReference` later without expanding the initial
 Open With, platform file associations, share intents, application activation, window selection, and multi-window document routing are outside this design.
 They require one application-level activation contract rather than a file-specific View event.
 
-Android `content://` values, Apple security-scoped URLs, browser file handles, and other granted external capabilities are not local paths.
-They are represented by `FileReference` rather than values constructed as `File`.
+Android `content://` values, Apple security-scoped URLs, browser file handles, and other granted external capabilities are represented by `FileReference`, not assumed to be ordinary local paths.
+Path-backed references can explicitly expose a `File` through `AsFile()` without transferring their access capability to that path value.
 
 Packaged HuxerUI resources remain owned by `PlatformResources` and `AppResources`.
 A resource is not required to have a stable operating-system path and is never projected into `File` merely for API uniformity.
@@ -375,6 +375,7 @@ public:
   [[nodiscard]] std::optional<std::string> ContentType() const;
   [[nodiscard]] bool CanWrite() const noexcept;
   [[nodiscard]] FileType Type() const noexcept;
+  [[nodiscard]] std::optional<File> AsFile() const;
 
   [[nodiscard]] Task<FileResult<Bytes>> ReadBytesAsync() const;
   [[nodiscard]] Task<FileResult<std::string>> ReadStringAsync() const;
@@ -390,11 +391,18 @@ public:
 };
 ```
 
-There is no default constructor, empty state, `HasValue()`, path accessor, or implicit conversion to `File`.
+There is no default constructor, empty state, `HasValue()`, unconditional path accessor, or implicit conversion to `File`.
 Code uses `std::optional<FileReference>` when absence is meaningful.
 `Name()` is a UTF-8 display filename and not a trustworthy local path segment without the same validation used by `File::Child()`.
 `Size()` and `ContentType()` are optional metadata hints obtained without reading the entire file.
 `ContentType()` returns a MIME string when the platform can supply or map one and does not expose a platform-specific type identifier.
+
+`AsFile()` synchronously returns the backend's stored local path, or `std::nullopt` when no local path is available; it does not perform I/O, copy contents, activate permission, or refresh a moved or deleted entry.
+Windows, macOS, and Linux local references support it, including files, directories, and derived children; path-backed iOS references use the same behavior, while Android document URIs and Web browser handles return no path.
+The decision belongs to the existing reference backend, not a shared platform-name switch: the private state defaults to no path, and the shared local state returns its existing `File` even when a coordination callback is present.
+The returned `File` does not retain the grant or temporary-file owner; application code must keep a reference alive for the whole path-based operation or project session, including asynchronous work.
+Path-based operations use ordinary system permissions and do not inherit `CanWrite()` restrictions, coordinated access, or handle-relative identity and containment guarantees; the original reference and its I/O contract remain unchanged.
+`AsFile()` is an explicit path interoperability operation, not an existence/access check or a persistent grant; use reference I/O when its authorization or coordination behavior is required.
 
 External references expose asynchronous I/O only because their platform transport may involve a provider process, coordinated access, security-scope activation, or a browser permission check.
 `ReadStringAsync()` follows the same UTF-8, byte-order-mark, and line-ending contract as `File::ReadStringAsync()`.
@@ -637,7 +645,7 @@ Without that host capability, `CanOpenFiles()` and `CanSaveFiles()` return `fals
 Windows uses the application's Local App Data identity for durable data, application-specific cache and temporary children, and the directory containing the process executable.
 Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection, adding `FOS_PICKFOLDERS` for a single directory.
 Filters map extension values directly and exact MIME types through the Windows registry; wildcard or unknown MIME mappings deliberately widen the system filter rather than excluding valid documents.
-Selected filesystem paths remain private to `FileReference`, and metadata reports the filename, size, registered MIME type when available, and basic write capability.
+Selected filesystem paths are available explicitly through `FileReference::AsFile()`, while metadata reports the filename, size, registered MIME type when available, and basic write capability.
 File and directory grants retain a metadata-only handle without locking idle ancestors; descendant access opens one child at a time with `NtCreateFile` relative to its parent's handle and rejects traversal-changing reparse points.
 `ReOpenFile` obtains operation-specific access and independent enumeration cursors from retained objects; enumeration, creation, overwrite finalization, and temporary-file cleanup use handles rather than reconstructed paths.
 Normalized names queried from those handles are used only for metadata and root-containment checks, never to reopen or mutate an entry.

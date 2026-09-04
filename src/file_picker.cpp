@@ -910,6 +910,9 @@ void ValidateReferenceChildName(std::string_view name) {
 std::shared_ptr<FileReferenceState> FileReferenceState::Of(const FileReference& reference) {
   return reference.state_;
 }
+std::optional<File> FileReferenceState::AsFile() const {
+  return std::nullopt;
+}
 std::string FileReferenceState::Identity() const {
   return {};
 }
@@ -983,6 +986,10 @@ bool FileReference::CanWrite() const noexcept {
 
 FileType FileReference::Type() const noexcept {
   return type_;
+}
+
+std::optional<File> FileReference::AsFile() const {
+  return state_ ? state_->AsFile() : std::nullopt;
 }
 
 Task<FileResult<Bytes>> FileReference::ReadBytesAsync() const {

@@ -171,4 +171,24 @@ TEST_CASE("MacFileReferenceMapsMissingFilesAndPickerCapabilities") {
   }
 }
 
+TEST_CASE("MacDirectoryReferencesExposeProjectPathsForDirectFileOperations") {
+  @autoreleasepool {
+    TemporaryDirectory temporary;
+    const File directory = temporary.Child("project");
+    REQUIRE(directory.CreateDirectory());
+    const FileReference reference = detail::MakeMacFileReference(temporary.ChildURL(@"project"), true);
+    REQUIRE(reference.Type() == FileType::Directory);
+    const auto project = reference.AsFile();
+    REQUIRE(project.has_value());
+    REQUIRE(project->Name() == "project");
+    REQUIRE(project->Child("src").CreateDirectory());
+    REQUIRE(project->Child("settings.json").WriteString("{}"));
+    REQUIRE(directory.Child("src").IsDirectory());
+    REQUIRE(directory.Child("settings.json").ReadString().Value() == "{}");
+    const auto children = project->ListChildren();
+    REQUIRE(children.Succeeded());
+    REQUIRE(children.Value().size() == 2);
+  }
+}
+
 } // namespace huxerui::test

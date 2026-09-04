@@ -48,6 +48,8 @@ public:
   virtual std::function<void()> ReplaceWith(File source, FileReferenceBoolCompletion completion) = 0;
 
   [[nodiscard]] static std::shared_ptr<FileReferenceState> Of(const FileReference& reference);
+  // Optional path projection only; the returned File never takes ownership of this state's grant.
+  [[nodiscard]] virtual std::optional<File> AsFile() const;
   // Used for ancestor-cycle and destination-alias checks, never as a public path or a persistent token.
   // An empty identity means traversal cannot establish the required relationship safely.
   [[nodiscard]] virtual std::string Identity() const;

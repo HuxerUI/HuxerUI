@@ -201,6 +201,19 @@ Task<void> CaptureOpenedFiles(std::shared_ptr<FilePicker> picker) {
 static_assert(!std::is_default_constructible_v<FileReference>);
 static_assert(std::is_copy_constructible_v<FileReference>);
 static_assert(!std::is_copy_constructible_v<FilePicker>);
+static_assert(std::is_same_v<decltype(std::declval<const FileReference&>().AsFile()), std::optional<File>>);
+
+TEST_CASE("FileReferencesWithoutLocalPathsDoNotInferOrImportOne") {
+  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("content"));
+  const FileReference file = MakeReference("/tmp/document.txt", true, state);
+  const FileReference directory = detail::MakeFileReference(
+      {.name = "/tmp/project", .can_write = true, .type = FileType::Directory}, state);
+  REQUIRE_FALSE(file.AsFile().has_value());
+  REQUIRE_FALSE(directory.AsFile().has_value());
+  REQUIRE(state->read_count == 0);
+  REQUIRE_FALSE(state->imported_to.has_value());
+  REQUIRE_FALSE(state->replaced_with.has_value());
+}
 
 TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
   ResetFilePickerState();

@@ -299,6 +299,51 @@ void ResetFileState() {
 
 } // namespace
 
+TEST_CASE("FileReferencesExposePathValuesWithoutTransferringTheirAccessLifetime") {
+  TemporaryDirectory temporary;
+  const File root(temporary.Paths().temporary_directory);
+  REQUIRE(root.CreateDirectory());
+  const File selected = root.Child("工程");
+  bool directory = false;
+  SECTION("A selected file has a local path") { REQUIRE(selected.WriteString("initial")); }
+  SECTION("A selected directory has a local path") {
+    directory = true;
+    REQUIRE(selected.CreateDirectory());
+  }
+  std::optional<File> path;
+  std::weak_ptr<int> weak_access;
+  {
+    auto access = std::make_shared<int>(0);
+    weak_access = access;
+    const FileReference reference = detail::MakeLocalFileReference(selected, false, {},
+        [access](const File*, const File*, const std::function<void()>& operation) {
+          ++*access;
+          operation();
+        });
+    FileReference copy = reference;
+    FileReference moved = std::move(copy);
+    REQUIRE_FALSE(copy.AsFile().has_value());
+    path = moved.AsFile();
+    REQUIRE(path.has_value());
+    REQUIRE(reference.AsFile() == path);
+    REQUIRE(path->Name() == selected.Name());
+    REQUIRE_FALSE(reference.CanWrite());
+    const File output = directory ? path->Child("settings.json") : *path;
+    REQUIRE(output.WriteString("{}"));
+    REQUIRE((directory ? selected.Child("settings.json") : selected).ReadString().Value() == "{}");
+    REQUIRE_FALSE(reference.CanWrite());
+    REQUIRE(*access == 1);
+    REQUIRE_FALSE(weak_access.expired());
+
+    REQUIRE(selected.MoveTo(root.Child("moved")));
+    REQUIRE(reference.AsFile() == path);
+    REQUIRE_FALSE(path->Exists());
+    REQUIRE(*access == 1);
+  }
+  REQUIRE(weak_access.expired());
+  REQUIRE(path.has_value());
+}
+
 TEST_CASE("RuntimeInstallsFileSystemAndFileAsyncOperationsResumeOnTheUIThread") {
   ResetFileState();
   TemporaryDirectory temporary;
@@ -683,6 +728,9 @@ TEST_CASE("DirectoryReferencesKeepRetainedChildrenAndRejectLinksAndRenamedChildr
   REQUIRE(text == "value");
   REQUIRE(copied);
   REQUIRE(idempotent);
+  REQUIRE(retained.has_value());
+  REQUIRE(retained->AsFile().has_value());
+  REQUIRE(retained->AsFile()->ReadString().Value() == "value");
   if (fs::equivalent(destination.Child("Case").Path(), destination.Child("case").Path())) {
     REQUIRE(rejected_alias);
   }

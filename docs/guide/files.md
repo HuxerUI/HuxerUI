@@ -43,8 +43,8 @@ The conversion is lexical and does not require the target to exist.
 POSIX-like hosts accept only local authorities, while Windows additionally maps supported non-empty authorities to UNC paths; `localhost` with a non-drive path identifies a local UNC share.
 Query, fragment, user-info, port, encoded separators, and platform-incompatible file forms are rejected.
 
-Do not convert `FileReference` into `File` or `Uri` merely because a platform capability originated from an Android content URI, Apple security-scoped URL, or browser handle.
-The capability remains authoritative for access.
+Use `FileReference::AsFile()` to obtain a local path when the reference has one, then `File::ToUri()` if a file URI is needed.
+Do not reconstruct a path from a display name, Android content URI, or browser handle; the returned `File` does not take ownership of the reference's access capability.
 
 ## Asynchronous operations
 
@@ -74,7 +74,7 @@ Their asynchronous counterparts take `Bytes` by value so the operation owns the 
 ## External files and directories
 
 `FileReference` is a capability for one file or directory selected or opened outside application-owned storage.
-It may represent a path, security-scoped Apple URL, Android document URI, or browser file handle without exposing that identity to shared code.
+It may represent a path, security-scoped Apple URL, Android document URI, or browser file handle; only path-backed references expose a local `File` through `AsFile()`.
 
 External references can be read, imported into application storage, or used for a supported replacement operation.
 Their lifetime and persistence follow platform capability rules.
@@ -89,6 +89,29 @@ External renaming or replacement can invalidate later operations; a retained dir
 Directory `ReadBytesAsync()` and `ReadStringAsync()` fail with `IsDirectory`.
 Existing `ImportToAsync()` and `ReplaceWithAsync()` remain single-file operations and return `false` for directories.
 
+### Direct local-path access
+
+`AsFile()` returns `std::optional<File>` for both files and directories without I/O, copying, or importing their contents.
+Windows, macOS, and Linux local selections support it; path-backed iOS selections do as well, while Android document URIs and Web browser file handles return `std::nullopt`.
+It returns the stored path, not a fresh existence or permission check, and does not update that path after a rename.
+
+For an IDE, select a writable project directory with `OpenDirectoryAsync(true)`, retain the returned `FileReference` in the project session, and pass its `AsFile()` value to the file tree, indexer, or other path-based library.
+The following helper retains its reference parameter until the asynchronous write completes:
+
+```cpp
+Task<bool> WriteProjectSettings(FileReference project, std::string json) {
+  auto directory = project.AsFile();
+  if (!directory) {
+    co_return false;
+  }
+  co_return co_await directory->Child("settings.json").WriteStringAsync(std::move(json));
+}
+```
+
+`File` remains a path value: it does not retain a security scope or temporary-file owner, enforce the reference's `CanWrite()` restriction, coordinate document access, or preserve native identity after path replacement.
+Keep the original reference or a copy alive throughout path-based use, especially for macOS security-scoped selections and iOS temporary activation copies.
+Actual operations still require system permission; continue using `FileReference` I/O when its grant restrictions or coordination are needed.
+
 ## FilePicker
 
 Use the file picker service to open one or more files, select one directory, or save an application-owned file through the current platform.
@@ -98,7 +121,7 @@ Filters are portable hints.
 The platform picker may present them according to platform conventions, but application code must still validate selected content.
 
 `OpenDirectoryAsync(bool writable = false)` selects one existing directory without file filters.
-The default reference and its children are read-only through HuxerUI even when the operating system grants broader rights.
+The default reference and its children are read-only through reference operations even when the operating system grants broader rights; explicit `AsFile()` access follows ordinary `File` permissions instead.
 Passing `true` requests read/write access and never silently returns a read-only selection.
 `CanOpenDirectories(writable)` checks host support without opening UI or creating probe files; it does not guarantee approval for a particular location.
 `CanWrite()` on the returned directory advertises child creation, not permission to overwrite every existing child.

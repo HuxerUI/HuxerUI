@@ -394,9 +394,9 @@ struct DirectoryCopySummary {
 };
 
 /// @brief A retained access capability for a file or directory supplied by a picker or platform activation.
-/// Unlike File, this value does not expose a local path and cannot be converted to a File or Uri. It may refer
-/// to a document provider, security-scoped resource, or browser handle. Its metadata is a creation-time snapshot;
-/// later operations can fail if the entry changes, a provider becomes unavailable, or permission is revoked.
+/// Unlike File, this value retains access and does not require a local path. AsFile() explicitly exposes a known
+/// local path when available; document providers and browser handles may have none. Metadata is a creation-time
+/// snapshot; later operations can fail if the entry changes, a provider becomes unavailable, or permission is revoked.
 ///
 /// Copies share the underlying access lifetime. Enumerated or created children retain their own access, so
 /// destroying the parent value does not invalidate them. Retention does not promise serializable or permanent
@@ -441,6 +441,27 @@ public:
   /// @brief Returns the entry kind captured when this reference was produced.
   /// @return File, Directory, or Other; no provider query is performed and later changes are not reflected.
   [[nodiscard]] FileType Type() const noexcept;
+
+  /// @brief Returns the known local path of this file or directory, when its backend has one.
+  /// @return A File path value, or std::nullopt for a reference without a local path. Local desktop references,
+  /// including macOS security-scoped selections, have paths; Android document URIs and browser handles do not.
+  /// This synchronous conversion does not perform I/O, copy or import contents, request permission, or refresh
+  /// the stored path. Success does not guarantee the entry still exists or is accessible; renaming does not
+  /// update the returned File or make it follow the reference's retained native identity.
+  /// @warning File does not retain this reference's grant or temporary-file owner. Keep a FileReference alive
+  /// throughout all path-based use, including asynchronous work or an IDE project session. File operations use
+  /// ordinary system permissions, not CanWrite(), and do not inherit reference coordination or grant-relative
+  /// access. Continue using FileReference I/O when those semantics are required.
+  /// @code{.cpp}
+  /// Task<bool> WriteProjectSettings(FileReference project) {
+  ///   auto directory = project.AsFile();
+  ///   if (!directory) {
+  ///     co_return false;
+  ///   }
+  ///   co_return co_await directory->Child("settings.json").WriteStringAsync("{}");
+  /// }
+  /// @endcode
+  [[nodiscard]] std::optional<File> AsFile() const;
 
   /// @brief Reads the complete contents of an ordinary referenced file into owned memory.
   /// @return A task yielding Bytes or a FileError; directories report IsDirectory and unsupported kinds report
@@ -636,8 +657,8 @@ public:
   /// @endcode
   [[nodiscard]] Task<bool> SaveFileAsync(File source, SaveFileOptions options = {}) const;
   /// @brief Asks the user to select one existing directory and retains access to that directory tree.
-  /// @param writable False requests a read-only grant enforced for the directory and its children; true requires
-  /// child-creation capability and never silently falls back to read-only access.
+  /// @param writable False requests a read-only grant enforced by reference operations for the directory and its
+  /// children; true requires child-creation capability and never silently falls back to read-only access.
   /// @return A task yielding the directory reference, or std::nullopt on dismissal, denial, failure, or unsupported
   /// access mode. The result is a live directory capability, not a list of uploaded files or a local-path string.
   /// On Web, selecting source and destination directories from separate user actions preserves user activation.
