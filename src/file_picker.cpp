@@ -421,7 +421,7 @@ Task<FileResult<DirectoryCopySummary>> CopyDirectoryContents(
     std::unordered_set<std::string> outputs;
     std::size_t next = 0;
     bool listed = false;
-    std::optional<std::unordered_multimap<std::string, FileReference>> destination_children;
+    std::optional<std::unordered_multimap<std::string, FileReference>> destination_children{};
   };
   std::vector<DirectoryFrame> stack;
   stack.push_back({source, target, {}, {}, {}});

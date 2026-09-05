@@ -126,7 +126,7 @@ struct ButtonStyle {
   float minimum_width = 0.0F;
   float minimum_height = 0.0F;
   float corner_radius = 8.0F;
-  std::optional<Indication> indication;
+  std::optional<Indication> indication{};
 
   static ButtonStyle Default();
 
@@ -347,7 +347,7 @@ struct TimePickerStyle {
 
 struct TextFieldVariantStyle {
   Color background = Color::Transparent();
-  std::optional<Color> disabled_background;
+  std::optional<Color> disabled_background{};
   Color border = Color::Rgb(87, 96, 106, 0.55F);
   Color hovered_border = Color::Rgb(31, 35, 40);
   Color focused_border = Color::Rgb(31, 111, 235);

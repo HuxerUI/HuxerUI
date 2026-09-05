@@ -39,8 +39,8 @@ private:
 // This is not an authorization cache: operations must still handle deletion and permission changes.
 struct FileReferenceMetadata {
   std::string name;
-  std::optional<std::uint64_t> size;
-  std::optional<std::string> content_type;
+  std::optional<std::uint64_t> size{};
+  std::optional<std::string> content_type{};
   bool can_write = false;
   FileType type = FileType::File;
 };

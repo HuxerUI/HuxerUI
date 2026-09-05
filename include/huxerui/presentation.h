@@ -417,7 +417,7 @@ struct DialogOptions {
   /// Whether Escape, platform Back, or another cancel request requests dismissal.
   bool dismiss_on_cancel = true;
   /// Optional owner callback that receives dismissal requests instead of automatic removal.
-  std::function<void()> on_dismiss_request;
+  std::function<void()> on_dismiss_request{};
 };
 
 /// Gives custom Dialog content access to the identifier and dismissal operation of its owning request.

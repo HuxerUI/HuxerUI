@@ -27,7 +27,7 @@ struct DownloadState {
   bool downloading {false};
   bool complete {false};
   std::uint64_t transferred_bytes = 0;
-  std::optional<std::uint64_t> total_bytes;
+  std::optional<std::uint64_t> total_bytes{};
   std::string status {"Ready"};
   std::string detail {"Press Download to stream 256 KiB into application temporary storage."};
 };

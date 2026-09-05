@@ -738,7 +738,7 @@ struct DrawerOverlayConfiguration {
   bool requested_open = false;
   float modal_content_reveal = 56.0F;
   float edge_drag_width = 24.0F;
-  std::optional<DrawerMotion> motion;
+  std::optional<DrawerMotion> motion{};
   std::shared_ptr<DrawerPresentationState> presentation;
 
   static const detail::ModifierDescriptor& Descriptor();

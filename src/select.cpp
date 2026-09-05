@@ -525,8 +525,6 @@ struct SelectTriggerBehavior {
   std::size_t selected_index = 0;
   bool invalid = false;
   std::string validation_message;
-
-  bool operator==(const SelectTriggerBehavior&) const = default;
 };
 
 class SelectTriggerBehaviorExtension final : public NodeExtension {

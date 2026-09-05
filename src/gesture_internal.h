@@ -156,13 +156,13 @@ struct DragSourceRecognitionState {
 struct TapRecognitionState {
   std::uint64_t node_identity = 0;
   bool activates = false;
-  std::vector<GestureRecognitionState> consumers;
+  std::vector<GestureRecognitionState> consumers{};
 };
 
 struct ScrollRecognitionState {
   std::uint64_t node_identity = 0;
   Axis axis = Axis::Vertical;
-  std::vector<std::uint64_t> active_nodes;
+  std::vector<std::uint64_t> active_nodes{};
 };
 
 struct ExtensionRecognitionState {
@@ -180,7 +180,7 @@ struct ContextMenuRecognitionState {
 struct TextSelectionRecognitionState {
   std::uint64_t node_identity = 0;
   // Text recognition uses the common protocol but resolves after deferred touch focus and before overlay geometry.
-  std::shared_ptr<GestureRecognizer> recognizer;
+  std::shared_ptr<GestureRecognizer> recognizer{};
 };
 
 // Mutable overlay drag state stays in the text-selection subsystem; this marker only identifies its pre-route owner.
@@ -230,13 +230,13 @@ struct DragDropSession {
   std::type_index payload_type = typeid(void);
   std::shared_ptr<const void> payload;
   DragEvent drag;
-  std::optional<ActiveDropTarget> target;
+  std::optional<ActiveDropTarget> target{};
   // A target is committed before Entered is invoked; this flag prevents cancellation from publishing Exited when an
   // earlier source or target callback failed before Entered began.
   bool target_entered = false;
-  std::optional<LayerId> preview_layer;
+  std::optional<LayerId> preview_layer{};
   // Layer placement is window-relative, so the frozen source transform resolves the local grab point once.
-  Point preview_grab_offset;
+  Point preview_grab_offset{};
 };
 
 struct PointerSession {

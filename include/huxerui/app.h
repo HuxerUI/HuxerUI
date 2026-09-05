@@ -196,9 +196,9 @@ private:
 /// Configures the process-level application declaration and each Runtime created from it.
 struct AppOptions {
   /// Initial native-window configuration.
-  WindowOptions window;
+  WindowOptions window{};
   /// Width thresholds used by `UseViewportClass()`.
-  ViewportBreakpoints viewport_breakpoints;
+  ViewportBreakpoints viewport_breakpoints{};
 #if defined(NDEBUG)
   /// Whether Runtime installs the built-in debug overlay above application root hooks.
   bool show_debug_overlay = false;
@@ -207,7 +207,7 @@ struct AppOptions {
   bool show_debug_overlay = true;
 #endif
   /// Ordered application root extensions installed for every Runtime.
-  std::vector<RootHook> root_hooks;
+  std::vector<RootHook> root_hooks{};
 };
 
 /// Function pointer that creates the application root View.

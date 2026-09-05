@@ -70,7 +70,7 @@ struct LinearGradient {
   std::vector<GradientStop> stops;
   /// Affine transform applied in normalized gradient coordinates before mapping into the destination.
   /// The identity default leaves the declared gradient geometry unchanged.
-  Transform2D transform;
+  Transform2D transform{};
 
   bool operator==(const LinearGradient&) const = default;
 };
@@ -88,7 +88,7 @@ struct RadialGradient {
   std::vector<GradientStop> stops;
   /// Affine transform applied in normalized gradient coordinates before mapping into the destination.
   /// The identity default leaves the declared gradient geometry unchanged.
-  Transform2D transform;
+  Transform2D transform{};
 
   bool operator==(const RadialGradient&) const = default;
 };
@@ -138,7 +138,7 @@ struct ImageFill {
   /// Sampling filter used for raster images.
   ImageSampling sampling = ImageSampling::Linear;
   /// Optional source tint when the resolved image kind supports tinting.
-  std::optional<Color> tint;
+  std::optional<Color> tint{};
   /// Fill opacity in the inclusive range from zero to one.
   float opacity = 1.0F;
 

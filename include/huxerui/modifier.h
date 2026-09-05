@@ -95,7 +95,7 @@ public:
     bool needs_frame = false;
 
     /// Requests a frame after this many seconds when continuous frames are unnecessary.
-    std::optional<double> wake_after;
+    std::optional<double> wake_after{};
 
     bool operator==(const FrameResult&) const = default;
   };
@@ -651,7 +651,7 @@ struct Shadow {
   Color color;
 
   /// Translation of the shadow caster in logical pixels.
-  Point offset;
+  Point offset{};
 
   /// Conservative outer blur falloff in logical pixels.
   float blur_radius = 0.0F;
@@ -708,22 +708,22 @@ struct Frame {
   static const detail::ModifierDescriptor& Descriptor();
 
   /// Preferred outer width in logical pixels.
-  std::optional<float> width;
+  std::optional<float> width{};
 
   /// Preferred outer height in logical pixels.
-  std::optional<float> height;
+  std::optional<float> height{};
 
   /// Minimum outer width in logical pixels.
-  std::optional<float> min_width;
+  std::optional<float> min_width{};
 
   /// Maximum outer width in logical pixels.
-  std::optional<float> max_width;
+  std::optional<float> max_width{};
 
   /// Minimum outer height in logical pixels.
-  std::optional<float> min_height;
+  std::optional<float> min_height{};
 
   /// Maximum outer height in logical pixels.
-  std::optional<float> max_height;
+  std::optional<float> max_height{};
 
   bool operator==(const Frame&) const = default;
 };

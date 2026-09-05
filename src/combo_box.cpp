@@ -629,8 +629,6 @@ struct ComboBoxFieldBehavior {
   PopupHandle popup;
   std::shared_ptr<ComboBoxSession> session;
   ViewFactory empty_content;
-
-  bool operator==(const ComboBoxFieldBehavior&) const = default;
 };
 
 class ComboBoxFieldBehaviorExtension final : public NodeExtension {

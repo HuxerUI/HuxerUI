@@ -93,17 +93,17 @@ void ApplySemantics(SemanticPatch& target, const SemanticPatch& source);
 
 struct SemanticBuilderItem {
   std::uint64_t local_id = 0;
-  std::optional<Rect> local_bounds;
-  SemanticPatch semantics;
+  std::optional<Rect> local_bounds{};
+  SemanticPatch semantics{};
   bool enabled = true;
   std::uint64_t actions = 0;
-  std::vector<std::pair<std::uint64_t, std::string>> custom_actions;
+  std::vector<std::pair<std::uint64_t, std::string>> custom_actions{};
 };
 
 struct SemanticBuilderState {
   std::shared_ptr<const Environment> environment;
   AppResources* resources = nullptr;
-  std::vector<SemanticBuilderItem> items;
+  std::vector<SemanticBuilderItem> items{};
 };
 
 struct VirtualSemanticKey {

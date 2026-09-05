@@ -15,7 +15,6 @@ target_compile_options(huxerui_codegen PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
-        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
 )
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Linux")

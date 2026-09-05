@@ -2569,7 +2569,7 @@ struct RefreshBoxBehavior {
   static const detail::ModifierDescriptor& Descriptor();
 
   bool refreshing = false;
-  RefreshBoxStyle style;
+  RefreshBoxStyle style{};
 
   bool operator==(const RefreshBoxBehavior&) const = default;
 };

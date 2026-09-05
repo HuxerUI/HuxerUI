@@ -484,6 +484,16 @@ View ReducedMotionPagerApp() {
   };
 }
 
+TEST_CASE("FrameAggregateLeavesOmittedConstraintsUnspecified") {
+  const Frame frame{.height = 48.0F};
+  REQUIRE(frame.height == 48.0F);
+  REQUIRE_FALSE(frame.width.has_value());
+  REQUIRE_FALSE(frame.min_width.has_value());
+  REQUIRE_FALSE(frame.max_width.has_value());
+  REQUIRE_FALSE(frame.min_height.has_value());
+  REQUIRE_FALSE(frame.max_height.has_value());
+}
+
 TEST_CASE("TestMainAndCrossAxisAlignment") {
   TestPlatform platform;
   Runtime runtime{AxisAlignmentApp, platform};

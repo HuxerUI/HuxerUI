@@ -157,7 +157,7 @@ struct StrokeStyle {
   /// Maximum miter length as a multiple of stroke width before the join is beveled.
   float miter_limit = 4.0F;
   /// Alternating painted and skipped lengths in local logical units.
-  std::vector<float> dash_pattern;
+  std::vector<float> dash_pattern{};
   /// Offset into the repeating dash cycle in local logical units.
   float dash_offset = 0.0F;
 

@@ -6,6 +6,7 @@
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -31,6 +32,26 @@ std::shared_ptr<ExternalTexture> TestExternalTexture() {
 static_assert(std::equality_comparable<Color>);
 static_assert(std::equality_comparable<Rect>);
 static_assert(std::equality_comparable<PaintCommand>);
+
+TEST_CASE("PaintAggregatesPreserveOmittedImageAndStrokeDefaults") {
+  STATIC_REQUIRE(std::is_aggregate_v<ImageFill>);
+  STATIC_REQUIRE(std::is_aggregate_v<StrokeStyle>);
+
+  const ImageFill fill{.source = TestImage()};
+  REQUIRE_FALSE(fill.tint.has_value());
+  REQUIRE(fill.fit == ImageFit::Fill);
+  REQUIRE(fill.opacity == 1.0F);
+
+  const StrokeStyle stroke{.width = 2.0F};
+  REQUIRE(stroke.width == 2.0F);
+  REQUIRE(stroke.dash_pattern.empty());
+  REQUIRE(stroke.cap == StrokeCap::Butt);
+  REQUIRE(stroke.join == StrokeJoin::Miter);
+
+  const std::vector<GradientStop> stops{{0.0F, Color::Black()}, {1.0F, Color::White()}};
+  REQUIRE(LinearGradient{.stops = stops}.transform == Transform2D{});
+  REQUIRE(RadialGradient{.stops = stops}.transform == Transform2D{});
+}
 
 TEST_CASE("PaintCommandsCompareByValue") {
   const PaintCommand left = DrawRectCommand{

@@ -72,9 +72,9 @@ struct LayerOptions {
   /// Response to a cancel request such as Escape or platform Back.
   LayerCancelPolicy cancel_policy = LayerCancelPolicy::PassThrough;
   /// Optional owner callback that receives dismissal requests instead of automatic removal.
-  std::function<void()> on_dismiss_request;
+  std::function<void()> on_dismiss_request{};
   /// Optional full-viewport barrier fill; requires Barrier pointer policy.
-  std::optional<Color> barrier_color;
+  std::optional<Color> barrier_color{};
 };
 
 /// Controls arbitrary window-scoped content outside the application root tree.

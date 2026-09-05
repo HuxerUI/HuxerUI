@@ -400,6 +400,29 @@ View ModifierReconciliationApp() {
       .With(huxerui::ScrollBar{});
 }
 
+TEST_CASE("InteractionAggregatesPreserveOmittedDefaults") {
+  const KeyEvent key{.key = Key::Tab};
+  REQUIRE(key.text.empty());
+  REQUIRE(key.modifiers == KeyModifiers{});
+  REQUIRE_FALSE(key.repeat);
+
+  const NodeExtension::FrameResult frame{.needs_frame = true};
+  REQUIRE(frame.needs_frame);
+  REQUIRE_FALSE(frame.wake_after.has_value());
+
+  const Indication indication{.hover = IndicationLayer{.fill = Color::Black()}};
+  REQUIRE(indication.geometry == IndicationGeometry{});
+  REQUIRE_FALSE(indication.focus.has_value());
+  REQUIRE_FALSE(indication.press.has_value());
+  REQUIRE_FALSE(indication.ripple.has_value());
+  REQUIRE_FALSE(indication.hover->border.has_value());
+  REQUIRE_FALSE(indication.hover->corner_radii.has_value());
+
+  const LayerOptions layer{.level = LayerLevel::Notification};
+  REQUIRE_FALSE(layer.on_dismiss_request);
+  REQUIRE_FALSE(layer.barrier_color.has_value());
+}
+
 TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   received_pointer_events.clear();
   pointer_clicks = 0;

@@ -159,7 +159,7 @@ struct VirtualNodeState {
 
 struct ScrollMotionFrameResult {
   bool needs_frame = false;
-  std::optional<float> transfer_velocity;
+  std::optional<float> transfer_velocity{};
 };
 
 class ScrollMotion {

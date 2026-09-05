@@ -106,7 +106,7 @@ struct FileDropHover {
   std::uint64_t session = 0;
   FileDropOffer offer;
   Point position;
-  std::optional<FileDropTargetState> target;
+  std::optional<FileDropTargetState> target{};
 };
 
 struct PendingFileDrop {

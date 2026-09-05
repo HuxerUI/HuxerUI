@@ -114,7 +114,7 @@ enum class TextDirection {
 
 struct TextShapingOptions {
   TextDirection direction = TextDirection::Auto;
-  std::string locale;
+  std::string locale{};
 
   bool operator==(const TextShapingOptions&) const = default;
 };
@@ -137,7 +137,7 @@ enum class TextWrap {
 };
 
 struct TextLayoutOptions {
-  TextShapingOptions shaping;
+  TextShapingOptions shaping{};
   TextAlign align = TextAlign::Leading;
   TextVerticalAlign vertical_align = TextVerticalAlign::Top;
   TextWrap wrap = TextWrap::Word;

@@ -14,9 +14,9 @@ enum class IndicationPlacement {
 };
 
 struct IndicationLayer {
-  std::optional<VisualFill> fill;
-  std::optional<Border> border;
-  std::optional<CornerRadii> corner_radii;
+  std::optional<VisualFill> fill{};
+  std::optional<Border> border{};
+  std::optional<CornerRadii> corner_radii{};
   IndicationPlacement placement = IndicationPlacement::AboveContent;
   AnimationSpec enter = TweenSpec{.duration = 0.08, .easing = Easing::EaseOut};
   AnimationSpec exit = TweenSpec{.duration = 0.16, .easing = Easing::EaseOut};
@@ -34,8 +34,8 @@ struct RippleEffect {
 };
 
 struct IndicationGeometry {
-  std::optional<Size> layer_size;
-  std::optional<CornerRadii> clip_corner_radii;
+  std::optional<Size> layer_size{};
+  std::optional<CornerRadii> clip_corner_radii{};
 
   bool operator==(const IndicationGeometry&) const = default;
 };
@@ -43,11 +43,11 @@ struct IndicationGeometry {
 struct Indication {
   static const detail::ModifierDescriptor& Descriptor();
 
-  IndicationGeometry geometry;
-  std::optional<IndicationLayer> focus;
-  std::optional<IndicationLayer> hover;
-  std::optional<IndicationLayer> press;
-  std::optional<RippleEffect> ripple;
+  IndicationGeometry geometry{};
+  std::optional<IndicationLayer> focus{};
+  std::optional<IndicationLayer> hover{};
+  std::optional<IndicationLayer> press{};
+  std::optional<RippleEffect> ripple{};
 
   bool operator==(const Indication&) const = default;
 };

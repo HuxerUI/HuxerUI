@@ -1520,10 +1520,10 @@ float ResolveGradientRadius(GradientLength value, Rect coordinate_rect, bool hor
 struct ResolvedGradient {
   bool radial = false;
   Rect coordinate_rect;
-  Point first;
-  Point second;
-  Transform transform;
-  std::vector<std::pair<float, Color>> stops;
+  Point first{};
+  Point second{};
+  Transform transform{};
+  std::vector<std::pair<float, Color>> stops{};
 };
 
 struct GradientDefinition {

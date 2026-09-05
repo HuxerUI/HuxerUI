@@ -45,7 +45,6 @@ target_compile_options(huxerui_cli_core PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
-        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
 )
 set_target_properties(huxerui_cli_core PROPERTIES CXX_EXTENSIONS OFF)
 
@@ -58,7 +57,6 @@ target_compile_options(huxerui_cli PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
-        "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
 )
 set_target_properties(huxerui_cli PROPERTIES
         CXX_EXTENSIONS OFF

@@ -127,7 +127,7 @@ struct SemanticRange {
   /// Current value in the same units as the bounds.
   double current = 0.0;
   /// Positive increment when known; absence leaves the increment unspecified.
-  std::optional<double> step;
+  std::optional<double> step{};
 
   bool operator==(const SemanticRange&) const = default;
 };
@@ -136,11 +136,11 @@ struct SemanticRange {
 /// Unknown counts remain absent; zero describes a known empty dimension.
 struct SemanticCollection {
   /// Total number of logical items, not just published semantic children.
-  std::optional<std::size_t> item_count;
+  std::optional<std::size_t> item_count{};
   /// Total row count when the collection has a row structure.
-  std::optional<std::size_t> row_count;
+  std::optional<std::size_t> row_count{};
   /// Total column count when the collection has a column structure.
-  std::optional<std::size_t> column_count;
+  std::optional<std::size_t> column_count{};
 
   bool operator==(const SemanticCollection&) const = default;
 };
@@ -153,11 +153,11 @@ struct SemanticCollection {
 /// @endcode
 struct SemanticCollectionItem {
   /// Linear item index when known, independent of the current realized window.
-  std::optional<std::size_t> index;
+  std::optional<std::size_t> index{};
   /// First occupied row when known.
-  std::optional<std::size_t> row_index;
+  std::optional<std::size_t> row_index{};
   /// First occupied column when known.
-  std::optional<std::size_t> column_index;
+  std::optional<std::size_t> column_index{};
   /// Number of occupied rows, including the starting row.
   std::size_t row_span = 1;
   /// Number of occupied columns, including the starting column.
@@ -191,53 +191,53 @@ struct Semantics {
   static const detail::ModifierDescriptor& Descriptor();
 
   /// Meaning of this element; does not create behavior for the chosen role.
-  std::optional<SemanticRole> role;
+  std::optional<SemanticRole> role{};
   /// Accessible name, kept separate from the current value, hint, and validation error.
-  std::optional<StringVariant> label;
+  std::optional<StringVariant> label{};
   /// Human-readable current value; secure text-input values are removed by Runtime.
-  std::optional<StringVariant> value;
+  std::optional<StringVariant> value{};
   /// Prompt for an empty value, not a substitute for a persistent label.
-  std::optional<StringVariant> placeholder;
+  std::optional<StringVariant> placeholder{};
   /// Additional usage guidance without repeating the label.
-  std::optional<StringVariant> hint;
+  std::optional<StringVariant> hint{};
   /// Human-readable state description when the standard state fields do not fully describe it.
-  std::optional<StringVariant> state_description;
+  std::optional<StringVariant> state_description{};
   /// Application-owned validation message, separate from the invalid flag.
-  std::optional<StringVariant> error;
+  std::optional<StringVariant> error{};
   /// Nonlocalized identifier for automation; it is neither the accessible name nor SemanticNodeId.
-  std::optional<std::string> identifier;
+  std::optional<std::string> identifier{};
   /// Check state; absence means no check state is declared.
-  std::optional<SemanticCheckedState> checked;
+  std::optional<SemanticCheckedState> checked{};
   /// Whether this item is selected; absence is distinct from an explicitly unselected item.
-  std::optional<bool> selected;
+  std::optional<bool> selected{};
   /// Whether expandable content is open; does not open or close it.
-  std::optional<bool> expanded;
+  std::optional<bool> expanded{};
   /// Whether an operation is in progress.
-  std::optional<bool> busy;
+  std::optional<bool> busy{};
   /// Whether the value is read-only; text-input configuration takes precedence.
-  std::optional<bool> read_only;
+  std::optional<bool> read_only{};
   /// Whether the application requires a value; does not perform validation.
-  std::optional<bool> required;
+  std::optional<bool> required{};
   /// Whether the application considers the value invalid; does not reject edits.
-  std::optional<bool> invalid;
+  std::optional<bool> invalid{};
   /// Heading depth from one through six, normally paired with SemanticRole::Heading.
-  std::optional<unsigned int> heading_level;
+  std::optional<unsigned int> heading_level{};
   /// Numeric bounds, current value, and optional increment.
-  std::optional<SemanticRange> range;
+  std::optional<SemanticRange> range{};
   /// Normalized nonnegative, half-open UTF-16 range; actual text-input selection takes precedence.
-  std::optional<TextRange> text_selection;
+  std::optional<TextRange> text_selection{};
   /// Finite nonnegative scroll metrics whose offset lies within maximum_offset; mounted scrolling takes precedence.
-  std::optional<ScrollMetrics> scroll;
+  std::optional<ScrollMetrics> scroll{};
   /// Logical collection dimensions rather than the number of currently mounted children.
-  std::optional<SemanticCollection> collection;
+  std::optional<SemanticCollection> collection{};
   /// This item's logical collection position and spans.
-  std::optional<SemanticCollectionItem> collection_item;
+  std::optional<SemanticCollectionItem> collection_item{};
   /// Announcement priority for content changes; does not move keyboard focus.
-  std::optional<SemanticLiveRegion> live_region;
+  std::optional<SemanticLiveRegion> live_region{};
   /// Whether ordinary descendant Views contribute their own semantics; defaults to Preserve.
-  std::optional<SemanticDescendantPolicy> descendants;
+  std::optional<SemanticDescendantPolicy> descendants{};
   /// Removes this mounted owner and its subtree from accessibility when true, without changing drawing or input.
-  std::optional<bool> hidden;
+  std::optional<bool> hidden{};
 
   bool operator==(const Semantics&) const = default;
 };
@@ -310,53 +310,53 @@ struct SemanticNode {
   /// Nonzero Runtime identity, independent of the node's position in SemanticFrame::nodes.
   SemanticNodeId id = 0;
   /// Parent identity, absent for the synthetic host root.
-  std::optional<SemanticNodeId> parent;
+  std::optional<SemanticNodeId> parent{};
   /// Runtime-owned PlatformView anchor identity for bridging a native accessibility subtree.
-  std::optional<std::uint64_t> platform_view_identity;
+  std::optional<std::uint64_t> platform_view_identity{};
   /// Child identities in accessibility traversal order; entries are IDs, not vector indices.
-  std::vector<SemanticNodeId> children;
+  std::vector<SemanticNodeId> children{};
   /// Resolved shared role.
   SemanticRole role = SemanticRole::Generic;
   /// Accessible name; empty when no meaningful name was supplied.
-  std::string label;
+  std::string label{};
   /// Formatted current value, empty for secure text input.
-  std::string value;
+  std::string value{};
   /// Prompt associated with an empty value.
-  std::string placeholder;
+  std::string placeholder{};
   /// Additional usage guidance.
-  std::string hint;
+  std::string hint{};
   /// Human-readable state information beyond the standard state fields.
-  std::string state_description;
+  std::string state_description{};
   /// Resolved application validation message.
-  std::string error;
+  std::string error{};
   /// Nonlocalized author-supplied automation identifier.
-  std::string identifier;
+  std::string identifier{};
   /// Check state when supported by this element.
-  std::optional<SemanticCheckedState> checked;
+  std::optional<SemanticCheckedState> checked{};
   /// Whether this item is selected, when selection state is present.
-  std::optional<bool> selected;
+  std::optional<bool> selected{};
   /// Whether expandable content is open, when expansion state is present.
-  std::optional<bool> expanded;
+  std::optional<bool> expanded{};
   /// Whether an operation is in progress, when busy state is present.
-  std::optional<bool> busy;
+  std::optional<bool> busy{};
   /// Whether edits are disallowed; resolved from text-input configuration when applicable.
-  std::optional<bool> read_only;
+  std::optional<bool> read_only{};
   /// Whether the application requires a value.
-  std::optional<bool> required;
+  std::optional<bool> required{};
   /// Whether application validation marks the value invalid.
-  std::optional<bool> invalid;
+  std::optional<bool> invalid{};
   /// Declared heading depth from one through six.
-  std::optional<unsigned int> heading_level;
+  std::optional<unsigned int> heading_level{};
   /// Numeric value metadata, when present.
-  std::optional<SemanticRange> range;
+  std::optional<SemanticRange> range{};
   /// Committed normalized UTF-16 selection; absent for secure text input.
-  std::optional<TextRange> text_selection;
+  std::optional<TextRange> text_selection{};
   /// Resolved scroll metrics in logical units.
-  std::optional<ScrollMetrics> scroll;
+  std::optional<ScrollMetrics> scroll{};
   /// Logical collection dimensions, including unrealized items when known.
-  std::optional<SemanticCollection> collection;
+  std::optional<SemanticCollection> collection{};
   /// Logical position and spans within a collection.
-  std::optional<SemanticCollectionItem> collection_item;
+  std::optional<SemanticCollectionItem> collection_item{};
   /// Requested announcement priority for content changes.
   SemanticLiveRegion live_region = SemanticLiveRegion::None;
   /// Effective availability; virtual children also inherit the mounted owner's disabled state.
@@ -372,7 +372,7 @@ struct SemanticNode {
   /// Available action bits, including Custom when custom_actions is nonempty; use SemanticActionMask to inspect them.
   std::uint64_t actions = 0;
   /// Available custom actions as (nonzero action ID, localized label) pairs; empty when disabled.
-  std::vector<std::pair<std::uint64_t, std::string>> custom_actions;
+  std::vector<std::pair<std::uint64_t, std::string>> custom_actions{};
   /// Full axis-aligned bounds in host-view logical coordinates after presentation transforms, not clipped bounds.
   Rect bounds;
 

@@ -56,10 +56,10 @@ struct HttpRequest {
   HttpMethod method = HttpMethod::Get;
 
   /// Request headers in declaration order. Repeated field names are preserved.
-  std::vector<HttpHeader> headers;
+  std::vector<HttpHeader> headers{};
 
   /// The owned binary request body. Text and structured formats must be encoded by application code.
-  Bytes body;
+  Bytes body{};
 
   /// The deadline for the complete operation, including redirects and streamed body reads. std::nullopt disables the
   /// HuxerUI deadline but cannot disable platform- or network-imposed failures.

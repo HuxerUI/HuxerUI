@@ -566,7 +566,7 @@ const detail::ModifierDescriptor& BottomSheetDragHandle::Descriptor() {
 
 struct PresentationContentMotion {
   std::shared_ptr<detail::LayerTransitionState> state;
-  std::shared_ptr<BottomSheetDragState> bottom_sheet_drag;
+  std::shared_ptr<BottomSheetDragState> bottom_sheet_drag{};
   PresentationMotion motion;
   Point slide_direction;
   TransformOrigin origin;

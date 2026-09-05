@@ -35,7 +35,7 @@ using EntryKind = resource_format::EntryKind;
 struct Entry {
   EntryKind kind = EntryKind::Raw;
   std::string key;
-  std::string package_path;
+  std::string package_path{};
   std::string mime_type;
   std::string locale;
   std::string value;
@@ -44,11 +44,11 @@ struct Entry {
   std::uint32_t pixel_height = 0;
   std::uint64_t content_hash = 0;
   std::uint32_t argument_count = 0;
-  std::filesystem::path source_path;
+  std::filesystem::path source_path{};
   float intrinsic_width = 0.0F;
   float intrinsic_height = 0.0F;
-  std::vector<std::byte> generated_payload;
-  std::string domain;
+  std::vector<std::byte> generated_payload{};
+  std::string domain{};
 };
 
 class Reader {

@@ -79,13 +79,13 @@ struct WindowTitleBarMetrics {
 /// toggle_maximize label is used for both maximize and restore states.
 struct WindowCaptionLabels {
   /// Label for the minimize control.
-  StringVariant minimize;
+  StringVariant minimize{};
 
   /// Label for the maximize or restore control.
-  StringVariant toggle_maximize;
+  StringVariant toggle_maximize{};
 
   /// Label for the close control.
-  StringVariant close;
+  StringVariant close{};
 
   /// Compares the three label declarations exactly.
   bool operator==(const WindowCaptionLabels&) const = default;
@@ -120,7 +120,7 @@ struct WindowOptions {
 
   /// The minimum logical client size for framework-owned resizable desktop windows. std::nullopt leaves it
   /// unconstrained by HuxerUI; the platform may still enforce a larger native minimum.
-  std::optional<Size> minimum_size;
+  std::optional<Size> minimum_size{};
 
   /// The stable root safe-area policy for this Runtime. Individual pages may still override SystemBarsAppearance.
   WindowContentMode content_mode = WindowContentMode::SafeArea;
@@ -132,7 +132,7 @@ struct WindowOptions {
   float title_bar_height = 40.0F;
 
   /// Accessibility labels for framework-rendered desktop caption controls.
-  WindowCaptionLabels caption_labels;
+  WindowCaptionLabels caption_labels{};
 
   /// Compares all startup configuration fields exactly.
   bool operator==(const WindowOptions&) const = default;
@@ -147,10 +147,10 @@ struct WindowMetrics {
   Size viewport;
 
   /// Remaining physical obstructions relative to viewport. Software-keyboard occlusion is not included.
-  EdgeInsets safe_area;
+  EdgeInsets safe_area{};
 
   /// Resolved title-bar geometry, present only when application content occupies native title-bar space.
-  std::optional<WindowTitleBarMetrics> title_bar;
+  std::optional<WindowTitleBarMetrics> title_bar{};
 
   /// Compares all submitted geometry fields exactly.
   bool operator==(const WindowMetrics&) const = default;

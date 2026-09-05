@@ -109,12 +109,12 @@ struct DragGesture {
   static const detail::ModifierDescriptor& Descriptor();
 
   // Constrains recognition and reported local movement to one axis; an empty value allows two-dimensional movement.
-  std::optional<Axis> axis;
+  std::optional<Axis> axis{};
   // Movement required to accept a normal drag, in logical pixels; an empty value uses GestureSettings::pointer_slop.
-  std::optional<float> minimum_distance;
+  std::optional<float> minimum_distance{};
   // A positive value creates a press-then-drag gesture. The pointer must remain within the platform pointer slop until
   // the duration elapses, after which the current position becomes the drag origin.
-  std::optional<std::chrono::duration<double>> minimum_press_duration;
+  std::optional<std::chrono::duration<double>> minimum_press_duration{};
 
   bool operator==(const DragGesture&) const = default;
 };

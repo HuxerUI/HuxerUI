@@ -18,7 +18,6 @@ function(huxerui_configure_compile_target target_name)
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>"
             "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
-            "$<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wno-missing-field-initializers>"
             ${HUXERUI_PLATFORM_COMPILE_OPTIONS}
     )
     target_compile_definitions(${target_name} PRIVATE
