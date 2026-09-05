@@ -89,7 +89,7 @@ public:
       return E_POINTER;
     }
     *object = nullptr;
-    if (iid != IID_IUnknown && iid != IID_IDropTarget) {
+    if (!IsEqualIID(iid, IID_IUnknown) && !IsEqualIID(iid, IID_IDropTarget)) {
       return E_NOINTERFACE;
     }
     *object = static_cast<IDropTarget*>(this);
