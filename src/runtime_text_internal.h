@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include <huxerui/app.h>
@@ -38,6 +39,7 @@ struct TextSelectionGestureState {
 };
 
 struct TextSelectionOverlayState {
+  // Presentation intent survives scrolling and missing geometry; RenderNode::visible describes actual output.
   bool visible = false;
   bool paint_dirty = true;
   bool indication_frame_active = false;
@@ -47,6 +49,7 @@ struct TextSelectionOverlayState {
   Point drag_position;
   bool show_handles = false;
   bool dismissing = false;
+  std::vector<std::pair<std::uint64_t, ScrollSource>> scroll_activities;
   std::optional<std::int64_t> pointer_id;
   std::optional<std::uint64_t> press_id;
   std::optional<std::size_t> pressed_action;
@@ -95,6 +98,7 @@ public:
   bool CanPerformTextEditingAction(TextEditingAction action) const;
   bool PerformTextEditingAction(TextEditingAction action);
   bool SelectTextWord(std::uint64_t node, Point position, bool show_overlay);
+  void HandleTextSelectionTap(std::optional<std::uint64_t> target);
   void HideTextSelectionOverlay();
   void AdvanceTextSelectionDrag(const FrameInfo& frame);
   void AdvanceTextSelectionOverlay(const FrameInfo& frame);
@@ -116,7 +120,7 @@ public:
 private:
   void InvalidateTextInputStateChange(std::uint64_t node, const TextInputState& previous, const TextInputState& current);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);
-  TextSelectionGeometry QueryFocusedTextSelectionGeometry() const;
+  std::optional<TextSelectionGeometry> QueryFocusedTextSelectionGeometry() const;
   void ShowTextSelectionOverlay(bool show_handles);
 
   Runtime::State& runtime_state_;

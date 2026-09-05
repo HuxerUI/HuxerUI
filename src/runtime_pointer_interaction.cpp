@@ -1557,7 +1557,7 @@ void detail::PointerInteraction::HandlePointerEvent(const PointerEvent& input_ev
   }
 }
 
-bool detail::PointerInteraction::CommitPendingTouchFocus(PointerSession& session, Point position) {
+bool detail::PointerInteraction::CommitPendingTouchFocus(PointerSession& session, const PointerEvent& event) {
   if (!session.focus_pending) {
     return false;
   }
@@ -1566,13 +1566,21 @@ bool detail::PointerInteraction::CommitPendingTouchFocus(PointerSession& session
 
   std::vector<detail::MountedNode*> route;
   const std::optional<std::uint64_t> released =
-      runtime_state_.mounted_root_ && BuildPointerRoute(*runtime_state_.mounted_root_, position, route)
+      runtime_state_.mounted_root_ && BuildPointerRoute(*runtime_state_.mounted_root_, event.position, route)
           ? runtime_state_.owner_.ResolvePointerFocusTarget(route)
           : std::nullopt;
   if (released != pending) {
     return false;
   }
 
+  if (event.type == PointerEventType::Up) {
+    runtime_state_.text_->HandleTextSelectionTap(pending);
+    const auto current = pointer_sessions_.find(event.pointer_id);
+    if (current == pointer_sessions_.end() || &current->second != &session || current->second.quarantined ||
+        current->second.pressed_buttons != PointerButton::None) {
+      return false;
+    }
+  }
   const bool refocusing = pending.has_value() && runtime_state_.focused_node_identity_ == pending;
   runtime_state_.owner_.SetFocusedNode(pending, false);
   if (refocusing) {
@@ -1605,7 +1613,8 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
   }
 
   std::vector<detail::MountedNode*> route;
-  if (!BuildPointerRoute(*runtime_state_.mounted_root_, event.position, route)) {
+  if (!BuildPointerRoute(*runtime_state_.mounted_root_, event.position, route) &&
+      (event.device_kind != PointerDeviceKind::Touch || event.changed_button != PointerButton::Primary)) {
     return;
   }
   const PointerButton initiating_button = event.changed_button;
@@ -1955,6 +1964,19 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
     return;
   }
 
+  // Selection updates may cancel this sequence or start another with the same pointer ID.
+  const auto continue_release = [&] {
+    captured = pointer_sessions_.find(event.pointer_id);
+    if (captured != pointer_sessions_.end() && &captured->second == &session && !captured->second.quarantined &&
+        captured->second.pressed_buttons == PointerButton::None) {
+      return true;
+    }
+    if (captured != pointer_sessions_.end() && captured->second.quarantined &&
+        captured->second.pressed_buttons == PointerButton::None) {
+      pointer_sessions_.erase(captured);
+    }
+    return false;
+  };
   std::optional<float> scroll_velocity;
   std::optional<Axis> scroll_axis;
   if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(session)) {
@@ -1977,7 +1999,10 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
     } else {
       static_cast<void>(UpdatePointerRecognition(session, *owner, event));
       if (std::holds_alternative<ExtensionRecognitionState>(recognition.state)) {
-        CommitPendingTouchFocus(session, event.position);
+        CommitPendingTouchFocus(session, event);
+        if (!continue_release()) {
+          return;
+        }
       }
     }
     EndPointerInteraction(session, InteractionEvent::Type::Release, event);
@@ -2000,7 +2025,10 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
       recognition.active = false;
     }
     if (!session.owner.has_value()) {
-      CommitPendingTouchFocus(session, event.position);
+      CommitPendingTouchFocus(session, event);
+      if (!continue_release()) {
+        return;
+      }
       const auto text_selection =
           std::ranges::find_if(session.recognitions, [](const PointerRecognition& recognition) {
             return recognition.active &&

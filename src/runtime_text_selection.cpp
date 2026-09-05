@@ -162,6 +162,24 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
   return result.result_code == TextInputResultCode::Ok;
 }
 
+void detail::TextInteraction::HandleTextSelectionTap(std::optional<std::uint64_t> target) {
+  HideTextSelectionOverlay();
+  runtime_state_.owner_.RequestFrame();
+  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_) {
+    return;
+  }
+  // A tap inside the active editor already places its caret through the extension's pointer handling.
+  if (text_input_session_ && target == text_input_session_->node_identity) {
+    return;
+  }
+  auto* owner = FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+  auto* client = owner ? FindTextSelectionClient(*owner) : nullptr;
+  if (client && owner->interaction.enabled) {
+    owner->foreground_paint_dirty = true;
+    client->ClearSelection();
+  }
+}
+
 bool detail::TextInteraction::SelectTextWord(std::uint64_t node, Point position, bool show_overlay) {
   const auto selection_owner = [&]() -> detail::MountedNode* {
     return runtime_state_.mounted_root_ && runtime_state_.focused_node_identity_
@@ -325,7 +343,7 @@ void detail::TextInteraction::AdvanceTextSelectionDrag(const FrameInfo& frame) {
   }
 }
 
-TextSelectionGeometry detail::TextInteraction::QueryFocusedTextSelectionGeometry() const {
+std::optional<TextSelectionGeometry> detail::TextInteraction::QueryFocusedTextSelectionGeometry() const {
   if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
     return {};
   }
@@ -340,14 +358,17 @@ TextSelectionGeometry detail::TextInteraction::QueryFocusedTextSelectionGeometry
   }
   // Preserve missing endpoints while translating available geometry to the overlay's window coordinate space.
   auto geometry = client->QuerySelectionGeometry();
+  if (!geometry) {
+    return std::nullopt;
+  }
   const auto transform = [&](std::optional<Rect>& rect) {
     if (rect) {
       rect = focused->LocalToWindowBounds(*rect);
     }
   };
-  transform(geometry.start);
-  transform(geometry.end);
-  transform(geometry.toolbar_anchor);
+  transform(geometry->start);
+  transform(geometry->end);
+  transform(geometry->toolbar_anchor);
   return geometry;
 }
 

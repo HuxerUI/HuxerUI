@@ -287,17 +287,21 @@ class TextSelectionClient {
 public:
   virtual ~TextSelectionClient() = default;
 
+  virtual bool ClearSelection() = 0;
   virtual bool SelectWord(Point position) = 0;
   virtual bool ExtendSelection(Point position, bool start_handle) = 0;
-  virtual TextSelectionGeometry QuerySelectionGeometry() const = 0;
+  virtual std::optional<TextSelectionGeometry> QuerySelectionGeometry() const = 0;
   virtual Color SelectionHandleColor() const noexcept = 0;
 };
 ```
 
 Selection points and geometry use the owning node's local logical coordinates.
 `TextSelectionGeometry` contains independent optional `start`, `end`, and `toolbar_anchor` rectangles; an offscreen endpoint does not hide a visible handle or clear the logical selection.
+`QuerySelectionGeometry()` returns `std::nullopt` when no logical selection or editor caret exists, ending the old menu intent; an existing selection with no visible geometry returns `TextSelectionGeometry{}` and can restore its menu when visible again.
 Runtime maps them through the node's resolved presentation transform exactly once at the host boundary.
 The optional editing-action methods allow read-only clients to expose Copy and Select All through the shared clipboard menu without pretending to be IME clients.
+
+`ClearSelection()` cancels a range without needing visible geometry: a read-only client removes its logical selection, while an editor collapses to its active endpoint through its normal controlled update path. Runtime invokes it after a confirmed touch tap elsewhere. A tap inside the active editor retains its ordinary caret-placement path instead of emitting a second selection update.
 
 A `NodeExtension` exposes at most one selection client through `GetTextSelectionClient()`.
 Runtime borrows this pointer only during dispatch and never retains it beyond the owning extension's lifetime.
@@ -815,6 +819,8 @@ The first pointer behavior includes:
 - Preserve pointer cancellation behavior when a parent scroll gesture wins.
 
 Shared Runtime recognition selects a word immediately on a mouse or pen double-click. Touch double-tap selects on the second release so a drag beginning with the second press can still yield to scrolling. The runtime also owns long-press word selection and paints the shared selection menu and handles in a framework-owned `FrameworkOverlay` above the shared LayerStack. The overlay state owns its stable RenderNode and is appended to the synthetic RuntimeRoot scene without becoming a mounted application or LayerStack node. It is not a public Layer entry and does not participate in application-layer ordering or focus containment, but Runtime Back routing hides it before consulting public layers. Magnifiers and more advanced gesture behavior remain incremental.
+
+Selection overlay intent is independent of its current visibility. Related drag, momentum, and overscroll activities temporarily suppress the overlay until their existing Begin/End/Cancel lifecycles finish. Missing geometry likewise suppresses presentation without discarding the intent or logical range. Visible geometry restores only a previously requested overlay; Copy, Back, focus changes, and explicit dismissal do not leave a pending reopen request. Touch Down outside the overlay still enters ordinary pointer arbitration, so a canceled tap or a winning scroll cannot clear the range or consume a child button or link action.
 
 ## Theme
 

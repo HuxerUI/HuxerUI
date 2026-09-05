@@ -451,7 +451,7 @@ public:
 /// An endpoint can be absent because its logical block is outside the viewport.
 ///
 /// Missing geometry does not clear logical selection. Runtime positions handles and the toolbar from the available
-/// rectangles; return an empty value when no selection geometry is available.
+/// rectangles; all three may be absent while a logical selection remains outside the viewport.
 struct TextSelectionGeometry {
   /// Caret-like rectangle at the ordered selection start, independent of anchor/active direction, when available.
   std::optional<Rect> start{};
@@ -494,6 +494,12 @@ public:
     return false;
   }
 
+  /// Cancels the current range selection without changing text or starting an input session.
+  /// @return Whether selection changed; false when there is nothing to clear.
+  /// Read-only clients remove their logical selection. Editors collapse it to the active endpoint, preserving
+  /// affinity and publishing the change through their usual controlled editing path. No visible geometry is required.
+  /// Runtime uses this after a confirmed touch tap elsewhere, not when scrolling merely hides the selection UI.
+  virtual bool ClearSelection() = 0;
   /// Selects the word or selectable text unit at a gesture position.
   /// @param position Point in the owning node's local logical coordinates.
   /// @return Whether selection was handled; false when no selectable content or layout is available.
@@ -504,8 +510,10 @@ public:
   /// @return Whether the drag was handled, even if clamping left the selection unchanged.
   /// Keep endpoints ordered and use valid caret boundaries. Built-in clients clamp at the opposite endpoint.
   virtual bool ExtendSelection(Point position, bool start_handle) = 0;
-  /// @return Available node-local handle and toolbar anchors, including partial geometry for virtualized selection.
-  [[nodiscard]] virtual TextSelectionGeometry QuerySelectionGeometry() const = 0;
+  /// @return Available node-local anchors, or std::nullopt when no logical selection or editor caret exists.
+  /// Return TextSelectionGeometry{} for an existing selection whose geometry is temporarily unavailable, such as
+  /// fully virtualized-away text. Runtime preserves menu intent for that value; std::nullopt ends the old menu.
+  [[nodiscard]] virtual std::optional<TextSelectionGeometry> QuerySelectionGeometry() const = 0;
   /// @return The color used to paint the shared selection handles.
   [[nodiscard]] virtual Color SelectionHandleColor() const noexcept = 0;
 };

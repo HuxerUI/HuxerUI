@@ -225,7 +225,8 @@ void detail::PointerInteraction::AdvanceTextSelectionLongPress(double timestamp)
   if (!recognizer || recognizer->AdvanceDeadline(timestamp) != GestureDecision::Accept) {
     return;
   }
-  if (!CommitPendingTouchFocus(session->second, ready_position)) {
+  const PointerEvent event{PointerEventType::Move, *ready_pointer, ready_position, PointerDeviceKind::Touch};
+  if (!CommitPendingTouchFocus(session->second, event)) {
     return;
   }
   runtime_state_.text_->RefreshTextInputSession();
@@ -241,7 +242,6 @@ void detail::PointerInteraction::AdvanceTextSelectionLongPress(double timestamp)
   });
   if (recognition != session->second.recognitions.end()) {
     const std::size_t index = static_cast<std::size_t>(recognition - session->second.recognitions.begin());
-    const PointerEvent event{PointerEventType::Move, *ready_pointer, ready_position, PointerDeviceKind::Touch};
     AcceptPointerRecognition(session->second, index, event);
   }
 }

@@ -288,6 +288,20 @@ void detail::TextInteraction::NotifyScrollActivity(detail::MountedNode& node, co
       text_input_session_->node_identity != node.identity && FindNode(node, text_input_session_->node_identity)) {
     text_input_session_->client->ViewportScrolled();
   }
+  auto& overlay = text_selection_overlay_.state;
+  if (overlay.visible && !overlay.dismissing) {
+    const auto key = std::pair{node.identity, activity.source};
+    if (activity.phase == ScrollPhase::End || activity.phase == ScrollPhase::Cancel) {
+      std::erase(overlay.scroll_activities, key);
+    } else if (activity.phase == ScrollPhase::Begin && runtime_state_.mounted_root_ &&
+               runtime_state_.focused_node_identity_) {
+      auto* owner = FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+      if (owner && (ContainsNodeIdentity(node, owner->identity) || ContainsNodeIdentity(*owner, node.identity)) &&
+          std::ranges::find(overlay.scroll_activities, key) == overlay.scroll_activities.end()) {
+        overlay.scroll_activities.push_back(key);
+      }
+    }
+  }
   InvalidateOverlay();
 }
 

@@ -158,6 +158,9 @@ bool detail::TextInteraction::HandleTextSelectionOverlayPointer(const PointerEve
   if (overlay.dismissing) {
     return true;
   }
+  if (!overlay.pointer_id && (!overlay.scroll_activities.empty() || !overlay.has_painted_geometry)) {
+    return false;
+  }
   const auto update_hover = [&](std::optional<std::size_t> hovered) {
     if (overlay.hovered_action == hovered) {
       return;
@@ -337,8 +340,11 @@ bool detail::TextInteraction::HandleTextSelectionOverlayPointer(const PointerEve
     return true;
   }
 
-  HideTextSelectionOverlay();
-  runtime_state_.owner_.RequestFrame();
+  // Touch Down may become a scroll or a canceled sequence. Dismiss only after the shared tap decision.
+  if (event.device_kind != PointerDeviceKind::Touch) {
+    HideTextSelectionOverlay();
+    runtime_state_.owner_.RequestFrame();
+  }
   return false;
 }
 
@@ -350,10 +356,7 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
   std::optional<TextSelectionGeometry> selection_geometry;
   if (overlay.visible && !overlay.dismissing && runtime_state_.mounted_root_ &&
       runtime_state_.focused_node_identity_.has_value()) {
-    const auto geometry = QueryFocusedTextSelectionGeometry();
-    if (geometry.start || geometry.end || geometry.toolbar_anchor) {
-      selection_geometry = geometry;
-    }
+    selection_geometry = QueryFocusedTextSelectionGeometry();
   }
   if (!overlay.paint_dirty) {
     if (!overlay.visible && render_node.revision != 0 && !render_node.visible) {
@@ -463,11 +466,24 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
 
   detail::MountedNode* focused =
       detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
-  if (!focused || !selection_geometry.has_value()) {
+  if (!focused || !focused->interaction.enabled || !selection_geometry) {
     HideTextSelectionOverlay();
     overlay.paint_dirty = false;
     overlay.has_painted_geometry = false;
     render_node.visible = false;
+    finish();
+    return;
+  }
+  std::erase_if(overlay.scroll_activities, [&](const auto& activity) {
+    const auto* node = FindNode(*runtime_state_.mounted_root_, activity.first);
+    return !node || !node->interaction.enabled || !IsScrollContainer(*node);
+  });
+  if ((!selection_geometry->start && !selection_geometry->end && !selection_geometry->toolbar_anchor) ||
+      !overlay.scroll_activities.empty()) {
+    overlay.has_painted_geometry = false;
+    overlay.start_handle_hit_rect = {};
+    overlay.end_handle_hit_rect = {};
+    overlay.action_rects.clear();
     finish();
     return;
   }

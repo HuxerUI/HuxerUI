@@ -49,6 +49,9 @@ Attributed text contains resolved direct text; translating sentence fragments in
 
 Wrap ordinary content in `SelectionArea` to select across descendant Text nodes. Nested areas are independent; copied paragraphs are separated by newlines. Static content supports Copy and Select All but never starts an IME session. Mouse dragging, double-click, Shift-click, touch long press, and selection handles use retained geometry.
 
+On touch devices, a completed tap outside the selection controls clears the existing read-only selection without consuming a button or link action. Scrolling preserves the range and temporarily hides its controls; an already-open menu returns when scrolling, including momentum, finishes and selected text is visible. Scrolling an offscreen selection back into view can restore that menu, but does not reopen a menu explicitly dismissed with Copy or Back.
+If a source update removes a selected endpoint block, both the logical selection and its pending menu presentation end; a later selection does not inherit the old menu.
+
 Virtualized documents provide a shared immutable `TextSelectionSource` snapshot, with `Count()`, `IdAt(index)`, `IndexOf(id)`, and `BlockAt(index)`. A block returns its attributed text and the separator to use when copying into the following block. Derive both the source and the visible Text values from the same snapshot:
 
 ```cpp

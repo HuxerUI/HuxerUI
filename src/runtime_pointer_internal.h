@@ -37,7 +37,7 @@ private:
   void CancelPointerTarget(PointerSession& session, const PointerEvent& event);
   [[nodiscard]] bool BeginPointerChord(PointerSession& session, const PointerEvent& event);
   void DispatchChordPointerEvent(PointerSession& session, const PointerEvent& event);
-  bool CommitPendingTouchFocus(PointerSession& session, Point position);
+  bool CommitPendingTouchFocus(PointerSession& session, const PointerEvent& event);
 
   [[nodiscard]] GestureDecision
   UpdatePointerRecognition(PointerSession& session, std::size_t index, const PointerEvent& event);

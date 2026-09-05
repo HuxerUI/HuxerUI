@@ -3464,6 +3464,41 @@ TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
   REQUIRE(FindText(touch.BuildFrame(), "复制") != nullptr);
 }
 
+TEST_CASE("TestTextFieldTouchTapCancelsRangeThroughOneControlledUpdate") {
+  ResetTextFieldState();
+  TestPlatform platform;
+  Runtime runtime{TextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  runtime.BuildFrame();
+  text_field_value = TextEditingValue::FromText("alpha beta");
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Down, 851, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 851, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::SelectAll));
+  runtime.BuildFrame();
+  text_field_changes.clear();
+
+  Point target{220.0F, 100.0F};
+  bool inside = false;
+  SECTION("Outside tap collapses to the active endpoint") {}
+  SECTION("Inside tap places the caret without a second update") {
+    target = {60.0F, 20.0F};
+    inside = true;
+  }
+  runtime.HandlePointerEvent({PointerEventType::Down, 852, target, PointerDeviceKind::Touch});
+  REQUIRE(text_field_value.Get().selection == TextSelection{0, 10});
+  REQUIRE(text_field_changes.empty());
+  runtime.HandlePointerEvent({PointerEventType::Up, 852, target, PointerDeviceKind::Touch});
+  REQUIRE(text_field_changes.size() == 1);
+  REQUIRE(text_field_value.Get().text == "alpha beta");
+  REQUIRE(text_field_value.Get().selection.IsCollapsed());
+  if (inside) {
+    REQUIRE(text_field_value.Get().selection.active < 10);
+  } else {
+    REQUIRE(text_field_value.Get().selection == TextSelection{10, 10});
+  }
+}
+
 TEST_CASE("TestTextFieldImeCommandsAndAuthoritativeReplacement") {
   ResetTextFieldState();
   TextFieldPlatformInput text_input;

@@ -108,6 +108,10 @@ struct CustomSelection {
       return this;
     }
 
+    bool ClearSelection() override {
+      return std::exchange(custom_selection_requested, false);
+    }
+
     bool SelectWord(Point) override {
       custom_selection_requested = true;
       return true;
@@ -117,13 +121,13 @@ struct CustomSelection {
       return false;
     }
 
-    TextSelectionGeometry QuerySelectionGeometry() const override {
+    std::optional<TextSelectionGeometry> QuerySelectionGeometry() const override {
       if (!custom_selection_requested) {
-        return {};
+        return std::nullopt;
       }
       const Rect start{0.0F, 0.0F, 1.0F, 16.0F};
       const Rect end{20.0F, 0.0F, 1.0F, 16.0F};
-      return {start, end, start};
+      return TextSelectionGeometry{start, end, start};
     }
 
     Color SelectionHandleColor() const noexcept override {
@@ -161,6 +165,19 @@ void Pointer(Runtime& runtime, PointerEventType type, float x, float y) {
       810,
       {x, y},
   });
+}
+
+void Touch(Runtime& runtime, PointerEventType type, Point position) {
+  runtime.HandlePointerEvent({type, 850, position, PointerDeviceKind::Touch});
+}
+
+void SelectByTouch(Runtime& runtime, TestPlatform& platform, Point position) {
+  Touch(runtime, PointerEventType::Down, position);
+  Touch(runtime, PointerEventType::Up, position);
+  platform.AdvanceTime(0.1);
+  Touch(runtime, PointerEventType::Down, position);
+  Touch(runtime, PointerEventType::Up, position);
+  REQUIRE(FindText(runtime.BuildFrame(), "Copy") != nullptr);
 }
 
 } // namespace
@@ -370,16 +387,19 @@ TEST_CASE("TestSelectionAreaCopiesLogicalBlocksWithoutRealizingOffscreenViews") 
   REQUIRE(clipboard.text->size() == 4999);
   REQUIRE(clipboard.text->starts_with("line\nline"));
   REQUIRE(clipboard.text->ends_with("\nline"));
-  REQUIRE(client->QuerySelectionGeometry().start.has_value());
-  REQUIRE_FALSE(client->QuerySelectionGeometry().end.has_value());
+  const auto initial_geometry = client->QuerySelectionGeometry();
+  REQUIRE(initial_geometry.has_value());
+  REQUIRE(initial_geometry->start.has_value());
+  REQUIRE_FALSE(initial_geometry->end.has_value());
 
   REQUIRE(scroll.ScrollToItem(500));
   runtime.BuildFrame();
   client = SelectionClient(runtime.RootNode());
   const auto middle = client->QuerySelectionGeometry();
-  REQUIRE_FALSE(middle.start.has_value());
-  REQUIRE_FALSE(middle.end.has_value());
-  REQUIRE(middle.toolbar_anchor.has_value());
+  REQUIRE(middle.has_value());
+  REQUIRE_FALSE(middle->start.has_value());
+  REQUIRE_FALSE(middle->end.has_value());
+  REQUIRE(middle->toolbar_anchor.has_value());
   const int middle_factories = factory_calls;
   REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
   REQUIRE(clipboard.text->size() == 4999);
@@ -541,6 +561,153 @@ TEST_CASE("TestSelectionAreaRejectedSourceUpdateCanRecoverWithoutLosingOldSelect
   REQUIRE_NOTHROW(runtime.BuildFrame());
   REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
   REQUIRE(clipboard.text == "line\nline");
+}
+
+TEST_CASE("TestSelectionAreaTouchTapClearsSelectionWithoutConsumingTarget") {
+  TestPlatform platform;
+  SelectionClipboard clipboard;
+  platform.platform_clipboard = &clipboard;
+  int clicks = 0;
+  const auto paragraph = AttributedText::FromRanges("Alpha link", {}, {{{6, 10}, Uri("https://example.com")}});
+  selection_test_root = [&]() -> View {
+    return ProvideEnvironment(TextSelectionMenuLabels{"Cut", "Copy", "Paste", "Select all"}, Column {
+      SelectionArea(Text(paragraph).On<TextEvents::LinkActivated>([&](const TextLinkActivation&) { ++clicks; }))
+          .With(Frame{300.0F, 120.0F}),
+      Button("Outside").OnClick([&] { ++clicks; }).With(Frame{300.0F, 48.0F}),
+    });
+  };
+  Runtime runtime{DynamicSelectionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {300.0F, 240.0F}});
+  runtime.BuildFrame();
+  SelectByTouch(runtime, platform, {20.0F, 10.0F});
+  auto* client = SelectionClient(runtime.RootNode());
+  REQUIRE(client->CanPerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+
+  Point target{260.0F, 90.0F};
+  int expected_clicks = 0;
+  SECTION("Inside the selection area") {}
+  SECTION("Empty viewport outside the application bounds") { target = {220.0F, 210.0F}; }
+  SECTION("Outside button") { target = {20.0F, 144.0F}; expected_clicks = 1; }
+  SECTION("Descendant link") { target = {85.0F, 10.0F}; expected_clicks = 1; }
+  Touch(runtime, PointerEventType::Down, target);
+  REQUIRE(client->CanPerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  Touch(runtime, PointerEventType::Up, target);
+  REQUIRE_FALSE(client->CanPerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+  REQUIRE(clicks == expected_clicks);
+}
+
+TEST_CASE("TestSelectionAreaTouchScrollRestoresMenuAndRetainsOffscreenSelection") {
+  TestPlatform platform;
+  SelectionClipboard clipboard;
+  platform.platform_clipboard = &clipboard;
+  auto source = std::make_shared<const SelectionSource>(100);
+  ScrollController scroll;
+  selection_test_root = [&]() -> View {
+    return ProvideEnvironment(TextSelectionMenuLabels{"Cut", "Copy", "Paste", "Select all"},
+        SelectionArea(VirtualList(source->Count(), [source](std::size_t index) {
+          return Text(source->BlockAt(index).text).SelectionBlock(source->IdAt(index)).Key(index);
+        }).ItemExtent(20.0F).CacheExtent(0.0F).Controller(scroll)
+            .With(ScrollPhysics{.overscroll_enabled = false})).Source(source));
+  };
+  Runtime runtime{DynamicSelectionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {300.0F, 160.0F}});
+  runtime.BuildFrame();
+  SelectByTouch(runtime, platform, {20.0F, 50.0F});
+  std::string expected_copy = "line";
+
+  SECTION("Drag then release") {
+    Touch(runtime, PointerEventType::Down, {270.0F, 130.0F});
+    Touch(runtime, PointerEventType::Move, {270.0F, 110.0F});
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    REQUIRE(scroll.Offset() > 0.0F);
+    Touch(runtime, PointerEventType::Up, {270.0F, 110.0F});
+  }
+  SECTION("Canceled drag") {
+    Touch(runtime, PointerEventType::Down, {270.0F, 130.0F});
+    Touch(runtime, PointerEventType::Move, {270.0F, 110.0F});
+    runtime.BuildFrame();
+    Touch(runtime, PointerEventType::Cancel, {270.0F, 110.0F});
+  }
+  SECTION("Offscreen and back") {
+    REQUIRE(scroll.ScrollToItem(50));
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    const auto geometry = SelectionClient(runtime.RootNode())->QuerySelectionGeometry();
+    REQUIRE(geometry.has_value());
+    REQUIRE_FALSE(geometry->start);
+    REQUIRE_FALSE(geometry->end);
+    REQUIRE_FALSE(geometry->toolbar_anchor);
+    REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
+    REQUIRE(clipboard.text == "line");
+    REQUIRE(scroll.ScrollTo(0.0F));
+  }
+  SECTION("Removing the selected block ends menu restoration") {
+    source = std::make_shared<const SelectionSource>(2);
+    runtime.InvalidateRoot();
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    REQUIRE_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Copy));
+    REQUIRE_FALSE(SelectionClient(runtime.RootNode())->QuerySelectionGeometry());
+    SECTION("Back reaches the application") {
+      REQUIRE_FALSE(runtime.HandleBack());
+    }
+    SECTION("A new selection does not inherit the old menu") {
+      REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::SelectAll));
+      REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    }
+    return;
+  }
+  SECTION("Canceled tap") {
+    Touch(runtime, PointerEventType::Down, {270.0F, 130.0F});
+    Touch(runtime, PointerEventType::Cancel, {270.0F, 130.0F});
+  }
+  SECTION("Momentum completes before the menu returns") {
+    REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::SelectAll));
+    REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
+    expected_copy = *clipboard.text;
+    runtime.BuildFrame();
+    Touch(runtime, PointerEventType::Down, {270.0F, 130.0F});
+    platform.AdvanceTime(0.05);
+    Touch(runtime, PointerEventType::Move, {270.0F, 110.0F});
+    platform.AdvanceTime(0.01);
+    Touch(runtime, PointerEventType::Up, {270.0F, 110.0F});
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    const float released_offset = scroll.Offset();
+    bool restored = false;
+    for (int frame = 0; frame < 300 && !restored; ++frame) {
+      platform.AdvanceTime(0.016);
+      restored = FindText(runtime.BuildFrame(), "Copy") != nullptr;
+    }
+    REQUIRE(restored);
+    REQUIRE(scroll.Offset() > released_offset);
+    const float stopped_offset = scroll.Offset();
+    platform.AdvanceTime(0.1);
+    runtime.BuildFrame();
+    REQUIRE(scroll.Offset() == stopped_offset);
+  }
+  SECTION("Back prevents later scroll from reopening the menu") {
+    REQUIRE(runtime.HandleBack());
+    REQUIRE(scroll.ScrollTo(20.0F));
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
+    return;
+  }
+  SECTION("Copy prevents later scroll from reopening the menu") {
+    const auto* copy = FindText(runtime.BuildFrame(), "Copy");
+    REQUIRE(copy != nullptr);
+    const Point center{copy->rect.x + copy->rect.width * 0.5F, copy->rect.y + copy->rect.height * 0.5F};
+    Touch(runtime, PointerEventType::Down, center);
+    Touch(runtime, PointerEventType::Up, center);
+    REQUIRE(clipboard.text == "line");
+    runtime.BuildFrame();
+    platform.AdvanceTime(0.3);
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    REQUIRE(scroll.ScrollTo(20.0F));
+    REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
+    return;
+  }
+  REQUIRE(FindText(runtime.BuildFrame(), "Copy") != nullptr);
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
+  REQUIRE(clipboard.text == expected_copy);
 }
 
 } // namespace huxerui::test

@@ -1079,6 +1079,15 @@ public:
     return selected.has_value() && clipboard->WriteText(*selected);
   }
 
+  bool ClearSelection() override {
+    if (!node_ || !node_->interaction.enabled || editing_.value.selection.IsCollapsed()) {
+      return false;
+    }
+    const auto selection = editing_.value.selection;
+    SetSelection({selection.active, selection.active, selection.affinity});
+    return true;
+  }
+
   bool SelectWord(Point position) override {
     if (!node_ || !text_layout_) {
       return false;
@@ -1115,15 +1124,18 @@ public:
     return true;
   }
 
-  TextSelectionGeometry QuerySelectionGeometry() const override {
-    if (!node_ || !text_layout_) {
-      return {};
+  std::optional<TextSelectionGeometry> QuerySelectionGeometry() const override {
+    if (!node_) {
+      return std::nullopt;
+    }
+    if (!text_layout_) {
+      return TextSelectionGeometry{};
     }
     const TextRange range = editing_.value.selection.Range();
     const Point origin = TextOrigin(*node_);
     const Rect start = OffsetRect(text_layout_->CaretRect(range.start, TextAffinity::Downstream), origin);
     const Rect end = OffsetRect(text_layout_->CaretRect(range.end, TextAffinity::Downstream), origin);
-    return {start, end, start};
+    return TextSelectionGeometry{start, end, start};
   }
 
   Color SelectionHandleColor() const noexcept override {

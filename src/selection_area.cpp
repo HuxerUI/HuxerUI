@@ -403,6 +403,15 @@ public:
     return text && clipboard->WriteText(*text);
   }
 
+  bool ClearSelection() override {
+    if (!enabled_ || !selection_.Anchor()) {
+      return false;
+    }
+    selection_.Clear();
+    InvalidatePaint();
+    return true;
+  }
+
   bool SelectWord(Point position) override {
     const auto hit = enabled_ ? HitPosition(position) : std::nullopt;
     if (!hit) {
@@ -438,10 +447,10 @@ public:
     return true;
   }
 
-  TextSelectionGeometry QuerySelectionGeometry() const override {
+  std::optional<TextSelectionGeometry> QuerySelectionGeometry() const override {
     const auto selected = selection_.Range();
     if (!selected) {
-      return {};
+      return std::nullopt;
     }
     // Either endpoint may be offscreen; the toolbar can still anchor to a visible fragment between them.
     TextSelectionGeometry result{CaretRect(selected->start), CaretRect(selected->end), {}};
