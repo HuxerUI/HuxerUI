@@ -5,6 +5,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 
 #include <huxerui/environment.h>
 #include <huxerui/root.h>
@@ -14,6 +15,10 @@
 namespace huxerui::detail {
 
 namespace {
+
+auto ResourceKey(const ResourceIndexEntry& entry) {
+  return std::tuple{entry.kind, entry.id.Domain(), entry.id.Key()};
+}
 
 bool IsAsciiAlpha(char value) {
   return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
@@ -106,6 +111,10 @@ AppResources::AppResources(PlatformResources* platform_resources) : platform_res
     throw std::logic_error("HuxerUI platform resource display scale must be finite and positive");
   }
   entries_ = ParseResourceIndex(platform_resources_->Read(resource_index_path));
+  // The immutable package keeps each resource's locale and scale variants contiguous after this initial sort.
+  std::ranges::sort(entries_, {}, [](const ResourceIndexEntry& entry) {
+    return std::tuple{ResourceKey(entry), std::string_view(entry.locale), entry.scale};
+  });
 }
 
 void AppResources::UpdateConfiguration(ResourceConfiguration configuration) {
@@ -126,24 +135,26 @@ ResourceConfiguration AppResources::Configuration() const {
 }
 
 RawAsset AppResources::Resolve(RawResource resource) {
-  const auto found = std::ranges::find_if(entries_, [&resource](const ResourceIndexEntry& entry) {
-    return entry.kind == ResourceEntryKind::Raw && entry.id == resource;
-  });
-  if (found == entries_.end()) {
+  const auto entries = FindEntries(ResourceEntryKind::Raw, resource);
+  if (entries.empty()) {
     throw std::logic_error(MissingResourceMessage(resource));
   }
-  return ReadEntry(*found);
+  return ReadEntry(entries.front());
 }
 
-const ResourceIndexEntry&
+std::span<const ResourceIndexEntry> AppResources::FindEntries(ResourceEntryKind kind, const ResourceId& id) const {
+  const auto entries = std::ranges::equal_range(entries_, std::tuple{kind, id.Domain(), id.Key()}, {}, ResourceKey);
+  return {entries.begin(), entries.end()};
+}
+
+std::span<const ResourceIndexEntry>
 AppResources::ResolveLocalized(const ResourceId& id, ResourceEntryKind kind, const Locale& locale) const {
+  const auto candidates = FindEntries(kind, id);
   const std::vector<std::string> fallbacks = LocaleFallbacks(locale);
   for (const std::string& fallback : fallbacks) {
-    const auto found = std::ranges::find_if(entries_, [&id, kind, &fallback](const ResourceIndexEntry& entry) {
-      return entry.kind == kind && entry.id == id && entry.locale == fallback;
-    });
-    if (found != entries_.end()) {
-      return *found;
+    const auto entries = std::ranges::equal_range(candidates, fallback, {}, &ResourceIndexEntry::locale);
+    if (!entries.empty()) {
+      return {entries.begin(), entries.end()};
     }
   }
   throw std::logic_error(MissingResourceMessage(id));
@@ -171,26 +182,10 @@ RawAsset AppResources::ReadEntry(const ResourceIndexEntry& entry) {
 
 ResolvedImageAsset AppResources::ResolveImage(ImageResource resource, const Locale& locale) {
   ObserveDependency(configuration_dependency_);
-  const std::vector<std::string> fallbacks = LocaleFallbacks(locale);
-  std::vector<const ResourceIndexEntry*> candidates;
-  for (const std::string& fallback : fallbacks) {
-    for (const ResourceIndexEntry& entry : entries_) {
-      if (entry.kind == ResourceEntryKind::Image && entry.id == resource && entry.locale == fallback) {
-        candidates.push_back(&entry);
-      }
-    }
-    if (!candidates.empty()) {
-      break;
-    }
-  }
-  if (candidates.empty()) {
-    throw std::logic_error(MissingResourceMessage(resource));
-  }
-  std::ranges::sort(candidates, {}, [](const ResourceIndexEntry* entry) { return entry->scale; });
-  const auto selected = std::ranges::find_if(candidates, [this](const ResourceIndexEntry* entry) {
-    return entry->scale >= configuration_.display_scale;
-  });
-  const ResourceIndexEntry& entry = **(selected == candidates.end() ? std::prev(candidates.end()) : selected);
+  const auto candidates = ResolveLocalized(resource, ResourceEntryKind::Image, locale);
+  const auto selected =
+      std::ranges::lower_bound(candidates, configuration_.display_scale, {}, &ResourceIndexEntry::scale);
+  const ResourceIndexEntry& entry = selected == candidates.end() ? candidates.back() : *selected;
   const std::string cache_key = entry.package_path + '@' + std::to_string(entry.content_hash);
   const auto cached = image_cache_.find(cache_key);
   if (cached != image_cache_.end()) {
@@ -230,7 +225,7 @@ VectorAsset AppResources::ResolveVector(ImageResource resource, const Locale& lo
 }
 
 ResolvedStringResource AppResources::Resolve(const StringResource& resource, const Locale& locale) const {
-  const ResourceIndexEntry& entry = ResolveLocalized(resource, ResourceEntryKind::String, locale);
+  const ResourceIndexEntry& entry = ResolveLocalized(resource, ResourceEntryKind::String, locale).front();
   return {entry.value, entry.argument_count};
 }
 

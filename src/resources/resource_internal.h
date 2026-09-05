@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -65,7 +66,8 @@ public:
   [[nodiscard]] ResolvedStringResource Resolve(const StringResource& resource, const Locale& locale) const;
 
 private:
-  [[nodiscard]] const ResourceIndexEntry&
+  [[nodiscard]] std::span<const ResourceIndexEntry> FindEntries(ResourceEntryKind kind, const ResourceId& id) const;
+  [[nodiscard]] std::span<const ResourceIndexEntry>
   ResolveLocalized(const ResourceId& id, ResourceEntryKind kind, const Locale& locale) const;
   [[nodiscard]] RawAsset ReadEntry(const ResourceIndexEntry& entry);
 

@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "image_test_support.h"
@@ -122,12 +123,15 @@ public:
   }
 
   RawAsset Read(std::string_view package_path) override {
-    const auto found = assets.find(std::string(package_path));
+    const std::string path(package_path);
+    ++read_counts[path];
+    const auto found = assets.find(path);
     return found == assets.end() ? RawAsset{} : found->second;
   }
 
   ResourceConfiguration configuration{Locale::FromLanguageTag("zh-Hans-CN"), 1.5F};
   std::unordered_map<std::string, RawAsset> assets;
+  std::unordered_map<std::string, std::size_t> read_counts;
 };
 
 class TestClipboard final : public PlatformClipboard {
@@ -472,6 +476,103 @@ TEST_CASE("AppResourcesResolveLocaleScaleAndRawPayloads") {
   const ImageAsset image = service.Resolve(ImageResource("test", "images/logo"), Locale::Default());
   REQUIRE(image.Scale() == 2.0F);
   REQUIRE(image.IntrinsicSize() == Size{20.0F, 10.0F});
+}
+
+TEST_CASE("AppResourcesResolveShuffledResourceIdentities") {
+  TestResources resources;
+  const RawAsset raw = RawAsset::FromBytes({std::byte{42}});
+  const RawAsset image = TestPng(20, 10);
+  std::vector<IndexEntry> entries{
+      {.kind = detail::ResourceEntryKind::String, .key = "shared/value", .value = "Other", .domain = "other"},
+      {.kind = detail::ResourceEntryKind::Image, .key = "shared/value", .path = "huxerui/test/value.png",
+       .mime_type = "image/png", .width = 20, .height = 10, .content_hash = Hash(image.Bytes())},
+      {.kind = detail::ResourceEntryKind::String, .key = "shared/value", .locale = "fr", .value = "French {0}",
+       .argument_count = 1},
+      {.kind = detail::ResourceEntryKind::Raw, .key = "shared/value", .path = "huxerui/test/value.bin",
+       .content_hash = Hash(raw.Bytes())},
+      {.kind = detail::ResourceEntryKind::String, .key = "shared/value/child", .value = "Child"},
+      {.kind = detail::ResourceEntryKind::String, .key = "shared/value", .value = "Default {0}", .argument_count = 1},
+  };
+  for (int index = 127; index >= 0; --index) {
+    entries.push_back({.kind = detail::ResourceEntryKind::String, .key = "noise/" + std::to_string(index),
+                      .value = std::to_string(index)});
+  }
+  std::ranges::rotate(entries, entries.begin() + GENERATE(0, 3, 37));
+  resources.assets.emplace(detail::resource_index_path, EncodeIndex(entries));
+  resources.assets.emplace("huxerui/test/value.bin", raw);
+  resources.assets.emplace("huxerui/test/value.png", image);
+
+  detail::AppResources service(&resources);
+  const Locale locale = Locale::FromLanguageTag("fr-CA");
+  const StringResource text("test", "shared/value");
+  REQUIRE(service.Resolve(text, locale).value == "French {0}");
+  REQUIRE(service.Resolve(text, locale).argument_count == 1);
+  REQUIRE(service.Resolve(text, Locale::FromLanguageTag("ja-JP")).value == "Default {0}");
+  REQUIRE(service.Resolve(StringResource("other", "shared/value"), locale).value == "Other");
+  REQUIRE(service.Resolve(StringResource("test", "shared/value/child"), locale).value == "Child");
+  REQUIRE(service.Resolve(StringResource("test", "noise/0"), locale).value == "0");
+  REQUIRE(service.Resolve(StringResource("test", "noise/127"), locale).value == "127");
+  REQUIRE(service.Resolve(RawResource("test", "shared/value")).Bytes().front() == std::byte{42});
+  REQUIRE(service.Resolve(ImageResource("test", "shared/value"), locale).IntrinsicSize() == Size{20.0F, 10.0F});
+  REQUIRE_THROWS_AS(service.Resolve(RawResource("other", "shared/value")), std::logic_error);
+  REQUIRE_THROWS_AS(service.Resolve(ImageResource("other", "shared/value"), locale), std::logic_error);
+  for (const char* key : {"aaa", "shared/absent", "zzz"}) {
+    REQUIRE_THROWS_AS(service.Resolve(StringResource("test", key), locale), std::logic_error);
+  }
+
+  detail::AppResources empty(nullptr);
+  REQUIRE_THROWS_AS(empty.Resolve(RawResource("test", "shared/value")), std::logic_error);
+  REQUIRE_THROWS_AS(empty.Resolve(ImageResource("test", "shared/value"), locale), std::logic_error);
+  REQUIRE_THROWS_AS(empty.Resolve(text, locale), std::logic_error);
+}
+
+TEST_CASE("AppResourcesSelectLocaleBeforeDensityAndReuseAssets") {
+  TestResources resources;
+  std::vector<IndexEntry> entries;
+  const auto add_image = [&](std::string locale, float scale) {
+    const auto width = static_cast<std::uint32_t>(20.0F * scale);
+    const auto height = static_cast<std::uint32_t>(10.0F * scale);
+    const RawAsset image = TestPng(width, height);
+    const std::string path = "huxerui/test/" + locale + std::to_string(scale) + ".png";
+    entries.push_back({.kind = detail::ResourceEntryKind::Image, .key = "images/logo", .path = path,
+                      .mime_type = "image/png", .locale = std::move(locale), .scale = scale, .width = width,
+                      .height = height, .content_hash = Hash(image.Bytes())});
+    resources.assets.emplace(path, image);
+  };
+  add_image("zh-TW", 3.0F);
+  add_image("", 4.0F);
+  add_image("zh", 3.0F);
+  add_image("zh-Hant", 2.0F);
+  add_image("", 1.0F);
+  add_image("zh-TW", 1.0F);
+  add_image("", 2.0F);
+  resources.assets.emplace(detail::resource_index_path, EncodeIndex(entries));
+
+  detail::AppResources service(&resources);
+  const ImageResource logo("test", "images/logo");
+  const Locale locale = Locale::FromLanguageTag("zh-Hant-TW");
+  const ImageAsset original = service.Resolve(logo, locale);
+  REQUIRE(original.Scale() == 3.0F);
+  REQUIRE(service.Resolve(logo, locale) == original);
+  for (const auto& [scale, expected] :
+       {std::pair{0.5F, 1.0F}, {1.0F, 1.0F}, {1.5F, 3.0F}, {3.0F, 3.0F}, {5.0F, 3.0F}}) {
+    CAPTURE(scale);
+    resources.configuration.display_scale = scale;
+    service.UpdateConfiguration(resources.configuration);
+    const ImageAsset selected = service.Resolve(logo, locale);
+    REQUIRE(selected.Scale() == expected);
+    REQUIRE(selected.IntrinsicSize() == Size{20.0F, 10.0F});
+  }
+  resources.configuration = {Locale::FromLanguageTag("fr-FR"), 1.5F};
+  service.UpdateConfiguration(resources.configuration);
+  REQUIRE(service.Resolve(logo, resources.configuration.locale).Scale() == 2.0F);
+  REQUIRE(service.Resolve(logo, Locale::FromLanguageTag("zh-Hant")).Scale() == 2.0F);
+  REQUIRE(service.Resolve(logo, Locale::FromLanguageTag("zh-MO")).Scale() == 3.0F);
+  REQUIRE(service.Resolve(logo, locale) == original);
+  for (const auto& [path, reads] : resources.read_counts) {
+    CAPTURE(path);
+    REQUIRE(reads == 1);
+  }
 }
 
 TEST_CASE("ImageResourceScopesObserveDisplayScalePrecisely") {

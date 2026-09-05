@@ -306,6 +306,11 @@ Explicit non-empty shaping locales do not consult the Locale Environment, but lo
 
 Resource variants support localized strings and image density scales.
 
+AppResources sorts its private entry array once by resource kind, domain, key, locale, and scale after parsing the immutable package index.
+Resource lookup uses binary search to obtain a contiguous read-only range, then searches locale and density variants within that range.
+Queries do not scan unrelated resources or rebuild and sort image candidate arrays.
+Locale and display-scale changes select from the same index; dependency observation still occurs on cache hits, and encoded payload and image caches retain their existing ownership.
+
 Locale fallback removes trailing variants first.
 When a tag includes both script and region, the language-region catalog takes precedence over the language-script catalog before lookup falls back to the language and bundle default:
 
