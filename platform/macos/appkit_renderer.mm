@@ -375,8 +375,15 @@ CFAttributedStringRef CreateAttributedString(const AttributedText& text, const T
   CFMutableAttributedStringRef attributed = CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base.Get());
   // A layout-only sentinel preserves the empty line after a trailing newline; source text and offsets stay unchanged.
   if (preserve_final_line && !text.PlainText().empty() && text.PlainText().back() == '\n') {
-    CFStringAppend(CFAttributedStringGetMutableString(attributed), CFSTR("\u200B"));
+    CFAttributedStringReplaceString(attributed, CFRangeMake(CFAttributedStringGetLength(attributed), 0), CFSTR("\u200B"));
   }
+  // CoreText changes the CGContext fill color for explicit runs; context-driven runs would inherit that color.
+  const Color base_color = style.foreground;
+  CFRef<CGColorRef> base_foreground{
+      CGColorCreateSRGB(base_color.red, base_color.green, base_color.blue, base_color.alpha)};
+  const CFRange full_range = CFRangeMake(0, CFAttributedStringGetLength(attributed));
+  CFAttributedStringSetAttribute(attributed, full_range, kCTForegroundColorFromContextAttributeName, kCFBooleanFalse);
+  CFAttributedStringSetAttribute(attributed, full_range, kCTForegroundColorAttributeName, base_foreground.Get());
   // CFString ranges use UTF-16 units; the attributed string retains the CTFont and CGColor objects.
   for (const auto& run : ResolveTextRuns(text, style)) {
     const CFRange range = CFRangeMake(static_cast<CFIndex>(run.range.start), static_cast<CFIndex>(run.range.Length()));
@@ -397,14 +404,12 @@ CFAttributedStringRef CreateAttributedString(const AttributedText& text, const T
       CFAttributedStringSetAttribute(attributed, range, CFSTR("HuxerUIBackgroundColor"), background.Get());
     }
   }
-  // Keep inherited foreground context-driven for cache reuse; explicit span colors override the CGContext color.
   for (const auto& item : text.StyleRanges()) {
     if (item.style.foreground) {
       const CFRange range =
           CFRangeMake(static_cast<CFIndex>(item.range.start), static_cast<CFIndex>(item.range.Length()));
       const Color color = *item.style.foreground;
       CFRef<CGColorRef> foreground{CGColorCreateSRGB(color.red, color.green, color.blue, color.alpha)};
-      CFAttributedStringSetAttribute(attributed, range, kCTForegroundColorFromContextAttributeName, kCFBooleanFalse);
       CFAttributedStringSetAttribute(attributed, range, kCTForegroundColorAttributeName, foreground.Get());
     }
   }
@@ -424,7 +429,8 @@ void DrawParagraphDecorations(CGContextRef context, CTFrameRef frame, Color fore
     for (CFIndex run_index = 0; run_index < CFArrayGetCount(runs); ++run_index) {
       CTRunRef run = static_cast<CTRunRef>(CFArrayGetValueAtIndex(runs, run_index));
       CFDictionaryRef attributes = CTRunGetAttributes(run);
-      CGColorRef background = static_cast<CGColorRef>(CFDictionaryGetValue(attributes, CFSTR("HuxerUIBackgroundColor")));
+      CGColorRef background = static_cast<CGColorRef>(
+          const_cast<void*>(CFDictionaryGetValue(attributes, CFSTR("HuxerUIBackgroundColor"))));
       CFNumberRef strike = static_cast<CFNumberRef>(
           CFDictionaryGetValue(attributes, (__bridge CFStringRef)NSStrikethroughStyleAttributeName));
       int strike_style = 0;
@@ -461,7 +467,8 @@ void DrawParagraphDecorations(CGContextRef context, CTFrameRef frame, Color fore
         CGContextFillRect(context,
             CGRectMake(origin.x + left, origin.y - descent, right - left, ascent + descent + leading));
       } else {
-        CGColorRef color = static_cast<CGColorRef>(CFDictionaryGetValue(attributes, kCTForegroundColorAttributeName));
+        CGColorRef color = static_cast<CGColorRef>(
+            const_cast<void*>(CFDictionaryGetValue(attributes, kCTForegroundColorAttributeName)));
         if (color != nullptr) {
           CGContextSetFillColorWithColor(context, color);
         } else {
@@ -725,8 +732,7 @@ struct AppKitRenderer::State {
 
   struct ParagraphKey {
     AttributedText text;
-    Font font;
-    TextDecoration decoration = TextDecoration::None;
+    TextStyle style;
     TextLayoutOptions options;
     Size size;
 
@@ -735,8 +741,7 @@ struct AppKitRenderer::State {
 
   struct ParagraphKeyView {
     const AttributedText& text;
-    const Font& font;
-    TextDecoration decoration;
+    const TextStyle& style;
     const TextLayoutOptions& options;
     Size size;
   };
@@ -745,19 +750,23 @@ struct AppKitRenderer::State {
     using is_transparent = void;
 
     std::size_t operator()(const ParagraphKey& key) const noexcept {
-      return Hash(key.text, key.font, key.decoration, key.options, key.size);
+      return Hash(key.text, key.style, key.options, key.size);
     }
 
     std::size_t operator()(const ParagraphKeyView& key) const noexcept {
-      return Hash(key.text, key.font, key.decoration, key.options, key.size);
+      return Hash(key.text, key.style, key.options, key.size);
     }
 
   private:
-    static std::size_t Hash(const AttributedText& text, const Font& font, TextDecoration decoration,
+    static std::size_t Hash(const AttributedText& text, const TextStyle& style,
         const TextLayoutOptions& options, Size size) noexcept {
       std::size_t result = InternalAccess::BodyHash(text);
-      CombineHash(result, HashFont(font));
-      CombineHash(result, std::hash<TextDecoration>{}(decoration));
+      CombineHash(result, HashFont(style.font));
+      CombineHash(result, std::hash<float>{}(style.foreground.red));
+      CombineHash(result, std::hash<float>{}(style.foreground.green));
+      CombineHash(result, std::hash<float>{}(style.foreground.blue));
+      CombineHash(result, std::hash<float>{}(style.foreground.alpha));
+      CombineHash(result, std::hash<TextDecoration>{}(style.decoration));
       CombineHash(result, HashShaping(options.shaping));
       CombineHash(result, std::hash<TextAlign>{}(options.align));
       CombineHash(result, std::hash<TextVerticalAlign>{}(options.vertical_align));
@@ -776,8 +785,8 @@ struct AppKitRenderer::State {
     }
 
     bool operator()(const ParagraphKey& left, const ParagraphKeyView& right) const noexcept {
-      return left.text == right.text && left.font == right.font &&
-             left.decoration == right.decoration && left.options == right.options && left.size == right.size;
+      return left.text == right.text && left.style == right.style &&
+             left.options == right.options && left.size == right.size;
     }
 
     bool operator()(const ParagraphKeyView& left, const ParagraphKey& right) const noexcept {
@@ -886,9 +895,7 @@ struct AppKitRenderer::State {
 
   std::shared_ptr<CachedParagraph> ParagraphFor(const DrawTextCommand& command) {
     const Size size{command.rect.width, command.rect.height};
-    const auto cached = paragraphs.find(
-        ParagraphKeyView{command.text, command.style.font, command.style.decoration, command.options, size}
-    );
+    const auto cached = paragraphs.find(ParagraphKeyView{command.text, command.style, command.options, size});
     if (cached != paragraphs.end()) {
       return cached->second;
     }
@@ -926,8 +933,7 @@ struct AppKitRenderer::State {
       paragraphs.erase(paragraphs.begin());
     }
     paragraph_bytes += cost;
-    paragraphs.emplace(ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size},
-        paragraph);
+    paragraphs.emplace(ParagraphKey{command.text, command.style, command.options, size}, paragraph);
     return paragraph;
   }
 
@@ -1549,7 +1555,6 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& 
   );
   CGContextScaleCTM(context, 1.0, -1.0);
   CGContextSetTextMatrix(context, CGAffineTransformIdentity);
-  SetFillColor(context, command.style.foreground);
   DrawParagraphDecorations(context, paragraph.frame.Get(), command.style.foreground, true);
   CTFrameDraw(paragraph.frame.Get(), context);
   DrawParagraphDecorations(context, paragraph.frame.Get(), command.style.foreground, false);
