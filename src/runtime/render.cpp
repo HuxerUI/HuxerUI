@@ -77,13 +77,8 @@ float AlignOffset(float available, float extent, VerticalAlignment alignment) no
   return alignment == VerticalAlignment::Center ? (available - extent) * 0.5F : 0.0F;
 }
 
-void PaintImage(
-    const ImageProperties& properties,
-    PaintContext& context,
-    Rect content,
-    std::optional<Color> vector_tint,
-    float opacity = 1.0F
-) {
+void PaintImage(const ImageProperties& properties, PaintContext& context, Rect content,
+                std::optional<Color> vector_tint, float opacity = 1.0F) {
   const Size intrinsic = properties.IntrinsicSize();
   if (intrinsic.width <= 0.0F || intrinsic.height <= 0.0F || content.IsEmpty()) {
     return;
@@ -92,9 +87,7 @@ void PaintImage(
     std::visit(
         [&](const auto& asset) {
           using Asset = std::decay_t<decltype(asset)>;
-          if constexpr (
-              std::same_as<Asset, ImageAsset> || std::same_as<Asset, std::shared_ptr<ExternalTexture>>
-          ) {
+          if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, std::shared_ptr<ExternalTexture>>) {
             context.DrawImageRect(asset, source, destination, properties.sampling, opacity);
           } else if constexpr (std::same_as<Asset, VectorAsset>) {
             context.DrawImageRect(asset, source, destination, vector_tint, opacity);
@@ -143,11 +136,7 @@ void PaintImage(const MountedNode& node, PaintContext& context) {
   PaintImage(node.image_properties, context, node.ContentBounds(), node.image_properties.tint);
 }
 
-void PaintLabelContent(
-    const MountedNode& node,
-    PaintContext& context,
-    const TextStyle& text_style
-) {
+void PaintLabelContent(const MountedNode& node, PaintContext& context, const TextStyle& text_style) {
   const LabelContentMetrics metrics = node.LayoutValueOr<LabelContentMetrics>({});
   const Rect content = node.ContentBounds();
   const float icon_width = std::min(std::max(0.0F, metrics.icon_size.width), content.width);
@@ -171,12 +160,8 @@ void PaintLabelContent(
   if (!show_label || text_width <= 0.0F) {
     return;
   }
-  context.DrawText(
-      {leading + icon_width + spacing, content.y, text_width, content.height},
-      node.text,
-      text_style,
-      node.properties.text_layout_options
-  );
+  context.DrawText({leading + icon_width + spacing, content.y, text_width, content.height}, node.text, text_style,
+                   node.properties.text_layout_options);
 }
 
 Rect RenderClipBounds(const RenderClip& clip) {
@@ -251,11 +236,8 @@ std::optional<Rect> ClipBounds(std::optional<Rect> bounds, const std::optional<R
   return intersection.IsEmpty() ? std::nullopt : std::optional<Rect>{intersection};
 }
 
-std::optional<Rect> ResolveClip(
-    const std::optional<Rect>& inherited_clip,
-    const Transform2D& world_transform,
-    const std::vector<RenderClip>& local_clips
-) {
+std::optional<Rect> ResolveClip(const std::optional<Rect>& inherited_clip, const Transform2D& world_transform,
+                                const std::vector<RenderClip>& local_clips) {
   std::optional<Rect> resolved = inherited_clip;
   for (const RenderClip& local_clip : local_clips) {
     const Rect world_clip = TransformBounds(world_transform, RenderClipBounds(local_clip));
@@ -264,12 +246,9 @@ std::optional<Rect> ResolveClip(
   return resolved;
 }
 
-void SnapshotExternalTextures(
-    const PaintSequence& sequence,
-    const Transform2D& world_transform,
-    const std::optional<Rect>& world_clip,
-    std::vector<ExternalTextureUseSnapshot>& textures
-) {
+void SnapshotExternalTextures(const PaintSequence& sequence, const Transform2D& world_transform,
+                              const std::optional<Rect>& world_clip,
+                              std::vector<ExternalTextureUseSnapshot>& textures) {
   if (!sequence.HasExternalTextureCommands()) {
     return;
   }
@@ -313,12 +292,8 @@ void SnapshotExternalTextures(
   }
 }
 
-std::optional<Rect> SnapshotRenderNode(
-    const RenderNode& node,
-    const Transform2D& inherited_transform,
-    const std::optional<Rect>& inherited_clip,
-    RenderDamageSnapshot& snapshot
-) {
+std::optional<Rect> SnapshotRenderNode(const RenderNode& node, const Transform2D& inherited_transform,
+                                       const std::optional<Rect>& inherited_clip, RenderDamageSnapshot& snapshot) {
   RenderNodeSnapshot node_snapshot;
   node_snapshot.content_revision = node.content.Revision();
   node_snapshot.foreground_revision = node.foreground.Revision();
@@ -342,12 +317,10 @@ std::optional<Rect> SnapshotRenderNode(
     return std::nullopt;
   }
 
-  SnapshotExternalTextures(
-      node.content, node_snapshot.world_transform, node_snapshot.world_clip, node_snapshot.external_textures
-  );
-  SnapshotExternalTextures(
-      node.foreground, node_snapshot.world_transform, node_snapshot.world_clip, node_snapshot.external_textures
-  );
+  SnapshotExternalTextures(node.content, node_snapshot.world_transform, node_snapshot.world_clip,
+                           node_snapshot.external_textures);
+  SnapshotExternalTextures(node.foreground, node_snapshot.world_transform, node_snapshot.world_clip,
+                           node_snapshot.external_textures);
 
   std::optional<Rect> own_bounds;
   own_bounds = UnionBounds(std::move(own_bounds), node.content.Bounds());
@@ -416,12 +389,8 @@ void AddSnapshotBounds(DamageRegion& damage, const RenderNodeSnapshot& snapshot,
   }
 }
 
-void AddExternalTextureDamage(
-    DamageRegion& damage,
-    const std::vector<ExternalTextureUseSnapshot>& previous,
-    const std::vector<ExternalTextureUseSnapshot>& current,
-    Rect viewport
-) {
+void AddExternalTextureDamage(DamageRegion& damage, const std::vector<ExternalTextureUseSnapshot>& previous,
+                              const std::vector<ExternalTextureUseSnapshot>& current, Rect viewport) {
   if (previous.size() != current.size()) {
     for (const ExternalTextureUseSnapshot& texture : previous) {
       AddDamageRect(damage, texture.bounds, viewport);
@@ -444,8 +413,7 @@ void AddExternalTextureDamage(
 }
 
 std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> ExternalTextures(
-    const RenderDamageSnapshot& scene
-) {
+    const RenderDamageSnapshot& scene) {
   std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> textures;
   for (const auto& [id, node] : scene) {
     static_cast<void>(id);
@@ -456,11 +424,8 @@ std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> ExternalT
   return textures;
 }
 
-void UpdateExternalTextureActivity(
-    const RenderDamageSnapshot& previous,
-    const RenderDamageSnapshot& current,
-    const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
-) {
+void UpdateExternalTextureActivity(const RenderDamageSnapshot& previous, const RenderDamageSnapshot& current,
+                                   const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester) {
   const auto previous_textures = ExternalTextures(previous);
   const auto current_textures = ExternalTextures(current);
   for (const auto& [identity, texture] : previous_textures) {
@@ -652,27 +617,19 @@ void PaintNodeWithinClip(huxerui::MountedNode& mounted_node, const Rect& clip, c
     PaintNodeExtensionsBehindContent(node, content);
     if (node.resolved_border.has_value() && node.resolved_border->color.alpha > 0.0F &&
         node.resolved_border->width > 0.0F) {
-      content.DrawBorder(bounds, node.resolved_border->color,
-                         StrokeStyle{.width = node.resolved_border->width}, node.resolved_corner_radii);
+      content.DrawBorder(bounds, node.resolved_border->color, StrokeStyle{.width = node.resolved_border->width},
+                         node.resolved_corner_radii);
     }
     if (node.kind == NodeKind::Text) {
       if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
         PaintLabelContent(node, content, text_style);
       } else {
-        content.DrawText(
-            node.ContentBounds(), node.text, text_style, node.properties.text_layout_options
-        );
+        content.DrawText(node.ContentBounds(), node.text, text_style, node.properties.text_layout_options);
       }
-    } else if (node.kind == NodeKind::IconButton ||
-               (node.kind == NodeKind::Chip && node.image_properties.HasValue())) {
+    } else if (node.kind == NodeKind::IconButton || (node.kind == NodeKind::Chip && node.image_properties.HasValue())) {
       PaintLabelContent(node, content, text_style);
     } else if (node.kind == NodeKind::Button || node.kind == NodeKind::Chip) {
-      content.DrawText(
-          bounds,
-          node.text,
-          text_style,
-          node.properties.text_layout_options
-      );
+      content.DrawText(bounds, node.text, text_style, node.properties.text_layout_options);
     } else if ((node.kind == NodeKind::Checkbox || node.kind == NodeKind::RadioButton ||
                 node.kind == NodeKind::Switch) &&
                !node.text.PlainText().empty()) {

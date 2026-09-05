@@ -1,39 +1,17 @@
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
-#include <huxerui/app.h>
 #include <huxerui/file.h>
-#include <huxerui/file_drop.h>
-#include <huxerui/platform_adapter.h>
 
 namespace huxerui::detail {
-
-class FileDropReceiver final {
-public:
-  explicit FileDropReceiver(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
-  ~FileDropReceiver();
-
-  bool HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position);
-  bool HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position);
-  void HandleFileDragExited(std::uint64_t session);
-  bool HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position, FileDropPreparation prepare);
-  void AdvanceFileDrop(const FrameInfo& frame);
-  void DisconnectFileDrop() noexcept;
-
-private:
-  struct State;
-  void RefreshFileDropTarget(bool emit_moved);
-  void FinishFileDrop(std::uint64_t operation, FileResult<std::vector<FileReference>> result);
-
-  Runtime::State& runtime_state_;
-  std::shared_ptr<State> state_;
-};
 
 // Copied into the public value when a reference is obtained; getters never refresh platform state.
 // This is not an authorization cache: operations must still handle deletion and permission changes.

@@ -3,10 +3,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <optional>
 #include <stdexcept>
+#include <type_traits>
+#include <utility>
+#include <variant>
 
 #include <huxerui/theme.h>
+
+#include "graphics/paint_internal.h"
+#include "resources/resource_internal.h"
 
 namespace huxerui {
 
@@ -332,3 +339,310 @@ const FileDropTargetCapability* InternalAccess::GetFileDropTargetCapability(cons
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui {
+
+namespace {
+
+template <class Modifier, void (*Apply)(detail::ViewSpec&, const Modifier&)>
+const detail::ModifierDescriptor& ApplyOnlyModifierDescriptor() {
+  static const detail::ModifierDescriptor descriptor{
+      [](detail::ViewSpec& spec,
+         detail::ModifierSpec& modifier,
+         const std::shared_ptr<const Environment>&,
+         detail::AppResources&) {
+        Apply(spec, *static_cast<const Modifier*>(modifier.value.get()));
+      },
+      nullptr,
+      nullptr,
+  };
+  return descriptor;
+}
+
+struct TextStyleProperty {
+  static const detail::ModifierDescriptor& Descriptor();
+
+  TextStyle value;
+};
+
+void ApplyTextStyleProperty(detail::ViewSpec& spec, const TextStyleProperty& property) {
+  spec.properties.text_style = property.value;
+}
+
+const detail::ModifierDescriptor& TextStyleProperty::Descriptor() {
+  return ApplyOnlyModifierDescriptor<TextStyleProperty, ApplyTextStyleProperty>();
+}
+
+} // namespace
+
+namespace detail {
+
+void ValidateBorder(const Border& border) {
+  ValidateColor(border.color, "HuxerUI border color must be finite");
+  if (!std::isfinite(border.width) || border.width < 0.0F) {
+    throw std::invalid_argument("HuxerUI border width must be finite and non-negative");
+  }
+}
+
+} // namespace detail
+
+namespace {
+
+void ValidateVisualFill(const VisualFill& fill) {
+  std::visit(
+      [](const auto& value) {
+        using Value = std::decay_t<decltype(value)>;
+        if constexpr (std::same_as<Value, Brush>) {
+          detail::ValidateBrush(value);
+        } else {
+          if (!std::isfinite(value.opacity) || value.opacity < 0.0F || value.opacity > 1.0F) {
+            throw std::invalid_argument("HuxerUI visual fill image opacity must be finite within [0, 1]");
+          }
+          if (value.tint.has_value()) {
+            detail::ValidateColor(*value.tint, "HuxerUI visual fill image tint must be finite");
+          }
+          const bool has_source = std::visit(
+              [](const auto& source) {
+                using Source = std::decay_t<decltype(source)>;
+                if constexpr (std::same_as<Source, ImageResource>) {
+                  return true;
+                } else {
+                  return source.HasValue();
+                }
+              },
+              value.source
+          );
+          if (!has_source) {
+            throw std::invalid_argument("HuxerUI visual fill image asset must not be empty");
+          }
+        }
+      },
+      fill.Get()
+  );
+}
+
+} // namespace
+
+namespace detail {
+
+VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale) {
+  const auto* image = std::get_if<ImageFill>(&fill.Get());
+  if (image == nullptr) {
+    ValidateVisualFill(fill);
+    return fill;
+  }
+  ImageFill resolved = *image;
+  std::visit(
+      [&resolved](auto asset) { resolved.source = std::move(asset); },
+      ResolveImage(resolved.source, resources, locale)
+  );
+  VisualFill fill_result{std::move(resolved)};
+  ValidateVisualFill(fill_result);
+  return fill_result;
+}
+
+} // namespace detail
+
+namespace {
+
+void ApplyPadding(detail::ViewSpec& spec, const Padding& modifier) {
+  spec.properties.padding = modifier.insets;
+}
+
+void ApplyBackground(detail::ViewSpec& spec, const Background& modifier) {
+  ValidateVisualFill(modifier.fill);
+  spec.properties.background = modifier.fill;
+}
+
+void ApplyBorder(detail::ViewSpec& spec, const Border& modifier) {
+  detail::ValidateBorder(modifier);
+  spec.properties.border = modifier;
+}
+
+void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
+  const bool color_finite = std::isfinite(modifier.color.red) && std::isfinite(modifier.color.green) &&
+                            std::isfinite(modifier.color.blue) && std::isfinite(modifier.color.alpha);
+  if (!color_finite || !std::isfinite(modifier.offset.x) || !std::isfinite(modifier.offset.y) ||
+      !std::isfinite(modifier.blur_radius) || modifier.blur_radius < 0.0F || !std::isfinite(modifier.spread)) {
+    throw std::invalid_argument("HuxerUI shadow values must be finite with non-negative blur");
+  }
+  spec.properties.shadow = modifier;
+}
+
+void ApplyForeground(detail::ViewSpec& spec, const Foreground& modifier) {
+  spec.properties.text_style.foreground = modifier.color;
+}
+
+void ApplyFontSize(detail::ViewSpec& spec, const FontSize& modifier) {
+  if (!std::isfinite(modifier.value) || modifier.value <= 0.0F) {
+    throw std::invalid_argument("HuxerUI font size must be finite and greater than zero");
+  }
+  spec.properties.text_style.font = spec.properties.text_style.font.WithSize(modifier.value);
+}
+
+void ValidateFrameValue(const std::optional<float>& value, const char* name) {
+  if (value.has_value() && (!std::isfinite(*value) || *value < 0.0F)) {
+    throw std::invalid_argument(std::string("HuxerUI frame ") + name + " must be finite and non-negative");
+  }
+}
+
+void ValidateFrameConstraints(const Frame& frame) {
+  ValidateFrameValue(frame.width, "width");
+  ValidateFrameValue(frame.height, "height");
+  ValidateFrameValue(frame.min_width, "minimum width");
+  ValidateFrameValue(frame.max_width, "maximum width");
+  ValidateFrameValue(frame.min_height, "minimum height");
+  ValidateFrameValue(frame.max_height, "maximum height");
+  if (frame.min_width.has_value() && frame.max_width.has_value() && *frame.min_width > *frame.max_width) {
+    throw std::invalid_argument("HuxerUI frame minimum width must not exceed maximum width");
+  }
+  if (frame.min_height.has_value() && frame.max_height.has_value() && *frame.min_height > *frame.max_height) {
+    throw std::invalid_argument("HuxerUI frame minimum height must not exceed maximum height");
+  }
+}
+
+void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
+  Frame frame = spec.properties.frame;
+  if (modifier.width.has_value()) {
+    frame.width = modifier.width;
+  }
+  if (modifier.height.has_value()) {
+    frame.height = modifier.height;
+  }
+  if (modifier.min_width.has_value()) {
+    frame.min_width = modifier.min_width;
+  }
+  if (modifier.max_width.has_value()) {
+    frame.max_width = modifier.max_width;
+  }
+  if (modifier.min_height.has_value()) {
+    frame.min_height = modifier.min_height;
+  }
+  if (modifier.max_height.has_value()) {
+    frame.max_height = modifier.max_height;
+  }
+  ValidateFrameConstraints(frame);
+  spec.properties.frame = std::move(frame);
+}
+
+void ApplyCornerRadius(detail::ViewSpec& spec, const CornerRadius& modifier) {
+  spec.properties.corner_radii = modifier.value;
+}
+
+void ApplyClipChildren(detail::ViewSpec& spec, const ClipChildren&) {
+  spec.properties.clip_children = true;
+}
+
+void ApplySpacing(detail::ViewSpec& spec, const Spacing& modifier) {
+  spec.properties.spacing = modifier.value;
+}
+
+void ApplyMainAlign(detail::ViewSpec& spec, const MainAlign& modifier) {
+  spec.properties.main_axis_alignment = modifier.alignment;
+}
+
+void ApplyCrossAlign(detail::ViewSpec& spec, const CrossAlign& modifier) {
+  spec.properties.cross_axis_alignment = modifier.alignment;
+}
+
+void ApplyAlign(detail::ViewSpec& spec, const Align& modifier) {
+  spec.properties.horizontal_alignment = modifier.horizontal;
+  spec.properties.vertical_alignment = modifier.vertical;
+}
+
+void ApplyGrow(detail::ViewSpec& spec, const Grow& modifier) {
+  if (!std::isfinite(modifier.factor) || modifier.factor < 0.0F) {
+    throw std::invalid_argument("HuxerUI grow factor must be finite and non-negative");
+  }
+  spec.layout_values.insert_or_assign(
+      typeid(detail::GrowFactorBinding), detail::MakeErasedLayoutValue(modifier.factor)
+  );
+}
+
+void ApplyEnabled(detail::ViewSpec& spec, const Enabled& modifier) {
+  spec.local_enabled = modifier.value;
+}
+
+void ApplyFocusable(detail::ViewSpec& spec, const Focusable& modifier) {
+  spec.focusable = modifier.value;
+}
+
+void ApplyPointerCursor(detail::ViewSpec& spec, const PointerCursor& modifier) {
+  spec.properties.pointer_cursor = modifier.kind;
+}
+
+} // namespace
+
+const detail::ModifierDescriptor& Padding::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Padding, ApplyPadding>();
+}
+
+const detail::ModifierDescriptor& Enabled::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Enabled, ApplyEnabled>();
+}
+
+const detail::ModifierDescriptor& Focusable::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Focusable, ApplyFocusable>();
+}
+
+const detail::ModifierDescriptor& PointerCursor::Descriptor() {
+  return ApplyOnlyModifierDescriptor<PointerCursor, ApplyPointerCursor>();
+}
+
+const detail::ModifierDescriptor& Background::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Background, ApplyBackground>();
+}
+
+const detail::ModifierDescriptor& Border::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Border, ApplyBorder>();
+}
+
+const detail::ModifierDescriptor& Shadow::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Shadow, ApplyShadow>();
+}
+
+const detail::ModifierDescriptor& Foreground::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Foreground, ApplyForeground>();
+}
+
+const detail::ModifierDescriptor& FontSize::Descriptor() {
+  return ApplyOnlyModifierDescriptor<FontSize, ApplyFontSize>();
+}
+
+const detail::ModifierDescriptor& Frame::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Frame, ApplyFrame>();
+}
+
+const detail::ModifierDescriptor& CornerRadius::Descriptor() {
+  return ApplyOnlyModifierDescriptor<CornerRadius, ApplyCornerRadius>();
+}
+
+const detail::ModifierDescriptor& ClipChildren::Descriptor() {
+  return ApplyOnlyModifierDescriptor<ClipChildren, ApplyClipChildren>();
+}
+
+const detail::ModifierDescriptor& Spacing::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Spacing, ApplySpacing>();
+}
+
+const detail::ModifierDescriptor& MainAlign::Descriptor() {
+  return ApplyOnlyModifierDescriptor<MainAlign, ApplyMainAlign>();
+}
+
+const detail::ModifierDescriptor& CrossAlign::Descriptor() {
+  return ApplyOnlyModifierDescriptor<CrossAlign, ApplyCrossAlign>();
+}
+
+const detail::ModifierDescriptor& Align::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Align, ApplyAlign>();
+}
+
+const detail::ModifierDescriptor& Grow::Descriptor() {
+  return ApplyOnlyModifierDescriptor<Grow, ApplyGrow>();
+}
+
+void View::SetTextStyle(TextStyle style) {
+  AddModifier(detail::MakeModifierSpec(TextStyleProperty{std::move(style)}));
+}
+
+} // namespace huxerui

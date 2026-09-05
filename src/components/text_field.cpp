@@ -274,7 +274,7 @@ Path OutlinedBorderPath(Rect frame, float width, CornerRadii corner_radii, float
   return path;
 }
 
-bool UsesTextFieldIndicator(TextFieldVariant variant) {
+bool HasTextFieldIndicator(TextFieldVariant variant) {
   return variant != TextFieldVariant::Outlined;
 }
 
@@ -602,7 +602,7 @@ public:
       if (max_lines_.has_value()) {
         editor_height = std::min(editor_height, line_height * static_cast<float>(*max_lines_));
       }
-      if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
+      if (HasTextFieldIndicator(variant_) && floating_label_layout_) {
         editor_height += floating_label_size.height + std::max(0.0F, style_.label_spacing);
       }
     }
@@ -774,7 +774,7 @@ public:
       border = variant_style_.hovered_border;
     }
     if (border_width > 0.0F && border.alpha > 0.0F) {
-      if (UsesTextFieldIndicator(variant_)) {
+      if (HasTextFieldIndicator(variant_)) {
         const float indicator_height = std::min(editor_frame.height, border_width);
         context.DrawRect(
             {
@@ -1438,7 +1438,7 @@ private:
     const Rect frame = EditorFrame(node);
     const EdgeInsets padding = node.resolved_padding;
     const float top_padding = std::max(0.0F, padding.top - FloatingLabelTopInset());
-    const float bottom_padding = UsesTextFieldIndicator(variant_) && floating_label_layout_
+    const float bottom_padding = HasTextFieldIndicator(variant_) && floating_label_layout_
                                      ? std::max(0.0F, padding.bottom * 0.5F)
                                      : padding.bottom;
     return {
@@ -1497,7 +1497,7 @@ private:
     const Rect frame = EditorFrame(node);
     const Size size = floating_label_layout_->Measure();
     float y = frame.y - size.height * 0.5F;
-    if (UsesTextFieldIndicator(variant_)) {
+    if (HasTextFieldIndicator(variant_)) {
       if (configuration_.multiline) {
         y = frame.y + std::max(0.0F, node.resolved_padding.top * 0.5F);
       } else {
@@ -2072,7 +2072,7 @@ private:
     } else if (text_layout_options_.vertical_align == TextVerticalAlign::Bottom) {
       y += remaining_height;
     }
-    if (UsesTextFieldIndicator(variant_) && floating_label_layout_) {
+    if (HasTextFieldIndicator(variant_) && floating_label_layout_) {
       const Rect floating_label = FloatingLabelBounds(node);
       float floating_y = floating_label.y + floating_label.height + std::max(0.0F, style_.label_spacing);
       if (!configuration_.multiline) {

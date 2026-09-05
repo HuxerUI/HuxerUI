@@ -42,10 +42,6 @@ struct TextInputReductionResult {
 [[nodiscard]] std::optional<TextOffset> NextWordEnd(std::string_view text, TextOffset offset);
 [[nodiscard]] std::optional<TextOffset> NextWordStart(std::string_view text, TextOffset offset);
 [[nodiscard]] bool IsValidTextEditingValue(const TextEditingValue& value) noexcept;
-[[nodiscard]] bool IsValidTextInputState(const TextInputState& state, TextInputSessionId session_id) noexcept;
-[[nodiscard]] bool IsValidTextInputStateTransition(
-    const TextInputState& previous, const TextInputState& current
-) noexcept;
 [[nodiscard]] TextInputReductionResult
 ReduceTextInputCommands(const TextFieldEditingState& state, const std::vector<TextInputCommand>& commands);
 

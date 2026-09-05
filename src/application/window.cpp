@@ -303,6 +303,42 @@ const detail::ModifierDescriptor& WindowDragRegion::Descriptor() {
   return ApplyOnlyModifierDescriptor<WindowDragRegion, ApplyWindowDragRegion>();
 }
 
+LayoutResult WindowTitleBar::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  const WindowTitleBarMetrics* metrics = context.TitleBarMetrics();
+  const auto& internal_node = static_cast<const detail::MountedNode&>(node);
+  const float requested_left = metrics == nullptr ? 0.0F : metrics->left_inset;
+  const float requested_right = metrics == nullptr ? 0.0F : metrics->right_inset;
+  const float maximum_width = constraints.max_width;
+  const float left = std::isfinite(maximum_width) ? std::min(requested_left, maximum_width) : requested_left;
+  const float right =
+      std::isfinite(maximum_width) ? std::min(requested_right, std::max(0.0F, maximum_width - left)) : requested_right;
+  const float reserved_width = left + right;
+
+  Constraints content_constraints{
+      std::max(0.0F, constraints.min_width - reserved_width),
+      std::isfinite(maximum_width) ? std::max(0.0F, maximum_width - reserved_width) : maximum_width,
+      std::max(
+          constraints.min_height,
+          metrics == nullptr ? 0.0F : std::max(0.0F, metrics->height - internal_node.resolved_padding.Vertical())
+      ),
+      constraints.max_height,
+  };
+  if (content_constraints.min_height > content_constraints.max_height) {
+    content_constraints.min_height = content_constraints.max_height;
+  }
+  if (std::isfinite(content_constraints.max_width)) {
+    content_constraints.min_width = content_constraints.max_width;
+  }
+
+  const LayoutResult content = Row::Measure(context, node, content_constraints);
+  LayoutResult result;
+  for (const LayoutResult::Placement& placement : content.Placements()) {
+    result.Place(*placement.child, {placement.offset.x + left, placement.offset.y});
+  }
+  result.SetSize(constraints.Constrain({content.MeasuredSize().width + reserved_width, content.MeasuredSize().height}));
+  return result;
+}
+
 void WindowHandle::Show() const {
   service_->Request(WindowCommand::Show);
 }

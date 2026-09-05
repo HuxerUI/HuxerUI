@@ -12,7 +12,7 @@
 
 namespace huxerui {
 
-namespace detail {
+namespace {
 
 bool IsValidTextInputState(const TextInputState& state, TextInputSessionId session_id) noexcept {
   const bool affinity_known =
@@ -31,10 +31,6 @@ bool IsValidTextInputStateTransition(const TextInputState& previous, const TextI
                                  current.content_revision != previous.content_revision;
   return !observable_change || current.revision > previous.revision;
 }
-
-} // namespace detail
-
-namespace {
 
 std::shared_ptr<TextInputClient> FindTextInputClient(detail::MountedNode& node) {
   std::shared_ptr<TextInputClient> result;
@@ -342,8 +338,8 @@ bool detail::TextInteraction::BringTextInputIntoView() {
   }
 
   const TextInputState current = session.client->State();
-  if (!detail::IsValidTextInputState(current, session.session_id) ||
-      !detail::IsValidTextInputStateTransition(session.state, current)) {
+  if (!IsValidTextInputState(current, session.session_id) ||
+      !IsValidTextInputStateTransition(session.state, current)) {
     throw std::logic_error("HuxerUI text input client returned invalid state");
   }
   const detail::MountedNode& node = *path.back();
@@ -424,8 +420,8 @@ void detail::TextInteraction::RefreshTextInputSession() {
     if (focused && focused->identity == active.node_identity && client == active.client) {
       const TextInputConfiguration configuration = active.client->Configuration();
       const TextInputState current = active.client->State();
-      if (!IsValidConfiguration(configuration) || !detail::IsValidTextInputState(current, active.session_id) ||
-          !detail::IsValidTextInputStateTransition(active.state, current)) {
+      if (!IsValidConfiguration(configuration) || !IsValidTextInputState(current, active.session_id) ||
+          !IsValidTextInputStateTransition(active.state, current)) {
         throw std::logic_error("HuxerUI text input client returned invalid state");
       }
       if (configuration.read_only) {
@@ -491,7 +487,7 @@ void detail::TextInteraction::RefreshTextInputSession() {
   }
   const TextInputSessionId session_id = next_text_input_session_id_++;
   const TextInputState initial = client->BeginTextInput(session_id);
-  if (!detail::IsValidTextInputState(initial, session_id)) {
+  if (!IsValidTextInputState(initial, session_id)) {
     client->EndTextInput(session_id, TextInputEndReason::ClientRemoved);
     throw std::logic_error("HuxerUI text input client returned invalid initial state");
   }
@@ -539,8 +535,8 @@ TextInputApplyResult detail::TextInteraction::HandleTextInputCommands(const Text
 
   const TextInputConfiguration configuration = active.client->Configuration();
   const TextInputState current = active.client->State();
-  if (!IsValidConfiguration(configuration) || !detail::IsValidTextInputState(current, active.session_id) ||
-      !detail::IsValidTextInputStateTransition(previous, current)) {
+  if (!IsValidConfiguration(configuration) || !IsValidTextInputState(current, active.session_id) ||
+      !IsValidTextInputStateTransition(previous, current)) {
     throw std::logic_error("HuxerUI text input client returned invalid state after applying commands");
   }
   if (configuration.read_only) {
@@ -739,8 +735,8 @@ bool detail::TextInteraction::HandleFocusedTextInputKey(const KeyEvent& event) {
   }
 
   const TextInputState current = client->State();
-  if (!detail::IsValidTextInputState(current, session_id) ||
-      !detail::IsValidTextInputStateTransition(previous, current)) {
+  if (!IsValidTextInputState(current, session_id) ||
+      !IsValidTextInputStateTransition(previous, current)) {
     throw std::logic_error("HuxerUI text input client returned invalid state after handling a key event");
   }
   InvalidateTextInputStateChange(node_identity, previous, current);

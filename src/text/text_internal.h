@@ -10,14 +10,12 @@
 #include <huxerui/text.h>
 
 namespace huxerui {
-class Environment;
 class PlatformAdapter;
 }
 
 namespace huxerui::detail {
 
 struct MountedNode;
-struct ViewSpec;
 
 struct Utf8CodePoint {
   std::uint32_t value = 0;
@@ -113,7 +111,5 @@ struct ParagraphLayout {
 
 // A mounted paragraph shares its shaping geometry between selection and links, never through a global text cache.
 std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, PlatformAdapter& platform);
-
-void CompileTextLinks(ViewSpec& spec, const std::shared_ptr<const Environment>& environment);
 
 } // namespace huxerui::detail

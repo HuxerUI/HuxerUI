@@ -535,6 +535,11 @@ Size MeasureNode(
     const WindowTitleBarMetrics* title_bar_metrics = nullptr
 );
 void LayoutNode(MountedNode& node, Point offset);
+
+inline bool AppliesDisabledAppearance(const huxerui::MountedNode& node) {
+  return static_cast<const MountedNode&>(node).applies_disabled_appearance;
+}
+
 float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept;
 Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
@@ -542,7 +547,6 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 MountedNode* FindTextSelectionOwner(MountedNode& root, std::uint64_t identity);
 void ResolvePresentationTree(MountedNode& node);
 void ValidateBorder(const Border& border);
-VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);
 DamageRegion ComputeDamageRegion(
     const RenderNode* root,

@@ -3,7 +3,6 @@
 #include "text/text_internal.h"
 #include "application/application_internal.h"
 #include "graphics/external_texture_internal.h"
-#include "io/file_internal.h"
 #include "resources/resource_internal.h"
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"

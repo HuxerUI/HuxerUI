@@ -19,6 +19,7 @@
 #include <huxerui/app.h>
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
+#include <huxerui/file_drop.h>
 #include <huxerui/gesture.h>
 #include <huxerui/lifecycle.h>
 #include <huxerui/modifier.h>
@@ -36,9 +37,29 @@ class AppResources;
 class TaskDelayScheduler;
 struct WindowState;
 class WindowService;
-class FileDropReceiver;
 class PointerInteraction;
 class TextInteraction;
+
+class FileDropReceiver final {
+public:
+  explicit FileDropReceiver(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
+  ~FileDropReceiver();
+
+  bool HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position);
+  bool HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position);
+  void HandleFileDragExited(std::uint64_t session);
+  bool HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position, FileDropPreparation prepare);
+  void AdvanceFileDrop(const FrameInfo& frame);
+  void DisconnectFileDrop() noexcept;
+
+private:
+  struct State;
+  void RefreshFileDropTarget(bool emit_moved);
+  void FinishFileDrop(std::uint64_t operation, FileResult<std::vector<FileReference>> result);
+
+  Runtime::State& runtime_state_;
+  std::shared_ptr<State> state_;
+};
 
 class EnvironmentTransaction {
 public:

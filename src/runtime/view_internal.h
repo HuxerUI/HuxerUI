@@ -1,11 +1,15 @@
 #pragma once
 
+#include <algorithm>
+#include <any>
+#include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <typeindex>
@@ -23,6 +27,12 @@
 #include <huxerui/view.h>
 
 #include "semantics_internal.h"
+
+namespace huxerui {
+
+struct ProgressCircleStyle;
+
+} // namespace huxerui
 
 namespace huxerui::detail {
 
@@ -334,6 +344,67 @@ struct ViewSpec {
 std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory);
 ViewSpec CompileViewSpec(const ViewSpec& declaration, const std::shared_ptr<const Environment>& environment,
                          AppResources& resources);
+VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale);
 
+void CompileTextLinks(ViewSpec& spec, const std::shared_ptr<const Environment>& environment);
+
+class LoopingPhase {
+public:
+  bool Reset() {
+    previous_timestamp_.reset();
+    const bool changed = value_ != 0.0F;
+    value_ = 0.0F;
+    return changed;
+  }
+
+  bool Advance(const FrameInfo& frame, double duration) {
+    if (!previous_timestamp_.has_value()) {
+      previous_timestamp_ = frame.timestamp;
+      return false;
+    }
+    const double elapsed = std::max(0.0, frame.timestamp - *previous_timestamp_);
+    previous_timestamp_ = frame.timestamp;
+    if (elapsed <= 0.0) {
+      return false;
+    }
+    const float previous = value_;
+    const double increment = std::fmod(elapsed, duration) / duration;
+    value_ = static_cast<float>(std::fmod(static_cast<double>(value_) + increment, 1.0));
+    return value_ != previous;
+  }
+
+  [[nodiscard]] float Value() const noexcept {
+    return value_;
+  }
+
+private:
+  std::optional<double> previous_timestamp_;
+  float value_ = 0.0F;
+};
+
+const std::any* FindThemeStyleValue(std::shared_ptr<const Environment> environment, std::type_index key);
+
+template <class Style>
+std::optional<Style> ResolveStyleOverride(const std::shared_ptr<const Environment>& environment) {
+  if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(Style))) {
+    if (const auto* style = std::any_cast<Style>(value)) {
+      return *style;
+    }
+    throw std::logic_error("HuxerUI component style environment value has an invalid type");
+  }
+  return std::nullopt;
+}
+
+inline void ResolveComponentLabel(detail::ViewSpec& spec) {
+  if (!spec.component_semantics.label.has_value()) {
+    spec.component_semantics.label = detail::StringLiteral(spec.text);
+  }
+}
+
+void PaintProgressCircle(PaintContext& context, Rect frame,
+  const ProgressCircleStyle& style, std::optional<float> progress, float phase);
+void ValidateFocusRing(const FocusRing& focus_ring);
+std::optional<std::variant<ImageAsset, VectorAsset>> ResolveOptionalControlIcon(const std::optional<ImageVariant>& value);
+std::shared_ptr<ViewSpec> MakeContainerSpec(NodeKind kind, std::vector<View> children);
 
 } // namespace huxerui::detail
