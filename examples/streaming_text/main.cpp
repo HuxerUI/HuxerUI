@@ -14,13 +14,15 @@
 
 using namespace huxerui;
 
-enum class BlockKind { User, Reasoning, Paragraph, Image, List, Code, Files, Table, Question };
+enum class BlockKind { User, Reasoning, Paragraph, Image, List, Code, Tool, Files, Table, Question };
 
 struct MessageBlock {
   TextBlockId id;
   BlockKind kind;
   std::vector<TextSelectionBlock> text;
   bool expanded = false;
+  std::string label{};
+  std::optional<int> exit_code{};
 };
 
 using Messages = std::vector<std::shared_ptr<const MessageBlock>>;
@@ -64,32 +66,61 @@ struct FileChange {
     return "--- a/" + path + "\n+++ b/" + path + "\n@@ -1," + std::to_string(lines.size() - Count('+')) +
         " +1," + std::to_string(lines.size() - Count('-')) + " @@";
   }
+
+  std::string Body(bool after) const {
+    std::string result;
+    for (const auto& line : lines) {
+      if (line.marker != (after ? '-' : '+')) {
+        result += line.text + "\n";
+      }
+    }
+    return result;
+  }
 };
 
 const auto& MockChanges() {
   static const std::array<FileChange, 2> changes{{
-    {"src/message_view.cpp", {
+    {"src/conversation.cpp", {
       {' ', "#include <huxerui/huxerui.h>"},
       {' ', ""},
       {' ', "using namespace huxerui;"},
       {' ', ""},
-      {' ', "View MessageView(const AttributedText& message) {"},
-      {'-', "  return Text(message);"},
+      {' ', "View Conversation(std::shared_ptr<const Transcript> snapshot,"},
+      {' ', "                  ScrollController scroll) {"},
+      {'-', "  return VirtualList(snapshot->Count(), [snapshot](std::size_t index) {"},
+      {'-', "    return Text(snapshot->BlockAt(index).text);"},
+      {'-', "  }).EstimatedItemExtent(96.0F).Controller(scroll);"},
       {'+', "  return SelectionArea("},
-      {'+', "      Text(message).SelectionBlock(42)"},
-      {'+', "  );"},
+      {'+', "      VirtualList(snapshot->Count(), [snapshot](std::size_t index) {"},
+      {'+', "        const auto id = snapshot->IdAt(index);"},
+      {'+', "        return Text(snapshot->BlockAt(index).text)"},
+      {'+', "            .SelectionBlock(id)"},
+      {'+', "            .Key(id);"},
+      {'+', "      }).EstimatedItemExtent(96.0F).Controller(scroll)"},
+      {'+', "  ).Source(snapshot);"},
       {' ', "}"},
     }},
-    {"tests/message_view.cpp", {
-      {' ', "TEST_CASE(\"Messages retain rich text\") {"},
-      {' ', "  const AttributedText message{"},
-      {'-', "    TextSpan(\"Hello, Agent\"),"},
-      {'+', "    TextSpan(\"Hello, \"),"},
-      {'+', "    TextSpan(\"Agent\").Style({.font_weight = FontWeight::Bold}),"},
-      {' ', "  };"},
-      {' ', "  REQUIRE(message.PlainText() == \"Hello, Agent\");"},
-      {'+', "  REQUIRE(message.Length() == 12);"},
-      {'+', "  REQUIRE(message.StyleRanges().size() == 1);"},
+    {"tests/conversation.cpp", {
+      {' ', "TEST_CASE(\"Copy spans unmounted messages\") {"},
+      {' ', "  const auto snapshot = MakeTranscript(500);"},
+      {' ', "  ConversationHarness app(snapshot);"},
+      {' ', "  app.BuildFrame();"},
+      {'-', "  REQUIRE(app.VisibleText().contains(\"Message 0\"));"},
+      {'+', "  REQUIRE(app.SelectAll());"},
+      {'+', "  app.ScrollToItem(400);"},
+      {'+', "  app.BuildFrame();"},
+      {'+', "  REQUIRE_FALSE(app.IsMounted(snapshot->IdAt(0)));"},
+      {'+', "  REQUIRE(app.CopyText() == snapshot->PlainText());"},
+      {'+', "  REQUIRE(app.RealizedCount() < 20);"},
+      {'+', "}"},
+      {'+', ""},
+      {'+', "TEST_CASE(\"Streaming does not steal the reading position\") {"},
+      {'+', "  ConversationHarness app(MakeTranscript(500));"},
+      {'+', "  app.ScrollToItem(120);"},
+      {'+', "  const auto anchor = app.VisibleAnchor();"},
+      {'+', "  app.AppendToLastMessage(\" additional text\");"},
+      {'+', "  app.BuildFrame();"},
+      {'+', "  REQUIRE(app.VisibleAnchor() == anchor);"},
       {' ', "}"},
     }},
   }};
@@ -170,6 +201,9 @@ struct StreamModel {
         continue;
       }
       for (std::size_t part = 0; part < row->text.size(); ++part) {
+        if (row->kind == BlockKind::Tool && !row->expanded && part != 0) {
+          continue;
+        }
         const auto id = row->id + part;
         updated->positions.emplace(id, updated->entries.size());
         updated->entries.push_back({id, row->text[part]});
@@ -190,33 +224,42 @@ struct StreamModel {
     }
   }
 
-  void Seal(Messages& updated) {
+  void Seal() {
     if (active_id == 0) {
       return;
     }
-    auto last = std::make_shared<MessageBlock>(*updated.back());
-    last->text[0].text = last->kind == BlockKind::Code ? Highlight(live.Get(), code_color) : live.Get();
-    updated.back() = std::move(last);
+    auto updated = std::make_shared<Messages>(*messages.Get());
+    auto last = std::make_shared<MessageBlock>(*updated->back());
+    last->text.at(active_id - last->id).text = last->kind == BlockKind::Code
+        ? Highlight(live.Get(), code_color) : live.Get();
+    if (last->kind == BlockKind::Tool && stop) {
+      last->exit_code.reset();
+    }
+    updated->back() = std::move(last);
     active_id = 0;
     ++version;
+    messages = std::move(updated);
+    RebuildIndex();
   }
 
-  void Append(BlockKind kind, std::vector<TextSelectionBlock> text, bool streaming = false) {
+  void Append(MessageBlock block, bool streaming = false) {
     const bool following = Following();
+    Seal();
     auto updated = std::make_shared<Messages>(*messages.Get());
-    Seal(*updated);
-    const auto id = next_id;
-    next_id += text.size();
-    updated->push_back(std::make_shared<const MessageBlock>(MessageBlock{id, kind, std::move(text)}));
-    if (kind == BlockKind::Question) {
+    block.id = next_id;
+    next_id += block.text.size();
+    if (block.kind == BlockKind::Question) {
       auto values = answers.Get();
-      values.emplace(id, Answer{});
+      values.emplace(block.id, Answer{});
       answers = std::move(values);
     }
     if (streaming) {
-      active_id = id;
+      // A tool keeps its command stable while only the final output part receives transport deltas.
+      active_id = block.id + block.text.size() - 1;
       live = AttributedText{};
+      block.text.back().text = AttributedText{};
     }
+    updated->push_back(std::make_shared<const MessageBlock>(std::move(block)));
     messages = std::move(updated);
     // Structural edits rebuild the index; streaming snapshots only replace the independently observed tail.
     RebuildIndex();
@@ -224,12 +267,7 @@ struct StreamModel {
   }
 
   void Finish() {
-    if (active_id != 0) {
-      auto updated = std::make_shared<Messages>(*messages.Get());
-      Seal(*updated);
-      messages = std::move(updated);
-      RebuildIndex();
-    }
+    Seal();
     running = false;
   }
 
@@ -253,7 +291,7 @@ struct StreamModel {
     return true;
   }
 
-  void ToggleReasoning(TextBlockId id) {
+  void ToggleDetails(TextBlockId id) {
     auto updated = std::make_shared<Messages>(*messages.Get());
     for (auto& row : *updated) {
       if (row->id == id) {
@@ -304,66 +342,239 @@ AttributedText AppendResponse(const AttributedText& current, const AttributedTex
   return AttributedText::FromRanges(std::move(body), std::move(styles), std::move(links));
 }
 
+AttributedText CodeText(std::string text) {
+  return AttributedText{TextSpan(std::move(text)).Style({.font = Font::Monospace(14.0F)})};
+}
+
+MessageBlock ToolCall(std::string label, std::string command, std::string output, int exit_code = 0) {
+  return {0, BlockKind::Tool, {{CodeText("$ " + command), "\n"}, {CodeText(std::move(output)), "\n\n"}},
+          true, std::move(label), exit_code};
+}
+
 std::vector<MessageBlock> ResponseContent(const ColorScheme& colors, const std::string& prompt, bool follow_up) {
   std::vector<MessageBlock> response{
     {0, BlockKind::Reasoning, {Paragraph(
-        "Scripted reasoning summary: separate readable paragraphs from images and interactive controls, "
-        "then keep generation and answers outside virtual rows. This is a local demo, not private model reasoning.")}},
+        "Scripted analysis summary: first separate a document-lifetime problem from a rendering problem. "
+        "A message leaving the viewport should release its View, not erase the text that Copy depends on. "
+        "Inspect the conversation boundary, reproduce the failure with a long fixture, and change only the "
+        "ownership and binding points supported by that evidence. This is a fictional work summary, not "
+        "private model reasoning.")}},
     {0, BlockKind::Paragraph, {{AttributedText{
-      TextSpan(follow_up ? "Thanks, I'll use those details. " : "Let's build that conversation. ")
+      TextSpan(follow_up ? "I'll replay the repair with your new constraints. "
+                        : "I'll investigate selection in the Agent conversation. ")
           .Style({.font_weight = FontWeight::Bold}),
-      TextSpan("Your message: "),
+      TextSpan("Your request: "),
       TextSpan(prompt).Style({.font_slant = FontSlant::Italic}),
-      TextSpan("\n\nThe Agent reply can use the full conversation width, mixing "),
-      TextSpan("rich text").Style({.foreground = colors.on_primary_container,
-                                   .background = colors.primary_container}),
-      TextSpan(" with ordinary components as each result arrives."),
+      TextSpan("\n\nThis run uses a fresh, simulated Atlas chat project. The reported failure appears after a "
+               "conversation grows beyond the viewport: selecting visible text works, but copying an entire "
+               "answer loses earlier paragraphs. Meanwhile, new output can pull a reader away from a message "
+               "they were inspecting. I'll trace both paths, reproduce the selection failure, and show the "
+               "proposed patch together with its verification evidence. The transcript below mixes "),
+      TextSpan("analysis, tool results, and a final handoff")
+          .Style({.foreground = colors.on_primary_container, .background = colors.primary_container}),
+      TextSpan("; none of the displayed commands will actually run on your machine."),
     }, "\n\n"}}},
+    {0, BlockKind::List, {
+      Paragraph("1. ", ""), Paragraph("Locate the conversation View, the immutable transcript, and the code that "
+          "publishes incoming text. Check which objects survive virtual-row eviction.", "\n"),
+      Paragraph("2. ", ""), Paragraph("Reproduce Copy with 500 messages and a selected endpoint outside the viewport. "
+          "Keep the fixture deterministic so a visual symptom becomes a repeatable assertion.", "\n"),
+      Paragraph("3. ", ""), Paragraph("Bind visible text to stable logical block identities and keep one selection "
+          "owner around the virtual list. Preserve the existing streaming publication path.", "\n"),
+      Paragraph("4. ", ""), Paragraph("Rebuild, rerun the focused tests, and review scrolling, cancellation, "
+          "and narrow-screen behavior before handing the change back."),
+    }},
+    ToolCall("Search the conversation boundary",
+        "rg -n 'VirtualList|SelectionArea|SelectionBlock|ScrollToItem' src tests",
+        "src/conversation.cpp:7:  return VirtualList(snapshot->Count(), [snapshot](std::size_t index) {\n"
+        "src/stream.cpp:41:  controller.ScrollToItem(last, ScrollAlignment::End);\n"
+        "src/stream.cpp:58:  if (following) PublishLatest();\n"
+        "tests/conversation.cpp:1: TEST_CASE(\"Copy spans unmounted messages\") {\n"
+        "tests/stream.cpp:24: TEST_CASE(\"Streaming batches text deltas\") {\n"
+        "\nSearch finished: 5 matches in 4 files.\n"
+        "No SelectionArea or SelectionBlock binding in src/conversation.cpp.\n"),
+    {0, BlockKind::Paragraph, {Paragraph(
+        "The search points to a small boundary rather than a missing text renderer. The conversation already uses "
+        "a virtual list, and the stream publisher already checks whether the reader is following the bottom. "
+        "There is no selection owner around that list, however, and the visible Text nodes have no binding to "
+        "the document's stable block IDs. I will inspect that construction before adding any new state or "
+        "changing the scrolling policy. A renderer workaround would leave Copy dependent on whatever rows "
+        "happen to be mounted at the time of the request.")}},
+    ToolCall("Read the current implementation", "sed -n '1,80p' src/conversation.cpp",
+        MockChanges()[0].Body(false)),
+    {0, BlockKind::Reasoning, {Paragraph(
+        "Scripted analysis summary: the transcript is already immutable and exposes Count, IdAt, IndexOf, and "
+        "BlockAt. That is the existing logical source needed by selection; another text cache would create a "
+        "second authority. The next check should distinguish a missing selection capability from malformed "
+        "UTF-16 ranges or an incomplete platform clipboard service.")}},
+    {0, BlockKind::Paragraph, {{AttributedText{
+      TextSpan("What the current code tells us").Style({.font_weight = FontWeight::Bold}),
+      TextSpan("\n\nEach row is reconstructed from an immutable snapshot, which is a useful foundation: generation "
+               "is not owned by a row and does not stop when that row disappears. The missing link is between "
+               "the visible paragraph and its logical document entry. A row index is not that identity; inserting "
+               "an earlier message shifts indices while the user's selected text should still refer to the same "
+               "message.\n\nThe selection source should describe the committed document, including unmounted "
+               "blocks. Mounted Text nodes should contribute only the geometry currently available for painting "
+               "and hit testing. That separation lets Copy read a long answer without creating hundreds of Views, "
+               "and lets handles disappear offscreen without silently deleting the logical range."),
+    }, "\n\n"}}},
+    {0, BlockKind::List, {
+      Paragraph("\xE2\x80\xA2 ", ""), Paragraph("One authoritative transcript: text and selection entries must come from "
+          "the same immutable snapshot, including while the current answer is still growing.", "\n"),
+      Paragraph("    \xE2\x97\xA6 ", ""), Paragraph("Give every logical paragraph a stable TextBlockId; use that identity "
+          "for both SelectionBlock and the virtual row's Key.", "\n"),
+      Paragraph("    \xE2\x97\xA6 ", ""), Paragraph("Keep completed blocks shared. Publish a new value only for the active "
+          "tail, rather than rewriting the entire conversation for each transport chunk.", "\n"),
+      Paragraph("\xE2\x80\xA2 ", ""), Paragraph("One persistent selection owner: put SelectionArea outside VirtualList, "
+          "not inside each row factory.", "\n"),
+      Paragraph("\xE2\x80\xA2 ", ""), Paragraph("No extra scrolling authority: keep the existing conditional bottom-follow "
+          "behavior, and verify that appending below the viewport does not steal the reading position."),
+    }},
+    ToolCall("Reproduce the missing selection", "./build/atlas_tests '[conversation]' --reporter compact",
+        "Run: conversation regression fixture / 500 messages\n"
+        "PASS  Streaming batches text deltas\n"
+        "PASS  Reading position survives an append below the viewport\n"
+        "\nFAIL  Copy spans unmounted messages\n"
+        "  tests/conversation.cpp:6\n"
+        "  REQUIRE(app.SelectAll())\n"
+        "  actual: false\n"
+        "  expected: a logical range covering 500 messages\n"
+        "\nMounted rows: 9 / 500\n"
+        "Clipboard service: available\n"
+        "UTF-16 range validation: no invalid offsets reported\n"
+        "Selection capability at the conversation boundary: missing\n"
+        "\n2 passed, 1 failed. The failure is retained in this transcript.\n", 1),
+    {0, BlockKind::Paragraph, {Paragraph(
+        "The failing run now gives us a precise condition: Select All cannot establish a logical range at the "
+        "conversation boundary. The clipboard is available and the fixture reports no invalid text offsets, "
+        "so this is not an encoding conversion failure. The nine realized rows are expected for the viewport; "
+        "increasing the cache would merely hide the problem until the next sufficiently long conversation.\n\n"
+        "The patch below wraps the existing virtual list in SelectionArea, provides the same snapshot as its "
+        "Source, and binds each Text to the snapshot's stable block ID. I am leaving the stream publisher alone "
+        "because its conditional-follow behavior already passed the reproduction. The new regression also "
+        "checks that Copy does not accidentally realize the rest of the document.")}},
+    {0, BlockKind::Code, {{CodeText(MockChanges()[0].Body(true)), "\n\n"}}},
+    {0, BlockKind::Paragraph, {Paragraph(
+        "The important change is ownership, not the amount of retained UI. SelectionArea remains mounted while "
+        "individual paragraphs enter and leave the viewport. Its source can retrieve the selected text even when "
+        "there is no corresponding Text node. A mounted paragraph contributes layout geometry through "
+        "SelectionBlock(id), and Key(id) keeps row identity independent of insertion or reordering.\n\n"
+        "The source snapshot and row factory capture the same value. This avoids a subtle mismatch where the "
+        "painted paragraph belongs to one revision but Copy reads another. Streaming can still replace the last "
+        "block's body as new text arrives; already committed paragraphs remain shared and unchanged.")}},
   };
-  if (!follow_up) {
-    response.push_back({0, BlockKind::Image, {Paragraph("A concept for the conversation layout.")}});
-    response.push_back({0, BlockKind::List, {
-      Paragraph("1. ", ""),
-      {AttributedText{
-        TextSpan("Keep text selectable. ").Style({.font_weight = FontWeight::Bold}),
-        TextSpan("Paragraphs, code, and table cells share one logical selection source."),
-      }, "\n"},
-      Paragraph("2. ", ""),
-      {AttributedText{
-        TextSpan("Keep state durable. ").Style({.font_weight = FontWeight::Bold}),
-        TextSpan("Earlier messages stay in the conversation; scrolling away does not stop the response."),
-      }, "\n\n"},
-    }});
-  }
-  response.push_back({0, BlockKind::Code, {{AttributedText{
-    TextSpan("auto ").Style({.font = Font::Monospace(15.0F), .font_weight = FontWeight::Bold}),
-    TextSpan("message = AttributedText{\n"
-             "  TextSpan(\"Hello, \"),\n"
-             "  TextSpan(\"Agent\").Style({.font_weight = FontWeight::Bold}),\n"
-             "};\nText(message).SelectionBlock(42);").Style({.font = Font::Monospace(15.0F)}),
-  }, "\n\n"}}});
   std::vector<TextSelectionBlock> files;
   for (const auto& change : MockChanges()) {
     files.push_back(Paragraph(change.path + "   " + change.Summary(), "\n"));
   }
   files.back().separator = "\n\n";
   response.push_back({0, BlockKind::Files, std::move(files)});
+  response.push_back({0, BlockKind::Reasoning, {Paragraph(
+      "Scripted validation summary: the patch must satisfy both document behavior and virtualization limits. "
+      "A passing Copy assertion alone could conceal eager realization of every row, so the test also checks "
+      "the realized count. Keep the earlier failed run visible, then append the build and rerun results as "
+      "separate tool calls rather than replacing that evidence.")}});
+  response.push_back({0, BlockKind::Paragraph, {Paragraph(
+      "I will now rebuild the simulated project and rerun the conversation tests. The acceptance condition is "
+      "not simply that a highlight appears: Copy must include offscreen blocks in document order, the list must "
+      "remain virtualized, and the reader's anchor must survive text arriving below it. These are independent "
+      "checks, so the final report will distinguish the selection fix from scrolling behavior that was already "
+      "correct. The file previews above are derived from the same mock diff data as the displayed code.")}});
+  response.push_back(ToolCall("Build the proposed changes", "cmake --build build --target atlas_tests -j 4",
+      "[1/8] Checking generated composable sources\n"
+      "[2/8] Transforming src/conversation.cpp\n"
+      "[3/8] Compiling src/conversation.cpp\n"
+      "[4/8] Compiling tests/conversation.cpp\n"
+      "[5/8] Compiling tests/stream.cpp\n"
+      "[6/8] Linking atlas_core\n"
+      "[7/8] Linking atlas_tests\n"
+      "[8/8] Build complete\n"
+      "\nTarget: atlas_tests\n"
+      "Configuration: Debug / simulated sandbox\n"
+      "Compiler diagnostics: none in this scripted run\n"));
+  response.push_back(ToolCall("Rerun the conversation checks", "./build/atlas_tests '[conversation]' --reporter compact",
+      "Run: conversation regression fixture / 500 messages\n"
+      "PASS  Copy spans unmounted messages\n"
+      "      Selected range: first block through last block\n"
+      "      Scroll position: item 400\n"
+      "      First selected endpoint mounted: no\n"
+      "      Copied text matches the complete logical snapshot\n"
+      "      Realized rows: 9 / 500\n"
+      "PASS  Streaming does not steal the reading position\n"
+      "      Reader anchor: message 120, unchanged after tail append\n"
+      "PASS  Streaming batches text deltas\n"
+      "      Completed blocks remain shared\n"
+      "PASS  Copy preserves paragraph separators\n"
+      "PASS  Cancel preserves received output\n"
+      "PASS  Stable identities survive an earlier insertion\n"
+      "\n6 test cases passed; 32 assertions passed.\n"
+      "This is simulated test output, not a test of your project.\n"));
+  response.push_back({0, BlockKind::Paragraph, {{AttributedText{
+    TextSpan("Verification summary").Style({.font_weight = FontWeight::Bold}),
+    TextSpan("\n\nThe scripted rerun now copies the complete 500-message snapshot while retaining only nine "
+             "realized rows. It also confirms that appending to the last answer does not change the reader's "
+             "anchor at message 120. The failed test has not been removed from the history: it remains above "
+             "the patch, with exit code 1, followed by this successful rerun with exit code 0.\n\n"
+             "Those results cover the logical behavior of the example scenario. They do not establish the "
+             "quality of every platform's shaping, selection-handle placement, or clipboard integration. "
+             "Those still need host-specific validation, especially for mixed-direction paragraphs, soft "
+             "line breaks, emoji, and IME editing. The table separates this simulated evidence from work "
+             "that a real project would still need to run."),
+  }, "\n\n"}}});
   response.push_back({0, BlockKind::Table, {
-    {AttributedText{TextSpan("Target").Style({.font_weight = FontWeight::Bold})}, "\t"},
-    {AttributedText{TextSpan("Result").Style({.font_weight = FontWeight::Bold})}, "\t"},
-    {AttributedText{TextSpan("Rendering").Style({.font_weight = FontWeight::Bold})}, "\n"},
-    Paragraph("Windows", "\t"), Paragraph("Ready", "\t"), Paragraph("Native", "\n"),
-    Paragraph("Web", "\t"), Paragraph("Basic shaping", "\t"), Paragraph("Canvas"),
+    {AttributedText{TextSpan("Check").Style({.font_weight = FontWeight::Bold})}, "\t"},
+    {AttributedText{TextSpan("Outcome").Style({.font_weight = FontWeight::Bold})}, "\t"},
+    {AttributedText{TextSpan("Evidence").Style({.font_weight = FontWeight::Bold})}, "\n"},
+    Paragraph("Offscreen Copy", "\t"), Paragraph("Passed in fixture", "\t"), Paragraph("500 blocks", "\n"),
+    Paragraph("Virtualization", "\t"), Paragraph("Bounded realization", "\t"), Paragraph("9 rows", "\n"),
+    Paragraph("Reader anchor", "\t"), Paragraph("Unchanged", "\t"), Paragraph("Item 120", "\n"),
+    Paragraph("Platform behavior", "\t"), Paragraph("Not executed", "\t"), Paragraph("Manual checks"),
+  }});
+  if (!follow_up) {
+    response.push_back({0, BlockKind::Image, {
+      Paragraph("Conversation overview: navigation, transcript, and action cards."),
+      Paragraph("Tool execution: a stable command with incremental output."),
+      Paragraph("Patch review: additions and deletions beside the original context."),
+    }});
+  }
+  response.push_back({0, BlockKind::Paragraph, {Paragraph(
+      "For the interaction review, scroll back to the failed command while this answer continues to grow. "
+      "The conversation should stay at your reading position until you choose Latest. Expand an earlier tool "
+      "call, select several output lines, and continue the selection into the explanation below it. Collapse "
+      "the call again and only its visible command should remain in Select All; reopening the output restores "
+      "its place in document order without rerunning the simulated command.\n\n"
+      "On a narrow viewport, prose and list items should wrap naturally, with continuation lines aligned under "
+      "their own text rather than under the bullet. Commands, code, and the result table keep horizontal "
+      "scrolling so long paths and source lines remain readable. Stopping a response preserves everything "
+      "already received, including partial tool output, and a later message starts a new turn instead of "
+      "rewriting this one.")}});
+  response.push_back({0, BlockKind::List, {
+    Paragraph("\xE2\x80\xA2 ", ""), Paragraph("Review the two proposed files. Their addition/deletion counts and the "
+        "previewed lines come from one immutable diff, not separately maintained labels.", "\n"),
+    Paragraph("\xE2\x80\xA2 ", ""), Paragraph("Exercise selection across a paragraph, a list item, and a command result; "
+        "copied text should retain bullets, indentation, and paragraph separators.", "\n"),
+    Paragraph("    \xE2\x97\xA6 ", ""), Paragraph("Scroll selected text completely offscreen, then return. The logical "
+        "range should survive even though there was temporarily no geometry to display.", "\n"),
+    Paragraph("    \xE2\x97\xA6 ", ""), Paragraph("Stop during a tool call. Its status should become Stopped, retain the "
+        "received log prefix, and never claim a successful exit.", "\n"),
+    Paragraph("\xE2\x80\xA2 ", ""), Paragraph("Choose the next target below, or send a revision request. Earlier messages, "
+        "tool results, expansion choices, and submitted answers remain part of the conversation."),
   }});
   response.push_back({0, BlockKind::Paragraph, {{AttributedText{
-    TextSpan("The proposed changes are ready to review. ").Style({.font_weight = FontWeight::Bold}),
-    TextSpan("Select and copy across blocks, or send another message. Learn more about "),
+    TextSpan("Ready for review. ").Style({.font_weight = FontWeight::Bold}),
+    TextSpan("The proposal connects visible paragraphs to a persistent logical document without changing the "
+             "existing transport or adding another scrolling controller. The reproduced failure, proposed "
+             "source changes, simulated build, and test rerun are all retained in the transcript. You can "
+             "inspect them independently instead of relying on a final success label.\n\n"
+             "For the actual SDK contract, see "),
     TextSpan("HuxerUI").Link(Uri("https://github.com/HuxerUI/HuxerUI")),
-    TextSpan(". No files were changed; this response was generated by the local demo script."),
+    TextSpan(". All analysis summaries, commands, results, and file changes in this conversation are local "
+             "fixtures. No model was contacted, no terminal command was executed, and no project file was changed."),
   }, "\n\n"}}});
   if (!follow_up) {
     response.push_back({0, BlockKind::Question, {Paragraph(
-        "Before continuing, choose your target platforms, response style, and project name.")}});
+        "Where should the next simulated review focus? Choose the target platforms, response style, and "
+        "project name. Submitting this form appends a new user turn; it does not replace the report above.")}});
   }
   return response;
 }
@@ -388,9 +599,10 @@ Task<void> HighlightLatest(std::shared_ptr<StreamModel> model) {
   model->highlighting = false;
 }
 
-Task<void>
-StreamParagraph(std::shared_ptr<StreamModel> model, TaskScope tasks, BlockKind kind, AttributedText response) {
-  model->Append(kind, {{AttributedText{}, "\n\n"}}, true);
+Task<void> StreamBlock(std::shared_ptr<StreamModel> model, TaskScope tasks, MessageBlock block) {
+  const auto kind = block.kind;
+  const auto response = block.text.back().text;
+  model->Append(std::move(block), true);
   TextOffset received = 0;
   std::size_t byte = 0;
   unsigned chunks = 0;
@@ -405,21 +617,26 @@ StreamParagraph(std::shared_ptr<StreamModel> model, TaskScope tasks, BlockKind k
     }
   };
   while (byte < response.PlainText().size() && !model->stop) {
-    co_await Delay(kind == BlockKind::Reasoning ? 50ms : 36ms);
+    co_await Delay(kind == BlockKind::Tool ? 140ms : kind == BlockKind::Reasoning ? 50ms : 36ms);
     if (model->stop) {
       break;
     }
-    // The mock transport delivers complete scalars; publish every two chunks instead of every character.
-    for (unsigned count = 0; count < 3 && byte < response.PlainText().size(); ++count) {
+    // Logs arrive in line batches; prose arrives in complete scalar batches, independent of UTF-8 byte width.
+    const unsigned scalars = kind == BlockKind::Reasoning ? 6 : 12 + (chunks % 4) * 4;
+    unsigned lines = 0;
+    for (unsigned count = 0; byte < response.PlainText().size() &&
+         (kind == BlockKind::Tool ? lines < 2 : count < scalars); ++count) {
       const auto first = static_cast<unsigned char>(response.PlainText()[byte]);
+      lines += first == '\n';
       byte += first < 0x80U ? 1 : first < 0xE0U ? 2 : first < 0xF0U ? 3 : 4;
       received += first < 0xF0U ? 1 : 2;
     }
-    if (++chunks % 2 == 0) {
+    if (++chunks % 2 == 0 || kind == BlockKind::Tool) {
       flush();
     }
   }
   flush();
+  model->Seal();
 }
 
 Task<void> GenerateResponse(std::shared_ptr<StreamModel> model, TaskScope tasks, ColorScheme colors, std::string prompt,
@@ -430,15 +647,16 @@ Task<void> GenerateResponse(std::shared_ptr<StreamModel> model, TaskScope tasks,
       if (model->stop) {
         break;
       }
-      const bool paragraph = block.kind == BlockKind::Reasoning || block.kind == BlockKind::Paragraph ||
-          block.kind == BlockKind::Code;
-      model->status = block.kind == BlockKind::Reasoning ? "Thinking..." : "Responding...";
-      if (paragraph) {
-        co_await StreamParagraph(model, tasks, block.kind, block.text[0].text);
+      const bool streaming = block.kind == BlockKind::Reasoning || block.kind == BlockKind::Paragraph ||
+          block.kind == BlockKind::Code || block.kind == BlockKind::Tool;
+      model->status = block.kind == BlockKind::Tool ? "Running simulated tool: " + block.label
+          : block.kind == BlockKind::Reasoning ? "Thinking..." : "Responding...";
+      if (streaming) {
+        co_await StreamBlock(model, tasks, block);
       } else {
         co_await Delay(350ms);
         if (!model->stop) {
-          model->Append(block.kind, block.text);
+          model->Append(block);
         }
       }
     }
@@ -457,7 +675,7 @@ void Send(std::shared_ptr<StreamModel> model, TaskScope tasks, ColorScheme color
   model->running = true;
   model->stop = false;
   model->follow_new_block = true;
-  model->Append(BlockKind::User, {Paragraph(prompt)});
+  model->Append({0, BlockKind::User, {Paragraph(prompt)}});
   tasks.Launch(GenerateResponse(model, tasks, colors, std::move(prompt), follow_up));
 }
 
@@ -522,25 +740,84 @@ const VectorAsset& ActionIcon(ChatIcon icon) {
   return icons.at(static_cast<std::size_t>(icon));
 }
 
-const VectorAsset& ConceptImage() {
-  static const auto image = VectorAsset::Create({640, 180}, [](VectorBuilder& builder) {
-    auto rect = [&](Rect bounds, Color color, float radius = 8.0F) {
-      builder.FillPath(Path::RoundedRect(bounds, CornerRadii{radius}), color);
-    };
-    rect({0, 0, 640, 180}, Color::Rgb(232, 236, 246), 16);
-    rect({18, 18, 116, 144}, Color::Rgb(43, 49, 73));
-    rect({34, 38, 78, 10}, Color::Rgb(182, 194, 247));
-    rect({34, 62, 59, 6}, Color::Rgb(123, 134, 172));
-    rect({34, 80, 70, 6}, Color::Rgb(123, 134, 172));
-    rect({152, 18, 470, 144}, Color::White());
-    rect({174, 38, 28, 28}, Color::Rgb(99, 79, 170));
-    rect({216, 40, 166, 8}, Color::Rgb(71, 77, 105));
-    rect({216, 57, 360, 6}, Color::Rgb(198, 205, 222));
-    rect({216, 75, 320, 6}, Color::Rgb(198, 205, 222));
-    rect({216, 98, 190, 43}, Color::Rgb(238, 235, 247));
-    rect({420, 98, 90, 43}, Color::Rgb(99, 79, 170));
-  });
-  return image;
+const auto& ConceptImages() {
+  static const std::array images{
+    VectorAsset::Create({640, 360}, [](VectorBuilder& builder) {
+      auto rect = [&](Rect bounds, Color color, float radius = 8.0F) {
+        builder.FillPath(Path::RoundedRect(bounds, CornerRadii{radius}), color);
+      };
+      rect({0, 0, 640, 360}, Color::Rgb(232, 236, 246), 16);
+      rect({18, 18, 116, 324}, Color::Rgb(43, 49, 73));
+      rect({34, 38, 78, 10}, Color::Rgb(182, 194, 247));
+      rect({34, 62, 59, 6}, Color::Rgb(123, 134, 172));
+      rect({34, 80, 70, 6}, Color::Rgb(123, 134, 172));
+      rect({152, 18, 470, 144}, Color::White());
+      rect({174, 38, 28, 28}, Color::Rgb(99, 79, 170));
+      rect({216, 40, 166, 8}, Color::Rgb(71, 77, 105));
+      rect({216, 57, 360, 6}, Color::Rgb(198, 205, 222));
+      rect({216, 75, 320, 6}, Color::Rgb(198, 205, 222));
+      rect({216, 98, 190, 43}, Color::Rgb(238, 235, 247));
+      rect({420, 98, 90, 43}, Color::Rgb(99, 79, 170));
+      rect({152, 180, 470, 98}, Color::White());
+      rect({174, 200, 330, 8}, Color::Rgb(71, 77, 105));
+      rect({174, 222, 410, 6}, Color::Rgb(198, 205, 222));
+      rect({174, 242, 370, 6}, Color::Rgb(198, 205, 222));
+      rect({152, 296, 470, 46}, Color::White());
+      rect({570, 306, 30, 26}, Color::Rgb(99, 79, 170));
+    }),
+    VectorAsset::Create({480, 300}, [](VectorBuilder& builder) {
+      auto rect = [&](Rect bounds, Color color, float radius = 6.0F) {
+        builder.FillPath(Path::RoundedRect(bounds, CornerRadii{radius}), color);
+      };
+      rect({0, 0, 480, 300}, Color::Rgb(28, 33, 49), 16);
+      rect({20, 20, 440, 38}, Color::Rgb(43, 49, 73));
+      rect({34, 34, 180, 8}, Color::Rgb(198, 205, 222));
+      rect({378, 30, 66, 18}, Color::Rgb(73, 144, 105));
+      rect({24, 82, 12, 10}, Color::Rgb(182, 194, 247));
+      rect({48, 82, 342, 10}, Color::Rgb(182, 194, 247));
+      for (int line = 0; line < 6; ++line) {
+        rect({24, 114.0F + line * 22.0F, 340.0F - (line % 3) * 46.0F, 7}, Color::Rgb(155, 169, 192));
+      }
+      rect({24, 262, 200, 8}, Color::Rgb(130, 210, 156));
+    }),
+    VectorAsset::Create({400, 320}, [](VectorBuilder& builder) {
+      auto rect = [&](Rect bounds, Color color, float radius = 4.0F) {
+        builder.FillPath(Path::RoundedRect(bounds, CornerRadii{radius}), color);
+      };
+      rect({0, 0, 400, 320}, Color::Rgb(244, 246, 250), 16);
+      rect({16, 16, 368, 40}, Color::Rgb(224, 230, 240));
+      rect({30, 32, 202, 8}, Color::Rgb(71, 77, 105));
+      for (int line = 0; line < 9; ++line) {
+        const float y = 72.0F + line * 25.0F;
+        const bool removed = line == 2 || line == 3;
+        const bool added = line >= 4 && line <= 6;
+        if (removed || added) {
+          rect({16, y - 4, 368, 23}, removed ? Color::Rgb(255, 222, 225) : Color::Rgb(211, 241, 221));
+        }
+        rect({28, y + 3, 12, 6}, Color::Rgb(145, 157, 176));
+        rect({56, y + 3, 274.0F - (line % 3) * 38.0F, 6}, Color::Rgb(83, 95, 116));
+      }
+    }),
+  };
+  return images;
+}
+
+[[huxerui::composable]]
+View ImagePreview(DialogContext dialog, VectorAsset image, std::string caption) {
+  const auto& colors = UseTheme().colors;
+  return Column {
+    Row {
+      Text("Image preview", TextRole::Title).With(Grow()),
+      IconButton(ActionIcon(ChatIcon::Close), "Close image").With(Tooltip("Close image (Escape)"))
+          .OnClick([dialog] { dialog.Dismiss(); }),
+    }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Center)),
+    Image(std::move(image)).Fit(ImageFit::Contain).With(
+        Grow(), Semantics{.role = SemanticRole::Image, .label = caption}),
+    Text(std::move(caption)).With(FontSize(13.0F), Foreground(colors.on_surface_variant)),
+  }.With(
+      Frame{.width = 900.0F, .height = 640.0F}, Padding(16.0F), Spacing(12.0F),
+      Background(colors.surface), CornerRadius(16.0F), ClipChildren(), CrossAlign(CrossAxisAlignment::Stretch)
+  );
 }
 
 [[huxerui::composable]]
@@ -655,7 +932,7 @@ View ResultTable(std::shared_ptr<StreamModel> model, std::shared_ptr<const Messa
   const auto& colors = UseTheme().colors;
   constexpr std::array widths{144.0F, 180.0F, 112.0F};
   std::vector<View> rows;
-  for (std::size_t row = 0; row < 3; ++row) {
+  for (std::size_t row = 0; row < block->text.size() / widths.size(); ++row) {
     std::vector<View> cells;
     for (std::size_t column = 0; column < 3; ++column) {
       const auto part = row * 3 + column;
@@ -700,7 +977,7 @@ View MessageRow(std::shared_ptr<StreamModel> model, TaskScope tasks, std::shared
           Focusable{}, PointerCursor(PointerCursorKind::Hand),
           Semantics{.role = SemanticRole::Button, .label = "Reasoning summary", .expanded = row->expanded,
                     .busy = model->active_id == row->id, .descendants = SemanticDescendantPolicy::Exclude}
-      ).OnClick([model, id = row->id] { model->ToggleReasoning(id); }).Key("disclosure"),
+      ).OnClick([model, id = row->id] { model->ToggleDetails(id); }).Key("disclosure"),
       row->expanded ? DocumentText(model, row).With(FontSize(14.0F), Foreground(colors.on_surface_variant),
           Padding(EdgeInsets{.left = 12.0F})).Key("summary") : View{},
     }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch));
@@ -708,26 +985,41 @@ View MessageRow(std::shared_ptr<StreamModel> model, TaskScope tasks, std::shared
   case BlockKind::Paragraph:
     content = DocumentText(model, row);
     break;
-  case BlockKind::Image:
+  case BlockKind::Image: {
+    const auto dialog = UseDialog();
+    std::vector<View> images;
+    for (std::size_t part = 0; part < row->text.size(); ++part) {
+      const auto image = ConceptImages().at(part);
+      const auto caption = row->text[part].text.PlainText();
+      images.push_back(Column {
+        Image(image).Fit(ImageFit::Contain).With(
+            Frame{.height = 180.0F}, CornerRadius(10.0F), ClipChildren(),
+            Background(colors.surface_container_low), Focusable{}, PointerCursor(PointerCursorKind::Hand),
+            Semantics{.role = SemanticRole::Button, .label = caption, .hint = "Open larger image"}
+        ).OnClick([dialog, image, caption] { dialog.Show(ImagePreview, image, caption); }),
+        DocumentText(model, row, part).With(FontSize(13.0F), Foreground(colors.on_surface_variant)),
+      }.With(Frame{.width = 300.0F}, Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch)).Key(row->id + part));
+    }
     content = Column {
-      Image(ConceptImage()).Fit(ImageFit::Contain).With(
-          Frame{.height = 180.0F},
-          Semantics{.label = "Conversation concept with a sidebar, message, and action card"}),
-      DocumentText(model, row).With(FontSize(13.0F), Foreground(colors.on_surface_variant)),
+      Text("Layout concepts / scroll horizontally, click to enlarge", TextRole::Label)
+          .With(Foreground(colors.on_surface_variant)),
+      ScrollView(Row(std::move(images)).With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Start)))
+          .ScrollAxis(Axis::Horizontal).With(ScrollBar()),
     }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch));
     break;
-  case BlockKind::List:
-    content = Column {
-      Row {
-        DocumentText(model, row, 0).With(Frame{.width = 26.0F}),
-        DocumentText(model, row, 1).With(Grow()),
-      },
-      Row {
-        DocumentText(model, row, 2).With(Frame{.width = 26.0F}),
-        DocumentText(model, row, 3).With(Grow()),
-      },
-    }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Stretch));
+  }
+  case BlockKind::List: {
+    std::vector<View> items;
+    for (std::size_t part = 0; part + 1 < row->text.size(); part += 2) {
+      // Prefixes include nested indentation and belong to the copied document, not a decorative overlay.
+      items.push_back(Row {
+        DocumentText(model, row, part),
+        DocumentText(model, row, part + 1).With(Grow()),
+      }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Start)).Key(row->id + part));
+    }
+    content = Column(std::move(items)).With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Stretch));
     break;
+  }
   case BlockKind::Code:
     content = Column {
       Text("C++ / select text to copy", TextRole::Label),
@@ -735,6 +1027,34 @@ View MessageRow(std::shared_ptr<StreamModel> model, TaskScope tasks, std::shared
     }.With(Spacing(12.0F), Padding(14.0F), Background(colors.surface_container_low),
         CornerRadius(12.0F), CrossAlign(CrossAxisAlignment::Stretch));
     break;
+  case BlockKind::Tool: {
+    const bool active = model->active_id == row->id + row->text.size() - 1;
+    const std::string result = active ? "Running..." : !row->exit_code ? "Stopped"
+        : (*row->exit_code == 0 ? "Completed / exit " : "Failed / exit ") + std::to_string(*row->exit_code);
+    const Color result_color = row->exit_code && *row->exit_code != 0 && !active
+        ? colors.error : colors.on_surface_variant;
+    content = Column {
+      Row {
+        Text(row->label, TextRole::Label).With(Grow()),
+        Text(result, TextRole::Label).With(FontSize(12.0F), Foreground(result_color)),
+        Image(ActionIcon(row->expanded ? ChatIcon::Collapse : ChatIcon::Expand)).Tint(colors.on_surface_variant)
+            .With(Frame{.width = 16.0F, .height = 16.0F}, Semantics{.hidden = true}),
+      }.With(
+          Spacing(8.0F), Frame{.min_height = 40.0F}, CrossAlign(CrossAxisAlignment::Center),
+          Focusable{}, PointerCursor(PointerCursorKind::Hand),
+          Semantics{.role = SemanticRole::Button, .label = row->label + ": " + result,
+                    .expanded = row->expanded, .busy = active, .descendants = SemanticDescendantPolicy::Exclude}
+      ).OnClick([model, id = row->id] { model->ToggleDetails(id); }).Key("tool-disclosure"),
+      Text("Terminal / simulated sandbox", TextRole::Label).With(Foreground(colors.on_surface_variant)),
+      ScrollView(Column {
+        DocumentText(model, row, 0).With(Foreground(colors.primary)),
+        row->expanded ? DocumentText(model, row, 1).Key("output") : View{},
+      }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Stretch)))
+          .ScrollAxis(Axis::Horizontal).With(ScrollBar()),
+    }.With(Spacing(8.0F), Padding(14.0F), Background(colors.surface_container_low),
+        CornerRadius(12.0F), CrossAlign(CrossAxisAlignment::Stretch));
+    break;
+  }
   case BlockKind::Files: {
     const auto dialog = UseDialog();
     std::vector<View> files;
@@ -789,7 +1109,7 @@ View TranscriptBlocks(std::shared_ptr<StreamModel> model, TaskScope tasks) {
   if (messages->empty()) {
     return Column {
       Text("Start a conversation", TextRole::Title),
-      Text("Send a message below. Watch the Agent build its reply with text, images, code, and questions."),
+      Text("Follow a scripted repair: analysis, source inspection, a failing test, a proposed patch, and a rerun."),
     }.With(Grow(), Spacing(12.0F), Padding(20.0F), MainAlign(MainAxisAlignment::Center),
         CrossAlign(CrossAxisAlignment::Stretch));
   }
@@ -832,7 +1152,8 @@ View Conversation() {
   auto source = UseState<std::shared_ptr<const TextSelectionSource>>(
       std::make_shared<const Transcript>(std::make_shared<const TranscriptIndex>(), 0, AttributedText{}));
   auto answers = UseState(Answers{});
-  auto draft = UseState(TextEditingValue::FromText("Help me build an Agent chat UI."));
+  auto draft = UseState(TextEditingValue::FromText(
+      "Investigate why Copy loses earlier messages in a long Agent conversation, and propose a tested fix."));
   auto status = UseState(std::string{"Enter to send. Responses are scripted locally."});
   auto running = UseState(false);
   auto scroll = UseScrollController();
