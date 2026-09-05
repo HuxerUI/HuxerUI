@@ -241,11 +241,11 @@ struct ComboBoxSuggestionBehavior {
 
 class ComboBoxSuggestionBehaviorExtension final : public NodeExtension {
 public:
-  ComboBoxSuggestionBehaviorExtension(MountedNode& node, const ComboBoxSuggestionBehavior& modifier) {
+  ComboBoxSuggestionBehaviorExtension(ViewNode& node, const ComboBoxSuggestionBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode&, const ComboBoxSuggestionBehavior& modifier) {
+  void Update(ViewNode&, const ComboBoxSuggestionBehavior& modifier) {
     state_ = modifier.state;
     if (active_background_ != modifier.active_background) {
       active_background_ = modifier.active_background;
@@ -259,7 +259,7 @@ public:
     generation_ = modifier.generation;
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo&) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     if (state_ && index_ < state_->enabled.size()) {
       state_->enabled[index_] = node.IsEnabled();
       state_->observed[index_] = true;
@@ -274,21 +274,21 @@ public:
     return {};
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  bool HoverHitTest(MountedNode& node, Point position) const override {
+  bool HoverHitTest(ViewNode& node, Point position) const override {
     return HitTest(node, position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     if (node.IsEnabled() && event.type != HoverEventType::Leave) {
       SetActiveSuggestion(state_, index_);
     }
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       return PointerResult::Ignored;
@@ -335,7 +335,7 @@ public:
     return true;
   }
 
-  void PaintBehindContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode& node, PaintContext& context) const override {
     if (active_ && active_background_.alpha > 0.0F) {
       context.DrawRect(node.Bounds(), active_background_);
     }
@@ -367,16 +367,16 @@ struct ComboBoxPopupBehavior {
 
 class ComboBoxPopupBehaviorExtension final : public NodeExtension {
 public:
-  ComboBoxPopupBehaviorExtension(MountedNode& node, const ComboBoxPopupBehavior& modifier) {
+  ComboBoxPopupBehaviorExtension(ViewNode& node, const ComboBoxPopupBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode&, const ComboBoxPopupBehavior& modifier) {
+  void Update(ViewNode&, const ComboBoxPopupBehavior& modifier) {
     state_ = modifier.state;
     scroll_controller_ = modifier.scroll_controller;
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo&) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     if (HasIndependentPopupInteraction(static_cast<const detail::MountedNode&>(node))) {
       throw std::invalid_argument(
           "HuxerUI ComboBox popup content must not provide independent pointer activation or focusable descendants"
@@ -392,17 +392,17 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     if (!state_ || !state_->reveal_active || !state_->active_index.has_value() || node.ChildCount() == 0 ||
         !scroll_controller_.IsConnected()) {
       return PaintInvalidation::None;
     }
-    MountedNode& content = node.ChildAt(0);
+    ViewNode& content = node.ChildAt(0);
     if (*state_->active_index >= content.ChildCount()) {
       return PaintInvalidation::None;
     }
     state_->reveal_active = false;
-    const MountedNode& active = content.ChildAt(*state_->active_index);
+    const ViewNode& active = content.ChildAt(*state_->active_index);
     const float top = active.LayoutOffset().y;
     const float bottom = top + active.LayoutSize().height;
     const ScrollMetrics metrics = scroll_controller_.Metrics();
@@ -633,7 +633,7 @@ struct ComboBoxFieldBehavior {
 
 class ComboBoxFieldBehaviorExtension final : public NodeExtension {
 public:
-  ComboBoxFieldBehaviorExtension(MountedNode& node, const ComboBoxFieldBehavior& modifier) {
+  ComboBoxFieldBehaviorExtension(ViewNode& node, const ComboBoxFieldBehavior& modifier) {
     Update(node, modifier);
   }
 
@@ -641,7 +641,7 @@ public:
     DismissComboBox(session_, false);
   }
 
-  void Update(MountedNode& node, const ComboBoxFieldBehavior& modifier) {
+  void Update(ViewNode& node, const ComboBoxFieldBehavior& modifier) {
     session_ = modifier.session;
     session_->source = modifier.source;
     session_->style = modifier.style;
@@ -662,7 +662,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo&) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     session_->composing = HasActiveTextComposition(static_cast<detail::MountedNode&>(node));
     if (!node.IsEnabled() && session_ && session_->layer.has_value()) {
       DismissComboBox(session_, false);
@@ -675,7 +675,7 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     if (!session_) {
       return PaintInvalidation::None;
     }
@@ -687,7 +687,7 @@ public:
     return PaintInvalidation::None;
   }
 
-  void OnFocusChanged(MountedNode&, bool focused, bool) override {
+  void OnFocusChanged(ViewNode&, bool focused, bool) override {
     if (!session_) {
       return;
     }

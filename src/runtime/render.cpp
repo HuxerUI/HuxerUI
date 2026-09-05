@@ -566,7 +566,7 @@ void HideRenderTree(MountedNode& node) {
 
 } // namespace
 
-void PaintNodeWithinClip(huxerui::MountedNode& mounted_node, const Rect& clip, const RenderNode* extra_child) {
+void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, const RenderNode* extra_child) {
   auto& node = static_cast<detail::MountedNode&>(mounted_node);
   RenderNode& render_node = node.render_node;
   const Transform2D& local_transform = node.presentation.local_transform;

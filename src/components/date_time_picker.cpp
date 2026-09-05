@@ -409,11 +409,11 @@ DateGeometry MakeDateGeometry(Rect bounds, const DatePickerStyle& style, bool ri
 
 class DatePickerBehaviorExtension final : public NodeExtension {
 public:
-  DatePickerBehaviorExtension(MountedNode& node, const DatePickerBehavior& value) {
+  DatePickerBehaviorExtension(ViewNode& node, const DatePickerBehavior& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode& node, const DatePickerBehavior& value) {
+  void Update(ViewNode& node, const DatePickerBehavior& value) {
     static_cast<void>(node);
     const bool controlled_changed = !initialized_ || value_ != value.value;
     const bool range_changed = minimum_ != value.minimum || maximum_ != value.maximum;
@@ -450,15 +450,15 @@ public:
     InvalidateSemantics();
   }
 
-  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HoverHitTest(ViewNode& node, Point position) const override {
     return HitTest(node, position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     const std::optional<std::size_t> previous = hover_day_;
     hover_day_.reset();
     if (event.type != HoverEventType::Leave && !year_mode_) {
@@ -475,7 +475,7 @@ public:
     }
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       return PointerResult::Ignored;
@@ -501,7 +501,7 @@ public:
     return PointerResult::Capture;
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     static_cast<void>(node);
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
@@ -577,7 +577,7 @@ public:
     }
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const DateGeometry geometry = MakeDateGeometry(node.Bounds(), style_, locale_.right_to_left);
     const TextLayoutOptions text_options = CenteredText(locale_);
     PaintChevron(context, geometry.previous, locale_.right_to_left ? 1 : -1);
@@ -709,7 +709,7 @@ public:
     return false;
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer) override {
     static_cast<void>(text_measurer);
     const Rect next = node.Bounds();
     if (next == bounds_) {
@@ -1122,11 +1122,11 @@ struct DialLabel {
 
 class TimePickerBehaviorExtension final : public NodeExtension {
 public:
-  TimePickerBehaviorExtension(MountedNode& node, const TimePickerBehavior& value) {
+  TimePickerBehaviorExtension(ViewNode& node, const TimePickerBehavior& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode& node, const TimePickerBehavior& value) {
+  void Update(ViewNode& node, const TimePickerBehavior& value) {
     static_cast<void>(node);
     const bool controlled_changed = !initialized_ || value_ != value.value;
     value_ = value.value;
@@ -1148,11 +1148,11 @@ public:
     InvalidateSemantics();
   }
 
-  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       last_emitted_.reset();
@@ -1222,7 +1222,7 @@ public:
     return PointerResult::Capture;
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     static_cast<void>(node);
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
@@ -1259,7 +1259,7 @@ public:
     }
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer) override {
     const Rect bounds = node.Bounds();
     if (geometry_prepared_ && bounds_ == bounds) {
       return PaintInvalidation::None;
@@ -1295,7 +1295,7 @@ public:
     return PaintInvalidation::Foreground;
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const TimeGeometry geometry = MakeTimeGeometry(node.Bounds(), style_, locale_.use_12_hour);
     const TextLayoutOptions options = CenteredText(locale_);
     PaintHeader(context, geometry, options);

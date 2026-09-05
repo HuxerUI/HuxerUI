@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
@@ -220,7 +221,7 @@ struct NodePresentation {
 
 // MountedNode is the retained counterpart of ViewSpec. Runtime reads copied component payloads only from matching
 // NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
-struct MountedNode final : public huxerui::MountedNode {
+struct MountedNode final : public huxerui::ViewNode {
   Runtime* runtime = nullptr;
   NodeKind kind = NodeKind::Layout;
   std::uint64_t identity = 0;
@@ -296,28 +297,33 @@ struct MountedNode final : public huxerui::MountedNode {
   bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;
 
-protected:
-  [[nodiscard]] std::size_t ChildCountImpl() const noexcept override {
+  [[nodiscard]] std::size_t ChildCount() const noexcept override {
     return children.size();
   }
 
-  MountedNode& ChildAtImpl(std::size_t index) override {
+  [[nodiscard]] huxerui::ViewNode& ChildAt(std::size_t index) override {
+    if (index >= children.size()) {
+      throw std::out_of_range("HuxerUI mounted child index is out of range");
+    }
     return *children[index];
   }
 
-  const MountedNode& ChildAtImpl(std::size_t index) const override {
+  [[nodiscard]] const huxerui::ViewNode& ChildAt(std::size_t index) const override {
+    if (index >= children.size()) {
+      throw std::out_of_range("HuxerUI mounted child index is out of range");
+    }
     return *children[index];
   }
 
-  [[nodiscard]] Size LayoutSizeImpl() const noexcept override {
+  [[nodiscard]] Size LayoutSize() const noexcept override {
     return measured_size;
   }
 
-  [[nodiscard]] Rect BoundsImpl() const noexcept override {
+  [[nodiscard]] Rect Bounds() const noexcept override {
     return bounds;
   }
 
-  [[nodiscard]] Rect ContentBoundsImpl() const noexcept override {
+  [[nodiscard]] Rect ContentBounds() const noexcept override {
     return {
         bounds.x + resolved_padding.left,
         bounds.y + resolved_padding.top,
@@ -326,67 +332,68 @@ protected:
     };
   }
 
-  [[nodiscard]] Point LayoutOffsetImpl() const noexcept override {
+  [[nodiscard]] Point LayoutOffset() const noexcept override {
     return layout_offset;
   }
 
-  [[nodiscard]] Rect PresentationBoundsImpl() const noexcept override {
+  [[nodiscard]] Rect PresentationBounds() const noexcept override {
     return TransformBounds(presentation.resolved_transform, bounds);
   }
 
-  [[nodiscard]] Point LocalToWindowImpl(Point point) const noexcept override {
+  [[nodiscard]] Point LocalToWindow(Point point) const noexcept override {
     return presentation.resolved_transform.Apply(point);
   }
 
-  [[nodiscard]] std::optional<Point> WindowToLocalImpl(Point point) const noexcept override {
+  [[nodiscard]] std::optional<Point> WindowToLocal(Point point) const noexcept override {
     return presentation.resolved_transform.Inverse(point);
   }
 
-  [[nodiscard]] Rect LocalToWindowBoundsImpl(Rect local_bounds) const noexcept override {
+  [[nodiscard]] Rect LocalToWindowBounds(Rect local_bounds) const noexcept override {
     return TransformBounds(presentation.resolved_transform, local_bounds);
   }
 
-  [[nodiscard]] float PresentationOpacityImpl() const noexcept override {
+  [[nodiscard]] float PresentationOpacity() const noexcept override {
     return presentation.resolved_opacity;
   }
 
-  [[nodiscard]] bool IsEnabledImpl() const noexcept override {
+  [[nodiscard]] bool IsEnabled() const noexcept override {
     return interaction.enabled;
   }
 
-  [[nodiscard]] bool IsFocusedImpl() const noexcept override {
+  [[nodiscard]] bool IsFocused() const noexcept override {
     return interaction.focused;
   }
 
-  [[nodiscard]] const InteractionState& InteractionImpl() const noexcept override {
+  [[nodiscard]] const InteractionState& Interaction() const noexcept override {
     return interaction;
   }
 
-  [[nodiscard]] float SpacingImpl() const noexcept override {
+  [[nodiscard]] float Spacing() const noexcept override {
     return properties.spacing;
   }
 
-  [[nodiscard]] float GrowFactorImpl() const noexcept override {
+  [[nodiscard]] float GrowFactor() const noexcept override {
     const float* factor = LayoutValue<GrowFactorBinding>();
     return factor == nullptr ? 0.0F : *factor;
   }
 
-  [[nodiscard]] MainAxisAlignment MainAlignmentImpl() const noexcept override {
+  [[nodiscard]] MainAxisAlignment MainAlignment() const noexcept override {
     return properties.main_axis_alignment;
   }
 
-  [[nodiscard]] CrossAxisAlignment CrossAlignmentImpl() const noexcept override {
+  [[nodiscard]] CrossAxisAlignment CrossAlignment() const noexcept override {
     return properties.cross_axis_alignment;
   }
 
-  [[nodiscard]] HorizontalAlignment HorizontalAlignmentImpl() const noexcept override {
+  [[nodiscard]] HorizontalAlignment HorizontalAlignmentValue() const noexcept override {
     return properties.horizontal_alignment;
   }
 
-  [[nodiscard]] VerticalAlignment VerticalAlignmentImpl() const noexcept override {
+  [[nodiscard]] VerticalAlignment VerticalAlignmentValue() const noexcept override {
     return properties.vertical_alignment;
   }
 
+protected:
   [[nodiscard]] const std::any* FindLayoutValue(std::type_index key_value) const noexcept override {
     const auto found = layout_values.find(key_value);
     if (found != layout_values.end()) {
@@ -536,7 +543,7 @@ Size MeasureNode(
 );
 void LayoutNode(MountedNode& node, Point offset);
 
-inline bool AppliesDisabledAppearance(const huxerui::MountedNode& node) {
+inline bool AppliesDisabledAppearance(const huxerui::ViewNode& node) {
   return static_cast<const MountedNode&>(node).applies_disabled_appearance;
 }
 

@@ -4,26 +4,26 @@ Use a retained modifier with `NodeExtension` only when behavior needs mounted-no
 
 ## Public lifecycle
 
-An app-side modifier spec exposes a nested `Extension` type. The extension must be constructible as `Extension(MountedNode&, const Spec&)` and provide `Update(MountedNode&, const Spec&)`.
+An app-side modifier spec exposes a nested `Extension` type. The extension must be constructible as `Extension(ViewNode&, const Spec&)` and provide `Update(ViewNode&, const Spec&)`.
 
 - Constructor: initialize retained state for the newly mounted node.
 - `Update`: accept a compatible declarative spec without resetting unrelated retained state.
 - Equality-comparable specs allow reconciliation to skip redundant updates.
 - `OnFrame`: advance retained animation and return `FrameResult`; use `wake_after` for a timed wakeup.
-- `PrepareGeometry(MountedNode&, TextMeasurer&)`: observe final presentation geometry and report which retained paint phase changed.
+- `PrepareGeometry(ViewNode&, TextMeasurer&)`: observe final presentation geometry and report which retained paint phase changed.
 - `PaintBehindContent` and `PaintAboveContent`: emit platform-neutral paint in node-local coordinates.
 - `OnInteraction`, hit testing, pointer, hover, focus, key, Back, and scroll hooks: implement only the behavior the modifier owns.
 - `BuildSemantics` and `OnSemanticAction`: expose and handle accessibility behavior.
 - `GetTextInputClient` or `GetTextSelectionClient`: only for a genuine custom text editing surface.
 
 Prefer `ViewEvents::Hover` for application-facing mouse or pen presence.
-An extension with specialized retained hover geometry overrides `HoverHitTest` and receives complete Enter, Move, and Leave updates through `OnHover(MountedNode&, const HoverEvent&)`.
+An extension with specialized retained hover geometry overrides `HoverHitTest` and receives complete Enter, Move, and Leave updates through `OnHover(ViewNode&, const HoverEvent&)`.
 Override `HoverWhenDisabled` only when that affordance intentionally remains active on a disabled View.
 
 `OnKey` receives the focused node's key event after `KeyIntercept` and focused text-input handling but before the node's public `KeyDown` or `KeyUp` event.
 Return `true` only when the extension consumed it; Runtime then skips the public target event and later defaults.
 
-Do not retain raw `MountedNode*`, child references, or platform objects across reconciliation. Visible retained-state changes call protected `InvalidatePaint`; semantic changes call `InvalidateSemantics`. Returning `needs_frame` schedules work but does not itself invalidate an already cached paint sequence.
+Do not retain raw `ViewNode*`, child references, or platform objects across reconciliation. Visible retained-state changes call protected `InvalidatePaint`; semantic changes call `InvalidateSemantics`. Returning `needs_frame` schedules work but does not itself invalidate an already cached paint sequence.
 
 ## Typed output
 

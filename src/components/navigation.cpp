@@ -684,7 +684,7 @@ class NavigationStackLayout final : public Layout<NavigationStackLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
     const auto* state = node.LayoutValue<NavigationStateValue>();
     if (state == nullptr || !*state) {
@@ -707,7 +707,7 @@ public:
     }
 
     Size measured;
-    for (huxerui::MountedNode& child : node.Children()) {
+    for (huxerui::ViewNode& child : node.Children()) {
       const std::uint64_t id = child.LayoutValueOr<NavigationEntryIdValue>(0);
       if (id != source_id && id != destination_id) {
         continue;
@@ -738,17 +738,17 @@ struct NavigationPageModifier {
 
 class NavigationPageExtension final : public NodeExtension {
 public:
-  NavigationPageExtension(huxerui::MountedNode& node, const NavigationPageModifier& modifier) {
+  NavigationPageExtension(huxerui::ViewNode& node, const NavigationPageModifier& modifier) {
     Update(node, modifier);
   }
 
-  void Update(huxerui::MountedNode& node, const NavigationPageModifier& modifier) {
+  void Update(huxerui::ViewNode& node, const NavigationPageModifier& modifier) {
     static_cast<void>(node);
     state_ = modifier.state;
     entry_id_ = modifier.entry_id;
   }
 
-  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(frame);
     auto& mounted = static_cast<detail::MountedNode&>(node);
     float opacity = 0.0F;
@@ -819,10 +819,10 @@ const ModifierDescriptor& NavigationPageModifier::Descriptor() {
         // Covered pages are disabled for interaction, not visually styled as disabled controls.
         spec.properties.disabled_opacity = 1.0F;
       },
-      [](huxerui::MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+      [](huxerui::ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<NavigationPageExtension>(node, *static_cast<const NavigationPageModifier*>(value));
       },
-      [](NodeExtension& extension, huxerui::MountedNode& node, const void* value) {
+      [](NodeExtension& extension, huxerui::ViewNode& node, const void* value) {
         static_cast<NavigationPageExtension&>(extension).Update(
             node,
             *static_cast<const NavigationPageModifier*>(value)
@@ -847,11 +847,11 @@ struct NavigationContainerModifier {
 
 class NavigationContainerExtension final : public NodeExtension {
 public:
-  NavigationContainerExtension(huxerui::MountedNode& node, const NavigationContainerModifier& modifier) {
+  NavigationContainerExtension(huxerui::ViewNode& node, const NavigationContainerModifier& modifier) {
     Update(node, modifier);
   }
 
-  void Update(huxerui::MountedNode& node, const NavigationContainerModifier& modifier) {
+  void Update(huxerui::ViewNode& node, const NavigationContainerModifier& modifier) {
     static_cast<void>(node);
     state_ = modifier.state;
     style_ = modifier.style;
@@ -861,7 +861,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     if (!state_ || !state_->Transition().has_value()) {
       animation_initialized_ = false;
@@ -892,7 +892,7 @@ public:
     return {result.needs_frame, result.wake_after};
   }
 
-  bool OnBack(huxerui::MountedNode& node, const BackEvent& event) override {
+  bool OnBack(huxerui::ViewNode& node, const BackEvent& event) override {
     static_cast<void>(node);
     if (!state_) {
       return false;

@@ -258,7 +258,7 @@ WindowHitTarget HitTestWindowTarget(MountedNode& node, Point position) {
 
 namespace {
 
-Size MeasureLayoutChild(void* state, huxerui::MountedNode& child, Constraints constraints) {
+Size MeasureLayoutChild(void* state, huxerui::ViewNode& child, Constraints constraints) {
   auto& layout_state = *static_cast<LayoutContextState*>(state);
   return MeasureNode(static_cast<MountedNode&>(child), constraints, *layout_state.platform, *layout_state.runtime,
                      layout_state.safe_area, layout_state.title_bar_metrics);
@@ -272,11 +272,11 @@ VirtualViewport CurrentVirtualViewport(void* state) {
   return static_cast<VirtualLayoutContextState*>(state)->viewport;
 }
 
-huxerui::MountedNode& ObtainVirtualItem(void* state, std::size_t index) {
+huxerui::ViewNode& ObtainVirtualItem(void* state, std::size_t index) {
   return static_cast<VirtualLayoutContextState*>(state)->session->Item(index);
 }
 
-Size MeasureVirtualItem(void* state, huxerui::MountedNode& item, Constraints constraints) {
+Size MeasureVirtualItem(void* state, huxerui::ViewNode& item, Constraints constraints) {
   auto& layout_state = *static_cast<VirtualLayoutContextState*>(state)->layout_state;
   return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.platform, *layout_state.runtime,
                      layout_state.safe_area, layout_state.title_bar_metrics);
@@ -340,7 +340,7 @@ void CommitLayoutParticipation(MountedNode& node, const std::vector<LayoutResult
     return;
   }
 
-  std::unordered_set<const huxerui::MountedNode*> placed;
+  std::unordered_set<const huxerui::ViewNode*> placed;
   placed.reserve(placements.size());
   for (const LayoutResult::Placement& placement : placements) {
     placed.insert(placement.child);

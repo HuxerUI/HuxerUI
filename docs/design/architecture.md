@@ -245,13 +245,11 @@ The framework-provided adapter performs type erasure and dispatches typed update
 ```cpp
 class GlowExtension final : public NodeExtension {
 public:
-  GlowExtension(MountedNode& node, const Glow& spec);
+  GlowExtension(ViewNode& node, const Glow& spec);
 
-  void Update(MountedNode& node, const Glow& spec);
+  void Update(ViewNode& node, const Glow& spec);
 
-  void Paint(
-      const MountedNode& node,
-      PaintContext& context) const override;
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override;
 };
 ```
 
@@ -301,7 +299,7 @@ The complete request, cancellation, error, and backend contract is defined in [H
 
 ## NodeExtension lifecycle
 
-`NodeExtension` operates directly on a controlled public `MountedNode`. There is no separate `ModifierHost` and no context object for every phase.
+`NodeExtension` operates directly on a controlled public `ViewNode`. There is no separate `ModifierHost` and no context object for every phase.
 
 The current public lifecycle is:
 
@@ -331,46 +329,46 @@ public:
   virtual ~NodeExtension() = default;
 
   virtual FrameResult OnFrame(
-      MountedNode& node,
+      ViewNode& node,
       const FrameInfo& frame);
 
-  virtual PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer);
+  virtual PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer);
 
   virtual void OnInteraction(
-      MountedNode& node,
+      ViewNode& node,
       const InteractionState& state,
       const std::optional<InteractionEvent>& event);
 
-  virtual float OnPreScroll(MountedNode& node, Axis axis, float available, ScrollSource source);
-  virtual float OnPostScroll(MountedNode& node, Axis axis, float consumed, float available, ScrollSource source);
-  virtual float OnPreFling(MountedNode& node, Axis axis, float available_velocity);
-  virtual float OnPostFling(MountedNode& node, Axis axis, float consumed_velocity, float available_velocity);
-  virtual void OnScrollActivity(MountedNode& node, const ScrollActivity& activity);
+  virtual float OnPreScroll(ViewNode& node, Axis axis, float available, ScrollSource source);
+  virtual float OnPostScroll(ViewNode& node, Axis axis, float consumed, float available, ScrollSource source);
+  virtual float OnPreFling(ViewNode& node, Axis axis, float available_velocity);
+  virtual float OnPostFling(ViewNode& node, Axis axis, float consumed_velocity, float available_velocity);
+  virtual void OnScrollActivity(ViewNode& node, const ScrollActivity& activity);
 
   virtual bool HitTest(
-      MountedNode& node,
+      ViewNode& node,
       Point position) const;
 
   virtual bool HoverHitTest(
-      MountedNode& node,
+      ViewNode& node,
       Point position) const;
 
   virtual bool HoverWhenDisabled() const noexcept;
 
-  virtual void OnHover(MountedNode& node, const HoverEvent& event);
-  virtual void OnFocusChanged(MountedNode& node, bool focused, bool reverse);
-  virtual bool OnKey(MountedNode& node, const KeyEvent& event);
+  virtual void OnHover(ViewNode& node, const HoverEvent& event);
+  virtual void OnFocusChanged(ViewNode& node, bool focused, bool reverse);
+  virtual bool OnKey(ViewNode& node, const KeyEvent& event);
 
   virtual PointerResult OnPointer(
-      MountedNode& node,
+      ViewNode& node,
       const PointerEvent& event);
 
   virtual void PaintBehindContent(
-      const MountedNode& node,
+      const ViewNode& node,
       PaintContext& context) const;
 
   virtual void PaintAboveContent(
-      const MountedNode& node,
+      const ViewNode& node,
       PaintContext& context) const;
 
 protected:
@@ -425,28 +423,34 @@ During frame construction, the current recording pass consumes that invalidation
 
 The existing `LayoutContext` and `VirtualLayoutContext` remain because they represent real child measurement sessions.
 
-## MountedNode capabilities
+## ViewNode capabilities
 
-The public `MountedNode` surface exposes controlled operations needed by layouts and modifiers:
+`ViewNode` is the public interface to a Runtime-owned node in the mounted View tree. The internal `detail::MountedNode` implements this interface and owns the retained state; both names refer to the same object. Node references, child ranges, and metadata pointers are borrowed and must not be retained across reconciliation.
+
+The node accessors are public virtual functions implemented directly by `detail::MountedNode`. `Children()` remains a non-virtual range helper, and the typed metadata and cache templates use the protected `FindLayoutValue()` and `EnsureCacheEntry()` virtual hooks. Both `ChildAt()` overloads check bounds in the mounted implementation and throw `std::out_of_range` for an invalid index.
+
+The public `ViewNode` surface exposes controlled operations needed by layouts and modifiers:
 
 ```cpp
-class MountedNode {
+class ViewNode {
 public:
-  Size LayoutSize() const;
-  Rect Bounds() const;
-  Rect ContentBounds() const;
-  Point LayoutOffset() const;
-  Rect PresentationBounds() const;
-  Point LocalToWindow(Point point) const;
-  std::optional<Point> WindowToLocal(Point point) const;
-  Rect LocalToWindowBounds(Rect bounds) const;
-  float PresentationOpacity() const;
-  bool IsEnabled() const;
-  bool IsFocused() const;
+  virtual ~ViewNode() = default;
 
-  std::size_t ChildCount() const;
-  MountedNode& ChildAt(std::size_t index);
-  const MountedNode& ChildAt(std::size_t index) const;
+  virtual Size LayoutSize() const noexcept = 0;
+  virtual Rect Bounds() const noexcept = 0;
+  virtual Rect ContentBounds() const noexcept = 0;
+  virtual Point LayoutOffset() const noexcept = 0;
+  virtual Rect PresentationBounds() const noexcept = 0;
+  virtual Point LocalToWindow(Point point) const noexcept = 0;
+  virtual std::optional<Point> WindowToLocal(Point point) const noexcept = 0;
+  virtual Rect LocalToWindowBounds(Rect bounds) const noexcept = 0;
+  virtual float PresentationOpacity() const noexcept = 0;
+  virtual bool IsEnabled() const noexcept = 0;
+  virtual bool IsFocused() const noexcept = 0;
+
+  virtual std::size_t ChildCount() const noexcept = 0;
+  virtual ViewNode& ChildAt(std::size_t index) = 0;
+  virtual const ViewNode& ChildAt(std::size_t index) const = 0;
 
   template <class Key>
   const typename Key::Value* LayoutValue() const;

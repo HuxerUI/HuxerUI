@@ -196,7 +196,7 @@ void ValidateOrigin(TransformOrigin origin) {
   }
 }
 
-Point ResolveOrigin(const MountedNode& node, TransformOrigin origin) {
+Point ResolveOrigin(const ViewNode& node, TransformOrigin origin) {
   const Rect frame = node.Bounds();
   return {
       frame.x + frame.width * origin.x,
@@ -206,11 +206,11 @@ Point ResolveOrigin(const MountedNode& node, TransformOrigin origin) {
 
 class OpacityExtension final : public NodeExtension {
 public:
-  OpacityExtension(MountedNode& node, const Opacity& modifier) {
+  OpacityExtension(ViewNode& node, const Opacity& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const Opacity& modifier) {
+  void Update(ViewNode& node, const Opacity& modifier) {
     static_cast<void>(node);
     if (const auto* immediate = std::get_if<float>(&modifier.value)) {
       value_.Set(std::clamp(*immediate, 0.0F, 1.0F));
@@ -227,7 +227,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const MotionAdvanceResult result = value_.Advance(frame);
     mounted.presentation.local_opacity *= value_.Value();
@@ -241,11 +241,11 @@ private:
 
 class OffsetExtension final : public NodeExtension {
 public:
-  OffsetExtension(MountedNode& node, const Offset& modifier) {
+  OffsetExtension(ViewNode& node, const Offset& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const Offset& modifier) {
+  void Update(ViewNode& node, const Offset& modifier) {
     static_cast<void>(node);
     if (const auto* immediate = std::get_if<Point>(&modifier.value)) {
       x_.Set(immediate->x);
@@ -264,7 +264,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const MotionAdvanceResult x_result = x_.Advance(frame);
     const MotionAdvanceResult y_result = y_.Advance(frame);
@@ -286,11 +286,11 @@ private:
 
 class ScaleExtension final : public NodeExtension {
 public:
-  ScaleExtension(MountedNode& node, const Scale& modifier) {
+  ScaleExtension(ViewNode& node, const Scale& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const Scale& modifier) {
+  void Update(ViewNode& node, const Scale& modifier) {
     static_cast<void>(node);
     ValidateOrigin(modifier.origin);
     origin_ = modifier.origin;
@@ -310,7 +310,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const MotionAdvanceResult result = value_.Advance(frame);
     const Point origin = ResolveOrigin(node, origin_);
@@ -340,11 +340,11 @@ private:
 
 class RotationExtension final : public NodeExtension {
 public:
-  RotationExtension(MountedNode& node, const Rotation& modifier) {
+  RotationExtension(ViewNode& node, const Rotation& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const Rotation& modifier) {
+  void Update(ViewNode& node, const Rotation& modifier) {
     static_cast<void>(node);
     ValidateOrigin(modifier.origin);
     origin_ = modifier.origin;
@@ -364,7 +364,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const MotionAdvanceResult result = degrees_.Advance(frame);
     constexpr float degrees_to_radians = 3.14159265358979323846F / 180.0F;
@@ -642,11 +642,11 @@ namespace detail {
 
 class TransitionExtension final : public NodeExtension {
 public:
-  TransitionExtension(huxerui::MountedNode& node, const Transition& modifier) {
+  TransitionExtension(huxerui::ViewNode& node, const Transition& modifier) {
     Update(node, modifier);
   }
 
-  void Update(huxerui::MountedNode& node, const Transition& modifier) {
+  void Update(huxerui::ViewNode& node, const Transition& modifier) {
     static_cast<void>(node);
     opacity_ = modifier.opacity_;
     offset_ = modifier.offset_;
@@ -668,7 +668,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
     const MotionAdvanceResult result = progress_.Advance(frame);
     const float progress = std::clamp(progress_.Value(), 0.0F, 1.0F);
     auto& mounted = static_cast<detail::MountedNode&>(node);

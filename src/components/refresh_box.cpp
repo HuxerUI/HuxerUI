@@ -55,11 +55,11 @@ void ValidateRefreshBoxStyle(const RefreshBoxStyle& style) {
 
 class RefreshBoxBehaviorExtension final : public NodeExtension {
 public:
-  RefreshBoxBehaviorExtension(MountedNode& node, const RefreshBoxBehavior& behavior) {
+  RefreshBoxBehaviorExtension(ViewNode& node, const RefreshBoxBehavior& behavior) {
     Update(node, behavior);
   }
 
-  void Update(MountedNode& node, const RefreshBoxBehavior& behavior) {
+  void Update(ViewNode& node, const RefreshBoxBehavior& behavior) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const bool was_initialized = initialized_;
     const bool previous_refreshing = behavior_.refreshing;
@@ -100,7 +100,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (mode_ == Mode::AwaitingCommit && !behavior_.refreshing) {
       BeginSettlement(mounted);
@@ -142,7 +142,7 @@ public:
     };
   }
 
-  void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) override {
+  void OnScrollActivity(ViewNode& node, const ScrollActivity& activity) override {
     if (activity.source != ScrollSource::Drag || activity.axis != Axis::Vertical) {
       return;
     }
@@ -197,7 +197,7 @@ public:
     return true;
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const float displacement = drag_active_ ? drag_displacement_ : displacement_.Value();
     if (displacement <= 0.0F) {
       return;
@@ -298,7 +298,7 @@ private:
 };
 
 struct RefreshBoxLayout {
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     if (node.ChildCount() != 1) {
       throw std::logic_error("HuxerUI RefreshBox requires exactly one mounted child");
     }
@@ -332,13 +332,13 @@ const detail::ModifierDescriptor& RefreshBoxBehavior::Descriptor() {
         );
         modifier.value = std::make_shared<RefreshBoxBehavior>(std::move(behavior));
       },
-      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+      [](ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<RefreshBoxBehaviorExtension>(
             node,
             *static_cast<const RefreshBoxBehavior*>(value)
         );
       },
-      [](NodeExtension& extension, MountedNode& node, const void* value) {
+      [](NodeExtension& extension, ViewNode& node, const void* value) {
         static_cast<RefreshBoxBehaviorExtension&>(extension).Update(
             node,
             *static_cast<const RefreshBoxBehavior*>(value)

@@ -25,18 +25,19 @@ Use `void` for notifications and a value result only for synchronous decisions o
 ## Custom layouts
 
 Derive from `Layout<Derived>` when behavior is a measurement and placement policy over ordinary children.
+The `ViewNode` interface provides geometry, interaction state, and layout metadata for a Runtime-owned mounted node; application code does not create or own these nodes.
 
 ```cpp
 class SimpleRow final : public Layout<SimpleRow> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     LayoutResult result;
     float x = 0.0F;
     float height = 0.0F;
 
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       const Size size = context.Measure(child, constraints.Loose());
       result.Place(child, {x, 0.0F});
       x += size.width;
@@ -50,6 +51,8 @@ public:
 ```
 
 Measure children only through the context and do not retain child references across reconciliation.
+
+`Children()` visits the current direct children; both const and mutable `ChildAt(index)` access throw `std::out_of_range` when `index >= ChildCount()`.
 Use typed `LayoutValue<Key>` metadata for semantics owned by the parent layout.
 
 ## Custom virtual layouts
@@ -83,10 +86,10 @@ struct SubmitOnEnter {
 
 class SubmitOnEnter::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode&, const SubmitOnEnter&) {}
-  void Update(MountedNode&, const SubmitOnEnter&) {}
+  Extension(ViewNode&, const SubmitOnEnter&) {}
+  void Update(ViewNode&, const SubmitOnEnter&) {}
 
-  bool OnKey(MountedNode&, const KeyEvent& event) override {
+  bool OnKey(ViewNode&, const KeyEvent& event) override {
     if (event.type != KeyEventType::Down || event.key != Key::Enter) {
       return false;
     }
@@ -110,12 +113,12 @@ Emission is synchronous and does not extend the extension's lifetime; do not ret
 When an internal child must emit an outer component's event, continue to pass the `EventEmitter` returned by that component's `UseEvents()` explicitly.
 Presentation handles such as `PopupHandle` and `DialogHandle` also remain explicit dependencies rather than additional NodeExtension methods.
 
-`PrepareGeometry(MountedNode&, TextMeasurer&)` runs after final presentation geometry is resolved and before paint recording.
+`PrepareGeometry(ViewNode&, TextMeasurer&)` runs after final presentation geometry is resolved and before paint recording.
 Use its borrowed measurer only for synchronous text-dependent retained geometry, and retain only the resulting value metrics.
 Return the exact `PaintInvalidation` phases whose recorded inputs changed; text that affects measurement belongs in `Layout` because this callback does not provide another layout pass.
-This is also the phase for `MountedNode` local-to-window conversion when retained behavior must publish geometry to a window-owned service such as Popup placement.
+This is also the phase for `ViewNode` local-to-window conversion when retained behavior must publish geometry to a window-owned service such as Popup placement.
 Paint callbacks continue to record node-local commands and do not use window coordinates to draw.
-Use `MountedNode::Bounds()` for the complete node rectangle and `ContentBounds()` when custom content should respect the node's resolved Padding.
+Use `ViewNode::Bounds()` for the complete node rectangle and `ContentBounds()` when custom content should respect the node's resolved Padding.
 
 For self-drawn controls, `BuildSemantics(SemanticBuilder&)` can publish virtual children with `AddChild(local_id, bounds, semantics, enabled)` and declare their actions through `AddAction` or `AddCustomAction`.
 Keep local IDs stable and use the same availability predicate as actual input.

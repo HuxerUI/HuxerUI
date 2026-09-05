@@ -77,7 +77,7 @@ using huxerui::MenuEntry;
 using huxerui::MenuHandle;
 using huxerui::MenuItem;
 using huxerui::MenuSection;
-using huxerui::MountedNode;
+using huxerui::ViewNode;
 using huxerui::NavigationController;
 using huxerui::NavigationStack;
 using huxerui::NodeExtension;

@@ -25,7 +25,7 @@ public:
   IndexedPages(std::vector<View> pages, std::size_t selected_index);
   IndexedPages(std::vector<View> pages, const State<std::size_t>& selected_index);
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 ```
 

@@ -22,15 +22,15 @@ struct FileDropTargetCapability {
 
 class FileDropTargetExtension final : public NodeExtension {
 public:
-  FileDropTargetExtension(huxerui::MountedNode& node, const FileDropTarget& target) {
+  FileDropTargetExtension(huxerui::ViewNode& node, const FileDropTarget& target) {
     Update(node, target);
   }
 
-  void Update(huxerui::MountedNode&, const FileDropTarget& target) {
+  void Update(huxerui::ViewNode&, const FileDropTarget& target) {
     capability_ = {target.options_, target.predicate_};
   }
 
-  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HitTest(huxerui::ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 

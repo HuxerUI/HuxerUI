@@ -40,11 +40,11 @@ struct SliderVisual {
 
 class SliderVisualExtension final : public NodeExtension {
 public:
-  SliderVisualExtension(MountedNode& node, const SliderVisual& modifier) {
+  SliderVisualExtension(ViewNode& node, const SliderVisual& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const SliderVisual& modifier) {
+  void Update(ViewNode& node, const SliderVisual& modifier) {
     style_ = node.LayoutValueOr<SliderStyleBinding>(SliderStyle::Default());
     if (!node.IsEnabled()) {
       pointer_id_.reset();
@@ -100,7 +100,7 @@ public:
     return true;
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     const float previous_width = thumb_width_.Value();
     const float previous_height = thumb_height_.Value();
@@ -115,15 +115,15 @@ public:
     };
   }
 
-  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HoverHitTest(ViewNode& node, Point position) const override {
     return HitTest(node, position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     const bool hovered = event.type != HoverEventType::Leave;
     if (hovered_ == hovered) {
@@ -133,7 +133,7 @@ public:
     UpdateThumbSize(node.IsEnabled());
   }
 
-  void OnFocusChanged(MountedNode& node, bool focused, bool) override {
+  void OnFocusChanged(ViewNode& node, bool focused, bool) override {
     static_cast<void>(node);
     if (focused_ == focused) {
       return;
@@ -142,7 +142,7 @@ public:
     UpdateThumbSize(node.IsEnabled());
   }
 
-  bool OnKey(MountedNode&, const KeyEvent& event) override {
+  bool OnKey(ViewNode&, const KeyEvent& event) override {
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
     }
@@ -167,7 +167,7 @@ public:
     }
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       pressed_ = false;
@@ -200,7 +200,7 @@ public:
     return PointerResult::Ignored;
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const Rect frame = node.Bounds();
     if (frame.width <= 0.0F || frame.height <= 0.0F) {
       return;
@@ -334,13 +334,13 @@ private:
     return std::clamp(minimum_ + steps * *step_, minimum_, maximum_);
   }
 
-  void EmitPointerValue(MountedNode& node, float pointer_x) {
+  void EmitPointerValue(ViewNode& node, float pointer_x) {
     const Rect track = ResolveTrackBounds(node);
     const float progress = track.width > 0.0F ? std::clamp((pointer_x - track.x) / track.width, 0.0F, 1.0F) : 0.0F;
     EmitValue(minimum_ + (maximum_ - minimum_) * progress);
   }
 
-  [[nodiscard]] Rect ResolveTrackBounds(const MountedNode& node) const {
+  [[nodiscard]] Rect ResolveTrackBounds(const ViewNode& node) const {
     const Rect frame = node.Bounds();
     const float maximum_thumb_width =
         std::max({style_.thumb_width, style_.hovered_thumb_width, style_.pressed_thumb_width, 0.0F});

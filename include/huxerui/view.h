@@ -1421,7 +1421,7 @@ public:
   using Layout::Layout;
 
   /// Implements Column measurement for Runtime and custom layout composition.
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
 /// Measures and places children horizontally in declaration order.
@@ -1430,7 +1430,7 @@ public:
   using Layout::Layout;
 
   /// Implements Row measurement for Runtime and custom layout composition.
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
 /// Places children in wrapping lines according to the configured Flow modifiers.
@@ -1439,7 +1439,7 @@ public:
   using Layout::Layout;
 
   /// Implements Flow measurement for Runtime and custom layout composition.
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
 /// Overlays children in declaration order within shared bounds.
@@ -1448,7 +1448,7 @@ public:
   using Layout::Layout;
 
   /// Implements Stack measurement for Runtime and custom layout composition.
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
 /// Retains all declared pages while measuring and presenting only the controlled selected page.
@@ -1465,7 +1465,7 @@ public:
       : IndexedPages(std::move(pages), selected_index.Get()) {}
 
   /// Implements selected-page measurement for Runtime.
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
 /// Retains peer pages while presenting controlled animated and directly draggable paging.
@@ -1558,10 +1558,10 @@ public:
   VirtualList CacheExtent(float extent) &&;
 
   /// Implements virtual range measurement and placement for Runtime.
-  static VirtualLayoutResult Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints);
+  static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints);
   /// Resolves the content offset required to align a logical item in the viewport.
   static std::optional<float>
-  ScrollOffsetForItem(MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent);
+  ScrollOffsetForItem(ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent);
 };
 
 /// Virtualizes a vertically scrolling grid with adaptive or fixed columns and optional item spans.
@@ -1592,10 +1592,10 @@ public:
   VirtualGrid ItemSpans(std::vector<std::size_t> spans) &&;
 
   /// Implements virtual grid range measurement and placement for Runtime.
-  static VirtualLayoutResult Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints);
+  static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints);
   /// Resolves the content offset required to align a logical item row in the viewport.
   static std::optional<float>
-  ScrollOffsetForItem(MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent);
+  ScrollOffsetForItem(ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent);
 };
 
 } // namespace huxerui

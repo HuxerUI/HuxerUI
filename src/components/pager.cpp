@@ -74,11 +74,11 @@ struct PagerBehavior {
 
 class PagerBehaviorExtension final : public NodeExtension {
 public:
-  PagerBehaviorExtension(MountedNode& node, const PagerBehavior& behavior) {
+  PagerBehaviorExtension(ViewNode& node, const PagerBehavior& behavior) {
     Update(node, behavior);
   }
 
-  void Update(MountedNode& node, const PagerBehavior& behavior) {
+  void Update(ViewNode& node, const PagerBehavior& behavior) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const bool geometry_changed = initialized_ &&
                                   (behavior.page_count != behavior_.page_count || behavior.axis != behavior_.axis ||
@@ -105,7 +105,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (mode_ == Mode::AwaitingCommit) {
       if (!proposal_emitted_) {
@@ -140,7 +140,7 @@ public:
     return {result.needs_frame, result.wake_after};
   }
 
-  float OnPreFling(MountedNode& node, Axis axis, float available_velocity) override {
+  float OnPreFling(ViewNode& node, Axis axis, float available_velocity) override {
     static_cast<void>(node);
     if (axis != behavior_.axis || (mode_ != Mode::Dragging && mode_ != Mode::AwaitingCommit)) {
       return 0.0F;
@@ -149,7 +149,7 @@ public:
     return available_velocity;
   }
 
-  void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) override {
+  void OnScrollActivity(ViewNode& node, const ScrollActivity& activity) override {
     if (activity.source != ScrollSource::Drag || activity.axis != behavior_.axis) {
       return;
     }
@@ -401,7 +401,7 @@ private:
 };
 
 struct PagerLayout {
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const detail::ModifierDescriptor& behavior_descriptor = PagerBehavior::Descriptor();
     auto extension = std::ranges::find(
@@ -434,7 +434,7 @@ struct PagerLayout {
     LayoutResult result;
     Size measured;
     for (std::size_t index : plan.measured_indices) {
-      MountedNode& page = node.ChildAt(index);
+      ViewNode& page = node.ChildAt(index);
       const Size page_size = context.Measure(page, page_constraints);
       measured.width = std::max(measured.width, page_size.width);
       measured.height = std::max(measured.height, page_size.height);
@@ -463,10 +463,10 @@ const detail::ModifierDescriptor& PagerBehavior::Descriptor() {
         behavior.animation.duration = detail::ResolveThemeSpec(environment).motion.normal;
         modifier.value = std::make_shared<PagerBehavior>(std::move(behavior));
       },
-      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+      [](ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<PagerBehaviorExtension>(node, *static_cast<const PagerBehavior*>(value));
       },
-      [](NodeExtension& extension, MountedNode& node, const void* value) {
+      [](NodeExtension& extension, ViewNode& node, const void* value) {
         static_cast<PagerBehaviorExtension&>(extension).Update(node, *static_cast<const PagerBehavior*>(value));
       },
       true,

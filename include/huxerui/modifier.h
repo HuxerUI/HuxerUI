@@ -62,12 +62,12 @@ struct FrameInfo {
 ///
 /// class Overlay::Extension final : public NodeExtension {
 /// public:
-///   Extension(MountedNode& node, const Overlay& value) { Update(node, value); }
-///   void Update(MountedNode&, const Overlay& value) {
+///   Extension(ViewNode& node, const Overlay& value) { Update(node, value); }
+///   void Update(ViewNode&, const Overlay& value) {
 ///     color_ = value.color;
 ///     InvalidatePaint();
 ///   }
-///   void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+///   void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
 ///     context.DrawRect(node.Bounds(), color_);
 ///   }
 ///
@@ -120,7 +120,7 @@ public:
   /// Advances retained time-based state for the current mounted node.
   ///
   /// Return a scheduling request when more work remains, and call InvalidatePaint() when retained visual state changes.
-  virtual FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) {
+  virtual FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) {
     static_cast<void>(node);
     static_cast<void>(frame);
     return {};
@@ -130,14 +130,14 @@ public:
   ///
   /// The text measurer is borrowed for this callback and must not be retained. Return every paint phase whose recorded
   /// inputs changed.
-  [[nodiscard]] virtual PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) {
+  [[nodiscard]] virtual PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer) {
     static_cast<void>(node);
     static_cast<void>(text_measurer);
     return PaintInvalidation::None;
   }
 
   /// Observes mounted interaction state and the event that produced its latest transition, when available.
-  virtual void OnInteraction(MountedNode& node, const InteractionState& state,
+  virtual void OnInteraction(ViewNode& node, const InteractionState& state,
                              const std::optional<InteractionEvent>& event) {
     static_cast<void>(node);
     static_cast<void>(state);
@@ -148,7 +148,7 @@ public:
   ///
   /// Runtime calls this only when the extension is attached to a scroll container participating in the transaction.
   /// The returned value must be finite, follow the direction of `available`, and not exceed its magnitude.
-  [[nodiscard]] virtual float OnPreScroll(MountedNode& node, Axis axis, float available, ScrollSource source) {
+  [[nodiscard]] virtual float OnPreScroll(ViewNode& node, Axis axis, float available, ScrollSource source) {
     static_cast<void>(node);
     static_cast<void>(axis);
     static_cast<void>(available);
@@ -160,7 +160,7 @@ public:
   ///
   /// `consumed` is the amount already consumed by this transaction. The returned value follows the same invariants as
   /// OnPreScroll().
-  [[nodiscard]] virtual float OnPostScroll(MountedNode& node, Axis axis, float consumed, float available,
+  [[nodiscard]] virtual float OnPostScroll(ViewNode& node, Axis axis, float consumed, float available,
                                            ScrollSource source) {
     static_cast<void>(node);
     static_cast<void>(axis);
@@ -171,7 +171,7 @@ public:
   }
 
   /// Consumes part of release velocity before retained momentum starts.
-  [[nodiscard]] virtual float OnPreFling(MountedNode& node, Axis axis, float available_velocity) {
+  [[nodiscard]] virtual float OnPreFling(ViewNode& node, Axis axis, float available_velocity) {
     static_cast<void>(node);
     static_cast<void>(axis);
     static_cast<void>(available_velocity);
@@ -179,7 +179,7 @@ public:
   }
 
   /// Consumes velocity remaining after this node's retained momentum ends or reaches a boundary.
-  [[nodiscard]] virtual float OnPostFling(MountedNode& node, Axis axis, float consumed_velocity,
+  [[nodiscard]] virtual float OnPostFling(ViewNode& node, Axis axis, float consumed_velocity,
                                           float available_velocity) {
     static_cast<void>(node);
     static_cast<void>(axis);
@@ -189,7 +189,7 @@ public:
   }
 
   /// Observes transient mounted scroll activity for retained presentation behavior.
-  virtual void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) {
+  virtual void OnScrollActivity(ViewNode& node, const ScrollActivity& activity) {
     static_cast<void>(node);
     static_cast<void>(activity);
   }
@@ -198,14 +198,14 @@ public:
   ///
   /// Runtime may call this more than once while routing an event, so the implementation must be deterministic and
   /// free of side effects.
-  [[nodiscard]] virtual bool HitTest(MountedNode& node, Point position) const {
+  [[nodiscard]] virtual bool HitTest(ViewNode& node, Point position) const {
     static_cast<void>(node);
     static_cast<void>(position);
     return false;
   }
 
   /// Returns whether a node-local position participates in this extension's hover affordance.
-  [[nodiscard]] virtual bool HoverHitTest(MountedNode& node, Point position) const {
+  [[nodiscard]] virtual bool HoverHitTest(ViewNode& node, Point position) const {
     static_cast<void>(node);
     static_cast<void>(position);
     return false;
@@ -219,7 +219,7 @@ public:
   /// Delivers entry, movement, and departure for this extension's active hover hit-test.
   ///
   /// The event position is local to `node`. Runtime sends Move only when the logical pointer position changes.
-  virtual void OnHover(MountedNode& node, const HoverEvent& event) {
+  virtual void OnHover(ViewNode& node, const HoverEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
   }
@@ -229,21 +229,21 @@ public:
   /// @param node The node receiving the focus change.
   /// @param focused Whether the node now owns focus.
   /// @param reverse True when focus enters through reverse keyboard traversal; false for other changes.
-  virtual void OnFocusChanged(MountedNode& node, bool focused, bool reverse) {
+  virtual void OnFocusChanged(ViewNode& node, bool focused, bool reverse) {
     static_cast<void>(node);
     static_cast<void>(focused);
     static_cast<void>(reverse);
   }
 
   /// Delivers a keyboard event routed to the focused node and returns whether the extension consumed it.
-  [[nodiscard]] virtual bool OnKey(MountedNode& node, const KeyEvent& event) {
+  [[nodiscard]] virtual bool OnKey(ViewNode& node, const KeyEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
     return false;
   }
 
   /// Handles a platform back request and returns whether the extension consumed it.
-  [[nodiscard]] virtual bool OnBack(MountedNode& node, const BackEvent& event) {
+  [[nodiscard]] virtual bool OnBack(ViewNode& node, const BackEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
     return false;
@@ -260,7 +260,7 @@ public:
   }
 
   /// Handles a node-local pointer event and reports recognition or ownership of its physical sequence.
-  virtual PointerResult OnPointer(MountedNode& node, const PointerEvent& event) {
+  virtual PointerResult OnPointer(ViewNode& node, const PointerEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
     return PointerResult::Ignored;
@@ -281,13 +281,13 @@ public:
   }
 
   /// Records node-local paint commands after the background and before the border, content, and descendants.
-  virtual void PaintBehindContent(const MountedNode& node, PaintContext& context) const {
+  virtual void PaintBehindContent(const ViewNode& node, PaintContext& context) const {
     static_cast<void>(node);
     static_cast<void>(context);
   }
 
   /// Records node-local paint commands after content and descendants and before the framework focus ring.
-  virtual void PaintAboveContent(const MountedNode& node, PaintContext& context) const {
+  virtual void PaintAboveContent(const ViewNode& node, PaintContext& context) const {
     static_cast<void>(node);
     static_cast<void>(context);
   }
@@ -342,7 +342,7 @@ protected:
 
 private:
   virtual std::shared_ptr<detail::GestureRecognizer> CreateGestureRecognizer(
-      MountedNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings,
+      ViewNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings,
       Transform2D frozen_node_to_window
   );
 
@@ -395,8 +395,8 @@ struct ModifierSpec {
 struct ModifierDescriptor {
   // Compilation applies one ordered declaration and may replace its retained value before mounted state changes.
   void (*compile)(ViewSpec&, ModifierSpec&, const std::shared_ptr<const Environment>&, AppResources&) = nullptr;
-  std::unique_ptr<NodeExtension> (*create_extension)(MountedNode&, const void*) = nullptr;
-  void (*update_extension)(NodeExtension&, MountedNode&, const void*) = nullptr;
+  std::unique_ptr<NodeExtension> (*create_extension)(ViewNode&, const void*) = nullptr;
+  void (*update_extension)(NodeExtension&, ViewNode&, const void*) = nullptr;
   // A changed retained value can affect this node's measured size.
   bool layout_affecting = false;
   bool (*equals)(const void*, const void*) = nullptr;
@@ -419,8 +419,8 @@ template <
     bool LayoutAffecting = false,
     bool (*LayoutEquals)(const Spec&, const Spec&) = nullptr>
   requires std::derived_from<Extension, NodeExtension> &&
-           std::constructible_from<Extension, MountedNode&, const Spec&> &&
-           requires(Extension& extension, MountedNode& node, const Spec& spec) { extension.Update(node, spec); }
+           std::constructible_from<Extension, ViewNode&, const Spec&> &&
+           requires(Extension& extension, ViewNode& node, const Spec& spec) { extension.Update(node, spec); }
 const ModifierDescriptor& ModifierDescriptorFor() {
   constexpr auto erased_layout_equals = []() -> bool (*)(const void*, const void*) {
     if constexpr (!LayoutAffecting) {
@@ -435,10 +435,10 @@ const ModifierDescriptor& ModifierDescriptorFor() {
   }();
   static const ModifierDescriptor descriptor{
       nullptr,
-      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+      [](ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<Extension>(node, *static_cast<const Spec*>(value));
       },
-      [](NodeExtension& extension, MountedNode& node, const void* value) {
+      [](NodeExtension& extension, ViewNode& node, const void* value) {
         static_cast<Extension&>(extension).Update(node, *static_cast<const Spec*>(value));
       },
       LayoutAffecting,
@@ -456,8 +456,8 @@ concept ExplicitModifierDescriptor = requires {
 template <class Modifier>
 concept AutomaticModifierDescriptor =
     requires { typename Modifier::Extension; } && std::derived_from<typename Modifier::Extension, NodeExtension> &&
-    std::constructible_from<typename Modifier::Extension, MountedNode&, const Modifier&> &&
-    requires(typename Modifier::Extension& extension, MountedNode& node, const Modifier& modifier) {
+    std::constructible_from<typename Modifier::Extension, ViewNode&, const Modifier&> &&
+    requires(typename Modifier::Extension& extension, ViewNode& node, const Modifier& modifier) {
       extension.Update(node, modifier);
     };
 

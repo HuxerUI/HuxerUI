@@ -1,6 +1,7 @@
 #include "runtime_test_support.h"
 
 #include <limits>
+#include <stdexcept>
 #include <vector>
 
 #include "external_texture_test_support.h"
@@ -89,14 +90,14 @@ public:
     return std::move(*this).With(huxerui::Spacing{value});
   }
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
     LayoutResult result;
     float x = 0.0F;
     float y = 0.0F;
     float line_height = 0.0F;
     float measured_width = 0.0F;
 
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       const Size child_size = context.Measure(child, constraints.Loose());
       const bool break_before = child.LayoutValueOr<FlowBreakBefore>(false);
       if (x > 0.0F && (break_before || x + child_size.width > constraints.max_width)) {
@@ -126,12 +127,12 @@ class UnboundedWidth final : public Layout<UnboundedWidth> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     LayoutResult result;
     if (node.ChildCount() == 0) {
       return result.SetSize(constraints.Constrain({}));
     }
-    MountedNode& child = node.ChildAt(0);
+    ViewNode& child = node.ChildAt(0);
     const Size size = context.Measure(
         child,
         {
@@ -1244,6 +1245,45 @@ TEST_CASE("TestCustomLayoutProtocol") {
   REQUIRE(root->children[1]->layout_offset.y == 20.0F);
   REQUIRE(root->children[2]->layout_offset.x == 50.0F);
   REQUIRE(root->children[2]->layout_offset.y == 20.0F);
+}
+
+TEST_CASE("ViewNodeChildAccessChecksMutableAndConstBounds") {
+  class CheckedLayout final : public Layout<CheckedLayout> {
+  public:
+    using Layout::Layout;
+
+    static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
+      const ViewNode& read_only = node;
+      std::size_t index = 0;
+      for (ViewNode& child : node.Children()) {
+        REQUIRE(&node.ChildAt(index) == &child);
+        REQUIRE(&read_only.ChildAt(index) == &child);
+        ++index;
+      }
+      REQUIRE(index == node.ChildCount());
+      constexpr auto maximum_index = std::numeric_limits<std::size_t>::max();
+      REQUIRE_THROWS_AS(static_cast<void>(node.ChildAt(node.ChildCount())), std::out_of_range);
+      REQUIRE_THROWS_AS(static_cast<void>(read_only.ChildAt(read_only.ChildCount())), std::out_of_range);
+      REQUIRE_THROWS_AS(static_cast<void>(node.ChildAt(maximum_index)), std::out_of_range);
+      REQUIRE_THROWS_AS(static_cast<void>(read_only.ChildAt(maximum_index)), std::out_of_range);
+      return Column::Measure(context, node, constraints);
+    }
+  };
+
+  const bool empty = GENERATE(true, false);
+  RootFactory root_factory = []() -> View { return CheckedLayout {}; };
+  if (!empty) {
+    root_factory = []() -> View {
+      return CheckedLayout {
+        Text("First"),
+        Text("Second"),
+      };
+    };
+  }
+  TestPlatform platform;
+  Runtime runtime{root_factory, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
 }
 
 TEST_CASE("TestLayoutTypeParticipatesInIdentity") {

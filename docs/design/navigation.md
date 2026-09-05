@@ -546,7 +546,7 @@ NodeExtension gains a general Back capability instead of Runtime checking for a 
 class NodeExtension {
 public:
   [[nodiscard]] virtual bool OnBack(
-      MountedNode& node,
+      ViewNode& node,
       const BackEvent& event
   );
 };

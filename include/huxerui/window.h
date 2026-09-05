@@ -259,7 +259,7 @@ public:
       : WindowTitleBar(detail::CollectChildren(std::forward<Children>(children)...)) {}
 
   /// Measures and places title-bar children inside the current platform control reservations.
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
 /// A lightweight handle for the current Runtime's top-level window operations.

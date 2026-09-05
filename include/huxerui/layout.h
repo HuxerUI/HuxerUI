@@ -105,7 +105,7 @@ template <class T> ErasedLayoutValue MakeErasedLayoutValue(T&& value) {
 }
 } // namespace detail
 
-/// Provides geometry, interaction state, and layout metadata for one Runtime-owned mounted View.
+/// Public interface to a Runtime-owned node in the mounted View tree.
 ///
 /// Custom layouts and NodeExtension callbacks receive this interface; application code does not create or own mounted
 /// nodes. Child ranges, references, and metadata pointers are borrowed and must not be retained across reconciliation.
@@ -119,15 +119,15 @@ template <class T> ErasedLayoutValue MakeErasedLayoutValue(T&& value) {
 /// const Rect local_content = node.ContentBounds();
 /// const Rect window_content = node.LocalToWindowBounds(local_content);
 /// @endcode
-class MountedNode {
+class ViewNode {
 public:
   /// Forward iterator over the current direct children of a mounted node.
   class ChildIterator {
   public:
     using difference_type = std::ptrdiff_t;
-    using value_type = MountedNode;
-    using reference = MountedNode&;
-    using pointer = MountedNode*;
+    using value_type = ViewNode;
+    using reference = ViewNode&;
+    using pointer = ViewNode*;
     using iterator_category = std::forward_iterator_tag;
 
     ChildIterator() = default;
@@ -154,12 +154,12 @@ public:
     bool operator==(const ChildIterator&) const = default;
 
   private:
-    ChildIterator(MountedNode& owner, std::size_t index) : owner_(&owner), index_(index) {}
+    ChildIterator(ViewNode& owner, std::size_t index) : owner_(&owner), index_(index) {}
 
-    MountedNode* owner_ = nullptr;
+    ViewNode* owner_ = nullptr;
     std::size_t index_ = 0;
 
-    friend class MountedNode;
+    friend class ViewNode;
   };
 
   /// Non-owning range over a node's current direct children in mounted order.
@@ -186,14 +186,14 @@ public:
     }
 
   private:
-    explicit ChildrenRange(MountedNode& owner) : owner_(&owner) {}
+    explicit ChildrenRange(ViewNode& owner) : owner_(&owner) {}
 
-    MountedNode* owner_;
+    ViewNode* owner_;
 
-    friend class MountedNode;
+    friend class ViewNode;
   };
 
-  virtual ~MountedNode() = default;
+  virtual ~ViewNode() = default;
 
   /// Returns a borrowed range for measuring or inspecting the current direct children.
   [[nodiscard]] ChildrenRange Children() noexcept {
@@ -201,145 +201,97 @@ public:
   }
 
   /// Returns the number of current direct children.
-  [[nodiscard]] std::size_t ChildCount() const noexcept {
-    return ChildCountImpl();
-  }
+  [[nodiscard]] virtual std::size_t ChildCount() const noexcept = 0;
 
   /// Returns a direct child by its position in the current mounted order.
   /// @param index Zero-based child index, less than ChildCount().
   /// @return A borrowed child reference valid for the current callback.
   /// @throws std::out_of_range if index is outside the current child range.
-  [[nodiscard]] MountedNode& ChildAt(std::size_t index) {
-    if (index >= ChildCount()) {
-      throw std::out_of_range("HuxerUI mounted child index is out of range");
-    }
-    return ChildAtImpl(index);
-  }
+  [[nodiscard]] virtual ViewNode& ChildAt(std::size_t index) = 0;
 
   /// Returns a read-only direct child by its position in the current mounted order.
   /// @param index Zero-based child index, less than ChildCount().
   /// @return A borrowed child reference valid for the current callback.
   /// @throws std::out_of_range if index is outside the current child range.
-  [[nodiscard]] const MountedNode& ChildAt(std::size_t index) const {
-    if (index >= ChildCount()) {
-      throw std::out_of_range("HuxerUI mounted child index is out of range");
-    }
-    return ChildAtImpl(index);
-  }
+  [[nodiscard]] virtual const ViewNode& ChildAt(std::size_t index) const = 0;
 
   /// Returns the latest measured outer size in DIPs, including this node's resolved Padding.
   ///
   /// LayoutContext::Measure() updates this value for a child before returning. It may differ from Bounds() until the
   /// corresponding layout pass completes.
-  [[nodiscard]] Size LayoutSize() const noexcept {
-    return LayoutSizeImpl();
-  }
+  [[nodiscard]] virtual Size LayoutSize() const noexcept = 0;
 
   /// Returns the complete layout rectangle in node-local DIPs, with a zero origin and including Padding.
   ///
   /// Use this rectangle for a full-node background, border, or hit area. It does not clip painting or include overflow
   /// from shadows and descendants.
-  [[nodiscard]] Rect Bounds() const noexcept {
-    return BoundsImpl();
-  }
+  [[nodiscard]] virtual Rect Bounds() const noexcept = 0;
 
   /// Returns Bounds() inset by the node's resolved Padding, with width and height clamped to at least zero.
   ///
   /// The rectangle stays in node-local DIPs; its origin is the left/top content inset, not necessarily zero. Resolved
   /// Padding includes safe-area edges consumed by this node's SafeAreaPadding. Use it for padding-aware content drawing
   /// or hit testing. It is neither a visible clip nor the union of child bounds, and does not subtract Border width.
-  [[nodiscard]] Rect ContentBounds() const noexcept {
-    return ContentBoundsImpl();
-  }
+  [[nodiscard]] virtual Rect ContentBounds() const noexcept = 0;
 
   /// Returns the node's layout origin in its parent's local DIPs, before presentation transforms.
-  [[nodiscard]] Point LayoutOffset() const noexcept {
-    return LayoutOffsetImpl();
-  }
+  [[nodiscard]] virtual Point LayoutOffset() const noexcept = 0;
 
   /// Returns the axis-aligned window-space bound of Bounds() after the resolved presentation transform.
   ///
   /// This is a layout-geometry query, not the clipped visible region or the extent of all painted pixels.
-  [[nodiscard]] Rect PresentationBounds() const noexcept {
-    return PresentationBoundsImpl();
-  }
+  [[nodiscard]] virtual Rect PresentationBounds() const noexcept = 0;
 
   /// Maps a node-local point into window logical coordinates using the resolved presentation transform.
   /// @param point Position in this node's local DIPs; it may lie outside Bounds().
   /// @return The corresponding position in window DIPs, not screen coordinates or physical pixels.
-  [[nodiscard]] Point LocalToWindow(Point point) const noexcept {
-    return LocalToWindowImpl(point);
-  }
+  [[nodiscard]] virtual Point LocalToWindow(Point point) const noexcept = 0;
 
   /// Maps a window-logical point into node-local coordinates when the resolved transform is invertible.
   /// @param point Position in window DIPs, not screen coordinates or physical pixels.
   /// @return The node-local position, or std::nullopt when the resolved transform is non-invertible.
-  [[nodiscard]] std::optional<Point> WindowToLocal(Point point) const noexcept {
-    return WindowToLocalImpl(point);
-  }
+  [[nodiscard]] virtual std::optional<Point> WindowToLocal(Point point) const noexcept = 0;
 
   /// Maps a node-local rectangle to its axis-aligned bounds in window logical coordinates.
   ///
   /// All four corners are transformed, so rotation can make the returned rectangle larger than the transformed shape.
   /// @param bounds Rectangle in this node's local DIPs; it may extend outside Bounds().
   /// @return A conservative axis-aligned rectangle in window DIPs, without clipping.
-  [[nodiscard]] Rect LocalToWindowBounds(Rect bounds) const noexcept {
-    return LocalToWindowBoundsImpl(bounds);
-  }
+  [[nodiscard]] virtual Rect LocalToWindowBounds(Rect bounds) const noexcept = 0;
 
   /// Returns the resolved effective opacity, including ancestor opacity, in the inclusive range from zero to one.
-  [[nodiscard]] float PresentationOpacity() const noexcept {
-    return PresentationOpacityImpl();
-  }
+  [[nodiscard]] virtual float PresentationOpacity() const noexcept = 0;
 
   /// Returns whether this node and its interaction ancestors are enabled.
-  [[nodiscard]] bool IsEnabled() const noexcept {
-    return IsEnabledImpl();
-  }
+  [[nodiscard]] virtual bool IsEnabled() const noexcept = 0;
 
   /// Returns whether this node itself currently owns keyboard focus.
-  [[nodiscard]] bool IsFocused() const noexcept {
-    return IsFocusedImpl();
-  }
+  [[nodiscard]] virtual bool IsFocused() const noexcept = 0;
 
   /// Returns the borrowed effective enabled, hover, focus, and press state for this node.
-  [[nodiscard]] const InteractionState& Interaction() const noexcept {
-    return InteractionImpl();
-  }
+  [[nodiscard]] virtual const InteractionState& Interaction() const noexcept = 0;
 
   /// Returns the configured inter-child spacing in DIPs, or zero when no Spacing modifier was supplied.
   ///
   /// Custom layouts decide how to apply this value; querying it does not insert gaps automatically.
-  [[nodiscard]] float Spacing() const noexcept {
-    return SpacingImpl();
-  }
+  [[nodiscard]] virtual float Spacing() const noexcept = 0;
 
   /// Returns this child's main-axis growth weight for a compatible parent layout, or zero when absent.
   ///
   /// Built-in Row and Column divide remaining bounded main-axis space in proportion to positive growth weights.
-  [[nodiscard]] float GrowFactor() const noexcept {
-    return GrowFactorImpl();
-  }
+  [[nodiscard]] virtual float GrowFactor() const noexcept = 0;
 
   /// Returns the configured main-axis alignment for this node's children, defaulting to MainAxisAlignment::Start.
-  [[nodiscard]] MainAxisAlignment MainAlignment() const noexcept {
-    return MainAlignmentImpl();
-  }
+  [[nodiscard]] virtual MainAxisAlignment MainAlignment() const noexcept = 0;
 
   /// Returns the configured cross-axis alignment for this node's children, defaulting to CrossAxisAlignment::Start.
-  [[nodiscard]] CrossAxisAlignment CrossAlignment() const noexcept {
-    return CrossAlignmentImpl();
-  }
+  [[nodiscard]] virtual CrossAxisAlignment CrossAlignment() const noexcept = 0;
 
   /// Returns the configured horizontal alignment, used by layouts such as Stack and defaulting to Start.
-  [[nodiscard]] HorizontalAlignment HorizontalAlignmentValue() const noexcept {
-    return HorizontalAlignmentImpl();
-  }
+  [[nodiscard]] virtual HorizontalAlignment HorizontalAlignmentValue() const noexcept = 0;
 
   /// Returns the configured vertical alignment, used by layouts such as Stack and defaulting to Start.
-  [[nodiscard]] VerticalAlignment VerticalAlignmentValue() const noexcept {
-    return VerticalAlignmentImpl();
-  }
+  [[nodiscard]] virtual VerticalAlignment VerticalAlignmentValue() const noexcept = 0;
 
   /// Looks up typed parent-child layout metadata applied with View::LayoutValue().
   ///
@@ -394,27 +346,6 @@ public:
   }
 
 protected:
-  virtual std::size_t ChildCountImpl() const noexcept = 0;
-  virtual MountedNode& ChildAtImpl(std::size_t index) = 0;
-  virtual const MountedNode& ChildAtImpl(std::size_t index) const = 0;
-  virtual Size LayoutSizeImpl() const noexcept = 0;
-  virtual Rect BoundsImpl() const noexcept = 0;
-  virtual Rect ContentBoundsImpl() const noexcept = 0;
-  virtual Point LayoutOffsetImpl() const noexcept = 0;
-  virtual Rect PresentationBoundsImpl() const noexcept = 0;
-  virtual Point LocalToWindowImpl(Point point) const noexcept = 0;
-  virtual std::optional<Point> WindowToLocalImpl(Point point) const noexcept = 0;
-  virtual Rect LocalToWindowBoundsImpl(Rect bounds) const noexcept = 0;
-  virtual float PresentationOpacityImpl() const noexcept = 0;
-  virtual bool IsEnabledImpl() const noexcept = 0;
-  virtual bool IsFocusedImpl() const noexcept = 0;
-  virtual const InteractionState& InteractionImpl() const noexcept = 0;
-  virtual float SpacingImpl() const noexcept = 0;
-  virtual float GrowFactorImpl() const noexcept = 0;
-  virtual MainAxisAlignment MainAlignmentImpl() const noexcept = 0;
-  virtual CrossAxisAlignment CrossAlignmentImpl() const noexcept = 0;
-  virtual HorizontalAlignment HorizontalAlignmentImpl() const noexcept = 0;
-  virtual VerticalAlignment VerticalAlignmentImpl() const noexcept = 0;
   virtual const std::any* FindLayoutValue(std::type_index key) const noexcept = 0;
   virtual std::any& EnsureCacheEntry(std::type_index key) = 0;
 };
@@ -425,13 +356,13 @@ protected:
 /// caching and child lifetimes. The context and its borrowed values must not escape the current Measure callback.
 class LayoutContext {
 public:
-  /// Measures one current child and updates its MountedNode::LayoutSize().
+  /// Measures one current child and updates its ViewNode::LayoutSize().
   ///
   /// Measurement does not place the child; add it to the returned LayoutResult to participate in this layout.
   /// @param child A direct child obtained from the owning node's Children() or ChildAt().
   /// @param constraints Valid size limits in DIPs for the child's outer size, including its own Padding.
   /// @return The child's measured outer size under the supplied constraints and its declarative modifiers.
-  [[nodiscard]] Size Measure(MountedNode& child, Constraints constraints) const {
+  [[nodiscard]] Size Measure(ViewNode& child, Constraints constraints) const {
     return measure_(state_, child, constraints);
   }
 
@@ -450,7 +381,7 @@ public:
   }
 
 private:
-  using MeasureFunction = Size (*)(void*, MountedNode&, Constraints);
+  using MeasureFunction = Size (*)(void*, ViewNode&, Constraints);
 
   LayoutContext(
       void* state, MeasureFunction measure, EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics
@@ -477,11 +408,11 @@ private:
 /// public:
 ///   using Layout::Layout;
 ///
-///   static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+///   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
 ///     LayoutResult result;
 ///     float width = 0.0F;
 ///     float height = 0.0F;
-///     for (MountedNode& child : node.Children()) {
+///     for (ViewNode& child : node.Children()) {
 ///       const Size size = context.Measure(child, constraints.Loose());
 ///       result.Place(child, {width, 0.0F});
 ///       width += size.width;
@@ -496,7 +427,7 @@ public:
   /// Records the content-relative origin of one participating direct child.
   struct Placement {
     /// Borrowed child measured through the current LayoutContext.
-    MountedNode* child;
+    ViewNode* child;
     /// Child origin in DIPs relative to the owning layout's content origin, before presentation transforms.
     Point offset;
   };
@@ -508,7 +439,7 @@ public:
   /// @param child A direct child measured through the current LayoutContext.
   /// @param offset Finite child origin in DIPs relative to the owning layout's content origin, excluding its Padding.
   /// @return This result for chaining additional placements or SetSize().
-  LayoutResult& Place(MountedNode& child, Point offset) {
+  LayoutResult& Place(ViewNode& child, Point offset) {
     placements_.push_back({&child, offset});
     return *this;
   }
@@ -540,13 +471,13 @@ namespace detail {
 
 struct LayoutDescriptor {
   std::type_index type;
-  LayoutResult (*measure)(LayoutContext&, MountedNode&, Constraints);
+  LayoutResult (*measure)(LayoutContext&, ViewNode&, Constraints);
 };
 
 template <class Derived> const LayoutDescriptor& LayoutDescriptorFor() {
   static const LayoutDescriptor descriptor{
       typeid(Derived),
-      [](LayoutContext& context, MountedNode& node, Constraints constraints) -> LayoutResult {
+      [](LayoutContext& context, ViewNode& node, Constraints constraints) -> LayoutResult {
         return Derived::Measure(context, node, constraints);
       },
   };

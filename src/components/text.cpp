@@ -35,15 +35,15 @@ struct TextLinkModifier {
 
 class TextLinkExtension final : public NodeExtension {
 public:
-  TextLinkExtension(huxerui::MountedNode&, const TextLinkModifier& modifier) : focus_ring_(modifier.focus_ring) {}
-  void Update(huxerui::MountedNode&, const TextLinkModifier& modifier) {
+  TextLinkExtension(huxerui::ViewNode&, const TextLinkModifier& modifier) : focus_ring_(modifier.focus_ring) {}
+  void Update(huxerui::ViewNode&, const TextLinkModifier& modifier) {
     if (focus_ring_ != modifier.focus_ring) {
       focus_ring_ = modifier.focus_ring;
       InvalidatePaint();
     }
   }
 
-  PaintInvalidation PrepareGeometry(huxerui::MountedNode& base, TextMeasurer& measurer) override {
+  PaintInvalidation PrepareGeometry(huxerui::ViewNode& base, TextMeasurer& measurer) override {
     auto& node = static_cast<MountedNode&>(base);
     auto* platform = dynamic_cast<PlatformAdapter*>(&measurer);
     const Rect content = node.ContentBounds();
@@ -87,11 +87,11 @@ public:
     return changed ? PaintInvalidation::Foreground : PaintInvalidation::None;
   }
 
-  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HitTest(huxerui::ViewNode& node, Point position) const override {
     return node.IsEnabled() && LinkAt(position).has_value();
   }
 
-  PointerResult OnPointer(huxerui::MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(huxerui::ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled() || event.type == PointerEventType::Cancel) {
       pressed_.reset();
       return PointerResult::Ignored;
@@ -123,7 +123,7 @@ public:
     return PointerResult::Observe;
   }
 
-  void OnFocusChanged(huxerui::MountedNode&, bool focused, bool reverse) override {
+  void OnFocusChanged(huxerui::ViewNode&, bool focused, bool reverse) override {
     // Runtime traverses the Text node; this extension chooses the entry link within that composite focus target.
     focused_link_ = focused && reverse && !text_.LinkRanges().empty() ? text_.LinkRanges().size() - 1 : 0;
     if (!focused) {
@@ -132,7 +132,7 @@ public:
     InvalidatePaint();
   }
 
-  bool OnKey(huxerui::MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(huxerui::ViewNode& node, const KeyEvent& event) override {
     if (!node.IsEnabled() || event.type != KeyEventType::Down || text_.LinkRanges().empty()) {
       return false;
     }
@@ -152,7 +152,7 @@ public:
     return false;
   }
 
-  void PaintAboveContent(const huxerui::MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const huxerui::ViewNode& node, PaintContext& context) const override {
     if (!node.Interaction().focus_visible || !node.IsFocused() || focus_ring_.width <= 0.0F ||
         focused_link_ >= text_.LinkRanges().size()) {
       return;

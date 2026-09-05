@@ -361,11 +361,11 @@ float MaximumCross(const Constraints& constraints, bool vertical) {
   return vertical ? constraints.max_width : constraints.max_height;
 }
 
-float TotalSpacing(const MountedNode& node) {
+float TotalSpacing(const ViewNode& node) {
   return node.ChildCount() < 2 ? 0.0F : node.Spacing() * static_cast<float>(node.ChildCount() - 1);
 }
 
-float SumMainSizes(const MountedNode& node, bool vertical) {
+float SumMainSizes(const ViewNode& node, bool vertical) {
   float result = 0.0F;
   for (std::size_t index = 0; index < node.ChildCount(); ++index) {
     result += LayoutMainSize(node.ChildAt(index).LayoutSize(), vertical);
@@ -373,7 +373,7 @@ float SumMainSizes(const MountedNode& node, bool vertical) {
   return result;
 }
 
-float MaxCrossSize(const MountedNode& node, bool vertical) {
+float MaxCrossSize(const ViewNode& node, bool vertical) {
   float result = 0.0F;
   for (std::size_t index = 0; index < node.ChildCount(); ++index) {
     result = std::max(result, LayoutCrossSize(node.ChildAt(index).LayoutSize(), vertical));
@@ -474,33 +474,33 @@ AxisPlacement ResolveAxisPlacement(MainAxisAlignment alignment, float spacing, s
   return result;
 }
 
-AxisPlacement ResolveAxisPlacement(const MountedNode& node, float available, bool vertical) {
+AxisPlacement ResolveAxisPlacement(const ViewNode& node, float available, bool vertical) {
   return ResolveAxisPlacement(node.MainAlignment(), node.Spacing(), node.ChildCount(),
                               SumMainSizes(node, vertical) + TotalSpacing(node), available);
 }
 
 struct FlowLine {
-  std::vector<MountedNode*> children;
+  std::vector<ViewNode*> children;
   float natural_width = 0.0F;
   float height = 0.0F;
   float total_grow = 0.0F;
 };
 
-AxisPlacement ResolveFlowLinePlacement(const MountedNode& node, const FlowLine& line, float available) {
+AxisPlacement ResolveFlowLinePlacement(const ViewNode& node, const FlowLine& line, float available) {
   const std::size_t count = line.children.size();
   float used = count < 2 ? 0.0F : node.Spacing() * static_cast<float>(count - 1);
-  for (const MountedNode* child : line.children) {
+  for (const ViewNode* child : line.children) {
     used += child->LayoutSize().width;
   }
   return ResolveAxisPlacement(node.MainAlignment(), node.Spacing(), count, used, available);
 }
 
-std::vector<FlowLine> BuildFlowLines(LayoutContext& context, MountedNode& node, const Constraints& loose,
+std::vector<FlowLine> BuildFlowLines(LayoutContext& context, ViewNode& node, const Constraints& loose,
                                      float maximum_width) {
   std::vector<FlowLine> lines;
   FlowLine current;
   const bool bounded = std::isfinite(maximum_width);
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     const Size size = context.Measure(child, loose);
     const float candidate = current.children.empty() ? size.width : current.natural_width + node.Spacing() + size.width;
     if (bounded && !current.children.empty() && candidate > maximum_width) {
@@ -521,7 +521,7 @@ std::vector<FlowLine> BuildFlowLines(LayoutContext& context, MountedNode& node, 
   return lines;
 }
 
-float ResolveFlowWidth(const MountedNode& node, const std::vector<FlowLine>& lines, const Constraints& constraints) {
+float ResolveFlowWidth(const ViewNode& node, const std::vector<FlowLine>& lines, const Constraints& constraints) {
   float natural_width = 0.0F;
   bool has_grow = false;
   for (const FlowLine& line : lines) {
@@ -534,11 +534,11 @@ float ResolveFlowWidth(const MountedNode& node, const std::vector<FlowLine>& lin
   return constraints.ConstrainWidth(natural_width);
 }
 
-void MeasureFlowLine(LayoutContext& context, const MountedNode& node, FlowLine& line, const Constraints& loose,
+void MeasureFlowLine(LayoutContext& context, const ViewNode& node, FlowLine& line, const Constraints& loose,
                      float width) {
   const float spacing = node.Spacing() * static_cast<float>(line.children.size() - 1);
   float fixed_width = 0.0F;
-  for (const MountedNode* child : line.children) {
+  for (const ViewNode* child : line.children) {
     if (child->GrowFactor() <= 0.0F) {
       fixed_width += child->LayoutSize().width;
     }
@@ -546,7 +546,7 @@ void MeasureFlowLine(LayoutContext& context, const MountedNode& node, FlowLine& 
 
   if (line.total_grow > 0.0F && std::isfinite(width)) {
     const float remaining = std::max(0.0F, width - fixed_width - spacing);
-    for (MountedNode* child : line.children) {
+    for (ViewNode* child : line.children) {
       if (child->GrowFactor() <= 0.0F) {
         continue;
       }
@@ -556,13 +556,13 @@ void MeasureFlowLine(LayoutContext& context, const MountedNode& node, FlowLine& 
   }
 
   line.height = 0.0F;
-  for (const MountedNode* child : line.children) {
+  for (const ViewNode* child : line.children) {
     line.height = std::max(line.height, child->LayoutSize().height);
   }
   if (node.CrossAlignment() != CrossAxisAlignment::Stretch) {
     return;
   }
-  for (MountedNode* child : line.children) {
+  for (ViewNode* child : line.children) {
     Constraints child_constraints = loose.TightHeight(line.height);
     if (child->GrowFactor() > 0.0F && line.total_grow > 0.0F && std::isfinite(width)) {
       child_constraints = child_constraints.TightWidth(child->LayoutSize().width);
@@ -571,7 +571,7 @@ void MeasureFlowLine(LayoutContext& context, const MountedNode& node, FlowLine& 
   }
 }
 
-LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constraints constraints, bool vertical) {
+LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constraints constraints, bool vertical) {
   const Constraints loose = constraints.Loose();
   const bool stretch = node.CrossAlignment() == CrossAxisAlignment::Stretch;
   const float minimum_cross = MinimumCross(constraints, vertical);
@@ -580,7 +580,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   const Constraints initial = tight_cross ? TightCross(loose, vertical, maximum_cross) : loose;
   float total_grow = 0.0F;
 
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     // A tight cross axis already determines the stretch result. Measuring loose first would recursively double the
     // work of every nested stretching linear layout without contributing another layout decision.
     static_cast<void>(context.Measure(child, initial));
@@ -590,14 +590,14 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   float target_cross = std::clamp(MaxCrossSize(node, vertical), minimum_cross, maximum_cross);
 
   if (stretch && !tight_cross) {
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, TightCross(loose, vertical, target_cross)));
     }
   }
 
   const float spacing = TotalSpacing(node);
   float fixed_main = 0.0F;
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     if (child.GrowFactor() <= 0.0F) {
       fixed_main += LayoutMainSize(child.LayoutSize(), vertical);
     }
@@ -608,7 +608,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   if (total_grow > 0.0F && std::isfinite(max_main)) {
     target_main = max_main;
     const float remaining = std::max(0.0F, target_main - fixed_main - spacing);
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       if (child.GrowFactor() <= 0.0F) {
         continue;
       }
@@ -634,7 +634,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
   LayoutResult result;
   const AxisPlacement placement = ResolveAxisPlacement(node, target_main, vertical);
   float main = placement.leading;
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     const Size child_size = child.LayoutSize();
     const float cross = CrossOffset(target_cross, LayoutCrossSize(child_size, vertical), node.CrossAlignment());
     result.Place(child, vertical ? Point{cross, main} : Point{main, cross});
@@ -647,7 +647,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, MountedNode& node, Constr
 
 } // namespace
 
-VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints) {
+VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints) {
   const Axis axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   const bool vertical = axis == Axis::Vertical;
   if ((vertical && !constraints.HasBoundedHeight()) || (!vertical && !constraints.HasBoundedWidth())) {
@@ -727,7 +727,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
   std::pair<std::size_t, std::size_t> range = resolve_range(scroll_offset);
   for (int pass = 0; pass < 4 && range.second > range.first; ++pass) {
     for (std::size_t index = range.first; index < range.second; ++index) {
-      MountedNode& item = context.Item(index);
+      ViewNode& item = context.Item(index);
       const auto& key = static_cast<detail::MountedNode&>(item).key;
       metrics.RestoreKey(index, key);
       const Size item_size = context.Measure(item, item_constraints);
@@ -746,7 +746,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
 
   float cross_extent = 0.0F;
   for (std::size_t index = range.first; index < range.second; ++index) {
-    MountedNode& item = context.Item(index);
+    ViewNode& item = context.Item(index);
     const auto& key = static_cast<detail::MountedNode&>(item).key;
     metrics.RestoreKey(index, key);
     const Size item_size = context.Measure(item, item_constraints);
@@ -776,7 +776,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
       );
 
   for (std::size_t index = range.first; index < range.second; ++index) {
-    MountedNode& item = context.Item(index);
+    ViewNode& item = context.Item(index);
     const Size item_size = item.LayoutSize();
     const float cross = CrossOffset(measured_cross, LayoutCrossSize(item_size, vertical), node.CrossAlignment());
     const float main = metrics.Offset(index);
@@ -794,7 +794,7 @@ VirtualLayoutResult VirtualList::Measure(VirtualLayoutContext& context, MountedN
 }
 
 std::optional<float> VirtualList::ScrollOffsetForItem(
-    MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent
+    ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent
 ) {
   auto& metrics = node.Cache<VirtualListMetrics>();
   if (!metrics.Initialized() || index >= metrics.ItemCount()) {
@@ -803,7 +803,7 @@ std::optional<float> VirtualList::ScrollOffsetForItem(
   return AlignedScrollOffset(metrics.Offset(index), metrics.Extent(index), viewport_extent, alignment);
 }
 
-VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedNode& node, Constraints constraints) {
+VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints) {
   if (!constraints.HasBoundedWidth() || !constraints.HasBoundedHeight()) {
     throw std::logic_error("HuxerUI VirtualGrid requires bounded width and height");
   }
@@ -885,7 +885,7 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
         if (fixed_row_extent.has_value()) {
           item_constraints = item_constraints.TightHeight(*fixed_row_extent);
         }
-        MountedNode& item = context.Item(index);
+        ViewNode& item = context.Item(index);
         const Size item_size = context.Measure(item, item_constraints);
         row_extents[row - rows.first] = std::max(row_extents[row - rows.first], item_size.height);
       }
@@ -936,7 +936,7 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
     const float y = metrics.Offset(row);
     for (std::size_t index = metrics.FirstItem(row); index < metrics.EndItem(row); ++index) {
       const VirtualGridCell& cell = metrics.Cell(index);
-      MountedNode& item = context.Item(index);
+      ViewNode& item = context.Item(index);
       result.Place(
           item,
           {
@@ -956,7 +956,7 @@ VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, MountedN
 }
 
 std::optional<float> VirtualGrid::ScrollOffsetForItem(
-    MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent
+    ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent
 ) {
   auto& metrics = node.Cache<VirtualGridMetrics>();
   if (!metrics.Initialized() || index >= metrics.ItemCount()) {
@@ -966,15 +966,15 @@ std::optional<float> VirtualGrid::ScrollOffsetForItem(
   return AlignedScrollOffset(metrics.Offset(row), metrics.RowExtent(row), viewport_extent, alignment);
 }
 
-LayoutResult Column::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult Column::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   return MeasureAxisLayout(context, node, constraints, true);
 }
 
-LayoutResult Row::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult Row::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   return MeasureAxisLayout(context, node, constraints, false);
 }
 
-LayoutResult Flow::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult Flow::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   const Constraints loose = constraints.Loose();
   std::vector<FlowLine> lines = BuildFlowLines(context, node, loose, constraints.max_width);
   const float width = ResolveFlowWidth(node, lines, constraints);
@@ -993,7 +993,7 @@ LayoutResult Flow::Measure(LayoutContext& context, MountedNode& node, Constraint
   for (const FlowLine& line : lines) {
     const AxisPlacement placement = ResolveFlowLinePlacement(node, line, width);
     float x = placement.leading;
-    for (MountedNode* child : line.children) {
+    for (ViewNode* child : line.children) {
       result.Place(
           *child,
           {
@@ -1009,15 +1009,15 @@ LayoutResult Flow::Measure(LayoutContext& context, MountedNode& node, Constraint
   return result;
 }
 
-LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult Stack::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   const Constraints loose = constraints.Loose();
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     static_cast<void>(context.Measure(child, loose));
   }
 
   float width = 0.0F;
   float height = 0.0F;
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     width = std::max(width, child.LayoutSize().width);
     height = std::max(height, child.LayoutSize().height);
   }
@@ -1027,17 +1027,17 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
   const bool stretch_width = node.HorizontalAlignmentValue() == HorizontalAlignment::Stretch;
   const bool stretch_height = node.VerticalAlignmentValue() == VerticalAlignment::Stretch;
   if (stretch_width) {
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, loose.TightWidth(width)));
     }
     height = 0.0F;
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       height = std::max(height, child.LayoutSize().height);
     }
     height = constraints.ConstrainHeight(height);
   }
   if (stretch_height) {
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       Constraints child_constraints = loose.TightHeight(height);
       if (stretch_width) {
         child_constraints = child_constraints.TightWidth(width);
@@ -1047,7 +1047,7 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
   }
 
   LayoutResult result;
-  for (MountedNode& child : node.Children()) {
+  for (ViewNode& child : node.Children()) {
     const Size child_size = child.LayoutSize();
     result.Place(
         child,
@@ -1061,12 +1061,12 @@ LayoutResult Stack::Measure(LayoutContext& context, MountedNode& node, Constrain
   return result;
 }
 
-LayoutResult IndexedPages::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult IndexedPages::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   const std::size_t selected_index = node.LayoutValueOr<detail::IndexedPagesSelection>(node.ChildCount());
   if (selected_index >= node.ChildCount()) {
     throw std::logic_error("HuxerUI mounted IndexedPages selected index is out of range");
   }
-  MountedNode& selected = node.ChildAt(selected_index);
+  ViewNode& selected = node.ChildAt(selected_index);
   const Size size = context.Measure(selected, constraints);
   return LayoutResult{}.Place(selected, {}).SetSize(constraints.Constrain(size));
 }

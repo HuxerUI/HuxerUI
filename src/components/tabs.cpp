@@ -71,7 +71,7 @@ struct TabsExpandItems {
 };
 
 struct TabsLayoutPolicy {
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     const std::size_t count = node.ChildCount();
     if (count == 0) {
       LayoutResult empty;
@@ -90,7 +90,7 @@ struct TabsLayoutPolicy {
     widths.reserve(count);
     float natural_width = 0.0F;
     float height = 0.0F;
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       const Size size = context.Measure(child, item_constraints);
       widths.push_back(size.width);
       natural_width += size.width;
@@ -106,7 +106,7 @@ struct TabsLayoutPolicy {
     LayoutResult result;
     float x = 0.0F;
     for (std::size_t index = 0; index < count; ++index) {
-      MountedNode& child = node.ChildAt(index);
+      ViewNode& child = node.ChildAt(index);
       static_cast<void>(context.Measure(child, {widths[index], widths[index], height, height}));
       result.Place(child, {x, 0.0F});
       x += widths[index];
@@ -176,11 +176,11 @@ struct TabsBehavior {
 
 class TabsBehaviorExtension final : public NodeExtension {
 public:
-  TabsBehaviorExtension(MountedNode& node, const TabsBehavior& modifier) {
+  TabsBehaviorExtension(ViewNode& node, const TabsBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const TabsBehavior& modifier) {
+  void Update(ViewNode& node, const TabsBehavior& modifier) {
     const bool selection_changed = initialized_ && selected_index_ != modifier.selected_index;
     selected_index_ = modifier.selected_index;
     enabled_items_ = modifier.enabled_items;
@@ -198,7 +198,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     const float previous_x = indicator_x_.Value();
     const float previous_width = indicator_width_.Value();
@@ -217,7 +217,7 @@ public:
     };
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     if (selected_index_ >= node.ChildCount()) {
       return PaintInvalidation::None;
     }
@@ -268,7 +268,7 @@ public:
     return changed ? PaintInvalidation::Foreground : PaintInvalidation::None;
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     if (!node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control ||
         event.modifiers.meta || enabled_items_.empty()) {
       return false;
@@ -289,7 +289,7 @@ public:
     return requested.has_value();
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const Rect frame = node.Bounds();
     const float divider_height = std::clamp(style_.divider_height, 0.0F, frame.height);
     if (divider_height > 0.0F && style_.divider_color.alpha > 0.0F &&

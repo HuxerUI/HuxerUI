@@ -212,11 +212,11 @@ struct DismissAction {
 
 class DismissActionExtension final : public NodeExtension {
 public:
-  DismissActionExtension(MountedNode& node, const DismissAction& modifier) {
+  DismissActionExtension(ViewNode& node, const DismissAction& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const DismissAction& modifier) {
+  void Update(ViewNode& node, const DismissAction& modifier) {
     static_cast<void>(node);
     request_ = modifier.request;
   }
@@ -248,18 +248,18 @@ struct ToastLifetime {
 
 class ToastLifetimeExtension final : public NodeExtension {
 public:
-  ToastLifetimeExtension(MountedNode& node, const ToastLifetime& modifier) {
+  ToastLifetimeExtension(ViewNode& node, const ToastLifetime& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const ToastLifetime& modifier) {
+  void Update(ViewNode& node, const ToastLifetime& modifier) {
     static_cast<void>(node);
     service_ = modifier.service;
     id_ = modifier.id;
     duration_ = std::max(0.0, modifier.duration);
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     if (dismissed_) {
       return {};
@@ -326,11 +326,11 @@ struct SnackBarLifetime {
 
 class SnackBarLifetimeExtension final : public NodeExtension {
 public:
-  SnackBarLifetimeExtension(MountedNode& node, const SnackBarLifetime& modifier) {
+  SnackBarLifetimeExtension(ViewNode& node, const SnackBarLifetime& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const SnackBarLifetime& modifier) {
+  void Update(ViewNode& node, const SnackBarLifetime& modifier) {
     static_cast<void>(node);
     const bool request_changed = id_ != modifier.id;
     service_ = modifier.service;
@@ -345,16 +345,16 @@ public:
     }
   }
 
-  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HoverHitTest(ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     pause_->Set(pause_->surface_hovered, event.type != HoverEventType::Leave);
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     if (dismissed_ || !remaining_.has_value()) {
       return {};
@@ -401,30 +401,30 @@ struct SnackBarActionPause {
 
 class SnackBarActionPauseExtension final : public NodeExtension {
 public:
-  SnackBarActionPauseExtension(MountedNode& node, const SnackBarActionPause& modifier) {
+  SnackBarActionPauseExtension(ViewNode& node, const SnackBarActionPause& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const SnackBarActionPause& modifier) {
+  void Update(ViewNode& node, const SnackBarActionPause& modifier) {
     static_cast<void>(node);
     pause_ = modifier.pause;
   }
 
-  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HoverHitTest(ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     pause_->Set(pause_->action_hovered, event.type != HoverEventType::Leave);
   }
 
-  void OnFocusChanged(MountedNode& node, bool focused, bool) override {
+  void OnFocusChanged(ViewNode& node, bool focused, bool) override {
     static_cast<void>(node);
     pause_->Set(pause_->action_focused, focused);
   }
 
-  void OnInteraction(MountedNode& node, const InteractionState& state,
+  void OnInteraction(ViewNode& node, const InteractionState& state,
                      const std::optional<InteractionEvent>& event) override {
     static_cast<void>(node);
     static_cast<void>(event);
@@ -494,11 +494,11 @@ struct BottomSheetDragHandle {
 
 class BottomSheetDragHandleExtension final : public NodeExtension {
 public:
-  BottomSheetDragHandleExtension(MountedNode& node, const BottomSheetDragHandle& modifier) {
+  BottomSheetDragHandleExtension(ViewNode& node, const BottomSheetDragHandle& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const BottomSheetDragHandle& modifier) {
+  void Update(ViewNode& node, const BottomSheetDragHandle& modifier) {
     static_cast<void>(node);
     if (state_ == modifier.state) {
       return;
@@ -507,11 +507,11 @@ public:
     pointer_id_.reset();
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return state_ && !state_->dismissed && node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!state_ || state_->dismissed || !node.IsEnabled()) {
       pointer_id_.reset();
       return PointerResult::Ignored;
@@ -577,11 +577,11 @@ struct PresentationContentMotion {
 
 class PresentationContentMotionExtension final : public NodeExtension {
 public:
-  PresentationContentMotionExtension(MountedNode& node, const PresentationContentMotion& modifier) {
+  PresentationContentMotionExtension(ViewNode& node, const PresentationContentMotion& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const PresentationContentMotion& modifier) {
+  void Update(ViewNode& node, const PresentationContentMotion& modifier) {
     static_cast<void>(node);
     if (state_ == modifier.state && bottom_sheet_drag_ == modifier.bottom_sheet_drag && motion_ == modifier.motion &&
         slide_direction_ == modifier.slide_direction && origin_ == modifier.origin &&
@@ -605,7 +605,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     if (!state_) {
       return {};
     }
@@ -1222,15 +1222,15 @@ class DebugOverlayLayout final : public Layout<DebugOverlayLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     const Constraints loose = constraints.Loose();
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, loose));
     }
 
     LayoutResult result;
     if (node.ChildCount() > 0) {
-      MountedNode& panel = node.ChildAt(0);
+      ViewNode& panel = node.ChildAt(0);
       result.Place(
           panel,
           {
@@ -1241,7 +1241,7 @@ public:
     }
     if (node.ChildCount() > 1) {
       constexpr float corner_inset = 30.0F;
-      MountedNode& ribbon = node.ChildAt(1);
+      ViewNode& ribbon = node.ChildAt(1);
       result.Place(
           ribbon,
           {
@@ -1259,13 +1259,13 @@ class MenuItemLayout final : public Layout<MenuItemLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     if (node.ChildCount() != 2) {
       throw std::logic_error("HuxerUI menu item layout requires content and a trailing item");
     }
     const Constraints loose = constraints.Loose();
-    MountedNode& content = node.ChildAt(0);
-    MountedNode& trailing = node.ChildAt(1);
+    ViewNode& content = node.ChildAt(0);
+    ViewNode& trailing = node.ChildAt(1);
     const Size trailing_size = context.Measure(trailing, loose);
     const float spacing = node.Spacing();
     Constraints content_constraints = loose;
@@ -1305,20 +1305,20 @@ struct DebugSampler {
 
 class DebugSamplerExtension final : public NodeExtension {
 public:
-  DebugSamplerExtension(MountedNode& node, const DebugSampler& modifier) {
+  DebugSamplerExtension(ViewNode& node, const DebugSampler& modifier) {
     Update(node, modifier);
     if (metrics_) {
       metrics_->ResetSampling();
     }
   }
 
-  void Update(MountedNode& node, const DebugSampler& modifier) {
+  void Update(ViewNode& node, const DebugSampler& modifier) {
     static_cast<void>(node);
     metrics_ = modifier.metrics;
     snapshot_ = modifier.snapshot;
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     constexpr double sample_interval = 1.0;
     if (!next_sample_at_.has_value()) {
@@ -1708,11 +1708,11 @@ struct MenuExpansionAction {
 
 class MenuExpansionActionExtension final : public NodeExtension {
 public:
-  MenuExpansionActionExtension(huxerui::MountedNode& node, const MenuExpansionAction& modifier) {
+  MenuExpansionActionExtension(huxerui::ViewNode& node, const MenuExpansionAction& modifier) {
     Update(node, modifier);
   }
 
-  void Update(huxerui::MountedNode& node, const MenuExpansionAction& modifier) {
+  void Update(huxerui::ViewNode& node, const MenuExpansionAction& modifier) {
     static_cast<void>(node);
     chain_ = modifier.chain;
     submenu_anchor_ = modifier.submenu_anchor;
@@ -2194,7 +2194,7 @@ View DialogService::StandardContent(
 
 class LayerAnchorExtension final : public NodeExtension {
 public:
-  LayerAnchorExtension(huxerui::MountedNode& node, const LayerAnchor& modifier) {
+  LayerAnchorExtension(huxerui::ViewNode& node, const LayerAnchor& modifier) {
     Update(node, modifier);
   }
 
@@ -2207,7 +2207,7 @@ public:
     }
   }
 
-  void Update(huxerui::MountedNode& node, const LayerAnchor& modifier) {
+  void Update(huxerui::ViewNode& node, const LayerAnchor& modifier) {
     static_cast<void>(node);
     if (state_ == modifier.state_) {
       return;
@@ -2221,7 +2221,7 @@ public:
     }
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(huxerui::MountedNode& node, huxerui::TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(huxerui::ViewNode& node, huxerui::TextMeasurer&) override {
     if (state_) {
       const auto& mounted = static_cast<const detail::MountedNode&>(node);
       state_->UpdateGeometry(node.PresentationBounds(), mounted.presentation.resolved_transform);
@@ -2270,7 +2270,7 @@ public:
 
 class DialogExtension final : public NodeExtension {
 public:
-  DialogExtension(huxerui::MountedNode& node, const Dialog& modifier) {
+  DialogExtension(huxerui::ViewNode& node, const Dialog& modifier) {
     Update(node, modifier);
   }
 
@@ -2283,7 +2283,7 @@ public:
     }
   }
 
-  void Update(huxerui::MountedNode& node, const Dialog& modifier) {
+  void Update(huxerui::ViewNode& node, const Dialog& modifier) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!service_) {
       service_ = DialogServiceFor(mounted);

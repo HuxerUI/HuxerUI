@@ -42,17 +42,17 @@ ScrollBarStyle ResolveScrollBarStyle(
   return style;
 }
 
-std::optional<detail::ScrollBarGeometry> ResolveLocalScrollBarGeometry(const MountedNode& node) {
+std::optional<detail::ScrollBarGeometry> ResolveLocalScrollBarGeometry(const ViewNode& node) {
   return detail::ResolveScrollBarGeometry(static_cast<const detail::MountedNode&>(node));
 }
 
 class ScrollBarExtension final : public NodeExtension {
 public:
-  ScrollBarExtension(MountedNode& node, const ScrollBar& modifier) {
+  ScrollBarExtension(ViewNode& node, const ScrollBar& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const ScrollBar& modifier) {
+  void Update(ViewNode& node, const ScrollBar& modifier) {
     static_cast<void>(node);
     if (!modifier.style.has_value()) {
       throw std::logic_error("HuxerUI compiled scroll bar style is missing");
@@ -60,7 +60,7 @@ public:
     style_ = *modifier.style;
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const float previous_opacity = opacity_.Value();
     const auto finish = [&](NodeExtension::FrameResult result) {
@@ -113,7 +113,7 @@ public:
     return finish({});
   }
 
-  void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) override {
+  void OnScrollActivity(ViewNode& node, const ScrollActivity& activity) override {
     static_cast<void>(node);
     activity_pending_ = true;
     InvalidatePaint();
@@ -125,16 +125,16 @@ public:
     }
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     const auto geometry = ResolveLocalScrollBarGeometry(node);
     return node.IsEnabled() && geometry.has_value() && opacity_.Value() > 0.01F && geometry->track.Contains(position);
   }
 
-  bool HoverHitTest(MountedNode& node, Point position) const override {
+  bool HoverHitTest(ViewNode& node, Point position) const override {
     return HitTest(node, position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     const bool hovered = event.type != HoverEventType::Leave;
     if (hovered_ == hovered) {
@@ -148,7 +148,7 @@ public:
     }
   }
 
-  NodeExtension::PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  NodeExtension::PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!node.IsEnabled()) {
       if (pointer_dragging_) {
@@ -210,7 +210,7 @@ public:
     return NodeExtension::PointerResult::Handled;
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const auto geometry = ResolveLocalScrollBarGeometry(node);
     if (!geometry.has_value() || opacity_.Value() <= 0.0F) {
       return;
@@ -299,10 +299,10 @@ const detail::ModifierDescriptor& ScrollBar::Descriptor() {
             CompileScrollBar(spec, environment, *static_cast<const ScrollBar*>(modifier.value.get()))
         );
       },
-      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+      [](ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<ScrollBarExtension>(node, *static_cast<const ScrollBar*>(value));
       },
-      [](NodeExtension& extension, MountedNode& node, const void* value) {
+      [](NodeExtension& extension, ViewNode& node, const void* value) {
         static_cast<ScrollBarExtension&>(extension).Update(node, *static_cast<const ScrollBar*>(value));
       },
       false,
@@ -317,7 +317,7 @@ namespace huxerui::detail {
 
 std::shared_ptr<GestureRecognizer> InternalAccess::CreateGestureRecognizer(
     NodeExtension& extension,
-    huxerui::MountedNode& node,
+    huxerui::ViewNode& node,
     const PointerEvent& event,
     double timestamp,
     const GestureSettings& settings,

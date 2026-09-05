@@ -19,11 +19,11 @@ class WindowControlsLayout final : public huxerui::Layout<WindowControlsLayout> 
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     const WindowTitleBarMetrics* metrics = context.TitleBarMetrics();
     if (metrics == nullptr || metrics->right_inset <= 0.0F || metrics->height <= 0.0F) {
       LayoutResult result;
-      for (huxerui::MountedNode& child : node.Children()) {
+      for (huxerui::ViewNode& child : node.Children()) {
         static_cast<void>(context.Measure(child, {0.0F, 0.0F, 0.0F, 0.0F}));
         result.Place(child, {});
       }
@@ -39,7 +39,7 @@ public:
     const float left = std::max(0.0F, constraints.max_width - width);
     LayoutResult result;
     for (std::size_t index = 0; index < node.ChildCount(); ++index) {
-      huxerui::MountedNode& child = node.ChildAt(index);
+      huxerui::ViewNode& child = node.ChildAt(index);
       static_cast<void>(context.Measure(child, {button_width, button_width, height, height}));
       result.Place(child, {left + button_width * static_cast<float>(index), 0.0F});
     }
@@ -303,7 +303,7 @@ const detail::ModifierDescriptor& WindowDragRegion::Descriptor() {
   return ApplyOnlyModifierDescriptor<WindowDragRegion, ApplyWindowDragRegion>();
 }
 
-LayoutResult WindowTitleBar::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult WindowTitleBar::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   const WindowTitleBarMetrics* metrics = context.TitleBarMetrics();
   const auto& internal_node = static_cast<const detail::MountedNode&>(node);
   const float requested_left = metrics == nullptr ? 0.0F : metrics->left_inset;

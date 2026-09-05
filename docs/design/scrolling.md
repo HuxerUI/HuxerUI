@@ -69,8 +69,8 @@ Modifier declaration order is used for pre-scroll and reversed for post-scroll, 
 The extension contract reports actual consumption:
 
 ```cpp
-float OnPreScroll(MountedNode& node, Axis axis, float available, ScrollSource source);
-float OnPostScroll(MountedNode& node, Axis axis, float consumed, float available, ScrollSource source);
+float OnPreScroll(ViewNode& node, Axis axis, float available, ScrollSource source);
+float OnPostScroll(ViewNode& node, Axis axis, float consumed, float available, ScrollSource source);
 ```
 
 `available` is the signed delta still available at that point.
@@ -96,8 +96,8 @@ Pointer cancellation ends the direct activity and settles any temporary overscro
 Fling uses the same scroll-container chain and a paired velocity contract:
 
 ```cpp
-float OnPreFling(MountedNode& node, Axis axis, float available_velocity);
-float OnPostFling(MountedNode& node, Axis axis, float consumed_velocity, float available_velocity);
+float OnPreFling(ViewNode& node, Axis axis, float available_velocity);
+float OnPostFling(ViewNode& node, Axis axis, float consumed_velocity, float available_velocity);
 ```
 
 Pre-fling visits outer containers before the selected inner momentum owner.

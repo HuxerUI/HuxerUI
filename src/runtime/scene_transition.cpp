@@ -197,7 +197,7 @@ void SceneTransitionService::Disconnect() noexcept {
 
 class SceneTransitionAnchorExtension final : public NodeExtension {
 public:
-  SceneTransitionAnchorExtension(huxerui::MountedNode& node, const SceneTransitionAnchor& modifier) {
+  SceneTransitionAnchorExtension(huxerui::ViewNode& node, const SceneTransitionAnchor& modifier) {
     Update(node, modifier);
   }
 
@@ -207,7 +207,7 @@ public:
     }
   }
 
-  void Update(huxerui::MountedNode& node, const SceneTransitionAnchor& modifier) {
+  void Update(huxerui::ViewNode& node, const SceneTransitionAnchor& modifier) {
     static_cast<void>(node);
     if (state_ == modifier.state_) {
       return;
@@ -221,7 +221,7 @@ public:
     }
   }
 
-  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node, huxerui::TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(huxerui::ViewNode& node, huxerui::TextMeasurer&) override {
     if (state_) {
       state_->UpdateBounds(node.PresentationBounds());
     }

@@ -103,7 +103,7 @@ struct InternalAccess {
 
   static std::shared_ptr<GestureRecognizer> CreateGestureRecognizer(
       NodeExtension& extension,
-      huxerui::MountedNode& node,
+      huxerui::ViewNode& node,
       const PointerEvent& event,
       double timestamp,
       const GestureSettings& settings,

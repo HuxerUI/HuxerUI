@@ -189,7 +189,7 @@ public:
 
   TopAppBar TitleAlignment(TopAppBarTitleAlignment alignment) &&;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 
 private:
   struct Construction;
@@ -263,7 +263,7 @@ public:
     return std::move(*this).On<DrawerEvents::OpenChanged>(std::forward<Function>(function));
   }
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 
 private:
   bool open_ = false;
@@ -284,7 +284,7 @@ public:
     return std::move(*this).On<DrawerEvents::OpenChanged>(std::forward<Function>(function));
   }
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 
 private:
   bool open_ = false;
@@ -299,7 +299,7 @@ public:
   DrawerLayout(View content, EndDrawer end);
   DrawerLayout(View content, StartDrawer start, EndDrawer end);
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints);
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 
 private:
   struct Construction;

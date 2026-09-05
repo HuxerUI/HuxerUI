@@ -81,10 +81,10 @@ class BoundedNavigationLayout final : public Layout<BoundedNavigationLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     LayoutResult result;
     if (node.ChildCount() > 0) {
-      MountedNode& child = node.ChildAt(0);
+      ViewNode& child = node.ChildAt(0);
       static_cast<void>(context.Measure(child, {0.0F, 180.0F, 0.0F, 120.0F}));
       result.Place(child, {});
     }

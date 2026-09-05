@@ -217,11 +217,11 @@ struct SelectItemBehavior {
 
 class SelectItemBehaviorExtension final : public NodeExtension {
 public:
-  SelectItemBehaviorExtension(MountedNode& node, const SelectItemBehavior& modifier) {
+  SelectItemBehaviorExtension(ViewNode& node, const SelectItemBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode&, const SelectItemBehavior& modifier) {
+  void Update(ViewNode&, const SelectItemBehavior& modifier) {
     state_ = modifier.state;
     if (active_background_ != modifier.active_background || selected_background_ != modifier.selected_background) {
       active_background_ = modifier.active_background;
@@ -231,7 +231,7 @@ public:
     index_ = modifier.index;
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo&) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
     if (HasIndependentSelectInteraction(mounted)) {
       throw std::invalid_argument(
@@ -264,7 +264,7 @@ public:
     return {};
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     if (!state_ || !node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt ||
         event.modifiers.control || event.modifiers.meta) {
       return false;
@@ -291,11 +291,11 @@ public:
     return requested.has_value();
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       return PointerResult::Ignored;
@@ -342,7 +342,7 @@ public:
     return true;
   }
 
-  void PaintBehindContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode& node, PaintContext& context) const override {
     Color color = Color::Transparent();
     if (active_) {
       color = active_background_;
@@ -380,16 +380,16 @@ struct SelectPopupBehavior {
 
 class SelectPopupBehaviorExtension final : public NodeExtension {
 public:
-  SelectPopupBehaviorExtension(MountedNode& node, const SelectPopupBehavior& modifier) {
+  SelectPopupBehaviorExtension(ViewNode& node, const SelectPopupBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode&, const SelectPopupBehavior& modifier) {
+  void Update(ViewNode&, const SelectPopupBehavior& modifier) {
     state_ = modifier.state;
     scroll_controller_ = modifier.scroll_controller;
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo&) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo&) override {
     if (!state_ || state_->enabled.empty()) {
       return {};
     }
@@ -427,16 +427,16 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     if (!state_ || !state_->reveal_active || node.ChildCount() == 0 || !scroll_controller_.IsConnected()) {
       return PaintInvalidation::None;
     }
-    MountedNode& content = node.ChildAt(0);
+    ViewNode& content = node.ChildAt(0);
     if (state_->active_index >= content.ChildCount()) {
       return PaintInvalidation::None;
     }
     state_->reveal_active = false;
-    const MountedNode& active = content.ChildAt(state_->active_index);
+    const ViewNode& active = content.ChildAt(state_->active_index);
     const float top = active.LayoutOffset().y;
     const float bottom = top + active.LayoutSize().height;
     const ScrollMetrics metrics = scroll_controller_.Metrics();
@@ -529,7 +529,7 @@ struct SelectTriggerBehavior {
 
 class SelectTriggerBehaviorExtension final : public NodeExtension {
 public:
-  SelectTriggerBehaviorExtension(MountedNode& node, const SelectTriggerBehavior& modifier) {
+  SelectTriggerBehaviorExtension(ViewNode& node, const SelectTriggerBehavior& modifier) {
     Update(node, modifier);
   }
 
@@ -539,7 +539,7 @@ public:
     }
   }
 
-  void Update(MountedNode&, const SelectTriggerBehavior& modifier) {
+  void Update(ViewNode&, const SelectTriggerBehavior& modifier) {
     source_ = modifier.source;
     style_ = modifier.style;
     events_ = modifier.events;
@@ -553,7 +553,7 @@ public:
     UpdateOpenPopup();
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo&) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     if (!node.IsEnabled() && session_ && popup_.has_value() && session_->layer.has_value()) {
       pointer_id_.reset();
       DismissSelect(session_, *popup_);
@@ -579,7 +579,7 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     if (!session_) {
       return PaintInvalidation::None;
     }
@@ -591,11 +591,11 @@ public:
     return PaintInvalidation::None;
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!node.IsEnabled()) {
       pointer_id_.reset();
       return PointerResult::Ignored;
@@ -621,7 +621,7 @@ public:
     return PointerResult::Handled;
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     if (!node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control ||
         event.modifiers.meta) {
       return false;

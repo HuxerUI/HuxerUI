@@ -154,7 +154,7 @@ Unmount ends the mounted ownership immediately and discards its transient intera
 NodeExtension gains one retained interaction callback:
 
 ```cpp
-virtual void OnInteraction(MountedNode& node, const InteractionState& state,
+virtual void OnInteraction(ViewNode& node, const InteractionState& state,
                            const std::optional<InteractionEvent>& event);
 ```
 
@@ -176,7 +176,7 @@ A newly mounted or replaced extension receives its first snapshot only after `Re
 
 An implementation-only pending-sync flag on the extension entry prevents an early callback with an incomplete default snapshot without adding another observer or binding abstraction.
 
-Compatible extension updates can read `MountedNode::Interaction()` immediately and preserve their retained animation state.
+Compatible extension updates can read `ViewNode::Interaction()` immediately and preserve their retained animation state.
 
 Ordinary node hover follows the deepest interactive hit target and is recomputed from the last pointer position after tree or layout changes.
 Public Hover handlers independently receive direct Enter, Move, and Leave notifications along the same resolved branch without becoming interaction targets.
@@ -533,9 +533,9 @@ enum class PaintInvalidation {
   Both,
 };
 
-virtual PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer);
-virtual void PaintBehindContent(const MountedNode& node, PaintContext& context);
-virtual void PaintAboveContent(const MountedNode& node, PaintContext& context);
+virtual PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer);
+virtual void PaintBehindContent(const ViewNode& node, PaintContext& context);
+virtual void PaintAboveContent(const ViewNode& node, PaintContext& context);
 ```
 
 The existing foreground-only `Paint` callback becomes `PaintAboveContent`.

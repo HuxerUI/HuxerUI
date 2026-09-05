@@ -184,7 +184,7 @@ Layouts measure children only through their context, obey parent constraints, re
 
 Property modifiers apply left to right and do not create wrapper nodes. Retained modifiers preserve declaration order and reconcile compatible `NodeExtension` instances by descriptor and position.
 
-`NodeExtension` is behavior attached to one `MountedNode`, not a general plugin host. Update compatible declarative configuration without resetting retained state, do not retain raw node references, and request frame timing only through `FrameResult`. Paint-visible retained state changes call the protected `InvalidatePaint()` operation; scheduling alone does not invalidate a PaintSequence. Runtime dispatches lifecycle capabilities without concrete modifier or component checks.
+`NodeExtension` is behavior attached to one mounted node through the public `ViewNode` interface, not a general plugin host. Update compatible declarative configuration without resetting retained state, do not retain raw node references, and request frame timing only through `FrameResult`. Paint-visible retained state changes call the protected `InvalidatePaint()` operation; scheduling alone does not invalidate a PaintSequence. Runtime dispatches lifecycle capabilities without concrete modifier or component checks.
 
 Presentation modifiers affect drawing, descendants, clipping, foreground extensions, and pointer hit testing without changing measurement or parent layout. Honor reduced motion and avoid per-frame state recomposition.
 

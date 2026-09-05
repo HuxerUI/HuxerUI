@@ -104,11 +104,11 @@ struct GradientGlow {
 
 class GradientGlow::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode& node, const GradientGlow& value) {
+  Extension(ViewNode& node, const GradientGlow& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode&, const GradientGlow& value) {
+  void Update(ViewNode&, const GradientGlow& value) {
     if (value_ == value) {
       return;
     }
@@ -116,7 +116,7 @@ public:
     InvalidatePaint(PaintInvalidation::Both);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;
@@ -125,7 +125,7 @@ public:
     return PaintInvalidation::Both;
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const float previous = phase_;
     const bool running = AdvanceLoop(phase_, value_.cycle_duration, 0.12F, frame);
     if (phase_ != previous) {
@@ -134,14 +134,14 @@ public:
     return {.needs_frame = running};
   }
 
-  void PaintBehindContent(const MountedNode&, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode&, PaintContext& context) const override {
     const Path outline = Outline();
     if (!outline.IsEmpty()) {
       context.DrawPathShadow(outline, Color::Rgb(151, 117, 255, 0.28F), {}, 22.0F);
     }
   }
 
-  void PaintAboveContent(const MountedNode&, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode&, PaintContext& context) const override {
     const Path outline = Outline();
     if (outline.IsEmpty()) {
       return;
@@ -193,11 +193,11 @@ struct Shimmer {
 
 class Shimmer::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode& node, const Shimmer& value) {
+  Extension(ViewNode& node, const Shimmer& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode&, const Shimmer& value) {
+  void Update(ViewNode&, const Shimmer& value) {
     if (value_ == value) {
       return;
     }
@@ -205,7 +205,7 @@ public:
     InvalidatePaint();
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const float previous = phase_;
     const bool running = AdvanceLoop(phase_, value_.cycle_duration, 0.52F, frame);
     if (phase_ != previous) {
@@ -214,7 +214,7 @@ public:
     return {.needs_frame = running};
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const Size size = node.LayoutSize();
     if (size.width <= 0.0F || size.height <= 0.0F) {
       return;
@@ -253,11 +253,11 @@ struct ParticleField {
 
 class ParticleField::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode&, const ParticleField& value) : value_(value) {
+  Extension(ViewNode&, const ParticleField& value) : value_(value) {
     InitializeParticles();
   }
 
-  void Update(MountedNode&, const ParticleField& value) {
+  void Update(ViewNode&, const ParticleField& value) {
     if (value_ == value) {
       return;
     }
@@ -269,7 +269,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;
@@ -278,12 +278,12 @@ public:
     return PaintInvalidation::Content;
   }
 
-  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HoverHitTest(ViewNode& node, Point position) const override {
     const Size size = node.LayoutSize();
     return node.IsEnabled() && Rect{0.0F, 0.0F, size.width, size.height}.Contains(position);
   }
 
-  void OnHover(MountedNode&, const HoverEvent& event) override {
+  void OnHover(ViewNode&, const HoverEvent& event) override {
     hovering_ = event.type != HoverEventType::Leave;
     if (hovering_ && size_.width > 0.0F && size_.height > 0.0F) {
       pointer_ = {
@@ -294,7 +294,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     if (frame.reduced_motion) {
       const bool changed = !reduced_motion_;
       reduced_motion_ = true;
@@ -332,7 +332,7 @@ public:
     return {.needs_frame = true};
   }
 
-  void PaintBehindContent(const MountedNode&, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode&, PaintContext& context) const override {
     if (size_.width <= 0.0F || size_.height <= 0.0F) {
       return;
     }
@@ -433,11 +433,11 @@ struct LiquidAurora {
 
 class LiquidAurora::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode& node, const LiquidAurora& value) {
+  Extension(ViewNode& node, const LiquidAurora& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode&, const LiquidAurora& value) {
+  void Update(ViewNode&, const LiquidAurora& value) {
     if (value_ == value) {
       return;
     }
@@ -445,7 +445,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;
@@ -454,7 +454,7 @@ public:
     return PaintInvalidation::Content;
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const float previous = phase_;
     const bool running = AdvanceLoop(phase_, value_.cycle_duration, 0.17F, frame);
     if (phase_ != previous) {
@@ -463,7 +463,7 @@ public:
     return {.needs_frame = running};
   }
 
-  void PaintBehindContent(const MountedNode&, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode&, PaintContext& context) const override {
     if (size_.width <= 0.0F || size_.height <= 0.0F) {
       return;
     }
@@ -529,11 +529,11 @@ struct OrbitMotion {
 
 class OrbitMotion::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode& node, const OrbitMotion& value) {
+  Extension(ViewNode& node, const OrbitMotion& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode&, const OrbitMotion& value) {
+  void Update(ViewNode&, const OrbitMotion& value) {
     if (value_ == value) {
       return;
     }
@@ -541,7 +541,7 @@ public:
     InvalidatePaint();
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const float previous = phase_;
     const bool running = AdvanceLoop(phase_, value_.cycle_duration, 0.18F, frame);
     if (phase_ != previous) {
@@ -550,7 +550,7 @@ public:
     return {.needs_frame = running};
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const Size size = node.LayoutSize();
     const float extent = std::min(size.width, size.height);
     if (extent <= 0.0F) {

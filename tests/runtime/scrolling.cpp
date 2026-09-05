@@ -50,22 +50,22 @@ struct ScrollHook {
 
 class ScrollHook::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode& node, const ScrollHook& modifier) {
+  Extension(ViewNode& node, const ScrollHook& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode&, const ScrollHook& modifier) {
+  void Update(ViewNode&, const ScrollHook& modifier) {
     name_ = modifier.name;
     pre_consumption_ = modifier.pre_consumption;
     post_consumption_ = modifier.post_consumption;
   }
 
-  float OnPreScroll(MountedNode&, Axis, float, ScrollSource) override {
+  float OnPreScroll(ViewNode&, Axis, float, ScrollSource) override {
     scroll_hook_calls.push_back(name_ + ".pre");
     return pre_consumption_;
   }
 
-  float OnPostScroll(MountedNode&, Axis, float, float, ScrollSource) override {
+  float OnPostScroll(ViewNode&, Axis, float, float, ScrollSource) override {
     scroll_hook_calls.push_back(name_ + ".post");
     return post_consumption_;
   }
@@ -84,11 +84,11 @@ struct ScrollActivityProbe {
 
 class ScrollActivityProbe::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode&, const ScrollActivityProbe&) {}
+  Extension(ViewNode&, const ScrollActivityProbe&) {}
 
-  void Update(MountedNode&, const ScrollActivityProbe&) {}
+  void Update(ViewNode&, const ScrollActivityProbe&) {}
 
-  void OnScrollActivity(MountedNode&, const ScrollActivity& activity) override {
+  void OnScrollActivity(ViewNode&, const ScrollActivity& activity) override {
     scroll_activities.push_back(activity);
   }
 };

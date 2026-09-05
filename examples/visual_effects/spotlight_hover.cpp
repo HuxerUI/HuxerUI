@@ -18,11 +18,11 @@ float EaseOutCubic(float progress) {
 
 class SpotlightHover::Extension final : public NodeExtension {
 public:
-  Extension(MountedNode& node, const SpotlightHover& value) {
+  Extension(ViewNode& node, const SpotlightHover& value) {
     Update(node, value);
   }
 
-  void Update(MountedNode&, const SpotlightHover& value) {
+  void Update(ViewNode&, const SpotlightHover& value) {
     if (value_ == value) {
       return;
     }
@@ -30,7 +30,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     const Size next = node.LayoutSize();
     if (next == size_) {
       return PaintInvalidation::None;
@@ -42,12 +42,12 @@ public:
     return PaintInvalidation::Content;
   }
 
-  [[nodiscard]] bool HoverHitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HoverHitTest(ViewNode& node, Point position) const override {
     const Size size = node.LayoutSize();
     return node.IsEnabled() && Rect{0.0F, 0.0F, size.width, size.height}.Contains(position);
   }
 
-  void OnHover(MountedNode&, const HoverEvent& event) override {
+  void OnHover(ViewNode&, const HoverEvent& event) override {
     if (event.type == HoverEventType::Leave) {
       hovering_ = false;
       animating_ = opacity_ > 0.0F;
@@ -60,7 +60,7 @@ public:
     InvalidatePaint(PaintInvalidation::Content);
   }
 
-  FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     if (!animating_) {
       return {};
     }
@@ -80,7 +80,7 @@ public:
     return {.needs_frame = animating_};
   }
 
-  void PaintBehindContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode& node, PaintContext& context) const override {
     if (opacity_ <= 0.0F) {
       return;
     }

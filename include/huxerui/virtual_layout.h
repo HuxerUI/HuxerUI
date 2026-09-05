@@ -66,19 +66,19 @@ public:
     return viewport_(state_);
   }
 
-  MountedNode& Item(std::size_t index) const {
+  ViewNode& Item(std::size_t index) const {
     return item_(state_, index);
   }
 
-  [[nodiscard]] Size Measure(MountedNode& item, Constraints constraints) const {
+  [[nodiscard]] Size Measure(ViewNode& item, Constraints constraints) const {
     return measure_(state_, item, constraints);
   }
 
 private:
   using ItemCountFunction = std::size_t (*)(void*);
   using ViewportFunction = VirtualViewport (*)(void*);
-  using ItemFunction = MountedNode& (*)(void*, std::size_t);
-  using MeasureFunction = Size (*)(void*, MountedNode&, Constraints);
+  using ItemFunction = ViewNode& (*)(void*, std::size_t);
+  using MeasureFunction = Size (*)(void*, ViewNode&, Constraints);
 
   VirtualLayoutContext(
       void* state, ItemCountFunction item_count, ViewportFunction viewport, ItemFunction item, MeasureFunction measure
@@ -97,18 +97,18 @@ private:
 class VirtualLayoutResult {
 public:
   struct Placement {
-    MountedNode* item;
+    ViewNode* item;
     Point offset;
     std::optional<SemanticCollectionItem> collection_item;
   };
 
-  VirtualLayoutResult& Place(MountedNode& item, Point offset) {
+  VirtualLayoutResult& Place(ViewNode& item, Point offset) {
     placements_.push_back({&item, offset, std::nullopt});
     return *this;
   }
 
   // Collection metadata follows the same realized placement commit, so Runtime never materializes semantic-only items.
-  VirtualLayoutResult& Place(MountedNode& item, Point offset, SemanticCollectionItem collection_item) {
+  VirtualLayoutResult& Place(ViewNode& item, Point offset, SemanticCollectionItem collection_item) {
     placements_.push_back({&item, offset, std::move(collection_item)});
     return *this;
   }
@@ -179,17 +179,17 @@ namespace detail {
 
 struct VirtualLayoutDescriptor {
   std::type_index type;
-  VirtualLayoutResult (*measure)(VirtualLayoutContext&, MountedNode&, Constraints);
-  std::optional<float> (*scroll_offset_for_item)(MountedNode&, std::size_t, ScrollAlignment, float);
+  VirtualLayoutResult (*measure)(VirtualLayoutContext&, ViewNode&, Constraints);
+  std::optional<float> (*scroll_offset_for_item)(ViewNode&, std::size_t, ScrollAlignment, float);
 };
 
 template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorFor() {
   static const VirtualLayoutDescriptor descriptor{
       typeid(Derived),
-      [](VirtualLayoutContext& context, MountedNode& node, Constraints constraints) -> VirtualLayoutResult {
+      [](VirtualLayoutContext& context, ViewNode& node, Constraints constraints) -> VirtualLayoutResult {
         return Derived::Measure(context, node, constraints);
       },
-      [](MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent)
+      [](ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent)
           -> std::optional<float> {
         if constexpr (requires { Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent); }) {
           return Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent);

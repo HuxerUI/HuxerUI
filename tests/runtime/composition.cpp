@@ -16,7 +16,7 @@ struct NodeEventProbe {
 class NodeEventProbe::Extension final : public NodeExtension {
 public:
   Extension() = default;
-  Extension(MountedNode& node, const NodeEventProbe& modifier) { Update(node, modifier); }
+  Extension(ViewNode& node, const NodeEventProbe& modifier) { Update(node, modifier); }
   ~Extension() override {
     if (destructions_) {
       ++*destructions_;
@@ -25,11 +25,11 @@ public:
 
   using NodeExtension::EmitEvent;
 
-  void Update(MountedNode&, const NodeEventProbe& modifier) { destructions_ = modifier.destructions; }
+  void Update(ViewNode&, const NodeEventProbe& modifier) { destructions_ = modifier.destructions; }
 
-  bool HitTest(MountedNode& node, Point position) const override { return node.Bounds().Contains(position); }
+  bool HitTest(ViewNode& node, Point position) const override { return node.Bounds().Contains(position); }
 
-  PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode&, const PointerEvent& event) override {
     if (event.type == PointerEventType::Up) {
       EmitEvent<SearchSubmitted>("pointer");
     }
@@ -344,12 +344,12 @@ View ViewportClassApp() {
 
 class ProbeModifierExtension final : public NodeExtension {
 public:
-  ProbeModifierExtension(MountedNode& node, const ProbeModifier& modifier);
+  ProbeModifierExtension(ViewNode& node, const ProbeModifier& modifier);
   ~ProbeModifierExtension() override {
     ++extension_destroys;
   }
 
-  void Update(MountedNode& node, const ProbeModifier& modifier);
+  void Update(ViewNode& node, const ProbeModifier& modifier);
 
   int value = 0;
 };
@@ -394,8 +394,8 @@ int opaque_extension_updates = 0;
 
 class OpaqueProbeModifierExtension final : public NodeExtension {
 public:
-  OpaqueProbeModifierExtension(MountedNode& node, const OpaqueProbeModifier& modifier);
-  void Update(MountedNode& node, const OpaqueProbeModifier& modifier);
+  OpaqueProbeModifierExtension(ViewNode& node, const OpaqueProbeModifier& modifier);
+  void Update(ViewNode& node, const OpaqueProbeModifier& modifier);
 };
 
 struct OpaqueProbeModifier {
@@ -404,24 +404,24 @@ struct OpaqueProbeModifier {
   int value;
 };
 
-OpaqueProbeModifierExtension::OpaqueProbeModifierExtension(MountedNode& node, const OpaqueProbeModifier& modifier) {
+OpaqueProbeModifierExtension::OpaqueProbeModifierExtension(ViewNode& node, const OpaqueProbeModifier& modifier) {
   static_cast<void>(node);
   static_cast<void>(modifier);
 }
 
-void OpaqueProbeModifierExtension::Update(MountedNode& node, const OpaqueProbeModifier& modifier) {
+void OpaqueProbeModifierExtension::Update(ViewNode& node, const OpaqueProbeModifier& modifier) {
   static_cast<void>(node);
   static_cast<void>(modifier);
   ++opaque_extension_updates;
 }
 
-ProbeModifierExtension::ProbeModifierExtension(MountedNode& node, const ProbeModifier& modifier)
+ProbeModifierExtension::ProbeModifierExtension(ViewNode& node, const ProbeModifier& modifier)
     : value(modifier.value) {
   static_cast<void>(node);
   ++extension_creations;
 }
 
-void ProbeModifierExtension::Update(MountedNode& node, const ProbeModifier& modifier) {
+void ProbeModifierExtension::Update(ViewNode& node, const ProbeModifier& modifier) {
   static_cast<void>(node);
   value = modifier.value;
   ++extension_updates;
@@ -728,22 +728,22 @@ View RecoveringChildApp() {
 
 class ThrowingModifierExtension final : public NodeExtension {
 public:
-  ThrowingModifierExtension(MountedNode& node, const struct ThrowingModifier& modifier);
+  ThrowingModifierExtension(ViewNode& node, const struct ThrowingModifier& modifier);
 
-  void Update(MountedNode& node, const struct ThrowingModifier& modifier);
+  void Update(ViewNode& node, const struct ThrowingModifier& modifier);
 };
 
 struct ThrowingModifier {
   using Extension = ThrowingModifierExtension;
 };
 
-ThrowingModifierExtension::ThrowingModifierExtension(MountedNode& node, const ThrowingModifier& modifier) {
+ThrowingModifierExtension::ThrowingModifierExtension(ViewNode& node, const ThrowingModifier& modifier) {
   static_cast<void>(node);
   static_cast<void>(modifier);
   throw std::runtime_error("modifier creation failed");
 }
 
-void ThrowingModifierExtension::Update(MountedNode& node, const ThrowingModifier& modifier) {
+void ThrowingModifierExtension::Update(ViewNode& node, const ThrowingModifier& modifier) {
   static_cast<void>(node);
   static_cast<void>(modifier);
 }

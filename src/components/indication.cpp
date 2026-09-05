@@ -333,7 +333,7 @@ InterpolateBorder(const std::optional<Border>& from, const std::optional<Border>
   };
 }
 
-Rect ResolveIndicationFrame(const MountedNode& node, const Indication& indication) {
+Rect ResolveIndicationFrame(const ViewNode& node, const Indication& indication) {
   const auto& mounted = static_cast<const detail::MountedNode&>(node);
   if (mounted.indication_bounds_override.has_value()) {
     return *mounted.indication_bounds_override;
@@ -353,15 +353,15 @@ Rect ResolveIndicationFrame(const MountedNode& node, const Indication& indicatio
 
 class IndicationExtension final : public NodeExtension {
 public:
-  IndicationExtension(MountedNode& node, const Indication& modifier) {
+  IndicationExtension(ViewNode& node, const Indication& modifier) {
     Update(node, modifier);
   }
 
-  IndicationExtension(MountedNode& node, const detail::DefaultIndication& modifier) {
+  IndicationExtension(ViewNode& node, const detail::DefaultIndication& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const Indication& modifier) {
+  void Update(ViewNode& node, const Indication& modifier) {
     std::optional<AnimationSpec> departing_exit;
     if (const IndicationLayer* departing = LayerFor(surface_state_)) {
       departing_exit = departing->exit;
@@ -373,18 +373,18 @@ public:
     InvalidatePaint(PaintInvalidation::Both);
   }
 
-  void Update(MountedNode& node, const detail::DefaultIndication& modifier) {
+  void Update(ViewNode& node, const detail::DefaultIndication& modifier) {
     if (!modifier.value.has_value()) {
       throw std::logic_error("HuxerUI compiled default indication is missing");
     }
     Update(node, *modifier.value);
   }
 
-  bool HoverHitTest(MountedNode& node, Point position) const override {
+  bool HoverHitTest(ViewNode& node, Point position) const override {
     return !detail::IsEmpty(spec_) && node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  void OnInteraction(MountedNode& node, const InteractionState& state,
+  void OnInteraction(ViewNode& node, const InteractionState& state,
                      const std::optional<InteractionEvent>& event) override {
     const PaintInvalidation previous_phases = indication_.ActivePaintPhases();
     indication_.SetInteraction(state, event, ResolveIndicationFrame(node, spec_));
@@ -394,7 +394,7 @@ public:
         detail::MergeInvalidation(previous_phases, indication_.ActivePaintPhases()), surface_invalidation));
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     const PaintInvalidation previous_phases = indication_.ActivePaintPhases();
     const MotionAdvanceResult indication_result = indication_.Advance(frame);
@@ -417,7 +417,7 @@ public:
     };
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!mounted.indication_bounds_override.has_value() && spec_.geometry.layer_size.has_value()) {
       const Size size = *spec_.geometry.layer_size;
@@ -438,11 +438,11 @@ public:
     return PaintInvalidation::Both;
   }
 
-  void PaintBehindContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintBehindContent(const ViewNode& node, PaintContext& context) const override {
     Paint(node, context, IndicationPlacement::BehindContent);
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     Paint(node, context, IndicationPlacement::AboveContent);
   }
 
@@ -499,7 +499,7 @@ private:
     };
   }
 
-  bool RetargetSurface(MountedNode& node, std::optional<AnimationSpec> departing_exit = std::nullopt) {
+  bool RetargetSurface(ViewNode& node, std::optional<AnimationSpec> departing_exit = std::nullopt) {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
     const std::optional<Border> base_border =
         mounted.applies_disabled_appearance && mounted.properties.disabled_border.has_value()
@@ -551,7 +551,7 @@ private:
     return radii;
   }
 
-  void Paint(const MountedNode& node, PaintContext& context, IndicationPlacement placement) const {
+  void Paint(const ViewNode& node, PaintContext& context, IndicationPlacement placement) const {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
     indication_.Paint(context, ResolveIndicationFrame(node, spec_), ResolveCornerRadii(mounted), placement);
   }

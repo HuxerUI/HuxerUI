@@ -112,20 +112,20 @@ struct HoverProbe {
 
 class HoverProbeExtension final : public NodeExtension {
 public:
-  HoverProbeExtension(MountedNode& node, const HoverProbe& modifier) {
+  HoverProbeExtension(ViewNode& node, const HoverProbe& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const HoverProbe& modifier) {
+  void Update(ViewNode& node, const HoverProbe& modifier) {
     static_cast<void>(node);
     hovered_ = modifier.hovered;
   }
 
-  bool HoverHitTest(MountedNode& node, Point position) const override {
+  bool HoverHitTest(ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     if (hovered_) {
       *hovered_ = event.type != HoverEventType::Leave;

@@ -46,11 +46,11 @@ struct TooltipSurfaceHover {
 
 class TooltipSurfaceHoverExtension final : public NodeExtension {
 public:
-  TooltipSurfaceHoverExtension(huxerui::MountedNode& node, const TooltipSurfaceHover& modifier) {
+  TooltipSurfaceHoverExtension(huxerui::ViewNode& node, const TooltipSurfaceHover& modifier) {
     Update(node, modifier);
   }
 
-  void Update(huxerui::MountedNode& node, const TooltipSurfaceHover& modifier) {
+  void Update(huxerui::ViewNode& node, const TooltipSurfaceHover& modifier) {
     static_cast<void>(node);
     target_ = modifier.target;
   }
@@ -61,11 +61,11 @@ public:
     }
   }
 
-  bool HoverHitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HoverHitTest(huxerui::ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
-  void OnHover(huxerui::MountedNode& node, const HoverEvent& event) override {
+  void OnHover(huxerui::ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     if (event.type == HoverEventType::Move) {
       return;
@@ -336,7 +336,7 @@ void DismissTooltipFromLayer(
 
 } // namespace
 
-static std::shared_ptr<TooltipService> TooltipServiceFor(const huxerui::MountedNode& node) {
+static std::shared_ptr<TooltipService> TooltipServiceFor(const huxerui::ViewNode& node) {
   const auto& mounted = static_cast<const detail::MountedNode&>(node);
   const std::any* value = FindEnvironmentValue(mounted.environment, typeid(TooltipService));
   if (!value) {
@@ -394,7 +394,7 @@ private:
 
 class TooltipExtension final : public NodeExtension {
 public:
-  TooltipExtension(huxerui::MountedNode& node, const TooltipConfiguration& modifier)
+  TooltipExtension(huxerui::ViewNode& node, const TooltipConfiguration& modifier)
       : target_(std::make_shared<TooltipTargetState>()) {
     Update(node, modifier);
   }
@@ -408,7 +408,7 @@ public:
     }
   }
 
-  void Update(huxerui::MountedNode& node, const TooltipConfiguration& modifier) {
+  void Update(huxerui::ViewNode& node, const TooltipConfiguration& modifier) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!service_) {
       service_ = TooltipServiceFor(node);
@@ -422,7 +422,7 @@ public:
     InvalidateSemantics();
   }
 
-  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
     target_->focus_visible = mounted.interaction.enabled && mounted.interaction.focus_visible;
     if (!target_->anchor_hovered && !target_->surface_hovered && !target_->focus_visible &&
@@ -499,7 +499,7 @@ public:
     return {};
   }
 
-  PaintInvalidation PrepareGeometry(huxerui::MountedNode& node, huxerui::TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(huxerui::ViewNode& node, huxerui::TextMeasurer&) override {
     const Rect bounds = node.PresentationBounds();
     if (target_->bounds == bounds) {
       return PaintInvalidation::None;
@@ -511,11 +511,11 @@ public:
     return PaintInvalidation::None;
   }
 
-  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HitTest(huxerui::ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  bool HoverHitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HoverHitTest(huxerui::ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
@@ -523,7 +523,7 @@ public:
     return true;
   }
 
-  void OnHover(huxerui::MountedNode& node, const HoverEvent& event) override {
+  void OnHover(huxerui::ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     if (event.type == HoverEventType::Move) {
       target_->anchor_hovered = true;
@@ -543,7 +543,7 @@ public:
     }
   }
 
-  PointerResult OnPointer(huxerui::MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(huxerui::ViewNode& node, const PointerEvent& event) override {
     static_cast<void>(node);
     if (event.type == PointerEventType::Down && event.device_kind != PointerDeviceKind::Touch) {
       Hide(true);
@@ -559,7 +559,7 @@ public:
 
 private:
   std::shared_ptr<GestureRecognizer>
-  CreateGestureRecognizer(huxerui::MountedNode& node, const PointerEvent& event, double timestamp,
+  CreateGestureRecognizer(huxerui::ViewNode& node, const PointerEvent& event, double timestamp,
                           const GestureSettings& settings, Transform2D) override {
     if (event.device_kind != PointerDeviceKind::Touch || !node.IsEnabled()) {
       return {};
@@ -676,12 +676,12 @@ Tooltip::Tooltip(StringVariant message) : message(std::move(message)) {
 const detail::ModifierDescriptor& Tooltip::Descriptor() {
   static const detail::ModifierDescriptor descriptor{
       detail::CompileTooltipModifier,
-      [](MountedNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
+      [](ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
         return std::make_unique<detail::TooltipExtension>(
             node, *static_cast<const detail::TooltipConfiguration*>(value)
         );
       },
-      [](NodeExtension& extension, MountedNode& node, const void* value) {
+      [](NodeExtension& extension, ViewNode& node, const void* value) {
         static_cast<detail::TooltipExtension&>(extension).Update(
             node, *static_cast<const detail::TooltipConfiguration*>(value)
         );

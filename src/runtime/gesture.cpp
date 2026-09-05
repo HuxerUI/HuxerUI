@@ -88,11 +88,11 @@ private:
 
 class MultiTapExtension final : public NodeExtension {
 public:
-  MultiTapExtension(MountedNode&, const MultiTapGesture& gesture) : gesture_(gesture) {
+  MultiTapExtension(ViewNode&, const MultiTapGesture& gesture) : gesture_(gesture) {
     Validate(gesture_);
   }
 
-  void Update(MountedNode&, const MultiTapGesture& gesture) {
+  void Update(ViewNode&, const MultiTapGesture& gesture) {
     Validate(gesture);
     if (gesture_ != gesture) {
       Reset();
@@ -100,7 +100,7 @@ public:
     }
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
@@ -137,7 +137,7 @@ public:
 
 private:
   std::shared_ptr<detail::GestureRecognizer>
-  CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings& settings,
+  CreateGestureRecognizer(ViewNode&, const PointerEvent&, double, const GestureSettings& settings,
                           Transform2D) override {
     return std::make_shared<MultiTapRecognizer>(gesture_, settings);
   }
@@ -232,22 +232,22 @@ private:
 
 class LongPressExtension final : public NodeExtension {
 public:
-  LongPressExtension(MountedNode&, const LongPressGesture& gesture) : gesture_(gesture) {
+  LongPressExtension(ViewNode&, const LongPressGesture& gesture) : gesture_(gesture) {
     Validate(gesture_);
   }
 
-  void Update(MountedNode&, const LongPressGesture& gesture) {
+  void Update(ViewNode&, const LongPressGesture& gesture) {
     Validate(gesture);
     gesture_ = gesture;
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
 private:
   std::shared_ptr<detail::GestureRecognizer>
-  CreateGestureRecognizer(MountedNode&, const PointerEvent& event, double timestamp,
+  CreateGestureRecognizer(ViewNode&, const PointerEvent& event, double timestamp,
                           const GestureSettings& settings, Transform2D) override {
     return std::make_shared<LongPressRecognizer>(gesture_, settings, event, timestamp);
   }
@@ -469,22 +469,22 @@ private:
 
 class DragExtension final : public NodeExtension {
 public:
-  DragExtension(MountedNode&, const DragGesture& gesture) : gesture_(gesture) {
+  DragExtension(ViewNode&, const DragGesture& gesture) : gesture_(gesture) {
     Validate(gesture_);
   }
 
-  void Update(MountedNode&, const DragGesture& gesture) {
+  void Update(ViewNode&, const DragGesture& gesture) {
     Validate(gesture);
     gesture_ = gesture;
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
 private:
   std::shared_ptr<detail::GestureRecognizer>
-  CreateGestureRecognizer(MountedNode&, const PointerEvent& event, double timestamp,
+  CreateGestureRecognizer(ViewNode&, const PointerEvent& event, double timestamp,
                           const GestureSettings& settings, Transform2D) override {
     return std::make_shared<DragRecognizer>(gesture_, settings, event, timestamp);
   }
@@ -695,11 +695,11 @@ private:
 
 class TransformExtension final : public NodeExtension {
 public:
-  TransformExtension(MountedNode&, const TransformGesture&) {}
+  TransformExtension(ViewNode&, const TransformGesture&) {}
 
-  void Update(MountedNode&, const TransformGesture&) {}
+  void Update(ViewNode&, const TransformGesture&) {}
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
@@ -717,7 +717,7 @@ private:
   }
 
   std::shared_ptr<detail::GestureRecognizer>
-  CreateGestureRecognizer(MountedNode&, const PointerEvent& event, double, const GestureSettings&,
+  CreateGestureRecognizer(ViewNode&, const PointerEvent& event, double, const GestureSettings&,
                           Transform2D frozen_node_to_window) override {
     const std::size_t device_index = DeviceIndex(event.device_kind);
     std::shared_ptr<TransformRecognizer> recognizer = recognizers_[device_index].lock();
@@ -737,21 +737,21 @@ namespace detail {
 
 class DragSourceExtension final : public NodeExtension {
 public:
-  DragSourceExtension(huxerui::MountedNode&, const DragSource& source) {
+  DragSourceExtension(huxerui::ViewNode&, const DragSource& source) {
     UpdateCapability(source);
   }
 
-  void Update(huxerui::MountedNode&, const DragSource& source) {
+  void Update(huxerui::ViewNode&, const DragSource& source) {
     UpdateCapability(source);
   }
 
-  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HitTest(huxerui::ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
 private:
   std::shared_ptr<GestureRecognizer>
-  CreateGestureRecognizer(huxerui::MountedNode&, const PointerEvent& event, double timestamp,
+  CreateGestureRecognizer(huxerui::ViewNode&, const PointerEvent& event, double timestamp,
                           const GestureSettings& settings, Transform2D) override {
     return std::make_shared<DragRecognizer>(gesture_, settings, event, timestamp, false);
   }
@@ -774,15 +774,15 @@ private:
 
 class DropTargetExtension final : public NodeExtension {
 public:
-  DropTargetExtension(huxerui::MountedNode&, const DropTarget& target) {
+  DropTargetExtension(huxerui::ViewNode&, const DropTarget& target) {
     UpdateCapability(target);
   }
 
-  void Update(huxerui::MountedNode&, const DropTarget& target) {
+  void Update(huxerui::ViewNode&, const DropTarget& target) {
     UpdateCapability(target);
   }
 
-  bool HitTest(huxerui::MountedNode& node, Point position) const override {
+  bool HitTest(huxerui::ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
@@ -803,7 +803,7 @@ private:
 } // namespace detail
 
 std::shared_ptr<detail::GestureRecognizer>
-NodeExtension::CreateGestureRecognizer(MountedNode&, const PointerEvent&, double, const GestureSettings&,
+NodeExtension::CreateGestureRecognizer(ViewNode&, const PointerEvent&, double, const GestureSettings&,
                                        Transform2D) {
   return {};
 }

@@ -2319,7 +2319,7 @@ private:
 
 class TextFieldExtension final : public NodeExtension {
 public:
-  TextFieldExtension(MountedNode& node, const detail::TextFieldModifier& modifier)
+  TextFieldExtension(ViewNode& node, const detail::TextFieldModifier& modifier)
       : client_(std::make_shared<TextFieldClient>()) {
     Update(node, modifier);
   }
@@ -2328,7 +2328,7 @@ public:
     client_->Detach();
   }
 
-  void Update(MountedNode& node, const detail::TextFieldModifier& modifier) {
+  void Update(ViewNode& node, const detail::TextFieldModifier& modifier) {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!node.IsEnabled()) {
       hovered_ = false;
@@ -2336,7 +2336,7 @@ public:
     client_->Update(mounted, modifier);
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     const bool geometry_changed = client_->UpdateEditorScrollOffset(mounted);
     bool caret_changed = false;
@@ -2349,15 +2349,15 @@ public:
     return result;
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  bool HoverHitTest(MountedNode& node, Point position) const override {
+  bool HoverHitTest(ViewNode& node, Point position) const override {
     return HitTest(node, position);
   }
 
-  void OnHover(MountedNode& node, const HoverEvent& event) override {
+  void OnHover(ViewNode& node, const HoverEvent& event) override {
     static_cast<void>(node);
     const bool hovered = event.type != HoverEventType::Leave;
     if (hovered_ == hovered) {
@@ -2367,13 +2367,13 @@ public:
     InvalidatePaint();
   }
 
-  void OnFocusChanged(MountedNode& node, bool focused, bool) override {
+  void OnFocusChanged(ViewNode& node, bool focused, bool) override {
     static_cast<void>(node);
     client_->FocusChanged(focused);
     InvalidatePaint();
   }
 
-  void OnScrollActivity(MountedNode& node, const ScrollActivity& activity) override {
+  void OnScrollActivity(ViewNode& node, const ScrollActivity& activity) override {
     static_cast<void>(node);
     static_cast<void>(activity);
     client_->ViewportScrolled();
@@ -2396,7 +2396,7 @@ public:
     return local_id == 0 && client_->PerformSemanticAction(action);
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     static_cast<void>(node);
     const PointerResult result = client_->Pointer(event);
     if (result != PointerResult::Ignored) {
@@ -2405,7 +2405,7 @@ public:
     return result;
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     client_->Paint(static_cast<const detail::MountedNode&>(node), context, hovered_);
   }
 

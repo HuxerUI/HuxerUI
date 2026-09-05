@@ -66,7 +66,7 @@ An absent iteration count means unbounded repetition. Tween and keyframe motion 
 MotionController motion;
 motion.AnimateTo(1.0F, TweenSpec{0.24, Easing::EaseOut});
 
-NodeExtension::FrameResult OnFrame(MountedNode&, const FrameInfo& frame) override {
+NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
   const MotionAdvanceResult result = motion.Advance(frame);
   return {result.needs_frame, result.wake_after};
 }

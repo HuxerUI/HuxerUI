@@ -46,10 +46,10 @@ struct GeometryMeasurement;
 
 class OverflowPaintExtension final : public NodeExtension {
 public:
-  OverflowPaintExtension(MountedNode& node, const OverflowPaint& modifier);
+  OverflowPaintExtension(ViewNode& node, const OverflowPaint& modifier);
 
-  void Update(MountedNode& node, const OverflowPaint& modifier);
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override;
+  void Update(ViewNode& node, const OverflowPaint& modifier);
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override;
 
 private:
   Color color_;
@@ -65,11 +65,11 @@ struct OverflowPaint {
 
 class FramePaintInvalidationExtension final : public NodeExtension {
 public:
-  FramePaintInvalidationExtension(MountedNode& node, const FramePaintInvalidation& modifier);
+  FramePaintInvalidationExtension(ViewNode& node, const FramePaintInvalidation& modifier);
 
-  void Update(MountedNode& node, const FramePaintInvalidation& modifier);
+  void Update(ViewNode& node, const FramePaintInvalidation& modifier);
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     static_cast<void>(frame);
     InvalidatePaint();
@@ -85,13 +85,13 @@ struct FramePaintInvalidation {
 
 class GeometryMeasurementExtension final : public NodeExtension {
 public:
-  GeometryMeasurementExtension(MountedNode& node, const GeometryMeasurement& modifier);
+  GeometryMeasurementExtension(ViewNode& node, const GeometryMeasurement& modifier);
 
-  void Update(MountedNode& node, const GeometryMeasurement& modifier);
+  void Update(ViewNode& node, const GeometryMeasurement& modifier);
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) override;
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer) override;
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override;
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override;
 
 private:
   struct Input {
@@ -115,30 +115,30 @@ struct GeometryMeasurement {
 };
 
 FramePaintInvalidationExtension::FramePaintInvalidationExtension(
-    MountedNode& node, const FramePaintInvalidation& modifier
+    ViewNode& node, const FramePaintInvalidation& modifier
 ) {
   static_cast<void>(node);
   static_cast<void>(modifier);
 }
 
-void FramePaintInvalidationExtension::Update(MountedNode& node, const FramePaintInvalidation& modifier) {
+void FramePaintInvalidationExtension::Update(ViewNode& node, const FramePaintInvalidation& modifier) {
   static_cast<void>(node);
   static_cast<void>(modifier);
 }
 
 GeometryMeasurementExtension::GeometryMeasurementExtension(
-    MountedNode& node, const GeometryMeasurement& modifier
+    ViewNode& node, const GeometryMeasurement& modifier
 ) {
   Update(node, modifier);
 }
 
-void GeometryMeasurementExtension::Update(MountedNode& node, const GeometryMeasurement& modifier) {
+void GeometryMeasurementExtension::Update(ViewNode& node, const GeometryMeasurement& modifier) {
   static_cast<void>(node);
   text_ = modifier.text;
 }
 
 NodeExtension::PaintInvalidation
-GeometryMeasurementExtension::PrepareGeometry(MountedNode& node, TextMeasurer& text_measurer) {
+GeometryMeasurementExtension::PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer) {
   geometry_used_expected_text_measurer = &text_measurer == expected_geometry_text_measurer;
   geometry_window_origin = node.LocalToWindow({});
   geometry_local_origin = node.WindowToLocal(geometry_window_origin);
@@ -154,22 +154,22 @@ GeometryMeasurementExtension::PrepareGeometry(MountedNode& node, TextMeasurer& t
   return PaintInvalidation::Foreground;
 }
 
-void GeometryMeasurementExtension::PaintAboveContent(const MountedNode& node, PaintContext& context) const {
+void GeometryMeasurementExtension::PaintAboveContent(const ViewNode& node, PaintContext& context) const {
   static_cast<void>(node);
   context.DrawRect({0.0F, 0.0F, measured_width_, 2.0F}, Color::Black());
 }
 
-OverflowPaintExtension::OverflowPaintExtension(MountedNode& node, const OverflowPaint& modifier)
+OverflowPaintExtension::OverflowPaintExtension(ViewNode& node, const OverflowPaint& modifier)
     : color_(modifier.color) {
   static_cast<void>(node);
 }
 
-void OverflowPaintExtension::Update(MountedNode& node, const OverflowPaint& modifier) {
+void OverflowPaintExtension::Update(ViewNode& node, const OverflowPaint& modifier) {
   static_cast<void>(node);
   color_ = modifier.color;
 }
 
-void OverflowPaintExtension::PaintAboveContent(const MountedNode& node, PaintContext& context) const {
+void OverflowPaintExtension::PaintAboveContent(const ViewNode& node, PaintContext& context) const {
   static_cast<void>(node);
   context.DrawRect({-200.0F, 0.0F, 80.0F, 20.0F}, color_);
 }
@@ -804,7 +804,7 @@ TEST_CASE("MountedNodeConvertsPointsAndAxisAlignedWindowBounds") {
       .translate_x = 10.0F,
       .translate_y = 20.0F,
   };
-  const huxerui::MountedNode& node = mounted;
+  const huxerui::ViewNode& node = mounted;
 
   const Point window_point = node.LocalToWindow({1.0F, 2.0F});
   REQUIRE(window_point == Point{4.0F, 22.0F});
@@ -825,7 +825,7 @@ TEST_CASE("MountedNodeConvertsPointsAndAxisAlignedWindowBounds") {
 TEST_CASE("MountedNodeExposesPaddingDeflatedContentBounds") {
   detail::MountedNode mounted;
   mounted.bounds = {0.0F, 0.0F, 100.0F, 60.0F};
-  const huxerui::MountedNode& node = mounted;
+  const huxerui::ViewNode& node = mounted;
 
   REQUIRE(node.ContentBounds() == node.Bounds());
 

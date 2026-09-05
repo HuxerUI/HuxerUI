@@ -83,7 +83,7 @@ Layouts measure through `LayoutContext`, obey incoming constraints, and return a
 
 ## Mounted coordinate spaces
 
-For custom layouts and retained behavior, use MountedNode's public geometry instead of manually adding offsets or reconstructing transforms:
+For custom layouts and retained behavior, use ViewNode's public geometry instead of manually adding offsets or reconstructing transforms:
 
 | API | Meaning |
 | --- | --- |

@@ -88,9 +88,9 @@ class RuntimeRootLayout final : public huxerui::Layout<RuntimeRootLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
-    for (huxerui::MountedNode& child : node.Children()) {
+    for (huxerui::ViewNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, constraints));
       result.Place(child, {});
     }
@@ -106,7 +106,7 @@ class ApplicationContentLayout final : public huxerui::Layout<ApplicationContent
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
     if (node.ChildCount() > 1) {
       throw std::logic_error("HuxerUI application content container must not contain multiple roots");
@@ -127,9 +127,9 @@ class LayerStackLayout final : public huxerui::Layout<LayerStackLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
-    for (huxerui::MountedNode& child : node.Children()) {
+    for (huxerui::ViewNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, constraints));
       result.Place(child, {});
     }
@@ -149,11 +149,11 @@ struct LayerTransition {
 
 class LayerTransitionExtension final : public NodeExtension {
 public:
-  LayerTransitionExtension(huxerui::MountedNode& node, const LayerTransition& modifier) {
+  LayerTransitionExtension(huxerui::ViewNode& node, const LayerTransition& modifier) {
     Update(node, modifier);
   }
 
-  void Update(huxerui::MountedNode& node, const LayerTransition& modifier) {
+  void Update(huxerui::ViewNode& node, const LayerTransition& modifier) {
     static_cast<void>(node);
     if (state_ == modifier.state) {
       return;
@@ -163,7 +163,7 @@ public:
     completion_sent_ = false;
   }
 
-  FrameResult OnFrame(huxerui::MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
     if (!state_) {
       return {};
     }
@@ -431,14 +431,14 @@ class LayerEntryLayout final : public huxerui::Layout<LayerEntryLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, huxerui::MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
     if (node.ChildCount() == 0) {
       result.SetSize(constraints.Constrain({constraints.max_width, constraints.max_height}));
       return result;
     }
 
-    huxerui::MountedNode& child = node.ChildAt(0);
+    huxerui::ViewNode& child = node.ChildAt(0);
     const auto* placement_value = node.LayoutValue<LayerPlacementValue>();
     const LayerPlacement fallback;
     const LayerPlacement& placement = placement_value && *placement_value ? **placement_value : fallback;
@@ -3258,7 +3258,7 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
   std::vector<std::size_t> next_indices;
   next.reserve(placements.size());
   next_indices.reserve(placements.size());
-  std::unordered_set<huxerui::MountedNode*> placed;
+  std::unordered_set<huxerui::ViewNode*> placed;
 
   for (const auto& placement : placements) {
     if (placement.item == nullptr || !placed.insert(placement.item).second) {

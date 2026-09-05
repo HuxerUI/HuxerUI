@@ -15,7 +15,7 @@ This is a navigation index, not a replacement for the active SDK's public header
 | Containers | `Column`, `Row`, `Flow`, `Stack`, `IndexedPages`, `Spacer` | [layout-and-ui.md](layout-and-ui.md) | `view.h` |
 | Controls | `Button`, `IconButton`, toggles, `Select`, `ComboBox`, `TextField`, tabs, progress, slider | [components.md](components.md) | `view.h` |
 | Date and time | `DatePicker`, `TimePicker`, `DatePickerStyle`, `TimePickerStyle`, chrono controlled values | [components.md](components.md#datepicker-and-timepicker) | `view.h`, `theme.h`, `event.h` |
-| Layout | Built-in layout selection; custom `Layout`, `LayoutContext`, `LayoutResult`, `MountedNode` only when needed | [layout-and-ui.md](layout-and-ui.md) | `view.h`, `layout.h` |
+| Layout | Built-in layout selection; custom `Layout`, `LayoutContext`, `LayoutResult`, `ViewNode` only when needed | [layout-and-ui.md](layout-and-ui.md) | `view.h`, `layout.h` |
 | Mounted geometry | `Bounds`, `ContentBounds`, `LocalToWindow`, `WindowToLocal`, `LocalToWindowBounds` | [layout-and-ui.md](layout-and-ui.md#mounted-coordinate-spaces) | `layout.h` |
 | Virtual layout | `VirtualLayout`, `VirtualLayoutContext`, `VirtualList`, `VirtualGrid` | [layout-and-ui.md](layout-and-ui.md) | `virtual_layout.h`, `view.h` |
 | Scrolling | `ScrollView`, `ScrollController`, `UseScrollController`, `ScrollPhysics`, `ScrollBar` | [layout-and-ui.md](layout-and-ui.md) | `scroll.h`, `modifier.h`, `view.h` |

@@ -60,11 +60,11 @@ ToggleVisual CompileToggleVisual(
 
 class ToggleVisualExtension final : public NodeExtension {
 public:
-  ToggleVisualExtension(MountedNode& node, const ToggleVisual& modifier) {
+  ToggleVisualExtension(ViewNode& node, const ToggleVisual& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const ToggleVisual& modifier) {
+  void Update(ViewNode& node, const ToggleVisual& modifier) {
     kind_ = modifier.kind;
     if (kind_ == ToggleVisualKind::Checkbox) {
       if (!modifier.checkmark.has_value() || !std::holds_alternative<VectorAsset>(*modifier.checkmark)) {
@@ -91,7 +91,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     const float previous_progress = progress_.Value();
     if (kind_ == ToggleVisualKind::Checkbox) {
@@ -118,7 +118,7 @@ public:
     };
   }
 
-  [[nodiscard]] PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     std::optional<Rect> indication_bounds;
     if (kind_ == ToggleVisualKind::Switch) {
@@ -153,7 +153,7 @@ public:
     return PaintInvalidation::None;
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     if (kind_ == ToggleVisualKind::Checkbox) {
       PaintCheckbox(node, context);
     } else if (kind_ == ToggleVisualKind::RadioButton) {
@@ -164,7 +164,7 @@ public:
   }
 
 private:
-  void PaintCheckbox(const MountedNode& node, PaintContext& context) const {
+  void PaintCheckbox(const ViewNode& node, PaintContext& context) const {
     const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const bool disabled = AppliesDisabledAppearance(node);
     if (checked_) {
@@ -183,7 +183,7 @@ private:
     );
   }
 
-  void PaintRadioButton(const MountedNode& node, PaintContext& context) const {
+  void PaintRadioButton(const ViewNode& node, PaintContext& context) const {
     constexpr float full_circle = 6.28318530717958647692F;
     const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const float progress = progress_.Value();
@@ -206,7 +206,7 @@ private:
     }
   }
 
-  void PaintSwitch(const MountedNode& node, PaintContext& context) const {
+  void PaintSwitch(const ViewNode& node, PaintContext& context) const {
     const Rect frame = detail::ResolveToggleControlBounds(static_cast<const detail::MountedNode&>(node));
     const float progress = progress_.Value();
     const bool disabled = AppliesDisabledAppearance(node);

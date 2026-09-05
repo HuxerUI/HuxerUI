@@ -540,7 +540,7 @@ Non-finite bounds fall back to full viewport damage.
 This design introduced the following coordinated breaking changes:
 
 - Replace ambiguous mounted-node absolute geometry with local geometry queries.
-- Replace `NodeExtension::Paint(const MountedNode&, DisplayList&)` with local `PaintContext` recording.
+- Record `NodeExtension` painting through local `PaintContext` operations.
 - Replace the flat `Runtime::BuildFrame()` DisplayList result with a committed RenderFrame containing `RenderScene` and `DamageRegion`.
 - Change every platform renderer from flat command iteration to retained scene traversal.
 - Keep `PaintCommand` as the platform-neutral immutable drawing primitive.

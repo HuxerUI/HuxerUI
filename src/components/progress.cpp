@@ -154,11 +154,11 @@ namespace {
 
 class ProgressCircleVisualExtension final : public NodeExtension {
 public:
-  ProgressCircleVisualExtension(MountedNode& node, const ProgressCircleVisual& modifier) {
+  ProgressCircleVisualExtension(ViewNode& node, const ProgressCircleVisual& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const ProgressCircleVisual& modifier) {
+  void Update(ViewNode& node, const ProgressCircleVisual& modifier) {
     style_ = node.LayoutValueOr<ProgressCircleStyleBinding>(ProgressCircleStyle::Default());
     if (progress_ != modifier.progress) {
       progress_ = modifier.progress;
@@ -166,7 +166,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
       if (phase_.Reset()) {
@@ -183,7 +183,7 @@ public:
     };
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     PaintProgressCircle(context, node.Bounds(), style_, progress_, phase_.Value());
   }
 
@@ -207,11 +207,11 @@ struct ProgressBarVisual {
 
 class ProgressBarVisualExtension final : public NodeExtension {
 public:
-  ProgressBarVisualExtension(MountedNode& node, const ProgressBarVisual& modifier) {
+  ProgressBarVisualExtension(ViewNode& node, const ProgressBarVisual& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const ProgressBarVisual& modifier) {
+  void Update(ViewNode& node, const ProgressBarVisual& modifier) {
     style_ = node.LayoutValueOr<ProgressBarStyleBinding>(ProgressBarStyle::Default());
     if (progress_ != modifier.progress) {
       progress_ = modifier.progress;
@@ -219,7 +219,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(node);
     if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
       if (phase_.Reset()) {
@@ -236,7 +236,7 @@ public:
     };
   }
 
-  void PaintAboveContent(const MountedNode& node, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
     const Rect frame = node.Bounds();
     if (frame.width <= 0.0F || frame.height <= 0.0F) {
       return;

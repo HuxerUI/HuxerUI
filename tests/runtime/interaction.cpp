@@ -44,11 +44,11 @@ struct RecordInteractions;
 
 class RecordInteractionsExtension final : public NodeExtension {
 public:
-  RecordInteractionsExtension(MountedNode&, const RecordInteractions&) {}
+  RecordInteractionsExtension(ViewNode&, const RecordInteractions&) {}
 
-  void Update(MountedNode&, const RecordInteractions&) {}
+  void Update(ViewNode&, const RecordInteractions&) {}
 
-  void OnInteraction(MountedNode&, const InteractionState& state,
+  void OnInteraction(ViewNode&, const InteractionState& state,
                      const std::optional<InteractionEvent>& event) override {
     if (event.has_value()) {
       recorded_interactions.emplace_back(state, *event);
@@ -66,15 +66,15 @@ struct CapturePointer;
 
 class CapturePointerExtension final : public NodeExtension {
 public:
-  CapturePointerExtension(MountedNode&, const CapturePointer&) {}
+  CapturePointerExtension(ViewNode&, const CapturePointer&) {}
 
-  void Update(MountedNode&, const CapturePointer&) {}
+  void Update(ViewNode&, const CapturePointer&) {}
 
-  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HitTest(ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode&, const PointerEvent& event) override {
     return event.type == PointerEventType::Down ? PointerResult::Capture : PointerResult::Handled;
   }
 };
@@ -89,15 +89,15 @@ struct ObservePointer;
 
 class ObservePointerExtension final : public NodeExtension {
 public:
-  ObservePointerExtension(MountedNode&, const ObservePointer&) {}
+  ObservePointerExtension(ViewNode&, const ObservePointer&) {}
 
-  void Update(MountedNode&, const ObservePointer&) {}
+  void Update(ViewNode&, const ObservePointer&) {}
 
-  [[nodiscard]] bool HitTest(MountedNode& node, Point position) const override {
+  [[nodiscard]] bool HitTest(ViewNode& node, Point position) const override {
     return node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode&, const PointerEvent& event) override {
     return event.type == PointerEventType::Down ? PointerResult::Observe : PointerResult::Ignored;
   }
 };
@@ -112,9 +112,9 @@ struct StableExtension;
 
 class StableExtensionState final : public NodeExtension {
 public:
-  StableExtensionState(MountedNode&, const StableExtension&) {}
+  StableExtensionState(ViewNode&, const StableExtension&) {}
 
-  void Update(MountedNode&, const StableExtension&) {
+  void Update(ViewNode&, const StableExtension&) {
     ++stable_extension_updates;
   }
 };

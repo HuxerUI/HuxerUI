@@ -92,15 +92,15 @@ bool custom_selection_requested = false;
 struct CustomSelection {
   class Extension final : public NodeExtension, public TextSelectionClient {
   public:
-    Extension(MountedNode&, const CustomSelection&) {}
+    Extension(ViewNode&, const CustomSelection&) {}
 
-    void Update(MountedNode&, const CustomSelection&) {}
+    void Update(ViewNode&, const CustomSelection&) {}
 
-    bool HitTest(MountedNode& node, Point position) const override {
+    bool HitTest(ViewNode& node, Point position) const override {
       return node.Bounds().Contains(position);
     }
 
-    PointerResult OnPointer(MountedNode&, const PointerEvent& event) override {
+    PointerResult OnPointer(ViewNode&, const PointerEvent& event) override {
       return event.type == PointerEventType::Down ? PointerResult::Observe : PointerResult::Ignored;
     }
 

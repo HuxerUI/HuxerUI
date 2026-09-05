@@ -21,7 +21,7 @@ public:
   using VirtualLayout::VirtualLayout;
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
+  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
     ++virtual_strip_measure_calls;
     constexpr float item_extent = 25.0F;
     const auto viewport = context.Viewport();
@@ -37,7 +37,7 @@ public:
 
     VirtualLayoutResult result;
     for (std::size_t index = first; index < last; ++index) {
-      MountedNode& item = context.Item(index);
+      ViewNode& item = context.Item(index);
       static_cast<void>(context.Measure(item, constraints.LooseHeight().TightHeight(item_extent)));
       result.Place(item, {0.0F, static_cast<float>(index) * item_extent});
     }
@@ -50,7 +50,7 @@ public:
   }
 
   static std::optional<float>
-  ScrollOffsetForItem(MountedNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent) {
+  ScrollOffsetForItem(ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent) {
     constexpr float item_extent = 25.0F;
     const float start = static_cast<float>(index) * item_extent;
     static_cast<void>(node);
@@ -84,7 +84,7 @@ public:
   }
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
+  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
     constexpr float minimum_cell_width = 30.0F;
     constexpr float row_height = 20.0F;
     constexpr float cache_extent = row_height;
@@ -135,7 +135,7 @@ public:
         continue;
       }
 
-      MountedNode& item = context.Item(index);
+      ViewNode& item = context.Item(index);
       if (item.LayoutValueOr<TestGridSpan>(std::size_t{1}) != cell.span) {
         throw std::logic_error("HuxerUI test virtual grid item span does not match its plan");
       }
@@ -223,8 +223,8 @@ public:
   using VirtualLayout::VirtualLayout;
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
-    MountedNode& item = context.Item(0);
+  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
+    ViewNode& item = context.Item(0);
     const Size item_size = context.Measure(item, constraints.Loose());
     VirtualLayoutResult result;
     result.Place(item, {}, SemanticCollectionItem{.index = 0});
@@ -238,8 +238,8 @@ public:
   using VirtualLayout::VirtualLayout;
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, MountedNode& node, huxerui::Constraints constraints) {
-    MountedNode& item = context.Item(0);
+  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
+    ViewNode& item = context.Item(0);
     const Size item_size = context.Measure(item, constraints.Loose());
     VirtualLayoutResult result;
     result.SetCollectionSemantics(
@@ -261,12 +261,12 @@ class RemeasuringVirtualHost final : public Layout<RemeasuringVirtualHost> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     LayoutResult result;
     if (node.ChildCount() == 0) {
       return result.SetSize(constraints.Constrain({}));
     }
-    MountedNode& child = node.ChildAt(0);
+    ViewNode& child = node.ChildAt(0);
     static_cast<void>(context.Measure(child, Constraints{100.0F, 100.0F, 300.0F, 300.0F}));
     static_cast<void>(context.Measure(child, Constraints{100.0F, 100.0F, 100.0F, 100.0F}));
     result.Place(child, {});

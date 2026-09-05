@@ -44,11 +44,11 @@ struct VirtualSemantics {
 
 class VirtualSemanticsExtension final : public NodeExtension {
 public:
-  VirtualSemanticsExtension(MountedNode& node, const VirtualSemantics& modifier) {
+  VirtualSemanticsExtension(ViewNode& node, const VirtualSemantics& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const VirtualSemantics& modifier) {
+  void Update(ViewNode& node, const VirtualSemantics& modifier) {
     static_cast<void>(node);
     if (enabled_ != modifier.enabled) {
       enabled_ = modifier.enabled;

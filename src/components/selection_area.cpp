@@ -256,11 +256,11 @@ private:
 
 class SelectionAreaExtension final : public NodeExtension, public TextSelectionClient {
 public:
-  SelectionAreaExtension(MountedNode&, const detail::SelectionAreaModifier& modifier) : pending_source_(modifier.source) {}
+  SelectionAreaExtension(ViewNode&, const detail::SelectionAreaModifier& modifier) : pending_source_(modifier.source) {}
 
-  void Update(MountedNode&, const detail::SelectionAreaModifier& modifier) { pending_source_ = modifier.source; }
+  void Update(ViewNode&, const detail::SelectionAreaModifier& modifier) { pending_source_ = modifier.source; }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer& measurer) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& measurer) override {
     auto* platform = dynamic_cast<PlatformAdapter*>(&measurer);
     if (!platform) {
       throw std::logic_error("HuxerUI selection geometry requires a platform text layout service");
@@ -276,11 +276,11 @@ public:
 
   TextSelectionClient* GetTextSelectionClient() noexcept override { return this; }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     return node.IsEnabled() && node.Bounds().Contains(position);
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (event.type == PointerEventType::Cancel || !node.IsEnabled()) {
       pointer_active_ = false;
       return PointerResult::Handled;
@@ -327,7 +327,7 @@ public:
     return PointerResult::Ignored;
   }
 
-  void PaintAboveContent(const MountedNode&, PaintContext& context) const override {
+  void PaintAboveContent(const ViewNode&, PaintContext& context) const override {
     const auto selected = selection_.Range();
     if (!selected) {
       return;

@@ -339,11 +339,11 @@ struct NavigationSelectionBehavior {
 
 class NavigationSelectionExtension final : public NodeExtension {
 public:
-  NavigationSelectionExtension(MountedNode& node, const NavigationSelectionBehavior& modifier) {
+  NavigationSelectionExtension(ViewNode& node, const NavigationSelectionBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const NavigationSelectionBehavior& modifier) {
+  void Update(ViewNode& node, const NavigationSelectionBehavior& modifier) {
     static_cast<void>(node);
     reveal_selection_ = reveal_selection_ || selected_index_ != modifier.selected_index;
     selected_index_ = modifier.selected_index;
@@ -353,13 +353,13 @@ public:
     events_ = modifier.events;
   }
 
-  PaintInvalidation PrepareGeometry(MountedNode& node, TextMeasurer&) override {
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     if (!reveal_selection_ || axis_ != Axis::Vertical || selected_index_ >= node.ChildCount() ||
         !scroll_controller_.IsConnected()) {
       return PaintInvalidation::None;
     }
     reveal_selection_ = false;
-    const MountedNode& selected = node.ChildAt(selected_index_);
+    const ViewNode& selected = node.ChildAt(selected_index_);
     const float top = selected.LayoutOffset().y;
     const float bottom = top + selected.LayoutSize().height;
     const ScrollMetrics metrics = scroll_controller_.Metrics();
@@ -371,7 +371,7 @@ public:
     return PaintInvalidation::None;
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     if (!node.IsEnabled() || event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control ||
         event.modifiers.meta || enabled_items_.empty()) {
       return false;
@@ -699,7 +699,7 @@ std::function<View()> NavigationPaneFactory(
   };
 }
 
-Size MeasureSingleChild(LayoutContext& context, MountedNode& node, Constraints constraints, const char* name) {
+Size MeasureSingleChild(LayoutContext& context, ViewNode& node, Constraints constraints, const char* name) {
   if (node.ChildCount() != 1) {
     throw std::logic_error(std::string("HuxerUI ") + name + " must contain exactly one child");
   }
@@ -763,11 +763,11 @@ struct DrawerPresentation {
 
 class DrawerPresentationExtension final : public NodeExtension {
 public:
-  DrawerPresentationExtension(MountedNode& node, const DrawerPresentation& modifier) {
+  DrawerPresentationExtension(ViewNode& node, const DrawerPresentation& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const DrawerPresentation& modifier) {
+  void Update(ViewNode& node, const DrawerPresentation& modifier) {
     state_ = modifier.state;
     role_ = modifier.role;
     if (role_ == DrawerPresentationRole::Scrim) {
@@ -784,7 +784,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(frame);
     if (!state_) {
       return {};
@@ -837,7 +837,7 @@ class DrawerOverlayLayout final : public Layout<DrawerOverlayLayout> {
 public:
   using Layout::Layout;
 
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     if (node.ChildCount() != 2) {
       throw std::logic_error("HuxerUI drawer overlay must contain a scrim and panel");
     }
@@ -872,11 +872,11 @@ public:
 
 class DrawerOverlayExtension final : public NodeExtension {
 public:
-  DrawerOverlayExtension(MountedNode& node, const DrawerOverlayConfiguration& modifier) {
+  DrawerOverlayExtension(ViewNode& node, const DrawerOverlayConfiguration& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode& node, const DrawerOverlayConfiguration& modifier) {
+  void Update(ViewNode& node, const DrawerOverlayConfiguration& modifier) {
     static_cast<void>(modifier);
     const DrawerOverlayConfiguration* configuration = node.LayoutValue<DrawerOverlayValue>();
     if (configuration == nullptr) {
@@ -894,7 +894,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(MountedNode& node, const FrameInfo& frame) override {
+  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     const bool target_visible = TargetVisible();
     const DrawerPlacement placement = Placement();
     if (placement_ != placement) {
@@ -931,7 +931,7 @@ public:
     return {result.needs_frame || focus_changed, result.wake_after};
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     if (!IsModal() || !node.IsEnabled() || !node.Bounds().Contains(position)) {
       return false;
     }
@@ -945,7 +945,7 @@ public:
     return configuration_.side == DrawerSide::Start ? position.x <= edge : position.x >= node.Bounds().width - edge;
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     if (!IsModal() || !node.IsEnabled()) {
       ResetPointer();
       return PointerResult::Ignored;
@@ -996,7 +996,7 @@ public:
     return PointerResult::Handled;
   }
 
-  bool OnBack(MountedNode& node, const BackEvent& event) override {
+  bool OnBack(ViewNode& node, const BackEvent& event) override {
     if (!IsModal()) {
       return false;
     }
@@ -1047,15 +1047,15 @@ private:
     return opening ? configuration_.motion->open : configuration_.motion->close;
   }
 
-  float PanelWidth(MountedNode& node) const {
+  float PanelWidth(ViewNode& node) const {
     return node.ChildCount() < 2 ? 0.0F : node.ChildAt(1).LayoutSize().width;
   }
 
-  Rect PresentedPanelBounds(MountedNode& node) const {
+  Rect PresentedPanelBounds(ViewNode& node) const {
     if (node.ChildCount() < 2) {
       return {};
     }
-    const MountedNode& panel = node.ChildAt(1);
+    const ViewNode& panel = node.ChildAt(1);
     const float width = panel.LayoutSize().width;
     const float closed = configuration_.side == DrawerSide::Start ? -width : width;
     return {
@@ -1066,7 +1066,7 @@ private:
     };
   }
 
-  void EmitOpenChanged(MountedNode& node, bool open) const {
+  void EmitOpenChanged(ViewNode& node, bool open) const {
     if (node.ChildCount() < 2 || open == configuration_.requested_open) {
       return;
     }
@@ -1315,7 +1315,7 @@ void TopAppBar::UpdateConfiguration() {
   );
 }
 
-LayoutResult TopAppBar::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult TopAppBar::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   if (node.ChildCount() != 3) {
     throw std::logic_error("HuxerUI TopAppBar must contain leading, title, and actions slots");
   }
@@ -1439,7 +1439,7 @@ StartDrawer StartDrawer::Open(bool open) && {
   return std::move(*this);
 }
 
-LayoutResult StartDrawer::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult StartDrawer::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   LayoutResult result;
   const Size size = MeasureSingleChild(context, node, constraints, "StartDrawer");
   result.Place(node.ChildAt(0), {});
@@ -1459,7 +1459,7 @@ EndDrawer EndDrawer::Open(bool open) && {
   return std::move(*this);
 }
 
-LayoutResult EndDrawer::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult EndDrawer::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   LayoutResult result;
   const Size size = MeasureSingleChild(context, node, constraints, "EndDrawer");
   result.Place(node.ChildAt(0), {});
@@ -1591,7 +1591,7 @@ DrawerLayout::DrawerLayout(View content, EndDrawer end)
 DrawerLayout::DrawerLayout(View content, StartDrawer start, EndDrawer end)
     : DrawerLayout(Build(std::move(content), std::move(start), std::move(end))) {}
 
-LayoutResult DrawerLayout::Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+LayoutResult DrawerLayout::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   if (node.ChildCount() == 0) {
     throw std::logic_error("HuxerUI DrawerLayout is missing its content");
   }
@@ -1690,7 +1690,7 @@ LayoutResult DrawerLayout::Measure(LayoutContext& context, MountedNode& node, Co
     slot->presentation->placement = inline_placement ? DrawerPlacement::Inline : DrawerPlacement::Modal;
     slot->presentation->target_visible = inline_placement || slot->requested_open;
     const float drawer_width = inline_placement ? width : size.width;
-    MountedNode& drawer = node.ChildAt(slot->child_index);
+    ViewNode& drawer = node.ChildAt(slot->child_index);
     static_cast<void>(context.Measure(drawer, {drawer_width, drawer_width, size.height, size.height}));
     const float x = inline_placement && side == DrawerSide::End ? size.width - drawer_width : 0.0F;
     result.Place(drawer, {x, 0.0F});

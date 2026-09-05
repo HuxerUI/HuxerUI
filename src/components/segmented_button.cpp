@@ -66,16 +66,16 @@ struct SegmentedButtonBehavior {
 
 class SegmentedButtonBehaviorExtension final : public NodeExtension {
 public:
-  SegmentedButtonBehaviorExtension(MountedNode& node, const SegmentedButtonBehavior& modifier) {
+  SegmentedButtonBehaviorExtension(ViewNode& node, const SegmentedButtonBehavior& modifier) {
     Update(node, modifier);
   }
 
-  void Update(MountedNode&, const SegmentedButtonBehavior& modifier) {
+  void Update(ViewNode&, const SegmentedButtonBehavior& modifier) {
     selected_index_ = modifier.selected_index;
     events_ = modifier.events;
   }
 
-  bool OnKey(MountedNode& node, const KeyEvent& event) override {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
     const std::size_t segment_count = node.ChildCount();
     if (!node.IsEnabled() || segment_count == 0 || event.type != KeyEventType::Down || event.modifiers.alt ||
         event.modifiers.control || event.modifiers.meta) {
@@ -107,7 +107,7 @@ const detail::ModifierDescriptor& SegmentedButtonBehavior::Descriptor() {
 }
 
 struct SegmentedButtonLayoutPolicy {
-  static LayoutResult Measure(LayoutContext& context, MountedNode& node, Constraints constraints) {
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     const std::size_t count = node.ChildCount();
     if (count == 0) {
       LayoutResult empty;
@@ -117,7 +117,7 @@ struct SegmentedButtonLayoutPolicy {
 
     float maximum_width = 0.0F;
     float maximum_height = 0.0F;
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       const Size size = context.Measure(child, constraints.Loose());
       maximum_width = std::max(maximum_width, size.width);
       maximum_height = std::max(maximum_height, size.height);
@@ -134,7 +134,7 @@ struct SegmentedButtonLayoutPolicy {
 
     LayoutResult result;
     float x = 0.0F;
-    for (MountedNode& child : node.Children()) {
+    for (ViewNode& child : node.Children()) {
       static_cast<void>(context.Measure(child, {segment_width, segment_width, height, height}));
       result.Place(child, {x, 0.0F});
       x += segment_width - overlap;

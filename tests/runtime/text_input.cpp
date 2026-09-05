@@ -184,21 +184,21 @@ struct TextInputProbe;
 
 class TextInputProbeExtension final : public NodeExtension {
 public:
-  TextInputProbeExtension(MountedNode& node, const TextInputProbe& probe);
+  TextInputProbeExtension(ViewNode& node, const TextInputProbe& probe);
 
-  void Update(MountedNode& node, const TextInputProbe& probe);
+  void Update(ViewNode& node, const TextInputProbe& probe);
 
   std::shared_ptr<huxerui::TextInputClient> GetTextInputClient() noexcept override {
     return client_;
   }
 
-  bool HitTest(MountedNode& node, Point position) const override {
+  bool HitTest(ViewNode& node, Point position) const override {
     static_cast<void>(node);
     static_cast<void>(position);
     return handle_pointer_;
   }
 
-  PointerResult OnPointer(MountedNode& node, const PointerEvent& event) override {
+  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
     static_cast<void>(node);
     if (!handle_pointer_ || event.type != PointerEventType::Down) {
       return PointerResult::Ignored;
@@ -221,11 +221,11 @@ struct TextInputProbe {
   TextOffset pointer_selection = 0;
 };
 
-TextInputProbeExtension::TextInputProbeExtension(MountedNode& node, const TextInputProbe& probe) {
+TextInputProbeExtension::TextInputProbeExtension(ViewNode& node, const TextInputProbe& probe) {
   Update(node, probe);
 }
 
-void TextInputProbeExtension::Update(MountedNode& node, const TextInputProbe& probe) {
+void TextInputProbeExtension::Update(ViewNode& node, const TextInputProbe& probe) {
   static_cast<void>(node);
   client_ = probe.client;
   handle_pointer_ = probe.handle_pointer;
