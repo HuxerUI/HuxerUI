@@ -687,7 +687,7 @@ public:
     return PaintInvalidation::None;
   }
 
-  void OnFocusChanged(MountedNode&, bool focused) override {
+  void OnFocusChanged(MountedNode&, bool focused, bool) override {
     if (!session_) {
       return;
     }

@@ -292,13 +292,16 @@ inline bool PlatformViewControllerEqual(const std::shared_ptr<const PlatformView
 // fields unrelated to that kind stay at their defaults and are ignored by the corresponding Runtime stages.
 using ViewDefaults = void (*)(ViewSpec&, const std::shared_ptr<const Environment>&);
 
+using ViewText = std::variant<StringVariant, AttributedText>;
+const std::string& StringLiteral(const ViewText& text);
+
 struct ViewSpec {
   explicit ViewSpec(NodeKind kind_value) : kind(kind_value) {}
 
   NodeKind kind;
   TextRole text_role = TextRole::Body;
   std::optional<ViewKey> key;
-  StringVariant text;
+  ViewText text;
   ViewProperties properties;
   SemanticPatch component_semantics;
   std::optional<SemanticPatch> author_semantics;

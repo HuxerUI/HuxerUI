@@ -921,8 +921,8 @@ TEST_CASE("TestStateListMutatesInPlaceAndInvalidatesObservedScopes") {
   REQUIRE(state_list_compositions == 2);
   const auto* root = runtime.RootNode();
   REQUIRE(root->children.size() == 2);
-  REQUIRE(root->children[0]->text == "Charlie");
-  REQUIRE(root->children[1]->text == "Alpha");
+  REQUIRE(root->children[0]->text.PlainText() == "Charlie");
+  REQUIRE(root->children[1]->text.PlainText() == "Alpha");
 
   copy.Set(0, "Charlie");
   copy.Move(0, 0);
@@ -1034,13 +1034,13 @@ TEST_CASE("TestRootCompositionRecoversAfterException") {
   root_recovery_state = 2;
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
   REQUIRE(runtime.RootNode()->identity == identity);
-  REQUIRE(runtime.RootNode()->text == "1");
+  REQUIRE(runtime.RootNode()->text.PlainText() == "1");
 
   root_composition_should_throw = false;
   root_recovery_state = 3;
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->identity == identity);
-  REQUIRE(runtime.RootNode()->text == "3");
+  REQUIRE(runtime.RootNode()->text.PlainText() == "3");
 }
 
 TEST_CASE("TestChildReconciliationRecoversAfterException") {
@@ -1066,7 +1066,7 @@ TEST_CASE("TestChildReconciliationRecoversAfterException") {
   REQUIRE(root->children[0]->identity == label_identity);
   REQUIRE(root->children[1]->identity == scope_identity);
   REQUIRE(root->children[1]->children.size() == 1);
-  REQUIRE(root->children[1]->children[0]->text == "0");
+  REQUIRE(root->children[1]->children[0]->text.PlainText() == "0");
 
   child_composition_should_throw = false;
   child_recovery_state = 2;
@@ -1074,9 +1074,9 @@ TEST_CASE("TestChildReconciliationRecoversAfterException") {
 
   root = runtime.RootNode();
   REQUIRE(root->children[0]->identity == label_identity);
-  REQUIRE(root->children[0]->text == "1");
+  REQUIRE(root->children[0]->text.PlainText() == "1");
   REQUIRE(root->children[1]->identity == scope_identity);
-  REQUIRE(root->children[1]->children[0]->text == "2");
+  REQUIRE(root->children[1]->children[0]->text.PlainText() == "2");
 }
 
 TEST_CASE("TestModifierReconciliationPreservesExtensionsOnException") {
@@ -1191,7 +1191,7 @@ TEST_CASE("EnvironmentBoundaryRetainsIdentityWithoutOwningARecomposeScope") {
   const auto* content = environment->children[0].get();
   REQUIRE(content->kind == detail::NodeKind::Scope);
   REQUIRE(content->children.size() == 1);
-  REQUIRE(content->children[0]->text == "environment 1");
+  REQUIRE(content->children[0]->text.PlainText() == "environment 1");
 
   const std::uint64_t environment_identity = environment->identity;
   const std::uint64_t content_identity = content->identity;
@@ -1212,7 +1212,7 @@ TEST_CASE("EnvironmentBoundaryRetainsIdentityWithoutOwningARecomposeScope") {
   REQUIRE(environment->identity == environment_identity);
   REQUIRE(environment->children[0]->identity == content_identity);
   REQUIRE(environment->owned_environment.get() == mounted_environment);
-  REQUIRE(environment->children[0]->children[0]->text == "environment 2");
+  REQUIRE(environment->children[0]->children[0]->text.PlainText() == "environment 2");
 }
 
 TEST_CASE("EnvironmentEntriesInvalidateOnlyTheirExactReaders") {
@@ -1263,11 +1263,11 @@ TEST_CASE("EnvironmentBoundaryRecoversAfterDescendantCompositionFailure") {
       detail::FindEnvironmentValue(environment->environment, typeid(ParameterizedEnvironmentValue));
   REQUIRE(committed != nullptr);
   REQUIRE(std::any_cast<const ParameterizedEnvironmentValue&>(*committed).value == 2);
-  REQUIRE(environment->children[0]->children[0]->text == "environment 1");
+  REQUIRE(environment->children[0]->children[0]->text.PlainText() == "environment 1");
 
   environment_boundary_should_throw = false;
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->children[0]->children[0]->text == "environment 2");
+  REQUIRE(runtime.RootNode()->children[0]->children[0]->text.PlainText() == "environment 2");
 }
 
 TEST_CASE("OneViewDeclarationResolvesIndependentlyUnderDifferentThemes") {
@@ -1403,15 +1403,15 @@ TEST_CASE("TestScopeStateIsolation") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 2);
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "0");
-  REQUIRE(root->children[1]->children[0]->children[0]->text == "0");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "0");
+  REQUIRE(root->children[1]->children[0]->children[0]->text.PlainText() == "0");
 
   InvokeClick(*root->children[0]->children[0]->children[1]);
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "1");
-  REQUIRE(root->children[1]->children[0]->children[0]->text == "0");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "1");
+  REQUIRE(root->children[1]->children[0]->children[0]->text.PlainText() == "0");
 }
 
 TEST_CASE("TestStatePassedIntoScope") {
@@ -1422,13 +1422,13 @@ TEST_CASE("TestStatePassedIntoScope") {
 
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
-  REQUIRE(root->children[0]->children[0]->text == "7");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "7");
 
   InvokeClick(*root->children[1]);
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->text == "8");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "8");
 }
 
 TEST_CASE("TestKeyedScopeIdentity") {
@@ -1444,15 +1444,15 @@ TEST_CASE("TestKeyedScopeIdentity") {
   InvokeClick(*root->children[0]->children[0]->children[1]);
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "1");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "1");
 
   InvokeClick(*root->children[2]);
   runtime.BuildFrame();
 
   root = runtime.RootNode();
   REQUIRE(root->children[1]->identity == first_scope_identity);
-  REQUIRE(root->children[1]->children[0]->children[0]->text == "1");
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "0");
+  REQUIRE(root->children[1]->children[0]->children[0]->text.PlainText() == "1");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "0");
 }
 
 TEST_CASE("TestDuplicateSiblingKeys") {
@@ -1478,17 +1478,17 @@ TEST_CASE("TestRepeatedUseStateCallSite") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 3);
-  REQUIRE(root->children[0]->text == "0");
-  REQUIRE(root->children[1]->text == "0");
-  REQUIRE(root->children[2]->text == "0");
+  REQUIRE(root->children[0]->text.PlainText() == "0");
+  REQUIRE(root->children[1]->text.PlainText() == "0");
+  REQUIRE(root->children[2]->text.PlainText() == "0");
   
   InvokeClick(*root->children[1]);
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->text == "0");
-  REQUIRE(root->children[1]->text == "1");
-  REQUIRE(root->children[2]->text == "0");
+  REQUIRE(root->children[0]->text.PlainText() == "0");
+  REQUIRE(root->children[1]->text.PlainText() == "1");
+  REQUIRE(root->children[2]->text.PlainText() == "0");
 }
 
 TEST_CASE("TestLocalScopeRecomposition") {
@@ -1517,8 +1517,8 @@ TEST_CASE("TestLocalScopeRecomposition") {
   REQUIRE(local_root_compositions == 1);
   REQUIRE(left_scope_compositions == 2);
   REQUIRE(right_scope_compositions == 1);
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "2");
-  REQUIRE(root->children[1]->children[0]->children[0]->text == "0");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "2");
+  REQUIRE(root->children[1]->children[0]->children[0]->text.PlainText() == "0");
 }
 
 TEST_CASE("TestScopeReceivesUpdatedProps") {
@@ -1531,7 +1531,7 @@ TEST_CASE("TestScopeReceivesUpdatedProps") {
   runtime.BuildFrame();
 
   const auto* root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->text == "3");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "3");
   REQUIRE(prop_root_compositions == 1);
   REQUIRE(prop_scope_compositions == 1);
 
@@ -1539,7 +1539,7 @@ TEST_CASE("TestScopeReceivesUpdatedProps") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->text == "4");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "4");
   REQUIRE(prop_root_compositions == 2);
   REQUIRE(prop_scope_compositions == 2);
 }

@@ -419,7 +419,7 @@ public:
     pause_->Set(pause_->action_hovered, event.type != HoverEventType::Leave);
   }
 
-  void OnFocusChanged(MountedNode& node, bool focused) override {
+  void OnFocusChanged(MountedNode& node, bool focused, bool) override {
     static_cast<void>(node);
     pause_->Set(pause_->action_focused, focused);
   }

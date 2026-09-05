@@ -181,6 +181,7 @@ bool detail::TextInteraction::HandleTextSelectionOverlayPointer(const PointerEve
     }
     if (event.type == PointerEventType::Move) {
       if (overlay.dragging) {
+        overlay.drag_position = event.position;
         ExtendFocusedTextSelection(event.position, overlay.dragging_start_handle);
       }
       return true;
@@ -318,6 +319,7 @@ bool detail::TextInteraction::HandleTextSelectionOverlayPointer(const PointerEve
   if (start_hit || end_hit) {
     overlay.pointer_id = event.pointer_id;
     overlay.dragging = true;
+    overlay.drag_position = event.position;
     overlay.paint_dirty = true;
     if (start_hit && end_hit) {
       const float start_x = overlay.start_handle_hit_rect.x + overlay.start_handle_hit_rect.width * 0.5F;
@@ -345,13 +347,12 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
   // shared, themed UI above application layers and outside the focused node's ancestor clips and transforms.
   detail::TextSelectionOverlayState& overlay = text_selection_overlay_.state;
   RenderNode& render_node = text_selection_overlay_.render_node;
-  std::optional<std::pair<Rect, Rect>> selection_geometry;
+  std::optional<TextSelectionGeometry> selection_geometry;
   if (overlay.visible && !overlay.dismissing && runtime_state_.mounted_root_ &&
       runtime_state_.focused_node_identity_.has_value()) {
-    Rect start;
-    Rect end;
-    if (QueryFocusedTextSelectionGeometry(start, end)) {
-      selection_geometry = std::pair{start, end};
+    const auto geometry = QueryFocusedTextSelectionGeometry();
+    if (geometry.start || geometry.end || geometry.toolbar_anchor) {
+      selection_geometry = geometry;
     }
   }
   if (!overlay.paint_dirty) {
@@ -359,7 +360,7 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
       return;
     }
     if (overlay.visible && !overlay.dismissing && selection_geometry.has_value() && overlay.has_painted_geometry &&
-        overlay.painted_start == selection_geometry->first && overlay.painted_end == selection_geometry->second) {
+        overlay.painted_geometry == *selection_geometry) {
       return;
     }
   }
@@ -460,7 +461,8 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
     return;
   }
 
-  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+  detail::MountedNode* focused =
+      detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (!focused || !selection_geometry.has_value()) {
     HideTextSelectionOverlay();
     overlay.paint_dirty = false;
@@ -469,11 +471,13 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
     finish();
     return;
   }
-  const Rect start = selection_geometry->first;
-  const Rect end = selection_geometry->second;
+  // Fallback rectangles place the toolbar only; an unmounted endpoint must not gain a synthetic draggable handle.
+  const Rect anchor = selection_geometry->toolbar_anchor.value_or(
+      selection_geometry->start.value_or(selection_geometry->end.value_or(Rect{})));
+  const Rect start = selection_geometry->start.value_or(anchor);
+  const Rect end = selection_geometry->end.value_or(anchor);
   overlay.has_painted_geometry = true;
-  overlay.painted_start = start;
-  overlay.painted_end = end;
+  overlay.painted_geometry = *selection_geometry;
 
   constexpr float handle_radius = 6.0F;
   if (overlay.show_handles) {
@@ -491,22 +495,28 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
     constexpr float handle_hit_radius = 22.0F;
     const Point start_center{start.x, start.y + start.height + handle_radius};
     const Point end_center{end.x, end.y + end.height + handle_radius};
-    overlay.start_handle_hit_rect = {
-        start_center.x - handle_hit_radius,
-        start_center.y - handle_hit_radius,
-        handle_hit_radius * 2.0F,
-        handle_hit_radius * 2.0F,
-    };
-    overlay.end_handle_hit_rect = {
-        end_center.x - handle_hit_radius,
-        end_center.y - handle_hit_radius,
-        handle_hit_radius * 2.0F,
-        handle_hit_radius * 2.0F,
-    };
-    context.DrawRect({start_center.x - 1.0F, start.y + start.height, 2.0F, handle_radius}, handle_color);
-    context.DrawRect({end_center.x - 1.0F, end.y + end.height, 2.0F, handle_radius}, handle_color);
-    context.DrawCircle(start_center, handle_radius, handle_color);
-    context.DrawCircle(end_center, handle_radius, handle_color);
+    overlay.start_handle_hit_rect = {};
+    overlay.end_handle_hit_rect = {};
+    if (selection_geometry->start) {
+      overlay.start_handle_hit_rect = {
+          start_center.x - handle_hit_radius,
+          start_center.y - handle_hit_radius,
+          handle_hit_radius * 2.0F,
+          handle_hit_radius * 2.0F
+      };
+      context.DrawRect({start_center.x - 1.0F, start.y + start.height, 2.0F, handle_radius}, handle_color);
+      context.DrawCircle(start_center, handle_radius, handle_color);
+    }
+    if (selection_geometry->end) {
+      overlay.end_handle_hit_rect = {
+          end_center.x - handle_hit_radius,
+          end_center.y - handle_hit_radius,
+          handle_hit_radius * 2.0F,
+          handle_hit_radius * 2.0F
+      };
+      context.DrawRect({end_center.x - 1.0F, end.y + end.height, 2.0F, handle_radius}, handle_color);
+      context.DrawCircle(end_center, handle_radius, handle_color);
+    }
   } else {
     overlay.start_handle_hit_rect = {};
     overlay.end_handle_hit_rect = {};

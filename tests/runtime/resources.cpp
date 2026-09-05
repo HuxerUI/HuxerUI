@@ -173,10 +173,9 @@ public:
     TextLayoutOptions options;
   };
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
-    measurements.push_back({std::string(text), options});
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) override {
+    measurements.push_back({text.PlainText(), options});
     return TestPlatform::MeasureText(text, style, max_width, options);
   }
 
@@ -607,7 +606,7 @@ TEST_CASE("MountedTextAndCanvasInheritLocaleWithoutSubscribingExplicitShaping") 
   const auto find_paragraph = [](const FlattenedScene& scene, std::string_view text) {
     for (const PaintCommand& command : scene.Commands()) {
       if (const auto* paragraph = std::get_if<DrawTextCommand>(&command);
-          paragraph != nullptr && paragraph->text == text) {
+          paragraph != nullptr && paragraph->text.PlainText() == text) {
         return paragraph;
       }
     }

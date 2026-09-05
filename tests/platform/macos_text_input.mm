@@ -1,6 +1,8 @@
 #import <AppKit/AppKit.h>
 
 #include "appkit_text_input.h"
+#include "appkit_renderer.h"
+#include "text_internal.h"
 #include "runtime_test_support.h"
 
 namespace huxerui::test {
@@ -228,4 +230,37 @@ TEST_CASE("TestMacTextInputNextSelectorUsesRuntimeFocusAction") {
 }
 
 } // namespace
+
+TEST_CASE("MacTextLayoutAlignsExplicitNoWrapLinesWithinAvailableWidth") {
+  @autoreleasepool {
+    detail::AppKitRenderer renderer;
+    const TextStyle style{Font::Monospace(20.0F), Color::Black()};
+    for (const TextDirection direction : {TextDirection::LeftToRight, TextDirection::RightToLeft}) {
+      const std::string text = direction == TextDirection::LeftToRight ? "ab\nabcd" : "אב\nאבגד";
+      for (const TextAlign align : {TextAlign::Leading, TextAlign::Center, TextAlign::Trailing}) {
+        const TextLayoutOptions options{.shaping = {.direction = direction}, .align = align, .wrap = TextWrap::NoWrap};
+        const auto narrow = renderer.CreateTextLayout(text, style, 160.0F, options);
+        const auto wide = renderer.CreateTextLayout(text, style, 240.0F, options);
+        const float shift = align == TextAlign::Center ? 40.0F
+            : ((align == TextAlign::Trailing) == (direction == TextDirection::LeftToRight) ? 80.0F : 0.0F);
+        REQUIRE(narrow->Measure() == wide->Measure());
+        for (const TextOffset offset : {TextOffset{0}, TextOffset{3}}) {
+          const Rect first = narrow->CaretRect(offset, TextAffinity::Downstream);
+          const Rect second = wide->CaretRect(offset, TextAffinity::Downstream);
+          REQUIRE(second.x - first.x == Catch::Approx(shift));
+          REQUIRE(second.y == first.y);
+          const TextPosition hit = wide->HitTest({second.x, second.y + second.height * 0.5F});
+          REQUIRE(hit.offset == offset);
+        }
+        const auto first = narrow->RangeRects({0, 7});
+        const auto second = wide->RangeRects({0, 7});
+        REQUIRE(first.size() == second.size());
+        for (std::size_t index = 0; index < first.size(); ++index) {
+          REQUIRE(second[index].x - first[index].x == Catch::Approx(shift));
+        }
+      }
+    }
+  }
+}
+
 } // namespace huxerui::test

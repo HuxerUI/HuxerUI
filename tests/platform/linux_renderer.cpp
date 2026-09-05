@@ -2,6 +2,7 @@
 
 #include <gtk/gtk.h>
 
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -11,7 +12,7 @@
 
 #include "linux_renderer.h"
 
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -640,6 +641,97 @@ TEST_CASE("LinuxRendererRepeatedLifecycleIsStable") {
   // A fresh renderer torn down without Initialize() must stay a no-op.
   detail::LinuxRenderer fresh;
   fresh.Discard();
+}
+
+TEST_CASE("LinuxAttributedParagraphKeepsMixedFontAndRangeGeometryAligned") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  const AttributedText text{
+    TextSpan("small "),
+    TextSpan("LARGE").Style({.font_size = 36.0F, .font_weight = FontWeight::Bold}),
+    TextSpan(" small"),
+  };
+  const auto metrics = renderer.MeasureText(text, style, 300.0F, {});
+  const auto plain = renderer.MeasureText(text.PlainText(), style, 300.0F, {});
+  const auto layout = renderer.CreateTextLayout(text, style, 300.0F, {.align = TextAlign::Center});
+  REQUIRE(metrics.size.height > plain.size.height);
+  REQUIRE(layout->Measure().height == metrics.size.height);
+  const auto rects = layout->RangeRects({0, text.Length()});
+  REQUIRE_FALSE(rects.empty());
+  const auto caret = layout->CaretRect(0, TextAffinity::Downstream);
+  REQUIRE(std::abs(rects.front().x - caret.x) < 1.0F);
+  const auto combining = renderer.CreateTextLayout(
+      AttributedText::FromRanges("a\u0301b", {{{1, 2}, {.font_size = 24.0F}}}), style, 200.0F, {});
+  REQUIRE(combining->NextCaretOffset(0) == 2);
+  REQUIRE(combining->PreviousCaretOffset(2) == 0);
+  const auto bidi = renderer.CreateTextLayout(AttributedText("abc \u05D0\u05D1\u05D2 xyz"), style, 300.0F, {});
+  REQUIRE(bidi->RangeRects({2, 5}).size() >= 2);
+}
+
+TEST_CASE("LinuxTextLayoutPreservesAffinityAtSoftWraps") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+  const TextStyle style{Font::Monospace(20.0F), Color::Black()};
+  for (const TextDirection direction : {TextDirection::LeftToRight, TextDirection::RightToLeft}) {
+    const std::string text = direction == TextDirection::LeftToRight ? "abcdefghijklm" : "אבגדהוזחטיכלמ";
+    for (const TextAlign align : {TextAlign::Leading, TextAlign::Center, TextAlign::Trailing}) {
+      const auto layout = renderer.CreateTextLayout(text, style, 62.0F,
+          {.shaping = {.direction = direction}, .align = align});
+      TextOffset boundary = 1;
+      while (boundary < 13 &&
+             layout->CaretRect(boundary, TextAffinity::Downstream).y ==
+                 layout->CaretRect(boundary - 1, TextAffinity::Downstream).y) {
+        ++boundary;
+      }
+      REQUIRE(boundary < 13);
+      const Rect before = layout->CaretRect(boundary, TextAffinity::Upstream);
+      const Rect after = layout->CaretRect(boundary, TextAffinity::Downstream);
+      REQUIRE(before.y < after.y);
+      const auto fragments = layout->RangeRects({boundary - 1, boundary});
+      REQUIRE(fragments.size() == 1);
+      const float edge = direction == TextDirection::LeftToRight
+          ? fragments.front().x + fragments.front().width : fragments.front().x;
+      REQUIRE(std::abs(before.x - edge) < 0.1F);
+      const TextPosition hit = layout->HitTest({before.x, before.y + before.height * 0.5F});
+      REQUIRE(hit.offset == boundary);
+      REQUIRE(hit.affinity == TextAffinity::Upstream);
+      REQUIRE(layout->CaretRect(hit.offset, hit.affinity) == before);
+    }
+  }
+}
+
+TEST_CASE("LinuxTextLayoutDoesNotMoveBackAcrossExplicitLineBreaks") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+  const TextStyle style{Font::Monospace(20.0F), Color::Black()};
+  for (const std::string separator : {"\n", "\r\n", "\r"}) {
+    const auto layout = renderer.CreateTextLayout("abc" + separator + "xyz", style, 200.0F);
+    const TextOffset offset = 3 + static_cast<TextOffset>(separator.size());
+    const Rect before = layout->CaretRect(offset, TextAffinity::Upstream);
+    const Rect after = layout->CaretRect(offset, TextAffinity::Downstream);
+    REQUIRE(before == after);
+    REQUIRE(after.y > layout->CaretRect(0, TextAffinity::Downstream).y);
+  }
+}
+
+TEST_CASE("LinuxTextLayoutCaretHitTestingPreservesAlignedBidiGeometry") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+  const TextStyle style{Font::Monospace(20.0F), Color::Black()};
+  const std::string text = "abc אבג xyz";
+  for (const TextAlign align : {TextAlign::Leading, TextAlign::Center, TextAlign::Trailing}) {
+    const auto layout = renderer.CreateTextLayout(text, style, 300.0F, {.align = align, .wrap = TextWrap::NoWrap});
+    for (TextOffset offset = 0; offset <= 11; ++offset) {
+      for (const TextAffinity affinity : {TextAffinity::Upstream, TextAffinity::Downstream}) {
+        const Rect caret = layout->CaretRect(offset, affinity);
+        const TextPosition hit = layout->HitTest({caret.x, caret.y + caret.height * 0.5F});
+        const Rect resolved = layout->CaretRect(hit.offset, hit.affinity);
+        REQUIRE(std::abs(resolved.x - caret.x) < 0.1F);
+        REQUIRE(resolved.y == caret.y);
+      }
+    }
+  }
 }
 
 } // namespace huxerui::test

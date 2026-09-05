@@ -5,7 +5,7 @@ Use application state for authoritative values and let mounted behavior retain t
 
 ## Text, images, and drawing
 
-`Text` accepts literals, `StringResource`, formatted values, and `State<T>`.
+`Text` accepts literals, `StringResource`, formatted values, `AttributedText`, and `State<T>`.
 Use `TextRole` for theme typography or provide an explicit `TextStyle`.
 Use `Align(TextAlign::...)` for horizontal paragraph alignment and `VerticalAlign(TextVerticalAlign::...)` when a framed Text should place its paragraph within extra height.
 Vertical alignment does not change intrinsic text measurement.
@@ -19,6 +19,58 @@ return Text("مرحبا")
 
 Canvas `DrawText`, `DrawTextRun`, and `DrawTextRuns` calls inherit the Canvas node Locale only for entries whose shaping locale is empty.
 TextMeasurer has no implicit Environment lookup; pass a locale explicitly when custom composition measurement needs it.
+
+### Attributed paragraphs and links
+
+Use one `Text` for a paragraph with mixed character styles. `AttributedText` is an immutable shared value, not a tree of span Views:
+
+```cpp
+const AttributedText paragraph{
+  TextSpan("Read "),
+  TextSpan("the guide").Style({.font_weight = FontWeight::Bold})
+                       .Link(Uri("https://example.com/guide")),
+  TextSpan(" before continuing."),
+};
+return Text(paragraph).On<TextEvents::LinkActivated>([](const TextLinkActivation& link) {
+  // Validate the scheme and request application navigation here.
+  OpenApplicationRoute(link.target);
+});
+```
+
+`TextSpanStyle` optionally overrides a complete Font, size, weight, slant, foreground, background, and decoration. Unspecified fields inherit the paragraph's final TextStyle; `TextDecoration::None` explicitly clears decoration. Alignment, wrapping, direction, and shaping locale remain paragraph-wide. Backgrounds follow visual fragments without adding padding.
+
+For already assembled content, `AttributedText::FromRanges(body, styles, links)` accepts independent ordered, non-overlapping style and link ranges. All offsets are UTF-16 code units, not UTF-8 byte offsets; invalid UTF-8, out-of-bounds ranges, and split surrogate pairs throw `std::invalid_argument`. `WithStyles(styles)` replaces visual ranges while sharing the existing body and retaining links. A link may cross several style ranges and remains one interaction and accessibility target.
+
+Links inherit Theme primary color and underlining unless a range explicitly overrides them. Pointer clicks, Tab/Shift-Tab and Enter, and supported platform accessibility actions emit the same `TextEvents::LinkActivated` event, containing the current target and range. HuxerUI never opens the URI automatically. Dragging, long press, scrolling, cancellation, and disabled input suppress activation. Focus indication uses the Theme's existing focus ring.
+
+Attributed text contains resolved direct text; translating sentence fragments independently is not a substitute for localizing the whole sentence. Existing StringResource-based plain Text declarations remain unchanged.
+
+### Selection and virtualized text
+
+Wrap ordinary content in `SelectionArea` to select across descendant Text nodes. Nested areas are independent; copied paragraphs are separated by newlines. Static content supports Copy and Select All but never starts an IME session. Mouse dragging, double-click, Shift-click, touch long press, and selection handles use retained geometry.
+
+Virtualized documents provide a shared immutable `TextSelectionSource` snapshot, with `Count()`, `IdAt(index)`, `IndexOf(id)`, and `BlockAt(index)`. A block returns its attributed text and the separator to use when copying into the following block. Derive both the source and the visible Text values from the same snapshot:
+
+```cpp
+return SelectionArea(
+    VirtualList(snapshot->Count(), [snapshot](std::size_t index) {
+      const auto id = snapshot->IdAt(index);
+      return Text(snapshot->BlockAt(index).text).SelectionBlock(id).Key(id);
+    })
+).Source(snapshot);
+```
+
+`SelectionBlock(id)` identifies one complete logical paragraph; it is independent of the sibling-local View Key. Each bound block can have only one mounted Text within its area, and its plain body must match the source. Unbound decorative Text is excluded in explicit-source mode. Source methods must not create Views, perform I/O, parse markup, or depend on mounted nodes.
+
+Select All establishes endpoints without reading every block. Copy reads only the selected blocks, including unmounted content, and does not add a trailing separator. Offscreen endpoints lose geometry, not selection. Dragging near a scroll viewport edge advances through newly realized blocks.
+
+Publish replacement source snapshots through State. Stable block IDs preserve endpoints across reorder; removing an endpoint block clears selection. Style changes preserve selection, and appended text does not extend an existing selection. Replaced endpoint text uses a conservative common-prefix/suffix mapping, not editor transaction semantics.
+
+For streaming, keep generation outside virtual rows, share completed blocks, and observe the changing block in its own composable scope. Batch deltas and bound pending UI publication instead of queuing a callback per token. Do not split ordinary paragraphs at arbitrary character counts: an indefinitely growing paragraph can still require full reflow. The [streaming example](../../examples/streaming_text/main.cpp) demonstrates these ownership rules, latest-version highlighting, and conditional bottom following without a parser or document framework.
+
+Web keeps its Canvas renderer and supports styles, wrapping, links, and basic selection. It does not promise parity with non-Web backends for mixed bidirectional text, ligatures across style boundaries, or contextual shaping across separately drawn runs. Platform font engines may also differ in exact glyph metrics.
+
+### Images and custom drawing
 
 `ImageVariant` covers `ImageResource`, `ImageAsset`, and `VectorAsset`.
 `Image` also accepts `std::shared_ptr<ExternalTexture>` through a separate overload because a live platform texture is not an application image value.
@@ -219,7 +271,7 @@ Apply a stable `.Key(...)` to the factory result when suggestions can insert, re
 `OnExpandedChanged(bool)` observes actual popup opening and closing while expansion remains internally owned.
 Equal state is not reported twice, and selection or submission reports collapse first.
 
-Focus and the native input session remain on the field while the popup is open.
+Focus and the text-input session remain on the field while the popup is open.
 Up and Down move through enabled suggestions without wrapping, Enter accepts the active suggestion, and Escape closes the popup.
 Arrow navigation does not run while an IME composition is active, so the platform input method retains ownership of composition keys.
 Shift-, Control-, and Meta-modified keys remain text-editing input rather than suggestion navigation.

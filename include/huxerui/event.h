@@ -176,6 +176,20 @@ constexpr PointerButton& operator&=(PointerButton& left, PointerButton right) no
   return left;
 }
 
+/// Describes keyboard modifiers active during an input event.
+struct KeyModifiers {
+  /// Whether Shift is active.
+  bool shift = false;
+  /// Whether Control is active.
+  bool control = false;
+  /// Whether Alt or Option is active.
+  bool alt = false;
+  /// Whether the platform Meta, Command, or Windows modifier is active.
+  bool meta = false;
+
+  bool operator==(const KeyModifiers&) const = default;
+};
+
 /// Carries normalized pointer input in logical coordinates.
 ///
 /// The receiving API defines the coordinate space. Runtime input and ViewEvents use the window coordinate space, while
@@ -193,6 +207,8 @@ struct PointerEvent {
   PointerButton changed_button = PointerButton::None;
   /// Complete pressed-button state after this event.
   PointerButton pressed_buttons = PointerButton::None;
+  /// Keyboard modifiers active when the pointer event was generated.
+  KeyModifiers modifiers{};
 
   /// Returns whether every button in a nonempty flag mask is currently pressed.
   /// @code
@@ -225,20 +241,6 @@ struct HoverEvent {
   Point window_position;
 
   bool operator==(const HoverEvent&) const = default;
-};
-
-/// Describes keyboard modifiers active during an input event.
-struct KeyModifiers {
-  /// Whether Shift is active.
-  bool shift = false;
-  /// Whether Control is active.
-  bool control = false;
-  /// Whether Alt or Option is active.
-  bool alt = false;
-  /// Whether the platform Meta, Command, or Windows modifier is active.
-  bool meta = false;
-
-  bool operator==(const KeyModifiers&) const = default;
 };
 
 /// Carries one platform-recognized wheel or trackpad update before default scrolling.

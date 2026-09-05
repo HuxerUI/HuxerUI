@@ -2,6 +2,7 @@
 #include "internal_access.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <concepts>
 #include <cstdint>
@@ -21,6 +22,7 @@
 #include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::detail {
 
@@ -153,7 +155,7 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   draw_brush_rect_ =
       environment->GetMethodID(view_class, "drawBrushRect", "(Landroid/graphics/Canvas;FFFFII[F[F[IF)V");
   draw_text_ =
-      environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFFFIFI[BIIIIIII[B)V");
+      environment->GetMethodID(view_class, "drawText", "(Landroid/graphics/Canvas;[BFFFFFFIFI[BIIIIIII[B[B)V");
   draw_text_runs_ =
       environment->GetMethodID(view_class, "drawTextRuns", "(Landroid/graphics/Canvas;[B[I[F[I[F[I[B[I)V");
   draw_image_ = environment->GetMethodID(view_class, "drawImage", "(Landroid/graphics/Canvas;J[BFFFFFFFFFI)Z");
@@ -363,36 +365,24 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 }
 
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command) {
-  auto bytes = android::BytesToJavaByteArray(environment, ByteSpan(command.text));
+  auto attributes = AndroidTextAttributes(environment, command.text, command.style);
+  if (!attributes) {
+    return;
+  }
+  auto bytes = android::BytesToJavaByteArray(environment, ByteSpan(command.text.PlainText()));
   auto family = android::BytesToJavaByteArray(environment, ByteSpan(command.style.font.FamilyName()));
   auto locale = android::BytesToJavaByteArray(environment, ByteSpan(command.options.shaping.locale));
   if (!bytes || !family || !locale) {
     return;
   }
-  environment->CallVoidMethod(
-      view,
-      draw_text_,
-      canvas,
-      bytes.Get(),
-      command.rect.x,
-      command.rect.y,
-      command.rect.width,
-      command.rect.height,
-      command.paragraph_offset.x,
-      command.paragraph_offset.y,
-      PackColor(command.style.foreground),
-      command.style.font.Size(),
-      static_cast<jint>(command.style.font.FamilyKind()),
-      family.Get(),
-      static_cast<jint>(command.style.font.Weight()),
-      static_cast<jint>(command.style.font.Slant()),
-      static_cast<jint>(command.style.decoration),
-      static_cast<jint>(command.options.align),
-      static_cast<jint>(command.options.vertical_align),
-      static_cast<jint>(command.options.wrap),
-      static_cast<jint>(command.options.shaping.direction),
-      locale.Get()
-  );
+  environment->CallVoidMethod(view, draw_text_, canvas, bytes.Get(),
+      command.rect.x, command.rect.y, command.rect.width, command.rect.height,
+      command.paragraph_offset.x, command.paragraph_offset.y, PackColor(command.style.foreground),
+      command.style.font.Size(), static_cast<jint>(command.style.font.FamilyKind()), family.Get(),
+      static_cast<jint>(command.style.font.Weight()), static_cast<jint>(command.style.font.Slant()),
+      static_cast<jint>(command.style.decoration), static_cast<jint>(command.options.align),
+      static_cast<jint>(command.options.vertical_align), static_cast<jint>(command.options.wrap),
+      static_cast<jint>(command.options.shaping.direction), locale.Get(), attributes.Get());
 }
 
 void AndroidRenderer::RenderCommand(
@@ -840,6 +830,44 @@ void AndroidRenderer::DrawSlice(
     CommandRange range{first_command, end, 0};
     static_cast<void>(RenderSceneNode(environment, view, canvas, *frame.scene.root, &range));
   }
+}
+
+// Wire format shared with HuxerUIView.attributedText: ten little-endian 32-bit fields, then UTF-8 font-family bytes.
+// Text ranges use UTF-16 offsets, matching Java String indices; the font-family length counts bytes instead.
+android::LocalRef<jbyteArray>
+AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const TextStyle& base) {
+  if (text.Length() > std::numeric_limits<jint>::max()) {
+    throw std::invalid_argument("HuxerUI Android paragraph exceeds the supported length");
+  }
+  std::vector<std::byte> bytes;
+  const auto append = [&](std::uint32_t value) {
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+      bytes.push_back(static_cast<std::byte>((value >> shift) & 0xFFU));
+    }
+  };
+  if (!text.StyleRanges().empty()) {
+    for (const auto& run : ResolveTextRuns(text, base)) {
+      const auto& font = run.style.font;
+      append(static_cast<std::uint32_t>(run.range.start));
+      append(static_cast<std::uint32_t>(run.range.end));
+      append(std::bit_cast<std::uint32_t>(font.Size()));
+      append(static_cast<std::uint32_t>(font.FamilyKind()));
+      append(static_cast<std::uint32_t>(font.Weight()));
+      append(static_cast<std::uint32_t>(font.Slant()));
+      append(static_cast<std::uint32_t>(PackColor(run.style.foreground)));
+      append(static_cast<std::uint32_t>(PackColor(run.background)));
+      append(static_cast<std::uint32_t>(run.style.decoration));
+      const auto family = font.FamilyName();
+      if (family.size() > static_cast<std::size_t>(std::numeric_limits<jint>::max())) {
+        throw std::invalid_argument("HuxerUI Android font family exceeds the supported length");
+      }
+      append(static_cast<std::uint32_t>(family.size()));
+      for (const char byte : family) {
+        bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
+      }
+    }
+  }
+  return android::BytesToJavaByteArray(environment, bytes);
 }
 
 } // namespace huxerui::detail

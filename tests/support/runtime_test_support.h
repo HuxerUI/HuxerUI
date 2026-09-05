@@ -17,7 +17,7 @@
 #include "internal_access.h"
 #include "runtime_internal.h"
 #include "system_tray_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::test {
 
@@ -749,9 +749,12 @@ public:
     return {width, bounds, metrics};
   }
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
+  using TextMeasurer::MeasureText;
+  using PlatformAdapter::CreateTextLayout;
+
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) override {
+    const auto& text = paragraph.PlainText();
     static_cast<void>(style);
     if (max_width <= 0.0F) {
       return {};
@@ -781,9 +784,9 @@ public:
     return {size, 15.0F, size.height - 5.0F, line_count};
   }
 
-  std::unique_ptr<huxerui::detail::TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
+  std::unique_ptr<huxerui::detail::TextLayout> CreateTextLayout(const huxerui::AttributedText& paragraph,
+      const TextStyle& style, float max_width, const TextLayoutOptions& options) override {
+    const auto& text = paragraph.PlainText();
     static_cast<void>(style);
     return std::make_unique<TextLayout>(
         text,
@@ -853,7 +856,7 @@ inline void SettlePresentation(TestPlatform& platform, Runtime& runtime, double 
 inline std::string FirstText(const FlattenedScene& scene) {
   for (const auto& command : scene.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
-      return text->text;
+      return text->text.PlainText();
     }
   }
   return {};
@@ -862,7 +865,7 @@ inline std::string FirstText(const FlattenedScene& scene) {
 inline bool ContainsText(const FlattenedScene& scene, std::string_view expected) {
   for (const auto& command : scene.Commands()) {
     const auto* text = std::get_if<DrawTextCommand>(&command);
-    if (text && text->text == expected) {
+    if (text && text->text.PlainText() == expected) {
       return true;
     }
   }
@@ -872,7 +875,7 @@ inline bool ContainsText(const FlattenedScene& scene, std::string_view expected)
 inline const DrawTextCommand* FindText(const FlattenedScene& scene, std::string_view expected) {
   for (const auto& command : scene.Commands()) {
     const auto* text = std::get_if<DrawTextCommand>(&command);
-    if (text && text->text == expected) {
+    if (text && text->text.PlainText() == expected) {
       return text;
     }
   }
@@ -981,7 +984,7 @@ inline std::optional<Rect> FindPresentedTextRect(const FlattenedScene& scene, st
       continue;
     }
     const auto* text = std::get_if<DrawTextCommand>(&command);
-    if (text && text->text == expected) {
+    if (text && text->text.PlainText() == expected) {
       return detail::TransformBounds(transform_stack.back(), text->rect);
     }
   }

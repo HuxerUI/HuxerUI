@@ -27,9 +27,12 @@ public:
   MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options = {});
   [[nodiscard]] TextLayoutMetrics
   MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  );
+  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {});
+  [[nodiscard]] TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options = {});
+  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {});
   void DrawSlice(
       CGContextRef context,
       CGRect dirty_rect,

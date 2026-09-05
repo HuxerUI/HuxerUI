@@ -342,7 +342,7 @@ public:
   virtual bool HoverWhenDisabled() const noexcept;
 
   virtual void OnHover(MountedNode& node, const HoverEvent& event);
-  virtual void OnFocusChanged(MountedNode& node, bool focused);
+  virtual void OnFocusChanged(MountedNode& node, bool focused, bool reverse);
   virtual bool OnKey(MountedNode& node, const KeyEvent& event);
 
   virtual PointerResult OnPointer(

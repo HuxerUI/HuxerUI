@@ -73,6 +73,8 @@ private:
   std::optional<PointerHoverState> pointer_hover_;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   std::unordered_map<std::int64_t, PointerSession> pointer_sessions_;
+
+  friend class TextInteraction;
 };
 
 } // namespace huxerui::detail

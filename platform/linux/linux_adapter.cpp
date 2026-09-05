@@ -45,7 +45,7 @@
 #include "linux_ui_dispatcher.h"
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 #include "window_internal.h"
 
 namespace huxerui::detail {
@@ -432,15 +432,13 @@ public:
     return renderer_.MeasureRun(text, style, options);
   }
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) override {
     return renderer_.MeasureText(text, style, max_width, options);
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
+  std::unique_ptr<TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options) override {
     return renderer_.CreateTextLayout(text, style, max_width, options);
   }
 
@@ -884,7 +882,7 @@ private:
   }
 
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
-                   PointerButton pressed_buttons = PointerButton::None) {
+      PointerButton pressed_buttons = PointerButton::None, KeyModifiers modifiers = {}) {
     if (runtime_ == nullptr) {
       return;
     }
@@ -896,6 +894,7 @@ private:
         PointerDeviceKind::Mouse,
         changed_button,
         pressed_buttons,
+        modifiers,
     });
   }
 
@@ -1061,10 +1060,11 @@ private:
       return;
     }
     pressed_buttons_ |= button;
-    SendPointer(PointerEventType::Down, position, button, pressed_buttons_);
+    SendPointer(PointerEventType::Down, position, button, pressed_buttons_,
+        event ? TranslateModifiers(gdk_event_get_modifier_state(event)) : KeyModifiers{});
   }
 
-  void ReleasePointer(guint platform_button, Point position) {
+  void ReleasePointer(GdkEvent* event, guint platform_button, Point position) {
     if (suppress_pointer_release_) {
       suppress_pointer_release_ = false;
       return;
@@ -1074,7 +1074,8 @@ private:
     }
     const PointerButton button = TranslatePointerButton(platform_button);
     pressed_buttons_ = RemovePointerButton(pressed_buttons_, button);
-    SendPointer(PointerEventType::Up, position, button, pressed_buttons_);
+    SendPointer(PointerEventType::Up, position, button, pressed_buttons_,
+        event ? TranslateModifiers(gdk_event_get_modifier_state(event)) : KeyModifiers{});
   }
 
   static gboolean PointerEventReceived(GtkEventControllerLegacy*, GdkEvent* event, gpointer data) {
@@ -1105,7 +1106,7 @@ private:
     if (type == GDK_BUTTON_PRESS) {
       self.PressPointer(event, platform_button, position);
     } else {
-      self.ReleasePointer(platform_button, position);
+      self.ReleasePointer(event, platform_button, position);
     }
     return FALSE;
   }
@@ -1121,23 +1122,26 @@ private:
   static void TouchReleased(GtkGestureClick* gesture, int, double x, double y, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
     const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
-    self.ReleasePointer(button, {static_cast<float>(x), static_cast<float>(y)});
+    GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
+    self.ReleasePointer(event, button, {static_cast<float>(x), static_cast<float>(y)});
   }
 
   static void PointerCanceled(GtkGesture*, GdkEventSequence*, gpointer data) {
     static_cast<LinuxPlatformAdapter*>(data)->CancelPointer();
   }
 
-  static void PointerEntered(GtkEventControllerMotion*, double x, double y, gpointer data) {
+  static void PointerEntered(GtkEventControllerMotion* controller, double x, double y, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
     self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
-                     self.pressed_buttons_);
+        self.pressed_buttons_,
+        TranslateModifiers(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller))));
   }
 
-  static void PointerMoved(GtkEventControllerMotion*, double x, double y, gpointer data) {
+  static void PointerMoved(GtkEventControllerMotion* controller, double x, double y, gpointer data) {
     auto& self = *static_cast<LinuxPlatformAdapter*>(data);
     self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
-                     self.pressed_buttons_);
+        self.pressed_buttons_,
+        TranslateModifiers(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller))));
   }
 
   static void PointerLeft(GtkEventControllerMotion*, gpointer data) {

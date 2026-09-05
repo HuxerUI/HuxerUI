@@ -152,6 +152,7 @@ public:
   /// Requests a relative content offset and returns whether a current connection accepted the request.
   bool ScrollBy(float delta) const;
   /// Requests item alignment from a connected virtual layout.
+  /// Variable-size layouts refine the target after measurement; direct scrolling or a newer request cancels it.
   bool ScrollToItem(std::size_t index, ScrollAlignment alignment = ScrollAlignment::Start) const;
 
   bool operator==(const ScrollController&) const = default;

@@ -9,11 +9,11 @@ This document records the implemented architecture and the remaining extension d
 ## Goals
 
 - Provide a controlled built-in TextField with selection and composition state.
-- Support native IME composition without inferring edits from full text snapshots.
+- Support platform IME composition without inferring edits from full text snapshots.
 - Keep focus and input session ownership in `Runtime`.
-- Keep native input connection behavior in `PlatformAdapter`.
+- Keep platform input connection behavior in `PlatformAdapter`.
 - Let editable components own their text, selection, composition, and editing semantics.
-- Isolate delayed callbacks from old native input sessions.
+- Isolate delayed callbacks from ended text-input sessions.
 - Use one platform input path for TextField, SweetEditor, and future custom editable components.
 - Preserve UTF-8 strings in the public C++ API while using one explicit offset convention across platforms.
 - Grow the validated single-line foundation into multiline editing without changing the platform input protocol.
@@ -26,7 +26,7 @@ The current design deliberately does not include:
 - A Flutter-style delta buffer and revision protocol.
 - Editor history, transactions, or linked-editing behavior in the common input protocol.
 - Platform-specific IME types in common public headers.
-- A temporary TextField that accepts characters but cannot represent native composition.
+- A temporary TextField that accepts characters but cannot represent IME composition.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ TextEditingValue
     declarative value of the built-in TextField
 
 TextInputCommandBatch
-    ordered editing intent delivered by a native input system
+    ordered editing intent delivered by a platform input system
 ```
 
 `TextEditingValue` is not the platform mutation protocol. A normal TextField reduces input commands into a new `TextEditingValue`. A complex component can apply the same commands to its own document core without creating a full value snapshot.
@@ -45,7 +45,7 @@ TextInputCommandBatch
 The complete path is:
 
 ```text
-native IME
+platform IME
     |
 platform input adapter
     |
@@ -64,13 +64,13 @@ The ownership boundaries are:
 
 | Layer | Responsibility |
 | --- | --- |
-| Platform input adapter | Normalize native callbacks and operate the native input connection |
+| Platform input adapter | Normalize platform callbacks and operate the platform input connection |
 | Runtime | Focus ownership, session identity, routing, and stale callback rejection |
 | TextInputClient | Text state, edit semantics, context queries, and text geometry |
 | TextField | Controlled value, simple editing reducer, selection, caret, and painting |
 | SweetEditor | Document state, transactions, history, and editor-specific behavior |
 
-`Runtime` does not own text content. `PlatformAdapter` does not decide how an edit changes a value. An editable component does not call native IME APIs directly.
+`Runtime` does not own text content. `PlatformAdapter` does not decide how an edit changes a value. An editable component does not call platform IME APIs directly.
 
 ## Text model
 
@@ -133,7 +133,7 @@ Application code should not normally manipulate UTF-16 offsets directly. TextFie
 
 ## Input commands
 
-Native input is normalized into typed commands:
+Platform input is normalized into typed commands:
 
 ```cpp
 enum class TextInputCommandKind {
@@ -178,11 +178,11 @@ struct TextInputCommandBatch {
 };
 ```
 
-`coordinate_space` applies to `target`. `selection_after` is always expressed in absolute UTF-16 offsets in the resulting text. A platform adapter converts native relative cursor placement before constructing the command.
+`coordinate_space` applies to `target`. `selection_after` is always expressed in absolute UTF-16 offsets in the resulting text. A platform adapter converts platform-specific relative cursor placement before constructing the command.
 
 The protocol has these semantics:
 
-- One native input callback produces one ordered batch.
+- One platform input callback produces one ordered batch.
 - A batch is validated before any visible mutation occurs.
 - Commands execute in order against a staged state.
 - A later command sees the state produced by earlier commands in the batch.
@@ -257,10 +257,10 @@ The result and state types are public because `TextInputClient` is a public exte
 - A current selection and optional composition.
 - A bounded text context query.
 - Accepted, rejected, read-only, and session-mismatch outcomes.
-- A request to update or restart the native input connection.
+- A request to update or restart the platform input connection.
 - Caret, range, and point hit-test geometry.
 
-`TextInputApplyResult` reports only the result code and any required native synchronization action.
+`TextInputApplyResult` reports only the result code and any required platform input synchronization action.
 Runtime derives whether state changed from `TextInputState` revisions instead of accepting a second, potentially inconsistent changed flag.
 
 A `NodeExtension` exposes the capability through one optional hook:
@@ -289,12 +289,13 @@ public:
 
   virtual bool SelectWord(Point position) = 0;
   virtual bool ExtendSelection(Point position, bool start_handle) = 0;
-  virtual bool QuerySelectionGeometry(Rect& start, Rect& end) const = 0;
+  virtual TextSelectionGeometry QuerySelectionGeometry() const = 0;
   virtual Color SelectionHandleColor() const noexcept = 0;
 };
 ```
 
 Selection points and geometry use the owning node's local logical coordinates.
+`TextSelectionGeometry` contains independent optional `start`, `end`, and `toolbar_anchor` rectangles; an offscreen endpoint does not hide a visible handle or clear the logical selection.
 Runtime maps them through the node's resolved presentation transform exactly once at the host boundary.
 The optional editing-action methods allow read-only clients to expose Copy and Select All through the shared clipboard menu without pretending to be IME clients.
 
@@ -307,7 +308,7 @@ It does not retain descendant node pointers, and unchanged descendant geometry k
 
 ## Input configuration
 
-The client describes native keyboard and submission behavior with typed configuration:
+The client describes platform keyboard and submission behavior with typed configuration:
 
 ```cpp
 enum class TextInputType {
@@ -358,9 +359,9 @@ Submission actions have common Runtime semantics:
 | `Next` | Trigger `OnSubmitted`, then move to the next focusable node without wrapping |
 | `Newline` | Insert a newline in a multiline TextField |
 
-Terminal soft-keyboard dismissal remains a platform responsibility. It does not clear HuxerUI focus merely to hide the keyboard. Native IME actions and hardware Enter both pass through the same focused TextInputClient key path.
+Terminal soft-keyboard dismissal remains a platform responsibility. It does not clear HuxerUI focus merely to hide the keyboard. Platform IME actions and hardware Enter both pass through the same focused TextInputClient key path.
 
-Secure entry uses the same state and command protocol. The retained `TextEditingValue` contains the real text, while TextField builds a separate single-line mask layout and draws one bullet per grapheme. Copy and Cut are disabled. Platform adapters prevent native surrounding-text and extracted-text queries from returning the value while preserving the internal context needed for command routing and composition. Secure and multiline configurations are mutually exclusive.
+Secure entry uses the same state and command protocol. The retained `TextEditingValue` contains the real text, while TextField builds a separate single-line mask layout and draws one bullet per grapheme. Copy and Cut are disabled. Platform adapters prevent platform surrounding-text and extracted-text queries from returning the value while preserving the internal context needed for command routing and composition. Secure and multiline configurations are mutually exclusive.
 
 The shared `SemanticFrame` follows the same privacy boundary.
 An ordinary TextField publishes its committed value, normalized UTF-16 selection, label, placeholder, validation state, focus, and supported SetText and SetSelection actions so platform accessibility can edit and announce it.
@@ -381,7 +382,7 @@ focused node identity
 focused TextInputClient
 monotonic TextInputSessionId
 last synchronized client revision
-native input connection state
+platform input connection state
 ```
 
 Session IDs are non-zero, monotonically increasing, and not reused during the Runtime lifetime.
@@ -391,7 +392,7 @@ The lifecycle is:
 ```text
 focus editable node
     begin client session
-    start native input
+    start platform input
 
 recompose same node and client
     preserve session
@@ -415,11 +416,11 @@ An asynchronous platform callback captures the session ID at entry. If focus or 
 
 Normal focus loss finishes composition by retaining provisional text and clearing the composition marker. Escape first cancels an active composition. When there is no active composition, Escape follows the existing Runtime focus behavior.
 
-Mouse and pen presses focus a node before native input synchronization. Touch focus remains pending until the gesture resolves as a tap. TextField also defers its touch caret placement until release. If movement wins a scroll gesture, both pending operations are cancelled, so scrolling across an editor does not focus it or display the software keyboard. A recognized long press commits focus before opening text selection.
+Mouse and pen presses focus a node before platform input synchronization. Touch focus remains pending until the gesture resolves as a tap. TextField also defers its touch caret placement until release. If movement wins a scroll gesture, both pending operations are cancelled, so scrolling across an editor does not focus it or display the software keyboard. A recognized long press commits focus before opening text selection.
 
-Native input starts or updates after the current pointer dispatch completes. The platform therefore sees the resulting selection and geometry rather than the caret position from the previous frame.
+Platform input starts or updates after the current pointer dispatch completes. The platform therefore sees the resulting selection and geometry rather than the caret position from the previous frame.
 
-Modal focus capture and restoration use the same lifecycle. Restoring focus to an editable node creates a new native input session rather than reviving an old session ID.
+Modal focus capture and restoration use the same lifecycle. Restoring focus to an editable node creates a new HuxerUI text-input session rather than reviving an old session ID.
 
 ## Platform input capability
 
@@ -483,11 +484,11 @@ QueryTextInputGeometry
 QueryTextInputPosition
 ```
 
-It does not retain a raw TextField or `TextInputClient` pointer across native callbacks.
+It does not retain a raw TextField or `TextInputClient` pointer across platform callbacks.
 
 ## State synchronization
 
-The native input connection needs selection, composition, and candidate geometry. It does not need an authoritative copy of the complete client text.
+The platform input connection needs selection, composition, and candidate geometry. It does not need an authoritative copy of the complete client text.
 
 `TextInputState` contains:
 
@@ -519,8 +520,8 @@ Large document clients return only the requested surrounding context. TextField 
 
 Client state changes outside an IME callback, including an authoritative controlled TextField update, increment the appropriate revisions.
 Runtime synchronizes the new state after reconciliation.
-A configuration or ownership change requests a native restart; an ordinary selection change requests only an update and paint invalidation.
-Client-owned geometry changes update candidate geometry without restarting an active native composition.
+A configuration or ownership change requests a platform input restart; an ordinary selection change requests only an update and paint invalidation.
+Client-owned geometry changes update candidate geometry without restarting an active IME composition.
 
 ## TextField API
 
@@ -581,11 +582,11 @@ Material defaults to Filled while Flat defaults to Standard; an explicit variant
 
 `LeadingIcon()` and `TrailingIcon()` accept image resources, raster assets, and vector assets.
 They are decorative content within the editor geometry rather than independent controls.
-Their occupied width participates in text layout, selection, caret geometry, scrolling, and native text-input geometry.
+Their occupied width participates in text layout, selection, caret geometry, scrolling, and platform text-input geometry.
 Vector assets resolve the TextField state color, while raster assets retain their encoded colors.
 
 `Align(TextAlign::...)` and `VerticalAlign(TextVerticalAlign::...)` configure the editable text region rather than the field container.
-The retained TextLayout applies horizontal alignment to the value, placeholder, selection, caret, hit testing, scrolling, and native input geometry.
+The retained TextLayout applies horizontal alignment to the value, placeholder, selection, caret, hit testing, scrolling, and platform input geometry.
 Vertical alignment places the same editing geometry within the available content height without changing intrinsic measurement.
 Single-line fields default to `Center`; multiline fields default to `Top`; an explicit value remains stable when line limits change.
 Floating labels, icons, and supporting messages keep their component-owned placement.
@@ -648,9 +649,11 @@ SelectionArea {
 };
 ```
 
-`SelectionArea` owns retained selection state and text layout geometry, but it does not expose a `TextInputClient` and never starts an IME session. Runtime routes Copy and Select All to the focused selection area through the same `TextEditingAction` entry points used by editable clients. Cut and Paste remain unavailable for static content.
+`SelectionArea` owns retained selection state and text layout geometry, but it does not expose a `TextInputClient` and never starts an IME session. Runtime routes Copy and Select All to the nearest selection owner of the focused node through the same `TextEditingAction` entry points used by editable clients. An active editable client retains priority. Cut and Paste remain unavailable for static content.
 
 Desktop hosts use pointer drag selection and the standard Ctrl or Command shortcuts. Touch input uses runtime-owned long-press word selection and a shared HuxerUI selection overlay with draggable handles. A newline separates adjacent descendant `Text` nodes in copied plain text.
+
+For virtual content, `SelectionArea::Source()` and `Text::SelectionBlock()` bind visible paragraphs to an immutable logical snapshot. Select All and Copy include unmounted blocks without realizing their Views. Snapshot replacement, optional endpoint geometry, links, and edge scrolling follow [Text and Fonts](text.md#logical-selection-source).
 
 ## Controlled value behavior
 
@@ -686,10 +689,10 @@ During reconciliation:
 
 - An incoming value equal to the last emitted value acknowledges the working value and preserves the session.
 - An incoming value different from the last emitted value is authoritative.
-- An authoritative replacement clears the old composition baseline, replaces the working value, and requests native synchronization.
+- An authoritative replacement clears the old composition baseline, replaces the working value, and requests platform input synchronization.
 - An authoritative text replacement clears local undo and redo history.
 - An authoritative selection-only replacement preserves history but ends the current merge group.
-- An authoritative replacement during active composition restarts the native input connection.
+- An authoritative replacement during active composition restarts the platform input connection.
 - TextField never converts an authoritative replacement into inferred insert or delete commands.
 
 If application code does not preserve the emitted value, a later reconciliation can restore the declarative value. This is consistent with other controlled controls and avoids an undocumented internal source of truth.
@@ -708,7 +711,7 @@ original selection
 
 `BeginComposition` captures this baseline once. Composition updates retain it. `CommitText` and `FinishComposition` discard it. `CancelComposition` restores it.
 
-Hardware keyboard movement and deletion use Unicode grapheme clusters. Native `DeleteSurrounding` follows the explicit unit in the command. These paths must not be implemented with UTF-8 byte movement or average character width assumptions.
+Hardware keyboard movement and deletion use Unicode grapheme clusters. Platform-requested `DeleteSurrounding` follows the explicit unit in the command. These paths must not be implemented with UTF-8 byte movement or average character width assumptions.
 
 The reducer does not own undo history. TextField keeps bounded undo and redo stacks beside its retained working value without changing the platform command protocol. Each entry stores the complete value before and after one edit so selection is restored with text.
 
@@ -718,7 +721,7 @@ Composition updates do not create intermediate entries. TextField captures one v
 
 ## Text layout and geometry
 
-The existing whole-string text measurement is insufficient for an editable control. Correct selection, caret placement, pointer hit testing, and native candidate windows require:
+The existing whole-string text measurement is insufficient for an editable control. Correct selection, caret placement, pointer hit testing, and platform input-method candidate windows require:
 
 - Point-to-text hit testing.
 - Text offset-to-caret geometry.
@@ -748,7 +751,7 @@ public:
 
 Secure TextField creates grapheme boundaries from the platform text layout, then lays out only its mask string. A small mapped layout translates between real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry, selection rectangles, and deletion. The PaintSequence never receives the real text.
 
-Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and native editable layouts.
+Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and platform text layouts.
 
 The TextField caches layout by text, font, available width, multiline configuration, resolved shaping options, and relevant style values.
 An empty shaping locale resolves from the mounted TextField's effective inherited Locale, while `TextField::Shaping()` preserves a non-empty explicit locale.
@@ -756,7 +759,7 @@ The resolved shaping value is shared by the controlled value, label, placeholder
 
 Editor components can use TextMeasurer for exact-run metrics while retaining their own line, selection, and document models. They do not reuse TextField's internal editable layout.
 
-Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform adapter converts those coordinates to the native coordinate space required by its input API.
+Candidate geometry is reported in node-local logical coordinates. Runtime applies layout and presentation transforms to obtain host-view coordinates. The platform adapter converts those coordinates to the coordinate space required by its input API.
 
 `TextInputClient::QueryTextInputPosition` receives a point in the owning node's local logical coordinates.
 `Runtime::QueryTextInputPosition` accepts host-view logical coordinates and applies the inverse node transform before calling the client.
@@ -802,7 +805,7 @@ A multiline field uses the same retained scroll state on the vertical axis when 
 
 The field participates in the same retained scroll chain as other scrollable nodes. Wheel and touch movement scroll the field first and pass unconsumed movement to an enclosing scroll container. Mouse and pen dragging retain text selection semantics, and dragging a selection beyond the viewport advances the internal text offset. Manual scrolling temporarily suppresses automatic caret reveal until editing or navigation resumes.
 
-The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. The resolved `caret_width` controls only painted caret thickness; text hit testing, scrolling, and native input geometry continue to use the logical caret boundary from TextLayout.
+The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. The resolved `caret_width` controls only painted caret thickness; text hit testing, scrolling, and platform input geometry continue to use the logical caret boundary from TextLayout.
 
 The first pointer behavior includes:
 
@@ -898,13 +901,13 @@ A collapsed TextField selection uses a caret-anchored menu without selection han
 
 Text-producing input and control keys remain separate:
 
-- Native committed and composing text enters through input commands.
+- Committed and composing text from the platform enters through input commands.
 - `KeyEvent` handles navigation, shortcuts, deletion, submission, and focus traversal.
 - `KeyIntercept` runs along the active focus route before text editing so an explicit parent policy can override it.
 - The focused TextInputClient receives text-related keys before component and generic activation behavior.
 - An unhandled key continues through `NodeExtension::OnKey`, then the focused View's `KeyDown` or `KeyUp` decision event.
 - Runtime and platform defaults run only after every earlier stage returns false.
-- A platform adapter suppresses native character events that duplicate an IME commit.
+- A platform adapter suppresses platform character events that duplicate an IME commit.
 
 Default behavior is:
 
@@ -935,7 +938,7 @@ Clipboard uses the optional `PlatformClipboard` capability. Runtime maps Ctrl/Co
 
 ## Android adapter
 
-`HuxerUIView` remains the native input target. `HuxerUIInputConnection` implements the input connection for the currently focused HuxerUI text input client.
+`HuxerUIView` remains the Android input target. `HuxerUIInputConnection` implements the input connection for the currently focused HuxerUI text input client.
 
 The Android adapter:
 
@@ -958,13 +961,13 @@ The Android adapter:
 
 The adapter can retain a bounded surrounding-text mirror for Android query behavior. It does not own an authoritative copy of a complete SweetEditor document.
 
-`restartInput()` is used when client ownership or input configuration changes, or when an authoritative state replacement invalidates the current native composition. Normal recomposition and selection changes use ordinary state updates.
+`restartInput()` is used when client ownership or input configuration changes, or when an authoritative state replacement invalidates the current IME composition. Normal recomposition and selection changes use ordinary state updates.
 
 ## Apple adapter
 
 An AppKit-specific client owned by `MacTextInput` conforms to `NSTextInputClient` on macOS. The host view remains the first responder and exposes the client's explicit `NSTextInputContext`.
 
-On iOS, a private non-accessible view owned by the `UIKitTextInput` bridge conforms to `UITextInput`, while the HuxerUI drawing host remains a separate accessibility container. Native UTF-16 positions, selection, marked text, keyboard traits, action keys, and geometry queries translate directly to the same Runtime session and command protocol. The UIKit bridge keeps only session and native-service bookkeeping; the controlled `TextEditingValue` remains authoritative in the shared TextField client.
+On iOS, a private non-accessible view owned by the `UIKitTextInput` bridge conforms to `UITextInput`, while the HuxerUI drawing host remains a separate accessibility container. UIKit's UTF-16 positions, selection, marked text, keyboard traits, action keys, and geometry queries translate directly to the same Runtime session and command protocol. The UIKit bridge keeps only session and UIKit text-service bookkeeping; the controlled `TextEditingValue` remains authoritative in the shared TextField client.
 
 The macOS adapter maps:
 
@@ -1006,9 +1009,9 @@ The bridge:
 - Converts GTK UTF-8 byte positions to the common UTF-16 offset space without splitting a code point or surrogate pair.
 - Maps committed UTF-8 text to `CommitText` and clears local composition bookkeeping after Runtime processes the command.
 - Publishes bounded non-secure surrounding text with both cursor and anchor positions and maps `delete-surrounding` to Unicode-code-point deletion.
-- Updates the native candidate location from the latest transformed caret geometry.
+- Updates the input-method candidate location from the latest transformed caret geometry.
 - Maps input purpose, autocorrection, capitalization, and secure-entry policy to GTK input purpose and hint values.
-- Disables inline preedit and surrounding-text publication for secure sessions while retaining native password input purpose and private-input hints.
+- Disables inline preedit and surrounding-text publication for secure sessions while retaining GTK password input purpose and private-input hints.
 
 The implementation does not contain separate XIM, IBus, or Fcitx state machines. GTK's input-method module boundary owns those desktop-specific protocols.
 
@@ -1060,17 +1063,17 @@ SweetEditor keeps:
 
 The bridge does not build a complete `TextEditingValue`, copy the document into Runtime, or use the built-in TextField reducer.
 
-SweetEditor's command path is the reference for ordered atomic native input, session mismatch handling, bounded context queries, and finish or cancel semantics. Editor-specific buffer protocols and recovery policies do not become mandatory HuxerUI APIs.
+SweetEditor's command path is the reference for ordered atomic platform input, session mismatch handling, bounded context queries, and finish or cancel semantics. Editor-specific buffer protocols and recovery policies do not become mandatory HuxerUI APIs.
 
 ## Threading and reentrancy
 
 Text input mutation occurs on the Runtime owning thread.
 
-The platform adapter must marshal native callbacks to that thread before calling Runtime. Runtime validates session identity again after marshaling.
+The platform adapter must marshal platform callbacks to that thread before calling Runtime. Runtime validates session identity again after marshaling.
 
 Applying one batch must not synchronously recompose the application in the middle of the reducer. The client publishes its resulting event and requests a frame after the atomic mutation completes.
 
-Native update, restart, and close actions are executed after the client returns from mutation. A platform callback must not recursively reopen the same input connection while a command batch is being applied.
+Platform input update, restart, and close actions are executed after the client returns from mutation. A platform callback must not recursively reopen the same input connection while a command batch is being applied.
 
 Destroying a host view invalidates every active session before destroying clients or platform input objects.
 
@@ -1191,29 +1194,29 @@ The usable control contains:
 - Hardware navigation, deletion, and submission.
 - Internal text geometry queries.
 - Flat and Material TextField styles.
-- Clipboard editing actions and native Android selection interaction.
+- Clipboard editing actions and Android text selection interaction.
 - Automatic caret reveal when the Android IME reduces the viewport.
 - Nested wheel and touch scrolling for fixed-height multiline fields.
 - Bounded TextField-local undo and redo with composition grouping.
 - Static selection through `SelectionArea`.
 
-Windows, macOS, Android, and iOS now provide end-to-end native IME adapters.
+Windows, macOS, Android, and iOS now provide end-to-end platform IME adapters.
 
 ## Final design constraints
 
 The implementation should preserve these constraints:
 
 - `TextEditingValue` is the declarative value of TextField, not the universal platform mutation protocol.
-- Native text mutation uses typed ordered command batches.
-- One native callback produces one atomic client mutation.
+- Platform text mutation uses typed ordered command batches.
+- One platform callback produces one atomic client mutation.
 - Runtime owns focus; its private TextInteraction owns logical input session identity, protocol validation, geometry synchronization, editing actions, and the selection overlay.
-- PlatformAdapter owns native input connections and coordinate conversion.
+- PlatformAdapter owns platform input connections and coordinate conversion.
 - Editable clients own text, selection, composition, and editing semantics.
 - Runtime and PlatformAdapter do not mirror complete editor documents.
 - Session IDs isolate delayed callbacks from previous clients.
 - UTF-8 text and UTF-16 offsets use one validated conversion policy.
 - TextField retains transient editing and animation state in a mounted extension.
-- Recomposition of the same TextField does not restart native input.
+- Recomposition of the same TextField does not restart platform input.
 - Authoritative controlled updates are not converted into inferred edits.
 - Text geometry is based on real layout data, not average character width.
 - TextField and SweetEditor share the input protocol without sharing their state models.
@@ -1223,4 +1226,4 @@ The implementation should preserve these constraints:
 
 TextInteraction creates text-selection recognizers using the existing GestureRecognizer decision and deadline protocol. PointerInteraction retains their physical sequence and applies selection only through successful ownership acceptance, after revalidating the original target and any focus, IME, or competing-recognizer callbacks. Double-tap history belongs to TextInteraction, while the pointer owner and candidate binding belong to PointerInteraction. TextInteraction never reads PointerSession state. Touch focus and text recognition keep their explicit order before overlay geometry is published.
 
-PointerInteraction requests keyboard presentation by node identity without obtaining native session IDs. SemanticTree routes text actions to TextInteraction, which invokes the original extension action, validates the client's resulting state, and synchronizes any active session. Semantic editing does not require the target to own focus or an active native session.
+PointerInteraction requests keyboard presentation by node identity without obtaining text-input session IDs. SemanticTree routes text actions to TextInteraction, which invokes the original extension action, validates the client's resulting state, and synchronizes any active session. Semantic editing does not require the target to own focus or an active text-input session.

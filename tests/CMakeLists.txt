@@ -24,6 +24,7 @@ add_executable(huxerui_tests
         unit/semantics.cpp
         unit/text.cpp
         unit/text_input.cpp
+        unit/text_selection.cpp
         unit/validation.cpp
         unit/vector.cpp
         platform/android_accessibility.cpp
@@ -58,6 +59,7 @@ add_executable(huxerui_tests
         runtime/system_tray.cpp
         runtime/selection_area.cpp
         runtime/task.cpp
+        runtime/text.cpp
         runtime/text_field.cpp
         runtime/text_input.cpp
         runtime/tooltip.cpp

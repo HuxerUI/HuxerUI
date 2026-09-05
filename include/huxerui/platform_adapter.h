@@ -71,25 +71,36 @@ public:
   virtual void SetPointerCursor(PointerCursorKind kind) {
     static_cast<void>(kind);
   }
-  virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(std::string_view text, const TextStyle& style,
-                                                               float max_width, const TextLayoutOptions& options = {});
+
+  virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {});
+
+  std::unique_ptr<detail::TextLayout> CreateTextLayout(std::string_view text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {});
+
   virtual PlatformTextInput* TextInput() noexcept {
     return nullptr;
   }
+
   virtual PlatformClipboard* Clipboard() noexcept {
     return nullptr;
   }
+
   virtual PlatformResources* Resources() noexcept {
     return nullptr;
   }
+
   virtual std::optional<ProcessMetrics> QueryProcessMetrics() noexcept {
     return std::nullopt;
   }
+
   // Embedded adapters without native-window authority may ignore desktop window commands.
   virtual void RequestWindowCommand(WindowCommand command) {
     static_cast<void>(command);
   }
+
   virtual void RequestApplicationQuit() {}
+
   // Embedded adapters without native-window authority may leave this optional capability as a no-op.
   virtual void SetSystemBarsContentBrightness(SystemBarContentBrightness status_bar,
                                               SystemBarContentBrightness navigation_bar) {

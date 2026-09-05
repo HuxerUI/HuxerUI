@@ -30,7 +30,7 @@
 #include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -139,6 +139,39 @@ void ConfigureLayout(
   }
 }
 
+void ConfigureLayout(PangoLayout* layout, const AttributedText& text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
+  ConfigureLayout(layout, text.PlainText(), style, max_width, options);
+  // Copy the paragraph attributes before adding resolved overrides; range indices below are UTF-8 byte offsets.
+  PangoAttrList* attributes = pango_attr_list_copy(pango_layout_get_attributes(layout));
+  for (const auto& run : ResolveTextRuns(text, style)) {
+    const auto insert = [&](PangoAttribute* attribute) {
+      attribute->start_index = static_cast<guint>(run.byte_start);
+      attribute->end_index = static_cast<guint>(run.byte_end);
+      pango_attr_list_change(attributes, attribute);
+    };
+    PangoFontDescription* font = CreateFontDescription(run.style.font);
+    insert(pango_attr_font_desc_new(font));
+    pango_font_description_free(font);
+    insert(pango_attr_underline_new(
+        HasTextDecoration(run.style.decoration, TextDecoration::Underline) ? PANGO_UNDERLINE_SINGLE
+                                                                         : PANGO_UNDERLINE_NONE
+    ));
+    insert(pango_attr_strikethrough_new(HasTextDecoration(run.style.decoration, TextDecoration::StrikeThrough)));
+    const auto channel = [](float value) { return static_cast<guint16>(std::clamp(value, 0.0F, 1.0F) * 65535.0F); };
+    const Color foreground = run.style.foreground;
+    insert(pango_attr_foreground_new(channel(foreground.red), channel(foreground.green), channel(foreground.blue)));
+    insert(pango_attr_foreground_alpha_new(channel(foreground.alpha)));
+    if (run.background.alpha > 0.0F) {
+      const Color background = run.background;
+      insert(pango_attr_background_new(channel(background.red), channel(background.green), channel(background.blue)));
+      insert(pango_attr_background_alpha_new(channel(background.alpha)));
+    }
+  }
+  pango_layout_set_attributes(layout, attributes);
+  pango_attr_list_unref(attributes);
+}
+
 std::optional<TextOffset> Utf8ByteToUtf16(std::string_view text, int byte_offset) noexcept {
   if (byte_offset < 0 || static_cast<std::size_t>(byte_offset) > text.size() ||
       !g_utf8_validate(text.data(), static_cast<gssize>(text.size()), nullptr)) {
@@ -201,20 +234,17 @@ TextLayoutMetrics LayoutMetrics(PangoLayout* layout) {
 
 class PangoTextLayout final : public TextLayout {
 public:
-  PangoTextLayout(
-      PangoContext* context,
-      std::string_view text,
-      const TextStyle& style,
-      float max_width,
-      const TextLayoutOptions& options
-  ) : text_(text) {
+  PangoTextLayout(PangoContext* context, const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options)
+      : text_(text.PlainText()) {
     PangoFontMap* font_map = pango_context_get_font_map(context);
+    // Retained interaction geometry must not inherit later direction or locale changes on the renderer's context.
     PangoContext* layout_context = pango_font_map_create_context(font_map);
     pango_context_set_language(layout_context, pango_context_get_language(context));
     pango_cairo_context_set_resolution(layout_context, pango_cairo_context_get_resolution(context));
     layout_ = pango_layout_new(layout_context);
     g_object_unref(layout_context);
-    ConfigureLayout(layout_, text_, style, max_width, options);
+    ConfigureLayout(layout_, text, style, max_width, options);
     metrics_ = LayoutMetrics(layout_);
     if (options.wrap == TextWrap::NoWrap && std::isfinite(max_width) && metrics_.size.width < max_width) {
       pango_layout_set_width(layout_, static_cast<int>(std::ceil(max_width * PANGO_SCALE)));
@@ -237,34 +267,77 @@ public:
   TextPosition HitTest(Point point) const override {
     int byte_index = 0;
     int trailing = 0;
-    const gboolean inside = pango_layout_xy_to_index(
-        layout_,
-        static_cast<int>(std::lround(point.x * PANGO_SCALE)),
-        static_cast<int>(std::lround(point.y * PANGO_SCALE)),
-        &byte_index,
-        &trailing
-    );
+    pango_layout_xy_to_index(layout_, static_cast<int>(std::lround(point.x * PANGO_SCALE)),
+        static_cast<int>(std::lround(point.y * PANGO_SCALE)), &byte_index, &trailing);
+    int line_index = 0;
+    int ignored_x = 0;
+    pango_layout_index_to_line_x(layout_, byte_index, FALSE, &line_index, &ignored_x);
     const char* current = text_.data() + std::clamp(byte_index, 0, static_cast<int>(text_.size()));
     const char* end = text_.data() + text_.size();
+    // Pango's trailing count is in Unicode characters, whereas the shared selection boundary uses UTF-16 units.
     while (trailing-- > 0 && current < end) {
       current = g_utf8_next_char(current);
     }
-    const int resolved_byte = static_cast<int>(current - text_.data());
-    const TextOffset offset = Utf8ByteToUtf16(text_, resolved_byte).value_or(0);
-    return {offset, inside ? TextAffinity::Downstream : TextAffinity::Upstream};
+    const TextOffset offset = Utf8ByteToUtf16(text_, static_cast<int>(current - text_.data())).value_or(0);
+    const auto distance = [&](const Rect& caret) {
+      return point.y >= caret.y && point.y < caret.y + caret.height
+          ? std::abs(point.x - caret.x) : std::numeric_limits<float>::infinity();
+    };
+    // Pango's inside/outside result is not affinity; choose between visual caret candidates on the hit line.
+    const float before = distance(CaretRect(offset, TextAffinity::Upstream));
+    const float after = distance(CaretRect(offset, TextAffinity::Downstream));
+    PangoLayoutLine* line = pango_layout_get_line_readonly(layout_, line_index);
+    const int line_end = line->start_index + line->length;
+    // A hit at a soft line end may name its last character rather than the boundary after it.
+    if (line_end > line->start_index && line_end < static_cast<int>(text_.size()) &&
+        text_[line_end - 1] != '\n' && text_[line_end - 1] != '\r') {
+      const TextOffset boundary = Utf8ByteToUtf16(text_, line_end).value_or(offset);
+      const float boundary_distance = distance(CaretRect(boundary, TextAffinity::Upstream));
+      if (std::isfinite(boundary_distance) && boundary_distance <= std::min(before, after)) {
+        return {boundary, TextAffinity::Upstream};
+      }
+    }
+    return {offset, before < after ? TextAffinity::Upstream : TextAffinity::Downstream};
   }
 
   Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
-    const int byte_index = Utf16ToUtf8Byte(text_, offset).value_or(static_cast<int>(text_.size()));
-    PangoRectangle strong{};
-    PangoRectangle weak{};
-    pango_layout_get_cursor_pos(layout_, byte_index, &strong, &weak);
-    const PangoRectangle& selected = affinity == TextAffinity::Upstream ? weak : strong;
+    offset = std::clamp<TextOffset>(offset, 0, caret_offsets_.back());
+    const int requested_byte = Utf16ToUtf8Byte(text_, offset).value_or(static_cast<int>(text_.size()));
+    int byte_index = requested_byte;
+    bool trailing = affinity == TextAffinity::Upstream && offset > 0;
+    if (trailing) {
+      const int previous = Utf16ToUtf8Byte(text_, PreviousCaretOffset(offset)).value_or(0);
+      // An explicit separator advances to the next line regardless of affinity.
+      trailing = text_[previous] != '\n' && text_[previous] != '\r';
+      if (trailing) {
+        byte_index = previous;
+      }
+    }
+    int line_index = 0;
+    int x = 0;
+    pango_layout_index_to_line_x(layout_, byte_index, trailing, &line_index, &x);
+    PangoLayoutLine* line = pango_layout_get_line_readonly(layout_, line_index);
+    // Pango strong/weak positions share a line; a soft-wrap upstream caret needs the preceding line's edge.
+    if (!trailing || requested_byte != line->start_index + line->length ||
+        line_index + 1 == pango_layout_get_line_count(layout_)) {
+      PangoRectangle strong{};
+      PangoRectangle weak{};
+      pango_layout_get_cursor_pos(layout_, requested_byte, &strong, &weak);
+      const PangoRectangle& selected = trailing ? weak : strong;
+      return {PangoUnits(selected.x), PangoUnits(selected.y), 1.0F, std::ceil(PangoUnits(selected.height))};
+    }
+    PangoLayoutIter* iterator = pango_layout_get_iter(layout_);
+    for (int index = 0; index < line_index; ++index) {
+      pango_layout_iter_next_line(iterator);
+    }
+    PangoRectangle logical{};
+    pango_layout_iter_get_line_extents(iterator, nullptr, &logical);
+    pango_layout_iter_free(iterator);
     return {
-        PangoUnits(selected.x),
-        PangoUnits(selected.y),
+        PangoUnits(logical.x + x),
+        PangoUnits(logical.y),
         1.0F,
-        std::ceil(PangoUnits(selected.height)),
+        std::ceil(PangoUnits(logical.height)),
     };
   }
 
@@ -298,11 +371,12 @@ public:
       pango_layout_iter_get_line_extents(iterator, nullptr, &logical);
       std::vector<Rect> line_rects;
       line_rects.reserve(static_cast<std::size_t>(range_count));
+      // Pango's x ranges already include line alignment; adding logical.x again would shift the selection twice.
       for (int range_index = 0; range_index < range_count; ++range_index) {
         const int first_x = ranges[range_index * 2];
         const int last_x = ranges[range_index * 2 + 1];
         line_rects.push_back({
-            PangoUnits(logical.x + std::min(first_x, last_x)),
+            PangoUnits(std::min(first_x, last_x)),
             PangoUnits(logical.y),
             PangoUnits(std::abs(last_x - first_x)),
             std::ceil(PangoUnits(logical.height)),
@@ -340,12 +414,13 @@ private:
     const PangoLogAttr* attributes = pango_layout_get_log_attrs_readonly(layout_, &attribute_count);
     const char* current = text_.data();
     const char* end = text_.data() + text_.size();
+    // Walk scalar positions once while accumulating UTF-16 offsets; visual style splits are not extra caret stops.
+    TextOffset offset = 0;
     for (int index = 1; index < attribute_count && current < end; ++index) {
+      offset += g_utf8_get_char(current) > 0xFFFFU ? 2 : 1;
       current = g_utf8_next_char(current);
       if (attributes[index].is_cursor_position != 0) {
-        caret_offsets_.push_back(
-            Utf8ByteToUtf16(text_, static_cast<int>(current - text_.data())).value_or(caret_offsets_.back())
-        );
+        caret_offsets_.push_back(offset);
       }
     }
     const TextOffset length = Utf8ByteToUtf16(text_, static_cast<int>(text_.size())).value_or(0);
@@ -780,7 +855,7 @@ private:
   }
 
   void DrawCommand(const DrawTextCommand& command) {
-    if (command.text.empty() || command.rect.IsEmpty() || command.style.foreground.alpha <= 0.0F) {
+    if (command.text.PlainText().empty() || command.rect.IsEmpty()) {
       return;
     }
     PangoLayout* layout = pango_layout_new(state_.context);
@@ -1616,9 +1691,18 @@ TextRunMetrics LinuxRenderer::MeasureRun(
   return result;
 }
 
-TextLayoutMetrics LinuxRenderer::MeasureText(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+TextLayoutMetrics LinuxRenderer::MeasureText(std::string_view text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
+  return MeasureText(AttributedText(std::string(text)), style, max_width, options);
+}
+
+std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(std::string_view text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
+  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+}
+
+TextLayoutMetrics LinuxRenderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
   if (std::isfinite(max_width) && max_width <= 0.0F) {
     return {};
   }
@@ -1630,9 +1714,8 @@ TextLayoutMetrics LinuxRenderer::MeasureText(
   return metrics;
 }
 
-std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
   return std::make_unique<PangoTextLayout>(state_->context, text, style, max_width, options);
 }
 

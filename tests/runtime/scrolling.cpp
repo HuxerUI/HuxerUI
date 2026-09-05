@@ -5,6 +5,7 @@ namespace huxerui::test {
 std::string scroll_clicked;
 State<bool> show_controlled_scroll;
 ScrollController controlled_list_scroll;
+ScrollController variable_list_scroll;
 ScrollController controlled_grid_scroll;
 ScrollController controlled_view_scroll;
 ScrollController horizontal_view_scroll;
@@ -148,6 +149,14 @@ View ScrollControllerToolbar(ScrollController scroll) {
     }
         .With(huxerui::Spacing{12.0F}, huxerui::CrossAlign{CrossAxisAlignment::Center});
   });
+}
+
+View VariableExtentScrollApp() {
+  auto scroll = UseScrollController();
+  variable_list_scroll = scroll;
+  return VirtualList(std::size_t{1001}, [](std::size_t index) {
+    return Text::Format("Block {}", index).With(Frame{.height = index == 1000 ? 120.0F : 46.0F}).Key(index);
+  }).EstimatedItemExtent(84.0F).CacheExtent(100.0F).Controller(scroll);
 }
 
 View ScrollControllerExampleApp() {
@@ -787,6 +796,74 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   );
   REQUIRE(example_scroll.Offset() == 0.0F);
   REQUIRE(runtime.RootNode()->children[1]->scroll_state->offset_y == 0.0F);
+}
+
+TEST_CASE("TestScrollControllerRefinesVariableItemAlignmentAfterRealization") {
+  TestPlatform platform;
+  Runtime runtime{VariableExtentScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 400.0F}});
+  runtime.BuildFrame();
+  REQUIRE(variable_list_scroll.ScrollToItem(1000, ScrollAlignment::End));
+  for (int frame = 0; frame < 8; ++frame) {
+    runtime.BuildFrame();
+  }
+  REQUIRE(variable_list_scroll.Offset() == variable_list_scroll.MaxOffset());
+  const auto* root = runtime.RootNode();
+  REQUIRE(root->virtual_state->realized_indices.back() == 1000);
+  REQUIRE(root->children.back()->layout_offset.y + root->children.back()->bounds.height == 400.0F);
+  const auto settled = variable_list_scroll.Metrics();
+  runtime.BuildFrame();
+  REQUIRE(variable_list_scroll.Metrics() == settled);
+}
+
+TEST_CASE("TestScrollControllerDirectScrollingCancelsPendingItemAlignment") {
+  TestPlatform platform;
+  Runtime runtime{VariableExtentScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 400.0F}});
+  runtime.BuildFrame();
+  REQUIRE(variable_list_scroll.ScrollToItem(1000, ScrollAlignment::End));
+  runtime.BuildFrame();
+  SECTION("New offset") { REQUIRE(variable_list_scroll.ScrollTo(0.0F)); }
+  SECTION("Wheel input") {
+    runtime.HandleScrollInput({{40.0F, 40.0F}, 0.0F, -500.0F});
+  }
+  for (int frame = 0; frame < 8; ++frame) {
+    runtime.BuildFrame();
+  }
+  REQUIRE(variable_list_scroll.Offset() < variable_list_scroll.MaxOffset() - 100.0F);
+  const auto settled = variable_list_scroll.Metrics();
+  runtime.BuildFrame();
+  REQUIRE(variable_list_scroll.Metrics() == settled);
+}
+
+TEST_CASE("TestScrollControllerDoesNotReplayPendingAlignmentAfterRemount") {
+  static ScrollController scroll;
+  static bool visible;
+  scroll = ScrollController{};
+  visible = true;
+  TestPlatform platform;
+  Runtime runtime{[]() -> View {
+    if (!visible) {
+      return Text("Hidden");
+    }
+    return VirtualList(std::size_t{1001}, [](std::size_t index) {
+      return Text::Format("Block {}", index).With(Frame{.height = index == 1000 ? 120.0F : 46.0F}).Key(index);
+    }).EstimatedItemExtent(84.0F).Controller(scroll);
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 400.0F}});
+  runtime.BuildFrame();
+  REQUIRE(scroll.ScrollToItem(1000, ScrollAlignment::End));
+  visible = false;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE_FALSE(scroll.IsConnected());
+  visible = true;
+  runtime.InvalidateRoot();
+  for (int frame = 0; frame < 8; ++frame) {
+    runtime.BuildFrame();
+  }
+  REQUIRE(scroll.IsConnected());
+  REQUIRE(scroll.Offset() == 0.0F);
 }
 
 TEST_CASE("TestScrollControllerControlsVirtualGridItems") {

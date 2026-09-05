@@ -158,6 +158,8 @@ Controller requests, focus reveal, text-input reveal, scrollbar dragging, drag-a
 They target the addressed container directly and do not automatically chain a remainder to ancestors.
 Only user scroll transactions and fling continuation perform nested consumption.
 
+`ScrollToItem` retains a pending index and alignment until measured placement agrees with the requested offset. Newly realized variable-height items may change the estimated target, so completion occurs after layout rather than when the initial offset is applied. Direct scrolling, a newer offset request, disablement, or an invalidated target cancels the pending request; correction never becomes a competing scroll position. Requests accepted by an old connection are not replayed after rebinding or remounting.
+
 ## Invariants
 
 - A mounted scroll container is the sole owner of its actual offset.

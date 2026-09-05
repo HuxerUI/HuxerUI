@@ -161,11 +161,13 @@ Each WebRenderer owns one Canvas measurement context rather than a DOM element f
 
 Creating a WebTextLayout materializes an immutable C++ snapshot containing measured size, baselines, line records, grapheme caret boundaries from `Intl.Segmenter`, and measured caret advances. Hit testing, caret lookup, and range geometry query that snapshot without returning to Canvas.
 
-Non-editable paragraph measurement and drawing share a bounded renderer-owned WebTextLayout cache keyed by text, font, layout options, and logical width. Editable layouts returned through `CreateTextLayout()` remain independently owned so active text geometry does not borrow cache lifetime.
+Paragraph drawing uses a renderer-owned WebTextLayout cache bounded by 256 entries and an estimated eight-megabyte retention budget. Its geometry key contains the text body, effective font ranges, layout options, and logical width; paint-only style and link changes reuse that geometry. Measurement and layouts returned through `CreateTextLayout()` are independently owned so secure source text never enters this cache.
 
 Drawing uses the same resolved CSS font description, direction, locale, alignment, wrapping decisions, and line records as measurement. The generated example entry waits for `document.fonts.ready` before mounting; direct integrations must do the same after loading application fonts. Runtime font-generation invalidation is not implemented by the Web backend.
 
-The Web backend resolves paragraph direction from the first strong character and handles whole-paragraph left-to-right or right-to-left placement. Mixed-direction caret geometry and full Unicode line breaking still need cross-browser validation. If Canvas metrics cannot meet the required consistency, an alternative text engine may replace WebTextLayout and WebRenderer internals without changing the public Text or TextInput APIs.
+Attributed paragraphs use one fallback layout with per-line mixed-font metrics, shared caret advances, range backgrounds, and text decorations. Styles do not create separate Views. The backend resolves paragraph direction from the first strong character and supports whole-paragraph left-to-right or right-to-left placement, links, and basic selection.
+
+Web intentionally does not promise native-equivalent mixed bidirectional layout, full Unicode line breaking, ligatures across style boundaries, or contextual shaping across separately drawn runs. No additional text-engine dependency is introduced. Applications requiring those typographic guarantees should use a native backend; the portable attributed and logical-selection APIs remain the same.
 
 ## Pointer, wheel, and keyboard input
 

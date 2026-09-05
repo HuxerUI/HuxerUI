@@ -22,6 +22,7 @@ android {
     defaultConfig {
         minSdk = huxeruiMinSdk
         consumerProguardFiles "consumer-rules.pro"
+        testInstrumentationRunner "org.huxerui.HuxerUITextLayoutTest"
 
         aarMetadata {
             minCompileSdk = huxeruiMinCompileSdk
@@ -43,6 +44,10 @@ android {
                 abiFilters(*huxeruiAbis)
             }
         }
+    }
+
+    sourceSets {
+        androidTest.java.srcDir "../../../tests/platform"
     }
 
     compileOptions {

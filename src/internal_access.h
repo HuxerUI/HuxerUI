@@ -15,6 +15,7 @@
 #include <huxerui/paint.h>
 #include <huxerui/resource.h>
 #include <huxerui/scroll.h>
+#include <huxerui/text.h>
 #include <huxerui/vector.h>
 #include <huxerui/virtual_layout.h>
 
@@ -182,6 +183,13 @@ struct InternalAccess {
   static bool HasSelectedIcon(const NavigationItem& item) noexcept;
   static bool HasBlankLiteralLabel(const NavigationItem& item) noexcept;
   static void ValidateImages(const NavigationItem& item);
+
+#pragma endregion
+
+#pragma region AttributedText
+
+  static bool SameBody(const AttributedText& left, const AttributedText& right) noexcept;
+  static std::size_t BodyHash(const AttributedText& text) noexcept;
 
 #pragma endregion
 

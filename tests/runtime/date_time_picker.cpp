@@ -30,9 +30,8 @@ class PickerMeasuringPlatform final : public TestPlatform {
 public:
   using TestPlatform::TestPlatform;
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) override {
     ++measurements;
     return TestPlatform::MeasureText(text, style, max_width, options);
   }

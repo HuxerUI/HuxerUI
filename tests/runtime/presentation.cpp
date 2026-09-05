@@ -101,7 +101,7 @@ constexpr Color initial_dialog_update_scrim = Color::Rgb(20, 30, 40, 0.2F);
 constexpr Color updated_dialog_update_scrim = Color::Rgb(80, 20, 100, 0.45F);
 
 const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std::string_view text) {
-  if (node.text == text) {
+  if (node.text.PlainText() == text) {
     return &node;
   }
   for (const auto& child : node.children) {
@@ -152,7 +152,7 @@ const Indication* MountedIndication(const detail::MountedNode& node) {
 bool PaintsText(const PaintSequence& sequence, std::string_view text) {
   return std::ranges::any_of(sequence.Commands(), [text](const PaintCommand& command) {
     const auto* draw_text = std::get_if<DrawTextCommand>(&command);
-    return draw_text != nullptr && draw_text->text == text;
+    return draw_text != nullptr && draw_text->text.PlainText() == text;
   });
 }
 
@@ -3479,7 +3479,7 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   std::vector<std::string> painted_text;
   for (const PaintCommand& command : with_modal.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
-      painted_text.push_back(text->text);
+      painted_text.push_back(text->text.PlainText());
     }
   }
   const auto modal_position = std::ranges::find(painted_text, "modal");
@@ -4135,7 +4135,7 @@ TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
 
   const DrawTextCommand* animated = nullptr;
   for (const auto& command : middle.Commands()) {
-    if (const auto* text = std::get_if<DrawTextCommand>(&command); text && text->text == "animated") {
+    if (const auto* text = std::get_if<DrawTextCommand>(&command); text && text->text.PlainText() == "animated") {
       animated = text;
       break;
     }

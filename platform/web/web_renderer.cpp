@@ -23,7 +23,7 @@
 #include "resource_internal.h"
 #include "shadow_internal.h"
 #include "text_input_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 #include "web_external_texture_internal.h"
 #include "web_text_internal.h"
 
@@ -433,6 +433,7 @@ std::vector<TextOffset> BrowserGraphemeBoundaries(std::string_view text, std::st
   } catch (...) {
   }
 
+  // Without Intl.Segmenter, keep scalar-safe UTF-16 boundaries; this fallback is not full grapheme segmentation.
   for (TextOffset offset = 1; offset <= length; ++offset) {
     if (Utf8TextInRange(text, {0, offset}).has_value()) {
       result.push_back(offset);
@@ -455,25 +456,35 @@ public:
     TextOffset end = 0;
     float width = 0.0F;
     float baseline = 0.0F;
+    float top = 0.0F;
+    float height = 0.0F;
     std::vector<CaretStop> carets;
   };
 
-  WebTextLayout(val context, std::string_view text, Font font, float max_width, TextLayoutOptions options)
+  WebTextLayout(val context, const AttributedText& text, Font font, float max_width, TextLayoutOptions options,
+      bool caret_geometry = true)
       : context_(std::move(context)), text_(text), font_(std::move(font)), options_(std::move(options)),
         max_width_(max_width) {
-    direction_ = ResolveWebTextDirection(text_, options_.shaping.direction);
+    direction_ = ResolveWebTextDirection(text_.PlainText(), options_.shaping.direction);
     ConfigureContext();
     font_metrics_ = ResolveWebFontMetrics(context_, font_);
-    line_height_ = std::max(1.0F, font_metrics_.LineHeight());
+    // Geometry depends on effective font runs, not color or link boundaries; merge equal-font neighbors first.
+    for (const auto& run : ResolveTextRuns(text_, TextStyle{.font = font_})) {
+      if (!font_runs_.empty() && font_runs_.back().style.font == run.style.font) {
+        font_runs_.back().range.end = run.range.end;
+      } else {
+        font_runs_.push_back(run);
+      }
+    }
     BuildBoundaries();
-    BuildLines(max_width_);
-    BuildCaretStops();
+    BuildLines(max_width_, caret_geometry);
+    // Geometry is materialized during construction and must not depend on later changes to the shared Canvas state.
     context_ = val::undefined();
   }
 
   [[nodiscard]] bool
-  Matches(std::string_view text, const Font& font, float max_width, const TextLayoutOptions& options) const noexcept {
-    return text_ == text && font_ == font && options_ == options && max_width_ == max_width;
+  Matches(const AttributedText& text, const Font& font, float max_width, const TextLayoutOptions& options) const noexcept {
+    return options_ == options && max_width_ == max_width && TextLayoutInputsEqual(text_, font_, text, font);
   }
 
   [[nodiscard]] Size Measure() const override {
@@ -484,8 +495,10 @@ public:
     if (lines_.empty()) {
       return {};
     }
-    const std::size_t line_index =
-        std::min(static_cast<std::size_t>(std::max(0.0F, std::floor(point.y / line_height_))), lines_.size() - 1);
+    std::size_t line_index = 0;
+    while (line_index + 1 < lines_.size() && point.y >= lines_[line_index].top + lines_[line_index].height) {
+      ++line_index;
+    }
     const Line& line = lines_[line_index];
     const float local_x = point.x - LineOffset(line);
     if (local_x <= 0.0F) {
@@ -516,7 +529,7 @@ public:
     if (direction_ == TextDirection::RightToLeft) {
       x = line.width - x;
     }
-    return {LineOffset(line) + x, LineTop(line), 1.0F, line_height_};
+    return {LineOffset(line) + x, LineTop(line), 1.0F, line.height};
   }
 
   [[nodiscard]] std::vector<Rect> RangeRects(TextRange range) const override {
@@ -539,7 +552,7 @@ public:
       if (left > right) {
         std::swap(left, right);
       }
-      result.push_back({LineOffset(line) + left, LineTop(line), right - left, line_height_});
+      result.push_back({LineOffset(line) + left, LineTop(line), right - left, line.height});
     }
     return result;
   }
@@ -562,14 +575,6 @@ public:
     return metrics_;
   }
 
-  [[nodiscard]] const FontMetrics& ResolvedFontMetrics() const noexcept {
-    return font_metrics_;
-  }
-
-  [[nodiscard]] std::string TextFor(const Line& line) const {
-    return Utf8TextInRange(text_, {line.start, line.end}).value_or(std::string{});
-  }
-
   [[nodiscard]] float LineOffset(const Line& line) const noexcept {
     switch (options_.align) {
     case TextAlign::Leading:
@@ -586,8 +591,24 @@ public:
     return direction_;
   }
 
-  [[nodiscard]] float LineWidth(const Line& line) const noexcept {
-    return line.width;
+  // This Canvas fallback mirrors whole RTL lines; it does not implement mixed-bidi visual run reordering.
+  [[nodiscard]] Rect FragmentRect(const Line& line, TextRange range) const noexcept {
+    float left = LineAdvance(line, range.start);
+    float right = LineAdvance(line, range.end);
+    if (direction_ == TextDirection::RightToLeft) {
+      left = line.width - left;
+      right = line.width - right;
+    }
+    return {LineOffset(line) + std::min(left, right), line.top, std::abs(right - left), line.height};
+  }
+
+  [[nodiscard]] std::size_t RetainedBytes() const noexcept {
+    std::size_t bytes = sizeof(*this) + ParagraphCacheCost(text_) + boundaries_.size() * sizeof(TextOffset);
+    bytes += font_runs_.size() * sizeof(ResolvedTextRun) + lines_.size() * sizeof(Line);
+    for (const auto& line : lines_) {
+      bytes += line.carets.size() * sizeof(CaretStop);
+    }
+    return bytes;
   }
 
 private:
@@ -599,46 +620,65 @@ private:
   }
 
   void BuildBoundaries() {
-    boundaries_ = BrowserGraphemeBoundaries(text_, options_.shaping.locale);
+    boundaries_ = BrowserGraphemeBoundaries(text_.PlainText(), options_.shaping.locale);
   }
 
+  // Shape each font-run prefix as a unit; adding isolated character widths would lose contextual advances.
   [[nodiscard]] float Width(TextOffset start, TextOffset end) const {
-    const std::optional<std::string> value = Utf8TextInRange(text_, {start, end});
-    if (!value.has_value()) {
-      return 0.0F;
-    }
+    float width = 0.0F;
     ConfigureContext();
-    return MeasureWidth(context_, *value);
+    auto run = std::lower_bound(font_runs_.begin(), font_runs_.end(), start, [](const auto& item, TextOffset offset) {
+      return item.range.end <= offset;
+    });
+    for (; run != font_runs_.end() && run->range.start < end; ++run) {
+      const TextRange range{std::max(start, run->range.start), std::min(end, run->range.end)};
+      context_.set("font", CssFont(run->style.font));
+      width += MeasureWidth(context_, text_.TextInRange(range));
+    }
+    return width;
   }
 
   [[nodiscard]] bool IsBreak(TextOffset start, TextOffset end) const {
-    const std::optional<std::string> value = Utf8TextInRange(text_, {start, end});
-    return value.has_value() && (*value == " " || *value == "\t" || *value == "-" || *value == "\n");
+    const std::string value = text_.TextInRange({start, end});
+    return value == " " || value == "\t" || value == "-";
   }
 
-  void AddLine(TextOffset start, TextOffset end) {
-    const float width = Width(start, end);
-    const float baseline =
-        static_cast<float>(lines_.size()) * line_height_ + font_metrics_.leading * 0.5F + font_metrics_.ascent;
-    lines_.push_back({start, end, width, baseline, {}});
+  void AddLine(TextOffset start, TextOffset end, const std::vector<CaretStop>& prefixes, bool caret_geometry) {
+    // Wrapping already measured these prefixes; reuse them for line width and caret positions instead of reshaping.
+    const auto advance = [&](TextOffset offset) {
+      const auto found = std::lower_bound(prefixes.begin(), prefixes.end(), offset,
+          [](const CaretStop& stop, TextOffset target) { return stop.offset < target; });
+      return found != prefixes.end() && found->offset == offset ? found->advance : Width(start, offset);
+    };
+    const float width = advance(end);
+    float ascent = font_metrics_.ascent + font_metrics_.leading * 0.5F;
+    float descent = font_metrics_.descent + font_metrics_.leading * 0.5F;
+    auto run = std::lower_bound(font_runs_.begin(), font_runs_.end(), start, [](const auto& item, TextOffset offset) {
+      return item.range.end <= offset;
+    });
+    for (; run != font_runs_.end() && run->range.start < end; ++run) {
+      const auto metrics = ResolveWebFontMetrics(context_, run->style.font);
+      ascent = std::max(ascent, metrics.ascent + metrics.leading * 0.5F);
+      descent = std::max(descent, metrics.descent + metrics.leading * 0.5F);
+    }
+    const float top = lines_.empty() ? 0.0F : lines_.back().top + lines_.back().height;
+    lines_.push_back({start, end, width, top + ascent, top, std::max(1.0F, ascent + descent), {}});
+    // Measurement callers need line metrics only, not a complete UTF-16-offset-to-x map.
+    if (caret_geometry) {
+      Line& line = lines_.back();
+      line.carets.push_back({start, 0.0F});
+      auto boundary = std::upper_bound(boundaries_.begin(), boundaries_.end(), start);
+      for (; boundary != boundaries_.end() && *boundary < end; ++boundary) {
+        line.carets.push_back({*boundary, advance(*boundary)});
+      }
+      if (end != start) {
+        line.carets.push_back({end, width});
+      }
+    }
     widest_line_ = std::max(widest_line_, width);
   }
 
-  void BuildCaretStops() {
-    for (Line& line : lines_) {
-      line.carets.push_back({line.start, 0.0F});
-      for (const TextOffset boundary : boundaries_) {
-        if (boundary > line.start && boundary <= line.end) {
-          line.carets.push_back({boundary, Width(line.start, boundary)});
-        }
-      }
-      if (line.carets.back().offset != line.end) {
-        line.carets.push_back({line.end, line.width});
-      }
-    }
-  }
-
-  void BuildLines(float max_width) {
+  void BuildLines(float max_width, bool caret_geometry) {
     const TextOffset length = boundaries_.back();
     const bool constrained = std::isfinite(max_width);
     if (constrained && max_width <= 0.0F) {
@@ -649,11 +689,19 @@ private:
     TextOffset line_start = 0;
     TextOffset last_break = -1;
     TextOffset previous = 0;
+    // Prefix advances belong to the current line_start and must be discarded whenever a line break moves it.
+    std::vector<CaretStop> prefixes;
     for (std::size_t index = 1; index < boundaries_.size(); ++index) {
-      const TextOffset boundary = boundaries_[index];
-      const std::optional<std::string> cluster = Utf8TextInRange(text_, {previous, boundary});
-      if (cluster == std::optional<std::string>{"\n"}) {
-        AddLine(line_start, previous);
+      TextOffset boundary = boundaries_[index];
+      const std::string cluster = text_.TextInRange({previous, boundary});
+      if (IsWebHardLineBreak(cluster)) {
+        // Scalar fallback may split CRLF; consume it as one hard break without normalizing source offsets.
+        if (cluster == "\r" && index + 1 < boundaries_.size() &&
+            text_.TextInRange({boundary, boundaries_[index + 1]}) == "\n") {
+          boundary = boundaries_[++index];
+        }
+        AddLine(line_start, previous, prefixes, caret_geometry);
+        prefixes.clear();
         line_start = boundary;
         last_break = -1;
         previous = boundary;
@@ -662,24 +710,28 @@ private:
       if (IsBreak(previous, boundary)) {
         last_break = boundary;
       }
-      if (constrained && options_.wrap == TextWrap::Word && line_start < previous &&
-          Width(line_start, boundary) > max_width) {
-        TextOffset end = last_break > line_start ? last_break : previous;
-        if (end <= line_start) {
-          end = boundary;
+      if (constrained && options_.wrap == TextWrap::Word && line_start < previous) {
+        const float width = Width(line_start, boundary);
+        prefixes.push_back({boundary, width});
+        if (width > max_width) {
+          TextOffset end = last_break > line_start ? last_break : previous;
+          if (end <= line_start) {
+            end = boundary;
+          }
+          AddLine(line_start, end, prefixes, caret_geometry);
+          prefixes.clear();
+          line_start = end;
+          last_break = -1;
         }
-        AddLine(line_start, end);
-        line_start = end;
-        last_break = -1;
       }
       previous = boundary;
     }
-    AddLine(line_start, length);
+    AddLine(line_start, length, prefixes, caret_geometry);
 
     const float width =
         constrained && options_.wrap == TextWrap::Word ? std::min(max_width, widest_line_) : widest_line_;
     metrics_ = {
-        {std::ceil(width), std::ceil(static_cast<float>(lines_.size()) * line_height_)},
+        {std::ceil(width), std::ceil(lines_.back().top + lines_.back().height)},
         lines_.empty() ? 0.0F : lines_.front().baseline,
         lines_.empty() ? 0.0F : lines_.back().baseline,
         lines_.size(),
@@ -688,7 +740,7 @@ private:
   }
 
   [[nodiscard]] float LineTop(const Line& line) const noexcept {
-    return line.baseline - font_metrics_.ascent - font_metrics_.leading * 0.5F;
+    return line.top;
   }
 
   [[nodiscard]] float LineAdvance(const Line& line, TextOffset offset) const noexcept {
@@ -728,13 +780,13 @@ private:
   }
 
   mutable val context_;
-  std::string text_;
+  AttributedText text_;
+  std::vector<ResolvedTextRun> font_runs_;
   Font font_;
   TextLayoutOptions options_;
   TextDirection direction_ = TextDirection::LeftToRight;
   FontMetrics font_metrics_;
   TextLayoutMetrics metrics_;
-  float line_height_ = 0.0F;
   float widest_line_ = 0.0F;
   float alignment_width_ = 0.0F;
   float max_width_ = 0.0F;
@@ -828,22 +880,30 @@ const val* WebRenderer::FrameFor(const std::shared_ptr<ExternalTexture>& texture
   return entry.frame.isNull() || entry.frame.isUndefined() ? nullptr : &entry.frame;
 }
 
-const WebTextLayout& WebRenderer::ParagraphFor(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+std::shared_ptr<const WebTextLayout> WebRenderer::ParagraphFor(const AttributedText& text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
   const auto cached = std::find_if(paragraph_cache_.begin(), paragraph_cache_.end(), [&](const auto& layout) {
     return layout->Matches(text, style.font, max_width, options);
   });
   if (cached != paragraph_cache_.end()) {
-    return **cached;
+    return *cached;
   }
 
+  auto paragraph = std::make_shared<WebTextLayout>(context_, text, style.font, max_width, options);
   constexpr std::size_t maximum_paragraphs = 256;
-  if (paragraph_cache_.size() >= maximum_paragraphs) {
+  constexpr std::size_t maximum_bytes = 8 * 1024 * 1024;
+  const auto bytes = paragraph->RetainedBytes();
+  if (bytes > maximum_bytes) {
+    return paragraph;
+  }
+  while (!paragraph_cache_.empty() &&
+         (paragraph_cache_.size() >= maximum_paragraphs || paragraph_bytes_ + bytes > maximum_bytes)) {
+    paragraph_bytes_ -= paragraph_cache_.front()->RetainedBytes();
     paragraph_cache_.erase(paragraph_cache_.begin());
   }
-  paragraph_cache_.push_back(std::make_unique<WebTextLayout>(context_, text, style.font, max_width, options));
-  return *paragraph_cache_.back();
+  paragraph_bytes_ += bytes;
+  paragraph_cache_.push_back(std::move(paragraph));
+  return paragraph_cache_.back();
 }
 
 FontMetrics WebRenderer::Metrics(const Font& font) {
@@ -881,15 +941,18 @@ WebRenderer::MeasureRun(std::string_view text, const TextStyle& style, const Tex
   return {advance, visual_bounds, metrics};
 }
 
-TextLayoutMetrics WebRenderer::MeasureText(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
-  return ParagraphFor(text, style, max_width, options).Metrics();
+TextLayoutMetrics WebRenderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
+  auto metrics = WebTextLayout(context_, text, style.font, max_width, options, false).Metrics();
+  // Constrain the public result without clipping the natural geometry used by hit testing and drawing.
+  if (std::isfinite(max_width)) {
+    metrics.size.width = std::min(metrics.size.width, std::max(0.0F, max_width));
+  }
+  return metrics;
 }
 
-std::unique_ptr<TextLayout> WebRenderer::CreateTextLayout(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+std::unique_ptr<TextLayout> WebRenderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
   return std::make_unique<WebTextLayout>(context_, text, style.font, max_width, options);
 }
 
@@ -965,10 +1028,11 @@ void WebRenderer::RenderCommand(const DrawRectCommand& command) {
 }
 
 void WebRenderer::RenderCommand(const DrawTextCommand& command) {
-  if (command.rect.IsEmpty() || command.style.foreground.alpha <= 0.0F) {
+  if (command.rect.IsEmpty()) {
     return;
   }
-  const WebTextLayout& layout = ParagraphFor(command.text, command.style, command.rect.width, command.options);
+  const auto paragraph = ParagraphFor(command.text, command.style, command.rect.width, command.options);
+  const WebTextLayout& layout = *paragraph;
   const float remaining_height = std::max(0.0F, command.rect.height - layout.Metrics().size.height);
   float vertical_offset = 0.0F;
   if (command.options.vertical_align == TextVerticalAlign::Center) {
@@ -984,16 +1048,29 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command) {
   context_.set("textBaseline", std::string("alphabetic"));
   context_.set("textAlign", std::string("left"));
   context_.set("direction", std::string(CssDirection(layout.Direction())));
-  context_.set(
-      "lang",
-      command.options.shaping.locale.empty() ? std::string("inherit") : command.options.shaping.locale
-  );
-  context_.set("fillStyle", CssColor(command.style.foreground));
+  context_.set("lang",
+      command.options.shaping.locale.empty() ? std::string("inherit") : command.options.shaping.locale);
+  // Cached geometry ignores paint-only changes, so replay resolves appearance from the current command.
+  const auto runs = ResolveTextRuns(command.text, command.style);
   for (const WebTextLayout::Line& line : layout.Lines()) {
-    const float x = command.rect.x + command.paragraph_offset.x + layout.LineOffset(line);
-    const float baseline = command.rect.y + command.paragraph_offset.y + vertical_offset + line.baseline;
-    context_.call<void>("fillText", layout.TextFor(line), x, baseline);
-    DrawTextDecorations(context_, x, baseline, layout.LineWidth(line), command.style, layout.ResolvedFontMetrics());
+    auto run = std::lower_bound(runs.begin(), runs.end(), line.start, [](const auto& item, TextOffset offset) {
+      return item.range.end <= offset;
+    });
+    for (; run != runs.end() && run->range.start < line.end; ++run) {
+      const TextRange range{std::max(line.start, run->range.start), std::min(line.end, run->range.end)};
+      const Rect fragment = layout.FragmentRect(line, range);
+      const float x = command.rect.x + command.paragraph_offset.x + fragment.x;
+      const float y = command.rect.y + command.paragraph_offset.y + vertical_offset;
+      if (run->background.alpha > 0.0F) {
+        context_.set("fillStyle", CssColor(run->background));
+        context_.call<void>("fillRect", x, y + fragment.y, fragment.width, fragment.height);
+      }
+      context_.set("font", CssFont(run->style.font));
+      context_.set("fillStyle", CssColor(run->style.foreground));
+      context_.call<void>("fillText", command.text.TextInRange(range), x, y + line.baseline);
+      DrawTextDecorations(context_, x, y + line.baseline, fragment.width, run->style,
+          ResolveWebFontMetrics(context_, run->style.font));
+    }
   }
   context_.call<void>("restore");
 }

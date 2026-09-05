@@ -1,5 +1,6 @@
 #include "runtime_internal.h"
 #include "internal_access.h"
+#include "text_internal.h"
 #include "application_internal.h"
 #include "external_texture_internal.h"
 #include "file_internal.h"
@@ -647,7 +648,9 @@ bool ContentPaintInputsEqual(const MountedNode& mounted, const ViewSpec& incomin
   if (incoming.kind == NodeKind::Canvas) {
     return false;
   }
-  return mounted.text == StringLiteral(incoming.text) && mounted.image_properties == incoming.image_properties &&
+  return TextPaintInputsEqual(mounted.text, mounted.properties.text_style, std::get<AttributedText>(incoming.text),
+                              incoming.properties.text_style) &&
+         mounted.image_properties == incoming.image_properties &&
          PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
          PlatformViewControllerEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties.ContentPaintEquals(incoming.properties);
@@ -658,18 +661,16 @@ bool ForegroundPaintInputsEqual(const MountedNode& mounted, const ViewSpec& inco
 }
 
 bool LayoutInputsEqual(const MountedNode& mounted, const ViewSpec& incoming) {
-  return mounted.text == StringLiteral(incoming.text) &&
+  return TextLayoutInputsEqual(mounted.text, mounted.properties.text_style.font,
+                               std::get<AttributedText>(incoming.text), incoming.properties.text_style.font) &&
          mounted.image_properties.LayoutEquals(incoming.image_properties) &&
          mounted.properties.LayoutEquals(incoming.properties) &&
          LayoutValuesEquivalent(mounted.layout_values, incoming.layout_values);
 }
 
-bool ExtensionNodeInputsEqual(
-    const MountedNode& mounted,
-    const ViewSpec& incoming,
-    const std::shared_ptr<const Environment>& environment
-) {
-  return mounted.text == StringLiteral(incoming.text) && mounted.image_properties == incoming.image_properties &&
+bool ExtensionNodeInputsEqual(const MountedNode& mounted, const ViewSpec& incoming,
+    const std::shared_ptr<const Environment>& environment) {
+  return mounted.text == std::get<AttributedText>(incoming.text) && mounted.image_properties == incoming.image_properties &&
          PlatformViewPropertiesEqual(mounted.platform_view, incoming.platform_view) &&
          mounted.properties == incoming.properties && mounted.component_semantics == incoming.component_semantics &&
          mounted.author_semantics == incoming.author_semantics &&
@@ -681,12 +682,8 @@ bool ExtensionNodeInputsEqual(
 }
 
 // Child structure, virtual sources, and node extensions reconcile separately because they carry mounted state.
-void ApplyViewDeclaration(
-    MountedNode& mounted,
-    ViewSpec& compiled,
-    std::shared_ptr<const Environment> environment
-) {
-  std::string compiled_text = StringLiteral(std::move(compiled.text));
+void ApplyViewDeclaration(MountedNode& mounted, ViewSpec& compiled, std::shared_ptr<const Environment> environment) {
+  AttributedText compiled_text = std::get<AttributedText>(std::move(compiled.text));
   if (!PlatformViewPropertiesEqual(mounted.platform_view, compiled.platform_view)) {
     ++mounted.platform_view_properties_revision;
   }
@@ -830,10 +827,11 @@ void DispatchScrollActivity(MountedNode& node, const ScrollActivity& activity) {
   }
 }
 
-void DispatchFocusChanged(MountedNode& node, bool focused) {
+// Traversal direction lets composite extensions choose their entry item without exposing their structure to Runtime.
+void DispatchFocusChanged(MountedNode& node, bool focused, bool reverse = false) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (entry.extension) {
-      entry.extension->OnFocusChanged(node, focused);
+      entry.extension->OnFocusChanged(node, focused, reverse);
     }
   }
   EmitEvent<ViewEvents::FocusChanged>(node.event_bindings, focused);
@@ -1715,6 +1713,8 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   state_->pointer_->AdvancePointerRecognition(frame.timestamp);
   state_->pointer_->AdvanceDragDrop(frame);
   state_->file_drop_->AdvanceFileDrop(frame);
+  // Selection re-hits use the prepared geometry above; any new auto-scroll is realized by the following frame.
+  state_->text_->AdvanceTextSelectionDrag(frame);
   // A completed long press can focus a client and change its selection. Resolve it before building the shared overlay
   // so the handles and editing toolbar use the resulting selection geometry in this commit.
   state_->pointer_->AdvanceTextSelectionLongPress(frame.timestamp);
@@ -2019,7 +2019,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
   return handled;
 }
 
-void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible) {
+void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible, bool reverse) {
   if (identity.has_value()) {
     if (!state_->mounted_root_) {
       identity.reset();
@@ -2077,7 +2077,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
       interaction.focus_visible = state_->focus_visible_;
       next->foreground_paint_dirty = true;
       UpdateInteraction(*next, interaction);
-      DispatchFocusChanged(*next, true);
+      DispatchFocusChanged(*next, true, reverse);
     }
   }
   RequestFrame();
@@ -2103,7 +2103,7 @@ void Runtime::MoveFocus(bool reverse, bool wrap) {
   }
 
   if (current == focusable.end()) {
-    SetFocusedNode((reverse ? focusable.back() : focusable.front())->identity, true);
+    SetFocusedNode((reverse ? focusable.back() : focusable.front())->identity, true, reverse);
     return;
   }
   if (reverse) {
@@ -2123,7 +2123,7 @@ void Runtime::MoveFocus(bool reverse, bool wrap) {
       current = focusable.begin();
     }
   }
-  SetFocusedNode((*current)->identity, true);
+  SetFocusedNode((*current)->identity, true, reverse);
 }
 
 bool Runtime::UpdateNodeExtensions(

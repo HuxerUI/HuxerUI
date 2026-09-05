@@ -131,7 +131,9 @@ bool detail::PointerInteraction::TrackTextSelectionGesture(const PointerEvent& e
   }
   return decision == GestureDecision::Accept &&
          (event.type != PointerEventType::Up ||
-          runtime_state_.focused_node_identity_ == std::optional{recognition->node_identity});
+          (runtime_state_.focused_node_identity_ && runtime_state_.mounted_root_ &&
+           detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_) ==
+               FindNode(*runtime_state_.mounted_root_, recognition->node_identity)));
 }
 
 void detail::PointerInteraction::RecordTextSelectionTap(
@@ -145,7 +147,8 @@ void detail::PointerInteraction::RecordTextSelectionTap(
     return;
   }
 
-  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+  detail::MountedNode* focused =
+      detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (focused == nullptr || detail::FindTextSelectionClient(*focused) == nullptr) {
     return;
   }

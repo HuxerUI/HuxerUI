@@ -464,7 +464,7 @@ private:
   void RefreshInteractionTree();
   bool DispatchKeyboardContextMenu();
   detail::MountedNode* ActiveFocusTrapRoot();
-  void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt);
+  void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt, bool reverse = false);
   void MoveFocus(bool reverse, bool wrap = true);
   bool UpdateNodeExtensions(
       detail::MountedNode& node,

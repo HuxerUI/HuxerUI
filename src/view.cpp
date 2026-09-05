@@ -16,10 +16,18 @@
 #include "resource_internal.h"
 #include "indication_internal.h"
 #include "text_field_internal.h"
+#include "text_internal.h"
 
 namespace huxerui {
 
 namespace detail {
+
+const std::string& StringLiteral(const ViewText& text) {
+  if (const auto* attributed = std::get_if<AttributedText>(&text)) {
+    return attributed->PlainText();
+  }
+  return StringLiteral(std::get<StringVariant>(text));
+}
 
 std::optional<ResolvedImageAsset> ResolveOptionalControlIcon(const std::optional<ImageVariant>& value) {
   return value.has_value() ? std::optional<ResolvedImageAsset>{UseImageVariant(*value)} : std::nullopt;
@@ -1059,7 +1067,7 @@ private:
   [[nodiscard]] static float ContentWidth(const detail::MountedNode& node) {
     const detail::LabelContentMetrics metrics = node.LayoutValueOr<detail::LabelContentMetrics>({});
     float width = std::max(0.0F, metrics.icon_size.width);
-    if (!metrics.show_label || node.text.empty()) {
+    if (!metrics.show_label || node.text.PlainText().empty()) {
       return width;
     }
     const auto cached = node.layout_cache.find(typeid(detail::LabelLayoutCache));
@@ -1512,7 +1520,7 @@ public:
     UpdateThumbSize(node.IsEnabled());
   }
 
-  void OnFocusChanged(MountedNode& node, bool focused) override {
+  void OnFocusChanged(MountedNode& node, bool focused, bool) override {
     static_cast<void>(node);
     if (focused_ == focused) {
       return;
@@ -1820,11 +1828,8 @@ void ApplyToggleLayoutDefaults(
   metrics.interactive_size.width = std::max(metrics.visual_size.width, metrics.interactive_size.width);
   metrics.interactive_size.height = std::max(metrics.visual_size.height, metrics.interactive_size.height);
   metrics.label_spacing = std::max(0.0F, metrics.label_spacing);
-  spec.layout_values.insert_or_assign(
-      typeid(detail::ToggleLayoutMetrics),
-      detail::MakeErasedLayoutValue(metrics)
-  );
-  if (detail::IsEmptyStringVariantLiteral(spec.text)) {
+  spec.layout_values.insert_or_assign(typeid(detail::ToggleLayoutMetrics), detail::MakeErasedLayoutValue(metrics));
+  if (detail::StringLiteral(spec.text).empty()) {
     spec.properties.frame.width = metrics.interactive_size.width;
     spec.properties.frame.height = metrics.interactive_size.height;
     return;
@@ -1973,13 +1978,6 @@ void ResolveComponentLabel(detail::ViewSpec& spec) {
   if (!spec.component_semantics.label.has_value()) {
     spec.component_semantics.label = detail::StringLiteral(spec.text);
   }
-}
-
-void ApplyTextDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
-  const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
-  spec.properties.text_style =
-      ResolveStyleOverride<TextStyle>(environment).value_or(detail::DefaultTextStyle(theme, spec.text_role));
-  ResolveComponentLabel(spec);
 }
 
 void ApplyButtonDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
@@ -2195,15 +2193,6 @@ void ApplySliderDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Env
     spec.properties.focus_ring = *style.focus_ring;
   }
   spec.properties.disabled_opacity = 1.0F;
-}
-
-std::shared_ptr<detail::ViewSpec> MakeTextSpec(StringVariant value, TextRole role) {
-  auto spec = std::make_shared<detail::ViewSpec>(detail::NodeKind::Text);
-  spec->defaults = ApplyTextDefaults;
-  spec->text = std::move(value);
-  spec->text_role = role;
-  spec->component_semantics.role = SemanticRole::Text;
-  return spec;
 }
 
 void ActivateClick(const detail::EventBindings& bindings) {
@@ -3486,9 +3475,13 @@ ViewSpec CompileViewSpec(
   };
   ViewSpec compiled(declaration.kind);
   compiled.key = declaration.key;
-  compiled.text = NeedsResourceResolution(declaration.text)
-                      ? StringVariant{ResolveString(declaration.text, resources, resource_locale())}
-                      : declaration.text;
+  // Resolve localization before normalizing both declaration paths into one mounted paragraph representation.
+  if (const auto* plain = std::get_if<StringVariant>(&declaration.text)) {
+    compiled.text = AttributedText(
+        NeedsResourceResolution(*plain) ? ResolveString(*plain, resources, resource_locale()) : StringLiteral(*plain));
+  } else {
+    compiled.text = std::get<AttributedText>(declaration.text);
+  }
   compiled.text_role = declaration.text_role;
   compiled.properties = declaration.properties;
   compiled.component_semantics = declaration.component_semantics;
@@ -3549,6 +3542,11 @@ ViewSpec CompileViewSpec(
     shaping.locale = resource_locale().LanguageTag();
   }
 
+  // Link defaults depend on the final inherited style and explicit modifiers, not the raw declaration style.
+  if (compiled.kind == NodeKind::Text) {
+    CompileTextLinks(compiled, environment);
+  }
+
   return compiled;
 }
 
@@ -3571,7 +3569,7 @@ Rect ResolveToggleControlBounds(const MountedNode& node) noexcept {
   const float width = std::min(metrics.visual_size.width, content.width);
   const float height = std::min(metrics.visual_size.height, content.height);
   const float requested_horizontal_offset =
-      node.text.empty() ? (content.width - metrics.visual_size.width) * 0.5F : 0.0F;
+      node.text.PlainText().empty() ? (content.width - metrics.visual_size.width) * 0.5F : 0.0F;
   return {
       content.x + std::clamp(requested_horizontal_offset, 0.0F, content.width - width),
       content.y + std::max(0.0F, (content.height - height) * 0.5F),
@@ -3581,7 +3579,7 @@ Rect ResolveToggleControlBounds(const MountedNode& node) noexcept {
 }
 
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept {
-  if (node.text.empty()) {
+  if (node.text.PlainText().empty()) {
     return {};
   }
   const ToggleLayoutMetrics metrics = node.LayoutValueOr<ToggleLayoutMetrics>({});
@@ -3794,28 +3792,6 @@ void View::EnsureUniqueSpec() {
   if (spec_.use_count() != 1) {
     spec_ = std::make_shared<detail::ViewSpec>(*spec_);
   }
-}
-
-Text::Text(StringVariant value, TextRole role) : View(MakeTextSpec(std::move(value), role)) {}
-
-Text Text::Style(TextStyle style) && {
-  SetTextStyle(std::move(style));
-  return std::move(*this);
-}
-
-Text Text::Shaping(TextShapingOptions shaping) && {
-  SetTextShaping(std::move(shaping));
-  return std::move(*this);
-}
-
-Text Text::Align(TextAlign align) && {
-  SetTextAlign(align);
-  return std::move(*this);
-}
-
-Text Text::VerticalAlign(TextVerticalAlign align) && {
-  SetTextVerticalAlign(align);
-  return std::move(*this);
 }
 
 Button::Button(StringVariant label) : View(MakeButtonSpec(std::move(label))) {}

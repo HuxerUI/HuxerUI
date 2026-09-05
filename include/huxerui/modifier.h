@@ -225,9 +225,14 @@ public:
   }
 
   /// Notifies the extension when keyboard focus enters or leaves its node.
-  virtual void OnFocusChanged(MountedNode& node, bool focused) {
+  ///
+  /// @param node The node receiving the focus change.
+  /// @param focused Whether the node now owns focus.
+  /// @param reverse True when focus enters through reverse keyboard traversal; false for other changes.
+  virtual void OnFocusChanged(MountedNode& node, bool focused, bool reverse) {
     static_cast<void>(node);
     static_cast<void>(focused);
+    static_cast<void>(reverse);
   }
 
   /// Delivers a keyboard event routed to the focused node and returns whether the extension consumed it.

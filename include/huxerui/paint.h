@@ -197,14 +197,14 @@ struct DrawRectCommand {
 struct DrawTextCommand {
   /// Paragraph layout and culling rectangle.
   Rect rect;
-  /// UTF-8 paragraph text.
-  std::string text;
+  /// Shared immutable paragraph text and character attributes.
+  AttributedText text;
   /// Font and foreground appearance.
   TextStyle style;
   /// Wrapping, alignment, direction, and shaping options.
   TextLayoutOptions options;
   /// Additional offset applied to the laid-out paragraph within rect.
-  Point paragraph_offset;
+  Point paragraph_offset{};
 
   bool operator==(const DrawTextCommand&) const = default;
 };
@@ -573,13 +573,13 @@ public:
   /// Records a platform-laid-out paragraph inside rect.
   ///
   /// paragraph_offset moves the resolved paragraph within rect without changing its layout width.
-  void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {},
-                Point paragraph_offset = {});
+  void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {}, Point paragraph_offset = {});
+  /// Records an attributed paragraph using the same layout and paint boundary as plain text.
+  void DrawText(Rect rect, AttributedText text, TextStyle style, TextLayoutOptions options = {}, Point paragraph_offset = {});
   /// Records one positioned text run and coalesces it with an adjacent DrawTextRunsCommand when possible.
   ///
   /// text must not contain a line break. Empty text or empty bounds produces no command.
-  void DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style,
-                   TextShapingOptions shaping = {});
+  void DrawTextRun(Rect bounds, Point baseline_origin, std::string text, TextStyle style, TextShapingOptions shaping = {});
   /// Records positioned text runs and coalesces them with an adjacent DrawTextRunsCommand when possible.
   ///
   /// Each run must contain no line break. Runs with empty text or bounds are omitted.

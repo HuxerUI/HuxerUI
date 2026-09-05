@@ -100,10 +100,9 @@ public:
 
 class RecordingTextLayoutPlatform final : public TestPlatform {
 public:
-  std::unique_ptr<detail::TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
-    if (text == "Centered value that overflows the editor" && options.align == TextAlign::Center) {
+  std::unique_ptr<detail::TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options) override {
+    if (text.PlainText() == "Centered value that overflows the editor" && options.align == TextAlign::Center) {
       centered_layout_width = max_width;
     }
     return TestPlatform::CreateTextLayout(text, style, max_width, options);
@@ -119,10 +118,9 @@ public:
     TextLayoutOptions options;
   };
 
-  std::unique_ptr<detail::TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
-    requests.push_back({std::string(text), options});
+  std::unique_ptr<detail::TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options) override {
+    requests.push_back({text.PlainText(), options});
     return TestPlatform::CreateTextLayout(text, style, max_width, options);
   }
 

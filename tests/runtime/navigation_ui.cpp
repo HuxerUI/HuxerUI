@@ -167,7 +167,7 @@ View ConstrainedResponsiveDrawerApp() {
 }
 
 bool ContainsMountedText(const detail::MountedNode& node, std::string_view text) {
-  if (node.text == text) {
+  if (node.text.PlainText() == text) {
     return true;
   }
   return std::ranges::any_of(node.children, [text](const auto& child) { return ContainsMountedText(*child, text); });

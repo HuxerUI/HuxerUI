@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::detail {
 
@@ -47,6 +47,7 @@ public:
       return {};
     }
     const jlong encoded = environment->CallLongMethod(layout_, hit_test_, point.x, point.y);
+    // Java packs affinity into the sign: -(offset + 1) keeps upstream offset zero distinct from downstream zero.
     const bool upstream = encoded < 0;
     return {
         static_cast<TextOffset>(upstream ? -encoded - 1 : encoded),

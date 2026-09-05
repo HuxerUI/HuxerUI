@@ -26,7 +26,7 @@
 #include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::detail {
 
@@ -368,12 +368,116 @@ CFAttributedStringRef CreateAttributedString(
   return attributed;
 }
 
-CTLineRef CreateLine(
-    std::string_view text,
-    const TextStyle& style,
-    const TextShapingOptions& shaping = {},
-    CTFontRef supplied_font = nullptr
-) {
+
+CFAttributedStringRef CreateAttributedString(const AttributedText& text, const TextStyle& style,
+    const TextLayoutOptions& options, CTFontRef supplied_font = nullptr, bool preserve_final_line = false) {
+  CFRef<CFAttributedStringRef> base{CreateAttributedString(text.PlainText(), style, options, supplied_font)};
+  CFMutableAttributedStringRef attributed = CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base.Get());
+  // A layout-only sentinel preserves the empty line after a trailing newline; source text and offsets stay unchanged.
+  if (preserve_final_line && !text.PlainText().empty() && text.PlainText().back() == '\n') {
+    CFStringAppend(CFAttributedStringGetMutableString(attributed), CFSTR("\u200B"));
+  }
+  // CFString ranges use UTF-16 units; the attributed string retains the CTFont and CGColor objects.
+  for (const auto& run : ResolveTextRuns(text, style)) {
+    const CFRange range = CFRangeMake(static_cast<CFIndex>(run.range.start), static_cast<CFIndex>(run.range.Length()));
+    CFRef<CTFontRef> font{CreateFont(run.style.font)};
+    CFAttributedStringSetAttribute(attributed, range, kCTFontAttributeName, font.Get());
+    const int underline = HasTextDecoration(run.style.decoration, TextDecoration::Underline)
+                              ? kCTUnderlineStyleSingle : 0;
+    const int strike = HasTextDecoration(run.style.decoration, TextDecoration::StrikeThrough)
+                           ? kCTUnderlineStyleSingle : 0;
+    CFRef<CFNumberRef> underline_value{CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &underline)};
+    CFRef<CFNumberRef> strike_value{CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &strike)};
+    CFAttributedStringSetAttribute(attributed, range, kCTUnderlineStyleAttributeName, underline_value.Get());
+    CFAttributedStringSetAttribute(attributed, range, (__bridge CFStringRef)NSStrikethroughStyleAttributeName,
+        strike_value.Get());
+    if (run.background.alpha > 0.0F) {
+      const Color color = run.background;
+      CFRef<CGColorRef> background{CGColorCreateSRGB(color.red, color.green, color.blue, color.alpha)};
+      CFAttributedStringSetAttribute(attributed, range, CFSTR("HuxerUIBackgroundColor"), background.Get());
+    }
+  }
+  // Keep inherited foreground context-driven for cache reuse; explicit span colors override the CGContext color.
+  for (const auto& item : text.StyleRanges()) {
+    if (item.style.foreground) {
+      const CFRange range =
+          CFRangeMake(static_cast<CFIndex>(item.range.start), static_cast<CFIndex>(item.range.Length()));
+      const Color color = *item.style.foreground;
+      CFRef<CGColorRef> foreground{CGColorCreateSRGB(color.red, color.green, color.blue, color.alpha)};
+      CFAttributedStringSetAttribute(attributed, range, kCTForegroundColorFromContextAttributeName, kCFBooleanFalse);
+      CFAttributedStringSetAttribute(attributed, range, kCTForegroundColorAttributeName, foreground.Get());
+    }
+  }
+  return attributed;
+}
+
+// Use the shaped glyph runs for both passes: backgrounds precede CTFrameDraw, while strikethrough follows it.
+// Logical ranges can cross bidi runs, so decoration widths come from visual glyph positions rather than text offsets.
+void DrawParagraphDecorations(CGContextRef context, CTFrameRef frame, Color foreground, bool backgrounds) {
+  CFArrayRef lines = CTFrameGetLines(frame);
+  const CFIndex count = CFArrayGetCount(lines);
+  std::vector<CGPoint> origins(static_cast<std::size_t>(count));
+  CTFrameGetLineOrigins(frame, CFRangeMake(0, count), origins.data());
+  for (CFIndex index = 0; index < count; ++index) {
+    CTLineRef line = static_cast<CTLineRef>(CFArrayGetValueAtIndex(lines, index));
+    CFArrayRef runs = CTLineGetGlyphRuns(line);
+    for (CFIndex run_index = 0; run_index < CFArrayGetCount(runs); ++run_index) {
+      CTRunRef run = static_cast<CTRunRef>(CFArrayGetValueAtIndex(runs, run_index));
+      CFDictionaryRef attributes = CTRunGetAttributes(run);
+      CGColorRef background = static_cast<CGColorRef>(CFDictionaryGetValue(attributes, CFSTR("HuxerUIBackgroundColor")));
+      CFNumberRef strike = static_cast<CFNumberRef>(
+          CFDictionaryGetValue(attributes, (__bridge CFStringRef)NSStrikethroughStyleAttributeName));
+      int strike_style = 0;
+      if (strike != nullptr) {
+        CFNumberGetValue(strike, kCFNumberIntType, &strike_style);
+      }
+      if ((backgrounds && background == nullptr) || (!backgrounds && strike_style == 0)) {
+        continue;
+      }
+      const CFIndex glyph_count = CTRunGetGlyphCount(run);
+      if (glyph_count == 0) {
+        continue;
+      }
+      std::vector<CGPoint> positions(static_cast<std::size_t>(glyph_count));
+      std::vector<CGSize> advances(static_cast<std::size_t>(glyph_count));
+      CTRunGetPositions(run, CFRangeMake(0, 0), positions.data());
+      CTRunGetAdvances(run, CFRangeMake(0, 0), advances.data());
+      CGFloat left = CGFLOAT_MAX;
+      CGFloat right = -CGFLOAT_MAX;
+      for (CFIndex glyph = 0; glyph < glyph_count; ++glyph) {
+        const auto position = static_cast<std::size_t>(glyph);
+        left = std::min(left, positions[position].x);
+        right = std::max(right, positions[position].x + advances[position].width);
+      }
+      const CGPoint origin = origins[static_cast<std::size_t>(index)];
+      CTFontRef font = static_cast<CTFontRef>(CFDictionaryGetValue(attributes, kCTFontAttributeName));
+      CGContextSaveGState(context);
+      if (backgrounds) {
+        CGFloat ascent = 0.0;
+        CGFloat descent = 0.0;
+        CGFloat leading = 0.0;
+        CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+        CGContextSetFillColorWithColor(context, background);
+        CGContextFillRect(context,
+            CGRectMake(origin.x + left, origin.y - descent, right - left, ascent + descent + leading));
+      } else {
+        CGColorRef color = static_cast<CGColorRef>(CFDictionaryGetValue(attributes, kCTForegroundColorAttributeName));
+        if (color != nullptr) {
+          CGContextSetFillColorWithColor(context, color);
+        } else {
+          CGContextSetRGBFillColor(context, foreground.red, foreground.green, foreground.blue, foreground.alpha);
+        }
+        const CGFloat thickness = std::max<CGFloat>(1.0, CTFontGetUnderlineThickness(font));
+        CGContextFillRect(context,
+            CGRectMake(origin.x + left, origin.y + CTFontGetXHeight(font) * 0.5, right - left, thickness));
+      }
+      CGContextRestoreGState(context);
+    }
+  }
+}
+
+CTLineRef CreateLine(std::string_view text, const TextStyle& style, const TextShapingOptions& shaping = {},
+    CTFontRef supplied_font = nullptr) {
   TextLayoutOptions options;
   options.shaping = shaping;
   options.wrap = TextWrap::NoWrap;
@@ -620,7 +724,7 @@ struct AppKitRenderer::State {
   };
 
   struct ParagraphKey {
-    std::string text;
+    AttributedText text;
     Font font;
     TextDecoration decoration = TextDecoration::None;
     TextLayoutOptions options;
@@ -630,7 +734,7 @@ struct AppKitRenderer::State {
   };
 
   struct ParagraphKeyView {
-    std::string_view text;
+    const AttributedText& text;
     const Font& font;
     TextDecoration decoration;
     const TextLayoutOptions& options;
@@ -649,10 +753,9 @@ struct AppKitRenderer::State {
     }
 
   private:
-    static std::size_t Hash(
-        std::string_view text, const Font& font, TextDecoration decoration, const TextLayoutOptions& options, Size size
-    ) noexcept {
-      std::size_t result = std::hash<std::string_view>{}(text);
+    static std::size_t Hash(const AttributedText& text, const Font& font, TextDecoration decoration,
+        const TextLayoutOptions& options, Size size) noexcept {
+      std::size_t result = InternalAccess::BodyHash(text);
       CombineHash(result, HashFont(font));
       CombineHash(result, std::hash<TextDecoration>{}(decoration));
       CombineHash(result, HashShaping(options.shaping));
@@ -673,7 +776,7 @@ struct AppKitRenderer::State {
     }
 
     bool operator()(const ParagraphKey& left, const ParagraphKeyView& right) const noexcept {
-      return std::string_view(left.text) == right.text && left.font == right.font &&
+      return left.text == right.text && left.font == right.font &&
              left.decoration == right.decoration && left.options == right.options && left.size == right.size;
     }
 
@@ -686,6 +789,7 @@ struct AppKitRenderer::State {
     CFRef<CTFrameRef> frame;
     float frame_height = 0.0F;
     float content_height = 0.0F;
+    std::size_t cost = 0;
   };
 
   CachedFont& FontFor(const Font& font) {
@@ -780,7 +884,7 @@ struct AppKitRenderer::State {
     return inserted->second;
   }
 
-  CachedParagraph& ParagraphFor(const DrawTextCommand& command) {
+  std::shared_ptr<CachedParagraph> ParagraphFor(const DrawTextCommand& command) {
     const Size size{command.rect.width, command.rect.height};
     const auto cached = paragraphs.find(
         ParagraphKeyView{command.text, command.style.font, command.style.decoration, command.options, size}
@@ -790,12 +894,8 @@ struct AppKitRenderer::State {
     }
 
     CachedFont& cached_font = FontFor(command.style.font);
-    std::string layout_text{command.text};
-    if (!layout_text.empty() && layout_text.back() == '\n') {
-      layout_text.append("\xE2\x80\x8B");
-    }
     CFRef<CFAttributedStringRef> attributed{
-        CreateAttributedString(layout_text, command.style, command.options, cached_font.ct_font.Get())
+        CreateAttributedString(command.text, command.style, command.options, cached_font.ct_font.Get(), true)
     };
     CFRef<CTFramesetterRef> framesetter{CTFramesetterCreateWithAttributedString(attributed.Get())};
     const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
@@ -812,16 +912,23 @@ struct AppKitRenderer::State {
     CFRef<CGPathRef> path{CGPathCreateWithRect(CGRectMake(0.0, 0.0, size.width, frame_height), nullptr)};
     CFRef<CTFrameRef> frame{CTFramesetterCreateFrame(framesetter.Get(), CFRangeMake(0, 0), path.Get(), nullptr)};
 
+    const auto cost = ParagraphCacheCost(command.text);
+    // Return an owning handle even when an oversized frame bypasses cache retention.
+    auto paragraph = std::make_shared<CachedParagraph>(
+        CachedParagraph{std::move(frame), frame_height, content_height, cost});
+    if (cost > paragraph_cache_budget) {
+      return paragraph;
+    }
     constexpr std::size_t maximum_paragraphs = 256;
-    if (paragraphs.size() >= maximum_paragraphs) {
+    while (!paragraphs.empty() &&
+           (paragraphs.size() >= maximum_paragraphs || paragraph_bytes + cost > paragraph_cache_budget)) {
+      paragraph_bytes -= paragraphs.begin()->second->cost;
       paragraphs.erase(paragraphs.begin());
     }
-    auto [inserted, was_inserted] = paragraphs.emplace(
-        ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size},
-        CachedParagraph{std::move(frame), frame_height, content_height}
-    );
-    static_cast<void>(was_inserted);
-    return inserted->second;
+    paragraph_bytes += cost;
+    paragraphs.emplace(ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size},
+        paragraph);
+    return paragraph;
   }
 
   CGImageRef ImageFor(const ImageAsset& image) {
@@ -957,7 +1064,8 @@ struct AppKitRenderer::State {
 
   std::unordered_map<Font, CachedFont, FontHash> fonts;
   std::unordered_map<RunKey, CachedRun, RunKeyHash, RunKeyEqual> runs;
-  std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs;
+  std::unordered_map<ParagraphKey, std::shared_ptr<CachedParagraph>, ParagraphKeyHash, ParagraphKeyEqual> paragraphs;
+  std::size_t paragraph_bytes = 0;
   std::vector<CachedImage> images;
   std::size_t image_cache_bytes = 0;
   __strong CIContext* external_texture_context = nil;
@@ -967,7 +1075,9 @@ struct AppKitRenderer::State {
 
 class MacTextLayout final : public TextLayout {
 public:
-  MacTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
+  MacTextLayout(const AttributedText& paragraph, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) {
+    const auto& text = paragraph.PlainText();
     string_ = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
     CTFontRef font = CreateFont(style.font);
     line_height_ = static_cast<float>(CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font));
@@ -981,14 +1091,16 @@ public:
 
     const bool has_hard_break = text.find('\n') != std::string_view::npos;
     if (!has_hard_break && (!constrained || options.wrap == TextWrap::NoWrap)) {
-      line_ = CreateLine(text, style, options.shaping);
+      CFRef<CFAttributedStringRef> attributed{CreateAttributedString(paragraph, style, options)};
+      line_ = CTLineCreateWithAttributedString(attributed.Get());
       CGFloat ascent = 0.0;
       CGFloat descent = 0.0;
       CGFloat leading = 0.0;
       const double width = CTLineGetTypographicBounds(line_, &ascent, &descent, &leading);
+      line_height_ = std::ceil(std::max(line_height_, static_cast<float>(ascent + descent + leading)));
       size_ = {
           std::ceil(static_cast<float>(width)),
-          std::ceil(std::max(line_height_, static_cast<float>(ascent + descent + leading))),
+          line_height_,
       };
       horizontal_offset_ = TextAlignmentOffset(options.align, direction, max_width, static_cast<float>(width));
       metrics_ = {
@@ -1000,11 +1112,7 @@ public:
       return;
     }
 
-    std::string layout_text{text};
-    if (!layout_text.empty() && layout_text.back() == '\n') {
-      layout_text.append("\xE2\x80\x8B");
-    }
-    CFAttributedStringRef attributed = CreateAttributedString(layout_text, style, options);
+    CFAttributedStringRef attributed = CreateAttributedString(paragraph, style, options, nullptr, true);
     CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
     const bool soft_wrap = constrained && options.wrap == TextWrap::Word;
     const CGFloat suggested_width = soft_wrap ? static_cast<CGFloat>(std::max(1.0F, max_width)) : CGFLOAT_MAX;
@@ -1017,6 +1125,8 @@ public:
     );
     const float width = soft_wrap ? suggested_width : std::max(1.0F, std::ceil(static_cast<float>(suggested.width)));
     const float height = std::max(line_height_, std::ceil(static_cast<float>(suggested.height)));
+    // NoWrap measures at natural width; translate explicit lines to match drawing within the available width.
+    horizontal_offset_ = soft_wrap ? 0.0F : TextAlignmentOffset(options.align, direction, max_width, width);
     CGPathRef path = CGPathCreateWithRect(CGRectMake(0.0, 0.0, width, height), nullptr);
     frame_ = CTFramesetterCreateFrame(framesetter, CFRangeMake(0, 0), path, nullptr);
     const float measured_width = std::ceil(static_cast<float>(suggested.width));
@@ -1027,7 +1137,11 @@ public:
     std::vector<CGPoint> origins(static_cast<std::size_t>(count));
     if (count > 0) {
       CTFrameGetLineOrigins(frame_, CFRangeMake(0, count), origins.data());
+      for (CGPoint& origin : origins) {
+        origin.x += horizontal_offset_;
+      }
     }
+    // Line references are borrowed from frame_, which stays owned for the lifetime of this geometry layout.
     line_records_.reserve(static_cast<std::size_t>(count));
     for (CFIndex index = 0; index < count; ++index) {
       CTLineRef line = static_cast<CTLineRef>(const_cast<void*>(CFArrayGetValueAtIndex(lines, index)));
@@ -1044,7 +1158,7 @@ public:
       });
     }
     if (line_records_.empty()) {
-      line_ = CreateLine(layout_text, style, options.shaping);
+      line_ = CTLineCreateWithAttributedString(attributed);
     }
     const float first_baseline = line_records_.empty() ? line_height_ : height - line_records_.front().origin.y;
     const float last_baseline = line_records_.empty() ? first_baseline : height - line_records_.back().origin.y;
@@ -1177,8 +1291,35 @@ public:
         if (run_start >= run_end) {
           continue;
         }
-        const CGFloat first = CTLineGetOffsetForStringIndex(line, run_start, nullptr);
-        const CGFloat last = CTLineGetOffsetForStringIndex(line, run_end, nullptr);
+        const CFIndex glyph_count = CTRunGetGlyphCount(run);
+        if (glyph_count == 0) {
+          continue;
+        }
+        std::vector<CGPoint> positions(static_cast<std::size_t>(glyph_count));
+        std::vector<CGSize> advances(static_cast<std::size_t>(glyph_count));
+        CTRunGetPositions(run, CFRangeMake(0, 0), positions.data());
+        CTRunGetAdvances(run, CFRangeMake(0, 0), advances.data());
+        CGFloat left = positions.front().x;
+        CGFloat right = left;
+        for (std::size_t glyph = 0; glyph < positions.size(); ++glyph) {
+          left = std::min(left, positions[glyph].x);
+          right = std::max(right, positions[glyph].x + advances[glyph].width);
+        }
+        const bool rtl = (CTRunGetStatus(run) & kCTRunStatusRightToLeft) != 0;
+        // At bidi boundaries a logical offset has two visual edges; select the one inside this CoreText run.
+        auto edge = [&](CFIndex offset) {
+          if (offset == run_range.location) {
+            return rtl ? right : left;
+          }
+          if (offset == run_range.location + run_range.length) {
+            return rtl ? left : right;
+          }
+          CGFloat secondary = 0.0;
+          const CGFloat primary = CTLineGetOffsetForStringIndex(line, offset, &secondary);
+          return std::clamp(primary >= left && primary <= right ? primary : secondary, left, right);
+        };
+        const CGFloat first = edge(run_start);
+        const CGFloat last = edge(run_end);
         rects.push_back({
             static_cast<float>(origin.x + std::min(first, last)),
             top,
@@ -1256,9 +1397,18 @@ AppKitRenderer::MeasureRun(std::string_view text, const TextStyle& style, const 
   return state_->RunFor(text, style, options).metrics;
 }
 
-TextLayoutMetrics AppKitRenderer::MeasureText(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+TextLayoutMetrics AppKitRenderer::MeasureText(std::string_view text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
+  return MeasureText(AttributedText(std::string(text)), style, max_width, options);
+}
+
+std::unique_ptr<TextLayout> AppKitRenderer::CreateTextLayout(std::string_view text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
+  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+}
+
+TextLayoutMetrics AppKitRenderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
   if (std::isfinite(max_width) && max_width <= 0.0F) {
     return {};
   }
@@ -1270,9 +1420,8 @@ TextLayoutMetrics AppKitRenderer::MeasureText(
   return metrics;
 }
 
-std::unique_ptr<TextLayout> AppKitRenderer::CreateTextLayout(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+std::unique_ptr<TextLayout> AppKitRenderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
   return std::make_unique<MacTextLayout>(text, style, max_width, options);
 }
 
@@ -1378,10 +1527,11 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawRectCommand& 
 }
 
 void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& command) {
-  if (command.rect.width <= 0.0F || command.rect.height <= 0.0F || command.style.foreground.alpha <= 0.0F) {
+  if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
     return;
   }
-  State::CachedParagraph& paragraph = state_->ParagraphFor(command);
+  const auto retained = state_->ParagraphFor(command);
+  const State::CachedParagraph& paragraph = *retained;
   const float remaining_height = std::max(0.0F, command.rect.height - paragraph.content_height);
   float vertical_offset = 0.0F;
   if (command.options.vertical_align == TextVerticalAlign::Center) {
@@ -1400,7 +1550,9 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& 
   CGContextScaleCTM(context, 1.0, -1.0);
   CGContextSetTextMatrix(context, CGAffineTransformIdentity);
   SetFillColor(context, command.style.foreground);
+  DrawParagraphDecorations(context, paragraph.frame.Get(), command.style.foreground, true);
   CTFrameDraw(paragraph.frame.Get(), context);
+  DrawParagraphDecorations(context, paragraph.frame.Get(), command.style.foreground, false);
   CGContextRestoreGState(context);
 }
 
@@ -1547,7 +1699,7 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawShadowCommand
   CGPathAddRect(outer_clip, nullptr, CGContextGetClipBoundingBox(context));
   CGPathAddPath(outer_clip, nullptr, caster_path);
   CGColorRef shadow_color =
-      CGColorCreateGenericRGB(command.color.red, command.color.green, command.color.blue, command.color.alpha);
+      CGColorCreateSRGB(command.color.red, command.color.green, command.color.blue, command.color.alpha);
 
   CGContextSaveGState(context);
   CGContextAddPath(context, outer_clip);
@@ -1628,7 +1780,7 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawPathShadowCom
   }
 
   CGColorRef shadow_color =
-      CGColorCreateGenericRGB(command.color.red, command.color.green, command.color.blue, command.color.alpha);
+      CGColorCreateSRGB(command.color.red, command.color.green, command.color.blue, command.color.alpha);
   CGContextBeginTransparencyLayer(context, nullptr);
   CGContextSetShadowWithColor(context, CGSizeZero, static_cast<CGFloat>(command.blur_radius / 3.0F), shadow_color);
   CGContextSetRGBFillColor(context, 1.0, 1.0, 1.0, 1.0);

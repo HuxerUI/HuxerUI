@@ -367,7 +367,7 @@ Size MeasureLabelContent(
       std::max(0.0F, metrics.icon_size.width),
       std::max(0.0F, metrics.icon_size.height),
   };
-  const bool show_label = metrics.show_label && !node.text.empty();
+  const bool show_label = metrics.show_label && !node.text.PlainText().empty();
   const float spacing = show_label && icon_size.width > 0.0F ? std::max(0.0F, metrics.icon_spacing) : 0.0F;
   const float maximum_text_width = constraints.HasBoundedWidth()
                                        ? std::max(0.0F, constraints.max_width - icon_size.width - spacing)
@@ -598,7 +598,7 @@ Size MeasureNode(
   case NodeKind::Checkbox:
   case NodeKind::RadioButton:
   case NodeKind::Switch: {
-    if (!node.text.empty()) {
+    if (!node.text.PlainText().empty()) {
       const detail::ToggleLayoutMetrics metrics = node.LayoutValueOr<detail::ToggleLayoutMetrics>({});
       const float label_leading = detail::ToggleLabelLeading(metrics);
       const float maximum_label_width = content_constraints.HasBoundedWidth()
@@ -963,6 +963,10 @@ void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhas
 float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source) {
   if (!node.interaction.enabled || !IsScrollContainer(node) || !AllowsScrollSource(node, source)) {
     return 0.0F;
+  }
+  // User input and reveal operations supersede any unfinished programmatic item-alignment correction.
+  if (source != ScrollSource::Programmatic && node.scroll_state->connection) {
+    node.scroll_state->connection->CancelPending();
   }
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
   const Rect viewport = ScrollViewport(node);

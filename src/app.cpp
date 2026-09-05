@@ -10,7 +10,7 @@
 #include "external_texture_internal.h"
 #include "platform_registry_internal.h"
 #include "system_tray_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui {
 
@@ -81,9 +81,13 @@ std::shared_ptr<detail::SystemTrayTransport> PlatformAdapter::CreateSystemTrayTr
   return {};
 }
 
-std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(std::string_view text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
+  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+}
+
+std::unique_ptr<detail::TextLayout> PlatformAdapter::CreateTextLayout(const AttributedText& text,
+    const TextStyle& style, float max_width, const TextLayoutOptions& options) {
   static_cast<void>(text);
   static_cast<void>(style);
   static_cast<void>(max_width);

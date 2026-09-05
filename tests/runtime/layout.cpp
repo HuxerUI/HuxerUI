@@ -26,9 +26,8 @@ std::shared_ptr<ExternalTexture> layout_test_external_texture;
 
 class CountingTextPlatform final : public TestPlatform {
 public:
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-  ) override {
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) override {
     ++measure_text_calls;
     return TestPlatform::MeasureText(text, style, max_width, options);
   }
@@ -1071,11 +1070,11 @@ TEST_CASE("TestForEachFlattensChildren") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 5);
-  REQUIRE(root->children[0]->text == "Header");
-  REQUIRE(root->children[1]->text == "First");
-  REQUIRE(root->children[2]->text == "Second");
-  REQUIRE(root->children[3]->text == "Third");
-  REQUIRE(root->children[4]->text == "Footer");
+  REQUIRE(root->children[0]->text.PlainText() == "Header");
+  REQUIRE(root->children[1]->text.PlainText() == "First");
+  REQUIRE(root->children[2]->text.PlainText() == "Second");
+  REQUIRE(root->children[3]->text.PlainText() == "Third");
+  REQUIRE(root->children[4]->text.PlainText() == "Footer");
   REQUIRE(root->children[0]->layout_offset.y == 0.0F);
   REQUIRE(root->children[1]->layout_offset.y == 25.0F);
   REQUIRE(root->children[2]->layout_offset.y == 50.0F);
@@ -1097,7 +1096,7 @@ TEST_CASE("TestForEachKeyedIdentity") {
   InvokeClick(*root->children[0]->children[0]->children[1]);
   runtime.BuildFrame();
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "1");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "1");
 
   InvokeClick(*root->children[2]);
   runtime.BuildFrame();
@@ -1105,7 +1104,7 @@ TEST_CASE("TestForEachKeyedIdentity") {
   root = runtime.RootNode();
   REQUIRE(root->children.size() == 4);
   REQUIRE(root->children[2]->identity == first_identity);
-  REQUIRE(root->children[2]->children[0]->children[0]->text == "1");
+  REQUIRE(root->children[2]->children[0]->children[0]->text.PlainText() == "1");
 
   InvokeClick(*root->children[3]);
   runtime.BuildFrame();
@@ -1113,7 +1112,7 @@ TEST_CASE("TestForEachKeyedIdentity") {
   root = runtime.RootNode();
   REQUIRE(root->children.size() == 3);
   REQUIRE(root->children[0]->identity == first_identity);
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "1");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "1");
 }
 
 TEST_CASE("TestReactiveStateApis") {
@@ -1128,17 +1127,17 @@ TEST_CASE("TestReactiveStateApis") {
   const auto* root = runtime.RootNode();
   REQUIRE(root != nullptr);
   REQUIRE(root->children.size() == 4);
-  REQUIRE(root->children[0]->text == "Taps 2");
-  REQUIRE(root->children[1]->text == "Alpha");
-  REQUIRE(root->children[2]->text == "Bravo");
+  REQUIRE(root->children[0]->text.PlainText() == "Taps 2");
+  REQUIRE(root->children[1]->text.PlainText() == "Alpha");
+  REQUIRE(root->children[2]->text.PlainText() == "Bravo");
 
   InvokeClick(*root->children[3]);
   runtime.BuildFrame();
 
   root = runtime.RootNode();
   REQUIRE(root->children.size() == 5);
-  REQUIRE(root->children[0]->text == "Taps 3");
-  REQUIRE(root->children[3]->text == "Charlie");
+  REQUIRE(root->children[0]->text.PlainText() == "Taps 3");
+  REQUIRE(root->children[3]->text.PlainText() == "Charlie");
 }
 
 TEST_CASE("TestLayoutReusesUnchangedMeasurements") {

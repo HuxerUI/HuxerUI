@@ -44,6 +44,7 @@ struct TextSelectionOverlayState {
   bool has_painted_geometry = false;
   bool dragging = false;
   bool dragging_start_handle = false;
+  Point drag_position;
   bool show_handles = false;
   bool dismissing = false;
   std::optional<std::int64_t> pointer_id;
@@ -52,8 +53,7 @@ struct TextSelectionOverlayState {
   std::optional<std::size_t> hovered_action;
   Rect start_handle_hit_rect;
   Rect end_handle_hit_rect;
-  Rect painted_start;
-  Rect painted_end;
+  TextSelectionGeometry painted_geometry;
   Rect toolbar_rect;
   Color toolbar_background;
   Color toolbar_separator;
@@ -96,6 +96,7 @@ public:
   bool PerformTextEditingAction(TextEditingAction action);
   bool SelectTextWord(std::uint64_t node, Point position, bool show_overlay);
   void HideTextSelectionOverlay();
+  void AdvanceTextSelectionDrag(const FrameInfo& frame);
   void AdvanceTextSelectionOverlay(const FrameInfo& frame);
   bool HandleTextSelectionOverlayPointer(const PointerEvent& event);
   void PaintTextSelectionOverlay();
@@ -115,12 +116,14 @@ public:
 private:
   void InvalidateTextInputStateChange(std::uint64_t node, const TextInputState& previous, const TextInputState& current);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);
-  bool QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const;
+  TextSelectionGeometry QueryFocusedTextSelectionGeometry() const;
   void ShowTextSelectionOverlay(bool show_handles);
 
   Runtime::State& runtime_state_;
   std::optional<ActiveTextInputSession> text_input_session_;
   TextSelectionGestureState text_selection_gesture_;
+  // Re-hit the retained pointer position after the next layout has consumed an auto-scroll offset change.
+  bool selection_scroll_pending_ = false;
   TextSelectionOverlay text_selection_overlay_;
   TextInputSessionId next_text_input_session_id_ = 1;
 };

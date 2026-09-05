@@ -1052,8 +1052,14 @@ bool detail::PointerInteraction::AcceptPointerRecognition(
 
   const auto* selection = std::get_if<TextSelectionRecognitionState>(&session.recognitions[index].state);
   const std::shared_ptr<GestureRecognizer> selection_recognizer = selection ? selection->recognizer : nullptr;
-  if (selection && (!selection_recognizer || runtime_state_.focused_node_identity_ != selection->node_identity)) {
-    return false;
+  if (selection) {
+    const MountedNode* owner =
+        runtime_state_.mounted_root_ && runtime_state_.focused_node_identity_
+            ? FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_)
+            : nullptr;
+    if (!selection_recognizer || !owner || owner->identity != selection->node_identity) {
+      return false;
+    }
   }
 
   session.owner = index;
@@ -1725,7 +1731,8 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
         session.recognitions.push_back(PointerRecognition{ExtensionRecognitionState{handle}});
       }
     }
-    if (focus_target == std::optional{(*node)->identity} && detail::FindTextSelectionClient(**node)) {
+    if (focus_target &&
+        detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *focus_target) == *node) {
       session.recognitions.push_back(PointerRecognition{
           TextSelectionRecognitionState{.node_identity = (*node)->identity},
       });

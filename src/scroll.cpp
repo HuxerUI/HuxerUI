@@ -25,6 +25,11 @@ bool ScrollConnection::IsCurrent() const noexcept {
 }
 
 void ScrollConnection::Connect() {
+  // A pending item request belongs to its original mounted connection and must not replay after rebinding.
+  if (state_->was_connected && state_->connection.lock().get() != this) {
+    state_->pending_offset.reset();
+    state_->pending_item.reset();
+  }
   state_->connection = shared_from_this();
   state_->was_connected = true;
   ApplyPending();
@@ -59,6 +64,12 @@ void ScrollConnection::SetCurrentOffset(float offset) noexcept {
 }
 
 bool ScrollConnection::ScrollTo(float offset) {
+  CancelPending();
+  return ScrollToOffset(offset);
+}
+
+// Internal refinement keeps the item request alive; a new public ScrollTo request cancels it first.
+bool ScrollConnection::ScrollToOffset(float offset) {
   if (!IsCurrent()) {
     return false;
   }
@@ -82,10 +93,22 @@ bool ScrollConnection::ScrollToItem(std::size_t index, ScrollAlignment alignment
     return false;
   }
   const auto target = node_->virtual_layout_descriptor->scroll_offset_for_item(*node_, index, alignment, ViewportExtent());
-  return target.has_value() && ScrollTo(*target);
+  if (!target) {
+    return false;
+  }
+  state_->pending_offset.reset();
+  state_->pending_item = ScrollItemRequest{index, alignment};
+  return ScrollToOffset(*target);
 }
 
-void ScrollConnection::ApplyPending() {
+void ScrollConnection::CancelPending() {
+  if (IsCurrent()) {
+    state_->pending_offset.reset();
+    state_->pending_item.reset();
+  }
+}
+
+void ScrollConnection::ApplyPending(bool after_layout) {
   if (!IsCurrent()) {
     return;
   }
@@ -93,8 +116,30 @@ void ScrollConnection::ApplyPending() {
     SetCurrentOffset(std::max(0.0F, *state_->pending_offset));
     state_->pending_offset.reset();
   }
-  if (state_->pending_item.has_value() && ScrollToItem(state_->pending_item->index, state_->pending_item->alignment)) {
-    state_->pending_item.reset();
+  if (!state_->pending_item) {
+    return;
+  }
+  const auto request = *state_->pending_item;
+  if (!node_->interaction.enabled || !node_->virtual_state || request.index >= node_->virtual_state->source.size ||
+      !node_->virtual_layout_descriptor || !node_->virtual_layout_descriptor->scroll_offset_for_item) {
+    CancelPending();
+    return;
+  }
+  const auto target = node_->virtual_layout_descriptor->scroll_offset_for_item(*node_, request.index, request.alignment,
+      ViewportExtent());
+  if (!target) {
+    if (after_layout) {
+      CancelPending();
+    }
+    return;
+  }
+  const float maximum = std::max(0.0F, ContentExtent() - ViewportExtent());
+  const float next = std::clamp(*target, 0.0F, maximum);
+  if (after_layout && next == CurrentOffset()) {
+    CancelPending();
+  } else {
+    // Measured item extents may change the target after realization; retain the request until placement agrees.
+    ScrollToOffset(next);
   }
 }
 
@@ -131,7 +176,7 @@ void CompleteScrollController(MountedNode& node) {
   if (!node.scroll_state->connection) {
     return;
   }
-  node.scroll_state->connection->ApplyPending();
+  node.scroll_state->connection->ApplyPending(true);
   node.scroll_state->connection->PublishMetrics();
 }
 

@@ -7,11 +7,16 @@
 #include <memory>
 #include <vector>
 
+#include <huxerui/android/jni.h>
 #include <huxerui/render_scene.h>
+#include <huxerui/text.h>
 
 #include "android_external_texture_internal.h"
 
 namespace huxerui::detail {
+
+android::LocalRef<jbyteArray>
+AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const TextStyle& base);
 
 class AndroidTextureLayers;
 

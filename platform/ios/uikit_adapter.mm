@@ -30,7 +30,7 @@
 #include "uikit_view.h"
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::detail {
 class IosPlatformAdapter;
@@ -631,15 +631,13 @@ public:
     return renderer_.MeasureRun(text, style, options);
   }
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  ) override {
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options = {}) override {
     return renderer_.MeasureText(text, style, max_width, options);
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  ) override {
+  std::unique_ptr<TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {}) override {
     return renderer_.CreateTextLayout(text, style, max_width, options);
   }
 
@@ -983,6 +981,10 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
           kind,
           changed,
           buttons,
+          {static_cast<bool>(event.modifierFlags & UIKeyModifierShift),
+           static_cast<bool>(event.modifierFlags & UIKeyModifierControl),
+           static_cast<bool>(event.modifierFlags & UIKeyModifierAlternate),
+           static_cast<bool>(event.modifierFlags & UIKeyModifierCommand)},
       });
     };
     if (type == huxerui::PointerEventType::Cancel) {

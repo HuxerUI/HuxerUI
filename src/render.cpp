@@ -152,7 +152,7 @@ void PaintLabelContent(
   const Rect content = node.ContentBounds();
   const float icon_width = std::min(std::max(0.0F, metrics.icon_size.width), content.width);
   const float icon_height = std::min(std::max(0.0F, metrics.icon_size.height), content.height);
-  const bool show_label = metrics.show_label && !node.text.empty();
+  const bool show_label = metrics.show_label && !node.text.PlainText().empty();
   const auto cached = node.layout_cache.find(typeid(LabelLayoutCache));
   const auto* layout = cached == node.layout_cache.end() ? nullptr : std::any_cast<LabelLayoutCache>(&cached->second);
   const Size measured_text = show_label && layout != nullptr ? layout->text.size : Size{};
@@ -675,13 +675,8 @@ void PaintNodeWithinClip(huxerui::MountedNode& mounted_node, const Rect& clip, c
       );
     } else if ((node.kind == NodeKind::Checkbox || node.kind == NodeKind::RadioButton ||
                 node.kind == NodeKind::Switch) &&
-               !node.text.empty()) {
-      content.DrawText(
-          ResolveToggleLabelBounds(node),
-          node.text,
-          text_style,
-          node.properties.text_layout_options
-      );
+               !node.text.PlainText().empty()) {
+      content.DrawText(ResolveToggleLabelBounds(node), node.text, text_style, node.properties.text_layout_options);
     } else if (node.kind == NodeKind::Image) {
       PaintImage(node, content);
     } else if (node.kind == NodeKind::PlatformView) {

@@ -33,7 +33,7 @@
 #include "paint_internal.h"
 #include "resource_internal.h"
 #include "shadow_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 #include "win32_external_texture_internal.h"
 #include "win32_internal.h"
 
@@ -137,18 +137,25 @@ TextDirection ResolveTextDirection(std::wstring_view text, TextDirection request
 
 class Win32TextLayout final : public TextLayout {
 public:
-  Win32TextLayout(std::wstring text, ComPtr<IDWriteTextLayout> layout)
-      : text_(std::move(text)), layout_(std::move(layout)) {
+  Win32TextLayout(std::wstring text, ComPtr<IDWriteTextLayout> layout, std::vector<TextOffset> caret_offsets)
+      : text_(std::move(text)), layout_(std::move(layout)), caret_offsets_(std::move(caret_offsets)) {}
+
+  static std::vector<TextOffset> CaretOffsets(IDWriteTextLayout& layout) {
     UINT32 count = 0;
-    layout_->GetClusterMetrics(nullptr, 0, &count);
-    cluster_metrics_.resize(count);
+    layout.GetClusterMetrics(nullptr, 0, &count);
+    std::vector<DWRITE_CLUSTER_METRICS> clusters(count);
     if (count > 0) {
-      ThrowIfFailed(
-          layout_->GetClusterMetrics(cluster_metrics_.data(), count, &count),
-          "HuxerUI could not query DirectWrite text clusters"
-      );
-      cluster_metrics_.resize(count);
+      ThrowIfFailed(layout.GetClusterMetrics(clusters.data(), count, &count),
+          "HuxerUI could not query DirectWrite text clusters");
+      clusters.resize(count);
     }
+    std::vector<TextOffset> offsets;
+    offsets.reserve(clusters.size() + 1);
+    offsets.push_back(0);
+    for (const auto& cluster : clusters) {
+      offsets.push_back(offsets.back() + cluster.length);
+    }
+    return offsets;
   }
 
   Size Measure() const override {
@@ -169,10 +176,15 @@ public:
         "HuxerUI could not hit test a DirectWrite text layout"
     );
     static_cast<void>(inside);
-    const TextOffset offset = std::min<TextOffset>(
-        static_cast<TextOffset>(text_.size()),
-        static_cast<TextOffset>(metrics.textPosition) + (trailing != FALSE ? metrics.length : 0)
-    );
+    TextOffset offset = std::min<TextOffset>(static_cast<TextOffset>(text_.size()),
+        static_cast<TextOffset>(metrics.textPosition) + (trailing != FALSE ? metrics.length : 0));
+    if (offset > 0 && offset < static_cast<TextOffset>(text_.size())) {
+      const auto previous = PreviousCaretOffset(offset);
+      const auto next = NextCaretOffset(previous);
+      if (next != offset) {
+        offset = trailing != FALSE ? next : previous;
+      }
+    }
     return {
         offset,
         trailing != FALSE ? TextAffinity::Upstream : TextAffinity::Downstream,
@@ -207,17 +219,16 @@ public:
       return {};
     }
 
-    std::vector<DWRITE_HIT_TEST_METRICS> metrics(text_.size() + 1);
     UINT32 count = 0;
-    const HRESULT result = layout_->HitTestTextRange(
-        static_cast<UINT32>(start),
-        static_cast<UINT32>(end - start),
-        0.0F,
-        0.0F,
-        metrics.data(),
-        static_cast<UINT32>(metrics.size()),
-        &count
-    );
+    // Query fragment count rather than allocating by text length; bidi and wrapping determine the actual geometry.
+    const HRESULT query = layout_->HitTestTextRange(static_cast<UINT32>(start), static_cast<UINT32>(end - start),
+        0.0F, 0.0F, nullptr, 0, &count);
+    if (query != E_NOT_SUFFICIENT_BUFFER) {
+      ThrowIfFailed(query, "HuxerUI could not count DirectWrite text range fragments");
+    }
+    std::vector<DWRITE_HIT_TEST_METRICS> metrics(count);
+    const HRESULT result = layout_->HitTestTextRange(static_cast<UINT32>(start), static_cast<UINT32>(end - start),
+        0.0F, 0.0F, metrics.data(), static_cast<UINT32>(metrics.size()), &count);
     ThrowIfFailed(result, "HuxerUI could not locate a DirectWrite text range");
 
     std::vector<Rect> rects;
@@ -234,34 +245,19 @@ public:
   }
 
   TextOffset PreviousCaretOffset(TextOffset offset) const override {
-    const TextOffset target = std::clamp<TextOffset>(offset, 0, text_.size());
-    TextOffset position = 0;
-    for (const DWRITE_CLUSTER_METRICS& cluster : cluster_metrics_) {
-      const TextOffset end = position + cluster.length;
-      if (target <= end) {
-        return position;
-      }
-      position = end;
-    }
-    return position;
+    const auto found = std::lower_bound(caret_offsets_.begin(), caret_offsets_.end(), offset);
+    return found == caret_offsets_.begin() ? 0 : *std::prev(found);
   }
 
   TextOffset NextCaretOffset(TextOffset offset) const override {
-    const TextOffset target = std::clamp<TextOffset>(offset, 0, text_.size());
-    TextOffset position = 0;
-    for (const DWRITE_CLUSTER_METRICS& cluster : cluster_metrics_) {
-      position += cluster.length;
-      if (target < position) {
-        return position;
-      }
-    }
-    return position;
+    const auto found = std::upper_bound(caret_offsets_.begin(), caret_offsets_.end(), offset);
+    return found == caret_offsets_.end() ? caret_offsets_.back() : *found;
   }
 
 private:
   std::wstring text_;
   ComPtr<IDWriteTextLayout> layout_;
-  std::vector<DWRITE_CLUSTER_METRICS> cluster_metrics_;
+  std::vector<TextOffset> caret_offsets_;
 };
 
 struct Win32Renderer::State {
@@ -379,7 +375,7 @@ struct Win32Renderer::State {
   };
 
   struct ParagraphKey {
-    std::string text;
+    AttributedText text;
     Font font;
     TextDecoration decoration = TextDecoration::None;
     TextLayoutOptions options;
@@ -389,7 +385,7 @@ struct Win32Renderer::State {
   };
 
   struct ParagraphKeyView {
-    std::string_view text;
+    const AttributedText& text;
     const Font& font;
     TextDecoration decoration;
     const TextLayoutOptions& options;
@@ -408,10 +404,9 @@ struct Win32Renderer::State {
     }
 
   private:
-    static std::size_t Hash(
-        std::string_view text, const Font& font, TextDecoration decoration, const TextLayoutOptions& options, Size size
-    ) noexcept {
-      std::size_t result = std::hash<std::string_view>{}(text);
+    static std::size_t Hash(const AttributedText& text, const Font& font, TextDecoration decoration,
+        const TextLayoutOptions& options, Size size) noexcept {
+      std::size_t result = InternalAccess::BodyHash(text);
       CombineHash(result, HashFont(font));
       CombineHash(result, std::hash<TextDecoration>{}(decoration));
       CombineHash(result, HashShaping(options.shaping));
@@ -432,7 +427,7 @@ struct Win32Renderer::State {
     }
 
     bool operator()(const ParagraphKey& left, const ParagraphKeyView& right) const noexcept {
-      return std::string_view(left.text) == right.text && left.font == right.font &&
+      return left.text == right.text && left.font == right.font &&
              left.decoration == right.decoration && left.options == right.options && left.size == right.size;
     }
 
@@ -443,11 +438,13 @@ struct Win32Renderer::State {
 
   struct CachedParagraph {
     ComPtr<IDWriteTextLayout> layout;
+    std::size_t cost = 0;
   };
 
   TextLayoutMetrics
-  MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
-    const std::wstring wide = Utf8ToWide(text);
+  MeasureText(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
+    ValidateParagraphLength(text);
+    const std::wstring wide = Utf8ToWide(text.PlainText());
     ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, options.shaping.locale);
     const bool constrained = std::isfinite(max_width);
     if (constrained && max_width <= 0.0F) {
@@ -475,6 +472,7 @@ struct Win32Renderer::State {
         "HuxerUI could not create a DirectWrite text layout"
     );
 
+    ApplyTextAttributes(*layout.Get(), text, style, false);
     DWRITE_TEXT_METRICS metrics{};
     ThrowIfFailed(layout->GetMetrics(&metrics), "HuxerUI could not measure a DirectWrite text layout");
     const float width = constrained ? std::min(metrics.widthIncludingTrailingWhitespace, max_width)
@@ -509,9 +507,10 @@ struct Win32Renderer::State {
     return TextRunFor(text, style, options).metrics;
   }
 
-  std::unique_ptr<TextLayout>
-  CreateTextLayout(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
-    std::wstring wide = Utf8ToWide(text);
+  std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) {
+    ValidateParagraphLength(text);
+    std::wstring wide = Utf8ToWide(text.PlainText());
     ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, options.shaping.locale);
     const bool constrained = std::isfinite(max_width);
     ConfigureTextFormat(*format.Get(), options, wide);
@@ -528,7 +527,53 @@ struct Win32Renderer::State {
         ),
         "HuxerUI could not create an editable DirectWrite text layout"
     );
-    return std::make_unique<Win32TextLayout>(std::move(wide), std::move(layout));
+    // Font overrides may split DirectWrite glyph runs inside a grapheme; caret stops belong to the undecorated body.
+    auto caret_offsets = Win32TextLayout::CaretOffsets(*layout.Get());
+    ApplyTextAttributes(*layout.Get(), text, style, false);
+    return std::make_unique<Win32TextLayout>(std::move(wide), std::move(layout), std::move(caret_offsets));
+  }
+
+  static void ValidateParagraphLength(const AttributedText& text) {
+    if (text.Length() > std::numeric_limits<UINT32>::max()) {
+      throw std::invalid_argument("HuxerUI DirectWrite paragraph exceeds the supported length");
+    }
+  }
+
+  void ApplyTextAttributes(IDWriteTextLayout& layout, const AttributedText& text, const TextStyle& base, bool drawing) {
+    for (const auto& run : ResolveTextRuns(text, base)) {
+      const DWRITE_TEXT_RANGE range{static_cast<UINT32>(run.range.start), static_cast<UINT32>(run.range.Length())};
+      const auto family = FontFamilyName(run.style.font);
+      ThrowIfFailed(layout.SetFontFamilyName(family.c_str(), range), "HuxerUI could not set paragraph font family");
+      ThrowIfFailed(layout.SetFontSize(run.style.font.Size(), range), "HuxerUI could not set paragraph font size");
+      ThrowIfFailed(layout.SetFontWeight(static_cast<DWRITE_FONT_WEIGHT>(run.style.font.Weight()), range),
+          "HuxerUI could not set paragraph font weight");
+      ThrowIfFailed(
+          layout.SetFontStyle(
+              run.style.font.Slant() == FontSlant::Italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL, range),
+          "HuxerUI could not set paragraph font slant"
+      );
+      ThrowIfFailed(layout.SetUnderline(HasTextDecoration(run.style.decoration, TextDecoration::Underline), range),
+          "HuxerUI could not set paragraph underline");
+      ThrowIfFailed(
+          layout.SetStrikethrough(HasTextDecoration(run.style.decoration, TextDecoration::StrikeThrough), range),
+          "HuxerUI could not set paragraph strikethrough");
+    }
+    // Only drawing layouts retain device brushes; measurement and interaction layouts stay device-independent.
+    if (drawing) {
+      for (const auto& item : text.StyleRanges()) {
+        // Inherited foreground is supplied by DrawTextLayout's brush; only explicit span colors become effects.
+        if (item.style.foreground) {
+          ComPtr<ID2D1SolidColorBrush> foreground;
+          ThrowIfFailed(device_context_->CreateSolidColorBrush(ToD2DColor(*item.style.foreground), &foreground),
+              "HuxerUI could not create paragraph foreground");
+          ThrowIfFailed(
+              layout.SetDrawingEffect(foreground.Get(),
+                  {static_cast<UINT32>(item.range.start), static_cast<UINT32>(item.range.Length())}),
+              "HuxerUI could not set paragraph foreground"
+          );
+        }
+      }
+    }
   }
 
   void InitializeFactories() {
@@ -717,6 +762,7 @@ struct Win32Renderer::State {
   }
 
   ComPtr<IDWriteTextLayout> ParagraphFor(const DrawTextCommand& command) {
+    ValidateParagraphLength(command.text);
     const Size size{command.rect.width, command.rect.height};
     const auto cached = paragraphs_.find(
         ParagraphKeyView{command.text, command.style.font, command.style.decoration, command.options, size}
@@ -725,7 +771,7 @@ struct Win32Renderer::State {
       return cached->second.layout;
     }
 
-    const std::wstring text = Utf8ToWide(command.text);
+    const std::wstring text = Utf8ToWide(command.text.PlainText());
     ComPtr<IDWriteTextFormat> format = CreateTextFormat(command.style.font, command.options.shaping.locale);
     ConfigureTextFormat(*format.Get(), command.options, text);
     ComPtr<IDWriteTextLayout> layout;
@@ -740,26 +786,21 @@ struct Win32Renderer::State {
         ),
         "HuxerUI could not create a DirectWrite text paragraph"
     );
-    if (HasTextDecoration(command.style.decoration, TextDecoration::Underline)) {
-      ThrowIfFailed(
-          layout->SetUnderline(TRUE, DWRITE_TEXT_RANGE{0, static_cast<UINT32>(text.size())}),
-          "HuxerUI could not configure DirectWrite paragraph underline"
-      );
-    }
-    if (HasTextDecoration(command.style.decoration, TextDecoration::StrikeThrough)) {
-      ThrowIfFailed(
-          layout->SetStrikethrough(TRUE, DWRITE_TEXT_RANGE{0, static_cast<UINT32>(text.size())}),
-          "HuxerUI could not configure DirectWrite paragraph strikethrough"
-      );
-    }
+    ApplyTextAttributes(*layout.Get(), command.text, command.style, true);
     constexpr std::size_t maximum_paragraphs = 256;
-    if (paragraphs_.size() >= maximum_paragraphs) {
+    const auto cost = ParagraphCacheCost(command.text);
+    // Draw oversized paragraphs without retaining their full body or evicting reusable cache entries.
+    if (cost > paragraph_cache_budget) {
+      return layout;
+    }
+    while (!paragraphs_.empty() &&
+           (paragraphs_.size() >= maximum_paragraphs || paragraph_bytes_ + cost > paragraph_cache_budget)) {
+      paragraph_bytes_ -= paragraphs_.begin()->second.cost;
       paragraphs_.erase(paragraphs_.begin());
     }
-    paragraphs_.emplace(
-        ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size},
-        CachedParagraph{layout}
-    );
+    paragraph_bytes_ += cost;
+    paragraphs_.emplace(ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size},
+        CachedParagraph{layout, cost});
     return layout;
   }
 
@@ -1130,6 +1171,9 @@ struct Win32Renderer::State {
   }
 
   void DiscardDeviceResources() noexcept {
+    // Paragraph drawing effects retain D2D brushes, so those layouts cannot survive device resource recreation.
+    paragraphs_.clear();
+    paragraph_bytes_ = 0;
     clip_stack_.clear();
     transform_stack_.clear();
     DiscardSizeDependentResources();
@@ -1349,7 +1393,7 @@ struct Win32Renderer::State {
   }
 
   void RenderCommand(const DrawTextCommand& command) {
-    if (command.rect.width <= 0.0F || command.rect.height <= 0.0F || command.style.foreground.alpha <= 0.0F) {
+    if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
       return;
     }
     ComPtr<IDWriteTextLayout> layout = ParagraphFor(command);
@@ -1364,6 +1408,30 @@ struct Win32Renderer::State {
     }
     SetBrushColor(command.style.foreground);
     device_context_->PushAxisAlignedClip(ToD2DRect(command.rect), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    // DirectWrite range fragments preserve wrapping and bidi gaps; one enclosing rectangle would color unrelated text.
+    for (const auto& item : command.text.StyleRanges()) {
+      if (!item.style.background || item.style.background->alpha <= 0.0F) {
+        continue;
+      }
+      UINT32 count = 0;
+      layout->HitTestTextRange(static_cast<UINT32>(item.range.start), static_cast<UINT32>(item.range.Length()),
+          0.0F, 0.0F, nullptr, 0, &count);
+      std::vector<DWRITE_HIT_TEST_METRICS> fragments(count);
+      if (count > 0) {
+        ThrowIfFailed(
+            layout->HitTestTextRange(static_cast<UINT32>(item.range.start), static_cast<UINT32>(item.range.Length()),
+                command.rect.x + command.paragraph_offset.x,
+                command.rect.y + vertical_offset + command.paragraph_offset.y, fragments.data(), count, &count),
+            "HuxerUI could not resolve paragraph background"
+        );
+        SetBrushColor(*item.style.background);
+        for (const auto& fragment : fragments) {
+          device_context_->FillRectangle(ToD2DRect({fragment.left, fragment.top, fragment.width, fragment.height}),
+              brush_.Get());
+        }
+      }
+    }
+    SetBrushColor(command.style.foreground);
     device_context_->DrawTextLayout(
         D2D1::Point2F(
             command.rect.x + command.paragraph_offset.x,
@@ -2462,6 +2530,7 @@ struct Win32Renderer::State {
   std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
   std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;
+  std::size_t paragraph_bytes_ = 0;
   std::vector<ClipState> clip_stack_;
   std::vector<D2D1_MATRIX_3X2_F> transform_stack_;
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
@@ -2483,6 +2552,7 @@ void Win32Renderer::Discard() noexcept {
   state_->d3d11_textures_.clear();
   state_->platform_composition_ = false;
   state_->paragraphs_.clear();
+  state_->paragraph_bytes_ = 0;
   state_->text_runs_.clear();
   state_->font_metrics_.clear();
   state_->wic_factory_.Reset();
@@ -2534,15 +2604,18 @@ Win32Renderer::MeasureRun(std::string_view text, const TextStyle& style, const T
   return state_->MeasureRun(text, style, options);
 }
 
-TextLayoutMetrics Win32Renderer::MeasureText(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+TextLayoutMetrics Win32Renderer::MeasureText(std::string_view text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
+  return MeasureText(AttributedText(std::string(text)), style, max_width, options);
+}
+
+TextLayoutMetrics Win32Renderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+    const TextLayoutOptions& options) {
   return state_->MeasureText(text, style, max_width, options);
 }
 
-std::unique_ptr<TextLayout> Win32Renderer::CreateTextLayout(
-    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options
-) {
+std::unique_ptr<TextLayout> Win32Renderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options) {
   return state_->CreateTextLayout(text, style, max_width, options);
 }
 

@@ -286,9 +286,13 @@ void PaintContext::DrawRect(Rect rect, Brush brush, CornerRadii corner_radii) {
   Include(rect);
 }
 
-void PaintContext::DrawText(
-    Rect rect, std::string text, TextStyle style, TextLayoutOptions options, Point paragraph_offset
-) {
+void PaintContext::DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options,
+    Point paragraph_offset) {
+  DrawText(rect, AttributedText(std::move(text)), std::move(style), std::move(options), paragraph_offset);
+}
+
+void PaintContext::DrawText(Rect rect, AttributedText text, TextStyle style, TextLayoutOptions options,
+    Point paragraph_offset) {
   RequireOpen();
   RequireRect(rect);
   RequireTextStyle(style);

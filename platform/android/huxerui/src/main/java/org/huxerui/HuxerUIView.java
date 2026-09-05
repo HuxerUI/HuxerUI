@@ -23,9 +23,11 @@ import android.os.Debug;
 import android.os.SystemClock;
 import android.os.Build;
 import android.text.Layout;
-import android.text.StaticLayout;
+import android.text.SpannableString;
+import android.text.Spanned;
+import android.text.style.CharacterStyle;
+import android.text.style.MetricAffectingSpan;
 import android.text.TextPaint;
-import android.text.TextDirectionHeuristics;
 import android.util.AttributeSet;
 import android.util.LongSparseArray;
 import android.util.LruCache;
@@ -51,6 +53,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
@@ -163,7 +167,14 @@ public final class HuxerUIView extends ViewGroup {
     private final Path scratchPath = new Path();
     private final LruCache<PathKey, Path> pathCache = new LruCache<>(128);
     private final LruCache<FontKey, Typeface> fontCache = new LruCache<>(32);
-    private final LruCache<ParagraphKey, StaticLayout> paragraphCache = new LruCache<>(256);
+    private static final int PARAGRAPH_CACHE_BUDGET = 8 * 1024 * 1024;
+    private final LruCache<ParagraphKey, HuxerUITextLayout> paragraphCache =
+            new LruCache<ParagraphKey, HuxerUITextLayout>(PARAGRAPH_CACHE_BUDGET) {
+                @Override
+                protected int sizeOf(ParagraphKey key, HuxerUITextLayout layout) {
+                    return key.retainedBytes();
+                }
+            };
     private final LruCache<Long, Bitmap> imageCache = new LruCache<Long, Bitmap>(IMAGE_CACHE_BUDGET) {
         @Override
         protected int sizeOf(Long identity, Bitmap bitmap) {
@@ -1029,8 +1040,11 @@ public final class HuxerUIView extends ViewGroup {
         } else {
             pointerButtons.put(pointerId, pressedButtons);
         }
+        int modifiers = KeyEvent.normalizeMetaState(event.getMetaState());
         nativePointer(nativeHandle, type, pointerDeviceKind(event, index), event.getPointerId(index),
-                event.getX(index) / density, event.getY(index) / density, changedButton, pressedButtons);
+                event.getX(index) / density, event.getY(index) / density, changedButton, pressedButtons,
+                (modifiers & KeyEvent.META_SHIFT_ON) != 0, (modifiers & KeyEvent.META_CTRL_ON) != 0,
+                (modifiers & KeyEvent.META_ALT_ON) != 0, (modifiers & KeyEvent.META_META_ON) != 0);
     }
 
     private int pressedPointerButtons(MotionEvent event, int index, int type) {
@@ -1614,30 +1628,95 @@ public final class HuxerUIView extends ViewGroup {
         };
     }
 
-    private float[] measureText(byte[] utf8, float fontSize, float maxWidth, int familyKind, byte[] familyName,
-            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale) {
-        String text = new String(utf8, StandardCharsets.UTF_8);
-        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, 0, utf8Locale);
-        boolean constrained = !Float.isInfinite(maxWidth) && !Float.isNaN(maxWidth);
-        if (constrained && maxWidth <= 0.0F) {
-            return new float[5];
+
+    private CharSequence attributedText(String text, byte[] attributes) {
+        if (attributes.length == 0) {
+            return text;
+        }
+        SpannableString result = new SpannableString(text);
+        // Decode the AndroidTextAttributes record layout; start/end are UTF-16 indices, not UTF-8 byte positions.
+        ByteBuffer data = ByteBuffer.wrap(attributes).order(ByteOrder.LITTLE_ENDIAN);
+        while (data.hasRemaining()) {
+            if (data.remaining() < 40) {
+                throw new IllegalArgumentException("HuxerUI received malformed paragraph attributes");
+            }
+            int start = data.getInt();
+            int end = data.getInt();
+            float size = data.getFloat();
+            int family = data.getInt();
+            int weight = data.getInt();
+            int slant = data.getInt();
+            int foreground = data.getInt();
+            int background = data.getInt();
+            int decoration = data.getInt();
+            int familyLength = data.getInt();
+            if (start < 0 || end < start || end > text.length() || familyLength < 0 || familyLength > data.remaining()) {
+                throw new IllegalArgumentException("HuxerUI received malformed paragraph attribute range");
+            }
+            byte[] name = new byte[familyLength];
+            data.get(name);
+            Typeface font = resolveTypeface(family, new String(name, StandardCharsets.UTF_8), weight, slant);
+            result.setSpan(new ParagraphFontSpan(font, size), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            result.setSpan(new ParagraphPaintSpan(foreground, background, decoration), start, end,
+                    Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        return result;
+    }
+
+    // Keep font metrics separate from paint-only overrides so appearance does not create metric-affecting spans.
+    private static final class ParagraphFontSpan extends MetricAffectingSpan {
+        private final Typeface font;
+        private final float size;
+
+        ParagraphFontSpan(Typeface font, float size) {
+            this.font = font;
+            this.size = size;
         }
 
-        float desiredWidth = StaticLayout.getDesiredWidth(text, textPaint);
-        float requestedWidth = constrained && wrap == TEXT_WRAP_WORD ? maxWidth : desiredWidth;
-        int layoutWidth = Math.max(1, (int) Math.ceil(requestedWidth));
-        StaticLayout layout = createTextLayout(text, layoutWidth, toTextAlignment(alignment), direction);
-        float measuredWidth = 0.0F;
-        for (int line = 0; line < layout.getLineCount(); ++line) {
-            measuredWidth = Math.max(measuredWidth, layout.getLineWidth(line));
+        @Override
+        public void updateMeasureState(TextPaint paint) {
+            paint.setTypeface(font);
+            paint.setTextSize(size);
         }
-        if (constrained) {
-            measuredWidth = Math.min(measuredWidth, maxWidth);
+
+        @Override
+        public void updateDrawState(TextPaint paint) {
+            updateMeasureState(paint);
         }
-        float width = (float) Math.ceil(measuredWidth);
-        float height = (float) Math.ceil(layout.getHeight());
-        return new float[] {width, height, layout.getLineBaseline(0), layout.getLineBaseline(layout.getLineCount() - 1),
-                layout.getLineCount()};
+    }
+
+    private static final class ParagraphPaintSpan extends CharacterStyle {
+        private final int foreground;
+        private final int background;
+        private final int decoration;
+
+        ParagraphPaintSpan(int foreground, int background, int decoration) {
+            this.foreground = foreground;
+            this.background = background;
+            this.decoration = decoration;
+        }
+
+        @Override
+        public void updateDrawState(TextPaint paint) {
+            paint.setColor(foreground);
+            paint.bgColor = background;
+            paint.setUnderlineText((decoration & TEXT_DECORATION_UNDERLINE) != 0);
+            paint.setStrikeThruText((decoration & TEXT_DECORATION_STRIKE_THROUGH) != 0);
+        }
+    }
+
+    private float[] measureText(byte[] utf8, float fontSize, float maxWidth, int familyKind, byte[] familyName,
+            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale, byte[] attributes) {
+        if (Float.isFinite(maxWidth) && maxWidth <= 0.0F) {
+            return new float[5];
+        }
+        HuxerUITextLayout layout = (HuxerUITextLayout) createTextLayout(utf8, fontSize, maxWidth, familyKind,
+                familyName, weight, slant, alignment, wrap, direction, utf8Locale, attributes);
+        float[] metrics = layout.measure();
+        if (Float.isFinite(maxWidth)) {
+            metrics[0] = (float) Math.ceil(Math.min(metrics[0], maxWidth));
+        }
+        return metrics;
     }
 
     private float[] measureTextRun(byte[] utf8, float fontSize, int familyKind, byte[] familyName, int weight,
@@ -1681,10 +1760,11 @@ public final class HuxerUIView extends ViewGroup {
     }
 
     private Object createTextLayout(byte[] utf8, float fontSize, float maxWidth, int familyKind, byte[] familyName,
-            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale) {
+            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale, byte[] attributes) {
         prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, 0, utf8Locale);
-        return new HuxerUITextLayout(new String(utf8, StandardCharsets.UTF_8), new TextPaint(textPaint), maxWidth,
-                toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
+        // Geometry may contain secure editing text; keep it uncached and detach its Paint from the reusable host Paint.
+        return new HuxerUITextLayout(attributedText(new String(utf8, StandardCharsets.UTF_8), attributes),
+                new TextPaint(textPaint), maxWidth, toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
     }
 
     private void drawBrushRect(Canvas canvas, float x, float y, float width, float height, int brushKind, int color,
@@ -1703,40 +1783,41 @@ public final class HuxerUIView extends ViewGroup {
     private void drawText(Canvas canvas, byte[] utf8, float x, float y, float width, float height,
             float paragraphOffsetX, float paragraphOffsetY, int color, float fontSize, int familyKind,
             byte[] familyName, int weight, int slant, int decoration, int alignment, int verticalAlignment, int wrap,
-            int direction, byte[] utf8Locale) {
+            int direction, byte[] utf8Locale, byte[] attributes) {
         if (width <= 0.0F || height <= 0.0F) {
             return;
         }
         String text = new String(utf8, StandardCharsets.UTF_8);
         String resolvedFamily = new String(familyName, StandardCharsets.UTF_8);
         String locale = new String(utf8Locale, StandardCharsets.UTF_8);
-        prepareTextPaint(fontSize, color, familyKind, resolvedFamily, weight, slant, decoration, locale);
-        int saveCount = canvas.save();
-        canvas.clipRect(x, y, x + width, y + height);
-        boolean wraps = wrap == TEXT_WRAP_WORD;
-        float desiredWidth = StaticLayout.getDesiredWidth(text, textPaint);
-        int layoutWidth = Math.max(1, (int) Math.ceil(wraps ? width : Math.max(width, desiredWidth)));
-        Layout.Alignment layoutAlignment = toTextAlignment(alignment);
-        ParagraphKey key = new ParagraphKey(text, fontSize, familyKind, resolvedFamily, weight, slant, decoration,
-                alignment, wrap, direction, locale, layoutWidth);
-        StaticLayout layout = paragraphCache.get(key);
+        ParagraphKey key = new ParagraphKey(text, attributes, fontSize, familyKind, resolvedFamily, weight,
+                slant, decoration, alignment, wrap, direction, locale, width);
+        // Look up raw immutable inputs before constructing spans, resolving fonts, or measuring natural width.
+        HuxerUITextLayout layout = paragraphCache.get(key);
         if (layout == null) {
-            layout = createTextLayout(text, layoutWidth, layoutAlignment, direction, new TextPaint(textPaint));
-            paragraphCache.put(key, layout);
+            prepareTextPaint(fontSize, color, familyKind, resolvedFamily, weight, slant, decoration, locale);
+            layout = new HuxerUITextLayout(attributedText(text, attributes), new TextPaint(textPaint), width,
+                    toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
+            // Bypass retention before insertion so one oversized paragraph cannot evict every reusable entry.
+            if (key.retainedBytes() <= PARAGRAPH_CACHE_BUDGET) {
+                java.util.Map<ParagraphKey, HuxerUITextLayout> retained = paragraphCache.snapshot();
+                if (retained.size() >= 256) {
+                    paragraphCache.remove(retained.keySet().iterator().next());
+                }
+                paragraphCache.put(key, layout);
+            }
         }
-        layout.getPaint().setColor(color);
-        float horizontalOffset = wraps ? 0.0F
-                : HuxerUITextLayout.resolveHorizontalOffset(text, width, layoutWidth, layoutAlignment, direction);
-        float remainingHeight = Math.max(0.0F, height - layout.getHeight());
+        float remainingHeight = Math.max(0.0F, height - layout.height());
         float verticalOffset = 0.0F;
         if (verticalAlignment == TEXT_VERTICAL_ALIGN_CENTER) {
             verticalOffset = remainingHeight * 0.5F;
         } else if (verticalAlignment == TEXT_VERTICAL_ALIGN_BOTTOM) {
             verticalOffset = remainingHeight;
         }
-        canvas.translate(
-                x + horizontalOffset + paragraphOffsetX, y + verticalOffset + paragraphOffsetY);
-        layout.draw(canvas);
+        int saveCount = canvas.save();
+        canvas.clipRect(x, y, x + width, y + height);
+        canvas.translate(x + layout.horizontalOffset() + paragraphOffsetX, y + verticalOffset + paragraphOffsetY);
+        layout.draw(canvas, color);
         canvas.restoreToCount(saveCount);
     }
 
@@ -2079,6 +2160,7 @@ public final class HuxerUIView extends ViewGroup {
 
     private static final class ParagraphKey {
         final String text;
+        final byte[] attributes;
         final float fontSize;
         final int familyKind;
         final String familyName;
@@ -2089,11 +2171,12 @@ public final class HuxerUIView extends ViewGroup {
         final int wrap;
         final int direction;
         final String locale;
-        final int width;
+        final float width;
 
-        ParagraphKey(String text, float fontSize, int familyKind, String familyName, int weight, int slant,
-                int decoration, int alignment, int wrap, int direction, String locale, int width) {
+        ParagraphKey(String text, byte[] attributes, float fontSize, int familyKind, String familyName, int weight,
+                int slant, int decoration, int alignment, int wrap, int direction, String locale, float width) {
             this.text = text;
+            this.attributes = attributes;
             this.fontSize = fontSize;
             this.familyKind = familyKind;
             this.familyName = familyName;
@@ -2107,6 +2190,11 @@ public final class HuxerUIView extends ViewGroup {
             this.width = width;
         }
 
+        int retainedBytes() {
+            long bytes = 256L + text.length() * 32L + attributes.length * 2L;
+            return (int) Math.min(Integer.MAX_VALUE, bytes);
+        }
+
         @Override
         public boolean equals(Object other) {
             if (this == other) {
@@ -2118,20 +2206,19 @@ public final class HuxerUIView extends ViewGroup {
             ParagraphKey key = (ParagraphKey) other;
             return Float.compare(fontSize, key.fontSize) == 0 && familyKind == key.familyKind && weight == key.weight
                     && slant == key.slant && decoration == key.decoration && alignment == key.alignment
-                    && wrap == key.wrap && direction == key.direction && width == key.width
+                    && wrap == key.wrap && direction == key.direction && Float.compare(width, key.width) == 0
                     && Objects.equals(text, key.text) && Objects.equals(familyName, key.familyName)
-                    && Objects.equals(locale, key.locale);
+                    && Objects.equals(locale, key.locale) && Arrays.equals(attributes, key.attributes);
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(text, fontSize, familyKind, familyName, weight, slant, decoration, alignment, wrap,
-                    direction, locale, width);
+                    direction, locale, width, Arrays.hashCode(attributes));
         }
     }
 
-    private void prepareTextPaint(float fontSize, int color, int familyKind, String familyName, int weight, int slant,
-            int decoration, String locale) {
+    private Typeface resolveTypeface(int familyKind, String familyName, int weight, int slant) {
         FontKey key = new FontKey(familyKind, familyName, weight, slant);
         Typeface typeface = fontCache.get(key);
         if (typeface == null) {
@@ -2155,6 +2242,12 @@ public final class HuxerUIView extends ViewGroup {
             }
             fontCache.put(key, typeface);
         }
+        return typeface;
+    }
+
+    private void prepareTextPaint(float fontSize, int color, int familyKind, String familyName, int weight, int slant,
+            int decoration, String locale) {
+        Typeface typeface = resolveTypeface(familyKind, familyName, weight, slant);
         textPaint.setTextSize(fontSize);
         textPaint.setColor(color);
         textPaint.setStyle(Paint.Style.FILL);
@@ -2222,25 +2315,6 @@ public final class HuxerUIView extends ViewGroup {
         canvas.drawBitmap(bitmap, source, rect, paint);
     }
 
-    private StaticLayout createTextLayout(String text, int width, Layout.Alignment alignment, int direction) {
-        return createTextLayout(text, width, alignment, direction, textPaint);
-    }
-
-    private StaticLayout createTextLayout(
-            String text, int width, Layout.Alignment alignment, int direction, TextPaint layoutPaint) {
-        StaticLayout.Builder builder = StaticLayout.Builder.obtain(text, 0, text.length(), layoutPaint, width)
-                                               .setAlignment(alignment)
-                                               .setIncludePad(true);
-        if (direction == TEXT_DIRECTION_LEFT_TO_RIGHT) {
-            builder.setTextDirection(TextDirectionHeuristics.LTR);
-        } else if (direction == TEXT_DIRECTION_RIGHT_TO_LEFT) {
-            builder.setTextDirection(TextDirectionHeuristics.RTL);
-        } else {
-            builder.setTextDirection(TextDirectionHeuristics.FIRSTSTRONG_LTR);
-        }
-        return builder.build();
-    }
-
     private long createNativeRuntime(HuxerUIApplicationActivation activation) {
         if (activation == null) {
             return nativeCreate(this, 0, null, null, -1L, null, false);
@@ -2299,7 +2373,7 @@ public final class HuxerUIView extends ViewGroup {
             String[] contentTypes, HuxerUIFileDrop.Operation operation);
 
     private static native void nativePointer(long handle, int type, int deviceKind, long pointerId, float x, float y,
-            int changedButton, int pressedButtons);
+            int changedButton, int pressedButtons, boolean shift, boolean control, boolean alt, boolean meta);
 
     private static native boolean nativeScroll(long handle, float x, float y, float deltaX, float deltaY,
             boolean shift, boolean control, boolean alt, boolean meta);

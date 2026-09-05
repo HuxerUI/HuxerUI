@@ -8,6 +8,10 @@
 
 namespace huxerui::detail {
 
+inline bool IsWebHardLineBreak(std::string_view text) noexcept {
+  return text == "\n" || text == "\r" || text == "\r\n";
+}
+
 inline bool DecodeWebCodePoint(std::string_view text, std::size_t& index, std::uint32_t& result) noexcept {
   if (index >= text.size()) {
     return false;

@@ -28,11 +28,10 @@ public:
   [[nodiscard]] FontMetrics Metrics(const Font& font);
   [[nodiscard]] TextRunMetrics
   MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options = {});
-  [[nodiscard]] TextLayoutMetrics
-  MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  );
+  [[nodiscard]] TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options = {});
+  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {});
 
   void Draw(const RenderFrame& frame);
   void DrawSlice(
@@ -48,8 +47,8 @@ private:
   struct CachedExternalTexture;
   struct CommandRange;
 
-  [[nodiscard]] const WebTextLayout&
-  ParagraphFor(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
+  [[nodiscard]] std::shared_ptr<const WebTextLayout>
+  ParagraphFor(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
   [[nodiscard]] const emscripten::val* FrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void DrawTarget(
       const emscripten::val& canvas,
@@ -82,7 +81,8 @@ private:
 
   emscripten::val canvas_;
   emscripten::val context_;
-  std::vector<std::unique_ptr<WebTextLayout>> paragraph_cache_;
+  std::vector<std::shared_ptr<WebTextLayout>> paragraph_cache_;
+  std::size_t paragraph_bytes_ = 0;
   std::vector<std::unique_ptr<CachedExternalTexture>> external_textures_;
   Size viewport_;
   float display_scale_ = 1.0F;

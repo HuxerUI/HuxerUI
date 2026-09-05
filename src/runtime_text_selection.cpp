@@ -1,7 +1,11 @@
 #include "runtime_internal.h"
+#include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
 #include "text_input_internal.h"
+#include "window_internal.h"
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -11,6 +15,25 @@
 namespace huxerui {
 
 namespace detail {
+
+// Keyboard focus may belong to a descendant link; resolve the nearest selection capability without node-kind checks.
+MountedNode* FindTextSelectionOwner(MountedNode& root, std::uint64_t identity) {
+  const auto find = [&](auto&& self, MountedNode& node, MountedNode* owner) -> MountedNode* {
+    if (FindTextSelectionClient(node)) {
+      owner = &node;
+    }
+    if (node.identity == identity) {
+      return owner;
+    }
+    for (const auto& child : node.children) {
+      if (auto* found = self(self, *child, owner)) {
+        return found;
+      }
+    }
+    return nullptr;
+  };
+  return find(find, root, nullptr);
+}
 
 TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
   TextSelectionClient* result = nullptr;
@@ -32,12 +55,14 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
 
 } // namespace detail
 
+// An active editor owns clipboard actions and secure-text policy before any enclosing read-only selection area.
 bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
     }
-    detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+    detail::MountedNode* focused =
+        detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
     return client && client->CanPerformTextEditingAction(action, runtime_state_.platform_->Clipboard());
   }
@@ -71,7 +96,8 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
     }
-    detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+    detail::MountedNode* focused =
+        detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
     if (!client || !client->PerformTextEditingAction(action, runtime_state_.platform_->Clipboard())) {
       return false;
@@ -137,24 +163,27 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
 }
 
 bool detail::TextInteraction::SelectTextWord(std::uint64_t node, Point position, bool show_overlay) {
-  if (!runtime_state_.mounted_root_ || runtime_state_.focused_node_identity_ != node) {
-    return false;
-  }
-  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, node);
-  if (!focused || !focused->interaction.enabled) {
+  const auto selection_owner = [&]() -> detail::MountedNode* {
+    return runtime_state_.mounted_root_ && runtime_state_.focused_node_identity_
+               ? detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_)
+               : nullptr;
+  };
+  detail::MountedNode* focused = selection_owner();
+  if (!focused || focused->identity != node || !focused->interaction.enabled) {
     return false;
   }
   TextSelectionClient* client = detail::FindTextSelectionClient(*focused);
   const std::optional<Point> local = client ? focused->WindowToLocal(position) : std::nullopt;
   const bool changed = local.has_value() && client->SelectWord(*local);
-  focused = runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, node) : nullptr;
-  if (!focused || !focused->interaction.enabled || runtime_state_.focused_node_identity_ != node) {
+  focused = selection_owner();
+  if (!focused || focused->identity != node || !focused->interaction.enabled) {
     return changed;
   }
   if (changed) {
     focused->foreground_paint_dirty = true;
     RefreshTextInputSession();
-    if (runtime_state_.focused_node_identity_ != node) {
+    focused = selection_owner();
+    if (!focused || focused->identity != node || !focused->interaction.enabled) {
       return true;
     }
     text_selection_overlay_.state.paint_dirty = true;
@@ -176,7 +205,8 @@ bool detail::TextInteraction::ExtendFocusedTextSelection(Point position, bool st
   if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
     return false;
   }
-  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+  detail::MountedNode* focused =
+      detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (!focused) {
     return false;
   }
@@ -192,21 +222,133 @@ bool detail::TextInteraction::ExtendFocusedTextSelection(Point position, bool st
   return changed;
 }
 
-bool detail::TextInteraction::QueryFocusedTextSelectionGeometry(Rect& start, Rect& end) const {
-  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
-    return false;
+void detail::TextInteraction::AdvanceTextSelectionDrag(const FrameInfo& frame) {
+  if (!runtime_state_.mounted_root_) {
+    return;
   }
-  detail::MountedNode* focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+  // The previous scroll is laid out before this call; a stationary pointer must hit the newly realized paragraphs.
+  const bool retest = std::exchange(selection_scroll_pending_, false);
+  const auto scroll = [&](detail::MountedNode& owner, Point position) {
+    const Size viewport_size = runtime_state_.window_->metrics.viewport;
+    const Point route_position{
+        std::clamp(position.x, 0.0F, std::max(0.0F, viewport_size.width - 0.01F)),
+        std::clamp(position.y, 0.0F, std::max(0.0F, viewport_size.height - 0.01F))
+    };
+    std::vector<detail::MountedNode*> route;
+    if (!BuildPointerRoute(*runtime_state_.mounted_root_, route_position, route) ||
+        std::find(route.begin(), route.end(), &owner) == route.end()) {
+      return;
+    }
+    // Prefer the deepest eligible viewport; when it is exhausted, an ancestor may continue the selection reveal.
+    for (auto candidate = route.rbegin(); candidate != route.rend(); ++candidate) {
+      auto& node = **candidate;
+      if (!node.IsEnabled() || !detail::IsScrollContainer(node) ||
+          !detail::AllowsScrollSource(node, ScrollSource::FocusReveal)) {
+        continue;
+      }
+      const auto local = node.WindowToLocal(position);
+      if (!local) {
+        continue;
+      }
+      const Rect viewport = detail::ScrollViewport(node);
+      const bool vertical = detail::ScrollAxis(node) == Axis::Vertical;
+      const float start = vertical ? viewport.y : viewport.x;
+      const float extent = vertical ? viewport.height : viewport.width;
+      const float value = vertical ? local->y : local->x;
+      const float edge = std::min(32.0F, extent * 0.5F);
+      if (edge <= 0.0F) {
+        continue;
+      }
+      const float intensity = value < start + edge ? -std::clamp((start + edge - value) / edge, 0.0F, 1.0F)
+                              : value > start + extent - edge
+                                  ? std::clamp((value - start - extent + edge) / edge, 0.0F, 1.0F) : 0.0F;
+      if (intensity == 0.0F || !detail::CanScrollNode(node, intensity)) {
+        continue;
+      }
+      if (frame.delta_time <= 0.0) {
+        runtime_state_.owner_.RequestFrame();
+        return;
+      }
+      const float delta = intensity * 600.0F * static_cast<float>(frame.delta_time);
+      if (detail::ScrollNodeBy(node, delta, ScrollSource::FocusReveal) != 0.0F) {
+        selection_scroll_pending_ = true;
+        runtime_state_.owner_.RequestFrame();
+        return;
+      }
+    }
+  };
+  auto& overlay = text_selection_overlay_.state;
+  if (overlay.dragging && overlay.pointer_id && runtime_state_.focused_node_identity_) {
+    auto* owner = detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
+    if (owner && owner->IsEnabled()) {
+      if (retest) {
+        ExtendFocusedTextSelection(overlay.drag_position, overlay.dragging_start_handle);
+      }
+      scroll(*owner, overlay.drag_position);
+    }
+    return;
+  }
+  // Auto-scroll follows only the winning selection extension, never a still-observing link or canceled session.
+  for (auto& [pointer_id, session] : runtime_state_.pointer_->pointer_sessions_) {
+    if (session.quarantined || !session.owner || session.device_kind == PointerDeviceKind::Touch) {
+      continue;
+    }
+    const auto* index = std::get_if<std::size_t>(&*session.owner);
+    if (!index || *index >= session.recognitions.size()) {
+      continue;
+    }
+    const auto* recognition = std::get_if<detail::ExtensionRecognitionState>(&session.recognitions[*index].state);
+    if (!recognition) {
+      continue;
+    }
+    NodeExtension* extension = FindExtension(*runtime_state_.mounted_root_, recognition->extension);
+    auto* owner = FindNode(*runtime_state_.mounted_root_, recognition->extension.node_identity);
+    if (!owner || !owner->IsEnabled() || !extension || !extension->GetTextSelectionClient() ||
+        std::hypot(session.last_position.x - session.down_position.x,
+            session.last_position.y - session.down_position.y) < runtime_state_.gesture_settings_.pointer_slop) {
+      continue;
+    }
+    if (retest) {
+      if (const auto local = owner->WindowToLocal(session.last_position)) {
+        extension->OnPointer(
+            *owner,
+            {PointerEventType::Move,
+             pointer_id,
+             *local,
+             session.device_kind,
+             PointerButton::None,
+             PointerButton::Primary}
+        );
+      }
+    }
+    scroll(*owner, session.last_position);
+  }
+}
+
+TextSelectionGeometry detail::TextInteraction::QueryFocusedTextSelectionGeometry() const {
+  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
+    return {};
+  }
+  detail::MountedNode* focused =
+      detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
   if (!focused) {
-    return false;
+    return {};
   }
   TextSelectionClient* client = detail::FindTextSelectionClient(*focused);
-  if (!client || !client->QuerySelectionGeometry(start, end)) {
-    return false;
+  if (!client) {
+    return {};
   }
-  start = focused->LocalToWindowBounds(start);
-  end = focused->LocalToWindowBounds(end);
-  return true;
+  // Preserve missing endpoints while translating available geometry to the overlay's window coordinate space.
+  auto geometry = client->QuerySelectionGeometry();
+  const auto transform = [&](std::optional<Rect>& rect) {
+    if (rect) {
+      rect = focused->LocalToWindowBounds(*rect);
+    }
+  };
+  transform(geometry.start);
+  transform(geometry.end);
+  transform(geometry.toolbar_anchor);
+  return geometry;
 }
 
 } // namespace huxerui

@@ -50,9 +50,9 @@ public:
     return {width, {0.0F, -15.0F, width, 20.0F}, metrics};
   }
 
-  huxerui::TextLayoutMetrics MeasureText(
-      std::string_view text, const huxerui::TextStyle& style, float max_width, const huxerui::TextLayoutOptions& options
-  ) override {
+  huxerui::TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const huxerui::TextStyle& style,
+      float max_width, const huxerui::TextLayoutOptions& options) override {
+    const auto& text = paragraph.PlainText();
     static_cast<void>(style);
     if (max_width <= 0.0F) {
       return {};
@@ -124,7 +124,7 @@ View GeneratedGrowApp() {
 [[nodiscard]] std::string FirstText(const RenderNode& node) {
   for (const auto& command : node.content.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
-      return text->text;
+      return text->text.PlainText();
     }
   }
   for (const RenderNode* child : node.children) {
@@ -137,7 +137,7 @@ View GeneratedGrowApp() {
   }
   for (const auto& command : node.foreground.Commands()) {
     if (const auto* text = std::get_if<DrawTextCommand>(&command)) {
-      return text->text;
+      return text->text.PlainText();
     }
   }
   return {};

@@ -25,7 +25,7 @@
 
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 #include "web_application_internal.h"
 #include "web_file.h"
 #include "web_http_internal.h"
@@ -279,18 +279,15 @@ EM_JS(
         const changedButton = (button) => [1, 4, 2, 8, 16][button] || 0;
         const sendPointer = (event, type) => {
           const point = position(event);
-          Module._huxerui_web_pointer(
-              session_id, type, event.pointerId, point[0], point[1], pointerKind(event.pointerType),
-              type === 0 || type === 1 ? changedButton(event.button) : 0,
-              type === 3 ? 0 : event.buttons & 31
-          );
+          Module._huxerui_web_pointer(session_id, type, event.pointerId, point[0], point[1],
+              pointerKind(event.pointerType), type === 0 || type === 1 ? changedButton(event.button) : 0,
+              type === 3 ? 0 : event.buttons & 31, !!event.shiftKey, !!event.ctrlKey, !!event.altKey, !!event.metaKey);
         };
         const sendMouseButton = (event, type) => {
           const point = position(event);
-          Module._huxerui_web_pointer(
-              session_id, type, session.mousePointerId, point[0], point[1], 0,
-              changedButton(event.button), event.buttons & 31
-          );
+          Module._huxerui_web_pointer(session_id, type, session.mousePointerId, point[0], point[1], 0,
+              changedButton(event.button), event.buttons & 31, !!event.shiftKey, !!event.ctrlKey, !!event.altKey,
+              !!event.metaKey);
         };
 
         let fileDrag = 0;
@@ -928,15 +925,13 @@ public:
     return renderer_.MeasureRun(text, style, options);
   }
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  ) override {
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options = {}) override {
     return renderer_.MeasureText(text, style, max_width, options);
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  ) override {
+  std::unique_ptr<TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {}) override {
     return renderer_.CreateTextLayout(text, style, max_width, options);
   }
 
@@ -1294,10 +1289,9 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_image_ready(std::uintptr_t session_id) {
   huxerui::detail::DispatchWebSession(session_id, "image update", [](auto& platform) { platform.ImageReady(); });
 }
 
-EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
-    std::uintptr_t session_id, int type, std::int32_t pointer_id, float x, float y, int device_kind,
-    std::uint32_t changed_button, std::uint32_t pressed_buttons
-) {
+EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(std::uintptr_t session_id, int type, std::int32_t pointer_id, float x,
+    float y, int device_kind, std::uint32_t changed_button, std::uint32_t pressed_buttons, bool shift, bool control,
+    bool alt, bool meta) {
   huxerui::detail::DispatchWebSession(session_id, "pointer input", [=](auto& platform) {
     platform.HandlePointer({
         static_cast<huxerui::PointerEventType>(std::clamp(type, 0, 3)),
@@ -1306,6 +1300,7 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(
         static_cast<huxerui::PointerDeviceKind>(std::clamp(device_kind, 0, 2)),
         static_cast<huxerui::PointerButton>(changed_button & 31U),
         static_cast<huxerui::PointerButton>(pressed_buttons & 31U),
+        {shift, control, alt, meta},
     });
   });
 }

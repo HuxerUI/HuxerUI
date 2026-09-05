@@ -35,7 +35,7 @@
 #include "platform_frame_internal.h"
 #include "resource_internal.h"
 #include "text_input_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 namespace huxerui::detail {
 
@@ -449,10 +449,10 @@ private:
     schedule_frame_ = environment->GetMethodID(view_class, "scheduleFrame", "(J)V");
     invalidate_full_frame_ = environment->GetMethodID(view_class, "invalidateFullFrame", "()V");
     font_metrics_ = environment->GetMethodID(view_class, "fontMetrics", "(FI[BII)[F");
-    measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFFI[BIIIII[B)[F");
+    measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFFI[BIIIII[B[B)[F");
     measure_text_run_ = environment->GetMethodID(view_class, "measureTextRun", "([BFI[BIIII[B)[F");
     create_text_layout_ =
-        environment->GetMethodID(view_class, "createTextLayout", "([BFFI[BIIIII[B)Ljava/lang/Object;");
+        environment->GetMethodID(view_class, "createTextLayout", "([BFFI[BIIIII[B[B)Ljava/lang/Object;");
     start_text_input_ = environment->GetMethodID(view_class, "startTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
     restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJIFFFF)V");
@@ -795,14 +795,17 @@ public:
     return {values[0], {values[1], values[2], values[3], values[4]}, metrics};
   }
 
-  TextLayoutMetrics MeasureText(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  ) override {
+  TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options = {}) override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
-    jbyteArray bytes = ToByteArray(environment, text);
+    auto attributes = AndroidTextAttributes(environment, text, style);
+    if (!attributes) {
+      return {};
+    }
+    jbyteArray bytes = ToByteArray(environment, text.PlainText());
     jbyteArray family = ToByteArray(environment, style.font.FamilyName());
     jbyteArray locale = ToByteArray(environment, options.shaping.locale);
     if (bytes == nullptr || family == nullptr || locale == nullptr) {
@@ -817,21 +820,11 @@ public:
       }
       return {};
     }
-    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(
-        view_,
-        measure_text_,
-        bytes,
-        style.font.Size(),
-        max_width,
-        static_cast<jint>(style.font.FamilyKind()),
-        family,
-        static_cast<jint>(style.font.Weight()),
-        static_cast<jint>(style.font.Slant()),
-        static_cast<jint>(options.align),
-        static_cast<jint>(options.wrap),
-        static_cast<jint>(options.shaping.direction),
-        locale
-    ));
+    auto* result = static_cast<jfloatArray>(environment->CallObjectMethod(view_, measure_text_, bytes,
+        style.font.Size(), max_width, static_cast<jint>(style.font.FamilyKind()), family,
+        static_cast<jint>(style.font.Weight()), static_cast<jint>(style.font.Slant()),
+        static_cast<jint>(options.align), static_cast<jint>(options.wrap), static_cast<jint>(options.shaping.direction),
+        locale, attributes.Get()));
     environment->DeleteLocalRef(locale);
     environment->DeleteLocalRef(family);
     environment->DeleteLocalRef(bytes);
@@ -861,14 +854,17 @@ public:
     };
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(
-      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {}
-  ) override {
+  std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options = {}) override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
-    jbyteArray bytes = ToByteArray(environment, text);
+    auto attributes = AndroidTextAttributes(environment, text, style);
+    if (!attributes) {
+      return {};
+    }
+    jbyteArray bytes = ToByteArray(environment, text.PlainText());
     jbyteArray family = ToByteArray(environment, style.font.FamilyName());
     jbyteArray locale = ToByteArray(environment, options.shaping.locale);
     if (bytes == nullptr || family == nullptr || locale == nullptr) {
@@ -883,21 +879,10 @@ public:
       }
       return {};
     }
-    jobject layout = environment->CallObjectMethod(
-        view_,
-        create_text_layout_,
-        bytes,
-        style.font.Size(),
-        max_width,
-        static_cast<jint>(style.font.FamilyKind()),
-        family,
-        static_cast<jint>(style.font.Weight()),
-        static_cast<jint>(style.font.Slant()),
-        static_cast<jint>(options.align),
-        static_cast<jint>(options.wrap),
-        static_cast<jint>(options.shaping.direction),
-        locale
-    );
+    jobject layout = environment->CallObjectMethod(view_, create_text_layout_, bytes, style.font.Size(), max_width,
+        static_cast<jint>(style.font.FamilyKind()), family, static_cast<jint>(style.font.Weight()),
+        static_cast<jint>(style.font.Slant()), static_cast<jint>(options.align), static_cast<jint>(options.wrap),
+        static_cast<jint>(options.shaping.direction), locale, attributes.Get());
     environment->DeleteLocalRef(locale);
     environment->DeleteLocalRef(family);
     environment->DeleteLocalRef(bytes);
@@ -1270,7 +1255,7 @@ public:
   }
 
   void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y,
-               PointerButton changed_button, PointerButton pressed_buttons) {
+      PointerButton changed_button, PointerButton pressed_buttons, KeyModifiers modifiers) {
     runtime_.HandlePointerEvent({
         type,
         pointer_id,
@@ -1278,6 +1263,7 @@ public:
         device_kind,
         changed_button,
         pressed_buttons,
+        modifiers,
     });
   }
 
@@ -1772,17 +1758,17 @@ extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIView_nativeMoveFoc
   }
 }
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativePointer(
-    JNIEnv* environment, jclass, jlong handle, jint type, jint device_kind, jlong pointer_id, jfloat x, jfloat y,
-    jint changed_button, jint pressed_buttons
-) {
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativePointer(JNIEnv* environment, jclass, jlong handle,
+    jint type, jint device_kind, jlong pointer_id, jfloat x, jfloat y, jint changed_button, jint pressed_buttons,
+    jboolean shift, jboolean control, jboolean alt, jboolean meta) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
       const auto event_type = static_cast<huxerui::PointerEventType>(type);
       const auto device = static_cast<huxerui::PointerDeviceKind>(device_kind);
       const auto changed = static_cast<huxerui::PointerButton>(changed_button & 31);
       const auto pressed = static_cast<huxerui::PointerButton>(pressed_buttons & 31);
-      session->Pointer(event_type, device, pointer_id, x, y, changed, pressed);
+      session->Pointer(event_type, device, pointer_id, x, y, changed, pressed,
+          {shift != JNI_FALSE, control != JNI_FALSE, alt != JNI_FALSE, meta != JNI_FALSE});
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

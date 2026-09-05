@@ -3,7 +3,7 @@
 #include "resource_internal.h"
 #include "text_field_internal.h"
 #include "text_input_internal.h"
-#include "text_layout_internal.h"
+#include "text_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1115,15 +1115,15 @@ public:
     return true;
   }
 
-  bool QuerySelectionGeometry(Rect& start, Rect& end) const override {
+  TextSelectionGeometry QuerySelectionGeometry() const override {
     if (!node_ || !text_layout_) {
-      return false;
+      return {};
     }
     const TextRange range = editing_.value.selection.Range();
     const Point origin = TextOrigin(*node_);
-    start = OffsetRect(text_layout_->CaretRect(range.start, TextAffinity::Downstream), origin);
-    end = OffsetRect(text_layout_->CaretRect(range.end, TextAffinity::Downstream), origin);
-    return true;
+    const Rect start = OffsetRect(text_layout_->CaretRect(range.start, TextAffinity::Downstream), origin);
+    const Rect end = OffsetRect(text_layout_->CaretRect(range.end, TextAffinity::Downstream), origin);
+    return {start, end, start};
   }
 
   Color SelectionHandleColor() const noexcept override {
@@ -2355,7 +2355,7 @@ public:
     InvalidatePaint();
   }
 
-  void OnFocusChanged(MountedNode& node, bool focused) override {
+  void OnFocusChanged(MountedNode& node, bool focused, bool) override {
     static_cast<void>(node);
     client_->FocusChanged(focused);
     InvalidatePaint();

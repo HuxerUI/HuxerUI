@@ -543,7 +543,7 @@ TEST_CASE("TestForEachStateSurvivesScrolling") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "0:4");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "0:4");
 
   runtime.HandleScrollInput(
       ScrollInputEvent{
@@ -564,7 +564,7 @@ TEST_CASE("TestForEachStateSurvivesScrolling") {
 
   root = runtime.RootNode();
   REQUIRE(root->scroll_state->offset_y == 0.0F);
-  REQUIRE(root->children[0]->children[0]->children[0]->text == "0:4");
+  REQUIRE(root->children[0]->children[0]->children[0]->text.PlainText() == "0:4");
 }
 
 TEST_CASE("TestVirtualListVirtualization") {
@@ -648,7 +648,7 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
   runtime.BuildFrame();
 
   root = runtime.RootNode();
-  REQUIRE(root->children[0]->children[0]->text == "0:4");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "0:4");
 
   runtime.HandleScrollInput(
       ScrollInputEvent{
@@ -680,7 +680,7 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
       (!root->virtual_state->item_state_cache ||
        !root->virtual_state->item_state_cache->keyed.contains(std::int64_t{0}))
   );
-  REQUIRE(root->children[0]->children[0]->text == "0:4");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "0:4");
 }
 
 TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
@@ -727,7 +727,7 @@ TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
     return child->key == huxerui::detail::ViewKey{std::int64_t{0}};
   });
   REQUIRE(found != root->children.end());
-  REQUIRE((*found)->children[0]->text == "0:4");
+  REQUIRE((*found)->children[0]->text.PlainText() == "0:4");
 }
 
 TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
@@ -854,7 +854,7 @@ TEST_CASE("TestVariableVirtualListRetainsMetricsAcrossItemDeclarationRefresh") {
       std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), 29);
   REQUIRE(last != root->virtual_state->realized_indices.end());
   const std::size_t position = static_cast<std::size_t>(last - root->virtual_state->realized_indices.begin());
-  REQUIRE(root->children[position]->children.front()->text == "1:29");
+  REQUIRE(root->children[position]->children.front()->text.PlainText() == "1:29");
   const float last_end = root->children[position]->layout_offset.y + root->children[position]->bounds.height;
   REQUIRE(std::abs(last_end - root->ContentBounds().height) < 0.01F);
 }
@@ -975,7 +975,7 @@ TEST_CASE("TestHorizontalVirtualListStateSurvivesCacheEviction") {
 
   root = runtime.RootNode();
   REQUIRE(root->scroll_state->offset_x == 0.0F);
-  REQUIRE(root->children[0]->children[0]->text == "0:4");
+  REQUIRE(root->children[0]->children[0]->text.PlainText() == "0:4");
 }
 
 TEST_CASE("TestCustomVirtualLayoutProtocol") {
@@ -1190,7 +1190,7 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   REQUIRE(restored != root->virtual_state->realized_indices.end());
   const std::size_t restored_position = static_cast<std::size_t>(restored - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[restored_position]->bounds.width == 60.0F);
-  REQUIRE(root->children[restored_position]->children[0]->text == "0:4");
+  REQUIRE(root->children[restored_position]->children[0]->text.PlainText() == "0:4");
   REQUIRE(virtual_grid_factory_calls < 200);
 }
 
@@ -1293,7 +1293,7 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
   REQUIRE(restored != root->virtual_state->realized_indices.end());
   const std::size_t restored_position = static_cast<std::size_t>(restored - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[restored_position]->bounds.width == 65.0F);
-  REQUIRE(root->children[restored_position]->children[0]->text == "0:4");
+  REQUIRE(root->children[restored_position]->children[0]->text.PlainText() == "0:4");
   REQUIRE(built_in_grid_factory_calls < 200);
 
   bool invalid_columns_rejected = false;
@@ -1373,7 +1373,7 @@ TEST_CASE("TestVariableVirtualGridRetainsMetricsAcrossItemDeclarationRefresh") {
       std::find(root->virtual_state->realized_indices.begin(), root->virtual_state->realized_indices.end(), 59);
   REQUIRE(last != root->virtual_state->realized_indices.end());
   const std::size_t position = static_cast<std::size_t>(last - root->virtual_state->realized_indices.begin());
-  REQUIRE(root->children[position]->children.front()->text == "1:59");
+  REQUIRE(root->children[position]->children.front()->text.PlainText() == "1:59");
   const float last_end = root->children[position]->layout_offset.y + root->children[position]->bounds.height;
   REQUIRE(std::abs(last_end - root->ContentBounds().height) < 0.01F);
 }

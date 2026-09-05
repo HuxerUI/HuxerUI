@@ -10,67 +10,15 @@
 #include <utility>
 #include <vector>
 
+#include "text_internal.h"
+
 namespace huxerui::detail {
 namespace {
-
-struct Utf8CodePoint {
-  std::uint32_t value = 0;
-  std::size_t byte_length = 0;
-};
 
 struct WordSpan {
   TextRange range;
   bool word = false;
 };
-
-bool DecodeCodePoint(std::string_view text, std::size_t index, Utf8CodePoint& result) noexcept {
-  if (index >= text.size()) {
-    return false;
-  }
-
-  const auto first = static_cast<std::uint8_t>(text[index]);
-  if (first <= 0x7FU) {
-    result = {first, 1};
-    return true;
-  }
-
-  std::size_t length = 0;
-  std::uint32_t value = 0;
-  std::uint32_t minimum = 0;
-  if ((first & 0xE0U) == 0xC0U) {
-    length = 2;
-    value = first & 0x1FU;
-    minimum = 0x80U;
-  } else if ((first & 0xF0U) == 0xE0U) {
-    length = 3;
-    value = first & 0x0FU;
-    minimum = 0x800U;
-  } else if ((first & 0xF8U) == 0xF0U) {
-    length = 4;
-    value = first & 0x07U;
-    minimum = 0x10000U;
-  } else {
-    return false;
-  }
-
-  if (index + length > text.size()) {
-    return false;
-  }
-  for (std::size_t offset = 1; offset < length; ++offset) {
-    const auto continuation = static_cast<std::uint8_t>(text[index + offset]);
-    if ((continuation & 0xC0U) != 0x80U) {
-      return false;
-    }
-    value = (value << 6U) | (continuation & 0x3FU);
-  }
-
-  if (value < minimum || value > 0x10FFFFU || (value >= 0xD800U && value <= 0xDFFFU)) {
-    return false;
-  }
-
-  result = {value, length};
-  return true;
-}
 
 std::optional<std::size_t> ByteOffsetAt(std::string_view text, TextOffset utf16_offset) noexcept {
   if (utf16_offset < 0) {

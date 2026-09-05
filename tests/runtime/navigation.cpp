@@ -93,7 +93,7 @@ public:
 };
 
 const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std::string_view text) {
-  if (node.text == text) {
+  if (node.text.PlainText() == text) {
     return &node;
   }
   for (const auto& child : node.children) {

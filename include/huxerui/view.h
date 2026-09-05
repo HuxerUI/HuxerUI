@@ -681,6 +681,8 @@ protected:
 class Text final : public View {
 public:
   explicit Text(StringVariant value, TextRole role = TextRole::Body);
+  explicit Text(AttributedText value, TextRole role = TextRole::Body);
+  explicit Text(const State<AttributedText>& value, TextRole role = TextRole::Body) : Text(value.Get(), role) {}
 
   /// Replaces the resolved typography for this Text declaration.
   Text Style(TextStyle style) &&;
@@ -690,6 +692,9 @@ public:
   Text Align(TextAlign align) &&;
   /// Sets vertical paragraph alignment when the Text receives extra height.
   Text VerticalAlign(TextVerticalAlign align) &&;
+  /// Binds this complete paragraph to a logical block in the enclosing SelectionArea source.
+  /// @param id Stable source identity, independent of the sibling Key used for reconciliation.
+  Text SelectionBlock(TextBlockId id) &&;
 
   /// Formats a literal string by replacing each `{}` placeholder in order.
   ///
@@ -716,6 +721,7 @@ public:
   }
 
   template <class T>
+    requires (!std::same_as<T, AttributedText>)
   explicit Text(const State<T>& value, TextRole role = TextRole::Body) : Text(detail::FormatText(value), role) {}
 };
 
@@ -1397,6 +1403,10 @@ public:
 class SelectionArea final : public View {
 public:
   explicit SelectionArea(View content);
+  /// Supplies an immutable logical document, including paragraphs outside a virtual viewport.
+  /// Unbound Text descendants are excluded. Publish source and Text values from the same block snapshots.
+  /// @param source Read-only snapshot. A null pointer restores automatic descendant discovery.
+  SelectionArea Source(std::shared_ptr<const TextSelectionSource> source) &&;
 };
 
 /// Consumes remaining main-axis space inside compatible Row and Column layouts.

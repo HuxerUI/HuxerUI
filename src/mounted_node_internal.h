@@ -32,6 +32,7 @@ namespace huxerui::detail {
 
 class AppResources;
 class RecomposeScope;
+struct ParagraphLayout;
 class ScrollConnection;
 
 inline std::optional<double> EarliestWakeAfter(std::optional<double> first, std::optional<double> second) noexcept {
@@ -224,7 +225,8 @@ struct MountedNode final : public huxerui::MountedNode {
   NodeKind kind = NodeKind::Layout;
   std::uint64_t identity = 0;
   std::optional<ViewKey> key;
-  std::string text;
+  AttributedText text;
+  std::shared_ptr<ParagraphLayout> paragraph_layout;
   ViewProperties properties;
   SemanticPatch component_semantics;
   std::optional<SemanticPatch> author_semantics;
@@ -422,7 +424,8 @@ public:
   bool ScrollTo(float offset);
   bool ScrollBy(float delta);
   bool ScrollToItem(std::size_t index, ScrollAlignment alignment);
-  void ApplyPending();
+  void CancelPending();
+  void ApplyPending(bool after_layout = false);
   void PublishMetrics();
 
 private:
@@ -430,6 +433,7 @@ private:
   [[nodiscard]] float ViewportExtent() const noexcept;
   [[nodiscard]] float ContentExtent() const noexcept;
   [[nodiscard]] float CurrentOffset() const noexcept;
+  bool ScrollToOffset(float offset);
   void SetCurrentOffset(float offset) noexcept;
 
   MountedNode* node_;
@@ -535,6 +539,7 @@ float ToggleLabelLeading(const ToggleLayoutMetrics& metrics) noexcept;
 Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
+MountedNode* FindTextSelectionOwner(MountedNode& root, std::uint64_t identity);
 void ResolvePresentationTree(MountedNode& node);
 void ValidateBorder(const Border& border);
 VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale);
