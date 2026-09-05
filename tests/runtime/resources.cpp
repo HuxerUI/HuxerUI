@@ -14,8 +14,8 @@
 #include <vector>
 
 #include "image_test_support.h"
-#include "resource_internal.h"
-#include "text_field_internal.h"
+#include "resources/resource_internal.h"
+#include "components/text_field_internal.h"
 
 namespace huxerui::test {
 

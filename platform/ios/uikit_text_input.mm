@@ -9,7 +9,7 @@
 #include <string_view>
 #include <utility>
 
-#include "text_input_internal.h"
+#include "text/text_input_internal.h"
 #include "uikit_view.h"
 
 @interface HuxerUITextPosition : UITextPosition {

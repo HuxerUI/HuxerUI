@@ -981,8 +981,8 @@ The public files are:
 - `include/huxerui/web/navigation.h` for the typed route-codec and Browser History adapter.
 - `include/huxerui/huxerui.h` for the public umbrella include.
 
-`src/navigation.cpp` owns controller state, navigation-source reconciliation, resolved entries, NavigationStack layout, retained page modifiers, and page motion.
-`src/navigation_ui.cpp` owns TopAppBar layout, NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
+`src/components/navigation.cpp` owns controller state, navigation-source reconciliation, resolved entries, NavigationStack layout, retained page modifiers, and page motion.
+`src/components/navigation_ui.cpp` owns TopAppBar layout, NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
 
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
 Runtime must not include navigation entry types or branch on NavigationStack, NavigationController, MaterialTheme, FlatTheme, Web, or Android.

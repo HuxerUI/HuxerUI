@@ -17,7 +17,7 @@
 #include <huxerui/ios/platform_registry.h>
 
 #include "uikit_renderer.h"
-#include "runtime_internal.h"
+#include "runtime/runtime_internal.h"
 
 @interface HuxerUIPlatformSliceView : UIView {
 @public

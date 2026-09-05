@@ -343,6 +343,7 @@ add_executable(huxerui_resource_compiler_tests
 target_compile_features(huxerui_resource_compiler_tests PRIVATE cxx_std_20)
 target_include_directories(huxerui_resource_compiler_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/src"
+        "${HUXERUI_PROJECT_DIR}/src/resources"
         "${HUXERUI_PROJECT_DIR}/tools/resource_compiler"
         "${CMAKE_CURRENT_SOURCE_DIR}/support"
 )

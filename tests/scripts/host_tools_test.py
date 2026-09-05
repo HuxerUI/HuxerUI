@@ -111,15 +111,15 @@ class HostToolsTests(unittest.TestCase):
     def test_build_inputs_trigger_update(self):
         for path in (
             "tools/codegen/transform.cpp", "tools/resource_compiler/CMakeLists.txt",
-            "src/resource_format.h", "src/vector_format.h", "scripts/build_tools.sh",
+            "src/resources/resource_format.h", "src/resources/vector_format.h", "scripts/build_tools.sh",
             "scripts/build_tools.ps1", ".github/workflows/update-host-tools.yml",
         ):
             self.assertTrue(host_tools.is_build_input(path), path)
-        self.push_plan("src/vector_format.h", (True, True))
+        self.push_plan("src/resources/vector_format.h", (True, True))
 
     def test_unrelated_files_do_not_trigger_builds(self):
         for path in (
-            "src/layout.cpp", "include/huxerui/layout.h", "README.md", "tools/codegen/README.md",
+            "src/runtime/layout.cpp", "include/huxerui/layout.h", "README.md", "tools/codegen/README.md",
             "tools/prebuilt/windows/x86_64/hcg.exe", "tools/huxerui_cli/main.cpp",
             "platform/android/gradle.properties", ".github/workflows/sdk-release.yml",
             "tests/codegen/transform.cpp", "tests/resource_compiler/compiler.cpp",

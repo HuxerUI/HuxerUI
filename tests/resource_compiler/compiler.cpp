@@ -15,8 +15,8 @@
 
 #include "compiler.h"
 #include "image_test_support.h"
-#include "path_internal.h"
-#include "resource_internal.h"
+#include "graphics/path_internal.h"
+#include "resources/resource_internal.h"
 #include "runtime_test_support.h"
 #include "internal_access.h"
 

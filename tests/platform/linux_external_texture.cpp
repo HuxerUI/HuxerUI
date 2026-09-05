@@ -20,7 +20,7 @@
 
 #include <huxerui/linux/external_texture.h>
 
-#include "external_texture_internal.h"
+#include "graphics/external_texture_internal.h"
 #include "linux_external_texture_internal.h"
 #include "linux_renderer.h"
 #include "runtime_test_support.h"

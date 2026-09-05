@@ -18,11 +18,11 @@
 
 #include <huxerui/android/jni.h>
 
-#include "path_internal.h"
-#include "paint_internal.h"
-#include "resource_internal.h"
-#include "shadow_internal.h"
-#include "text_internal.h"
+#include "graphics/path_internal.h"
+#include "graphics/paint_internal.h"
+#include "resources/resource_internal.h"
+#include "graphics/shadow_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 

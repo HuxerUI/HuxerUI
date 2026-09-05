@@ -13,7 +13,7 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
-#include "platform_registry_internal.h"
+#include "application/platform_registry_internal.h"
 
 namespace huxerui::web::detail {
 

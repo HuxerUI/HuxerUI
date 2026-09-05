@@ -19,7 +19,7 @@
 #include <huxerui/macos/platform_registry.h>
 
 #include "appkit_renderer.h"
-#include "runtime_internal.h"
+#include "runtime/runtime_internal.h"
 
 @interface HuxerUIPlatformSliceView : NSView {
 @public

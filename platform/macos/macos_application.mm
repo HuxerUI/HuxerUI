@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "application_internal.h"
+#include "application/application_internal.h"
 #include "macos_file_internal.h"
 
 namespace huxerui::detail {

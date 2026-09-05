@@ -1174,11 +1174,11 @@ The design does not create one public header per range, selection, command, sess
 Implementation files can be:
 
 ```text
-src/text_input.cpp
-src/runtime_text_input.cpp
-src/runtime_text_selection.cpp
-src/text_field.cpp
-src/selection_area.cpp
+src/text/text_input.cpp
+src/runtime/runtime_text_input.cpp
+src/runtime/runtime_text_selection.cpp
+src/components/text_field.cpp
+src/components/selection_area.cpp
 ```
 
 Platform adapters remain in their existing platform directories. Generic input behavior must not move into Windows, Apple, or Android helper libraries.

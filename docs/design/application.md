@@ -246,9 +246,9 @@ Embedded platform views do not consume an enclosing application shell's activati
 ## Implementation ownership
 
 - `<huxerui/app.h>` owns activation values, lifecycle state, `ApplicationHandle`, `UseApplication()`, and the Runtime boundary.
-- `src/application.cpp` owns validation, observation, lifecycle-bound connections, FIFO delivery, and handle behavior.
-- `src/application_internal.h` is the private contract shared with Runtime.
-- `src/runtime.cpp` installs the service and invokes queue delivery before application recomposition.
+- `src/application/application.cpp` owns validation, observation, lifecycle-bound connections, FIFO delivery, and handle behavior.
+- `src/application/application_internal.h` is the private contract shared with Runtime.
+- `src/runtime/runtime.cpp` installs the service and invokes queue delivery before application recomposition.
 - Platform application shells own platform input normalization and target selection.
 
 The implementation does not add Runtime subclasses, an Access type, a public service, a callback registry, or a second application state store.

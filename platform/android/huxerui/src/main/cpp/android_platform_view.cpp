@@ -22,7 +22,7 @@
 
 #include "android_external_texture_internal.h"
 #include "android_renderer.h"
-#include "runtime_internal.h"
+#include "runtime/runtime_internal.h"
 
 namespace huxerui::detail {
 

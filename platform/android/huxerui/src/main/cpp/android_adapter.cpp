@@ -32,10 +32,10 @@
 #include "android_renderer.h"
 #include "android_text_layout.h"
 #include "android_text_input_internal.h"
-#include "platform_frame_internal.h"
-#include "resource_internal.h"
-#include "text_input_internal.h"
-#include "text_internal.h"
+#include "application/platform_frame_internal.h"
+#include "resources/resource_internal.h"
+#include "text/text_input_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 

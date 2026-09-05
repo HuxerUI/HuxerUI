@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "text_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 

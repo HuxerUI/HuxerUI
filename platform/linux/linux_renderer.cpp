@@ -24,13 +24,13 @@
 #include <variant>
 #include <vector>
 
-#include "external_texture_internal.h"
+#include "graphics/external_texture_internal.h"
 #include "linux_external_texture_internal.h"
-#include "path_internal.h"
-#include "paint_internal.h"
-#include "resource_internal.h"
-#include "shadow_internal.h"
-#include "text_internal.h"
+#include "graphics/path_internal.h"
+#include "graphics/paint_internal.h"
+#include "resources/resource_internal.h"
+#include "graphics/shadow_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 namespace {

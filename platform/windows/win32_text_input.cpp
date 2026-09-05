@@ -13,7 +13,7 @@
 
 #include <huxerui/app.h>
 
-#include "text_input_internal.h"
+#include "text/text_input_internal.h"
 #include "win32_internal.h"
 
 namespace huxerui::detail {

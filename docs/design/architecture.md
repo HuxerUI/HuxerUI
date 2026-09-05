@@ -81,6 +81,20 @@ Stable node identities and NodeExtensionHandle values cross callbacks and frames
 
 Private collaborators store ordinary state directly; implementation hiding is not a separate ownership boundary. Runtime keeps its public-header PImpl and owns the shared context for the entire mounted lifetime. Ordinary collaborators hold a non-owning context reference; the handle-retainable SceneTransitionService holds a pointer cleared on disconnect. Asynchronous file deliveries capture a dispatcher copy and weak pending-operation state, never the shared Runtime context.
 
+Shared implementation is organized one directory below `src/` by responsibility:
+
+| Directory | Responsibility |
+| --- | --- |
+| `runtime/` | Composition, mounted nodes, layout execution, scene generation, input coordination, semantics, tasks, layers, and animation execution |
+| `components/` | Controls including TextField and SelectionArea, navigation components, themes, presentation services, tooltips, and interaction visuals |
+| `text/` | Text models, editing protocol, and validation |
+| `graphics/` | Paint commands, paths, vectors, external textures, and geometry helpers |
+| `resources/` | Resource resolution, indexes, and binary formats |
+| `application/` | Application entry and lifecycle, windows, system tray, and shared platform integration |
+| `io/` | URIs, files, file pickers, and HTTP |
+
+These directories organize existing implementation responsibilities within the same build targets. Private headers stay with their owning subsystem; cross-directory includes use paths relative to `src/`, whose root remains the single shared private include directory. `internal_access.h` stays at that root. Concrete operating-system backends remain under `platform/`.
+
 Private implementation layering progresses from View declarations to retained nodes and then Runtime coordination: `view_internal.h` owns declarations and component-construction support, `mounted_node_internal.h` adds retained node state and node operations, and `runtime_internal.h` adds composition and per-window coordination. Include dependencies point only toward the lower layer: Runtime may include the mounted-node header, and the mounted-node header may include the View header. Feature contracts such as pointer, text, semantics, and file drop remain focused headers and do not create a second umbrella include.
 
 Shared access bridges use one non-template `detail::InternalAccess`, including access-helper operations and presentation services' private LayerController operations. Public headers only forward-declare this friend; `src/internal_access.h` declares its static entry points without including retained-node or Runtime-state definitions, and each implementation remains in its owning source file. This is not a mandatory route for internal calls: established ownership and cooperation remain direct, including Runtime's State owner, RecomposeScope, LayerController, and NodeExtension lifecycle binding. Direct field-sharing friendships remain unchanged. Existing access helpers belong to InternalAccess even when a helper function only reads a field.

@@ -12,8 +12,8 @@
 
 #include "external_texture_test_support.h"
 #include "image_test_support.h"
-#include "paint_internal.h"
-#include "shadow_internal.h"
+#include "graphics/paint_internal.h"
+#include "graphics/shadow_internal.h"
 
 namespace huxerui::test {
 

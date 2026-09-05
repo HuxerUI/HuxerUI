@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "macos_external_texture_internal.h"
-#include "platform_registry_internal.h"
+#include "application/platform_registry_internal.h"
 
 using huxerui::Bytes;
 using huxerui::ExternalTexture;

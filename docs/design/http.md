@@ -54,7 +54,7 @@ If a progress callback throws, the current Task rethrows that exception and the 
 
 ## Shared operation state
 
-`src/http_internal.h` defines the only platform boundary:
+`src/io/http_internal.h` defines the only platform boundary:
 
 ```cpp
 struct HttpTransportResponse {

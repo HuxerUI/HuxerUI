@@ -2,7 +2,7 @@
 
 #include <limits>
 
-#include "indication_internal.h"
+#include "components/indication_internal.h"
 
 namespace huxerui::test {
 

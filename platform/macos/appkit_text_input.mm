@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-#include "text_input_internal.h"
+#include "text/text_input_internal.h"
 
 namespace huxerui::detail {
 class MacTextInputState;

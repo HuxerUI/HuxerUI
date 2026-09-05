@@ -10,7 +10,7 @@
 #include <huxerui/app.h>
 #include <huxerui/file_drop.h>
 
-#include "file_internal.h"
+#include "io/file_internal.h"
 #include "linux_file_internal.h"
 #include "linux_file_picker_internal.h"
 

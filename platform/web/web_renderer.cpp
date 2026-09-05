@@ -18,12 +18,12 @@
 
 #include <emscripten.h>
 
-#include "path_internal.h"
-#include "paint_internal.h"
-#include "resource_internal.h"
-#include "shadow_internal.h"
-#include "text_input_internal.h"
-#include "text_internal.h"
+#include "graphics/path_internal.h"
+#include "graphics/paint_internal.h"
+#include "resources/resource_internal.h"
+#include "graphics/shadow_internal.h"
+#include "text/text_input_internal.h"
+#include "text/text_internal.h"
 #include "web_external_texture_internal.h"
 #include "web_text_internal.h"
 

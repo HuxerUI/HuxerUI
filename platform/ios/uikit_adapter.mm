@@ -28,9 +28,9 @@
 #include "uikit_renderer.h"
 #include "uikit_text_input.h"
 #include "uikit_view.h"
-#include "platform_frame_internal.h"
-#include "resource_internal.h"
-#include "text_internal.h"
+#include "application/platform_frame_internal.h"
+#include "resources/resource_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 class IosPlatformAdapter;

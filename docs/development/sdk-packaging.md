@@ -78,7 +78,7 @@ Rerunning CI preserves an existing release body and draft or published state whi
 
 The `Update Host Tools` workflow maintains the checked-in `hcg` and `hrc` packages independently of SDK releases.
 Pushes to `main` are filtered by relevant paths before starting the workflow; a matching push runs a change-selection job to distinguish rebuilding with writeback from validation only.
-Tool sources and build configuration under `tools/codegen/` and `tools/resource_compiler/` (excluding Markdown), `src/resource_format.h`, `src/vector_format.h`, `scripts/build_tools.sh`, `scripts/build_tools.ps1`, the workflow itself, and its `host_tools.py` helper trigger rebuilding and writeback.
+Tool sources and build configuration under `tools/codegen/` and `tools/resource_compiler/` (excluding Markdown), `src/resources/resource_format.h`, `src/resources/vector_format.h`, `scripts/build_tools.sh`, `scripts/build_tools.ps1`, the workflow itself, and its `host_tools.py` helper trigger rebuilding and writeback.
 Workflow-support tests, shell build-script tests, and platform validation scripts trigger validation only, without updating prebuilts.
 Framework regression tests are not run by this workflow and do not select tool builds.
 Ordinary framework changes, CLI changes, documentation, and generated prebuilts are excluded by the workflow's path filter.

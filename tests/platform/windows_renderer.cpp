@@ -7,7 +7,7 @@
 #include <huxerui/text.h>
 
 #include "win32_renderer.h"
-#include "text_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::test {
 

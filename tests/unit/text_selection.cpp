@@ -8,7 +8,7 @@
 
 #include <huxerui/text.h>
 
-#include "selection_area_internal.h"
+#include "components/selection_area_internal.h"
 
 namespace huxerui::test {
 namespace {

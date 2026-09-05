@@ -129,6 +129,8 @@ Use forward declarations only when a complete type is unnecessary. Keep include 
 
 Do not create a public header per trivial control or grow `view.h` with unrelated services, platform types, or rendering machinery. A new cross-platform public header updates `<huxerui/huxerui.h>`, public header checks, packaging metadata when applicable, and public documentation. Platform-specific public headers remain explicit includes and update their available-host header checks, packaging metadata when applicable, and public documentation.
 
+Organize shared implementation in `src/runtime`, `src/components`, `src/text`, `src/graphics`, `src/resources`, `src/application`, and `src/io`. Keep private headers beside their subsystem and use paths relative to `src` for cross-directory private includes. Keep `src/internal_access.h` at the shared root and retain the existing build targets.
+
 Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep declaration and component-construction support in `view_internal.h`, retained node types and operations in `mounted_node_internal.h`, and Runtime state and coordination in `runtime_internal.h`. Runtime may include the mounted-node header and the mounted-node header may include the View header; reverse dependencies are not allowed.
 
 ## Public API and state
@@ -235,7 +237,7 @@ Add equivalent focused guidance when a new backend gains repository-owned implem
 
 Use C++20 with extensions disabled. Preserve `-Wall -Wextra -Wpedantic` and MSVC `/W4 /permissive-`.
 
-Shared `src/*.cpp` files belong to the core object target; platform sources and libraries are selected through `cmake/platform/*.cmake`. Consumers link public targets and never include `src` or depend on source-checkout platform paths.
+Shared C++ files in the subsystem directories under `src/` belong to the core object target; platform sources and libraries are selected through `cmake/platform/*.cmake`. Consumers link public targets and never include `src` or depend on source-checkout platform paths.
 
 Enable `[[huxerui::composable]]` transformation with `huxerui_enable_codegen(target)` after all sources are added. Marked definitions belong in `.cpp`, `.cc`, or `.cxx`; do not annotate the app root.
 

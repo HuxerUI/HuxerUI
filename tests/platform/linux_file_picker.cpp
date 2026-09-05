@@ -26,7 +26,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include "file_internal.h"
+#include "io/file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "runtime_test_support.h"
 

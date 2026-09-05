@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <emscripten/val.h>
 #include "web_renderer.h"
-#include "text_internal.h"
+#include "text/text_internal.h"
 #endif
 
 using namespace huxerui;

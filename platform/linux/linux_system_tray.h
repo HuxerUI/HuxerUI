@@ -4,7 +4,7 @@
 
 #include <memory>
 
-#include "system_tray_internal.h"
+#include "application/system_tray_internal.h"
 
 namespace huxerui::detail {
 

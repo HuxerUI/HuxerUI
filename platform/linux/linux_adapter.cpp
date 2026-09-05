@@ -34,8 +34,8 @@
 #include <huxerui/resource.h>
 #include <huxerui/window.h>
 
-#include "file_internal.h"
-#include "http_internal.h"
+#include "io/file_internal.h"
+#include "io/http_internal.h"
 #include "linux_file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "linux_http_internal.h"
@@ -43,10 +43,10 @@
 #include "linux_system_tray.h"
 #include "linux_text_input.h"
 #include "linux_ui_dispatcher.h"
-#include "platform_frame_internal.h"
-#include "resource_internal.h"
-#include "text_internal.h"
-#include "window_internal.h"
+#include "application/platform_frame_internal.h"
+#include "resources/resource_internal.h"
+#include "text/text_internal.h"
+#include "application/window_internal.h"
 
 namespace huxerui::detail {
 namespace {

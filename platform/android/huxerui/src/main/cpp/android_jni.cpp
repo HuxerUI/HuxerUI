@@ -11,7 +11,7 @@
 
 #include <huxerui/android/platform_registry.h>
 
-#include "platform_registry_internal.h"
+#include "application/platform_registry_internal.h"
 
 namespace huxerui::android {
 

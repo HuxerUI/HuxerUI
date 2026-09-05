@@ -25,9 +25,9 @@
 
 #include <huxerui/app.h>
 
-#include "platform_frame_internal.h"
-#include "resource_internal.h"
-#include "text_internal.h"
+#include "application/platform_frame_internal.h"
+#include "resources/resource_internal.h"
+#include "text/text_internal.h"
 #include "win32_accessibility.h"
 #include "win32_application_internal.h"
 #include "win32_application_runner.h"
@@ -39,7 +39,7 @@
 #include "win32_system_tray.h"
 #include "win32_text_input.h"
 #include "win32_ui_dispatcher.h"
-#include "window_internal.h"
+#include "application/window_internal.h"
 
 namespace huxerui::detail {
 

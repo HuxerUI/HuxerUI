@@ -465,7 +465,7 @@ Backends whose child lookup is an exact display-name listing scan opt into one d
 The index preserves duplicate-name ambiguity, is updated after successful writes, and is discarded with the frame; later copies enumerate again, and native filename resolution remains authoritative for other backends.
 The destination state returns the written reference, actual byte count, and creation status directly.
 Local directory frames retain their destination state; supported provider-to-local copies use the source's streaming import and then confirm the finalized local reference on the file worker, preserving import and metadata errors.
-Local paths and path-backed grants share one implementation-only final state in `src/file.cpp`; Windows and Linux use it directly, while Apple supplies retained access and coordinated-operation callbacks.
+Local paths and path-backed grants share one implementation-only final state in `src/io/file.cpp`; Windows and Linux use it directly, while Apple supplies retained access and coordinated-operation callbacks.
 Local destinations use this same state without manufacturing a public reference or adding a filesystem, service, registry, or storage backend.
 A selected file does not require opening or modifying its parent directory; directory-derived references share a root directory anchor and resolve descendants without following traversal-changing links.
 Each native enumeration opens an independent directory description rather than duplicating a shared enumeration cursor.
@@ -781,7 +781,7 @@ This matches the platform rule that an uninterruptible filesystem operation may 
 
 ### Internal boundary
 
-The Web implementation uses narrow internal scheduling, persistent-root classification, synchronization, and `FileSystem` construction functions shared by `src/file.cpp` and `platform/web/web_file.cpp`.
+The Web implementation uses narrow internal scheduling, persistent-root classification, synchronization, and `FileSystem` construction functions shared by `src/io/file.cpp` and `platform/web/web_file.cpp`.
 It does not introduce a public or private polymorphic `FileBackend`, a second service registry, a PlatformModule instance, or Web-only methods on `File`.
 Emscripten glue owns IDBFS mounting and synchronization, the Web adapter publishes the initialized application directories, and the shared file implementation retains path validation, operation semantics, Task cancellation, and result mapping.
 

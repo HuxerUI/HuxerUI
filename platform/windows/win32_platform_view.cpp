@@ -22,7 +22,7 @@
 #include <huxerui/app.h>
 #include <huxerui/windows/platform_registry.h>
 
-#include "runtime_internal.h"
+#include "runtime/runtime_internal.h"
 
 namespace huxerui::detail {
 

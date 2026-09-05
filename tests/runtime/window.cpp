@@ -2,7 +2,7 @@
 
 #include <limits>
 
-#include "window_internal.h"
+#include "application/window_internal.h"
 
 namespace huxerui::test {
 

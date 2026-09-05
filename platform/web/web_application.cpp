@@ -8,7 +8,7 @@
 #include <memory>
 #include <utility>
 
-#include "application_internal.h"
+#include "application/application_internal.h"
 
 namespace huxerui::detail {
 namespace {

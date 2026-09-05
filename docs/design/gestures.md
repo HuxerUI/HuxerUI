@@ -657,9 +657,9 @@ There is no public recognizer base class, gesture controller, ownership handle, 
 Implementation ownership is focused:
 
 - `<huxerui/gesture.h>` owns public gesture modifiers, event keys, payloads, and GestureSettings.
-- `src/gesture.cpp` owns retained gesture modifier behavior and private recognizer implementations.
+- `src/runtime/gesture.cpp` owns retained gesture modifier behavior and private recognizer implementations.
 - One focused private header owns the recognizer contract used by gesture modifiers, pointer routing, and scrolling.
-- `src/runtime_pointer_interaction.cpp` owns PointerSession, raw delivery, ownership resolution, and quarantine.
+- `src/runtime/runtime_pointer_interaction.cpp` owns PointerSession, raw delivery, ownership resolution, and quarantine.
 - Existing scrolling code owns delta consumption and momentum after its recognizer accepts.
 - Platform adapters own timestamps, pointer identifiers, semantic button mapping, complete pressed-button masks, host-level sequence delivery, cancellation, and platform settings mapping.
 

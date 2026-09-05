@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#include "text_input_internal.h"
+#include "text/text_input_internal.h"
 
 namespace huxerui::test {
 namespace {

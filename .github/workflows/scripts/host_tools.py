@@ -20,8 +20,8 @@ PACKAGES = (
     "android/arm64-v8a",
 )
 BUILD_FILES = {
-    "src/resource_format.h",
-    "src/vector_format.h",
+    "src/resources/resource_format.h",
+    "src/resources/vector_format.h",
     "scripts/build_tools.sh",
     "scripts/build_tools.ps1",
     ".github/workflows/update-host-tools.yml",

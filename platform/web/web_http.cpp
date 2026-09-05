@@ -11,7 +11,7 @@
 #include <emscripten.h>
 #include <emscripten/val.h>
 
-#include "http_internal.h"
+#include "io/http_internal.h"
 
 namespace huxerui::detail {
 

@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "path_internal.h"
+#include "graphics/path_internal.h"
 #include "internal_access.h"
 
 namespace huxerui::test {

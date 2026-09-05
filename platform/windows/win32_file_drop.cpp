@@ -14,7 +14,7 @@
 #include <huxerui/app.h>
 #include <huxerui/file_drop.h>
 
-#include "file_internal.h"
+#include "io/file_internal.h"
 
 namespace huxerui::detail {
 namespace {

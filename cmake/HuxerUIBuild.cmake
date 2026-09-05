@@ -98,7 +98,7 @@ function(huxerui_configure_targets)
     endif ()
 
     file(GLOB HUXERUI_CORE_SOURCE_FILES CONFIGURE_DEPENDS
-            "${HUXERUI_PROJECT_DIR}/src/*.cpp"
+            "${HUXERUI_PROJECT_DIR}/src/*/*.cpp"
     )
 
     if (IOS)

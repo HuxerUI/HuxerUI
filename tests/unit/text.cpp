@@ -5,7 +5,7 @@
 #include <concepts>
 #include <stdexcept>
 
-#include "text_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::test {
 

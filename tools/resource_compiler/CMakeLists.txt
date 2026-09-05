@@ -8,7 +8,7 @@ add_executable(huxerui_resource_compiler
 )
 
 target_compile_features(huxerui_resource_compiler PRIVATE cxx_std_20)
-target_include_directories(huxerui_resource_compiler PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+target_include_directories(huxerui_resource_compiler PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../src/resources")
 target_compile_options(huxerui_resource_compiler PRIVATE
         "$<$<CXX_COMPILER_ID:MSVC>:/W4>"
         "$<$<CXX_COMPILER_ID:MSVC>:/permissive->"

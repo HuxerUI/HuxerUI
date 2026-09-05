@@ -13,11 +13,11 @@
 #include <variant>
 #include <vector>
 
-#include "application_internal.h"
+#include "application/application_internal.h"
 #include "internal_access.h"
-#include "runtime_internal.h"
-#include "system_tray_internal.h"
-#include "text_internal.h"
+#include "runtime/runtime_internal.h"
+#include "application/system_tray_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::test {
 

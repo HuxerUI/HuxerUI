@@ -11,7 +11,7 @@
 #include <huxerui/resource.h>
 
 #include "image_test_support.h"
-#include "resource_internal.h"
+#include "resources/resource_internal.h"
 
 namespace {
 

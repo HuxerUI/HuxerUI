@@ -23,9 +23,9 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 
-#include "platform_frame_internal.h"
-#include "resource_internal.h"
-#include "text_internal.h"
+#include "application/platform_frame_internal.h"
+#include "resources/resource_internal.h"
+#include "text/text_internal.h"
 #include "web_application_internal.h"
 #include "web_file.h"
 #include "web_http_internal.h"

@@ -2,7 +2,7 @@
 
 #include "appkit_text_input.h"
 #include "appkit_renderer.h"
-#include "text_internal.h"
+#include "text/text_internal.h"
 #include "runtime_test_support.h"
 
 namespace huxerui::test {

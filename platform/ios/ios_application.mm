@@ -10,7 +10,7 @@
 #include <string_view>
 #include <utility>
 
-#include "application_internal.h"
+#include "application/application_internal.h"
 #include "ios_file_internal.h"
 
 namespace huxerui::detail {

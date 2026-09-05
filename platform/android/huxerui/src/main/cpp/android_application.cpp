@@ -12,9 +12,9 @@
 
 #include <huxerui/android/jni.h>
 
-#include "application_internal.h"
+#include "application/application_internal.h"
 #include "android_file_internal.h"
-#include "file_internal.h"
+#include "io/file_internal.h"
 
 namespace huxerui::detail {
 

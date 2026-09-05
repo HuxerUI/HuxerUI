@@ -282,9 +282,9 @@ This preserves strong internal commit while ensuring later physical pointer even
 ## Implementation ownership
 
 - `<huxerui/gesture.h>` owns public source, target, event, result, and payload-construction templates.
-- `src/gesture.cpp` owns source and target retained modifiers, erased payload dispatch, and the drag recognition state shared with DragGesture.
-- `src/gesture_internal.h` owns private source and target capability contracts and DragDropSession as part of PointerSession.
-- `src/runtime_pointer_interaction.cpp` owns target selection, preview coordination, auto-scroll, terminal ordering, and quarantine.
+- `src/runtime/gesture.cpp` owns source and target retained modifiers, erased payload dispatch, and the drag recognition state shared with DragGesture.
+- `src/runtime/gesture_internal.h` owns private source and target capability contracts and DragDropSession as part of PointerSession.
+- `src/runtime/runtime_pointer_interaction.cpp` owns target selection, preview coordination, auto-scroll, terminal ordering, and quarantine.
 - Existing Layer and scrolling implementations remain generic and receive no DragSource or DropTarget branches.
 
 Focused tests cover exact type matching, predicates, nested target fallback, event order, source payload snapshots, target-local coordinates, preview exclusion and dismissal, compatible target updates, auto-scroll, and cancellation.

@@ -1,7 +1,7 @@
 #include "runtime_test_support.h"
 #include "internal_access.h"
 #include "image_test_support.h"
-#include "path_internal.h"
+#include "graphics/path_internal.h"
 
 namespace huxerui::test {
 namespace {
