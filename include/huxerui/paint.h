@@ -25,7 +25,7 @@ struct RenderNode;
 
 namespace detail {
 struct FrozenScene;
-struct PlatformViewPaintAccess;
+struct InternalAccess;
 void PaintNodeWithinClip(huxerui::MountedNode& node, const Rect& clip, const RenderNode* extra_child);
 } // namespace detail
 
@@ -478,7 +478,7 @@ private:
   std::uint64_t controller_revision_ = 0;
   Rect bounds_;
 
-  friend struct detail::PlatformViewPaintAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Holds one immutable platform-neutral drawing, stack, or PlatformView placement command.
@@ -678,7 +678,7 @@ private:
   bool finished_ = false;
 
   friend void detail::PaintNodeWithinClip(huxerui::MountedNode&, const Rect&, const RenderNode*);
-  friend struct detail::PlatformViewPaintAccess;
+  friend struct detail::InternalAccess;
 };
 
 } // namespace huxerui

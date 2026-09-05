@@ -50,18 +50,6 @@ struct ResolvedStringResource {
 std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index);
 bool IsValidResourcePackagePath(std::string_view path) noexcept;
 
-class ResourceAccess {
-public:
-  static const std::variant<std::string, StringResource>& StringValue(const StringVariant& value) noexcept;
-  static std::variant<std::string, StringResource>& StringValue(StringVariant& value) noexcept;
-  static std::span<const std::string> StringArguments(const StringVariant& value) noexcept;
-  static RawAsset WithMimeType(RawAsset asset, std::string mime_type);
-  static ImageAsset ImageFromRaw(RawAsset asset, float scale);
-  static VectorAsset VectorFromRaw(RawAsset asset);
-  static bool IsVectorPayload(const RawAsset& asset) noexcept;
-  static std::uint64_t ImageIdentity(const ImageAsset& image) noexcept;
-};
-
 using ResolvedImageAsset = std::variant<ImageAsset, VectorAsset>;
 
 class AppResources {

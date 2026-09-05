@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "geometry_internal.h"
+#include "internal_access.h"
 #include "path_internal.h"
 
 namespace huxerui {
@@ -705,7 +706,7 @@ void Path::EnsureUnique() {
   }
 }
 
-std::span<const detail::PathElement> detail::PathAccess::Elements(const Path& path) noexcept {
+std::span<const detail::PathElement> detail::InternalAccess::Elements(const Path& path) noexcept {
   if (!path.data_) {
     return {};
   }

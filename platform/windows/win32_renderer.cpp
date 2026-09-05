@@ -1,4 +1,5 @@
 #include "win32_renderer.h"
+#include "internal_access.h"
 
 #include <d2d1_1.h>
 #include <d2d1_1helper.h>
@@ -1392,7 +1393,7 @@ struct Win32Renderer::State {
   }
 
   ComPtr<ID2D1Bitmap1> ImageBitmapFor(const ImageAsset& image) {
-    const std::uint64_t identity = ResourceAccess::ImageIdentity(image);
+    const std::uint64_t identity = InternalAccess::ImageIdentity(image);
     const auto cached =
         std::ranges::find_if(images_, [identity](const CachedImage& entry) { return entry.identity == identity; });
     if (cached != images_.end()) {
@@ -1870,7 +1871,7 @@ struct Win32Renderer::State {
     }
     sink->SetFillMode(fill_rule == PathFillRule::EvenOdd ? D2D1_FILL_MODE_ALTERNATE : D2D1_FILL_MODE_WINDING);
     bool figure_open = false;
-    for (const PathElement& element : PathAccess::Elements(path)) {
+    for (const PathElement& element : InternalAccess::Elements(path)) {
       switch (element.verb) {
       case PathVerb::MoveTo:
         if (figure_open) {

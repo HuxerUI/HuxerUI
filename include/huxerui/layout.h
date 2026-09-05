@@ -76,7 +76,7 @@ enum class VerticalAlignment {
 };
 
 namespace detail {
-struct LayoutContextAccess;
+struct InternalAccess;
 
 struct ErasedLayoutValue {
   std::any value;
@@ -462,7 +462,7 @@ private:
   EdgeInsets safe_area_;
   const WindowTitleBarMetrics* title_bar_metrics_;
 
-  friend struct detail::LayoutContextAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Describes a custom layout's measured content size and the children participating in that layout.

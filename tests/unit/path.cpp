@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "path_internal.h"
+#include "internal_access.h"
 
 namespace huxerui::test {
 
@@ -84,13 +85,13 @@ TEST_CASE("PathArcToNormalizesEveryArcSelectionToCubics") {
   const Path counterclockwise_small = arc(ArcSize::Small, ArcDirection::CounterClockwise);
   const Path clockwise_large = arc(ArcSize::Large, ArcDirection::Clockwise);
   const Path counterclockwise_large = arc(ArcSize::Large, ArcDirection::CounterClockwise);
-  const auto clockwise_small_elements = detail::PathAccess::Elements(clockwise_small);
-  const auto counterclockwise_small_elements = detail::PathAccess::Elements(counterclockwise_small);
+  const auto clockwise_small_elements = detail::InternalAccess::Elements(clockwise_small);
+  const auto counterclockwise_small_elements = detail::InternalAccess::Elements(counterclockwise_small);
 
   REQUIRE(clockwise_small_elements.size() == 2);
   REQUIRE(counterclockwise_small_elements.size() == 2);
-  REQUIRE(detail::PathAccess::Elements(clockwise_large).size() == 4);
-  REQUIRE(detail::PathAccess::Elements(counterclockwise_large).size() == 4);
+  REQUIRE(detail::InternalAccess::Elements(clockwise_large).size() == 4);
+  REQUIRE(detail::InternalAccess::Elements(counterclockwise_large).size() == 4);
   REQUIRE(clockwise_small_elements.back().verb == detail::PathVerb::CubicTo);
   REQUIRE(clockwise_small_elements.back().points[2] == Point{0.0F, 10.0F});
   REQUIRE(clockwise_small_elements.back().points[0].x == Catch::Approx(10.0F));
@@ -109,14 +110,14 @@ TEST_CASE("PathArcToScalesUndersizedRadiiAndHandlesDegenerateSegments") {
       {20.0F, 10.0F}, 0.0F, ArcSize::Large, ArcDirection::Clockwise, {4.0F, 6.0F}
   );
   REQUIRE(coincident.IsEmpty());
-  REQUIRE(detail::PathAccess::Elements(coincident).size() == 1);
+  REQUIRE(detail::InternalAccess::Elements(coincident).size() == 1);
 
   Path line;
   line.MoveTo({4.0F, 6.0F}).ArcTo(
       {20.0F, 0.0F}, 0.0F, ArcSize::Large, ArcDirection::CounterClockwise, {24.0F, 16.0F}
   );
-  REQUIRE(detail::PathAccess::Elements(line).size() == 2);
-  REQUIRE(detail::PathAccess::Elements(line).back().verb == detail::PathVerb::LineTo);
+  REQUIRE(detail::InternalAccess::Elements(line).size() == 2);
+  REQUIRE(detail::InternalAccess::Elements(line).back().verb == detail::PathVerb::LineTo);
   REQUIRE(line.Bounds() == Rect{4.0F, 6.0F, 20.0F, 10.0F});
 
   Path corrected;
@@ -127,7 +128,7 @@ TEST_CASE("PathArcToScalesUndersizedRadiiAndHandlesDegenerateSegments") {
   corrected_large.MoveTo({0.0F, 0.0F}).ArcTo(
       {10.0F, 5.0F}, 0.0F, ArcSize::Large, ArcDirection::Clockwise, {100.0F, 0.0F}
   );
-  REQUIRE(detail::PathAccess::Elements(corrected).size() == 3);
+  REQUIRE(detail::InternalAccess::Elements(corrected).size() == 3);
   REQUIRE(corrected == corrected_large);
   REQUIRE(corrected.Bounds().width == Catch::Approx(100.0F));
   REQUIRE(corrected.Bounds().height == Catch::Approx(25.0F));
@@ -148,7 +149,7 @@ TEST_CASE("PathArcToBuildsRotatedEllipsesWithCurveExtremaBounds") {
       .ArcTo({radius_x, radius_y}, rotation, ArcSize::Small, ArcDirection::Clockwise, start)
       .Close();
 
-  const auto elements = detail::PathAccess::Elements(ellipse);
+  const auto elements = detail::InternalAccess::Elements(ellipse);
   REQUIRE(elements.size() == 6);
   REQUIRE(elements[1].verb == detail::PathVerb::CubicTo);
   REQUIRE(elements[2].verb == detail::PathVerb::CubicTo);
@@ -225,8 +226,8 @@ TEST_CASE("PathArcToPreservesCopyOnWriteAndPaintSnapshots") {
   REQUIRE(std::get<DrawPathShadowCommand>(sequence.Commands()[2]).path == copy);
   REQUIRE(std::get<PushPathClipCommand>(sequence.Commands()[3]).path == copy);
   REQUIRE(std::holds_alternative<PopClipCommand>(sequence.Commands()[4]));
-  REQUIRE(detail::PathAccess::Elements(copy).size() == 2);
-  REQUIRE(detail::PathAccess::Elements(path).size() == 5);
+  REQUIRE(detail::InternalAccess::Elements(copy).size() == 2);
+  REQUIRE(detail::InternalAccess::Elements(path).size() == 5);
   path.Reset();
   REQUIRE(path == Path{});
 }
@@ -349,7 +350,7 @@ TEST_CASE("PathContainsValidatesWithoutMutatingPathOrSnapshots") {
   const float infinity = std::numeric_limits<float>::infinity();
   Path path = Path::RoundedRect({0.0F, 0.0F, 20.0F, 20.0F}, CornerRadii{4.0F});
   const Path copy = path;
-  const auto* storage = detail::PathAccess::Elements(path).data();
+  const auto* storage = detail::InternalAccess::Elements(path).data();
   PaintSequence sequence;
   PaintContext context(sequence, {0.0F, 0.0F, 20.0F, 20.0F});
   context.FillPath(path, Color::Black());
@@ -360,7 +361,7 @@ TEST_CASE("PathContainsValidatesWithoutMutatingPathOrSnapshots") {
   REQUIRE_THROWS_AS(path.Contains({}, static_cast<PathFillRule>(20)), std::invalid_argument);
   REQUIRE(path.Contains({10.0F, 10.0F}, PathFillRule::NonZero));
   REQUIRE(path == copy);
-  REQUIRE(detail::PathAccess::Elements(path).data() == storage);
+  REQUIRE(detail::InternalAccess::Elements(path).data() == storage);
 
   path.MoveTo({30.0F, 30.0F}).LineTo({40.0F, 40.0F});
   REQUIRE(path != copy);
@@ -369,7 +370,7 @@ TEST_CASE("PathContainsValidatesWithoutMutatingPathOrSnapshots") {
 
 TEST_CASE("RoundedRectUsesCubicCircularCorners") {
   const Path path = Path::RoundedRect({10.0F, 20.0F, 80.0F, 60.0F}, CornerRadii::Top(16.0F));
-  const auto elements = detail::PathAccess::Elements(path);
+  const auto elements = detail::InternalAccess::Elements(path);
 
   REQUIRE(elements.size() == 10);
   REQUIRE(elements[2].verb == detail::PathVerb::CubicTo);
@@ -382,7 +383,7 @@ TEST_CASE("RoundedRectUsesCubicCircularCorners") {
 TEST_CASE("RoundedRectScalesOverconstrainedCornerRadiiProportionally") {
   constexpr float scale = 2.0F / 7.0F;
   const Path path = Path::RoundedRect({0.0F, 0.0F, 120.0F, 40.0F}, {80.0F, 40.0F, 20.0F, 60.0F});
-  const auto elements = detail::PathAccess::Elements(path);
+  const auto elements = detail::InternalAccess::Elements(path);
 
   REQUIRE(elements[0].points[0].x == Catch::Approx(80.0F * scale));
   REQUIRE(elements[1].points[0].x == Catch::Approx(120.0F - 40.0F * scale));

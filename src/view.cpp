@@ -10,6 +10,7 @@
 #include <huxerui/theme.h>
 
 #include "huxerui_builtin_resources.h"
+#include "internal_access.h"
 #include "runtime_internal.h"
 #include "paint_internal.h"
 #include "resource_internal.h"
@@ -24,65 +25,61 @@ std::optional<ResolvedImageAsset> ResolveOptionalControlIcon(const std::optional
   return value.has_value() ? std::optional<ResolvedImageAsset>{UseImageVariant(*value)} : std::nullopt;
 }
 
-struct SegmentedButtonItemAccess {
-  static std::optional<ResolvedImageAsset> ResolveIcon(SegmentedButtonItem& item) {
-    return ResolveOptionalControlIcon(item.icon_);
-  }
+std::optional<ResolvedImageAsset> InternalAccess::ResolveIcon(SegmentedButtonItem& item) {
+  return ResolveOptionalControlIcon(item.icon_);
+}
 
-  static std::string ResolveLabel(SegmentedButtonItem& item) {
-    return UseString(std::move(item.label_));
-  }
+std::string InternalAccess::ResolveLabel(SegmentedButtonItem& item) {
+  return UseString(std::move(item.label_));
+}
 
-  static bool ShowsLabel(const SegmentedButtonItem& item) noexcept {
-    return item.show_label_;
-  }
+bool InternalAccess::ShowsLabel(const SegmentedButtonItem& item) noexcept {
+  return item.show_label_;
+}
 
-  static bool HasIcon(const SegmentedButtonItem& item) noexcept {
-    return item.icon_.has_value();
-  }
+bool InternalAccess::HasIcon(const SegmentedButtonItem& item) noexcept {
+  return item.icon_.has_value();
+}
 
-  static bool HasBlankLiteralLabel(const SegmentedButtonItem& item) noexcept {
-    return IsBlankStringVariantLiteral(item.label_);
-  }
+bool InternalAccess::HasBlankLiteralLabel(const SegmentedButtonItem& item) noexcept {
+  return IsBlankStringVariantLiteral(item.label_);
+}
 
-  static void ValidateIcon(const SegmentedButtonItem& item) {
-    if (item.icon_.has_value()) {
-      ValidateImageVariant(*item.icon_);
-    }
+void InternalAccess::ValidateIcon(const SegmentedButtonItem& item) {
+  if (item.icon_.has_value()) {
+    ValidateImageVariant(*item.icon_);
   }
-};
+}
 
-struct TabItemAccess {
-  static std::optional<ResolvedImageAsset> ResolveIcon(TabItem& item) {
-    return ResolveOptionalControlIcon(item.icon_);
-  }
+std::optional<ResolvedImageAsset> InternalAccess::ResolveIcon(TabItem& item) {
+  return ResolveOptionalControlIcon(item.icon_);
+}
 
-  static std::string ResolveLabel(TabItem& item) {
-    return UseString(std::move(item.label_));
-  }
+std::string InternalAccess::ResolveLabel(TabItem& item) {
+  return UseString(std::move(item.label_));
+}
 
-  static bool ShowsLabel(const TabItem& item) noexcept {
-    return item.show_label_;
-  }
+bool InternalAccess::ShowsLabel(const TabItem& item) noexcept {
+  return item.show_label_;
+}
 
-  static bool IsEnabled(const TabItem& item) noexcept {
-    return item.enabled_;
-  }
+bool InternalAccess::IsEnabled(const TabItem& item) noexcept {
+  return item.enabled_;
+}
 
-  static bool HasIcon(const TabItem& item) noexcept {
-    return item.icon_.has_value();
-  }
+bool InternalAccess::HasIcon(const TabItem& item) noexcept {
+  return item.icon_.has_value();
+}
 
-  static bool HasBlankLiteralLabel(const TabItem& item) noexcept {
-    return IsBlankStringVariantLiteral(item.label_);
-  }
+bool InternalAccess::HasBlankLiteralLabel(const TabItem& item) noexcept {
+  return IsBlankStringVariantLiteral(item.label_);
+}
 
-  static void ValidateIcon(const TabItem& item) {
-    if (item.icon_.has_value()) {
-      ValidateImageVariant(*item.icon_);
-    }
+void InternalAccess::ValidateIcon(const TabItem& item) {
+  if (item.icon_.has_value()) {
+    ValidateImageVariant(*item.icon_);
   }
-};
+}
 
 } // namespace detail
 
@@ -2281,14 +2278,13 @@ MakeSegmentedButtonSpec(std::vector<SegmentedButtonItem> items, std::size_t sele
   }
 
   for (const SegmentedButtonItem& item : items) {
-    if (detail::SegmentedButtonItemAccess::HasBlankLiteralLabel(item)) {
+    if (detail::InternalAccess::HasBlankLiteralLabel(item)) {
       throw std::invalid_argument("HuxerUI SegmentedButton item requires a non-empty semantic label");
     }
-    if (!detail::SegmentedButtonItemAccess::ShowsLabel(item) &&
-        !detail::SegmentedButtonItemAccess::HasIcon(item)) {
+    if (!detail::InternalAccess::ShowsLabel(item) && !detail::InternalAccess::HasIcon(item)) {
       throw std::invalid_argument("HuxerUI icon-only SegmentedButton item requires an icon and semantic label");
     }
-    detail::SegmentedButtonItemAccess::ValidateIcon(item);
+    detail::InternalAccess::ValidateIcon(item);
   }
 
   return detail::MakeScopeSpec([items = std::move(items), selected_index]() -> View {
@@ -2296,9 +2292,9 @@ MakeSegmentedButtonSpec(std::vector<SegmentedButtonItem> items, std::size_t sele
     resolved_items.reserve(items.size());
     for (SegmentedButtonItem item : items) {
       ResolvedSegmentedButtonItem resolved{
-          detail::SegmentedButtonItemAccess::ResolveLabel(item),
-          detail::SegmentedButtonItemAccess::ResolveIcon(item),
-          detail::SegmentedButtonItemAccess::ShowsLabel(item),
+          detail::InternalAccess::ResolveLabel(item),
+          detail::InternalAccess::ResolveIcon(item),
+          detail::InternalAccess::ShowsLabel(item),
       };
       if (resolved.label.empty()) {
         throw std::invalid_argument("HuxerUI SegmentedButton item requires a non-empty semantic label");
@@ -2455,13 +2451,13 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
   }
 
   for (const TabItem& item : items) {
-    if (detail::TabItemAccess::HasBlankLiteralLabel(item)) {
+    if (detail::InternalAccess::HasBlankLiteralLabel(item)) {
       throw std::invalid_argument("HuxerUI Tabs item requires a non-empty semantic label");
     }
-    if (!detail::TabItemAccess::ShowsLabel(item) && !detail::TabItemAccess::HasIcon(item)) {
+    if (!detail::InternalAccess::ShowsLabel(item) && !detail::InternalAccess::HasIcon(item)) {
       throw std::invalid_argument("HuxerUI icon-only Tabs item requires an icon and semantic label");
     }
-    detail::TabItemAccess::ValidateIcon(item);
+    detail::InternalAccess::ValidateIcon(item);
   }
 
   return detail::MakeScopeSpec([items = std::move(items), selected_index]() -> View {
@@ -2469,10 +2465,10 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
     resolved_items.reserve(items.size());
     for (TabItem item : items) {
       ResolvedTabItem resolved{
-          detail::TabItemAccess::ResolveLabel(item),
-          detail::TabItemAccess::ResolveIcon(item),
-          detail::TabItemAccess::ShowsLabel(item),
-          detail::TabItemAccess::IsEnabled(item),
+          detail::InternalAccess::ResolveLabel(item),
+          detail::InternalAccess::ResolveIcon(item),
+          detail::InternalAccess::ShowsLabel(item),
+          detail::InternalAccess::IsEnabled(item),
       };
       if (resolved.label.empty()) {
         throw std::invalid_argument("HuxerUI Tabs item requires a non-empty semantic label");
@@ -2826,7 +2822,7 @@ private:
     UpdateAllowedSources(node);
     InvalidateSemantics();
     if (node.runtime) {
-      detail::RuntimeAccess::RequestFrame(*node.runtime);
+      detail::InternalAccess::RequestFrame(*node.runtime);
     }
   }
 
@@ -3027,7 +3023,7 @@ public:
     if (activity.phase == ScrollPhase::End && mode_ == Mode::Dragging) {
       mode_ = Mode::AwaitingCommit;
       proposal_emitted_ = false;
-      detail::RuntimeAccess::RequestFrame(*mounted.runtime);
+      detail::InternalAccess::RequestFrame(*mounted.runtime);
       return;
     }
     if (activity.phase == ScrollPhase::Cancel && mode_ == Mode::Dragging) {
@@ -3179,7 +3175,7 @@ private:
 
   void InvalidateLayout(detail::MountedNode& node) {
     if (node.runtime) {
-      detail::RuntimeAccess::InvalidateLayout(*node.runtime, node);
+      detail::InternalAccess::InvalidateLayout(*node.runtime, node);
     }
   }
 

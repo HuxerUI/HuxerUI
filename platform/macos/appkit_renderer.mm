@@ -1,4 +1,5 @@
 #include "appkit_renderer.h"
+#include "internal_access.h"
 
 #import <AppKit/AppKit.h>
 #import <CoreImage/CoreImage.h>
@@ -460,7 +461,7 @@ void DrawCGImage(
 
 CGMutablePathRef CreatePath(const Path& source) {
   CGMutablePathRef path = CGPathCreateMutable();
-  for (const PathElement& element : PathAccess::Elements(source)) {
+  for (const PathElement& element : InternalAccess::Elements(source)) {
     switch (element.verb) {
     case PathVerb::MoveTo:
       CGPathMoveToPoint(path, nullptr, element.points[0].x, element.points[0].y);
@@ -824,7 +825,7 @@ struct AppKitRenderer::State {
   }
 
   CGImageRef ImageFor(const ImageAsset& image) {
-    const std::uint64_t identity = ResourceAccess::ImageIdentity(image);
+    const std::uint64_t identity = InternalAccess::ImageIdentity(image);
     const auto cached =
         std::ranges::find_if(images, [identity](const CachedImage& entry) { return entry.identity == identity; });
     if (cached != images.end()) {

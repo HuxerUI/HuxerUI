@@ -1,4 +1,5 @@
 #include "mounted_node_internal.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -304,3 +305,30 @@ const detail::ModifierDescriptor& ScrollBar::Descriptor() {
 }
 
 } // namespace huxerui
+
+namespace huxerui::detail {
+
+std::shared_ptr<GestureRecognizer> InternalAccess::CreateGestureRecognizer(
+    NodeExtension& extension,
+    huxerui::MountedNode& node,
+    const PointerEvent& event,
+    double timestamp,
+    const GestureSettings& settings,
+    Transform2D frozen_node_to_window
+) {
+  return extension.CreateGestureRecognizer(node, event, timestamp, settings, frozen_node_to_window);
+}
+
+const DragSourceCapability* InternalAccess::GetDragSourceCapability(const NodeExtension& extension) noexcept {
+  return extension.GetDragSourceCapability();
+}
+
+const DropTargetCapability* InternalAccess::GetDropTargetCapability(const NodeExtension& extension) noexcept {
+  return extension.GetDropTargetCapability();
+}
+
+const FileDropTargetCapability* InternalAccess::GetFileDropTargetCapability(const NodeExtension& extension) noexcept {
+  return extension.GetFileDropTargetCapability();
+}
+
+} // namespace huxerui::detail

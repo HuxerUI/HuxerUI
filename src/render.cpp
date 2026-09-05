@@ -1,4 +1,5 @@
 #include "mounted_node_internal.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -684,7 +685,7 @@ void PaintNodeWithinClip(huxerui::MountedNode& mounted_node, const Rect& clip, c
     } else if (node.kind == NodeKind::Image) {
       PaintImage(node, content);
     } else if (node.kind == NodeKind::PlatformView) {
-      PlatformViewPaintAccess::Paint(node, content);
+      InternalAccess::PaintPlatformView(node, content);
     } else if (node.kind == NodeKind::Canvas && node.canvas_painter) {
       const Point content_origin{node.resolved_padding.left, node.resolved_padding.top};
       if (content_origin != Point{}) {

@@ -13,7 +13,7 @@
 #include "paint_internal.h"
 #include "path_internal.h"
 #include "shadow_internal.h"
-#include "vector_internal.h"
+#include "internal_access.h"
 
 namespace huxerui {
 namespace {
@@ -484,7 +484,7 @@ void PaintContext::DrawImageRect(
   };
   PushClip(destination);
   PushTransform(placement);
-  for (const PaintCommand& command : detail::VectorAccess::Sequence(image).Commands()) {
+  for (const PaintCommand& command : detail::InternalAccess::Sequence(image).Commands()) {
     std::visit(
         [this, tint, opacity](const auto& value) {
           using Command = std::decay_t<decltype(value)>;

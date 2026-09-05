@@ -1,4 +1,5 @@
 #include "android_platform_view.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -131,7 +132,7 @@ struct AndroidPlatformViews::State {
               route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
@@ -139,7 +140,7 @@ struct AndroidPlatformViews::State {
               route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted_view = std::make_unique<HostedPlatformView>();
@@ -425,7 +426,7 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
     hosted_view->event_route->active = true;
   }
 
-  const std::optional<std::uint64_t> focused_identity = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
   if (focused_identity.has_value() &&
       *focused_identity > static_cast<std::uint64_t>(std::numeric_limits<jlong>::max())) {
     throw std::overflow_error("HuxerUI Android PlatformView focus identity exceeds the JNI range");
@@ -438,7 +439,7 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
     throw std::logic_error("HuxerUI Android PlatformView host failed to synchronize focus");
   }
   if (focused_identity.has_value() && focus_applied != JNI_TRUE) {
-    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
   }
 }
 
@@ -483,20 +484,20 @@ void AndroidPlatformViews::ClearTextureLayerSurface(std::uint64_t identity) noex
 }
 
 std::optional<std::uint64_t> AndroidPlatformViews::HitTest(Point point) const {
-  return state_->runtime == nullptr ? std::nullopt : RuntimeAccess::HitTestPlatformView(*state_->runtime, point);
+  return state_->runtime == nullptr ? std::nullopt : InternalAccess::HitTestPlatformView(*state_->runtime, point);
 }
 
 void AndroidPlatformViews::SynchronizeFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
   if (state_->runtime != nullptr) {
-    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
+    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
   }
 }
 
 bool AndroidPlatformViews::MoveFocus(std::uint64_t identity, bool reverse) {
-  if (state_->runtime == nullptr || RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
+  if (state_->runtime == nullptr || InternalAccess::FocusedPlatformView(*state_->runtime) != identity) {
     return false;
   }
-  return RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, identity, reverse);
+  return InternalAccess::MoveFocusFromPlatformView(*state_->runtime, identity, reverse);
 }
 
 void AndroidPlatformViews::Shutdown(JNIEnv* environment) {

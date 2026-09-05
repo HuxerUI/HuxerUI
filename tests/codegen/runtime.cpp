@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "runtime_internal.h"
+#include "internal_access.h"
 
 namespace {
 
@@ -175,7 +176,7 @@ TEST_CASE("Generated scopes expose recomposed parent layout values") {
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
-  const auto* root = huxerui::detail::RuntimeAccess::RootNode(runtime);
+  const auto* root = huxerui::detail::InternalAccess::RootNode(runtime);
   REQUIRE(root != nullptr);
   REQUIRE(root->children[1]->kind == huxerui::detail::NodeKind::Scope);
   REQUIRE(root->children[1]->bounds.height == 80.0F);
@@ -184,7 +185,7 @@ TEST_CASE("Generated scopes expose recomposed parent layout values") {
   generated_grow_enabled = false;
   runtime.BuildFrame();
 
-  root = huxerui::detail::RuntimeAccess::RootNode(runtime);
+  root = huxerui::detail::InternalAccess::RootNode(runtime);
   REQUIRE(root->children[1]->bounds.height == 20.0F);
   REQUIRE(root->children[1]->children[0]->bounds.height == 20.0F);
 }

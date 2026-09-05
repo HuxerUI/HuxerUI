@@ -340,11 +340,10 @@ const Application& CurrentApplication();
 int RunPlatformApplication(const Application& application);
 
 struct MountedNode;
-struct RuntimeAccess;
+struct InternalAccess;
 class SceneTransitionService;
 struct ViewSpec;
 class RecomposeScope;
-class ScrollConnection;
 class VirtualMeasureSession;
 
 } // namespace detail
@@ -524,10 +523,9 @@ private:
   friend class detail::RecomposeScope;
   friend class detail::SceneTransitionService;
   friend class detail::SemanticTree;
-  friend class detail::ScrollConnection;
   friend class detail::TextInteraction;
   friend class detail::VirtualMeasureSession;
-  friend struct detail::RuntimeAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Runs the platform application shell for the unique process-level `Application` declaration.

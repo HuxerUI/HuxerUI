@@ -12,7 +12,7 @@
 
 #include "resource_internal.h"
 #include "vector_format.h"
-#include "vector_internal.h"
+#include "internal_access.h"
 
 namespace huxerui {
 
@@ -312,18 +312,18 @@ bool VectorAsset::operator==(const VectorAsset& other) const noexcept {
                                   data_->sequence.Commands() == other.data_->sequence.Commands());
 }
 
-const PaintSequence& detail::VectorAccess::Sequence(const VectorAsset& asset) noexcept {
+const PaintSequence& detail::InternalAccess::Sequence(const VectorAsset& asset) noexcept {
   static const PaintSequence empty;
   return asset.data_ ? asset.data_->sequence : empty;
 }
 
-bool detail::ResourceAccess::IsVectorPayload(const RawAsset& asset) noexcept {
+bool detail::InternalAccess::IsVectorPayload(const RawAsset& asset) noexcept {
   const std::span<const std::byte> bytes = asset.Bytes();
   return bytes.size() >= vector_format::magic.size() &&
          std::equal(vector_format::magic.begin(), vector_format::magic.end(), bytes.begin());
 }
 
-VectorAsset detail::ResourceAccess::VectorFromRaw(RawAsset asset) {
+VectorAsset detail::InternalAccess::VectorFromRaw(RawAsset asset) {
   if (!IsVectorPayload(asset)) {
     throw std::invalid_argument("HuxerUI image resource is not a vector payload");
   }

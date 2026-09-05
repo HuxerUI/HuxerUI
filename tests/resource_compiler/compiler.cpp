@@ -18,7 +18,7 @@
 #include "path_internal.h"
 #include "resource_internal.h"
 #include "runtime_test_support.h"
-#include "vector_internal.h"
+#include "internal_access.h"
 
 namespace {
 
@@ -619,7 +619,7 @@ TEST_CASE("SvgStylesAllowTrailingWhitespaceAndSmoothCurvesDoNotReflectArcControl
   });
   REQUIRE(fill != sequence.Commands().end());
   const std::span<const huxerui::detail::PathElement> elements =
-      huxerui::detail::PathAccess::Elements(std::get<huxerui::FillPathCommand>(*fill).path);
+      huxerui::detail::InternalAccess::Elements(std::get<huxerui::FillPathCommand>(*fill).path);
   REQUIRE_FALSE(elements.empty());
   REQUIRE(elements.back().verb == huxerui::detail::PathVerb::CubicTo);
   REQUIRE(elements.back().points[0] == huxerui::Point{20.0F, 10.0F});
@@ -639,7 +639,7 @@ TEST_CASE("SvgResourcesExpandForwardUseReferencesAndCompilePathClips") {
 </svg>)svg"
   );
 
-  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::InternalAccess::Sequence(vector).Commands();
   REQUIRE(std::ranges::count_if(commands, [](const huxerui::PaintCommand& command) {
     return std::holds_alternative<huxerui::FillPathCommand>(command);
   }) == 3);
@@ -710,7 +710,7 @@ TEST_CASE("SvgResourcesCompileAspectRatioVisibilityUnitsColorsAndSkew") {
   );
 
   REQUIRE(vector.IntrinsicSize() == huxerui::Size{96.0F, 96.0F});
-  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::InternalAccess::Sequence(vector).Commands();
   REQUIRE(std::ranges::count_if(commands, [](const huxerui::PaintCommand& command) {
     return std::holds_alternative<huxerui::FillPathCommand>(command);
   }) == 2);
@@ -739,7 +739,7 @@ TEST_CASE("SvgResourcesCompileNoneAndSliceAspectRatioModes") {
       "aspect-none"
   );
   REQUIRE(std::ranges::none_of(
-      huxerui::detail::VectorAccess::Sequence(unscaled).Commands(),
+      huxerui::detail::InternalAccess::Sequence(unscaled).Commands(),
       [](const huxerui::PaintCommand& command) {
         return std::holds_alternative<huxerui::PushTransformCommand>(command);
       }
@@ -753,7 +753,7 @@ TEST_CASE("SvgResourcesCompileNoneAndSliceAspectRatioModes") {
       "aspect-slice"
   );
   const auto transform = std::ranges::find_if(
-      huxerui::detail::VectorAccess::Sequence(sliced).Commands(),
+      huxerui::detail::InternalAccess::Sequence(sliced).Commands(),
       [](const huxerui::PaintCommand& command) {
         if (!std::holds_alternative<huxerui::PushTransformCommand>(command)) {
           return false;
@@ -762,7 +762,7 @@ TEST_CASE("SvgResourcesCompileNoneAndSliceAspectRatioModes") {
         return value.m11 == 2.0F && value.m22 == 1.0F && value.translate_x == -5.0F;
       }
   );
-  REQUIRE(transform != huxerui::detail::VectorAccess::Sequence(sliced).Commands().end());
+  REQUIRE(transform != huxerui::detail::InternalAccess::Sequence(sliced).Commands().end());
 }
 
 TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
@@ -794,7 +794,7 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
-      huxerui::detail::ResourceAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
+      huxerui::detail::InternalAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
       std::logic_error
   );
 
@@ -803,7 +803,7 @@ TEST_CASE("SvgResourcesCompileGradientPathFillsInHuxvecVersionOne") {
   const huxerui::VectorAsset vector = resources.ResolveVector(
       huxerui::ImageResource("test_app", "images/gradient"), huxerui::Locale::Default()
   );
-  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::InternalAccess::Sequence(vector).Commands();
   const auto linear = std::ranges::find_if(commands, [](const huxerui::PaintCommand& command) {
     const auto* fill = std::get_if<huxerui::FillPathCommand>(&command);
     return fill != nullptr && std::holds_alternative<huxerui::LinearGradient>(fill->brush.Get());
@@ -861,7 +861,7 @@ TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
-      huxerui::detail::ResourceAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
+      huxerui::detail::InternalAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
       std::logic_error
   );
 
@@ -870,7 +870,7 @@ TEST_CASE("SvgResourcesCompileInheritedObjectAndUserSpaceGradientTransforms") {
   const huxerui::VectorAsset vector = resources.ResolveVector(
       huxerui::ImageResource("test_app", "images/transformed"), huxerui::Locale::Default()
   );
-  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::InternalAccess::Sequence(vector).Commands();
   REQUIRE(commands.size() == 3);
   const auto& inherited =
       std::get<huxerui::LinearGradient>(std::get<huxerui::FillPathCommand>(commands[0]).brush.Get()).transform;
@@ -920,7 +920,7 @@ TEST_CASE("SvgResourcesCompileGradientPathStrokesInHuxvecVersionOne") {
   std::vector<std::byte> truncated(payload.size() - 1);
   std::memcpy(truncated.data(), payload.data(), truncated.size());
   REQUIRE_THROWS_AS(
-      huxerui::detail::ResourceAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
+      huxerui::detail::InternalAccess::VectorFromRaw(huxerui::RawAsset::FromBytes(std::move(truncated))),
       std::logic_error
   );
 
@@ -929,7 +929,7 @@ TEST_CASE("SvgResourcesCompileGradientPathStrokesInHuxvecVersionOne") {
   const huxerui::VectorAsset vector = resources.ResolveVector(
       huxerui::ImageResource("test_app", "images/gradient_stroke"), huxerui::Locale::Default()
   );
-  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::VectorAccess::Sequence(vector).Commands();
+  const std::vector<huxerui::PaintCommand>& commands = huxerui::detail::InternalAccess::Sequence(vector).Commands();
   REQUIRE(commands.size() == 2);
   const auto& linear = std::get<huxerui::StrokePathCommand>(commands[0]);
   const auto& linear_gradient = std::get<huxerui::LinearGradient>(linear.brush.Get());

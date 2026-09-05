@@ -1,4 +1,5 @@
 #include "web_platform_view.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -231,7 +232,7 @@ struct WebPlatformViews::State {
               route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
@@ -239,7 +240,7 @@ struct WebPlatformViews::State {
               route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();
@@ -483,15 +484,15 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     hosted->event_route->active = true;
   }
 
-  const std::optional<std::uint64_t> focused_identity = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
   if (focused_identity.has_value()) {
     const auto focused = state_->hosted.find(*focused_identity);
     if (focused == state_->hosted.end() || !focused->second->placement.has_value() ||
         focused->second->placement->hidden) {
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     } else if (!WebPlatformElementContainsFocus(focused->second->element.as_handle()) &&
                !FocusWebPlatformElement(focused->second->element.as_handle())) {
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     }
   } else {
     const bool platform_view_focused = std::ranges::any_of(state_->hosted, [](const auto& entry) {
@@ -526,7 +527,7 @@ void WebPlatformViews::SynchronizeFocus(std::uint32_t token, bool focus_visible)
   if (!state_ || state_->runtime == nullptr) {
     return;
   }
-  RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, state_->IdentityForToken(token), focus_visible);
+  InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, state_->IdentityForToken(token), focus_visible);
 }
 
 bool WebPlatformViews::HitTest(std::uint32_t token, Point point) const {
@@ -534,7 +535,7 @@ bool WebPlatformViews::HitTest(std::uint32_t token, Point point) const {
     return false;
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
-  return identity.has_value() && RuntimeAccess::HitTestPlatformView(*state_->runtime, point) == identity;
+  return identity.has_value() && InternalAccess::HitTestPlatformView(*state_->runtime, point) == identity;
 }
 
 void WebPlatformViews::MoveFocus(std::uint32_t token, bool reverse) {
@@ -543,7 +544,7 @@ void WebPlatformViews::MoveFocus(std::uint32_t token, bool reverse) {
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
   if (identity.has_value()) {
-    static_cast<void>(RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
+    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
   }
 }
 

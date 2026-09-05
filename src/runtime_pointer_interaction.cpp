@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "internal_access.h"
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
 #include "window_internal.h"
@@ -566,7 +567,7 @@ std::optional<ActiveDropTarget> detail::PointerInteraction::ResolveDropTarget(
       if (!entry.extension) {
         continue;
       }
-      const DropTargetCapability* capability = entry.extension->GetDropTargetCapability();
+      const DropTargetCapability* capability = InternalAccess::GetDropTargetCapability(*entry.extension);
       if (!capability || capability->payload_type != session.payload_type || !capability->accepts ||
           !capability->accepts(session.payload.get())) {
         continue;
@@ -595,7 +596,8 @@ void detail::PointerInteraction::BeginDragDrop(PointerSession& session, DragSour
     const Point transformed_origin = recognition.frozen_node_to_window.Apply({});
     const Point transformed_grab = recognition.frozen_node_to_window.Apply(drag.origin);
     drag_drop.preview_grab_offset = transformed_grab - transformed_origin;
-    drag_drop.preview_layer = runtime_state_.layer_controller_.AttachCaptured(
+    drag_drop.preview_layer = InternalAccess::AttachCaptured(
+        runtime_state_.layer_controller_,
         LayerOptions{.level = LayerLevel::Notification, .pointer_policy = LayerPointerPolicy::PassThrough},
         [preview] {
           return preview().With(Semantics{
@@ -636,8 +638,10 @@ void detail::PointerInteraction::UpdateDragDrop(PointerSession& session, const D
   DragDropSession& drag_drop = *session.drag_drop;
   drag_drop.drag = drag;
   if (drag_drop.preview_layer.has_value()) {
-    runtime_state_.layer_controller_.UpdatePlacement(
-        *drag_drop.preview_layer, DragPreviewPlacement(drag.window_position, drag_drop.preview_grab_offset)
+    InternalAccess::UpdatePlacement(
+        runtime_state_.layer_controller_,
+        *drag_drop.preview_layer,
+        DragPreviewPlacement(drag.window_position, drag_drop.preview_grab_offset)
     );
   }
 
@@ -787,13 +791,13 @@ void detail::AutoScrollDropTarget(
       continue;
     }
     if (frame.delta_time <= 0.0) {
-      RuntimeAccess::RequestFrame(runtime);
+      InternalAccess::RequestFrame(runtime);
       break;
     }
     const float delta = intensity * maximum_speed * static_cast<float>(frame.delta_time);
     const float consumed = ScrollNodeBy(*node, delta, ScrollSource::DragDrop);
     if (consumed != 0.0F) {
-      RuntimeAccess::RequestFrame(runtime);
+      InternalAccess::RequestFrame(runtime);
     }
     if (std::abs(consumed - delta) < 0.001F) {
       break;
@@ -1687,11 +1691,12 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
       };
       PointerEvent local_event = event;
       local_event.position = *local_position;
-      std::shared_ptr<GestureRecognizer> gesture = entry.extension->CreateGestureRecognizer(
-          **node, local_event, timestamp, runtime_state_.gesture_settings_, (*node)->presentation.resolved_transform
+      std::shared_ptr<GestureRecognizer> gesture = InternalAccess::CreateGestureRecognizer(
+          *entry.extension, **node, local_event, timestamp,
+          runtime_state_.gesture_settings_, (*node)->presentation.resolved_transform
       );
       if (gesture) {
-        const DragSourceCapability* source = entry.extension->GetDragSourceCapability();
+        const DragSourceCapability* source = InternalAccess::GetDragSourceCapability(*entry.extension);
         std::shared_ptr<DragSourceRecognizer> source_recognizer =
             source ? std::dynamic_pointer_cast<DragSourceRecognizer>(gesture) : nullptr;
         if (source && source_recognizer) {
@@ -1714,7 +1719,7 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
             session.recognitions.push_back(PointerRecognition{std::move(retained)});
           }
         }
-      } else if (entry.extension->GetDropTargetCapability()) {
+      } else if (InternalAccess::GetDropTargetCapability(*entry.extension)) {
         continue;
       } else {
         session.recognitions.push_back(PointerRecognition{ExtensionRecognitionState{handle}});

@@ -1,4 +1,5 @@
 #include "linux_internal.h"
+#include "internal_access.h"
 
 #include "linux_renderer.h"
 
@@ -418,7 +419,7 @@ void AddRoundedRect(cairo_t* context, Rect rect, float corner_radius) {
 
 void AppendPathContour(cairo_t* context, const Path& path) {
   Point previous;
-  for (const PathElement& element : PathAccess::Elements(path)) {
+  for (const PathElement& element : InternalAccess::Elements(path)) {
     switch (element.verb) {
     case PathVerb::MoveTo:
       cairo_move_to(context, element.points[0].x, element.points[0].y);
@@ -561,7 +562,7 @@ struct LinuxRenderer::State {
     if (!image.HasValue()) {
       return nullptr;
     }
-    const std::uint64_t identity = ResourceAccess::ImageIdentity(image);
+    const std::uint64_t identity = InternalAccess::ImageIdentity(image);
     const auto existing = std::find_if(images.begin(), images.end(), [identity](const CachedImage& candidate) {
       return candidate.identity == identity;
     });
@@ -1316,7 +1317,7 @@ void ApplySnapshotTransform(GtkSnapshot* snapshot, const Transform2D& transform)
 
 GskPath* CreateGskPath(const Path& path) {
   GskPathBuilder* builder = gsk_path_builder_new();
-  for (const PathElement& element : PathAccess::Elements(path)) {
+  for (const PathElement& element : InternalAccess::Elements(path)) {
     switch (element.verb) {
     case PathVerb::MoveTo:
       gsk_path_builder_move_to(builder, element.points[0].x, element.points[0].y);

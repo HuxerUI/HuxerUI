@@ -11,6 +11,7 @@
 #include <huxerui/theme.h>
 
 #include "gesture_internal.h"
+#include "internal_access.h"
 #include "runtime_internal.h"
 #include "resource_internal.h"
 #include "tooltip_internal.h"
@@ -254,7 +255,8 @@ public:
 
     target->visible = true;
     if (active_layer_.has_value() && active_target_.lock() == target) {
-      layers_.UpdateCaptured(
+      InternalAccess::UpdateCaptured(
+          layers_,
           *active_layer_,
           TooltipLayerOptions(weak_from_this(), target, active_id_),
           TooltipContent(target, std::move(message), style),
@@ -266,7 +268,8 @@ public:
     }
 
     auto id = std::make_shared<LayerId>(0);
-    const LayerId attached = layers_.AttachCaptured(
+    const LayerId attached = InternalAccess::AttachCaptured(
+        layers_,
         TooltipLayerOptions(weak_from_this(), target, id),
         TooltipContent(target, std::move(message), style),
         std::move(environment),
@@ -280,7 +283,7 @@ public:
 
   void UpdatePlacement(const std::shared_ptr<TooltipTargetState>& target, const TooltipStyle& style) {
     if (active_layer_.has_value() && active_target_.lock() == target && target->bounds.has_value()) {
-      layers_.UpdatePlacement(*active_layer_, TooltipPlacement(*target->bounds, style));
+      InternalAccess::UpdatePlacement(layers_, *active_layer_, TooltipPlacement(*target->bounds, style));
     }
   }
 

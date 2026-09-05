@@ -457,10 +457,6 @@ struct PlatformViewPlacement {
   bool operator==(const PlatformViewPlacement&) const = default;
 };
 
-struct PlatformViewPaintAccess {
-  static void Paint(const MountedNode& node, PaintContext& context);
-};
-
 using RenderCompositionLayer = std::variant<RenderSlice, PlatformViewPlacement>;
 
 struct RenderComposition {

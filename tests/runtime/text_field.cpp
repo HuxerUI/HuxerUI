@@ -1,4 +1,5 @@
 #include "runtime_test_support.h"
+#include "internal_access.h"
 #include "image_test_support.h"
 #include "path_internal.h"
 
@@ -1055,7 +1056,7 @@ TEST_CASE("TestMaterialTextFieldSupportsOutlinedVariant") {
   const StrokePathCommand* outline = FindTextFieldOutline(scene, style.outlined.border, style.border_width);
   REQUIRE(label != nullptr);
   REQUIRE(outline != nullptr);
-  const auto elements = detail::PathAccess::Elements(outline->path);
+  const auto elements = detail::InternalAccess::Elements(outline->path);
   REQUIRE(elements.size() >= 2);
   REQUIRE(elements.front().verb == detail::PathVerb::MoveTo);
   REQUIRE(elements.back().verb == detail::PathVerb::LineTo);

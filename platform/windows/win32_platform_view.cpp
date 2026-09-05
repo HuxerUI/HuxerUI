@@ -1,4 +1,5 @@
 #include "win32_platform_view.h"
+#include "internal_access.h"
 
 #include <dwmapi.h>
 #include <windowsx.h>
@@ -230,7 +231,7 @@ struct Win32PlatformViews::State {
               route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
@@ -238,7 +239,7 @@ struct Win32PlatformViews::State {
               route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     hosted->event_route = std::move(route);
@@ -395,7 +396,7 @@ struct Win32PlatformViews::State {
       POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
       ScreenToClient(state->root, &point);
       const float scale = std::max(state->dpi_scale, 0.01F);
-      const std::optional<std::uint64_t> identity = RuntimeAccess::HitTestPlatformView(
+      const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(
           *state->runtime,
           {static_cast<float>(point.x) / scale, static_cast<float>(point.y) / scale}
       );
@@ -505,7 +506,7 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
   }
   state_->ResizeOverlay();
 
-  const std::optional<std::uint64_t> focused = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*state_->runtime);
   const std::optional<std::uint64_t> current = state_->IdentityForWindow(GetFocus());
   if (focused.has_value()) {
     const auto found = state_->hosted_views.find(*focused);
@@ -513,11 +514,11 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
       if (current == focused) {
         SetFocus(state_->root);
       }
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     } else if (current != focused) {
       SetFocus(state_->FocusTarget(*found->second));
       if (state_->IdentityForWindow(GetFocus()) != focused) {
-        RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+        InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
       }
     }
   } else if (current.has_value()) {
@@ -565,7 +566,7 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
                            (!reverse && std::next(current) == tab_order.end());
   state_->pending_focus_visible = true;
   if (leaves_view) {
-    static_cast<void>(RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
+    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
     return true;
   }
   SetFocus(reverse ? *std::prev(current) : *std::next(current));
@@ -580,10 +581,10 @@ void Win32PlatformViews::SynchronizeFocus(HWND focused) {
   const std::optional<std::uint64_t> previous = state_->platform_view_focus_identity;
   state_->platform_view_focus_identity = identity;
   if (identity.has_value()) {
-    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, state_->pending_focus_visible);
+    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, state_->pending_focus_visible);
     state_->pending_focus_visible = false;
-  } else if (previous.has_value() && RuntimeAccess::FocusedPlatformView(*state_->runtime) == previous) {
-    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+  } else if (previous.has_value() && InternalAccess::FocusedPlatformView(*state_->runtime) == previous) {
+    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
   }
 }
 

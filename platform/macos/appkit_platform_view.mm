@@ -1,4 +1,5 @@
 #include "appkit_platform_view.h"
+#include "internal_access.h"
 
 #import <QuartzCore/QuartzCore.h>
 
@@ -261,14 +262,14 @@ struct AppKitPlatformViews::State {
           if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
           if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();
@@ -458,7 +459,7 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
     static_cast<void>(identity);
     hosted->event_route->active = true;
   }
-  const std::optional<std::uint64_t> focused_identity = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
   const std::optional<std::uint64_t> current_responder_identity =
       state_->IdentityForResponder(root.window.firstResponder);
   if (focused_identity.has_value()) {
@@ -468,13 +469,13 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
         [root.window makeFirstResponder:root];
       }
       state_->platform_view_focus_identity.reset();
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
       if ([root.window makeFirstResponder:focused->second->view]) {
         state_->platform_view_focus_identity = focused_identity;
       } else {
         state_->platform_view_focus_identity.reset();
-        RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+        InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
       }
     } else {
       state_->platform_view_focus_identity = focused_identity;
@@ -509,7 +510,7 @@ NSView* AppKitPlatformViews::HitTest(Point point) const {
   if (state_->runtime == nullptr) {
     return nil;
   }
-  const std::optional<std::uint64_t> identity = RuntimeAccess::HitTestPlatformView(*state_->runtime, point);
+  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*state_->runtime, point);
   if (!identity.has_value()) {
     return nil;
   }
@@ -549,9 +550,9 @@ void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
   const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
   if (identity.has_value()) {
     state_->platform_view_focus_identity = identity;
-    if (RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
+    if (InternalAccess::FocusedPlatformView(*state_->runtime) != identity) {
       const bool focus_visible = state_->pending_focus_traversal.has_value();
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
     }
     return;
   }
@@ -560,17 +561,17 @@ void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
   if (!previous_platform_view_focus.has_value()) {
     return;
   }
-  const std::optional<std::uint64_t> focused = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*state_->runtime);
   if (focused != previous_platform_view_focus) {
     return;
   }
   if (state_->pending_focus_traversal.has_value() && state_->pending_focus_traversal->first == *focused) {
     const bool reverse = state_->pending_focus_traversal->second;
     state_->pending_focus_traversal.reset();
-    static_cast<void>(RuntimeAccess::MoveFocusFromPlatformView(*state_->runtime, *focused, reverse));
+    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->runtime, *focused, reverse));
     return;
   }
-  RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+  InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
 }
 
 void AppKitPlatformViews::Shutdown() {

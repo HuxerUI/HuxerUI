@@ -15,18 +15,9 @@ class Runtime;
 class Environment;
 
 namespace detail {
-class PointerInteraction;
-struct LayerAnchorState;
+struct InternalAccess;
 struct SemanticModalGroupToken;
 struct LayerTransitionState;
-class BottomSheetService;
-class DebugOverlayInstaller;
-class DialogService;
-class MenuService;
-class PopupService;
-class SnackBarService;
-class ToastService;
-class TooltipService;
 struct LayerPlacement;
 } // namespace detail
 
@@ -206,16 +197,7 @@ private:
   std::shared_ptr<State> state_;
 
   friend class Runtime;
-  friend class detail::PointerInteraction;
-  friend class detail::BottomSheetService;
-  friend class detail::DebugOverlayInstaller;
-  friend class detail::DialogService;
-  friend class detail::MenuService;
-  friend class detail::PopupService;
-  friend class detail::SnackBarService;
-  friend class detail::ToastService;
-  friend class detail::TooltipService;
-  friend struct detail::LayerAnchorState;
+  friend struct detail::InternalAccess;
 };
 
 } // namespace huxerui

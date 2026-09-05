@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <atomic>
@@ -261,7 +262,7 @@ void detail::FileDropReceiver::RefreshFileDropTarget(bool emit_moved) {
       }
       for (std::size_t index = (*node)->extensions.size(); index > 0; --index) {
         const auto& entry = (*node)->extensions[index - 1];
-        const auto* capability = entry.extension ? entry.extension->GetFileDropTargetCapability() : nullptr;
+        const auto* capability = entry.extension ? InternalAccess::GetFileDropTargetCapability(*entry.extension) : nullptr;
         if (capability && AcceptsFileDropOffer(capability->options, offer) && capability->predicate(offer)) {
           next = FileDropTargetState{{(*node)->identity, index - 1, entry.descriptor}, {*local, position}};
           break;
@@ -314,7 +315,7 @@ bool detail::FileDropReceiver::HandleFileDrop(
   }
   const auto target = *drop->hover->target;
   const auto* extension = FindExtension(*runtime_state_.mounted_root_, target.extension);
-  const auto* capability = extension ? extension->GetFileDropTargetCapability() : nullptr;
+  const auto* capability = extension ? InternalAccess::GetFileDropTargetCapability(*extension) : nullptr;
   if (!capability) {
     HandleFileDragExited(session);
     return false;

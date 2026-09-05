@@ -53,8 +53,7 @@ struct VirtualViewport {
 };
 
 namespace detail {
-struct VirtualLayoutContextAccess;
-struct VirtualLayoutResultAccess;
+struct InternalAccess;
 }
 
 class VirtualLayoutContext {
@@ -92,7 +91,7 @@ private:
   ItemFunction item_;
   MeasureFunction measure_;
 
-  friend struct detail::VirtualLayoutContextAccess;
+  friend struct detail::InternalAccess;
 };
 
 class VirtualLayoutResult {
@@ -173,7 +172,7 @@ private:
   SemanticRole collection_item_role_ = SemanticRole::Generic;
   std::optional<SemanticCollection> collection_;
 
-  friend struct detail::VirtualLayoutResultAccess;
+  friend struct detail::InternalAccess;
 };
 
 namespace detail {

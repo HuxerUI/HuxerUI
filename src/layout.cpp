@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -14,64 +15,58 @@
 
 namespace huxerui::detail {
 
-struct LayoutContextAccess {
-  static LayoutContext Create(
-      void* state,
-      LayoutContext::MeasureFunction measure,
-      EdgeInsets safe_area,
-      const WindowTitleBarMetrics* title_bar_metrics
-  ) {
-    return LayoutContext{state, measure, safe_area, title_bar_metrics};
-  }
-};
+LayoutContext InternalAccess::CreateLayoutContext(
+    void* state,
+    LayoutContext::MeasureFunction measure,
+    EdgeInsets safe_area,
+    const WindowTitleBarMetrics* title_bar_metrics
+) {
+  return LayoutContext{state, measure, safe_area, title_bar_metrics};
+}
 
-struct VirtualLayoutContextAccess {
-  static VirtualLayoutContext Create(
-      void* state,
-      VirtualLayoutContext::ItemCountFunction item_count,
-      VirtualLayoutContext::ViewportFunction viewport,
-      VirtualLayoutContext::ItemFunction item,
-      VirtualLayoutContext::MeasureFunction measure
-  ) {
-    return VirtualLayoutContext{state, item_count, viewport, item, measure};
-  }
-};
+VirtualLayoutContext InternalAccess::CreateVirtualLayoutContext(
+    void* state,
+    VirtualLayoutContext::ItemCountFunction item_count,
+    VirtualLayoutContext::ViewportFunction viewport,
+    VirtualLayoutContext::ItemFunction item,
+    VirtualLayoutContext::MeasureFunction measure
+) {
+  return VirtualLayoutContext{state, item_count, viewport, item, measure};
+}
 
-struct VirtualLayoutResultAccess {
-  static std::optional<VirtualCollectionSemantics> CollectionSemantics(const VirtualLayoutResult& result) {
-    if (!result.collection_.has_value()) {
-      if (std::ranges::any_of(result.placements_, [](const VirtualLayoutResult::Placement& placement) {
-            return placement.collection_item.has_value();
-          })) {
-        throw std::logic_error("HuxerUI virtual collection item metadata requires collection semantics");
-      }
-      return std::nullopt;
+std::optional<VirtualCollectionSemantics> InternalAccess::CollectionSemantics(const VirtualLayoutResult& result) {
+  if (!result.collection_.has_value()) {
+    if (std::ranges::any_of(result.placements_, [](const VirtualLayoutResult::Placement& placement) {
+          return placement.collection_item.has_value();
+        })) {
+      throw std::logic_error("HuxerUI virtual collection item metadata requires collection semantics");
     }
-
-    for (const VirtualLayoutResult::Placement& placement : result.placements_) {
-      if (!placement.collection_item.has_value()) {
-        continue;
-      }
-      const SemanticCollectionItem& item = *placement.collection_item;
-      if (item.row_span == 0 || item.column_span == 0 ||
-          (item.index.has_value() && result.collection_->item_count.has_value() &&
-           *item.index >= *result.collection_->item_count) ||
-          (item.row_index.has_value() && result.collection_->row_count.has_value() &&
-           (*item.row_index >= *result.collection_->row_count ||
-            item.row_span > *result.collection_->row_count - *item.row_index)) ||
-          (item.column_index.has_value() && result.collection_->column_count.has_value() &&
-           (*item.column_index >= *result.collection_->column_count ||
-            item.column_span > *result.collection_->column_count - *item.column_index))) {
-        throw std::logic_error("HuxerUI virtual collection item metadata is outside its collection bounds");
-      }
-    }
-    return VirtualCollectionSemantics{
-        result.collection_role_,
-        result.collection_item_role_,
-        *result.collection_,
-    };
+    return std::nullopt;
   }
-};
+
+  for (const VirtualLayoutResult::Placement& placement : result.placements_) {
+    if (!placement.collection_item.has_value()) {
+      continue;
+    }
+    const SemanticCollectionItem& item = *placement.collection_item;
+    if (item.row_span == 0 || item.column_span == 0 ||
+        (item.index.has_value() && result.collection_->item_count.has_value() &&
+         *item.index >= *result.collection_->item_count) ||
+        (item.row_index.has_value() && result.collection_->row_count.has_value() &&
+         (*item.row_index >= *result.collection_->row_count ||
+          item.row_span > *result.collection_->row_count - *item.row_index)) ||
+        (item.column_index.has_value() && result.collection_->column_count.has_value() &&
+         (*item.column_index >= *result.collection_->column_count ||
+          item.column_span > *result.collection_->column_count - *item.column_index))) {
+      throw std::logic_error("HuxerUI virtual collection item metadata is outside its collection bounds");
+    }
+  }
+  return VirtualCollectionSemantics{
+      result.collection_role_,
+      result.collection_item_role_,
+      *result.collection_,
+  };
+}
 
 bool IsScrollContainer(const MountedNode& node) noexcept {
   return static_cast<bool>(node.scroll_state);
@@ -446,7 +441,8 @@ namespace {
 
 Size MeasureWithLayoutDescriptor(MountedNode& node, const Constraints& constraints, LayoutContextState& layout_state,
                                  EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics) {
-  LayoutContext context = LayoutContextAccess::Create(&layout_state, MeasureLayoutChild, safe_area, title_bar_metrics);
+  LayoutContext context =
+      InternalAccess::CreateLayoutContext(&layout_state, MeasureLayoutChild, safe_area, title_bar_metrics);
   LayoutResult result = node.layout_descriptor->measure(context, node, constraints);
   const Size measured_size = constraints.Constrain(result.MeasuredSize());
   CommitLayoutParticipation(node, result.Placements());
@@ -692,7 +688,7 @@ Size MeasureNode(
             provisional_viewport,
         },
     };
-    VirtualLayoutContext context = VirtualLayoutContextAccess::Create(
+    VirtualLayoutContext context = InternalAccess::CreateVirtualLayoutContext(
         &virtual_context_state,
         VirtualItemCount,
         CurrentVirtualViewport,
@@ -701,7 +697,7 @@ Size MeasureNode(
     );
     VirtualLayoutResult result = node.virtual_layout_descriptor->measure(context, node, content_constraints);
     std::optional<VirtualCollectionSemantics> collection_semantics =
-        VirtualLayoutResultAccess::CollectionSemantics(result);
+        InternalAccess::CollectionSemantics(result);
     session.CommitRealization(result.Placements());
     node.virtual_state->realized_placements = result.Placements();
     node.virtual_state->collection_semantics = std::move(collection_semantics);
@@ -959,7 +955,7 @@ void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhas
   if (!node.runtime) {
     return;
   }
-  RuntimeAccess::NotifyScrollActivity(
+  InternalAccess::NotifyScrollActivity(
       *node.runtime, node, ScrollActivity{source, phase, ScrollAxis(node), delta, ResolveScrollMetrics(node)}
   );
 }
@@ -1036,7 +1032,7 @@ const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node) {
   const auto binding = node.layout_values.find(typeid(ScrollPhysics));
   if (binding == node.layout_values.end()) {
     if (node.runtime) {
-      return RuntimeAccess::DefaultScrollPhysics(*node.runtime);
+      return InternalAccess::DefaultScrollPhysics(*node.runtime);
     }
     static const ScrollPhysics fallback;
     return fallback;
@@ -1090,7 +1086,7 @@ void ScrollMotion::Stop(MountedNode& node, ScrollPhase phase) {
     if (settling) {
       NotifyScrollNodeActivity(node, source, phase, 0.0F);
     }
-    RuntimeAccess::RequestFrame(*node.runtime);
+    InternalAccess::RequestFrame(*node.runtime);
   }
 }
 
@@ -1117,7 +1113,7 @@ bool ScrollMotion::StartOverscrollSettlement(MountedNode& node) {
   mode_ = Mode::OverscrollSettlement;
   NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::Begin, 0.0F);
   if (node.runtime) {
-    RuntimeAccess::RequestFrame(*node.runtime);
+    InternalAccess::RequestFrame(*node.runtime);
   }
   return true;
 }

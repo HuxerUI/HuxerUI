@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "geometry_internal.h"
+#include "internal_access.h"
 #include "mounted_node_internal.h"
 #include "platform_registry_internal.h"
 
@@ -50,7 +51,7 @@ std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string name, PlatformValue p
   return spec;
 }
 
-void PlatformViewPaintAccess::Paint(const MountedNode& node, PaintContext& context) {
+void InternalAccess::PaintPlatformView(const MountedNode& node, PaintContext& context) {
   if (!node.platform_view) {
     throw std::logic_error("HuxerUI mounted PlatformView has no declaration");
   }

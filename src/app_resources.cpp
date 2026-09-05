@@ -1,4 +1,5 @@
 #include "resource_internal.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -163,7 +164,7 @@ RawAsset AppResources::ReadEntry(const ResourceIndexEntry& entry) {
   if (resource_format::ContentHash(asset.Bytes()) != entry.content_hash) {
     throw std::logic_error("HuxerUI packaged resource payload does not match its index: " + entry.package_path);
   }
-  asset = ResourceAccess::WithMimeType(std::move(asset), entry.mime_type);
+  asset = InternalAccess::WithMimeType(std::move(asset), entry.mime_type);
   raw_cache_.emplace(entry.package_path, asset);
   return asset;
 }
@@ -196,15 +197,15 @@ ResolvedImageAsset AppResources::ResolveImage(ImageResource resource, const Loca
     return cached->second;
   }
   RawAsset raw = ReadEntry(entry);
-  if (ResourceAccess::IsVectorPayload(raw)) {
-    VectorAsset asset = ResourceAccess::VectorFromRaw(std::move(raw));
+  if (InternalAccess::IsVectorPayload(raw)) {
+    VectorAsset asset = InternalAccess::VectorFromRaw(std::move(raw));
     if (asset.IntrinsicSize() != entry.intrinsic_size) {
       throw std::logic_error("HuxerUI vector metadata does not match the installed payload: " + entry.id.ToString());
     }
     image_cache_.emplace(cache_key, asset);
     return asset;
   }
-  ImageAsset asset = ResourceAccess::ImageFromRaw(std::move(raw), entry.scale);
+  ImageAsset asset = InternalAccess::ImageFromRaw(std::move(raw), entry.scale);
   if (asset.PixelWidth() != entry.pixel_width || asset.PixelHeight() != entry.pixel_height) {
     throw std::logic_error("HuxerUI image metadata does not match the installed payload: " + entry.id.ToString());
   }
@@ -337,16 +338,16 @@ std::string FormatResolvedString(
 } // namespace
 
 std::string ResolveString(const StringVariant& value, AppResources& resources, const Locale& locale) {
-  const auto& source = ResourceAccess::StringValue(value);
+  const auto& source = InternalAccess::StringValue(value);
   if (const auto* literal = std::get_if<std::string>(&source)) {
     return *literal;
   }
   const StringResource& resource = std::get<StringResource>(source);
-  return FormatResolvedString(resource, resources.Resolve(resource, locale), ResourceAccess::StringArguments(value));
+  return FormatResolvedString(resource, resources.Resolve(resource, locale), InternalAccess::StringArguments(value));
 }
 
 std::string ResolveString(StringVariant&& value, AppResources& resources, const Locale& locale) {
-  auto& source = ResourceAccess::StringValue(value);
+  auto& source = InternalAccess::StringValue(value);
   if (auto* literal = std::get_if<std::string>(&source)) {
     return std::move(*literal);
   }
@@ -354,14 +355,14 @@ std::string ResolveString(StringVariant&& value, AppResources& resources, const 
 }
 
 const std::string& StringLiteral(const StringVariant& value) {
-  if (const auto* literal = std::get_if<std::string>(&ResourceAccess::StringValue(value))) {
+  if (const auto* literal = std::get_if<std::string>(&InternalAccess::StringValue(value))) {
     return *literal;
   }
   throw std::logic_error("HuxerUI unresolved StringVariant reached mounted state");
 }
 
 std::string StringLiteral(StringVariant&& value) {
-  if (auto* literal = std::get_if<std::string>(&ResourceAccess::StringValue(value))) {
+  if (auto* literal = std::get_if<std::string>(&InternalAccess::StringValue(value))) {
     return std::move(*literal);
   }
   throw std::logic_error("HuxerUI unresolved StringVariant reached mounted state");

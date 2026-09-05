@@ -30,7 +30,7 @@ namespace huxerui {
 
 namespace detail {
 class NavigationState;
-struct NavigationItemAccess;
+struct InternalAccess;
 
 template <class Route>
 concept NavigationRouteValue = std::copy_constructible<Route> && std::equality_comparable<Route>;
@@ -215,7 +215,7 @@ private:
   StringVariant label_;
   bool enabled_ = true;
 
-  friend struct detail::NavigationItemAccess;
+  friend struct detail::InternalAccess;
 };
 
 class NavigationBar final : public detail::TypedView<NavigationBar> {

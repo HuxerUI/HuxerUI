@@ -1,4 +1,5 @@
 #include "uikit_platform_view.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -273,14 +274,14 @@ struct UIKitPlatformViews::State {
           if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
           if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
             return std::nullopt;
           }
-          return RuntimeAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();
@@ -464,7 +465,7 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
     static_cast<void>(identity);
     hosted->event_route->active = true;
   }
-  const std::optional<std::uint64_t> focused_identity = RuntimeAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
   const std::optional<std::uint64_t> current_responder_identity =
       state_->IdentityForResponder(FindFirstResponder(root));
   if (focused_identity.has_value()) {
@@ -473,10 +474,10 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
       if (current_responder_identity == focused_identity) {
         ResignFirstResponder(root);
       }
-      RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
       if (![focused->second->view becomeFirstResponder]) {
-        RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+        InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
       }
     }
   } else if (current_responder_identity.has_value()) {
@@ -506,7 +507,7 @@ UIView* UIKitPlatformViews::HitTest(Point point, UIEvent* event) {
   if (state_->runtime == nullptr) {
     return nil;
   }
-  const std::optional<std::uint64_t> identity = RuntimeAccess::HitTestPlatformView(*state_->runtime, point);
+  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*state_->runtime, point);
   if (!identity.has_value()) {
     return nil;
   }
@@ -518,8 +519,8 @@ UIView* UIKitPlatformViews::HitTest(Point point, UIEvent* event) {
   const CGPoint container_point = [found->second->container convertPoint:root_point fromView:state_->root];
   UIView* target = [found->second->container hitTest:container_point withEvent:event];
   if (target != nil && event != nil && event.type == UIEventTypeTouches &&
-      RuntimeAccess::FocusedPlatformView(*state_->runtime) != identity) {
-    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, false);
+      InternalAccess::FocusedPlatformView(*state_->runtime) != identity) {
+    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, false);
   }
   return target;
 }
@@ -540,8 +541,8 @@ void UIKitPlatformViews::ClearFocus() {
   if (state_->IdentityForResponder(responder).has_value()) {
     [responder resignFirstResponder];
   }
-  if (RuntimeAccess::FocusedPlatformView(*state_->runtime).has_value()) {
-    RuntimeAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+  if (InternalAccess::FocusedPlatformView(*state_->runtime).has_value()) {
+    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
   }
 }
 

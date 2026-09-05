@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include "runtime_internal.h"
+#include "internal_access.h"
 
 namespace huxerui {
 
@@ -290,3 +291,96 @@ LayerController::DismissRequestResult LayerController::RequestDismiss(LayerId id
 }
 
 } // namespace huxerui
+
+namespace huxerui::detail {
+
+LayerId InternalAccess::AttachCaptured(
+    const LayerController& layers,
+    LayerOptions options,
+    ViewFactory content,
+    std::shared_ptr<const Environment> environment,
+    LayerPlacement placement,
+    std::shared_ptr<LayerTransitionState> transition,
+    std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group,
+    std::optional<std::uint64_t> retained_focus_identity
+) {
+  return layers.AttachCaptured(
+      std::move(options),
+      std::move(content),
+      std::move(environment),
+      std::move(placement),
+      std::move(transition),
+      std::move(semantic_modal_group),
+      retained_focus_identity
+  );
+}
+
+LayerId InternalAccess::AttachCapturedReplacing(
+    const LayerController& layers,
+    std::optional<LayerId> replaced,
+    LayerOptions options,
+    ViewFactory content,
+    std::shared_ptr<const Environment> environment,
+    LayerPlacement placement,
+    std::shared_ptr<LayerTransitionState> transition,
+    std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group,
+    std::optional<std::uint64_t> retained_focus_identity
+) {
+  return layers.AttachCapturedReplacing(
+      replaced,
+      std::move(options),
+      std::move(content),
+      std::move(environment),
+      std::move(placement),
+      std::move(transition),
+      std::move(semantic_modal_group),
+      retained_focus_identity
+  );
+}
+
+bool InternalAccess::UpdateCaptured(
+    const LayerController& layers,
+    LayerId id,
+    LayerOptions options,
+    ViewFactory content,
+    std::shared_ptr<const Environment> environment,
+    LayerPlacement placement,
+    std::shared_ptr<LayerTransitionState> transition
+) {
+  return layers.UpdateCaptured(
+      id,
+      std::move(options),
+      std::move(content),
+      std::move(environment),
+      std::move(placement),
+      std::move(transition)
+  );
+}
+
+bool InternalAccess::UpdateEntry(
+    const LayerController& layers,
+    LayerId id,
+    std::optional<LayerOptions> options,
+    ViewFactory content,
+    std::optional<std::shared_ptr<const Environment>> environment
+) {
+  return layers.UpdateEntry(id, std::move(options), std::move(content), std::move(environment));
+}
+
+bool InternalAccess::UpdatePlacement(const LayerController& layers, LayerId id, LayerPlacement placement) {
+  return layers.UpdatePlacement(id, std::move(placement));
+}
+
+std::optional<LayerOptions> InternalAccess::EntryOptions(const LayerController& layers, LayerId id) {
+  return layers.EntryOptions(id);
+}
+
+std::shared_ptr<LayerTransitionState> InternalAccess::Transition(const LayerController& layers, LayerId id) {
+  return layers.Transition(id);
+}
+
+LayerController::DismissRequestResult InternalAccess::RequestDismiss(const LayerController& layers, LayerId id) {
+  return layers.RequestDismiss(id);
+}
+
+} // namespace huxerui::detail

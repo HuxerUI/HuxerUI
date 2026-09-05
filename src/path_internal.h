@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <span>
 
 #include <huxerui/vector.h>
 
@@ -21,11 +20,6 @@ struct PathElement {
   std::array<Point, 3> points{};
 
   bool operator==(const PathElement&) const = default;
-};
-
-class PathAccess final {
-public:
-  [[nodiscard]] static std::span<const PathElement> Elements(const Path& path) noexcept;
 };
 
 [[nodiscard]] Path CreateBorderStrokePath(Rect rect, CornerRadii corner_radii, float width);

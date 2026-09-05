@@ -57,8 +57,7 @@ namespace detail {
 struct ViewSpec;
 struct PlatformEventDescriptor;
 std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string name, PlatformValue properties);
-struct SegmentedButtonItemAccess;
-struct TabItemAccess;
+struct InternalAccess;
 class VirtualMeasureSession;
 } // namespace detail
 
@@ -774,7 +773,7 @@ private:
   StringVariant label_;
   bool show_label_ = true;
 
-  friend struct detail::SegmentedButtonItemAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Presents a finite set of mutually exclusive controlled choices.
@@ -821,7 +820,7 @@ private:
   bool show_label_ = true;
   bool enabled_ = true;
 
-  friend struct detail::TabItemAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Presents controlled navigation destinations without owning page content.

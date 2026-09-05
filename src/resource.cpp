@@ -13,6 +13,7 @@
 #include <huxerui/paint.h>
 
 #include "resource_internal.h"
+#include "internal_access.h"
 
 namespace huxerui {
 
@@ -28,7 +29,7 @@ StringVariant::StringVariant(StringResource resource, std::vector<std::string> a
     : value_(std::move(resource)), arguments_(std::move(arguments)) {}
 
 bool detail::NeedsResourceResolution(const StringVariant& value) noexcept {
-  return std::holds_alternative<StringResource>(detail::ResourceAccess::StringValue(value));
+  return std::holds_alternative<StringResource>(detail::InternalAccess::StringValue(value));
 }
 
 bool detail::NeedsResourceResolution(const ImageVariant& value) noexcept {
@@ -41,12 +42,12 @@ bool detail::NeedsResourceResolution(const VisualFill& fill) noexcept {
 }
 
 bool detail::IsEmptyStringVariantLiteral(const StringVariant& value) noexcept {
-  const auto* literal = std::get_if<std::string>(&detail::ResourceAccess::StringValue(value));
+  const auto* literal = std::get_if<std::string>(&detail::InternalAccess::StringValue(value));
   return literal != nullptr && literal->empty();
 }
 
 bool detail::IsBlankStringVariantLiteral(const StringVariant& value) noexcept {
-  const auto* literal = std::get_if<std::string>(&detail::ResourceAccess::StringValue(value));
+  const auto* literal = std::get_if<std::string>(&detail::InternalAccess::StringValue(value));
   return literal != nullptr && std::ranges::all_of(*literal, [](unsigned char character) {
            return std::isspace(character) != 0;
          });
@@ -426,19 +427,19 @@ bool ImageAsset::operator==(const ImageAsset& other) const noexcept {
 
 namespace huxerui::detail {
 
-const std::variant<std::string, StringResource>& ResourceAccess::StringValue(const StringVariant& value) noexcept {
+const std::variant<std::string, StringResource>& InternalAccess::StringValue(const StringVariant& value) noexcept {
   return value.value_;
 }
 
-std::variant<std::string, StringResource>& ResourceAccess::StringValue(StringVariant& value) noexcept {
+std::variant<std::string, StringResource>& InternalAccess::StringValue(StringVariant& value) noexcept {
   return value.value_;
 }
 
-std::span<const std::string> ResourceAccess::StringArguments(const StringVariant& value) noexcept {
+std::span<const std::string> InternalAccess::StringArguments(const StringVariant& value) noexcept {
   return value.arguments_;
 }
 
-RawAsset ResourceAccess::WithMimeType(RawAsset asset, std::string mime_type) {
+RawAsset InternalAccess::WithMimeType(RawAsset asset, std::string mime_type) {
   if (!asset.data_ || asset.data_->mime_type == mime_type) {
     return asset;
   }
@@ -452,11 +453,11 @@ RawAsset ResourceAccess::WithMimeType(RawAsset asset, std::string mime_type) {
   );
 }
 
-ImageAsset ResourceAccess::ImageFromRaw(RawAsset asset, float scale) {
+ImageAsset InternalAccess::ImageFromRaw(RawAsset asset, float scale) {
   return ImageAsset::FromRawAsset(std::move(asset), scale);
 }
 
-std::uint64_t ResourceAccess::ImageIdentity(const ImageAsset& image) noexcept {
+std::uint64_t InternalAccess::ImageIdentity(const ImageAsset& image) noexcept {
   return image.data_ ? image.data_->identity : 0;
 }
 

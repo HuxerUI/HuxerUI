@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "application_internal.h"
+#include "internal_access.h"
 #include "runtime_internal.h"
 #include "system_tray_internal.h"
 #include "text_layout_internal.h"
@@ -379,11 +380,11 @@ public:
   }
 
   void InvalidateRoot() {
-    huxerui::detail::RuntimeAccess::InvalidateRoot(runtime_);
+    huxerui::detail::InternalAccess::InvalidateRoot(runtime_);
   }
 
   const huxerui::detail::MountedNode* RootNode() const noexcept {
-    return huxerui::detail::RuntimeAccess::RootNode(runtime_);
+    return huxerui::detail::InternalAccess::RootNode(runtime_);
   }
 
 private:

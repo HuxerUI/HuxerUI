@@ -13,9 +13,7 @@ namespace huxerui {
 class Brush;
 
 namespace detail {
-class PathAccess;
-class ResourceAccess;
-class VectorAccess;
+struct InternalAccess;
 } // namespace detail
 
 /// Selects how overlapping path contours determine filled and clipped regions.
@@ -118,7 +116,7 @@ private:
 
   std::shared_ptr<Data> data_;
 
-  friend class detail::PathAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Selects the shape drawn at open stroke and dash-segment endpoints.
@@ -205,8 +203,7 @@ private:
 
   std::shared_ptr<const Data> data_;
 
-  friend class detail::ResourceAccess;
-  friend class detail::VectorAccess;
+  friend struct detail::InternalAccess;
 };
 
 /// Records the immutable contents of one VectorAsset inside its Create() callback.

@@ -33,8 +33,7 @@ struct DragSourceCapability;
 struct DropTargetCapability;
 struct FileDropTargetCapability;
 class GestureRecognizer;
-class PointerInteraction;
-class FileDropReceiver;
+struct InternalAccess;
 }
 
 /// Describes the timing and accessibility policy for one extension frame callback.
@@ -366,8 +365,7 @@ private:
   std::function<void()> invalidate_semantics_;
 
   friend class Runtime;
-  friend class detail::PointerInteraction;
-  friend class detail::FileDropReceiver;
+  friend struct detail::InternalAccess;
 };
 
 namespace detail {

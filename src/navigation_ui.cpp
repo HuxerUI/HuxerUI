@@ -13,6 +13,7 @@
 #include <huxerui/theme.h>
 
 #include "mounted_node_internal.h"
+#include "internal_access.h"
 #include "resource_internal.h"
 
 namespace huxerui::detail {
@@ -25,44 +26,42 @@ std::optional<ResolvedImageAsset> ResolveNavigationIcon(const std::optional<Imag
 
 } // namespace
 
-struct NavigationItemAccess {
-  static std::string ResolveLabel(NavigationItem& item) {
-    return UseString(std::move(item.label_));
-  }
+std::string InternalAccess::ResolveLabel(NavigationItem& item) {
+  return UseString(std::move(item.label_));
+}
 
-  static std::optional<ResolvedImageAsset> ResolveIcon(NavigationItem& item) {
-    return ResolveNavigationIcon(item.icon_);
-  }
+std::optional<ResolvedImageAsset> InternalAccess::ResolveIcon(NavigationItem& item) {
+  return ResolveNavigationIcon(item.icon_);
+}
 
-  static std::optional<ResolvedImageAsset> ResolveSelectedIcon(NavigationItem& item) {
-    return ResolveNavigationIcon(item.selected_icon_);
-  }
+std::optional<ResolvedImageAsset> InternalAccess::ResolveSelectedIcon(NavigationItem& item) {
+  return ResolveNavigationIcon(item.selected_icon_);
+}
 
-  static bool IsEnabled(const NavigationItem& item) noexcept {
-    return item.enabled_;
-  }
+bool InternalAccess::IsEnabled(const NavigationItem& item) noexcept {
+  return item.enabled_;
+}
 
-  static bool HasIcon(const NavigationItem& item) noexcept {
-    return item.icon_.has_value();
-  }
+bool InternalAccess::HasIcon(const NavigationItem& item) noexcept {
+  return item.icon_.has_value();
+}
 
-  static bool HasSelectedIcon(const NavigationItem& item) noexcept {
-    return item.selected_icon_.has_value();
-  }
+bool InternalAccess::HasSelectedIcon(const NavigationItem& item) noexcept {
+  return item.selected_icon_.has_value();
+}
 
-  static bool HasBlankLiteralLabel(const NavigationItem& item) noexcept {
-    return IsBlankStringVariantLiteral(item.label_);
-  }
+bool InternalAccess::HasBlankLiteralLabel(const NavigationItem& item) noexcept {
+  return IsBlankStringVariantLiteral(item.label_);
+}
 
-  static void ValidateImages(const NavigationItem& item) {
-    if (item.icon_.has_value()) {
-      ValidateImageVariant(*item.icon_);
-    }
-    if (item.selected_icon_.has_value()) {
-      ValidateImageVariant(*item.selected_icon_);
-    }
+void InternalAccess::ValidateImages(const NavigationItem& item) {
+  if (item.icon_.has_value()) {
+    ValidateImageVariant(*item.icon_);
   }
-};
+  if (item.selected_icon_.has_value()) {
+    ValidateImageVariant(*item.selected_icon_);
+  }
+}
 
 struct ResolvedNavigationItem {
   std::string label;
@@ -189,10 +188,10 @@ std::shared_ptr<const detail::ResolvedNavigationItems> ResolveItems(std::vector<
   resolved->values.reserve(items.size());
   for (NavigationItem& item : items) {
     detail::ResolvedNavigationItem value{
-        detail::NavigationItemAccess::ResolveLabel(item),
-        detail::NavigationItemAccess::ResolveIcon(item),
-        detail::NavigationItemAccess::ResolveSelectedIcon(item),
-        detail::NavigationItemAccess::IsEnabled(item),
+        detail::InternalAccess::ResolveLabel(item),
+        detail::InternalAccess::ResolveIcon(item),
+        detail::InternalAccess::ResolveSelectedIcon(item),
+        detail::InternalAccess::IsEnabled(item),
     };
     if (value.label.empty()) {
       throw std::invalid_argument("HuxerUI NavigationItem requires a non-empty semantic label");
@@ -239,16 +238,16 @@ void ValidateNavigationDeclarations(
     throw std::invalid_argument("HuxerUI navigation selected index is out of range");
   }
   for (const NavigationItem& item : items) {
-    if (detail::NavigationItemAccess::HasBlankLiteralLabel(item)) {
+    if (detail::InternalAccess::HasBlankLiteralLabel(item)) {
       throw std::invalid_argument("HuxerUI NavigationItem requires a non-empty semantic label");
     }
-    if (detail::NavigationItemAccess::HasSelectedIcon(item) && !detail::NavigationItemAccess::HasIcon(item)) {
+    if (detail::InternalAccess::HasSelectedIcon(item) && !detail::InternalAccess::HasIcon(item)) {
       throw std::invalid_argument("HuxerUI NavigationItem selected icon requires a regular icon");
     }
-    if (require_icons && !detail::NavigationItemAccess::HasIcon(item)) {
+    if (require_icons && !detail::InternalAccess::HasIcon(item)) {
       throw std::invalid_argument("HuxerUI navigation items require icons");
     }
-    detail::NavigationItemAccess::ValidateImages(item);
+    detail::InternalAccess::ValidateImages(item);
   }
 }
 

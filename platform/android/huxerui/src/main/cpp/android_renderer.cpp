@@ -1,4 +1,5 @@
 #include "android_renderer.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -62,7 +63,7 @@ jfloatArray ToFloatArray(JNIEnv* environment, const std::vector<jfloat>& values)
 
 jfloatArray ToPathArray(JNIEnv* environment, const Path& path) {
   std::vector<jfloat> data;
-  const std::span<const PathElement> elements = PathAccess::Elements(path);
+  const std::span<const PathElement> elements = InternalAccess::Elements(path);
   data.reserve(elements.size() * 7);
   for (const PathElement& element : elements) {
     data.push_back(static_cast<jfloat>(element.verb));
@@ -483,7 +484,7 @@ void AndroidRenderer::RenderCommand(
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command
 ) {
-  const std::uint64_t identity = ResourceAccess::ImageIdentity(command.image);
+  const std::uint64_t identity = InternalAccess::ImageIdentity(command.image);
   const float scale = command.image.Scale();
   const auto draw = [&](jbyteArray encoded) {
     return environment->CallBooleanMethod(

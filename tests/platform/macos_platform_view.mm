@@ -1,6 +1,7 @@
 #import <AppKit/AppKit.h>
 
 #include "appkit_platform_view.h"
+#include "internal_access.h"
 #include "appkit_renderer.h"
 #include "runtime_test_support.h"
 
@@ -377,7 +378,7 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
 
     REQUIRE([window makeFirstResponder:mac_created_platform_view]);
     platform_views.SynchronizeFocus(window.firstResponder);
-    REQUIRE(detail::RuntimeAccess::FocusedPlatformView(runtime.CoreRuntime()) == platform_view_identity);
+    REQUIRE(detail::InternalAccess::FocusedPlatformView(runtime.CoreRuntime()) == platform_view_identity);
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(window.firstResponder == mac_created_platform_view);
 

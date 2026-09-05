@@ -24,7 +24,7 @@ std::string UseString(const StringVariant& value);
 std::string UseString(StringVariant&& value);
 
 namespace detail {
-class ResourceAccess;
+struct InternalAccess;
 bool IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
 } // namespace detail
 
@@ -82,7 +82,7 @@ private:
   std::variant<std::string, StringResource> value_;
   std::vector<std::string> arguments_;
 
-  friend class detail::ResourceAccess;
+  friend struct detail::InternalAccess;
 };
 
 class RawResource final : public ResourceId {
@@ -141,7 +141,7 @@ private:
   std::shared_ptr<const Data> data_;
 
   friend class ImageAsset;
-  friend class detail::ResourceAccess;
+  friend struct detail::InternalAccess;
 };
 
 enum class ImageFormat {
@@ -181,7 +181,7 @@ private:
 
   std::shared_ptr<const Data> data_;
 
-  friend class detail::ResourceAccess;
+  friend struct detail::InternalAccess;
 };
 
 // ExternalTexture remains separate because it is a live shared texture rather than an application image value.

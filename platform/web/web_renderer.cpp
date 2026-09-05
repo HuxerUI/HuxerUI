@@ -1,4 +1,5 @@
 #include "web_renderer.h"
+#include "internal_access.h"
 
 #include <algorithm>
 #include <cmath>
@@ -299,7 +300,7 @@ void AddRoundedRect(val& context, Rect rect, float radius) {
 }
 
 void AddPath(val& context, const Path& path) {
-  for (const PathElement& element : PathAccess::Elements(path)) {
+  for (const PathElement& element : InternalAccess::Elements(path)) {
     switch (element.verb) {
     case PathVerb::MoveTo:
       context.call<void>("moveTo", element.points[0].x, element.points[0].y);
@@ -1025,7 +1026,7 @@ void WebRenderer::RenderCommand(const DrawTextRunsCommand& command) {
 }
 
 void WebRenderer::RenderCommand(const DrawImageCommand& command) {
-  const std::uint64_t identity = ResourceAccess::ImageIdentity(command.image);
+  const std::uint64_t identity = InternalAccess::ImageIdentity(command.image);
   val image = val::take_ownership(GetWebImage(session_id_, identity));
   if (image.isNull() || image.isUndefined()) {
     if (session_id_ != 0) {

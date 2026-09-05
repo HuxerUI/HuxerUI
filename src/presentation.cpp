@@ -15,6 +15,7 @@
 #include <huxerui/window.h>
 
 #include "huxerui_builtin_resources.h"
+#include "internal_access.h"
 #include "runtime_internal.h"
 #include "resource_internal.h"
 #include "tooltip_internal.h"
@@ -1538,7 +1539,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
     const Rect next_anchor = ResolveTarget(active_target);
     if (active_placement.anchor != next_anchor) {
       active_placement.anchor = next_anchor;
-      layers.UpdatePlacement(*active_layer, active_placement);
+      InternalAccess::UpdatePlacement(layers, *active_layer, active_placement);
     }
   }
 
@@ -1572,7 +1573,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
     }
     active_target = next_target;
     active_placement.anchor = ResolveTarget(active_target);
-    return layers.UpdatePlacement(id, active_placement);
+    return InternalAccess::UpdatePlacement(layers, id, active_placement);
   }
 
   bool Dismiss(LayerId id) {
@@ -1592,7 +1593,7 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   }
 
   bool RequestDismissActive() {
-    return active_layer.has_value() && layers.RequestDismiss(*active_layer).handled;
+    return active_layer.has_value() && InternalAccess::RequestDismiss(layers, *active_layer).handled;
   }
 
   void SetDismissHandler(LayerId id, std::function<bool(LayerId)> handler) {
@@ -1623,7 +1624,8 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
     if (!options.on_dismiss_request) {
       options.on_dismiss_request = [anchor = shared_from_this(), id] { anchor->Dismiss(*id); };
     }
-    const LayerId attached = layers.AttachCaptured(
+    const LayerId attached = InternalAccess::AttachCaptured(
+        layers,
         std::move(options),
         std::move(content),
         std::move(environment),
@@ -2237,7 +2239,8 @@ public:
     LayerPlacement placement;
     placement.kind = LayerPlacementKind::Fill;
     placement.safe_area_policy = LayerSafeAreaPolicy::Ignore;
-    root.Layers().AttachCaptured(
+    InternalAccess::AttachCaptured(
+        root.Layers(),
         LayerOptions{
             .level = LayerLevel::System,
             .pointer_policy = LayerPointerPolicy::Content,
@@ -2418,7 +2421,8 @@ LayerId detail::ToastService::Show(
   std::weak_ptr<ToastService> service = weak_from_this();
   detail::LayerPlacement placement;
   placement.kind = VerticalLayerPlacementKind(style.placement);
-  const LayerId attached = layers_.AttachCaptured(
+  const LayerId attached = InternalAccess::AttachCaptured(
+      layers_,
       LayerOptions{
           .level = LayerLevel::Notification,
           .pointer_policy = LayerPointerPolicy::PassThrough,
@@ -2523,7 +2527,8 @@ LayerId detail::SnackBarService::Show(StringVariant message, std::optional<Snack
   auto pause = std::make_shared<SnackBarPauseState>();
   detail::LayerPlacement placement;
   placement.kind = detail::LayerPlacementKind::BottomCenter;
-  const LayerId attached = layers_.AttachCapturedReplacing(
+  const LayerId attached = InternalAccess::AttachCapturedReplacing(
+      layers_,
       replaceable_layer_,
       LayerOptions{
           .level = LayerLevel::Notification,
@@ -2630,7 +2635,7 @@ std::shared_ptr<detail::LayerTransitionState> detail::DialogService::ReconcileTr
   if (!motion.has_value()) {
     return {};
   }
-  std::shared_ptr<detail::LayerTransitionState> transition = layers_.Transition(id);
+  std::shared_ptr<detail::LayerTransitionState> transition = InternalAccess::Transition(layers_, id);
   if (transition) {
     UpdatePresentationTransition(transition, *motion);
     return transition;
@@ -2648,7 +2653,7 @@ ViewFactory detail::DialogService::PresentedContent(
 ) const {
   std::function<bool()> request_dismiss;
   if (dismissible) {
-    request_dismiss = [layers = layers_, id = std::move(id)] { return layers.RequestDismiss(*id).handled; };
+    request_dismiss = [layers = layers_, id = std::move(id)] { return InternalAccess::RequestDismiss(layers, *id).handled; };
   }
   return AnimatedDialogContent(std::move(content), style, std::move(transition), std::move(request_dismiss));
 }
@@ -2675,7 +2680,8 @@ LayerId detail::DialogService::Show(
   auto id = std::make_shared<LayerId>(0);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
-  const LayerId attached = layers_.AttachCaptured(
+  const LayerId attached = InternalAccess::AttachCaptured(
+      layers_,
       std::move(layer_options),
       PresentedContent(
           [title = std::move(title),
@@ -2724,7 +2730,8 @@ LayerId detail::DialogService::Show(
   auto id = std::make_shared<LayerId>(0);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
-  const LayerId attached = layers_.AttachCaptured(
+  const LayerId attached = InternalAccess::AttachCaptured(
+      layers_,
       std::move(layer_options),
       PresentedContent(std::move(content), style, transition, id, dismissible),
       std::move(environment),
@@ -2757,14 +2764,15 @@ bool detail::DialogService::Update(LayerId id, ViewFactory content, std::shared_
   }
   const DialogStyle style = ResolveDialogStyle(environment);
   ValidateDialogStyle(style);
-  std::optional<LayerOptions> layer_options = layers_.EntryOptions(id);
+  std::optional<LayerOptions> layer_options = InternalAccess::EntryOptions(layers_, id);
   if (!layer_options.has_value()) {
     return false;
   }
   layer_options->barrier_color = style.scrim;
   const std::shared_ptr<detail::LayerTransitionState> transition = ReconcileTransition(id, style.motion);
   const bool dismissible = layer_options->cancel_policy == LayerCancelPolicy::Dismiss;
-  return layers_.UpdateCaptured(
+  return InternalAccess::UpdateCaptured(
+      layers_,
       id,
       std::move(*layer_options),
       PresentedContent(std::move(content), style, transition, std::make_shared<LayerId>(id), dismissible),
@@ -2782,7 +2790,8 @@ bool detail::DialogService::Update(
   LayerOptions layer_options = DialogLayerOptions(options, style.scrim);
   const std::shared_ptr<detail::LayerTransitionState> transition = ReconcileTransition(id, style.motion);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
-  return layers_.UpdateCaptured(
+  return InternalAccess::UpdateCaptured(
+      layers_,
       id,
       std::move(layer_options),
       PresentedContent(std::move(content), style, transition, std::make_shared<LayerId>(id), dismissible),
@@ -2839,7 +2848,7 @@ LayerId detail::BottomSheetService::Show(
   auto id_value = std::make_shared<LayerId>(0);
   std::function<bool()> request_dismiss;
   if (dismissible) {
-    request_dismiss = [layers = layers_, id_value] { return layers.RequestDismiss(*id_value).handled; };
+    request_dismiss = [layers = layers_, id_value] { return InternalAccess::RequestDismiss(layers, *id_value).handled; };
   }
   std::shared_ptr<BottomSheetDragState> drag;
   if (ShowsBottomSheetDragHandle(style)) {
@@ -2852,7 +2861,8 @@ LayerId detail::BottomSheetService::Show(
   placement.safe_area_policy = detail::LayerSafeAreaPolicy::ExtendBottom;
   placement.fill_cross_axis = true;
   placement.maximum_cross_axis_extent = style.maximum_width;
-  const LayerId id = layers_.AttachCaptured(
+  const LayerId id = InternalAccess::AttachCaptured(
+      layers_,
       std::move(layer_options),
       BottomSheetContent(std::move(content), style, transition, drag, std::move(request_dismiss)),
       std::move(environment),
@@ -2861,7 +2871,7 @@ LayerId detail::BottomSheetService::Show(
   );
   *id_value = id;
   if (drag) {
-    drag->dismiss = [layers = layers_, id] { return layers.RequestDismiss(id).dismissed; };
+    drag->dismiss = [layers = layers_, id] { return InternalAccess::RequestDismiss(layers, id).dismissed; };
   }
   return id;
 }
@@ -3025,7 +3035,7 @@ bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState
   if (!anchor || anchor->active_layer != id) {
     return false;
   }
-  return layers_.UpdateEntry(id, std::nullopt, std::move(content), std::move(environment));
+  return InternalAccess::UpdateEntry(layers_, id, std::nullopt, std::move(content), std::move(environment));
 }
 
 bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id,

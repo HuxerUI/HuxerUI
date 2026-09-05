@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "internal_access.h"
 #include "application_internal.h"
 #include "external_texture_internal.h"
 #include "file_internal.h"
@@ -1023,6 +1024,59 @@ std::optional<bool> DeclaredEnabled(const MountedNode& node, std::uint64_t ident
 
 bool IsVirtualLayoutNode(const MountedNode& node) noexcept {
   return node.kind == NodeKind::VirtualLayout;
+}
+
+void InternalAccess::InvalidateRoot(Runtime& runtime) {
+  runtime.InvalidateRoot();
+}
+
+const MountedNode* InternalAccess::RootNode(const Runtime& runtime) noexcept {
+  return runtime.RootNode();
+}
+
+const ScrollPhysics& InternalAccess::DefaultScrollPhysics(const Runtime& runtime) noexcept {
+  return runtime.state_->default_scroll_physics_;
+}
+
+void InternalAccess::NotifyScrollActivity(Runtime& runtime, MountedNode& node, const ScrollActivity& activity) {
+  runtime.NotifyScrollActivity(node, activity);
+}
+
+void InternalAccess::RequestFrame(Runtime& runtime) {
+  runtime.RequestFrame();
+}
+
+void InternalAccess::InvalidateLayout(Runtime& runtime, MountedNode& node) {
+  runtime.InvalidateLayout(node);
+}
+
+std::optional<std::uint64_t> InternalAccess::HitTestPlatformView(const Runtime& runtime, Point position) {
+  return runtime.HitTestPlatformView(position);
+}
+
+std::optional<std::uint64_t> InternalAccess::FocusedPlatformView(const Runtime& runtime) {
+  return runtime.FocusedPlatformView();
+}
+
+void
+InternalAccess::SynchronizePlatformViewFocus(Runtime& runtime, std::optional<std::uint64_t> identity, bool focus_visible) {
+  runtime.SynchronizePlatformViewFocus(identity, focus_visible);
+}
+
+bool InternalAccess::MoveFocusFromPlatformView(Runtime& runtime, std::uint64_t identity, bool reverse) {
+  return runtime.MoveFocusFromPlatformView(identity, reverse);
+}
+
+std::optional<PlatformPayload> InternalAccess::DispatchPlatformViewEvent(
+    Runtime& runtime, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
+) {
+  return runtime.DispatchPlatformViewEvent(identity, name, payload);
+}
+
+std::optional<PlatformValue> InternalAccess::DispatchPlatformViewEvent(
+    Runtime& runtime, std::uint64_t identity, std::type_index key, const PlatformValue& value
+) {
+  return runtime.DispatchPlatformViewEvent(identity, key, value);
 }
 
 } // namespace huxerui::detail
