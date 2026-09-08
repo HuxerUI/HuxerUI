@@ -115,7 +115,7 @@ If the producer device is removed, publish a replacement texture from a valid de
 
 The macOS backend requires macOS 12 or later.
 The macOS backend uses AppKit, Core Graphics, Core Text, and `NSTextInputClient`.
-Build with Xcode and the macOS SDK.
+Build with Xcode 26 or later and the macOS SDK; release CI uses Xcode 26.2. This toolchain requirement does not raise the macOS 12 deployment target.
 
 Custom chrome extends application content into the title bar while preserving AppKit traffic lights and window behavior.
 External file references preserve security-scoped access when required.
@@ -287,7 +287,7 @@ Termux diagnosis and setup do not require `sdkmanager`, platform-tools, or ADB b
 ## iOS
 
 The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
-Build on macOS with Xcode and an installed simulator runtime or paired device.
+Build on macOS with Xcode 26 or later and an installed simulator runtime or paired device; release CI uses Xcode 26.2. This toolchain requirement does not raise the iOS 15 deployment target.
 
 ```bash
 huxerui devices ios

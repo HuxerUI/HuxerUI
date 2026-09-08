@@ -10,6 +10,8 @@ Application developers using a released SDK should follow [Getting Started](../g
 - A C++20 compiler
 - The required platform SDK and dependencies
 
+Apple builds require Xcode 26 or later for the standard library's `std::stop_token` and `std::stop_source` support without experimental-library flags. Release CI selects Xcode 26.2 explicitly through `DEVELOPER_DIR` for iOS artifacts and both macOS architectures, including their host-tool builds. For a local build, select a supported Xcode before configuring a fresh build directory. The build-machine requirement is separate from the deployment targets, which remain iOS 15.0 and macOS 12.0.
+
 Linux additionally requires GTK 4.14 or later, libepoxy, Pango, Cairo, GIO, and libsoup 3 development packages discoverable through pkg-config.
 
 Debian or Ubuntu:
