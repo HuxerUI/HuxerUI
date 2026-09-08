@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "process_runner.h"
+#include "sdk.h"
 #include "template.h"
 
 namespace huxerui::cli {

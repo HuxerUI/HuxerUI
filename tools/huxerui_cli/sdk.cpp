@@ -3,8 +3,10 @@
 #include <array>
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <ostream>
 #include <random>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -75,10 +77,6 @@ bool IsInstalledHome(const std::filesystem::path& path) {
          std::filesystem::is_directory(ApplicationDevelopmentSkillDirectory(path, SdkLayout::Installed));
 }
 
-bool IsSdkHome(const std::filesystem::path& path) {
-  return IsSourceHome(path) || IsInstalledHome(path);
-}
-
 std::filesystem::path Normalize(const std::filesystem::path& path) {
   std::error_code error;
   const std::filesystem::path normalized = std::filesystem::weakly_canonical(path, error);
@@ -114,14 +112,7 @@ std::filesystem::path ExecutablePath(std::string_view argument_zero) {
 
 SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
   if (const std::optional<std::string> environment = ReadEnvironmentVariable("HUXERUI_HOME")) {
-    if (environment->empty()) {
-      throw std::runtime_error("HUXERUI_HOME is empty");
-    }
-    const std::filesystem::path home = Normalize(*environment);
-    if (!IsSdkHome(home)) {
-      throw std::runtime_error("HUXERUI_HOME is not a HuxerUI SDK or source checkout: " + home.string());
-    }
-    return {home, SdkLocationSource::Environment};
+    return {environment->empty() ? std::filesystem::path{} : Normalize(*environment), SdkLocationSource::Environment};
   }
 
   const std::filesystem::path executable_directory = executable_path.parent_path();
@@ -130,7 +121,7 @@ SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
       executable_directory.parent_path().parent_path(),
   };
   for (const std::filesystem::path& candidate : candidates) {
-    if (IsSdkHome(candidate)) {
+    if (IsInstalledHome(candidate)) {
       return {Normalize(candidate), SdkLocationSource::Executable};
     }
   }
@@ -143,6 +134,29 @@ std::filesystem::path ResolveHuxerUISource(const std::filesystem::path& path) {
     throw std::runtime_error("HuxerUI source checkout is invalid: " + source.string());
   }
   return source;
+}
+
+std::string BuildHomeKey(const std::filesystem::path& home) {
+  const std::string location = Normalize(home).generic_string();
+  std::uint64_t hash = 14695981039346656037ULL;
+  for (const unsigned char character : location) {
+    hash = (hash ^ character) * 1099511628211ULL;
+  }
+  std::ostringstream key;
+  key << "home-" << std::hex << std::setw(16) << std::setfill('0') << hash;
+  return key.str();
+}
+
+std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
+    const std::optional<std::filesystem::path>& source, const std::filesystem::path& working_directory) {
+  if (source) {
+    return ResolveHuxerUISource(source->is_absolute() ? *source : working_directory / *source);
+  }
+  const auto home = sdk_home.empty() ? std::filesystem::path{} : Normalize(sdk_home);
+  if (home.empty() || !IsInstalledHome(home)) {
+    throw std::runtime_error("HuxerUI build requires an installed SDK in HUXERUI_HOME or an explicit --source <path>");
+  }
+  return home;
 }
 
 void ValidateSdkUpdate(const SdkLocation& sdk, const std::filesystem::path& executable_path) {
@@ -246,7 +260,16 @@ int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool chec
 
 std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home) {
   if (huxerui_home.empty()) {
-    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or set HUXERUI_HOME");
+    for (auto directory = ExecutablePath({}).parent_path(); !directory.empty(); directory = directory.parent_path()) {
+      const auto skill = ApplicationDevelopmentSkillDirectory(directory, SdkLayout::Source);
+      if (std::filesystem::is_regular_file(skill / "SKILL.md")) {
+        return skill;
+      }
+      if (directory == directory.root_path()) {
+        break;
+      }
+    }
+    throw std::runtime_error("HuxerUI application development skill is unavailable; install the SDK or use --agent none");
   }
   for (const SdkLayout layout : {SdkLayout::Installed, SdkLayout::Source}) {
     const std::filesystem::path skill = ApplicationDevelopmentSkillDirectory(huxerui_home, layout);

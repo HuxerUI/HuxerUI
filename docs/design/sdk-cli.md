@@ -212,7 +212,9 @@ Windows and Linux require no platform projection when their library integration 
 
 The library graph never contains an application identifier, SDK or NDK versions, ABIs, product names, permissions, platform dependencies, hooks, resource namespaces, or SDK selection.
 Those values remain in their owning Gradle, Xcode, platform package, or CMake files.
-Deleting `.huxerui/generated` and configuring again must reproduce the library graph and derived platform-package integration.
+Only the CLI's graph-only configure writes the platform library graph, once at the end of the application directory; normal native configurations never overwrite it.
+The CLI supplies the graph output path, and unchanged graph content preserves its timestamp.
+Deleting `.huxerui/generated` and running `huxerui build android`, `huxerui build ios`, or `huxerui open ios` reproduces the graph and required platform-package integration.
 The CLI never parses `CMakeLists.txt` or `HuxerUIProject.cmake` as source text.
 
 ## CLI surface
@@ -329,11 +331,11 @@ Desktop drivers do not expose synthetic devices.
 
 ### Build
 
-Builds retain platform output below `.huxerui/build/<platform>/<profile>`. iOS uses explicit `ios-simulator` and `ios-device` DerivedData roots so Simulator and device products, intermediates, architectures, and signing state never share one directory.
+CLI-managed build directories live below `.huxerui/build/<home-key>/<platform>/<profile>`. iOS uses explicit `ios-simulator` and `ios-device` DerivedData roots so Simulator and device products, intermediates, architectures, and signing state never share one directory.
 The CLI validates the complete requested set before executing commands and prints each platform command.
 `build`, `run`, `package`, and `open ios` accept `--source <path>` as a strict per-invocation HuxerUI source-checkout override.
 The override replaces only the effective HuxerUI home passed through the existing platform command context and child-process environment; it does not persist or rewrite the parent shell's installed SDK selection.
-Configure commands always pass the effective home through `-DHUXERUI_HOME`, so an existing CMake cache can switch between the installed SDK and source checkout without a parallel build workflow or another build directory convention.
+Configure commands pass the effective home through `-DHUXERUI_HOME`. Each framework location uses its own CMake cache, so switching between an installed SDK and a source checkout preserves both incremental builds.
 
 Desktop builds configure the root CMake project and then build it.
 Fresh Linux and macOS builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
@@ -347,7 +349,10 @@ iOS builds invoke the source-controlled Xcode project. A build without `--device
 Android builds invoke the source-controlled Gradle shell, whose `externalNativeBuild` configures the repository root `CMakeLists.txt` directly.
 Gradle owns the application namespace, application identifier, compile and target SDK versions, minimum SDK, NDK version, ABI filters, dependencies, manifest merging, signing, and APK output.
 The application attaches each consumed library's `platform/android` Gradle library in library-graph order.
-Before Gradle starts, the CLI incrementally configures the same root project with `HUXERUI_LIBRARY_GRAPH_ONLY=ON` to refresh only the platform-neutral library graph needed during Gradle settings evaluation. This mode records the declared application and library relationships without enabling C++, configuring a host platform backend, creating an application target, compiling sources, or scheduling resources. Its dedicated build directory is independent of Gradle, Xcode, and platform build directories.
+Before Gradle starts, the CLI incrementally configures the same root project with `HUXERUI_LIBRARY_GRAPH_ONLY=ON` to refresh only the platform-neutral library graph needed during Gradle settings evaluation. This mode records the declared application and library relationships without enabling C++, configuring a host platform backend, creating a native application target, compiling sources, or scheduling resources. Its dedicated build directory is independent of Gradle, Xcode, and platform build directories.
+Both source and installed SDK entry points use the same declaration-only framework targets in this mode; installed headers, resources, host libraries, and platform dependencies are not loaded for graph discovery.
+Application and library helpers create non-compiling interface targets for dependency discovery. Library aliases and `huxerui_use_library` declarations remain available in both modes, while compiler settings, platform dependency discovery, resource build operations, and other native target configuration stay outside graph-only execution. Generated library templates return after declaring the library and its alias; custom library CMake files must preserve that boundary when adding native configuration.
+The iOS Swift package projection is written only when its content changes.
 The ABI-specific C++ build remains exclusively owned by Gradle's root-project `externalNativeBuild` invocation.
 The Android application shared library defaults to its CMake target name; `OUTPUT_NAME` and configuration postfixes remain target-owned.
 The shell supplies `HUXERUI_ANDROID_APP_INTEGRATION_ROOT` with a variant-specific build directory, and each real NDK configure generates the existing application integration plan at `<root>/<abi>/app.json` with its final artifact path.
@@ -506,17 +511,21 @@ The Windows target exports are generated by installing Debug and Release from on
 The CLI resolves its home in this order:
 
 - A valid explicit `HUXERUI_HOME`.
-- A valid installation or source root derived from the running `huxerui` executable.
+- A valid installed SDK derived from the running `huxerui` executable.
 
-The CLI validates the resolved root, exports the resolved `HUXERUI_HOME` to CMake, Gradle, Xcode, and other child processes, and reports the source of the selection through `doctor`.
-For build-owning commands, `--source <path>` may replace that resolved home with a validated source checkout for the current invocation only.
-It is not a second installed-SDK selector: `doctor`, `setup`, project creation, and platform-shell generation continue to use the normally resolved SDK, while build children receive the effective home through the existing environment and platform configuration.
+SDK discovery locates the configured candidate without rejecting it before command parsing. Build commands validate it as an installed SDK unless an explicit `--source <path>` supplies a source checkout; the override works without an installed SDK and takes precedence over an invalid `HUXERUI_HOME`.
+The CLI exports the effective `HUXERUI_HOME` to build children. It never changes the parent shell or persistent system environment, and `doctor` diagnoses the normally selected installed SDK.
+A source path in `HUXERUI_HOME` alone does not enable source builds. Every CLI invocation without `--source` requires an installed SDK.
+It is not a second installed-SDK selector: `doctor`, `setup`, project creation, and platform-shell generation continue to use the normally resolved SDK, while build children receive the effective home through the process environment and build arguments.
 The CLI must remain usable when the environment variable is absent, because a platform installer can place `huxerui` on `PATH` more reliably than every operating system can persist an arbitrary environment variable for all shells and GUI processes.
-Direct CMake consumers may set `HUXERUI_HOME` or use the standard `CMAKE_PREFIX_PATH` package lookup.
+Generated projects accept `HUXERUI_HOME` as the framework location and load its source or installed layout. Direct consumers of the installed package may still use standard `find_package(HuxerUI CONFIG REQUIRED)` lookup.
 The former `HUXERUI_SDK_ROOT` input has been removed rather than retained as an alias.
 
 A source root exposes the same canonical targets, helpers, tools, and resource contract as a local development override.
-The application root CMake project therefore does not branch into a second source-SDK application model.
+Project templates use `add_subdirectory` for the selected source checkout and `find_package` for an installed SDK. Both expose the same application, library, resource, and codegen helpers, and both enter declaration-only graph discovery without configuring native framework targets. No separate source package entry point or build-mode setting is required.
+CLI-managed CMake directories live under `.huxerui/build/<home-key>/<platform>/<profile>`; the home key derives only from the normalized framework location. Graph discovery uses `<home-key>/library-graph`. Switching framework locations preserves independent caches instead of reusing imported-target or source-build state.
+Android reads the effective `HUXERUI_HOME` from the child-process environment. Gradle loads the matching source project or AAR and passes the home to externalNativeBuild, whose argument-specific CMake directories separate native configurations. iOS receives the home as an explicit `xcodebuild` setting, and the CLI's home-specific DerivedData path separates native configurations. The CLI does not write framework selection into `local.properties` or `Local.xcconfig`; existing Android SDK and signing settings remain user-owned. Direct IDE builds use the IDE's environment or explicit build settings and do not retain the CLI's last `--source` selection.
+The executable's embedded templates and source-tree development skill lookup remain separate from framework build selection.
 No `sdk.json` is required: standard CMake and platform-package metadata describe the installed SDK and platform artifacts, while platform-specific facts remain in the platform integration that owns them.
 
 ### Platform release forms
@@ -641,7 +650,7 @@ Missing PlatformView, accessibility, or library capabilities are backend limitat
 ### Web
 
 The shell supplies the browser-owned HTML document and empty host element used by the adapter-owned composition root.
-The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/web`, and uses `emrun` for local development on desktop hosts.
+The driver wraps the existing Emscripten CMake backend with `emcmake`, retains incremental output under `.huxerui/build/<home-key>/web`, and uses `emrun` for local development on desktop hosts.
 It does not define a parallel JavaScript component system or expose browsers as synthetic devices.
 Termux instead uses Python's standard-library HTTP server because `emrun` does not recognize Android hosts, then opens the bound loopback URL through `termux-open`.
 Formal distribution uses an Emscripten-compatible SDK archive, and a source checkout remains an explicit override of the same root-project configuration.
@@ -665,9 +674,9 @@ The shell is a source-controlled Xcode application project. It owns the Info.pli
 
 On iOS, the application-core archive contains the static `Application` declaration, while the shell's minimal Objective-C++ `main.mm` calls `RunApplication()`. `huxerui_add_app()` produces an application-core archive instead of another executable or App Bundle. CMake places the archive, linker response file, and merged HuxerUI resource package under `huxerui-ios/<target>` so every Xcode shell consumes the same stable application-core contract. CMake remains responsible for the common C++ sources, composable code generation, resource generation, and linking the selected installed or source HuxerUI static target. Xcode remains responsible for process entry, platform resources, destination selection, signing, packaging, installation metadata, and debugging, and fails its staging phase when the merged HuxerUI resource package is absent.
 
-iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; only `HUXERUI_HOME` resolution changes. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding are not part of the current SDK workflow.
+iOS has one application build path. Source-checkout development and a packaged SDK use the same application-core contract; the selected `HUXERUI_HOME` determines whether the framework is imported or compiled. The driver discovers paired devices and booted Simulators, invokes `xcodebuild`, installs through `devicectl` or `simctl`, and opens the checked-in project directly. Distribution export automation and public UIView embedding are not part of the current SDK workflow.
 
-`huxerui open ios` writes the resolved SDK location only to the ignored local Xcode configuration. Repository examples use one source-controlled platform runner whose `HUXERUI_APP_TARGET` build setting selects an `example_*` application core; adding an example does not add another Xcode project or platform application target.
+`huxerui open ios` refreshes library integration and opens the Xcode project without modifying local framework or signing settings. Repository examples use one source-controlled platform runner whose `HUXERUI_APP_TARGET` build setting selects an `example_*` application core; adding an example does not add another Xcode project or platform application target.
 
 ## Libraries and platform integration
 

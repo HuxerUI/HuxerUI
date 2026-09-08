@@ -154,14 +154,15 @@ std::vector<ProcessCommand> DesktopPackageStageCommands(const PlatformCommandCon
 }
 
 std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandContext& context) {
-  const std::filesystem::path build_directory = context.project_root / ".huxerui/build/library-graph";
+  const std::filesystem::path build_directory = context.project_root / ".huxerui/build" /
+      BuildHomeKey(context.huxerui_home) / "library-graph";
   std::vector<std::string> arguments{
       "-S",
       context.project_root.string(),
       "-B",
       build_directory.string(),
-      "-DCMAKE_BUILD_TYPE=Debug",
       "-DHUXERUI_LIBRARY_GRAPH_ONLY=ON",
+      "-DHUXERUI_LIBRARY_GRAPH_OUTPUT=" + (context.project_root / ".huxerui/generated/libraries.json").string(),
       "-DHUXERUI_HOME=" + context.huxerui_home.string(),
   };
   if (!std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&

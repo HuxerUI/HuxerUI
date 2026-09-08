@@ -81,9 +81,10 @@ std::vector<std::string> ExpectedLibraryGraphArguments(const huxerui::cli::Platf
       "-S",
       context.project_root.string(),
       "-B",
-      (context.project_root / ".huxerui/build/library-graph").string(),
-      "-DCMAKE_BUILD_TYPE=Debug",
+      (context.project_root / ".huxerui/build" /
+       huxerui::cli::BuildHomeKey(context.huxerui_home) / "library-graph").string(),
       "-DHUXERUI_LIBRARY_GRAPH_ONLY=ON",
+      "-DHUXERUI_LIBRARY_GRAPH_OUTPUT=" + (context.project_root / ".huxerui/generated/libraries.json").string(),
       "-DHUXERUI_HOME=" + context.huxerui_home.string(),
   };
   if (!huxerui::cli::ReadEnvironmentVariable("CMAKE_GENERATOR") && huxerui::cli::FindExecutable("ninja")) {
@@ -155,6 +156,39 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
   REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
   REQUIRE(invocation.output.find("a common library's Preview enable all platforms") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliBuildSelectionRequiresAnExplicitSourceOverride") {
+  using namespace huxerui::cli;
+  TemporaryDirectory temporary;
+  const auto source = std::filesystem::path(HUXERUI_TEST_SOURCE_DIRECTORY);
+  REQUIRE_THROWS_WITH(ResolveBuildHome(source, std::nullopt, temporary.Path()),
+                      Catch::Matchers::ContainsSubstring("--source"));
+  REQUIRE_THROWS_AS(ResolveBuildHome({}, std::nullopt, temporary.Path()), std::runtime_error);
+  const auto selected = ResolveBuildHome(temporary.Path() / "missing-sdk", source, temporary.Path());
+  REQUIRE(std::filesystem::equivalent(selected, source));
+  REQUIRE(BuildHomeKey(selected) == BuildHomeKey(source / "."));
+  REQUIRE(BuildHomeKey(selected) != BuildHomeKey(temporary.Path()));
+}
+
+TEST_CASE("HuxerUICliPreservesAndroidLocalSettings") {
+  using namespace huxerui::cli;
+  TemporaryDirectory temporary;
+  const auto local = temporary.Path() / "platform/android/local.properties";
+  PlatformCommandContext context;
+  context.project_root = temporary.Path();
+  context.huxerui_home = HUXERUI_TEST_SOURCE_DIRECTORY;
+  const auto* android = FindPlatformDriver("android");
+  android->UpdateProjectIntegration(context);
+  REQUIRE_FALSE(std::filesystem::exists(local));
+
+  std::filesystem::create_directories(local.parent_path());
+  const std::string original = "sdk.dir=D:/Android/Sdk\n";
+  std::ofstream(local) << original;
+  const auto timestamp = std::filesystem::last_write_time(local);
+  android->UpdateProjectIntegration(context);
+  REQUIRE(Read(local) == original);
+  REQUIRE(std::filesystem::last_write_time(local) == timestamp);
 }
 
 TEST_CASE("HuxerUICliValidatesExplicitSourceCheckouts") {
@@ -365,14 +399,14 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   const std::string project_cmake = Read(project / "HuxerUIProject.cmake");
   REQUIRE(project_cmake.find("NO_CMAKE_FIND_ROOT_PATH") != std::string::npos);
   REQUIRE(project_cmake.find("\"id\": \"dev.example.sampleapp\"") != std::string::npos);
-  REQUIRE(project_cmake.find("HUXERUI_LIBRARY_GRAPH_OUTPUT") != std::string::npos);
+  REQUIRE(project_cmake.find("HUXERUI_LIBRARY_GRAPH_OUTPUT") == std::string::npos);
   REQUIRE(project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   REQUIRE(project_cmake.find("if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)\n    enable_language(CXX)") !=
           std::string::npos);
   REQUIRE(project_cmake.find("enable_language(RC)") != std::string::npos);
   REQUIRE(project_cmake.find("\"${HUXERUI_WINDOWS_RESOURCE}\"") != std::string::npos);
-  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_SHARED ON CACHE BOOL \"\" FORCE)") != std::string::npos);
-  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_STATIC OFF CACHE BOOL \"\" FORCE)") != std::string::npos);
+  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_SHARED ON") != std::string::npos);
+  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_STATIC OFF") != std::string::npos);
   REQUIRE(project_cmake.find("RESOURCE_OUTPUT_DIRECTORY") != std::string::npos);
   REQUIRE(project_cmake.find("function(huxerui_configure_project_app target_name)") != std::string::npos);
   const std::string application = Read(project / "src/app.cpp");
@@ -1592,6 +1626,7 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   const huxerui::cli::PlatformCommandContext context{project, temporary.Path() / "sdk", {}, {}, "debug", {}};
   ios->UpdateProjectIntegration(context);
 
+  REQUIRE_FALSE(std::filesystem::exists(project / "platform/ios/Config/Local.xcconfig"));
   const std::filesystem::path integration = project / ".huxerui/generated/ios/libraries";
   const std::string manifest = Read(integration / "Package.swift");
   const std::size_t camera_dependency = manifest.find(".package(name: \"HuxerUICameraKit\"");
@@ -1605,6 +1640,18 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   REQUIRE(manifest.find("CommonTools") == std::string::npos);
   REQUIRE(manifest.find(camera.generic_string()) != std::string::npos);
   REQUIRE(std::filesystem::is_regular_file(integration / "Sources/HuxerUILibraries/HuxerUILibraries.swift"));
+  const std::array unchanged_files{
+      integration / "Package.swift",
+      integration / "Sources/HuxerUILibraries/HuxerUILibraries.swift",
+  };
+  const auto previous_time = std::filesystem::file_time_type::clock::now() - std::chrono::hours(24);
+  for (const auto& file : unchanged_files) {
+    std::filesystem::last_write_time(file, previous_time);
+  }
+  ios->UpdateProjectIntegration(context);
+  for (const auto& file : unchanged_files) {
+    REQUIRE(std::filesystem::last_write_time(file) == previous_time);
+  }
 }
 
 TEST_CASE("HuxerUICliRejectsIncompleteIosLibraryPackages") {
@@ -1627,24 +1674,27 @@ TEST_CASE("HuxerUICliRejectsIncompleteIosLibraryPackages") {
   );
 }
 
-TEST_CASE("HuxerUICliConfiguresIosHomeWithoutReplacingLocalSigningSettings") {
+TEST_CASE("HuxerUICliPreservesIosLocalSettings") {
   TemporaryDirectory temporary;
   const std::filesystem::path configuration = temporary.Path() / "platform/ios/Config/Local.xcconfig";
   const std::filesystem::path huxerui_home = temporary.Path() / "installed sdk";
   std::filesystem::create_directories(configuration.parent_path());
   std::filesystem::create_directories(temporary.Path() / ".huxerui/generated");
   std::ofstream(temporary.Path() / ".huxerui/generated/libraries.json") << "{\"schema\":1,\"libraries\":[]}";
-  std::ofstream(configuration) << "DEVELOPMENT_TEAM = ABC123\nHUXERUI_HOME = /old/sdk\n";
+  const std::string original = "DEVELOPMENT_TEAM = ABC123\nHUXERUI_HOME = /ide/sdk\n";
+  std::ofstream(configuration) << original;
+  const auto timestamp = std::filesystem::last_write_time(configuration);
 
   const huxerui::cli::PlatformDriver* ios = huxerui::cli::FindPlatformDriver("ios");
   REQUIRE(ios != nullptr);
-  const huxerui::cli::PlatformCommandContext context{temporary.Path(), huxerui_home, {}, {}, "debug", {}};
+  huxerui::cli::PlatformCommandContext context{temporary.Path(), huxerui_home, {}, {}, "debug", {}};
   ios->UpdateProjectIntegration(context);
-
-  const std::string content = Read(configuration);
-  REQUIRE(content.find("DEVELOPMENT_TEAM = ABC123") != std::string::npos);
-  REQUIRE(content.find("HUXERUI_HOME = " + huxerui_home.generic_string()) != std::string::npos);
-  REQUIRE(content.find("/old/sdk") == std::string::npos);
+  REQUIRE(Read(configuration) == original);
+  REQUIRE(std::filesystem::last_write_time(configuration) == timestamp);
+  context.huxerui_home = HUXERUI_TEST_SOURCE_DIRECTORY;
+  ios->UpdateProjectIntegration(context);
+  REQUIRE(Read(configuration) == original);
+  REQUIRE(std::filesystem::last_write_time(configuration) == timestamp);
 }
 
 TEST_CASE("HuxerUICliParsesIosDeviceStates") {
@@ -1745,7 +1795,7 @@ TEST_CASE("HuxerUICliRejectsDeviceSelectionForDesktopRunsBeforeBuilding") {
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
-  const std::vector<std::string_view> arguments{"run", "windows", "--device", "phone"};
+  const std::vector<std::string_view> arguments{"run", "windows", "--device", "phone", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;
@@ -1776,7 +1826,7 @@ TEST_CASE("HuxerUICliRejectsJavaHomeOverridesForNonAndroidBuilds") {
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
-  const std::vector<std::string_view> arguments{"build", "windows", "--java-home", "jdk"};
+  const std::vector<std::string_view> arguments{"build", "windows", "--java-home", "jdk", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;
@@ -1801,7 +1851,7 @@ TEST_CASE("HuxerUICliValidatesJavaHomeOverridesBeforeAndroidBuilds") {
   const std::filesystem::path project = temporary.Path() / "sample";
   const std::filesystem::path java_home = project / "jdk";
   std::filesystem::create_directories(java_home);
-  const std::vector<std::string_view> arguments{"build", "android", "--java-home", "jdk"};
+  const std::vector<std::string_view> arguments{"build", "android", "--java-home", "jdk", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;
@@ -1830,7 +1880,7 @@ TEST_CASE("HuxerUICliRejectsUnknownProjectPlatformsBeforeRun") {
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
   std::filesystem::create_directories(project / "platform/custom");
-  const std::vector<std::string_view> arguments{"run", "windows"};
+  const std::vector<std::string_view> arguments{"run", "windows", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;
@@ -1851,6 +1901,14 @@ TEST_CASE("HuxerUICliRejectsUnknownProjectPlatformsBeforeRun") {
 
 TEST_CASE("HuxerUICliDoctorReportsTheResolvedSdk") {
   TemporaryDirectory temporary;
+  for (const auto directory : {"include/huxerui", "lib/cmake/HuxerUI", "share/huxerui/tools",
+                               "share/huxerui/resources/huxerui", "share/huxerui/skills/huxerui-app-development"}) {
+    std::filesystem::create_directories(temporary.Path() / directory);
+  }
+  for (const auto file : {"include/huxerui/huxerui.h", "lib/cmake/HuxerUI/HuxerUIConfig.cmake",
+                          "share/huxerui/resources/huxerui/resources.bin"}) {
+    std::ofstream(temporary.Path() / file) << "fixture";
+  }
   const std::optional<std::filesystem::path> cmake = huxerui::cli::FindExecutable("cmake");
   REQUIRE(cmake);
   const std::vector<std::string_view> arguments{"doctor"};

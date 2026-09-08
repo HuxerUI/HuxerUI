@@ -236,27 +236,27 @@ file(MAKE_DIRECTORY
         "${LIBRARY_GRAPH_SECOND_ROOT}"
 )
 file(WRITE "${LIBRARY_GRAPH_PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
+file(WRITE "${LIBRARY_GRAPH_FIRST_ROOT}/CMakeLists.txt"
+        "huxerui_add_library(first_library SOURCES first.cpp)\n"
+        "add_library(FirstLibrary::FirstLibrary ALIAS first_library)\n"
+)
+file(WRITE "${LIBRARY_GRAPH_SECOND_ROOT}/CMakeLists.txt"
+        "huxerui_add_library(second_library SOURCES second.cpp)\n"
+        "add_library(SecondLibrary::SecondLibrary ALIAS second_library)\n"
+)
 file(WRITE "${LIBRARY_GRAPH_PROJECT_ROOT}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.20)\n"
-        "project(library_graph LANGUAGES CXX)\n"
+        "project(library_graph LANGUAGES NONE)\n"
         "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUILibraries.cmake\")\n"
         "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUIApp.cmake\")\n"
         "set(HUXERUI_LIBRARY_GRAPH_ONLY ON)\n"
         "set(HUXERUI_LIBRARY_GRAPH_OUTPUT \"${LIBRARY_GRAPH_OUTPUT}\")\n"
         "huxerui_add_app(library_app SOURCES main.cpp)\n"
-        "add_library(first_library INTERFACE)\n"
-        "set_property(TARGET first_library PROPERTY HUXERUI_LIBRARY TRUE)\n"
-        "set_property(TARGET first_library PROPERTY HUXERUI_LIBRARY_SOURCE_ROOT \"${LIBRARY_GRAPH_FIRST_ROOT}\")\n"
-        "add_library(FirstLibrary::FirstLibrary ALIAS first_library)\n"
-        "add_library(second_library INTERFACE)\n"
-        "set_property(TARGET second_library PROPERTY HUXERUI_LIBRARY TRUE)\n"
-        "set_property(TARGET second_library PROPERTY HUXERUI_LIBRARY_SOURCE_ROOT \"${LIBRARY_GRAPH_SECOND_ROOT}\")\n"
-        "add_library(SecondLibrary::SecondLibrary ALIAS second_library)\n"
         "add_library(predeclared_library INTERFACE)\n"
         "set_property(TARGET predeclared_library PROPERTY HUXERUI_LIBRARY TRUE)\n"
-        "huxerui_use_library(library_app TARGET SecondLibrary::SecondLibrary)\n"
+        "huxerui_use_library(library_app TARGET SecondLibrary::SecondLibrary PATH \"${LIBRARY_GRAPH_SECOND_ROOT}\")\n"
         "huxerui_use_library(library_app TARGET predeclared_library)\n"
-        "huxerui_use_library(library_app TARGET FirstLibrary::FirstLibrary)\n"
+        "huxerui_use_library(library_app TARGET FirstLibrary::FirstLibrary PATH \"${LIBRARY_GRAPH_FIRST_ROOT}\")\n"
 )
 execute_process(
         COMMAND "${CMAKE_COMMAND}"

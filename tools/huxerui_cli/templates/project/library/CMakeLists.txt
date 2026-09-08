@@ -63,9 +63,13 @@ huxerui_add_library(@LIBRARY_IMPLEMENTATION_TARGET@
             @LIBRARY_RESOURCE_NAMESPACE@
 )
 
+@LIBRARY_ALIAS@
+
+if (HUXERUI_LIBRARY_GRAPH_ONLY)
+    return()
+endif ()
+
 target_include_directories(@LIBRARY_IMPLEMENTATION_TARGET@ PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:include>"
 )
-
-@LIBRARY_ALIAS@

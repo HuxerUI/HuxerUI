@@ -2,9 +2,18 @@
 
 #include <filesystem>
 #include <iosfwd>
+#include <optional>
+#include <string>
 #include <string_view>
 
 namespace huxerui::cli {
+
+/// Identifies incremental output by the normalized framework location.
+[[nodiscard]] std::string BuildHomeKey(const std::filesystem::path& home);
+
+/// Validates an explicit source override before validating the configured SDK candidate.
+[[nodiscard]] std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
+    const std::optional<std::filesystem::path>& source, const std::filesystem::path& working_directory);
 
 /// Identifies how the CLI located the active HuxerUI SDK.
 enum class SdkLocationSource {
@@ -29,14 +38,14 @@ struct SdkLocation {
 /// @return An absolute, normalized executable path when the host can resolve it.
 [[nodiscard]] std::filesystem::path ExecutablePath(std::string_view argument_zero);
 
-/// Locates the HuxerUI SDK used by the CLI.
+/// Locates the configured HuxerUI SDK candidate without validating a build selection.
 ///
 /// A defined `HUXERUI_HOME` is authoritative. Otherwise the function inspects the installed layout surrounding the CLI
 /// executable.
 ///
 /// @param executable_path Resolved CLI executable path.
-/// @return The selected SDK location, or a location with source `Missing` when no SDK is available.
-/// @throws std::runtime_error if `HUXERUI_HOME` is defined but does not name a valid HuxerUI SDK or source checkout.
+/// @return The configured location, or source `Missing` when no SDK is available.
+/// Environment selections are validated by the consuming command so --source can override an invalid SDK path.
 [[nodiscard]] SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path);
 
 /// Rejects source checkouts, missing installations, and a CLI belonging to another SDK.

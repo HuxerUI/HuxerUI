@@ -174,11 +174,19 @@ std::vector<EnvironmentDiagnostic> DiagnoseCommonEnvironment(const SdkLocation& 
         {},
     });
   } else {
+    auto status = EnvironmentDiagnosticStatus::Ready;
+    std::string detail = sdk.home.string();
+    try {
+      static_cast<void>(ResolveBuildHome(sdk.home, std::nullopt, {}));
+    } catch (const std::runtime_error& error) {
+      status = EnvironmentDiagnosticStatus::Missing;
+      detail += "; " + std::string(error.what());
+    }
     diagnostics.push_back({
-        EnvironmentDiagnosticStatus::Ready,
+        status,
         "huxerui_home",
         "HUXERUI_HOME (" + std::string(SdkLocationSourceName(sdk.source)) + ")",
-        sdk.home.string(),
+        std::move(detail),
     });
   }
 
@@ -694,14 +702,7 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
 std::filesystem::path ResolveAndExportBuildHome(const std::filesystem::path& sdk_home,
                                                 const std::optional<std::filesystem::path>& source,
                                                 const std::filesystem::path& working_directory) {
-  std::filesystem::path huxerui_home;
-  if (source) {
-    huxerui_home = ResolveHuxerUISource(source->is_absolute() ? *source : working_directory / *source);
-  } else if (sdk_home.empty()) {
-    throw std::runtime_error("cannot locate HUXERUI_HOME; install HuxerUI or use --source <path>");
-  } else {
-    huxerui_home = sdk_home;
-  }
+  const std::filesystem::path huxerui_home = ResolveBuildHome(sdk_home, source, working_directory);
   SetProcessEnvironmentVariable("HUXERUI_HOME", huxerui_home.string());
   return huxerui_home;
 }
@@ -788,7 +789,8 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
     build_variant +=
         options.selected_device && options.selected_device->kind == DeviceKind::Physical ? "-device" : "-simulator";
   }
-  const std::filesystem::path build_directory = project.root / ".huxerui/build" / build_variant / options.profile;
+  const std::filesystem::path build_directory =
+      project.root / ".huxerui/build" / BuildHomeKey(huxerui_home) / build_variant / options.profile;
   std::string cmake_generator = options.cmake_generator;
   if (platform.Id() == "windows") {
     if (!cmake_generator.empty()) {

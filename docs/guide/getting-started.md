@@ -61,7 +61,11 @@ Use `--source <path>` to compile HuxerUI from one explicit source checkout for t
 huxerui run windows --source ../HuxerUI
 ```
 
-The source override applies only to that CLI process and its build children; it does not replace the configured `HUXERUI_HOME` in the parent shell.
+The source override applies only to that CLI process and its build children; it does not replace the configured `HUXERUI_HOME` in the parent shell. It works without an installed SDK. Without `--source`, the CLI requires an installed SDK; setting `HUXERUI_HOME` to a source checkout does not implicitly select source mode.
+
+Direct CMake builds of generated projects use `-DHUXERUI_HOME=<path>`. CMake loads the source checkout or installed package at that location. Use a separate build directory for each framework location; the CLI does this automatically.
+
+The CLI passes the selected framework home through its process environment and build arguments without writing it into platform configuration files. Direct Android Studio builds require `HUXERUI_HOME` in the IDE's environment; direct Xcode builds require it in the IDE's environment or explicit build settings, such as `Config/Local.xcconfig`. An already running IDE does not inherit the CLI's temporary environment or remember its last `--source` selection.
 
 Android and iOS accept a device selected from:
 
@@ -77,6 +81,8 @@ Open the generated iOS project with:
 ```bash
 huxerui open ios
 ```
+
+Android and iOS commands first resolve the CMake library declarations so Gradle and Xcode can attach their platform packages before compiling. This graph-only configure does not require a host C++ compiler or host HuxerUI binaries. Keep library declarations and aliases available under `HUXERUI_LIBRARY_GRAPH_ONLY`; guard native target configuration and platform dependency discovery with `if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)`. The generated library template already separates these operations. After changing library dependencies, run the CLI build command (or `huxerui open ios`) to refresh platform integration before building directly in the IDE.
 
 ## Application source
 

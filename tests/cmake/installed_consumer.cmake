@@ -1,5 +1,5 @@
 foreach (required_variable IN ITEMS
-        BUILD_DIRECTORY BUILD_CONFIG WORK_DIRECTORY INSTALL_BINDIR CLI_SUFFIX PLATFORM_ID HOST_GENERATOR
+        BUILD_DIRECTORY BUILD_CONFIG WORK_DIRECTORY INSTALL_BINDIR CLI_SUFFIX PLATFORM_ID HOST_GENERATOR SOURCE_DIRECTORY
 )
     if (NOT DEFINED ${required_variable})
         message(FATAL_ERROR "${required_variable} is required")
@@ -150,13 +150,13 @@ endif ()
 execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env
                 "HUXERUI_HOME=${TEST_ROOT}/missing"
-                "${HUXERUI_CLI}" --version
+                "${HUXERUI_CLI}" doctor
         RESULT_VARIABLE INVALID_HOME_RESULT
         OUTPUT_VARIABLE INVALID_HOME_OUTPUT
         ERROR_VARIABLE INVALID_HOME_ERROR
 )
 if (INVALID_HOME_RESULT EQUAL 0
-        OR NOT INVALID_HOME_ERROR MATCHES "HUXERUI_HOME is not a HuxerUI SDK or source checkout")
+        OR NOT INVALID_HOME_OUTPUT MATCHES "requires an installed SDK")
     message(FATAL_ERROR "Invalid HUXERUI_HOME was not rejected:\n${INVALID_HOME_OUTPUT}${INVALID_HOME_ERROR}")
 endif ()
 execute_process(
@@ -216,7 +216,7 @@ if (NOT BUILD_RESULT EQUAL 0)
     message(FATAL_ERROR "Installed SDK consumer build failed:\n${BUILD_OUTPUT}${BUILD_ERROR}")
 endif ()
 file(GLOB_RECURSE APP_INTEGRATION_PLANS
-        "${PROJECT_ROOT}/.huxerui/build/*/*/huxerui-integration/*/app.json"
+        "${PROJECT_ROOT}/.huxerui/build/*/*/*/huxerui-integration/*/app.json"
 )
 list(LENGTH APP_INTEGRATION_PLANS APP_INTEGRATION_PLAN_COUNT)
 if (NOT APP_INTEGRATION_PLAN_COUNT EQUAL 1)
@@ -242,5 +242,55 @@ foreach (EXPECTED_CONTENT IN ITEMS
         message(FATAL_ERROR "Installed SDK consumer generated an invalid HuxerUI resource header")
     endif ()
 endforeach ()
+
+execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env "HUXERUI_HOME=${SOURCE_DIRECTORY}"
+                "${HUXERUI_CLI}" build "${PLATFORM_ID}"
+        WORKING_DIRECTORY "${PROJECT_ROOT}"
+        RESULT_VARIABLE IMPLICIT_SOURCE_RESULT OUTPUT_VARIABLE IMPLICIT_SOURCE_OUTPUT ERROR_VARIABLE IMPLICIT_SOURCE_ERROR
+)
+if (IMPLICIT_SOURCE_RESULT EQUAL 0 OR NOT IMPLICIT_SOURCE_ERROR MATCHES "--source")
+    message(FATAL_ERROR "Implicit source selection was not rejected:\n${IMPLICIT_SOURCE_OUTPUT}${IMPLICIT_SOURCE_ERROR}")
+endif ()
+
+set(SOURCE_BUILD_COMMAND
+        "${CMAKE_COMMAND}" -E env "HUXERUI_HOME=${TEST_ROOT}/missing-sdk"
+        "${HUXERUI_CLI}" build "${PLATFORM_ID}" --profile "${BUILD_PROFILE}" --source "${SOURCE_DIRECTORY}"
+)
+if (NOT PLATFORM_ID STREQUAL "windows")
+    list(APPEND SOURCE_BUILD_COMMAND --generator "${HOST_GENERATOR}")
+endif ()
+execute_process(COMMAND ${SOURCE_BUILD_COMMAND}
+        WORKING_DIRECTORY "${PROJECT_ROOT}"
+        RESULT_VARIABLE SOURCE_RESULT OUTPUT_VARIABLE SOURCE_OUTPUT ERROR_VARIABLE SOURCE_ERROR
+)
+if (NOT SOURCE_RESULT EQUAL 0)
+    message(FATAL_ERROR "Explicit source build without an installed SDK failed:\n${SOURCE_OUTPUT}${SOURCE_ERROR}")
+endif ()
+execute_process(COMMAND ${BUILD_COMMAND}
+        WORKING_DIRECTORY "${PROJECT_ROOT}"
+        RESULT_VARIABLE RETURN_RESULT OUTPUT_VARIABLE RETURN_OUTPUT ERROR_VARIABLE RETURN_ERROR
+)
+if (NOT RETURN_RESULT EQUAL 0)
+    message(FATAL_ERROR "Returning to the SDK build failed:\n${RETURN_OUTPUT}${RETURN_ERROR}")
+endif ()
+file(GLOB HOME_CACHES "${PROJECT_ROOT}/.huxerui/build/home-*/*/*/CMakeCache.txt")
+list(LENGTH HOME_CACHES HOME_CACHE_COUNT)
+if (NOT HOME_CACHE_COUNT EQUAL 2)
+    message(FATAL_ERROR "SDK and source locations did not retain independent incremental caches")
+endif ()
+set(CACHED_HOMES)
+foreach (HOME_CACHE IN LISTS HOME_CACHES)
+    file(STRINGS "${HOME_CACHE}" CACHED_HOME REGEX "^HUXERUI_HOME:PATH=")
+    string(REPLACE "HUXERUI_HOME:PATH=" "" CACHED_HOME "${CACHED_HOME}")
+    file(REAL_PATH "${CACHED_HOME}" CACHED_HOME)
+    list(APPEND CACHED_HOMES "${CACHED_HOME}")
+endforeach ()
+file(REAL_PATH "${SOURCE_DIRECTORY}" SOURCE_HOME)
+list(FIND CACHED_HOMES "${SDK_ROOT}" SDK_HOME_INDEX)
+list(FIND CACHED_HOMES "${SOURCE_HOME}" SOURCE_HOME_INDEX)
+if (SDK_HOME_INDEX LESS 0 OR SOURCE_HOME_INDEX LESS 0)
+    message(FATAL_ERROR "Build caches did not preserve the selected SDK and source locations")
+endif ()
 
 file(REMOVE_RECURSE "${TEST_ROOT}")

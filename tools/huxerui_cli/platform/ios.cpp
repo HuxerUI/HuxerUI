@@ -269,10 +269,16 @@ std::string EscapeSwiftString(std::string_view value) {
 }
 
 void WriteIosIntegrationFile(const std::filesystem::path& path, std::string_view content) {
+  if (std::ifstream input(path, std::ios::binary); input) {
+    const std::string existing{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    if (existing == content) {
+      return;
+    }
+  }
   std::filesystem::create_directories(path.parent_path());
   std::ofstream output(path, std::ios::binary | std::ios::trunc);
   if (!output || !output.write(content.data(), static_cast<std::streamsize>(content.size()))) {
-    throw std::runtime_error("HuxerUI cannot write iOS library integration: " + path.string());
+    throw std::runtime_error("HuxerUI cannot write iOS integration: " + path.string());
   }
 }
 
@@ -304,57 +310,6 @@ void UpdateIosLibraryIntegration(const std::filesystem::path& project_root) {
   const std::filesystem::path output = project_root / ".huxerui/generated/ios/libraries";
   for (const GeneratedFile& file : files) {
     WriteIosIntegrationFile(output / file.path, file.content);
-  }
-}
-
-void ConfigureIosLocalHome(const std::filesystem::path& project_root, const std::filesystem::path& huxerui_home) {
-  if (huxerui_home.empty()) {
-    throw std::invalid_argument("HuxerUI iOS local configuration requires HUXERUI_HOME");
-  }
-  const std::filesystem::path configuration = project_root / "platform/ios/Config/Local.xcconfig";
-  if (!std::filesystem::is_directory(configuration.parent_path())) {
-    throw std::runtime_error("HuxerUI iOS configuration directory is missing: " + configuration.parent_path().string());
-  }
-
-  std::string content;
-  if (std::ifstream input(configuration, std::ios::binary); input) {
-    content.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-  }
-
-  constexpr std::string_view setting_name = "HUXERUI_HOME";
-  const std::string setting = std::string(setting_name) + " = " + huxerui_home.generic_string();
-  bool replaced = false;
-  std::size_t line_start = 0;
-  while (line_start < content.size()) {
-    const std::size_t line_end = content.find('\n', line_start);
-    const std::size_t assignment = content.find('=', line_start);
-    if (assignment != std::string::npos && (line_end == std::string::npos || assignment < line_end)) {
-      std::string_view name(content.data() + line_start, assignment - line_start);
-      while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) {
-        name.remove_suffix(1);
-      }
-      if (name == setting_name) {
-        const std::size_t replace_end = line_end == std::string::npos ? content.size() : line_end;
-        content.replace(line_start, replace_end - line_start, setting);
-        replaced = true;
-        break;
-      }
-    }
-    if (line_end == std::string::npos) {
-      break;
-    }
-    line_start = line_end + 1;
-  }
-  if (!replaced) {
-    if (!content.empty() && content.back() != '\n') {
-      content += '\n';
-    }
-    content += setting + '\n';
-  }
-
-  std::ofstream output(configuration, std::ios::binary | std::ios::trunc);
-  if (!output || !output.write(content.data(), static_cast<std::streamsize>(content.size()))) {
-    throw std::runtime_error("HuxerUI cannot update iOS local configuration: " + configuration.string());
   }
 }
 
@@ -478,7 +433,6 @@ public:
 
   void UpdateProjectIntegration(const PlatformCommandContext& context) const override {
     UpdateIosLibraryIntegration(context.project_root);
-    ConfigureIosLocalHome(context.project_root, context.huxerui_home);
   }
 
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {

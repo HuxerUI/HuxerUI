@@ -176,9 +176,8 @@ function(huxerui_add_app target_name)
                 HUXERUI_LIBRARY_GRAPH_OUTPUT
                 "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
         )
-        _huxerui_write_library_graph(
-                ${target_name}
-                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
+        cmake_language(EVAL CODE
+                "cmake_language(DEFER CALL _huxerui_write_library_graph [[${target_name}]])"
         )
         return()
     endif ()
@@ -257,22 +256,6 @@ function(huxerui_add_app target_name)
         huxerui_add_resources(${target_name}
                 ROOT "${HUXERUI_APP_RESOURCE_ROOT}"
                 NAMESPACE "${HUXERUI_APP_RESOURCE_NAMESPACE}"
-        )
-    endif ()
-
-    if (HUXERUI_LIBRARY_GRAPH_OUTPUT)
-        get_filename_component(HUXERUI_APP_LIBRARY_GRAPH_OUTPUT
-                "${HUXERUI_LIBRARY_GRAPH_OUTPUT}"
-                ABSOLUTE
-                BASE_DIR "${CMAKE_BINARY_DIR}"
-        )
-        set_property(TARGET ${target_name} PROPERTY
-                HUXERUI_LIBRARY_GRAPH_OUTPUT
-                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
-        )
-        _huxerui_write_library_graph(
-                ${target_name}
-                "${HUXERUI_APP_LIBRARY_GRAPH_OUTPUT}"
         )
     endif ()
 

@@ -2,6 +2,15 @@ include_guard(GLOBAL)
 
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
 
+function(_huxerui_configure_library_graph_framework)
+    if (TARGET huxerui_library_graph_framework)
+        return()
+    endif ()
+    add_library(huxerui_library_graph_framework INTERFACE)
+    add_library(HuxerUI::huxerui ALIAS huxerui_library_graph_framework)
+    add_library(HuxerUI::huxerui_static ALIAS huxerui_library_graph_framework)
+endfunction()
+
 function(_huxerui_select_framework_target output_variable)
     if (ANDROID)
         if (NOT TARGET HuxerUI::huxerui)
@@ -46,13 +55,14 @@ function(_huxerui_json_escape input output)
     set(${output} "${value}" PARENT_SCOPE)
 endfunction()
 
-function(_huxerui_write_library_graph target_name output_file)
+function(_huxerui_write_library_graph target_name)
     if (NOT TARGET ${target_name})
         message(FATAL_ERROR
                 "HuxerUI library graph application target does not exist: ${target_name}"
         )
     endif ()
 
+    get_property(output_file TARGET ${target_name} PROPERTY HUXERUI_LIBRARY_GRAPH_OUTPUT)
     get_property(HUXERUI_GRAPH_LIBRARIES
             TARGET ${target_name}
             PROPERTY HUXERUI_LIBRARIES
@@ -112,8 +122,10 @@ function(_huxerui_write_library_graph target_name output_file)
             DIRECTORY
     )
     file(MAKE_DIRECTORY "${HUXERUI_GRAPH_DIRECTORY}")
-    file(WRITE "${output_file}"
-            "{\n  \"schema\": 1,\n  \"libraries\": [\n${HUXERUI_GRAPH_ENTRIES}\n  ]\n}\n"
+    set(HUXERUI_GRAPH_CONTENT "{\n  \"schema\": 1,\n  \"libraries\": [\n${HUXERUI_GRAPH_ENTRIES}\n  ]\n}\n")
+    file(CONFIGURE OUTPUT "${output_file}"
+            CONTENT "@HUXERUI_GRAPH_CONTENT@"
+            @ONLY
     )
 endfunction()
 
@@ -155,12 +167,17 @@ function(huxerui_add_library target_name)
                 "huxerui_add_library() currently accepts one resource root"
         )
     endif ()
-    add_library(${target_name} STATIC ${HUXERUI_LIBRARY_SOURCES})
-    target_compile_features(${target_name} PRIVATE cxx_std_20)
-    set_target_properties(${target_name} PROPERTIES
-            CXX_EXTENSIONS OFF
-            POSITION_INDEPENDENT_CODE ON
-    )
+    if (HUXERUI_LIBRARY_GRAPH_ONLY)
+        add_library(${target_name} INTERFACE)
+        set_property(TARGET ${target_name} PROPERTY HUXERUI_LIBRARY_GRAPH_ONLY TRUE)
+    else ()
+        add_library(${target_name} STATIC ${HUXERUI_LIBRARY_SOURCES})
+        target_compile_features(${target_name} PRIVATE cxx_std_20)
+        set_target_properties(${target_name} PROPERTIES
+                CXX_EXTENSIONS OFF
+                POSITION_INDEPENDENT_CODE ON
+        )
+    endif ()
     file(REAL_PATH
             "${CMAKE_CURRENT_SOURCE_DIR}"
             HUXERUI_LIBRARY_SOURCE_ROOT
@@ -394,21 +411,6 @@ function(huxerui_use_library target_name)
             HUXERUI_REQUESTED_LIBRARY_TARGETS
             "${HUXERUI_USE_LIBRARY_TARGET}"
     )
-    get_property(HUXERUI_LIBRARY_GRAPH_OUTPUT_SET
-            TARGET ${target_name}
-            PROPERTY HUXERUI_LIBRARY_GRAPH_OUTPUT
-            SET
-    )
-    if (HUXERUI_LIBRARY_GRAPH_OUTPUT_SET)
-        get_property(HUXERUI_LIBRARY_GRAPH_OUTPUT
-                TARGET ${target_name}
-                PROPERTY HUXERUI_LIBRARY_GRAPH_OUTPUT
-        )
-        _huxerui_write_library_graph(
-                ${target_name}
-                "${HUXERUI_LIBRARY_GRAPH_OUTPUT}"
-        )
-    endif ()
     if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
         get_property(HUXERUI_LIBRARY_RESOURCE_PACKAGE_SET
                 TARGET ${HUXERUI_RESOLVED_LIBRARY_TARGET}

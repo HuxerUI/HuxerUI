@@ -1,6 +1,6 @@
 include_guard(GLOBAL)
 
-include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUILibraries.cmake")
 
 set(HUXERUI_BUILD_CMAKE_DIR "${CMAKE_CURRENT_LIST_DIR}")
 
@@ -60,13 +60,7 @@ endfunction()
 
 function(huxerui_configure_targets)
     if (HUXERUI_LIBRARY_GRAPH_ONLY)
-        add_library(huxerui_library_graph_framework INTERFACE)
-        target_include_directories(huxerui_library_graph_framework INTERFACE
-                $<BUILD_INTERFACE:${HUXERUI_PUBLIC_INCLUDE_DIR}>
-                $<INSTALL_INTERFACE:include>
-        )
-        add_library(HuxerUI::huxerui ALIAS huxerui_library_graph_framework)
-        add_library(HuxerUI::huxerui_static ALIAS huxerui_library_graph_framework)
+        _huxerui_configure_library_graph_framework()
         return()
     endif ()
     if (NOT HUXERUI_BUILD_SHARED AND NOT HUXERUI_BUILD_STATIC)
