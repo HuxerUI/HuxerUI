@@ -82,6 +82,8 @@ const Application application{
 };
 ```
 
+Explore complete application demos in [HuxerUI-Demos](https://github.com/HuxerUI/HuxerUI-Demos), or browse the [examples](examples/) for focused API usage.
+
 ## Platforms
 
 | Platform | Host integration | Renderer |

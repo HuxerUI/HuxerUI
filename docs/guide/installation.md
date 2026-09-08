@@ -44,14 +44,14 @@ Windows:
 
 ```powershell
 Invoke-WebRequest https://github.com/HuxerUI/HuxerUI/releases/latest/download/install.ps1 -OutFile install.ps1
-.\install.ps1 -Version 0.2.0 -Prefix D:\Environment\HuxerUI -Yes
+.\install.ps1 -Version 0.3.0 -Prefix D:\Environment\HuxerUI -Yes
 ```
 
 macOS, Linux, or Android:
 
 ```bash
 curl -fsSLO https://github.com/HuxerUI/HuxerUI/releases/latest/download/install.sh
-sh install.sh --version 0.2.0 --prefix "$HOME/Environment/HuxerUI" --yes
+sh install.sh --version 0.3.0 --prefix "$HOME/Environment/HuxerUI" --yes
 ```
 
 Omitting the version installs the latest GitHub release.
@@ -65,7 +65,7 @@ Update the installed SDK, including its CLI, host tools, headers, libraries, and
 huxerui update --check
 huxerui update
 huxerui update --yes
-huxerui update --version 0.2.0
+huxerui update --version 0.3.0
 ```
 
 Without `--version`, the command selects the latest stable GitHub release and never downgrades a newer installation.
@@ -96,17 +96,17 @@ On macOS and Linux, the command waits for the installer and returns its result.
 Install an already downloaded archive without querying a release:
 
 ```powershell
-.\install.ps1 -Archive .\huxerui-sdk-0.2.0-windows-x86_64.zip -Yes
+.\install.ps1 -Archive .\huxerui-sdk-0.3.0-windows-x86_64.zip -Yes
 ```
 
 ```bash
-sh install.sh --archive ./huxerui-sdk-0.2.0-linux-x86_64.tar.gz --yes
+sh install.sh --archive ./huxerui-sdk-0.3.0-linux-x86_64.tar.gz --yes
 ```
 
 For Android arm64-v8a:
 
 ```bash
-sh install.sh --archive ./huxerui-sdk-0.2.0-android-arm64-v8a.tar.gz --yes
+sh install.sh --archive ./huxerui-sdk-0.3.0-android-arm64-v8a.tar.gz --yes
 ```
 
 Place the matching `.sha256` file beside the archive.
