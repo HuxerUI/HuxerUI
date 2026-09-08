@@ -407,6 +407,16 @@ add_test(NAME HuxerUILibraryValidationTests
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/library_validation.cmake"
 )
 
+if (NOT CMAKE_CROSSCOMPILING AND NOT CMAKE_CONFIGURATION_TYPES)
+    add_test(NAME HuxerUIAndroidAppIntegrationTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                    "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                    "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/android_app_integration.cmake"
+    )
+endif ()
+
 if (WIN32)
     set(HUXERUI_SOURCE_SUBDIRECTORY_WORK_DIRECTORY "$ENV{TEMP}")
 else ()

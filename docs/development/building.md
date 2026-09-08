@@ -124,6 +124,7 @@ cmake --build build --target example_ui_gallery
 
 Desktop binaries or application bundles are emitted under the configured build output.
 Android examples use `platform/android/example_runner`, and iOS examples use the repository platform runner.
+The Android runner resolves the selected example's final CMake shared-library name into `BuildConfig.HUXERUI_APP_LIBRARY`; MainActivity loads it before creating the hosted Runtime, without a fixed application `.so` name.
 
 [`example_buffer_reference`](../../examples/buffer_reference/main.cpp) pulls successive grayscale frames from one fixed native allocation, analyzes row-strided bytes in C++, and displays the mean, histogram, and backing-reference reuse check without converting frames into images.
 Select `-PhuxeruiExample=buffer_reference` on Android or `HUXERUI_APP_TARGET=example_buffer_reference` in the iOS runner; Android uses DirectByteBuffer and Apple uses NSMutableData through PlatformPayload, while Windows and Linux use the C++ reference directly.

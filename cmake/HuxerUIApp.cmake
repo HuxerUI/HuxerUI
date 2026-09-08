@@ -200,9 +200,6 @@ function(huxerui_add_app target_name)
         )
     elseif (ANDROID)
         add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES})
-        set_target_properties(${target_name} PROPERTIES
-                OUTPUT_NAME "huxerui_app"
-        )
     else ()
         add_executable(${target_name} ${HUXERUI_APP_SOURCES})
     endif ()
@@ -298,6 +295,11 @@ function(huxerui_add_app target_name)
     set(HUXERUI_APP_INTEGRATION_PLAN
             "${HUXERUI_APP_INTEGRATION_DIRECTORY}/$<CONFIG>/app.json"
     )
+    if (ANDROID AND HUXERUI_ANDROID_APP_INTEGRATION_ROOT)
+        # Gradle supplies a variant-specific root; each NDK configure owns exactly one ABI and configuration.
+        set(HUXERUI_APP_INTEGRATION_DIRECTORY "${HUXERUI_ANDROID_APP_INTEGRATION_ROOT}/${ANDROID_ABI}")
+        set(HUXERUI_APP_INTEGRATION_PLAN "${HUXERUI_APP_INTEGRATION_DIRECTORY}/app.json")
+    endif ()
     set(HUXERUI_APP_BUNDLE_PATH)
     if (APPLE)
         set(HUXERUI_APP_BUNDLE_PATH "$<TARGET_BUNDLE_DIR:${target_name}>")

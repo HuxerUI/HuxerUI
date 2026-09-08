@@ -243,6 +243,7 @@ TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
 
   REQUIRE(activity != files.end());
   REQUIRE(activity->content.find("package dev.example.sample;") != std::string::npos);
+  REQUIRE(activity->content.find("System.loadLibrary(BuildConfig.HUXERUI_APP_LIBRARY)") != std::string::npos);
   REQUIRE(activity->content.find("@PROJECT_") == std::string::npos);
   REQUIRE_THROWS_WITH(
       huxerui::cli::RenderTemplateTree("project/library", context),
@@ -397,6 +398,24 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(android_app.find("-DHUXERUI_HOME=${huxeruiHome.absolutePath}") != std::string::npos);
   REQUIRE(android_app.find("compileSdk = huxeruiCompileSdk") != std::string::npos);
   REQUIRE(android_app.find("HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT") != std::string::npos);
+  REQUIRE(android_app.find("buildConfig = true") != std::string::npos);
+  REQUIRE(android_app.find("lintOptions {") != std::string::npos);
+  REQUIRE(android_app.find("checkReleaseBuilds = false") != std::string::npos);
+  REQUIRE(android_app.find("abortOnError = false") != std::string::npos);
+  REQUIRE(android_app.find("HUXERUI_ANDROID_APP_INTEGRATION_ROOT") != std::string::npos);
+  REQUIRE(android_app.find("variant.buildConfigFields.put(\"HUXERUI_APP_LIBRARY\", resolveLibrary.map") !=
+          std::string::npos);
+  REQUIRE(android_app.find("variant.artifacts.get(SingleArtifact.MERGED_NATIVE_LIBS.INSTANCE)") != std::string::npos);
+  REQUIRE(android_app.find("inputs.dir(nativeLibraries)") != std::string::npos);
+  REQUIRE(android_app.find("new File(integrationRoot, \"${abiDirectory.name}/app.json\")") != std::string::npos);
+  REQUIRE(android_app.find("new JsonSlurper().parse(planFile)") != std::string::npos);
+  REQUIRE(android_app.find("must match across Android ABIs") != std::string::npos);
+  REQUIRE(android_app.find("new File(abiDirectory, fileName).isFile()") != std::string::npos);
+  REQUIRE(android_app.find("variant.sources.assets.addGeneratedSourceDirectory(stageAssets)") != std::string::npos);
+  REQUIRE(android_app.find("packageDirectories.from(packagedAbis.map") != std::string::npos);
+  REQUIRE(android_app.find("assets.srcDir") == std::string::npos);
+  REQUIRE(android_app.find("registerHuxerUIResourceStaging") == std::string::npos);
+  REQUIRE(android_app.find("huxerui_app") == std::string::npos);
   REQUIRE(android_app.find("huxeruiAbis") != std::string::npos);
   REQUIRE(android_app.find(".cxx") == std::string::npos);
   REQUIRE(android_app.find("lastModified") == std::string::npos);
@@ -407,6 +426,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
           .starts_with(std::string("\x89PNG\r\n\x1a\n", 8))
   );
   REQUIRE(android_properties.find("huxeruiBuildNative=false") != std::string::npos);
+  REQUIRE(android_properties.find("huxeruiAppLibrary") == std::string::npos);
   REQUIRE(android_properties.find("huxeruiCompileSdk=36") != std::string::npos);
   REQUIRE(android_properties.find("huxeruiNdkVersion=29.0.14206865") != std::string::npos);
   const std::string wrapper_properties = Read(project / "platform/android/gradle/wrapper/gradle-wrapper.properties");

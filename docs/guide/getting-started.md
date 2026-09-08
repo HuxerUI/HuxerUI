@@ -178,6 +178,12 @@ Android builds accept `--java-home <path>` to use that JDK for the current CLI i
 The generated `CMakeLists.txt` keeps source discovery, target creation, resources, and library dependencies explicit.
 Its sibling `HuxerUIProject.cmake` contains the generated project plan, SDK discovery, and platform-shell connection details.
 
+On Android, the application library defaults to `lib<cmake-target>.so` and links the shared `libhuxerui.so` framework.
+The generated Gradle shell resolves the final CMake artifact name into `BuildConfig.HUXERUI_APP_LIBRARY`, which MainActivity passes to `System.loadLibrary`; changing `OUTPUT_NAME` or a configuration postfix does not require a second library-name setting in Gradle.
+All packaged ABIs must use the same application library name, and that name must not be `huxerui`.
+Custom Android hosts must load their application library before creating a HuxerUI Runtime; HuxerUIActivity does not load application code on their behalf.
+Existing source-controlled shells are not rewritten by SDK updates: migrate their Gradle integration and MainActivity loading code together when adopting this contract.
+
 Library names remain repository and display identities.
 `--namespace` selects the exact generated C++ namespace, while `--target` selects an unqualified or single-package-qualified public CMake target.
 Package prefixes such as `HuxerUI::` are allowed; the generated targets must not collide with existing CMake targets.

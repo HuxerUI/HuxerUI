@@ -18,10 +18,6 @@ import android.window.OnBackInvokedCallback;
 import android.window.OnBackInvokedDispatcher;
 
 public class HuxerUIActivity extends Activity {
-    static {
-        System.loadLibrary("huxerui_app");
-    }
-
     private HuxerUIView contentView;
     private Object backCallback;
 
