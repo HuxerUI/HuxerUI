@@ -52,6 +52,7 @@ if (IOS)
                 "-framework MobileCoreServices"
                 "-framework QuartzCore"
                 "-framework UIKit"
+                "-framework UserNotifications"
                 "-weak_framework UniformTypeIdentifiers"
         )
         foreach (_HUXERUI_IOS_TARGET IN ITEMS HuxerUI::huxerui HuxerUI::huxerui_static)
