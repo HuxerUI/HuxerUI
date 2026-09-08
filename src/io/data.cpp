@@ -11,6 +11,38 @@
 
 namespace huxerui {
 
+struct BufferReference::Data {
+  std::span<const std::byte> bytes;
+  std::shared_ptr<const void> owner;
+};
+
+BufferReference::BufferReference(std::span<const std::byte> bytes, std::shared_ptr<const void> owner) {
+  if (!bytes.empty() && (!bytes.data() || owner.use_count() == 0)) {
+    throw std::invalid_argument("HuxerUI buffer reference requires retained, address-stable storage");
+  }
+  data_ = std::make_shared<Data>(bytes, std::move(owner));
+  size_ = bytes.size();
+}
+
+std::span<const std::byte> BufferReference::AsBytes() const noexcept {
+  return data_ ? data_->bytes.subspan(offset_, size_) : std::span<const std::byte>{};
+}
+
+BufferReference BufferReference::Slice(std::size_t offset, std::size_t size) const {
+  const std::size_t available = AsBytes().size();
+  if (offset > available || size > available - offset) {
+    throw std::invalid_argument("HuxerUI buffer slice is outside the referenced range");
+  }
+  BufferReference result = *this;
+  result.offset_ = data_ ? offset_ + offset : 0;
+  result.size_ = size;
+  return result;
+}
+
+bool BufferReference::operator==(const BufferReference& other) const noexcept {
+  return data_ == other.data_ && (!data_ || (offset_ == other.offset_ && size_ == other.size_));
+}
+
 namespace {
 
 using detail::HexDigitValue;

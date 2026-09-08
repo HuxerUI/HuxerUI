@@ -969,11 +969,13 @@ Libraries choose virtual functions, concrete values, callbacks, pimpl, or their 
 Stable method strings exist only inside the common call channel or a custom bridge, while Event Keys directly inherit `Event<Result(Arguments...)>` and add only their stable boundary name without redeclaring `Signature`; the concrete request, result, event argument, or event result type owns any required boundary conversion.
 `void` is the uniform no-value contract and maps to a strictly validated Null payload only when crossing a language boundary.
 The common cross-language bridge serializes `PlatformPayload` through one HuxerUI binary envelope.
-The Android SDK, Web adapter, and separate iOS/macOS Objective-C bridges convert that representation to their immutable platform-language `PlatformPayload` APIs through the same value and envelope contract.
+The Android SDK, Web adapter, and separate iOS/macOS Objective-C bridges convert that representation to their structurally immutable platform-language `PlatformPayload` APIs through the same value and envelope contract.
 The Android value type provides explicit construction, exact scalar reads, field and element navigation, unknown-field validation, and path-aware diagnostics without adding a public Reader, Builder, Writer, or Codec.
 Library-defined Java, Swift, Objective-C, and JavaScript boundary types own their local encode and decode operations; the SDK does not provide reflection-based object mapping, JSON conversion, numeric coercion, or public HUXP byte access.
-Library implementations never parse transport bytes, while opaque ExternalTexture values use an envelope-local bridge capability table rather than a public numeric handle.
-Callbacks, arbitrary C++ objects, system handles, and media frames never enter the payload; an ExternalTexture capability retains the same shared platform-owned object used by rendering.
+Library implementations never parse transport bytes, while opaque ExternalTexture, FileReference, and BufferReference values use envelope-local bridge capability tables rather than a public numeric handle.
+Callbacks, arbitrary C++ objects, and system handles never enter the payload; an ExternalTexture capability retains the same shared platform-owned object used by rendering.
+BufferReference retains an address-stable CPU memory range without copying or serializing its bytes; producer synchronization and frame metadata remain library responsibilities.
+Android and Apple bridge this capability; Web rejects it explicitly. Windows and Linux libraries use the C++ type directly.
 
 A library's RootHook explicitly registers each visual or nonvisual factory under a nonempty case-sensitive UTF-8 name such as `WebView`, `web/WebView`, or `audio/Player`.
 Names have no required separator, hierarchy, prefix, or grammar beyond valid UTF-8; `/` is only an optional library naming convention.

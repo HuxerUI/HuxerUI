@@ -12,6 +12,8 @@ add_executable(huxerui_tests
         unit/animation.cpp
         support/builtin_resources.cpp
         unit/application.cpp
+        unit/buffer_reference_example.cpp
+        "${HUXERUI_PROJECT_DIR}/examples/buffer_reference/frame_source.cpp"
         unit/data.cpp
         unit/external_texture.cpp
         unit/file.cpp

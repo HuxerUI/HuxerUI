@@ -239,7 +239,8 @@ final class HuxerUILocalNotification {
             throw new IllegalArgumentException("HuxerUI local notification data exceeds the 64 KiB encoded size limit");
         }
         // No retained resource tables exist after a scheduled notification outlives its process.
-        return PlatformPayload.decodeEnvelope(data, Collections.emptyList(), Collections.emptyList());
+        return PlatformPayload.decodeEnvelope(
+                data, Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
 
     static Uri alarmUri(Context context, String identifier) {

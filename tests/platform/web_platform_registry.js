@@ -46,6 +46,10 @@ global.Module = {
 require(path.resolve(runtimePath));
 
 const Payload = Module.HuxerUI.PlatformPayload;
+assert.throws(
+  () => Payload.decode(new Uint8Array([72, 85, 88, 80, 1, 0, 0, 0, 10, 3, 0, 0, 0, 0])),
+  /does not support BufferReference/
+);
 const FileReference = Module.HuxerUI.FileReference;
 
 const payload = Payload.object({

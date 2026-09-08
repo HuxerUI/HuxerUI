@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +21,44 @@ namespace huxerui {
 /// payload.push_back(std::byte{0x02});
 /// @endcode
 using Bytes = std::vector<std::byte>;
+
+/// A retained, read-only view of address-stable memory, not an immutable byte snapshot.
+/// The owner must keep storage alive without resizing, unmapping, or closing it while any reference survives.
+/// Producers must synchronize writes with readers; retaining a reference does not prevent concurrent mutation.
+/// Copies retain the same backing state. Equality compares that state and the selected range, never byte contents.
+/// Independently wrapping the same address creates distinct references. An empty reference is valid.
+/// Nonempty construction requires an owner; invalid storage throws std::invalid_argument.
+/// @code{.cpp}
+/// auto storage = std::make_shared<Bytes>(4096);
+/// BufferReference frame(*storage, storage);
+/// FillFrame(*storage);
+/// Analyze(frame.AsBytes());
+/// // Reuse storage only after all readers finish; do not resize it.
+/// @endcode
+class BufferReference final {
+public:
+  BufferReference() noexcept = default;
+  BufferReference(std::span<const std::byte> bytes, std::shared_ptr<const void> owner);
+
+  /// Borrows this range without copying. The span does not retain its owner.
+  /// @return Read-only bytes, valid while a reference to the backing state remains alive.
+  [[nodiscard]] std::span<const std::byte> AsBytes() const noexcept;
+
+  /// Retains a subrange with the same backing identity and lifetime.
+  /// @param offset Byte offset relative to this range, including its end for an empty slice.
+  /// @param size Number of bytes to include.
+  /// @return A zero-copy reference to the selected range.
+  /// @throws std::invalid_argument If the range exceeds this reference.
+  [[nodiscard]] BufferReference Slice(std::size_t offset, std::size_t size) const;
+
+  bool operator==(const BufferReference& other) const noexcept;
+
+private:
+  struct Data;
+  std::shared_ptr<const Data> data_;
+  std::size_t offset_ = 0;
+  std::size_t size_ = 0;
+};
 
 /// An owned success value or domain-specific error, without implicit boolean or value conversion.
 /// @tparam T Owned success type; use void when success carries no payload.

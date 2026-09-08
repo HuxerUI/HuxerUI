@@ -6,6 +6,8 @@
 -keep class org.huxerui.HuxerUIPlatformChannel { *; }
 -keep class org.huxerui.HuxerUIPlatformChannel$* { *; }
 -keep class org.huxerui.HuxerUIExternalTexture { *; }
+-keep class org.huxerui.HuxerUIBufferReference { *; }
+-keep class org.huxerui.HuxerUIBufferReference$* { *; }
 -keep class org.huxerui.PlatformPayload { *; }
 -keep class org.huxerui.PlatformPayload$* { *; }
 -keep class * implements org.huxerui.HuxerUIPlatformModule$Factory { public <init>(); *; }

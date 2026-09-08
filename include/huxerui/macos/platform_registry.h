@@ -19,6 +19,30 @@ NS_SWIFT_NAME(FileReference)
 
 @end
 
+/// Retains address-stable memory without taking a byte snapshot.
+/// The owner must keep the pointer valid; it may be released on the last reader's thread.
+/// Synchronize producer writes with readers. Never retain pointers borrowed from temporary Swift Data storage.
+NS_SWIFT_NAME(BufferReference)
+@interface HUXBufferReference : NSObject
+
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
+- (instancetype)initWithBytes:(const void* _Nullable)bytes length:(NSUInteger)length owner:(id)owner
+    NS_SWIFT_NAME(init(bytes:length:owner:));
+
+/// Borrows read-only memory for the callback only. The pointer must not escape.
+/// @param reader Synchronous reader; retain the reference itself for asynchronous work.
+- (void)withUnsafeBytes:(void (^)(const void* _Nullable bytes, NSUInteger length))reader
+    NS_SWIFT_NAME(withUnsafeBytes(_:));
+
+/// Returns a retained subrange without copying.
+/// @param offset Byte offset relative to this reference.
+/// @param length Byte count; an out-of-range slice raises NSInvalidArgumentException.
+- (HUXBufferReference*)sliceWithOffset:(NSUInteger)offset length:(NSUInteger)length
+    NS_SWIFT_NAME(slice(offset:length:));
+
+@end
+
 typedef NS_ENUM(NSInteger, HUXPlatformPayloadKind) {
   HUXPlatformPayloadKindNull,
   HUXPlatformPayloadKindBoolean,
@@ -30,6 +54,7 @@ typedef NS_ENUM(NSInteger, HUXPlatformPayloadKind) {
   HUXPlatformPayloadKindObject,
   HUXPlatformPayloadKindExternalTexture,
   HUXPlatformPayloadKindFileReference,
+  HUXPlatformPayloadKindBufferReference,
 } NS_SWIFT_NAME(PlatformPayload.Kind);
 
 NS_SWIFT_NAME(PlatformPayload)
@@ -50,6 +75,7 @@ NS_SWIFT_NAME(PlatformPayload)
 + (instancetype)objectValue:(NSDictionary<NSString*, HUXPlatformPayload*>*)value NS_SWIFT_NAME(object(_:));
 + (instancetype)externalTextureValue:(HUXExternalTexture*)texture NS_SWIFT_NAME(externalTexture(_:));
 + (instancetype)fileReferenceValue:(HUXFileReference*)reference NS_SWIFT_NAME(fileReference(_:));
++ (instancetype)bufferReferenceValue:(HUXBufferReference*)reference NS_SWIFT_NAME(bufferReference(_:));
 
 - (BOOL)booleanValue NS_SWIFT_NAME(boolean());
 - (int64_t)integerValue NS_SWIFT_NAME(integer());
@@ -58,6 +84,7 @@ NS_SWIFT_NAME(PlatformPayload)
 - (NSData*)bytesValue NS_SWIFT_NAME(bytes());
 - (HUXExternalTexture*)externalTextureValue NS_SWIFT_NAME(externalTexture());
 - (HUXFileReference*)fileReferenceValue NS_SWIFT_NAME(fileReference());
+- (HUXBufferReference*)bufferReferenceValue NS_SWIFT_NAME(bufferReference());
 - (HUXPlatformPayload*)field:(NSString*)name NS_SWIFT_NAME(field(_:));
 - (HUXPlatformPayload*)elementAtIndex:(NSUInteger)index NS_SWIFT_NAME(element(at:));
 - (void)validateFields:(NSSet<NSString*>*)fields NS_SWIFT_NAME(validate(fields:));

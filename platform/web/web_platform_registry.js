@@ -22,6 +22,7 @@
     object: 7,
     externalTexture: 8,
     fileReference: 9,
+    bufferReference: 10,
   });
   const kinds = Object.freeze(Object.keys(tags));
 
@@ -161,6 +162,8 @@
             this.value(value, depth + 1);
           }
           return;
+        case tags.bufferReference:
+          throw new TypeError("HuxerUI Web bridge does not support BufferReference");
         case tags.externalTexture:
           throw new TypeError("HuxerUI Web PlatformPayload does not support ExternalTexture capabilities");
         case tags.fileReference: {
@@ -347,6 +350,8 @@
           }
           return new PlatformPayload(internalConstruction, tag, fields, path);
         }
+        case tags.bufferReference:
+          throw new TypeError("HuxerUI Web bridge does not support BufferReference");
         case tags.externalTexture:
           throw new TypeError("HuxerUI Web PlatformPayload does not support ExternalTexture capabilities");
         case tags.fileReference: {

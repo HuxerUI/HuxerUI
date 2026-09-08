@@ -123,6 +123,10 @@ cmake --build build --target example_ui_gallery
 Desktop binaries or application bundles are emitted under the configured build output.
 Android examples use `platform/android/example_runner`, and iOS examples use the repository platform runner.
 
+[`example_buffer_reference`](../../examples/buffer_reference/main.cpp) pulls successive grayscale frames from one fixed native allocation, analyzes row-strided bytes in C++, and displays the mean, histogram, and backing-reference reuse check without converting frames into images.
+Select `-PhuxeruiExample=buffer_reference` on Android or `HUXERUI_APP_TARGET=example_buffer_reference` in the iOS runner; Android uses DirectByteBuffer and Apple uses NSMutableData through PlatformPayload, while Windows and Linux use the C++ reference directly.
+The next button is enabled only after analysis finishes; there is no background producer or implicit read lock. Web displays an unsupported message.
+
 `example_application` demonstrates lifecycle, general activation, activated-file reading, and runtime permissions. The separate [`example_local_notification`](../../examples/local_notification/main.cpp) demonstrates notification authorization, default and template presentation, one-shot scheduling, cancellation, and activation data.
 
 For Android, select it with `-PhuxeruiExample=local_notification` when building `platform/android/example_runner`. The runner loads the selected example's Java sources and resources from `examples/<name>/android/src/main/{java,res}` and merges its optional `AndroidManifest.xml` over the shared manifest for debug and release. Notification channel setup, permission, receiver, and RemoteViews belong to this example; other examples do not package that configuration. For example, from `platform/android`:

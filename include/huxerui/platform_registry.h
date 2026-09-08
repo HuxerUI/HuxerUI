@@ -43,13 +43,15 @@ enum class PlatformPayloadKind {
   Object,
   ExternalTexture,
   FileReference,
+  BufferReference,
 };
 
-/// An immutable dynamic value used only when data crosses a platform-language boundary.
+/// A structurally immutable dynamic value used when data crosses a platform-language boundary.
+/// Retained capabilities may refer to mutable external resources; BufferReference is not a byte snapshot.
 ///
 /// Direct C++ PlatformModule and PlatformView implementations receive their concrete C++ types and do not need this
 /// class. Java, Swift, Objective-C, JavaScript, and similar bridges use PlatformPayload to exchange null, scalar,
-/// collection, byte, ExternalTexture, and FileReference values without JSON coercion.
+/// collection, byte, ExternalTexture, FileReference, and BufferReference values without JSON coercion.
 ///
 /// Objects require UTF-8 string keys. Integer construction rejects values outside the signed 64-bit range, and the
 /// typed accessors throw std::invalid_argument when the stored kind does not match the requested kind.
@@ -90,6 +92,7 @@ public:
   PlatformPayload(Object value);
   PlatformPayload(std::shared_ptr<ExternalTexture> value);
   PlatformPayload(FileReference value);
+  PlatformPayload(BufferReference value);
 
   /// Returns the exact stored kind.
   [[nodiscard]] PlatformPayloadKind Kind() const noexcept;
@@ -108,6 +111,9 @@ public:
   [[nodiscard]] const Object& AsObject() const;
   [[nodiscard]] const std::shared_ptr<ExternalTexture>& AsExternalTexture() const;
   [[nodiscard]] const FileReference& AsFileReference() const;
+  /// Borrows a retained memory range without copying its bytes. The stored kind must be BufferReference.
+  /// @return The reference, whose storage may change only under producer/consumer synchronization.
+  [[nodiscard]] const BufferReference& AsBufferReference() const;
 
   /// Compares values by kind and contents. Object insertion order does not affect equality, and capabilities compare
   /// as the same retained capability only when they share their backing state.
@@ -120,6 +126,7 @@ public:
     Bytes bytes;
     std::vector<std::shared_ptr<ExternalTexture>> external_textures;
     std::vector<FileReference> file_references;
+    std::vector<BufferReference> buffer_references;
   };
 
   /// Encodes this value and its retained capabilities to one transport envelope.
@@ -273,6 +280,8 @@ template <class Value> Value DecodePlatformPayload(const PlatformPayload& payloa
     return payload.AsExternalTexture();
   } else if constexpr (std::same_as<Value, FileReference>) {
     return payload.AsFileReference();
+  } else if constexpr (std::same_as<Value, BufferReference>) {
+    return payload.AsBufferReference();
   } else {
     return Value::Decode(payload);
   }
@@ -287,7 +296,7 @@ template <class Value> PlatformPayload EncodePlatformValue(const Value& value) {
   } else if constexpr (std::same_as<Value, bool> || std::integral<Value> || std::floating_point<Value> ||
                        std::same_as<Value, std::string> || std::same_as<Value, Bytes> ||
                        std::same_as<Value, std::shared_ptr<ExternalTexture>> ||
-                       std::same_as<Value, FileReference>) {
+                       std::same_as<Value, FileReference> || std::same_as<Value, BufferReference>) {
     return PlatformPayload(value);
   } else {
     return Value::Encode(value);
@@ -299,7 +308,7 @@ concept PlatformPayloadEncodable =
     std::same_as<Value, std::monostate> || std::same_as<Value, PlatformPayload> || std::same_as<Value, bool> ||
     std::integral<Value> || std::floating_point<Value> || std::same_as<Value, std::string> ||
     std::same_as<Value, Bytes> || std::same_as<Value, std::shared_ptr<ExternalTexture>> ||
-    std::same_as<Value, FileReference> || requires(const Value& value) {
+    std::same_as<Value, FileReference> || std::same_as<Value, BufferReference> || requires(const Value& value) {
       { Value::Encode(value) } -> std::same_as<PlatformPayload>;
     };
 
@@ -308,7 +317,7 @@ concept PlatformPayloadDecodable =
     std::same_as<Value, std::monostate> || std::same_as<Value, bool> || std::integral<Value> ||
     std::floating_point<Value> || std::same_as<Value, std::string> || std::same_as<Value, Bytes> ||
     std::same_as<Value, std::shared_ptr<ExternalTexture>> || std::same_as<Value, FileReference> ||
-    requires(const PlatformPayload& payload) {
+    std::same_as<Value, BufferReference> || requires(const PlatformPayload& payload) {
       { Value::Decode(payload) } -> std::convertible_to<Value>;
     };
 

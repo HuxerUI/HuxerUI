@@ -795,15 +795,15 @@ An outbound-only type defines only `Encode`, an inbound-only type defines only `
 Framework concepts diagnose a missing operation when a cross-language bridge requires it.
 Scalar and framework data types have built-in boundary conversion; a library wraps an external structured type in an explicit boundary value rather than defining a detached codec specialization.
 
-`PlatformPayload` remains an immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, `Bytes`, list, string-keyed object, and the closed framework capabilities `ExternalTexture` and `FileReference`.
+`PlatformPayload` remains a structurally immutable equality-comparable tree containing null, boolean, signed 64-bit integer, double, UTF-8 string, `Bytes`, list, string-keyed object, and the closed framework capabilities `ExternalTexture`, `FileReference`, and `BufferReference`.
 It is an in-process boundary value rather than a persistence, network, or general serialization format.
 Its value tree never accepts callbacks, arbitrary C++ objects, platform Views, or executable closures, and its binary form never embeds system handles or pointers.
-Large or continuous media frames do not travel through it; an ExternalTexture payload retains the same shared platform-owned texture object used by rendering.
+Media bytes are not implicitly serialized: an ExternalTexture payload retains the same shared platform-owned texture object used by rendering, while a BufferReference capability retains a CPU-readable memory range without copying it.
 A FileReference payload retains the same access state and captured metadata used by shared file operations so a platform library can consume an Android `Uri`, Apple `NSURL`, or browser `File` without reducing the original grant to a local path or detached platform value.
 
 #### Platform-language value API
 
-The Android Java SDK, Web JavaScript bridge, and Apple Objective-C/Swift adapters expose one immutable `PlatformPayload` value type rather than separate Reader, Writer, Builder, or Codec abstractions.
+The Android Java SDK, Web JavaScript bridge, and Apple Objective-C/Swift adapters expose one structurally immutable `PlatformPayload` value type rather than separate Reader, Writer, Builder, or Codec abstractions.
 Platform naming follows the language convention, while each common adapter provides the same explicit construction operations:
 
 ```text
@@ -819,8 +819,9 @@ fileReference(value)
 ```
 
 An adapter with an implemented ExternalTexture capability bridge additionally provides `externalTexture(value)`.
+Android and Apple also provide `bufferReference(value)` and the corresponding exact accessor; Web explicitly rejects BufferReference.
 
-Constructors copy or safely freeze mutable byte and collection inputs.
+Bytes and collection constructors copy or safely freeze their inputs; BufferReference retains external storage without freezing its contents.
 Byte reads return a defensive copy or an immutable platform view and never expose mutable backing storage.
 Java maps Int64 to `long` and Bytes to copied `byte[]`.
 The Apple adapters map them to Swift `Int64` and `Data`, while Web maps them to JavaScript `bigint` and copied `Uint8Array`.
@@ -882,12 +883,13 @@ platform PlatformPayload
 
 The envelope starts with the four ASCII bytes `HUXP`, a little-endian unsigned 16-bit format version, and a little-endian unsigned 16-bit flags field.
 Version 1 requires zero flags and contains exactly one value followed by no trailing bytes.
-The one-byte tags are Null `0`, Boolean `1`, Integer `2`, Double `3`, String `4`, Bytes `5`, List `6`, Object `7`, ExternalTexture `8`, and FileReference `9`.
+The one-byte tags are Null `0`, Boolean `1`, Integer `2`, Double `3`, String `4`, Bytes `5`, List `6`, Object `7`, ExternalTexture `8`, FileReference `9`, and BufferReference `10`.
 Integer values use signed 64-bit little-endian representation, Double values use their IEEE 754 binary64 bits in little-endian order, and all byte lengths and container counts use unsigned 32-bit little-endian values.
 Strings contain a byte length followed by UTF-8 bytes, lists contain a count followed by values, and objects contain a count followed by length-prefixed UTF-8 keys and values.
 Object keys are serialized in ascending UTF-8 byte order so one payload has one canonical encoding.
 ExternalTexture contains capability kind `1` as one byte followed by an unsigned 32-bit envelope-local slot.
-FileReference uses the same slot representation with capability kind `2`.
+FileReference uses the same slot representation with capability kind `2`; BufferReference uses capability kind `3`.
+Existing tags and version 1 scalar encodings remain unchanged; older decoders reject the new tag.
 
 The binary format preserves all payload kinds without implicit coercion.
 Decoders require the declared tag and range instead of converting strings to numbers, truncating doubles to integers, or treating bytes as text.
@@ -896,11 +898,11 @@ The maximum nesting depth is 64, matching the in-process payload contract.
 All bridge implementations use the same framework constants for maximum envelope bytes, scalar bytes, and container entries, plus capability slots where supported, and validate them before allocation; a platform must not substitute looser local limits.
 Unknown versions, flags, tags, or capability kinds, duplicate object keys, invalid UTF-8, non-finite doubles, integer or length overflow, truncated input, excessive allocation, and trailing bytes are malformed payloads.
 
-`ExternalTexture` and `FileReference` are opaque capabilities and therefore travel beside the binary data in separate bridge-private, strongly typed companion tables.
+`ExternalTexture`, `FileReference`, and `BufferReference` are opaque capabilities and therefore travel beside the binary data in separate bridge-private, strongly typed companion tables.
 The binary stream contains only an envelope-local typed slot, while JNI references, Objective-C objects, JavaScript handles, or retained C++ objects remain in the owning bridge for that crossing.
 Slots are unique only within one envelope and are not public identifiers.
 Repeated references to the same slot preserve the same capability within that decode.
-A bridge without ExternalTexture capability transport rejects the value before encoding.
+A bridge without transport for a capability rejects the value before encoding, without a byte-copy fallback.
 A bridge that supports a capability rejects a missing slot, duplicate capability-table entry, unreferenced table entry, or kind mismatch while decoding.
 On successful decode, the resulting shared reference or language wrapper retains the capability before the temporary table is released; on failure, the bridge releases the complete table.
 Library code cannot forge, retain, or reuse a slot, and the closed table cannot carry arbitrary platform objects.
@@ -913,11 +915,32 @@ The Apple adapters retain the C++ value in a lightweight `HUXFileReference` wrap
 Web exposes a retained `FileReference` wrapper whose asynchronous `getFile()` resolves the current browser handle or captured `File`, and whose `close()` releases its C++ share.
 These projections do not start a new security scope, duplicate `CanWrite()`, attenuate the original grant, or make the capability persistent.
 
+BufferReference lives in `data.h` and owns one shared backing state containing a fixed byte span and a retained owner; slices add only an offset and length.
+Construction rejects nonempty storage without an owner, and slicing validates bounds using subtraction to avoid overflow.
+Equality and table deduplication use backing-state identity plus range, not contents or the raw address alone; independently wrapping the same address creates a distinct capability.
+Default and moved-from references are valid empty values, distinct from payload Null; even an empty slice may retain an owner.
+Referenced memory is outside the inline scalar-byte limit, while the total capability-slot limit still applies; Android additionally requires lengths representable by ByteBuffer.
+
+Retaining the owner guarantees neither immutable contents nor synchronization.
+The producer must keep memory mapped and address-stable, finish its writes before reading begins, and wait for every reader to complete before reuse.
+The framework adds no buffer pool, lock, lease, frame scheduler, or implicit copy; dimensions, row strides, pixel formats, and sequence numbers belong to a library's frame type.
+Reusing a reference does not change payload equality or automatically invalidate UI state.
+Only CPU-readable memory belongs here; GPU resources continue to use ExternalTexture.
+
+Android retains global references to the direct ByteBuffer slice and optional final-release Runnable, never to the wrapper that owns the native handle.
+The wrapper captures position-to-limit at construction, and payload construction and extraction retain independent native shares.
+A scoped read keeps a temporary native share through its callback, even when the wrapper closes reentrantly; the read-only ByteBuffer must not escape.
+The last backing-state release invokes the optional Runnable on the releasing thread before dropping the global references; the callback must handle thread affinity and must not throw.
+Java finalization is a fallback, not a prompt-release guarantee for payload-owned shares.
+Apple holds the C++ reference in an ARC wrapper and retains the supplied storage owner, whose release can likewise occur on the final reader's thread.
+Pointers from temporary Swift Data borrows and direct views into externally closed images are not made safe by retaining a wrapper.
+Local-notification persistence rejects nested buffer capabilities rather than snapshotting them; Web has no supported shared-memory bridge.
+
 | Platform boundary | Binary data | Capability table |
 | --- | --- | --- |
-| Android | `byte[]` | Separate `HuxerUIExternalTexture` and `HuxerUIFileReference` lists |
-| Apple Objective-C/Swift adapters | `NSData` | Separate `HUXExternalTexture` and `HUXFileReference` arrays |
-| Web common adapter | `Uint8Array` | `FileReference` list; ExternalTexture remains unsupported |
+| Android | `byte[]` | Separate `HuxerUIExternalTexture`, `HuxerUIFileReference`, and `HuxerUIBufferReference` lists |
+| Apple Objective-C/Swift adapters | Internal owned bytes | Separate `HUXExternalTexture`, `HUXFileReference`, and `HUXBufferReference` arrays |
+| Web common adapter | `Uint8Array` | `FileReference` list; ExternalTexture and BufferReference remain unsupported |
 
 Application callback objects never enter the envelope, and Objective-C, Java, JavaScript, or C++ exceptions are contained by the bridge that owns them.
 `PlatformError` has a stable UTF-8 `code`, an English `message`, and optional structured `details` carried by the same payload envelope.

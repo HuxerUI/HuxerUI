@@ -55,6 +55,9 @@ void RequireFactory(const val& factory, std::string_view kind) {
 
 val PlatformPayloadToJavaScript(const PlatformPayload& payload) {
   PlatformPayload::Envelope envelope = payload.Encode();
+  if (!envelope.buffer_references.empty()) {
+    throw std::invalid_argument("HuxerUI Web bridge does not support BufferReference");
+  }
   if (!envelope.external_textures.empty()) {
     throw std::invalid_argument("HuxerUI Web JavaScript bridge does not support ExternalTexture payloads");
   }

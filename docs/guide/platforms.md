@@ -21,6 +21,61 @@ The shared local-notification API is available on every listed platform.
 Configured Android hosts and the iOS and macOS adapters install native transports; Windows, Linux, and Web currently report unavailable capabilities and operations.
 See [Local Notifications](../design/local-notifications.md) for authorization, activation, and platform mapping details.
 
+## Shared CPU buffer references
+
+Include `<huxerui/data.h>` for `BufferReference`: a retained, read-only view of address-stable CPU memory.
+Unlike `Bytes`, it does not own a byte snapshot or copy memory when passed through a supported PlatformPayload bridge.
+Use it for image analysis or other large in-process buffers; dimensions, format, row strides, and frame sequence belong in your own typed frame structure.
+The runnable [`buffer_reference` example](../../examples/buffer_reference/main.cpp) demonstrates native allocation, zero-copy analysis, and sequential reuse, including a histogram that excludes row padding.
+
+```cpp
+auto storage = std::make_shared<huxerui::Bytes>(4096);
+huxerui::BufferReference frame(*storage, storage);
+FillFrame(*storage);
+Analyze(frame.AsBytes());
+auto region = frame.Slice(128, 512);
+```
+
+The owner must keep the address valid without resizing or explicitly closing the resource.
+Finish producer writes before reading, and wait for every reader to complete before filling the next frame.
+For asynchronous analysis, retain a BufferReference in the task and signal completion before reusing storage; retaining it alone does not prevent a data race.
+A borrowed span must not outlive its owner.
+Equality compares shared backing identity and range, so changing memory contents does not publish a new UI value; send an event or update a sequence number separately.
+Notifications and other durable data must use owned values, not retained buffers.
+
+Android libraries use `HuxerUIBufferReference.wrap(directBuffer)`, or `wrap(directBuffer, onRelease)` when external storage needs a final-release callback.
+Only direct buffers are accepted, and wrapping freezes the current position-to-limit range without changing the original cursor.
+`withBuffer(reader)` supplies a read-only ByteBuffer for that synchronous callback only; do not store the borrowed view.
+`PlatformPayload.bufferReference(reference)` retains its own share, and `requireBufferReference()` returns a new wrapper that callers should close.
+Closing the original wrapper does not invalidate payloads, slices, or active readers.
+The optional callback runs once after the last backing share is released, on that thread; dispatch if the resource requires a particular thread.
+Payload-owned Java shares may remain alive until garbage collection, so do not rely on the release callback for prompt per-frame scheduling; use explicit reader completion.
+Retaining a DirectByteBuffer from an Android image does not prevent an independent `Image.close()`; coordinate that lifetime yourself.
+
+```java
+ByteBuffer storage = ByteBuffer.allocateDirect(4096);
+try (HuxerUIBufferReference reference = HuxerUIBufferReference.wrap(storage)) {
+    fillFrame(storage);
+    reference.withBuffer(bytes -> analyze(bytes));
+}
+```
+
+Apple libraries import `BufferReference` from `HuxerUIPlatform` (`HUXBufferReference` in Objective-C).
+The initializer accepts a stable pointer, length, and an owning object; `withUnsafeBytes` borrows it only during the callback, and `slice(offset:length:)` retains a subrange.
+ARC keeps the storage owner alive through copies and payload round trips; the owner can be released on the last reader's thread.
+
+```swift
+let storage = NSMutableData(length: 4096)!
+let reference = BufferReference(bytes: storage.bytes, length: UInt(storage.length), owner: storage)
+let payload = PlatformPayload.bufferReference(reference)
+payload.bufferReference().withUnsafeBytes { bytes, length in
+  analyze(bytes, length)
+}
+```
+
+Do not resize that NSMutableData or construct a retained reference from a temporary Swift `Data.withUnsafeBytes` pointer.
+Windows and Linux libraries use the shared C++ type directly; Web's JavaScript bridge explicitly rejects BufferReference without silently copying it.
+
 ## Windows
 
 The default backend targets Windows 10 version 1607 or later and uses Win32, D3D11, Direct2D, DirectWrite, DXGI, and IMM32.
@@ -67,7 +122,7 @@ Camera and microphone permissions use AVFoundation and require the corresponding
 Local notifications use User Notifications for authorization, immediate presentation, durable one-shot scheduling, cancellation, and primary-action activation.
 Notification interactions enter `OnActivation()` even when they launched the process.
 macOS supports only `DefaultNotificationPresentation`; template requests return `Unavailable`.
-The installed SDK exposes AppKit PlatformModule, PlatformView, PlatformPayload, FileReference, and ExternalTexture contracts to Objective-C and Swift through `HuxerUIPlatform`.
+The installed SDK exposes AppKit PlatformModule, PlatformView, PlatformPayload, FileReference, BufferReference, and ExternalTexture contracts to Objective-C and Swift through `HuxerUIPlatform`.
 FileReference payloads retain the shared grant and expose its path-backed `NSURL` as `fileURL` for native libraries.
 
 Native libraries include `<huxerui/macos/external_texture.h>` for `macos::PixelBufferTexture` and `macos::MetalTexture`.
@@ -150,7 +205,7 @@ The `example_external_texture` Web build demonstrates Canvas2D and WebGL2 produc
 
 JavaScript platform libraries receive a retained `HuxerUI.FileReference` from `PlatformPayload.requireFileReference()`.
 Call `await reference.getFile()` when a browser media or document API requires a `File`, and call `close()` when the library no longer needs its retained C++ capability share.
-The public `PlatformPayload.encode()` remains a capability-free byte API; the framework's private bridge envelope carries FileReference companion entries and Web continues to reject ExternalTexture payloads.
+The public `PlatformPayload.encode()` remains a capability-free byte API; the framework's private bridge envelope carries FileReference companion entries and Web continues to reject ExternalTexture and BufferReference payloads.
 
 Typed routed navigation can bind the authoritative `NavigationPath` to browser URL and history state.
 Browser restrictions still govern clipboard, file pickers, autoplay, cross-origin requests, and storage persistence.
@@ -245,7 +300,7 @@ Local notifications use User Notifications for authorization, immediate presenta
 Notification interactions enter `OnActivation()` even when they launched the process.
 Embedded Notification Content Extensions declare stable `UNNotificationExtensionCategory` values; discovered categories enable template presentation and receive matching requests through `categoryIdentifier`.
 The extension owns the expanded interface, while the ordinary banner/list UI remains system-controlled and HuxerUI retains notification identity, scheduling, cancellation, and activation semantics.
-The iOS XCFramework exposes UIKit PlatformModule, PlatformView, PlatformPayload, FileReference, and ExternalTexture contracts to Objective-C and Swift through `HuxerUIPlatform`.
+The iOS XCFramework exposes UIKit PlatformModule, PlatformView, PlatformPayload, FileReference, BufferReference, and ExternalTexture contracts to Objective-C and Swift through `HuxerUIPlatform`.
 FileReference payloads retain the shared grant and expose its path-backed `NSURL` as `fileURL` for native libraries.
 
 Native libraries include `<huxerui/ios/external_texture.h>` for the iOS forms of `PixelBufferTexture` and `MetalTexture`.

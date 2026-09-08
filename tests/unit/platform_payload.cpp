@@ -54,6 +54,51 @@ FileReference MakePayloadFileReference(const std::shared_ptr<PayloadFileReferenc
       {.name = std::move(name), .size = 42, .content_type = "video/mp4", .can_write = true}, state);
 }
 
+TEST_CASE("PlatformPayloadTransportsBufferReferencesWithoutInlineBytes") {
+  auto storage = std::make_shared<Bytes>(17U * 1024U * 1024U);
+  BufferReference reference(*storage, storage);
+  const PlatformPayload payload = PlatformPayload::List{reference, reference, reference.Slice(1, 2)};
+  auto envelope = payload.Encode();
+  REQUIRE(envelope.bytes.size() == 31);
+  REQUIRE(envelope.buffer_references.size() == 2);
+  REQUIRE(envelope.buffer_references[0] == reference);
+  const auto decoded = PlatformPayload::Decode(envelope);
+  REQUIRE(decoded == payload);
+  REQUIRE(decoded.AsList()[0].AsBufferReference().AsBytes().data() == storage->data());
+  (*storage)[0] = std::byte{23};
+  REQUIRE(decoded.AsList()[0].AsBufferReference().AsBytes()[0] == std::byte{23});
+  REQUIRE(detail::DecodePlatformPayload<BufferReference>(detail::EncodePlatformValue(reference)) == reference);
+  STATIC_REQUIRE(detail::PlatformPayloadEncodable<BufferReference>);
+  STATIC_REQUIRE(detail::PlatformPayloadDecodable<BufferReference>);
+  const PlatformPayload empty = BufferReference{};
+  REQUIRE_FALSE(empty.IsNull());
+  REQUIRE(empty.Kind() == PlatformPayloadKind::BufferReference);
+  REQUIRE(PlatformPayload::Decode(empty.Encode()) == empty);
+  REQUIRE_THROWS_AS(empty.AsBytes(), std::bad_variant_access);
+}
+
+TEST_CASE("PlatformPayloadRequiresExactBufferCapabilityTables") {
+  const PlatformPayload payload = BufferReference{};
+  auto envelope = payload.Encode();
+  REQUIRE(envelope.bytes == WireBytes({'H', 'U', 'X', 'P', 1, 0, 0, 0, 10, 3, 0, 0, 0, 0}));
+  SECTION("Missing table") {
+    envelope.buffer_references.clear();
+  }
+  SECTION("Duplicate slot") {
+    envelope.buffer_references.push_back(envelope.buffer_references[0]);
+  }
+  SECTION("Unused slot") {
+    envelope.buffer_references.emplace_back(std::span<const std::byte>{}, std::shared_ptr<const void>{});
+  }
+  SECTION("Wrong discriminator") {
+    envelope.bytes[9] = std::byte{2};
+  }
+  SECTION("Missing slot") {
+    envelope.bytes[10] = std::byte{1};
+  }
+  REQUIRE_THROWS_AS(PlatformPayload::Decode(envelope), std::invalid_argument);
+}
+
 TEST_CASE("PlatformPayloadPreservesSupportedKinds") {
   const PlatformPayload payload = PlatformPayload::Object{
       {"boolean", true},

@@ -452,7 +452,7 @@ void LocalNotificationService::Disconnect() noexcept {
 
 Bytes EncodeLocalNotificationData(const PlatformPayload& data) {
   PlatformPayload::Envelope envelope = data.Encode();
-  if (!envelope.external_textures.empty() || !envelope.file_references.empty()) {
+  if (!envelope.external_textures.empty() || !envelope.file_references.empty() || !envelope.buffer_references.empty()) {
     throw std::invalid_argument("HuxerUI local notification data cannot contain retained capabilities");
   }
   if (envelope.bytes.size() > max_local_notification_data_bytes) {
@@ -467,7 +467,8 @@ PlatformPayload DecodeLocalNotificationData(std::span<const std::byte> bytes) {
   }
   // Empty capability tables make nested resource references invalid during decoding as well.
   return PlatformPayload::Decode({
-      .bytes = Bytes(bytes.begin(), bytes.end()), .external_textures = {}, .file_references = {},
+      .bytes = Bytes(bytes.begin(), bytes.end()),
+      .external_textures = {}, .file_references = {}, .buffer_references = {},
   });
 }
 

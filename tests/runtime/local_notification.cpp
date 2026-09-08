@@ -555,6 +555,12 @@ TEST_CASE("Local notification data preserves durable values and rejects malforme
   REQUIRE_THROWS_AS(detail::EncodeLocalNotificationData(PlatformPayload(Bytes(65536 - 12))), std::invalid_argument);
 }
 
+TEST_CASE("Local notification data rejects nested buffer references without copying") {
+  const PlatformPayload data = PlatformPayload::Object{{"frame", PlatformPayload::List{BufferReference{}}}};
+  REQUIRE_THROWS_AS(detail::EncodeLocalNotificationData(data), std::invalid_argument);
+  REQUIRE_THROWS_AS(detail::DecodeLocalNotificationData(data.Encode().bytes), std::invalid_argument);
+}
+
 TEST_CASE("Local notification submission rejects nested retained resources before launching a Task") {
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;

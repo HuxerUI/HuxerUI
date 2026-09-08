@@ -197,6 +197,72 @@ TEST_CASE("MacObjectiveCPlatformPayloadRejectsInvalidValuesAndTextures") {
   }
 }
 
+TEST_CASE("MacObjectiveCBufferReferenceRetainsStorageWithoutCopying") {
+  __weak NSMutableData* weak_storage = nil;
+  __strong HUXBufferReference* survivor = nil;
+  @autoreleasepool {
+    NSMutableData* storage = [NSMutableData dataWithLength:8];
+    weak_storage = storage;
+    HUXBufferReference* reference = [[HUXBufferReference alloc] initWithBytes:storage.bytes length:8 owner:storage];
+    HUXPlatformPayload* payload = [HUXPlatformPayload bufferReferenceValue:reference];
+    REQUIRE(payload.kind == HUXPlatformPayloadKindBufferReference);
+    survivor = [payload.bufferReferenceValue sliceWithOffset:2 length:4];
+    REQUIRE([payload.bufferReferenceValue isEqual:reference]);
+    REQUIRE(payload.bufferReferenceValue.hash == reference.hash);
+    REQUIRE_FALSE([reference isEqual:[[HUXBufferReference alloc] initWithBytes:storage.bytes length:8 owner:storage]]);
+    static_cast<std::byte*>(storage.mutableBytes)[2] = std::byte{42};
+    const void* expected = static_cast<const std::byte*>(storage.bytes) + 2;
+    [survivor withUnsafeBytes:^(const void* bytes, NSUInteger length) {
+      REQUIRE(bytes == expected);
+      REQUIRE(length == 4);
+      REQUIRE(static_cast<const std::byte*>(bytes)[0] == std::byte{42});
+    }];
+    bool rejected = false;
+    @try {
+      [reference sliceWithOffset:8 length:1];
+    } @catch (NSException* exception) {
+      rejected = [exception.name isEqualToString:NSInvalidArgumentException];
+    }
+    REQUIRE(rejected);
+  }
+  REQUIRE(weak_storage != nil);
+  survivor = nil;
+  REQUIRE(weak_storage == nil);
+}
+
+TEST_CASE("MacObjectiveCBufferReferenceRoundTripPreservesBackingIdentity") {
+  @autoreleasepool {
+    TestPlatform platform;
+    NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 320, 200)
+                                                 styleMask:NSWindowStyleMaskBorderless
+                                                   backing:NSBackingStoreBuffered defer:NO];
+    HuxerUITestMacPlatformViewFactory* factory = [HuxerUITestMacPlatformViewFactory new];
+    auto storage = std::make_shared<Bytes>(8);
+    BufferReference reference(*storage, storage);
+    PlatformEventEmitter emitter = detail::MakePlatformEventEmitter({}, [](std::string, PlatformPayload) {
+      return std::optional<PlatformPayload>{};
+    });
+    auto instance = macos::detail::CreateObjectiveCPlatformView(
+        platform, window, factory, PlatformPayload(reference), std::move(emitter), true, true);
+    const void* expected = storage->data();
+    [factory.instance.properties.bufferReferenceValue withUnsafeBytes:^(const void* bytes, NSUInteger length) {
+      REQUIRE(bytes == expected);
+      REQUIRE(length == 8);
+    }];
+    std::optional<BufferReference> returned;
+    PlatformChannel channel = macos::detail::GetObjectiveCPlatformViewChannel(instance);
+    static_cast<void>(channel.Invoke("echo", PlatformPayload(reference), [&](PlatformResult<PlatformPayload> result) {
+      returned = std::get<PlatformPayload>(result).AsBufferReference();
+    }));
+    platform.RunPlatformModuleTasks();
+    REQUIRE(returned.has_value());
+    REQUIRE(*returned == reference);
+    REQUIRE(returned->AsBytes().data() == expected);
+    macos::detail::DisposeObjectiveCPlatformView(instance);
+    platform.RunPlatformModuleTasks();
+  }
+}
+
 TEST_CASE("MacObjectiveCPlatformPayloadRetainsFileReferenceAndExposesFileURL") {
   @autoreleasepool {
     TestPlatform platform;

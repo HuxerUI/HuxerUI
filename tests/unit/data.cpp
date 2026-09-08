@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -35,6 +36,58 @@ static_assert(std::is_same_v<decltype(std::declval<TextResult&>().Error()), int&
 static_assert(std::is_same_v<decltype(std::declval<const TextResult&>().Error()), const int&>);
 static_assert(std::is_same_v<decltype(std::declval<TextResult&&>().Error()), int&&>);
 static_assert(std::is_same_v<decltype(std::declval<const TextResult&&>().Error()), const int&&>);
+
+TEST_CASE("BufferReferenceRetainsStorageAndSlicesWithoutCopying") {
+  int releases = 0;
+  auto storage = std::shared_ptr<Bytes>(new Bytes(8), [&releases](Bytes* bytes) {
+    ++releases;
+    delete bytes;
+  });
+  BufferReference reference(*storage, storage);
+  const auto* address = storage->data();
+  REQUIRE(reference.AsBytes().data() == address);
+  auto copy = reference;
+  auto slice = reference.Slice(2, 4);
+  REQUIRE(slice.AsBytes().data() == address + 2);
+  REQUIRE(slice.AsBytes().size() == 4);
+  REQUIRE(copy == reference);
+  REQUIRE(slice == reference.Slice(1, 6).Slice(1, 4));
+  REQUIRE_FALSE(slice == reference);
+  REQUIRE_FALSE(BufferReference(*storage, storage) == reference);
+  (*storage)[2] = std::byte{42};
+  REQUIRE(slice.AsBytes()[0] == std::byte{42});
+  storage.reset();
+  reference = {};
+  copy = {};
+  REQUIRE(releases == 0);
+  auto moved = std::move(slice);
+  REQUIRE(slice.AsBytes().empty());
+  REQUIRE(slice == BufferReference{});
+  REQUIRE(slice.Slice(0, 0) == BufferReference{});
+  REQUIRE(moved.AsBytes().data() == address + 2);
+  moved = {};
+  REQUIRE(releases == 1);
+}
+
+TEST_CASE("BufferReferenceValidatesRangesWithoutOverflow") {
+  auto storage = std::make_shared<Bytes>(4);
+  BufferReference reference(*storage, storage);
+  REQUIRE(reference.Slice(4, 0).AsBytes().empty());
+  REQUIRE(reference.Slice(4, 0).AsBytes().data() == storage->data() + 4);
+  REQUIRE_THROWS_AS(reference.Slice(5, 0), std::invalid_argument);
+  REQUIRE_THROWS_AS(reference.Slice(3, 2), std::invalid_argument);
+  REQUIRE_THROWS_AS(reference.Slice(1, std::numeric_limits<std::size_t>::max()), std::invalid_argument);
+  REQUIRE_THROWS_AS(BufferReference(*storage, {}), std::invalid_argument);
+  REQUIRE(BufferReference{}.AsBytes().empty());
+  REQUIRE_NOTHROW(BufferReference({}, {}));
+  std::weak_ptr<Bytes> weak = storage;
+  BufferReference empty({}, storage);
+  reference = {};
+  storage.reset();
+  REQUIRE_FALSE(weak.expired());
+  empty = {};
+  REQUIRE(weak.expired());
+}
 
 TEST_CASE("ResultPreservesValuesAndRejectsWrongBranchAccess") {
   TextResult value("value");

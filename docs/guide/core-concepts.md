@@ -200,7 +200,7 @@ tasks.Launch([=]() -> Task<void> {
 ```
 
 `ApplicationHandle::LocalNotifications()` returns the focused local-notification handle.
-`LocalNotification::data` supplies a resource-free `PlatformPayload` snapshot to native templates and returns through `NotificationActivation::data`. It defaults to Null, is limited to 64 KiB of HUXP encoding, and rejects nested `ExternalTexture` and `FileReference` values. Treat notification data as potentially stale or externally supplied, not as authorization or protected storage.
+`LocalNotification::data` supplies a resource-free `PlatformPayload` snapshot to native templates and returns through `NotificationActivation::data`. It defaults to Null, is limited to 64 KiB of HUXP encoding, and rejects nested `ExternalTexture`, `FileReference`, and `BufferReference` values. Treat notification data as potentially stale or externally supplied, not as authorization or protected storage.
 It exposes independent capability snapshots, notification authorization returning `PermissionStatus`, immediate presentation, durable one-shot scheduling, and idempotent cancellation through stable application-owned identifiers. The shared permission types and notification API live in `<huxerui/system.h>`; `Granted` and `Provisional` permit notification submission, with provisional authorization retaining native presentation limits such as quiet delivery.
 The shared API is available on every host.
 Configured Android hosts use `NotificationManager` and an inexact alarm, while iOS and macOS use User Notifications; Windows, Linux, and Web currently report unavailable capabilities and operations.

@@ -2,6 +2,7 @@
 #import <huxerui/macos/platform_registry.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -15,6 +16,7 @@
 #include "macos_external_texture_internal.h"
 #include "application/platform_registry_internal.h"
 
+using huxerui::BufferReference;
 using huxerui::Bytes;
 using huxerui::ExternalTexture;
 using huxerui::FileReference;
@@ -85,12 +87,32 @@ static FileReference UnwrapFileReference(HUXFileReference* reference) {
   return [reference referenceForHuxerUI];
 }
 
+@interface HUXBufferReference () {
+@private
+  BufferReference reference_;
+}
+- (instancetype)initForHuxerUIWithReference:(BufferReference)reference;
+- (BufferReference)referenceForHuxerUI;
+@end
+
+static HUXBufferReference* WrapBufferReference(BufferReference reference) {
+  return [[HUXBufferReference alloc] initForHuxerUIWithReference:std::move(reference)];
+}
+
+static BufferReference UnwrapBufferReference(HUXBufferReference* reference) {
+  if (reference == nil) {
+    throw std::invalid_argument("HuxerUI platform boundary requires a BufferReference value");
+  }
+  return [reference referenceForHuxerUI];
+}
+
 // HUXP capability slots index these retained wrapper arrays, so bytes and wrappers must share one object lifetime.
 @interface HUXPlatformPayload () {
 @private
   Bytes bytes_;
   __strong NSArray<HUXExternalTexture*>* textures_;
   __strong NSArray<HUXFileReference*>* file_references_;
+  __strong NSArray<HUXBufferReference*>* buffer_references_;
 }
 - (instancetype)initForHuxerUIWithEnvelope:(PlatformPayload::Envelope)envelope;
 - (PlatformPayload)platformPayloadForHuxerUI;
@@ -129,6 +151,8 @@ static HUXPlatformPayloadKind ToObjectiveCKind(PlatformPayloadKind kind) {
     return HUXPlatformPayloadKindExternalTexture;
   case PlatformPayloadKind::FileReference:
     return HUXPlatformPayloadKindFileReference;
+  case PlatformPayloadKind::BufferReference:
+    return HUXPlatformPayloadKindBufferReference;
   }
   throw std::logic_error("HuxerUI PlatformPayload contained an unknown kind");
 }
@@ -365,6 +389,65 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
 
 @end
 
+@implementation HUXBufferReference
+
+- (instancetype)initForHuxerUIWithReference:(BufferReference)reference {
+  self = [super init];
+  if (self != nil) {
+    reference_ = std::move(reference);
+  }
+  return self;
+}
+
+- (instancetype)initWithBytes:(const void*)bytes length:(NSUInteger)length owner:(id)owner {
+  if (owner == nil || (bytes == nullptr && length != 0)) {
+    RaiseInvalidArgument(@"HuxerUI buffer reference requires retained, address-stable storage");
+  }
+  try {
+    struct Owner {
+      __strong id object;
+    };
+    auto retained = std::make_shared<Owner>(owner);
+    return [self initForHuxerUIWithReference:BufferReference(
+        {static_cast<const std::byte*>(bytes), length}, std::move(retained))];
+  } catch (const std::exception& exception) {
+    RaiseCppException(exception);
+  }
+}
+
+- (BufferReference)referenceForHuxerUI {
+  return reference_;
+}
+
+- (void)withUnsafeBytes:(void (^)(const void*, NSUInteger))reader {
+  if (reader == nil) {
+    RaiseInvalidArgument(@"HuxerUI buffer reader must not be nil");
+  }
+  const BufferReference retained = reference_;
+  const auto bytes = retained.AsBytes();
+  reader(bytes.data(), bytes.size());
+}
+
+- (HUXBufferReference*)sliceWithOffset:(NSUInteger)offset length:(NSUInteger)length {
+  try {
+    return WrapBufferReference(reference_.Slice(offset, length));
+  } catch (const std::exception& exception) {
+    RaiseCppException(exception);
+  }
+}
+
+- (BOOL)isEqual:(id)object {
+  return [object isKindOfClass:[HUXBufferReference class]] &&
+         reference_ == [static_cast<HUXBufferReference*>(object) referenceForHuxerUI];
+}
+
+- (NSUInteger)hash {
+  const auto bytes = reference_.AsBytes();
+  return reinterpret_cast<std::uintptr_t>(bytes.data()) ^ bytes.size();
+}
+
+@end
+
 @implementation HUXPlatformPayload
 
 - (instancetype)initForHuxerUIWithEnvelope:(PlatformPayload::Envelope)envelope {
@@ -383,12 +466,17 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
       [file_references addObject:WrapFileReference(std::move(reference))];
     }
     file_references_ = [file_references copy];
+    NSMutableArray<HUXBufferReference*>* buffers = [NSMutableArray arrayWithCapacity:envelope.buffer_references.size()];
+    for (BufferReference& reference : envelope.buffer_references) {
+      [buffers addObject:WrapBufferReference(std::move(reference))];
+    }
+    buffer_references_ = [buffers copy];
   }
   return self;
 }
 
 - (PlatformPayload)platformPayloadForHuxerUI {
-  if (textures_ == nil || file_references_ == nil) {
+  if (textures_ == nil || file_references_ == nil || buffer_references_ == nil) {
     throw std::invalid_argument("HuxerUI macOS platform boundary received an invalid PlatformPayload value");
   }
   PlatformPayload::Envelope envelope;
@@ -400,6 +488,10 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
   envelope.file_references.reserve(file_references_.count);
   for (HUXFileReference* reference in file_references_) {
     envelope.file_references.push_back(UnwrapFileReference(reference));
+  }
+  envelope.buffer_references.reserve(buffer_references_.count);
+  for (HUXBufferReference* reference in buffer_references_) {
+    envelope.buffer_references.push_back(UnwrapBufferReference(reference));
   }
   return PlatformPayload::Decode(envelope);
 }
@@ -489,6 +581,22 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
 + (instancetype)fileReferenceValue:(HUXFileReference*)reference {
   try {
     return EncodePayload(PlatformPayload(UnwrapFileReference(reference)));
+  } catch (const std::exception& exception) {
+    RaiseCppException(exception);
+  }
+}
+
++ (instancetype)bufferReferenceValue:(HUXBufferReference*)reference {
+  try {
+    return EncodePayload(PlatformPayload(UnwrapBufferReference(reference)));
+  } catch (const std::exception& exception) {
+    RaiseCppException(exception);
+  }
+}
+
+- (HUXBufferReference*)bufferReferenceValue {
+  try {
+    return WrapBufferReference(DecodePayload(self).AsBufferReference());
   } catch (const std::exception& exception) {
     RaiseCppException(exception);
   }

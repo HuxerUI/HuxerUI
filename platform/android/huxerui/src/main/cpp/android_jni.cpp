@@ -185,29 +185,71 @@ LocalRef<jobject> PlatformPayloadToJava(JNIEnv* environment, const PlatformPaylo
   LocalRef<jclass> payload_class(environment, environment->FindClass("org/huxerui/PlatformPayload"));
   LocalRef<jclass> texture_class(environment, environment->FindClass("org/huxerui/HuxerUIExternalTexture"));
   LocalRef<jclass> reference_class(environment, environment->FindClass("org/huxerui/HuxerUIFileReference"));
+  LocalRef<jclass> buffer_class(environment, environment->FindClass("org/huxerui/HuxerUIBufferReference"));
   LocalRef<jclass> list_class(environment, environment->FindClass("java/util/ArrayList"));
-  if (!bytes || !payload_class || !texture_class || !reference_class || !list_class || environment->ExceptionCheck()) {
+  if (!bytes || !payload_class || !texture_class || !reference_class || !buffer_class || !list_class ||
+      environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI could not resolve the Android PlatformPayload bridge");
   }
+  const jmethodID buffer_constructor = environment->GetMethodID(buffer_class.Get(), "<init>", "(J)V");
+  const jmethodID buffer_close = environment->GetMethodID(buffer_class.Get(), "close", "()V");
   const jmethodID texture_constructor = environment->GetMethodID(texture_class.Get(), "<init>", "(J)V");
   const jmethodID reference_constructor =
       environment->GetMethodID(reference_class.Get(), "<init>", "(JJLjava/lang/String;)V");
   const jmethodID list_constructor = environment->GetMethodID(list_class.Get(), "<init>", "(I)V");
   const jmethodID list_add = environment->GetMethodID(list_class.Get(), "add", "(Ljava/lang/Object;)Z");
+  const jmethodID list_get = environment->GetMethodID(list_class.Get(), "get", "(I)Ljava/lang/Object;");
   const jmethodID decode = environment->GetStaticMethodID(
       payload_class.Get(), "decodeEnvelope",
-      "([BLjava/util/List;Ljava/util/List;)Lorg/huxerui/PlatformPayload;");
-  if (texture_constructor == nullptr || reference_constructor == nullptr || list_constructor == nullptr ||
-      list_add == nullptr || decode == nullptr || environment->ExceptionCheck()) {
+      "([BLjava/util/List;Ljava/util/List;Ljava/util/List;)Lorg/huxerui/PlatformPayload;");
+  if (texture_constructor == nullptr || reference_constructor == nullptr || buffer_constructor == nullptr ||
+      buffer_close == nullptr || list_constructor == nullptr || list_add == nullptr || list_get == nullptr ||
+      decode == nullptr || environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI Android PlatformPayload bridge methods do not match the SDK");
   }
   LocalRef<jobject> textures(environment, environment->NewObject(list_class.Get(), list_constructor,
                                                                  static_cast<jint>(envelope.external_textures.size())));
   LocalRef<jobject> references(environment, environment->NewObject(list_class.Get(), list_constructor,
                                                                    static_cast<jint>(envelope.file_references.size())));
-  if (!textures || !references || environment->ExceptionCheck()) {
+  LocalRef<jobject> buffers(environment, environment->NewObject(list_class.Get(), list_constructor,
+                                                              static_cast<jint>(envelope.buffer_references.size())));
+  if (!textures || !references || !buffers || environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI could not allocate the Android PlatformPayload capability table");
   }
+  // Decoded payloads retain independent shares; temporary wrappers must not hold storage until Java finalization.
+  struct TemporaryBufferTable {
+    JNIEnv* environment;
+    jobject list;
+    jmethodID get;
+    jmethodID close;
+    jint count = 0;
+    LocalRef<jobject> current;
+
+    void Close(jobject reference) noexcept {
+      if (reference != nullptr) {
+        environment->CallVoidMethod(reference, close);
+      }
+      if (environment->ExceptionCheck()) {
+        environment->ExceptionDescribe();
+        environment->ExceptionClear();
+      }
+    }
+
+    ~TemporaryBufferTable() {
+      LocalRef<jthrowable> pending(environment, environment->ExceptionOccurred());
+      if (pending) {
+        environment->ExceptionClear();
+      }
+      Close(current.Get());
+      for (jint index = 0; index < count; ++index) {
+        LocalRef<jobject> reference(environment, environment->CallObjectMethod(list, get, index));
+        Close(reference.Get());
+      }
+      if (pending) {
+        environment->Throw(pending.Get());
+      }
+    }
+  } buffer_table{environment, buffers.Get(), list_get, buffer_close, 0, {}};
   for (const std::shared_ptr<ExternalTexture>& texture : envelope.external_textures) {
     auto handle = std::make_unique<std::shared_ptr<ExternalTexture>>(texture);
     LocalRef<jobject> java_texture(
@@ -241,8 +283,27 @@ LocalRef<jobject> PlatformPayloadToJava(JNIEnv* environment, const PlatformPaylo
       throw std::runtime_error("HuxerUI could not populate the Android PlatformPayload capability table");
     }
   }
-  jobject result =
-      environment->CallStaticObjectMethod(payload_class.Get(), decode, bytes.Get(), textures.Get(), references.Get());
+  for (const BufferReference& reference : envelope.buffer_references) {
+    if (reference.AsBytes().size() > static_cast<std::size_t>(std::numeric_limits<jint>::max())) {
+      throw std::invalid_argument("HuxerUI Android buffer reference exceeds the ByteBuffer capacity range");
+    }
+    auto handle = std::make_unique<BufferReference>(reference);
+    LocalRef<jobject> wrapper(environment, environment->NewObject(
+        buffer_class.Get(), buffer_constructor, static_cast<jlong>(reinterpret_cast<std::uintptr_t>(handle.get()))));
+    if (!wrapper || environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI could not create an Android buffer reference capability");
+    }
+    handle.release();
+    buffer_table.current = std::move(wrapper);
+    environment->CallBooleanMethod(buffers.Get(), list_add, buffer_table.current.Get());
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI could not populate the Android buffer reference table");
+    }
+    ++buffer_table.count;
+    buffer_table.current.Reset();
+  }
+  jobject result = environment->CallStaticObjectMethod(
+      payload_class.Get(), decode, bytes.Get(), textures.Get(), references.Get(), buffers.Get());
   if (result == nullptr || environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI could not decode PlatformPayload for Android");
   }
@@ -258,8 +319,9 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
   LocalRef<jclass> envelope_class(environment, environment->FindClass("org/huxerui/PlatformPayload$Envelope"));
   LocalRef<jclass> texture_class(environment, environment->FindClass("org/huxerui/HuxerUIExternalTexture"));
   LocalRef<jclass> reference_class(environment, environment->FindClass("org/huxerui/HuxerUIFileReference"));
+  LocalRef<jclass> buffer_class(environment, environment->FindClass("org/huxerui/HuxerUIBufferReference"));
   LocalRef<jclass> list_class(environment, environment->FindClass("java/util/List"));
-  if (!payload_class || !envelope_class || !texture_class || !reference_class || !list_class ||
+  if (!payload_class || !envelope_class || !texture_class || !reference_class || !buffer_class || !list_class ||
       environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI could not resolve the Android PlatformPayload bridge");
   }
@@ -272,8 +334,11 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
   const jmethodID list_get = environment->GetMethodID(list_class.Get(), "get", "(I)Ljava/lang/Object;");
   const jmethodID retain_texture = environment->GetMethodID(texture_class.Get(), "retainHandle", "()J");
   const jmethodID retain_reference = environment->GetMethodID(reference_class.Get(), "retainHandle", "()J");
+  const jmethodID retain_buffer = environment->GetMethodID(buffer_class.Get(), "retainHandle", "()J");
+  const jfieldID buffers_field = environment->GetFieldID(envelope_class.Get(), "bufferReferences", "Ljava/util/List;");
   if (encode == nullptr || bytes_field == nullptr || textures_field == nullptr || references_field == nullptr ||
       list_size == nullptr || list_get == nullptr || retain_texture == nullptr || retain_reference == nullptr ||
+      retain_buffer == nullptr || buffers_field == nullptr ||
       environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI Android PlatformPayload bridge methods do not match the SDK");
   }
@@ -285,7 +350,8 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
                              static_cast<jbyteArray>(environment->GetObjectField(envelope.Get(), bytes_field)));
   LocalRef<jobject> textures(environment, environment->GetObjectField(envelope.Get(), textures_field));
   LocalRef<jobject> references(environment, environment->GetObjectField(envelope.Get(), references_field));
-  if (!bytes || !textures || !references || environment->ExceptionCheck()) {
+  LocalRef<jobject> buffers(environment, environment->GetObjectField(envelope.Get(), buffers_field));
+  if (!bytes || !textures || !references || !buffers || environment->ExceptionCheck()) {
     throw std::runtime_error("HuxerUI Android PlatformPayload envelope is invalid");
   }
   const jint texture_count = environment->CallIntMethod(textures.Get(), list_size);
@@ -330,6 +396,24 @@ PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload) {
   decoded.bytes = JavaByteArrayToBytes(environment, bytes.Get());
   decoded.external_textures = std::move(external_textures);
   decoded.file_references = std::move(file_references);
+  const jint buffer_count = environment->CallIntMethod(buffers.Get(), list_size);
+  if (buffer_count < 0 || environment->ExceptionCheck()) {
+    throw std::runtime_error("HuxerUI Android buffer reference table is invalid");
+  }
+  decoded.buffer_references.reserve(static_cast<std::size_t>(buffer_count));
+  for (jint index = 0; index < buffer_count; ++index) {
+    LocalRef<jobject> buffer(environment, environment->CallObjectMethod(buffers.Get(), list_get, index));
+    if (!buffer || !environment->IsInstanceOf(buffer.Get(), buffer_class.Get()) || environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android PlatformPayload capability is not a buffer reference");
+    }
+    const jlong handle = environment->CallLongMethod(buffer.Get(), retain_buffer);
+    if (handle == 0 || environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android PlatformPayload buffer reference is closed");
+    }
+    const std::unique_ptr<BufferReference> reference(
+        reinterpret_cast<BufferReference*>(static_cast<std::uintptr_t>(handle)));
+    decoded.buffer_references.push_back(*reference);
+  }
   return PlatformPayload::Decode(decoded);
 }
 
@@ -410,6 +494,37 @@ void DeleteGlobalReference(JavaVM* virtual_machine, jobject reference) noexcept 
     environment->DeleteGlobalRef(reference);
   }
 }
+
+struct BufferOwner {
+  JavaVM* virtual_machine = nullptr;
+  jobject buffer = nullptr;
+  jobject on_release = nullptr;
+  jmethodID run = nullptr;
+  bool published = false;
+
+  ~BufferOwner() {
+    JavaEnvironment attached(virtual_machine);
+    if (JNIEnv* environment = attached.Get()) {
+      // Destruction can occur during exception unwinding; a release callback must not replace that exception.
+      LocalRef<jthrowable> pending(environment, environment->ExceptionOccurred());
+      if (pending) {
+        environment->ExceptionClear();
+      }
+      if (published && on_release != nullptr) {
+        environment->CallVoidMethod(on_release, run);
+        if (environment->ExceptionCheck()) {
+          environment->ExceptionDescribe();
+          environment->ExceptionClear();
+        }
+      }
+      environment->DeleteGlobalRef(on_release);
+      environment->DeleteGlobalRef(buffer);
+      if (pending) {
+        environment->Throw(pending.Get());
+      }
+    }
+  }
+};
 
 jclass ResolveClass(JNIEnv* environment, jobject context, std::string_view class_name) {
   if (class_name.empty()) {
@@ -1013,4 +1128,134 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIPlatformChannel_native
                                                                                               jlong handle) {
   delete reinterpret_cast<huxerui::android::detail::PlatformResultCompletion*>(
       static_cast<std::uintptr_t>(handle));
+}
+
+namespace {
+
+void ThrowBufferException(JNIEnv* environment, const std::exception& exception) {
+  if (!environment->ExceptionCheck()) {
+    const char* name = dynamic_cast<const std::bad_alloc*>(&exception) != nullptr
+                           ? "java/lang/OutOfMemoryError"
+                           : "java/lang/IllegalArgumentException";
+    huxerui::android::LocalRef<jclass> type(environment, environment->FindClass(name));
+    if (type) {
+      environment->ThrowNew(type.Get(), exception.what());
+    }
+  }
+}
+
+const huxerui::BufferReference& RequireBuffer(jlong handle) {
+  if (handle == 0) {
+    throw std::invalid_argument("HuxerUI buffer reference is closed");
+  }
+  return *reinterpret_cast<const huxerui::BufferReference*>(static_cast<std::uintptr_t>(handle));
+}
+
+} // namespace
+
+extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIBufferReference_create(
+    JNIEnv* environment, jclass, jobject buffer, jobject on_release) {
+  try {
+    if (buffer == nullptr) {
+      throw std::invalid_argument("HuxerUI buffer reference requires a direct ByteBuffer");
+    }
+    const jlong size = environment->GetDirectBufferCapacity(buffer);
+    const auto* address = static_cast<const std::byte*>(environment->GetDirectBufferAddress(buffer));
+    if (size < 0 || size > std::numeric_limits<jint>::max() || (size != 0 && address == nullptr)) {
+      throw std::invalid_argument("HuxerUI buffer reference requires an accessible direct ByteBuffer");
+    }
+    auto owner = std::make_shared<huxerui::android::detail::BufferOwner>();
+    if (environment->GetJavaVM(&owner->virtual_machine) != JNI_OK) {
+      throw std::runtime_error("HuxerUI could not retain the Java VM for a buffer reference");
+    }
+    owner->buffer = environment->NewGlobalRef(buffer);
+    if (owner->buffer == nullptr || environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI could not retain direct buffer storage");
+    }
+    if (on_release != nullptr) {
+      huxerui::android::LocalRef<jclass> type(environment, environment->GetObjectClass(on_release));
+      owner->run = type ? environment->GetMethodID(type.Get(), "run", "()V") : nullptr;
+      if (owner->run == nullptr || environment->ExceptionCheck()) {
+        throw std::invalid_argument("HuxerUI buffer release callback must implement Runnable");
+      }
+      owner->on_release = environment->NewGlobalRef(on_release);
+      if (owner->on_release == nullptr || environment->ExceptionCheck()) {
+        throw std::runtime_error("HuxerUI could not retain the buffer release callback");
+      }
+    }
+    auto reference = std::make_unique<huxerui::BufferReference>(
+        std::span<const std::byte>(address, static_cast<std::size_t>(size)), owner);
+    owner->published = true;
+    return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(reference.release()));
+  } catch (const std::exception& exception) {
+    ThrowBufferException(environment, exception);
+    return 0;
+  }
+}
+
+extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIBufferReference_retain(
+    JNIEnv* environment, jclass, jlong handle) {
+  try {
+    auto reference = std::make_unique<huxerui::BufferReference>(RequireBuffer(handle));
+    return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(reference.release()));
+  } catch (const std::exception& exception) {
+    ThrowBufferException(environment, exception);
+    return 0;
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIBufferReference_release(JNIEnv*, jclass, jlong handle) {
+  delete reinterpret_cast<huxerui::BufferReference*>(static_cast<std::uintptr_t>(handle));
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_org_huxerui_HuxerUIBufferReference_view(
+    JNIEnv* environment, jclass, jlong handle) {
+  try {
+    const auto bytes = RequireBuffer(handle).AsBytes();
+    if (bytes.size() > static_cast<std::size_t>(std::numeric_limits<jint>::max())) {
+      throw std::invalid_argument("HuxerUI buffer reference exceeds the ByteBuffer capacity range");
+    }
+    static std::byte empty_buffer;
+    void* address = bytes.data() == nullptr ? &empty_buffer : const_cast<std::byte*>(bytes.data());
+    return environment->NewDirectByteBuffer(address, static_cast<jlong>(bytes.size()));
+  } catch (const std::exception& exception) {
+    ThrowBufferException(environment, exception);
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIBufferReference_slice(
+    JNIEnv* environment, jclass, jlong handle, jint offset, jint size) {
+  try {
+    if (offset < 0 || size < 0) {
+      throw std::invalid_argument("HuxerUI buffer slice requires nonnegative offset and size");
+    }
+    auto reference = std::make_unique<huxerui::BufferReference>(
+        RequireBuffer(handle).Slice(static_cast<std::size_t>(offset), static_cast<std::size_t>(size)));
+    return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(reference.release()));
+  } catch (const std::exception& exception) {
+    ThrowBufferException(environment, exception);
+    return 0;
+  }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIBufferReference_equal(
+    JNIEnv* environment, jclass, jlong left, jlong right) {
+  try {
+    return RequireBuffer(left) == RequireBuffer(right);
+  } catch (const std::exception& exception) {
+    ThrowBufferException(environment, exception);
+    return false;
+  }
+}
+
+extern "C" JNIEXPORT jint JNICALL Java_org_huxerui_HuxerUIBufferReference_hash(
+    JNIEnv* environment, jclass, jlong handle) {
+  try {
+    const auto bytes = RequireBuffer(handle).AsBytes();
+    return static_cast<jint>(reinterpret_cast<std::uintptr_t>(bytes.data()) ^ bytes.size());
+  } catch (const std::exception& exception) {
+    ThrowBufferException(environment, exception);
+    return 0;
+  }
 }

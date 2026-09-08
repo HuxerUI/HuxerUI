@@ -46,6 +46,14 @@ func useFileReference(_ reference: FileReference) {
   _ = PlatformPayload.fileReference(reference).fileReference()
 }
 
+let storage = NSMutableData(length: 8)!
+let buffer = BufferReference(bytes: storage.bytes, length: UInt(storage.length), owner: storage)
+let bufferPayload = PlatformPayload.bufferReference(buffer)
+bufferPayload.bufferReference().slice(offset: 2, length: 4).withUnsafeBytes { bytes, length in
+  precondition(bytes == storage.bytes.advanced(by: 2))
+  precondition(length == 4)
+}
+
 let texture = PixelBufferTexture(intrinsicSize: CGSize(width: 16, height: 9))
 texture.finish()
 
