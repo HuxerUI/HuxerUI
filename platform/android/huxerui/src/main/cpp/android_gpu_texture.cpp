@@ -1398,7 +1398,9 @@ void AndroidTextureLayers::Draw(
       }
     }
   }
-  if (!layer.has_presentation) {
+  // A new TextureView creates its Surface during the first drawChild pass. Let that
+  // empty child draw before presentation, while still hiding stale frames on an existing output.
+  if (!layer.has_presentation && layer.output) {
     return;
   }
   environment->CallVoidMethod(
