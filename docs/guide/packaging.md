@@ -184,7 +184,7 @@ Custom desktop-stack builds outside distribution library directories are rejecte
 The target machine needs the corresponding runtime packages, not their development packages or the HuxerUI SDK.
 Bundled ELF files use `$ORIGIN`-relative RUNPATH entries, and versioned library link chains are preserved.
 Deployment prints the packaged binaries' `GLIBC`, `GLIBCXX`, and `CXXABI` requirements; build and test release packages on the intended minimum environment.
-The official SDK's glibc 2.35 requirement alone does not establish an application's minimum system requirements or provide GTK through the AppImage.
+The official SDK's glibc 2.38 requirement alone does not establish an application's minimum system requirements or provide GTK through the AppImage.
 
 ## Custom Windows installer interface
 

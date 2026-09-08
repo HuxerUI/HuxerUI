@@ -148,7 +148,8 @@ Libepoxy provides OpenGL dispatch, Pango provides text layout, Cairo records ord
 
 Install the corresponding development packages before configuring CMake.
 The SDK archive does not bundle distribution-owned GTK, libepoxy, Pango, Cairo, GIO, or libsoup libraries.
-Official Linux SDK binaries require glibc 2.35 or later.
+Official Linux SDK binaries require glibc 2.38 or later.
+Release CI builds and tests on Ubuntu 24.04; meeting the glibc baseline alone does not establish validation on another distribution.
 Application packages retain the distribution-owned runtime stack and may require newer system ABI versions according to their binaries; see [Packaging Applications](packaging.md#desktop-system-requirements).
 
 Linux builds are provided for x86_64 and aarch64 hosts.

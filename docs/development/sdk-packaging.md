@@ -74,7 +74,7 @@ On macOS, also create an iOS-only smoke project and run `huxerui build ios --pro
 
 CMake packaging changes require both an incremental build and a separate clean configure and build on the affected host.
 Release CI produces Windows x86_64, macOS arm64 and x86_64, Linux aarch64 and x86_64, and Android arm64-v8a archives.
-Linux release CI rejects binaries that require symbols newer than GLIBC 2.35, GLIBCXX 3.4.32, or CXXABI 1.3.15.
+Linux release CI rejects binaries that require symbols newer than GLIBC 2.38, GLIBCXX 3.4.32, or CXXABI 1.3.15.
 Release jobs rebuild their host tools from source before configuration instead of publishing the executables checked into the selected release ref.
 Distributed Linux host tools are built in a GLIBC 2.28 environment and statically link the GNU C++ runtime independently of the newer Linux SDK-library baseline.
 

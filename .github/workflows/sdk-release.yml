@@ -468,7 +468,7 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates fontconfig fonts-dejavu-core gdb git libepoxy-dev libgtk-4-dev \
+            binutils ca-certificates fontconfig fonts-dejavu-core git libepoxy-dev libgtk-4-dev \
             libsoup-3.0-dev ninja-build patchelf pkg-config python3-pip software-properties-common
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
@@ -494,21 +494,15 @@ jobs:
       - name: Build
         run: cmake --build build --parallel "${{ matrix.parallel_jobs }}"
       - name: Test
-        run: bash .github/workflows/scripts/run_linux_tests.sh build
-      - name: Collect Linux failure diagnostics
-        if: failure()
-        run: >-
-          bash .github/workflows/scripts/collect_linux_test_diagnostics.sh
-          build
-          "${RUNNER_TEMP}/huxerui-linux-test-diagnostics"
-          "${GITHUB_WORKSPACE}"
-      - name: Upload Linux failure diagnostics
-        if: failure()
+        id: linux-tests
+        run: ctest --test-dir build --output-on-failure --timeout 300
+      - name: Upload Linux test logs
+        if: failure() && steps.linux-tests.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: linux-test-diagnostics-${{ matrix.architecture }}
-          path: ${{ runner.temp }}/huxerui-linux-test-diagnostics
-          if-no-files-found: error
+          name: linux-test-logs-${{ matrix.architecture }}
+          path: build/Testing/Temporary/
+          if-no-files-found: warn
           retention-days: 7
       - name: Validate Linux SDK binary compatibility
         run: >-
