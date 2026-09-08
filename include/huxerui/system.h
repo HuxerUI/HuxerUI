@@ -233,6 +233,34 @@ private:
 #if defined(_WIN32)
 namespace windows {
 
+/// Registers an application-owned URL scheme for the current executable and Windows user.
+///
+/// Call explicitly from application entry code, normally before RunApplication(). Creates a persistent
+/// HKCU registration with a quoted executable path and URL argument; no installer, administrator, COM, or Runtime
+/// is required. Repeated registration by the same executable may update its display name. Other executables,
+/// non-protocol keys, and machine-wide registrations are rejected rather than replaced. The user's default-app
+/// choice is never changed, so registration does not guarantee that Windows will route every URL to this app.
+/// Registration survives process exit. Validate incoming UrlActivation content before performing application actions.
+/// Available in the Windows 7 compatibility backend as well as the default Windows backend.
+///
+/// @param scheme Bare, case-insensitive ASCII scheme: a letter followed by letters, digits, '+', '-', or '.'.
+/// Use 2 to 255 characters; single-letter schemes conflict with Windows drive designators. Do not include ':'.
+/// @param display_name Non-empty UTF-8 application name without embedded nulls or line breaks.
+/// @throws std::invalid_argument if a parameter is invalid.
+/// @throws std::runtime_error if ownership conflicts or a native operation fails.
+void RegisterUrlScheme(std::string_view scheme, std::string_view display_name);
+
+/// Removes only a matching current-user URL scheme registration owned by the current executable.
+///
+/// An absent registration is a no-op. Prior registration in this process is not required. Call explicitly before
+/// removing or relocating the executable, not during ordinary exit. Does not alter machine-wide registrations,
+/// other users, or default-app choices. An installer running as another user cannot clean up this user's registration.
+///
+/// @param scheme Bare scheme originally passed to RegisterUrlScheme(), with the same syntax requirements.
+/// @throws std::invalid_argument if the scheme is invalid.
+/// @throws std::runtime_error if ownership conflicts or a native operation fails.
+void UnregisterUrlScheme(std::string_view scheme);
+
 /// Supplies application-owned ToastGeneric XML for a Windows notification template.
 ///
 /// Called synchronously on the host UI thread when a template is submitted, including when scheduling it, not at

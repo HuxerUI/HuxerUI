@@ -5,8 +5,7 @@ huxerui_add_example(
 )
 
 if (WIN32)
-    target_sources(example_application PRIVATE application_windows.cpp)
-    target_link_libraries(example_application PRIVATE advapi32)
+    target_compile_definitions(example_application PRIVATE HUXERUI_EXAMPLE_WINDOWS_URL_SCHEME=1)
 endif ()
 
 if (APPLE AND NOT IOS)

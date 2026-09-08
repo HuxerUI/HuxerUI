@@ -209,7 +209,11 @@ For an external URL or file activation, a new process first looks for a window c
 
 Ordinary launches are never forwarded, so this mechanism does not impose general single-instance behavior. Multiple ordinary instances remain possible, while an external activation targets one existing instance.
 
-URL protocol and file-association registration remain application or packaging metadata rather than `AppOptions`. `example_application` registers the `huxerui-example` URL protocol under the current Windows user and demonstrates both cold and subsequent browser activation without administrator access.
+URL protocol registration is an explicit application-entry operation through `windows::RegisterUrlScheme()` and `UnregisterUrlScheme()` in `<huxerui/system.h>`, not `AppOptions` or a Runtime service. The Windows application implementation owns current-user registry writes, executable-path quoting, ownership checks, and Shell association-change notification. It reuses native registry and registration-lock helpers with local notifications, but URL schemes require neither a notification identity nor COM/WinRT. The API is also available in the Windows 7 compatibility backend.
+
+The registration belongs to the current executable path and persists beyond process lifetime. The same executable may register repeatedly; another executable, a non-protocol class, or a machine-wide registration is not replaced. Explicit cleanup verifies ownership before removing a current-user key. This is a cooperative ownership check, not a security boundary against other processes running as the same user. User default-app choices remain untouched. File associations and all-user packaging policy remain application-owned.
+
+`example_application` explicitly registers the `huxerui-example` URL protocol before `RunApplication()` and exposes a separate cleanup argument. It demonstrates both cold and subsequent browser activation without administrator access and without static-initialization side effects or example-owned registry helpers.
 
 ## Android mapping
 

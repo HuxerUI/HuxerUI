@@ -39,6 +39,8 @@ Use `UseApplication().StartupActivation()` for the cold-start `ApplicationActiva
 
 For local-notification submission, templates, scheduling, and activation data, read [local-notifications.md](local-notifications.md).
 
+On Windows, register an application-owned custom URL scheme with `windows::RegisterUrlScheme(scheme, display_name)` from `<huxerui/system.h>` in explicit entry code, normally before `RunApplication()`. Prefer this public API over hand-written registry helpers or static-initialization side effects. It targets the current executable and current user, including the Windows 7 compatibility backend; no notification identity, COM setup, or CMake registration metadata is required. Use a bare ASCII scheme without ':', with a letter followed by letters, digits, '+', '-', or '.', and 2 to 255 characters. Registration persists after exit. Call `windows::UnregisterUrlScheme(scheme)` only for explicit removal or relocation, not from normal lifecycle cleanup. Repeated registration by the same executable is allowed; another executable or a machine-wide registration is rejected. Report conflicts rather than deleting another application's keys. This API does not override user default-app choices, register file associations, or manage all-user installation; other platforms still use their native manifest or bundle declarations. Incoming URLs continue through `UrlActivation` and require application-level validation and authorization.
+
 ## System tray
 
 `UseApplication().SystemTray()` returns the application-level tray handle, and `UseApplication().Quit()` requests orderly application termination. Check `IsAvailable()` before hiding the last visible window because unsupported hosts and temporarily unavailable Linux tray hosts report `false`.

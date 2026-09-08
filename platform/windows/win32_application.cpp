@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlobj.h>
 
 #include <cstddef>
 #include <chrono>
@@ -17,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 #include <type_traits>
@@ -31,7 +33,6 @@
 #include <notificationactivationcallback.h>
 #include <propkey.h>
 #include <propvarutil.h>
-#include <shlobj.h>
 #include <shobjidl.h>
 #include <wincrypt.h>
 #include <wrl.h>
@@ -124,6 +125,133 @@ std::wstring Hexadecimal(std::uint64_t value) {
   return result;
 }
 
+void CheckRegistryStatus(LSTATUS result) {
+  if (result != ERROR_SUCCESS) {
+    throw std::system_error(result, std::system_category(), "HuxerUI Windows registry operation failed");
+  }
+}
+
+using RegistryKey = std::unique_ptr<std::remove_pointer_t<HKEY>, decltype(&RegCloseKey)>;
+
+RegistryKey OpenRegistryKey(HKEY root, const std::wstring& path) {
+  HKEY key = nullptr;
+  const LSTATUS result = RegOpenKeyExW(root, path.c_str(), 0, KEY_READ, &key);
+  if (result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND) {
+    CheckRegistryStatus(result);
+  }
+  return RegistryKey(key, RegCloseKey);
+}
+
+std::wstring ReadRegistryString(HKEY key, const wchar_t* subkey, const wchar_t* name) {
+  std::wstring text(32768, L'\0');
+  DWORD bytes = static_cast<DWORD>(text.size() * sizeof(wchar_t));
+  CheckRegistryStatus(RegGetValueW(key, subkey, name, RRF_RT_REG_SZ, nullptr, text.data(), &bytes));
+  text.resize(wcsnlen_s(text.data(), text.size()));
+  return text;
+}
+
+void SetRegistryString(const std::wstring& path, const wchar_t* name, const std::wstring& value) {
+  HKEY key = nullptr;
+  CheckRegistryStatus(RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr,
+      REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr));
+  RegistryKey owned(key, RegCloseKey);
+  CheckRegistryStatus(RegSetValueExW(key, name, 0, REG_SZ,
+      reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t))));
+}
+
+std::unique_ptr<void, decltype(&CloseHandle)> AcquireRegistrationLock(const std::wstring& name) {
+  // Coordinate cooperating processes in the current session; this is not an ownership or security boundary.
+  const std::wstring mutex_name = L"Local\\HuxerUI.Registration." + name;
+  std::unique_ptr<void, decltype(&CloseHandle)> mutex(CreateMutexW(nullptr, FALSE, mutex_name.c_str()), CloseHandle);
+  if (!mutex) {
+    throw std::system_error(GetLastError(), std::system_category(), "HuxerUI could not create a registration lock");
+  }
+  const DWORD wait = WaitForSingleObject(mutex.get(), 10000);
+  if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
+    throw std::runtime_error("HuxerUI could not acquire the Windows registration lock");
+  }
+  return mutex;
+}
+
+std::wstring ParseUrlScheme(std::string_view scheme) {
+  if (scheme.size() < 2 || scheme.size() > 255 || !IsAsciiAlpha(scheme.front()) ||
+      scheme.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+.-") != scheme.npos) {
+    throw std::invalid_argument("HuxerUI Windows URL scheme is invalid");
+  }
+  std::wstring result(scheme.begin(), scheme.end());
+  for (auto& character : result) {
+    if (character >= L'A' && character <= L'Z') {
+      character += L'a' - L'A';
+    }
+  }
+  return result;
+}
+
+bool RegistryValueExists(HKEY key, const wchar_t* subkey, const wchar_t* name) {
+  const LSTATUS result = RegGetValueW(key, subkey, name, RRF_RT_ANY, nullptr, nullptr, nullptr);
+  if (result == ERROR_FILE_NOT_FOUND || result == ERROR_PATH_NOT_FOUND) {
+    return false;
+  }
+  CheckRegistryStatus(result);
+  return true;
+}
+
+RegistryKey OpenOwnedUrlSchemeKey(const std::wstring& path, const std::wstring& command) {
+  if (OpenRegistryKey(HKEY_LOCAL_MACHINE, path)) {
+    throw std::runtime_error("HuxerUI refuses to replace or remove a machine-owned URL scheme");
+  }
+  auto key = OpenRegistryKey(HKEY_CURRENT_USER, path);
+  if (!key) {
+    return key;
+  }
+  if (!ReadRegistryString(key.get(), nullptr, L"URL Protocol").empty() ||
+      _wcsicmp(ReadRegistryString(key.get(), L"shell\\open\\command", nullptr).c_str(), command.c_str()) != 0) {
+    throw std::runtime_error("HuxerUI URL scheme belongs to another registration; unregister that copy first");
+  }
+  const auto verb = RegistryValueExists(key.get(), L"shell", nullptr)
+                        ? ReadRegistryString(key.get(), L"shell", nullptr) : std::wstring{};
+  // A matching command is not sufficient when Shell would dispatch through another verb or activation mechanism.
+  if (RegistryValueExists(key.get(), L"shell\\open\\command", L"DelegateExecute") ||
+      OpenRegistryKey(key.get(), L"shell\\open\\ddeexec") ||
+      (!verb.empty() && _wcsicmp(verb.c_str(), L"open") != 0)) {
+    throw std::runtime_error("HuxerUI URL scheme uses an unsupported activation handler");
+  }
+  return key;
+}
+
+void RegisterWin32UrlScheme(const std::wstring& scheme, const std::wstring& display_name) {
+  auto mutex = AcquireRegistrationLock(L"UrlScheme");
+  const std::unique_ptr<void, decltype(&ReleaseMutex)> lock(mutex.get(), ReleaseMutex);
+  const std::wstring path = L"Software\\Classes\\" + scheme;
+  const std::wstring command = L"\"" + CurrentExecutablePath() + L"\" \"%1\"";
+  auto existing = OpenOwnedUrlSchemeKey(path, command);
+  try {
+    SetRegistryString(path + L"\\shell\\open\\command", nullptr, command);
+    SetRegistryString(path, nullptr, L"URL:" + display_name);
+    SetRegistryString(path, L"URL Protocol", L"");
+  } catch (...) {
+    // Never remove an existing registration when a later write fails.
+    if (!existing) {
+      RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str());
+    }
+    throw;
+  }
+  SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+}
+
+void UnregisterWin32UrlScheme(const std::wstring& scheme) {
+  auto mutex = AcquireRegistrationLock(L"UrlScheme");
+  const std::unique_ptr<void, decltype(&ReleaseMutex)> lock(mutex.get(), ReleaseMutex);
+  const std::wstring path = L"Software\\Classes\\" + scheme;
+  const std::wstring command = L"\"" + CurrentExecutablePath() + L"\" \"%1\"";
+  auto existing = OpenOwnedUrlSchemeKey(path, command);
+  if (existing) {
+    existing.reset();
+    CheckRegistryStatus(RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str()));
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+  }
+}
+
 #if !defined(HUXERUI_WINDOWS_7_COMPAT)
 
 using namespace winrt::Windows::UI::Notifications;
@@ -166,34 +294,6 @@ std::wstring NotificationClsidText(const NotificationIdentity& identity) {
   wchar_t text[39]{};
   winrt::check_bool(StringFromGUID2(identity.clsid, text, 39) != 0);
   return text;
-}
-
-using NotificationRegistryKey = std::unique_ptr<std::remove_pointer_t<HKEY>, decltype(&RegCloseKey)>;
-
-NotificationRegistryKey OpenNotificationKey(HKEY root, const std::wstring& path) {
-  HKEY key = nullptr;
-  const LSTATUS result = RegOpenKeyExW(root, path.c_str(), 0, KEY_READ, &key);
-  if (result != ERROR_FILE_NOT_FOUND && result != ERROR_PATH_NOT_FOUND) {
-    winrt::check_hresult(HRESULT_FROM_WIN32(result));
-  }
-  return NotificationRegistryKey(key, RegCloseKey);
-}
-
-std::wstring ReadNotificationRegistryString(HKEY key, const wchar_t* subkey, const wchar_t* name) {
-  std::wstring text(32768, L'\0');
-  DWORD bytes = static_cast<DWORD>(text.size() * sizeof(wchar_t));
-  winrt::check_hresult(HRESULT_FROM_WIN32(RegGetValueW(key, subkey, name, RRF_RT_REG_SZ, nullptr, text.data(), &bytes)));
-  text.resize(wcsnlen_s(text.data(), text.size()));
-  return text;
-}
-
-void SetNotificationRegistryString(const std::wstring& path, const wchar_t* name, const std::wstring& value) {
-  HKEY key = nullptr;
-  winrt::check_hresult(HRESULT_FROM_WIN32(RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr,
-      REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr)));
-  NotificationRegistryKey owned(key, RegCloseKey);
-  winrt::check_hresult(HRESULT_FROM_WIN32(RegSetValueExW(key, name, 0, REG_SZ,
-      reinterpret_cast<const BYTE*>(value.c_str()), static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)))));
 }
 
 std::filesystem::path NotificationShortcutPath(const std::wstring& app_id) {
@@ -283,35 +383,22 @@ private:
   HRESULT result_;
 };
 
-winrt::handle AcquireNotificationRegistrationLock(const std::wstring& app_id) {
-  // Serialize this identity's registration across applications in the current interactive session.
-  const std::wstring mutex_name = L"Local\\HuxerUI.NotificationRegistration." + app_id;
-  winrt::handle mutex(CreateMutexW(nullptr, FALSE, mutex_name.c_str()));
-  winrt::check_bool(static_cast<bool>(mutex));
-  const DWORD wait = WaitForSingleObject(mutex.get(), 10000);
-  if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED) {
-    throw std::runtime_error("HuxerUI could not acquire the Windows notification registration lock");
-  }
-  return mutex;
-}
-
-std::pair<NotificationRegistryKey, NotificationRegistryKey>
+std::pair<RegistryKey, RegistryKey>
 OpenOwnedNotificationKeys(const NotificationIdentity& identity, const std::wstring& executable) {
   const auto clsid = NotificationClsidText(identity);
   const std::wstring com_path = L"Software\\Classes\\CLSID\\" + clsid;
   const std::wstring app_path = L"Software\\Classes\\AppUserModelId\\" + identity.app_id;
   const std::wstring command = L"\"" + executable + L"\" " + std::wstring(win32_notification_launch_flag);
-  if (OpenNotificationKey(HKEY_LOCAL_MACHINE, com_path) || OpenNotificationKey(HKEY_LOCAL_MACHINE, app_path)) {
+  if (OpenRegistryKey(HKEY_LOCAL_MACHINE, com_path) || OpenRegistryKey(HKEY_LOCAL_MACHINE, app_path)) {
     throw std::runtime_error("HuxerUI refuses to replace or remove a machine-owned notification identity");
   }
-  auto com_key = OpenNotificationKey(HKEY_CURRENT_USER, com_path);
-  auto app_key = OpenNotificationKey(HKEY_CURRENT_USER, app_path);
-  if (com_key && _wcsicmp(ReadNotificationRegistryString(com_key.get(), L"LocalServer32", nullptr).c_str(),
-                           command.c_str()) != 0) {
+  auto com_key = OpenRegistryKey(HKEY_CURRENT_USER, com_path);
+  auto app_key = OpenRegistryKey(HKEY_CURRENT_USER, app_path);
+  if (com_key && _wcsicmp(ReadRegistryString(com_key.get(), L"LocalServer32", nullptr).c_str(), command.c_str()) != 0) {
     throw std::runtime_error("HuxerUI notification identity belongs to another executable; unregister that copy first");
   }
-  if (app_key && (!com_key || _wcsicmp(ReadNotificationRegistryString(app_key.get(), nullptr, L"CustomActivator").c_str(),
-                                        clsid.c_str()) != 0)) {
+  if (app_key && (!com_key || _wcsicmp(ReadRegistryString(app_key.get(), nullptr, L"CustomActivator").c_str(),
+                                     clsid.c_str()) != 0)) {
     throw std::runtime_error("HuxerUI notification application ID belongs to another registration");
   }
   return {std::move(com_key), std::move(app_key)};
@@ -325,7 +412,7 @@ void RegisterWin32LocalNotifications(NotificationIdentity identity, const std::w
     throw std::logic_error("HuxerUI Windows notification identity is already configured for this process");
   }
   const NotificationApartment apartment;
-  auto mutex = AcquireNotificationRegistrationLock(identity.app_id);
+  auto mutex = AcquireRegistrationLock(L"Notification." + identity.app_id);
   const std::unique_ptr<void, decltype(&ReleaseMutex)> lock(mutex.get(), ReleaseMutex);
   const auto executable = CurrentExecutablePath();
   auto [com_key, app_key] = OpenOwnedNotificationKeys(identity, executable);
@@ -336,9 +423,9 @@ void RegisterWin32LocalNotifications(NotificationIdentity identity, const std::w
   const std::wstring app_path = L"Software\\Classes\\AppUserModelId\\" + identity.app_id;
   const std::wstring command = L"\"" + executable + L"\" " + std::wstring(win32_notification_launch_flag);
   try {
-    SetNotificationRegistryString(com_path + L"\\LocalServer32", nullptr, command);
-    SetNotificationRegistryString(app_path, L"CustomActivator", clsid);
-    SetNotificationRegistryString(app_path, L"DisplayName", display_name);
+    SetRegistryString(com_path + L"\\LocalServer32", nullptr, command);
+    SetRegistryString(app_path, L"CustomActivator", clsid);
+    SetRegistryString(app_path, L"DisplayName", display_name);
     if (!shortcut_exists) {
       CreateNotificationShortcut(shortcut, identity, executable, display_name);
     }
@@ -363,7 +450,7 @@ void RegisterWin32LocalNotifications(NotificationIdentity identity, const std::w
 void UnregisterWin32LocalNotifications(const NotificationIdentity& identity) {
   const std::scoped_lock process_lock(notification_identity_mutex);
   const NotificationApartment apartment;
-  auto mutex = AcquireNotificationRegistrationLock(identity.app_id);
+  auto mutex = AcquireRegistrationLock(L"Notification." + identity.app_id);
   const std::unique_ptr<void, decltype(&ReleaseMutex)> lock(mutex.get(), ReleaseMutex);
   const auto executable = CurrentExecutablePath();
   auto [com_key, app_key] = OpenOwnedNotificationKeys(identity, executable);
@@ -1012,7 +1099,7 @@ Win32LocalNotificationHost::Win32LocalNotificationHost(UIThreadDispatcher dispat
     }
     const auto& identity = *configured;
     const std::wstring key = L"CLSID\\" + NotificationClsidText(identity) + L"\\LocalServer32";
-    const auto command = ReadNotificationRegistryString(HKEY_CLASSES_ROOT, key.c_str(), nullptr);
+    const auto command = ReadRegistryString(HKEY_CLASSES_ROOT, key.c_str(), nullptr);
     const std::wstring expected =
         L"\"" + CurrentExecutablePath() + L"\" " + std::wstring(win32_notification_launch_flag);
     if (_wcsicmp(command.c_str(), expected.c_str()) != 0) {
@@ -1250,6 +1337,20 @@ std::shared_ptr<PermissionTransport> CreateWin32PermissionTransport() {
 } // namespace huxerui::detail
 
 namespace huxerui::windows {
+
+void RegisterUrlScheme(std::string_view scheme, std::string_view display_name) {
+  const auto normalized = detail::ParseUrlScheme(scheme);
+  const auto name = detail::StrictUtf8ToWide(display_name);
+  if (!name || name->empty() || display_name.find('\0') != display_name.npos ||
+      display_name.find_first_of("\r\n") != display_name.npos) {
+    throw std::invalid_argument("HuxerUI Windows URL scheme display name is invalid");
+  }
+  detail::RegisterWin32UrlScheme(normalized, *name);
+}
+
+void UnregisterUrlScheme(std::string_view scheme) {
+  detail::UnregisterWin32UrlScheme(detail::ParseUrlScheme(scheme));
+}
 
 void RegisterLocalNotifications(
     std::string_view app_id, std::string_view display_name, std::string_view activator_clsid,

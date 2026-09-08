@@ -6,10 +6,6 @@
 #include <type_traits>
 #include <utility>
 
-#if defined(_WIN32)
-#include "application_windows.h"
-#endif
-
 using namespace huxerui;
 
 namespace {
@@ -21,16 +17,9 @@ struct TextFilePreview {
   bool operator==(const TextFilePreview&) const = default;
 };
 
-#if defined(_WIN32)
-const bool browser_scheme_registered = example::RegisterApplicationExampleUrlScheme();
-#endif
-
 std::string PlatformActivationHint() {
 #if defined(_WIN32)
-  if (browser_scheme_registered) {
-    return "Open huxerui-example://documents/42 in a browser to deliver a URL activation.";
-  }
-  return "The huxerui-example URL protocol could not be registered for the current Windows user.";
+  return "Open huxerui-example://documents/42 in a browser to deliver a URL activation.";
 #elif defined(__ANDROID__)
   return "Open huxerui-example://documents/42, or choose HuxerUI Application when another app opens a file.";
 #elif defined(__APPLE__)

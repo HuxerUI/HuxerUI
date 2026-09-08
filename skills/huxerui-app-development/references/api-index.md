@@ -6,6 +6,7 @@ This is a navigation index, not a replacement for the active SDK's public header
 | --- | --- | --- | --- |
 | App and lifecycle | `Application`, `AppOptions`, `RunApplication`, `UseApplication`, `ApplicationHandle`, `ApplicationActivation`, `ApplicationLifecycleState`, `Lifecycle` | [fundamentals.md](fundamentals.md) | `app.h`, `lifecycle.h` |
 | Permissions | `Permission`, `PermissionStatus`, `ApplicationHandle::CheckPermissionAsync`, `ApplicationHandle::RequestPermissionAsync`, `ApplicationHandle::OpenPermissionSettingsAsync` | [fundamentals.md](fundamentals.md) | `system.h`, `app.h` |
+| Windows URL schemes | `windows::RegisterUrlScheme`, `windows::UnregisterUrlScheme` | [navigation-and-window.md](navigation-and-window.md) | `system.h` |
 | Local notifications | `LocalNotificationHandle`, `LocalNotification`, `LocalNotificationCapabilities`, `LocalNotificationPresentation`, `DefaultNotificationPresentation`, `TemplateNotificationPresentation`, `PermissionStatus`, `LocalNotificationOperationStatus`, `NotificationActivation`, `ApplicationHandle::LocalNotifications` | [local-notifications.md](local-notifications.md) | `system.h`, `app.h` |
 | System tray | `SystemTrayHandle`, `SystemTrayOptions`, `MenuEntry`, `ApplicationHandle::SystemTray`, `ApplicationHandle::Quit` | [navigation-and-window.md](navigation-and-window.md) | `app.h`, `presentation.h` |
 | Tasks | `Task`, `TaskScope`, `UseTaskScope`, `Delay`, `RunWorker`, `WorkerSequence`, `TaskScope::Post` | [fundamentals.md](fundamentals.md) | `task.h` |

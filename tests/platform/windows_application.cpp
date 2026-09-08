@@ -1,17 +1,24 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <windows.h>
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <variant>
 #include <vector>
+
+#include <huxerui/system.h>
 
 #include "win32_application_internal.h"
 #include "application/application_internal.h"
@@ -27,6 +34,53 @@ namespace huxerui::test {
 namespace {
 
 namespace fs = std::filesystem;
+
+class TemporaryUrlScheme final {
+public:
+  TemporaryUrlScheme() {
+    static std::atomic<unsigned int> sequence = 0;
+    scheme = "huxerui.test+" + std::to_string(GetCurrentProcessId()) + "-" +
+             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+             std::to_string(sequence.fetch_add(1));
+    path = L"Software\\Classes\\" + std::wstring(scheme.begin(), scheme.end());
+    HKEY key = nullptr;
+    DWORD disposition = 0;
+    const auto result = RegCreateKeyExW(HKEY_CURRENT_USER, path.c_str(), 0, nullptr, REG_OPTION_NON_VOLATILE,
+                                        KEY_ALL_ACCESS, nullptr, &key, &disposition);
+    const std::unique_ptr<std::remove_pointer_t<HKEY>, decltype(&RegCloseKey)> owned(key, RegCloseKey);
+    REQUIRE(result == ERROR_SUCCESS);
+    REQUIRE(disposition == REG_CREATED_NEW_KEY);
+  }
+
+  ~TemporaryUrlScheme() {
+    RegDeleteTreeW(HKEY_CURRENT_USER, path.c_str());
+  }
+
+  TemporaryUrlScheme(const TemporaryUrlScheme&) = delete;
+  TemporaryUrlScheme& operator=(const TemporaryUrlScheme&) = delete;
+
+  void Set(const std::wstring& suffix, const wchar_t* name, const std::wstring& value) const {
+    HKEY key = nullptr;
+    const auto result = RegCreateKeyExW(HKEY_CURRENT_USER, (path + suffix).c_str(), 0, nullptr,
+                                        REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, nullptr, &key, nullptr);
+    const std::unique_ptr<std::remove_pointer_t<HKEY>, decltype(&RegCloseKey)> owned(key, RegCloseKey);
+    REQUIRE(result == ERROR_SUCCESS);
+    REQUIRE(RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()),
+                            static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS);
+  }
+
+  std::wstring Read(const std::wstring& suffix, const wchar_t* name) const {
+    std::wstring value(32768, L'\0');
+    DWORD bytes = static_cast<DWORD>(value.size() * sizeof(wchar_t));
+    REQUIRE(RegGetValueW(HKEY_CURRENT_USER, (path + suffix).c_str(), name, RRF_RT_REG_SZ, nullptr,
+                          value.data(), &bytes) == ERROR_SUCCESS);
+    value.resize(bytes / sizeof(wchar_t) - 1);
+    return value;
+  }
+
+  std::string scheme;
+  std::wstring path;
+};
 
 class ActivationTemporaryDirectory final {
 public:
@@ -52,6 +106,66 @@ private:
 };
 
 } // namespace
+
+TEST_CASE("Win32UrlSchemeRegistrationRejectsInvalidParametersBeforeNativeWrites") {
+  for (const std::string_view scheme : {"", "a", "1example", "example:", "bad/scheme", "bad\\scheme",
+                                         "bad scheme", "bad_scheme", "例子"}) {
+    REQUIRE_THROWS_AS(windows::RegisterUrlScheme(scheme, "Example"), std::invalid_argument);
+    REQUIRE_THROWS_AS(windows::UnregisterUrlScheme(scheme), std::invalid_argument);
+  }
+  REQUIRE_THROWS_AS(windows::RegisterUrlScheme(std::string(256, 'a'), "Example"), std::invalid_argument);
+  REQUIRE_THROWS_AS(windows::UnregisterUrlScheme(std::string_view("good\0bad", 8)), std::invalid_argument);
+  for (const auto& name : {std::string(), std::string("bad\0name", 8), std::string("bad\nname"), std::string("\xFF")}) {
+    REQUIRE_THROWS_AS(windows::RegisterUrlScheme("huxerui-test-invalid-name", name), std::invalid_argument);
+  }
+}
+
+TEST_CASE("Win32UrlSchemeRegistrationUsesCurrentExecutableAndSupportsExplicitCleanup") {
+  TemporaryUrlScheme registration;
+  REQUIRE(RegDeleteTreeW(HKEY_CURRENT_USER, registration.path.c_str()) == ERROR_SUCCESS);
+  windows::UnregisterUrlScheme(registration.scheme);
+  windows::RegisterUrlScheme(registration.scheme, "Application 测试");
+  REQUIRE(registration.Read(L"", nullptr) == L"URL:Application 测试");
+  REQUIRE(registration.Read(L"", L"URL Protocol").empty());
+
+  std::wstring executable(32768, L'\0');
+  const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
+  REQUIRE(length > 0);
+  REQUIRE(length < executable.size());
+  executable.resize(length);
+  REQUIRE(registration.Read(L"\\shell\\open\\command", nullptr) == L"\"" + executable + L"\" \"%1\"");
+
+  auto upper_scheme = registration.scheme;
+  upper_scheme[0] = 'H';
+  windows::RegisterUrlScheme(upper_scheme, "Updated application");
+  REQUIRE(registration.Read(L"", nullptr) == L"URL:Updated application");
+  windows::UnregisterUrlScheme(upper_scheme);
+  REQUIRE(RegGetValueW(HKEY_CURRENT_USER, registration.path.c_str(), L"URL Protocol", RRF_RT_ANY,
+                        nullptr, nullptr, nullptr) == ERROR_FILE_NOT_FOUND);
+  windows::UnregisterUrlScheme(registration.scheme);
+}
+
+TEST_CASE("Win32UrlSchemeRegistrationPreservesUnrelatedHandlers") {
+  TemporaryUrlScheme registration;
+  SECTION("Non-protocol class") {
+    registration.Set(L"", nullptr, L"Unrelated class");
+  }
+  SECTION("Another executable") {
+    registration.Set(L"", nullptr, L"Unrelated class");
+    registration.Set(L"", L"URL Protocol", L"");
+    registration.Set(L"\\shell\\open\\command", nullptr, L"\"C:\\other.exe\" \"%1\"");
+  }
+  SECTION("Delegated activation despite a matching command") {
+    REQUIRE(RegDeleteTreeW(HKEY_CURRENT_USER, registration.path.c_str()) == ERROR_SUCCESS);
+    windows::RegisterUrlScheme(registration.scheme, "Unrelated class");
+    registration.Set(L"\\shell\\open\\command", L"DelegateExecute", L"{00000000-0000-0000-0000-000000000000}");
+  }
+  const auto original = registration.Read(L"", nullptr);
+  REQUIRE_THROWS_AS(windows::RegisterUrlScheme(registration.scheme, "Replacement"), std::runtime_error);
+  REQUIRE(registration.Read(L"", nullptr) == original);
+  REQUIRE_THROWS_AS(windows::UnregisterUrlScheme(registration.scheme), std::runtime_error);
+  REQUIRE(registration.Read(L"", nullptr) == original);
+}
 
 TEST_CASE("Win32ApplicationActivationPreservesLaunchAndUrlInputs") {
   REQUIRE(

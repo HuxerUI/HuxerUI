@@ -24,6 +24,30 @@ Windows setup generation currently supports x64 applications.
 Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
 Linux requires `appimagetool`, `patchelf`, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
+## Windows URL scheme registration
+
+For a custom scheme owned by your Win32 application, call `windows::RegisterUrlScheme(scheme, display_name)` from `<huxerui/system.h>` explicitly in entry code before `RunApplication()`. It registers the current executable for the current user without administrator privileges, an installer, or CMake registration metadata. This also works in the Windows 7 compatibility backend.
+
+```cpp
+#if defined(_WIN32)
+windows::RegisterUrlScheme("myapp", "My Application");
+#endif
+```
+
+The bare scheme is case-insensitive ASCII: a letter followed by letters, digits, '+', '-', or '.', with 2 to 255 characters and no colon. Single-letter schemes are reserved for Windows drive interpretation. The display name is non-empty UTF-8 without nulls or line breaks. Invalid parameters throw `std::invalid_argument`; native failures or ownership conflicts throw `std::runtime_error`. Catch and report startup failures rather than continuing as if registration succeeded.
+
+Registration stores `"<current executable>" "%1"` under `HKCU\Software\Classes\<scheme>\shell\open\command`. Repeating it for the same executable may change the display name. A scheme owned by another executable, a non-protocol class, or a machine-wide registration is rejected rather than replaced. Use a separate development scheme when development and installed copies need to coexist. Registration does not override a user's default-app choice or guarantee that every URL opens this executable; it is not an API for taking over standard browser schemes, file associations, or all-user installation.
+
+External URLs still use `ApplicationHandle::StartupActivation()` and `OnActivation()` with `UrlActivation`. Treat route contents as untrusted input and apply application authorization before opening files or performing other actions. Registration does not add route callbacks or change the existing cold-start and running-window activation flow.
+
+Registration persists after exit. Call `windows::UnregisterUrlScheme(scheme)` explicitly before removing or relocating the owning executable, not on ordinary shutdown. No preceding registration in that process is required. Cleanup removes only matching current-user registration, does nothing when absent, and rejects ownership conflicts without modifying them. It does not clear user default-app choices or registrations belonging to other users. All-user installer cleanup is not implied.
+
+`example_application` registers `huxerui-example` in the [shared example entry point](../../examples/main.cpp), not during static initialization. After closing the example, clean up its protocol before moving or deleting the executable:
+
+```powershell
+& <build-directory>/bin/example_application.exe --unregister-url-scheme
+```
+
 ## Windows notification registration
 
 Ordinary Win32 applications can use native local notifications without MSIX, the Windows App SDK, or CMake-generated notification metadata. The application opts in by passing its stable AppUserModelID, UTF-8 display name, and fixed COM activator CLSID to `windows::RegisterLocalNotifications()` from `<huxerui/system.h>` on its entry thread before `RunApplication()`:
