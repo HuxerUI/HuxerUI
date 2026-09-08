@@ -24,6 +24,57 @@ Windows setup generation currently supports x64 applications.
 Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
 Linux requires `appimagetool`, `patchelf`, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
+## Windows notification registration
+
+Ordinary Win32 applications can use native local notifications without MSIX, the Windows App SDK, or CMake-generated notification metadata. The application opts in by passing its stable AppUserModelID, UTF-8 display name, and fixed COM activator CLSID to `windows::RegisterLocalNotifications()` from `<huxerui/system.h>` on its entry thread before `RunApplication()`:
+
+```cpp
+#include <huxerui/app.h>
+#include <huxerui/system.h>
+
+int main() {
+  huxerui::windows::RegisterLocalNotifications(
+      "com.example.app", "Example App", "{7451F115-EB29-4BDB-8467-BF2DDDE97980}");
+  return huxerui::RunApplication();
+}
+```
+
+Choose your own App ID and CLSID rather than copying the example identity, and keep both stable across launches and releases. The App ID starts with an ASCII letter or digit, contains only ASCII letters, digits, '.', '_', or '-', and is at most 128 characters. The CLSID is a non-null GUID in braced form. Registration validates and copies its arguments; caller-owned strings need not outlive the call. Each process supports one configured notification identity. Call registration on every launch, including notification-triggered cold launches: the host uses the successful registration's in-process configuration for both sending and COM activation.
+
+Registration writes the current user's COM launch command and app identity/display metadata. It manages only the current-user Start menu shortcut named `<app_id>.lnk`, preserving it if the executable, App ID, and CLSID already match. It neither searches other shortcut locations nor modifies them; ordinary installer shortcuts may coexist with this notification shortcut. The generated installer creates ordinary application shortcuts and does not supply notification metadata or register COM. Repeated registration is allowed only for the same executable. Conflicting registrations and machine-owned identities are rejected, not overwritten. Invalid arguments throw `std::invalid_argument`, switching an already configured process to another identity throws `std::logic_error`, and native failures throw `std::runtime_error`; applications should report errors at their entry boundary. Ordinary host construction and authorization queries never register an application implicitly.
+
+The Windows `example_local_notification` enables a notification-specific branch in the [shared example entry point](../../examples/main.cpp), passing an isolated `.development` App ID and a fixed development CLSID. Build and run it directly without installation, administrator privileges, or a registration script. Other applications choose their own separate development and installed identities in code; CMake does not derive or override notification identity from bundle metadata.
+
+Persistent registration survives ordinary process exit so scheduled notifications and later clicks can still launch the application. This is distinct from the live COM class factory, which the host registers for each process and revokes on exit. For explicit cleanup, call `windows::UnregisterLocalNotifications(app_id, activator_clsid)` before `RunApplication()` or after it returns, never while the notification host is running. No preceding registration call is required. It cancels schedules, clears history, and removes matching current-user registration and the framework-created shortcut path; it also clears a matching in-process identity. Installer-owned shortcuts, other executables, other users, application files, and application data are preserved. Cleanup is not transactional; report errors rather than assuming every native operation completed. The current machine-wide installer does not clean these per-user registrations for all users; applications own explicit per-user cleanup before removal or relocation. Automatic all-user uninstall cleanup is not implemented.
+
+Close the notification example before moving or deleting its executable, then run:
+
+```powershell
+& <build-directory>/bin/example_local_notification.exe --unregister-notifications
+```
+
+The cleanup argument bypasses registration and application startup. It does not affect a formal installation or silently redirect a registration to another build path.
+
+`RequestAuthorizationAsync()` reports the current Windows notification setting; it does not display a permission prompt. Default notifications and configured XML templates support immediate presentation, system-owned one-shot scheduling, cancellation, and identifier/data round-trip. Windows limits the complete UTF-8 notification XML to 5 KiB, including Base64 data and text, so keep data small even though the shared encoded-data limit is 64 KiB. An oversized request returns `Failed` without replacing existing content. Treat returned activation data as untrusted routing input, not proof of file access or authorization.
+
+Before an application's first native notification, authorization may be `NotDetermined`; this does not prevent submission on Windows. Authorization queries never initialize notification state. The first immediate request sends its real content. A first scheduled request performs framework-owned initialization using a silent, non-popup notification that is immediately removed and expires after fifteen seconds if cleanup fails; a brief notification-center entry is possible, but no banner is requested. Applications must not send their own initialization notifications or interpret `NotDetermined` as an unconditional denial across platforms.
+
+### Windows notification templates
+
+Pass an optional `windows::LocalNotificationTemplateProvider` as the fourth argument to `RegisterLocalNotifications()`. The callback receives `(template_identifier, title, body, data)` as borrowed `std::string_view` values and `const PlatformPayload&`; title and body are already localized UTF-8. It returns `std::optional<std::string>` containing a complete UTF-8 `<toast>` document, or `std::nullopt` for an unknown template. Submit the matching identifier through the ordinary `TemplateNotificationPresentation`; keep XML out of shared application notification data.
+
+```cpp
+windows::RegisterLocalNotifications(app_id, display_name, activator_clsid, BuildNotificationTemplate);
+```
+
+An empty provider disables `can_use_templates`; a non-empty provider enables the mechanism without promising every identifier. Default presentation bypasses it. Successful registration replaces the previous provider, including clearing it when omitted; failed registration preserves the old configuration. Configure it before host startup, never while the host is running. The process retains the callback and each host takes a copy, so capture durable application-shell values rather than Runtime, View, composition state, or borrowed references. Explicit unregistration also clears the matching process provider.
+
+The provider runs synchronously on the host UI thread at submission time, including for `ScheduleAsync()`. Do not block on I/O or retain parameter references. The completed XML is submitted to Windows immediately; scheduled delivery and later clicks do not call the provider. Images referenced by the XML must remain accessible through native delivery, even after the submitting process exits.
+
+Return one `<visual>` containing one `<binding template="ToastGeneric">` under `<toast>`. Native text, images, groups, and progress elements remain application-owned; use an XML DOM or properly escape all dynamic text and attribute values. HuxerUI rejects DTDs, external entities, `launch`, `activationType`, and `protocolActivationTargetApplicationPfn` on the root, and any `actions`, `input`, or `header` elements. These routes need separate activation contracts, not just XML support. HuxerUI injects its own `launch` envelope and retains native tag/group, primary-click data, scheduling, replacement, and cancellation. It checks the final encoded size before touching existing notifications; empty or malformed XML, forbidden routing, provider exceptions, and excessive size return `Failed`, while unknown templates return `Unavailable` without fallback. Windows remains responsible for its full XML schema, feature availability, and final presentation; successful parsing does not guarantee visibility.
+
+The [Windows download template](../../examples/local_notification/windows/notification_template.cpp) demonstrates DOM-based text escaping and locale-independent progress formatting. Progress bars require Windows 10 version 1703 or later. The example's detailed-layout switch adds text and byte counts rather than controlling system expansion. Repeated `ShowAsync()` calls replace notifications and can show another popup even with silent audio; they do not use Windows data-binding updates. Native in-place updates and custom action/input handling are outside the current API.
+
 ## Application payloads
 
 CMake install rules are the only source of application files placed into desktop packages.

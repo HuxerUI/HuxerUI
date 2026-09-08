@@ -7,7 +7,7 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 
 | Platform | Rendering and text | HTTP and files | Accessibility | PlatformView | ExternalTexture | Permissions | Local notifications | System tray |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | AppCapability | Unavailable | Yes |
+| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | AppCapability | Registered Win32 toast identity | Yes |
 | macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Camera and microphone | User Notifications | Yes |
 | Linux | GSK, Cairo, and Pango | Yes | Not supported | No | Yes | Unavailable | Unavailable | StatusNotifierItem host |
 | Web | Canvas 2D and browser text metrics | Yes | Not supported | Yes | Yes | Query only | Unavailable | No |
@@ -18,7 +18,7 @@ Capabilities not listed as implemented are not implied by the shared API.
 OHOS does not currently have a repository-owned backend.
 
 The shared local-notification API is available on every listed platform.
-Configured Android hosts and the iOS and macOS adapters install native transports; Windows, Linux, and Web currently report unavailable capabilities and operations.
+Registered Windows applications, configured Android hosts, and the iOS and macOS adapters install native transports; Linux and Web currently report unavailable capabilities and operations.
 See [Local Notifications](../design/local-notifications.md) for authorization, activation, and platform mapping details.
 
 ## Shared CPU buffer references
@@ -90,6 +90,7 @@ Custom chrome keeps Win32 window behavior while HuxerUI draws the title-bar cont
 Windows 11 Snap Layout is available through the shared maximize-button geometry on the default backend.
 System tray presentation uses the Windows notification area and restores its item after Explorer restarts.
 Runtime camera and microphone permissions use AppCapability when present; package capability declarations remain application-owned.
+Local notifications use the Windows system toast service without MSIX or Windows App SDK dependencies. Before `RunApplication()`, pass an application-owned App ID, display name, and fixed CLSID to `windows::RegisterLocalNotifications()` from `<huxerui/system.h>`; no CMake notification metadata is required. See [Windows notification registration](packaging.md#windows-notification-registration) for registration and explicit cleanup. Default presentation, scheduling, cancellation, and data-bearing activation are supported. An optional `windows::LocalNotificationTemplateProvider` passed during registration enables application-owned ToastGeneric XML templates; custom actions and in-place progress updates are not supported. The Windows 7 compatibility backend remains unavailable. Notification clicks enter `OnActivation()` even when they launch the process.
 
 Native libraries include `<huxerui/windows/external_texture.h>` for `windows::PixelTexture` and `windows::D3D11Texture`.
 `PixelTexture` copies straight-alpha RGBA8888 or BGRA8888 rows into premultiplied CPU storage.

@@ -10,7 +10,6 @@ Current behavior is documented in the user guides, while detailed constraints li
 
 ## Platform integration
 
-- Complete the Windows packaging and identity review required for a native local-notification transport.
 - Add Linux `PlatformView` hosting while preserving shared composition ordering.
 - Complete iOS archive export, distribution signing, and embeddable host integration.
 - Add an OHOS backend through the existing platform boundaries.

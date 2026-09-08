@@ -124,8 +124,8 @@ View LocalNotificationCard(const ApplicationHandle& application, TaskScope tasks
     Text("Local notification", TextRole::Title),
     Text(DescribeLocalNotificationCapabilities(capabilities), TextRole::Label)
         .With(Foreground(theme.colors.primary)),
-    Text("Configured Android, iOS, and macOS hosts provide native delivery. Android also demonstrates an "
-         "application-owned RemoteViews template."),
+    Text("Configured Windows, Android, iOS, and macOS hosts provide native delivery. The download below uses an "
+         "application-owned native template on supported hosts."),
     Text("The default reminder and download use separate identifiers, so they do not replace each other."),
     Text("Last result: " + result.Get()),
     Button("Check authorization").OnClick([=] {
@@ -321,7 +321,9 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
   return Column {
     Text("Download progress template", TextRole::Title),
     Text(download_file_name, TextRole::Label),
-    Text("HuxerUI v0.2.0, 54.8 MB. Templates use Android RemoteViews or the iOS notification Content Extension."),
+    Text("HuxerUI v0.2.0, 54.8 MB. Templates use Windows Toast XML, Android RemoteViews, or an iOS Content Extension."),
+    Text("Windows progress bars require Windows 10 version 1703 or later. Updates replace the notification and may "
+         "show another popup; native in-place progress updates are not demonstrated."),
     Text("Downloads require this app to keep running; no background service or process-restart recovery is provided."),
     Button(expanded.Get() ? "Detailed template layout: on" : "Detailed template layout: off")
         .With(Enabled(!download.busy))

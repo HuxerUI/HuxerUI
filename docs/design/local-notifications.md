@@ -1,6 +1,6 @@
 # Local Notifications
 
-> Status: The shared public API, unavailable transport behavior, application activation alternative, Android transport, iOS/macOS User Notifications transport, and host-template presentation on Android and iOS are implemented. Windows, Linux, and Web remain unavailable, and macOS supports only system presentation.
+> Status: The shared public API, Windows desktop transport, Android transport, iOS/macOS User Notifications transports, and host-template presentation on Android and iOS are implemented. Linux and Web remain unavailable; Windows and macOS support only default presentation.
 
 This document defines the intended application-facing boundary for local operating-system notifications.
 It covers authorization, immediate presentation, one-shot scheduling, stable identifiers, cancellation, and application activation without introducing push delivery, a notification registry, or a fallback presentation channel.
@@ -23,7 +23,7 @@ The current contract does not provide remote or push notification registration, 
 The initial contract also does not define custom notification action buttons.
 Those actions depend on Apple categories, Android intent construction, Windows activation registration, and background execution policy that do not yet share a reviewed application lifetime.
 
-HuxerUI does not generate Android channels or manifest declarations, Apple categories or entitlements, Windows application identity, Linux desktop entries, or Web service workers.
+HuxerUI does not generate Android channels or manifest declarations, Apple categories or entitlements, Linux desktop entries, or Web service workers. On Windows, application code explicitly supplies and registers its notification identity; CMake and the installer do not generate notification metadata.
 It does not use `SystemTrayHandle`, Toast layers, application windows, or in-process timers as notification fallbacks.
 
 ## Public model
@@ -98,7 +98,7 @@ Call it when application UI needs the current transport snapshot.
 It does not guarantee delivery time, foreground presentation, sound, persistence across restart, or user visibility because operating-system policy may suppress or delay presentation.
 `Unauthorized` means the host supports the operation but the current notification authorization does not permit it.
 `Unavailable` covers an unsupported operation, a missing native declaration or identity, and a host that cannot provide the capability.
-`Failed` represents a supported and configured platform operation that encountered a transient native failure.
+`Failed` represents a supported and configured platform operation that failed, including invalid native template content or a native service error.
 
 Empty identifiers, embedded null characters, malformed UTF-8, invalid template identifiers, and an unresolved required title and body are caller errors and throw `std::invalid_argument` before platform dispatch.
 At least one of the resolved title or body must be non-empty.
@@ -247,7 +247,7 @@ Presentation may still be useful when activation is unavailable, so this capabil
 A missing transport creates an unavailable service so application code retains one API path on every host.
 
 The private transport owns authorization queries and requests, presentation, scheduling, and cancellation.
-It receives resolved UTF-8 content and application identifiers and never retains `StringVariant`, Environment, Runtime, View, or application callbacks.
+It receives resolved UTF-8 content and application identifiers and never retains `StringVariant`, Environment, Runtime, View, or composition callbacks. A native application-shell template provider may be retained as immutable host configuration, independently of Runtime lifetime.
 Each asynchronous operation returns a cancellation callback when the native API can cancel the operation itself.
 
 Notification activation does not travel back through the transport.
@@ -257,7 +257,7 @@ Runtime never branches on Android channels, UIKit or AppKit delegates, Windows a
 ## Target platform mapping
 
 The configured Android adapter and the iOS and macOS adapters install native transports.
-Other current adapters use the unavailable transport while preserving the shared API and activation contract.
+The Windows application host owns its COM activator and notification transport; Linux and Web use the unavailable transport while preserving the shared API and activation contract.
 
 ### Android
 
@@ -347,12 +347,34 @@ Custom actions remain application-owned and outside the current contract.
 
 ### Windows
 
-The Windows implementation requires a separate packaging review before selecting the Windows App SDK app-notification API or an inbox WinRT integration.
-That review must define packaged and unpackaged identity, activation registration, installer output, dependency delivery, and behavior for an already running process.
+The ordinary Win32 host uses inbox `Windows.UI.Notifications` through C++/WinRT, without requiring MSIX or the Windows App SDK. This transport targets the existing Windows 10 version 1607 or later backend.
 
-The default Windows 10 backend may expose capabilities only after the selected identity and activator are valid.
+Application code supplies a stable AppUserModelID, UTF-8 display name, and non-null COM activator CLSID. Notification identity does not depend on `huxerui_add_app`, bundle metadata, generated executable resources, or install location. Development and installed copies use explicitly distinct App IDs and CLSIDs.
+
+The Windows-only `huxerui::windows` entry points declared under `_WIN32` in `<huxerui/system.h>` own the native registration mechanics in `win32_application.cpp`; the application calls `RegisterLocalNotifications(app_id, display_name, activator_clsid)` before `RunApplication()` on every launch. Successful registration publishes an owned App ID and CLSID as process configuration; the display name is used only while registering. The host copies that identity for its COM class factory and transport. Failed registration preserves the previous configuration, and a process cannot register a different identity until explicitly unregistering its current one. Registration validates ownership, writes current-user `LocalServer32`, `CustomActivator`, and display metadata, and manages only the current-user `<app_id>.lnk` shortcut with `System.AppUserModel.ID` and `System.AppUserModel.ToastActivatorCLSID`. A matching shortcut at that path is preserved; other shortcut locations are not searched or modified. The installer creates ordinary shortcuts without notification properties. Registration rejects another executable's path or machine-owned identity. Ordinary host construction never performs these writes. See [Windows notification registration](../guide/packaging.md#windows-notification-registration).
+
+Persistent registration outlives ordinary exit for cold activation. `UnregisterLocalNotifications(app_id, activator_clsid)` is an explicit pre-host or post-host operation that does not require prior in-process registration. It cancels schedules, clears history, removes only the matching current-user registration and framework shortcut path, and clears a matching process configuration. Installer-owned shortcuts and other users are not modified. Current machine-wide installation does not imply automatic cleanup of every user's notification mappings; that lifecycle remains an application/deployment responsibility, not an all-user registry scan in the notification backend. Native mutations are not transactional; registration attempts roll back newly created entries on failure, while cleanup may partially complete and report an error.
+
+The process host registers one COM class factory before constructing the Runtime. It checks the executable identity and matching registered command before exposing a transport. COM callbacks validate the application ID and bounded versioned arguments, retain the decoded activation in a synchronized inbox, and post through the existing UI-thread dispatcher. The inbox retains callbacks received before a window exists and disconnects before the Runtime is destroyed.
+
+A COM-only launch uses `--huxerui-notification-activate` and pumps COM/window messages for at most ten seconds while awaiting real content; failure exits without creating a dummy application window. The received activation is forwarded to an existing executable-specific window through the existing bounded `WM_COPYDATA` path when possible. Otherwise the new Runtime receives it through `OnActivation()`, not `StartupActivation()`. Ordinary launches remain independent; notification activation does not introduce a general single-instance application policy. Private activation arguments are routing data, never an authorization credential.
+
+The full notification identifier and resource-free HUXP data are Base64-encoded in versioned toast launch arguments, with no auxiliary file store. The complete UTF-8 XML payload must fit 5 KiB, including text and encoding overhead; a payload can satisfy the shared 64 KiB data limit and still return `Failed` here. UTF-8, XML, data, and size validation finish before replacement. The native 16-character tag is a stable hash and the group is framework-owned; both scheduled and delivered candidates are checked against the full embedded identifier before any matching notification is removed. A collision or malformed matching record fails rather than deleting another record.
+
+Immediate presentation removes matching pending and delivered notifications before submitting the replacement. Scheduling removes only the matching pending request and uses the operating system scheduler, which survives process exit; cancellation removes both forms. Native removal/submission calls do not form an OS transaction: a native failure after removal does not restore previous content. Accepted delivery remains subject to Windows settings, focus assistance, and scheduling policy.
+
+Authorization maps `NotificationSetting::Enabled` to `Granted`, user/application disablement to `Denied`, group policy to `Restricted`, and manifest/configuration failure to `Unavailable`. `RequestAuthorizationAsync()` queries this setting without opening a permission dialog or Settings.
+
+The optional fourth registration argument is a `windows::LocalNotificationTemplateProvider`, retained in process configuration under the identity mutex and copied into each host's transport. Successful registration replaces it (omission clears it), failed registration preserves it, and matching unregistration releases the process copy. It is not part of native identity or persisted registry data. Registration changes are pre-host operations only; providers capture durable shell-owned values, not Runtime or composition objects. No provider means `can_use_templates == false`; otherwise the flag advertises the mechanism, not individual identifiers.
+
+Template submission invokes the provider synchronously on the host UI thread with the template identifier, resolved title/body, and decoded resource-free data snapshot. `nullopt` returns `Unavailable`; exceptions or invalid content return `Failed`. Default presentation bypasses the callback. The provider returns a complete UTF-8 ToastGeneric document. A bounded parse prohibits DTDs and external entity resolution, requires a single visual/binding layout, and rejects root launch/activationType/protocolActivationTargetApplicationPfn attributes and actions/input/header elements. These exclusions preserve primary-only activation instead of accepting interactions the inbox cannot route. The framework injects the validated launch envelope through the XML DOM and checks the final serialized UTF-8 size before replacing any scheduled or delivered content. Windows owns the rest of its XML schema and version-specific presentation semantics.
+
+Scheduling builds and submits the completed XML now, never at delivery time; no provider callback, live Runtime, or auxiliary data store is needed for delivery or activation after process exit. Application-owned image resources must outlive native delivery. Layout content does not change ShowAsync replacement semantics: native NotificationData/Update progress binding and custom actions remain outside the current contract. The Windows example adds a ToastGeneric download progress provider (progress requires Windows 10 version 1703 or later), while retaining shared download state and activation data. Its detailed-layout option controls extra content, not Windows expansion policy.
+
+A correctly registered identity that has never submitted a native notification can return `ERROR_NOT_FOUND` from the setting query; this maps to `NotDetermined`, not rejection. Both authorization operations remain read-only. The first `ShowAsync()` submits the requested real content directly. For a first `ScheduleAsync()`, after validating the request, the transport submits a silent initialization toast with `SuppressPopup`, a separate framework group, and a fifteen-second expiry, then immediately removes it and rechecks authorization before installing the schedule. Windows otherwise may accept that first schedule and silently discard it at delivery. Initialization never carries application activation data; a failed removal fails the operation and the expiry limits residual notification-center content. No initialization marker is written to application storage or the registry.
+
 The Windows 7 compatibility build reports every local notification capability and authorization operation as unavailable.
-The notification feature must not silently disable the existing compatibility build or make Windows App SDK a dependency of applications that do not use it.
+The compatibility build excludes WinRT notification APIs and their additional link dependencies.
 
 ### Linux
 
@@ -388,6 +410,7 @@ Shared tests cover:
 - Startup and subsequent `NotificationActivation` validation, FIFO delivery, and reentrant deferral.
 
 Platform-focused tests cover deterministic native mapping and construction boundaries without presenting operating-system UI.
+Windows tests cover provider dispatch and default bypass, unknown templates, XML layout and activation preservation, forbidden activation routes and DTDs, malformed content, and final size limits after envelope injection. Native registration, visible delivery, and scheduled persistence still require host integration validation.
 Android instrumentation covers complete identifier-based Intent identity, notification activation normalization, and the immutable provider content/layout values without requiring AndroidX or the native HuxerUI library.
 macOS platform tests cover system content, template rejection, authorization conversion, foreground presentation, and activation filtering.
 iOS Content Extension discovery and category assignment remain iOS build and native integration validation boundaries.
@@ -396,7 +419,6 @@ Clock-sensitive tests use injected transport time or fixed future instants rathe
 
 ## Remaining platform work
 
-- Review Windows packaging and identity before adding a Windows transport or dependency.
 - Add Linux immediate presentation only after its session-local limitations are represented by the capability contract.
 - Leave Web unavailable until a PWA and Service Worker activation contract is approved.
 

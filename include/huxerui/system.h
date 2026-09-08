@@ -1,7 +1,9 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -125,8 +127,8 @@ struct LocalNotification {
   LocalNotificationPresentation presentation;
   /// Application-owned snapshot supplied to native templates and returned with primary activation.
   ///
-  /// Null is the default. Only scalar, byte, list, and object values are supported; retained ExternalTexture and
-  /// FileReference capabilities are rejected recursively. The complete HUXP encoding must not exceed 64 KiB.
+  /// Null is the default. Only scalar, byte, list, and object values are supported; retained ExternalTexture,
+  /// FileReference, and BufferReference capabilities are rejected recursively. The HUXP encoding must not exceed 64 KiB.
   /// This is persisted notification content, not protected storage or live application state.
   PlatformPayload data;
 };
@@ -227,5 +229,76 @@ private:
 
   friend class ApplicationHandle;
 };
+
+#if defined(_WIN32)
+namespace windows {
+
+/// Supplies application-owned ToastGeneric XML for a Windows notification template.
+///
+/// Called synchronously on the host UI thread when a template is submitted, including when scheduling it, not at
+/// delivery time. Parameters are borrowed for the call only; title/body are resolved UTF-8 and data is the submitted
+/// resource-free snapshot. Do not retain references, block on I/O, or capture composition/Runtime-owned state.
+/// Return nullopt for an unknown template (Unavailable). Empty, malformed, oversized XML or a thrown exception causes
+/// Failed. Return one UTF-8 `<toast>` document with one `<visual>` and `<binding template="ToastGeneric">`, escaping
+/// dynamic text and attributes. DTDs and external entities are forbidden. Image resources must remain accessible until
+/// native delivery. The final XML, including framework activation data, must fit 5 KiB.
+/// The framework injects launch and owns identity, primary activation, replacement, scheduling, and cancellation.
+/// Do not supply launch, activationType, or protocolActivationTargetApplicationPfn on `<toast>`. Actions, input, and
+/// header elements are unsupported because their separate activation semantics are not part of NotificationActivation.
+/// Native XML feature/version requirements and final layout remain Windows-owned. This is not a HuxerUI View or an
+/// in-place progress update API; ShowAsync still replaces the notification and may display another popup.
+using LocalNotificationTemplateProvider =
+    std::function<std::optional<std::string>(std::string_view template_identifier, std::string_view title,
+                                            std::string_view body, const PlatformPayload& data)>;
+
+/// Registers the current executable's local-notification identity for the current Windows user.
+///
+/// Call on the application entry thread before RunApplication() on every launch, including notification launches.
+/// The framework copies the identity for this process's notification host; no CMake metadata is required.
+/// Only one identity may be configured per process until explicitly unregistered. Repeated registration is allowed
+/// for the same executable; an identity owned by another executable or a machine-wide COM registration is rejected.
+/// Creates a current-user Start menu shortcut named after app_id, or preserves a matching shortcut at that path.
+/// Other shortcut locations are not searched or modified. No administrator privileges, installer, Runtime, or
+/// notification submission is required.
+/// Persistent registration survives process exit so scheduled notifications and later clicks can launch the app.
+/// This operation does not grant notification permission or guarantee visible delivery.
+/// Successful registration replaces the in-process template provider, including clearing it when omitted. Configure
+/// it before RunApplication(); do not register again while a host is running. The provider is retained in process
+/// configuration and copied into the host; it is never persisted in the registry or required to handle a later click.
+///
+/// @param app_id Stable ASCII application ID, starting with a letter or digit, using letters, digits, '.', '_',
+/// and '-', with at most 128 characters. Use a distinct ID and CLSID for a development executable.
+/// @param display_name Non-empty UTF-8 application name without embedded nulls or line breaks.
+/// @param activator_clsid Stable, non-null COM GUID in braced form: "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}".
+/// @param template_provider Optional native XML provider. An empty callback disables template capability; default
+/// presentation never calls it. Unknown template identifiers return Unavailable without fallback.
+/// @throws std::invalid_argument if an identity parameter is invalid.
+/// @throws std::logic_error if this process already configured a different identity.
+/// @throws std::runtime_error if ownership conflicts, a native operation fails,
+/// or the Windows 7 compatibility backend is in use.
+void RegisterLocalNotifications(
+    std::string_view app_id, std::string_view display_name, std::string_view activator_clsid,
+    LocalNotificationTemplateProvider template_provider = {});
+
+/// Removes the current executable's current-user local-notification registration.
+///
+/// Call on the application entry thread before RunApplication() or after it returns, never while its notification
+/// host is running. Cancels scheduled notifications and clears delivered history before removing owned registration.
+/// Only the matching current-user COM/app identity and the matching framework-created shortcut path are removed;
+/// installer-owned shortcuts, other executables, other users, application files, and application data are preserved.
+/// An absent registration is a no-op. Do not call this during ordinary exit: notifications can outlive the process.
+/// The application owns when to invoke cleanup before removal or relocation; machine-wide uninstall does not imply
+/// cleanup for every user. Native cleanup is not transactional and can partially complete before an error is reported.
+///
+/// @param app_id Application ID originally passed to RegisterLocalNotifications().
+/// @param activator_clsid COM GUID originally passed to RegisterLocalNotifications(). Prior registration in this
+/// process is not required. Successful cleanup also clears the matching in-process identity.
+/// @throws std::invalid_argument if an identity parameter is invalid.
+/// @throws std::runtime_error if ownership conflicts, a native operation fails,
+/// or the Windows 7 compatibility backend is in use.
+void UnregisterLocalNotifications(std::string_view app_id, std::string_view activator_clsid);
+
+} // namespace windows
+#endif
 
 } // namespace huxerui

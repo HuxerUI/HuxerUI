@@ -30,6 +30,7 @@
 #include "text/text_internal.h"
 #include "win32_accessibility.h"
 #include "win32_application_internal.h"
+#include "application/application_internal.h"
 #include "win32_application_runner.h"
 #include "win32_file_internal.h"
 #include "win32_http_internal.h"
@@ -413,9 +414,10 @@ class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
                                    public huxerui::PlatformResources {
 public:
   Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher, std::wstring window_class_name,
-                       Win32WindowReady on_window_ready)
+                       Win32WindowReady on_window_ready, std::shared_ptr<LocalNotificationTransport> notifications)
       : PlatformAdapter(ui_dispatcher.Bind()), ui_dispatcher_(ui_dispatcher),
-        window_class_name_(std::move(window_class_name)), on_window_ready_(std::move(on_window_ready)) {
+        window_class_name_(std::move(window_class_name)), on_window_ready_(std::move(on_window_ready)),
+        notifications_(std::move(notifications)) {
     win32_api_.ConfigureProcessDpiAwareness();
   }
 
@@ -570,6 +572,8 @@ public:
   std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
     return CreateWin32PermissionTransport();
   }
+
+  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override { return notifications_; }
 
   std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
     if (!system_tray_) {
@@ -1584,6 +1588,7 @@ private:
   std::unique_ptr<Win32PlatformViews> platform_views_;
   std::unique_ptr<Win32FileDrop> file_drop_;
   std::shared_ptr<Win32SystemTrayTransport> system_tray_;
+  std::shared_ptr<LocalNotificationTransport> notifications_;
 };
 
 int RunWin32PlatformApplication(const Application& application, Win32WindowReady on_window_ready) {
@@ -1597,9 +1602,38 @@ int RunWin32PlatformApplication(const Application& application, Win32WindowReady
   }
   Win32COMApartment com_apartment;
   Win32UIThreadDispatcher ui_dispatcher;
-  Win32PlatformAdapter platform(ui_dispatcher, window_class_name, std::move(on_window_ready));
+  Win32LocalNotificationHost notifications(ui_dispatcher.Bind());
+  std::optional<NotificationActivation> notification;
+  if (startup.notification_server) {
+    notification = notifications.WaitForActivation();
+    if (!notification) {
+      return 1;
+    }
+    const ResolvedLocalNotification resolved{.identifier = notification->identifier,
+                                             .data = EncodeLocalNotificationData(notification->data)};
+    const std::vector<std::wstring> arguments{std::wstring(win32_notification_payload_flag),
+                                              EncodeWin32NotificationActivation(resolved)};
+    if (TryForwardWin32ApplicationActivation(window_class_name, arguments)) {
+      return 0;
+    }
+    startup.activation = LaunchActivation{};
+  }
+  Win32PlatformAdapter platform(ui_dispatcher, window_class_name, std::move(on_window_ready),
+                                notifications.Transport());
   Runtime runtime{application, platform, std::move(startup.activation)};
-  return platform.Run(runtime, options);
+  notifications.SetActivationHandler(
+      [&runtime](NotificationActivation activation) { runtime.HandleApplicationActivation(std::move(activation)); });
+  if (notification) {
+    runtime.HandleApplicationActivation(std::move(*notification));
+  }
+  try {
+    const int result = platform.Run(runtime, options);
+    notifications.SetActivationHandler({});
+    return result;
+  } catch (...) {
+    notifications.SetActivationHandler({});
+    throw;
+  }
 }
 
 int RunPlatformApplication(const Application& application) {
