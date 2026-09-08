@@ -553,8 +553,16 @@ struct ToggleEvents {
 
 /// Event keys emitted by Slider.
 struct SliderEvents {
+  /// Begins an adjustment with the currently displayed controlled value.
+  struct Started : Event<void(float)> {};
   /// Requests a new constrained Slider value.
   struct Changed : Event<void(float)> {};
+  /// Finishes an adjustment with its final proposal, not an acknowledgement of owner acceptance.
+  /// Each effective key down, including repeats, and each accessibility adjustment commits independently.
+  struct Committed : Event<void(float)> {};
+  /// Cancels an active pointer adjustment without rolling back the controlled value.
+  /// Unmounting does not guarantee a terminal event.
+  struct Canceled : Event<void()> {};
 };
 
 /// Event keys emitted by SegmentedButton.
@@ -573,6 +581,9 @@ struct TabsEvents {
 struct PagerEvents {
   /// Requests selection of the page at the supplied zero-based index.
   struct Changed : Event<void(std::size_t)> {};
+  /// Reports the displayed index after paging or rebound and final layout have settled.
+  /// Includes programmatic transitions and repeated indices, but not initial mount or stationary recomposition.
+  struct Settled : Event<void(std::size_t)> {};
 };
 
 /// Event keys emitted by RefreshBox.
@@ -585,6 +596,9 @@ struct RefreshEvents {
 struct SelectEvents {
   /// Requests selection of the option at the supplied zero-based index.
   struct Changed : Event<void(std::size_t)> {};
+  /// Reports successful opening or the start of closing, not exit-animation completion or cancellation.
+  /// Closing precedes Changed when selecting another option; initial mount and destruction do not emit this event.
+  struct ExpandedChanged : Event<void(bool)> {};
 };
 
 /// Controlled-value requests and activation emitted by TreeView<Node>.

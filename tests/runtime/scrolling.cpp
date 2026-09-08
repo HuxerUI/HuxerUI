@@ -20,6 +20,7 @@ State<std::size_t> interactive_pager_page;
 State<bool> interactive_pager_drag_enabled;
 State<std::size_t> reversed_pager_page;
 std::vector<std::size_t> pager_proposals;
+std::vector<std::size_t> pager_settlements;
 bool accept_pager_proposals = true;
 int scroll_observer_compositions = 0;
 bool consume_scroll_input = false;
@@ -294,7 +295,8 @@ View InteractivePagerApp() {
         if (accept_pager_proposals) {
           selected = index;
         }
-      });
+      })
+      .OnSettled([](std::size_t index) { pager_settlements.push_back(index); });
 }
 
 View ReversedVerticalPagerApp() {
@@ -990,6 +992,7 @@ TEST_CASE("Pager uses direct drag without mapping wheel input and honors DragEna
 }
 
 TEST_CASE("Pager returns to controlled selection when a proposal is rejected") {
+  pager_settlements.clear();
   pager_proposals.clear();
   accept_pager_proposals = false;
   TestPlatform platform;
@@ -1011,6 +1014,96 @@ TEST_CASE("Pager returns to controlled selection when a proposal is rejected") {
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->children[1]->PresentationBounds().x == Catch::Approx(0.0F));
   REQUIRE_FALSE(runtime.RootNode()->children[2]->participates_in_layout);
+  REQUIRE(pager_settlements == std::vector<std::size_t>{1});
+}
+
+TEST_CASE("Pager settles once after accepted dragging or rebound including repeated indices") {
+  const std::string scenario = GENERATE("accepted", "insufficient distance", "canceled", "disabled");
+  CAPTURE(scenario);
+  pager_proposals.clear();
+  pager_settlements.clear();
+  accept_pager_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{InteractivePagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+  REQUIRE(pager_settlements.empty());
+
+  std::size_t expected = 1;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    const std::size_t previous_count = pager_settlements.size();
+    const auto pointer = static_cast<std::int64_t>(910 + attempt);
+    const bool return_drag = scenario == "accepted" && attempt == 1;
+    runtime.HandlePointerEvent({PointerEventType::Down, pointer, {return_drag ? 20.0F : 80.0F, 40.0F}});
+    if (scenario == "accepted") {
+      const Point destination{return_drag ? 80.0F : 20.0F, 40.0F};
+      runtime.HandlePointerEvent({PointerEventType::Move, pointer, destination});
+      runtime.HandlePointerEvent({PointerEventType::Up, pointer, destination});
+      expected = return_drag ? 1 : 2;
+    } else if (scenario == "insufficient distance") {
+      runtime.HandlePointerEvent({PointerEventType::Move, pointer, {60.0F, 40.0F}});
+      CAPTURE(attempt);
+      REQUIRE(runtime.RootNode()->scroll_state->offset_x > 100.0F);
+      runtime.HandlePointerEvent({PointerEventType::Up, pointer, {60.0F, 40.0F}});
+    } else if (scenario == "canceled") {
+      runtime.HandlePointerEvent({PointerEventType::Move, pointer, {20.0F, 40.0F}});
+      runtime.HandlePointerEvent({PointerEventType::Cancel, pointer, {20.0F, 40.0F}});
+    } else {
+      runtime.HandlePointerEvent({PointerEventType::Move, pointer, {20.0F, 40.0F}});
+      interactive_pager_drag_enabled = false;
+      runtime.BuildFrame();
+      runtime.HandlePointerEvent({PointerEventType::Up, pointer, {20.0F, 40.0F}});
+    }
+    REQUIRE(pager_settlements.size() == previous_count);
+    for (int frame = 0; frame < 6; ++frame) {
+      runtime.BuildFrame();
+      platform.AdvanceTime(0.25);
+    }
+    REQUIRE(pager_settlements.size() == previous_count + 1);
+    REQUIRE(pager_settlements.back() == expected);
+    REQUIRE(runtime.RootNode()->children[expected]->PresentationBounds().x == Catch::Approx(0.0F));
+    interactive_pager_drag_enabled = true;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+    REQUIRE(pager_settlements.size() == previous_count + 1);
+  }
+}
+
+TEST_CASE("Pager only settles the final programmatic target after retargeting") {
+  pager_proposals.clear();
+  pager_settlements.clear();
+  TestPlatform platform;
+  static Runtime* observed_runtime = nullptr;
+  Runtime runtime{[] {
+    return InteractivePagerApp().On<PagerEvents::Settled>([](std::size_t index) {
+      const auto* root = observed_runtime->RootNode();
+      REQUIRE(root->children[index]->PresentationBounds().x == Catch::Approx(0.0F));
+      REQUIRE(root->children[index]->participates_in_layout);
+      REQUIRE(std::ranges::count_if(root->children, [](const auto& page) {
+        return page->participates_in_layout;
+      }) == 1);
+      pager_settlements.push_back(index);
+    });
+  }, platform};
+  observed_runtime = &runtime;
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+  interactive_pager_page = 2;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  REQUIRE(pager_settlements.empty());
+  interactive_pager_page = 0;
+  for (int frame = 0; frame < 6; ++frame) {
+    runtime.BuildFrame();
+    platform.AdvanceTime(0.25);
+  }
+  REQUIRE(pager_proposals.empty());
+  REQUIRE(pager_settlements == std::vector<std::size_t>{0});
+  REQUIRE(runtime.RootNode()->children[0]->PresentationBounds().x == Catch::Approx(0.0F));
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE(pager_settlements == std::vector<std::size_t>{0});
 }
 
 TEST_CASE("Pager composes vertical paging with explicit reversal") {

@@ -46,8 +46,12 @@ public:
 
   void Update(ViewNode& node, const SliderVisual& modifier) {
     style_ = node.LayoutValueOr<SliderStyleBinding>(SliderStyle::Default());
+    if (pointer_id_.has_value() && (!node.IsEnabled() || modifier.minimum != minimum_ || modifier.maximum != maximum_ ||
+                                  modifier.step != step_)) {
+      // Declarative updates only mark cancellation; mounted input or frame dispatch owns its event.
+      cancel_pending_ = true;
+    }
     if (!node.IsEnabled()) {
-      pointer_id_.reset();
       hovered_ = false;
       pressed_ = false;
     }
@@ -55,7 +59,10 @@ public:
     minimum_ = modifier.minimum;
     maximum_ = modifier.maximum;
     step_ = modifier.step;
-    last_emitted_value_ = value_;
+    // Controlled writeback and theme recomposition must not replace the active pointer's final proposal.
+    if (!pointer_id_.has_value()) {
+      last_emitted_value_ = value_;
+    }
     UpdateThumbSize(node.IsEnabled());
   }
 
@@ -75,7 +82,7 @@ public:
   }
 
   bool OnSemanticAction(std::uint64_t local_id, const SemanticAction& action) override {
-    if (local_id != 0) {
+    if (local_id != 0 || pointer_id_.has_value()) {
       return false;
     }
     float requested = value_;
@@ -92,16 +99,14 @@ public:
     } else {
       return false;
     }
-    const float snapped = Snap(requested);
-    if (snapped != last_emitted_value_) {
-      last_emitted_value_ = snapped;
-      EmitEvent<SliderEvents::Changed>(snapped);
-    }
+    EmitAdjustment(requested);
     return true;
   }
 
   NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
+    if (cancel_pending_ || (!node.IsEnabled() && pointer_id_.has_value())) {
+      CancelAdjustment(node.IsEnabled());
+    }
     const float previous_width = thumb_width_.Value();
     const float previous_height = thumb_height_.Value();
     const MotionAdvanceResult width_result = thumb_width_.Advance(frame);
@@ -142,25 +147,32 @@ public:
     UpdateThumbSize(node.IsEnabled());
   }
 
-  bool OnKey(ViewNode&, const KeyEvent& event) override {
-    if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
+  bool OnKey(ViewNode& node, const KeyEvent& event) override {
+    if (!node.IsEnabled() || event.type != KeyEventType::Down) {
+      return false;
+    }
+    if (event.key == Key::Escape && pointer_id_.has_value()) {
+      CancelAdjustment(true);
+      return true;
+    }
+    if (pointer_id_.has_value() || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
     }
     const float increment = step_.value_or((maximum_ - minimum_) / 100.0F);
     switch (event.key) {
     case Key::ArrowLeft:
     case Key::ArrowDown:
-      EmitValue(last_emitted_value_ - increment);
+      EmitAdjustment(last_emitted_value_ - increment);
       return true;
     case Key::ArrowRight:
     case Key::ArrowUp:
-      EmitValue(last_emitted_value_ + increment);
+      EmitAdjustment(last_emitted_value_ + increment);
       return true;
     case Key::Home:
-      EmitValue(minimum_);
+      EmitAdjustment(minimum_);
       return true;
     case Key::End:
-      EmitValue(maximum_);
+      EmitAdjustment(maximum_);
       return true;
     default:
       return false;
@@ -168,16 +180,19 @@ public:
   }
 
   PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
-    if (!node.IsEnabled()) {
-      pointer_id_.reset();
-      pressed_ = false;
-      UpdateThumbSize(false);
+    if (!node.IsEnabled() || cancel_pending_) {
+      CancelAdjustment(node.IsEnabled());
       return PointerResult::Ignored;
     }
     if (event.type == PointerEventType::Down) {
+      if (pointer_id_.has_value()) {
+        return PointerResult::Ignored;
+      }
       pointer_id_ = event.pointer_id;
+      last_emitted_value_ = value_;
       pressed_ = true;
       UpdateThumbSize(true);
+      EmitEvent<SliderEvents::Started>(value_);
       EmitPointerValue(node, event.position.x);
       return PointerResult::Capture;
     }
@@ -190,11 +205,16 @@ public:
     }
     if (event.type == PointerEventType::Up) {
       EmitPointerValue(node, event.position.x);
-    }
-    if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
+      const float proposal = last_emitted_value_;
+      // Clear ownership before callbacks so later cancellation cannot terminate the same adjustment twice.
       pointer_id_.reset();
       pressed_ = false;
       UpdateThumbSize(true);
+      EmitEvent<SliderEvents::Committed>(proposal);
+      return PointerResult::Handled;
+    }
+    if (event.type == PointerEventType::Cancel) {
+      CancelAdjustment(true);
       return PointerResult::Handled;
     }
     return PointerResult::Ignored;
@@ -363,6 +383,28 @@ private:
     EmitEvent<SliderEvents::Changed>(snapped);
   }
 
+  void EmitAdjustment(float value) {
+    const float proposal = Snap(value);
+    if (proposal == last_emitted_value_) {
+      return;
+    }
+    EmitEvent<SliderEvents::Started>(value_);
+    EmitValue(proposal);
+    EmitEvent<SliderEvents::Committed>(proposal);
+  }
+
+  void CancelAdjustment(bool enabled) {
+    cancel_pending_ = false;
+    if (!pointer_id_.has_value()) {
+      return;
+    }
+    pointer_id_.reset();
+    pressed_ = false;
+    last_emitted_value_ = value_;
+    UpdateThumbSize(enabled);
+    EmitEvent<SliderEvents::Canceled>();
+  }
+
   void UpdateThumbSize(bool enabled) {
     float target_width = style_.thumb_width;
     float target_height = style_.thumb_height;
@@ -398,6 +440,7 @@ private:
   bool hovered_ = false;
   bool pressed_ = false;
   bool focused_ = false;
+  bool cancel_pending_ = false;
   bool thumb_size_initialized_ = false;
 };
 

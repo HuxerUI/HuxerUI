@@ -28,6 +28,7 @@ State<bool> select_enabled;
 State<bool> select_configuration_updated;
 State<bool> select_visible;
 int select_changes = 0;
+std::vector<std::string> select_events;
 int invalid_select_style_case = 0;
 
 constexpr Color custom_select_foreground = Color::Rgb(173, 47, 91);
@@ -45,9 +46,11 @@ View SelectApp() {
          })
       .Label("Number")
       .OnChanged([](std::size_t index) {
+        select_events.push_back("changed");
         ++select_changes;
         select_index = index;
       })
+      .OnExpandedChanged([](bool expanded) { select_events.push_back(expanded ? "opened" : "closed"); })
       .With(Enabled{select_enabled.Get()});
 }
 
@@ -88,7 +91,9 @@ View ConditionalSelectApp() {
   if (!select_visible.Get()) {
     return Text("Replacement");
   }
-  return Select(std::array{"One", "Two"}, 0, [](const char* label) { return Text(label); }).Label("Number");
+  return Select(std::array{"One", "Two"}, 0, [](const char* label) { return Text(label); })
+      .Label("Number")
+      .OnExpandedChanged([](bool expanded) { select_events.push_back(expanded ? "opened" : "closed"); });
 }
 
 View ThemedSelectApp() {
@@ -403,6 +408,7 @@ TEST_CASE("DisabledSelectCannotOpenAndDynamicDisableDismissesItsPopup") {
 }
 
 TEST_CASE("SelectUnmountDismissesItsPopup") {
+  select_events.clear();
   TestPlatform platform{BuiltinTestResources()};
   Runtime runtime{ConditionalSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
@@ -414,6 +420,50 @@ TEST_CASE("SelectUnmountDismissesItsPopup") {
   const std::shared_ptr<const SemanticFrame> replaced = runtime.BuildCommit().semantic_frame;
   REQUIRE_FALSE(HasRole(*replaced, SemanticRole::ComboBox));
   REQUIRE_FALSE(HasRole(*replaced, SemanticRole::List));
+  REQUIRE(select_events == std::vector<std::string>{"opened"});
+}
+
+TEST_CASE("Select expansion events observe transitions and precede selection changes") {
+  select_events.clear();
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime runtime{SelectApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildCommit();
+  REQUIRE(select_events.empty());
+  OpenSelect(runtime);
+  REQUIRE(select_events == std::vector<std::string>{"opened"});
+  runtime.InvalidateRoot();
+  runtime.BuildCommit();
+  REQUIRE(select_events == std::vector<std::string>{"opened"});
+
+  bool changed = false;
+  SECTION("another choice") {
+    const auto frame = runtime.LastCommit().semantic_frame;
+    const Rect choice = ListItemAt(*frame, FindRole(*frame, SemanticRole::List), 2).bounds;
+    ClickAt(runtime, {choice.x + choice.width * 0.5F, choice.y + choice.height * 0.5F});
+    changed = true;
+  }
+  SECTION("same choice") {
+    runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Enter});
+  }
+  SECTION("escape") {
+    runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Escape});
+  }
+  SECTION("outside press") {
+    ClickAt(runtime, {319.0F, 239.0F});
+  }
+  SECTION("disabled") {
+    select_enabled = false;
+    runtime.BuildCommit();
+  }
+  std::vector<std::string> expected{"opened", "closed"};
+  if (changed) {
+    expected.push_back("changed");
+  }
+  REQUIRE(select_events == expected);
+  runtime.BuildCommit();
+  runtime.BuildCommit();
+  REQUIRE(select_events == expected);
 }
 
 TEST_CASE("SelectClearsItsActiveChoiceWhenEveryItemIsDisabled") {
@@ -429,6 +479,51 @@ TEST_CASE("SelectClearsItsActiveChoiceWhenEveryItemIsDisabled") {
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   const SemanticNode& list = FindRole(*frame, SemanticRole::List);
   REQUIRE(std::ranges::none_of(list.children, [&frame](SemanticNodeId id) { return FindNode(*frame, id).focused; }));
+}
+
+TEST_CASE("Select closes a stale popup during resize without relying on unsolicited frames") {
+  select_events.clear();
+  std::optional<LayerController> layers;
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.root_hooks.push_back([&](RootContext& root) { layers = root.Layers(); });
+  TestPlatform platform{BuiltinTestResources()};
+  Runtime runtime{[]() -> View {
+    ThemeSpec theme = FlatLightThemeSpec();
+    theme.motion.reduced_motion = true;
+    return Theme {ThemeDefinition{theme}, SelectApp()};
+  }, platform, std::move(options)};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  OpenSelect(runtime);
+  const auto finish_requested_frames = [&] {
+    for (int frame = 0; runtime.LastCommit().next_frame_deadline.has_value(); ++frame) {
+      REQUIRE(frame < 32);
+      platform.AdvanceTime(std::max(0.016, *runtime.LastCommit().next_frame_deadline - platform.Now()));
+      runtime.BuildCommit();
+    }
+  };
+  finish_requested_frames();
+  REQUIRE(select_events == std::vector<std::string>{"opened"});
+  REQUIRE(layers.has_value());
+  // Select intentionally does not expose its popup handle; locate the sole layer to simulate external removal.
+  LayerId popup = 1;
+  while (popup < 32 && !detail::InternalAccess::EntryOptions(*layers, popup).has_value()) {
+    ++popup;
+  }
+  REQUIRE(popup < 32);
+  REQUIRE(layers->Dismiss(popup));
+  runtime.BuildCommit();
+  finish_requested_frames();
+  REQUIRE(select_events == std::vector<std::string>{"opened"});
+  runtime.SetWindowMetrics({.viewport = {400.0F, 240.0F}});
+  runtime.BuildCommit();
+  finish_requested_frames();
+  REQUIRE(select_events == std::vector<std::string>{"opened", "closed"});
+  REQUIRE(FindRole(*runtime.LastCommit().semantic_frame, SemanticRole::ComboBox).expanded == false);
+  REQUIRE_FALSE(HasRole(*runtime.LastCommit().semantic_frame, SemanticRole::List));
+  OpenSelect(runtime);
+  finish_requested_frames();
+  REQUIRE(select_events == std::vector<std::string>{"opened", "closed", "opened"});
 }
 
 TEST_CASE("SelectPointerChoiceCommitsAndRestoresTriggerFocus") {

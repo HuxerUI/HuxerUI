@@ -154,6 +154,11 @@ return Pager(
 ```
 
 Pager never owns the selected index.
+`OnChanged(std::size_t)` requests a new controlled index; programmatic selection does not emit Changed.
+`OnSettled(std::size_t)` reports the displayed page after a transition or rebound finishes and its final layout is stable, including programmatic transitions and reduced motion.
+A short or canceled drag, or a rejected selection proposal, settles back to the original index, so successive Settled events can contain the same index.
+Retargeting an unfinished animation reports only the final settled target, not the interrupted target.
+Initial mount and stationary recomposition do not emit Settled; the event describes component layout, not acknowledgement that a frame reached the display.
 Set `DragEnabled(false)` to keep programmatic and accessibility paging while disabling direct pointer paging.
 `Reverse()` applies an explicit direction inversion; it is not a replacement for natural layout direction.
 Pager does not map wheel or trackpad distance to page changes.

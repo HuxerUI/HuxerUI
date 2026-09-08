@@ -397,6 +397,14 @@ Emission belongs to mounted behavior on the owning UI thread, including input, s
 It neither queues work nor creates an emitter that may outlive the extension.
 Popup, Dialog, and other window services remain explicit typed-handle dependencies.
 
+Component adjustment and presentation events remain local to existing retained behavior rather than introducing a generic transaction layer.
+Slider retains the active pointer's last proposal across controlled writeback, ends ownership before Committed or Canceled dispatch, and defers cancellation caused by declarative configuration to mounted dispatch.
+Keyboard repeats and accessibility adjustments are independent atomic adjustments; cancellation never writes an application-owned rollback value.
+Select routes popup close paths through its existing session and reports ExpandedChanged(false) before a selection request, without emitting from destruction.
+Trigger-width synchronization runs in OnFrame after layout, allowing a stale popup update to close and notify in the same mounted callback instead of depending on an unscheduled frame after geometry preparation.
+Pager distinguishes a requested index from settled movement: its existing animation state requests the final slot-rebasing layout, then a subsequent mounted frame emits Settled once.
+Retargeting suppresses the interrupted settlement, while a completed rebound may report the same index again.
+
 `PrepareGeometry()` runs after final presentation transforms are resolved and before paint consumes geometry.
 It receives the active `TextMeasurer` as a callback-scoped borrowed reference so geometry-dependent extensions can measure labels without retaining a platform service.
 It reports exactly which retained paint sequence changed.

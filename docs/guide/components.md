@@ -181,6 +181,24 @@ View Controls() {
 Disabled behavior is configured with the shared enabled modifier where supported.
 Disabled components remain visible but do not emit activation or value-change events.
 
+### Slider adjustment events
+
+`OnStarted(float)` reports the displayed, range-clamped controlled value before an adjustment.
+`OnChanged(float)` requests constrained, step-snapped values while the pointer moves.
+`OnCommitted(float)` reports the final proposal on pointer release, including a final position change; it does not acknowledge that the application accepted or persisted that value.
+A click at the unchanged value still emits Started and Committed, without Changed.
+Ordinary controlled-value writeback or theme recomposition neither starts another adjustment nor replaces the active pointer's last proposal.
+
+Each effective keyboard KeyDown, including long-press repeats, emits Started, Changed, and Committed independently; KeyUp and no-op input at a range boundary emit none of these events.
+Each effective accessibility adjustment follows the same atomic sequence.
+While a pointer adjustment is active, another pointer, keyboard adjustment, or accessibility adjustment cannot replace it.
+
+`OnCanceled()` ends an active pointer adjustment on pointer cancellation, capture loss, Escape, disabling, or a range/step change.
+Cancellation does not emit Committed or a rollback Changed; the application owns any preview rollback.
+For a media slider, capture the preview origin in OnStarted, update the preview in OnChanged, perform the seek in OnCommitted, and discard the preview in OnCanceled.
+Unmounting is not a guaranteed terminal notification; an owner removing the component must also clean up its preview or pending work.
+DatePicker and TimePicker remain controlled value editors; confirmation or cancellation of a surrounding dialog belongs to that dialog's application logic.
+
 ## TreeView
 
 `TreeView<Node>(roots, factory, item_info)` accepts a vector snapshot of application-owned values or handles.
@@ -312,6 +330,10 @@ Up and Down move through enabled choices without wrapping, Home and End move to 
 Opening focuses the selected choice when enabled, otherwise the first enabled choice; a list with no enabled choices has no active item.
 Escape, Back, outside press, and selecting the already controlled value close the popup without emitting a duplicate change.
 Disabling the Select while it is open closes the popup without emitting a change.
+`OnExpandedChanged(bool)` observes successful opening (`true`) and the start of closing (`false`), not exit-animation completion.
+Selecting another option emits ExpandedChanged(false) before Changed(index); selecting the same option only emits ExpandedChanged(false).
+Closing may also follow Escape, Back, outside press, or disabling, so false alone does not mean cancellation.
+Initial mount, unchanged expansion state, and destruction do not emit ExpandedChanged.
 `Validation` presents application-owned validation state without changing selection rules.
 
 ## ComboBox

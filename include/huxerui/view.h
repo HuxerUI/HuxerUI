@@ -901,6 +901,11 @@ public:
     return std::move(*this).On<SelectEvents::Changed>(std::forward<Function>(function));
   }
 
+  /// Observes popup opening and the start of closing.
+  template <class Function> Select OnExpandedChanged(Function&& function) && {
+    return std::move(*this).On<SelectEvents::ExpandedChanged>(std::forward<Function>(function));
+  }
+
   /// Sets the field label and accessible name.
   Select Label(StringVariant value) &&;
   /// Presents application-owned validation state without changing selection rules.
@@ -1378,6 +1383,21 @@ public:
     return std::move(*this).On<SliderEvents::Changed>(std::forward<Function>(function));
   }
 
+  /// Observes the displayed controlled value at the start of an adjustment.
+  template <class Function> Slider OnStarted(Function&& function) && {
+    return std::move(*this).On<SliderEvents::Started>(std::forward<Function>(function));
+  }
+
+  /// Handles the final proposal; key repeats commit independently and pointer clicks may commit unchanged values.
+  template <class Function> Slider OnCommitted(Function&& function) && {
+    return std::move(*this).On<SliderEvents::Committed>(std::forward<Function>(function));
+  }
+
+  /// Observes pointer adjustment cancellation without automatic rollback or a guaranteed event on unmount.
+  template <class Function> Slider OnCanceled(Function&& function) && {
+    return std::move(*this).On<SliderEvents::Canceled>(std::forward<Function>(function));
+  }
+
 private:
   void UpdateModifier();
 
@@ -1481,7 +1501,7 @@ public:
 /// Retains peer pages while presenting controlled animated and directly draggable paging.
 ///
 /// The selected index remains application-owned. Direct manipulation proposes one adjacent index through OnChanged,
-/// while programmatic selected-index changes animate without emitting an event.
+/// while programmatic selected-index changes animate without emitting Changed. Settled observes completed movement.
 class Pager final : public detail::TypedView<Pager> {
 public:
   Pager(std::initializer_list<View> pages, std::size_t selected_index)
@@ -1502,6 +1522,11 @@ public:
   /// Handles a requested controlled selected-index change.
   template <class Function> Pager OnChanged(Function&& function) && {
     return std::move(*this).On<PagerEvents::Changed>(std::forward<Function>(function));
+  }
+
+  /// Observes the displayed index after movement and layout settle, including rebound to the same index.
+  template <class Function> Pager OnSettled(Function&& function) && {
+    return std::move(*this).On<PagerEvents::Settled>(std::forward<Function>(function));
   }
 
 private:

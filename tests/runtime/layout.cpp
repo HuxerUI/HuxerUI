@@ -16,6 +16,7 @@ State<bool> update_opaque_layout_value;
 State<std::size_t> indexed_page_selection;
 State<std::size_t> pager_selection;
 State<std::size_t> reduced_motion_pager_selection;
+std::vector<std::size_t> reduced_motion_pager_settlements;
 ImageAsset layout_test_image;
 ImageFit layout_test_image_fit = ImageFit::Contain;
 HorizontalAlignment layout_test_image_horizontal_alignment = HorizontalAlignment::Center;
@@ -480,7 +481,8 @@ View ReducedMotionPagerApp() {
   theme.motion.reduced_motion = true;
   return Theme {
     ThemeDefinition{theme},
-    Pager({Text("First"), Text("Second")}, selected),
+    Pager({Text("First"), Text("Second")}, selected)
+        .OnSettled([](std::size_t index) { reduced_motion_pager_settlements.push_back(index); }),
   };
 }
 
@@ -635,16 +637,24 @@ TEST_CASE("Pager validates and retains its controlled page set") {
 }
 
 TEST_CASE("Pager resolves programmatic selection immediately under reduced motion") {
+  reduced_motion_pager_settlements.clear();
   TestPlatform platform;
   Runtime runtime{ReducedMotionPagerApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
+
+  REQUIRE(reduced_motion_pager_settlements.empty());
 
   reduced_motion_pager_selection = 1;
   runtime.BuildFrame();
   const FlattenedScene& settled = runtime.BuildFrame();
   REQUIRE_FALSE(ContainsText(settled, "First"));
   REQUIRE(ContainsText(settled, "Second"));
+  runtime.BuildFrame();
+  REQUIRE(reduced_motion_pager_settlements == std::vector<std::size_t>{1});
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  REQUIRE(reduced_motion_pager_settlements == std::vector<std::size_t>{1});
 }
 
 TEST_CASE("TestImageMeasuresIntrinsicSizeAndResolvesContainFit") {

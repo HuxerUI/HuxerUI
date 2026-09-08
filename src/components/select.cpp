@@ -42,6 +42,7 @@ struct SelectPopupState {
 };
 
 struct SelectSession {
+  EventEmitter events;
   std::optional<LayerId> layer;
   std::shared_ptr<SelectPopupState> popup_state;
   std::size_t selected_index = 0;
@@ -176,7 +177,7 @@ void SetActiveChoice(const std::shared_ptr<SelectPopupState>& state, std::size_t
   state->reveal_active = true;
 }
 
-void DismissSelect(const std::shared_ptr<SelectSession>& session, const PopupHandle& popup) {
+void DismissSelect(const std::shared_ptr<SelectSession>& session, const PopupHandle& popup, bool notify = true) {
   if (!session->layer.has_value()) {
     return;
   }
@@ -184,6 +185,9 @@ void DismissSelect(const std::shared_ptr<SelectSession>& session, const PopupHan
   session->layer.reset();
   session->popup_state.reset();
   static_cast<void>(popup.Dismiss(layer));
+  if (notify) {
+    session->events.Emit<SelectEvents::ExpandedChanged>(false);
+  }
 }
 
 struct SelectDisplayContent {
@@ -539,16 +543,16 @@ public:
 
   ~SelectTriggerBehaviorExtension() override {
     if (session_ && popup_.has_value()) {
-      DismissSelect(session_, *popup_);
+      DismissSelect(session_, *popup_, false);
     }
   }
 
   void Update(ViewNode&, const SelectTriggerBehavior& modifier) {
     source_ = modifier.source;
     style_ = modifier.style;
-    events_ = modifier.events;
     popup_ = modifier.popup;
     session_ = modifier.session;
+    session_->events = modifier.events;
     selected_index_ = modifier.selected_index;
     accessible_label_ = modifier.accessible_label;
     invalid_ = modifier.invalid;
@@ -558,7 +562,14 @@ public:
   }
 
   FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
-    if (!node.IsEnabled() && session_ && popup_.has_value() && session_->layer.has_value()) {
+    // Layout has established the trigger width. Handle a failed popup update in this same mounted callback,
+    // rather than leaving geometry preparation to request a follow-up frame it cannot schedule.
+    if (session_ && session_->trigger_width != node.Bounds().width) {
+      session_->trigger_width = node.Bounds().width;
+      UpdateOpenPopup();
+    }
+    if ((!node.IsEnabled() || popup_missing_) && session_ && popup_.has_value() && session_->layer.has_value()) {
+      popup_missing_ = false;
       pointer_id_.reset();
       DismissSelect(session_, *popup_);
       InvalidateSemantics();
@@ -581,18 +592,6 @@ public:
       InvalidateSemantics();
     }
     return {};
-  }
-
-  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
-    if (!session_) {
-      return PaintInvalidation::None;
-    }
-    const float width = node.Bounds().width;
-    if (session_->trigger_width != width) {
-      session_->trigger_width = width;
-      UpdateOpenPopup();
-    }
-    return PaintInvalidation::None;
   }
 
   bool HitTest(ViewNode& node, Point position) const override {
@@ -688,7 +687,7 @@ private:
     }
     std::weak_ptr<SelectSession> weak_session = session_;
     const PopupHandle popup = *popup_;
-    const EventEmitter events = events_;
+    const EventEmitter events = session_->events;
     session_->popup_state->selected_index = selected_index_;
     ResizePopupState(session_->popup_state, source_.size);
     session_->popup_state->commit = [weak_session, popup, events](std::size_t index) {
@@ -718,8 +717,8 @@ private:
     }
     ConfigurePopupState();
     if (!popup_->Update(*session_->layer, PopupContentFactory())) {
-      session_->layer.reset();
-      session_->popup_state.reset();
+      // Reconciliation cannot emit business events; close the stale session from the next mounted frame.
+      popup_missing_ = true;
     }
   }
 
@@ -742,7 +741,9 @@ private:
       }
     };
     session_->layer = popup_->Show(PopupContentFactory(), std::move(options));
+    popup_missing_ = false;
     InvalidateSemantics();
+    session_->events.Emit<SelectEvents::ExpandedChanged>(true);
   }
 
   void Toggle() {
@@ -756,7 +757,6 @@ private:
 
   detail::ViewItemSource source_;
   SelectStyle style_;
-  EventEmitter events_;
   std::optional<PopupHandle> popup_;
   std::shared_ptr<SelectSession> session_;
   std::optional<std::string> label_;
@@ -764,6 +764,7 @@ private:
   std::optional<std::int64_t> pointer_id_;
   std::size_t selected_index_ = 0;
   bool invalid_ = false;
+  bool popup_missing_ = false;
   std::string validation_message_;
 };
 

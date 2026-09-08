@@ -87,10 +87,12 @@ public:
     behavior_ = behavior;
 
     if (!initialized_ || geometry_changed) {
+      settlement_pending_ = settlement_pending_ || (initialized_ && mode_ != Mode::Stable);
       initialized_ = true;
       displayed_index_ = behavior_.selected_index;
       mode_ = Mode::Stable;
       needs_rebase_ = true;
+      layout_ready_ = false;
       ConfigureScrollState(mounted);
       InvalidateLayout(mounted);
       return;
@@ -107,6 +109,11 @@ public:
 
   FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
+    if (mode_ == Mode::Stable && settlement_pending_ && !needs_rebase_) {
+      // Animation completion requests a final layout pass; notify only after that pass rebases the page slots.
+      settlement_pending_ = false;
+      EmitEvent<PagerEvents::Settled>(displayed_index_);
+    }
     if (mode_ == Mode::AwaitingCommit) {
       if (!proposal_emitted_) {
         const std::size_t proposal = ResolveReleaseProposal(mounted);
@@ -121,7 +128,7 @@ public:
       return {.needs_frame = true};
     }
     if (mode_ != Mode::Animating || !layout_ready_) {
-      return {.needs_frame = mode_ == Mode::Animating};
+      return {.needs_frame = mode_ == Mode::Animating || settlement_pending_};
     }
 
     const MotionAdvanceResult result = progress_.Advance(frame);
@@ -131,6 +138,7 @@ public:
     if (!result.needs_frame && !result.wake_after.has_value()) {
       displayed_index_ = behavior_.selected_index;
       mode_ = Mode::Stable;
+      settlement_pending_ = true;
       needs_rebase_ = true;
       layout_ready_ = false;
       UpdateAllowedSources(mounted);
@@ -156,6 +164,7 @@ public:
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (activity.phase == ScrollPhase::Begin) {
       mode_ = Mode::Dragging;
+      settlement_pending_ = false;
       drag_target_.reset();
       release_velocity_ = 0.0F;
       InvalidateLayout(mounted);
@@ -376,6 +385,7 @@ private:
     animation_initial_displacement_ = extent_ > 0.0F ? (Offset(node) - anchor_offset_) / extent_ : 0.0F;
     animation_target_index_ = target;
     mode_ = Mode::Animating;
+    settlement_pending_ = false;
     UpdateAllowedSources(node);
     layout_ready_ = false;
     proposal_emitted_ = false;
@@ -398,6 +408,7 @@ private:
   bool needs_rebase_ = true;
   bool layout_ready_ = false;
   bool proposal_emitted_ = false;
+  bool settlement_pending_ = false;
 };
 
 struct PagerLayout {

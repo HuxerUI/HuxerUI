@@ -639,6 +639,38 @@ View SliderApp() {
   };
 }
 
+State<float> lifecycle_slider_value;
+State<float> lifecycle_slider_maximum;
+State<float> lifecycle_slider_step;
+State<bool> lifecycle_slider_enabled;
+State<bool> lifecycle_slider_visible;
+std::vector<std::pair<std::string, float>> slider_lifecycle_events;
+bool accept_slider_proposals = true;
+
+View SliderLifecycleApp() {
+  lifecycle_slider_value = UseState(4.0F);
+  lifecycle_slider_maximum = UseState(10.0F);
+  lifecycle_slider_step = UseState(2.0F);
+  lifecycle_slider_enabled = UseState(true);
+  lifecycle_slider_visible = UseState(true);
+  if (!lifecycle_slider_visible.Get()) {
+    return Text("Replacement");
+  }
+  return Slider(lifecycle_slider_value)
+      .Range(0.0F, lifecycle_slider_maximum.Get())
+      .Step(lifecycle_slider_step.Get())
+      .OnStarted([](float value) { slider_lifecycle_events.emplace_back("started", value); })
+      .OnChanged([](float value) {
+        slider_lifecycle_events.emplace_back("changed", value);
+        if (accept_slider_proposals) {
+          lifecycle_slider_value = value;
+        }
+      })
+      .OnCommitted([](float value) { slider_lifecycle_events.emplace_back("committed", value); })
+      .OnCanceled([] { slider_lifecycle_events.emplace_back("canceled", 0.0F); })
+      .With(Enabled{lifecycle_slider_enabled.Get()});
+}
+
 View MaterialSliderApp() {
   return huxerui::MaterialTheme {
     Row {
@@ -2963,6 +2995,141 @@ TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
   });
   REQUIRE_FALSE(drew_node_focus_ring);
   REQUIRE(drew_focused_handle);
+}
+
+TEST_CASE("Slider pointer adjustment preserves proposals across controlled writeback and recomposition") {
+  slider_lifecycle_events.clear();
+  accept_slider_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{SliderLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
+  runtime.BuildFrame();
+  REQUIRE(slider_lifecycle_events.empty());
+  const Rect bounds = runtime.RootNode()->PresentationBounds();
+  const Point end{bounds.x + bounds.width - 1.0F, bounds.y + bounds.height * 0.5F};
+  runtime.HandlePointerEvent({PointerEventType::Down, 901, end});
+  runtime.BuildFrame();
+  lifecycle_slider_value = 2.0F;
+  runtime.InvalidateRoot();
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Move, 901, end});
+  runtime.HandlePointerEvent({PointerEventType::Up, 901, end});
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 901, end});
+  const std::vector<std::pair<std::string, float>> expected{
+      {"started", 4.0F}, {"changed", 10.0F}, {"committed", 10.0F},
+  };
+  REQUIRE(slider_lifecycle_events == expected);
+  REQUIRE(lifecycle_slider_value.Get() == 2.0F);
+}
+
+TEST_CASE("Slider unchanged pointer clicks commit and rejected proposals remain proposals") {
+  slider_lifecycle_events.clear();
+  accept_slider_proposals = false;
+  TestPlatform platform;
+  Runtime runtime{SliderLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
+  runtime.BuildFrame();
+  lifecycle_slider_value = 0.0F;
+  runtime.BuildFrame();
+  const Rect bounds = runtime.RootNode()->PresentationBounds();
+  const Point start{bounds.x + 1.0F, bounds.y + bounds.height * 0.5F};
+  const Point end{bounds.x + bounds.width - 1.0F, start.y};
+  ClickAt(runtime, start);
+  ClickAt(runtime, end);
+  const std::vector<std::pair<std::string, float>> expected{
+      {"started", 0.0F}, {"committed", 0.0F},
+      {"started", 0.0F}, {"changed", 10.0F}, {"committed", 10.0F},
+  };
+  REQUIRE(slider_lifecycle_events == expected);
+  REQUIRE(lifecycle_slider_value.Get() == 0.0F);
+}
+
+TEST_CASE("Slider cancellation terminates once without rollback") {
+  slider_lifecycle_events.clear();
+  accept_slider_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{SliderLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
+  runtime.BuildFrame();
+  const Rect bounds = runtime.RootNode()->PresentationBounds();
+  const Point end{bounds.x + bounds.width - 1.0F, bounds.y + bounds.height * 0.5F};
+  runtime.HandlePointerEvent({PointerEventType::Down, 902, end});
+  runtime.BuildFrame();
+
+  SECTION("pointer cancel") {
+    runtime.HandlePointerEvent({PointerEventType::Cancel, 902, end});
+  }
+  SECTION("escape") {
+    runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Escape});
+  }
+  SECTION("disabled") {
+    lifecycle_slider_enabled = false;
+  }
+  SECTION("range change") {
+    lifecycle_slider_maximum = 20.0F;
+  }
+  SECTION("step change") {
+    lifecycle_slider_step = 1.0F;
+  }
+  runtime.BuildFrame();
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 902, end});
+  runtime.HandlePointerEvent({PointerEventType::Up, 902, end});
+  runtime.BuildFrame();
+  const std::vector<std::pair<std::string, float>> expected{
+      {"started", 4.0F}, {"changed", 10.0F}, {"canceled", 0.0F},
+  };
+  REQUIRE(slider_lifecycle_events == expected);
+  REQUIRE(lifecycle_slider_value.Get() == 10.0F);
+}
+
+TEST_CASE("Slider ignores another pointer and does not emit a destructor event") {
+  slider_lifecycle_events.clear();
+  accept_slider_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{SliderLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
+  runtime.BuildFrame();
+  const Rect bounds = runtime.RootNode()->PresentationBounds();
+  const Point end{bounds.x + bounds.width - 1.0F, bounds.y + bounds.height * 0.5F};
+  const Point start{bounds.x + 1.0F, end.y};
+  runtime.HandlePointerEvent({PointerEventType::Down, 903, end, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Down, 904, start, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 904, start, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 903, end, PointerDeviceKind::Touch});
+  const std::vector<std::pair<std::string, float>> expected{
+      {"started", 4.0F}, {"changed", 10.0F}, {"committed", 10.0F},
+  };
+  REQUIRE(slider_lifecycle_events == expected);
+  lifecycle_slider_visible = false;
+  runtime.BuildFrame();
+  REQUIRE(slider_lifecycle_events == expected);
+}
+
+TEST_CASE("Slider keyboard repeats and accessibility adjustments commit independently") {
+  slider_lifecycle_events.clear();
+  accept_slider_proposals = true;
+  TestPlatform platform;
+  Runtime runtime{SliderLifecycleApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab});
+  runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::ArrowRight});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::ArrowRight, .repeat = true});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent({.type = KeyEventType::Up, .key = Key::ArrowRight});
+  const auto& nodes = runtime.LastCommit().semantic_frame->nodes;
+  const auto slider = std::ranges::find(nodes, SemanticRole::Slider, &SemanticNode::role);
+  REQUIRE(slider != nodes.end());
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(slider->id, {SemanticActionKind::Increment, std::monostate{}}));
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::ArrowRight, .repeat = true});
+  const std::vector<std::pair<std::string, float>> expected{
+      {"started", 4.0F}, {"changed", 6.0F}, {"committed", 6.0F},
+      {"started", 6.0F}, {"changed", 8.0F}, {"committed", 8.0F},
+      {"started", 8.0F}, {"changed", 10.0F}, {"committed", 10.0F},
+  };
+  REQUIRE(slider_lifecycle_events == expected);
 }
 
 TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
