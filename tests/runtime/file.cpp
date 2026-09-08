@@ -417,9 +417,13 @@ TEST_CASE("FileAsyncStreamsUseRequestedReadSizesAndExplicitClose") {
     IoResult<AsyncOutputStream> opened_output = co_await source.OpenWriteAsync();
     REQUIRE(opened_output.Succeeded());
     AsyncOutputStream output = std::move(opened_output).Value();
-    REQUIRE((co_await output.WriteAsync(Bytes{std::byte{1}, std::byte{2}})).Succeeded());
-    REQUIRE((co_await output.WriteAsync(Bytes{std::byte{3}, std::byte{4}, std::byte{5}})).Succeeded());
-    REQUIRE((co_await output.CloseAsync()).Succeeded());
+    // Keep suspension outside assertion macros, which expand their expression in multiple contexts.
+    const auto first_write = co_await output.WriteAsync(Bytes{std::byte{1}, std::byte{2}});
+    REQUIRE(first_write.Succeeded());
+    const auto second_write = co_await output.WriteAsync(Bytes{std::byte{3}, std::byte{4}, std::byte{5}});
+    REQUIRE(second_write.Succeeded());
+    const auto closed = co_await output.CloseAsync();
+    REQUIRE(closed.Succeeded());
 
     IoResult<AsyncInputStream> opened_input = co_await source.OpenReadAsync();
     REQUIRE(opened_input.Succeeded());
@@ -440,7 +444,8 @@ TEST_CASE("FileAsyncStreamsUseRequestedReadSizesAndExplicitClose") {
     AsyncInputStream copy_input = std::move(opened_copy_input).Value();
     AsyncOutputStream copy_output = std::move(opened_copy_output).Value();
     copied = (co_await copy_input.CopyToAsync(copy_output, 3)).Value();
-    REQUIRE((co_await copy_output.CloseAsync()).Succeeded());
+    const auto copy_closed = co_await copy_output.CloseAsync();
+    REQUIRE(copy_closed.Succeeded());
     file_task_complete = true;
   });
 
@@ -465,7 +470,8 @@ TEST_CASE("FilePendingOutputRetainsTheFileAfterItsOwnerIsReleased") {
       auto output = std::move(opened).Value();
       return output.WriteAsync(Bytes{std::byte{1}, std::byte{2}});
     }();
-    REQUIRE((co_await std::move(pending)).Succeeded());
+    const auto written = co_await std::move(pending);
+    REQUIRE(written.Succeeded());
     file_task_complete = true;
   });
   platform.RunUntil([] { return file_task_complete; });
@@ -555,15 +561,20 @@ TEST_CASE("LocalFileReferencesProvideIncrementalAsyncStreams") {
     IoResult<AsyncOutputStream> opened_output = co_await reference.OpenWriteAsync();
     REQUIRE(opened_output.Succeeded());
     AsyncOutputStream output = std::move(opened_output).Value();
-    REQUIRE((co_await output.WriteAsync(Bytes{std::byte{9}, std::byte{8}})).Succeeded());
-    REQUIRE((co_await output.CloseAsync()).Succeeded());
+    const auto written = co_await output.WriteAsync(Bytes{std::byte{9}, std::byte{8}});
+    REQUIRE(written.Succeeded());
+    const auto closed = co_await output.CloseAsync();
+    REQUIRE(closed.Succeeded());
     file_task_complete = true;
   });
 
   platform.RunUntil([] { return file_task_complete; });
   REQUIRE(read_sizes == std::vector<std::size_t>{2, 2, 1, 0});
   REQUIRE((async_bytes == Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}}));
-  REQUIRE((file.ReadBytes().Value() == Bytes{std::byte{9}, std::byte{8}}));
+  const auto read_back = file.ReadBytes();
+  REQUIRE(read_back.Succeeded());
+  const Bytes expected{std::byte{9}, std::byte{8}};
+  REQUIRE(read_back.Value() == expected);
 }
 
 TEST_CASE("CancelingAFileTaskDropsItsContinuation") {

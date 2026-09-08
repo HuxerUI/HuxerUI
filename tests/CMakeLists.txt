@@ -181,6 +181,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
             PkgConfig::HUXERUI_GTK4
             PkgConfig::HUXERUI_GIO
     )
+    target_compile_definitions(huxerui_tests PRIVATE HUXERUI_TEST_GTK=1)
 endif ()
 
 if (EMSCRIPTEN)
