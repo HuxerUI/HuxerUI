@@ -229,6 +229,7 @@ huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
 huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
+huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]
 huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
 huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
 huxerui open ios [--source <path>]
@@ -241,6 +242,8 @@ The accepted identifiers are `codex`, `claude`, `antigravity`, `opencode`, `comm
 `codex`, `antigravity`, `opencode`, `command-code`, `omp`, and `dsh` map to `.agents/skills`; `claude` maps to `.claude/skills`; and `zcode` maps to `.zcode/skills`.
 The default is `codex`; `all` selects the three distinct directories, and `none` disables Skill creation.
 An explicit list replaces the default, and aliases that share a directory are deduplicated.
+
+`huxerui mcpp build` is an independent generic mcpp frontend. It requires `mcpp.toml` in the selected source directory and invokes the `mcpp` executable directly. It does not participate in HuxerUI project discovery, alter the existing CMake and platform-driver paths, or provide HuxerUI package integration; the mcpp project owns those details.
 
 ### Create and platform add
 

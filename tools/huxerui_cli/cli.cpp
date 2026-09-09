@@ -17,6 +17,7 @@
 #include "platform.h"
 #include "process_runner.h"
 #include "project.h"
+#include "mcpp/mcpp.h"
 
 namespace huxerui::cli {
 namespace {
@@ -58,6 +59,7 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui devices [platform]\n"
          << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] "
             "[--source <path>] [--java-home <path>]\n"
+         << "  huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]\n"
          << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] "
             "[--source <path>] [--java-home <path>]\n"
          << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] "
@@ -1123,6 +1125,9 @@ int Run(std::span<const std::string_view> arguments, const std::filesystem::path
     }
     if (arguments[0] == "devices") {
       return RunDevices(arguments, output);
+    }
+    if (arguments[0] == "mcpp") {
+      return mcpp::Run(arguments.subspan(1), working_directory, output, error);
     }
     if (arguments[0] == "build") {
       return RunBuild(arguments, working_directory, sdk.home, output);
