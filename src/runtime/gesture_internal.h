@@ -259,6 +259,10 @@ struct PointerSession {
   std::array<ScrollVelocitySample, 8> scroll_velocity_samples;
   std::size_t scroll_velocity_sample_count = 0;
   bool focus_pending = false;
+  // Set when a pending-focus touch moves past the gesture slop. Scrolling must
+  // not commit focus on pointer up, even when a recognizer owns the session
+  // and the owner-gated slop cancel is skipped.
+  bool focus_slop_exceeded = false;
   bool chorded = false;
   // Deactivation preserves the host pointer sequence without retaining any mounted output target.
   bool quarantined = false;
