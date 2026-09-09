@@ -279,9 +279,16 @@ jobs:
           --target huxerui huxerui_static
           --parallel 4
       - name: Build
+        id: test-build
         run: cmake --build build --config Release --parallel 4
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Test common contracts and tools
+        run: ctest --test-dir build -C Release --output-on-failure -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
+      - name: Test portable platform contracts
+        if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
+        run: ctest --test-dir build -C Release --output-on-failure -L portable --no-tests=error --output-junit "${{ github.workspace }}/build/portable-tests.xml"
+      - name: Test native platform integration
+        if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
+        run: ctest --test-dir build -C Release --output-on-failure -L native --no-tests=error --output-junit "${{ github.workspace }}/build/native-tests.xml"
       - name: Package
         run: >-
           cpack
@@ -394,6 +401,7 @@ jobs:
           -DHUXERUI_BUILD_TESTS=ON
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
       - name: Build
+        id: test-build
         run: cmake --build build --config Release --parallel "${{ matrix.parallel_jobs }}"
       - name: Validate macOS deployment targets
         run: |
@@ -403,8 +411,14 @@ jobs:
             build/bin/huxerui \
             build/lib/libhuxerui.dylib \
             build/lib/libhuxerui_static.a
-      - name: Test
-        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Test common contracts and tools
+        run: ctest --test-dir build -C Release --output-on-failure -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
+      - name: Test portable platform contracts
+        if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
+        run: ctest --test-dir build -C Release --output-on-failure -L portable --no-tests=error --output-junit "${{ github.workspace }}/build/portable-tests.xml"
+      - name: Test native platform integration
+        if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
+        run: ctest --test-dir build -C Release --output-on-failure -L native --no-tests=error --output-junit "${{ github.workspace }}/build/native-tests.xml"
       - name: Package
         run: >-
           cpack
@@ -492,16 +506,27 @@ jobs:
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${GITHUB_WORKSPACE}/platform-artifacts
           -DHUXERUI_ENABLE_PROFILING=OFF
       - name: Build
+        id: test-build
         run: cmake --build build --parallel "${{ matrix.parallel_jobs }}"
-      - name: Test
-        id: linux-tests
-        run: ctest --test-dir build --output-on-failure --timeout 300
+      - name: Test common contracts and tools
+        id: linux-common-tests
+        run: ctest --test-dir build --output-on-failure --timeout 300 -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
+      - name: Test portable platform contracts
+        id: linux-portable-tests
+        if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
+        run: ctest --test-dir build --output-on-failure --timeout 300 -L portable --no-tests=error --output-junit "${{ github.workspace }}/build/portable-tests.xml"
+      - name: Test native platform integration
+        id: linux-native-tests
+        if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
+        run: ctest --test-dir build --output-on-failure --timeout 300 -L native --no-tests=error --output-junit "${{ github.workspace }}/build/native-tests.xml"
       - name: Upload Linux test logs
-        if: failure() && steps.linux-tests.outcome == 'failure'
+        if: failure() && (steps.linux-common-tests.outcome == 'failure' || steps.linux-portable-tests.outcome == 'failure' || steps.linux-native-tests.outcome == 'failure')
         uses: actions/upload-artifact@v4
         with:
           name: linux-test-logs-${{ matrix.architecture }}
-          path: build/Testing/Temporary/
+          path: |
+            build/Testing/Temporary/
+            build/*-tests.xml
           if-no-files-found: warn
           retention-days: 7
       - name: Validate Linux SDK binary compatibility

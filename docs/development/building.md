@@ -13,6 +13,7 @@ Application developers using a released SDK should follow [Getting Started](../g
 Apple builds require Xcode 26 or later for the standard library's `std::stop_token` and `std::stop_source` support without experimental-library flags. Release CI selects Xcode 26.2 explicitly through `DEVELOPER_DIR` for iOS artifacts and both macOS architectures, including their host-tool builds. For a local build, select a supported Xcode before configuring a fresh build directory. The build-machine requirement is separate from the deployment targets, which remain iOS 15.0 and macOS 12.0.
 
 Linux additionally requires GTK 4.14 or later, libepoxy, Pango, Cairo, GIO, and libsoup 3 development packages discoverable through pkg-config.
+Linux release CI uses GCC 14. Select it explicitly with `CC=gcc-14 CXX=g++-14` when configuring a fresh build directory; GCC 13 can encounter an internal compiler error in the coroutine-based local-notification example.
 
 Debian or Ubuntu:
 
@@ -57,14 +58,28 @@ Useful project options:
 ctest --test-dir build --output-on-failure
 ```
 
-Run focused test executables directly when changing a narrow subsystem.
-The desktop runtime-deployment tests build and run relocated dependency fixtures; Linux requires `patchelf` and binutils, and Windows requires the toolchain's Release VC++ redistributables.
+Test ownership follows the production contract: `tests/unit` covers portable values and algorithms, `tests/runtime` covers shared composition and lifecycle behavior, and `tests/platform/<platform>` owns backend logic and native integration. `tests/platform/common` contains filesystem integration contracts executed against the selected backend; POSIX and Windows requirements remain separate source files. CLI tests separate command handling, project generation, SDK selection, process execution, and each platform driver. Codegen, resource compiler, CMake integration, and script tests keep their own registration files.
+
+Each suite has CTest labels for its ownership and execution requirements:
+
+```bash
+ctest --test-dir build -LE platform --output-on-failure
+ctest --test-dir build -L portable --output-on-failure
+ctest --test-dir build -L native --output-on-failure
+```
+
+The first command runs common contracts, tools, and general build integration. `portable` selects platform-specific conversion and CLI contract tests that can run on the development host; it does not claim native device coverage. The Web JavaScript bridge and file-picker contracts also run in this group when Node.js is available, using test doubles for browser services. `native` selects integration with the configured platform's services, renderer, and filesystem. Platform names are additional labels for focused selection. Android Instrumentation and Apple bridge checks remain owned by their device or platform build workflows. Common, portable, and native results are reported separately in SDK CI. Public header compile checks also have separate common and platform targets.
+
+Emscripten C++ test artifacts currently inherit the browser application's modularized ES-module settings. Loading those modules with Node.js does not invoke the Catch2 entry point, so a successful default CTest process is not evidence that their assertions ran. Until an executable Web test harness is provided, distinguish Web C++ compile validation from the JavaScript contract tests above.
+
+Group cases around one observable contract, using sections or parameterized inputs for its variations. Keep independent lifecycle and error boundaries distinguishable, share only fixtures with matching ownership, and do not add cases merely to increase the count. Run focused test executables directly when changing a narrow subsystem.
+Host CMake integration and script tests are registered in native builds; cross-compilation builds retain their target executable suites and profiling artifact checks. The desktop runtime-deployment tests build and run relocated dependency fixtures; Linux requires `patchelf` and binutils, and Windows requires the toolchain's Release VC++ redistributables.
 Code-generation changes also require the codegen tests and updated required host tools.
 CI maintains all checked-in host packages through [Host-tool updates](sdk-packaging.md#host-tool-updates).
 When changing that workflow or its support script, run `python -B tests/scripts/host_tools_test.py`; it uses temporary Git repositories and requires only Python 3.12 or later and Git.
 
 Android Runtime tests run on a device or emulator with `./gradlew :HuxerUI:connectedDebugAndroidTest` from `platform/android` (`gradlew.bat` on Windows).
-The library's `androidTest` source set uses `tests/platform/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency or native HuxerUI library.
+The library's `androidTest` source set uses `tests/platform/android/instrumentation/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency or native HuxerUI library.
 It covers paragraph geometry and local-notification Intent identity and activation normalization, and installs only the separate test package rather than replacing an example application.
 
 ## Runtime profiling
@@ -78,7 +93,7 @@ Existing DebugOverlay metrics are separate and retain their current behavior.
 
 ```bash
 cmake -S . -B build/profile -G Ninja -DCMAKE_BUILD_TYPE=Release -DHUXERUI_ENABLE_PROFILING=ON
-cmake --build build/profile --target example_ui_gallery huxerui_tests --parallel
+cmake --build build/profile --target example_ui_gallery huxerui_runtime_tests --parallel
 ctest --test-dir build/profile -R HuxerUIProfilingBuildTests --output-on-failure
 ```
 

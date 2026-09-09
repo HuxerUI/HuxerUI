@@ -237,6 +237,8 @@ public:
   }
   ~NotificationXmlApartment() {
     if (SUCCEEDED(result_)) {
+      // Cached activation factories must not outlive the apartment recreated by the next test.
+      winrt::clear_factory_cache();
       RoUninitialize();
     }
   }

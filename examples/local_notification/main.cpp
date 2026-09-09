@@ -225,11 +225,12 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
     co_return;
   }
 
-  auto opened = co_await http->SendStreamAsync({
+  HttpRequest request{
       .url = download_url,
       .headers = {{"Accept", "application/octet-stream"}},
       .timeout = std::chrono::minutes(10),
-  }, [state](HttpProgress progress) {
+  };
+  auto opened = co_await http->SendStreamAsync(std::move(request), [state](HttpProgress progress) {
     if (progress.kind == HttpProgressKind::Download) {
       state.Update([progress](DownloadState& value) { value.total_bytes = progress.total_bytes; });
     }

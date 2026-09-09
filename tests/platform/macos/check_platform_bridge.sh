@@ -3,7 +3,7 @@
 set -eu
 
 if [ "$#" -ne 4 ]; then
-  printf 'usage: check_macos_platform_bridge.sh <source-dir> <headers-dir> <library> <build-dir>\n' >&2
+  printf 'usage: check_platform_bridge.sh <source-dir> <headers-dir> <library> <build-dir>\n' >&2
   exit 1
 fi
 
@@ -22,10 +22,10 @@ xcrun --sdk macosx clang \
   -fobjc-arc \
   -fmodules \
   -I "$module_headers" \
-  "$source_directory/tests/platform/macos_platform_registry.m"
+  "$source_directory/tests/platform/macos/platform_registry.m"
 xcrun --sdk macosx swiftc \
   -I "$module_headers" \
-  "$source_directory/tests/platform/macos_platform_registry.swift" \
+  "$source_directory/tests/platform/macos/platform_registry.swift" \
   "$library_path" \
   -lc++ \
   -framework AppKit \

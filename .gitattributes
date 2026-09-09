@@ -2,5 +2,6 @@
 *.icns -text
 *.ico -text
 *.png -text
-install.sh text eol=lf
+*.sh text eol=lf
+**/gradlew text eol=lf
 tools/huxerui_cli/templates/platform/linux/** text eol=lf

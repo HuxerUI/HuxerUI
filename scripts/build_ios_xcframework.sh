@@ -106,7 +106,7 @@ xcrun --sdk iphonesimulator clang \
   -fmodules \
   -target arm64-apple-ios15.0-simulator \
   -I "$simulator_slice/Headers" \
-  "$source_directory/tests/platform/ios_platform_registry.m"
+  "$source_directory/tests/platform/ios/platform_registry.m"
 xcrun --sdk iphonesimulator clang++ \
   -c \
   -fobjc-arc \
@@ -114,12 +114,12 @@ xcrun --sdk iphonesimulator clang++ \
   -std=c++20 \
   -target arm64-apple-ios15.0-simulator \
   -I "$simulator_slice/Headers" \
-  "$source_directory/tests/platform/ios_platform_registry.mm" \
+  "$source_directory/tests/platform/ios/platform_registry.mm" \
   -o "$build_directory/huxerui_ios_direct_factory_test.o"
 xcrun --sdk iphonesimulator swiftc \
   -target arm64-apple-ios15.0-simulator \
   -I "$simulator_slice/Headers" \
-  "$source_directory/tests/platform/ios_platform_registry.swift" \
+  "$source_directory/tests/platform/ios/platform_registry.swift" \
   -L "$simulator_slice" \
   -lhuxerui_static \
   -lc++ \
