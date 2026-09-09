@@ -6,10 +6,12 @@ namespace huxerui::test {
 namespace {
 
 State<bool> scene_transition_changed;
+State<bool> scene_conceal_transition_changed;
 State<bool> scene_transition_anchor_visible;
 State<bool> platform_scene_transition_changed;
 State<bool> synchronized_transition_selected;
 std::optional<SceneTransitionHandle> interaction_scene_transition;
+std::optional<SceneTransitionHandle> interaction_scene_conceal_transition;
 
 View SynchronizedTransitionApp() {
   auto selected = UseState(false);
@@ -31,6 +33,22 @@ View SceneTransitionApp() {
     Button("Change")
         .OnClick([transition, changed] {
           transition.RunFromCurrentInteraction(CircularRevealSceneTransition{}, [changed] { changed = true; });
+        })
+        .With(Frame{80.0F, 40.0F}),
+    Text(changed ? "new" : "old"),
+  };
+}
+
+View SceneConcealTransitionApp() {
+  auto changed = UseState(false);
+  scene_conceal_transition_changed = changed;
+  auto transition = UseSceneTransition();
+  interaction_scene_conceal_transition = transition;
+  return Column {
+    Button("Change")
+        .OnClick([transition, changed] {
+          transition.RunFromCurrentInteraction(
+              CircularConcealSceneTransition{}, [changed] { changed = true; });
         })
         .With(Frame{80.0F, 40.0F}),
     Text(changed ? "new" : "old"),
@@ -118,6 +136,38 @@ TEST_CASE("SceneTransitionPublishesFrozenAndLiveSceneComposition") {
       std::get_if<PushPathClipCommand>(&transition.scene.root->children[1]->child_clips.front());
   REQUIRE(reveal != nullptr);
   REQUIRE(reveal->path.Bounds() == Rect{20.0F, 20.0F, 0.0F, 0.0F});
+
+  platform.AdvanceTime(0.5);
+  const RenderFrame& completed = runtime.BuildRenderFrame();
+  REQUIRE(completed.damage.full);
+  REQUIRE(completed.scene.root != nullptr);
+  REQUIRE(completed.scene.root->id == live_root_identity);
+}
+
+TEST_CASE("CircularConcealTransitionShrinksFrozenSceneOverLiveScene") {
+  TestPlatform platform;
+  Runtime runtime{SceneConcealTransitionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  const RenderFrame& initial = runtime.BuildRenderFrame();
+  REQUIRE(initial.scene.root != nullptr);
+  const std::uint64_t live_root_identity = initial.scene.root->id;
+
+  ClickAt(runtime, {20.0F, 20.0F});
+  REQUIRE(scene_conceal_transition_changed.Get());
+  const RenderFrame& transition = runtime.BuildRenderFrame();
+  REQUIRE(transition.damage.full);
+  REQUIRE(transition.scene.root != nullptr);
+  REQUIRE(transition.scene.root->id == std::numeric_limits<std::uint64_t>::max());
+  REQUIRE(transition.scene.root->children.size() == 2);
+  REQUIRE(transition.scene.root->children[0]->id == std::numeric_limits<std::uint64_t>::max() - 2);
+  REQUIRE(transition.scene.root->children[0]->children.size() == 1);
+  REQUIRE(transition.scene.root->children[0]->children[0]->id == live_root_identity);
+  REQUIRE(transition.scene.root->children[1]->id == std::numeric_limits<std::uint64_t>::max() - 1);
+  REQUIRE(transition.scene.root->children[1]->child_clips.size() == 1);
+  const auto* conceal =
+      std::get_if<PushPathClipCommand>(&transition.scene.root->children[1]->child_clips.front());
+  REQUIRE(conceal != nullptr);
+  REQUIRE(conceal->path.Bounds().width > 500.0F);
 
   platform.AdvanceTime(0.5);
   const RenderFrame& completed = runtime.BuildRenderFrame();

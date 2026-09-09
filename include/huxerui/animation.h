@@ -468,6 +468,21 @@ struct CircularRevealSceneTransition {
   bool operator==(const CircularRevealSceneTransition&) const = default;
 };
 
+/// Conceals the previously committed scene through a shrinking circular clip.
+///
+/// The scene produced by the synchronous mutation is composed underneath the frozen old scene. The old scene
+/// starts fully visible and contracts toward the supplied origin until the mutated scene is fully visible. This is a
+/// one-shot scene transition, not reverse playback of a CircularRevealSceneTransition.
+struct CircularConcealSceneTransition {
+  /// Motion used to advance normalized transition progress.
+  AnimationSpec animation = TweenSpec{0.36, Easing::EaseInOut};
+  /// Non-negative delay in seconds before the transition begins.
+  double delay = 0.0;
+
+  /// Compares motion and delay.
+  bool operator==(const CircularConcealSceneTransition&) const = default;
+};
+
 /// Retained modifier that supplies stable presentation geometry to a circular scene transition.
 ///
 /// One anchor returned by SceneTransitionHandle::Anchor() may be mounted on only one View at a time.
@@ -517,11 +532,17 @@ public:
   /// Throws `std::logic_error` when no anchor is mounted.
   void Run(CircularRevealSceneTransition transition, std::function<void()> mutation) const;
 
+  /// Conceals the previously committed scene toward the center of the mounted Anchor().
+  void Run(CircularConcealSceneTransition transition, std::function<void()> mutation) const;
+
   /// Reveals the mutated scene from a finite window-local logical point.
   ///
   /// RunAt() is appropriate when the caller already owns stable geometry or resumes asynchronous work after an input
   /// callback has returned.
   void RunAt(Point origin, CircularRevealSceneTransition transition, std::function<void()> mutation) const;
+
+  /// Conceals the previously committed scene toward a finite window-local logical point.
+  void RunAt(Point origin, CircularConcealSceneTransition transition, std::function<void()> mutation) const;
 
   /// Runs a circular reveal from the current synchronous pointer, keyboard, or semantic interaction.
   ///
@@ -534,6 +555,10 @@ public:
   /// });
   /// @endcode
   void RunFromCurrentInteraction(CircularRevealSceneTransition transition, std::function<void()> mutation) const;
+
+  /// Runs a circular conceal from the current synchronous pointer, keyboard, or semantic interaction.
+  void RunFromCurrentInteraction(CircularConcealSceneTransition transition,
+                                 std::function<void()> mutation) const;
 
 private:
   SceneTransitionHandle(std::shared_ptr<detail::SceneTransitionService> service,

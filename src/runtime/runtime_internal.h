@@ -230,6 +230,7 @@ struct LayerEntry {
 enum class SceneTransitionKind {
   Fade,
   CircularReveal,
+  CircularConceal,
 };
 
 struct SceneTransitionRequest {

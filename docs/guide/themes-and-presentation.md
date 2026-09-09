@@ -74,6 +74,15 @@ Button("Next").OnClick([transition, page] {
 });
 ```
 
+Use `CircularConcealSceneTransition` when the old scene should contract toward the interaction origin while the mutated
+scene remains underneath it:
+
+```cpp
+Button("Close").OnClick([transition, page] {
+  transition.RunFromCurrentInteraction(CircularConcealSceneTransition{}, [page] { page += 1; });
+});
+```
+
 The implicit origin exists only for the duration of the interaction callback.
 Use `RunAt` with retained geometry for asynchronous work, and use `Anchor` plus `Run` when the reveal belongs to stable View geometry rather than the triggering interaction.
 When reduced motion is enabled, the runtime selects the documented reduced or immediate path rather than leaving each component to interpret the system setting independently.

@@ -113,6 +113,8 @@ return Button("Dark theme")
 
 `RunAt()` accepts a window-local logical point for callers that already own pointer geometry.
 `Run()` with a circular reveal uses the final bounds of the retained anchor, while Fade does not require an anchor.
+`CircularConcealSceneTransition` uses the same origin and timing contract while contracting the frozen old scene over
+the live scene. It is an explicit one-shot transition, not reverse playback of a circular reveal.
 
 `RunFromCurrentInteraction()` resolves a circular reveal from the Runtime's current synchronous interaction origin:
 
@@ -147,7 +149,11 @@ The new tree becomes authoritative immediately for input, focus, text input, tex
 
 Starting a transition while another one is active freezes the currently committed composite and replaces the prior snapshot. Transitions do not queue or create nested snapshots. Reduced motion runs the mutation without freezing or scheduling animation. A viewport change that invalidates the frozen logical coordinate space ends the transition.
 
-Whole-scene transitions are one-shot. Their public descriptions expose an optional delay but do not expose repetition or reverse playback because either policy would retain obsolete full-scene visual data indefinitely. They reject undamped springs for the same ownership reason: an undamped spring never settles. Repetition and undamped springs remain available to ordinary `MotionController` animation.
+Whole-scene transitions are one-shot. Their public descriptions expose an optional delay but do not expose repetition or
+reverse playback controls because either policy would retain obsolete full-scene visual data indefinitely. A caller that
+needs the opposite visual composition chooses the explicit one-shot `CircularConcealSceneTransition` instead. They
+reject undamped springs for the same ownership reason: an undamped spring never settles. Repetition and undamped
+springs remain available to ordinary `MotionController` animation.
 
 ### FrozenScene
 
@@ -161,7 +167,7 @@ The existing damage snapshot is renamed `RenderDamageSnapshot`. It remains light
 
 SceneTransitionService owns the active snapshot, motion controller, and synthetic render wrappers as one optional active transition, without a separate implementation-state allocation. It reads the committed render frame and window through the shared Runtime::State context. Runtime advances the service at the scene-composition boundary and combines its scheduling result with the rest of the frame. Disconnecting the service clears its context pointer, releases active transition data, and rejects subsequent requests from retained handles.
 
-A fade scene transition without a PlatformView uses two synthetic render wrappers: old opacity is `1 - progress`, new opacity is `progress`. A circular reveal draws the old frozen composite normally and places the live composite beneath one circular child clip on an otherwise empty wrapper. It does not require a separate whole-subtree clip primitive or inverse and even-odd clipping.
+A fade scene transition without a PlatformView uses two synthetic render wrappers: old opacity is `1 - progress`, new opacity is `progress`. A circular reveal draws the old frozen composite normally and places the live composite beneath one circular child clip on an otherwise empty wrapper. A circular conceal reverses the visual ordering: the live composite is drawn first and the old frozen composite is placed above it with a shrinking circular child clip. Neither transition requires a separate whole-subtree clip primitive or inverse and even-odd clipping.
 
 An active scene transition reports full damage because the visible composite changes across the reveal or cross-fade. Normal incremental damage resumes after completion.
 

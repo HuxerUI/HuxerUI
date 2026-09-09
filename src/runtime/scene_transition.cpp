@@ -95,12 +95,22 @@ const RenderNode* SceneTransitionService::Compose(const RenderNode* live_root) {
     return &transition.composite;
   }
 
-  const float radius = CircularRevealRadius(transition.request.origin, transition.viewport) * progress;
-  transition.new_wrapper.child_clips.push_back(PushPathClipCommand{
-      CircularClip(transition.request.origin, radius),
-      PathFillRule::NonZero,
-  });
-  transition.composite.children = {transition.frozen->root, &transition.new_wrapper};
+  const float maximum_radius = CircularRevealRadius(transition.request.origin, transition.viewport);
+  if (transition.request.kind == SceneTransitionKind::CircularConceal) {
+    const float radius = maximum_radius * (1.0F - progress);
+    transition.old_wrapper.child_clips.push_back(PushPathClipCommand{
+        CircularClip(transition.request.origin, radius),
+        PathFillRule::NonZero,
+    });
+    transition.composite.children = {&transition.new_wrapper, &transition.old_wrapper};
+  } else {
+    const float radius = maximum_radius * progress;
+    transition.new_wrapper.child_clips.push_back(PushPathClipCommand{
+        CircularClip(transition.request.origin, radius),
+        PathFillRule::NonZero,
+    });
+    transition.composite.children = {transition.frozen->root, &transition.new_wrapper};
+  }
   return &transition.composite;
 }
 
@@ -261,6 +271,14 @@ void SceneTransitionHandle::Run(CircularRevealSceneTransition transition, std::f
   RunAt(*origin, std::move(transition), std::move(mutation));
 }
 
+void SceneTransitionHandle::Run(CircularConcealSceneTransition transition, std::function<void()> mutation) const {
+  const std::optional<Point> origin = anchor_ ? anchor_->Center() : std::nullopt;
+  if (!origin.has_value()) {
+    throw std::logic_error("HuxerUI circular scene transition requires a mounted anchor");
+  }
+  RunAt(*origin, std::move(transition), std::move(mutation));
+}
+
 void SceneTransitionHandle::RunAt(
     Point origin, CircularRevealSceneTransition transition, std::function<void()> mutation
 ) const {
@@ -279,8 +297,36 @@ void SceneTransitionHandle::RunAt(
   );
 }
 
+void SceneTransitionHandle::RunAt(
+    Point origin, CircularConcealSceneTransition transition, std::function<void()> mutation
+) const {
+  if (!std::isfinite(origin.x) || !std::isfinite(origin.y)) {
+    throw std::invalid_argument("HuxerUI scene transition origin must be finite");
+  }
+  service_->Run(
+      detail::SceneTransitionRequest{
+          .kind = detail::SceneTransitionKind::CircularConceal,
+          .animation = std::move(transition.animation),
+          .delay = transition.delay,
+          .origin = origin,
+      },
+      std::move(mutation),
+      reduced_motion_
+  );
+}
+
 void SceneTransitionHandle::RunFromCurrentInteraction(
     CircularRevealSceneTransition transition, std::function<void()> mutation
+) const {
+  const std::optional<Point> origin = service_->CurrentInteractionOrigin();
+  if (!origin.has_value()) {
+    throw std::logic_error("HuxerUI scene transition requires a current interaction origin");
+  }
+  RunAt(*origin, std::move(transition), std::move(mutation));
+}
+
+void SceneTransitionHandle::RunFromCurrentInteraction(
+    CircularConcealSceneTransition transition, std::function<void()> mutation
 ) const {
   const std::optional<Point> origin = service_->CurrentInteractionOrigin();
   if (!origin.has_value()) {
