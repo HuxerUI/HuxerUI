@@ -142,6 +142,8 @@ Examples live under `examples/<name>` and produce targets named `example_<name>`
 cmake --build build --target example_ui_gallery
 ```
 
+[`example_transition`](../../examples/transition/main.cpp) is an interactive Transition Studio covering page Push, Pop, Replace, and whole-scene changes. Select among ten effects, including a prism sweep, split gate, cascade mosaic, circular reveal and close, and the fragmented Crimson rift, enable slow motion, and compare the reversed return animation. Example-owned path, transform, fragment, and synchronized decoration effects live in [`effects.cpp`](../../examples/transition/effects.cpp). Build with `cmake --build build --target example_transition`; Android selects `-PhuxeruiExample=transition` and the iOS runner selects `HUXERUI_APP_TARGET=example_transition`.
+
 Desktop binaries or application bundles are emitted under the configured build output.
 Android examples use `platform/android/example_runner`, and iOS examples use the repository platform runner.
 The Android runner resolves the selected example's final CMake shared-library name into `BuildConfig.HUXERUI_APP_LIBRARY`; MainActivity loads it before creating the hosted Runtime, without a fixed application `.so` name.

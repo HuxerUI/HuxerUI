@@ -25,6 +25,20 @@ constexpr std::size_t content_page = 6;
 constexpr std::size_t layout_page = 7;
 constexpr std::size_t motion_page = 8;
 
+struct GalleryLiftTransition {
+  float distance = 32.0F;
+
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    const float progress = std::clamp(context.progress, 0.0F, 1.0F);
+    TransitionFrame frame = FadeTransition{}.Evaluate(context);
+    frame.incoming.transform.translate_y = distance * (1.0F - progress);
+    frame.incoming.clip = ClipShape::Rectangle(context.bounds);
+    return frame;
+  }
+
+  bool operator==(const GalleryLiftTransition&) const = default;
+};
+
 const char* PageName(std::size_t page) {
   switch (page) {
   case actions_page:
@@ -754,6 +768,7 @@ View FeedbackDemo(MenuHandle menu) {
 View GalleryStackDetails() {
   const ThemeSpec& theme = UseTheme();
   const NavigationController navigation = UseNavigation();
+  const TransitionSpec enter{GalleryLiftTransition{}, TweenSpec{theme.motion.normal}};
   return Column {
     Text("Details", TextRole::Title),
     Text::Format("Retained stack depth: {}", navigation.Depth()),
@@ -761,7 +776,8 @@ View GalleryStackDetails() {
   }.With(
       Padding(theme.spacing.medium),
       Spacing(theme.spacing.small),
-      Background(theme.colors.surface_container)
+      Background(theme.colors.surface_container),
+      PageTransition{enter, enter.Reversed(), enter}
   );
 }
 
@@ -1038,7 +1054,14 @@ View MotionDemo() {
         Column {
           Button("Change scene").OnClick([alternate_scene, scene_transition] {
             scene_transition.RunFromCurrentInteraction(
-                CircularRevealSceneTransition{}, [alternate_scene] { alternate_scene = !alternate_scene; }
+                TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}},
+                [alternate_scene] { alternate_scene = !alternate_scene; }
+            );
+          }),
+          Button("Custom lift").OnClick([alternate_scene, scene_transition] {
+            scene_transition.Run(
+                TransitionSpec{GalleryLiftTransition{48.0F}, TweenSpec{0.32}},
+                [alternate_scene] { alternate_scene = !alternate_scene; }
             );
           }),
           Text(alternate_scene ? "Alternate scene" : "Initial scene", TextRole::Title).With(
@@ -1097,13 +1120,16 @@ View GalleryToolsContent(
     SegmentedButton({"Material", "Flat"}, theme_family)
         .OnChanged([family_transition, theme_family](std::size_t index) {
           family_transition.RunFromCurrentInteraction(
-              CircularRevealSceneTransition{}, [theme_family, index] { theme_family = index; }
+              TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}},
+              [theme_family, index] { theme_family = index; }
           );
         }),
     Switch(dark_mode ? "Dark mode" : "Light mode", dark_mode)
         .OnChanged([brightness_transition, dark_mode](bool enabled) {
+          const TransitionSpec reveal{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}};
           brightness_transition.RunFromCurrentInteraction(
-              CircularRevealSceneTransition{}, [dark_mode, enabled] { dark_mode = enabled; }
+              enabled ? reveal : reveal.Reversed(),
+              [dark_mode, enabled] { dark_mode = enabled; }
           );
         }),
     Divider(),

@@ -16,6 +16,7 @@
 
 #include "graphics/geometry_internal.h"
 #include "runtime/mounted_node_internal.h"
+#include "internal_access.h"
 
 namespace huxerui::detail {
 
@@ -55,6 +56,11 @@ struct NavigationTransition {
   bool interactive = false;
   bool complete_operation = true;
   std::vector<std::uint64_t> retire_ids;
+  bool gesture_driven = false;
+  std::optional<TransitionSpec> spec{};
+  TransitionContext context{};
+  TransitionFrame frame{};
+  bool native_fallback = false;
 };
 
 struct NavigationEnvironmentEntry {
@@ -87,18 +93,6 @@ struct NavigationEntryIdValue {
   using Value = std::uint64_t;
 };
 
-float Interpolate(float from, float to, float progress) noexcept {
-  return from + (to - from) * std::clamp(progress, 0.0F, 1.0F);
-}
-
-Point ResolveOffset(Point fraction, Rect bounds) noexcept {
-  return {fraction.x * bounds.width, fraction.y * bounds.height};
-}
-
-Point Scale(Point value, float factor) noexcept {
-  return {value.x * factor, value.y * factor};
-}
-
 AnimationSpec ContinuationAnimation(AnimationSpec animation, float from, float to) {
   const float remaining = std::clamp(std::abs(to - from), 0.0F, 1.0F);
   if (remaining <= 0.0F) {
@@ -110,6 +104,11 @@ AnimationSpec ContinuationAnimation(AnimationSpec animation, float from, float t
     animation = KeyframeSpec(keyframes->Duration() * remaining, keyframes->Keyframes());
   }
   return animation;
+}
+
+bool PageHasPlatformView(const MountedNode& node) {
+  return node.kind == NodeKind::PlatformView || std::any_of(node.children.begin(), node.children.end(),
+      [](const auto& child) { return PageHasPlatformView(*child); });
 }
 
 } // namespace
@@ -297,6 +296,7 @@ public:
         .interactive = true,
         .complete_operation = false,
         .retire_ids = {entries_.back().id},
+        .gesture_driven = true,
     };
     ++revision_;
     Invalidate();
@@ -405,7 +405,36 @@ public:
 
   void SetTransitionProgress(float progress) noexcept {
     if (transition_.has_value()) {
-      transition_->progress = std::clamp(progress, 0.0F, 1.0F);
+      transition_->progress = progress;
+    }
+  }
+
+  void SetTransitionSpec(TransitionSpec spec) {
+    if (transition_ && !transition_->spec) {
+      transition_->spec = std::move(spec);
+    }
+  }
+
+  void EvaluateTransition(huxerui::ViewNode& container, bool suppress_interactive_motion = false) {
+    if (transition_ && transition_->spec) {
+      const float progress = suppress_interactive_motion ? 0.0F : transition_->progress;
+      transition_->context = {progress, container.Bounds(), std::nullopt};
+      if (!transition_->native_fallback) {
+        transition_->frame = transition_->spec->Evaluate(transition_->context);
+        for (const huxerui::ViewNode& child : container.Children()) {
+          const auto id = child.LayoutValueOr<NavigationEntryIdValue>(0);
+          const bool fragmented =
+              (id == transition_->source_id && !transition_->frame.outgoing.fragments.empty()) ||
+              (id == transition_->destination_id && !transition_->frame.incoming.fragments.empty());
+          if (fragmented && PageHasPlatformView(static_cast<const MountedNode&>(child))) {
+            transition_->native_fallback = true;
+            break;
+          }
+        }
+      }
+      if (transition_->native_fallback) {
+        transition_->frame = FadeTransition{}.Evaluate(transition_->context);
+      }
     }
   }
 
@@ -520,6 +549,7 @@ private:
         .interactive = true,
         .complete_operation = false,
         .retire_ids = {source_id},
+        .gesture_driven = true,
     };
     ++revision_;
     Invalidate();
@@ -736,6 +766,24 @@ struct NavigationPageModifier {
   bool operator==(const NavigationPageModifier&) const = default;
 };
 
+void ApplyNavigationPagePresentation(MountedNode& page, const NavigationState& state, std::uint64_t entry_id) {
+  page.presentation.local_opacity = entry_id == state.ActiveEntryId() ? 1.0F : 0.0F;
+  const auto& transition = state.Transition();
+  if (transition && transition->spec) {
+    if (entry_id != transition->source_id && entry_id != transition->destination_id) {
+      page.presentation.local_opacity = 0.0F;
+      return;
+    }
+    const bool outgoing = entry_id == transition->source_id;
+    const TransitionSample& sample = outgoing ? transition->frame.outgoing : transition->frame.incoming;
+    page.presentation.children_transform = sample.transform;
+    page.presentation.local_opacity = sample.opacity;
+    page.presentation.z_index = outgoing == (transition->frame.order == TransitionOrder::OutgoingAbove) ? 1 : 0;
+    page.presentation.children_fragments = sample.fragments;
+    if (sample.clip) { page.presentation.children_clips.push_back(*sample.clip); }
+  }
+}
+
 class NavigationPageExtension final : public NodeExtension {
 public:
   NavigationPageExtension(huxerui::ViewNode& node, const NavigationPageModifier& modifier) {
@@ -751,55 +799,13 @@ public:
   FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
     static_cast<void>(frame);
     auto& mounted = static_cast<detail::MountedNode&>(node);
-    float opacity = 0.0F;
-    Point offset;
-    float scale = 1.0F;
-    const Rect bounds = node.Bounds();
-
     if (!state_) {
       mounted.presentation.local_opacity = 0.0F;
       return {};
     }
     const auto& transition = state_->Transition();
-    if (!transition.has_value()) {
-      opacity = entry_id_ == state_->ActiveEntryId() ? 1.0F : 0.0F;
-    } else {
-      const float progress = transition->progress;
-      const NavigationMotion motion = state_->Style().motion.value_or(NavigationMotion{});
-      const Point entering_offset = ResolveOffset(motion.entering_offset_fraction, bounds);
-      const Point covered_offset = ResolveOffset(motion.covered_offset_fraction, bounds);
-      if (transition->kind == NavigationOperationKind::Push || transition->kind == NavigationOperationKind::Replace) {
-        if (entry_id_ == transition->source_id) {
-          offset = Scale(covered_offset, progress);
-          scale = Interpolate(1.0F, motion.covered_scale, progress);
-          opacity = Interpolate(1.0F, motion.covered_opacity, progress);
-        } else if (entry_id_ == transition->destination_id) {
-          offset = Scale(entering_offset, 1.0F - progress);
-          scale = Interpolate(motion.entering_scale, 1.0F, progress);
-          opacity = Interpolate(motion.entering_opacity, 1.0F, progress);
-        }
-      } else {
-        if (entry_id_ == transition->source_id) {
-          offset = Scale(entering_offset, progress);
-          scale = Interpolate(1.0F, motion.entering_scale, progress);
-          opacity = Interpolate(1.0F, motion.entering_opacity, progress);
-        } else if (entry_id_ == transition->destination_id) {
-          offset = Scale(covered_offset, 1.0F - progress);
-          scale = Interpolate(motion.covered_scale, 1.0F, progress);
-          opacity = Interpolate(motion.covered_opacity, 1.0F, progress);
-        }
-      }
-    }
-
-    if (scale != 1.0F) {
-      const Point origin{bounds.x + bounds.width * 0.5F, bounds.y + bounds.height * 0.5F};
-      const Transform2D scale_transform{scale, 0.0F, 0.0F, scale};
-      mounted.presentation.local_transform =
-          ComposeTransform(AroundOriginTransform(scale_transform, origin), mounted.presentation.local_transform);
-    }
-    mounted.presentation.local_transform =
-        ComposeTransform(TranslationTransform(offset), mounted.presentation.local_transform);
-    mounted.presentation.local_opacity *= opacity;
+    mounted.local_enabled = !transition && entry_id_ == state_->ActiveEntryId();
+    ApplyNavigationPagePresentation(mounted, *state_, entry_id_);
     return {};
   }
 
@@ -816,7 +822,7 @@ const ModifierDescriptor& NavigationPageModifier::Descriptor() {
          AppResources&) {
         const auto& modifier = *static_cast<const NavigationPageModifier*>(compiled_modifier.value.get());
         spec.local_enabled = modifier.state && modifier.state->ActiveEntryId() == modifier.entry_id;
-        // Covered pages are disabled for interaction, not visually styled as disabled controls.
+        // Page content cannot interact during motion; container-level Back and its cancellation remain available.
         spec.properties.disabled_opacity = 1.0F;
       },
       [](huxerui::ViewNode& node, const void* value) -> std::unique_ptr<NodeExtension> {
@@ -845,6 +851,41 @@ struct NavigationContainerModifier {
   bool operator==(const NavigationContainerModifier&) const = default;
 };
 
+// Retention only validates placement; PageTransition itself remains an immutable declaration.
+class PageTransitionRootCheck final : public NodeExtension {
+public:
+  PageTransitionRootCheck(huxerui::ViewNode&, const PageTransition&) {}
+  void Update(huxerui::ViewNode&, const PageTransition&) {}
+  void Accept() noexcept { accepted_ = true; }
+  FrameResult OnFrame(huxerui::ViewNode&, const FrameInfo&) override {
+    if (!accepted_) {
+      throw std::invalid_argument("HuxerUI PageTransition must be declared on a NavigationStack page root");
+    }
+    accepted_ = false;
+    return {};
+  }
+private:
+  bool accepted_ = false;
+};
+
+const PageTransition* ReadPageTransition(MountedNode& page) {
+  const PageTransition* result = nullptr;
+  MountedNode* current = page.children.empty() ? nullptr : page.children.front().get();
+  while (current != nullptr) {
+    for (NodeExtensionEntry& entry : current->extensions) {
+      if (entry.descriptor == &PageTransition::Descriptor()) {
+        static_cast<PageTransitionRootCheck&>(*entry.extension).Accept();
+        result = static_cast<const PageTransition*>(entry.value.get());
+      }
+    }
+    if ((current->kind != NodeKind::Scope && current->kind != NodeKind::Environment) || current->children.size() != 1) {
+      break;
+    }
+    current = current->children.front().get();
+  }
+  return result;
+}
+
 class NavigationContainerExtension final : public NodeExtension {
 public:
   NavigationContainerExtension(huxerui::ViewNode& node, const NavigationContainerModifier& modifier) {
@@ -862,34 +903,82 @@ public:
   }
 
   FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
-    if (!state_ || !state_->Transition().has_value()) {
+    if (!state_) {
+      return {};
+    }
+    const PageTransition* selected = nullptr;
+    const auto& active = state_->Transition();
+    const std::uint64_t policy_id = active
+        ? (active->kind == NavigationOperationKind::Pop ? active->source_id : active->destination_id) : 0;
+    for (huxerui::ViewNode& child : node.Children()) {
+      const auto policy = ReadPageTransition(static_cast<MountedNode&>(child));
+      const auto id = child.LayoutValueOr<NavigationEntryIdValue>(0);
+      if (id == policy_id) { selected = policy; }
+    }
+    if (!active) {
+      if (painted_) { InvalidatePaint(); }
+      painted_ = false;
       animation_initialized_ = false;
       return {};
     }
-    const NavigationTransition& transition = *state_->Transition();
+    if (!active->spec) {
+      const PageTransition policy = selected ? *selected : style_.motion.value_or(PageTransition{});
+      state_->SetTransitionSpec(active->kind == NavigationOperationKind::Pop ? policy.pop
+          : active->kind == NavigationOperationKind::Push ? policy.push : policy.replace);
+    }
+    const NavigationTransition& transition = *active;
+    const TransitionSpec& spec = *transition.spec;
     if (transition.interactive) {
-      progress_.Set(transition.progress);
+      progress_.Seek(transition.progress);
       animation_initialized_ = false;
-      return {};
-    }
-    if (!animation_initialized_) {
-      progress_.Set(transition.progress);
-      const NavigationMotion motion = style_.motion.value_or(NavigationMotion{});
-      AnimationSpec animation = transition.kind == NavigationOperationKind::Pop ? motion.pop : motion.push;
-      animation = ContinuationAnimation(std::move(animation), transition.progress, transition.target);
-      progress_.AnimateTo(transition.target, style_.motion.has_value() ? animation : AnimationSpec{SnapSpec{}});
+    } else if (!animation_initialized_) {
+      progress_.Seek(transition.progress);
+      AnimationSpec animation = ContinuationAnimation(
+          spec.Animation(), transition.progress, transition.target);
+      const double delay = !transition.gesture_driven && transition.progress == 0.0F && transition.complete_operation
+          ? spec.Delay() : 0.0;
+      progress_.AnimateTo(transition.target, std::move(animation), AnimationPlayback{.delay = delay});
       animation_initialized_ = true;
     }
-
-    const MotionAdvanceResult result = progress_.Advance(frame);
-    state_->SetTransitionProgress(progress_.Value());
-    if (!result.needs_frame && !result.wake_after.has_value() && progress_.Value() == transition.target) {
+    MotionAdvanceResult result;
+    if (!transition.interactive) {
+      result = progress_.Advance(frame);
+      state_->SetTransitionProgress(progress_.Value());
+    }
+    try {
+      state_->EvaluateTransition(node, transition.interactive &&
+          (frame.reduced_motion || spec.IsImmediate()));
+    } catch (...) {
+      state_->FinishTransition();
+      animation_initialized_ = false;
+      throw;
+    }
+    const bool paints = !frame.reduced_motion && !spec.IsImmediate() && !transition.native_fallback &&
+        InternalAccess::HasTransitionPaint(spec);
+    if (painted_ || paints) {
+      InvalidatePaint();
+    }
+    painted_ = paints;
+    if (!transition.interactive && !progress_.IsRunning()) {
       state_->FinishTransition();
       animation_initialized_ = false;
       return {true, std::nullopt};
     }
     return {result.needs_frame, result.wake_after};
+  }
+
+  void PaintAboveContent(const huxerui::ViewNode& node, PaintContext& paint) const override {
+    if (!state_) { return; }
+    const auto& transition = state_->Transition();
+    if (!painted_ || !transition || !transition->spec || transition->native_fallback) { return; }
+    try {
+      paint.PushClip(node.Bounds());
+      transition->spec->Paint(paint, transition->context);
+      paint.PopClip();
+    } catch (...) {
+      state_->FinishTransition();
+      throw;
+    }
   }
 
   bool OnBack(huxerui::ViewNode& node, const BackEvent& event) override {
@@ -919,6 +1008,7 @@ private:
   MotionController progress_;
   std::uint64_t revision_ = 0;
   bool animation_initialized_ = false;
+  bool painted_ = false;
 };
 
 const ModifierDescriptor& NavigationContainerModifier::Descriptor() {
@@ -1013,8 +1103,13 @@ bool CheckNavigationAccess(const std::weak_ptr<NavigationState>& state) {
 
 namespace huxerui {
 
+const detail::ModifierDescriptor& PageTransition::Descriptor() {
+  return detail::ModifierDescriptorFor<PageTransition, detail::PageTransitionRootCheck>();
+}
+
 NavigationStyle NavigationStyle::Default() {
-  return {};
+  const TransitionSpec enter{SlideTransition{}, TweenSpec{0.3}};
+  return {PageTransition{enter, enter.Reversed(TweenSpec{0.25}), enter}};
 }
 
 void NavigationController::Push(std::function<View()> page) const {

@@ -204,13 +204,9 @@ MenuStyle FlatMenuStyle(const ThemeSpec& theme) {
 }
 
 NavigationStyle FlatNavigationStyle(const ThemeSpec& theme) {
+  const TransitionSpec enter{SlideTransition{}, TweenSpec{.duration = theme.motion.normal}};
   return {
-      .motion = NavigationMotion{
-          .entering_offset_fraction = {1.0F, 0.0F},
-          .covered_offset_fraction = {-1.0F, 0.0F},
-          .push = TweenSpec{.duration = theme.motion.normal},
-          .pop = TweenSpec{.duration = theme.motion.normal},
-      },
+      .motion = PageTransition{enter, enter.Reversed(), enter},
   };
 }
 
@@ -971,13 +967,11 @@ MenuStyle MaterialMenuStyle(const ThemeSpec& theme) {
 }
 
 NavigationStyle MaterialNavigationStyle(const ThemeSpec& theme) {
+  const TransitionSpec enter{
+      SlideTransition{.outgoing_offset = {-0.2F, 0.0F}}, TweenSpec{.duration = theme.motion.slow},
+  };
   return {
-      .motion = NavigationMotion{
-          .entering_offset_fraction = {1.0F, 0.0F},
-          .covered_offset_fraction = {-0.2F, 0.0F},
-          .push = TweenSpec{.duration = theme.motion.slow},
-          .pop = TweenSpec{.duration = theme.motion.normal},
-      },
+      .motion = PageTransition{enter, enter.Reversed(TweenSpec{.duration = theme.motion.normal}), enter},
   };
 }
 

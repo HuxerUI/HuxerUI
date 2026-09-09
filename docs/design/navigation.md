@@ -5,13 +5,16 @@ This document defines explicit top app bars, page stacks, destination selection,
 Factory navigation is deliberately factory-driven and imperative at the navigation boundary.
 Typed-route navigation preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
 
+Custom page transitions are implemented as described in [Page transition customization](#page-transition-customization).
+[Shared-element transitions](#planned-shared-element-transitions) remain approved but unimplemented.
+
 ## Goals
 
 - Present a retained stack of ordinary HuxerUI Views with Push, Pop, and Replace operations.
 - Preserve page-local state while another page covers it.
 - Keep navigation ownership local so independent and nested stacks do not share history accidentally.
 - Route Back through framework overlays, public layers, application handlers, and nested page stacks before invoking a platform fallback.
-- Drive page transitions through retained presentation state without per-frame recomposition, measurement, layout, or PaintSequence recording.
+- Drive page transitions through retained presentation state without per-frame recomposition, measurement, layout, or rerecording clean page content; optional decoration records as its sample changes.
 - Support reduced motion and deterministic animation tests through the existing AnimationSpec model.
 - Cancel input, focus, and text-input work when a page stops accepting interaction.
 - Define a platform-neutral predictive Back transaction that Android can drive immediately and other platforms can adopt when their host integration owns an equivalent gesture.
@@ -22,7 +25,7 @@ Typed-route navigation preserves the same private entry, mounting, transition, i
 
 ## Non-goals
 
-Factory navigation does not provide:
+The current factory navigation implementation does not provide:
 
 - Named routes, string route tables, URI matching, or a destination registry.
 - A public `Page`, `Route`, or `NavigationEntry` base class.
@@ -34,7 +37,8 @@ Factory navigation does not provide:
 - Browser History integration in the shared Runtime.
 - An iOS edge gesture owned unconditionally by an embedded HuxerUI View.
 
-Saveable state, route serialization, shared-element transitions, and navigation-aware lifecycle effects build on this contract after their independent ownership rules are defined.
+Saveable state, route serialization, and navigation-aware lifecycle effects build on this contract after their independent ownership rules are defined.
+The approved shared-element ownership rules are recorded in the explicitly planned section.
 
 ## Page stack design summary
 
@@ -381,16 +385,16 @@ In a stable state:
 
 During a programmatic Push, Pop, or Replace:
 
-- The destination becomes the active interaction subtree.
-- The source remains renderable for its exit but stops receiving new input.
-- Existing source pointer sessions are cancelled.
+- Both participating pages remain renderable but disable content interaction until the operation completes.
+- Existing page pointer sessions are cancelled, and disabled page focus and text-input sessions are cleared.
+- Completion enables the final destination; container-level Back remains available during motion.
 
 During a predictive Pop:
 
-- The current page remains the active interaction subtree until Commit.
-- The revealed page remains non-interactive while progress is tentative.
-- Cancel restores the current stable state without focus or IME churn.
-- Commit deactivates the outgoing page and completes the Pop.
+- Both pages disable content interaction while progress is tentative and while Commit or Cancel settles.
+- Cancel restores the source page's stable presentation and enables its content after settling, without automatically restoring focus or reopening the IME.
+- Commit completes the Pop and enables the revealed page after settling.
+- The container continues receiving predictive Back updates and cancellation.
 
 Runtime uses shared disabled-subtree input cleanup rather than a navigation-specific `DeactivateNavigationInput()` path.
 The shared cleanup cancels pointer capture and observers, clears hover, clears focus that belongs to the disabled subtree, and ends an owned text-input session with `TextInputEndReason::FocusLost`.
@@ -410,51 +414,17 @@ Because layers route Back before page navigation, dismissing a dialog restores a
 Navigation motion is a Theme value because Material, Flat, future iOS, and third-party themes may choose different page-transition geometry.
 The logical stack and controller never inspect a concrete Theme type.
 
-The public values are:
+NavigationStyle::motion is an optional PageTransition, selecting independent Push, Pop, and Replace descriptions.
+An explicit page-root declaration overrides the complete theme policy; see [Page configuration](#page-configuration).
 
-```cpp
-struct NavigationMotion {
-  Point entering_offset_fraction;
-  Point covered_offset_fraction;
-  float entering_scale = 1.0F;
-  float covered_scale = 1.0F;
-  float entering_opacity = 1.0F;
-  float covered_opacity = 1.0F;
-  AnimationSpec push = TweenSpec{.duration = 0.3};
-  AnimationSpec pop = TweenSpec{.duration = 0.25};
+The built-in themes use opaque SlideTransition effects by default.
+Flat moves the entering and covered pages by one full viewport in opposite directions.
+Material moves the entering page by one viewport and the covered page by a 0.2-viewport parallax offset.
+Both themes use Reversed() for Pop, with their own timing, and use the forward effect for Replace.
+NavigationStyle::Default() supplies a full-width slide with 0.3-second forward and 0.25-second reverse motion; a directly constructed empty NavigationStyle has no motion.
 
-  bool operator==(const NavigationMotion&) const = default;
-};
-
-struct NavigationStyle {
-  std::optional<NavigationMotion> motion;
-
-  static NavigationStyle Default();
-
-  bool operator==(const NavigationStyle&) const = default;
-};
-```
-
-Offset fractions multiply the current NavigationStack width and height.
-An entering offset of `{1.0F, 0.0F}` expresses a full-width horizontal slide, while a small fraction expresses a shared-axis-like shift and `{}` expresses no translation.
-
-The built-in themes use opaque horizontal transitions by default.
-Flat moves the entering and covered pages by one full viewport in opposite directions, while Material moves the entering page by one viewport and gives the covered page a shorter parallax offset.
-Custom themes may still combine offsets with scale and opacity.
-
-Push interpolates the covered page from its stable values toward the covered values and the entering page from its entering values toward its stable values.
-Pop reverses the same pair.
-
-Point offsets, scale, opacity, and independent push and pop AnimationSpecs can express:
-
-- A Material shared-axis-like slide and fade.
-- A Flat fade or short displacement.
-- A future iOS-style full-width slide with a partially displaced covered page.
-- A scale-and-fade transition used by another Theme.
-
-NavigationMotion is distinct from PresentationMotion.
-PresentationMotion describes one window-level surface entering or leaving a Layer placement, while NavigationMotion synchronizes two application pages and supports direct progress seeking.
-Combining them would make the meaning of initial scale, slide distance, and exit timing depend on the consumer.
+PresentationMotion continues to own window-level surfaces.
+PageTransition describes a pair of application pages and shares TransitionSpec with scene transitions without changing layer lifecycles.
 
 An absent motion disables animation.
 Reduced-motion resolution uses the existing Theme and animation path and settles to the target without adding a Navigation-specific accessibility switch.
@@ -1081,3 +1051,219 @@ Application activation integration requires platform tests for cold-start delive
 - Route paths resolve into the same private page-entry engine rather than creating another navigator.
 - Application activation selects a target Runtime before it requests route state and never targets an arbitrary committed View.
 - Browser URL policy remains outside shared Runtime and PlatformAdapter.
+
+## Page transition customization
+
+Custom page motion uses reusable effects inside the existing navigation engine.
+The common `TransitionSpec`, effect evaluation, timing, reversal, and scene contract are defined in [Animation and Scene Transitions](animation.md#extensible-transitions).
+Navigation reuses that contract instead of introducing another effect interface or animation scheduler.
+
+### Page configuration
+
+`PageTransition` is both the complete page-transition configuration and a View modifier:
+
+```cpp
+struct PageTransition {
+  TransitionSpec push;
+  TransitionSpec pop;
+  TransitionSpec replace;
+
+  static const detail::ModifierDescriptor& Descriptor();
+  bool operator==(const PageTransition&) const = default;
+};
+```
+
+An application attaches the value directly to the root of an ordinary page:
+
+```cpp
+auto enter = TransitionSpec(LiftTransition{}, TweenSpec{0.28, Easing::EaseOut});
+auto product_transition = PageTransition{
+    .push = enter,
+    .pop = enter.Reversed(),
+    .replace = TransitionSpec(FadeTransition{}, TweenSpec{0.18, Easing::EaseInOut}),
+};
+
+return Column {
+  Text("Product"),
+  Text("Product details"),
+}.With(product_transition);
+```
+
+`LiftTransition` is the application-defined effect illustrated in the animation design.
+Page-transition policy uses View::With() without layout metadata, a public page wrapper, or a new generic View method.
+An internal retained check validates root placement; it owns no progress or effect execution.
+
+The declaration belongs to the page root.
+Compiler-generated Scope and transparent Environment boundaries may surround that root, but lookup does not search arbitrary layout descendants.
+A declaration on an unsupported descendant is diagnosed instead of silently controlling its containing page.
+Multiple declarations on the same root follow ordinary property-modifier ordering: the last complete value wins.
+
+`NavigationStyle::motion` is `std::optional<PageTransition>`.
+An explicit page declaration overrides the themed value as a whole; there is no per-field merge.
+`PageTransition{}` explicitly selects immediate Push, Pop, and Replace because a default `TransitionSpec` completes immediately.
+Without a page declaration, the resolved theme value applies; an absent themed value also means immediate presentation.
+Flat and Material themes explicitly supply their intended motion instead of depending on accidental aggregate defaults.
+
+| Operation | Selected configuration |
+| --- | --- |
+| Push | Incoming page's `push` |
+| Pop or predictive Back | Departing page's `pop` |
+| Replace or arbitrary changed-path replacement | Incoming page's `replace` |
+
+The selected configuration is captured when the operation starts and remains stable until it finishes.
+Recomposition or theme changes configure later operations without restarting an active transition.
+Initial stack construction and initial deep paths present their final active destination immediately.
+
+### Navigation execution and interruption
+
+The existing entry engine, operation queue, retained pages, and factory-versus-controlled-path ownership remain authoritative.
+Transition customization changes presentation, not when a controlled path becomes authoritative or how factory operations reserve and commit history.
+One normalized progress value drives the outgoing and incoming pages; planned shared elements will consume the same value.
+Effects evaluate against the current stack bounds and update retained presentation without per-frame state writes, recomposition, measurement, layout, or rerecording clean page content.
+Optional foreground decoration records into its own PaintSequence as the sampled progress changes.
+
+Predictive Back seeks this same progress directly and ignores the configured start delay during gesture control.
+Commit settles toward one and Cancel settles toward zero using the existing controller.
+Velocity is handed through `Seek` only when a real velocity sample is available; the engine must not invent one from an absent platform value.
+At Cancel, source presentation and the original interaction ownership are restored.
+The departing page's Pop declaration supplies the effect for both interactive and ordinary Back.
+
+A viewport change preserves normalized page progress and reevaluates page effects in the new bounds after required layout.
+The planned shared-element contract ends pairs captured in the former coordinate space while page motion continues.
+Reduced motion takes the same logical navigation outcome without retaining animation frame work.
+Unmounting the owner releases all visual retention and controller work through the existing lifecycle.
+
+Custom effects do not bypass navigation's input, focus, IME, clipping, or page-activation rules.
+Both pages disable content interaction during an active navigation operation and restore the final page after completion or cancellation; the container still handles Back and predictive cancellation.
+Fragments only replicate render data, so there is no per-fragment hit-test, focus, or accessibility representation.
+Their transforms, source clips, and optional synchronized foreground decoration use the shared rendering primitives described in [Animation](animation.md#fragment-composition-and-decoration).
+No new completion event, transition-operation handle, result type, or public cancellation protocol is introduced.
+
+An explicit Scene transition whose mutation also changes navigation composes with page presentation.
+There is no automatic suppression based on which system began first.
+An application that wants only the Scene effect selects immediate page motion for that operation's participating page.
+Planned shared elements follow navigation progress, not the independent Scene clock.
+
+## Planned shared-element transitions
+
+Status: approved design, not implemented.
+All shared-element declarations and examples below describe planned APIs rather than available SDK behavior.
+
+### Shared-element declarations and matching
+
+Two property modifiers describe the intended relationship:
+
+```cpp
+Image(product.image).With(SharedElement(product.id));
+
+Column {
+  Text(product.name),
+  Text(product.description),
+}.With(SharedBounds(product.id));
+```
+
+`SharedElement(key)` denotes the same visual content moving between page locations.
+`SharedBounds(key)` denotes different content whose regions transition together, including source-to-target crossfade.
+They use the same integer and string key forms as `View::Key`, but shared matching has a separate identity domain and does not affect reconciliation keys.
+
+The nearest `NavigationStack` owns the matching scope.
+Only the active outgoing and incoming pages participate in a Push, Pop, or Replace operation.
+Keys never match across nested stacks, independent stacks, windows, or unrelated Scene transitions.
+Static pages and initial stack construction do not start shared-element motion.
+
+A key may occur once in each participating page.
+Duplicate keys within a participant are caller errors; using different marker kinds for the same matched key is also an error.
+Matching an ancestor and its descendant would create overlapping retained representations, so such pairs are rejected in the first implementation.
+Applications choose one enclosing `SharedBounds` or independently marked, nonoverlapping children.
+
+The engine resolves pairs once, using the first committed layout that provides valid participating page geometry.
+An unmatched key, unrealized virtual item, unavailable asset, or target without valid laid-out bounds skips only that element's visual transition.
+There is no implicit network wait, deferred navigation, or late joining after a pair set has been captured.
+Applications that require a particular pair prepare its content and scroll position before requesting navigation.
+
+### Shared bounds transforms
+
+The default shared geometry interpolates source and target bounds using navigation progress.
+An application can provide a copied, equality-comparable value through the marker's component-specific fluent method:
+
+```cpp
+Image(product.image).With(
+    SharedElement(product.id).BoundsTransform(ArcBounds{36.0F})
+);
+```
+
+The application-defined bounds transform has this evaluation contract:
+
+```cpp
+Rect Evaluate(Rect from, Rect to, float progress) const;
+```
+
+`ArcBounds` is an example application value, not another framework type.
+The callable is immutable and pure, preserves the supplied endpoint rectangles at zero and one, and returns finite valid bounds.
+The engine privately erases its value type and compares configuration without a public bounds-transform interface or registry.
+It follows the page transition's progress, including reversal and predictive cancellation, and has no independent `AnimationSpec` or clock.
+The shared-element geometry does not expand `TransitionContext` with source and destination node data.
+
+### Shared-element retention and fallback
+
+Original nodes remain mounted and retain their normal layout, state, and lifecycle.
+The engine suppresses their duplicate painting while a retained shared representation supplies the transition visual.
+That representation appears above the stack's pages, below window layers, and inside the stack's clipping boundary.
+It creates no additional pointer target, focus target, accessibility node, or text-input owner.
+Input and semantics continue to follow the existing active-page policy.
+
+The first implementation remaps retained rendering into interpolated bounds rather than laying out the subtree on every frame.
+`SharedElement` requires visually corresponding content; it does not infer semantic equivalence from a key.
+`SharedBounds` can retain both sides and crossfade their content as the region changes.
+Text scales or crossfades with that rendering; glyph morphing and intermediate line-wrap reflow are outside the contract.
+
+| Condition | Behavior |
+| --- | --- |
+| Missing counterpart, unavailable content, or invalid geometry | Skip the affected pair and keep ordinary page presentation |
+| Source or target removed or replaced during motion | End that pair and restore painting for every surviving original |
+| Viewport or coordinate-space change | End affected pairs and continue page motion with current bounds |
+| Predictive Back cancellation | Reverse the retained pair with page progress, then restore source presentation |
+| Stack destruction | Release all retained representations and references |
+| Reduced motion or immediate page transition | Present the final logical state without retaining shared animation work |
+
+Supported content initially includes ordinary paint, images, and geometry representable by valid two-dimensional bounds.
+Native `PlatformView` content, continuously updated external textures, and transforms whose rotation or skew cannot be represented by this bounds contract use an explicit pair-level fallback to ordinary page presentation.
+The implementation must not claim frozen external-texture pixels merely because it retains a resource reference.
+Fallback leaves the remaining pairs and logical navigation intact and uses existing diagnostics or tracing to identify the reason.
+
+Retained visual ownership is bounded by the operation and the existing rendering resources it captures.
+Implementation must preserve the [native-content and scene-retention contract](animation.md#native-content-and-scene-retention), including native-view eligibility and release of captured resources at the end of their lifetime.
+No fixed structural quota is defined for shared-element retention; capability failures preserve navigation and restore surviving originals.
+There is no public resource-budget object in this design.
+
+### Planned implementation boundaries
+
+Public timing and effect declarations belong in `animation.h`; page policy and shared markers belong in `navigation.h`.
+The navigation state and existing page/container extensions own matching, progress, suppression, restoration, and cleanup.
+Private shared declarations should move into a focused internal header only when multiple implementations actually need the contract.
+This design introduces no global coordinator, plugin interface, context store, root service, or second retained-page engine.
+Any rendering support added to Runtime remains generic and must not inspect concrete Navigation components or shared-marker types.
+
+Shared-element retention and matching will build on the implemented common effects and page/Scene owners.
+This planned extension introduces neither compatibility aliases nor a parallel page-configuration path.
+Ordinary View appearance/disappearance, automatic layout animation, three-dimensional transforms, arbitrary shaders, and effect filters remain separate work.
+
+## Transition validation
+
+Common effect, timing, and Scene acceptance criteria remain in the animation design.
+Page-transition tests cover the implemented policy and execution paths; shared-element items below remain acceptance criteria for the planned extension:
+
+- Complete page override, theme fallback, explicit immediate defaults, modifier ordering, transparent page-root boundaries, and misplaced declarations.
+- Incoming Push and Replace selection, departing Pop selection, immutable active configuration, queued operations, and controlled path replacement.
+- Initial and deep-path presentation, independent nested stacks, retained page state, and absence of per-frame recomposition, layout, or rerecording clean page content.
+- Deterministic predictive seeking, velocity availability, commit, cancellation, reduced motion, interruption, viewport changes, and owner destruction.
+- Separate reconciliation and shared identities, duplicate and mismatched marker errors, and rejection of overlapping ancestor/descendant pairs.
+- One-time pairing, missing counterparts, unavailable images, unrealized virtual targets, late content, and independent fallback without stopping other pairs.
+- Custom bounds endpoints, finite geometry, overshoot handling, reversal, draw order, clipping, paint suppression, and restoration after replacement or removal.
+- Source and target state retention without duplicate input, focus, semantics, or IME ownership, including predictive cancellation.
+- Ordinary image and painted-content transitions, text scale/crossfade boundaries, native-content fallback, interruption, and resource release.
+- Explicit Scene-plus-navigation composition with independent clocks and intentional immediate page configuration.
+
+A Gallery demonstration should cover a card-to-detail image transition, a differing-content `SharedBounds` transition, a custom page effect, and a custom Scene effect without becoming a new showcase framework.
+Predictive Back, reduced motion, interrupted transitions, and unsupported-content fallback need executable coverage beyond visual inspection.
+Changes to shared presentation or drawing require a renderer audit and every affected platform build available locally; unavailable platforms must be reported explicitly.

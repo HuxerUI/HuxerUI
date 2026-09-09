@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <typeindex>
@@ -15,6 +16,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/animation.h>
 #include <huxerui/app.h>
 #include <huxerui/event.h>
 #include <huxerui/environment.h>
@@ -209,10 +211,25 @@ struct NodeExtensionEntry {
   bool interaction_sync_pending = true;
 };
 
+// Owns render-only instances; source identities and revisions avoid rerecording mounted content for every fragment.
+struct FragmentRenderGroup {
+  void Update(std::span<const RenderNode* const> sources, std::span<const TransitionFragment> fragments);
+  void Clear();
+
+  std::vector<std::unique_ptr<RenderNode>> nodes;
+  std::vector<std::uint64_t> source_ids;
+  std::vector<const RenderNode*> roots;
+};
+
 struct NodePresentation {
   Transform2D local_transform;
   // A retained container can move its descendants without changing its own layout or foreground presentation.
   Transform2D children_transform;
+  // Clips intersect in this node's local space, after descendant transforms.
+  std::vector<ClipShape> children_clips;
+  std::vector<TransitionFragment> children_fragments;
+  // Higher values paint above siblings; equal values preserve declaration order.
+  int z_index = 0;
   float local_opacity = 1.0F;
   float render_opacity = 1.0F;
   Transform2D resolved_transform;
@@ -257,6 +274,7 @@ struct MountedNode final : public huxerui::ViewNode {
   Rect bounds;
   Point layout_offset;
   NodePresentation presentation;
+  std::unique_ptr<FragmentRenderGroup> fragment_render_group;
   RenderNode render_node;
   std::uint64_t measure_revision = 0;
   std::uint64_t layout_revision = 0;
@@ -267,8 +285,7 @@ struct MountedNode final : public huxerui::ViewNode {
   bool layout_dirty = true;
   bool content_paint_dirty = true;
   bool foreground_paint_dirty = true;
-  // RenderNode children are retained raw pointers, so a mounted child-structure change must be synchronized even when
-  // this subtree is not currently painted.
+  // Mounted child changes and fragment links in this subtree need synchronization even while invisible.
   bool render_structure_dirty = true;
   // This records whether the immediate parent committed this node in its LayoutResult placements. Effective
   // participation also requires every ancestor to participate and is intentionally distinct from visual visibility.
@@ -296,6 +313,8 @@ struct MountedNode final : public huxerui::ViewNode {
   bool trap_focus = false;
   bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;
+  // Resolved child indices in paint order; empty means declaration order. Rebuilt with presentation geometry.
+  std::vector<std::size_t> child_paint_order;
 
   [[nodiscard]] std::size_t ChildCount() const noexcept override {
     return children.size();
@@ -553,6 +572,7 @@ Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 MountedNode* FindTextSelectionOwner(MountedNode& root, std::uint64_t identity);
 void ResolvePresentationTree(MountedNode& node);
+MountedNode& ChildInPaintOrder(const MountedNode& node, std::size_t index);
 void ValidateBorder(const Border& border);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);
 DamageRegion ComputeDamageRegion(

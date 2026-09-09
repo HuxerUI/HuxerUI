@@ -2,8 +2,10 @@
 #include "internal_access.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <optional>
+#include <numeric>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -16,6 +18,98 @@
 #include "profiling_internal.h"
 
 namespace huxerui::detail {
+
+namespace {
+
+constexpr Rect fragment_source_bounds{-1.0e10F, -1.0e10F, 2.0e10F, 2.0e10F};
+
+} // namespace
+
+RenderClip InternalAccess::RenderClipShape(const ClipShape& shape) {
+  return std::visit([](const auto& value) -> RenderClip {
+    if constexpr (std::same_as<std::decay_t<decltype(value)>, ClipShape::RectangleData>) {
+      return PushClipCommand{value.bounds, value.radius};
+    } else {
+      return PushPathClipCommand{value.path, value.fill_rule};
+    }
+  }, shape.data_);
+}
+
+MountedNode& ChildInPaintOrder(const MountedNode& node, std::size_t index) {
+  return *node.children[node.child_paint_order.empty() ? index : node.child_paint_order[index]];
+}
+
+void FragmentRenderGroup::Clear() {
+  roots.clear();
+  nodes.clear();
+  source_ids.clear();
+}
+
+void FragmentRenderGroup::Update(
+    std::span<const RenderNode* const> sources, std::span<const TransitionFragment> fragments
+) {
+  if (fragments.empty()) {
+    Clear();
+    roots.assign(sources.begin(), sources.end());
+    return;
+  }
+  for (const RenderNode* source : sources) {
+    if (RenderSceneHasPlatformViews(source)) {
+      throw std::logic_error("HuxerUI fragment sources cannot contain PlatformViews");
+    }
+  }
+
+  // Instance identities use a separate range from mounted nodes, frozen scenes, and scene wrappers.
+  static std::atomic<std::uint64_t> next_identity{0xC000000000000000ULL};
+  std::size_t used = 0;
+  const auto acquire = [&](std::uint64_t source_id) -> RenderNode& {
+    if (used == nodes.size()) {
+      nodes.push_back(std::make_unique<RenderNode>());
+      source_ids.push_back(0);
+    }
+    RenderNode& node = *nodes[used];
+    if (node.id == 0 || source_ids[used] != source_id) {
+      node = {};
+      node.id = next_identity.fetch_add(1, std::memory_order_relaxed);
+      source_ids[used] = source_id;
+    }
+    ++used;
+    return node;
+  };
+  const auto copy = [&](auto&& self, const RenderNode& source_node) -> const RenderNode* {
+    RenderNode& node = acquire(source_node.id);
+    if (node.content.Revision() != source_node.content.Revision()) { node.content = source_node.content; }
+    if (node.foreground.Revision() != source_node.foreground.Revision()) { node.foreground = source_node.foreground; }
+    node.offset = source_node.offset;
+    node.transform = source_node.transform;
+    node.children_transform = source_node.children_transform;
+    node.child_clips = source_node.child_clips;
+    node.opacity = source_node.opacity;
+    node.visible = source_node.visible;
+    node.revision = source_node.revision;
+    node.children.clear();
+    for (const RenderNode* child : source_node.children) {
+      if (child) { node.children.push_back(self(self, *child)); }
+    }
+    return &node;
+  };
+  roots.clear();
+  for (const TransitionFragment& fragment : fragments) {
+    RenderNode& wrapper = acquire(0);
+    wrapper.transform = fragment.transform;
+    wrapper.opacity = fragment.opacity;
+    wrapper.child_clips = {InternalAccess::RenderClipShape(fragment.source_clip)};
+    wrapper.visible = fragment.opacity > 0.0F;
+    wrapper.children.clear();
+    ++wrapper.revision;
+    for (const RenderNode* root : sources) {
+      if (root) { wrapper.children.push_back(copy(copy, *root)); }
+    }
+    roots.push_back(&wrapper);
+  }
+  nodes.resize(used);
+  source_ids.resize(used);
+}
 
 PaintSequence FrozenScene::CopyPaintSequence(const PaintSequence& source) {
   PaintSequence copy = source;
@@ -181,6 +275,10 @@ Rect RenderClipBounds(const RenderClip& clip) {
 
 std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
   std::vector<RenderClip> clips;
+  clips.reserve(node.presentation.children_clips.size());
+  for (const ClipShape& shape : node.presentation.children_clips) {
+    clips.push_back(InternalAccess::RenderClipShape(shape));
+  }
   if (node.properties.clip_children) {
     const CornerRadii corner_radii = NormalizeCornerRadii(node.bounds, node.resolved_corner_radii);
     if (corner_radii.IsUniform()) {
@@ -464,7 +562,24 @@ bool CommonChildOrderChanged(const std::vector<std::uint64_t>& previous, const s
   return previous_common != current_common;
 }
 
+void SortChildPaintOrder(MountedNode& node) {
+  node.child_paint_order.clear();
+  const auto less = [](const auto& first, const auto& second) {
+    return first->presentation.z_index < second->presentation.z_index;
+  };
+  if (!std::is_sorted(node.children.begin(), node.children.end(), less)) {
+    node.child_paint_order.resize(node.children.size());
+    std::iota(node.child_paint_order.begin(), node.child_paint_order.end(), std::size_t{0});
+    std::stable_sort(
+        node.child_paint_order.begin(), node.child_paint_order.end(), [&](std::size_t first, std::size_t second) {
+          return less(node.children[first], node.children[second]);
+        }
+    );
+  }
+}
+
 void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity) {
+  SortChildPaintOrder(node);
   const Transform2D node_transform =
       ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform);
   node.presentation.resolved_transform = ComposeTransform(inherited_transform, node_transform);
@@ -530,10 +645,11 @@ void PaintFocusRing(const MountedNode& node, PaintContext& context) {
 }
 
 void HideRenderTree(MountedNode& node) {
+  node.presentation.children_fragments.clear();
   RenderNode& render_node = node.render_node;
   // Non-participating subtrees keep their retained RenderNode links so existing invisible PlatformView placements can
   // preserve native instances. Rebuild those links only after mounted child structure changes.
-  if (!node.render_structure_dirty && !render_node.visible) {
+  if (!node.fragment_render_group && !node.render_structure_dirty && !render_node.visible) {
     return;
   }
   std::vector<const RenderNode*> children;
@@ -542,6 +658,7 @@ void HideRenderTree(MountedNode& node) {
     HideRenderTree(*child);
     children.push_back(&child->render_node);
   }
+  node.fragment_render_group.reset();
   bool changed = false;
   if (render_node.id != node.identity) {
     render_node.id = node.identity;
@@ -579,6 +696,10 @@ void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, cons
   std::vector<RenderClip> child_clips = ResolveChildClips(node);
   for (const RenderClip& render_clip : child_clips) {
     child_clip = child_clip.Intersection(TransformBounds(transform, RenderClipBounds(render_clip)));
+  }
+  if (!node.presentation.children_fragments.empty()) {
+    // Record complete sources: a fragment can bring previously culled content back into the viewport.
+    child_clip = fragment_source_bounds;
   }
 
   bool changed = false;
@@ -673,15 +794,25 @@ void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, cons
   const bool own_visible =
       opacity > 0.0F && own_paint_bounds.has_value() && TransformBounds(transform, *own_paint_bounds).Intersects(clip);
 
+  bool descendants_need_link_reset = false;
   std::vector<const RenderNode*> children;
   children.reserve(node.children.size());
-  for (const auto& child : node.children) {
-    if (child->participates_in_layout) {
-      PaintNodeWithinClip(*child, child_clip, nullptr);
+  for (std::size_t index = 0; index < node.children.size(); ++index) {
+    MountedNode& child = ChildInPaintOrder(node, index);
+    if (child.participates_in_layout) {
+      PaintNodeWithinClip(child, child_clip, nullptr);
     } else {
-      HideRenderTree(*child);
+      HideRenderTree(child);
     }
-    children.push_back(&child->render_node);
+    descendants_need_link_reset = descendants_need_link_reset || child.render_structure_dirty;
+    children.push_back(&child.render_node);
+  }
+  if (!node.presentation.children_fragments.empty()) {
+    if (!node.fragment_render_group) { node.fragment_render_group = std::make_unique<FragmentRenderGroup>(); }
+    node.fragment_render_group->Update(children, node.presentation.children_fragments);
+    children = node.fragment_render_group->roots;
+  } else {
+    node.fragment_render_group.reset();
   }
   if (extra_child != nullptr) {
     children.push_back(extra_child);
@@ -725,7 +856,8 @@ void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, cons
   if (changed) {
     ++render_node.revision;
   }
-  node.render_structure_dirty = false;
+  // Hidden ancestors must still reach fragment instances once to reconnect mounted links and release the caches.
+  node.render_structure_dirty = node.fragment_render_group || descendants_need_link_reset;
 }
 
 void PaintVisualFill(PaintContext& context, Rect bounds, const VisualFill& fill, CornerRadii corner_radii,

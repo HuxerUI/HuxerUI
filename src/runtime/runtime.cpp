@@ -850,6 +850,11 @@ bool DispatchKey(MountedNode& node, const KeyEvent& event) {
 }
 
 bool RefreshExtensionPresence(MountedNode& node) {
+  if (node.extensions.empty()) {
+    node.presentation.children_clips.clear();
+    node.presentation.children_fragments.clear();
+    node.presentation.z_index = 0;
+  }
   bool subtree_has_extensions = !node.extensions.empty();
   for (auto& child : node.children) {
     subtree_has_extensions = RefreshExtensionPresence(*child) || subtree_has_extensions;
@@ -957,8 +962,8 @@ MountedNode* FindTopmostFocusTrap(MountedNode& node) {
   if (!node.interaction.enabled) {
     return nullptr;
   }
-  for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-    if (MountedNode* root = FindTopmostFocusTrap(**child)) {
+  for (std::size_t index = node.children.size(); index > 0; --index) {
+    if (MountedNode* root = FindTopmostFocusTrap(ChildInPaintOrder(node, index - 1))) {
       return root;
     }
   }
@@ -969,8 +974,8 @@ bool RouteBackTarget(MountedNode& node, const BackEvent& event, BackTarget& targ
   if (!node.interaction.enabled) {
     return false;
   }
-  for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-    if (RouteBackTarget(**child, event, target, already_dispatched)) {
+  for (std::size_t index = node.children.size(); index > 0; --index) {
+    if (RouteBackTarget(ChildInPaintOrder(node, index - 1), event, target, already_dispatched)) {
       return true;
     }
   }
@@ -1690,7 +1695,10 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   HUXERUI_PROFILE_NEXT(profile_stage, Extensions);
   std::optional<double> next_wakeup;
-  UpdateNodeExtensions(*state_->mounted_root_, frame, needs_frame, next_wakeup, state_->extension_tree_dirty_);
+  if (UpdateNodeExtensions(*state_->mounted_root_, frame, needs_frame, next_wakeup, state_->extension_tree_dirty_)) {
+    // Retained behavior may end an input exclusion in this frame; publish that change with its final visual sample.
+    RefreshInteractionTree();
+  }
   state_->extension_tree_dirty_ = false;
   ResolvePresentationTree(*state_->mounted_root_);
 
@@ -2178,11 +2186,15 @@ bool Runtime::UpdateNodeExtensions(
     return false;
   }
   if (!node.participates_in_layout) {
-    return node.subtree_has_extensions;
+    return false;
   }
 
+  const bool was_enabled = node.local_enabled;
   node.presentation.local_transform = {};
   node.presentation.children_transform = {};
+  node.presentation.children_clips.clear();
+  node.presentation.children_fragments.clear();
+  node.presentation.z_index = 0;
   node.presentation.local_opacity = 1.0F;
   FrameInfo node_frame = frame;
   if (!node.extensions.empty()) {
@@ -2203,10 +2215,11 @@ bool Runtime::UpdateNodeExtensions(
     }
   }
 
+  bool interaction_changed = was_enabled != node.local_enabled;
   for (auto& child : node.children) {
-    UpdateNodeExtensions(*child, frame, needs_frame, next_wakeup, false);
+    interaction_changed = UpdateNodeExtensions(*child, frame, needs_frame, next_wakeup, false) || interaction_changed;
   }
-  return node.subtree_has_extensions;
+  return interaction_changed;
 }
 
 void Runtime::BindExtensions(detail::MountedNode& node) {
@@ -2699,6 +2712,7 @@ void Runtime::ComposeApplication() {
     if (application) {
       application_children.push_back(std::move(application));
     }
+    application_content->child_paint_order.clear();
     if (ReconcileChildren(application_content->children, application_children, state_->root_environment_)) {
       application_content->measure_dirty = true;
       application_content->render_structure_dirty = true;
@@ -2782,6 +2796,7 @@ void Runtime::ComposeLayers() {
       layer_children.emplace_back(std::move(layer), environment);
     }
 
+    layer_stack->child_paint_order.clear();
     if (ReconcileLayerChildren(layer_stack->children, layer_children)) {
       layer_stack->measure_dirty = true;
       layer_stack->render_structure_dirty = true;
@@ -2795,6 +2810,7 @@ void Runtime::ComposeLayers() {
 }
 
 bool Runtime::ComposeScope(detail::MountedNode& mounted) {
+  mounted.child_paint_order.clear();
   if (!mounted.scope_factory) {
     const bool layout_changed = !mounted.children.empty();
     mounted.children.clear();
@@ -2923,6 +2939,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
     }
     layout_changed = true;
   } else {
+    mounted->child_paint_order.clear();
     layout_changed = ReconcileChildren(mounted->children, incoming->children, mounted->environment) || layout_changed;
   }
   mounted->measure_dirty = mounted->measure_dirty || layout_changed;
@@ -3354,6 +3371,7 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
     }
   }
 
+  owner_->child_paint_order.clear();
   owner_->children = std::move(next);
   owner_->virtual_state->realized_indices = std::move(next_indices);
   runtime_->state_->extension_tree_dirty_ = runtime_->state_->extension_tree_dirty_ || structure_changed;
@@ -3361,6 +3379,7 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
 }
 
 void VirtualMeasureSession::RestoreOwner() noexcept {
+  owner_->child_paint_order.clear();
   owner_->children.clear();
   owner_->virtual_state->realized_indices.clear();
   for (std::size_t position = 0; position < requested_nodes_.size(); ++position) {

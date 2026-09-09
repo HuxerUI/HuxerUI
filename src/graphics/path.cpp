@@ -3,12 +3,15 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "geometry_internal.h"
@@ -20,6 +23,19 @@ namespace {
 
 using detail::PathElement;
 using detail::PathVerb;
+
+void ValidateBounds(Rect bounds) {
+  if (!std::isfinite(bounds.x) || !std::isfinite(bounds.y) || !std::isfinite(bounds.width) ||
+      !std::isfinite(bounds.height) || bounds.width < 0.0F || bounds.height < 0.0F) {
+    throw std::invalid_argument("HuxerUI clip bounds must be finite with non-negative dimensions");
+  }
+}
+
+void ValidatePoint(Point point) {
+  if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+    throw std::invalid_argument("HuxerUI clip point must be finite");
+  }
+}
 
 struct CubicSegment {
   Point first_control;
@@ -712,5 +728,77 @@ std::span<const detail::PathElement> detail::InternalAccess::Elements(const Path
   }
   return path.data_->elements;
 }
+
+ClipShape ClipShape::Rectangle(Rect bounds) {
+  return RoundedRectangle(bounds, 0.0F);
+}
+
+ClipShape ClipShape::RoundedRectangle(Rect bounds, float radius) {
+  ValidateBounds(bounds);
+  if (!std::isfinite(radius) || radius < 0.0F) {
+    throw std::invalid_argument("HuxerUI clip radius must be finite and non-negative");
+  }
+  ClipShape shape;
+  shape.data_ = RectangleData{bounds, std::min(radius, std::min(bounds.width, bounds.height) * 0.5F)};
+  return shape;
+}
+
+ClipShape ClipShape::Circle(Point center, float radius) {
+  ValidatePoint(center);
+  if (!std::isfinite(radius) || radius < 0.0F) {
+    throw std::invalid_argument("HuxerUI clip radius must be finite and non-negative");
+  }
+  const Rect bounds{center.x - radius, center.y - radius, radius * 2.0F, radius * 2.0F};
+  ValidateBounds(bounds);
+  constexpr float cubic_circle = 0.5522847498F;
+  const float control = radius * cubic_circle;
+  Path path;
+  path.MoveTo({center.x + radius, center.y})
+      .CubicTo({center.x + radius, center.y + control}, {center.x + control, center.y + radius},
+               {center.x, center.y + radius})
+      .CubicTo({center.x - control, center.y + radius}, {center.x - radius, center.y + control},
+               {center.x - radius, center.y})
+      .CubicTo({center.x - radius, center.y - control}, {center.x - control, center.y - radius},
+               {center.x, center.y - radius})
+      .CubicTo({center.x + control, center.y - radius}, {center.x + radius, center.y - control},
+               {center.x + radius, center.y})
+      .Close();
+  return FromPath(std::move(path));
+}
+
+ClipShape ClipShape::FromPath(Path path, PathFillRule fill_rule) {
+  if (fill_rule != PathFillRule::NonZero && fill_rule != PathFillRule::EvenOdd) {
+    throw std::invalid_argument("HuxerUI clip fill rule is invalid");
+  }
+  ValidateBounds(path.Bounds());
+  ClipShape shape;
+  shape.data_ = PathData{std::move(path), fill_rule};
+  return shape;
+}
+
+namespace detail {
+
+bool InternalAccess::ClipContains(const ClipShape& shape, Point point) {
+  ValidatePoint(point);
+  return std::visit([point](const auto& value) {
+    if constexpr (std::same_as<std::decay_t<decltype(value)>, ClipShape::RectangleData>) {
+      return !value.bounds.IsEmpty() && RoundedRectContains(value.bounds, CornerRadii{value.radius}, point);
+    } else {
+      return value.path.Contains(point, value.fill_rule);
+    }
+  }, shape.data_);
+}
+
+Rect InternalAccess::ClipBounds(const ClipShape& shape) noexcept {
+  return std::visit([](const auto& value) {
+    if constexpr (std::same_as<std::decay_t<decltype(value)>, ClipShape::RectangleData>) {
+      return value.bounds;
+    } else {
+      return value.path.Bounds();
+    }
+  }, shape.data_);
+}
+
+} // namespace detail
 
 } // namespace huxerui

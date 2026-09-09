@@ -227,16 +227,9 @@ struct LayerEntry {
   std::shared_ptr<LayerTransitionState> transition;
 };
 
-enum class SceneTransitionKind {
-  Fade,
-  CircularReveal,
-};
-
 struct SceneTransitionRequest {
-  SceneTransitionKind kind = SceneTransitionKind::Fade;
-  AnimationSpec animation = TweenSpec{};
-  double delay = 0.0;
-  Point origin;
+  TransitionSpec transition;
+  std::optional<Point> origin;
 };
 
 class InteractionOriginScope final {
@@ -294,10 +287,15 @@ private:
     RenderNode composite;
     RenderNode old_wrapper;
     RenderNode new_wrapper;
+    FragmentRenderGroup old_fragments;
+    FragmentRenderGroup new_fragments;
+    std::optional<TransitionContext> painted_context;
   };
 
+  void ClearActive() noexcept;
   Runtime::State* runtime_state_;
   std::optional<ActiveTransition> active_;
+  bool mutating_ = false;
 };
 
 class VirtualMeasureSession {

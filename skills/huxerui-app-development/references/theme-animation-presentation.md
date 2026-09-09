@@ -112,18 +112,29 @@ Use `AnimateTo` with `Opacity`, `Offset`, `Scale`, `Rotation`, or `Transition` f
 
 Honor `FrameInfo::reduced_motion` or the resolved environment motion policy. Do not drive animation through state writes on every frame.
 
-`UseSceneTransition()` provides fade and circular-reveal transitions around an application mutation. Attach its anchor modifier and use `Run` when a circular reveal belongs to stable View geometry, or use `RunAt` with an explicit window-logical point.
+`UseSceneTransition()` accepts TransitionSpec for built-in or custom effects around an application mutation. Attach its anchor modifier and use `Run` when a circular reveal belongs to stable View geometry, or use `RunAt` with an explicit window-logical point.
 Inside a synchronous Click, component event, Menu action, keyboard activation, or accessibility activation, `RunFromCurrentInteraction` uses the exact pointer position or the activated View center without changing semantic event signatures:
 
 ```cpp
 Button("Next").OnClick([transition, page] {
-  transition.RunFromCurrentInteraction(CircularRevealSceneTransition{}, [page] { page += 1; });
+  transition.RunFromCurrentInteraction(
+      TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}},
+      [page] { page += 1; }
+  );
 });
 ```
 
 The implicit origin ends when the interaction callback returns and the method throws `std::logic_error` outside that scope.
 Do not store a global last-pointer position, manually record raw Pointer Down, or add Point to OnClick/OnChanged solely to start a transition; asynchronous work retains geometry and calls `RunAt` explicitly.
 Reduced motion is handled by the resolved handle; still keep the mutation correct without the visual effect.
+
+Custom effects are copied, equality-comparable values with a pure `TransitionFrame Evaluate(const TransitionContext&) const` method.
+TransitionSample contains transform, opacity, and optional ClipShape; use ClipShape factories instead of constructing render commands.
+Attach PageTransition{push, pop, replace} to a NavigationStack page root with With().
+It overrides the complete NavigationStyle::motion policy, and an empty PageTransition selects immediate motion.
+Push selects the incoming page, Pop selects the departing page, and Replace selects the incoming page.
+Use TransitionSpec::Reversed() to exchange both samples and drawing order; active descriptions remain frozen during an operation.
+Shared-element markers remain planned and must not be used as current SDK API.
 
 ## Presentation services
 

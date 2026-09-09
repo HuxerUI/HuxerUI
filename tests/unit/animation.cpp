@@ -3,6 +3,7 @@
 #include <limits>
 
 #include <huxerui/animation.h>
+#include <huxerui/paint.h>
 
 namespace huxerui::test {
 
@@ -155,6 +156,166 @@ TEST_CASE("AnimationTimingRejectsInvalidConfiguration") {
       ),
       std::invalid_argument
   );
+}
+
+namespace {
+struct SampleEffect {
+  float distance = 10.0F;
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    TransitionFrame frame;
+    frame.outgoing.opacity = 1.0F - context.progress;
+    frame.incoming.opacity = context.progress;
+    frame.incoming.transform.translate_x = distance * (1.0F - context.progress);
+    frame.incoming.clip = ClipShape::Rectangle(context.bounds);
+    return frame;
+  }
+  bool operator==(const SampleEffect&) const = default;
+};
+}
+
+TEST_CASE("TransitionSpecCopiesAndComparesEffectValuesAndTiming") {
+  const TransitionSpec first{SampleEffect{12.0F}, TweenSpec{0.5}, 0.1};
+  REQUIRE(first == TransitionSpec{SampleEffect{12.0F}, TweenSpec{0.5}, 0.1});
+  REQUIRE_FALSE(first == TransitionSpec{SampleEffect{13.0F}, TweenSpec{0.5}, 0.1});
+  REQUIRE_FALSE(first == TransitionSpec{FadeTransition{}, TweenSpec{0.5}, 0.1});
+  REQUIRE(first == TransitionSpec{first});
+  REQUIRE(first == first.Reversed().Reversed());
+  REQUIRE_FALSE(first == first.Reversed());
+  REQUIRE(std::holds_alternative<SnapSpec>(TransitionSpec{}.Animation()));
+  REQUIRE(TransitionSpec{}.Delay() == 0.0);
+  REQUIRE(TransitionSpec{}.IsImmediate());
+  REQUIRE(TransitionSpec{FadeTransition{}, TweenSpec{0.0}}.IsImmediate());
+  REQUIRE_FALSE(TransitionSpec{FadeTransition{}, SnapSpec{}, 0.1}.IsImmediate());
+  REQUIRE_FALSE(TransitionSpec{FadeTransition{}, TweenSpec{0.0}, 0.1}.IsImmediate());
+  REQUIRE_FALSE(first.IsImmediate());
+  REQUIRE_FALSE(TransitionSpec{FadeTransition{}, SpringSpec{}}.IsImmediate());
+  REQUIRE_THROWS_AS((TransitionSpec{SampleEffect{}, SpringSpec{.damping_ratio = 0.0F}}), std::invalid_argument);
+  REQUIRE_THROWS_AS((TransitionSpec{SampleEffect{}, TweenSpec{-1.0}}), std::invalid_argument);
+  REQUIRE_THROWS_AS((TransitionSpec{SampleEffect{}, TweenSpec{}, -1.0}), std::invalid_argument);
+}
+
+TEST_CASE("TransitionReversalSwapsBothSidesAndDrawingOrder") {
+  const TransitionSpec transition{SampleEffect{}, TweenSpec{1.0}, 0.2};
+  const TransitionContext context{0.25F, {0.0F, 0.0F, 100.0F, 80.0F}, std::nullopt};
+  const TransitionFrame reversed = transition.Reversed().Evaluate(context);
+  const TransitionFrame forward = transition.Evaluate({0.75F, context.bounds, std::nullopt});
+  REQUIRE(reversed.outgoing == forward.incoming);
+  REQUIRE(reversed.incoming == forward.outgoing);
+  REQUIRE(reversed.order == TransitionOrder::OutgoingAbove);
+  const auto faster = transition.Reversed(TweenSpec{0.3});
+  REQUIRE(std::get<TweenSpec>(faster.Animation()).duration == 0.3);
+  REQUIRE(faster.Delay() == 0.2);
+}
+
+TEST_CASE("TransitionSamplesPreserveFiniteOvershootAndRejectInvalidOutput") {
+  const TransitionSpec transition{SampleEffect{}, SpringSpec{}};
+  const TransitionContext context{1.2F, {0.0F, 0.0F, 100.0F, 80.0F}, std::nullopt};
+  const auto frame = transition.Evaluate(context);
+  REQUIRE(frame.outgoing.opacity == 0.0F);
+  REQUIRE(frame.incoming.opacity == 1.0F);
+  REQUIRE(frame.incoming.transform.translate_x == Catch::Approx(-2.0F));
+  const TransitionSpec invalid{SampleEffect{std::numeric_limits<float>::infinity()}, TweenSpec{}};
+  REQUIRE_THROWS_AS(invalid.Evaluate(context), std::invalid_argument);
+  REQUIRE_THROWS_AS(transition.Evaluate({std::numeric_limits<float>::quiet_NaN(), {}, {}}), std::invalid_argument);
+}
+
+TEST_CASE("BuiltInTransitionEffectsJoinTheirStableEndpoints") {
+  const Rect bounds{10.0F, 20.0F, 100.0F, 80.0F};
+  for (const TransitionSpec& transition : {
+      TransitionSpec{FadeTransition{}, TweenSpec{}}, TransitionSpec{SlideTransition{}, TweenSpec{}},
+      TransitionSpec{ScaleFadeTransition{}, TweenSpec{}},
+  }) {
+    const auto start = transition.Evaluate({0.0F, bounds, {}});
+    const auto end = transition.Evaluate({1.0F, bounds, {}});
+    REQUIRE(start.outgoing.transform.IsIdentity());
+    REQUIRE(start.outgoing.opacity == 1.0F);
+    REQUIRE(end.incoming.transform.IsIdentity());
+    REQUIRE(end.incoming.opacity == 1.0F);
+  }
+  const TransitionSpec reveal{CircularRevealTransition{}, TweenSpec{}};
+  REQUIRE_THROWS_AS(reveal.Evaluate({0.0F, bounds, {}}), std::logic_error);
+  REQUIRE(reveal.Evaluate({0.0F, bounds, Point{30.0F, 40.0F}}).incoming.clip ==
+          ClipShape::Circle({30.0F, 40.0F}, 0.0F));
+}
+
+TEST_CASE("ClipShapeValidatesGeometryAndOwnsPathValues") {
+  REQUIRE(ClipShape::Rectangle({0.0F, 0.0F, 20.0F, 30.0F}) ==
+          ClipShape::RoundedRectangle({0.0F, 0.0F, 20.0F, 30.0F}, 0.0F));
+  REQUIRE(ClipShape::RoundedRectangle({0.0F, 0.0F, 20.0F, 30.0F}, 30.0F) ==
+          ClipShape::RoundedRectangle({0.0F, 0.0F, 20.0F, 30.0F}, 10.0F));
+  REQUIRE_THROWS_AS(ClipShape::Rectangle({0.0F, 0.0F, -1.0F, 20.0F}), std::invalid_argument);
+  REQUIRE_THROWS_AS(ClipShape::Circle({}, -1.0F), std::invalid_argument);
+  REQUIRE_THROWS_AS(ClipShape::Circle({std::numeric_limits<float>::infinity(), 0.0F}, 1.0F), std::invalid_argument);
+  Path path = Path::RoundedRect({0.0F, 0.0F, 20.0F, 20.0F}, CornerRadii{2.0F});
+  const auto clip = ClipShape::FromPath(path);
+  const auto copy = clip;
+  REQUIRE_FALSE(clip == ClipShape::FromPath(path, PathFillRule::EvenOdd));
+  path.Reset();
+  REQUIRE(clip == copy);
+  REQUIRE_FALSE(clip == ClipShape::FromPath(path));
+  REQUIRE_FALSE(std::optional<ClipShape>{ClipShape{}} == std::nullopt);
+}
+
+namespace {
+
+struct FragmentEffect {
+  float opacity = 1.0F;
+  float offset = 20.0F;
+
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    TransitionFrame frame;
+    frame.outgoing.fragments = {
+      TransitionFragment{
+          .source_clip = ClipShape::Rectangle(context.bounds),
+          .transform = Transform2D{1.0F, 0.0F, 0.0F, 1.0F, offset * context.progress, 0.0F},
+          .opacity = opacity,
+      },
+    };
+    return frame;
+  }
+
+  void Paint(PaintContext& paint, const TransitionContext& context) const {
+    paint.DrawRect({context.progress * 100.0F, 0.0F, 5.0F, 5.0F}, Color::White());
+  }
+
+  bool operator==(const FragmentEffect&) const = default;
+};
+
+}
+
+TEST_CASE("TransitionFragmentsAndDecorationsShareReversedProgress") {
+  const TransitionSpec effect{FragmentEffect{}, TweenSpec{1.0, Easing::Linear}};
+  const TransitionContext context{0.25F, {0.0F, 0.0F, 100.0F, 80.0F}};
+  const auto reversed = effect.Reversed();
+  const auto frame = reversed.Evaluate(context);
+  REQUIRE(frame.outgoing.fragments.empty());
+  REQUIRE(frame.incoming.fragments.size() == 1);
+  REQUIRE(frame.incoming.fragments.front().transform.translate_x == Catch::Approx(15.0F));
+  REQUIRE(frame.incoming == effect.Evaluate({0.75F, context.bounds}).outgoing);
+  PaintSequence sequence;
+  PaintContext paint{sequence, context.bounds};
+  reversed.Paint(paint, context);
+  paint.Finish();
+  REQUIRE(sequence.Commands().size() == 1);
+  REQUIRE(std::get<DrawRectCommand>(sequence.Commands().front()).rect.x == Catch::Approx(75.0F));
+  REQUIRE(effect == reversed.Reversed());
+}
+
+TEST_CASE("TransitionFragmentsValidateEveryVisualAndKeepOptionalPaintEmpty") {
+  const TransitionContext context{1.2F, {0.0F, 0.0F, 100.0F, 80.0F}};
+  const TransitionSpec clamped{FragmentEffect{2.0F}, TweenSpec{1.0}};
+  const auto frame = clamped.Evaluate(context);
+  REQUIRE(frame.outgoing.fragments.front().opacity == 1.0F);
+  REQUIRE(frame.outgoing.fragments.front().transform.translate_x == Catch::Approx(24.0F));
+  REQUIRE_THROWS_AS((TransitionSpec{FragmentEffect{std::numeric_limits<float>::quiet_NaN()}, TweenSpec{1.0}}
+      .Evaluate(context)), std::invalid_argument);
+  REQUIRE_THROWS_AS((TransitionSpec{FragmentEffect{1.0F, std::numeric_limits<float>::infinity()}, TweenSpec{1.0}}
+      .Evaluate(context)), std::invalid_argument);
+  PaintSequence sequence;
+  PaintContext paint{sequence, context.bounds};
+  TransitionSpec{FadeTransition{}, TweenSpec{1.0}}.Paint(paint, context);
+  paint.Finish();
+  REQUIRE(sequence.Commands().empty());
 }
 
 } // namespace huxerui::test

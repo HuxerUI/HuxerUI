@@ -14,6 +14,7 @@
 #include <huxerui/modifier.h>
 #include <huxerui/paint.h>
 #include <huxerui/resource.h>
+#include <huxerui/render_scene.h>
 #include <huxerui/scroll.h>
 #include <huxerui/text.h>
 #include <huxerui/vector.h>
@@ -22,6 +23,7 @@
 namespace huxerui {
 class NavigationItem;
 class Runtime;
+class TransitionSpec;
 class View;
 }
 
@@ -34,6 +36,7 @@ struct VirtualCollectionSemantics;
 // Public headers only declare this friend. Implementations stay with the subsystem owning each operation.
 // Existing ownership, internal cooperation, and direct field sharing do not need a forwarding function here.
 struct InternalAccess {
+  static bool HasTransitionPaint(const TransitionSpec& transition) noexcept;
 #pragma region View
 
   static const std::optional<std::variant<std::int64_t, std::uint64_t, std::string>>&
@@ -237,6 +240,14 @@ struct InternalAccess {
 #pragma region Path
 
   [[nodiscard]] static std::span<const PathElement> Elements(const Path& path) noexcept;
+
+#pragma endregion
+
+#pragma region ClipShape
+
+  static bool ClipContains(const ClipShape& shape, Point point);
+  static Rect ClipBounds(const ClipShape& shape) noexcept;
+  static RenderClip RenderClipShape(const ClipShape& shape);
 
 #pragma endregion
 };

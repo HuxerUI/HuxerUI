@@ -976,14 +976,18 @@ TEST_CASE("BuiltInThemesProvideNavigationMotion") {
   const huxerui::NavigationStyle material = ThemeDefinitionValue<huxerui::NavigationStyle>(MaterialThemeDefinition());
   REQUIRE(flat.motion.has_value());
   REQUIRE(material.motion.has_value());
-  REQUIRE(material.motion->entering_scale == 1.0F);
-  REQUIRE(material.motion->covered_scale == 1.0F);
-  REQUIRE(material.motion->entering_opacity == 1.0F);
-  REQUIRE(material.motion->covered_opacity == 1.0F);
-  REQUIRE(flat.motion->covered_offset_fraction.x == -1.0F);
-  REQUIRE(material.motion->entering_offset_fraction.x == 1.0F);
-  REQUIRE(material.motion->covered_offset_fraction.x == -0.2F);
-  REQUIRE(std::get<TweenSpec>(material.motion->pop).duration < std::get<TweenSpec>(material.motion->push).duration);
+  const TransitionContext halfway{0.5F, {0.0F, 0.0F, 100.0F, 100.0F}, std::nullopt};
+  const auto flat_frame = flat.motion->push.Evaluate(halfway);
+  const auto material_frame = material.motion->push.Evaluate(halfway);
+  REQUIRE(material_frame.incoming.transform.m11 == 1.0F);
+  REQUIRE(material_frame.outgoing.transform.m11 == 1.0F);
+  REQUIRE(material_frame.incoming.opacity == 1.0F);
+  REQUIRE(material_frame.outgoing.opacity == 1.0F);
+  REQUIRE(flat_frame.outgoing.transform.translate_x == -50.0F);
+  REQUIRE(material_frame.incoming.transform.translate_x == 50.0F);
+  REQUIRE(material_frame.outgoing.transform.translate_x == -10.0F);
+  REQUIRE(std::get<TweenSpec>(material.motion->pop.Animation()).duration <
+          std::get<TweenSpec>(material.motion->push.Animation()).duration);
 }
 
 TEST_CASE("NavigationControllerValidatesFactoriesAndDisconnects") {
@@ -1022,6 +1026,501 @@ TEST_CASE("NavigationFactoriesBindTypedArguments") {
   navigation->Replace(ParameterizedPage, std::string{"Replaced"}, 31);
   SettleNavigation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "Replaced 31"));
+}
+
+namespace {
+State<PageTransition> custom_page_policy;
+
+View CustomPolicyPage() {
+  auto policy = UseState(PageTransition{
+      TransitionSpec{SlideTransition{.incoming_offset = {0.5F, 0.0F}}, TweenSpec{1.0, Easing::Linear}},
+      TransitionSpec{}, TransitionSpec{},
+  });
+  custom_page_policy = policy;
+  return Text("Custom page").With(policy.Get());
+}
+
+struct PageClipEffect {
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    auto result = FadeTransition{}.Evaluate(context);
+    result.incoming.clip = ClipShape::Rectangle({0.0F, 0.0F, 20.0F, context.bounds.height});
+    result.order = TransitionOrder::OutgoingAbove;
+    return result;
+  }
+  bool operator==(const PageClipEffect&) const = default;
+};
+}
+
+TEST_CASE("PageTransitionOverridesThemeAndFreezesTheActiveDescription") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  navigation->Push(CustomPolicyPage);
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.25);
+  auto bounds = FindPresentedTextRect(runtime.BuildFrame(), "Custom page");
+  REQUIRE(bounds.has_value());
+  REQUIRE(bounds->x == Catch::Approx(120.0F));
+  custom_page_policy = PageTransition{};
+  bounds = FindPresentedTextRect(runtime.BuildFrame(), "Custom page");
+  REQUIRE(bounds->x == Catch::Approx(120.0F));
+  platform.AdvanceTime(0.25);
+  bounds = FindPresentedTextRect(runtime.BuildFrame(), "Custom page");
+  REQUIRE(bounds->x == Catch::Approx(80.0F));
+  SettleNavigation(platform, runtime);
+  REQUIRE(navigation->Pop());
+  runtime.BuildFrame();
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Custom page"));
+}
+
+TEST_CASE("PageTransitionRecognizesTransparentRootsAndCompleteImmediateOverrides") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  navigation->Push([] {
+    return FlatTheme {Scope([] {
+      return Text("Immediate page").With(
+          PageTransition{TransitionSpec{SlideTransition{}, TweenSpec{10.0}}}, PageTransition{}
+      );
+    })};
+  });
+  runtime.BuildFrame();
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Immediate page"));
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Root page"));
+  navigation->Replace([] { return Text("Replacement").With(PageTransition{}); });
+  runtime.BuildFrame();
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Replacement"));
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Immediate page"));
+}
+
+TEST_CASE("PageTransitionRejectsDeclarationsOutsideThePageRoot") {
+  TestPlatform platform;
+  Runtime standalone([] { return Text("Outside").With(PageTransition{}); }, platform);
+  standalone.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  REQUIRE_THROWS_AS(standalone.BuildFrame(), std::invalid_argument);
+  Runtime nested([] {
+    return NavigationStack([] {
+      return Column {Text("Nested").With(PageTransition{})};
+    });
+  }, platform);
+  nested.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  REQUIRE_THROWS_AS(nested.BuildFrame(), std::invalid_argument);
+}
+
+TEST_CASE("PageTransitionBlocksPointerInputUntilItCompletes") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  int clicks = 0;
+  navigation->Push([&] {
+    return Column {
+      Button("Clipped").OnClick([&] { ++clicks; }).With(Frame{100.0F, 40.0F}),
+    }.With(PageTransition{TransitionSpec{PageClipEffect{}, TweenSpec{1.0, Easing::Linear}}});
+  });
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.5);
+  runtime.BuildFrame();
+  ClickAt(runtime, {50.0F, 20.0F});
+  REQUIRE(clicks == 0);
+  ClickAt(runtime, {10.0F, 20.0F});
+  REQUIRE(clicks == 0);
+  ClickAt(runtime, {-10.0F, 20.0F});
+  REQUIRE(clicks == 0);
+  SettleNavigation(platform, runtime);
+  ClickAt(runtime, {50.0F, 20.0F});
+  REQUIRE(clicks == 1);
+}
+
+TEST_CASE("PageTransitionPredictiveBackSeeksAndSettlesWithoutItsStartDelay") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  navigation->Push([] {
+    const TransitionSpec pop{SlideTransition{}, TweenSpec{1.0, Easing::Linear}, 5.0};
+    return Text("Gesture page").With(PageTransition{.pop = pop.Reversed()});
+  });
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.25F}));
+  auto bounds = FindPresentedTextRect(runtime.BuildFrame(), "Gesture page");
+  REQUIRE(bounds.has_value());
+  REQUIRE(bounds->x == Catch::Approx(80.0F));
+  REQUIRE(runtime.HandleBack({BackPhase::Cancel, 0.0F}));
+  SettleNavigation(platform, runtime);
+  REQUIRE(FindPresentedTextRect(runtime.BuildFrame(), "Gesture page")->x == Catch::Approx(0.0F));
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  runtime.BuildFrame();
+  REQUIRE(runtime.HandleBack({BackPhase::Commit, 1.0F}));
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.25);
+  REQUIRE(FindPresentedTextRect(runtime.BuildFrame(), "Gesture page")->x == Catch::Approx(80.0F));
+}
+
+namespace {
+
+struct SplitPageEffect {
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    TransitionFrame frame;
+    frame.outgoing.opacity = 0.0F;
+    frame.incoming.fragments = {
+      TransitionFragment{
+          .source_clip = ClipShape::Rectangle({0.0F, 0.0F, 50.0F, 80.0F}),
+          .transform = Transform2D{1.0F, 0.0F, 0.0F, 1.0F, context.progress * 100.0F, 0.0F},
+      },
+      TransitionFragment{
+          .source_clip = ClipShape::Rectangle({50.0F, 0.0F, 50.0F, 80.0F}),
+          .transform = Transform2D{1.0F, 0.0F, 0.0F, 1.0F, context.progress * 200.0F, 0.0F},
+      },
+    };
+    return frame;
+  }
+  void Paint(PaintContext& paint, const TransitionContext& context) const {
+    paint.DrawCircle({context.progress * 100.0F, 100.0F}, 3.0F, Color::Rgb(241, 3, 7));
+  }
+  bool operator==(const SplitPageEffect&) const = default;
+};
+
+std::optional<Point> PageDecoration(const FlattenedScene& scene) {
+  for (const auto& command : scene.Commands()) {
+    if (const auto* circle = std::get_if<DrawCircleCommand>(&command);
+        circle && circle->color == Color::Rgb(241, 3, 7)) { return circle->center; }
+  }
+  return std::nullopt;
+}
+
+}
+
+TEST_CASE("PageFragmentsBlockContentInputAndRetainOnlyOnePageState") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  int clicks = 0;
+  int compositions = 0;
+  navigation->Push([&] {
+    ++compositions;
+    return Column {
+      Button("Fragment button").OnClick([&] { ++clicks; }).With(Frame{100.0F, 40.0F}),
+    }.With(PageTransition{TransitionSpec{SplitPageEffect{}, TweenSpec{1.0, Easing::Linear}}});
+  });
+  runtime.BuildFrame();
+  const int initial_compositions = compositions;
+  platform.AdvanceTime(0.5);
+  const auto scene = runtime.BuildFrame();
+  REQUIRE(compositions == initial_compositions);
+  REQUIRE(PageDecoration(scene).has_value());
+  REQUIRE(PageDecoration(scene)->x == Catch::Approx(50.0F));
+  const auto* semantics = runtime.BuildCommit().semantic_frame.get();
+  REQUIRE(semantics != nullptr);
+  const auto button = std::find_if(semantics->nodes.begin(), semantics->nodes.end(), [](const SemanticNode& node) {
+    return node.label == "Fragment button" && node.role == SemanticRole::Button;
+  });
+  REQUIRE(button != semantics->nodes.end());
+  REQUIRE_FALSE(button->enabled);
+  REQUIRE(std::count_if(semantics->nodes.begin(), semantics->nodes.end(), [](const SemanticNode& node) {
+    return node.label == "Fragment button" && node.role == SemanticRole::Button;
+  }) == 1);
+  REQUIRE_FALSE(runtime.CoreRuntime().PerformSemanticAction(button->id, {.kind = SemanticActionKind::Activate}));
+  ClickAt(runtime, {25.0F, 20.0F});
+  ClickAt(runtime, {125.0F, 20.0F});
+  REQUIRE(clicks == 0);
+  ClickAt(runtime, {75.0F, 20.0F});
+  ClickAt(runtime, {175.0F, 20.0F});
+  REQUIRE(clicks == 0);
+  platform.AdvanceTime(1.0);
+  REQUIRE_FALSE(PageDecoration(runtime.BuildFrame()).has_value());
+  ClickAt(runtime, {25.0F, 20.0F});
+  REQUIRE(clicks == 1);
+}
+
+TEST_CASE("PageFragmentDecorationsFollowPredictiveBackAndClearAfterCancellation") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  navigation->Push([] {
+    const TransitionSpec effect{SplitPageEffect{}, TweenSpec{1.0, Easing::Linear}};
+    return Text("Fragment back").With(PageTransition{.pop = effect.Reversed()});
+  });
+  runtime.BuildFrame();
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.25F}));
+  const auto scene = runtime.BuildFrame();
+  REQUIRE(PageDecoration(scene).has_value());
+  REQUIRE(PageDecoration(scene)->x == Catch::Approx(75.0F));
+  REQUIRE(runtime.HandleBack({BackPhase::Cancel, 0.0F}));
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Fragment back"));
+  REQUIRE_FALSE(PageDecoration(runtime.BuildFrame()).has_value());
+}
+
+namespace {
+
+struct ManyFragmentPageEffect {
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    TransitionFrame frame;
+    frame.order = TransitionOrder::OutgoingAbove;
+    frame.outgoing.transform.translate_x = 30.0F;
+    frame.outgoing.clip = ClipShape::Rectangle({0.0F, 0.0F, 100.0F, context.bounds.height});
+    frame.incoming.transform.translate_x = 40.0F;
+    const TransitionFragment fragment{.source_clip = ClipShape::Rectangle(context.bounds)};
+    frame.incoming.fragments.assign(65, fragment);
+    frame.outgoing.fragments.assign(2, fragment);
+    return frame;
+  }
+  void Paint(PaintContext& paint, const TransitionContext& context) const {
+    SplitPageEffect{}.Paint(paint, context);
+  }
+  bool operator==(const ManyFragmentPageEffect&) const = default;
+};
+
+struct UndecoratedManyFragmentPageEffect {
+  TransitionFrame Evaluate(const TransitionContext& context) const { return ManyFragmentPageEffect{}.Evaluate(context); }
+  bool operator==(const UndecoratedManyFragmentPageEffect&) const = default;
+};
+
+struct InvisibleFragmentPageEffect {
+  TransitionFrame Evaluate(const TransitionContext& context) const {
+    TransitionFrame frame = SplitPageEffect{}.Evaluate(context);
+    for (auto& fragment : frame.incoming.fragments) { fragment.opacity = 0.0F; }
+    return frame;
+  }
+  bool operator==(const InvisibleFragmentPageEffect&) const = default;
+};
+
+std::size_t FragmentCacheCount(const detail::MountedNode& node) {
+  std::size_t count = node.fragment_render_group ? 1 : 0;
+  for (const auto& child : node.children) { count += FragmentCacheCount(*child); }
+  return count;
+}
+
+}
+
+TEST_CASE("PageFragmentsPreserveCustomMotionAndDecorationWhenPaintOutputGrows") {
+  const bool decorated = GENERATE(false, true);
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  State<int> command_count;
+  int recordings = 0;
+  navigation->Push([&] {
+    command_count = UseState(0);
+    const int count = command_count.Get();
+    const TweenSpec timing{1.0, Easing::Linear};
+    const TransitionSpec effect = decorated ? TransitionSpec{ManyFragmentPageEffect{}, timing}
+                                           : TransitionSpec{UndecoratedManyFragmentPageEffect{}, timing};
+    return Column {
+      Text("Fragment page"),
+      Canvas([&, count](PaintContext& paint, Size) {
+        ++recordings;
+        for (int index = 0; index < count; ++index) {
+          paint.DrawRect({0.0F, 0.0F, 1.0F, 1.0F}, Color::White());
+        }
+      }).With(Frame{100.0F, 40.0F}),
+    }.With(PageTransition{effect});
+  });
+  REQUIRE(PageDecoration(runtime.BuildFrame()).has_value() == decorated);
+  const int initial_recordings = recordings;
+  command_count = 2100;
+  platform.AdvanceTime(0.5);
+  const auto& scene = runtime.BuildFrame();
+  REQUIRE(PageDecoration(scene).has_value() == decorated);
+  REQUIRE(recordings == initial_recordings + 1);
+  REQUIRE(FindPresentedTextRect(scene, "Root page")->x == Catch::Approx(30.0F));
+  REQUIRE(FindPresentedTextRect(scene, "Fragment page")->x == Catch::Approx(40.0F));
+  REQUIRE(std::count_if(scene.Commands().begin(), scene.Commands().end(), [](const PaintCommand& command) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
+    return rect && rect->rect.width == 1.0F && rect->rect.height == 1.0F;
+  }) == 65 * 2100);
+  const auto* root = FindMountedText(*runtime.RootNode(), "Root page");
+  const auto* incoming = FindMountedText(*runtime.RootNode(), "Fragment page");
+  REQUIRE(root->presentation.resolved_opacity == Catch::Approx(1.0F));
+  REQUIRE(incoming->presentation.resolved_opacity == Catch::Approx(1.0F));
+  const auto& semantics = runtime.LastCommit().semantic_frame;
+  REQUIRE(semantics);
+  for (const auto* page_text : {root, incoming}) {
+    const auto semantic = std::find_if(semantics->nodes.begin(), semantics->nodes.end(), [&](const auto& node) {
+      return node.label == page_text->text.PlainText();
+    });
+    REQUIRE(semantic != semantics->nodes.end());
+    REQUIRE(semantic->bounds == page_text->PresentationBounds());
+    REQUIRE_FALSE(semantic->enabled);
+  }
+  command_count = 0;
+  platform.AdvanceTime(0.1);
+  REQUIRE(PageDecoration(runtime.BuildFrame()).has_value() == decorated);
+  REQUIRE(FindPresentedTextRect(runtime.BuildFrame(), "Fragment page")->x == Catch::Approx(40.0F));
+  SettleNavigation(platform, runtime);
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Root page"));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Fragment page"));
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 0);
+}
+
+TEST_CASE("PageFragmentsKeepPredictiveCancellationWithLargePaintOutput") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  State<int> command_count;
+  navigation->Push([&] {
+    command_count = UseState(0);
+    const int count = command_count.Get();
+    const TransitionSpec effect{ManyFragmentPageEffect{}, TweenSpec{1.0, Easing::Linear}};
+    return Column {
+      Text("Fragment back"),
+      Canvas([count](PaintContext& paint, Size) {
+        for (int index = 0; index < count; ++index) {
+          paint.DrawRect({0.0F, 0.0F, 1.0F, 1.0F}, Color::White());
+        }
+      }).With(Frame{100.0F, 40.0F}),
+    }.With(PageTransition{.pop = effect.Reversed()});
+  });
+  runtime.BuildFrame();
+  command_count = 2100;
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.25F}));
+  const auto& scene = runtime.BuildFrame();
+  REQUIRE(PageDecoration(scene).has_value());
+  REQUIRE(PageDecoration(scene)->x == Catch::Approx(75.0F));
+  REQUIRE(FindPresentedTextRect(scene, "Fragment back")->x == Catch::Approx(40.0F));
+  REQUIRE(FindMountedText(*runtime.RootNode(), "Fragment back")->presentation.resolved_opacity == Catch::Approx(1.0F));
+  const auto& semantics = runtime.LastCommit().semantic_frame;
+  REQUIRE(semantics);
+  const auto semantic = std::find_if(semantics->nodes.begin(), semantics->nodes.end(), [](const auto& node) {
+    return node.label == "Fragment back";
+  });
+  REQUIRE(semantic != semantics->nodes.end());
+  REQUIRE(semantic->bounds.x == Catch::Approx(40.0F));
+  REQUIRE_FALSE(semantic->enabled);
+  command_count = 0;
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.5F}));
+  REQUIRE(PageDecoration(runtime.BuildFrame())->x == Catch::Approx(50.0F));
+  REQUIRE(runtime.HandleBack({BackPhase::Cancel, 0.0F}));
+  SettleNavigation(platform, runtime);
+  REQUIRE(navigation->Depth() == 2);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Fragment back"));
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Root page"));
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 0);
+  REQUIRE(runtime.HandleBack({BackPhase::Begin, 0.0F}));
+  REQUIRE(runtime.HandleBack({BackPhase::Update, 0.25F}));
+  REQUIRE(PageDecoration(runtime.BuildFrame()).has_value());
+}
+
+TEST_CASE("PageFragmentNativeEligibilityIsResolvedBeforeGeometryAndPainting") {
+  const bool initially_native = GENERATE(false, true);
+  ResetNavigationTestState();
+  TestPlatform platform;
+  Runtime runtime(NavigationApp, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  State<bool> show_native;
+  navigation->Push([&] {
+    show_native = UseState(initially_native);
+    const TransitionSpec effect{ManyFragmentPageEffect{}, TweenSpec{1.0, Easing::Linear}};
+    return Column {
+      Text("Native fragment page"),
+      show_native.Get() ? huxerui::PlatformView("test/View").With(Frame{100.0F, 40.0F}) : View{},
+    }.With(PageTransition{effect});
+  });
+  REQUIRE(PageDecoration(runtime.BuildFrame()).has_value() == !initially_native);
+  show_native = true;
+  platform.AdvanceTime(0.5);
+  const auto& scene = runtime.BuildFrame();
+  REQUIRE_FALSE(PageDecoration(scene).has_value());
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 0);
+  REQUIRE(std::count_if(scene.Commands().begin(), scene.Commands().end(), [](const PaintCommand& command) {
+    return std::holds_alternative<PlacePlatformViewCommand>(command);
+  }) == 1);
+  const auto* outgoing = FindMountedText(*runtime.RootNode(), "Root page");
+  const auto* incoming = FindMountedText(*runtime.RootNode(), "Native fragment page");
+  REQUIRE(outgoing->PresentationBounds().x == Catch::Approx(0.0F));
+  REQUIRE(incoming->PresentationBounds().x == Catch::Approx(0.0F));
+  REQUIRE(outgoing->presentation.resolved_opacity == Catch::Approx(0.5F));
+  REQUIRE(incoming->presentation.resolved_opacity == Catch::Approx(0.5F));
+  const auto& semantics = runtime.LastCommit().semantic_frame;
+  REQUIRE(semantics);
+  for (const auto* text : {outgoing, incoming}) {
+    const auto semantic = std::find_if(semantics->nodes.begin(), semantics->nodes.end(), [&](const auto& node) {
+      return node.label == text->text.PlainText();
+    });
+    REQUIRE(semantic != semantics->nodes.end());
+    REQUIRE(semantic->bounds == text->PresentationBounds());
+    REQUIRE_FALSE(semantic->enabled);
+  }
+  show_native = false;
+  platform.AdvanceTime(0.1);
+  REQUIRE_FALSE(PageDecoration(runtime.BuildFrame()).has_value());
+  SettleNavigation(platform, runtime);
+  REQUIRE(FindPresentedTextRect(runtime.BuildFrame(), "Native fragment page")->x == Catch::Approx(0.0F));
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Root page"));
+}
+
+TEST_CASE("PageFragmentsReleaseMountedCachesWhenTheStackIsRemoved") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  static State<bool> show_stack;
+  Runtime runtime([]() -> View {
+    show_stack = UseState(true);
+    return show_stack.Get() ? Scope(NavigationApp) : View{Text("Stack removed")};
+  }, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  navigation->Push([] {
+    return Text("Fragment page").With(PageTransition{TransitionSpec{SplitPageEffect{}, TweenSpec{1.0}}});
+  });
+  REQUIRE(PageDecoration(runtime.BuildFrame()).has_value());
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 1);
+  show_stack = false;
+  const auto& scene = runtime.BuildFrame();
+  REQUIRE(ContainsText(scene, "Stack removed"));
+  REQUIRE_FALSE(PageDecoration(scene).has_value());
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 0);
+}
+
+TEST_CASE("PageFragmentsReleaseCachesWhenAnInvisibleAncestorStopsParticipatingInLayout") {
+  ResetNavigationTestState();
+  TestPlatform platform;
+  static State<std::size_t> selected;
+  Runtime runtime([]() -> View {
+    selected = UseState<std::size_t>(0);
+    return IndexedPages({
+      Stack {
+        Scope(NavigationApp),
+      },
+      Text("Other page"),
+    }, selected);
+  }, platform);
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  navigation->Push([] {
+    return Text("Invisible fragment page").With(
+        PageTransition{TransitionSpec{InvisibleFragmentPageEffect{}, TweenSpec{1.0}}});
+  });
+  runtime.BuildRenderFrame();
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 1);
+  selected = 1;
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Other page"));
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 0);
+  selected = 0;
+  runtime.BuildFrame();
+  platform.AdvanceTime(1.0);
+  SettleNavigation(platform, runtime);
+  REQUIRE(ContainsText(runtime.BuildFrame(), "Invisible fragment page"));
+  REQUIRE(FragmentCacheCount(*runtime.RootNode()) == 0);
 }
 
 } // namespace huxerui::test

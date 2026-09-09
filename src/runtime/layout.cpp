@@ -179,6 +179,20 @@ enum class PointerRoutePurpose {
   Hover,
 };
 
+bool AllowsChildHit(const MountedNode& node, Point local_position) {
+  if (IsScrollContainer(node) && !node.ContentBounds().Contains(local_position)) {
+    return false;
+  }
+  if (node.properties.clip_children &&
+      !RoundedRectContains(node.bounds, node.properties.corner_radii, local_position)) {
+    return false;
+  }
+  return std::all_of(
+      node.presentation.children_clips.begin(), node.presentation.children_clips.end(),
+      [local_position](const ClipShape& shape) { return InternalAccess::ClipContains(shape, local_position); }
+  );
+}
+
 bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<MountedNode*>& route,
                            PointerRoutePurpose purpose) {
   if (!node.participates_in_layout || !node.pointer_events_enabled) {
@@ -191,14 +205,9 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
 
   route.push_back(&node);
   const bool within_node = node.bounds.Contains(*local_position);
-  const Rect content = node.ContentBounds();
-  const bool within_scroll_viewport = !IsScrollContainer(node) || content.Contains(*local_position);
-  const bool within_child_clip =
-      !node.properties.clip_children || RoundedRectContains(node.bounds, node.properties.corner_radii, *local_position);
-  const bool can_hit_children = within_scroll_viewport && within_child_clip;
-  if (can_hit_children) {
-    for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-      if (BuildPointerRouteImpl(**child, position, route, purpose)) {
+  if (AllowsChildHit(node, *local_position)) {
+    for (std::size_t index = node.children.size(); index > 0; --index) {
+      if (BuildPointerRouteImpl(ChildInPaintOrder(node, index - 1), position, route, purpose)) {
         return true;
       }
     }
@@ -232,13 +241,9 @@ WindowHitTarget HitTestWindowTarget(MountedNode& node, Point position) {
   }
 
   const bool within_node = node.bounds.Contains(*local_position);
-  const Rect content = node.ContentBounds();
-  const bool within_scroll_viewport = !IsScrollContainer(node) || content.Contains(*local_position);
-  const bool within_child_clip =
-      !node.properties.clip_children || RoundedRectContains(node.bounds, node.properties.corner_radii, *local_position);
-  if (within_scroll_viewport && within_child_clip) {
-    for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-      const WindowHitTarget target = HitTestWindowTarget(**child, position);
+  if (AllowsChildHit(node, *local_position)) {
+    for (std::size_t index = node.children.size(); index > 0; --index) {
+      const WindowHitTarget target = HitTestWindowTarget(ChildInPaintOrder(node, index - 1), position);
       if (target != WindowHitTarget::None) {
         return target;
       }

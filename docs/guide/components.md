@@ -510,6 +510,7 @@ They may include typed parameters and can be encoded for Web URL history or appl
 Nested stacks use their nearest controller.
 Capture or provide the intended root controller when an operation must replace a higher-level flow.
 
+Attach PageTransition to a page root to customize Push, Pop, and Replace effects; see [Page transitions](themes-and-presentation.md#page-transitions) for configuration and theme fallback.
 See [Navigation Design](../design/navigation.md) for controller, transition, Back, URL, and activation contracts.
 
 ## Gestures

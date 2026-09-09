@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "runtime_internal.h"
+#include "internal_access.h"
 #include "resources/resource_internal.h"
 #include "runtime_text_internal.h"
 #include "application/window_internal.h"
@@ -259,6 +260,9 @@ ScrollMetrics MountedScrollMetrics(const detail::MountedNode& node) {
 }
 
 Rect DescendantSemanticClip(const detail::MountedNode& node, Rect inherited) {
+  for (const ClipShape& shape : node.presentation.children_clips) {
+    inherited = inherited.Intersection(node.LocalToWindowBounds(detail::InternalAccess::ClipBounds(shape)));
+  }
   if (node.properties.clip_children) {
     inherited = inherited.Intersection(node.PresentationBounds());
   }
@@ -818,8 +822,8 @@ void detail::SemanticTree::BuildSemantics() {
       if (!node.interaction.enabled || layer_is_exiting(node)) {
         return nullptr;
       }
-      for (auto child = node.children.rbegin(); child != node.children.rend(); ++child) {
-        if (detail::MountedNode* trap = self(self, **child)) {
+      for (std::size_t index = node.children.size(); index > 0; --index) {
+        if (detail::MountedNode* trap = self(self, detail::ChildInPaintOrder(node, index - 1))) {
           return trap;
         }
       }

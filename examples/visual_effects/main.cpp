@@ -148,7 +148,7 @@ View SpotlightPreview(State<bool> active, State<int> activation_count, SceneTran
     )
         .OnClick([scene, active, activation_count] {
           scene.RunFromCurrentInteraction(
-              CircularRevealSceneTransition{.animation = TweenSpec{0.46, Easing::EaseInOut}},
+              TransitionSpec{CircularRevealTransition{}, TweenSpec{0.46, Easing::EaseInOut}},
               [active, activation_count] {
                 active = !active.Get();
                 activation_count += 1;
