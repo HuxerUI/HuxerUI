@@ -259,7 +259,8 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   }
   ios->UpdateProjectIntegration(context);
   for (const auto& file : unchanged_files) {
-    REQUIRE(std::filesystem::last_write_time(file) == previous_time);
+    // Keep Catch2 from formatting filesystem clocks with a non-streamable representation.
+    REQUIRE((std::filesystem::last_write_time(file) == previous_time));
   }
 }
 
@@ -299,11 +300,11 @@ TEST_CASE("HuxerUICliPreservesIosLocalSettings") {
   huxerui::cli::PlatformCommandContext context{temporary.Path(), huxerui_home, {}, {}, "debug", {}};
   ios->UpdateProjectIntegration(context);
   REQUIRE(Read(configuration) == original);
-  REQUIRE(std::filesystem::last_write_time(configuration) == timestamp);
+  REQUIRE((std::filesystem::last_write_time(configuration) == timestamp));
   context.huxerui_home = HUXERUI_TEST_SOURCE_DIRECTORY;
   ios->UpdateProjectIntegration(context);
   REQUIRE(Read(configuration) == original);
-  REQUIRE(std::filesystem::last_write_time(configuration) == timestamp);
+  REQUIRE((std::filesystem::last_write_time(configuration) == timestamp));
 }
 
 TEST_CASE("HuxerUICliParsesIosDeviceStates") {

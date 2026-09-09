@@ -27,6 +27,9 @@ if (NOT CREATE_RESULT EQUAL 0)
     message(FATAL_ERROR "Generated library creation failed:\n${CREATE_OUTPUT}${CREATE_ERROR}")
 endif ()
 
+# Library discovery resolves aliases such as Windows short paths before exporting sourceRoot.
+file(REAL_PATH "${LIBRARY_SOURCE}" EXPECTED_LIBRARY_SOURCE)
+
 set(LIBRARY_GRAPH "${PREVIEW_SOURCE}/.huxerui/generated/libraries.json")
 set(GRAPH_SDK "${TEST_ROOT}/graph-sdk")
 file(MAKE_DIRECTORY "${GRAPH_SDK}/lib/cmake/HuxerUI")
@@ -77,8 +80,11 @@ foreach (GRAPH_HOME IN ITEMS "${SOURCE_DIRECTORY}" "${GRAPH_SDK}")
         file(READ "${LIBRARY_GRAPH}" GRAPH_CONTENT)
         string(JSON GRAPH_TARGET GET "${GRAPH_CONTENT}" libraries 0 target)
         string(JSON GRAPH_SOURCE GET "${GRAPH_CONTENT}" libraries 0 sourceRoot)
-        if (NOT GRAPH_TARGET STREQUAL "HuxerUI::Camera" OR NOT GRAPH_SOURCE STREQUAL "${LIBRARY_SOURCE}")
-            message(FATAL_ERROR "Generated library graph did not preserve the public target and source root")
+        if (NOT GRAPH_TARGET STREQUAL "HuxerUI::Camera" OR NOT GRAPH_SOURCE STREQUAL "${EXPECTED_LIBRARY_SOURCE}")
+            message(FATAL_ERROR
+                    "Generated library graph did not preserve the public target and source root:\n"
+                    "Expected HuxerUI::Camera at ${EXPECTED_LIBRARY_SOURCE}\n"
+                    "Received ${GRAPH_TARGET} at ${GRAPH_SOURCE}")
         endif ()
         file(TIMESTAMP "${LIBRARY_GRAPH}" GRAPH_TIMESTAMP "%s.%f")
         if (GRAPH_PASS EQUAL 1)

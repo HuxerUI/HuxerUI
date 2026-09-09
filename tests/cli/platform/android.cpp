@@ -130,7 +130,8 @@ TEST_CASE("HuxerUICliPreservesAndroidLocalSettings") {
   const auto timestamp = std::filesystem::last_write_time(local);
   android->UpdateProjectIntegration(context);
   REQUIRE(Read(local) == original);
-  REQUIRE(std::filesystem::last_write_time(local) == timestamp);
+  // Keep Catch2 from formatting filesystem clocks with a non-streamable representation.
+  REQUIRE((std::filesystem::last_write_time(local) == timestamp));
 }
 
 TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {

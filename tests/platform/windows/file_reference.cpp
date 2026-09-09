@@ -118,7 +118,10 @@ TEST_CASE("WindowsDirectoryReferencesProbeWriteAccessWithoutChangingTheDirectory
   REQUIRE_NOTHROW(reference = detail::MakeLocalFileReference(directory, writable));
   REQUIRE(reference->Type() == FileType::Directory);
   REQUIRE(reference->CanWrite() == expected_write);
-  REQUIRE(reference->AsFile() == directory);
+  const auto path = reference->AsFile();
+  REQUIRE(path.has_value());
+  CAPTURE(path->Path(), directory.Path());
+  REQUIRE(fs::equivalent(fs::u8path(path->Path()), fs::u8path(directory.Path())));
   const auto entries = directory.ListChildren();
   REQUIRE(entries.Succeeded());
   REQUIRE(entries.Value().empty());
@@ -154,7 +157,9 @@ TEST_CASE("WindowsDirectoryReferencePathsRemainUsableAfterReleasingNativeHandles
     auto reference = detail::MakeLocalFileReference(selected, false);
     auto copy = reference;
     path = copy.AsFile();
-    REQUIRE(path == selected);
+    REQUIRE(path.has_value());
+    CAPTURE(path->Path(), selected.Path());
+    REQUIRE(fs::equivalent(fs::u8path(path->Path()), fs::u8path(selected.Path())));
   }
   REQUIRE(parent.MoveTo(moved));
   REQUIRE_FALSE(path->Exists());
@@ -201,7 +206,10 @@ TEST_CASE("WindowsDirectoryOverwritesPreserveOriginalsAndCleanUpFailedStagingFil
   blocker.reset();
   copy();
   REQUIRE(result->Succeeded());
-  REQUIRE(result->Value().AsFile() == target);
+  const auto path = result->Value().AsFile();
+  REQUIRE(path.has_value());
+  CAPTURE(path->Path(), target.Path());
+  REQUIRE(fs::equivalent(fs::u8path(path->Path()), fs::u8path(target.Path())));
   REQUIRE(target.ReadString().Value() == "replacement");
   REQUIRE(directory.ListChildren().Value() == std::vector<File>{target});
   REQUIRE(source.ReadString().Value() == "replacement");
