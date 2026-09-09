@@ -71,7 +71,6 @@ foreach (required_path IN ITEMS
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIWebPlatformRegistry.js"
         "share/huxerui/resources/huxerui/resources.bin"
         "share/huxerui/skills/huxerui-app-development/SKILL.md"
-        "share/huxerui/skills/huxerui-app-development/references/mcpp-build.md"
         "share/huxerui/skills/huxerui-app-development/references/project-workflow.md"
         "share/huxerui/skills/huxerui-app-development/references/resources-files-network.md"
         "share/huxerui/tools/${HOST_PLATFORM}/${HOST_ARCHITECTURE}/hcg${CLI_SUFFIX}"
