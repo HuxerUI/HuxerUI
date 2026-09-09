@@ -158,6 +158,7 @@ Do not add a second dependency manifest or invoke FetchContent separately for a 
 ## Build and run without changing toolchains
 
 For an independent project that uses mcpp, run `huxerui mcpp build`. The selected directory must contain `mcpp.toml`; this frontend invokes mcpp directly and does not change the CMake-based HuxerUI project workflow below.
+Read [mcpp-build.md](mcpp-build.md) before choosing the compiler, standard library, runtime linkage, or language standard for that project.
 
 - Reuse the project's compatible build directory and generator.
 - On Windows, keep the existing MSVC generator; do not switch to MinGW or pin a Visual Studio release without a project requirement.

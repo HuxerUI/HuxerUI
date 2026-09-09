@@ -176,7 +176,8 @@ if (NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/SKILL.md"
     message(FATAL_ERROR "Installed CLI did not create the default HuxerUI application development skill")
 endif ()
 if (NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/references/project-workflow.md" OR
-    NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/references/resources-files-network.md")
+    NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/references/resources-files-network.md" OR
+    NOT EXISTS "${PROJECT_ROOT}/.agents/skills/huxerui-app-development/references/mcpp-build.md")
     message(FATAL_ERROR "Installed CLI created an incomplete HuxerUI application development skill")
 endif ()
 

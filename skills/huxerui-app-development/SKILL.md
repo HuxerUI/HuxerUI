@@ -48,6 +48,7 @@ Prefer that SDK's `include/huxerui` and `lib/cmake/HuxerUI` over this Skill's gu
 Read only the references needed for the request:
 
 - Creating, opening, configuring, building, running, or diagnosing a project: [project-workflow.md](references/project-workflow.md)
+- Using the standalone mcpp frontend or matching an mcpp project's compiler and ABI to the HuxerUI SDK: [mcpp-build.md](references/mcpp-build.md)
 - Writing or editing any UI declaration or snippet: [dsl-style.md](references/dsl-style.md)
 - Selecting and configuring built-in controls, TreeView, date/time pickers, or their controlled values: [components.md](references/components.md)
 - Arranging UI, scrolling, virtualization, responsiveness, app shells, mounted coordinate conversion, or any proposed custom layout: [layout-and-ui.md](references/layout-and-ui.md)
