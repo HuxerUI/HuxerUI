@@ -1,5 +1,7 @@
 #include "support.h"
 
+#include "mcpp/mcpp.h"
+
 using namespace huxerui::cli::test;
 
 TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
@@ -26,6 +28,34 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
   REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
   REQUIRE(invocation.output.find("a common library's Preview enable all platforms") != std::string::npos);
+  REQUIRE(invocation.output.find("huxerui mcpp build") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliCreatesMcppBuildCommands") {
+  TemporaryDirectory temporary;
+  const huxerui::cli::mcpp::BuildOptions options{
+      temporary.Path() / "mcpp-project",
+      true,
+      true,
+      true,
+      true,
+  };
+  const std::vector<huxerui::cli::ProcessCommand> commands = huxerui::cli::mcpp::BuildCommands(options);
+
+  REQUIRE(commands.size() == 1);
+  REQUIRE(commands[0].executable == "mcpp");
+  REQUIRE(
+      commands[0].arguments == std::vector<std::string>{"build", "--release", "--locked", "--offline", "--verbose"}
+  );
+  REQUIRE(commands[0].working_directory == options.project_root);
+}
+
+TEST_CASE("HuxerUICliMcppRequiresAManifest") {
+  TemporaryDirectory temporary;
+  const Invocation invocation = Invoke(temporary.Path(), {"mcpp", "build"});
+
+  REQUIRE(invocation.result == 1);
+  REQUIRE(invocation.error.find("mcpp.toml") != std::string::npos);
 }
 
 TEST_CASE("HuxerUICliRejectsInvalidSourceBuildOptions") {

@@ -1,0 +1,44 @@
+[package]
+name = "huxerui-mcpp-demo"
+version = "0.1.0"
+standard = "c++26"
+description = "A small HuxerUI page built through the mcpp CLI frontend"
+
+[toolchain]
+default = "gcc@16.1.0"
+
+[targets.huxerui_mcpp_demo]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+include_dirs = ["../../include"]
+cxxflags = ["-pthread"]
+static_stdlib = false
+ldflags = [
+    "-L../../build/lib",
+    "-lhuxerui_static",
+    "-Wl,--no-as-needed",
+    "/lib64/libgtk-4.so",
+    "/lib64/libpangocairo-1.0.so",
+    "/lib64/libpango-1.0.so",
+    "/lib64/libgdk_pixbuf-2.0.so",
+    "/lib64/libcairo-gobject.so",
+    "/lib64/libcairo.so",
+    "/lib64/libharfbuzz.so",
+    "/lib64/libvulkan.so",
+    "/lib64/libgraphene-1.0.so",
+    "/lib64/libepoxy.so",
+    "/lib64/libsoup-3.0.so",
+    "/lib64/libgio-2.0.so",
+    "/lib64/libgobject-2.0.so",
+    "/lib64/libgmodule-2.0.so",
+    "/lib64/libglib-2.0.so",
+    "/lib64/libpcre2-8.so",
+    "/lib64/libfontconfig.so",
+    "-pthread",
+    "-Wl,--as-needed",
+]
+
+[runtime]
+library_dirs = ["/lib64"]
