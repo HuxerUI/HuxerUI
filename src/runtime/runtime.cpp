@@ -1032,6 +1032,10 @@ const MountedNode* InternalAccess::RootNode(const Runtime& runtime) noexcept {
   return runtime.RootNode();
 }
 
+const MountedNode* InternalAccess::MountedRoot(const Runtime& runtime) noexcept {
+  return runtime.state_->mounted_root_.get();
+}
+
 const ScrollPhysics& InternalAccess::DefaultScrollPhysics(const Runtime& runtime) noexcept {
   return runtime.state_->default_scroll_physics_;
 }

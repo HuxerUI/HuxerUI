@@ -18,3 +18,4 @@ rootProject.name = "HuxerUI"
 include(":HuxerUI")
 project(":HuxerUI").projectDir = file("huxerui")
 include(":example_runner")
+include(":ui_testing")

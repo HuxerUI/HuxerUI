@@ -45,6 +45,7 @@ struct InternalAccess {
 
   static void InvalidateRoot(Runtime& runtime);
   static const MountedNode* RootNode(const Runtime& runtime) noexcept;
+  static const MountedNode* MountedRoot(const Runtime& runtime) noexcept;
   static const ScrollPhysics& DefaultScrollPhysics(const Runtime& runtime) noexcept;
   static void NotifyScrollActivity(Runtime& runtime, MountedNode& node, const ScrollActivity& activity);
   static void RequestFrame(Runtime& runtime);

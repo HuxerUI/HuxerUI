@@ -64,7 +64,7 @@ jobs:
           git push origin "refs/tags/${RELEASE_TAG}"
 
   android-artifacts:
-    name: Build Android SDK artifacts
+    name: Build Android platform artifacts
     needs: validate
     runs-on: ubuntu-24.04
     steps:
@@ -89,23 +89,41 @@ jobs:
             "platform-tools" \
             "ndk;29.0.14206865"
       - name: Build Android artifacts
-        working-directory: platform/android
         run: |
-          ./gradlew :HuxerUI:assembleRelease -PhuxeruiBuildNative=true
-          mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
-          aar="$(find huxerui/build/outputs/aar -name '*-release.aar' -print -quit)"
-          unzip -q "${aar}" -d "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
-          for abi in arm64-v8a x86_64; do
-            mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}"
-            cp "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/jni/${abi}/libhuxerui.so" \
-              "${RUNNER_TEMP}/huxerui-platform-artifacts/android/${abi}/libhuxerui.so"
+          properties=platform/android/gradle.properties
+          ndk_version=$(sed -n 's/^huxeruiNdkVersion=//p' "$properties" | tr -d '\r')
+          min_sdk=$(sed -n 's/^huxeruiMinSdk=//p' "$properties" | tr -d '\r')
+          stl=$(sed -n 's/^huxeruiStl=//p' "$properties" | tr -d '\r')
+          abis=$(sed -n 's/^huxeruiAbis=//p' "$properties" | tr -d '\r' | tr ',' ' ')
+          if [ -z "$ndk_version" ] || [ -z "$min_sdk" ] || [ -z "$stl" ] || [ -z "$abis" ]; then
+            echo "HuxerUI Android build properties are incomplete" >&2
+            exit 1
+          fi
+          ndk="${ANDROID_HOME}/ndk/${ndk_version}"
+          test -f "$ndk/build/cmake/android.toolchain.cmake"
+          (cd platform/android && sh ./gradlew :HuxerUI:assembleRelease -PhuxeruiBuildNative=false --no-daemon)
+          aar=platform/android/huxerui/build/outputs/aar/HuxerUI-release.aar
+          aar_entries=$(cmake -E tar tf "$aar")
+          if printf '%s\n' "$aar_entries" | grep -Eq '^(jni|prefab)/'; then
+            echo "HuxerUI Android SDK AAR must be Java-only" >&2
+            exit 1
+          fi
+          artifacts="${RUNNER_TEMP}/huxerui-platform-artifacts/android"
+          mkdir -p "$artifacts"
+          cp "$aar" "$artifacts/HuxerUI.aar"
+          for abi in $abis; do
+            abi_build="${RUNNER_TEMP}/huxerui-android-build/release/${abi}"
+            cmake -S . -B "$abi_build" -G Ninja \
+              "-DCMAKE_TOOLCHAIN_FILE=$ndk/build/cmake/android.toolchain.cmake" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=. \
+              "-DANDROID_ABI=$abi" "-DANDROID_PLATFORM=android-$min_sdk" "-DANDROID_STL=$stl" \
+              -DHUXERUI_BUILD_SHARED=ON -DHUXERUI_BUILD_STATIC=OFF -DHUXERUI_ENABLE_PROFILING=OFF \
+              -DHUXERUI_BUILD_CLI=OFF -DHUXERUI_BUILD_EXAMPLES=OFF -DHUXERUI_BUILD_TESTS=OFF \
+              -DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_BUILD_TESTING_SMOKE_TESTS=OFF
+            cmake --build "$abi_build" --target huxerui huxerui_testing --parallel 4
+            cmake --install "$abi_build" --config Release --component HuxerUILibraries \
+              --prefix "$artifacts/$abi" --strip
           done
-          rm -rf "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/jni" \
-            "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar/prefab"
-          cd "${RUNNER_TEMP}/huxerui-platform-artifacts/android/aar"
-          zip -qr ../HuxerUI.aar .
-          cd ..
-          rm -rf aar
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -115,7 +133,7 @@ jobs:
           retention-days: 7
 
   web-artifacts:
-    name: Build Web SDK artifacts
+    name: Build Web platform artifacts
     needs: validate
     runs-on: ubuntu-24.04
     steps:
@@ -138,11 +156,14 @@ jobs:
             -DHUXERUI_ENABLE_PROFILING=OFF \
             -DHUXERUI_BUILD_CLI=OFF \
             -DHUXERUI_BUILD_EXAMPLES=OFF \
+            -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
             -DHUXERUI_BUILD_TESTS=OFF
-          cmake --build build-web --target huxerui_static --parallel
+          cmake --build build-web --target huxerui_static huxerui_testing --parallel
           mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19"
           cp build-web/lib/libhuxerui_static.a \
             "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19/libhuxerui.a"
+          cp build-web/lib/libhuxerui_testing.a \
+            "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19/libhuxerui_testing.a"
       - name: Upload Web artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -152,7 +173,7 @@ jobs:
           retention-days: 7
 
   ios-artifacts:
-    name: Build iOS SDK artifacts
+    name: Build iOS platform artifacts
     needs: validate
     runs-on: macos-15
     env:
@@ -235,7 +256,7 @@ jobs:
           retention-days: 7
 
   build-windows:
-    name: Build Windows x86_64
+    name: Build Windows x86_64 SDK
     needs:
       - validate
       - android-artifacts
@@ -276,7 +297,7 @@ jobs:
           cmake
           --build build
           --config Debug
-          --target huxerui huxerui_static
+          --target huxerui huxerui_static huxerui_testing
           --parallel 4
       - name: Build
         id: test-build
@@ -342,7 +363,7 @@ jobs:
           retention-days: 7
 
   build-macos:
-    name: Build macOS ${{ matrix.architecture }}
+    name: Build macOS ${{ matrix.architecture }} SDK
     needs:
       - validate
       - android-artifacts
@@ -438,7 +459,7 @@ jobs:
           retention-days: 7
 
   build-linux:
-    name: Build Linux ${{ matrix.architecture }}
+    name: Build Linux ${{ matrix.architecture }} SDK
     needs:
       - validate
       - android-artifacts
@@ -553,7 +574,7 @@ jobs:
           retention-days: 7
 
   build-android-host:
-    name: Build Android arm64-v8a host SDK
+    name: Build Android-Termux arm64-v8a SDK
     needs:
       - validate
       - android-artifacts
@@ -587,7 +608,7 @@ jobs:
             --platform android \
             --architecture arm64-v8a \
             --android-ndk "${ANDROID_HOME}/ndk/29.0.14206865"
-      - name: Configure Android host SDK
+      - name: Configure Android-Termux SDK
         run: >-
           cmake
           -S .
@@ -604,16 +625,16 @@ jobs:
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=OFF
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
-      - name: Build Android host SDK
+      - name: Build Android-Termux SDK
         run: cmake --build build-android-host --parallel
-      - name: Package Android host SDK
+      - name: Package Android-Termux SDK
         run: >-
           cpack
           --config build-android-host/CPackConfig.cmake
           -C Release
           -G TGZ
           -B release-assets
-      - name: Validate Android host SDK
+      - name: Validate Android-Termux SDK
         env:
           SDK_ROOT: ${{ runner.temp }}/android-host-sdk
           SDK_ARCHIVE: ${{ github.workspace }}/release-assets/huxerui-sdk-${{ needs.validate.outputs.version }}-android-arm64-v8a.tar.gz
@@ -632,7 +653,7 @@ jobs:
           test -f "${SDK_ROOT}/lib/cmake/HuxerUI/HuxerUIConfig.cmake"
           test -f "${SDK_ROOT}/share/huxerui/resources/huxerui/resources.bin"
           test -f "${SDK_ROOT}/share/huxerui/platform/android/HuxerUI.aar"
-      - name: Upload Android host SDK archive
+      - name: Upload Android-Termux SDK archive
         uses: actions/upload-artifact@v4
         with:
           name: sdk-android-arm64-v8a

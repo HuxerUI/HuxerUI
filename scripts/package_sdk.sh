@@ -72,7 +72,7 @@ MINGW* | MSYS* | CYGWIN*) fail "use scripts/package_sdk.ps1 on Windows" ;;
 esac
 host_system=$(uname -s)
 
-for command_name in cmake cpack java jar emcmake emcc; do
+for command_name in cmake cpack ninja java emcmake emcc; do
   command -v "$command_name" >/dev/null 2>&1 || fail "'$command_name' is required on PATH"
 done
 
@@ -89,7 +89,7 @@ absolute_directory() {
 build_directory=$(absolute_directory "$build_directory")
 output_directory=$(absolute_directory "$output_directory")
 platform_artifact_root="$build_directory/platform-artifacts"
-android_extract_directory="$build_directory/android-aar"
+android_build_directory="$build_directory/android"
 web_build_directory="$build_directory/web"
 host_build_directory="$build_directory/host"
 ios_build_directory="$build_directory/ios"
@@ -112,7 +112,6 @@ run() {
 }
 
 reset_owned_directory "$platform_artifact_root"
-reset_owned_directory "$android_extract_directory"
 reset_owned_directory "$web_build_directory"
 reset_owned_directory "$host_build_directory"
 if [ "$host_system" = Darwin ]; then
@@ -126,36 +125,43 @@ web_version=$(sed -n 's/^set(HUXERUI_WEB_EMSCRIPTEN_VERSION "\([^"]*\)").*/\1/p'
 emcc --version 2>&1 | grep "$web_version" >/dev/null || fail "Emscripten $web_version is required"
 
 android_directory="$source_directory/platform/android"
-[ -f "$android_directory/gradlew" ] || fail "HuxerUI Android Gradle wrapper is missing"
+android_properties="$android_directory/gradle.properties"
+android_ndk_version=$(sed -n 's/^huxeruiNdkVersion=//p' "$android_properties" | tr -d '\r')
+android_min_sdk=$(sed -n 's/^huxeruiMinSdk=//p' "$android_properties" | tr -d '\r')
+android_stl=$(sed -n 's/^huxeruiStl=//p' "$android_properties" | tr -d '\r')
+android_abis=$(sed -n 's/^huxeruiAbis=//p' "$android_properties" | tr -d '\r' | tr ',' ' ')
+[ -n "$android_ndk_version" ] && [ -n "$android_min_sdk" ] && [ -n "$android_stl" ] && \
+  [ -n "$android_abis" ] || fail "Android build properties are incomplete"
+android_sdk=${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}
+[ -n "$android_sdk" ] || fail "ANDROID_HOME or ANDROID_SDK_ROOT is required"
+android_ndk="$android_sdk/ndk/$android_ndk_version"
+[ -f "$android_ndk/build/cmake/android.toolchain.cmake" ] || fail "Android NDK $android_ndk_version is missing"
 gradle_variant=$(printf '%s' "$configuration" | tr '[:upper:]' '[:lower:]')
 (
   cd "$android_directory"
-  run sh ./gradlew ":HuxerUI:assemble$configuration" -PhuxeruiBuildNative=true --no-daemon
+  run sh ./gradlew ":HuxerUI:assemble$configuration" -PhuxeruiBuildNative=false --no-daemon
 )
-
-aar_count=$(find "$android_directory/huxerui/build/outputs/aar" -maxdepth 1 \
-  -type f -name "*-$gradle_variant.aar" -print | wc -l | tr -d ' ')
-[ "$aar_count" -eq 1 ] || fail "expected one HuxerUI Android $configuration AAR, found $aar_count"
-aar_path=$(find "$android_directory/huxerui/build/outputs/aar" -maxdepth 1 \
-  -type f -name "*-$gradle_variant.aar" -print -quit)
-(
-  cd "$android_extract_directory"
-  run jar -xf "$aar_path"
-)
-
+aar="$android_directory/huxerui/build/outputs/aar/HuxerUI-$gradle_variant.aar"
+aar_entries=$(cmake -E tar tf "$aar")
+if printf '%s\n' "$aar_entries" | grep -Eq '^(jni|prefab)/'; then
+  fail "Android SDK AAR must be Java-only"
+fi
 android_artifact_directory="$platform_artifact_root/android"
 mkdir -p -- "$android_artifact_directory"
-for abi in arm64-v8a x86_64; do
-  abi_output="$android_artifact_directory/$abi"
-  mkdir -p -- "$abi_output"
-  shared_library="$android_extract_directory/jni/$abi/libhuxerui.so"
-  [ -f "$shared_library" ] || fail "HuxerUI Android AAR is missing $abi/libhuxerui.so"
-  cp -- "$shared_library" "$abi_output/libhuxerui.so"
+cp -- "$aar" "$android_artifact_directory/HuxerUI.aar"
+for abi in $android_abis; do
+  abi_build="$android_build_directory/$gradle_variant/$abi"
+  run cmake -S "$source_directory" -B "$abi_build" -G Ninja \
+    "-DCMAKE_TOOLCHAIN_FILE=$android_ndk/build/cmake/android.toolchain.cmake" \
+    "-DCMAKE_BUILD_TYPE=$configuration" -DCMAKE_INSTALL_LIBDIR=. \
+    "-DANDROID_ABI=$abi" "-DANDROID_PLATFORM=android-$android_min_sdk" "-DANDROID_STL=$android_stl" \
+    -DHUXERUI_BUILD_SHARED=ON -DHUXERUI_BUILD_STATIC=OFF -DHUXERUI_ENABLE_PROFILING=OFF \
+    -DHUXERUI_BUILD_CLI=OFF -DHUXERUI_BUILD_EXAMPLES=OFF -DHUXERUI_BUILD_TESTS=OFF \
+    -DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_BUILD_TESTING_SMOKE_TESTS=OFF
+  run cmake --build "$abi_build" --target huxerui huxerui_testing --parallel "$jobs"
+  run cmake --install "$abi_build" --config "$configuration" --component HuxerUILibraries \
+    --prefix "$android_artifact_directory/$abi" --strip
 done
-
-rm -rf -- "$android_extract_directory/jni" "$android_extract_directory/prefab"
-run jar --create --file "$android_artifact_directory/HuxerUI.aar" \
-  --no-manifest -C "$android_extract_directory" .
 
 run emcmake cmake -S "$source_directory" -B "$web_build_directory" \
   -DHUXERUI_ENABLE_PROFILING=OFF \
@@ -164,13 +170,15 @@ run emcmake cmake -S "$source_directory" -B "$web_build_directory" \
   -DHUXERUI_BUILD_STATIC=ON \
   -DHUXERUI_BUILD_CLI=OFF \
   -DHUXERUI_BUILD_EXAMPLES=OFF \
+  -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
   -DHUXERUI_BUILD_TESTS=OFF
-run cmake --build "$web_build_directory" --target huxerui_static --parallel "$jobs"
+run cmake --build "$web_build_directory" --target huxerui_static huxerui_testing --parallel "$jobs"
 web_library="$web_build_directory/lib/libhuxerui_static.a"
 [ -f "$web_library" ] || fail "HuxerUI Web build did not produce libhuxerui_static.a"
 web_artifact_directory="$platform_artifact_root/web/emscripten-$web_version"
 mkdir -p -- "$web_artifact_directory"
 cp -- "$web_library" "$web_artifact_directory/libhuxerui.a"
+cp -- "$web_build_directory/lib/libhuxerui_testing.a" "$web_artifact_directory/libhuxerui_testing.a"
 
 if [ "$host_system" = Darwin ]; then
   run sh "$source_directory/scripts/build_ios_xcframework.sh" \
@@ -187,6 +195,7 @@ run cmake -S "$source_directory" -B "$host_build_directory" \
   -DHUXERUI_BUILD_CLI=ON \
   -DHUXERUI_BUILD_EXAMPLES=OFF \
   -DHUXERUI_BUILD_TESTS=OFF \
+  -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
   "-DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=$platform_artifact_root"
 run cmake --build "$host_build_directory" --config "$configuration" --parallel "$jobs"
 run cpack --config "$host_build_directory/CPackConfig.cmake" \

@@ -81,6 +81,31 @@ foreach (required_path IN ITEMS
     endif ()
 endforeach ()
 
+if (EXISTS "${SDK_ROOT}/${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUITestingTargets.cmake")
+    set(TESTING_REQUIRED_PATHS "include/huxerui/testing/ui_test.h")
+    if (HOST_PLATFORM STREQUAL "windows" AND WINDOWS_DEBUG_INCLUDED)
+        list(APPEND TESTING_REQUIRED_PATHS
+                "${INSTALL_LIBDIR}/huxerui_testing.lib"
+                "${INSTALL_LIBDIR}/huxerui_testing_debug.lib")
+    endif ()
+    if (PLATFORM_ARTIFACTS_INCLUDED)
+        list(APPEND TESTING_REQUIRED_PATHS
+                "share/huxerui/platform/android/arm64-v8a/libhuxerui_testing.so"
+                "share/huxerui/platform/android/x86_64/libhuxerui_testing.so"
+                "share/huxerui/platform/web/emscripten-4.0.19/libhuxerui_testing.a")
+        if (HOST_PLATFORM STREQUAL "macos")
+            list(APPEND TESTING_REQUIRED_PATHS
+                    "share/huxerui/platform/ios/HuxerUITesting.xcframework/ios-arm64/libhuxerui_testing.a"
+                    "share/huxerui/platform/ios/HuxerUITesting.xcframework/ios-arm64_x86_64-simulator/libhuxerui_testing.a")
+        endif ()
+    endif ()
+    foreach (required_path IN LISTS TESTING_REQUIRED_PATHS)
+        if (NOT EXISTS "${SDK_ROOT}/${required_path}")
+            message(FATAL_ERROR "SDK testing archive is missing ${required_path}")
+        endif ()
+    endforeach ()
+endif ()
+
 if (HOST_PLATFORM STREQUAL "windows" AND WINDOWS_DEBUG_INCLUDED)
     foreach (required_path IN ITEMS
             "bin/huxerui.dll"
@@ -110,6 +135,19 @@ foreach (build_only_path IN ITEMS
 endforeach ()
 
 if (PLATFORM_ARTIFACTS_INCLUDED)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar tf
+            "${SDK_ROOT}/share/huxerui/platform/android/HuxerUI.aar"
+            RESULT_VARIABLE AAR_LIST_RESULT OUTPUT_VARIABLE AAR_ENTRIES ERROR_VARIABLE AAR_LIST_ERROR)
+    if (NOT AAR_LIST_RESULT EQUAL 0)
+        message(FATAL_ERROR "Cannot inspect SDK Android AAR: ${AAR_LIST_ERROR}")
+    endif ()
+    if (AAR_ENTRIES MATCHES "(^|\n)(jni|prefab)/")
+        message(FATAL_ERROR "SDK Android AAR must be Java-only; CMake owns native dependencies")
+    endif ()
+    file(GLOB_RECURSE ANDROID_SMOKE_LIBRARIES "${SDK_ROOT}/share/huxerui/platform/android/*smoke*.so")
+    if (ANDROID_SMOKE_LIBRARIES)
+        message(FATAL_ERROR "SDK Android artifacts must not contain smoke libraries")
+    endif ()
     foreach (required_path IN ITEMS
             "share/huxerui/platform/android/HuxerUI.aar"
             "share/huxerui/platform/android/arm64-v8a/libhuxerui.so"

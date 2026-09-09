@@ -6,6 +6,7 @@ They explain the current implementation and deliberately unsupported behavior; t
 ## Runtime and composition
 
 - [Architecture](architecture.md): Runtime, mounted nodes, modifiers, Environment, layers, and extension ownership.
+- [UI Testing](ui-testing.md): windowless Runtime ownership, observation lifetime, captures, distribution, and carriers.
 - [View Composition and Environment](view-composition.md): declaration, compilation, reconciliation, and composition boundaries.
 - [Composable Code Generation](composable-codegen.md): marker transformation, diagnostics, and CMake integration.
 - [Incremental Layout and Rendering](incremental-rendering.md): retained geometry, invalidation, scene construction, and damage.

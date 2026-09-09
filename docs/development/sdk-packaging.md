@@ -1,13 +1,28 @@
 # SDK Packaging
 
 SDK libraries are built with `HUXERUI_ENABLE_PROFILING=OFF`, independently of their Debug or Release configuration.
-The packaging scripts and release workflow explicitly disable the option, and SDK library installation rejects a profiling-enabled host build.
+The packaging scripts and release workflow explicitly disable the option, and library installation rejects a profiling-enabled build.
 Source builds include the private diagnostics described in [Runtime profiling](building.md#runtime-profiling) and record in `detailed` mode by default; application macros cannot enable diagnostics in a released SDK.
 
 Repository packaging scripts build a complete SDK for the current desktop host and include the Android and Web target artifacts consumed by generated projects.
 Release CI additionally cross-builds the Android arm64-v8a host SDK for Termux with the Android NDK.
 The macOS SDK additionally contains the static iOS XCFramework for device and Simulator application-core builds.
 They are release and integration tools, not prerequisites for ordinary source builds.
+
+The existing packaging scripts and release CI directly build the Android artifacts, without a separate Android build entry point.
+They build the production AAR through `:HuxerUI:assembleRelease -PhuxeruiBuildNative=false` (or the corresponding Debug task), verify that it is Java-only, and copy it unchanged.
+For each ABI they configure and build the root CMake project with core and testing enabled and repository tests and smoke tests disabled, then call `cmake --install --component HuxerUILibraries --strip` into the SDK's ABI directory.
+The packaging entry points select the ABI and installation prefix, while the source CMake install rules own library selection, locations, and stripping through the configured toolchain; the native build directories retain their original libraries.
+The `:ui_testing` module is exclusively a test consumer; SDK production neither invokes its tasks nor depends on its runner or smoke resources.
+The Android NDK version, minimum API, STL, and ABIs come from `platform/android/gradle.properties`; set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to the SDK containing that NDK.
+
+## Native installation and SDK assembly
+
+`cmake/HuxerUIBuild.cmake` defines native targets and their `HuxerUILibraries` install rules for top-level source builds, independently of SDK assembly.
+`cmake/HuxerUISdk.cmake` owns the complete SDK's package metadata, headers, tools, resources, platform artifact collection, and CPack setup.
+Adding the source through `add_subdirectory` registers neither framework library installation nor SDK packaging, even when the testing library is enabled.
+An Android target build with the CLI disabled installs its libraries without requiring a host SDK or test runner; the Termux host SDK continues to consume the separately assembled Android target artifacts without installing duplicate core libraries.
+An iOS or Web native-library install is an intermediate artifact, not a complete SDK; XCFramework assembly and Web artifact naming remain owned by platform packaging.
 
 ## Requirements
 
@@ -17,7 +32,7 @@ Packaging requires:
 - Android SDK, NDK, Java, and the repository Gradle wrapper requirements;
 - Emscripten 4.0.19;
 - Xcode when packaging on macOS;
-- CMake and the generator used by the script.
+- CMake, Ninja for Android, and the host generator used by the script.
 
 The scripts validate required artifacts and fail instead of publishing a partial SDK.
 

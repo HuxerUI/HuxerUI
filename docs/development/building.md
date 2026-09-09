@@ -82,6 +82,11 @@ Android Runtime tests run on a device or emulator with `./gradlew :HuxerUI:conne
 The library's `androidTest` source set uses `tests/platform/android/instrumentation/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency or native HuxerUI library.
 It covers paragraph geometry and local-notification Intent identity and activation normalization, and installs only the separate test package rather than replacing an example application.
 
+The separate windowless UI smoke runs with `./gradlew :ui_testing:connectedDebugAndroidTest` from the same directory.
+It builds source libraries by default; `-PhuxeruiTestingSdk=/absolute/path/to/sdk` selects installed headers, libraries, tools, and resources instead.
+The test module packages its own native dependencies and assets without changing `:HuxerUI` or an example application.
+See [Android execution](../guide/testing.md#android-execution) for the resource and runner contract.
+
 ## Runtime profiling
 
 Source builds default to `HUXERUI_ENABLE_PROFILING=ON`, making private Runtime diagnostics available to source applications and repository examples.

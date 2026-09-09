@@ -40,6 +40,9 @@ device_build_directory="$build_directory/device"
 simulator_build_directory="$build_directory/simulator"
 device_library="$device_build_directory/lib/$configuration/libhuxerui_static.a"
 simulator_library="$simulator_build_directory/lib/$configuration/libhuxerui_static.a"
+device_testing_library="$device_build_directory/lib/$configuration/libhuxerui_testing.a"
+simulator_testing_library="$simulator_build_directory/lib/$configuration/libhuxerui_testing.a"
+testing_output_path="$(dirname "$output_path")/HuxerUITesting.xcframework"
 headers_directory="$build_directory/headers"
 
 cmake -S "$source_directory" -B "$device_build_directory" -G Xcode \
@@ -50,11 +53,12 @@ cmake -S "$source_directory" -B "$device_build_directory" -G Xcode \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
   -DHUXERUI_BUILD_SHARED=OFF \
   -DHUXERUI_BUILD_STATIC=ON \
+  -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
   -DHUXERUI_BUILD_CLI=OFF \
   -DHUXERUI_BUILD_EXAMPLES=OFF \
   -DHUXERUI_BUILD_TESTS=OFF
 cmake --build "$device_build_directory" --config "$configuration" \
-  --target huxerui_static --parallel "$jobs"
+  --target huxerui_static huxerui_testing --parallel "$jobs"
 
 cmake -S "$source_directory" -B "$simulator_build_directory" -G Xcode \
   -DHUXERUI_ENABLE_PROFILING=OFF \
@@ -64,11 +68,12 @@ cmake -S "$source_directory" -B "$simulator_build_directory" -G Xcode \
   -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0 \
   -DHUXERUI_BUILD_SHARED=OFF \
   -DHUXERUI_BUILD_STATIC=ON \
+  -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
   -DHUXERUI_BUILD_CLI=OFF \
   -DHUXERUI_BUILD_EXAMPLES=OFF \
   -DHUXERUI_BUILD_TESTS=OFF
 cmake --build "$simulator_build_directory" --config "$configuration" \
-  --target huxerui_static --parallel "$jobs"
+  --target huxerui_static huxerui_testing --parallel "$jobs"
 
 [ -f "$device_library" ] || fail "device build did not produce libhuxerui_static.a"
 [ -f "$simulator_library" ] || fail "Simulator build did not produce libhuxerui_static.a"
@@ -87,6 +92,14 @@ xcodebuild -create-xcframework \
   -library "$device_library" -headers "$headers_directory" \
   -library "$simulator_library" -headers "$headers_directory" \
   -output "$output_path"
+
+lipo "$device_testing_library" -verify_arch arm64 || fail "testing device library does not contain arm64"
+lipo "$simulator_testing_library" -verify_arch arm64 x86_64 || fail "testing Simulator library is incomplete"
+rm -rf -- "$testing_output_path"
+xcodebuild -create-xcframework \
+  -library "$device_testing_library" \
+  -library "$simulator_testing_library" \
+  -output "$testing_output_path"
 
 for required_path in \
   Info.plist \

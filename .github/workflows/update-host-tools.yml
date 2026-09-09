@@ -39,6 +39,7 @@ defaults:
 
 jobs:
   plan:
+    name: Plan host tool update
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -62,6 +63,7 @@ jobs:
         run: python tests/scripts/host_tools_test.py
 
   build:
+    name: Build ${{ matrix.platform == 'android' && 'Android-Termux' || matrix.platform == 'macos' && 'macOS' || matrix.platform == 'windows' && 'Windows' || 'Linux' }} ${{ matrix.architecture }} host tools
     needs: plan
     if: needs.plan.outputs.run == 'true'
     timeout-minutes: 30
@@ -135,7 +137,7 @@ jobs:
             sh .github/workflows/scripts/check_linux_binary_compatibility.sh \
               "${RUNNER_TEMP}/host-tools/linux/${TOOL_ARCHITECTURE}/hcg" \
               "${RUNNER_TEMP}/host-tools/linux/${TOOL_ARCHITECTURE}/hrc"
-      - name: Build Android host tools
+      - name: Build Android-Termux host tools
         if: matrix.platform == 'android'
         run: |
           set +o pipefail
@@ -191,6 +193,7 @@ jobs:
           retention-days: 7
 
   publish:
+    name: Update prebuilt host tools
     needs: [plan, build]
     if: needs.plan.outputs.update == 'true'
     runs-on: ubuntu-24.04

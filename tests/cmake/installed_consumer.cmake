@@ -130,6 +130,53 @@ endif ()
     endif ()
 endforeach ()
 
+file(GLOB_RECURSE TESTING_TARGET_EXPORTS "${SDK_ROOT}/*/cmake/HuxerUI/HuxerUITestingTargets.cmake")
+if (TESTING_TARGET_EXPORTS)
+    foreach (TESTING_LINKAGE IN ITEMS default shared static)
+        set(TESTING_BUILD "${TEST_ROOT}/testing-${TESTING_LINKAGE}")
+        set(TESTING_CONFIGURE_ARGUMENTS)
+        if (NOT TESTING_LINKAGE STREQUAL "default")
+            list(APPEND TESTING_CONFIGURE_ARGUMENTS
+                    "-DHUXERUI_TEST_LINK_FORM=${TESTING_LINKAGE}" -DHUXERUI_TEST_PRELOAD_CORE=ON)
+        endif ()
+        execute_process(
+                COMMAND "${CMAKE_COMMAND}" -S "${SOURCE_DIRECTORY}/tests/cmake/testing_consumer"
+                        -B "${TESTING_BUILD}" -G "${HOST_GENERATOR}"
+                        "-DCMAKE_PREFIX_PATH=${SDK_ROOT}" "-DCMAKE_BUILD_TYPE=${BUILD_CONFIG}"
+                        ${TESTING_CONFIGURE_ARGUMENTS}
+                RESULT_VARIABLE TESTING_RESULT OUTPUT_VARIABLE TESTING_OUTPUT ERROR_VARIABLE TESTING_ERROR
+        )
+        if (NOT TESTING_RESULT EQUAL 0)
+            message(FATAL_ERROR "Testing consumer configure failed:\n${TESTING_OUTPUT}${TESTING_ERROR}")
+        endif ()
+        execute_process(
+                COMMAND "${CMAKE_COMMAND}" --build "${TESTING_BUILD}" --config "${BUILD_CONFIG}"
+                RESULT_VARIABLE TESTING_RESULT OUTPUT_VARIABLE TESTING_OUTPUT ERROR_VARIABLE TESTING_ERROR
+        )
+        if (NOT TESTING_RESULT EQUAL 0)
+            message(FATAL_ERROR "Testing consumer build failed:\n${TESTING_OUTPUT}${TESTING_ERROR}")
+        endif ()
+        execute_process(
+                COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${TESTING_BUILD}" -C "${BUILD_CONFIG}"
+                        --output-on-failure --no-tests=error
+                RESULT_VARIABLE TESTING_RESULT OUTPUT_VARIABLE TESTING_OUTPUT ERROR_VARIABLE TESTING_ERROR
+        )
+        if (NOT TESTING_RESULT EQUAL 0)
+            message(FATAL_ERROR "Testing consumer execution failed:\n${TESTING_OUTPUT}${TESTING_ERROR}")
+        endif ()
+    endforeach ()
+    execute_process(
+            COMMAND "${CMAKE_COMMAND}" -S "${SOURCE_DIRECTORY}/tests/cmake/testing_consumer"
+                    -B "${TEST_ROOT}/testing-conflict" -G "${HOST_GENERATOR}"
+                    "-DCMAKE_PREFIX_PATH=${SDK_ROOT}" -DHUXERUI_TEST_LINK_FORM=shared
+                    -DHUXERUI_TEST_CONFLICT_LINK_FORM=static
+            RESULT_VARIABLE TESTING_RESULT OUTPUT_VARIABLE TESTING_OUTPUT ERROR_VARIABLE TESTING_ERROR
+    )
+    if (TESTING_RESULT EQUAL 0 OR NOT TESTING_ERROR MATCHES "HuxerUI testing is already bound")
+        message(FATAL_ERROR "Testing consumer did not reject conflicting core forms:\n${TESTING_OUTPUT}${TESTING_ERROR}")
+    endif ()
+endif ()
+
 set(HUXERUI_CLI "${SDK_ROOT}/${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}")
 string(TOLOWER "${BUILD_CONFIG}" BUILD_PROFILE)
 if (NOT BUILD_PROFILE)

@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>HuxerUI windowless testing smoke</title>
+<pre id="result">Running…</pre>
+<script type="module">
+  import createModule from './huxerui_ui_testing_smoke.js';
+  const result = document.querySelector('#result');
+  const timeout = setTimeout(() => {
+    result.textContent = 'FAIL: module initialization timed out';
+    result.dataset.status = 'failed';
+  }, 30000);
+  try {
+    const module = await createModule();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const error = module.runUiTestingSmoke();
+    clearTimeout(timeout);
+    result.textContent = error ? `FAIL: ${error}` : 'PASS';
+    result.dataset.status = error ? 'failed' : 'passed';
+  } catch (error) {
+    clearTimeout(timeout);
+    result.textContent = `FAIL: ${error}`;
+    result.dataset.status = 'failed';
+  }
+</script>

@@ -10,6 +10,7 @@ User guides describe the current public SDK, development guides cover this repos
 - [Core Concepts](guide/core-concepts.md): Views, composition, state, identity, events, and Environment.
 - [Layout and Scrolling](guide/layout.md): constraints, responsive layout, scrolling, and virtualization.
 - [Components and Input](guide/components.md): controls, navigation, gestures, and text editing.
+- [Windowless UI Testing](guide/testing.md): real-Runtime queries, input, virtual frames, and structural captures.
 - [Themes and Presentation](guide/themes-and-presentation.md): themes, indication, animation, and layers.
 - [Files and Storage](guide/files.md): application storage, external files, and pickers.
 - [HTTP Client](guide/http.md): buffered and streaming responses, transfer progress, Tasks, and errors.

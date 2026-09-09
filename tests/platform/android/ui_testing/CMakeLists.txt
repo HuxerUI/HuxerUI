@@ -1,0 +1,28 @@
+cmake_minimum_required(VERSION 3.20)
+project(huxerui_android_ui_testing LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (NOT ANDROID)
+    message(FATAL_ERROR "HuxerUI Android UI testing requires the Android toolchain")
+endif ()
+
+if (HUXERUI_TESTING_SDK)
+    unset(HuxerUI_DIR CACHE)
+    find_package(HuxerUI CONFIG REQUIRED COMPONENTS testing shared
+            PATHS "${HUXERUI_TESTING_SDK}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+else ()
+    set(HUXERUI_BUILD_SHARED ON CACHE BOOL "" FORCE)
+    set(HUXERUI_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+    set(HUXERUI_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(HUXERUI_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(HUXERUI_BUILD_CLI OFF CACHE BOOL "" FORCE)
+    set(HUXERUI_BUILD_TESTING_LIBRARY ON CACHE BOOL "" FORCE)
+    set(HUXERUI_BUILD_TESTING_SMOKE_TESTS OFF CACHE BOOL "" FORCE)
+    set(HUXERUI_ENABLE_PROFILING OFF CACHE BOOL "" FORCE)
+    add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../../.." huxerui)
+endif ()
+
+get_target_property(HUXERUI_BUILTIN_RESOURCE_PACKAGE HuxerUI::huxerui HUXERUI_RESOURCE_PACKAGE)
+add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../../testing" smoke)

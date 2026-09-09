@@ -3,13 +3,6 @@ include_guard(GLOBAL)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
-if (HUXERUI_ENABLE_PROFILING)
-    install(CODE
-            "message(FATAL_ERROR \"HuxerUI SDK installation requires HUXERUI_ENABLE_PROFILING=OFF\")"
-            COMPONENT HuxerUILibraries
-    )
-endif ()
-
 set(HUXERUI_WEB_EMSCRIPTEN_VERSION "4.0.19")
 
 if (ANDROID)
@@ -37,23 +30,10 @@ if (PROJECT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR
     endif ()
 endif ()
 
-if (TARGET ${HUXERUI_SHARED_LIB_NAME}
-        AND NOT HUXERUI_SDK_HOST_PLATFORM STREQUAL "android")
-    install(TARGETS ${HUXERUI_SHARED_LIB_NAME}
-            EXPORT HuxerUISharedTargets
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
-    )
-endif ()
-if (TARGET ${HUXERUI_STATIC_LIB_NAME}
-        AND NOT HUXERUI_SDK_HOST_PLATFORM STREQUAL "android")
-    install(TARGETS ${HUXERUI_STATIC_LIB_NAME}
-            EXPORT HuxerUIStaticTargets
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
-            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
-    )
+if (TARGET huxerui_testing AND NOT ANDROID)
+    install(EXPORT HuxerUITestingTargets FILE HuxerUITestingTargets.cmake
+            NAMESPACE HuxerUI:: DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/HuxerUI"
+            COMPONENT HuxerUILibraries)
 endif ()
 
 install(DIRECTORY "${HUXERUI_PUBLIC_HEADER_DIR}"
@@ -198,6 +178,11 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
         install(DIRECTORY "${HUXERUI_IOS_XCFRAMEWORK}"
                 DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/platform/ios"
         )
+        if (EXISTS "${HUXERUI_SDK_ARTIFACT_ROOT}/ios/HuxerUITesting.xcframework")
+            install(DIRECTORY "${HUXERUI_SDK_ARTIFACT_ROOT}/ios/HuxerUITesting.xcframework"
+                    DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/platform/ios"
+            )
+        endif ()
     endif ()
 endif ()
 

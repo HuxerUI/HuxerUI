@@ -41,6 +41,21 @@ huxerui_add_test_suite(huxerui_runtime_tests HuxerUIRuntimeTests
             window.cpp
             "${HUXERUI_TEST_DIR}/support/builtin_resources.cpp"
 )
+if (TARGET HuxerUI::testing)
+    huxerui_add_test_suite(huxerui_ui_tests HuxerUIUiTests
+            LABELS common runtime testing
+            LIBRARIES HuxerUI::testing
+            SOURCES ui_testing.cpp
+    )
+    huxerui_add_resources(huxerui_ui_tests
+            ROOT "${HUXERUI_TEST_DIR}/libraries/application_resources"
+            NAMESPACE ui_test_fixture
+    )
+    _huxerui_append_resource_package_input(huxerui_ui_tests "${HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE}")
+    target_compile_definitions(huxerui_ui_tests PRIVATE
+            "HUXERUI_UI_TEST_PACKAGE=\"${CMAKE_CURRENT_BINARY_DIR}/huxerui-resources/huxerui_ui_tests/package\""
+    )
+endif ()
 target_compile_definitions(huxerui_runtime_tests PRIVATE
         HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE="${HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE}"
         $<$<BOOL:${HUXERUI_ENABLE_PROFILING}>:HUXERUI_ENABLE_PROFILING=1>

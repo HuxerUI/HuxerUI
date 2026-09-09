@@ -124,7 +124,7 @@ $outputDirectory = if ($OutputDirectory) {
     Join-Path $buildDirectory "packages"
 }
 $platformArtifactRoot = Join-Path $buildDirectory "platform-artifacts"
-$androidExtractDirectory = Join-Path $buildDirectory "android-aar"
+$androidBuildDirectory = Join-Path $buildDirectory "android"
 $webBuildDirectory = Join-Path $buildDirectory "web"
 $hostBuildDirectory = Join-Path $buildDirectory "host"
 $hostConfiguration = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) { "Release" } else { $Configuration }
@@ -134,13 +134,10 @@ New-Item -ItemType Directory -Path $buildDirectory, $outputDirectory -Force | Ou
 $cmake = Require-Command "cmake"
 $cpack = Require-Command "cpack"
 $null = Require-Command "java"
-$jar = Require-Command "jar"
 $emcmake = Require-Command "emcmake"
 $emcc = Require-Command "emcc"
 Initialize-WindowsToolchain
-if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-    $null = Require-Command "ninja"
-}
+$null = Require-Command "ninja"
 
 $sdkDefinition = Get-Content -LiteralPath (Join-Path $sourceDirectory "cmake/HuxerUISdk.cmake") -Raw
 if ($sdkDefinition -notmatch 'set\(HUXERUI_WEB_EMSCRIPTEN_VERSION "([^"]+)"\)') {
@@ -153,50 +150,57 @@ if ($LASTEXITCODE -ne 0 -or $emccVersion -notmatch [regex]::Escape($webVersion))
 }
 
 Reset-OwnedDirectory $platformArtifactRoot $buildDirectory
-Reset-OwnedDirectory $androidExtractDirectory $buildDirectory
 Reset-OwnedDirectory $webBuildDirectory $buildDirectory
 Reset-OwnedDirectory $hostBuildDirectory $buildDirectory
 
 $androidDirectory = Join-Path $sourceDirectory "platform/android"
-$gradleWrapper = Join-Path $androidDirectory "gradlew.bat"
-if (-not (Test-Path -LiteralPath $gradleWrapper -PathType Leaf)) {
-    throw "HuxerUI Android Gradle wrapper is missing: $gradleWrapper"
+$androidProperties = Get-Content -LiteralPath (Join-Path $androidDirectory "gradle.properties") -Raw |
+        ConvertFrom-StringData
+foreach ($name in @("huxeruiNdkVersion", "huxeruiMinSdk", "huxeruiStl", "huxeruiAbis")) {
+    if (-not $androidProperties[$name]) {
+        throw "HuxerUI Android build property is missing: $name"
+    }
+}
+$androidSdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $env:ANDROID_SDK_ROOT }
+if (-not $androidSdk) {
+    throw "HuxerUI SDK packaging requires ANDROID_HOME or ANDROID_SDK_ROOT"
+}
+$androidNdk = Join-Path $androidSdk "ndk/$($androidProperties.huxeruiNdkVersion)"
+if (-not (Test-Path -LiteralPath (Join-Path $androidNdk "build/cmake/android.toolchain.cmake") -PathType Leaf)) {
+    throw "HuxerUI Android NDK is missing: $androidNdk"
 }
 $gradleVariant = $Configuration.ToLowerInvariant()
-Invoke-Checked $gradleWrapper @(
-    ":HuxerUI:assemble$Configuration",
-    "-PhuxeruiBuildNative=true",
-    "--no-daemon"
+Invoke-Checked (Join-Path $androidDirectory "gradlew.bat") @(
+    ":HuxerUI:assemble$Configuration", "-PhuxeruiBuildNative=false", "--no-daemon"
 ) $androidDirectory
-
-$aarCandidates = @(Get-ChildItem -LiteralPath (Join-Path $androidDirectory "huxerui/build/outputs/aar") `
-        -Filter "*-$gradleVariant.aar" -File)
-if ($aarCandidates.Count -ne 1) {
-    throw "Expected one HuxerUI Android $Configuration AAR, found $($aarCandidates.Count)"
+$aar = Join-Path $androidDirectory "huxerui/build/outputs/aar/HuxerUI-$gradleVariant.aar"
+$aarEntries = & $cmake -E tar tf $aar
+if ($LASTEXITCODE -ne 0 -or ($aarEntries -match '^(jni|prefab)/')) {
+    throw "HuxerUI SDK packaging requires a readable Java-only Android AAR"
 }
-Invoke-Checked $jar @("-xf", $aarCandidates[0].FullName) $androidExtractDirectory
-
 $androidArtifactDirectory = Join-Path $platformArtifactRoot "android"
 New-Item -ItemType Directory -Path $androidArtifactDirectory -Force | Out-Null
-foreach ($abi in @("arm64-v8a", "x86_64")) {
-    $abiOutput = Join-Path $androidArtifactDirectory $abi
-    New-Item -ItemType Directory -Path $abiOutput -Force | Out-Null
-    $sharedLibrary = Join-Path $androidExtractDirectory "jni/$abi/libhuxerui.so"
-    if (-not (Test-Path -LiteralPath $sharedLibrary -PathType Leaf)) {
-        throw "HuxerUI Android AAR is missing $abi/libhuxerui.so"
-    }
-    Copy-Item -LiteralPath $sharedLibrary -Destination (Join-Path $abiOutput "libhuxerui.so")
+Copy-Item -LiteralPath $aar -Destination (Join-Path $androidArtifactDirectory "HuxerUI.aar")
+foreach ($abi in $androidProperties.huxeruiAbis.Split(',')) {
+    $abiBuild = Join-Path $androidBuildDirectory "$gradleVariant/$abi"
+    Invoke-Checked $cmake @(
+        "-S", $sourceDirectory, "-B", $abiBuild, "-G", "Ninja",
+        "-DCMAKE_TOOLCHAIN_FILE=$(Join-Path $androidNdk 'build/cmake/android.toolchain.cmake')",
+        "-DCMAKE_BUILD_TYPE=$Configuration", "-DCMAKE_INSTALL_LIBDIR=.",
+        "-DANDROID_ABI=$abi", "-DANDROID_PLATFORM=android-$($androidProperties.huxeruiMinSdk)",
+        "-DANDROID_STL=$($androidProperties.huxeruiStl)",
+        "-DHUXERUI_BUILD_SHARED=ON", "-DHUXERUI_BUILD_STATIC=OFF", "-DHUXERUI_ENABLE_PROFILING=OFF",
+        "-DHUXERUI_BUILD_CLI=OFF", "-DHUXERUI_BUILD_EXAMPLES=OFF", "-DHUXERUI_BUILD_TESTS=OFF",
+        "-DHUXERUI_BUILD_TESTING_LIBRARY=ON", "-DHUXERUI_BUILD_TESTING_SMOKE_TESTS=OFF"
+    ) $sourceDirectory
+    Invoke-Checked $cmake @(
+        "--build", $abiBuild, "--target", "huxerui", "huxerui_testing", "--parallel", $Jobs
+    ) $sourceDirectory
+    Invoke-Checked $cmake @(
+        "--install", $abiBuild, "--config", $Configuration, "--component", "HuxerUILibraries",
+        "--prefix", (Join-Path $androidArtifactDirectory $abi), "--strip"
+    ) $sourceDirectory
 }
-
-Remove-Item -LiteralPath (Join-Path $androidExtractDirectory "jni") -Recurse -Force
-if (Test-Path -LiteralPath (Join-Path $androidExtractDirectory "prefab")) {
-    Remove-Item -LiteralPath (Join-Path $androidExtractDirectory "prefab") -Recurse -Force
-}
-$javaOnlyAar = Join-Path $androidArtifactDirectory "HuxerUI.aar"
-Invoke-Checked $jar @(
-    "--create", "--file", $javaOnlyAar,
-    "--no-manifest", "-C", $androidExtractDirectory, "."
-) $sourceDirectory
 
 Invoke-Checked $emcmake @(
     $cmake,
@@ -208,11 +212,12 @@ Invoke-Checked $emcmake @(
     "-DHUXERUI_ENABLE_PROFILING=OFF",
     "-DHUXERUI_BUILD_CLI=OFF",
     "-DHUXERUI_BUILD_EXAMPLES=OFF",
+    "-DHUXERUI_BUILD_TESTING_LIBRARY=ON",
     "-DHUXERUI_BUILD_TESTS=OFF"
 ) $sourceDirectory
 Invoke-Checked $cmake @(
     "--build", $webBuildDirectory,
-    "--target", "huxerui_static",
+    "--target", "huxerui_static", "huxerui_testing",
     "--parallel", $Jobs
 ) $sourceDirectory
 $webLibrary = Join-Path $webBuildDirectory "lib/libhuxerui_static.a"
@@ -222,6 +227,8 @@ if (-not (Test-Path -LiteralPath $webLibrary -PathType Leaf)) {
 $webArtifactDirectory = Join-Path $platformArtifactRoot "web/emscripten-$webVersion"
 New-Item -ItemType Directory -Path $webArtifactDirectory -Force | Out-Null
 Copy-Item -LiteralPath $webLibrary -Destination (Join-Path $webArtifactDirectory "libhuxerui.a")
+Copy-Item -LiteralPath (Join-Path $webBuildDirectory "lib/libhuxerui_testing.a") `
+        -Destination (Join-Path $webArtifactDirectory "libhuxerui_testing.a")
 
 $hostConfigureArguments = @(
     "-S", $sourceDirectory,
@@ -230,6 +237,7 @@ $hostConfigureArguments = @(
     "-DHUXERUI_BUILD_CLI=ON",
     "-DHUXERUI_BUILD_EXAMPLES=OFF",
     "-DHUXERUI_BUILD_TESTS=OFF",
+    "-DHUXERUI_BUILD_TESTING_LIBRARY=ON",
     "-DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=$platformArtifactRoot"
 )
 if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
@@ -245,7 +253,7 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
     Invoke-Checked $cmake @(
         "--build", $hostBuildDirectory,
         "--config", "Debug",
-        "--target", "huxerui", "huxerui_static",
+        "--target", "huxerui", "huxerui_static", "huxerui_testing",
         "--parallel", $Jobs
     ) $sourceDirectory
 }

@@ -161,3 +161,36 @@ function(huxerui_configure_targets)
 
     set(HUXERUI_BUILTIN_RESOURCE_PACKAGE "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" PARENT_SCOPE)
 endfunction()
+
+function(huxerui_install_libraries)
+    include(GNUInstallDirs)
+    if (HUXERUI_ENABLE_PROFILING)
+        install(CODE
+                "message(FATAL_ERROR \"HuxerUI SDK installation requires HUXERUI_ENABLE_PROFILING=OFF\")"
+                COMPONENT HuxerUILibraries)
+    endif ()
+
+    # The Termux host SDK consumes the separately assembled Android target libraries.
+    if (ANDROID AND HUXERUI_BUILD_CLI)
+        return()
+    endif ()
+
+    if (TARGET ${HUXERUI_SHARED_LIB_NAME})
+        install(TARGETS ${HUXERUI_SHARED_LIB_NAME} EXPORT HuxerUISharedTargets
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries)
+    endif ()
+    if (TARGET ${HUXERUI_STATIC_LIB_NAME})
+        install(TARGETS ${HUXERUI_STATIC_LIB_NAME} EXPORT HuxerUIStaticTargets
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries)
+    endif ()
+    if (TARGET huxerui_testing)
+        install(TARGETS huxerui_testing EXPORT HuxerUITestingTargets
+                RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT HuxerUILibraries
+                LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries
+                ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT HuxerUILibraries)
+    endif ()
+endfunction()
