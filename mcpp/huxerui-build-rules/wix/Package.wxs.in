@@ -7,7 +7,7 @@
   bindpath.Application is the directory ninja links into, reached as the
   relative path `bin` because a wix action runs with the build directory as its
   working directory. `<Files Include="…\**" />` harvests it, so the install set
-  is whatever the link produced -- on Windows the executable and the DLLs
+  is whatever the link produced — on Windows the executable and the DLLs
   beside it. HuxerUI's compiled resources are linked INTO the executable, so
   there is nothing else to carry.
 -->
