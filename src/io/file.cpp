@@ -24,7 +24,14 @@
 #include <vector>
 
 #if defined(_WIN32)
+// Guarded because both build systems already define it -- CMake in
+// cmake/platform/Windows.cmake and mcpp in [target.windows.build] defines --
+// and a bare `-DNOMINMAX` on the command line means `NOMINMAX 1`, which this
+// line then redefines to nothing. clang says so on every Windows build of this
+// file; the guard keeps the definition and drops the warning.
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <winternl.h>
 #include <io.h>
