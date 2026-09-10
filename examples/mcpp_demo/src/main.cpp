@@ -1,36 +1,18 @@
-#include <huxerui/huxerui.h>
+// The entry translation unit, and it instantiates NOTHING.
+//
+// That is the whole trick behind it having no includes. HuxerUI's UseState(),
+// View and Layout templates instantiate `typeid` in their CALLER, and GCC's
+// typeid check is per-translation-unit -- so any TU that builds a View needs
+// <typeinfo>. Keep the entry to `RunApplication()` and the work in a module
+// unit, and the include goes where a module unit's includes belong: its own
+// global module fragment.
+//
+// huxerui.rules leaves the entry alone for a separate reason -- a build program
+// can add a source but cannot replace one, so a transformed copy of this file
+// would link beside the original as `multiple definition of main`. The two
+// constraints point the same way.
 
-#include <cstdio>
+import huxerui;
+import app;
 
-using namespace huxerui;
-
-View App() {
-  return Column {
-    Text("mcpp + HuxerUI", TextRole::Title),
-    Text("This small page is compiled by mcpp and linked directly to the HuxerUI static library."),
-    Divider(),
-    Text("The SDK CLI does not need to know what the application is. It only delegates the build to mcpp."),
-    Row {
-      Button("Say hello").OnClick([] { std::puts("Hello from the HuxerUI mcpp demo."); }),
-    }.With(Spacing(12.0F)),
-  }.With(
-      Padding(32.0F),
-      Spacing(16.0F),
-      CrossAlign(CrossAxisAlignment::Stretch),
-      Background(Color::Rgb(248, 249, 252))
-  );
-}
-
-const Application application{
-    App,
-    {
-        .window = {
-            .title = "mcpp HuxerUI Demo",
-            .initial_size = {640.0F, 420.0F},
-        },
-    },
-};
-
-int main() {
-  return RunApplication();
-}
+int main() { return huxerui::RunApplication(); }

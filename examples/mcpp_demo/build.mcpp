@@ -1,0 +1,18 @@
+// The whole build program for a HuxerUI application.
+//
+// `huxerui.rules` arrives through the `huxerui` dependency, which re-exports
+// it, so this file names no package of its own. configure() schedules the
+// composable transform (hcg) and the resource compiler (hrc) as build-graph
+// edges -- incremental, parallel, and attributable to the file that failed.
+
+import mcpp;
+import huxerui.rules;
+
+int main() {
+    return huxerui::rules::configure({
+        .resources         = "resources",
+        .resource_namespace = "mcpp_demo",
+        .bundle_name       = "HuxerUI mcpp Demo",
+        .bundle_identifier = "com.huxerui.mcpp_demo",
+    }) ? 0 : 1;
+}

@@ -1,44 +1,38 @@
-[package]
-name = "huxerui-mcpp-demo"
-version = "0.1.0"
-standard = "c++26"
-description = "A small HuxerUI page built through the mcpp CLI frontend"
+# A HuxerUI application built natively by mcpp.
+#
+# Everything this file used to spell out by hand -- the SDK include directory,
+# the HuxerUI static library, twenty absolute /lib64/*.so paths and a runtime
+# library_dirs entry -- is now supplied by the `huxerui` dependency edge. A
+# dependency's build.mcpp emits link-lib/link-search that reach the FINAL link,
+# so GTK arrives here without this manifest naming it.
 
-[toolchain]
-default = "gcc@16.1.0"
+[package]
+name        = "huxerui-mcpp-demo"
+version     = "0.1.0"
+standard    = "c++20"
+description = "A HuxerUI page built natively by mcpp"
+
+[dependencies]
+huxerui = { path = "../.." }
 
 [targets.huxerui_mcpp_demo]
 kind = "bin"
 main = "src/main.cpp"
 
 [build]
-include_dirs = ["../../include"]
-cxxflags = ["-pthread"]
-static_stdlib = false
-ldflags = [
-    "-L../../build/lib",
-    "-lhuxerui_static",
-    "-Wl,--no-as-needed",
-    "/lib64/libgtk-4.so",
-    "/lib64/libpangocairo-1.0.so",
-    "/lib64/libpango-1.0.so",
-    "/lib64/libgdk_pixbuf-2.0.so",
-    "/lib64/libcairo-gobject.so",
-    "/lib64/libcairo.so",
-    "/lib64/libharfbuzz.so",
-    "/lib64/libvulkan.so",
-    "/lib64/libgraphene-1.0.so",
-    "/lib64/libepoxy.so",
-    "/lib64/libsoup-3.0.so",
-    "/lib64/libgio-2.0.so",
-    "/lib64/libgobject-2.0.so",
-    "/lib64/libgmodule-2.0.so",
-    "/lib64/libglib-2.0.so",
-    "/lib64/libpcre2-8.so",
-    "/lib64/libfontconfig.so",
-    "-pthread",
-    "-Wl,--as-needed",
-]
+# huxerui.rules owns the source selection: a build program can ADD a source but
+# cannot replace one, so a package that also globbed src/**/*.cpp would link
+# both the original and the hcg-transformed copy of every composable.
+sources = []
 
-[runtime]
-library_dirs = ["/lib64"]
+# The Windows executable's icon and the version metadata its Properties dialog
+# shows. FILEVERSION, ProductName, FileDescription and CompanyName all default
+# from [package], so this one line is the whole thing.
+#
+# ONLY PE TARGETS COMPILE THIS. On Linux and macOS the table is inapplicable --
+# no resource units, no diagnostics, byte-identical build -- so it is written
+# unconditionally and needs no cfg(windows) predicate. The file's existence IS
+# checked on every target, which is what catches a typo on the Linux build
+# rather than on the Windows one.
+[resources]
+icon = "assets/app.ico"

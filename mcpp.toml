@@ -1,0 +1,297 @@
+# HuxerUI as a native mcpp package.
+#
+# This file is additive: nothing in the CMake build reads it, and deleting it
+# returns the repository to a CMake-only project. See
+# `.agents/docs/2026-09-09-mcpp-native-build-and-modules-plan.md` for the design
+# and `mcpp/README.md` for how to drive it.
+
+[workspace]
+# The packages `mcpp build --workspace` can build, and only those.
+#
+# huxerui-build-rules is deliberately NOT here. It imports mcpp, so it compiles
+# only as part of a build program's compile -- its own manifest says so -- and
+# listing it made `mcpp build --workspace` fail on the first member with
+# `failed to read compiled module`. It is reached the way it is meant to be
+# reached: as a host-module build-dependency.
+#
+# huxerui-tools IS here despite pinning `standard = "c++23"`: a member that
+# declares the key keeps its own value, and it needs c++23 for tomlplusplus's
+# module build.
+#
+# `mcpp test` is not run from this root and cannot be. mcpp defines a test as
+# every `tests/**/*.cpp`, with no manifest key to point that elsewhere, and
+# this repository's `tests/` tree is CMake's -- ~50 Catch2 suites that need the
+# framework, the CLI core and a Catch2 main. `mcpp test --list` here lists all
+# of them. The packages that do have mcpp tests are tested from their own
+# directory, which is what CI does.
+members = ["mcpp/huxerui-source-select", "mcpp/huxerui-tools",
+           "tools/codegen", "tools/resource_compiler"]
+
+[package]
+name        = "huxerui"
+namespace   = "huxerui"
+version     = "0.3.0"
+# C++20 is the SDK ABI baseline (CMAKE_CXX_STANDARD 20, extensions off).
+# Do not raise it here: the standard is module-graph-global in mcpp, so this
+# value would also be imposed on every consumer of this package.
+standard    = "c++20"
+description = "HuxerUI declarative cross-platform UI framework"
+license     = "Apache-2.0"
+repo        = "https://github.com/Sunrisepeak/HuxerUI"
+platforms   = ["linux", "windows", "macos"]
+
+# The package's primary module interface. mcpp's convention is
+# `src/<last segment of package name>.cppm`; HuxerUI keeps the module out of
+# `src/` because `src/` is private implementation and this file is public API.
+[lib]
+path = "modules/huxerui.cppm"
+
+[targets.huxerui]
+# `lib`, not `shared`: whether HuxerUI is a separate file at run time is the
+# consuming program's decision, expressed with `[build] dependency_linkage`.
+# CMake's huxerui/huxerui_static pair is the same choice made by the author.
+kind = "lib"
+
+[build]
+# Mirrors `file(GLOB HUXERUI_CORE_SOURCE_FILES "${HUXERUI_PROJECT_DIR}/src/*/*.cpp")`
+# in cmake/HuxerUIBuild.cmake. `huxerui-build-check` asserts the two agree.
+# `modules/huxerui.cppm` is the C++20 front door: it includes the public headers
+# in its global module fragment and re-exports their names, so `import huxerui;`
+# and `#include <huxerui/huxerui.h>` name the SAME entities with the same
+# linkage. Compiling it here is what makes the module importable by consumers.
+sources                 = ["src/*/*.cpp", "modules/huxerui.cppm"]
+include_dirs            = ["include", "src"]
+# `src` carries implementation-only headers; a consumer must never receive it.
+# CMake expresses the same split with PRIVATE vs PUBLIC target_include_directories.
+private_include_dirs    = ["src"]
+cxxflags                = ["-Wall", "-Wextra", "-Wpedantic"]
+macos_deployment_target = "12.0"
+# CMake's HUXERUI_ENABLE_PROFILING defaults ON and compiles src/runtime/profiling.cpp.
+defines                 = ["HUXERUI_ENABLE_PROFILING=1"]
+
+# BUILD-dependencies, not dependencies: none of these three reaches the
+# artifact. hcg and hrc run on the build machine and produce sources; the rule
+# module is compiled into build.mcpp itself. Declaring them as ordinary
+# dependencies would say they are part of what HuxerUI links, which is false.
+#
+# `reexport = true` is what makes an application's manifest a single line: the
+# tools and the rule module reach ITS build program without it naming them.
+#
+# The tools are built from source rather than taken from tools/prebuilt/ -- see
+# tools/codegen/mcpp.toml for why.
+[build-dependencies]
+huxerui-codegen           = { path = "tools/codegen",           tools = ["hcg"], reexport = true }
+huxerui-resource-compiler = { path = "tools/resource_compiler", tools = ["hrc"], reexport = true }
+huxerui-build-rules       = { path = "mcpp/huxerui-build-rules", host-module = true, reexport = true }
+
+# ------------------------------------------------- consumer environment ----
+# What a CONSUMER of the published package must have installed, and the only
+# place that reaches the package descriptor.
+#
+# The same payloads are declared under `[target.<sel>.xlings.workspace]` below,
+# and that is not redundant -- the two tables answer different questions and
+# mcpp resolves them on different axes:
+#
+#   [target.<sel>.xlings.workspace]   target axis: what THIS package's build
+#                                     compiles and links against
+#   [xlings.workspace]                host axis:  what the environment must
+#                                     contain, and what `mcpp emit xpkg`
+#                                     writes into xpm.<platform>.deps
+#
+# A path dependency provisions the target axis, which is why examples/mcpp_demo
+# links GTK today. A consumer that resolves `huxerui.huxerui` from the index
+# gets only what the descriptor names, and `mcpp emit xpkg` says so out loud:
+#
+#   warning: [target.'cfg(linux)'] declares tools (...) and the descriptor
+#   carries no edge for them: its blocks are per platform, and a selector is
+#   not a platform.
+#
+# Without this table the framework publishes cleanly and every consumer fails
+# to link.
+#
+# The values are platform-scoped tables: a table with no key for the host and
+# no `default` declares nothing there, so a macOS consumer resolves none of the
+# Linux payloads.
+[xlings.workspace]
+"xim:cairo" = { linux = "1.18.4" }
+"xim:expat" = { linux = "2.6.2" }
+"xim:fontconfig" = { linux = "2.15.0.1" }
+"xim:freetype" = { linux = "2.13.2" }
+"xim:fribidi" = { linux = "1.0.13" }
+"xim:gdk-pixbuf" = { linux = "2.44.8" }
+"xim:glib" = { linux = "2.88.3" }
+"xim:graphene" = { linux = "1.10.8" }
+"xim:gtk4" = { linux = "4.16.13" }
+"xim:harfbuzz" = { linux = "14.4.0" }
+"xim:libX11" = { linux = "1.8.10" }
+"xim:libXau" = { linux = "1.0.11" }
+"xim:libXdmcp" = { linux = "1.1.5" }
+"xim:libXext" = { linux = "1.3.6" }
+"xim:libXft" = { linux = "2.3.9" }
+"xim:libXrender" = { linux = "0.9.11" }
+"xim:libdatrie" = { linux = "0.2.14" }
+"xim:libepoxy" = { linux = "1.5.10" }
+"xim:libffi" = { linux = "3.4.4" }
+"xim:libglvnd" = { linux = "1.7.0.1" }
+"xim:libjpeg-turbo" = { linux = "3.2.0" }
+"xim:libpng" = { linux = "1.6.43" }
+"xim:libpsl" = { linux = "0.23.3" }
+"xim:libselinux" = { linux = "3.11" }
+"xim:libsoup" = { linux = "3.6.6" }
+"xim:libthai" = { linux = "0.1.30" }
+"xim:libtiff" = { linux = "4.7.2" }
+"xim:libxcb" = { linux = "1.17.0" }
+"xim:nghttp2" = { linux = "1.70.0" }
+"xim:pango" = { linux = "1.52.1" }
+"xim:pcre2" = { linux = "10.42" }
+"xim:pixman" = { linux = "0.42.2" }
+"xim:sqlite" = { linux = "3.53.4" }
+"xim:util-linux" = { linux = "2.40.2" }
+"xim:xorgproto" = { linux = "2024.1" }
+"xim:zlib" = { linux = "1.3.1" }
+"xim:wix"  = { windows = "5.0.2" }
+
+# ---------------------------------------------------------------- Linux ----
+# Sources mirror cmake/platform/Linux.cmake.
+[target.'cfg(linux)'.build]
+sources = ["platform/linux/*.cpp"]
+
+# THE GTK STACK COMES FROM XLINGS, NOT FROM THE MACHINE.
+#
+# mcpp is payload-first: it compiles with its own toolchain and its own glibc
+# (xim:glibc). Reaching for the host's GTK mixes two C libraries in one binary,
+# and it does not fail politely. `pkg-config --cflags gtk4` on Debian/Ubuntu
+# emits `-I/usr/include/x86_64-linux-gnu` -- the system glibc's multiarch
+# directory -- and the payload glibc's <time.h> then reaches the SYSTEM's
+# <bits/time.h>:
+#
+#     .../xim-x-glibc/2.44/include/time.h:37
+#       -> /usr/include/x86_64-linux-gnu/bits/time.h:73
+#     error: 'time' has not been declared in '::'
+#     error: 'struct timespec' has no member named 'tv_sec'
+#     error: cannot convert '<brace-enclosed initializer list>' to 'unsigned int'
+#
+# Every core translation unit fails, not just the platform ones, because a build
+# program's include dirs colour the whole package. `-idirafter` makes that
+# compile again and is still wrong: the LINK would then join libraries built
+# against glibc 2.39 to objects compiled against 2.44.
+#
+# So the whole stack is declared here. build.mcpp points PKG_CONFIG_LIBDIR at
+# these payloads only, which is what keeps the host out entirely.
+#
+# The list is the transitive .pc closure of gtk4 + epoxy + libsoup, resolved
+# once and pinned. It is long because it is complete: an entry missing here
+# surfaces as `Package <x> was not found in the pkg-config search path`, which
+# names exactly what to add.
+#
+# CMake keeps using the distribution's packages, as cmake/platform/Linux.cmake
+# and AGENTS.md require -- the two build systems answer "where does GTK come
+# from" differently ON PURPOSE, because they compile with different C libraries.
+[target.'cfg(linux)'.xlings.workspace]
+"xim:cairo" = "1.18.4"
+"xim:expat" = "2.6.2"
+"xim:fontconfig" = "2.15.0.1"
+"xim:freetype" = "2.13.2"
+"xim:fribidi" = "1.0.13"
+"xim:gdk-pixbuf" = "2.44.8"
+"xim:glib" = "2.88.3"
+"xim:graphene" = "1.10.8"
+"xim:gtk4" = "4.16.13"
+"xim:harfbuzz" = "14.4.0"
+"xim:libX11" = "1.8.10"
+"xim:libXau" = "1.0.11"
+"xim:libXdmcp" = "1.1.5"
+"xim:libXext" = "1.3.6"
+"xim:libXft" = "2.3.9"
+"xim:libXrender" = "0.9.11"
+"xim:libdatrie" = "0.2.14"
+"xim:libepoxy" = "1.5.10"
+"xim:libffi" = "3.4.4"
+"xim:libglvnd" = "1.7.0.1"
+"xim:libjpeg-turbo" = "3.2.0"
+"xim:libpng" = "1.6.43"
+"xim:libpsl" = "0.23.3"
+"xim:libselinux" = "3.11"
+"xim:libsoup" = "3.6.6"
+"xim:libthai" = "0.1.30"
+"xim:libtiff" = "4.7.2"
+"xim:libxcb" = "1.17.0"
+"xim:nghttp2" = "1.70.0"
+"xim:pango" = "1.52.1"
+"xim:pcre2" = "10.42"
+"xim:pixman" = "0.42.2"
+"xim:sqlite" = "3.53.4"
+"xim:util-linux" = "2.40.2"
+"xim:xorgproto" = "2024.1"
+"xim:zlib" = "1.3.1"
+
+# -------------------------------------------------------------- Windows ----
+[target.windows.build]
+# windows_installer.cpp is NOT part of the framework: it is the WiX custom-action
+# DLL, built as a separate SDK artifact by cmake/HuxerUISdk.cmake:131. A bare
+# `platform/windows/*.cpp` glob sweeps it into libhuxerui, which is what
+# `huxerui-build-check` caught before this ever ran on Windows.
+sources  = ["platform/windows/*.cpp", "!platform/windows/windows_installer.cpp"]
+defines  = ["UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN",
+            "WINVER=0x0A00", "_WIN32_WINNT=0x0A00"]
+# NO MSVC-DIALECT FLAGS. mcpp builds Windows with clang targeting
+# x86_64-windows-msvc -- the MSVC ABI and the Windows SDK, not MinGW -- and its
+# GNU driver rejects `/W4`, `/permissive-` and `/utf-8` outright
+# ("error: no such file or directory: '/W4'"). The warning level is already set
+# once in the base [build] cxxflags, and clang reads UTF-8 by default.
+#
+# `[toolchain] windows = "msvc"` would put both build systems on one compiler
+# and was tried; mcpp 2026.9.8.1 then hands the host module's BMI to cl.exe in
+# clang's `name=path` spelling and the link fails with
+# `LNK1104: cannot open file 'huxerui.rules=...ifc'`. NOT RE-TESTED on the
+# 2026.9.10.2 this repository now pins -- the observation above is from 9.8.1
+# and the bug may already be gone. Retry `windows = "msvc"` before treating
+# this paragraph as current.
+
+# The WiX toolset, for projects that build a Windows installer. It is an
+# xlings payload rather than a NuGet restore inside this repository: WiX is a
+# general-purpose tool, and the download-and-verify that used to live in
+# cmake/HuxerUIWindowsInstaller.cmake is index work.
+#
+# Declared by the framework so that a consumer gets it through the dependency
+# edge -- xpkg_dir answers for a package a DEPENDENCY declared (mcpp
+# 2026.9.6.6+), so an application's build.mcpp reaches it without naming it.
+[target.windows.xlings.workspace]
+"xim:wix" = "5.0.2"
+
+[target.windows.runtime]
+# The first group is what cmake/platform/Windows.cmake names explicitly.
+#
+# The second is what CMake adds IMPLICITLY and mcpp does not:
+# CMAKE_CXX_STANDARD_LIBRARIES defaults to kernel32/user32/gdi32/winspool/
+# shell32/ole32/oleaut32/uuid/comdlg32/advapi32, so a CMake target links them
+# whether or not it says so. mcpp names exactly what the manifest names, so the
+# omission surfaces at the link -- measured as
+# `lld-link: error: undefined symbol: __declspec(dllimport) CreateDIBSection`
+# from win32_system_tray.cpp, which uses GDI without gdi32 ever being listed.
+libraries = ["advapi32", "d2d1", "d3d11", "dwrite", "dwmapi", "dxguid", "dxgi",
+             "imm32", "ole32", "oleaut32", "psapi", "shell32", "uiautomationcore",
+             "user32", "winhttp", "windowscodecs",
+             "dcomp", "windowsapp", "crypt32", "propsys",
+             "kernel32", "gdi32", "winspool", "uuid", "comdlg32"]
+
+# ---------------------------------------------------------------- macOS ----
+[target.macos.build]
+# `.mm` is a first-class C++ source kind in mcpp but is NOT in the default
+# glob (src/**/*.{cppm,cpp,cc,c,S,s,asm}), so it must be listed explicitly.
+sources  = ["platform/macos/*.mm"]
+cxxflags = ["-fobjc-arc"]
+# `-weak_framework` has no neutral spelling; [runtime] frameworks covers only
+# ordinary framework linkage.
+ldflags  = ["-weak_framework", "UniformTypeIdentifiers"]
+
+# frameworks belongs to the TOP-LEVEL [runtime] table. The per-target
+# vocabulary is `libraries` / `link_library_dirs` only, so a
+# [target.macos.runtime] frameworks entry is reported and ignored -- the build
+# then fails at link on macOS alone. Unconditional here is correct: the engine
+# renders this only for Mach-O (src/build/flags.cppm, `flavor == MachO`), the
+# same shape [resources] has for PE.
+[runtime]
+frameworks = ["AppKit", "AVFoundation", "Carbon", "CoreGraphics", "CoreImage",
+              "CoreText", "CoreVideo", "ImageIO", "Foundation", "Metal",
+              "MetalPerformanceShaders", "QuartzCore", "UserNotifications"]

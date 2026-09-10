@@ -1,0 +1,16 @@
+# The parts of the build rules that are pure functions of their inputs.
+#
+# Split out so they can be TESTED. `huxerui-build-rules` is a host module: it
+# `import mcpp;`, which only exists inside a build program's compile, so
+# `mcpp test` cannot build it and nothing in it was covered. Everything here
+# imports std and nothing else, so `mcpp test` runs it like any package.
+
+[package]
+name        = "huxerui-source-select"
+namespace   = "huxerui"
+version     = "0.3.0"
+description = "Source selection and composable detection for the HuxerUI build rules"
+license     = "Apache-2.0"
+
+[lib]
+path = "src/sources.cppm"

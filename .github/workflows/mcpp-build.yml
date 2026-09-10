@@ -1,0 +1,394 @@
+name: mcpp Build
+
+# The mcpp leg of the dual build system. CMake remains the full-platform path
+# and the only path for Android, iOS and Web; this workflow covers what mcpp
+# can build today (see .agents/docs/2026-09-09-mcpp-native-build-and-modules-plan.md).
+#
+# `parity` is first and cheap on purpose: it builds two small programs and no
+# framework, so the failure it catches -- a source added to one build system
+# and not the other -- is reported before anyone waits on a compile.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mcpp.toml'
+      - 'build.mcpp'
+      - 'mcpp/**'
+      - 'src/**'
+      - 'include/**'
+      - 'platform/linux/**'
+      - 'platform/windows/**'
+      - 'platform/macos/**'
+      - 'resources/**'
+      - 'cmake/platform/**'
+      - 'cmake/HuxerUIBuild.cmake'
+      - 'examples/mcpp_demo/**'
+      - 'tools/codegen/**'
+      - '.github/workflows/mcpp-build.yml'
+  pull_request:
+    paths:
+      - 'mcpp.toml'
+      - 'build.mcpp'
+      - 'mcpp/**'
+      - 'src/**'
+      - 'include/**'
+      - 'platform/linux/**'
+      - 'platform/windows/**'
+      - 'platform/macos/**'
+      - 'resources/**'
+      - 'cmake/platform/**'
+      - 'cmake/HuxerUIBuild.cmake'
+      - 'examples/mcpp_demo/**'
+      - 'tools/codegen/**'
+      - '.github/workflows/mcpp-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mcpp-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Pinned rather than latest: an mcpp release changes build behaviour, and a
+  # green PR should stay green until someone chooses to move this line.
+  MCPP_VERSION: '2026.9.10.2'
+  XLINGS_NON_INTERACTIVE: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  parity:
+    name: mcpp/CMake parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+          xlings install "mcpp@${MCPP_VERSION}" -y || true
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      # The tooling is built by mcpp rather than written in Python: a
+      # repository that offers mcpp as a first-class build system should not
+      # need a second language to check its own build. It builds only the two
+      # small programs and their dependencies, not the framework.
+      - name: Unit-test the scanning the tools and the rules share
+        working-directory: mcpp/huxerui-source-select
+        run: mcpp test
+
+      - name: Check that both build systems describe the same project
+        working-directory: mcpp/huxerui-tools
+        run: mcpp run huxerui-build-check
+
+      # The module shell and the scope prelude are generated from the public
+      # headers; a public name added to a header and not to the shell is a name
+      # `import huxerui;` cannot see.
+      - name: Check that the module shell is up to date
+        working-directory: mcpp/huxerui-tools
+        run: mcpp run huxerui-module-gen -- --check
+
+      # `[workspace] members` is otherwise a table nothing reads. It was wrong
+      # when this ran for the first time: huxerui-build-rules was listed, and
+      # that package imports mcpp, so it compiles only inside a build program's
+      # compile and the fan-out died on the first member with `failed to read
+      # compiled module`.
+      - name: Build every workspace member
+        run: mcpp build --workspace
+
+  linux:
+    name: mcpp build (linux x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      # NOTE: no apt-get. The GTK stack comes from the xlings payloads declared
+      # in [target.'cfg(linux)'.xlings.workspace], because mcpp compiles with
+      # its own toolchain and its own glibc -- see the comment there for what
+      # mixing the host's glibc in actually produces. CMake keeps using the
+      # distribution's packages; the two build systems answer "where does GTK
+      # come from" differently on purpose.
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          # The payload store holds the whole GTK closure (36 packages), so
+          # the key names the manifest that selects them.
+          key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      # The framework: 67 core sources, platform/linux, the builtin resource
+      # header (hrc) and the C++20 module shell. mcpp provisions the GTK
+      # payloads itself; this step is separate only so a provisioning failure
+      # is attributed to provisioning rather than to the compile.
+      - name: Build the framework
+        run: mcpp build
+
+      # An application on top of it. Its mcpp.toml names one dependency and its
+      # build.mcpp is one call; everything else -- GTK on the link line, the
+      # composable transform, the resource packages -- arrives through the
+      # dependency edge.
+      - name: Build the example application
+        working-directory: examples/mcpp_demo
+        run: mcpp build
+      - name: Pack the library and check its shape
+        shell: bash
+        run: |
+          mcpp pack
+          archive=$(find target/dist -name 'huxerui-*.tar.gz' -o -name 'huxerui-*.zip' | head -1)
+          test -n "$archive" || { echo "mcpp pack produced no archive"; exit 1; }
+          echo "packed $archive"
+          list=$(tar tzf "$archive" 2>/dev/null || unzip -Z1 "$archive")
+          for expected in 'include/huxerui/huxerui.h' 'interface/huxerui.cppm' 'mcpp.toml'; do
+            echo "$list" | grep -q "$expected" \
+              || { echo "the package omits $expected"; exit 1; }
+          done
+          # Both consumption paths belong in the package: a consumer writing
+          # `#include <huxerui/huxerui.h>` and one writing `import huxerui;`
+          # are looking at the same library.
+          echo "$list" | grep -qE 'lib/.+/(libhuxerui\.a|huxerui\.lib)' \
+            || { echo "the package carries no library"; exit 1; }
+          echo "package carries headers, the module interface and a library"
+      - name: Assert the composable transform ran and is macro-free
+        working-directory: examples/mcpp_demo
+        run: |
+          # Name the unit rather than taking the first match. hcg's output
+          # directory ACCUMULATES -- renaming a source leaves its old
+          # transformed copy behind -- so `find ... | head -1` asserts on
+          # whichever file the directory happens to yield first. That is green
+          # on a fresh runner and wrong in any tree that has been built before.
+          generated=$(find target -path '*hcg*' -name '*app.cppm' | head -1)
+          test -n "$generated" || { echo "hcg did not transform src/app.cppm"; exit 1; }
+          grep -q 'return ::huxerui::Scope(' "$generated" \
+            || { echo "transformed source lacks the composable scope"; exit 1; }
+          # A generated module interface must still declare itself, or the
+          # importer compiles first and dies on "failed to read compiled module".
+          grep -q '^export module ' "$generated" \
+            || { echo "the transform dropped the module declaration"; exit 1; }
+          # Macros do not cross a module boundary, so generated code that named
+          # HUXERUI_SCOPE_BEGIN would not compile under `import huxerui;`.
+          ! grep -q 'HUXERUI_SCOPE_BEGIN' "$generated" \
+            || { echo "transform still injects the macro name"; exit 1; }
+          echo "composable transform verified in $generated"
+
+      # Two different holes, two different fixes. hcg emitting the expansion
+      # covers GENERATED code; the force-included prelude covers HAND-WRITTEN
+      # code, which uses HUXERUI_SCOPE directly and would otherwise fail with
+      # `'HUXERUI_SCOPE' was not declared in this scope` under `import`.
+      - name: Assert hand-written scope macros work under import
+        working-directory: examples/mcpp_demo
+        run: |
+          grep -q 'HUXERUI_SCOPE(' src/app.cppm \
+            || { echo "the demo no longer exercises a hand-written scope macro"; exit 1; }
+          # The demo is module-style, so the prelude is NOT force-included --
+          # `-include` prepends before `module;`, which is ill-formed. The
+          # module unit includes it in its own global module fragment instead,
+          # and the rule puts the directory on the include path.
+          grep -q '#include <huxerui_scope_prelude.h>' src/app.cppm \
+            || { echo "the module unit no longer includes the scope prelude"; exit 1; }
+          grep -rq -- 'huxerui-build-rules[/\\]include' target/*/*/build.ninja \
+            || { echo "the prelude directory never reached the include path"; exit 1; }
+          echo "hand-written HUXERUI_SCOPE compiles in a module unit"
+
+      - name: Assert the demo consumes HuxerUI as a module
+        working-directory: examples/mcpp_demo
+        run: |
+          grep -q '^import huxerui;' src/main.cpp \
+            || { echo "the demo no longer imports the module"; exit 1; }
+          # Anchored: the file's own comment explains what `import` replaces,
+          # and an unanchored pattern matches that sentence.
+          ! grep -qE '^[[:space:]]*#include <huxerui/' src/main.cpp \
+            || { echo "the demo still includes the umbrella header"; exit 1; }
+          echo "demo builds against import huxerui;"
+
+      # The umbrella header is the CMake build's contract, and this PR must not
+      # touch it. Compile it standalone with the SYSTEM compiler -- the one
+      # CMake uses -- rather than mcpp's payload g++, which needs the sysroot
+      # flags mcpp passes and fails on `features.h` without them.
+      - name: Assert the header path still compiles
+        run: |
+          printf '#include <huxerui/huxerui.h>\nint main() { return 0; }\n' \
+            > /tmp/header_only.cpp
+          g++ --version | head -1
+          g++ -std=c++20 -fsyntax-only -Iinclude /tmp/header_only.cpp
+          echo "#include <huxerui/huxerui.h> still compiles"
+
+  macos:
+    name: mcpp build (macos arm64)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      # No payload closure here: AppKit and the twelve other frameworks come
+      # from the machine's SDK, which is what `aarch64-macos` means in mcpp's
+      # target table. Only Linux declares [xlings.workspace] entries.
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      # 25 Objective-C++ sources compiled with -fobjc-arc, and the frameworks
+      # from the top-level [runtime] table -- which the engine renders only for
+      # Mach-O, so the manifest states them once and unconditionally.
+      - name: Build the framework
+        run: mcpp build
+
+      - name: Build the example application
+        working-directory: examples/mcpp_demo
+        run: mcpp build
+      - name: Pack the library and check its shape
+        shell: bash
+        run: |
+          mcpp pack
+          archive=$(find target/dist -name 'huxerui-*.tar.gz' -o -name 'huxerui-*.zip' | head -1)
+          test -n "$archive" || { echo "mcpp pack produced no archive"; exit 1; }
+          echo "packed $archive"
+          list=$(tar tzf "$archive" 2>/dev/null || unzip -Z1 "$archive")
+          for expected in 'include/huxerui/huxerui.h' 'interface/huxerui.cppm' 'mcpp.toml'; do
+            echo "$list" | grep -q "$expected" \
+              || { echo "the package omits $expected"; exit 1; }
+          done
+          # Both consumption paths belong in the package: a consumer writing
+          # `#include <huxerui/huxerui.h>` and one writing `import huxerui;`
+          # are looking at the same library.
+          echo "$list" | grep -qE 'lib/.+/(libhuxerui\.a|huxerui\.lib)' \
+            || { echo "the package carries no library"; exit 1; }
+          echo "package carries headers, the module interface and a library"
+  windows:
+    name: mcpp build (windows x86_64)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      # mcpp locates MSVC on the machine for x86_64-windows-msvc; the
+      # developer environment is what makes the Windows SDK headers and the
+      # eighteen system import libraries reachable.
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "$HOME\.xlings")) {
+            irm https://d2learn.org/xlings-install.ps1.txt | iex
+          }
+          "$HOME\.xlings\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "$HOME\.xlings\subos\current\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Select the pinned mcpp
+        shell: pwsh
+        run: |
+          xlings install "mcpp@$env:MCPP_VERSION" -y
+          mcpp --version
+
+      - name: Build the framework
+        shell: pwsh
+        run: mcpp build
+
+      - name: Build the example application
+        shell: pwsh
+        working-directory: examples/mcpp_demo
+        run: mcpp build
+      - name: Assert the Windows executable carries its version resource
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: examples/mcpp_demo
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter 'huxerui_mcpp_demo.exe' target | Select-Object -First 1
+          if (-not $exe) { throw 'the demo produced no executable' }
+          $info = $exe.VersionInfo
+          Write-Host "FileVersion=$($info.FileVersion) ProductName=$($info.ProductName)"
+          if (-not $info.FileVersion) { throw 'the executable carries no version resource' }
+
+      - name: Pack the library and check its shape
+        shell: bash
+        run: |
+          mcpp pack
+          archive=$(find target/dist -name 'huxerui-*.tar.gz' -o -name 'huxerui-*.zip' | head -1)
+          test -n "$archive" || { echo "mcpp pack produced no archive"; exit 1; }
+          echo "packed $archive"
+          list=$(tar tzf "$archive" 2>/dev/null || unzip -Z1 "$archive")
+          for expected in 'include/huxerui/huxerui.h' 'interface/huxerui.cppm' 'mcpp.toml'; do
+            echo "$list" | grep -q "$expected" \
+              || { echo "the package omits $expected"; exit 1; }
+          done
+          # Both consumption paths belong in the package: a consumer writing
+          # `#include <huxerui/huxerui.h>` and one writing `import huxerui;`
+          # are looking at the same library.
+          echo "$list" | grep -qE 'lib/.+/(libhuxerui\.a|huxerui\.lib)' \
+            || { echo "the package carries no library"; exit 1; }
+          echo "package carries headers, the module interface and a library"

@@ -1,0 +1,118 @@
+// HuxerUI's own build program.
+//
+// Two jobs, and deliberately no third:
+//
+//   1. Linux platform dependencies, resolved entirely from xlings payloads.
+//   2. The builtin resource header, which 11 of this project's translation
+//      units #include and which therefore cannot be deferred to a consumer.
+//
+// There is NO composable codegen here: `grep -r '[[huxerui::composable]]' src/
+// platform/` finds nothing. huxerui_enable_codegen() is called only from
+// cmake/HuxerUIApp.cmake (applications) and cmake/HuxerUILibraries.cmake (user
+// libraries), so the framework's own build has never needed hcg.
+
+import std;
+import mcpp;
+import huxerui.rules;
+
+namespace {
+
+// The xlings payloads declared in [target.'cfg(linux)'.xlings.workspace].
+// Their VERSIONS live in mcpp.toml; xpkg_dir answers with the directory of
+// whatever this build installed, so this list carries names only.
+constexpr std::string_view kLinuxPayloads[] = {
+    "gtk4", "libepoxy", "libsoup", "glib", "cairo", "pango", "harfbuzz",
+    "fribidi", "fontconfig", "gdk-pixbuf", "graphene", "libpng", "libtiff",
+    "libjpeg-turbo", "pcre2", "libffi", "zlib", "expat", "freetype",
+    "graphite2", "sqlite", "libpsl", "nghttp2", "libthai", "libdatrie",
+    "libselinux", "util-linux", "pixman", "libglvnd", "libX11", "libxcb",
+    "libXau", "libXdmcp", "libXext", "libXft", "libXrender", "xorgproto",
+};
+
+// pkg-config searches THESE directories and nothing else.
+//
+// PKG_CONFIG_LIBDIR replaces the default search path outright (unlike
+// PKG_CONFIG_PATH, which prepends to it), so /usr/lib/pkgconfig never
+// participates and no host header or library can enter the build. That is the
+// whole point: mcpp compiles against xim:glibc, and a GTK built against the
+// machine's glibc does not belong in the same binary.
+//
+// --define-prefix recomputes each package's `prefix` from the .pc file's own
+// location, which is what makes a relocatable payload store work at all.
+std::string pkg_config_libdir() {
+    std::string dirs;
+    std::size_t found = 0;
+    for (std::string_view name : kLinuxPayloads) {
+        const std::string root = mcpp::xpkg_dir("xim", std::string(name).c_str());
+        if (root.empty()) continue;
+        ++found;
+        // xorgproto and friends install their .pc under share/, not lib/.
+        for (const char* sub : { "/lib/pkgconfig", "/share/pkgconfig", "/lib64/pkgconfig" }) {
+            const std::string d = root + sub;
+            if (!std::filesystem::is_directory(d)) continue;
+            if (!dirs.empty()) dirs += ':';
+            dirs += d;
+        }
+    }
+    if (found != std::size(kLinuxPayloads)) {
+        std::cerr << "huxerui: " << (std::size(kLinuxPayloads) - found)
+                  << " of " << std::size(kLinuxPayloads)
+                  << " xlings payloads did not resolve; check "
+                     "[target.'cfg(linux)'.xlings.workspace] in mcpp.toml\n";
+    }
+    return dirs;
+}
+
+// pkg-config's output, split into mcpp directives. `-l` and `-L` reach the
+// final link, which is what puts GTK on an application's link line without the
+// application naming it; `-I` colours this package's own TUs only.
+bool probe(std::string_view module_spec, const std::string& libdir) {
+    const std::string out = std::string(mcpp::out_dir()) + "/pkg-config.txt";
+    const std::string cmd = "PKG_CONFIG_LIBDIR='" + libdir + "' "
+                            "pkg-config --define-prefix --cflags --libs '"
+                          + std::string(module_spec) + "' > '" + out + "' 2>&1";
+    const bool ok = std::system(cmd.c_str()) == 0;
+
+    std::ifstream in(out);
+    if (!in) return false;
+    if (!ok) {
+        std::cerr << "huxerui: pkg-config failed for '" << module_spec << "':\n";
+        std::cerr << in.rdbuf() << "\n";
+        return false;
+    }
+    std::string token;
+    while (in >> token) {
+        if (token.empty())                     continue;
+        else if (token.starts_with("-I"))      mcpp::include_dir(token.substr(2).c_str());
+        else if (token.starts_with("-l"))      mcpp::link_lib(token.substr(2).c_str());
+        else if (token.starts_with("-L"))      mcpp::link_search(token.substr(2).c_str());
+        // A linker flag is not a compile flag. Routing -Wl,... to cxxflag would
+        // put it on every compile line, where it is at best ignored.
+        else if (token.starts_with("-Wl,"))    mcpp::link_flag(token.c_str());
+        else                                   mcpp::cxxflag(token.c_str());
+    }
+    return true;
+}
+
+} // namespace
+
+int main() {
+    if (!huxerui::rules::builtin_resources()) return 1;
+
+    if (std::string_view(mcpp::target_os()) != "linux") return 0;
+
+    const std::string libdir = pkg_config_libdir();
+    if (libdir.empty()) {
+        std::cerr << "huxerui: no xlings payload resolved for the Linux GTK "
+                     "stack -- mcpp installs them from "
+                     "[target.'cfg(linux)'.xlings.workspace]\n";
+        return 1;
+    }
+
+    // Version floors match cmake/platform/Linux.cmake.
+    for (std::string_view m : { "gtk4 >= 4.14", "epoxy >= 1.5",
+                                "gio-2.0", "libsoup-3.0 >= 3.0" }) {
+        if (!probe(m, libdir)) return 1;
+    }
+    return 0;
+}
