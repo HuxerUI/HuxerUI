@@ -12,36 +12,78 @@ on:
   push:
     branches: [main]
     paths:
+      # WHAT THIS BUILD ACTUALLY READS, and nothing else. Every entry below is
+      # an input to `mcpp build`, `mcpp test` or the parity check; a change
+      # anywhere else cannot alter the result, and running an hour of five
+      # platforms to prove that is waste.
+      #
+      # The `!` line is last on purpose: in a paths filter a later pattern
+      # overrides an earlier one, so it subtracts documentation from every
+      # directory named above. README.md under mcpp/, include/ or
+      # examples/mcpp_demo/ is not a build input.
       - 'mcpp.toml'
       - 'build.mcpp'
       - 'mcpp/**'
+      # The library itself, its public headers and the resources hrc compiles.
       - 'src/**'
       - 'include/**'
+      - 'modules/**'
       - 'platform/linux/**'
       - 'platform/windows/**'
       - 'platform/macos/**'
       - 'resources/**'
+      # Read by huxerui-build-check, which compares the two build systems.
       - 'cmake/platform/**'
       - 'cmake/HuxerUIBuild.cmake'
       - 'examples/mcpp_demo/**'
       - 'tools/codegen/**'
+      - 'tools/resource_compiler/**'
+      # Compiled by mcpp/huxerui-tests: the suite, what it links beside it, and
+      # the vendored Catch2. Without these a change to a unit test would not run
+      # the suite that compiles it.
+      - 'tests/unit/**'
+      - 'tests/support/**'
+      - 'examples/buffer_reference/**'
+      - '3dparty/catch2/**'
       - '.github/workflows/mcpp-build.yml'
+      - '!**.[mM][dD]'
   pull_request:
     paths:
+      # WHAT THIS BUILD ACTUALLY READS, and nothing else. Every entry below is
+      # an input to `mcpp build`, `mcpp test` or the parity check; a change
+      # anywhere else cannot alter the result, and running an hour of five
+      # platforms to prove that is waste.
+      #
+      # The `!` line is last on purpose: in a paths filter a later pattern
+      # overrides an earlier one, so it subtracts documentation from every
+      # directory named above. README.md under mcpp/, include/ or
+      # examples/mcpp_demo/ is not a build input.
       - 'mcpp.toml'
       - 'build.mcpp'
       - 'mcpp/**'
+      # The library itself, its public headers and the resources hrc compiles.
       - 'src/**'
       - 'include/**'
+      - 'modules/**'
       - 'platform/linux/**'
       - 'platform/windows/**'
       - 'platform/macos/**'
       - 'resources/**'
+      # Read by huxerui-build-check, which compares the two build systems.
       - 'cmake/platform/**'
       - 'cmake/HuxerUIBuild.cmake'
       - 'examples/mcpp_demo/**'
       - 'tools/codegen/**'
+      - 'tools/resource_compiler/**'
+      # Compiled by mcpp/huxerui-tests: the suite, what it links beside it, and
+      # the vendored Catch2. Without these a change to a unit test would not run
+      # the suite that compiles it.
+      - 'tests/unit/**'
+      - 'tests/support/**'
+      - 'examples/buffer_reference/**'
+      - '3dparty/catch2/**'
       - '.github/workflows/mcpp-build.yml'
+      - '!**.[mM][dD]'
   workflow_dispatch:
 
 concurrency:
