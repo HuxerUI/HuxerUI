@@ -327,8 +327,9 @@ std::string McppPathDependency(std::string_view manifest, const std::filesystem:
 }
 
 std::vector<GeneratedFile> McppApplicationProjectFiles(const ProjectTemplateContext& context,
-    const std::filesystem::path& huxerui_home) {
-  std::vector<GeneratedFile> files = RenderPackageTemplateTree("templates/app",
+    const std::filesystem::path& huxerui_home, std::string_view template_name) {
+  std::vector<GeneratedFile> files = RenderPackageTemplateTree(
+      std::string("templates/") + std::string(template_name),
       // The EXACT identity (namespace, name). A bare `huxerui` reaches mcpp's
       // deprecated bare-name search, which means `mcpplibs` only and is removed
       // in 2026.9.
@@ -743,7 +744,7 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
     std::span<const PlatformDriver* const> application_platforms,
     std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
     std::span<const AgentSkillDirectory> agent_skill_directories, BuildSystem build_system,
-    const std::filesystem::path& huxerui_home) {
+    const std::filesystem::path& huxerui_home, std::string_view template_name) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
@@ -752,9 +753,6 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
   // An mcpp project has no platform shells: mcpp builds Linux, Windows and
   // macOS from one manifest, and the three platforms CMake owns alone --
   // Android, iOS and Web -- are outside mcpp's target language entirely.
-  if (build_system == BuildSystem::Mcpp && library != nullptr) {
-    throw std::invalid_argument("mcpp projects are applications; a library keeps the CMake layout");
-  }
   if (build_system == BuildSystem::CMake && library == nullptr && application_platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
   }
@@ -775,7 +773,14 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
   if (build_system == BuildSystem::Mcpp) {
-    WriteFiles(temporary, McppApplicationProjectFiles(context, huxerui_home));
+    // The template a kind maps to when none was named. `mcpp new` picks the
+    // one whose template.toml says `default = true`, which is `app`; the CLI
+    // knows something mcpp does not -- whether the caller asked for a library
+    // -- so it names that one instead of falling back to the default.
+    const std::string_view selected =
+        !template_name.empty() ? template_name
+                               : (library != nullptr ? std::string_view("library") : std::string_view("app"));
+    WriteFiles(temporary, McppApplicationProjectFiles(context, huxerui_home, selected));
     CopyApplicationDevelopmentSkill(temporary, skill_source, agent_skill_directories);
     std::filesystem::rename(temporary, destination);
     cleanup.Commit();

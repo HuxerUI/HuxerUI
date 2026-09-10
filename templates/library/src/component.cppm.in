@@ -1,0 +1,33 @@
+// The library's module interface.
+//
+// No headers, and no global module fragment to put one in. `import std;` makes
+// std::type_info visible, which UseState(), View and Layout need because GCC
+// checks `typeid` per translation unit and they instantiate it in their caller.
+
+export module component;
+
+import std;
+import huxerui;
+
+using namespace huxerui;
+
+// Exported, because a consumer's `import component;` is how it is reached.
+// [[huxerui::composable]] marks it as owning its own recomposition lifetime,
+// which is what UseState() below requires.
+export
+[[huxerui::composable]]
+View LabelledCounter(std::string label) {
+  auto count = UseState(0);
+
+  return Row {
+    Text(std::move(label)),
+    Text(count).With(FontSize(20.0F)),
+    Button("+1").OnClick([count] { count += 1; }),
+  }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Center));
+}
+
+// Not every export has to be composable. A plain function that builds a View
+// from its arguments needs no marker, because it holds no state of its own.
+export View Badge(std::string_view text) {
+  return Text(text).With(FontSize(12.0F), Padding(4.0F));
+}

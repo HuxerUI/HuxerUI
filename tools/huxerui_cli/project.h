@@ -119,6 +119,9 @@ MakeProjectTemplateContext(std::string_view project_name, std::string_view proje
 ///        source checkout depends on it by path rather than by published
 ///        version, which is what makes it buildable before HuxerUI is
 ///        published.
+/// @param template_name mcpp package template under `templates/`. Empty selects
+///        `app` for an application and `library` for a library, which is what
+///        `mcpp new --template huxerui.huxerui:<name>` instantiates.
 /// @throws std::invalid_argument if an application or library Preview has no platform,
 ///         or if an mcpp project is requested for anything but an application.
 /// @throws std::runtime_error if generation or publication fails.
@@ -126,7 +129,8 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
     std::span<const PlatformDriver* const> application_platforms,
     std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
     std::span<const AgentSkillDirectory> agent_skill_directories,
-    BuildSystem build_system = BuildSystem::CMake, const std::filesystem::path& huxerui_home = {});
+    BuildSystem build_system = BuildSystem::CMake, const std::filesystem::path& huxerui_home = {},
+    std::string_view template_name = {});
 
 /// Version of the HuxerUI package an mcpp project depends on.
 [[nodiscard]] std::string_view McppPackageVersion() noexcept;

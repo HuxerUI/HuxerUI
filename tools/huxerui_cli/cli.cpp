@@ -48,9 +48,10 @@ constexpr std::array agent_skill_mappings{
 void PrintHelp(std::ostream& output) {
   output << "HuxerUI project and platform tool\n\n"
          << "Usage:\n"
-         << "  huxerui create app <name> [--build cmake|mcpp] [--id <project-id>] "
+         << "  huxerui create app <name> [--build cmake|mcpp] [--template <name>] [--id <project-id>] "
             "[-p|--platform <platform-list>] [--agent <agent-list>]\n"
-         << "  huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] "
+         << "  huxerui create library <name> [--build cmake|mcpp] [--template <name>] "
+            "[--namespace <cpp-namespace>] [--target <public-cmake-target>] "
             "[--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]\n"
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
@@ -385,6 +386,7 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   std::optional<std::string_view> platform_list;
   std::string_view agent_list = "codex";
   std::string_view build_system_name = "cmake";
+  std::optional<std::string_view> template_name;
   bool build_specified = false;
   bool platform_specified = false;
   bool agent_specified = false;
@@ -394,7 +396,8 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   for (std::size_t index = 3; index < arguments.size(); ++index) {
     const std::string_view argument = arguments[index];
     if (argument != "-p" && argument != "--platform" && argument != "--id" && argument != "--agent" &&
-        argument != "--namespace" && argument != "--target" && argument != "--build") {
+        argument != "--namespace" && argument != "--target" && argument != "--build" &&
+        argument != "--template") {
       throw UsageError("unexpected create argument: " + std::string(arguments[index]));
     }
     if (++index >= arguments.size()) {
@@ -433,6 +436,11 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
       }
       build_system_name = arguments[index];
       build_specified = true;
+    } else if (argument == "--template") {
+      if (template_name) {
+        throw UsageError("--template may be specified only once");
+      }
+      template_name = arguments[index];
     } else {
       if (agent_specified) {
         throw UsageError("--agent may be specified only once");
@@ -455,13 +463,15 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
     // platform shells; the three platforms CMake owns alone -- Android, iOS and
     // Web -- are outside mcpp's target language, so a platform list here would
     // promise something the build cannot keep.
-    if (kind != ProjectKind::App) {
-      throw UsageError("--build mcpp is supported only for app creation");
-    }
     if (platform_specified) {
       throw UsageError("--build mcpp projects have no platform shells; omit --platform");
     }
     platform_list.reset();
+  } else if (template_name) {
+    // `templates/` is the mcpp package-template tree. A CMake project is
+    // rendered from tools/huxerui_cli/templates, which has no such vocabulary,
+    // and silently ignoring the option would be worse than refusing it.
+    throw UsageError("--template selects an mcpp package template; it needs --build mcpp");
   }
 
   if (project_id && !IsValidProjectId(*project_id)) {
@@ -498,7 +508,8 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
                                                  : ResolveApplicationDevelopmentSkill(huxerui_home);
   const std::filesystem::path destination = working_directory / arguments[2];
   CreateProject(destination, project_template, application_platforms, library_platforms, skill_source,
-                agent_skill_directories, build_system, huxerui_home);
+                agent_skill_directories, build_system, huxerui_home,
+                template_name.value_or(std::string_view{}));
 
   output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << '\n';
   if (build_system == BuildSystem::Mcpp) {

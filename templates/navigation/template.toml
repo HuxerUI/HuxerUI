@@ -1,0 +1,19 @@
+[template]
+description = "A multi-page HuxerUI application: NavigationStack, page factories and a theme"
+post_message = """
+Built with:   mcpp build
+Run with:     mcpp run
+
+src/app.cppm holds the pages. Each is an ordinary function returning a View,
+and NavigationStack(HomePage) makes the first one the root of a stack the
+others push onto:
+
+    const NavigationController navigation = UseNavigation();
+    navigation.Push(DetailPage, 2);   // arguments are kept with the page
+    navigation.Pop();
+
+A page factory takes its arguments by value and keeps its own mounted state,
+so a pushed page survives until it is popped.
+
+Both files write `import huxerui;` rather than #include <huxerui/huxerui.h>.
+"""

@@ -208,9 +208,9 @@ void check_platform(const std::filesystem::path& root, const toml::table& manife
 }
 
 
-void check_package_template(const std::filesystem::path& root) {
-    const std::filesystem::path templates = root / "templates" / "app";
-    if (!std::filesystem::is_directory(templates)) { fail("templates/app is missing"); return; }
+void check_one_template(const std::filesystem::path& root,
+                        const std::filesystem::path& templates,
+                        const std::string& name) {
 
     static constexpr std::string_view kKnown[] = {
         "project.name", "project.namespace", "project.qualifiedName",
@@ -261,17 +261,59 @@ void check_package_template(const std::filesystem::path& root) {
         }
     }
     if (!has_module)
-        fail("templates/app declares no module interface unit; the project it generates would "
-             "not be module-style");
+        fail("templates/" + name + " declares no module interface unit; the project it "
+             "generates would not be module-style");
     if (!std::filesystem::is_regular_file(templates / "template.toml"))
-        fail("templates/app/template.toml is missing");
+        fail("templates/" + name + "/template.toml is missing");
 
     // The composable must not live in the entry: huxerui.rules leaves the
-    // target's entry alone, so a composable there is never transformed.
-    const std::string entry = read(templates / "src" / "main.cpp.in");
-    if (entry.find("[[huxerui::composable]]") != std::string::npos)
-        fail("templates/app/src/main.cpp.in marks a composable in the target's entry, which "
-             "huxerui.rules never transforms");
+    // target's entry alone, so a composable there is never transformed. A
+    // library template has no entry, and that is not a defect.
+    const std::filesystem::path entry_path = templates / "src" / "main.cpp.in";
+    if (std::filesystem::is_regular_file(entry_path) &&
+        read(entry_path).find("[[huxerui::composable]]") != std::string::npos) {
+        fail("templates/" + name + "/src/main.cpp.in marks a composable in the target's entry, "
+             "which huxerui.rules never transforms");
+    }
+}
+
+void check_package_template(const std::filesystem::path& root) {
+    const std::filesystem::path templates = root / "templates";
+    if (!std::filesystem::is_directory(templates)) { fail("templates/ is missing"); return; }
+
+    // Every template, not just the default one: a project generated from any of
+    // them has to be module-style, header-free and renderable by `mcpp new`.
+    int seen = 0;
+    int defaults = 0;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(templates, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        const std::string name = entry.path().filename().string();
+        ++seen;
+        check_one_template(root, entry.path(), name);
+        const std::filesystem::path meta = entry.path() / "template.toml";
+        if (!std::filesystem::is_regular_file(meta)) continue;
+        // A line whose key is `default` and whose value is `true`, whatever
+        // alignment the file uses.
+        std::istringstream lines(read(meta));
+        for (std::string line; std::getline(lines, line);) {
+            const std::size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            const auto trim = [](std::string_view v) {
+                while (!v.empty() && std::isspace(static_cast<unsigned char>(v.front()))) v.remove_prefix(1);
+                while (!v.empty() && std::isspace(static_cast<unsigned char>(v.back())))  v.remove_suffix(1);
+                return v;
+            };
+            if (trim(std::string_view(line).substr(0, eq)) == "default" &&
+                trim(std::string_view(line).substr(eq + 1)) == "true") {
+                ++defaults;
+            }
+        }
+    }
+    if (seen == 0) fail("templates/ contains no template");
+    // mcpp refuses a package that declares more than one default template.
+    if (defaults > 1)
+        fail("templates/ declares more than one `default = true`; mcpp accepts at most one");
 }
 
 } // namespace

@@ -1,0 +1,19 @@
+[template]
+description = "A reusable HuxerUI component library: an exported module of composables, with a test"
+post_message = """
+Built with:   mcpp build
+Tested with:  mcpp test
+
+src/component.cppm is the library's module interface. It exports composables
+that a consumer reaches with `import component;` after declaring this package
+as a dependency.
+
+RENAME THE MODULE before publishing. `component` is a placeholder, and two
+libraries that both keep it cannot be used in one program -- a module name is
+global to the build. Change `export module component;`, the file name, and
+`[lib] path` together; they are one decision written three times.
+
+tests/component.cpp is a test: mcpp compiles every tests/**/*.cpp into its own
+program and a zero exit is a pass, so a test needs no framework and no
+registration.
+"""

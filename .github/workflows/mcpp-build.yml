@@ -561,7 +561,7 @@ jobs:
           echo "package carries headers, the module interface and a library"
 
   generated-app:
-    name: huxerui create --build mcpp, then mcpp build
+    name: every template, created then built
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -609,55 +609,59 @@ jobs:
       # HUXERUI_HOME selects the SDK, and a source checkout is a valid one --
       # the CLI already resolves the app-development Skill from either layout.
       # Naming it here is what tells `create` that HuxerUI is this tree rather
-      # than a release, which is the whole input to the decision below.
-      - name: Create an mcpp project
+      # than a release, so it writes a path dependency instead of the published
+      # version, which is the only reason these projects can build before
+      # HuxerUI is in an mcpp index.
+      #
+      # EVERY TEMPLATE, not just the default one. `templates/` is what
+      # `mcpp new --template huxerui.huxerui:<name>` instantiates, and a
+      # template that renders but does not compile is a broken project handed
+      # to whoever runs that command.
+      - name: Create and build a project from every template
         env:
           HUXERUI_HOME: ${{ github.workspace }}
-        run: ./build-cli/bin/huxerui create app SampleApp --build mcpp --agent none
-
-      # WHAT THIS DOES NOT COVER. The template names the published package
-      # (`huxerui.huxerui = "<version>"`), and HuxerUI is not in an mcpp index
-      # yet, so registry resolution cannot run here. Pointing the edge at this
-      # checkout exercises everything else: the rendered manifest, build.mcpp,
-      # the module-style sources, the composable transform, the resource
-      # compiler and the link. Delete these two lines once the package is
-      # published -- the job then covers the resolution too.
-      # No manifest surgery here. `huxerui create` resolved its SDK to this
-      # checkout, saw an mcpp package, and wrote a path dependency -- which is
-      # what mcpp documents for local development and what makes a project
-      # created from a source tree buildable before HuxerUI is published. A
-      # project created against an INSTALLED SDK gets the published identity
-      # instead; the generated manifest carries that line, commented, beside it.
-      - name: Show the resolved dependency
-        working-directory: SampleApp
         run: |
-          grep -q '^huxerui = { path = ' mcpp.toml \
-            || { echo "the CLI did not resolve a path dependency"; sed -n '1,20p' mcpp.toml; exit 1; }
-          grep -q '^#   huxerui\.huxerui = ' mcpp.toml \
-            || { echo "the published identity is not recorded"; exit 1; }
-          cat mcpp.toml
+          set -euo pipefail
+          cli="$GITHUB_WORKSPACE/build-cli/bin/huxerui"
+          work="$RUNNER_TEMP/generated"
+          mkdir -p "$work"
 
-      - name: Build it
-        working-directory: SampleApp
-        run: mcpp build
+          run_one() {
+            local dir="$1"; shift
+            ( cd "$work" && "$cli" "$@" )
+            local project="$work/$dir"
 
-      - name: Assert the generated project is what the template promises
-        working-directory: SampleApp
+            grep -q '^huxerui = { path = ' "$project/mcpp.toml" \
+              || { echo "$dir: the CLI did not resolve a path dependency"; exit 1; }
+            grep -q '^#   huxerui\.huxerui = ' "$project/mcpp.toml" \
+              || { echo "$dir: the published identity is not recorded"; exit 1; }
+            # No headers anywhere: the entry instantiates nothing and the module
+            # unit reaches std::type_info through `import std;`.
+            ! grep -rn '^[[:space:]]*#include' "$project/src" \
+              || { echo "$dir: an mcpp project should carry no headers"; exit 1; }
+            test ! -e "$project/CMakeLists.txt" \
+              || { echo "$dir: an mcpp project should carry no CMakeLists.txt"; exit 1; }
+            echo "--- $dir"
+          }
+
+          run_one AppDemo create app AppDemo --build mcpp --agent none
+          run_one NavDemo create app NavDemo --build mcpp --template navigation --agent none
+          run_one my-widgets create library my-widgets --build mcpp --agent none
+
+          # The two applications build; the library is a lib, so its own test is
+          # what says it works -- and `mcpp test` proves the module it exports
+          # can actually be imported.
+          ( cd "$work/AppDemo" && mcpp build )
+          ( cd "$work/NavDemo" && mcpp build )
+          ( cd "$work/my-widgets" && mcpp test )
+
+      - name: Assert the transform ran on a generated project
         run: |
-          test -f src/app.cppm || { echo "the page is not in a module unit"; exit 1; }
-          test ! -e CMakeLists.txt || { echo "an mcpp project should carry no CMakeLists.txt"; exit 1; }
-          # No headers anywhere in the project. The entry instantiates nothing,
-          # and the module unit reaches std::type_info through `import std;`
-          # rather than a global module fragment -- so an mcpp project written
-          # against HuxerUI has no #include in it at all.
-          ! grep -rn '^[[:space:]]*#include' src/ \
-            || { echo "an mcpp project should carry no headers"; exit 1; }
-          grep -q '^import std;' src/app.cppm \
-            || { echo "the module unit no longer imports std"; exit 1; }
+          cd "$RUNNER_TEMP/generated/AppDemo"
           generated=$(find target -path '*hcg*' -name '*app.cppm' | head -1)
           test -n "$generated" || { echo "hcg did not transform src/app.cppm"; exit 1; }
           grep -q 'return ::huxerui::Scope(' "$generated" \
             || { echo "the composable was not wrapped"; exit 1; }
-          find target -type f -name SampleApp | head -1 | grep -q . \
+          find target -type f -name AppDemo | head -1 | grep -q . \
             || { echo "no executable was produced"; exit 1; }
           echo "generated project builds and runs the transform"

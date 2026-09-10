@@ -81,13 +81,51 @@ TEST_CASE("HuxerUICliNamesMcppWhenItCannotDriveTheProject") {
   REQUIRE(invocation.error.find("mcpp build") != std::string::npos);
 }
 
+TEST_CASE("HuxerUICliSelectsAnMcppTemplate") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Nav-App", "--build", "mcpp", "--template", "navigation", "--agent", "none"})
+              .result == 0);
+  const std::string page = Read(temporary.Path() / "Nav-App/src/app.cppm");
+  REQUIRE(page.find("NavigationStack(HomePage)") != std::string::npos);
+  REQUIRE(page.find("navigation.Push(DetailPage, 1)") != std::string::npos);
+  REQUIRE(page.find("{{") == std::string::npos);
+}
+
+TEST_CASE("HuxerUICliCreatesMcppLibraries") {
+  TemporaryDirectory temporary;
+  // A library is the `library` template without naming it: the CLI knows the
+  // kind, so it selects what `mcpp new --template huxerui.huxerui:library`
+  // would instantiate.
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "library", "my-widgets", "--build", "mcpp", "--agent", "none"})
+              .result == 0);
+  const std::filesystem::path project = temporary.Path() / "my-widgets";
+  REQUIRE(std::filesystem::is_regular_file(project / "src/component.cppm"));
+  REQUIRE(std::filesystem::is_regular_file(project / "tests/component.cpp"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "src/main.cpp"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "CMakeLists.txt"));
+
+  const std::string manifest = Read(project / "mcpp.toml");
+  REQUIRE(manifest.find("kind = \"lib\"") != std::string::npos);
+  REQUIRE(manifest.find("path = \"src/component.cppm\"") != std::string::npos);
+  REQUIRE(Read(project / "src/component.cppm").find("export module component;") != std::string::npos);
+}
+
 TEST_CASE("HuxerUICliRejectsUnsupportedBuildSystems") {
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "Sample-App", "--build", "meson"}).result != 0);
-  REQUIRE(Invoke(temporary.Path(), {"create", "library", "sample-lib", "--build", "mcpp"}).result != 0);
   // mcpp builds three platforms from one manifest and has no platform shells.
   REQUIRE(Invoke(temporary.Path(),
               {"create", "app", "Sample-App", "--build", "mcpp", "--platform", "windows"})
+              .result != 0);
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Sample-App", "--build", "mcpp", "--template", "nonesuch"})
+              .result != 0);
+  // `templates/` is the mcpp template tree; a CMake project is rendered from a
+  // different one that has no such vocabulary.
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Sample-App", "--template", "navigation"})
               .result != 0);
 }
 
