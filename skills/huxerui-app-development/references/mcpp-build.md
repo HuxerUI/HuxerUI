@@ -5,7 +5,7 @@
 > and calls `huxerui::rules::configure()` from its `build.mcpp`, and the SDK
 > include directory, the library, the platform link interface, the composable
 > transform (`hcg`) and the resource compiler (`hrc`) all arrive through that
-> one edge. See `mcpp/README.md` and `examples/mcpp_demo/`. None of the manual
+> one edge. See `mcpp/README.md` and `mcpp/examples/`. None of the manual
 > recovery below applies there.
 >
 > The rest of this file covers the remaining case: an **independent** mcpp
@@ -118,4 +118,4 @@ For macOS use `otool -L` and deployment-target inspection; for Windows use the a
 Do not claim compatibility from a successful compile alone: record the exact compiler, standard library, architecture, linkage, and runtime checks that actually ran.
 
 A standalone project without the source tree still needs an explicit integration for the HuxerUI code generator and resource compiler, or an equivalent source-level implementation.
-With the source tree available, `huxerui.rules` already provides it — `examples/mcpp_demo/` uses a `[[huxerui::composable]]` function with `UseState` and a packaged resource root, and its whole manifest is one dependency line.
+With the source tree available, `huxerui.rules` already provides it — `mcpp/examples/` holds three applications whose whole manifest is one dependency line.

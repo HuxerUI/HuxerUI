@@ -2,7 +2,7 @@
 
 > **状态**：对照报告。所有数字来自本机与 CI 的实测,不是估算。
 > **对应 PR**：[#1](https://github.com/Sunrisepeak/HuxerUI/pull/1)(16 commits,CI 五 job 全绿)
-> **相关**：设计方案 `2026-09-09-mcpp-native-build-and-modules-plan.md`;可行性分析 `docs/design/mcpp-dual-build-analysis.md`
+> **相关**：设计文档 `docs/design/mcpp-build-system.md`
 
 ---
 
@@ -103,7 +103,7 @@ import huxerui;
 [[huxerui::composable]] export View Counter() { auto count = UseState(0); ... }
 ```
 
-对比之前 `examples/mcpp_demo/mcpp.toml` 的 20 行 `/lib64/*.so` 绝对路径 —— GTK 现在通过依赖边到达链接行,应用一个字都不用写。
+对比适配前手写的 20 行 `/lib64/*.so` 绝对路径 —— GTK 现在通过依赖边到达链接行,应用一个字都不用写。
 
 ### 一个必须知道的约束
 
