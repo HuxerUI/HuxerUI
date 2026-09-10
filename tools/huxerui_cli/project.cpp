@@ -313,7 +313,7 @@ std::string McppPathDependency(std::string_view manifest, const std::filesystem:
       std::string("[dependencies]"),
       "huxerui = { path = \"" + path + "\" }",
   };
-  lines.erase(first, table + 2);
+  first = lines.erase(first, table + 2);
   lines.insert(first, replacement.begin(), replacement.end());
 
   std::string out;
