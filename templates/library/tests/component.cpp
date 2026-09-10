@@ -14,8 +14,6 @@ import component;
 int main() {
   const huxerui::View badge   = Badge("new");
   const huxerui::View counter = LabelledCounter("items");
-  // std::print and std::println are C++23 LIBRARY facilities; this package
-  // pins `standard = "c++20"`, where `import std;` works but they do not.
-  std::cout << "built 2 views\n";
+  std::println("built {} views", 2);
   return 0;
 }

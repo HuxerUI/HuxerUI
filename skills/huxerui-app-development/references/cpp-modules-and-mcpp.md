@@ -68,8 +68,10 @@ View Counter() {
   `UseState()`, `View` and `Layout` instantiate `typeid` in their caller, GCC
   checks that per translation unit, and a global module fragment's includes do
   not reach an importer — so `import huxerui;` cannot supply `<typeinfo>`.
-  The std module is a C++23 library feature and the clang mcpp resolves for
-  Windows offers it only from c++23 up.
+  The c++23 pin is a workaround, not a requirement: every implementation this
+  project builds with offers the std module at C++20, and mcpp's
+  clang-on-Windows path hardcodes a c++23 floor instead of probing the STL it
+  found ([mcpp#603](https://github.com/mcpp-community/mcpp/issues/603)).
 - **Keep the entry empty.** `src/main.cpp` calls `RunApplication()` and nothing
   else, so it instantiates nothing and needs no imports beyond `huxerui` and
   the app module. It is also the one file `huxerui.rules` never transforms.
