@@ -280,11 +280,14 @@ std::string McppPathDependency(std::string_view manifest, const std::filesystem:
   std::vector<std::string> lines;
   for (std::size_t start = 0; start <= manifest.size();) {
     const std::size_t end = manifest.find('\n', start);
+    std::string_view line = manifest.substr(start, end == std::string_view::npos ? end : end - start);
+    if (line.ends_with('\r')) {
+      line.remove_suffix(1);
+    }
+    lines.emplace_back(line);
     if (end == std::string_view::npos) {
-      lines.emplace_back(manifest.substr(start));
       break;
     }
-    lines.emplace_back(manifest.substr(start, end - start));
     start = end + 1;
   }
 
