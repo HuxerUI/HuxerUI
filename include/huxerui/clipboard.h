@@ -6,7 +6,9 @@
 
 namespace huxerui {
 
-class Runtime;
+namespace detail {
+class ApplicationService;
+}
 
 /// @brief Identifies a semantic editing command for the currently focused text client.
 ///
@@ -51,7 +53,7 @@ struct TextSelectionMenuLabels {
 ///
 /// These methods run synchronously on the Runtime's UI thread. A supporting PlatformAdapter returns a stable instance
 /// from PlatformAdapter::Clipboard() whose lifetime covers the Runtime. Implementations must not retain borrowed
-/// string views. Application code obtains the Runtime-owned Clipboard service instead of retaining this platform
+/// string views. Application code obtains Clipboard through ApplicationHandle instead of retaining this platform
 /// capability.
 class PlatformClipboard {
 public:
@@ -70,7 +72,7 @@ public:
 
 /// @brief Provides application access to the current Runtime's plain-text clipboard.
 ///
-/// Runtime installs one shared Clipboard service in the root Environment. Obtain it with UseService<Clipboard>()
+/// The application service owns one shared Clipboard per Runtime. Obtain it with UseApplication().Clipboard()
 /// during composition and capture the shared pointer into UI-thread event handlers. Calls are synchronous and may
 /// enter native clipboard APIs, so they must not run on application worker threads.
 ///
@@ -80,7 +82,7 @@ public:
 ///
 /// @code{.cpp}
 /// [[huxerui::composable]] View ClipboardButton() {
-///   const auto clipboard = UseService<Clipboard>();
+///   const auto clipboard = UseApplication().Clipboard();
 ///   return Button("Copy HuxerUI")
 ///       .OnClick([clipboard] { clipboard->WriteText("HuxerUI"); })
 ///       .With(Enabled(clipboard->IsAvailable()));
@@ -122,7 +124,7 @@ private:
 
   PlatformClipboard* platform_ = nullptr;
 
-  friend class Runtime;
+  friend class detail::ApplicationService;
 };
 
 } // namespace huxerui

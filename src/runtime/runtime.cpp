@@ -1169,15 +1169,13 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
       std::make_shared<PermissionController>(platform.CreatePermissionTransport(), platform.ui_thread_dispatcher_),
       LocalNotificationService::Create(platform.CreateLocalNotificationTransport(), platform.ui_thread_dispatcher_,
                                        state_->app_resources_),
-      SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_));
+      SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_), platform.Clipboard());
   root.Provide(state_->application_service_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
   state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*state_);
   root.Provide(state_->scene_transition_service_);
-  state_->clipboard_ = std::shared_ptr<Clipboard>(new Clipboard(platform.Clipboard()));
-  root.Provide(state_->clipboard_);
   if (std::shared_ptr<FileSystem> file_system = platform.CreateFileSystem()) {
     root.Provide(std::move(file_system));
   }
@@ -1212,7 +1210,6 @@ Runtime::~Runtime() {
   state_->pointer_->Disconnect();
   state_->layer_controller_.Disconnect();
   state_->application_service_->Disconnect();
-  state_->clipboard_->Disconnect();
   state_->window_service_->Disconnect();
   state_->scene_transition_service_->Disconnect();
   DiscardLifecycleCommits();

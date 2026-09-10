@@ -364,13 +364,13 @@ View GallerySection(const char* title, const char* description, View content) {
 [[huxerui::composable]]
 View ActionsDemo() {
   const ThemeSpec& theme = UseTheme();
-  const auto clipboard = UseService<Clipboard>();
+  const auto clipboard = UseApplication().Clipboard();
   auto chip_selected = UseState(false);
   return Column {
     GallerySection(
         "Buttons",
         "Text and icon actions share typed click events, indication, focus, disabled state, and tooltips. The copy "
-        "action uses the Runtime clipboard service when available.",
+        "action uses the application clipboard when available.",
         Flow {
           Button("Copy HuxerUI")
               .OnClick([clipboard] { clipboard->WriteText("HuxerUI"); })

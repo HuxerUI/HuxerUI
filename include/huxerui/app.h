@@ -15,6 +15,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/clipboard.h>
 #include <huxerui/data.h>
 #include <huxerui/environment.h>
 #include <huxerui/event.h>
@@ -223,7 +224,7 @@ public:
   const AppOptions options;
 };
 
-/// Provides composition-bound access to application activation, lifecycle, notifications, tray, and termination.
+/// Provides application activation, lifecycle, clipboard, notifications, tray, and termination access.
 ///
 /// `StartupActivation()` is immutable, while `OnActivation()` receives only later platform activations.
 /// `LifecycleState()` exposes the coalesced current value, while `OnLifecycleChange()` preserves distinct mounted
@@ -247,6 +248,18 @@ public:
   ///
   /// Reading the value during composition subscribes the current scope to later distinct state changes.
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
+  /// @brief Returns the shared plain-text clipboard for this application's Runtime.
+  /// @return The same non-null instance on every call, including on hosts without clipboard support. Query
+  /// Clipboard::IsAvailable() before presenting clipboard actions; individual reads and writes may still fail.
+  ///
+  /// This accessor does not require an active composition and may be called on a captured ApplicationHandle.
+  /// Clipboard operations run synchronously on the owning UI thread. After Runtime destruction, the returned
+  /// instance remains safe to retain and call but reports unavailable results.
+  /// @code{.cpp}
+  /// auto clipboard = UseApplication().Clipboard();
+  /// return Button("Copy").OnClick([clipboard] { clipboard->WriteText("HuxerUI"); });
+  /// @endcode
+  [[nodiscard]] std::shared_ptr<huxerui::Clipboard> Clipboard() const noexcept;
   /// Returns the system tray handle owned by the current composition scope.
   [[nodiscard]] SystemTrayHandle SystemTray() const;
   /// Returns the local-notification handle bound to the current composition Environment.

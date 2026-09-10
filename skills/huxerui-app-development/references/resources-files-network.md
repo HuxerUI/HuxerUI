@@ -46,7 +46,7 @@ Text, built-in labels, TextField, and Canvas text inherit the effective `Locale`
 
 ## Clipboard
 
-Obtain the current Runtime's plain-text clipboard with `UseService<Clipboard>()` during composition, then capture the shared handle into a UI-thread event handler. `IsAvailable()` reports whether the Runtime currently has synchronous clipboard access. `ReadText()` returns an optional UTF-8 string, and `WriteText(text)` reports whether valid UTF-8 text was accepted.
+Obtain the current Runtime's plain-text clipboard with `UseApplication().Clipboard()` during composition, then capture the shared handle into a UI-thread event handler. A captured `ApplicationHandle` can also return the same clipboard outside composition. `IsAvailable()` reports whether the Runtime currently has synchronous clipboard access. `ReadText()` returns an optional UTF-8 string, and `WriteText(text)` reports whether valid UTF-8 text was accepted.
 
 Clipboard operations are synchronous and may enter native APIs. Do not call them from `RunWorker()` or another application worker thread. A captured handle remains safe after its Runtime is destroyed but reports unavailable results. Web does not expose this application clipboard service; browser-managed TextField copy, cut, and paste continue through trusted editing events.
 

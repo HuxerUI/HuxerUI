@@ -68,6 +68,8 @@ application.OnActivation([](ApplicationActivation activation) {
 });
 ```
 
+`ApplicationHandle::Clipboard()` returns the same shared `Clipboard` owned by this service on every call, without requiring an active composition after the handle has been obtained. This is a per-Runtime capability, not process-global state or a separate Clipboard Root Service. Application-service disconnection makes captured clipboard instances unavailable before the platform adapter is destroyed. The implementation lives in `src/application/clipboard.cpp`; platform integration and text-editing commands retain the existing `PlatformClipboard` boundary.
+
 `ApplicationHandle` deliberately separates four timing contracts:
 
 - `LifecycleState()` is the observable current platform state and may coalesce before recomposition.

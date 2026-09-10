@@ -392,11 +392,12 @@ void PermissionController::Disconnect() noexcept {
 ApplicationService::ApplicationService(Runtime& runtime, ApplicationActivation startup_activation,
                                        std::shared_ptr<PermissionController> permissions,
                                        std::shared_ptr<LocalNotificationService> local_notifications,
-                                       std::shared_ptr<SystemTrayService> system_tray)
+                                       std::shared_ptr<SystemTrayService> system_tray,
+                                       PlatformClipboard* platform_clipboard)
     : runtime_(&runtime), startup_activation_(std::move(startup_activation)),
       lifecycle_state_(std::make_shared<StateCell<ApplicationLifecycleState>>(ApplicationLifecycleState::Active)),
       permissions_(std::move(permissions)), local_notifications_(std::move(local_notifications)),
-      system_tray_(std::move(system_tray)) {
+      system_tray_(std::move(system_tray)), clipboard_(new huxerui::Clipboard(platform_clipboard)) {
   ValidateApplicationActivation(startup_activation_);
   if (!permissions_) {
     throw std::invalid_argument("HuxerUI application permission controller must not be empty");
@@ -476,6 +477,10 @@ const std::shared_ptr<LocalNotificationService>& ApplicationService::LocalNotifi
   return local_notifications_;
 }
 
+const std::shared_ptr<Clipboard>& ApplicationService::Clipboard() const noexcept {
+  return clipboard_;
+}
+
 Task<PermissionStatus> ApplicationService::CheckPermission(Permission permission) const {
   return permissions_->Check(permission);
 }
@@ -538,6 +543,7 @@ void ApplicationService::DispatchPending() {
 }
 
 void ApplicationService::Disconnect() noexcept {
+  clipboard_->Disconnect();
   permissions_->Disconnect();
   local_notifications_->Disconnect();
   system_tray_->Disconnect();
@@ -578,6 +584,10 @@ const ApplicationActivation& ApplicationHandle::StartupActivation() const noexce
 
 ApplicationLifecycleState ApplicationHandle::LifecycleState() const {
   return service_->LifecycleState();
+}
+
+std::shared_ptr<Clipboard> ApplicationHandle::Clipboard() const noexcept {
+  return service_->Clipboard();
 }
 
 SystemTrayHandle ApplicationHandle::SystemTray() const {

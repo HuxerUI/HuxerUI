@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "text_input_internal.h"
+#include "text/text_input_internal.h"
 
 namespace huxerui {
 

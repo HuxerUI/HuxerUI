@@ -496,7 +496,6 @@ struct Runtime::State {
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
   std::shared_ptr<detail::ApplicationService> application_service_;
-  std::shared_ptr<Clipboard> clipboard_;
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
   std::shared_ptr<detail::WindowService> window_service_;
   std::shared_ptr<detail::SceneTransitionService> scene_transition_service_;

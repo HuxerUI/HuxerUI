@@ -29,13 +29,16 @@ public:
 };
 
 std::shared_ptr<Clipboard> clipboard_service;
+std::optional<ApplicationHandle> application_handle;
 
 View ClipboardApp() {
-  clipboard_service = UseService<Clipboard>();
+  application_handle = UseApplication();
+  clipboard_service = application_handle->Clipboard();
   return Text("Clipboard");
 }
 
 void ResetClipboardService() {
+  application_handle.reset();
   clipboard_service.reset();
 }
 
@@ -44,7 +47,7 @@ void ResetClipboardService() {
 static_assert(!std::is_copy_constructible_v<Clipboard>);
 static_assert(!std::is_move_constructible_v<Clipboard>);
 
-TEST_CASE("RuntimeInstallsClipboardServiceAndDelegatesTextOperations") {
+TEST_CASE("ApplicationProvidesStableClipboardOutsideComposition") {
   ResetClipboardService();
   TestClipboard platform_clipboard;
   platform_clipboard.text = "initial";
@@ -54,6 +57,7 @@ TEST_CASE("RuntimeInstallsClipboardServiceAndDelegatesTextOperations") {
   runtime.BuildFrame();
 
   REQUIRE(clipboard_service);
+  REQUIRE(application_handle->Clipboard() == clipboard_service);
   REQUIRE(clipboard_service->IsAvailable());
   REQUIRE(clipboard_service->ReadText() == std::optional<std::string>{"initial"});
   REQUIRE(platform_clipboard.read_count == 1);
@@ -106,8 +110,34 @@ TEST_CASE("ClipboardServiceDisconnectsWhenRuntimeIsDestroyed") {
   REQUIRE_FALSE(clipboard_service->IsAvailable());
   REQUIRE_FALSE(clipboard_service->ReadText().has_value());
   REQUIRE_FALSE(clipboard_service->WriteText("ignored"));
+  REQUIRE(application_handle->Clipboard() == clipboard_service);
   REQUIRE(platform_clipboard.read_count == 0);
   REQUIRE(platform_clipboard.write_count == 0);
+}
+
+TEST_CASE("ApplicationClipboardUsesItsOwningPlatformAndLifetime") {
+  ResetClipboardService();
+  TestClipboard first_clipboard;
+  TestClipboard second_clipboard;
+  TestPlatform first_platform;
+  TestPlatform second_platform;
+  first_platform.platform_clipboard = &first_clipboard;
+  second_platform.platform_clipboard = &second_clipboard;
+  Runtime first_runtime(ClipboardApp, first_platform);
+  first_runtime.BuildFrame();
+  const auto first_service = clipboard_service;
+  {
+    Runtime second_runtime(ClipboardApp, second_platform);
+    second_runtime.BuildFrame();
+    REQUIRE(clipboard_service != first_service);
+    REQUIRE(first_service->WriteText("first"));
+    REQUIRE(clipboard_service->WriteText("second"));
+    REQUIRE(first_clipboard.text == std::optional<std::string>{"first"});
+    REQUIRE(second_clipboard.text == std::optional<std::string>{"second"});
+  }
+  REQUIRE_FALSE(clipboard_service->IsAvailable());
+  REQUIRE(first_service->IsAvailable());
+  REQUIRE(first_service->ReadText() == std::optional<std::string>{"first"});
 }
 
 } // namespace huxerui::test

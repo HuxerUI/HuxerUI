@@ -659,10 +659,10 @@ View PasswordField(State<TextEditingValue> password, ImageVariant visibility_ico
 Static text selection, TextField selection, clipboard actions, and platform IME behavior share one Runtime editing model.
 The platform adapter translates UTF-16 offsets or toolkit-specific conventions at the boundary while application text remains UTF-8.
 
-Application code obtains the plain-text clipboard as a per-Runtime root service during composition and captures it in an event handler:
+Application code obtains the plain-text clipboard through `UseApplication().Clipboard()` during composition and captures it in an event handler:
 
 ```cpp
-const auto clipboard = UseService<Clipboard>();
+const auto clipboard = UseApplication().Clipboard();
 
 return Button("Copy").OnClick([clipboard] {
   clipboard->WriteText("HuxerUI");
@@ -671,6 +671,7 @@ return Button("Copy").OnClick([clipboard] {
 
 `IsAvailable()` reports whether the current platform supplies synchronous clipboard access.
 `ReadText()` returns no value when text is absent or cannot be read, and `WriteText()` reports whether the platform accepted valid UTF-8 text.
+Each Runtime has one shared Clipboard instance; a captured ApplicationHandle can retrieve it outside composition, and retained clipboard objects report unavailable results after their Runtime is destroyed.
 The Web backend reports this service as unavailable; browser-managed TextField copy, cut, and paste continue to work through trusted editing events.
 
 For editing invariants and platform protocols, see [Text Input and TextField Design](../design/text-input.md).
