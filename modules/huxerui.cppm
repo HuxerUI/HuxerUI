@@ -59,8 +59,9 @@ export namespace huxerui {
     using huxerui::CheckboxStyle;
     using huxerui::Chip;
     using huxerui::ChipStyle;
-    using huxerui::CircularRevealSceneTransition;
+    using huxerui::CircularRevealTransition;
     using huxerui::ClipChildren;
+    using huxerui::ClipShape;
     using huxerui::Clipboard;
     using huxerui::Color;
     using huxerui::ColorScheme;
@@ -124,7 +125,7 @@ export namespace huxerui {
     using huxerui::Event;
     using huxerui::EventEmitter;
     using huxerui::ExternalTexture;
-    using huxerui::FadeSceneTransition;
+    using huxerui::FadeTransition;
     using huxerui::File;
     using huxerui::FileActivation;
     using huxerui::FileDropEvent;
@@ -136,7 +137,6 @@ export namespace huxerui {
     using huxerui::FilePicker;
     using huxerui::FilePickerFilter;
     using huxerui::FileReference;
-    using huxerui::FileSystem;
     using huxerui::FileType;
     using huxerui::FileWriteMode;
     using huxerui::FillPathCommand;
@@ -254,7 +254,6 @@ export namespace huxerui {
     using huxerui::NavigationController;
     using huxerui::NavigationEvents;
     using huxerui::NavigationItem;
-    using huxerui::NavigationMotion;
     using huxerui::NavigationPane;
     using huxerui::NavigationPaneStyle;
     using huxerui::NavigationPath;
@@ -267,6 +266,7 @@ export namespace huxerui {
     using huxerui::OpenPlatformModule;
     using huxerui::OutputStream;
     using huxerui::Padding;
+    using huxerui::PageTransition;
     using huxerui::Pager;
     using huxerui::PagerEvents;
     using huxerui::PaintCommand;
@@ -347,6 +347,7 @@ export namespace huxerui {
     using huxerui::SafeAreaPadding;
     using huxerui::SaveFileOptions;
     using huxerui::Scale;
+    using huxerui::ScaleFadeTransition;
     using huxerui::SceneTransitionAnchor;
     using huxerui::SceneTransitionHandle;
     using huxerui::Scope;
@@ -386,7 +387,12 @@ export namespace huxerui {
     using huxerui::Semantics;
     using huxerui::Shadow;
     using huxerui::ShapeScheme;
+    using huxerui::SharedBounds;
+    using huxerui::SharedElement;
+    using huxerui::SharedTransitionHandle;
+    using huxerui::SharedTransitionScope;
     using huxerui::Size;
+    using huxerui::SlideTransition;
     using huxerui::Slider;
     using huxerui::SliderEvents;
     using huxerui::SliderStyle;
@@ -504,6 +510,12 @@ export namespace huxerui {
     using huxerui::TransformGesture;
     using huxerui::TransformOrigin;
     using huxerui::Transition;
+    using huxerui::TransitionContext;
+    using huxerui::TransitionFragment;
+    using huxerui::TransitionFrame;
+    using huxerui::TransitionOrder;
+    using huxerui::TransitionSample;
+    using huxerui::TransitionSpec;
     using huxerui::TreeItemInfo;
     using huxerui::TreeView;
     using huxerui::TreeViewEvents;
@@ -527,6 +539,7 @@ export namespace huxerui {
     using huxerui::UseSceneTransition;
     using huxerui::UseScrollController;
     using huxerui::UseService;
+    using huxerui::UseSharedTransition;
     using huxerui::UseSnackBar;
     using huxerui::UseState;
     using huxerui::UseStateList;
