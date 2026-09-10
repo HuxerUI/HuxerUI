@@ -15,6 +15,120 @@ TEST_CASE("HuxerUICliRendersEmbeddedTemplatePathsAndContents") {
 
 }
 
+TEST_CASE("HuxerUICliCreatesMcppProjects") {
+  TemporaryDirectory temporary;
+  const Invocation invocation =
+      Invoke(temporary.Path(), {"create", "app", "Sample-App", "--build", "mcpp", "--agent", "none"});
+
+  REQUIRE(invocation.result == 0);
+  const std::filesystem::path project = temporary.Path() / "Sample-App";
+  REQUIRE(std::filesystem::is_regular_file(project / "mcpp.toml"));
+  REQUIRE(std::filesystem::is_regular_file(project / "build.mcpp"));
+  REQUIRE(std::filesystem::is_regular_file(project / "src/main.cpp"));
+  // The composable lives outside the entry, in a MODULE interface unit:
+  // huxerui.rules never transforms the target's entry, and an mcpp project is
+  // module-style throughout.
+  REQUIRE(std::filesystem::is_regular_file(project / "src/app.cppm"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "src/counter.h"));
+  // No headers anywhere. The entry instantiates nothing, and the module unit
+  // reaches std::type_info -- which UseState() needs, because GCC checks typeid
+  // per translation unit -- through `import std;` rather than a global module
+  // fragment. An mcpp project written against HuxerUI has no #include in it.
+  REQUIRE(Read(project / "src/main.cpp").find("#include") == std::string::npos);
+  REQUIRE(Read(project / "src/app.cppm").find("\n#include") == std::string::npos);
+  REQUIRE(Read(project / "src/app.cppm").find("\nimport std;") != std::string::npos);
+
+  // An mcpp project has no CMake and no platform shells.
+  REQUIRE_FALSE(std::filesystem::exists(project / "CMakeLists.txt"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "platform"));
+  // template.toml describes the template to `mcpp new --list-templates`; it is
+  // not part of what the template produces.
+  REQUIRE_FALSE(std::filesystem::exists(project / "template.toml"));
+  // `.in` files are rendered and lose the suffix.
+  REQUIRE_FALSE(std::filesystem::exists(project / "mcpp.toml.in"));
+
+  const std::string manifest = Read(project / "mcpp.toml");
+  REQUIRE(manifest.find("name     = \"Sample-App\"") != std::string::npos);
+  REQUIRE(manifest.find("{{") == std::string::npos);
+
+  // Created against a source checkout, so the dependency is a path -- the
+  // version the template names is only resolvable from an index, and this tree
+  // is not published. mcpp documents `path` as the form for local development.
+  REQUIRE(manifest.find("huxerui = { path = \"") != std::string::npos);
+  REQUIRE(manifest.find(HUXERUI_TEST_SOURCE_DIRECTORY) != std::string::npos);
+  // The published identity stays in the file as the line to swap in, and it is
+  // the EXACT one: a bare name reaches mcpp's deprecated bare-name search,
+  // which resolves in `mcpplibs` only.
+  REQUIRE(manifest.find("#   huxerui.huxerui = ") != std::string::npos);
+  // Commented out, not active -- two [dependencies] entries would be one too many.
+  REQUIRE(manifest.find("\nhuxerui.huxerui = ") == std::string::npos);
+
+  REQUIRE(Read(project / "src/main.cpp").find("import huxerui;") != std::string::npos);
+  REQUIRE(Read(project / "src/main.cpp").find("import app;") != std::string::npos);
+  REQUIRE(Read(project / "src/app.cppm").find("export module app;") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliNamesMcppWhenItCannotDriveTheProject") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "Sample-App", "--build", "mcpp", "--agent", "none"}).result == 0);
+
+  // This CLI drives the CMake project. An mcpp project has no CMakeLists.txt
+  // on purpose, so every command that opens one has to say which tool does
+  // drive it -- "no HuxerUI project found" sends its owner looking for a file
+  // that is supposed to be absent.
+  const Invocation invocation = Invoke(temporary.Path() / "Sample-App", {"platform", "add", "linux"});
+  REQUIRE(invocation.result != 0);
+  REQUIRE(invocation.error.find("mcpp build") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliSelectsAnMcppTemplate") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Nav-App", "--build", "mcpp", "--template", "navigation", "--agent", "none"})
+              .result == 0);
+  const std::string page = Read(temporary.Path() / "Nav-App/src/app.cppm");
+  REQUIRE(page.find("NavigationStack(HomePage)") != std::string::npos);
+  REQUIRE(page.find("navigation.Push(DetailPage, 1)") != std::string::npos);
+  REQUIRE(page.find("{{") == std::string::npos);
+}
+
+TEST_CASE("HuxerUICliCreatesMcppLibraries") {
+  TemporaryDirectory temporary;
+  // A library is the `library` template without naming it: the CLI knows the
+  // kind, so it selects what `mcpp new --template huxerui.huxerui:library`
+  // would instantiate.
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "library", "my-widgets", "--build", "mcpp", "--agent", "none"})
+              .result == 0);
+  const std::filesystem::path project = temporary.Path() / "my-widgets";
+  REQUIRE(std::filesystem::is_regular_file(project / "src/component.cppm"));
+  REQUIRE(std::filesystem::is_regular_file(project / "tests/component.cpp"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "src/main.cpp"));
+  REQUIRE_FALSE(std::filesystem::exists(project / "CMakeLists.txt"));
+
+  const std::string manifest = Read(project / "mcpp.toml");
+  REQUIRE(manifest.find("kind = \"lib\"") != std::string::npos);
+  REQUIRE(manifest.find("path = \"src/component.cppm\"") != std::string::npos);
+  REQUIRE(Read(project / "src/component.cppm").find("export module component;") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliRejectsUnsupportedBuildSystems") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "Sample-App", "--build", "meson"}).result != 0);
+  // mcpp builds three platforms from one manifest and has no platform shells.
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Sample-App", "--build", "mcpp", "--platform", "windows"})
+              .result != 0);
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Sample-App", "--build", "mcpp", "--template", "nonesuch"})
+              .result != 0);
+  // `templates/` is the mcpp template tree; a CMake project is rendered from a
+  // different one that has no such vocabulary.
+  REQUIRE(Invoke(temporary.Path(),
+              {"create", "app", "Sample-App", "--template", "navigation"})
+              .result != 0);
+}
+
 TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(

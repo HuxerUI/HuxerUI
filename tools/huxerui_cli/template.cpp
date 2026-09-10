@@ -111,6 +111,43 @@ std::vector<GeneratedFile> LoadTemplateTree(std::string_view root, const Project
   return files;
 }
 
+/// Substitutes mcpp's closed token vocabulary.
+///
+/// An unknown token is an error rather than a silent copy: mcpp refuses one, so
+/// a template that renders here and fails under `mcpp new` would be worse than
+/// no reuse at all.
+std::string RenderPackageTokens(std::string_view value, const PackageTemplateContext& context,
+                                std::string_view origin) {
+  std::string out;
+  out.reserve(value.size());
+  std::size_t cursor = 0;
+  while (cursor < value.size()) {
+    const std::size_t open = value.find("{{", cursor);
+    if (open == std::string_view::npos) {
+      out.append(value.substr(cursor));
+      break;
+    }
+    out.append(value.substr(cursor, open - cursor));
+    const std::size_t close = value.find("}}", open + 2);
+    if (close == std::string_view::npos) {
+      throw std::logic_error("HuxerUI CLI template has an unterminated token: " + std::string(origin));
+    }
+    const std::string_view token = value.substr(open + 2, close - open - 2);
+    if (token == "project.name") {
+      out.append(context.project_name);
+    } else if (token == "self.name" || token == "template.package.selector") {
+      out.append(context.package_selector);
+    } else if (token == "self.version" || token == "template.package.version") {
+      out.append(context.package_version);
+    } else {
+      throw std::logic_error("HuxerUI CLI template uses an unsupported token '" + std::string(token) +
+                             "' in " + std::string(origin));
+    }
+    cursor = close + 2;
+  }
+  return out;
+}
+
 } // namespace
 
 std::string ProjectTemplateContext::Render(std::string_view value) const {
@@ -128,6 +165,30 @@ std::vector<GeneratedFile> RenderTemplateTree(std::string_view root, const Proje
 
 std::vector<GeneratedFile> CopyTemplateTree(std::string_view root) {
   return LoadTemplateTree(root, nullptr, {});
+}
+
+std::vector<GeneratedFile> RenderPackageTemplateTree(std::string_view root,
+                                                     const PackageTemplateContext& context) {
+  std::vector<GeneratedFile> files = LoadTemplateTree(root, nullptr, {});
+  std::vector<GeneratedFile> generated;
+  generated.reserve(files.size());
+  for (GeneratedFile& file : files) {
+    const std::string relative = file.path.generic_string();
+    // Metadata for `mcpp new --list-templates`; it describes the template and
+    // is not part of what the template produces.
+    if (relative == "template.toml") {
+      continue;
+    }
+    const bool rendered = relative.size() > 3 && relative.compare(relative.size() - 3, 3, ".in") == 0;
+    if (!rendered) {
+      generated.push_back(std::move(file));
+      continue;
+    }
+    file.path = std::filesystem::path(relative.substr(0, relative.size() - 3));
+    file.content = RenderPackageTokens(file.content, context, relative);
+    generated.push_back(std::move(file));
+  }
+  return generated;
 }
 
 } // namespace huxerui::cli

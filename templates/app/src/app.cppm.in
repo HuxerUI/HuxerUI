@@ -1,0 +1,58 @@
+// Everything the application is: its page, its composables, and the
+// `Application` object whose constructor registers them.
+//
+// No headers, and no global module fragment to put one in.
+//
+// `import std;` is what makes that possible. GCC checks `typeid` per
+// translation unit, and UseState(), View and Layout instantiate it in their
+// CALLER, so any unit that builds a View needs std::type_info to be visible --
+// which a CMake project gets for free from #include <huxerui/huxerui.h>, and
+// which `import huxerui;` cannot supply, because a global module fragment's
+// includes do not reach an importer. Importing std satisfies it without a
+// header. (`import std;` is a C++23 library feature that GCC, Clang+libc++ and
+// the MSVC STL all provide in C++20 mode too.)
+//
+// Everything below is the same code a CMake project writes: [[huxerui::composable]]
+// means exactly what it means there, and the same hcg transforms it.
+//
+// To hand-write a scope with HUXERUI_SCOPE(...) instead of marking a function,
+// this unit needs a global module fragment after all -- macros do not cross a
+// module boundary:
+//
+//   module;
+//   #include <huxerui_scope_prelude.h>
+//   export module app;
+//
+// The rule already puts that header's directory on the include path.
+
+export module app;
+
+import std;
+import huxerui;
+
+using namespace huxerui;
+
+[[huxerui::composable]]
+View Counter() {
+  auto count = UseState(0);
+
+  return Row {
+    Button("Count").OnClick([count] { count += 1; }),
+    Text(count).With(FontSize(24.0F)),
+  }.With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Center));
+}
+
+View App() {
+  return Column {
+    Text("{{project.name}}", TextRole::Title),
+    Divider(),
+    Counter(),
+  }.With(Padding(32.0F), Spacing(16.0F));
+}
+
+// Not exported: nothing needs to name it. Its constructor runs at static
+// initialisation, which is what registers the application.
+const Application application{
+    App,
+    {.window = {.title = "{{project.name}}", .initial_size = {560.0F, 360.0F}}},
+};

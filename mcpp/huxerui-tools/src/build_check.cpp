@@ -208,6 +208,114 @@ void check_platform(const std::filesystem::path& root, const toml::table& manife
 }
 
 
+void check_one_template(const std::filesystem::path& root,
+                        const std::filesystem::path& templates,
+                        const std::string& name) {
+
+    static constexpr std::string_view kKnown[] = {
+        "project.name", "project.namespace", "project.qualifiedName",
+        "template.package.namespace", "template.package.name",
+        "template.package.selector", "template.package.version",
+        "template.name", "self.name", "self.version",
+    };
+    bool has_module = false;
+    std::error_code ec;
+    for (auto it = std::filesystem::recursive_directory_iterator(templates, ec);
+         it != std::filesystem::recursive_directory_iterator(); ++it) {
+        if (!it->is_regular_file(ec)) continue;
+        const std::filesystem::path& path = it->path();
+        const std::string relative = std::filesystem::relative(path, root, ec).generic_string();
+        const std::string text = read(path);
+
+        if (path.extension() == ".h" || path.extension() == ".hpp")
+            fail(relative + ": an mcpp project is module-style and should carry no headers");
+        if (relative.ends_with(".cppm") || relative.ends_with(".cppm.in")) {
+            has_module = true;
+            // UseState() instantiates typeid in its CALLER and GCC checks that
+            // per translation unit, so std::type_info has to be visible here.
+            // huxerui.rules cannot supply it -- `-include` prepends before
+            // `module;`, which is ill-formed -- so the unit says so itself.
+            // `import std;` is the header-free way and what the template uses;
+            // <typeinfo> in a global module fragment is the other.
+            if (text.find("UseState") != std::string::npos &&
+                text.find("import std;") == std::string::npos &&
+                text.find("#include <typeinfo>") == std::string::npos) {
+                fail(relative + " instantiates typeid through UseState but makes std::type_info "
+                                "visible by neither `import std;` nor <typeinfo>");
+            }
+        }
+
+        // mcpp renders `**.in` with a closed token vocabulary and copies
+        // everything else verbatim, so an unknown token fails at `mcpp new`
+        // time -- on the user's machine, not here.
+        std::size_t at = 0;
+        while ((at = text.find("{{", at)) != std::string::npos) {
+            const std::size_t close = text.find("}}", at);
+            if (close == std::string::npos) break;
+            const std::string token = text.substr(at + 2, close - at - 2);
+            if (path.extension() != ".in")
+                fail(relative + " carries {{...}} tokens but is not a .in file");
+            else if (std::ranges::find(kKnown, token) == std::end(kKnown))
+                fail(relative + " uses unknown template token '{{" + token + "}}'");
+            at = close + 2;
+        }
+    }
+    if (!has_module)
+        fail("templates/" + name + " declares no module interface unit; the project it "
+             "generates would not be module-style");
+    if (!std::filesystem::is_regular_file(templates / "template.toml"))
+        fail("templates/" + name + "/template.toml is missing");
+
+    // The composable must not live in the entry: huxerui.rules leaves the
+    // target's entry alone, so a composable there is never transformed. A
+    // library template has no entry, and that is not a defect.
+    const std::filesystem::path entry_path = templates / "src" / "main.cpp.in";
+    if (std::filesystem::is_regular_file(entry_path) &&
+        read(entry_path).find("[[huxerui::composable]]") != std::string::npos) {
+        fail("templates/" + name + "/src/main.cpp.in marks a composable in the target's entry, "
+             "which huxerui.rules never transforms");
+    }
+}
+
+void check_package_template(const std::filesystem::path& root) {
+    const std::filesystem::path templates = root / "templates";
+    if (!std::filesystem::is_directory(templates)) { fail("templates/ is missing"); return; }
+
+    // Every template, not just the default one: a project generated from any of
+    // them has to be module-style, header-free and renderable by `mcpp new`.
+    int seen = 0;
+    int defaults = 0;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(templates, ec)) {
+        if (!entry.is_directory(ec)) continue;
+        const std::string name = entry.path().filename().string();
+        ++seen;
+        check_one_template(root, entry.path(), name);
+        const std::filesystem::path meta = entry.path() / "template.toml";
+        if (!std::filesystem::is_regular_file(meta)) continue;
+        // A line whose key is `default` and whose value is `true`, whatever
+        // alignment the file uses.
+        std::istringstream lines(read(meta));
+        for (std::string line; std::getline(lines, line);) {
+            const std::size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            const auto trim = [](std::string_view v) {
+                while (!v.empty() && std::isspace(static_cast<unsigned char>(v.front()))) v.remove_prefix(1);
+                while (!v.empty() && std::isspace(static_cast<unsigned char>(v.back())))  v.remove_suffix(1);
+                return v;
+            };
+            if (trim(std::string_view(line).substr(0, eq)) == "default" &&
+                trim(std::string_view(line).substr(eq + 1)) == "true") {
+                ++defaults;
+            }
+        }
+    }
+    if (seen == 0) fail("templates/ contains no template");
+    // mcpp refuses a package that declares more than one default template.
+    if (defaults > 1)
+        fail("templates/ declares more than one `default = true`; mcpp accepts at most one");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -243,6 +351,7 @@ int main(int argc, char** argv) {
     check_platform(root, manifest, "Linux.cmake", "cfg(linux)");
     check_platform(root, manifest, "Windows.cmake", "windows");
     check_platform(root, manifest, "MacOS.cmake", "macos");
+    check_package_template(root);
 
     if (!failures.empty()) {
         std::cerr << "mcpp/CMake parity check FAILED:\n\n";

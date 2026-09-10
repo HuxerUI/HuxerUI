@@ -43,6 +43,20 @@ struct LibraryTemplateContext {
   std::string public_target;
 };
 
+/// Values an mcpp package template is rendered with.
+///
+/// The vocabulary is mcpp's, not this CLI's: `templates/` holds mcpp package
+/// templates, which `mcpp new --template` also instantiates. Keeping the tokens
+/// identical is what lets one tree serve both.
+struct PackageTemplateContext {
+  /// Generated project name, substituted for `{{project.name}}`.
+  std::string project_name;
+  /// Exact package selector of the template's own package, for `{{self.name}}`.
+  std::string package_selector;
+  /// Version of the template's own package, for `{{self.version}}`.
+  std::string package_version;
+};
+
 /// Additional token replacement applied while rendering a template tree.
 struct TemplateReplacement {
   /// Token including its delimiters, such as `@ANDROID_COMPILE_SDK@`.
@@ -60,6 +74,18 @@ struct TemplateReplacement {
 [[nodiscard]] std::vector<GeneratedFile>
 RenderTemplateTree(std::string_view root, const ProjectTemplateContext& context,
                    std::span<const TemplateReplacement> replacements = {});
+
+/// Loads an embedded mcpp package template and renders it.
+///
+/// Files ending in `.in` are rendered and lose that suffix; everything else is
+/// copied verbatim, and `template.toml` is metadata that never reaches the
+/// generated project. This mirrors mcpp's own scaffolding rules.
+/// @param root Embedded template directory, such as `templates/app`.
+/// @param context Token values.
+/// @return Generated files ordered by relative path.
+/// @throws std::logic_error if the tree is missing or names an unknown token.
+[[nodiscard]] std::vector<GeneratedFile>
+RenderPackageTemplateTree(std::string_view root, const PackageTemplateContext& context);
 
 /// Loads an embedded template tree without token substitution.
 /// @param root Embedded template directory relative to the CLI template root.

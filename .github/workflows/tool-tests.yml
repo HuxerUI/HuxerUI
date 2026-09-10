@@ -24,6 +24,9 @@ on:
       - 'tests/cli/**'
       # Defines huxerui_add_test_suite, which both of them are built by.
       - 'tests/CMakeLists.txt'
+      # Embedded into the CLI by cmrc and asserted on by HuxerUICliTests, so a
+      # template change has to run the suite that checks what it renders.
+      - 'templates/**'
       - '.github/workflows/tool-tests.yml'
       - '!**.[mM][dD]'
   pull_request:
@@ -38,6 +41,9 @@ on:
       - 'tests/cli/**'
       # Defines huxerui_add_test_suite, which both of them are built by.
       - 'tests/CMakeLists.txt'
+      # Embedded into the CLI by cmrc and asserted on by HuxerUICliTests, so a
+      # template change has to run the suite that checks what it renders.
+      - 'templates/**'
       - '.github/workflows/tool-tests.yml'
       - '!**.[mM][dD]'
   workflow_dispatch:

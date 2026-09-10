@@ -1,0 +1,15 @@
+// The whole build program for a HuxerUI component library.
+//
+// `huxerui.rules` arrives through the huxerui dependency, which re-exports it,
+// so this file names no package of its own. configure() schedules the
+// composable transform (hcg) for every source it selects.
+//
+// A library has no resources of its own here; add `.resources = "resources"`
+// when it grows some, and the resource compiler joins the same build graph.
+
+import mcpp;
+import huxerui.rules;
+
+int main() {
+    return huxerui::rules::configure({}) ? 0 : 1;
+}

@@ -1,0 +1,42 @@
+# c++23, and it is a workaround rather than a language requirement.
+#
+# The module unit writes `import std;`, which every implementation this project
+# builds with supports at c++20. mcpp's clang-on-Windows path hardcodes a
+# c++23 floor instead of probing the STL it found (mcpp-community/mcpp#603) and
+# refuses the build below it.
+#
+# A module graph has exactly one standard, so this compiles huxerui at c++23
+# too. Change this line back to c++20 once #603 is fixed.
+[package]
+name     = "{{project.name}}"
+version  = "0.1.0"
+standard = "c++23"
+
+# The EXACT package identity, not a bare name: namespace omission means
+# `mcpplibs` only, and mcpp's bare-name fallback is deprecated
+# ("This fallback is removed in 2026.9"). {{self.name}} renders the selector,
+# which carries the namespace.
+[dependencies]
+{{self.name}} = "{{self.version}}"
+
+[targets.{{project.name}}]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+# huxerui.rules owns the source selection: a build program can ADD a source but
+# cannot replace one, so a package that also globbed src/**/*.cpp would link
+# both the original and the transformed copy of every composable.
+sources = []
+
+# The Windows executable's icon and the version metadata its Properties dialog
+# shows. FILEVERSION, ProductName, FileDescription and CompanyName all default
+# from [package], so this one line is the whole thing.
+#
+# ONLY PE TARGETS COMPILE THIS. On Linux and macOS the table is inapplicable --
+# no resource units, no diagnostics, byte-identical build -- so it is written
+# unconditionally and needs no cfg(windows) predicate. The file's existence IS
+# checked on every target, which is what catches a typo on the Linux build
+# rather than on the Windows one.
+[resources]
+icon = "assets/app.ico"

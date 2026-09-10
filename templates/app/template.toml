@@ -1,0 +1,20 @@
+[template]
+description = "A HuxerUI desktop application: `import huxerui;`, composables and packaged resources"
+default     = true
+post_message = """
+Built with:   mcpp build
+Run with:     mcpp run
+
+The page is in src/app.cppm, a module interface unit. src/main.cpp holds only
+the call to RunApplication() and deliberately instantiates nothing -- that is
+why it needs no includes at all, and why huxerui.rules can leave it alone.
+
+Both files write `import huxerui;` rather than #include <huxerui/huxerui.h>.
+The two name the same entities; the module is what HuxerUI ships for consumers
+that want it.
+
+build.mcpp calls huxerui::rules::configure(), which schedules the composable
+transform and the resource compiler as build-graph edges. Everything else --
+the platform link interface, the scope macros, the GTK stack on Linux --
+arrives through the huxerui dependency.
+"""

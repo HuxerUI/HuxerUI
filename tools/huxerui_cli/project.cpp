@@ -6,11 +6,13 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <ranges>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
 
 #include "process_runner.h"
+#include "sdk.h"
 #include "template.h"
 
 namespace huxerui::cli {
@@ -259,6 +261,92 @@ std::string NormalizeLibraryIdentifier(std::string_view name) {
   return identifier;
 }
 
+// The mcpp project comes from the repository's own `templates/app`, which is an
+// mcpp PACKAGE template: `mcpp new --template huxerui.huxerui:app` renders the
+// same files once HuxerUI is published. One tree, two renderers -- a copy under
+// tools/huxerui_cli/templates would be the drift this project checks for
+// everywhere else.
+/// Rewrites the manifest's HuxerUI dependency as a path dependency.
+///
+/// The template names the published package, which is what `mcpp new` must
+/// produce and what a user with an installed SDK needs. It is the wrong answer
+/// for a checkout: the version it names is only resolvable from an index, so a
+/// project created against a source tree would not build until that tree is
+/// published. mcpp documents `path` as the form for exactly this case.
+///
+/// The comment above the dependency is replaced along with it, or the manifest
+/// would explain a namespace rule that no longer applies to the line below it.
+std::string McppPathDependency(std::string_view manifest, const std::filesystem::path& huxerui_home) {
+  std::vector<std::string> lines;
+  for (std::size_t start = 0; start <= manifest.size();) {
+    const std::size_t end = manifest.find('\n', start);
+    if (end == std::string_view::npos) {
+      lines.emplace_back(manifest.substr(start));
+      break;
+    }
+    lines.emplace_back(manifest.substr(start, end - start));
+    start = end + 1;
+  }
+
+  const auto table = std::ranges::find(lines, "[dependencies]");
+  if (table == lines.end() || table + 1 == lines.end()) {
+    throw std::logic_error("templates/app/mcpp.toml.in has no [dependencies] table");
+  }
+  // The rendered dependency line, and every comment line attached above the
+  // table -- both describe the identity that is about to change.
+  auto first = table;
+  while (first != lines.begin() && (first - 1)->starts_with("#")) {
+    --first;
+  }
+  std::filesystem::path home = huxerui_home.lexically_normal();
+  std::string path = home.generic_string();
+  // TOML basic strings take backslash escapes, and a Windows path is full of
+  // them. The generic form is accepted by mcpp on every platform.
+  const std::vector replacement{
+      std::string("# A path dependency on the HuxerUI checkout this CLI was built from -- mcpp's"),
+      std::string("# documented form for local development. Created against an INSTALLED SDK,"),
+      std::string("# this project would instead name the published package:"),
+      std::string("#"),
+      std::string("#   huxerui.huxerui = \"") + std::string(McppPackageVersion()) + "\"",
+      std::string("#"),
+      std::string("# Swap it for that line to build against a release rather than this tree."),
+      std::string("[dependencies]"),
+      "huxerui = { path = \"" + path + "\" }",
+  };
+  lines.erase(first, table + 2);
+  lines.insert(first, replacement.begin(), replacement.end());
+
+  std::string out;
+  for (std::size_t index = 0; index < lines.size(); ++index) {
+    out += lines[index];
+    if (index + 1 < lines.size()) {
+      out += '\n';
+    }
+  }
+  return out;
+}
+
+std::vector<GeneratedFile> McppApplicationProjectFiles(const ProjectTemplateContext& context,
+    const std::filesystem::path& huxerui_home, std::string_view template_name) {
+  std::vector<GeneratedFile> files = RenderPackageTemplateTree(
+      std::string("templates/") + std::string(template_name),
+      // The EXACT identity (namespace, name). A bare `huxerui` reaches mcpp's
+      // deprecated bare-name search, which means `mcpplibs` only and is removed
+      // in 2026.9.
+      PackageTemplateContext{context.project_name, "huxerui.huxerui", std::string(McppPackageVersion())});
+  if (!IsMcppSourcePackage(huxerui_home)) {
+    return files;
+  }
+  const auto manifest = std::ranges::find_if(files, [](const GeneratedFile& file) {
+    return file.path.generic_string() == "mcpp.toml";
+  });
+  if (manifest == files.end()) {
+    throw std::logic_error("templates/app renders no mcpp.toml");
+  }
+  manifest->content = McppPathDependency(manifest->content, huxerui_home);
+  return files;
+}
+
 std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext& context) {
   std::vector<GeneratedFile> files = RenderTemplateTree("project/app", context);
   std::vector<GeneratedFile> project_support = RenderTemplateTree("project/application", context);
@@ -361,8 +449,22 @@ std::string ReadFile(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
+/// True for a directory `huxerui create --build mcpp` produced.
+bool IsMcppProjectRoot(const std::filesystem::path& root) {
+  return std::filesystem::is_regular_file(root / "mcpp.toml") &&
+         std::filesystem::is_regular_file(root / "build.mcpp");
+}
+
 Project InspectProjectRoot(const std::filesystem::path& root) {
   if (!std::filesystem::is_regular_file(root / "CMakeLists.txt")) {
+    // This CLI drives the CMake project: build, run, package and platform add
+    // all read it. An mcpp project has no CMakeLists.txt on purpose, and
+    // "missing CMakeLists.txt" sends its owner looking for the wrong thing.
+    if (IsMcppProjectRoot(root)) {
+      throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
+                               " -- build it with `mcpp build` and run it with `mcpp run`: " +
+                               root.string());
+    }
     throw std::runtime_error("HuxerUI project is missing CMakeLists.txt: " + root.string());
   }
 
@@ -555,6 +657,7 @@ Project DiscoverProject(const std::filesystem::path& start) {
     current = current.parent_path();
   }
 
+  std::filesystem::path mcpp_root;
   while (!current.empty()) {
     const bool has_cmake = std::filesystem::is_regular_file(current / "CMakeLists.txt");
     const bool has_platforms = std::filesystem::is_directory(current / "platform");
@@ -562,12 +665,22 @@ Project DiscoverProject(const std::filesystem::path& start) {
     if (has_cmake && (has_platforms || has_library_headers)) {
       return InspectProjectRoot(current);
     }
+    // Recorded rather than returned: the walk still prefers a CMake project
+    // further up, which is what a CMake project holding an mcpp example needs.
+    if (mcpp_root.empty() && IsMcppProjectRoot(current)) {
+      mcpp_root = current;
+    }
 
     const std::filesystem::path parent = current.parent_path();
     if (parent == current) {
       break;
     }
     current = parent;
+  }
+  if (!mcpp_root.empty()) {
+    throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
+                             " -- build it with `mcpp build` and run it with `mcpp run`: " +
+                             mcpp_root.string());
   }
   throw std::runtime_error("no HuxerUI project found from " + start.string());
 }
@@ -630,13 +743,17 @@ Project ResolveApplicationProject(const Project& project) {
 void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
     std::span<const PlatformDriver* const> application_platforms,
     std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
-    std::span<const AgentSkillDirectory> agent_skill_directories) {
+    std::span<const AgentSkillDirectory> agent_skill_directories, BuildSystem build_system,
+    const std::filesystem::path& huxerui_home, std::string_view template_name) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
   const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
   const ProjectTemplateContext& context = ProjectContext(project_template);
-  if (library == nullptr && application_platforms.empty()) {
+  // An mcpp project has no platform shells: mcpp builds Linux, Windows and
+  // macOS from one manifest, and the three platforms CMake owns alone --
+  // Android, iOS and Web -- are outside mcpp's target language entirely.
+  if (build_system == BuildSystem::CMake && library == nullptr && application_platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
   }
   if (library != nullptr && application_platforms.empty()) {
@@ -655,6 +772,20 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
+  if (build_system == BuildSystem::Mcpp) {
+    // The template a kind maps to when none was named. `mcpp new` picks the
+    // one whose template.toml says `default = true`, which is `app`; the CLI
+    // knows something mcpp does not -- whether the caller asked for a library
+    // -- so it names that one instead of falling back to the default.
+    const std::string_view selected =
+        !template_name.empty() ? template_name
+                               : (library != nullptr ? std::string_view("library") : std::string_view("app"));
+    WriteFiles(temporary, McppApplicationProjectFiles(context, huxerui_home, selected));
+    CopyApplicationDevelopmentSkill(temporary, skill_source, agent_skill_directories);
+    std::filesystem::rename(temporary, destination);
+    cleanup.Commit();
+    return;
+  }
   if (library == nullptr) {
     WriteFiles(temporary, ApplicationProjectFiles(context));
     CreateResourceDirectories(temporary);
@@ -681,6 +812,10 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 
   std::filesystem::rename(temporary, destination);
   cleanup.Commit();
+}
+
+std::string_view McppPackageVersion() noexcept {
+  return HUXERUI_CLI_VERSION;
 }
 
 void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,

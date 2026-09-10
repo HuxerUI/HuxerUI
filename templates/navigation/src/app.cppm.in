@@ -1,0 +1,72 @@
+// A two-page application.
+//
+// No headers, and no global module fragment to put one in. `import std;` makes
+// std::type_info visible, which UseState(), View and Layout need because GCC
+// checks `typeid` per translation unit and they instantiate it in their caller.
+// A CMake project gets that from #include <huxerui/huxerui.h>; a module unit
+// cannot, because a global module fragment's includes do not reach an importer.
+
+export module app;
+
+import std;
+import huxerui;
+
+using namespace huxerui;
+
+// Declared before it is pushed, defined below: a page factory is an ordinary
+// function, so the two pages can reach each other the way functions do.
+View DetailPage(int item);
+
+[[huxerui::composable]]
+View HomePage() {
+  const ThemeSpec& theme = UseTheme();
+  const NavigationController navigation = UseNavigation();
+
+  return Column {
+    Text("{{project.name}}", TextRole::Title),
+    Text("Push a page, and its arguments go with it."),
+    Text::Format("Stack depth: {}", navigation.Depth()),
+    Flow {
+      Button("Open item 1").OnClick([navigation] { navigation.Push(DetailPage, 1); }),
+      Button("Open item 2").OnClick([navigation] { navigation.Push(DetailPage, 2); }),
+    }.With(Spacing(theme.spacing.small)),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
+
+// `item` is kept with the pushed page and outlives the click that supplied it.
+// The counter is this page's own state: pop it and push it again, and the
+// count starts over.
+[[huxerui::composable]]
+View DetailPage(int item) {
+  const ThemeSpec& theme = UseTheme();
+  const NavigationController navigation = UseNavigation();
+  auto count = UseState(0);
+
+  return Column {
+    Text::Format(TextRole::Title, "Item {}", item),
+    Text::Format("Counted {} times on this page", count),
+    Flow {
+      Button("Count").OnClick([count] { count += 1; }),
+      Button("Back").OnClick([navigation] { navigation.Pop(); }),
+    }.With(Spacing(theme.spacing.small)),
+  }.With(
+      Padding(theme.spacing.extra_large),
+      Spacing(theme.spacing.medium),
+      Background(theme.colors.background)
+  );
+}
+
+View App() {
+  return MaterialTheme { NavigationStack(HomePage) };
+}
+
+// Not exported: nothing needs to name it. Its constructor runs at static
+// initialisation, which is what registers the application.
+const Application application{
+    App,
+    {.window = {.title = "{{project.name}}", .initial_size = {640.0F, 480.0F}}},
+};

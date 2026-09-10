@@ -15,6 +15,20 @@ cmrc_add_resource_library(huxerui_cli_template_resources
         WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/templates"
         ${HUXERUI_CLI_TEMPLATE_FILES}
 )
+
+# The mcpp package templates are embedded from the repository root rather than
+# copied here. `mcpp new --template` reads that same tree once HuxerUI is
+# published, so the CLI and mcpp instantiate the same files; only the renderer
+# differs. A second copy under this directory would be the drift this project
+# spends its parity check preventing.
+file(GLOB_RECURSE HUXERUI_CLI_PACKAGE_TEMPLATE_FILES CONFIGURE_DEPENDS
+        LIST_DIRECTORIES FALSE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../templates/*"
+)
+cmrc_add_resources(huxerui_cli_template_resources
+        WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+        ${HUXERUI_CLI_PACKAGE_TEMPLATE_FILES}
+)
 cmrc_add_resource_library(huxerui_cli_installer_resources
         NAMESPACE huxerui_cli_installers
         WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/../.."

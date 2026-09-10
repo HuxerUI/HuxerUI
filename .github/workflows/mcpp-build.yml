@@ -46,6 +46,11 @@ on:
       - 'tests/support/**'
       - 'examples/buffer_reference/**'
       - '3dparty/catch2/**'
+      # The generated-app job builds the CLI and instantiates every template,
+      # so those trees are inputs to this workflow as much as the framework is.
+      - 'templates/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/cli/**'
       - '.github/workflows/mcpp-build.yml'
       - '!**.[mM][dD]'
   pull_request:
@@ -82,6 +87,11 @@ on:
       - 'tests/support/**'
       - 'examples/buffer_reference/**'
       - '3dparty/catch2/**'
+      # The generated-app job builds the CLI and instantiates every template,
+      # so those trees are inputs to this workflow as much as the framework is.
+      - 'templates/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/cli/**'
       - '.github/workflows/mcpp-build.yml'
       - '!**.[mM][dD]'
   workflow_dispatch:
@@ -549,3 +559,109 @@ jobs:
           echo "$list" | grep -qE 'lib/.+/(libhuxerui\.a|huxerui\.lib)' \
             || { echo "the package carries no library"; exit 1; }
           echo "package carries headers, the module interface and a library"
+
+  generated-app:
+    name: every template, created then built
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+          xlings install "mcpp@${MCPP_VERSION}" -y || true
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      # The CLI is a CMake artifact; only its dependencies are needed here, not
+      # the framework's.
+      - name: Build the huxerui CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build
+          cmake -S . -B build-cli -G Ninja \
+            -DHUXERUI_BUILD_EXAMPLES=OFF \
+            -DHUXERUI_BUILD_SHARED=OFF \
+            -DHUXERUI_BUILD_CLI=ON \
+            -DHUXERUI_BUILD_TESTS=OFF
+          cmake --build build-cli --target huxerui_cli --parallel
+
+      # HUXERUI_HOME selects the SDK, and a source checkout is a valid one --
+      # the CLI already resolves the app-development Skill from either layout.
+      # Naming it here is what tells `create` that HuxerUI is this tree rather
+      # than a release, so it writes a path dependency instead of the published
+      # version, which is the only reason these projects can build before
+      # HuxerUI is in an mcpp index.
+      #
+      # EVERY TEMPLATE, not just the default one. `templates/` is what
+      # `mcpp new --template huxerui.huxerui:<name>` instantiates, and a
+      # template that renders but does not compile is a broken project handed
+      # to whoever runs that command.
+      - name: Create and build a project from every template
+        env:
+          HUXERUI_HOME: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          cli="$GITHUB_WORKSPACE/build-cli/bin/huxerui"
+          work="$RUNNER_TEMP/generated"
+          mkdir -p "$work"
+
+          run_one() {
+            local dir="$1"; shift
+            ( cd "$work" && "$cli" "$@" )
+            local project="$work/$dir"
+
+            grep -q '^huxerui = { path = ' "$project/mcpp.toml" \
+              || { echo "$dir: the CLI did not resolve a path dependency"; exit 1; }
+            grep -q '^#   huxerui\.huxerui = ' "$project/mcpp.toml" \
+              || { echo "$dir: the published identity is not recorded"; exit 1; }
+            # No headers anywhere: the entry instantiates nothing and the module
+            # unit reaches std::type_info through `import std;`.
+            ! grep -rn '^[[:space:]]*#include' "$project/src" \
+              || { echo "$dir: an mcpp project should carry no headers"; exit 1; }
+            test ! -e "$project/CMakeLists.txt" \
+              || { echo "$dir: an mcpp project should carry no CMakeLists.txt"; exit 1; }
+            echo "--- $dir"
+          }
+
+          run_one AppDemo create app AppDemo --build mcpp --agent none
+          run_one NavDemo create app NavDemo --build mcpp --template navigation --agent none
+          run_one my-widgets create library my-widgets --build mcpp --agent none
+
+          # The two applications build; the library is a lib, so its own test is
+          # what says it works -- and `mcpp test` proves the module it exports
+          # can actually be imported.
+          ( cd "$work/AppDemo" && mcpp build )
+          ( cd "$work/NavDemo" && mcpp build )
+          ( cd "$work/my-widgets" && mcpp test )
+
+      - name: Assert the transform ran on a generated project
+        run: |
+          cd "$RUNNER_TEMP/generated/AppDemo"
+          generated=$(find target -path '*hcg*' -name '*app.cppm' | head -1)
+          test -n "$generated" || { echo "hcg did not transform src/app.cppm"; exit 1; }
+          grep -q 'return ::huxerui::Scope(' "$generated" \
+            || { echo "the composable was not wrapped"; exit 1; }
+          find target -type f -name AppDemo | head -1 | grep -q . \
+            || { echo "no executable was produced"; exit 1; }
+          echo "generated project builds and runs the transform"

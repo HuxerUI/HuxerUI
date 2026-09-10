@@ -76,6 +76,11 @@ int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool chec
 /// @throws std::runtime_error if the SDK layout is invalid or the Skill is absent.
 [[nodiscard]] std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home);
 
+/// True when `huxerui_home` is a HuxerUI source checkout that is also an mcpp
+/// package, and can therefore be named by path rather than by published version.
+/// @param huxerui_home Resolved SDK home, which may be empty.
+[[nodiscard]] bool IsMcppSourcePackage(const std::filesystem::path& huxerui_home);
+
 /// Returns the stable diagnostic name for an SDK location source.
 /// @param source Source value to name.
 /// @return `"missing"`, `"environment"`, or `"executable"`.
