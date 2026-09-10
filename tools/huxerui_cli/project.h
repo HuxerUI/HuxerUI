@@ -19,6 +19,15 @@ enum class ProjectKind {
   Library,
 };
 
+/// Build system a generated project is driven by.
+enum class BuildSystem {
+  /// CMake project with per-platform shells, the default.
+  CMake,
+  /// mcpp package rendered from the repository's `templates/app` tree, the same
+  /// tree `mcpp new --template` instantiates.
+  Mcpp,
+};
+
 /// Validated template identity for either an application or a reusable library.
 using ProjectTemplate = std::variant<ProjectTemplateContext, LibraryTemplateContext>;
 
@@ -105,12 +114,18 @@ MakeProjectTemplateContext(std::string_view project_name, std::string_view proje
 /// @param library_platforms Platform packages owned by a reusable library.
 /// @param skill_source Canonical application-development Skill directory.
 /// @param agent_skill_directories Agent layouts that should receive the Skill.
-/// @throws std::invalid_argument if an application or library Preview has no platform.
+/// @param build_system Build system the generated project is driven by.
+/// @throws std::invalid_argument if an application or library Preview has no platform,
+///         or if an mcpp project is requested for anything but an application.
 /// @throws std::runtime_error if generation or publication fails.
 void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
     std::span<const PlatformDriver* const> application_platforms,
     std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
-    std::span<const AgentSkillDirectory> agent_skill_directories);
+    std::span<const AgentSkillDirectory> agent_skill_directories,
+    BuildSystem build_system = BuildSystem::CMake);
+
+/// Version of the HuxerUI package an mcpp project depends on.
+[[nodiscard]] std::string_view McppPackageVersion() noexcept;
 
 /// Adds missing platform shells and library packages to an existing project.
 /// @param project Existing project.

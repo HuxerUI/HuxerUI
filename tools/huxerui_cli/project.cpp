@@ -259,6 +259,19 @@ std::string NormalizeLibraryIdentifier(std::string_view name) {
   return identifier;
 }
 
+// The mcpp project comes from the repository's own `templates/app`, which is an
+// mcpp PACKAGE template: `mcpp new --template huxerui.huxerui:app` renders the
+// same files once HuxerUI is published. One tree, two renderers -- a copy under
+// tools/huxerui_cli/templates would be the drift this project checks for
+// everywhere else.
+std::vector<GeneratedFile> McppApplicationProjectFiles(const ProjectTemplateContext& context) {
+  return RenderPackageTemplateTree("templates/app",
+      // The EXACT identity (namespace, name). A bare `huxerui` reaches mcpp's
+      // deprecated bare-name search, which means `mcpplibs` only and is removed
+      // in 2026.9.
+      PackageTemplateContext{context.project_name, "huxerui.huxerui", std::string(McppPackageVersion())});
+}
+
 std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext& context) {
   std::vector<GeneratedFile> files = RenderTemplateTree("project/app", context);
   std::vector<GeneratedFile> project_support = RenderTemplateTree("project/application", context);
@@ -361,8 +374,22 @@ std::string ReadFile(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
+/// True for a directory `huxerui create --build mcpp` produced.
+bool IsMcppProjectRoot(const std::filesystem::path& root) {
+  return std::filesystem::is_regular_file(root / "mcpp.toml") &&
+         std::filesystem::is_regular_file(root / "build.mcpp");
+}
+
 Project InspectProjectRoot(const std::filesystem::path& root) {
   if (!std::filesystem::is_regular_file(root / "CMakeLists.txt")) {
+    // This CLI drives the CMake project: build, run, package and platform add
+    // all read it. An mcpp project has no CMakeLists.txt on purpose, and
+    // "missing CMakeLists.txt" sends its owner looking for the wrong thing.
+    if (IsMcppProjectRoot(root)) {
+      throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
+                               " -- build it with `mcpp build` and run it with `mcpp run`: " +
+                               root.string());
+    }
     throw std::runtime_error("HuxerUI project is missing CMakeLists.txt: " + root.string());
   }
 
@@ -555,6 +582,7 @@ Project DiscoverProject(const std::filesystem::path& start) {
     current = current.parent_path();
   }
 
+  std::filesystem::path mcpp_root;
   while (!current.empty()) {
     const bool has_cmake = std::filesystem::is_regular_file(current / "CMakeLists.txt");
     const bool has_platforms = std::filesystem::is_directory(current / "platform");
@@ -562,12 +590,22 @@ Project DiscoverProject(const std::filesystem::path& start) {
     if (has_cmake && (has_platforms || has_library_headers)) {
       return InspectProjectRoot(current);
     }
+    // Recorded rather than returned: the walk still prefers a CMake project
+    // further up, which is what a CMake project holding an mcpp example needs.
+    if (mcpp_root.empty() && IsMcppProjectRoot(current)) {
+      mcpp_root = current;
+    }
 
     const std::filesystem::path parent = current.parent_path();
     if (parent == current) {
       break;
     }
     current = parent;
+  }
+  if (!mcpp_root.empty()) {
+    throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
+                             " -- build it with `mcpp build` and run it with `mcpp run`: " +
+                             mcpp_root.string());
   }
   throw std::runtime_error("no HuxerUI project found from " + start.string());
 }
@@ -630,13 +668,19 @@ Project ResolveApplicationProject(const Project& project) {
 void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
     std::span<const PlatformDriver* const> application_platforms,
     std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
-    std::span<const AgentSkillDirectory> agent_skill_directories) {
+    std::span<const AgentSkillDirectory> agent_skill_directories, BuildSystem build_system) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
   const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
   const ProjectTemplateContext& context = ProjectContext(project_template);
-  if (library == nullptr && application_platforms.empty()) {
+  // An mcpp project has no platform shells: mcpp builds Linux, Windows and
+  // macOS from one manifest, and the three platforms CMake owns alone --
+  // Android, iOS and Web -- are outside mcpp's target language entirely.
+  if (build_system == BuildSystem::Mcpp && library != nullptr) {
+    throw std::invalid_argument("mcpp projects are applications; a library keeps the CMake layout");
+  }
+  if (build_system == BuildSystem::CMake && library == nullptr && application_platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
   }
   if (library != nullptr && application_platforms.empty()) {
@@ -655,6 +699,13 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
+  if (build_system == BuildSystem::Mcpp) {
+    WriteFiles(temporary, McppApplicationProjectFiles(context));
+    CopyApplicationDevelopmentSkill(temporary, skill_source, agent_skill_directories);
+    std::filesystem::rename(temporary, destination);
+    cleanup.Commit();
+    return;
+  }
   if (library == nullptr) {
     WriteFiles(temporary, ApplicationProjectFiles(context));
     CreateResourceDirectories(temporary);
@@ -681,6 +732,10 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 
   std::filesystem::rename(temporary, destination);
   cleanup.Commit();
+}
+
+std::string_view McppPackageVersion() noexcept {
+  return HUXERUI_CLI_VERSION;
 }
 
 void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,

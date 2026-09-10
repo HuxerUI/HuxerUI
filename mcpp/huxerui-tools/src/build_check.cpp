@@ -208,6 +208,68 @@ void check_platform(const std::filesystem::path& root, const toml::table& manife
 }
 
 
+void check_package_template(const std::filesystem::path& root) {
+    const std::filesystem::path templates = root / "templates" / "app";
+    if (!std::filesystem::is_directory(templates)) { fail("templates/app is missing"); return; }
+
+    static constexpr std::string_view kKnown[] = {
+        "project.name", "project.namespace", "project.qualifiedName",
+        "template.package.namespace", "template.package.name",
+        "template.package.selector", "template.package.version",
+        "template.name", "self.name", "self.version",
+    };
+    bool has_module = false;
+    std::error_code ec;
+    for (auto it = std::filesystem::recursive_directory_iterator(templates, ec);
+         it != std::filesystem::recursive_directory_iterator(); ++it) {
+        if (!it->is_regular_file(ec)) continue;
+        const std::filesystem::path& path = it->path();
+        const std::string relative = std::filesystem::relative(path, root, ec).generic_string();
+        const std::string text = read(path);
+
+        if (path.extension() == ".h" || path.extension() == ".hpp")
+            fail(relative + ": an mcpp project is module-style and should carry no headers");
+        if (relative.ends_with(".cppm") || relative.ends_with(".cppm.in")) {
+            has_module = true;
+            // huxerui.rules cannot force an include on a package with module
+            // units, so a unit that instantiates typeid carries <typeinfo>
+            // itself.
+            if (text.find("UseState") != std::string::npos &&
+                text.find("#include <typeinfo>") == std::string::npos) {
+                fail(relative + " instantiates typeid through UseState but its global module "
+                                "fragment omits <typeinfo>");
+            }
+        }
+
+        // mcpp renders `**.in` with a closed token vocabulary and copies
+        // everything else verbatim, so an unknown token fails at `mcpp new`
+        // time -- on the user's machine, not here.
+        std::size_t at = 0;
+        while ((at = text.find("{{", at)) != std::string::npos) {
+            const std::size_t close = text.find("}}", at);
+            if (close == std::string::npos) break;
+            const std::string token = text.substr(at + 2, close - at - 2);
+            if (path.extension() != ".in")
+                fail(relative + " carries {{...}} tokens but is not a .in file");
+            else if (std::ranges::find(kKnown, token) == std::end(kKnown))
+                fail(relative + " uses unknown template token '{{" + token + "}}'");
+            at = close + 2;
+        }
+    }
+    if (!has_module)
+        fail("templates/app declares no module interface unit; the project it generates would "
+             "not be module-style");
+    if (!std::filesystem::is_regular_file(templates / "template.toml"))
+        fail("templates/app/template.toml is missing");
+
+    // The composable must not live in the entry: huxerui.rules leaves the
+    // target's entry alone, so a composable there is never transformed.
+    const std::string entry = read(templates / "src" / "main.cpp.in");
+    if (entry.find("[[huxerui::composable]]") != std::string::npos)
+        fail("templates/app/src/main.cpp.in marks a composable in the target's entry, which "
+             "huxerui.rules never transforms");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -243,6 +305,7 @@ int main(int argc, char** argv) {
     check_platform(root, manifest, "Linux.cmake", "cfg(linux)");
     check_platform(root, manifest, "Windows.cmake", "windows");
     check_platform(root, manifest, "MacOS.cmake", "macos");
+    check_package_template(root);
 
     if (!failures.empty()) {
         std::cerr << "mcpp/CMake parity check FAILED:\n\n";

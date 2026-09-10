@@ -1,5 +1,17 @@
 # Standalone mcpp Builds
 
+> **Prefer the native path when the HuxerUI source tree is available.**
+> HuxerUI is an mcpp package: an application declares `huxerui` as a dependency
+> and calls `huxerui::rules::configure()` from its `build.mcpp`, and the SDK
+> include directory, the library, the platform link interface, the composable
+> transform (`hcg`) and the resource compiler (`hrc`) all arrive through that
+> one edge. See `mcpp/README.md` and `examples/mcpp_demo/`. None of the manual
+> recovery below applies there.
+>
+> The rest of this file covers the remaining case: an **independent** mcpp
+> project that consumes a released HuxerUI SDK without a source checkout, built
+> through the delegating `huxerui mcpp build` frontend.
+
 Use this reference for an independent mcpp project that includes HuxerUI headers or links an HuxerUI SDK library directly.
 The `huxerui mcpp` frontend validates `mcpp.toml` and delegates to `mcpp build`; it does not discover the SDK, inject compiler flags, translate CMake link interfaces, run HuxerUI code generation, or run the resource compiler.
 
@@ -80,8 +92,7 @@ ldflags = ["<sdk library and platform link options>"]
 library_dirs = ["<runtime library directories>"]
 ```
 
-Use `mcpp/examples/01-import/mcpp.toml` as a shape example only.
-Its absolute Linux library paths, GCC version, and direct GTK link list are host-specific and must not be copied to another platform or SDK installation.
+`mcpp/examples/01-import/mcpp.toml` is not a shape example for this case: it uses the native path (one dependency line) and carries none of the manual SDK wiring described here.
 
 ## C++23 and C++26
 
@@ -106,5 +117,5 @@ For Linux distribution builds, inspect the final binary with `readelf` and `ldd`
 For macOS use `otool -L` and deployment-target inspection; for Windows use the active MSVC toolchain and dependency inspection; for Android, Web, and iOS use the platform toolchain and ABI defined by the release workflow.
 Do not claim compatibility from a successful compile alone: record the exact compiler, standard library, architecture, linkage, and runtime checks that actually ran.
 
-The demo deliberately uses stateless public components.
-Stateful `UseXxx()` code and generated resource headers need an explicit mcpp integration for the HuxerUI code generator and resource compiler, or an equivalent source-level implementation.
+A standalone project without the source tree still needs an explicit integration for the HuxerUI code generator and resource compiler, or an equivalent source-level implementation.
+With the source tree available, `huxerui.rules` already provides it — `examples/mcpp_demo/` uses a `[[huxerui::composable]]` function with `UseState` and a packaged resource root, and its whole manifest is one dependency line.

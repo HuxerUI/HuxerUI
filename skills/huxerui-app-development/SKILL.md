@@ -14,12 +14,27 @@ Treat the task as HuxerUI SDK application work when the user names HuxerUI or it
 - `find_package(HuxerUI CONFIG REQUIRED)`
 - `HuxerUI::huxerui` or `HuxerUI::huxerui_static`
 - an include under `<huxerui/...>`
+- `import huxerui;` in a source or module interface unit
+- an `mcpp.toml` that depends on `huxerui.huxerui`, beside a `build.mcpp` that
+  imports `huxerui.rules`
+
+The last two identify an **mcpp** project, which `huxerui create app <name>
+--build mcpp` produces. It is HuxerUI application work like any other, and the
+public contracts below apply unchanged -- an mcpp project reaches the same
+entities through `import huxerui;` that a CMake project reaches through the
+umbrella header. What differs is the build: mcpp drives it, not this CLI and not
+CMake, so `mcpp build` and `mcpp run` replace `huxerui build` and `huxerui run`,
+there is no `CMakeLists.txt` and no `platform/` shell to edit, and the SDK
+discovery below does not apply -- the framework arrives through the dependency
+edge. See `references/mcpp-build.md`.
 
 Opening a matching project does not authorize changes or commands by itself.
 
 ## Establish the SDK truth
 
-Before relying on an API, identify the SDK used by the project:
+Before relying on an API, identify the SDK used by the project.
+An mcpp project skips this section: it names a package version in `mcpp.toml`,
+and mcpp resolves it -- there is no installed SDK prefix to locate.
 
 1. Read `HuxerUI_DIR` from the active build directory's `CMakeCache.txt`, then derive the SDK prefix from `lib/cmake/HuxerUI`.
 2. Otherwise use `HUXERUI_HOME` when it identifies an installed SDK.

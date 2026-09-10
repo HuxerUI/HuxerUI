@@ -46,6 +46,11 @@ on:
       - 'tests/support/**'
       - 'examples/buffer_reference/**'
       - '3dparty/catch2/**'
+      # The generated-app job builds the CLI and instantiates every template,
+      # so those trees are inputs to this workflow as much as the framework is.
+      - 'templates/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/cli/**'
       - '.github/workflows/mcpp-build.yml'
       - '!**.[mM][dD]'
   pull_request:
@@ -82,6 +87,11 @@ on:
       - 'tests/support/**'
       - 'examples/buffer_reference/**'
       - '3dparty/catch2/**'
+      # The generated-app job builds the CLI and instantiates every template,
+      # so those trees are inputs to this workflow as much as the framework is.
+      - 'templates/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/cli/**'
       - '.github/workflows/mcpp-build.yml'
       - '!**.[mM][dD]'
   workflow_dispatch:
@@ -549,3 +559,86 @@ jobs:
           echo "$list" | grep -qE 'lib/.+/(libhuxerui\.a|huxerui\.lib)' \
             || { echo "the package carries no library"; exit 1; }
           echo "package carries headers, the module interface and a library"
+
+  generated-app:
+    name: huxerui create --build mcpp, then mcpp build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+          xlings install "mcpp@${MCPP_VERSION}" -y || true
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      # The CLI is a CMake artifact; only its dependencies are needed here, not
+      # the framework's.
+      - name: Build the huxerui CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build
+          cmake -S . -B build-cli -G Ninja \
+            -DHUXERUI_BUILD_EXAMPLES=OFF \
+            -DHUXERUI_BUILD_SHARED=OFF \
+            -DHUXERUI_BUILD_CLI=ON \
+            -DHUXERUI_BUILD_TESTS=OFF
+          cmake --build build-cli --target huxerui_cli --parallel
+
+      - name: Create an mcpp project
+        run: ./build-cli/bin/huxerui create app SampleApp --build mcpp --agent none
+
+      # WHAT THIS DOES NOT COVER. The template names the published package
+      # (`huxerui.huxerui = "<version>"`), and HuxerUI is not in an mcpp index
+      # yet, so registry resolution cannot run here. Pointing the edge at this
+      # checkout exercises everything else: the rendered manifest, build.mcpp,
+      # the module-style sources, the composable transform, the resource
+      # compiler and the link. Delete these two lines once the package is
+      # published -- the job then covers the resolution too.
+      - name: Point the dependency at this checkout
+        working-directory: SampleApp
+        run: |
+          grep -q '^huxerui\.huxerui = ' mcpp.toml \
+            || { echo "the template no longer declares huxerui.huxerui"; exit 1; }
+          sed -i "s|^huxerui\.huxerui = .*|huxerui = { path = \"$GITHUB_WORKSPACE\" }|" mcpp.toml
+          cat mcpp.toml
+
+      - name: Build it
+        working-directory: SampleApp
+        run: mcpp build
+
+      - name: Assert the generated project is what the template promises
+        working-directory: SampleApp
+        run: |
+          test -f src/app.cppm || { echo "the page is not in a module unit"; exit 1; }
+          test ! -e CMakeLists.txt || { echo "an mcpp project should carry no CMakeLists.txt"; exit 1; }
+          ! grep -q '#include' src/main.cpp \
+            || { echo "the entry gained an include"; exit 1; }
+          generated=$(find target -path '*hcg*' -name '*app.cppm' | head -1)
+          test -n "$generated" || { echo "hcg did not transform src/app.cppm"; exit 1; }
+          grep -q 'return ::huxerui::Scope(' "$generated" \
+            || { echo "the composable was not wrapped"; exit 1; }
+          find target -type f -name SampleApp | head -1 | grep -q . \
+            || { echo "no executable was produced"; exit 1; }
+          echo "generated project builds and runs the transform"
