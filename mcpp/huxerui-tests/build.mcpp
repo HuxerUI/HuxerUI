@@ -30,9 +30,15 @@ int main() {
         return 1;
     }
 
-    const std::string odir    = std::string(mcpp::out_dir()) + "/hrc";
-    const std::string src     = root + "/resources";
-    const std::string package = odir + "/builtin/package";
+    const std::string odir = std::string(mcpp::out_dir()) + "/hrc";
+    const std::string src  = root + "/resources";
+    // FORWARD SLASHES, and not for tidiness. This path is baked into a string
+    // literal by the -D below, and on Windows out_dir() is a backslash path:
+    // `...\out\hrc\...` puts `\o` and `\h` in the literal, and clang reports
+    // `expected '{' after '\o' escape sequence`. Windows accepts '/' in a path
+    // everywhere this value is used.
+    const std::string package =
+        std::filesystem::path(odir + "/builtin/package").generic_string();
 
     std::vector<std::string> inputs{ hrc };
     std::error_code ec;

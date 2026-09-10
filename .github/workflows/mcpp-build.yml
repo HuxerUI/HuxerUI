@@ -294,13 +294,19 @@ jobs:
           echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
           echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
 
-      - name: Select the pinned mcpp
+      # `mcpp toolchain default` once, rather than --toolchain on each command.
+      # Only `mcpp build` takes that flag: `mcpp test` and `mcpp pack` reject it
+      # with `unknown option: --toolchain`, so a per-command flag would have to
+      # be a per-command environment variable for two of the three.
+      - name: Select the pinned mcpp and make clang the default toolchain
         run: |
           xlings install "mcpp@${MCPP_VERSION}" -y
           mcpp --version
+          mcpp toolchain default "${MCPP_LLVM}"
+          mcpp toolchain list
 
       - name: Build the framework
-        run: mcpp build --toolchain "${MCPP_LLVM}"
+        run: mcpp build
 
       # THIS is the step the job exists for. A library builds under either
       # compiler; consuming it as a MODULE is where they diverge, because clang
@@ -316,7 +322,7 @@ jobs:
         working-directory: examples/mcpp_demo
         run: |
           set -o pipefail
-          mcpp build --toolchain "${MCPP_LLVM}" 2>&1 | tee build.log
+          mcpp build 2>&1 | tee build.log
           # A configuration mismatch is a warning before it is an error, so a
           # build can pass while the module was quietly not in effect.
           ! grep -q 'module-file-config-mismatch' build.log \
@@ -331,12 +337,10 @@ jobs:
       - name: Run the unit test suite
         working-directory: mcpp/huxerui-tests
         run: mcpp test
-        env:
-          MCPP_TOOLCHAIN: ${{ env.MCPP_LLVM }}
 
       - name: Pack the library and check its shape
         run: |
-          mcpp pack --toolchain "${MCPP_LLVM}"
+          mcpp pack
           archive=$(find target/dist -name 'huxerui-*.tar.gz' | head -1)
           test -n "$archive" || { echo "mcpp pack produced no archive"; exit 1; }
           echo "packed $archive"
