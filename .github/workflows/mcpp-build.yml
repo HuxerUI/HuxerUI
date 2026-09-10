@@ -646,8 +646,14 @@ jobs:
         run: |
           test -f src/app.cppm || { echo "the page is not in a module unit"; exit 1; }
           test ! -e CMakeLists.txt || { echo "an mcpp project should carry no CMakeLists.txt"; exit 1; }
-          ! grep -q '#include' src/main.cpp \
-            || { echo "the entry gained an include"; exit 1; }
+          # No headers anywhere in the project. The entry instantiates nothing,
+          # and the module unit reaches std::type_info through `import std;`
+          # rather than a global module fragment -- so an mcpp project written
+          # against HuxerUI has no #include in it at all.
+          ! grep -rn '^[[:space:]]*#include' src/ \
+            || { echo "an mcpp project should carry no headers"; exit 1; }
+          grep -q '^import std;' src/app.cppm \
+            || { echo "the module unit no longer imports std"; exit 1; }
           generated=$(find target -path '*hcg*' -name '*app.cppm' | head -1)
           test -n "$generated" || { echo "hcg did not transform src/app.cppm"; exit 1; }
           grep -q 'return ::huxerui::Scope(' "$generated" \

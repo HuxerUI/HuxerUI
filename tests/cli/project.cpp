@@ -30,8 +30,13 @@ TEST_CASE("HuxerUICliCreatesMcppProjects") {
   // module-style throughout.
   REQUIRE(std::filesystem::is_regular_file(project / "src/app.cppm"));
   REQUIRE_FALSE(std::filesystem::exists(project / "src/counter.h"));
-  // The entry instantiates nothing, so it needs no includes at all.
+  // No headers anywhere. The entry instantiates nothing, and the module unit
+  // reaches std::type_info -- which UseState() needs, because GCC checks typeid
+  // per translation unit -- through `import std;` rather than a global module
+  // fragment. An mcpp project written against HuxerUI has no #include in it.
   REQUIRE(Read(project / "src/main.cpp").find("#include") == std::string::npos);
+  REQUIRE(Read(project / "src/app.cppm").find("\n#include") == std::string::npos);
+  REQUIRE(Read(project / "src/app.cppm").find("\nimport std;") != std::string::npos);
 
   // An mcpp project has no CMake and no platform shells.
   REQUIRE_FALSE(std::filesystem::exists(project / "CMakeLists.txt"));

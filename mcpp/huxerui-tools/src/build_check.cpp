@@ -231,13 +231,17 @@ void check_package_template(const std::filesystem::path& root) {
             fail(relative + ": an mcpp project is module-style and should carry no headers");
         if (relative.ends_with(".cppm") || relative.ends_with(".cppm.in")) {
             has_module = true;
-            // huxerui.rules cannot force an include on a package with module
-            // units, so a unit that instantiates typeid carries <typeinfo>
-            // itself.
+            // UseState() instantiates typeid in its CALLER and GCC checks that
+            // per translation unit, so std::type_info has to be visible here.
+            // huxerui.rules cannot supply it -- `-include` prepends before
+            // `module;`, which is ill-formed -- so the unit says so itself.
+            // `import std;` is the header-free way and what the template uses;
+            // <typeinfo> in a global module fragment is the other.
             if (text.find("UseState") != std::string::npos &&
+                text.find("import std;") == std::string::npos &&
                 text.find("#include <typeinfo>") == std::string::npos) {
-                fail(relative + " instantiates typeid through UseState but its global module "
-                                "fragment omits <typeinfo>");
+                fail(relative + " instantiates typeid through UseState but makes std::type_info "
+                                "visible by neither `import std;` nor <typeinfo>");
             }
         }
 

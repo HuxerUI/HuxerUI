@@ -1,28 +1,33 @@
 // Everything the application is: its page, its composables, and the
 // `Application` object whose constructor registers them.
 //
-// One include, and it is not HuxerUI's. GCC checks `typeid` per translation
-// unit, and UseState(), View and Layout instantiate it in their CALLER, so any
-// unit that builds a View needs <typeinfo>. `import huxerui;` cannot supply it
-// the way `#include <huxerui/huxerui.h>` does -- a global module fragment's
-// includes do not reach an importer -- and huxerui.rules cannot force it
-// either, because `-include` prepends before `module;`, which is ill-formed.
+// No headers, and no global module fragment to put one in.
 //
-// Everything else below is the same code a CMake project writes:
-// [[huxerui::composable]] means exactly what it means there, and the same hcg
-// transforms it.
+// `import std;` is what makes that possible. GCC checks `typeid` per
+// translation unit, and UseState(), View and Layout instantiate it in their
+// CALLER, so any unit that builds a View needs std::type_info to be visible --
+// which a CMake project gets for free from #include <huxerui/huxerui.h>, and
+// which `import huxerui;` cannot supply, because a global module fragment's
+// includes do not reach an importer. Importing std satisfies it without a
+// header. (`import std;` is a C++23 library feature that GCC, Clang+libc++ and
+// the MSVC STL all provide in C++20 mode too.)
+//
+// Everything below is the same code a CMake project writes: [[huxerui::composable]]
+// means exactly what it means there, and the same hcg transforms it.
 //
 // To hand-write a scope with HUXERUI_SCOPE(...) instead of marking a function,
-// add `#include <huxerui_scope_prelude.h>` here -- macros do not cross a
-// module boundary, and the rule already puts that header's directory on the
-// include path.
-
-module;
-
-#include <typeinfo>
+// this unit needs a global module fragment after all -- macros do not cross a
+// module boundary:
+//
+//   module;
+//   #include <huxerui_scope_prelude.h>
+//   export module app;
+//
+// The rule already puts that header's directory on the include path.
 
 export module app;
 
+import std;
 import huxerui;
 
 using namespace huxerui;
