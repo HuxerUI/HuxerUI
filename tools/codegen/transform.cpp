@@ -859,14 +859,16 @@ TransformResult TransformSource(std::string_view source, std::string_view source
         Edit{
             composable.opening_brace + 1,
             0,
-            "\n  HUXERUI_SCOPE_BEGIN\n" + LineDirective(opening.line, escaped_path),
+            "\n  " + std::string(kScopeOpenText) + "\n" +
+                LineDirective(opening.line, escaped_path),
         }
     );
     edits.push_back(
         Edit{
             composable.closing_brace,
             0,
-            "\n  HUXERUI_SCOPE_END\n" + LineDirective(closing.line, escaped_path),
+            "\n  " + std::string(kScopeCloseText) + "\n" +
+                LineDirective(closing.line, escaped_path),
         }
     );
   }

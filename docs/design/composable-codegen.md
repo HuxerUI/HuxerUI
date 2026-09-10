@@ -48,24 +48,7 @@ The marker applies to a function definition, not to calls of that function. Call
 
 ## Generated form
 
-The transformer removes the marker and wraps the original function body with the existing scope macros:
-
-```cpp
-View Counter(int initial) {
-  HUXERUI_SCOPE_BEGIN
-  auto count = UseState(initial);
-
-  return Column{
-      Text(count),
-      Button("+1").OnClick([count] {
-        ++count;
-      }),
-  };
-  HUXERUI_SCOPE_END
-}
-```
-
-The transformation is semantically equivalent to:
+The transformer removes the marker and wraps the original function body in a deferred scope factory:
 
 ```cpp
 View Counter(int initial) {
@@ -82,7 +65,14 @@ View Counter(int initial) {
 }
 ```
 
-All returns in the original body therefore return from the deferred scope factory. Parameters and `this` follow the capture behavior of the existing `HUXERUI_SCOPE_BEGIN` macro.
+The injected text is the *expansion* of `HUXERUI_SCOPE_BEGIN` / `HUXERUI_SCOPE_END`, not the macro names.
+Preprocessing the two forms produces identical tokens, so the choice is invisible to the compiler.
+It is not invisible to a consumer reached through `import`: macros do not cross a module boundary, and generated code naming them would fail to compile in a translation unit that writes `import huxerui;` rather than including the umbrella header.
+
+The macros remain public API for hand-written scopes, and the transformer still *recognizes* them in its input — see "Interaction with explicit scopes" below.
+The two texts are defined once, as `kScopeOpenText` and `kScopeCloseText` in `tools/codegen/transform.h`.
+
+All returns in the original body therefore return from the deferred scope factory. Parameters and `this` follow the capture behavior of the `HUXERUI_SCOPE_BEGIN` macro.
 
 ## CMake integration
 
@@ -143,8 +133,8 @@ For every marker, the transformer:
 - Finds its matching closing brace using lexical brace depth.
 - Records both insertion offsets.
 - Removes the marker.
-- Inserts `HUXERUI_SCOPE_BEGIN` after the opening brace.
-- Inserts `HUXERUI_SCOPE_END` before the matching closing brace.
+- Inserts the scope-open text (`return ::huxerui::Scope([=]() -> ::huxerui::View {`) after the opening brace.
+- Inserts the scope-close text (`});`) before the matching closing brace.
 
 Edits are applied from the end of the source toward the beginning so earlier source offsets remain valid when a file contains multiple marked functions.
 
@@ -165,11 +155,11 @@ Generated sources should use `#line` directives around inserted text and origina
 ```cpp
 #line 24 "/project/src/counter.cpp"
 View Counter(int initial) {
-  HUXERUI_SCOPE_BEGIN
+  return ::huxerui::Scope([=]() -> ::huxerui::View {
 #line 25 "/project/src/counter.cpp"
   auto count = UseState(initial);
   return Text(count);
-  HUXERUI_SCOPE_END
+  });
 }
 ```
 
