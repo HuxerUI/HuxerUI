@@ -606,7 +606,13 @@ jobs:
             -DHUXERUI_BUILD_TESTS=OFF
           cmake --build build-cli --target huxerui_cli --parallel
 
+      # HUXERUI_HOME selects the SDK, and a source checkout is a valid one --
+      # the CLI already resolves the app-development Skill from either layout.
+      # Naming it here is what tells `create` that HuxerUI is this tree rather
+      # than a release, which is the whole input to the decision below.
       - name: Create an mcpp project
+        env:
+          HUXERUI_HOME: ${{ github.workspace }}
         run: ./build-cli/bin/huxerui create app SampleApp --build mcpp --agent none
 
       # WHAT THIS DOES NOT COVER. The template names the published package
@@ -616,12 +622,19 @@ jobs:
       # the module-style sources, the composable transform, the resource
       # compiler and the link. Delete these two lines once the package is
       # published -- the job then covers the resolution too.
-      - name: Point the dependency at this checkout
+      # No manifest surgery here. `huxerui create` resolved its SDK to this
+      # checkout, saw an mcpp package, and wrote a path dependency -- which is
+      # what mcpp documents for local development and what makes a project
+      # created from a source tree buildable before HuxerUI is published. A
+      # project created against an INSTALLED SDK gets the published identity
+      # instead; the generated manifest carries that line, commented, beside it.
+      - name: Show the resolved dependency
         working-directory: SampleApp
         run: |
-          grep -q '^huxerui\.huxerui = ' mcpp.toml \
-            || { echo "the template no longer declares huxerui.huxerui"; exit 1; }
-          sed -i "s|^huxerui\.huxerui = .*|huxerui = { path = \"$GITHUB_WORKSPACE\" }|" mcpp.toml
+          grep -q '^huxerui = { path = ' mcpp.toml \
+            || { echo "the CLI did not resolve a path dependency"; sed -n '1,20p' mcpp.toml; exit 1; }
+          grep -q '^#   huxerui\.huxerui = ' mcpp.toml \
+            || { echo "the published identity is not recorded"; exit 1; }
           cat mcpp.toml
 
       - name: Build it

@@ -498,7 +498,7 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
                                                  : ResolveApplicationDevelopmentSkill(huxerui_home);
   const std::filesystem::path destination = working_directory / arguments[2];
   CreateProject(destination, project_template, application_platforms, library_platforms, skill_source,
-                agent_skill_directories, build_system);
+                agent_skill_directories, build_system, huxerui_home);
 
   output << "Created " << (kind == ProjectKind::App ? "app " : "library ") << destination.string() << '\n';
   if (build_system == BuildSystem::Mcpp) {

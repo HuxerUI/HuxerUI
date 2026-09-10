@@ -44,10 +44,19 @@ TEST_CASE("HuxerUICliCreatesMcppProjects") {
 
   const std::string manifest = Read(project / "mcpp.toml");
   REQUIRE(manifest.find("name     = \"Sample-App\"") != std::string::npos);
-  // The EXACT package identity: a bare name reaches mcpp's deprecated
-  // bare-name search, which resolves in `mcpplibs` only.
-  REQUIRE(manifest.find("huxerui.huxerui = ") != std::string::npos);
   REQUIRE(manifest.find("{{") == std::string::npos);
+
+  // Created against a source checkout, so the dependency is a path -- the
+  // version the template names is only resolvable from an index, and this tree
+  // is not published. mcpp documents `path` as the form for local development.
+  REQUIRE(manifest.find("huxerui = { path = \"") != std::string::npos);
+  REQUIRE(manifest.find(HUXERUI_TEST_SOURCE_DIRECTORY) != std::string::npos);
+  // The published identity stays in the file as the line to swap in, and it is
+  // the EXACT one: a bare name reaches mcpp's deprecated bare-name search,
+  // which resolves in `mcpplibs` only.
+  REQUIRE(manifest.find("#   huxerui.huxerui = ") != std::string::npos);
+  // Commented out, not active -- two [dependencies] entries would be one too many.
+  REQUIRE(manifest.find("\nhuxerui.huxerui = ") == std::string::npos);
 
   REQUIRE(Read(project / "src/main.cpp").find("import huxerui;") != std::string::npos);
   REQUIRE(Read(project / "src/main.cpp").find("import app;") != std::string::npos);

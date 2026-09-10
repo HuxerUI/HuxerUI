@@ -258,6 +258,12 @@ int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool chec
   }
 }
 
+bool IsMcppSourcePackage(const std::filesystem::path& huxerui_home) {
+  return !huxerui_home.empty() && IsSourceHome(huxerui_home) &&
+         std::filesystem::is_regular_file(huxerui_home / "mcpp.toml") &&
+         std::filesystem::is_regular_file(huxerui_home / "build.mcpp");
+}
+
 std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home) {
   if (huxerui_home.empty()) {
     for (auto directory = ExecutablePath({}).parent_path(); !directory.empty(); directory = directory.parent_path()) {

@@ -1,23 +1,25 @@
 // Everything the application is: its page, its composables, and the
 // `Application` object whose constructor registers them.
 //
-// The global module fragment carries what this unit needs. huxerui.rules
-// cannot force an include on a package with module units -- `-include`
-// prepends before `module;`, which is ill-formed -- so a module unit writes
-// them itself.
+// One include, and it is not HuxerUI's. GCC checks `typeid` per translation
+// unit, and UseState(), View and Layout instantiate it in their CALLER, so any
+// unit that builds a View needs <typeinfo>. `import huxerui;` cannot supply it
+// the way `#include <huxerui/huxerui.h>` does -- a global module fragment's
+// includes do not reach an importer -- and huxerui.rules cannot force it
+// either, because `-include` prepends before `module;`, which is ill-formed.
 //
-//   <typeinfo>                GCC's typeid check is per-TU, and UseState()
-//                             instantiates typeid in the caller
-//   huxerui_scope_prelude.h   HUXERUI_SCOPE and friends, for hand-written
-//                             scopes; macros do not cross a module boundary.
-//                             The rule puts this header's directory on the
-//                             include path. Drop the line if you never write
-//                             one by hand.
+// Everything else below is the same code a CMake project writes:
+// [[huxerui::composable]] means exactly what it means there, and the same hcg
+// transforms it.
+//
+// To hand-write a scope with HUXERUI_SCOPE(...) instead of marking a function,
+// add `#include <huxerui_scope_prelude.h>` here -- macros do not cross a
+// module boundary, and the rule already puts that header's directory on the
+// include path.
 
 module;
 
 #include <typeinfo>
-#include <huxerui_scope_prelude.h>
 
 export module app;
 
