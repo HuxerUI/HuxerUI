@@ -207,20 +207,21 @@ struct msi_inputs {
     std::string package_wxs;     // the rendered definition, absolute
     std::string project_dir;     // holds the icon, absolute
     std::string out;             // the .msi to write, absolute
-    std::string bindpath_app;    // the link directory, relative to the build dir
+    std::string executable;      // the linked program, as mcpp names it
 };
 
 // The `wix build` argv.
 //
-// `bindpath_app` is relative on purpose. An action runs with the BUILD
-// directory as its working directory, and that is the directory ninja links
-// into -- so `bin` reaches the executable without the rule having to know the
-// target triple or the fingerprint, neither of which a build program is told.
+// The program is passed as a preprocessor variable rather than through a
+// directory bindpath. A bindpath that resolves to nothing yields a valid,
+// empty installer and no diagnostic; a `<File Source>` whose path is wrong is
+// an error. `Project` stays a bindpath because it holds the icon, which the
+// manifest names and the rule has already checked exists.
 [[nodiscard]] inline std::vector<std::string> msi_arguments(const msi_inputs& in) {
     return {
         in.wix, "build", in.package_wxs,
         "-arch", "x64",
-        "-bindpath", "Application=" + in.bindpath_app,
+        "-d", "Executable=" + in.executable,
         "-bindpath", "Project=" + in.project_dir,
         "-out", in.out,
     };

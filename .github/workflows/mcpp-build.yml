@@ -557,7 +557,31 @@ jobs:
           $msi = Get-ChildItem -Recurse -Filter '*.msi' target | Select-Object -First 1
           if (-not $msi) { throw 'huxerui.rules produced no installer' }
           Write-Host "built $($msi.FullName) ($([math]::Round($msi.Length/1KB)) KB)"
-          if ($msi.Length -lt 100KB) { throw 'the MSI is too small to contain the application' }
+
+          # Read the File table rather than judging by size. A size threshold is
+          # a proxy for "carries the application", and a poor one: an installer
+          # whose source path resolved to nothing is a valid 52 KB MSI, and one
+          # that carries the wrong file is any size at all.
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.GetType().InvokeMember(
+              'OpenDatabase', 'InvokeMethod', $null, $installer, @($msi.FullName, 0))
+          $view = $db.GetType().InvokeMember(
+              'OpenView', 'InvokeMethod', $null, $db, @('SELECT FileName, FileSize FROM File'))
+          $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
+          $files = @()
+          while ($true) {
+            $row = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+            if (-not $row) { break }
+            $name = $row.GetType().InvokeMember('StringData', 'GetProperty', $null, $row, @(1))
+            $size = $row.GetType().InvokeMember('IntegerData', 'GetProperty', $null, $row, @(2))
+            $files += [pscustomobject]@{ Name = $name; Size = $size }
+          }
+          $files | ForEach-Object { Write-Host "  $($_.Name)  $($_.Size) bytes" }
+          if ($files.Count -eq 0) { throw 'the MSI carries no files' }
+          $exe = $files | Where-Object { $_.Name -like '*huxerui_example_module_units.exe*' }
+          if (-not $exe) { throw 'the MSI does not carry the application executable' }
+          if ($exe.Size -lt 1MB) { throw "the installed executable is $($exe.Size) bytes, which is not the application" }
+
           # The definition the rule rendered, kept beside it for inspection.
           $wxs = Get-ChildItem -Recurse -Filter 'Package.wxs' target | Select-Object -First 1
           if (-not $wxs) { throw 'the rendered Package.wxs is missing' }

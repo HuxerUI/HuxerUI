@@ -280,18 +280,21 @@ void test_upgrade_code() {
 void test_msi_arguments() {
     using huxerui::rules::sources::msi_arguments;
     const auto argv = msi_arguments({
-        .wix          = "C:/wix/wix.exe",
-        .package_wxs  = "C:/build/out/wix/Package.wxs",
-        .project_dir  = "C:/app/assets",
-        .out          = "C:/build/out/wix/App.msi",
-        .bindpath_app = "bin",
+        .wix         = "C:/wix/wix.exe",
+        .package_wxs = "C:/build/out/wix/Package.wxs",
+        .project_dir = "C:/app/assets",
+        .out         = "C:/build/out/wix/App.msi",
+        .executable  = "bin/App.exe",
     });
     check(argv.front() == "C:/wix/wix.exe", "the tool comes first");
     check(argv[1] == "build", "then the verb");
     const auto has = [&](std::string_view v) {
         return std::ranges::find(argv, v) != argv.end();
     };
-    check(has("Application=bin"), "the link directory is bound relative");
+    // Named, not harvested: a directory bindpath that resolves to nothing
+    // produces a valid empty installer and says nothing about it.
+    check(has("Executable=bin/App.exe"), "the program is named exactly");
+    check(!has("Application=bin"), "no directory is harvested");
     check(has("Project=C:/app/assets"), "the icon directory is bound absolute");
     check(has("-arch") && has("x64"), "the architecture is stated");
     check(argv[argv.size() - 2] == "-out", "-out is next to last");

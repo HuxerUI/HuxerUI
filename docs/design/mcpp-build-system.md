@@ -251,10 +251,12 @@ ninja sequences it after the link with no phase machinery.
 
 Three things make it one action rather than several:
 
-- **No staging.** `bindpath.Application` is the *relative* path `bin`, because
-  an action runs with the build directory as its working directory and that is
-  the directory ninja links into. `<Files Include="!(bindpath.Application)\**" />`
-  then harvests whatever the link produced.
+- **No staging.** The program is passed to WiX as a preprocessor variable,
+  `-d Executable=${mcpp.target_file:<target>}`, and the definition names it with
+  `<File Source="$(Executable)" />`. An earlier version harvested a directory
+  bindpath instead and produced a valid, empty, 52 KB installer when the path
+  resolved to nothing — with no diagnostic. A `<File Source>` whose path is
+  wrong is an error before anything is written.
 - **No resource copying.** HuxerUI's compiled resources are linked into the
   executable; moving the whole `out/hrc` tree away and running the program
   confirms it. The install set is the executable and the DLLs beside it.
@@ -262,6 +264,10 @@ Three things make it one action rather than several:
   to the link output. A build program is told neither the target triple nor the
   fingerprint, so the placeholder is the only way to name it — and an unknown
   target is refused rather than expanded to an empty path.
+
+CI reads the MSI's `File` table rather than judging the installer by its size:
+an installer that carries nothing and one that carries the wrong file are both
+plausible sizes, and only the table says which file is in it.
 
 Silent on Linux and macOS: the rule returns before it reads anything when the
 target is not Windows.

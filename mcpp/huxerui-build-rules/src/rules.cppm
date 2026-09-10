@@ -434,14 +434,16 @@ inline bool plan_installer(const options& opt, std::vector<edge>& out) {
         .role        = "artifact",
         .description = "windows installer (" + display + ".msi)",
         .command     = huxerui::rules::sources::msi_arguments({
-                           .wix          = layout.tool,
-                           .package_wxs  = wxs_out,
-                           .project_dir  = icon_path.parent_path().string(),
-                           .out          = msi,
-                           .bindpath_app = "bin",
+                           .wix         = layout.tool,
+                           .package_wxs = wxs_out,
+                           .project_dir = icon_path.parent_path().string(),
+                           .out         = msi,
+                           // `${mcpp.target_file:<name>}` is what mcpp expands
+                           // to the link output; a build program is told
+                           // neither the triple nor the fingerprint. An unknown
+                           // target name is refused rather than left empty.
+                           .executable  = "${mcpp.target_file:" + in.target + "}",
                        }),
-        // `${mcpp.target_file:<name>}` is what mcpp expands to the link output.
-        // An unknown target name is refused rather than silently empty.
         .inputs      = { "${mcpp.target_file:" + in.target + "}", wxs_out },
         .outputs     = { msi },
     });
