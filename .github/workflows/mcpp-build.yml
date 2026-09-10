@@ -271,33 +271,35 @@ jobs:
             || { echo "transform still injects the macro name"; exit 1; }
           echo "composable transform verified in $generated"
 
-      # Two different holes, two different fixes. hcg emitting the expansion
-      # covers GENERATED code; the force-included prelude covers HAND-WRITTEN
-      # code, which uses HUXERUI_SCOPE directly and would otherwise fail with
-      # `'HUXERUI_SCOPE' was not declared in this scope` under `import`.
-      - name: Assert hand-written scope macros work under import
+      # A scope written by hand needs no macro and therefore no header.
+      # HUXERUI_SCOPE expands to `return Scope([=]() -> View {...})`, and
+      # `import huxerui;` carries Scope and View even though it cannot carry the
+      # macro -- so the module-native spelling is the expansion, which is also
+      # what hcg injects. The prelude header remains for a NON-module
+      # translation unit in an mcpp project, which the rule force-includes; it
+      # is asserted here because no example needs it any more.
+      - name: Assert a hand-written scope needs no macro
         working-directory: mcpp/examples/02-module-units
         run: |
-          grep -q 'HUXERUI_SCOPE(' src/banner.cppm \
-            || { echo "02 no longer exercises a hand-written scope macro"; exit 1; }
-          # A module unit cannot be force-included -- `-include` prepends before
-          # `module;`, which is ill-formed -- so it includes the prelude in its
-          # own global module fragment, and the rule puts that directory on the
-          # include path.
-          grep -q '#include <huxerui_scope_prelude.h>' src/banner.cppm \
-            || { echo "the module unit no longer includes the scope prelude"; exit 1; }
+          grep -q 'return Scope(\[=\]() -> View' src/banner.cppm \
+            || { echo "02 no longer spells a scope out by hand"; exit 1; }
+          # Comment lines excluded: the file explains what the macro is, which
+          # an unanchored pattern would read as using it.
+          ! grep -vE '^[[:space:]]*//' src/banner.cppm | grep -q 'HUXERUI_SCOPE' \
+            || { echo "02 went back to the macro; the module path does not need it"; exit 1; }
           grep -rq -- 'huxerui-build-rules[/\\]include' target/*/*/build.ninja \
             || { echo "the prelude directory never reached the include path"; exit 1; }
-          echo "hand-written HUXERUI_SCOPE compiles in a module unit"
+          echo "hand-written scope compiles with no macro and no header"
 
       - name: Assert the examples consume HuxerUI as a module
         working-directory: mcpp/examples/01-import
         run: |
           grep -q '^import huxerui;' src/main.cpp \
             || { echo "01 no longer imports the module"; exit 1; }
-          # 01 is the header-free form: no #include anywhere, in either unit.
-          ! grep -rn '^[[:space:]]*#include' src/ \
-            || { echo "01 gained a header"; exit 1; }
+          # No headers in ANY example, in any unit: `import std;` covers
+          # std::type_info and `import huxerui;` covers everything else.
+          ! grep -rn '^[[:space:]]*#include' ../0*/src ../0*/widgets/src \
+            || { echo "an example gained a header"; exit 1; }
           # Anchored: the file's own comment explains what `import` replaces,
           # and an unanchored pattern matches that sentence.
           echo "01 builds against import huxerui;, with no headers"

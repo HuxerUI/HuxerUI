@@ -8,7 +8,7 @@ built by CMake.
 | | What it shows |
 |---|---|
 | [`01-import`](01-import/) | The smallest form: `import huxerui;`, one composable, **no headers anywhere** |
-| [`02-module-units`](02-module-units/) | One application across four module units, and the one case that still needs a global module fragment |
+| [`02-module-units`](02-module-units/) | One application across four module units, and a scope written by hand without the macro |
 | [`03-library`](03-library/) | `import` crossing a package boundary: a library package and the application that consumes it |
 
 ```bash
@@ -38,15 +38,16 @@ original and the transformed copy of every composable.
 
 ## The header question
 
-`import std;` is what makes 01 and 03 header-free. `UseState()`, `View` and
+`import std;` is what makes them header-free. `UseState()`, `View` and
 `Layout` instantiate `typeid` in their **caller**, and GCC checks that per
 translation unit, so `std::type_info` has to be visible wherever a View is
 built. A CMake project gets it from `#include <huxerui/huxerui.h>`; an importer
 cannot, because a global module fragment's includes do not reach whoever
 imports it. Importing `std` answers it without a header.
 
-`02-module-units/src/banner.cppm` is the exception, and it is worth reading for
-what it costs: a **hand-written** `HUXERUI_SCOPE(...)` needs the macro, macros
-do not cross a module boundary, and an include needs a global module fragment.
-Marking the function `[[huxerui::composable]]` instead needs none of that —
-`hcg` injects the macro's expansion, so generated code is macro-free.
+There is no exception. `02-module-units/src/banner.cppm` writes a scope by hand
+without the `HUXERUI_SCOPE` macro, because the macro expands to
+`return Scope([=]() -> View { … })` and `Scope` and `View` are both exported —
+the macro was only hiding them. Macros do not cross a module boundary, and
+under modules nothing needs one to: `hcg` injects that same expansion for a
+`[[huxerui::composable]]` function, which is what a real unit would write.

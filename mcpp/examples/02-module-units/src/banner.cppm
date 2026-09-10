@@ -1,21 +1,21 @@
-// THE ONE CASE THAT STILL NEEDS A GLOBAL MODULE FRAGMENT.
+// A scope written by hand, with no macro and no header.
 //
-// HUXERUI_SCOPE is a macro, and macros do not cross a module boundary:
-// `import huxerui;` does not carry it, however much it carries otherwise. A
-// unit that writes one by hand has to include the prelude, and an include
-// belongs in a global module fragment -- which is what `module;` opens.
+// HUXERUI_SCOPE(...) exists for the header path, and it expands to exactly the
+// line below:
 //
-// huxerui.rules puts that header's directory on the include path. It cannot
-// force the include, because `-include` prepends before `module;` and that is
-// ill-formed.
+//     #define HUXERUI_SCOPE(...) \
+//         return ::huxerui::Scope([=]() -> ::huxerui::View __VA_ARGS__)
 //
-// Marking the function [[huxerui::composable]] instead would need none of this:
-// hcg injects the macro's EXPANSION, so generated code is macro-free. The macro
-// is for the scope you write yourself.
-
-module;
-
-#include <huxerui_scope_prelude.h>
+// Macros do not cross a module boundary, so `import huxerui;` cannot carry it
+// -- but it does carry `Scope` and `View`, which is all the macro was hiding.
+// Writing the expansion is the module-native spelling, and it is the same text
+// hcg injects for a [[huxerui::composable]] function.
+//
+// Prefer the marker. This unit spells the scope out to show what the marker
+// does; a real one would write:
+//
+//     [[huxerui::composable]]
+//     View Banner() { return Text("..."); }
 
 export module banner;
 
@@ -25,5 +25,5 @@ import huxerui;
 using namespace huxerui;
 
 export View Banner() {
-  HUXERUI_SCOPE({ return Text("hand-written HUXERUI_SCOPE"); });
+  return Scope([=]() -> View { return Text("hand-written scope, no macro"); });
 }

@@ -129,10 +129,13 @@ boundary. Two different holes, two different fixes:
   transformed composable compiles under `import` and under `#include` alike.
   Preprocessing the two forms yields identical tokens, so the CMake build sees
   no change at all. See [Composable Code Generation](composable-codegen.md).
-- **Hand-written code.** A unit that writes `HUXERUI_SCOPE(...)` itself needs
-  the macro, so it includes `<huxerui_scope_prelude.h>` in its own global
-  module fragment. The rule puts that header's directory on the include path.
+- **Hand-written code.** A scope written by hand is spelled the way the macro
+  expands — `return Scope([=]() -> View { … });` — and `Scope` and `View` are
+  exported, so a module unit needs neither the macro nor a header.
   `mcpp/examples/02-module-units/src/banner.cppm` is the worked case.
+  `<huxerui_scope_prelude.h>` remains for a **non-module** translation unit in
+  an mcpp project, which the rule force-includes; that is the only case left
+  where the macro is reachable and needed.
 
 The prelude is generated from `view.h` by the same `huxerui-module-gen`, so the
 two definitions cannot drift into an illegal redefinition.
