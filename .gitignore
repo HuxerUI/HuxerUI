@@ -20,5 +20,8 @@ compile_commands.json
 # GCC writes module BMIs beside the compiler's working directory; a stray
 # `gcm.cache/` at the repo root is a 28 MB build artifact, not a source file.
 gcm.cache/
+# HuxerUI's profiling writes a runtime trace per process into the working
+# directory, so `mcpp test` leaves one behind in the test package.
+traces/
 __pycache__/
 *.pyc
