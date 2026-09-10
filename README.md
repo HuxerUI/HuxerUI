@@ -30,9 +30,25 @@ Open a new terminal, then verify the installation:
 huxerui doctor
 ```
 
+Or install through [xlings](https://github.com/d2learn/xlings), on any of the three desktop hosts:
+
+```bash
+xlings install huxerui -y
+```
+
+> Installing this way also brings the tools the SDK builds with — CMake, mcpp and the rest of the toolchain — so a fresh machine needs nothing else.
+
 See [Installation](docs/guide/installation.md) for supported host architectures, explicit versions, custom prefixes, upgrades, and uninstall commands.
 
 ## Create an application
+
+HuxerUI offers two ways to build one. They share the same public API and the
+same `[[huxerui::composable]]` model; they differ in how the project is
+described and what it can target.
+
+### With headers and CMake
+
+The full-platform path, and the only one that reaches Android, iOS and Web.
 
 ```bash
 huxerui create app hello_huxer --platform windows,macos,linux,web,android,ios
@@ -82,6 +98,58 @@ const Application application{
 };
 ```
 
+### With C++20 modules and mcpp
+
+The module path: `import huxerui;` instead of the umbrella header, and
+[mcpp](https://github.com/mcpp-community/mcpp) instead of CMake. It builds
+Linux, Windows and macOS from one manifest.
+
+```bash
+huxerui create app hello_huxer --build mcpp
+cd hello_huxer
+mcpp build
+mcpp run
+```
+
+The generated project has no `CMakeLists.txt`, no platform shells, and **no
+`#include` anywhere**:
+
+```cpp
+export module app;
+
+import std;
+import huxerui;
+
+using namespace huxerui;
+
+[[huxerui::composable]]
+View Counter() {
+  auto count = UseState(0);
+
+  return Column {
+    Text::Format("Count: {}", count),
+    Button("Increment").OnClick([count] { count += 1; }),
+  }.With(Padding(24.0F), Spacing(12.0F));
+}
+
+View App() {
+  return MaterialTheme { Counter() };
+}
+
+const Application application{
+    App,
+    {.window = {.title = "Counter", .initial_size = {480.0F, 320.0F}}},
+};
+```
+
+`--template navigation` and `--template library` produce a multi-page
+application and a reusable component library from the same command. The whole
+manifest is one dependency line, and `mcpp new hello_huxer --template
+huxerui.huxerui` instantiates the same project without the HuxerUI CLI.
+
+See [Developing with C++20 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
+and the three worked applications in [`mcpp/examples`](mcpp/examples/).
+
 Explore complete application demos in [HuxerUI-Demos](https://github.com/HuxerUI/HuxerUI-Demos), or browse the [examples](examples/) for focused API usage.
 
 ## Platforms
@@ -104,6 +172,7 @@ See [Platform Support](docs/guide/platforms.md) for host requirements and platfo
 - [Core Concepts](docs/guide/core-concepts.md)
 - [Components and Input](docs/guide/components.md)
 - [Architecture Design](docs/design/architecture.md)
+- [C++20 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
 - [Examples](examples/)
 
 Repository contributors should start with [Building HuxerUI](docs/development/building.md).

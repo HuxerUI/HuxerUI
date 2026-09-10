@@ -265,6 +265,36 @@ Validation depth is proportional to the affected contract:
 
 Finish with `git diff --check` and `git status --short`. Report important files, exact validation outcomes, unavailable platforms, remaining limitations, and whether anything was staged or committed. Never claim an unexecuted target, architecture, platform, or test passed.
 
+## C++20 modules and the mcpp build
+
+HuxerUI has a second build system. CMake is the full-platform one and the only
+path to Android, iOS and Web; mcpp builds the framework and applications on
+Linux, Windows and macOS. **Neither reads the other's files.** `mcpp.toml`,
+`build.mcpp`, `mcpp/`, `modules/` and `templates/` are the mcpp leg, and no
+change to them may alter what CMake compiles.
+
+- `modules/huxerui.cppm` is generated from the public headers by
+  `huxerui-module-gen`, not written. A public name added to a header and not to
+  the shell is a name `import huxerui;` cannot see; CI checks it.
+- `import huxerui;` and `#include <huxerui/huxerui.h>` name the same entities.
+  Do not introduce a module-only API or a header-only one.
+- Macros do not cross a module boundary. Generated code must therefore carry no
+  macro name: `hcg` injects the expansion of `HUXERUI_SCOPE`, which is also
+  what hand-written module code should spell.
+- An mcpp application contains no `#include` and pins `standard = "c++23"`,
+  because `import std;` is what makes `std::type_info` visible to a caller that
+  instantiates `typeid`.
+- A change to the framework's sources, defines or platform link interface must
+  be made in `mcpp.toml` as well as in `cmake/`. `huxerui-build-check` compares
+  the two and names what is missing.
+- `mcpp test` runs the unit suite against the mcpp-built framework. It compiles
+  the same files `tests/unit/CMakeLists.txt` does; do not copy them.
+
+The design is [`docs/design/mcpp-build-system.md`](docs/design/mcpp-build-system.md).
+For writing an application rather than changing the framework, the reference is
+[`skills/huxerui-app-development/references/cpp-modules-and-mcpp.md`](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md),
+which links the upstream mcpp documentation.
+
 ## Documentation
 
 Documentation has distinct ownership:
@@ -273,6 +303,7 @@ Documentation has distinct ownership:
 - `docs/guide/` documents current public SDK behavior for application developers.
 - `docs/development/` documents repository builds, validation, and SDK packaging.
 - `docs/design/` records internal architecture, ownership, invariants, and unsupported boundaries.
+- `mcpp/README.md`, `mcpp/examples/` and `modules/README.md` document the mcpp build for someone driving it; the design behind it is `docs/design/mcpp-build-system.md`.
 - `docs/roadmap.md` summarizes future capability areas without promising release dates.
 
 Public API or behavior changes update the owning user and design documents. Update README only when its project overview, installation, first-use flow, supported platforms, or top-level documentation links change; keep details in the owning document.

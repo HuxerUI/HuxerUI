@@ -78,6 +78,7 @@ Read only the references needed for the request:
 - Canvas, custom drawing, paint geometry, programmatic vectors, external textures, and GPU frame publication: [canvas-paint-and-images.md](references/canvas-paint-and-images.md)
 - Non-visual platform services: [platform-modules.md](references/platform-modules.md)
 - Embedded platform controls: [platform-views.md](references/platform-views.md)
+- Any project built by mcpp rather than CMake, `import huxerui;`, module units, and `mcpp` commands: [cpp-modules-and-mcpp.md](references/cpp-modules-and-mcpp.md)
 - Fast public API and header lookup: [api-index.md](references/api-index.md)
 
 ## Apply changes safely
