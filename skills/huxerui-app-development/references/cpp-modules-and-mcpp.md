@@ -1,10 +1,17 @@
-# C++20 Modules and mcpp
+# C++20/23 Modules and mcpp
 
 Use this reference when the project is an **mcpp** project — created by
 `huxerui create app <name> --build mcpp`, or by
 `mcpp new <name> --template huxerui.huxerui`. The public API is the same one
 the CMake path uses; what differs is how the project is described, built and
 consumed.
+
+What it feels like to work in: `import huxerui;` in place of the umbrella
+header, `import std;` in place of the standard ones, and **no `#include`
+anywhere in the project**. A page is a module unit; units reach each other by
+`import`, so there is no header to keep in step with a source and no list of
+sources in the manifest. `[[huxerui::composable]]` means exactly what it means
+under CMake.
 
 Recognise it by `mcpp.toml` beside a `build.mcpp`, or by `import huxerui;` in a
 source. Such a project has no `CMakeLists.txt` and no `platform/` shell, and

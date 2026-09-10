@@ -265,7 +265,7 @@ Validation depth is proportional to the affected contract:
 
 Finish with `git diff --check` and `git status --short`. Report important files, exact validation outcomes, unavailable platforms, remaining limitations, and whether anything was staged or committed. Never claim an unexecuted target, architecture, platform, or test passed.
 
-## C++20 modules and the mcpp build
+## C++20/23 modules and the mcpp build
 
 HuxerUI has a second build system. CMake is the full-platform one and the only
 path to Android, iOS and Web; mcpp builds the framework and applications on

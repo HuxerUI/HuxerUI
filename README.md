@@ -98,11 +98,16 @@ const Application application{
 };
 ```
 
-### With C++20 modules and mcpp
+### With C++20/23 modules and mcpp
 
-The module path: `import huxerui;` instead of the umbrella header, and
-[mcpp](https://github.com/mcpp-community/mcpp) instead of CMake. It builds
-Linux, Windows and macOS from one manifest.
+Modules all the way down. `import huxerui;` replaces the umbrella header,
+`import std;` replaces the standard headers, and an application ends up with
+**no `#include` in it at all** — a page is a module unit, and the units reach
+each other by `import` rather than through a header and a list of sources.
+
+[mcpp](https://github.com/mcpp-community/mcpp) builds it, from one manifest for
+Linux, Windows and macOS, with the toolchain and the GTK stack provisioned
+rather than assumed.
 
 ```bash
 huxerui create app hello_huxer --build mcpp
@@ -147,7 +152,7 @@ application and a reusable component library from the same command. The whole
 manifest is one dependency line, and `mcpp new hello_huxer --template
 huxerui.huxerui` instantiates the same project without the HuxerUI CLI.
 
-See [Developing with C++20 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
+See [Developing with C++20/23 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
 and the three worked applications in [`mcpp/examples`](mcpp/examples/).
 
 Explore complete application demos in [HuxerUI-Demos](https://github.com/HuxerUI/HuxerUI-Demos), or browse the [examples](examples/) for focused API usage.
@@ -172,7 +177,7 @@ See [Platform Support](docs/guide/platforms.md) for host requirements and platfo
 - [Core Concepts](docs/guide/core-concepts.md)
 - [Components and Input](docs/guide/components.md)
 - [Architecture Design](docs/design/architecture.md)
-- [C++20 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
+- [C++20/23 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
 - [Examples](examples/)
 
 Repository contributors should start with [Building HuxerUI](docs/development/building.md).
