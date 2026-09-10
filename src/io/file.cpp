@@ -1375,7 +1375,13 @@ void RenameReference(HANDLE file, HANDLE parent, std::wstring_view name) {
   static const auto set_information =
       reinterpret_cast<SetInformationFile>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtSetInformationFile"));
   CheckReference(set_information != nullptr, IoErrorCode::Unsupported);
-  constexpr auto rename_information = static_cast<FILE_INFORMATION_CLASS>(10);
+  // `const`, not `constexpr`: FileRenameInformation is 10, but winternl.h's
+  // FILE_INFORMATION_CLASS declares only a handful of enumerators and has no
+  // fixed underlying type, so 10 lies outside the range the enum can represent.
+  // Clang therefore refuses the cast in a constant expression ("must be
+  // initialized by a constant expression"); MSVC accepts it. The runtime cast
+  // is what both compilers emit either way.
+  const auto rename_information = static_cast<FILE_INFORMATION_CLASS>(10);
   IO_STATUS_BLOCK io{};
   CheckReferenceStatus(set_information(file, &io, info, static_cast<ULONG>(size), rename_information));
 }

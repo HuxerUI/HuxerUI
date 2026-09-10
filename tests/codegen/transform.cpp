@@ -6,6 +6,8 @@
 
 namespace {
 
+using huxerui::codegen::kScopeCloseText;
+using huxerui::codegen::kScopeOpenText;
 using huxerui::codegen::TransformError;
 using huxerui::codegen::TransformSource;
 
@@ -29,8 +31,12 @@ TEST_CASE("Composable marker generates scope boundaries") {
 
   REQUIRE(result.composable_count == 1);
   REQUIRE(result.source.find("[[huxerui::composable]]") == std::string::npos);
-  REQUIRE(result.source.find("HUXERUI_SCOPE_BEGIN") != std::string::npos);
-  REQUIRE(result.source.find("HUXERUI_SCOPE_END") != std::string::npos);
+  // The injected text is the macro's EXPANSION, not its name: generated code
+  // has to compile under `import huxerui;` too, and macros do not cross a
+  // module boundary.
+  REQUIRE(result.source.find(kScopeOpenText) != std::string::npos);
+  REQUIRE(result.source.find(kScopeCloseText) != std::string::npos);
+  REQUIRE(result.source.find("HUXERUI_SCOPE_BEGIN") == std::string::npos);
   REQUIRE(result.source.find("#line 1 \"counter.cpp\"") != std::string::npos);
 }
 
@@ -69,9 +75,9 @@ TEST_CASE("Multiple composables are transformed") {
   const auto result = TransformSource(source, "multiple.cpp");
 
   REQUIRE(result.composable_count == 2);
-  const std::size_t first = result.source.find("HUXERUI_SCOPE_BEGIN");
+  const std::size_t first = result.source.find(kScopeOpenText);
   REQUIRE(first != std::string::npos);
-  REQUIRE(result.source.find("HUXERUI_SCOPE_BEGIN", first + 1) != std::string::npos);
+  REQUIRE(result.source.find(kScopeOpenText, first + 1) != std::string::npos);
 }
 
 TEST_CASE("Markers inside non-code text are ignored") {

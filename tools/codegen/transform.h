@@ -7,6 +7,22 @@
 
 namespace huxerui::codegen {
 
+// The text the transform injects around a [[huxerui::composable]] body.
+//
+// This is the EXPANSION of HUXERUI_SCOPE_BEGIN / HUXERUI_SCOPE_END rather than
+// the macro names, and the difference matters for exactly one reason: macros do
+// not cross a module boundary. An application that writes `import huxerui;`
+// instead of `#include <huxerui/huxerui.h>` never sees those macros, so
+// generated code naming them would not compile at all.
+//
+// Emitting the expansion makes generated code macro-free and therefore
+// identical under both spellings. The macros themselves remain public API for
+// hand-written code, and the transform still RECOGNISES them in its input --
+// see the explicit-scope diagnostic in transform.cpp.
+inline constexpr std::string_view kScopeOpenText =
+    "return ::huxerui::Scope([=]() -> ::huxerui::View {";
+inline constexpr std::string_view kScopeCloseText = "});";
+
 struct SourcePosition {
   std::size_t line = 1;
   std::size_t column = 1;

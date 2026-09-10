@@ -1,0 +1,76 @@
+name: Tool Tests
+
+# The Catch2 suites that cover the tools this repository compiles with CMake --
+# the composable transform (hcg) and the project CLI.
+#
+# They existed before this workflow and nothing ran them on a pull request:
+# update-host-tools.yml rebuilds the tools on main and then runs
+# tests/scripts/host_tools_test.py, which checks the build scripts rather than
+# the transform's behaviour, and sdk-release.yml only fires on a tag. A change
+# to tools/codegen/transform.cpp could therefore reach main having compiled
+# nowhere and run nothing.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/codegen/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/codegen/**'
+      - 'tests/cli/**'
+      - 'templates/**'
+      - '.github/workflows/tool-tests.yml'
+  pull_request:
+    paths:
+      - 'tools/codegen/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/codegen/**'
+      - 'tests/cli/**'
+      - 'templates/**'
+      - '.github/workflows/tool-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: tool-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  catch2:
+    name: codegen and CLI suites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # Configure needs the framework's dependencies even though neither suite
+      # links the framework: huxerui_codegen_tests compiles transform.cpp
+      # standalone and huxerui_cli_tests links only huxerui_cli_core.
+      - name: Install the CMake build's dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config ninja-build
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DHUXERUI_BUILD_EXAMPLES=OFF \
+            -DHUXERUI_BUILD_SHARED=OFF \
+            -DHUXERUI_BUILD_CLI=ON \
+            -DHUXERUI_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --target huxerui_codegen_tests huxerui_cli_tests --parallel
+
+      - name: Run
+        working-directory: build
+        run: |
+          ctest --output-on-failure \
+            -R '^(HuxerUICodegenTests|HuxerUICliTests)$'
