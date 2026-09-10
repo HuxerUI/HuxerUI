@@ -72,6 +72,8 @@ jobs:
         with:
           ref: ${{ env.RELEASE_REF }}
       - name: Build Linux host tools
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
         run: |
           chmod +x platform/android/gradlew scripts/build_tools.sh
           sh scripts/build_tools.sh --platform linux --architecture x86_64
@@ -141,6 +143,8 @@ jobs:
         with:
           ref: ${{ env.RELEASE_REF }}
       - name: Build Linux host tools
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
         run: |
           chmod +x scripts/build_tools.sh
           sh scripts/build_tools.sh --platform linux --architecture x86_64
@@ -158,7 +162,7 @@ jobs:
             -DHUXERUI_BUILD_EXAMPLES=OFF \
             -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
             -DHUXERUI_BUILD_TESTS=OFF
-          cmake --build build-web --target huxerui_static huxerui_testing --parallel
+          cmake --build build-web --target huxerui_static huxerui_testing --parallel 4
           mkdir -p "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19"
           cp build-web/lib/libhuxerui_static.a \
             "${RUNNER_TEMP}/huxerui-platform-artifacts/web/emscripten-4.0.19/libhuxerui.a"
@@ -236,6 +240,7 @@ jobs:
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --env HOME=/tmp \
+            --env CMAKE_BUILD_PARALLEL_LEVEL=4 \
             --volume "${GITHUB_WORKSPACE}:/workspace" \
             --workdir /workspace \
             "${{ matrix.image }}" \
@@ -601,6 +606,8 @@ jobs:
           set -o pipefail
           "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865"
       - name: Build host tools
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
         run: |
           chmod +x scripts/build_tools.sh
           sh scripts/build_tools.sh --platform linux --architecture x86_64
@@ -626,7 +633,7 @@ jobs:
           -DHUXERUI_BUILD_TESTS=OFF
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
       - name: Build Android-Termux SDK
-        run: cmake --build build-android-host --parallel
+        run: cmake --build build-android-host --parallel 4
       - name: Package Android-Termux SDK
         run: >-
           cpack
