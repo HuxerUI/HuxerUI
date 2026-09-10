@@ -318,4 +318,32 @@ TEST_CASE("TransitionFragmentsValidateEveryVisualAndKeepOptionalPaintEmpty") {
   REQUIRE(sequence.Commands().empty());
 }
 
+namespace {
+struct LinearSharedBounds {
+  float curvature = 0.0F;
+  Rect Evaluate(Rect from, Rect to, float p) const {
+    return {from.x + (to.x - from.x) * p, from.y + (to.y - from.y) * p + curvature * p * (1.0F - p),
+            from.width + (to.width - from.width) * p, from.height + (to.height - from.height) * p};
+  }
+  bool operator==(const LinearSharedBounds&) const = default;
+};
+}
+
+TEST_CASE("SharedMarkersCompareKeysAndBoundsConfigurationByValue") {
+  enum class Key : int { Product = 7 };
+  REQUIRE(SharedElement(7) == SharedElement(Key::Product));
+  REQUIRE(SharedElement(7) == SharedElement(std::int64_t{7}));
+  REQUIRE(SharedElement(7) != SharedElement(7U));
+  REQUIRE(SharedElement("7") != SharedElement(7));
+  REQUIRE(SharedBounds("product") == SharedBounds(std::string_view{"product"}));
+  REQUIRE(SharedBounds("product") == SharedBounds(std::string{"product"}));
+  REQUIRE(SharedElement(7).BoundsTransform(LinearSharedBounds{}) ==
+          SharedElement(7).BoundsTransform(LinearSharedBounds{}));
+  REQUIRE(SharedBounds("product").BoundsTransform(LinearSharedBounds{20.0F}) !=
+          SharedBounds("product").BoundsTransform(LinearSharedBounds{30.0F}));
+  REQUIRE(SharedBounds("product") != SharedBounds("product").BoundsTransform(LinearSharedBounds{}));
+  REQUIRE_THROWS_AS(SharedElement(static_cast<const char*>(nullptr)), std::invalid_argument);
+  REQUIRE_THROWS_AS(SharedBounds(static_cast<const char*>(nullptr)), std::invalid_argument);
+}
+
 } // namespace huxerui::test

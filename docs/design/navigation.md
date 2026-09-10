@@ -6,7 +6,7 @@ Factory navigation is deliberately factory-driven and imperative at the navigati
 Typed-route navigation preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
 
 Custom page transitions are implemented as described in [Page transition customization](#page-transition-customization).
-[Shared-element transitions](#planned-shared-element-transitions) remain approved but unimplemented.
+[Shared-element transitions](#shared-element-transitions) use the common navigation and local matching engine.
 
 ## Goals
 
@@ -32,13 +32,13 @@ The current factory navigation implementation does not provide:
 - A serializable or type-erased path inferred from retained factories.
 - Automatic synthesis of application bars, titles, Back buttons, overflow menus, or master-detail page composition.
 - Navigation-specific `OnAppear`, `OnDisappear`, or other component lifecycle callbacks.
-- Shared-element, hero, container-transform, or cross-page layout animation.
+- Automatic cross-page layout animation or intermediate subtree reflow.
 - Automatic suspension or serialization of covered page state.
 - Browser History integration in the shared Runtime.
 - An iOS edge gesture owned unconditionally by an embedded HuxerUI View.
 
 Saveable state, route serialization, and navigation-aware lifecycle effects build on this contract after their independent ownership rules are defined.
-The approved shared-element ownership rules are recorded in the explicitly planned section.
+Shared-element ownership follows the common animation contract and the navigation integration below.
 
 ## Page stack design summary
 
@@ -1118,7 +1118,7 @@ Initial stack construction and initial deep paths present their final active des
 
 The existing entry engine, operation queue, retained pages, and factory-versus-controlled-path ownership remain authoritative.
 Transition customization changes presentation, not when a controlled path becomes authoritative or how factory operations reserve and commit history.
-One normalized progress value drives the outgoing and incoming pages; planned shared elements will consume the same value.
+One normalized progress value drives the outgoing and incoming pages; shared elements consume the same value.
 Effects evaluate against the current stack bounds and update retained presentation without per-frame state writes, recomposition, measurement, layout, or rerecording clean page content.
 Optional foreground decoration records into its own PaintSequence as the sampled progress changes.
 
@@ -1129,7 +1129,7 @@ At Cancel, source presentation and the original interaction ownership are restor
 The departing page's Pop declaration supplies the effect for both interactive and ordinary Back.
 
 A viewport change preserves normalized page progress and reevaluates page effects in the new bounds after required layout.
-The planned shared-element contract ends pairs captured in the former coordinate space while page motion continues.
+The shared-element contract ends pairs captured in the former coordinate space while page motion continues.
 Reduced motion takes the same logical navigation outcome without retaining animation frame work.
 Unmounting the owner releases all visual retention and controller work through the existing lifecycle.
 
@@ -1142,116 +1142,37 @@ No new completion event, transition-operation handle, result type, or public can
 An explicit Scene transition whose mutation also changes navigation composes with page presentation.
 There is no automatic suppression based on which system began first.
 An application that wants only the Scene effect selects immediate page motion for that operation's participating page.
-Planned shared elements follow navigation progress, not the independent Scene clock.
+Shared elements follow navigation progress, not the independent Scene clock.
 
-## Planned shared-element transitions
+## Shared-element transitions
 
-Status: approved design, not implemented.
-All shared-element declarations and examples below describe planned APIs rather than available SDK behavior.
-
-### Shared-element declarations and matching
-
-Two property modifiers describe the intended relationship:
+SharedElement and SharedBounds are declared in animation.h and support both navigation and explicit local mutations.
+Their matching, custom bounds, retention, and fallback contract is defined in [Shared transitions](animation.md#shared-transitions).
 
 ```cpp
 Image(product.image).With(SharedElement(product.id));
-
 Column {
   Text(product.name),
   Text(product.description),
-}.With(SharedBounds(product.id));
+}.With(SharedBounds("product-details"));
 ```
 
-`SharedElement(key)` denotes the same visual content moving between page locations.
-`SharedBounds(key)` denotes different content whose regions transition together, including source-to-target crossfade.
-They use the same integer and string key forms as `View::Key`, but shared matching has a separate identity domain and does not affect reconciliation keys.
+NavigationContainerExtension owns its SharedTransitionSession and supplies the page operation's progress; shared elements do not allocate another page clock.
+Only the outgoing and incoming pages participate, including markers inside their local scopes, without crossing a nested NavigationStack.
+Initial presentation and immediate or reduced-motion navigation skip shared retention.
+Push and Replace select destination configuration/content; Pop selects departing-page configuration/content and samples the canonical curve in reverse.
+The existing predictive Back transaction, cancellation, page state retention, and input exclusion remain authoritative.
 
-The nearest `NavigationStack` owns the matching scope.
-Only the active outgoing and incoming pages participate in a Push, Pop, or Replace operation.
-Keys never match across nested stacks, independent stacks, windows, or unrelated Scene transitions.
-Static pages and initial stack construction do not start shared-element motion.
-
-A key may occur once in each participating page.
-Duplicate keys within a participant are caller errors; using different marker kinds for the same matched key is also an error.
-Matching an ancestor and its descendant would create overlapping retained representations, so such pairs are rejected in the first implementation.
-Applications choose one enclosing `SharedBounds` or independently marked, nonoverlapping children.
-
-The engine resolves pairs once, using the first committed layout that provides valid participating page geometry.
-An unmatched key, unrealized virtual item, unavailable asset, or target without valid laid-out bounds skips only that element's visual transition.
-There is no implicit network wait, deferred navigation, or late joining after a pair set has been captured.
-Applications that require a particular pair prepare its content and scroll position before requesting navigation.
-
-### Shared bounds transforms
-
-The default shared geometry interpolates source and target bounds using navigation progress.
-An application can provide a copied, equality-comparable value through the marker's component-specific fluent method:
-
-```cpp
-Image(product.image).With(
-    SharedElement(product.id).BoundsTransform(ArcBounds{36.0F})
-);
-```
-
-The application-defined bounds transform has this evaluation contract:
-
-```cpp
-Rect Evaluate(Rect from, Rect to, float progress) const;
-```
-
-`ArcBounds` is an example application value, not another framework type.
-The callable is immutable and pure, preserves the supplied endpoint rectangles at zero and one, and returns finite valid bounds.
-The engine privately erases its value type and compares configuration without a public bounds-transform interface or registry.
-It follows the page transition's progress, including reversal and predictive cancellation, and has no independent `AnimationSpec` or clock.
-The shared-element geometry does not expand `TransitionContext` with source and destination node data.
-
-### Shared-element retention and fallback
-
-Original nodes remain mounted and retain their normal layout, state, and lifecycle.
-The engine suppresses their duplicate painting while a retained shared representation supplies the transition visual.
-That representation appears above the stack's pages, below window layers, and inside the stack's clipping boundary.
-It creates no additional pointer target, focus target, accessibility node, or text-input owner.
-Input and semantics continue to follow the existing active-page policy.
-
-The first implementation remaps retained rendering into interpolated bounds rather than laying out the subtree on every frame.
-`SharedElement` requires visually corresponding content; it does not infer semantic equivalence from a key.
-`SharedBounds` can retain both sides and crossfade their content as the region changes.
-Text scales or crossfades with that rendering; glyph morphing and intermediate line-wrap reflow are outside the contract.
-
-| Condition | Behavior |
-| --- | --- |
-| Missing counterpart, unavailable content, or invalid geometry | Skip the affected pair and keep ordinary page presentation |
-| Source or target removed or replaced during motion | End that pair and restore painting for every surviving original |
-| Viewport or coordinate-space change | End affected pairs and continue page motion with current bounds |
-| Predictive Back cancellation | Reverse the retained pair with page progress, then restore source presentation |
-| Stack destruction | Release all retained representations and references |
-| Reduced motion or immediate page transition | Present the final logical state without retaining shared animation work |
-
-Supported content initially includes ordinary paint, images, and geometry representable by valid two-dimensional bounds.
-Native `PlatformView` content, continuously updated external textures, and transforms whose rotation or skew cannot be represented by this bounds contract use an explicit pair-level fallback to ordinary page presentation.
-The implementation must not claim frozen external-texture pixels merely because it retains a resource reference.
-Fallback leaves the remaining pairs and logical navigation intact and uses existing diagnostics or tracing to identify the reason.
-
-Retained visual ownership is bounded by the operation and the existing rendering resources it captures.
-Implementation must preserve the [native-content and scene-retention contract](animation.md#native-content-and-scene-retention), including native-view eligibility and release of captured resources at the end of their lifetime.
-No fixed structural quota is defined for shared-element retention; capability failures preserve navigation and restore surviving originals.
-There is no public resource-budget object in this design.
-
-### Planned implementation boundaries
-
-Public timing and effect declarations belong in `animation.h`; page policy and shared markers belong in `navigation.h`.
-The navigation state and existing page/container extensions own matching, progress, suppression, restoration, and cleanup.
-Private shared declarations should move into a focused internal header only when multiple implementations actually need the contract.
-This design introduces no global coordinator, plugin interface, context store, root service, or second retained-page engine.
-Any rendering support added to Runtime remains generic and must not inspect concrete Navigation components or shared-marker types.
-
-Shared-element retention and matching will build on the implemented common effects and page/Scene owners.
-This planned extension introduces neither compatibility aliases nor a parallel page-configuration path.
-Ordinary View appearance/disappearance, automatic layout animation, three-dimensional transforms, arbitrary shaders, and effect filters remain separate work.
+Capture resolves canonical layout before page effects and suppresses successful pairs before page-fragment copying.
+Shared visuals draw above pages and their fragments, below synchronized effect decoration and window layers, within the navigation container's clipping boundary.
+They never duplicate interaction, semantics, focus, or IME ownership.
+A missing or unsupported pair keeps ordinary page drawing; later geometry/content changes end an affected pair while page motion continues.
+Source/destination mounted identities are independent from navigation entry identifiers.
 
 ## Transition validation
 
 Common effect, timing, and Scene acceptance criteria remain in the animation design.
-Page-transition tests cover the implemented policy and execution paths; shared-element items below remain acceptance criteria for the planned extension:
+Page-transition and shared-element validation covers these policy and execution boundaries:
 
 - Complete page override, theme fallback, explicit immediate defaults, modifier ordering, transparent page-root boundaries, and misplaced declarations.
 - Incoming Push and Replace selection, departing Pop selection, immutable active configuration, queued operations, and controlled path replacement.
@@ -1264,6 +1185,6 @@ Page-transition tests cover the implemented policy and execution paths; shared-e
 - Ordinary image and painted-content transitions, text scale/crossfade boundaries, native-content fallback, interruption, and resource release.
 - Explicit Scene-plus-navigation composition with independent clocks and intentional immediate page configuration.
 
-A Gallery demonstration should cover a card-to-detail image transition, a differing-content `SharedBounds` transition, a custom page effect, and a custom Scene effect without becoming a new showcase framework.
+The standalone Shared Transitions example demonstrates cross-page titles and covers, local SharedElement/SharedBounds motion, custom bounds, interruption, and slow playback; Transition Studio focuses on whole-page and Scene effects.
 Predictive Back, reduced motion, interrupted transitions, and unsupported-content fallback need executable coverage beyond visual inspection.
 Changes to shared presentation or drawing require a renderer audit and every affected platform build available locally; unavailable platforms must be reported explicitly.

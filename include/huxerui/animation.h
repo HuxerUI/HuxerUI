@@ -1,13 +1,15 @@
 #pragma once
 
 /// @file
-/// Animation timing, retained presentation modifiers, and custom page and Scene transition effects.
+/// Animation timing, retained presentation modifiers, shared elements, and custom page and Scene transition effects.
 
 #include <concepts>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -27,6 +29,38 @@ class SceneTransitionAnchorExtension;
 class SceneTransitionService;
 struct SceneTransitionAnchorState;
 class TransitionExtension;
+class SharedTransitionState;
+
+struct SharedBoundsEvaluator {
+  virtual ~SharedBoundsEvaluator() = default;
+  virtual Rect Evaluate(Rect from, Rect to, float progress) const = 0;
+  virtual bool Equals(const SharedBoundsEvaluator& other) const = 0;
+};
+
+template <class T> struct SharedBoundsEvaluatorValue final : SharedBoundsEvaluator {
+  explicit SharedBoundsEvaluatorValue(T value) : value(std::move(value)) {}
+  Rect Evaluate(Rect from, Rect to, float progress) const override { return value.Evaluate(from, to, progress); }
+  bool Equals(const SharedBoundsEvaluator& other) const override {
+    const auto* typed = dynamic_cast<const SharedBoundsEvaluatorValue*>(&other);
+    return typed && value == typed->value;
+  }
+  T value;
+};
+
+struct SharedMarkerData {
+  std::variant<std::int64_t, std::uint64_t, std::string> key;
+  std::shared_ptr<const SharedBoundsEvaluator> bounds_transform;
+  bool operator==(const SharedMarkerData& other) const {
+    return key == other.key && (bounds_transform == other.bounds_transform ||
+        (bounds_transform && other.bounds_transform && bounds_transform->Equals(*other.bounds_transform)));
+  }
+};
+
+template <class T>
+concept SharedBoundsEffect = std::copy_constructible<T> && std::equality_comparable<T> &&
+    requires(const T& effect, Rect from, Rect to, float progress) {
+      { effect.Evaluate(from, to, progress) } -> std::same_as<Rect>;
+    };
 } // namespace detail
 
 /// Identifies a built-in timing curve that maps normalized time to normalized progress.
@@ -763,6 +797,120 @@ private:
   bool reversed_ = false;
   friend struct detail::InternalAccess;
 };
+
+/// Marks corresponding visual content for navigation or an explicit local shared transition.
+/// Keys are independent of View::Key and must be unique on each participating side.
+/// The retained visual is mapped between bounds without intermediate layout; use SharedBounds for different content.
+/// Unsupported native/texture content, partial ancestor clipping, and rotation/skew mappings skip the affected pair.
+/// @code
+/// Image(product.image).With(SharedElement(product.id));
+/// @endcode
+class SharedElement {
+public:
+  explicit SharedElement(std::string key) : data_{std::move(key), {}} {}
+  explicit SharedElement(std::string_view key) : SharedElement(std::string(key)) {}
+  explicit SharedElement(const char* key);
+  template <std::integral T> explicit SharedElement(T key) {
+    if constexpr (std::is_signed_v<T>) { data_.key = static_cast<std::int64_t>(key); }
+    else { data_.key = static_cast<std::uint64_t>(key); }
+  }
+  template <class T> requires std::is_enum_v<T>
+  explicit SharedElement(T key) : SharedElement(static_cast<std::underlying_type_t<T>>(key)) {}
+
+  /// Selects a pure bounds calculation; its zero and one samples must preserve both endpoints.
+  /// @param effect Copyable, equality-comparable value with Rect Evaluate(Rect, Rect, float) const.
+  /// @return The configured marker. Timing remains owned by the surrounding operation.
+  template <detail::SharedBoundsEffect T> SharedElement BoundsTransform(T effect) && {
+    data_.bounds_transform = std::make_shared<detail::SharedBoundsEvaluatorValue<T>>(std::move(effect));
+    return std::move(*this);
+  }
+  /// Returns the modifier descriptor used by View::With().
+  /// @return The framework descriptor for a shared-element marker.
+  static const detail::ModifierDescriptor& Descriptor();
+  bool operator==(const SharedElement&) const = default;
+private:
+  detail::SharedMarkerData data_;
+  friend struct detail::InternalAccess;
+};
+
+/// Marks corresponding regions whose different retained contents crossfade while their bounds move together.
+/// A matched ancestor and descendant cannot both participate. Mark an enclosing region or its separate children.
+/// @code
+/// Column {Text(title), Text(description)}.With(SharedBounds("product"));
+/// @endcode
+class SharedBounds {
+public:
+  explicit SharedBounds(std::string key) : data_{std::move(key), {}} {}
+  explicit SharedBounds(std::string_view key) : SharedBounds(std::string(key)) {}
+  explicit SharedBounds(const char* key);
+  template <std::integral T> explicit SharedBounds(T key) {
+    if constexpr (std::is_signed_v<T>) { data_.key = static_cast<std::int64_t>(key); }
+    else { data_.key = static_cast<std::uint64_t>(key); }
+  }
+  template <class T> requires std::is_enum_v<T>
+  explicit SharedBounds(T key) : SharedBounds(static_cast<std::underlying_type_t<T>>(key)) {}
+
+  /// Selects a pure bounds calculation shared by both retained contents.
+  /// @param effect Copyable, equality-comparable value with Rect Evaluate(Rect, Rect, float) const.
+  /// @return The configured marker; invalid sampled geometry is rejected before publication.
+  template <detail::SharedBoundsEffect T> SharedBounds BoundsTransform(T effect) && {
+    data_.bounds_transform = std::make_shared<detail::SharedBoundsEvaluatorValue<T>>(std::move(effect));
+    return std::move(*this);
+  }
+  /// Returns the modifier descriptor used by View::With().
+  /// @return The framework descriptor for a shared-bounds marker.
+  static const detail::ModifierDescriptor& Descriptor();
+  bool operator==(const SharedBounds&) const = default;
+private:
+  detail::SharedMarkerData data_;
+  friend struct detail::InternalAccess;
+};
+
+/// Attaches one local shared-transition operation owner to a stable container.
+/// Obtain this modifier through SharedTransitionHandle::Scope(); mount it on at most one View at a time.
+/// Mark descendants inside the container. Nested local scopes are transparent to an outer active operation.
+class SharedTransitionScope {
+public:
+  /// Returns the modifier descriptor used by View::With().
+  /// @return The retained descriptor that binds the local operation owner.
+  static const detail::ModifierDescriptor& Descriptor();
+  bool operator==(const SharedTransitionScope&) const = default;
+private:
+  explicit SharedTransitionScope(std::shared_ptr<detail::SharedTransitionState> state) : state_(std::move(state)) {}
+  std::shared_ptr<detail::SharedTransitionState> state_;
+  friend class SharedTransitionHandle;
+  friend struct detail::InternalAccess;
+};
+
+/// Runs shared-element motion over a synchronous state change inside one attached local scope.
+/// Only matched visuals animate; normal layout and unmatched content adopt the new state immediately.
+/// Scope content cannot interact during motion. Controls outside the scope remain available.
+class SharedTransitionHandle {
+public:
+  /// Returns the modifier that attaches this handle to its participating container.
+  /// @return A scope modifier; its mounted identity must survive Run's mutation.
+  [[nodiscard]] SharedTransitionScope Scope() const;
+  /// Captures committed shared visuals, executes mutation once, and matches the next prepared layout.
+  /// @param animation One-shot timing; repetition and non-convergent springs are unsupported.
+  /// @param mutation Non-empty synchronous state update; already-performed writes are not rolled back on failure.
+  /// @throws std::invalid_argument If timing, mutation, keys, or sampled bounds are invalid.
+  /// @throws std::logic_error If the scope is disconnected, the thread is wrong, or the request re-enters evaluation.
+  /// @note A new request starts from committed shared visuals; velocity continuity is not guaranteed.
+  void Run(AnimationSpec animation, std::function<void()> mutation) const;
+private:
+  explicit SharedTransitionHandle(std::shared_ptr<detail::SharedTransitionState> state) : state_(std::move(state)) {}
+  std::shared_ptr<detail::SharedTransitionState> state_;
+  friend SharedTransitionHandle UseSharedTransition();
+};
+
+/// Retains a local shared-transition handle in the calling composition scope.
+/// @return A stable handle whose Scope() modifier must be attached before calling Run().
+/// @throws std::logic_error If called outside composition.
+/// @code
+/// auto transition = UseSharedTransition();
+/// return Stack {Content()}.With(transition.Scope());
+/// @endcode
+SharedTransitionHandle UseSharedTransition();
 
 /// Retained modifier that supplies stable presentation geometry to a circular scene transition.
 ///

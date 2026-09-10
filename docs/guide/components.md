@@ -511,7 +511,7 @@ Nested stacks use their nearest controller.
 Capture or provide the intended root controller when an operation must replace a higher-level flow.
 
 Attach PageTransition to a page root to customize Push, Pop, and Replace effects; see [Page transitions](themes-and-presentation.md#page-transitions) for configuration and theme fallback.
-See [Navigation Design](../design/navigation.md) for controller, transition, Back, URL, and activation contracts.
+SharedElement and SharedBounds match participating page content using the page clock; the same markers support explicit local state changes through UseSharedTransition. See [Shared elements and local changes](themes-and-presentation.md#shared-elements-and-local-changes) for usage and [Navigation Design](../design/navigation.md) for controller, transition, Back, URL, and activation contracts.
 
 ## Gestures
 

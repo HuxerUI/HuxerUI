@@ -234,6 +234,10 @@ struct NodePresentation {
   float render_opacity = 1.0F;
   Transform2D resolved_transform;
   float resolved_opacity = 1.0F;
+  // Temporary render-only replacement never changes declarative opacity or accessibility identity.
+  bool suppress_render = false;
+  // Borrowed render subtree appended after ordinary children and before foreground paint.
+  const RenderNode* overlay = nullptr;
 };
 
 // MountedNode is the retained counterpart of ViewSpec. Runtime reads copied component payloads only from matching
@@ -299,6 +303,8 @@ struct MountedNode final : public huxerui::ViewNode {
   bool reduced_motion = false;
   bool pointer_events_enabled = true;
   bool local_enabled = true;
+  // Transient input exclusion preserves the declarative enabled state and its visual styling.
+  bool exclude_input = false;
   InteractionState interaction;
   std::uint32_t active_press_count = 0;
   // True only for the node that first disables an otherwise enabled subtree. Stateful controls use their disabled
@@ -522,14 +528,8 @@ struct RenderNodeSnapshot {
 // Retains committed geometry and revisions for damage comparison, not visual scene content.
 using RenderDamageSnapshot = std::unordered_map<std::uint64_t, RenderNodeSnapshot>;
 
-struct FrozenScene {
-  static PaintSequence CopyPaintSequence(const PaintSequence& source);
-
-  const RenderNode* root = nullptr;
-  std::vector<std::unique_ptr<RenderNode>> nodes;
-};
-
-std::shared_ptr<FrozenScene> FreezeRenderScene(const RenderNode* root);
+Transform2D ResolveChildrenTransform(const MountedNode& node);
+std::vector<RenderClip> ResolveChildClips(const MountedNode& node);
 bool RenderSceneHasPlatformViews(const RenderNode* root);
 
 struct ScrollBarGeometry {

@@ -264,6 +264,12 @@ Transform2D detail::ResolveGradientTransform(Rect rect, const RadialGradient& gr
 
 PaintContext::PaintContext(PaintSequence& sequence, Rect bounds) : PaintContext(sequence, bounds, {}) {}
 
+PaintContext detail::InternalAccess::CreatePaintContext(
+    PaintSequence& sequence, Rect bounds, std::string default_shaping_locale
+) {
+  return PaintContext{sequence, bounds, std::move(default_shaping_locale)};
+}
+
 PaintContext::PaintContext(PaintSequence& sequence, Rect bounds, std::string default_shaping_locale)
     : sequence_(sequence), bounds_(bounds), default_shaping_locale_(std::move(default_shaping_locale)) {
   RequireRect(bounds);

@@ -11,6 +11,7 @@
 #include <huxerui/theme.h>
 
 #include "runtime_internal.h"
+#include "transition_internal.h"
 #include "internal_access.h"
 #include "application/window_internal.h"
 #include "graphics/geometry_internal.h"
@@ -56,12 +57,11 @@ void ValidateContext(const TransitionContext& context) {
   if (context.origin) { ValidatePoint(*context.origin); }
 }
 
-struct EvaluationScope {
-  EvaluationScope() { ++evaluation_depth; }
-  ~EvaluationScope() { --evaluation_depth; }
-};
-
 } // namespace
+
+detail::TransitionEvaluationScope::TransitionEvaluationScope() { ++evaluation_depth; }
+detail::TransitionEvaluationScope::~TransitionEvaluationScope() { --evaluation_depth; }
+bool detail::TransitionEvaluationScope::Active() noexcept { return evaluation_depth != 0; }
 
 TransitionFrame FadeTransition::Evaluate(const TransitionContext& context) const {
   const float progress = std::clamp(context.progress, 0.0F, 1.0F);
@@ -115,16 +115,20 @@ TransitionFrame CircularRevealTransition::Evaluate(const TransitionContext& cont
 }
 
 void TransitionSpec::ValidateTiming() const {
-  if (const auto* spring = std::get_if<SpringSpec>(&animation_); spring && spring->damping_ratio <= 0.0F) {
+  detail::ValidateTransitionTiming(animation_, delay_);
+}
+
+void detail::ValidateTransitionTiming(const AnimationSpec& animation, double delay) {
+  if (const auto* spring = std::get_if<SpringSpec>(&animation); spring && spring->damping_ratio <= 0.0F) {
     throw std::invalid_argument("HuxerUI transition spring damping ratio must be positive");
   }
   MotionController validator;
-  validator.AnimateTo(1.0F, animation_, AnimationPlayback{.delay = delay_});
+  validator.AnimateTo(1.0F, animation, AnimationPlayback{.delay = delay});
 }
 
 TransitionFrame TransitionSpec::Evaluate(const TransitionContext& context) const {
   ValidateContext(context);
-  EvaluationScope evaluation_scope;
+  detail::TransitionEvaluationScope evaluation_scope;
   TransitionContext input = context;
   if (reversed_) {
     input.progress = 1.0F - input.progress;
@@ -145,7 +149,7 @@ TransitionFrame TransitionSpec::Evaluate(const TransitionContext& context) const
 
 void TransitionSpec::Paint(PaintContext& paint, const TransitionContext& context) const {
   ValidateContext(context);
-  EvaluationScope evaluation_scope;
+  detail::TransitionEvaluationScope evaluation_scope;
   TransitionContext input = context;
   if (reversed_) { input.progress = 1.0F - input.progress; }
   if (effect_) { effect_->Paint(paint, input); }
@@ -174,11 +178,15 @@ bool TransitionSpec::operator==(const TransitionSpec& other) const {
 }
 
 bool TransitionSpec::IsImmediate() const noexcept {
-  if (delay_ != 0.0) {
+  return detail::IsImmediateTransitionTiming(animation_, delay_);
+}
+
+bool detail::IsImmediateTransitionTiming(const AnimationSpec& animation, double delay) noexcept {
+  if (delay != 0.0) {
     return false;
   }
-  const auto* tween = std::get_if<TweenSpec>(&animation_);
-  return std::holds_alternative<SnapSpec>(animation_) || (tween && tween->duration == 0.0);
+  const auto* tween = std::get_if<TweenSpec>(&animation);
+  return std::holds_alternative<SnapSpec>(animation) || (tween && tween->duration == 0.0);
 }
 
 } // namespace huxerui

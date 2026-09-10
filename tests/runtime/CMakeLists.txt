@@ -3,6 +3,7 @@ huxerui_add_test_suite(huxerui_runtime_tests HuxerUIRuntimeTests
         LIBRARIES ${HUXERUI_TEST_LIBRARY}
         SOURCES
             animation.cpp
+            shared_transition.cpp
             application.cpp
             clipboard.cpp
             composition.cpp

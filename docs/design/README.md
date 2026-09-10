@@ -16,12 +16,12 @@ They explain the current implementation and deliberately unsupported behavior, w
 - [RefreshBox](refresh-box.md): controlled refresh requests, overscroll handoff, retained presentation, and semantics.
 - [Typed Drag-and-Drop](drag-drop.md): typed payloads, targets, previews, auto-scroll, and cancellation.
 - [External File Drop](file-drop.md): host file offers, hover targets, asynchronous delivery, and retained file access.
-- [Animation and Scene Transitions](animation.md): timing, controllers, synchronized transitions, frozen scenes, and custom effects through TransitionSpec.
+- [Animation and Scene Transitions](animation.md): timing, controllers, synchronized transitions, frozen scenes, custom effects through TransitionSpec, and [shared transitions](animation.md#shared-transitions) across pages and local changes.
 
 ## Application structure
 
 - [Application Activation and Lifecycle](application.md): cold start, later activation, lifecycle, and platform delivery.
-- [Navigation](navigation.md): stacks, typed routes, Back, URL history, activation integration, custom page transitions, and [planned shared-element transitions](navigation.md#planned-shared-element-transitions).
+- [Navigation](navigation.md): stacks, typed routes, Back, URL history, activation integration, custom page transitions, and [shared-element transitions](navigation.md#shared-element-transitions).
 - [Indexed Pages](indexed-pages.md): retained peer pages and controlled selection.
 - [Pager](pager.md): controlled animated and directly draggable paging across retained peer pages.
 - [Window Insets and System Bars](window-insets.md): safe area, edge-to-edge content, and system-bar appearance.

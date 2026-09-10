@@ -35,6 +35,7 @@
 namespace huxerui::detail {
 
 class AppResources;
+struct FrozenScene;
 class TaskDelayScheduler;
 struct WindowState;
 class WindowService;

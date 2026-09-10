@@ -21,12 +21,10 @@
 namespace huxerui {
 
 class PaintContext;
-struct RenderNode;
 
 namespace detail {
 struct FrozenScene;
 struct InternalAccess;
-void PaintNodeWithinClip(huxerui::ViewNode& node, const Rect& clip, const RenderNode* extra_child);
 } // namespace detail
 
 /// Selects how intrinsic image geometry maps into a destination rectangle.
@@ -677,7 +675,6 @@ private:
   std::vector<StackEntry> command_stack_;
   bool finished_ = false;
 
-  friend void detail::PaintNodeWithinClip(huxerui::ViewNode&, const Rect&, const RenderNode*);
   friend struct detail::InternalAccess;
 };
 

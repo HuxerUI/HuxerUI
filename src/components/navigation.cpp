@@ -16,6 +16,7 @@
 
 #include "graphics/geometry_internal.h"
 #include "runtime/mounted_node_internal.h"
+#include "runtime/transition_internal.h"
 #include "internal_access.h"
 
 namespace huxerui::detail {
@@ -886,9 +887,11 @@ const PageTransition* ReadPageTransition(MountedNode& page) {
   return result;
 }
 
-class NavigationContainerExtension final : public NodeExtension {
+class NavigationContainerExtension final : public NodeExtension, public SharedTransitionSession {
 public:
-  NavigationContainerExtension(huxerui::ViewNode& node, const NavigationContainerModifier& modifier) {
+  NavigationContainerExtension(huxerui::ViewNode& node, const NavigationContainerModifier& modifier)
+      : SharedTransitionSession(true) {
+    Bind(static_cast<MountedNode&>(node));
     Update(node, modifier);
   }
 
@@ -916,6 +919,7 @@ public:
       if (id == policy_id) { selected = policy; }
     }
     if (!active) {
+      Clear();
       if (painted_) { InvalidatePaint(); }
       painted_ = false;
       animation_initialized_ = false;
@@ -949,6 +953,7 @@ public:
       state_->EvaluateTransition(node, transition.interactive &&
           (frame.reduced_motion || spec.IsImmediate()));
     } catch (...) {
+      Clear();
       state_->FinishTransition();
       animation_initialized_ = false;
       throw;
@@ -959,12 +964,32 @@ public:
       InvalidatePaint();
     }
     painted_ = paints;
+    std::uint64_t shared_source = 0;
+    std::uint64_t shared_destination = 0;
+    for (const ViewNode& child : node.Children()) {
+      const auto id = child.LayoutValueOr<NavigationEntryIdValue>(0);
+      if (id == transition.source_id) { shared_source = static_cast<const MountedNode&>(child).identity; }
+      if (id == transition.destination_id) { shared_destination = static_cast<const MountedNode&>(child).identity; }
+    }
+    Navigation(shared_source, shared_destination, transition.progress,
+               transition.kind == NavigationOperationKind::Pop, !frame.reduced_motion && !spec.IsImmediate());
     if (!transition.interactive && !progress_.IsRunning()) {
+      Clear();
       state_->FinishTransition();
       animation_initialized_ = false;
       return {true, std::nullopt};
     }
     return {result.needs_frame, result.wake_after};
+  }
+
+  void PrepareRender(MountedNode& node) override {
+    try {
+      SharedTransitionSession::PrepareRender(node);
+    } catch (...) {
+      state_->FinishTransition();
+      animation_initialized_ = false;
+      throw;
+    }
   }
 
   void PaintAboveContent(const huxerui::ViewNode& node, PaintContext& paint) const override {

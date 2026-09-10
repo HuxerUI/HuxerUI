@@ -1,4 +1,5 @@
 #include "runtime_internal.h"
+#include "transition_internal.h"
 #include "internal_access.h"
 #include "text/text_internal.h"
 #include "application/application_internal.h"
@@ -854,6 +855,9 @@ bool RefreshExtensionPresence(MountedNode& node) {
     node.presentation.children_clips.clear();
     node.presentation.children_fragments.clear();
     node.presentation.z_index = 0;
+    node.presentation.suppress_render = false;
+    node.exclude_input = false;
+    node.presentation.overlay = nullptr;
   }
   bool subtree_has_extensions = !node.extensions.empty();
   for (auto& child : node.children) {
@@ -906,7 +910,8 @@ void PrepareExtensionGeometry(MountedNode& node, TextMeasurer& text_measurer) {
 }
 
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
-  const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled;
+  const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled &&
+      !node.exclude_input;
   const bool applies_disabled_appearance = parent_enabled && node.participates_in_layout && !node.local_enabled;
   const bool disabled_appearance_changed = node.applies_disabled_appearance != applies_disabled_appearance;
   if (disabled_appearance_changed) {
@@ -1642,6 +1647,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
 
   if (!state_->mounted_root_ || state_->window_->metrics.viewport.width <= 0.0F ||
       state_->window_->metrics.viewport.height <= 0.0F) {
+    if (state_->mounted_root_) { PrepareSharedTransitions(*state_->mounted_root_, false); }
     HUXERUI_PROFILE_NEXT(profile_stage, Input);
     state_->pointer_->RefreshCursor();
     state_->pointer_->RefreshHover(false);
@@ -1745,6 +1751,9 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   }
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();
+  }
+  if (PrepareSharedTransitions(*state_->mounted_root_)) {
+    RefreshInteractionTree();
   }
   HUXERUI_PROFILE_NEXT(profile_stage, Input);
   state_->pointer_->RefreshCursor();
@@ -2190,6 +2199,10 @@ bool Runtime::UpdateNodeExtensions(
   }
 
   const bool was_enabled = node.local_enabled;
+  const bool was_excluded = node.exclude_input;
+  node.presentation.suppress_render = false;
+  node.exclude_input = false;
+  node.presentation.overlay = nullptr;
   node.presentation.local_transform = {};
   node.presentation.children_transform = {};
   node.presentation.children_clips.clear();
@@ -2215,7 +2228,7 @@ bool Runtime::UpdateNodeExtensions(
     }
   }
 
-  bool interaction_changed = was_enabled != node.local_enabled;
+  bool interaction_changed = was_enabled != node.local_enabled || was_excluded != node.exclude_input;
   for (auto& child : node.children) {
     interaction_changed = UpdateNodeExtensions(*child, frame, needs_frame, next_wakeup, false) || interaction_changed;
   }

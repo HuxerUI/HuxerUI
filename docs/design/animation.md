@@ -1,9 +1,9 @@
 # Animation and Scene Transition Design
 
-This document defines one retained motion model for animated values, synchronized presentation properties, component motion, and whole-scene transitions. It deliberately keeps ordinary View insertion and removal outside the initial scene-transition implementation.
+This document defines retained motion for animated values, synchronized presentation properties, component motion, shared elements, and whole-scene transitions. Ordinary View insertion and removal remain outside this contract.
 
 Custom page and scene effects are available through TransitionSpec.
-Page configuration is defined in [Navigation](navigation.md#page-transition-customization); shared-element transitions remain explicitly planned there.
+Page configuration is defined in [Navigation](navigation.md#page-transition-customization); navigation and explicit local mutations share the matching and rendering contract below.
 
 ## Goals
 
@@ -212,7 +212,7 @@ These restrictions do not change ordinary MotionController playback.
 
 Navigation chooses and executes a page transition while owning history and page state.
 SceneTransitionService chooses and executes a scene transition while owning frozen visual data.
-Shared elements consume their navigation operation's progress and use a bounds-specific calculation rather than receiving a separate animation clock or an outgoing/incoming page-effect interface.
+Shared elements consume their operation owner's progress and use a bounds-specific calculation rather than receiving an outgoing/incoming page-effect interface. Navigation supplies its page clock; a local scope uses one MotionController for its matched set.
 
 ### Effect evaluation
 
@@ -422,7 +422,7 @@ Extensible effects must preserve the current distinction between immutable rende
 An unsupported PlatformView combination retains the existing fallback of fading frozen render content above the unmodified live scene; it must not pretend that a native View participates in arbitrary group clipping or transforms.
 A PlatformView removed by mutation disappears through its real lifecycle rather than surviving as a stale handle.
 Freezing render geometry does not freeze the pixels of a producer-backed ExternalTexture.
-Shared-element eligibility and fallback are defined separately in [Navigation](navigation.md#shared-element-retention-and-fallback).
+Shared-element eligibility and fallback are defined in [Shared retention and fallback](#shared-retention-and-fallback).
 
 A single active operation does not guarantee bounded snapshot memory: copying an in-flight composite can repeatedly preserve visual structure from earlier operations.
 FreezeRenderScene copies the committed representation without fixed structural quotas or count-based termination of visual work.
@@ -433,21 +433,127 @@ Same-frame requests capture the last committed visual; releasing an active snaps
 ### Implementation and acceptance
 
 Public effect declarations live in `include/huxerui/animation.h`, ClipShape lives beside Path in `include/huxerui/vector.h`, and page configuration lives in `include/huxerui/navigation.h`.
-Shared-element markers are planned for navigation.h but are not implemented.
+SharedElement, SharedBounds, SharedTransitionHandle, and SharedTransitionScope live in animation.h so local use does not depend on navigation declarations.
 `src/runtime/animation.cpp` owns timing, MotionController, and single-node animation modifiers. `src/runtime/transition.cpp` contains TransitionSpec, built-in effects, and Scene transition execution, with each type retaining its own responsibilities.
 ClipShape construction and geometric queries live in `src/graphics/path.cpp`; ClipShape-to-RenderClip conversion lives in shared rendering support. Both reuse InternalAccess only where private shape data is required.
-Effect-evaluation re-entry bookkeeping stays private to transition.cpp. TransitionSpec::IsImmediate() reports zero-time, zero-delay timing for both page and Scene execution.
+`src/runtime/transition_internal.h` declares the shared transition session, effect-evaluation re-entry guard, timing helpers, and FrozenScene capture contracts used across transition implementations. Snapshot copying remains in render.cpp beside render-tree assembly. TransitionSpec and local shared transitions reuse the same timing validation and immediate-completion checks.
 Navigation retains page selection, progress, and cleanup; SceneTransitionService retains scene capture and composition; shared rendering code owns visual subtree copies and damage.
 Runtime does not gain concrete component branches, a second animation scheduler, or a public transition registry.
 Declarative modifier configuration may live in ViewSpec; mutable running state and captured active configuration belong to the existing subsystem owners or NodeExtensions.
 NodePresentation retains intersecting ClipShape values and optional fragment descriptions for descendants in node-local coordinates. Ordinary pointer and window-drag hit testing share the geometric clip check; page content remains disabled during navigation motion, so fragment rendering introduces no alternate input-coordinate tree. RenderClip is produced only when generating render data.
 NodePresentation::z_index controls sibling stacking independently from layout and mounted child order. Equal values preserve declaration order; child_paint_order stores the resolved child indices shared by rendering and reverse-order hit traversal. Navigation assigns z_index only to its transition participants; no public ZIndex modifier is provided.
 
-Shared-element retention and bounds transitions remain planned as a separate extension of the current page/scene effect contract.
 Ordinary View insertion/removal, layout animation, three-dimensional effects, and filters remain outside this extension.
 
 Acceptance requires deterministic tests for effect value equality, default immediate completion, valid and invalid timing, endpoint behavior, reversal of both roles and order, finite overshoot, clipping, reduced motion, mutation exceptions, forbidden scene re-entry, rapid replacement, Runtime destruction, viewport invalidation, and bounded retained resources.
-Navigation-specific validation and planned shared-element acceptance are recorded in [Navigation](navigation.md#transition-validation).
+Navigation-specific validation is recorded in [Navigation](navigation.md#transition-validation).
 ClipShape tests cover factory validation, copying and value equality, path fill rules, empty versus absent clipping, coordinate-space behavior, and conversion into the existing rectangle/path rendering representation.
 Static page content must not recompose, remeasure, or rerecord clean PaintSequences during effect-only frames; custom effect geometry may still require its own per-frame calculation.
 Audit every renderer for the reused group-transform, opacity, and clip behavior, and validate each affected platform available locally, including native-content fallback paths.
+
+## Shared transitions
+
+`SharedElement(key)` marks the same visual at two locations; one retained representation moves between their bounds.
+`SharedBounds(key)` marks different visuals whose retained source and destination crossfade inside the same moving rectangle.
+Both are retained modifiers with immutable configuration in `animation.h` and use `.With(...)`; they do not add a layout value, page option, callback registry, or new PaintCommand.
+Shared keys use View::Key's signed integer, unsigned integer, enum, and string forms, with a separate identity domain that never changes reconciliation.
+Signed and unsigned keys remain distinct.
+
+### Operation scope
+
+Navigation pairs its outgoing and incoming page descendants for Push, Pop, or Replace, using the page operation's clock and predictive progress.
+An explicit local operation pairs the last committed descendants of one stable container with its next prepared descendants:
+
+```cpp
+auto transition = UseSharedTransition();
+auto expanded = UseState(false);
+return Column {
+  Button("Toggle").OnClick([transition, expanded] {
+    transition.Run(TweenSpec{0.45, Easing::EaseInOut}, [expanded] { expanded = !expanded.Get(); });
+  }),
+  Stack {
+    Image(product.image).With(
+        Frame{expanded.Get() ? 200.0F : 96.0F, expanded.Get() ? 200.0F : 96.0F},
+        SharedElement(product.id)
+    ),
+  }.With(Frame{.height = 240.0F}, transition.Scope()),
+};
+```
+
+The handle is retained by its calling composition scope; Scope() attaches it to at most one mounted View, whose identity must survive the mutation.
+Run requires a connected scope on its UI thread, valid one-shot AnimationSpec, and a non-empty synchronous mutation.
+Timing validation precedes mutation; endpoint and output validation occur when destination layout becomes available.
+Mutations execute once and already-performed writes are never rolled back after an exception.
+Recursive local or Scene requests from a mutation or effect evaluation throw std::logic_error.
+Snap and reduced motion still perform the mutation and skip capture and playback.
+
+The operation range defines key uniqueness: one key on each navigation page, or one key before and after a local mutation.
+Nested local scopes are transparent to matching; independent scopes may reuse keys and animate concurrently.
+An active outer operation ends inner shared sessions and owns the resulting visual range; inner Run still executes its mutation without starting shared playback.
+When multiple scopes decorate the same mounted node, the later declaration has outer precedence.
+Nested NavigationStacks are hard matching boundaries even when an outer local scope encloses them.
+The scope owner itself is not a candidate; mark content inside it.
+
+Duplicate keys, different marker kinds for a matched key, and matched ancestor/descendant regions throw std::invalid_argument.
+Choose one enclosing SharedBounds or separately marked children.
+Matching happens once after layout, before render suppression and page-fragment copying; unsupported or missing counterparts do not join later.
+Unmatched local content adopts the new state immediately, with normal layout and lifecycle.
+Source nodes replaced by a local mutation may unmount normally; only their paint data survives.
+Navigation keeps pages mounted through its existing page lifecycle.
+
+### Bounds evaluation and reversal
+
+Bounds are axis-aligned rectangles in the operation container's logical coordinates, excluding the navigation page effect's transform, opacity, and clip.
+The default interpolates those rectangles; `.BoundsTransform(effect)` accepts a copied equality-comparable value with `Rect Evaluate(Rect from, Rect to, float progress) const`.
+Evaluation must be pure and preserve the exact supplied endpoints at zero and one.
+Output coordinates and dimensions must be finite, with non-negative dimensions.
+Progress may overshoot for springs or custom curves; crossfade opacity alone clamps to the unit interval.
+The custom bounds effect owns no timing or callback lifecycle and never receives mounted nodes or TransitionContext page data.
+
+Push and Replace prefer the destination's bounds effect and single SharedElement content; Pop prefers the departing page's configuration and content.
+If the preferred side has no custom bounds effect, the other side supplies it.
+Pop samples swapped endpoint rectangles at `1 - progress`, so the same canonical curve retraces on predictive seeking and cancellation.
+Local SharedElement uses the committed source visual; SharedBounds always blends both sides.
+Pair draw order follows the destination's paint order for local, Push, and Replace operations and the departing page's order for Pop.
+
+### Shared retention and fallback
+
+The private SharedTransitionSession owns pair metadata, immutable subtree captures, and synthetic render wrappers; Navigation or SharedTransitionState owns operation progress.
+transition_internal.h declares the session contract shared with Navigation; local state, visual metadata, and pair definitions remain in shared_transition.cpp.
+NodePresentation carries temporary render suppression and a borrowed overlay reference; input exclusion belongs to MountedNode's interaction state and preserves declarative enabled styling.
+Runtime calls the internal PrepareSharedTransitions entry after layout and presentation geometry settle, before input/semantics publication and scene assembly.
+The shared-transition implementation prepares participating sessions directly and releases hidden sessions without adding a general extension lifecycle interface or cached capability pointer. Local sessions end when no valid pairs remain; input exclusion is resolved once per node from its active local sessions after preparation.
+Runtime itself does not inspect marker or component types.
+
+Capture reuses ordinary content and foreground recording, retaining complete paint even when a navigation page is visually displaced or transparent.
+Successful pairs suppress the real source/destination drawing before page fragments copy their render sources.
+Page content and fragments draw first, then shared visuals, then TransitionSpec.Paint decoration, then window layers.
+The overlay stays within its owner and ancestor clips and is not affected by page transforms.
+Every synthetic or frozen node has an independent retained-render identity, including simultaneous captures and interrupted composites.
+No additional hit, focus, semantic, or text-input representation is created.
+Navigation page content remains non-interactive during its operation; a local scope excludes content interaction without applying disabled styling, while external controls remain usable.
+
+| Condition | Behavior |
+| --- | --- |
+| Missing counterpart, empty or unavailable paint, unrealized virtual item | Skip that pair and retain ordinary drawing |
+| PlatformView, ExternalTexture, or nested fragment rendering inside the marked subtree | Skip that pair; a resource reference does not freeze native content or producer pixels |
+| Rotation, skew, mirrored mapping, or partial ancestor clipping | Conservatively skip that pair; rectangular ancestor clips must contain the complete region |
+| Rounded ancestor clip | Use a conservative inner rectangle; path ancestor clips make descendants ineligible |
+| Own node clip | Retain it with the captured content |
+| Unrequested target geometry/content change, including keyed child replacement/reordering, or navigation participant replacement | End the affected pair and restore surviving originals |
+| Owner coordinate space, viewport, or visibility changes | Release shared visuals; navigation may continue its ordinary page effect |
+| Completion, failure, scope removal, or Runtime destruction | Clear published links and release retained paint resources |
+
+Subtrees are captured once per operation, not laid out or rerecorded for each animation sample.
+Per-frame work validates participating geometry/content and updates bounds, opacity, and render revisions; its cost depends on the participating tree and captured drawing.
+Text scales or crossfades with the snapshot; this does not provide glyph morphing or intermediate line wrapping.
+
+A consecutive local Run freezes each currently committed shared composite as its new source.
+Every synchronous mutation executes, while requests before another render commit coalesce their intermediate visuals.
+Retargeting does not promise velocity continuity.
+Interrupted crossfades may retain earlier composite structure until the latest operation ends; there is no structural quota or constant-memory guarantee.
+Applications should keep marked regions and interruption frequency appropriate to their devices.
+SceneTransition remains an explicit window-composite operation, does not automatically match shared elements, and can compose independently with local or navigation motion.
+Ordinary insertion/removal, automatic layout animation, shaders, and general native snapshot capture remain separate capabilities.
+
+Focused tests verify key/configuration equality, deterministic local movement, replacement and interruption, same-frame mutations, navigation reversal and predictive cancellation, nested ownership, independent scopes, hidden/viewport cleanup, unsupported content, invalid output, and suppression before page-fragment copying.

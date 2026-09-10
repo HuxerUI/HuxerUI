@@ -3,6 +3,8 @@
 #include <limits>
 #include <unordered_set>
 
+#include "runtime/transition_internal.h"
+
 namespace huxerui::test {
 namespace {
 

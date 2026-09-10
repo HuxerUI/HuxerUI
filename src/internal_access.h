@@ -23,6 +23,9 @@
 namespace huxerui {
 class NavigationItem;
 class Runtime;
+class SharedBounds;
+class SharedElement;
+class SharedTransitionScope;
 class TransitionSpec;
 class View;
 }
@@ -31,12 +34,13 @@ namespace huxerui::detail {
 
 struct MountedNode;
 struct PathElement;
+struct SharedMarkerData;
+class SharedTransitionState;
 struct VirtualCollectionSemantics;
 
 // Public headers only declare this friend. Implementations stay with the subsystem owning each operation.
 // Existing ownership, internal cooperation, and direct field sharing do not need a forwarding function here.
 struct InternalAccess {
-  static bool HasTransitionPaint(const TransitionSpec& transition) noexcept;
 #pragma region View
 
   static const std::optional<std::variant<std::int64_t, std::uint64_t, std::string>>&
@@ -47,7 +51,9 @@ struct InternalAccess {
 #pragma region Runtime
 
   static void InvalidateRoot(Runtime& runtime);
+  // Returns the application content root inside the runtime-owned containers.
   static const MountedNode* RootNode(const Runtime& runtime) noexcept;
+  // Returns the complete mounted tree, including runtime-owned containers.
   static const MountedNode* MountedRoot(const Runtime& runtime) noexcept;
   static const ScrollPhysics& DefaultScrollPhysics(const Runtime& runtime) noexcept;
   static void NotifyScrollActivity(Runtime& runtime, MountedNode& node, const ScrollActivity& activity);
@@ -64,6 +70,20 @@ struct InternalAccess {
   );
   static std::optional<PlatformValue>
   DispatchPlatformViewEvent(Runtime& runtime, std::uint64_t identity, std::type_index key, const PlatformValue& value);
+
+#pragma endregion
+
+#pragma region TransitionSpec
+
+  static bool HasTransitionPaint(const TransitionSpec& transition) noexcept;
+
+#pragma endregion
+
+#pragma region SharedTransition
+
+  static const SharedMarkerData& SharedMarker(const SharedElement& marker) noexcept;
+  static const SharedMarkerData& SharedMarker(const SharedBounds& marker) noexcept;
+  static const std::shared_ptr<SharedTransitionState>& SharedScope(const SharedTransitionScope& scope) noexcept;
 
 #pragma endregion
 
@@ -155,6 +175,12 @@ struct InternalAccess {
 #pragma region VirtualLayoutResult
 
   static std::optional<VirtualCollectionSemantics> CollectionSemantics(const VirtualLayoutResult& result);
+
+#pragma endregion
+
+#pragma region Paint
+
+  static PaintContext CreatePaintContext(PaintSequence& sequence, Rect bounds, std::string default_shaping_locale);
 
 #pragma endregion
 

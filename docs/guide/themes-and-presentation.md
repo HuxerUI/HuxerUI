@@ -177,7 +177,7 @@ The selected description is frozen for an operation, and predictive Back seeks t
 Page content is disabled for interaction while an operation is active and restored after completion or cancellation; the NavigationStack's Back gesture and cancellation remain available.
 Fragments are visual-only and do not introduce per-fragment hit testing, focus, or duplicate accessibility nodes.
 Page effects currently receive no implicit interaction origin; use context.bounds for geometry or capture explicit application-owned origin data in a custom effect.
-Shared-element matching and SharedBounds are not yet available.
+SharedElement and SharedBounds inside the two participating pages automatically follow this same progress, including predictive Back cancellation.
 
 Scene and page transitions compose when a Scene mutation explicitly navigates.
 Select immediate page motion when only the Scene effect is desired.
@@ -185,6 +185,83 @@ Scene requests replace active visual work, reject recursive requests from mutati
 Reduced motion skips visual retention while still executing the mutation.
 Native PlatformView content uses the frozen-scene fade fallback; retaining an external texture does not freeze its producer's pixels.
 Repeated scene replacement captures the committed composite and can increase retained memory; it has no count-based cutoff, so assess interruption frequency and effect cost on the intended devices.
+
+### Shared elements and local changes
+
+Use `SharedElement(key)` for the same image or visual at two locations, and `SharedBounds(key)` for different content that should move and crossfade together.
+Both are available from `<huxerui/animation.h>` and the umbrella header:
+
+```cpp
+Image(product.image).With(SharedElement(product.id));
+Column {
+  Text(product.name),
+  Text(product.description),
+}.With(SharedBounds("product-summary"));
+```
+
+Navigation matches keys between its participating pages automatically.
+For a change within the current page, attach one stable local scope and wrap the synchronous state update in Run:
+
+```cpp
+auto expanded = UseState(false);
+auto shared = UseSharedTransition();
+return Column {
+  Button("Expand").OnClick([shared, expanded] {
+    shared.Run(TweenSpec{0.5, Easing::EaseInOut}, [expanded] { expanded = !expanded.Get(); });
+  }),
+  Stack {
+    Image(product.image).With(
+        Frame{expanded.Get() ? 200.0F : 96.0F, expanded.Get() ? 200.0F : 96.0F},
+        SharedElement(product.id)
+    ),
+  }.With(Frame{.height = 240.0F}, shared.Scope()),
+};
+```
+
+Mark descendants inside Scope, keep its mounted identity stable, and mount each handle's Scope on only one View.
+The new layout and unmatched content take effect immediately; local shared content alone animates.
+Content inside the scope cannot interact during playback; keep a retarget button outside it.
+Calling Run again starts from the last committed shared visual, without promising velocity continuity.
+Every mutation executes, including multiple calls before the next frame and reduced-motion requests.
+
+Shared keys are separate from View::Key; integer and string forms are supported, with signed and unsigned integers distinct.
+Each key must be unique on each participating side and use the same marker kind.
+Do not mark both a matching ancestor and its descendant.
+An outer active operation includes nested local scopes and takes precedence over them; nested NavigationStacks remain separate boundaries.
+
+To customize the path, supply a copyable, equality-comparable value:
+
+```cpp
+struct ArcBounds {
+  float lift = 24.0F;
+  Rect Evaluate(Rect from, Rect to, float p) const {
+    return {
+        from.x + (to.x - from.x) * p,
+        from.y + (to.y - from.y) * p - lift * 4.0F * p * (1.0F - p),
+        from.width + (to.width - from.width) * p,
+        from.height + (to.height - from.height) * p,
+    };
+  }
+  bool operator==(const ArcBounds&) const = default;
+};
+
+Image(product.image).With(SharedElement(product.id).BoundsTransform(ArcBounds{}));
+```
+
+Evaluate must be pure, preserve both endpoint rectangles exactly, and return finite coordinates and non-negative dimensions, including for progress outside zero to one.
+It uses the operation's timing; Pop traverses the canonical path in reverse.
+SharedElement keeps one visual (the source for a local operation, destination for Push/Replace, departing page for Pop); use SharedBounds when the visuals differ.
+Text scales or crossfades with retained paint rather than reflowing at intermediate sizes.
+
+Prepare images and scroll positions before starting: missing, unrealized, partially ancestor-clipped, native PlatformView, and ExternalTexture content skip shared pairing.
+Rotation/skew mappings and fragment-rendered marked subtrees also use ordinary drawing.
+A change to captured target geometry/content ends that pair; explicit Run is how to request animated local retargeting.
+Scope visibility, viewport, or coordinate-space changes release the shared operation.
+Repeated interrupted crossfades can retain more drawing until completion; no fixed structural cutoff is imposed.
+
+The standalone [Shared Transitions example](../../examples/shared_transition/main.cpp) demonstrates a reading list whose titles and covers move into a detail page, descriptions that crossfade through SharedBounds, and a local card with an arc, slow playback, and interruption. The [Transition Studio](../../examples/transition/main.cpp) focuses on whole-page and scene effects.
+Shared visuals compose above page fragments and below effect decoration; SceneTransition continues to animate the window composite without automatic shared matching.
+See [Shared transition design](../design/animation.md#shared-transitions) for ownership and fallback details.
 
 ## Tooltips
 

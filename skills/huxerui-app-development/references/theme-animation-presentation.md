@@ -134,7 +134,7 @@ Attach PageTransition{push, pop, replace} to a NavigationStack page root with Wi
 It overrides the complete NavigationStyle::motion policy, and an empty PageTransition selects immediate motion.
 Push selects the incoming page, Pop selects the departing page, and Replace selects the incoming page.
 Use TransitionSpec::Reversed() to exchange both samples and drawing order; active descriptions remain frozen during an operation.
-Shared-element markers remain planned and must not be used as current SDK API.
+Use SharedElement(key) for corresponding content and SharedBounds(key) for different content that crossfades inside moving bounds. Both live in animation.h and attach with With(). Navigation pairs its participating pages automatically; local mutations use UseSharedTransition(), a stable container.With(handle.Scope()), and handle.Run(AnimationSpec, synchronous_mutation). Mark descendants, keep keys unique per participating side, and do not match both an ancestor and descendant. BoundsTransform(value) accepts a copied comparable pure Rect Evaluate(Rect, Rect, float) const that preserves endpoints. Local scope input is blocked during playback; keep retarget controls outside it. Nested local scopes follow active outer ownership; nested NavigationStacks are separate boundaries. Missing, partially ancestor-clipped, native, external-texture, or unsupported transform content skips pairing. See docs/guide/themes-and-presentation.md for examples and limitations.
 
 ## Presentation services
 
