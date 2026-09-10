@@ -89,114 +89,81 @@ TEST_CASE("Markers inside non-code text are ignored") {
   REQUIRE(result.source == source);
 }
 
-template <class Function> void ExpectTransformError(Function&& function) {
-  bool rejected = false;
-  try {
-    function();
-  } catch (const TransformError&) {
-    rejected = true;
-  }
-  REQUIRE(rejected);
-}
-
 TEST_CASE("Composable declarations are rejected") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource("[[huxerui::composable]] View Counter();\n", "declaration.cpp"));
-  });
+  REQUIRE_THROWS_AS(TransformSource("[[huxerui::composable]] View Counter();\n", "declaration.cpp"), TransformError);
 }
 
 TEST_CASE("Explicit scope boundaries are rejected") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "[[huxerui::composable]]\n"
-        "View Counter() {\n"
-        "  HUXERUI_SCOPE_BEGIN\n"
-        "  return Text(\"counter\");\n"
-        "  HUXERUI_SCOPE_END\n"
-        "}\n",
-        "explicit.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("[[huxerui::composable]]\n"
+                                    "View Counter() {\n"
+                                    "  HUXERUI_SCOPE_BEGIN\n"
+                                    "  return Text(\"counter\");\n"
+                                    "  HUXERUI_SCOPE_END\n"
+                                    "}\n",
+                                    "explicit.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Conditional compilation inside scopes is rejected") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "[[huxerui::composable]]\n"
-        "View Counter() {\n"
-        "#if ENABLE_COUNTER\n"
-        "  return Text(\"counter\");\n"
-        "#else\n"
-        "  return View{};\n"
-        "#endif\n"
-        "}\n",
-        "conditional.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("[[huxerui::composable]]\n"
+                                    "View Counter() {\n"
+                                    "#if ENABLE_COUNTER\n"
+                                    "  return Text(\"counter\");\n"
+                                    "#else\n"
+                                    "  return View{};\n"
+                                    "#endif\n"
+                                    "}\n",
+                                    "conditional.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Unmarked composition calls are rejected") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "View Counter() {\n"
-        "  auto count = UseState(0);\n"
-        "  return Text(count);\n"
-        "}\n",
-        "unmarked.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("View Counter() {\n"
+                                    "  auto count = UseState(0);\n"
+                                    "  return Text(count);\n"
+                                    "}\n",
+                                    "unmarked.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Qualified unmarked composition calls are rejected") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "View Timer() {\n"
-        "  auto timer = example::UseTimer();\n"
-        "  return View{};\n"
-        "}\n",
-        "qualified.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("View Timer() {\n"
+                                    "  auto timer = example::UseTimer();\n"
+                                    "  return View{};\n"
+                                    "}\n",
+                                    "qualified.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Templated unmarked composition calls are rejected") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "View Content() {\n"
-        "  const auto& value = UseEnvironment<Locale>();\n"
-        "  return Text(value.name);\n"
-        "}\n",
-        "templated.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("View Content() {\n"
+                                    "  const auto& value = UseEnvironment<Locale>();\n"
+                                    "  return Text(value.name);\n"
+                                    "}\n",
+                                    "templated.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Composition calls in control flow are not mistaken for hook definitions") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "View Content() {\n"
-        "  if (UseState(false)) {\n"
-        "    return Text(\"active\");\n"
-        "  }\n"
-        "  return View{};\n"
-        "}\n",
-        "control_flow.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("View Content() {\n"
+                                    "  if (UseState(false)) {\n"
+                                    "    return Text(\"active\");\n"
+                                    "  }\n"
+                                    "  return View{};\n"
+                                    "}\n",
+                                    "control_flow.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Qualified composition calls in control flow are not mistaken for hook definitions") {
-  ExpectTransformError([] {
-    static_cast<void>(TransformSource(
-        "View Content() {\n"
-        "  if (huxerui::UseState(false)) {\n"
-        "    return Text(\"active\");\n"
-        "  }\n"
-        "  return View{};\n"
-        "}\n",
-        "qualified_control_flow.cpp"
-    ));
-  });
+  REQUIRE_THROWS_AS(TransformSource("View Content() {\n"
+                                    "  if (huxerui::UseState(false)) {\n"
+                                    "    return Text(\"active\");\n"
+                                    "  }\n"
+                                    "  return View{};\n"
+                                    "}\n",
+                                    "qualified_control_flow.cpp"),
+                    TransformError);
 }
 
 TEST_CASE("Application roots use their implicit composition scope") {

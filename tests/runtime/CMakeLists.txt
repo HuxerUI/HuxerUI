@@ -7,6 +7,7 @@ huxerui_add_test_suite(huxerui_runtime_tests HuxerUIRuntimeTests
             application.cpp
             clipboard.cpp
             composition.cpp
+            controls.cpp
             file_picker.cpp
             file_drop.cpp
             gestures.cpp
@@ -23,6 +24,7 @@ huxerui_add_test_suite(huxerui_runtime_tests HuxerUIRuntimeTests
             platform_view.cpp
             presentation.cpp
             presentation_semantics.cpp
+            semantics.cpp
             profiling.cpp
             render_scene.cpp
             resources.cpp
@@ -37,6 +39,7 @@ huxerui_add_test_suite(huxerui_runtime_tests HuxerUIRuntimeTests
             text.cpp
             text_field.cpp
             text_input.cpp
+            theme.cpp
             tooltip.cpp
             virtual_layout.cpp
             window.cpp

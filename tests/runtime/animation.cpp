@@ -3,6 +3,7 @@
 #include <limits>
 #include <unordered_set>
 
+#include "components/indication_internal.h"
 #include "runtime/transition_internal.h"
 
 namespace huxerui::test {
@@ -658,6 +659,287 @@ TEST_CASE("SceneFragmentReplacementKeepsIdentitiesUniqueAndReleasesVisualsOnComp
   }
   platform.AdvanceTime(2.0);
   REQUIRE(runtime.BuildRenderFrame().scene.root->id == live_identity);
+}
+
+namespace {
+
+State<bool> animation_target;
+State<bool> transform_animation_target;
+int indication_clicks = 0;
+int transformed_clicks = 0;
+State<bool> show_modifier_branch;
+
+View AnimationApp() {
+  animation_target = UseState(false);
+  const bool moved = animation_target.Get();
+  return Text("animated")
+      .With(
+          Offset{AnimateTo(Point{moved ? 100.0F : 0.0F, 0.0F}, TweenSpec{1.0, Easing::Linear})},
+          Opacity{AnimateTo(moved ? 0.0F : 1.0F, TweenSpec{1.0, Easing::Linear})}
+      );
+}
+
+View TransformAnimationApp() {
+  transform_animation_target = UseState(false);
+  const bool transformed = transform_animation_target.Get();
+  return Stack {
+    Text("transform")
+        .With(
+            huxerui::Frame{80.0F, 40.0F},
+            Scale{AnimateTo(transformed ? 2.0F : 1.0F, TweenSpec{1.0, Easing::Linear})},
+            Rotation{AnimateTo(transformed ? 90.0F : 0.0F, TweenSpec{1.0, Easing::Linear})}
+        ),
+  };
+}
+
+View TransformedHitTestApp() {
+  return Stack {
+    Button("transformed").With(huxerui::Frame{80.0F, 40.0F}, Scale{1.5F}, Rotation{45.0F}).OnClick([] {
+      ++transformed_clicks;
+    }),
+  };
+}
+
+View IndicationApp() {
+  return Button("press").OnClick([] { ++indication_clicks; });
+}
+
+View PresentedIndicationApp() {
+  return Stack {
+    Button("presented").With(huxerui::Frame{80.0F, 40.0F}, Offset{Point{50.0F, 0.0F}}, Opacity{0.5F}).OnClick([] {}),
+  };
+}
+
+View ExplicitIndicationApp() {
+  return Button("explicit").OnClick([] { ++indication_clicks; }).With(huxerui::Indication{});
+}
+
+View NodeExtensionPruningApp() {
+  auto visible = UseState(true);
+  show_modifier_branch = visible;
+  if (visible.Get()) {
+    return Column {
+      Text("plain"),
+      Button("interactive").OnClick([] {}),
+    };
+  }
+  return Column {
+    Text("plain"),
+  };
+}
+
+} // namespace
+
+TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
+  TestPlatform platform;
+  Runtime runtime{AnimationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  animation_target = true;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.5);
+  const FlattenedScene& middle = runtime.BuildFrame();
+
+  const DrawTextCommand* animated = nullptr;
+  for (const auto& command : middle.Commands()) {
+    if (const auto* text = std::get_if<DrawTextCommand>(&command); text && text->text.PlainText() == "animated") {
+      animated = text;
+      break;
+    }
+  }
+  REQUIRE(animated != nullptr);
+  const PushTransformCommand* transform = nullptr;
+  for (const auto& command : middle.Commands()) {
+    if (const auto* candidate = std::get_if<PushTransformCommand>(&command);
+        candidate && std::abs(candidate->transform.translate_x - 50.0F) < 0.01F) {
+      transform = candidate;
+      break;
+    }
+  }
+  REQUIRE(transform != nullptr);
+  REQUIRE(animated->style.foreground.alpha == 1.0F);
+  REQUIRE(std::abs(runtime.RootNode()->render_node.opacity - 0.5F) < 0.01F);
+
+  platform.AdvanceTime(0.5);
+  const FlattenedScene& finished = runtime.BuildFrame();
+  REQUIRE(!ContainsText(finished, "animated"));
+}
+
+TEST_CASE("TestAnimatedScaleAndRotationModifiers") {
+  TestPlatform platform;
+  Runtime runtime{TransformAnimationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 200.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* content = root->children[0].get();
+  REQUIRE(content->PresentationBounds().width == 80.0F);
+  REQUIRE(content->PresentationBounds().height == 40.0F);
+
+  transform_animation_target = true;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.5);
+  const FlattenedScene& middle = runtime.BuildFrame();
+
+  root = runtime.RootNode();
+  content = root->children[0].get();
+  constexpr float middle_extent = 127.27922F;
+  REQUIRE(std::abs(content->PresentationBounds().width - middle_extent) < 0.01F);
+  REQUIRE(std::abs(content->PresentationBounds().height - middle_extent) < 0.01F);
+
+  const PushTransformCommand* transform = nullptr;
+  for (const auto& command : middle.Commands()) {
+    if (const auto* candidate = std::get_if<PushTransformCommand>(&command);
+        candidate && std::abs(candidate->transform.m12) > 0.01F) {
+      transform = candidate;
+      break;
+    }
+  }
+  REQUIRE(transform != nullptr);
+  REQUIRE(std::abs(transform->transform.m11 - 1.06066F) < 0.01F);
+  REQUIRE(std::abs(transform->transform.m12 - 1.06066F) < 0.01F);
+
+  platform.AdvanceTime(0.5);
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  content = root->children[0].get();
+  REQUIRE(std::abs(content->PresentationBounds().width - 80.0F) < 0.01F);
+  REQUIRE(std::abs(content->PresentationBounds().height - 160.0F) < 0.01F);
+}
+
+TEST_CASE("TestTransformedControlUsesVisualHitRegion") {
+  transformed_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{TransformedHitTestApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* button = root->children[0].get();
+  REQUIRE(button->Bounds().height == 40.0F);
+  REQUIRE(std::abs(button->PresentationBounds().height - 127.27922F) < 0.01F);
+
+  ClickAt(runtime, {1.0F, 39.0F}, 94);
+  REQUIRE(transformed_clicks == 0);
+
+  ClickAt(runtime, {80.0F, 60.0F}, 95);
+  REQUIRE(transformed_clicks == 1);
+}
+
+TEST_CASE("TestClickIndicationUsesPointerObservation") {
+  indication_clicks = 0;
+  TestPlatform platform;
+  Runtime runtime{IndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      91,
+      {20.0F, 20.0F},
+  });
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.04);
+  const FlattenedScene& pressed = runtime.BuildFrame();
+
+  std::size_t rectangles = 0;
+  for (const auto& command : pressed.Commands()) {
+    if (std::holds_alternative<DrawRectCommand>(command)) {
+      ++rectangles;
+    }
+  }
+  REQUIRE(rectangles >= 2);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      91,
+      {20.0F, 20.0F},
+  });
+  REQUIRE(indication_clicks == 1);
+}
+
+TEST_CASE("TestModifierPresentationGeometry") {
+  TestPlatform platform;
+  Runtime runtime{PresentedIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->children.size() == 1);
+  const auto* button = root->children[0].get();
+  REQUIRE(std::abs(button->PresentationBounds().x - 50.0F) < 0.01F);
+  REQUIRE(std::abs(button->PresentationOpacity() - 0.5F) < 0.01F);
+  REQUIRE(std::abs(button->render_node.opacity - 0.5F) < 0.01F);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      92,
+      {60.0F, 20.0F},
+  });
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.04);
+  const FlattenedScene& pressed = runtime.BuildFrame();
+
+  std::size_t presented_rectangles = 0;
+  bool translated = false;
+  for (const auto& command : pressed.Commands()) {
+    if (const auto* transform = std::get_if<PushTransformCommand>(&command);
+        transform && std::abs(transform->transform.translate_x - 50.0F) < 0.01F) {
+      translated = true;
+    }
+    if (const auto* rectangle = std::get_if<DrawRectCommand>(&command);
+        rectangle && std::abs(rectangle->rect.x) < 0.01F) {
+      ++presented_rectangles;
+    }
+  }
+  const DrawTextCommand* presented_text = FindText(pressed, "presented");
+  REQUIRE(presented_text != nullptr);
+  REQUIRE(presented_text->style.foreground.alpha == 1.0F);
+  REQUIRE(translated);
+  REQUIRE(presented_rectangles >= 2);
+}
+
+TEST_CASE("TestExplicitIndicationOverridesAutomaticDefault") {
+  indication_clicks = 0;
+  TestPlatform platform;
+  Runtime runtime{ExplicitIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->extensions.size() == 1);
+  REQUIRE(huxerui::detail::IsExplicitIndicationDescriptor(root->extensions[0].descriptor));
+
+  ClickAt(runtime, {20.0F, 20.0F}, 93);
+  REQUIRE(indication_clicks == 1);
+}
+
+TEST_CASE("TestNodeExtensionFrameSubtreeCache") {
+  TestPlatform platform;
+  Runtime runtime{NodeExtensionPruningApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const auto* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->subtree_has_extensions);
+  REQUIRE(root->children.size() == 2);
+  REQUIRE(!root->children[0]->subtree_has_extensions);
+  REQUIRE(root->children[1]->subtree_has_extensions);
+
+  show_modifier_branch = false;
+  runtime.BuildFrame();
+  root = runtime.RootNode();
+  REQUIRE(root->children.size() == 1);
+  REQUIRE(!root->subtree_has_extensions);
 }
 
 } // namespace huxerui::test

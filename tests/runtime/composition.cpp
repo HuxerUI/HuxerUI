@@ -1778,4 +1778,56 @@ TEST_CASE("ViewFactoriesBindTypedArgumentsAcrossCompositionWrappers") {
   REQUIRE(ContainsText(runtime.BuildFrame(), "bound 42"));
 }
 
+namespace {
+
+struct TestEnvironmentValue {
+  std::string value;
+
+  static TestEnvironmentValue Default() {
+    return {"fallback"};
+  }
+
+  bool operator==(const TestEnvironmentValue&) const = default;
+};
+
+std::vector<std::string> observed_environment_values;
+
+View EnvironmentReader() {
+  HUXERUI_SCOPE({
+    observed_environment_values.push_back(UseEnvironment<TestEnvironmentValue>().value);
+    return Text(UseEnvironment<TestEnvironmentValue>().value);
+  });
+}
+
+View EnvironmentApp() {
+  Environment outer;
+  outer.Set(TestEnvironmentValue{"outer"});
+  return Column {
+    EnvironmentReader(),
+    huxerui::ProvideEnvironment(
+        std::move(outer),
+        Column {
+          EnvironmentReader(),
+          huxerui::ProvideEnvironment(TestEnvironmentValue{"inner"}, EnvironmentReader()),
+        }
+    ),
+  };
+}
+
+} // namespace
+
+TEST_CASE("TestNestedEnvironment") {
+  observed_environment_values.clear();
+
+  TestPlatform platform;
+  Runtime runtime{EnvironmentApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(observed_environment_values.size() == 3);
+  REQUIRE(observed_environment_values[0] == "fallback");
+  REQUIRE(observed_environment_values[1] == "outer");
+  REQUIRE(observed_environment_values[2] == "inner");
+}
+
 } // namespace huxerui::test

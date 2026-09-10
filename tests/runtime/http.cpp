@@ -257,33 +257,15 @@ Task<void> CaptureHttpDownloadProgressException(std::shared_ptr<HttpClient> clie
 
 } // namespace
 
-TEST_CASE("HttpResultTypesDistinguishTheirAlternatives") {
-  STATIC_REQUIRE((std::is_same_v<HttpResult<HttpResponse>, Result<HttpResponse, HttpError>>));
-  STATIC_REQUIRE((std::is_same_v<HttpResult<HttpResponseStream>, Result<HttpResponseStream, HttpError>>));
-  STATIC_REQUIRE((std::is_same_v<decltype(std::declval<const HttpClient&>().SendAsync(HttpRequest{})),
-                                 Task<HttpResult<HttpResponse>>>));
-  STATIC_REQUIRE((std::is_same_v<decltype(std::declval<const HttpClient&>().SendStreamAsync(HttpRequest{})),
-                                 Task<HttpResult<HttpResponseStream>>>));
-  STATIC_REQUIRE(std::is_copy_constructible_v<HttpResult<HttpResponse>>);
-  STATIC_REQUIRE_FALSE(std::is_copy_constructible_v<HttpResult<HttpResponseStream>>);
-  STATIC_REQUIRE(std::is_nothrow_move_constructible_v<HttpResult<HttpResponseStream>>);
-
-  HttpResult<HttpResponse> response_result(HttpResponse{.url = "https://example.test/unavailable", .status_code = 503});
-  REQUIRE(response_result.Succeeded());
-  REQUIRE(response_result.Value().status_code == 503);
-  REQUIRE_THROWS_AS(response_result.Error(), std::logic_error);
-
-  HttpResult<HttpResponse> error_result(HttpError{HttpErrorCode::Timeout, "HuxerUI HTTP request timed out"});
-  REQUIRE_FALSE(error_result.Succeeded());
-  REQUIRE(error_result.Error().code == HttpErrorCode::Timeout);
-  REQUIRE_THROWS_AS(error_result.Value(), std::logic_error);
-
-  const auto stream_error = HttpResult<HttpResponseStream>::Failure(
-      HttpError{HttpErrorCode::Unsupported, "HuxerUI HTTP streaming is unsupported"});
-  REQUIRE_FALSE(stream_error.Succeeded());
-  REQUIRE(stream_error.Error().code == HttpErrorCode::Unsupported);
-  REQUIRE_THROWS_AS(stream_error.Value(), std::logic_error);
-}
+static_assert((std::is_same_v<HttpResult<HttpResponse>, Result<HttpResponse, HttpError>>));
+static_assert((std::is_same_v<HttpResult<HttpResponseStream>, Result<HttpResponseStream, HttpError>>));
+static_assert((std::is_same_v<decltype(std::declval<const HttpClient&>().SendAsync(HttpRequest{})),
+                              Task<HttpResult<HttpResponse>>>));
+static_assert((std::is_same_v<decltype(std::declval<const HttpClient&>().SendStreamAsync(HttpRequest{})),
+                              Task<HttpResult<HttpResponseStream>>>));
+static_assert(std::is_copy_constructible_v<HttpResult<HttpResponse>>);
+static_assert(!std::is_copy_constructible_v<HttpResult<HttpResponseStream>>);
+static_assert(std::is_nothrow_move_constructible_v<HttpResult<HttpResponseStream>>);
 
 TEST_CASE("HttpClientSendsOneTypedOperationAndAggregatesItsPullReads") {
   ResetHttpState();

@@ -92,18 +92,6 @@ public:
   }
 };
 
-const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std::string_view text) {
-  if (node.text.PlainText() == text) {
-    return &node;
-  }
-  for (const auto& child : node.children) {
-    if (const detail::MountedNode* found = FindMountedText(*child, text)) {
-      return found;
-    }
-  }
-  return nullptr;
-}
-
 int LatestRoutedPageToken(std::string_view name) {
   const auto found =
       std::ranges::find_if(routed_page_tokens.rbegin(), routed_page_tokens.rend(), [name](const auto& entry) {

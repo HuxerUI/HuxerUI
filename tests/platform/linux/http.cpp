@@ -204,7 +204,12 @@ private:
           requests_.push_back(request);
         }
         condition_.notify_all();
-        handler(client, request);
+        try {
+          handler(client, request);
+        } catch (...) {
+          CloseSocket(client);
+          throw;
+        }
         CloseSocket(client);
       }
     } catch (...) {
@@ -232,7 +237,10 @@ struct PendingRequest {
   std::shared_ptr<detail::HttpTransportOperation> operation;
 };
 
-PendingRequest StartRequest(const std::shared_ptr<detail::HttpTransport>& transport, HttpRequest request) {
+PendingRequest StartRequest(
+    const std::shared_ptr<detail::HttpTransport>& transport, HttpRequest request,
+    std::function<void()> terminal_observer = {}
+) {
   struct State {
     void RequestRead() {
       std::shared_ptr<detail::HttpTransportOperation> current;
@@ -262,6 +270,9 @@ PendingRequest StartRequest(const std::shared_ptr<detail::HttpTransport>& transp
     }
 
     void Complete(HttpResult<HttpResponse> result) {
+      if (terminal_observer) {
+        terminal_observer();
+      }
       bool publish = false;
       {
         std::scoped_lock lock(mutex);
@@ -275,6 +286,7 @@ PendingRequest StartRequest(const std::shared_ptr<detail::HttpTransport>& transp
       }
     }
 
+    std::function<void()> terminal_observer;
     std::mutex mutex;
     std::promise<HttpResult<HttpResponse>> promise;
     std::shared_ptr<detail::HttpTransportOperation> operation;
@@ -285,6 +297,7 @@ PendingRequest StartRequest(const std::shared_ptr<detail::HttpTransport>& transp
   };
 
   auto state = std::make_shared<State>();
+  state->terminal_observer = std::move(terminal_observer);
   std::future<HttpResult<HttpResponse>> future = state->promise.get_future();
   detail::HttpTransportCallbacks callbacks{
       .response = [state](detail::HttpTransportResponse response) {
@@ -444,80 +457,94 @@ TEST_CASE("Linux HTTP transport enforces the complete request timeout") {
 }
 
 TEST_CASE("Linux HTTP transport suppresses completion after cancellation") {
-  LoopbackHttpServer server({[](int socket, const std::string&) {
-    std::this_thread::sleep_for(150ms);
-    SendResponse(socket, 200, "OK", {}, "late");
-  }});
-  const std::shared_ptr<detail::HttpTransport> transport = detail::CreateLinuxHttpTransport();
-  std::atomic<int> completions = 0;
-  const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
-      {.url = server.Url("/cancel"), .timeout = 2s},
-      true,
-      {
-          .complete = [&completions] { ++completions; },
-          .error = [&completions](HttpError) { ++completions; },
-      });
-
+  std::promise<void> release_response;
+  const auto released = release_response.get_future().share();
+  LoopbackHttpServer server({
+      [released](int socket, const std::string&) {
+        if (released.wait_for(2s) != std::future_status::ready) {
+          throw std::runtime_error("HuxerUI test did not release the canceled response");
+        }
+        SendResponse(socket, 200, "OK", {}, "late");
+      },
+      [](int socket, const std::string&) { SendResponse(socket, 200, "OK", {}, "barrier"); },
+  });
+  auto transport = detail::CreateLinuxHttpTransport();
+  auto completions = std::make_shared<std::atomic<int>>(0);
+  PendingRequest canceled = StartRequest(
+      transport, {.url = server.Url("/cancel"), .timeout = 2s}, [completions] { ++*completions; }
+  );
   REQUIRE(server.WaitForRequests(1));
-  operation->Cancel();
-  std::this_thread::sleep_for(250ms);
-  REQUIRE(completions == 0);
+  canceled.operation->Cancel();
+  release_response.set_value();
+
+  PendingRequest barrier = StartRequest(transport, {.url = server.Url("/barrier"), .timeout = 2s});
+  REQUIRE(barrier.result.wait_for(2s) == std::future_status::ready);
+  REQUIRE(barrier.result.get().Succeeded());
+  transport.reset();
+  REQUIRE(completions->load() == 0);
 }
 
 TEST_CASE("Linux HTTP transport resolves cancellation and completion races once") {
   for (int iteration = 0; iteration < 20; ++iteration) {
-    std::atomic<bool> release_response = false;
-    LoopbackHttpServer server({[&release_response](int socket, const std::string&) {
-      while (!release_response.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
+    CAPTURE(iteration);
+    std::promise<void> release_response;
+    const auto released = release_response.get_future().share();
+    LoopbackHttpServer server({[released](int socket, const std::string&) {
+      if (released.wait_for(2s) != std::future_status::ready) {
+        throw std::runtime_error("HuxerUI test did not release the racing response");
       }
       SendResponse(socket, 200, "OK", {}, "done");
     }});
-    std::shared_ptr<detail::HttpTransport> transport = detail::CreateLinuxHttpTransport();
-    std::atomic<int> completions = 0;
-    const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
-        {.url = server.Url("/race"), .timeout = 2s},
-        true,
-        {
-            .complete = [&completions] { ++completions; },
-            .error = [&completions](HttpError) { ++completions; },
-        });
+    auto transport = detail::CreateLinuxHttpTransport();
+    auto completions = std::make_shared<std::atomic<int>>(0);
+    PendingRequest pending = StartRequest(
+        transport, {.url = server.Url("/race"), .timeout = 2s}, [completions] { ++*completions; }
+    );
     REQUIRE(server.WaitForRequests(1));
 
-    std::thread cancel_thread([operation, &release_response] {
-      while (!release_response.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
+    std::jthread cancel_thread([operation = pending.operation, released] {
+      if (released.wait_for(2s) == std::future_status::ready) {
+        operation->Cancel();
       }
-      operation->Cancel();
     });
-    release_response.store(true, std::memory_order_release);
+    release_response.set_value();
     cancel_thread.join();
     transport.reset();
-    REQUIRE(completions.load() <= 1);
+    REQUIRE(completions->load() <= 1);
+    if (completions->load() == 1) {
+      REQUIRE(pending.result.wait_for(0s) == std::future_status::ready);
+      const auto result = pending.result.get();
+      REQUIRE(result.Succeeded());
+      REQUIRE(result.Value().body == BytesFromString("done"));
+    }
   }
 }
 
 TEST_CASE("Destroying Linux HTTP transport cancels active requests and joins its network thread") {
-  LoopbackHttpServer server({[](int socket, const std::string&) {
-    std::this_thread::sleep_for(250ms);
-    SendResponse(socket, 200, "OK", {}, "late");
+  std::promise<void> release_response;
+  const auto released = release_response.get_future().share();
+  LoopbackHttpServer server({[released](int socket, const std::string&) {
+    if (released.wait_for(2s) == std::future_status::ready) {
+      SendResponse(socket, 200, "OK", {}, "late");
+    }
   }});
   std::shared_ptr<detail::HttpTransport> transport = detail::CreateLinuxHttpTransport();
-  std::atomic<int> completions = 0;
+  auto completions = std::make_shared<std::atomic<int>>(0);
   const std::shared_ptr<detail::HttpTransportOperation> operation = transport->Start(
       {.url = server.Url("/shutdown"), .timeout = 2s},
       true,
       {
-          .complete = [&completions] { ++completions; },
-          .error = [&completions](HttpError) { ++completions; },
+          .complete = [completions] { ++*completions; },
+          .error = [completions](HttpError) { ++*completions; },
       });
   REQUIRE(server.WaitForRequests(1));
 
   const auto start = std::chrono::steady_clock::now();
   transport.reset();
   const auto elapsed = std::chrono::steady_clock::now() - start;
+  release_response.set_value();
   REQUIRE(elapsed < 2s);
-  REQUIRE(completions == 0);
+  REQUIRE(completions->load() == 0);
   static_cast<void>(operation);
 }
 

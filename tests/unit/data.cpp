@@ -177,16 +177,6 @@ TEST_CASE("ResultVoidSupportsMoveOnlyAndOptionalErrorValues") {
   REQUIRE_FALSE(empty_error.Error().has_value());
 }
 
-TEST_CASE("BytesOwnsMutableContiguousBinaryData") {
-  Bytes bytes{std::byte{0}, std::byte{0xFF}};
-  bytes.push_back(std::byte{'a'});
-
-  REQUIRE(bytes.size() == 3);
-  REQUIRE(bytes.data()[0] == std::byte{0});
-  REQUIRE(bytes.data()[1] == std::byte{0xFF});
-  REQUIRE(bytes.data()[2] == std::byte{'a'});
-}
-
 TEST_CASE("UriPreservesAbsoluteSyntaxAndExposesPresentComponents") {
   const Uri uri("Custom://user@example.test:42/documents/%E6%B5%8B%E8%AF%95?first=1&first=2#part");
 

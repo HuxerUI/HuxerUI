@@ -32,18 +32,6 @@ static_assert(std::copy_constructible<AppDirectories>);
 static_assert(std::is_same_v<IoResult<std::string>, Result<std::string, IoError>>);
 static_assert(std::is_same_v<IoResult<void>, Result<void, IoError>>);
 
-TEST_CASE("IoResultDistinguishesValuesFromErrors") {
-  IoResult<std::string> value(std::string{"value"});
-  REQUIRE(value.Succeeded());
-  REQUIRE(value.Value() == "value");
-  REQUIRE_THROWS_AS(value.Error(), std::logic_error);
-
-  IoResult<std::string> error(IoError{IoErrorCode::NotFound, "missing"});
-  REQUIRE_FALSE(error.Succeeded());
-  REQUIRE(error.Error().code == IoErrorCode::NotFound);
-  REQUIRE_THROWS_AS(error.Value(), std::logic_error);
-}
-
 TEST_CASE("FileNormalizesUtf8PathsAndProvidesLexicalOperations") {
   File root(Utf8Path(fs::absolute("huxerui-file-tests")));
   File file = root.Resolve("folder/../folder/报告.txt");

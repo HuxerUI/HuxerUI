@@ -901,6 +901,38 @@ inline const Color* SolidFillColor(const huxerui::VisualFill& fill) {
   return brush != nullptr ? SolidBrushColor(*brush) : nullptr;
 }
 
+inline const Color* SolidFillColor(const std::optional<VisualFill>& fill) {
+  return fill.has_value() ? SolidFillColor(*fill) : nullptr;
+}
+
+inline const detail::MountedNode* FindMountedKind(const detail::MountedNode& node, detail::NodeKind kind) {
+  if (node.kind == kind) {
+    return &node;
+  }
+  for (const auto& child : node.children) {
+    if (const detail::MountedNode* found = FindMountedKind(*child, kind)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+inline const detail::MountedNode* FindMountedText(const detail::MountedNode& node, std::string_view text) {
+  if (node.text.PlainText() == text) {
+    return &node;
+  }
+  for (const auto& child : node.children) {
+    if (const detail::MountedNode* found = FindMountedText(*child, text)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
+inline const Color* LayerFillColor(const std::optional<IndicationLayer>& layer) {
+  return layer.has_value() ? SolidFillColor(layer->fill) : nullptr;
+}
+
 inline bool BrushIsColor(const Brush& brush, Color expected) {
   const Color* color = SolidBrushColor(brush);
   return color != nullptr && *color == expected;

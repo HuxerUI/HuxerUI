@@ -1,5 +1,6 @@
 #include "runtime_test_support.h"
 
+#include <limits>
 #include <stdexcept>
 
 namespace huxerui::test {
@@ -1825,6 +1826,684 @@ TEST_CASE("TestEaseInTweenStartsSlowlyAndReachesItsTarget") {
   REQUIRE(animated.Value() == Catch::Approx(0.421875F));
   REQUIRE_FALSE(animated.Advance({3.0, 0.25}).needs_frame);
   REQUIRE(animated.Value() == 1.0F);
+}
+
+namespace {
+
+State<bool> alternate_disabled_button_style;
+std::optional<DialogHandle> saved_dialogs;
+State<bool> first_focus_enabled;
+std::vector<std::string> focus_changes;
+std::vector<Key> received_keys;
+int first_keyboard_clicks = 0;
+int third_keyboard_clicks = 0;
+int custom_keyboard_clicks = 0;
+std::vector<std::string> key_route;
+bool consume_root_key = false;
+bool consume_focused_intercept = false;
+bool consume_focused_key_down = false;
+bool consume_focused_key_up = false;
+int routed_keyboard_clicks = 0;
+int disabled_clicks = 0;
+int underlying_clicks = 0;
+int background_dialog_clicks = 0;
+int first_dialog_clicks = 0;
+int second_dialog_clicks = 0;
+
+View InteractionTestTheme(View content) {
+  ThemeSpec spec = huxerui::FlatLightThemeSpec();
+  spec.motion.reduced_motion = true;
+  spec.interactions.indication.hover = IndicationLayer{.fill = Color::Rgb(20, 80, 160, 0.2F)};
+  spec.interactions.indication.press = IndicationLayer{.fill = Color::Rgb(200, 40, 60, 0.3F)};
+  return Theme {ThemeDefinition{spec}, std::move(content)};
+}
+
+View ThemedIndicationApp() {
+  return InteractionTestTheme(Button("themed indication").OnClick([] {}));
+}
+
+View FallbackIndicationApp() {
+  ThemeSpec spec = huxerui::FlatLightThemeSpec();
+  spec.motion.reduced_motion = true;
+  spec.interactions.indication.hover = IndicationLayer{.fill = Color::Rgb(20, 80, 160, 0.2F)};
+  spec.interactions.indication.press.reset();
+  return Theme {ThemeDefinition{spec}, Button("fallback indication").OnClick([] {})};
+}
+
+View SurfaceIndicationApp() {
+  const Color normal_border = Color::Rgb(160, 40, 60);
+  const Color pressed_border = Color::Rgb(20, 100, 200);
+  return Button("surface indication")
+      .OnClick([] {})
+      .With(
+          Frame{160.0F, 48.0F},
+          Border{normal_border, 2.0F},
+          CornerRadius{8.0F},
+          Indication{
+              .press = IndicationLayer{
+                  .border = Border{pressed_border, 4.0F},
+                  .corner_radii = CornerRadii{20.0F},
+                  .enter = SnapSpec{},
+                  .exit = SnapSpec{},
+              },
+          }
+      );
+}
+
+View FocusTestTheme(View content) {
+  ThemeSpec spec = huxerui::FlatLightThemeSpec();
+  spec.motion.reduced_motion = true;
+  spec.interactions.focus_ring = FocusRing{Color::Rgb(40, 180, 90), 3.0F, 4.0F};
+  spec.interactions.disabled_opacity = 0.3F;
+  return Theme {ThemeDefinition{spec}, std::move(content)};
+}
+
+View FlatSliderFocusApp() {
+  return FocusTestTheme(Slider(0.5F));
+}
+
+View FocusContent() {
+  HUXERUI_SCOPE({
+    first_focus_enabled = UseState(true);
+    return Column {
+      Button("first")
+          .With(Enabled{first_focus_enabled})
+          .OnClick([] { ++first_keyboard_clicks; })
+          .On<ViewEvents::FocusChanged>([](bool focused) {
+            focus_changes.push_back(focused ? "first:on" : "first:off");
+          }),
+      Button("disabled").With(Enabled{false}).OnClick([] { ++disabled_clicks; }),
+      Button("third").OnClick([] { ++third_keyboard_clicks; }).On<ViewEvents::FocusChanged>([](bool focused) {
+        focus_changes.push_back(focused ? "third:on" : "third:off");
+      }),
+      Text("custom focus")
+          .With(Focusable{})
+          .OnClick([] { ++custom_keyboard_clicks; })
+          .On<ViewEvents::KeyDown>([](const KeyEvent& event) {
+            received_keys.push_back(event.key);
+            return false;
+          }),
+    };
+  });
+}
+
+View FocusApp() {
+  return FocusTestTheme(FocusContent());
+}
+
+View KeyRoutingApp() {
+  return Column {
+    Text("focused")
+        .With(Focusable{})
+        .OnClick([] { ++routed_keyboard_clicks; })
+        .On<ViewEvents::KeyIntercept>([](const KeyEvent&) {
+          key_route.push_back("focused-intercept");
+          return consume_focused_intercept;
+        })
+        .On<ViewEvents::KeyDown>([](const KeyEvent&) {
+          key_route.push_back("down");
+          return consume_focused_key_down;
+        })
+        .On<ViewEvents::KeyUp>([](const KeyEvent&) {
+          key_route.push_back("up");
+          return consume_focused_key_up;
+        }),
+  }.On<ViewEvents::KeyIntercept>([](const KeyEvent&) {
+    key_route.push_back("root-intercept");
+    return consume_root_key;
+  });
+}
+
+View FocusOnlyApp() {
+  return FocusTestTheme(Text("focus only").With(Focusable{}));
+}
+
+View InvalidFocusRingApp() {
+  ThemeSpec spec = FlatLightThemeSpec();
+  spec.interactions.focus_ring.width = -1.0F;
+  return Theme {ThemeDefinition{spec}, Text("invalid focus ring").With(Focusable{})};
+}
+
+View DisabledHitTestApp() {
+  return Stack {
+    Button("underlying").OnClick([] { ++underlying_clicks; }),
+    Button("disabled overlay").With(Enabled{false}).OnClick([] { ++disabled_clicks; }),
+  };
+}
+
+View DisabledSubtreeApp() {
+  return Column {
+    Button("disabled child").With(Enabled{true}).OnClick([] { ++disabled_clicks; }),
+  }.With(Enabled{false});
+}
+
+View DisabledButtonStyleUpdateApp() {
+  auto alternate = UseState(false);
+  alternate_disabled_button_style = alternate;
+  ButtonStyle style = ButtonStyle::Default();
+  style.disabled_background = alternate ? Color::Rgb(180, 40, 60) : Color::Rgb(30, 80, 170);
+  ThemeDefinition definition;
+  definition.Set(style);
+  return Theme {std::move(definition), Button("disabled style").With(Enabled{false})};
+}
+
+View FocusDialogApp() {
+  HUXERUI_SCOPE({
+    saved_dialogs = UseDialog();
+    return Button("background focus").OnClick([] { ++background_dialog_clicks; });
+  });
+}
+
+} // namespace
+
+TEST_CASE("TestFlatSliderRetainsThemeFocusRing") {
+  TestPlatform platform;
+  Runtime runtime{FlatSliderFocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
+  runtime.BuildFrame();
+  runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
+  const FlattenedScene& focused = runtime.BuildFrame();
+
+  const bool drew_focus_ring = std::ranges::any_of(focused.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(40, 180, 90) && border->style.width == 3.0F;
+  });
+  REQUIRE(drew_focus_ring);
+}
+
+TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
+  TestPlatform platform;
+  Runtime runtime{ThemedIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const Color hover = Color::Rgb(20, 80, 160, 0.2F);
+  const Color pressed = Color::Rgb(200, 40, 60, 0.3F);
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      101,
+      {20.0F, 20.0F},
+  });
+  const FlattenedScene& hovered = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(hovered, hover) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      101,
+      {20.0F, 20.0F},
+  });
+  const FlattenedScene& down = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(down, pressed) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      101,
+      {20.0F, 20.0F},
+  });
+  const FlattenedScene& released = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(released, hover) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Move,
+      101,
+      {240.0F, 120.0F},
+  });
+  const FlattenedScene& outside = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(outside, hover) == nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      102,
+      {20.0F, 20.0F},
+      huxerui::PointerDeviceKind::Touch,
+  });
+  const FlattenedScene& touch_down = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(touch_down, pressed) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      102,
+      {20.0F, 20.0F},
+      huxerui::PointerDeviceKind::Touch,
+  });
+  const FlattenedScene& touch_released = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(touch_released, pressed) == nullptr);
+  REQUIRE(FindRectWithColor(touch_released, hover) == nullptr);
+}
+
+TEST_CASE("TestPressedInteractionFallsBackToAvailableHoverLayer") {
+  TestPlatform platform;
+  Runtime runtime{FallbackIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const Color hover = Color::Rgb(20, 80, 160, 0.2F);
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Move, 103, {20.0F, 20.0F}});
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), hover) != nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 103, {20.0F, 20.0F}});
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), hover) != nullptr);
+}
+
+TEST_CASE("TestIndicationReplacesResolvedBorderAndCornerRadii") {
+  TestPlatform platform;
+  Runtime runtime{SurfaceIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+
+  const Color normal_border = Color::Rgb(160, 40, 60);
+  const Color pressed_border = Color::Rgb(20, 100, 200);
+  const FlattenedScene& normal = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(normal, normal_border) != nullptr);
+  REQUIRE(FindBorderWithColor(normal, pressed_border) == nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 104, {20.0F, 20.0F}});
+  const FlattenedScene& pressed = runtime.BuildFrame();
+  const DrawBorderCommand* border = FindBorderWithColor(pressed, pressed_border);
+  REQUIRE(border != nullptr);
+  REQUIRE(border->style.width == 4.0F);
+  REQUIRE(border->corner_radius == 20.0F);
+  REQUIRE(FindBorderWithColor(pressed, normal_border) == nullptr);
+}
+
+TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
+  disabled_clicks = 0;
+  underlying_clicks = 0;
+
+  TestPlatform platform;
+  Runtime overlay{DisabledHitTestApp, platform};
+  overlay.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  const FlattenedScene& scene = overlay.BuildFrame();
+  const DrawTextCommand* disabled = FindText(scene, "disabled overlay");
+  REQUIRE(disabled != nullptr);
+  REQUIRE(std::abs(disabled->style.foreground.alpha - 0.42F) < 0.001F);
+
+  const auto* overlay_root = overlay.RootNode();
+  REQUIRE(overlay_root != nullptr);
+  REQUIRE(overlay_root->children.size() == 2);
+  REQUIRE(!overlay_root->children[1]->IsEnabled());
+  REQUIRE(overlay_root->children[1]->render_node.opacity == 1.0F);
+  ClickAt(
+      overlay,
+      {
+          disabled->rect.x + disabled->rect.width * 0.5F,
+          disabled->rect.y + disabled->rect.height * 0.5F,
+      },
+      102
+  );
+  REQUIRE(disabled_clicks == 0);
+  REQUIRE(underlying_clicks == 0);
+
+  Runtime subtree{DisabledSubtreeApp, platform};
+  subtree.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  const FlattenedScene& subtree_display = subtree.BuildFrame();
+  const auto* subtree_root = subtree.RootNode();
+  REQUIRE(subtree_root != nullptr);
+  REQUIRE(!subtree_root->IsEnabled());
+  REQUIRE(subtree_root->applies_disabled_appearance);
+  REQUIRE(subtree_root->render_node.opacity == Catch::Approx(0.42F));
+  REQUIRE(subtree_root->children.size() == 1);
+  REQUIRE(!subtree_root->children[0]->IsEnabled());
+  REQUIRE_FALSE(subtree_root->children[0]->applies_disabled_appearance);
+  REQUIRE(subtree_root->children[0]->render_node.opacity == 1.0F);
+  const DrawTextCommand* child = FindText(subtree_display, "disabled child");
+  REQUIRE(child != nullptr);
+  REQUIRE(child->style.foreground.alpha == 1.0F);
+  ClickAt(
+      subtree,
+      {
+          child->rect.x + child->rect.width * 0.5F,
+          child->rect.y + child->rect.height * 0.5F,
+      },
+      103
+  );
+  REQUIRE(disabled_clicks == 0);
+}
+
+TEST_CASE("TestDisabledButtonStyleChangeInvalidatesContentPaint") {
+  TestPlatform platform;
+  Runtime runtime{DisabledButtonStyleUpdateApp, platform};
+  runtime.SetWindowMetrics({.viewport = {180.0F, 64.0F}});
+
+  const Color initial = Color::Rgb(30, 80, 170);
+  REQUIRE(FindRectWithColor(runtime.BuildFrame(), initial) != nullptr);
+
+  alternate_disabled_button_style = true;
+  const Color updated = Color::Rgb(180, 40, 60);
+  const FlattenedScene& scene = runtime.BuildFrame();
+  REQUIRE(FindRectWithColor(scene, initial) == nullptr);
+  REQUIRE(FindRectWithColor(scene, updated) != nullptr);
+}
+
+TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
+  focus_changes.clear();
+  received_keys.clear();
+  first_keyboard_clicks = 0;
+  third_keyboard_clicks = 0;
+  custom_keyboard_clicks = 0;
+  disabled_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{FocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  const FlattenedScene& first_focused = runtime.BuildFrame();
+  REQUIRE(focus_changes.size() == 1);
+  REQUIRE(focus_changes.back() == "first:on");
+  const DrawBorderCommand* first_border = FindBorderWithColor(first_focused, Color::Rgb(40, 180, 90));
+  REQUIRE(first_border != nullptr);
+  REQUIRE(first_border->style.width == 3.0F);
+  const detail::MountedNode* focused_first_node = FindMountedText(*runtime.RootNode(), "first");
+  REQUIRE(focused_first_node != nullptr);
+  const Rect focused_bounds = focused_first_node->PresentationBounds();
+  const float focus_ring_outset = 7.0F;
+  const Rect expected_focus_ring{
+      focused_bounds.x - focus_ring_outset,
+      focused_bounds.y - focus_ring_outset,
+      focused_bounds.width + focus_ring_outset * 2.0F,
+      focused_bounds.height + focus_ring_outset * 2.0F,
+  };
+  REQUIRE(first_border->rect == expected_focus_ring);
+  REQUIRE(first_border->corner_radius == focused_first_node->properties.corner_radii.top_left + focus_ring_outset);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  REQUIRE(first_keyboard_clicks == 1);
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Up,
+      .key = Key::Enter,
+  });
+
+  first_focus_enabled = false;
+  const FlattenedScene& disabled_first = runtime.BuildFrame();
+  REQUIRE(focus_changes.back() == "first:off");
+  const DrawTextCommand* first_text = FindText(disabled_first, "first");
+  REQUIRE(first_text != nullptr);
+  REQUIRE(std::abs(first_text->style.foreground.alpha - 0.3F) < 0.001F);
+  const detail::MountedNode* first_node = FindMountedText(*runtime.RootNode(), "first");
+  REQUIRE(first_node != nullptr);
+  REQUIRE(first_node->render_node.opacity == 1.0F);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.BuildFrame();
+  REQUIRE(focus_changes.back() == "third:on");
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Space,
+  });
+  REQUIRE(third_keyboard_clicks == 0);
+  const FlattenedScene& space_down = runtime.BuildFrame();
+  const ThemeSpec light_theme = huxerui::FlatLightThemeSpec();
+  const Color* keyboard_press = LayerFillColor(light_theme.interactions.indication.press);
+  REQUIRE(keyboard_press != nullptr);
+  REQUIRE(FindRectWithColor(space_down, *keyboard_press) != nullptr);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Up,
+      .key = Key::Space,
+  });
+  REQUIRE(third_keyboard_clicks == 1);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::ArrowRight,
+  });
+  REQUIRE(received_keys.size() == 1);
+  REQUIRE(received_keys.front() == Key::ArrowRight);
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  REQUIRE(custom_keyboard_clicks == 1);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+      .modifiers = {
+          .shift = true,
+      },
+  });
+  runtime.BuildFrame();
+  REQUIRE(focus_changes.back() == "third:on");
+}
+
+TEST_CASE("TestKeyRoutingConsumptionAndActivation") {
+  key_route.clear();
+  consume_root_key = false;
+  consume_focused_intercept = false;
+  consume_focused_key_down = false;
+  consume_focused_key_up = false;
+  routed_keyboard_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{KeyRoutingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  runtime.BuildFrame();
+  const auto send_key = [&runtime](KeyEventType type, Key key) {
+    return runtime.HandleKeyEvent({.type = type, .key = key});
+  };
+
+  REQUIRE(send_key(KeyEventType::Down, Key::Tab));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept"}));
+
+  key_route.clear();
+  REQUIRE_FALSE(send_key(KeyEventType::Down, Key::Unknown));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept", "focused-intercept", "down"}));
+  REQUIRE(runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab, .repeat = true}));
+
+  key_route.clear();
+  consume_root_key = true;
+  REQUIRE(send_key(KeyEventType::Down, Key::B));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept"}));
+
+  key_route.clear();
+  consume_root_key = false;
+  consume_focused_intercept = true;
+  REQUIRE(send_key(KeyEventType::Down, Key::C));
+  REQUIRE((key_route == std::vector<std::string>{"root-intercept", "focused-intercept"}));
+
+  key_route.clear();
+  consume_focused_intercept = false;
+  consume_focused_key_down = true;
+  REQUIRE(send_key(KeyEventType::Down, Key::Enter));
+  REQUIRE(routed_keyboard_clicks == 0);
+
+  consume_focused_key_down = false;
+  REQUIRE(send_key(KeyEventType::Down, Key::Enter));
+  REQUIRE(routed_keyboard_clicks == 1);
+  REQUIRE(runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Enter, .repeat = true}));
+  REQUIRE(send_key(KeyEventType::Up, Key::Enter));
+  REQUIRE(routed_keyboard_clicks == 1);
+
+  REQUIRE(send_key(KeyEventType::Down, Key::Space));
+  REQUIRE(runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Space, .repeat = true}));
+  consume_focused_key_up = true;
+  REQUIRE(send_key(KeyEventType::Up, Key::Space));
+  REQUIRE(routed_keyboard_clicks == 1);
+}
+
+TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
+  focus_changes.clear();
+
+  TestPlatform platform;
+  Runtime runtime{FocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
+  const FlattenedScene& initial = runtime.BuildFrame();
+  const DrawTextCommand* first = FindText(initial, "first");
+  REQUIRE(first != nullptr);
+  const Point pointer{
+      first->rect.x + first->rect.width * 0.5F,
+      first->rect.y + first->rect.height * 0.5F,
+  };
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Down,
+      104,
+      pointer,
+  });
+  const FlattenedScene& pointer_focused = runtime.BuildFrame();
+  REQUIRE(focus_changes.size() == 1);
+  REQUIRE(focus_changes.back() == "first:on");
+  REQUIRE(FindBorderWithColor(pointer_focused, Color::Rgb(40, 180, 90)) == nullptr);
+
+  runtime.HandlePointerEvent(PointerEvent{
+      PointerEventType::Up,
+      104,
+      pointer,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::ControlLeft,
+      .modifiers = {
+          .control = true,
+      },
+  });
+  const FlattenedScene& modifier_only = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(modifier_only, Color::Rgb(40, 180, 90)) == nullptr);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Unknown,
+  });
+  const FlattenedScene& unknown_key = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(unknown_key, Color::Rgb(40, 180, 90)) != nullptr);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  const FlattenedScene& keyboard_focused = runtime.BuildFrame();
+  REQUIRE(focus_changes.back() == "third:on");
+  REQUIRE(FindBorderWithColor(keyboard_focused, Color::Rgb(40, 180, 90)) != nullptr);
+}
+
+TEST_CASE("TestFocusableViewWithoutClickPaintsFocusRing") {
+  TestPlatform platform;
+  Runtime runtime{FocusOnlyApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  const FlattenedScene& focused = runtime.BuildFrame();
+  REQUIRE(FindBorderWithColor(focused, Color::Rgb(40, 180, 90)) != nullptr);
+}
+
+TEST_CASE("TestVisualFillIndicationAndFocusRingValidateDuringViewResolution") {
+  const auto rejects = [](RootFactory factory) {
+    TestPlatform platform;
+    Runtime runtime{factory, platform};
+    runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  };
+
+  rejects(+[] { return Spacer().With(Background{LinearGradient{.stops = {{0.0F, Color::Black()}}}}); });
+  rejects(+[] {
+    return Spacer().With(Background{LinearGradient{
+        .stops = {{0.0F, Color::Black()}, {1.0F, Color::White()}},
+        .transform = {0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F},
+    }});
+  });
+  rejects(+[] { return Spacer().With(Background{ImageFill{.source = ImageAsset{}}}); });
+  rejects(+[] {
+    return Button("invalid indication").With(Indication{.geometry = {.layer_size = Size{-1.0F, 20.0F}}});
+  });
+  rejects(+[] {
+    return Button("invalid ripple")
+        .With(Indication{
+            .ripple = RippleEffect{
+                .color = {0.0F, 0.0F, 0.0F, std::numeric_limits<float>::quiet_NaN()},
+            },
+        });
+  });
+
+  TestPlatform platform;
+  Runtime runtime{InvalidFocusRingApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+}
+
+TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
+  saved_dialogs.reset();
+  background_dialog_clicks = 0;
+  first_dialog_clicks = 0;
+  second_dialog_clicks = 0;
+
+  TestPlatform platform;
+  Runtime runtime{FocusDialogApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.BuildFrame();
+
+  const LayerId dialog = saved_dialogs->Show(
+      [] {
+        return Column {
+          Button("first dialog focus").OnClick([] { ++first_dialog_clicks; }),
+          Button("second dialog focus").OnClick([] { ++second_dialog_clicks; }),
+        };
+      },
+      huxerui::DialogOptions{.dismiss_on_outside_press = false}
+  );
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  REQUIRE(first_dialog_clicks == 1);
+  REQUIRE(background_dialog_clicks == 0);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  REQUIRE(second_dialog_clicks == 1);
+  REQUIRE(background_dialog_clicks == 0);
+
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Tab,
+  });
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  REQUIRE(first_dialog_clicks == 2);
+
+  REQUIRE(saved_dialogs->Dismiss(dialog));
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  runtime.HandleKeyEvent(KeyEvent{
+      .type = KeyEventType::Down,
+      .key = Key::Enter,
+  });
+  REQUIRE(background_dialog_clicks == 1);
 }
 
 } // namespace huxerui::test
