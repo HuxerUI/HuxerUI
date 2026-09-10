@@ -183,6 +183,77 @@ struct wix_layout {
     std::string dutil_lib;              // dutil.lib
 };
 
+// ------------------------------------------------------------- installer --
+
+// A WiX UpgradeCode is a GUID, and getting it wrong is not loud: WiX accepts a
+// malformed one as a literal and the MSI then never upgrades in place, which
+// shows up as two entries in Add/Remove Programs on a user's machine rather
+// than as a build failure here.
+[[nodiscard]] inline bool is_upgrade_code(std::string_view value) {
+    if (value.size() != 36) return false;
+    for (std::size_t i = 0; i < value.size(); ++i) {
+        const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
+        if (dash) {
+            if (value[i] != '-') return false;
+        } else if (!std::isxdigit(static_cast<unsigned char>(value[i]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+struct msi_inputs {
+    std::string wix;             // wix.exe, from the xim:wix payload
+    std::string package_wxs;     // the rendered definition, absolute
+    std::string project_dir;     // holds the icon, absolute
+    std::string out;             // the .msi to write, absolute
+    std::string bindpath_app;    // the link directory, relative to the build dir
+};
+
+// The `wix build` argv.
+//
+// `bindpath_app` is relative on purpose. An action runs with the BUILD
+// directory as its working directory, and that is the directory ninja links
+// into -- so `bin` reaches the executable without the rule having to know the
+// target triple or the fingerprint, neither of which a build program is told.
+[[nodiscard]] inline std::vector<std::string> msi_arguments(const msi_inputs& in) {
+    return {
+        in.wix, "build", in.package_wxs,
+        "-arch", "x64",
+        "-bindpath", "Application=" + in.bindpath_app,
+        "-bindpath", "Project=" + in.project_dir,
+        "-out", in.out,
+    };
+}
+
+// Replaces every @@TOKEN@@ in the shipped Package.wxs. An unresolved token is
+// an error rather than a literal: WiX would accept `@@VERSION@@` as a version
+// string and fail somewhere less obvious.
+[[nodiscard]] inline std::string render_wxs(
+        std::string_view text,
+        const std::vector<std::pair<std::string, std::string>>& values,
+        std::string& error) {
+    std::string out;
+    std::size_t cursor = 0;
+    while (cursor < text.size()) {
+        const std::size_t open = text.find("@@", cursor);
+        if (open == std::string_view::npos) { out.append(text.substr(cursor)); break; }
+        out.append(text.substr(cursor, open - cursor));
+        const std::size_t close = text.find("@@", open + 2);
+        if (close == std::string_view::npos) {
+            error = "unterminated @@ token"; return {};
+        }
+        const std::string_view key = text.substr(open + 2, close - open - 2);
+        const auto it = std::ranges::find_if(values, [&](const auto& kv) { return kv.first == key; });
+        if (it == values.end()) {
+            error = "unknown token '" + std::string(key) + "'"; return {};
+        }
+        out.append(it->second);
+        cursor = close + 2;
+    }
+    return out;
+}
+
 [[nodiscard]] inline wix_layout wix_paths(std::string_view root) {
     const std::string r(root);
     return wix_layout{

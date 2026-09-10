@@ -25,6 +25,24 @@ export namespace huxerui::rules {
 // ---------------------------------------------------------------- options --
 // Field-for-field the arguments of huxerui_add_app() in cmake/HuxerUIApp.cmake,
 // so the two spellings of "an application" can be reviewed side by side.
+// What an application must state to get a Windows installer, and nothing it
+// could have been asked for twice.
+//
+// `mcpp` tells a build program the package NAME but not its version, so the
+// version is stated here rather than guessed. The upgrade code has to be a
+// stable GUID chosen once per product: a new one on every release makes every
+// release a separate installed product.
+struct installer_options {
+    std::string target;         // the [targets.*] bin to install; enables the rule
+    std::string version;        // "1.2.3"
+    std::string upgrade_code;   // a GUID, stable for the life of the product
+    std::string manufacturer;   // default: the package namespace, else its name
+    std::string display_name;   // default: the package name
+    std::string icon;           // .ico, relative to the manifest; default assets/app.ico
+
+    [[nodiscard]] bool requested() const { return !target.empty(); }
+};
+
 struct options {
     std::vector<std::string> sources;             // default: src/**/*.cpp
     // The bin target's entry, which mcpp compiles separately from `sources`.
@@ -38,6 +56,7 @@ struct options {
     std::string              resource_namespace;  // = RESOURCE_NAMESPACE
     std::string              bundle_name;         // = BUNDLE_NAME
     std::string              bundle_identifier;   // = BUNDLE_IDENTIFIER
+    installer_options        installer;           // Windows MSI; empty = none
 };
 
 // A planned build-graph edge, handed back so a caller that needs to adjust one
@@ -316,6 +335,112 @@ inline bool submit(std::span<const edge> edges) {
     return true;
 }
 
+// ------------------------------------------------------------- installer --
+// The Windows MSI, built by the WiX toolset from the xim:wix payload.
+//
+// One action, and it is a `role = "artifact"` one: its input is the link
+// output, which is what sequences it after the link without any phase
+// machinery. There is no staging step -- `bindpath.Application` is the
+// relative path `bin`, which is the directory ninja links into and the
+// directory this action's working directory contains, and HuxerUI's compiled
+// resources are linked INTO the executable rather than carried beside it.
+//
+// Silent on every non-Windows target and on a project that asked for nothing.
+inline bool plan_installer(const options& opt, std::vector<edge>& out) {
+    if (!opt.installer.requested()) return true;
+    if (std::string_view(mcpp::target_os()) != "windows") return true;
+
+    const installer_options& in = opt.installer;
+    if (!huxerui::rules::sources::is_upgrade_code(in.upgrade_code)) {
+        std::cerr << "huxerui.rules: installer.upgrade_code must be a GUID "
+                     "(8-4-4-4-12 hex digits); got '" << in.upgrade_code << "'\n";
+        return false;
+    }
+    if (in.version.empty()) {
+        std::cerr << "huxerui.rules: installer.version is required -- mcpp does not "
+                     "tell a build program the package version\n";
+        return false;
+    }
+
+    const auto layout = wix();
+    if (layout.tool.empty()) {
+        std::cerr << "huxerui.rules: the xim:wix payload is not installed; the framework "
+                     "declares it under [target.windows.xlings.workspace]\n";
+        return false;
+    }
+
+    const std::string manifest = std::string(mcpp::manifest_dir());
+    const std::string odir     = std::string(mcpp::out_dir()) + "/wix";
+    const std::string icon     = in.icon.empty() ? std::string("assets/app.ico") : in.icon;
+    const std::string display  = in.display_name.empty() ? std::string(mcpp::package_name())
+                                                         : in.display_name;
+    std::string maker = in.manufacturer;
+    if (maker.empty()) {
+        maker = std::string(mcpp::package_namespace());
+        if (maker.empty()) maker = std::string(mcpp::package_name());
+    }
+
+    const std::filesystem::path icon_path = std::filesystem::path(manifest) / icon;
+    if (!std::filesystem::exists(icon_path)) {
+        std::cerr << "huxerui.rules: installer icon is missing: " << icon_path.string() << "\n";
+        return false;
+    }
+
+    // Read the definition the rule package ships, render it, and write it where
+    // the action will read it. build.mcpp runs before ninja, so this is a plain
+    // file write rather than another edge.
+    const std::string tmpl_path = sdk_root() + "/mcpp/huxerui-build-rules/wix/Package.wxs.in";
+    std::ifstream tmpl(tmpl_path, std::ios::binary);
+    if (!tmpl) {
+        std::cerr << "huxerui.rules: cannot read " << tmpl_path << "\n";
+        return false;
+    }
+    const std::string text{std::istreambuf_iterator<char>(tmpl), std::istreambuf_iterator<char>()};
+
+    std::string error;
+    const std::string wxs = huxerui::rules::sources::render_wxs(text, {
+        {"DISPLAY_NAME",  display},
+        {"MANUFACTURER",  maker},
+        {"VERSION",       in.version},
+        {"UPGRADE_CODE",  in.upgrade_code},
+        {"ICON",          std::filesystem::path(icon).filename().string()},
+        {"TARGET_FILE",   in.target + ".exe"},
+    }, error);
+    if (!error.empty()) {
+        std::cerr << "huxerui.rules: " << tmpl_path << ": " << error << "\n";
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(odir, ec);
+    const std::string wxs_out = odir + "/Package.wxs";
+    {
+        std::ofstream file(wxs_out, std::ios::binary | std::ios::trunc);
+        if (!file) { std::cerr << "huxerui.rules: cannot write " << wxs_out << "\n"; return false; }
+        file << wxs;
+    }
+    mcpp::rerun_if_changed(tmpl_path.c_str());
+
+    const std::string msi = odir + "/" + display + "-" + in.version + ".msi";
+    out.push_back(edge{
+        .id          = "wix:msi",
+        .role        = "artifact",
+        .description = "windows installer (" + display + ".msi)",
+        .command     = huxerui::rules::sources::msi_arguments({
+                           .wix          = layout.tool,
+                           .package_wxs  = wxs_out,
+                           .project_dir  = icon_path.parent_path().string(),
+                           .out          = msi,
+                           .bindpath_app = "bin",
+                       }),
+        // `${mcpp.target_file:<name>}` is what mcpp expands to the link output.
+        // An unknown target name is refused rather than silently empty.
+        .inputs      = { "${mcpp.target_file:" + in.target + "}", wxs_out },
+        .outputs     = { msi },
+    });
+    return true;
+}
+
 // -------------------------------------------------------------- configure --
 // One call for the common case. Returns false only on a condition that should
 // stop the build; a missing optional input is reported and tolerated.
@@ -466,6 +591,8 @@ inline bool configure(options opt = {}) {
             (std::string(mcpp::out_dir()) + "/hrc/builtin/include").c_str());
     }
     edges.insert(edges.end(), rs.begin(), rs.end());
+
+    if (!plan_installer(opt, edges)) return false;
 
     return submit(edges);
 }

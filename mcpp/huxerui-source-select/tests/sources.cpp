@@ -262,6 +262,59 @@ void umbrella_includes_are_read_in_order() {
 
 } // namespace
 
+// ------------------------------------------------------------- installer --
+
+void test_upgrade_code() {
+    using huxerui::rules::sources::is_upgrade_code;
+    check(is_upgrade_code("6F2B4C1E-9A3D-4F58-8B27-1D0E5A7C93B4"), "a GUID is accepted");
+    check(is_upgrade_code("6f2b4c1e-9a3d-4f58-8b27-1d0e5a7c93b4"), "lower case is a GUID too");
+    check(!is_upgrade_code(""), "empty is not a GUID");
+    check(!is_upgrade_code("not-a-guid"), "a word is not a GUID");
+    // The failure this guards is silent: WiX takes a malformed code literally
+    // and the MSI then never upgrades in place.
+    check(!is_upgrade_code("6F2B4C1E9A3D4F588B271D0E5A7C93B4"), "dashes are required");
+    check(!is_upgrade_code("6F2B4C1E-9A3D-4F58-8B27-1D0E5A7C93B"), "35 characters is not a GUID");
+    check(!is_upgrade_code("6F2B4C1E-9A3D-4F58-8B27-1D0E5A7C93BG"), "G is not a hex digit");
+}
+
+void test_msi_arguments() {
+    using huxerui::rules::sources::msi_arguments;
+    const auto argv = msi_arguments({
+        .wix          = "C:/wix/wix.exe",
+        .package_wxs  = "C:/build/out/wix/Package.wxs",
+        .project_dir  = "C:/app/assets",
+        .out          = "C:/build/out/wix/App.msi",
+        .bindpath_app = "bin",
+    });
+    check(argv.front() == "C:/wix/wix.exe", "the tool comes first");
+    check(argv[1] == "build", "then the verb");
+    const auto has = [&](std::string_view v) {
+        return std::ranges::find(argv, v) != argv.end();
+    };
+    check(has("Application=bin"), "the link directory is bound relative");
+    check(has("Project=C:/app/assets"), "the icon directory is bound absolute");
+    check(has("-arch") && has("x64"), "the architecture is stated");
+    check(argv[argv.size() - 2] == "-out", "-out is next to last");
+    check(argv.back() == "C:/build/out/wix/App.msi", "the msi is last");
+}
+
+void test_render_wxs() {
+    using huxerui::rules::sources::render_wxs;
+    std::string error;
+    const std::string out = render_wxs("<Package Name=\"@@DISPLAY_NAME@@\" Version=\"@@VERSION@@\" />",
+                                       {{"DISPLAY_NAME", "Sample"}, {"VERSION", "1.2.3"}}, error);
+    check(error.empty(), "a complete token set renders");
+    check(out == "<Package Name=\"Sample\" Version=\"1.2.3\" />", "both tokens are replaced");
+
+    error.clear();
+    render_wxs("@@NOPE@@", {{"DISPLAY_NAME", "Sample"}}, error);
+    check(error.find("NOPE") != std::string::npos, "an unknown token is named, not copied");
+
+    error.clear();
+    render_wxs("@@UNTERMINATED", {}, error);
+    check(!error.empty(), "an unterminated token is an error");
+}
+
 int main() {
     header_scan_finds_namespace_scope_declarations();
     header_scan_sees_past_an_attribute();
@@ -280,6 +333,9 @@ int main() {
     glob_anchors_at_both_ends();
     codegen_prefilter_matches_the_cmake_rule();
     entry_is_excluded_from_the_transform_set();
+    test_upgrade_code();
+    test_msi_arguments();
+    test_render_wxs();
     if (failures != 0) {
         std::cerr << failures << " check(s) failed\n";
         return 1;

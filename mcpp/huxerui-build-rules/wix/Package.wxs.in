@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The MSI definition huxerui.rules builds. Rendered into the build directory
+  with the values an application gave `installer_options`, then handed to
+  `wix build`.
+
+  bindpath.Application is the directory ninja links into, reached as the
+  relative path `bin` because a wix action runs with the build directory as its
+  working directory. `<Files Include="…\**" />` harvests it, so the install set
+  is whatever the link produced -- on Windows the executable and the DLLs
+  beside it. HuxerUI's compiled resources are linked INTO the executable, so
+  there is nothing else to carry.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="@@DISPLAY_NAME@@" Manufacturer="@@MANUFACTURER@@" Version="@@VERSION@@"
+           UpgradeCode="@@UPGRADE_CODE@@" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of @@DISPLAY_NAME@@ is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="ApplicationIcon" SourceFile="!(bindpath.Project)\@@ICON@@" />
+    <Property Id="ARPPRODUCTICON" Value="ApplicationIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="@@DISPLAY_NAME@@" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="APPLICATIONPROGRAMMENU" Name="@@DISPLAY_NAME@@" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Files Include="!(bindpath.Application)\**" />
+    </ComponentGroup>
+    <Component Id="ApplicationShortcut" Directory="APPLICATIONPROGRAMMENU">
+      <Shortcut Id="ApplicationStartMenuShortcut" Name="@@DISPLAY_NAME@@"
+                Target="[INSTALLFOLDER]@@TARGET_FILE@@" WorkingDirectory="INSTALLFOLDER"
+                Icon="ApplicationIcon" />
+      <RemoveFolder Id="RemoveApplicationProgramMenu" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\@@MANUFACTURER@@\@@DISPLAY_NAME@@" Name="installed"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Application" Title="@@DISPLAY_NAME@@" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+  </Package>
+</Wix>

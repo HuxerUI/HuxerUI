@@ -519,10 +519,20 @@ jobs:
         shell: pwsh
         run: mcpp build
 
-      - name: Build the example application
+      # All three, as the other jobs do. This job had built only 02 because its
+      # step is written in pwsh and the loop that replaced the others did not
+      # match it.
+      - name: Build the examples
         shell: pwsh
-        working-directory: mcpp/examples/02-module-units
-        run: mcpp build
+        run: |
+          Get-ChildItem -Directory mcpp/examples -Filter '0*' | ForEach-Object {
+            Write-Host "--- $($_.Name)"
+            Push-Location $_.FullName
+            mcpp build
+            if ($LASTEXITCODE -ne 0) { Pop-Location; throw "$($_.Name) failed" }
+            Pop-Location
+          }
+
       - name: Assert the Windows executable carries its version resource
         if: runner.os == 'Windows'
         shell: pwsh
@@ -533,6 +543,25 @@ jobs:
           $info = $exe.VersionInfo
           Write-Host "FileVersion=$($info.FileVersion) ProductName=$($info.ProductName)"
           if (-not $info.FileVersion) { throw 'the executable carries no version resource' }
+
+      # The installer, built by huxerui.rules through the WiX toolset the
+      # framework declares as an xlings payload. `role = "artifact"` is what
+      # sequences it after the link -- its input is the executable above -- and
+      # `bindpath.Application=bin` is what lets it harvest the link directory
+      # without a staging step.
+      - name: Assert the MSI was produced
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: mcpp/examples/02-module-units
+        run: |
+          $msi = Get-ChildItem -Recurse -Filter '*.msi' target | Select-Object -First 1
+          if (-not $msi) { throw 'huxerui.rules produced no installer' }
+          Write-Host "built $($msi.FullName) ($([math]::Round($msi.Length/1KB)) KB)"
+          if ($msi.Length -lt 100KB) { throw 'the MSI is too small to contain the application' }
+          # The definition the rule rendered, kept beside it for inspection.
+          $wxs = Get-ChildItem -Recurse -Filter 'Package.wxs' target | Select-Object -First 1
+          if (-not $wxs) { throw 'the rendered Package.wxs is missing' }
+          if ((Get-Content $wxs.FullName -Raw) -match '@@') { throw 'the Package.wxs has unresolved tokens' }
 
       # The suite that says the LIBRARY works, not just that it links. Same
       # sources tests/unit/CMakeLists.txt compiles and the same vendored

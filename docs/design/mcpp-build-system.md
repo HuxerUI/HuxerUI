@@ -211,7 +211,53 @@ so `platform/macos/*.mm` is listed explicitly. `frameworks` is a **top-level**
 `[target.macos.runtime] frameworks` entry is ignored, failing at link on macOS
 alone. Unconditional is correct: the engine renders it only for Mach-O.
 
-## 7. Verification
+## 7. The Windows installer
+
+An application asks for an MSI in its build program, and gets one:
+
+```cpp
+huxerui::rules::configure({
+    .resources = "resources",
+    .installer = {
+        .target       = "myapp",
+        .version      = "1.2.3",
+        .upgrade_code = "27B7A054-FFE4-48A5-92E3-5D90C0507EEB",
+    },
+});
+```
+
+The rule renders the MSI definition it ships
+(`mcpp/huxerui-build-rules/wix/Package.wxs.in`) into the build directory and
+submits **one** action, `role = "artifact"` — whose inputs are link outputs, so
+ninja sequences it after the link with no phase machinery. The WiX toolset
+comes from the `xim:wix` payload the framework declares under
+`[target.windows.xlings.workspace]`, so nothing is installed by hand.
+
+Three things make it one action rather than several:
+
+- **No staging.** `bindpath.Application` is the *relative* path `bin`, because
+  an action runs with the build directory as its working directory and that is
+  the directory ninja links into. `<Files Include="!(bindpath.Application)\**" />`
+  then harvests whatever the link produced.
+- **No resource copying.** HuxerUI's compiled resources are linked into the
+  executable; moving the whole `out/hrc` tree away and running the program
+  confirms it. The install set is the executable and the DLLs beside it.
+- **No path arithmetic.** `${mcpp.target_file:<target>}` is what mcpp expands
+  to the link output. A build program is told neither the target triple nor the
+  fingerprint, so the placeholder is the only way to name it — and an unknown
+  target is refused rather than expanded to an empty path.
+
+Silent on Linux and macOS: the rule returns before it reads anything when the
+target is not Windows.
+
+**The branded bundle is not built.** `Bundle.wxs` in the CMake path wraps the
+MSI in a WiX **bootstrapper application**, which is a second HuxerUI program —
+`platform/windows/windows_installer.cpp` (896 lines) plus a per-application UI
+and ten locales, linking `balutil.lib` and `dutil.lib` from the same payload.
+`wix_paths()` already resolves those, so nothing structural is missing; it is
+unbuilt, not blocked.
+
+## 8. Verification
 
 | Check | What it catches |
 |---|---|
@@ -231,7 +277,7 @@ not redundant with the other two — Windows and macOS compile a BMI and its
 consumer in the same job with the same flags, so a dialect divergence like §5's
 shows only where GCC is the default and clang is the exception.
 
-## 8. Known gaps
+## 9. Known gaps
 
 **Android, iOS and Web** are outside mcpp's target language today, and CMake
 remains the only path to them. Web is the one that has been taken up with
