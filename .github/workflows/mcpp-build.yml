@@ -1,8 +1,10 @@
 name: mcpp Build
 
-# The mcpp leg of the dual build system. CMake remains the full-platform path
-# and the only path for Android, iOS and Web; this workflow covers what mcpp
-# can build today (see .agents/docs/2026-09-09-mcpp-native-build-and-modules-plan.md).
+# Developing HuxerUI and its applications with mcpp.
+#
+# CMake remains the full-platform path and the only path for Android, iOS and
+# Web; this workflow covers what mcpp builds today. The design is
+# docs/design/mcpp-build-system.md.
 #
 # `parity` is first and cheap on purpose: it builds two small programs and no
 # framework, so the failure it catches -- a source added to one build system
@@ -20,7 +22,7 @@ on:
       # The `!` line is last on purpose: in a paths filter a later pattern
       # overrides an earlier one, so it subtracts documentation from every
       # directory named above. README.md under mcpp/, include/ or
-      # examples/mcpp_demo/ is not a build input.
+      # mcpp/examples/ is not a build input.
       - 'mcpp.toml'
       - 'build.mcpp'
       - 'mcpp/**'
@@ -35,7 +37,6 @@ on:
       # Read by huxerui-build-check, which compares the two build systems.
       - 'cmake/platform/**'
       - 'cmake/HuxerUIBuild.cmake'
-      - 'examples/mcpp_demo/**'
       - 'tools/codegen/**'
       - 'tools/resource_compiler/**'
       # Compiled by mcpp/huxerui-tests: the suite, what it links beside it, and
@@ -57,7 +58,7 @@ on:
       # The `!` line is last on purpose: in a paths filter a later pattern
       # overrides an earlier one, so it subtracts documentation from every
       # directory named above. README.md under mcpp/, include/ or
-      # examples/mcpp_demo/ is not a build input.
+      # mcpp/examples/ is not a build input.
       - 'mcpp.toml'
       - 'build.mcpp'
       - 'mcpp/**'
@@ -72,7 +73,6 @@ on:
       # Read by huxerui-build-check, which compares the two build systems.
       - 'cmake/platform/**'
       - 'cmake/HuxerUIBuild.cmake'
-      - 'examples/mcpp_demo/**'
       - 'tools/codegen/**'
       - 'tools/resource_compiler/**'
       # Compiled by mcpp/huxerui-tests: the suite, what it links beside it, and
@@ -214,13 +214,16 @@ jobs:
       - name: Build the framework
         run: mcpp build
 
-      # An application on top of it. Its mcpp.toml names one dependency and its
-      # build.mcpp is one call; everything else -- GTK on the link line, the
-      # composable transform, the resource packages -- arrives through the
-      # dependency edge.
-      - name: Build the example application
-        working-directory: examples/mcpp_demo
-        run: mcpp build
+      # Three applications on top of it. Each mcpp.toml names one dependency
+      # and each build.mcpp is one call; everything else -- GTK on the link
+      # line, the composable transform, the resource packages -- arrives
+      # through the dependency edge.
+      - name: Build the examples
+        run: |
+          for example in mcpp/examples/0*/; do
+            echo "--- $example"
+            ( cd "$example" && mcpp build )
+          done
       # The suite that says the LIBRARY works, not just that it links. Same
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
@@ -247,15 +250,15 @@ jobs:
             || { echo "the package carries no library"; exit 1; }
           echo "package carries headers, the module interface and a library"
       - name: Assert the composable transform ran and is macro-free
-        working-directory: examples/mcpp_demo
+        working-directory: mcpp/examples/02-module-units
         run: |
           # Name the unit rather than taking the first match. hcg's output
           # directory ACCUMULATES -- renaming a source leaves its old
           # transformed copy behind -- so `find ... | head -1` asserts on
           # whichever file the directory happens to yield first. That is green
           # on a fresh runner and wrong in any tree that has been built before.
-          generated=$(find target -path '*hcg*' -name '*app.cppm' | head -1)
-          test -n "$generated" || { echo "hcg did not transform src/app.cppm"; exit 1; }
+          generated=$(find target -path '*hcg*' -name '*counter.cppm' | head -1)
+          test -n "$generated" || { echo "hcg did not transform src/counter.cppm"; exit 1; }
           grep -q 'return ::huxerui::Scope(' "$generated" \
             || { echo "transformed source lacks the composable scope"; exit 1; }
           # A generated module interface must still declare itself, or the
@@ -273,30 +276,31 @@ jobs:
       # code, which uses HUXERUI_SCOPE directly and would otherwise fail with
       # `'HUXERUI_SCOPE' was not declared in this scope` under `import`.
       - name: Assert hand-written scope macros work under import
-        working-directory: examples/mcpp_demo
+        working-directory: mcpp/examples/02-module-units
         run: |
-          grep -q 'HUXERUI_SCOPE(' src/app.cppm \
-            || { echo "the demo no longer exercises a hand-written scope macro"; exit 1; }
-          # The demo is module-style, so the prelude is NOT force-included --
-          # `-include` prepends before `module;`, which is ill-formed. The
-          # module unit includes it in its own global module fragment instead,
-          # and the rule puts the directory on the include path.
-          grep -q '#include <huxerui_scope_prelude.h>' src/app.cppm \
+          grep -q 'HUXERUI_SCOPE(' src/banner.cppm \
+            || { echo "02 no longer exercises a hand-written scope macro"; exit 1; }
+          # A module unit cannot be force-included -- `-include` prepends before
+          # `module;`, which is ill-formed -- so it includes the prelude in its
+          # own global module fragment, and the rule puts that directory on the
+          # include path.
+          grep -q '#include <huxerui_scope_prelude.h>' src/banner.cppm \
             || { echo "the module unit no longer includes the scope prelude"; exit 1; }
           grep -rq -- 'huxerui-build-rules[/\\]include' target/*/*/build.ninja \
             || { echo "the prelude directory never reached the include path"; exit 1; }
           echo "hand-written HUXERUI_SCOPE compiles in a module unit"
 
-      - name: Assert the demo consumes HuxerUI as a module
-        working-directory: examples/mcpp_demo
+      - name: Assert the examples consume HuxerUI as a module
+        working-directory: mcpp/examples/01-import
         run: |
           grep -q '^import huxerui;' src/main.cpp \
-            || { echo "the demo no longer imports the module"; exit 1; }
+            || { echo "01 no longer imports the module"; exit 1; }
+          # 01 is the header-free form: no #include anywhere, in either unit.
+          ! grep -rn '^[[:space:]]*#include' src/ \
+            || { echo "01 gained a header"; exit 1; }
           # Anchored: the file's own comment explains what `import` replaces,
           # and an unanchored pattern matches that sentence.
-          ! grep -qE '^[[:space:]]*#include <huxerui/' src/main.cpp \
-            || { echo "the demo still includes the umbrella header"; exit 1; }
-          echo "demo builds against import huxerui;"
+          echo "01 builds against import huxerui;, with no headers"
 
       # The umbrella header is the CMake build's contract, and this PR must not
       # touch it. Compile it standalone with the SYSTEM compiler -- the one
@@ -344,6 +348,9 @@ jobs:
         run: |
           xlings install "mcpp@${MCPP_VERSION}" -y
           mcpp --version
+          # `default` selects; it does not install. On a cold cache the next
+          # command is `error: llvm@22.1.8 is not installed`.
+          mcpp toolchain install "${MCPP_LLVM}"
           mcpp toolchain default "${MCPP_LLVM}"
           mcpp toolchain list
 
@@ -361,7 +368,7 @@ jobs:
       # `mcpp build` is fully cached, emits no compile lines, and would make
       # the assertion pass by having nothing to read.
       - name: Build the example application, and check the BMI was loaded
-        working-directory: examples/mcpp_demo
+        working-directory: mcpp/examples/02-module-units
         run: |
           set -o pipefail
           mcpp build 2>&1 | tee build.log
@@ -427,9 +434,12 @@ jobs:
       - name: Build the framework
         run: mcpp build
 
-      - name: Build the example application
-        working-directory: examples/mcpp_demo
-        run: mcpp build
+      - name: Build the examples
+        run: |
+          for example in mcpp/examples/0*/; do
+            echo "--- $example"
+            ( cd "$example" && mcpp build )
+          done
       # The suite that says the LIBRARY works, not just that it links. Same
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
@@ -499,14 +509,14 @@ jobs:
 
       - name: Build the example application
         shell: pwsh
-        working-directory: examples/mcpp_demo
+        working-directory: mcpp/examples/02-module-units
         run: mcpp build
       - name: Assert the Windows executable carries its version resource
         if: runner.os == 'Windows'
         shell: pwsh
-        working-directory: examples/mcpp_demo
+        working-directory: mcpp/examples/02-module-units
         run: |
-          $exe = Get-ChildItem -Recurse -Filter 'huxerui_mcpp_demo.exe' target | Select-Object -First 1
+          $exe = Get-ChildItem -Recurse -Filter 'huxerui_example_module_units.exe' target | Select-Object -First 1
           if (-not $exe) { throw 'the demo produced no executable' }
           $info = $exe.VersionInfo
           Write-Host "FileVersion=$($info.FileVersion) ProductName=$($info.ProductName)"

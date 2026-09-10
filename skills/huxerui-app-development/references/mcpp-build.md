@@ -80,7 +80,7 @@ ldflags = ["<sdk library and platform link options>"]
 library_dirs = ["<runtime library directories>"]
 ```
 
-Use `examples/mcpp_demo/mcpp.toml` as a shape example only.
+Use `mcpp/examples/01-import/mcpp.toml` as a shape example only.
 Its absolute Linux library paths, GCC version, and direct GTK link list are host-specific and must not be copied to another platform or SDK installation.
 
 ## C++23 and C++26

@@ -1,4 +1,4 @@
-# The mcpp leg of the HuxerUI build
+# Developing HuxerUI and its applications with mcpp
 
 HuxerUI has two build systems. **CMake is the full-platform one and the only
 path for Android, iOS and Web**; mcpp builds the framework and applications on
@@ -6,15 +6,15 @@ Linux, Windows and macOS. Neither reads the other's files, and deleting this
 directory plus `mcpp.toml` and `build.mcpp` returns the repository to a
 CMake-only project.
 
-The design, the phasing and the open questions are in
-[`.agents/docs/2026-09-09-mcpp-native-build-and-modules-plan.md`](../.agents/docs/2026-09-09-mcpp-native-build-and-modules-plan.md);
-the analysis behind it is in [`docs/design/mcpp-dual-build-analysis.md`](../docs/design/mcpp-dual-build-analysis.md).
+The design and the open gaps are in
+[`docs/design/mcpp-build-system.md`](../docs/design/mcpp-build-system.md);
+three worked applications are in [`examples/`](examples/).
 
 ## Building
 
 ```bash
 mcpp build                          # the framework
-cd examples/mcpp_demo && mcpp build # an application on top of it
+cd mcpp/examples/01-import && mcpp build  # an application on top of it
 ```
 
 **Nothing needs to be installed first.** The GTK 4 stack comes from the xlings
@@ -62,7 +62,7 @@ int main() { return huxerui::rules::configure({ .resources = "resources" }) ? 0 
 compiler (`hrc`) as build-graph edges. GTK, the HuxerUI library and the include
 path arrive through the dependency edge: a dependency's `build.mcpp` emits
 `link-lib` / `link-search` that reach the **final** link, so an application
-never restates them. `examples/mcpp_demo/` is the worked example.
+never restates them. `mcpp/examples/` holds three worked examples.
 
 ## Three things worth knowing before editing
 

@@ -1,0 +1,19 @@
+[package]
+name        = "huxerui-example-library"
+version     = "0.1.0"
+standard    = "c++20"
+description = "An application importing a HuxerUI component library"
+
+# Two edges, and only one of them is named by this application's own code.
+# `widgets` is what it imports; `huxerui` is here because the application uses
+# HuxerUI directly too -- a dependency's dependency is not importable.
+[dependencies]
+huxerui        = { path = "../../.." }
+example-widgets = { path = "widgets" }
+
+[targets.huxerui_example_library]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+sources = []

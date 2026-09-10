@@ -1,0 +1,21 @@
+[package]
+name        = "huxerui-example-module-units"
+version     = "0.1.0"
+standard    = "c++20"
+description = "One application across several module units, and what a macro costs"
+
+[dependencies]
+huxerui = { path = "../../.." }
+
+[targets.huxerui_example_module_units]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+sources = []
+
+# The Windows executable's icon and version metadata. FILEVERSION, ProductName
+# and FileDescription default from [package]. Only PE targets compile it; on
+# Linux and macOS the table is inapplicable and the build is byte-identical.
+[resources]
+icon = "assets/app.ico"

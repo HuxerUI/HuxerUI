@@ -1,0 +1,18 @@
+[package]
+name        = "huxerui-example-import"
+version     = "0.1.0"
+standard    = "c++20"
+description = "The smallest HuxerUI application mcpp can build"
+
+[dependencies]
+huxerui = { path = "../../.." }
+
+[targets.huxerui_example_import]
+kind = "bin"
+main = "src/main.cpp"
+
+# huxerui.rules owns the source selection: a build program can ADD a source but
+# cannot replace one, so a package that also globbed src/**/*.cpp would link
+# both the original and the hcg-transformed copy of every composable.
+[build]
+sources = []

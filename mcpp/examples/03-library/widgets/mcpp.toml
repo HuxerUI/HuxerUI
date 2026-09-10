@@ -1,0 +1,19 @@
+[package]
+name        = "example-widgets"
+version     = "0.1.0"
+standard    = "c++20"
+description = "A HuxerUI component library, consumed as a module"
+
+[dependencies]
+huxerui = { path = "../../../.." }
+
+[targets.example-widgets]
+kind = "lib"
+
+# The module a consumer imports. A package name may contain characters a module
+# name may not, so the file is named for the module it declares.
+[lib]
+path = "src/widgets.cppm"
+
+[build]
+sources = []
