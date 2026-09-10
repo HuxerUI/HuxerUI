@@ -1,0 +1,7 @@
+// A library needs the same build program an application does: its composables
+// are transformed by the same hcg, scheduled by the same rules.
+
+import mcpp;
+import huxerui.rules;
+
+int main() { return huxerui::rules::configure({}) ? 0 : 1; }

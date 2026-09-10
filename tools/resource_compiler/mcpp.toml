@@ -1,0 +1,20 @@
+# hrc as an mcpp package. See tools/codegen/mcpp.toml for why the mcpp build
+# compiles the host tools from source instead of using tools/prebuilt/.
+
+[package]
+name        = "huxerui-resource-compiler"
+namespace   = "huxerui"
+version     = "0.3.0"
+standard    = "c++20"
+description = "hrc -- the HuxerUI resource compiler"
+license     = "Apache-2.0"
+
+[targets.hrc]
+kind = "bin"
+main = "main.cpp"
+
+[build]
+sources = ["compiler.cpp", "svg_compiler.cpp"]
+# resource_format.h and vector_format.h are the on-disk package format, shared
+# with the runtime; CMakeLists.txt points at the same directory.
+include_dirs = [".", "../../src/resources"]

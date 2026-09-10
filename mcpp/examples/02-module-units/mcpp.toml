@@ -1,0 +1,31 @@
+# c++23, and it is a workaround rather than a language requirement.
+#
+# The module unit writes `import std;`, which every implementation this project
+# builds with supports at c++20 -- the MSVC STL's named modules are documented
+# as needing /std:c++20 or later. But mcpp's clang-on-Windows path hardcodes
+# `importStdMinLevel = 23` instead of probing the STL it found
+# (mcpp-community/mcpp#603), and refuses the build below c++23.
+#
+# A module graph has exactly one standard, so this compiles huxerui at c++23
+# too. Change this line back to c++20 once #603 is fixed.
+[package]
+name        = "huxerui-example-module-units"
+version     = "0.1.0"
+standard    = "c++23"
+description = "One application across several module units, and what a macro costs"
+
+[dependencies]
+huxerui = { path = "../../.." }
+
+[targets.huxerui_example_module_units]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+sources = []
+
+# The Windows executable's icon and version metadata. FILEVERSION, ProductName
+# and FileDescription default from [package]. Only PE targets compile it; on
+# Linux and macOS the table is inapplicable and the build is byte-identical.
+[resources]
+icon = "assets/app.ico"

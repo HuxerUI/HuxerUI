@@ -1,0 +1,40 @@
+# The repository's own tooling, built by mcpp rather than written in Python.
+#
+# Two programs, no shared code -- each target's `main` is its own translation
+# unit and `[build] sources` is empty, so neither links the other's.
+#
+#   huxerui-module-gen    generates modules/huxerui.cppm and the scope prelude
+#                         from the public headers
+#   huxerui-build-check   asserts mcpp.toml and the CMake build describe the
+#                         same project
+#
+# Both were Python. They are C++ now for the reason the rest of this directory
+# exists: a repository that offers mcpp as a first-class build system should
+# not need a second language to check its own build. `mcpp test` covers them,
+# and the scanning they share with the build rules lives in
+# huxerui-source-select, where it is already tested.
+
+[package]
+name        = "huxerui-tools"
+namespace   = "huxerui"
+version     = "0.3.0"
+standard    = "c++23"
+description = "Repository tooling: the module-shell generator and the build-parity check"
+license     = "Apache-2.0"
+
+[dependencies]
+huxerui-source-select = { path = "../huxerui-source-select" }
+"marzer.tomlplusplus"  = "3.4.0"
+
+[build]
+# Each program is its own entry; there is no shared implementation to compile
+# once, and an empty set is how a manifest says so.
+sources = []
+
+[targets.huxerui-module-gen]
+kind = "bin"
+main = "src/module_gen.cpp"
+
+[targets.huxerui-build-check]
+kind = "bin"
+main = "src/build_check.cpp"

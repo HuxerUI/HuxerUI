@@ -70,24 +70,24 @@ View PlatformModuleApp() {
 TEST_CASE("PlatformRegistryOpensExactMoveOnlyModuleFromRoot") {
   TestPlatform platform;
   const auto disposals = std::make_shared<int>(0);
-  std::unique_ptr<TestModule> module;
+  std::unique_ptr<TestModule> opened;
   AppOptions options{.show_debug_overlay = false};
   options.root_hooks.push_back([&](RootContext& root) {
     root.RegisterPlatformModule<TestModule, TestModuleOptions>(
         "test/Module", [disposals](PlatformAdapter&, const TestModuleOptions& options) {
           return TestModule(options.value, disposals);
         });
-    module =
+    opened =
         std::make_unique<TestModule>(root.OpenPlatformModule<TestModule>("test/Module", TestModuleOptions{.value = 7}));
   });
 
   {
     Runtime runtime(PlatformModuleApp, platform, std::move(options));
-    REQUIRE(module != nullptr);
-    REQUIRE(module->Value() == 7);
+    REQUIRE(opened != nullptr);
+    REQUIRE(opened->Value() == 7);
     REQUIRE(*disposals == 0);
   }
-  module.reset();
+  opened.reset();
   REQUIRE(*disposals == 1);
 }
 

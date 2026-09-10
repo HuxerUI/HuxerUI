@@ -1,0 +1,28 @@
+# hcg as an mcpp package.
+#
+# The mcpp build does NOT use tools/prebuilt/. Those binaries are built for the
+# host's C library by .github/workflows/update-host-tools.yml, while mcpp
+# compiles with its own payload toolchain and its own glibc -- and after a
+# change to transform.cpp they are stale until that workflow runs on main.
+# Building the tool from source keeps the mcpp leg self-consistent and matches
+# the rest of this build system, which takes nothing from the machine.
+#
+# mcpp builds it FOR THE BUILD MACHINE (a code generator has to run there),
+# caches it globally, and hands build.mcpp its absolute path. CMake keeps using
+# tools/prebuilt/ exactly as before; this file changes nothing for it.
+
+[package]
+name        = "huxerui-codegen"
+namespace   = "huxerui"
+version     = "0.3.0"
+standard    = "c++20"
+description = "hcg -- the HuxerUI composable source transform"
+license     = "Apache-2.0"
+
+[targets.hcg]
+kind = "bin"
+main = "main.cpp"
+
+[build]
+sources      = ["transform.cpp"]
+include_dirs = ["."]
