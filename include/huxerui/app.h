@@ -224,7 +224,7 @@ public:
   const AppOptions options;
 };
 
-/// Provides application activation, lifecycle, clipboard, notifications, tray, and termination access.
+/// Provides application activation, lifecycle, clipboard, directories, notifications, tray, and termination access.
 ///
 /// `StartupActivation()` is immutable, while `OnActivation()` receives only later platform activations.
 /// `LifecycleState()` exposes the coalesced current value, while `OnLifecycleChange()` preserves distinct mounted
@@ -260,6 +260,28 @@ public:
   /// return Button("Copy").OnClick([clipboard] { clipboard->WriteText("HuxerUI"); });
   /// @endcode
   [[nodiscard]] std::shared_ptr<huxerui::Clipboard> Clipboard() const noexcept;
+  /// @brief Returns the platform-selected application directories captured at initialization without performing I/O.
+  /// @return A reference valid while this ApplicationHandle or its Runtime retains the application service.
+  /// Individual File values and the complete AppDirectories value may be copied and retained independently.
+  /// @throws std::logic_error If the host does not provide application directories.
+  ///
+  /// A captured ApplicationHandle can query these paths outside composition and after Runtime destruction.
+  /// Paths remain values, not access grants; later I/O can fail if permissions or on-disk contents change.
+  /// @code{.cpp}
+  /// auto application = UseApplication();
+  /// File settings = application.Directories().data_directory.Child("settings.json");
+  /// @endcode
+  [[nodiscard]] const AppDirectories& Directories() const;
+  /// @brief Queries the process current working directory at the time of the call.
+  /// @return An absolute File path, which need not be an application data or executable directory.
+  /// @throws std::runtime_error If the platform cannot determine the current working directory.
+  ///
+  /// This query does not require an active composition or a connected Runtime. The working directory is shared
+  /// by all Runtime instances in the process and is not cached in AppDirectories.
+  /// @code{.cpp}
+  /// File working_directory = application.CurrentDirectory();
+  /// @endcode
+  [[nodiscard]] File CurrentDirectory() const;
   /// Returns the system tray handle owned by the current composition scope.
   [[nodiscard]] SystemTrayHandle SystemTray() const;
   /// Returns the local-notification handle bound to the current composition Environment.

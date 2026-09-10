@@ -654,8 +654,8 @@ public:
     return this;
   }
 
-  std::shared_ptr<FileSystem> CreateFileSystem() override {
-    return CreateMacFileSystem();
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateMacAppDirectories();
   }
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {

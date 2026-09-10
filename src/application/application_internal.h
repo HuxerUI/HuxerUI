@@ -124,7 +124,8 @@ public:
   ApplicationService(Runtime& runtime, ApplicationActivation startup_activation,
                      std::shared_ptr<PermissionController> permissions,
                      std::shared_ptr<LocalNotificationService> local_notifications,
-                     std::shared_ptr<SystemTrayService> system_tray, PlatformClipboard* platform_clipboard);
+                     std::shared_ptr<SystemTrayService> system_tray, PlatformClipboard* platform_clipboard,
+                     std::optional<AppDirectories> directories);
 
   [[nodiscard]] const ApplicationActivation& StartupActivation() const noexcept;
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
@@ -136,6 +137,7 @@ public:
   [[nodiscard]] const std::shared_ptr<LocalNotificationService>& LocalNotifications() const noexcept;
   [[nodiscard]] const std::shared_ptr<SystemTrayService>& SystemTray() const noexcept;
   [[nodiscard]] const std::shared_ptr<huxerui::Clipboard>& Clipboard() const noexcept;
+  [[nodiscard]] const AppDirectories& Directories() const;
   void Quit() const;
   void Enqueue(ApplicationActivation activation);
   void UpdateLifecycleState(ApplicationLifecycleState lifecycle_state);
@@ -153,6 +155,7 @@ private:
   std::shared_ptr<LocalNotificationService> local_notifications_;
   std::shared_ptr<SystemTrayService> system_tray_;
   std::shared_ptr<huxerui::Clipboard> clipboard_;
+  std::optional<AppDirectories> directories_;
   std::deque<ApplicationActivation> pending_activations_;
   std::deque<ApplicationLifecycleState> pending_lifecycle_states_;
   std::function<void(ApplicationActivation)> activation_handler_;

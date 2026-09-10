@@ -13,12 +13,9 @@ typedef struct _GtkWidget GtkWidget;
 
 namespace huxerui {
 
-class FileSystem;
 class Runtime;
 
 namespace detail {
-
-struct FileSystemPaths;
 
 class LinuxFileDrop final {
 public:
@@ -32,7 +29,7 @@ private:
   std::unique_ptr<State> state_;
 };
 
-struct LinuxFileSystemEnvironment {
+struct LinuxAppDirectoryEnvironment {
   std::optional<std::string> home_directory;
   std::optional<std::string> passwd_home_directory;
   std::optional<std::string> data_home;
@@ -43,11 +40,11 @@ struct LinuxFileSystemEnvironment {
 };
 
 [[nodiscard]] std::string ResolveLinuxExecutablePath();
-[[nodiscard]] FileSystemPaths
-ResolveLinuxFileSystemPaths(std::string_view executable_path, const LinuxFileSystemEnvironment& environment);
-[[nodiscard]] std::shared_ptr<FileSystem>
-CreateLinuxFileSystem(std::string_view executable_path, LinuxFileSystemEnvironment environment);
-[[nodiscard]] std::shared_ptr<FileSystem> CreateLinuxFileSystem();
+[[nodiscard]] AppDirectories
+ResolveLinuxAppDirectories(std::string_view executable_path, const LinuxAppDirectoryEnvironment& environment);
+[[nodiscard]] AppDirectories
+CreateLinuxAppDirectories(std::string_view executable_path, LinuxAppDirectoryEnvironment environment);
+[[nodiscard]] AppDirectories CreateLinuxAppDirectories();
 
 } // namespace detail
 } // namespace huxerui

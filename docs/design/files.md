@@ -1,7 +1,7 @@
 # File and Application Storage Design
 
 This document defines the public API, ownership, error, threading, path, picker, external-reference, and platform contracts for files and application storage.
-The shared `File`, `FileInfo`, `IoResult<T>`, `FileSystem`, `FileReference`, and `FilePicker` surfaces, shared native worker execution, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
+The shared `File`, `FileInfo`, `IoResult<T>`, `AppDirectories`, `FileReference`, and `FilePicker` surfaces, shared native worker execution, Runtime service integration, Windows, macOS, Linux, iOS, Android, and Web local implementations, focused local-file example, and fake picker/reference tests are implemented.
 The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and the external-file flows in the focused example are also implemented.
 
 ## Goals
@@ -18,7 +18,7 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 
 ## Non-goals
 
-The file API does not provide a public `FileSystem` subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, or a document-provider abstraction.
+The file API does not provide a public filesystem subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, or a document-provider abstraction.
 Directory copying does not add multi-directory selection, mixed file/directory selection, recursive deletion of grants, mirroring, moves, metadata preservation, transactions, rollback, resumability, or a progress-controller API.
 
 It also does not persist picker grants across process launches or add clipboard, recent-file, or share-sheet APIs.
@@ -35,7 +35,7 @@ A resource is not required to have a stable operating-system path and is never p
 
 ## Public model
 
-All public declarations in this design live in `<huxerui/file.h>` and are re-exported from `<huxerui/huxerui.h>`.
+File and directory values live in `<huxerui/file.h>`, while application directory access is declared by `ApplicationHandle` in `<huxerui/app.h>`; both are re-exported from `<huxerui/huxerui.h>`.
 `File`, `FileReference`, and `FilePicker` remain one cohesive file-capability surface rather than being split by whether a value originated inside or outside the application sandbox.
 
 The public model consists of:
@@ -44,7 +44,7 @@ The public model consists of:
 - `FileInfo`, detailed metadata returned by `Stat()`.
 - `IoError` and `IoResult<T>`, used only where a legitimate empty value must remain distinct from failure.
 - `AppDirectories`, immutable application-owned locations represented as `File` values.
-- `FileSystem`, the Runtime-installed Root Service that exposes application and process directories.
+- `ApplicationHandle::Directories()` and `CurrentDirectory()`, the application entry points for storage locations and the process working directory.
 - `FileReference`, an immutable capability for one platform-granted external file or directory.
 - `FilePicker`, the Runtime-installed Root Service for opening files, selecting a directory, and saving user-visible files.
 
@@ -350,25 +350,18 @@ struct AppDirectories {
   File temporary_directory;
 };
 
-class FileSystem final {
+class ApplicationHandle final {
 public:
-  ~FileSystem();
-
-  FileSystem(const FileSystem&) = delete;
-  FileSystem& operator=(const FileSystem&) = delete;
-  FileSystem(FileSystem&&) = delete;
-  FileSystem& operator=(FileSystem&&) = delete;
-
-  [[nodiscard]] const AppDirectories& Directories() const noexcept;
+  [[nodiscard]] const AppDirectories& Directories() const;
   [[nodiscard]] File CurrentDirectory() const;
 };
 ```
 
-Runtime automatically installs one `FileSystem` Root Service before application RootHooks run:
+Runtime initializes the application service's directory values before application RootHooks run:
 
 ```cpp
-auto files = UseService<FileSystem>();
-File settings{files->Directories().data_directory, "settings.json"};
+auto application = UseApplication();
+File settings{application.Directories().data_directory, "settings.json"};
 ```
 
 `data_directory` contains durable application-private files that the operating system does not normally evict.
@@ -376,11 +369,14 @@ File settings{files->Directories().data_directory, "settings.json"};
 `temporary_directory` contains short-lived files and does not promise persistence across launches.
 `executable_directory` is present only when the platform exposes a meaningful local executable location.
 
-`CurrentDirectory()` reports the process working directory and is distinct from `executable_directory`.
+`ApplicationHandle::CurrentDirectory()` queries the process working directory at each call and is distinct from `executable_directory`.
+It does not depend on composition or a connected Runtime, and all Runtime instances share the process working directory.
 HuxerUI does not provide a process-wide working-directory mutation because it would affect other Runtime instances, libraries, and threads.
 Application storage must use the semantic application directories rather than depend on a launcher's working directory.
 
-The application directories are created and validated before the service is published.
+The application directories are created, validated, and registered with deletion safeguards before the application service is published.
+`Directories()` returns the captured values without I/O and remains usable on a retained ApplicationHandle after Runtime destruction; callers may also copy AppDirectories or individual File values.
+A host may omit this capability, in which case Runtime creation still succeeds but `Directories()` throws `std::logic_error`; `CurrentDirectory()` remains independent.
 Platform shells determine their application identity from bundle, package, or executable metadata rather than adding another identifier to the static `Application` declaration.
 
 The public API does not expose a cross-platform Documents directory.
@@ -624,14 +620,15 @@ Platform application metadata remains owned by the shell: Android intent filters
 
 ## Runtime and local ownership
 
-`FileSystem` is a built-in Runtime capability like `HttpClient`, not a PlatformModule and not a user-installed RootHook service.
-It owns immutable application-directory values and registers those roots with process-local recursive-deletion safeguards.
+The internal application service stores optional AppDirectories values directly, without a separate shared service or disconnection protocol.
+PlatformAdapter::CreateAppDirectories() supplies the prepared values; its default implementation returns no directories for hosts without that capability.
+Platform factories retain their identity resolution and platform-specific initialization. PrepareAppDirectories() is a shared helper for creating and validating the AppDirectories values they return; Web returns the directory values already initialized by its storage bootstrap.
+The application service always calls ProtectAppDirectories() for supplied values, including those returned directly by custom adapters. This registers process-local deletion safeguards without repeating platform initialization or creating directories.
 
-Each `File` stores only a normalized absolute UTF-8 local path and remains usable after its originating `FileSystem` handle or component has gone out of scope.
+Each `File` stores only a normalized absolute UTF-8 local path and remains usable after its originating ApplicationHandle, Runtime, or component has gone out of scope.
 Local operations are private implementation functions rather than a polymorphic provider interface.
 
-The public `FileSystem` is final.
-The API does not add filesystem registration, mount names, URL schemes, or a public `ZipFileSystem` subclass merely to reserve that possibility.
+The API does not add filesystem registration, mount names, URL schemes, or a public archive-filesystem abstraction merely to reserve that possibility.
 An archive or virtual filesystem requires a separate deliberate public design rather than an unused local-file abstraction.
 
 ## Synchronous and asynchronous execution
@@ -702,7 +699,7 @@ The initial adapter retains process-scoped URI access only and does not call `ta
 
 `HuxerUIActivity` installs the SAF launcher and forwards Activity results automatically.
 An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its owner installs `HuxerUIView.FilePickerLauncher` and forwards matching results through `dispatchFilePickerResult()`.
-Without that host capability, `CanOpenFiles()` and `CanSaveFiles()` return `false` while local `FileSystem` access remains available.
+Without that host capability, `CanOpenFiles()` and `CanSaveFiles()` return `false` while local File operations and application directories remain available.
 
 Windows uses the application's Local App Data identity for durable data, application-specific cache and temporary children, and the directory containing the process executable.
 Its picker transport uses the COM system file dialogs owned by the HuxerUI window for active selection, adding `FOS_PICKFOLDERS` for a single directory.
@@ -741,7 +738,7 @@ Its picker transport uses browser file handles when available and an input-eleme
 
 ## Web application storage
 
-The Web implementation preserves the existing `File`, `FileSystem`, and explicitly named asynchronous operations without adding a browser-specific public file type, provider interface, or mount API.
+The Web implementation preserves the existing File values, application directory access, and explicitly named asynchronous operations without adding a browser-specific public file type, provider interface, or mount API.
 It uses Emscripten's synchronous virtual filesystem for local path behavior and IDBFS for application-private persistence.
 Browser `File` values and File System Access handles remain inside `FileReference` because a user-granted external capability is not an application-private local path.
 
@@ -806,11 +803,11 @@ Web storage is initialized once per Emscripten module before any HuxerUI Runtime
 A Web pre-initialization script validates the storage key, mounts IDBFS, restores IndexedDB contents with `FS.syncfs(true)`, creates the application directories, and releases an Emscripten run dependency only after restoration completes.
 The module factory therefore does not resolve and `mountHuxerUI()` cannot construct application UI while persistent files are still absent from the virtual filesystem.
 
-Every Runtime in the same module receives a `FileSystem` Root Service using the already initialized directories.
+Every Runtime in the same module receives AppDirectories values in its application service using the already initialized directories.
 Runtime creation never mounts, restores, or clears IDBFS again, so several host elements share the application storage without introducing per-window databases or races.
 
 If storage initialization fails, Runtime mounting fails with a clear HuxerUI diagnostic.
-The implementation does not silently publish a volatile `FileSystem`, because reporting successful durable writes that disappear after reload would violate the application-directory contract.
+The implementation does not silently publish volatile application data directories, because reporting successful durable writes that disappear after reload would violate the application-directory contract.
 
 ### Synchronous operation policy
 
@@ -845,7 +842,7 @@ This matches the platform rule that an uninterruptible filesystem operation may 
 
 ### Internal boundary
 
-The Web implementation uses narrow internal scheduling, persistent-root classification, synchronization, and `FileSystem` construction functions shared by `src/io/file.cpp` and `platform/web/web_file.cpp`.
+The Web implementation uses narrow internal scheduling, persistent-root classification, synchronization, and application-directory preparation functions shared by `src/io/file.cpp` and `platform/web/web_file.cpp`.
 It does not introduce a public or private polymorphic `FileBackend`, a second service registry, a PlatformModule instance, or Web-only methods on `File`.
 Emscripten glue owns IDBFS mounting and synchronization, the Web adapter publishes the initialized application directories, and the shared file implementation retains path validation, operation semantics, Task cancellation, and result mapping.
 

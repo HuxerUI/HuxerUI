@@ -670,8 +670,8 @@ public:
     return this;
   }
 
-  std::shared_ptr<FileSystem> CreateFileSystem() override {
-    return CreateIosFileSystem();
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateIosAppDirectories();
   }
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {

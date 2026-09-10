@@ -950,8 +950,8 @@ public:
     return CreateWebPermissionTransport();
   }
 
-  std::shared_ptr<FileSystem> CreateFileSystem() override {
-    return CreateWebFileSystem();
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateWebAppDirectories();
   }
 
   void Resize(float width, float height, float display_scale) {

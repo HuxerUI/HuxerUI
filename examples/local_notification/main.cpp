@@ -306,7 +306,6 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
 
 [[huxerui::composable]] View DownloadNotificationCard(const ApplicationHandle& application) {
   auto http = UseService<HttpClient>();
-  auto files = UseService<FileSystem>();
   auto tasks = UseTaskScope();
   auto state = UseState(DownloadState{});
   auto active = UseState(std::shared_ptr<TaskHandle>{});
@@ -337,7 +336,7 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
                                 .detail = "Waiting for notification authorization and response headers..."};
           // Each attempt has its own cache directory: a canceled worker cannot overwrite a later attempt.
           const auto attempt = std::chrono::steady_clock::now().time_since_epoch().count();
-          const File directory = files->Directories().cache_directory.Child(
+          const File directory = application.Directories().cache_directory.Child(
               "notification-download-" + std::to_string(attempt));
           active = std::make_shared<TaskHandle>(tasks.Launch(DownloadRelease(http, notifications, directory, state)));
         }),

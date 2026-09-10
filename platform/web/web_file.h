@@ -4,10 +4,6 @@
 
 #include <huxerui/file_drop.h>
 
-namespace huxerui {
-class FileSystem;
-}
-
 namespace emscripten {
 class val;
 }
@@ -19,7 +15,7 @@ class FilePickerTransport;
 [[nodiscard]] FileDropOffer ReadWebFileDropOffer(const emscripten::val& transfer);
 [[nodiscard]] FileDropPreparation CaptureWebFileDrop(const emscripten::val& transfer);
 
-[[nodiscard]] std::shared_ptr<FileSystem> CreateWebFileSystem();
+[[nodiscard]] AppDirectories CreateWebAppDirectories();
 [[nodiscard]] std::shared_ptr<FilePickerTransport> CreateWebFilePickerTransport();
 
 } // namespace huxerui::detail

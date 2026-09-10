@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -42,7 +41,7 @@ NSURL* DirectoryURL(NSFileManager* manager, NSSearchPathDirectory directory, con
 
 } // namespace
 
-std::shared_ptr<FileSystem> CreateIosFileSystem() {
+AppDirectories CreateIosAppDirectories() {
   @autoreleasepool {
     NSFileManager* manager = NSFileManager.defaultManager;
     NSBundle* bundle = NSBundle.mainBundle;
@@ -51,12 +50,12 @@ std::shared_ptr<FileSystem> CreateIosFileSystem() {
     NSURL* temporary = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     NSURL* executable = bundle.executableURL.URLByDeletingLastPathComponent;
 
-    return MakeFileSystem({
+    return PrepareAppDirectories({
         .executable_directory =
-            executable == nil ? std::nullopt : std::optional<std::string>{Utf8(executable.path, "executable path")},
-        .data_directory = Utf8(data.path, "Application Support path"),
-        .cache_directory = Utf8(cache.path, "Caches path"),
-        .temporary_directory = Utf8(temporary.path, "temporary path"),
+            executable == nil ? std::nullopt : std::optional<File>{File(Utf8(executable.path, "executable path"))},
+        .data_directory = File(Utf8(data.path, "Application Support path")),
+        .cache_directory = File(Utf8(cache.path, "Caches path")),
+        .temporary_directory = File(Utf8(temporary.path, "temporary path")),
     });
   }
 }

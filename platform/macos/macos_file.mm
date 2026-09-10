@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -47,7 +46,7 @@ NSURL* ApplicationDirectory(NSURL* base, NSString* identity) {
 
 } // namespace
 
-std::shared_ptr<FileSystem> CreateMacFileSystem() {
+AppDirectories CreateMacAppDirectories() {
   @autoreleasepool {
     NSFileManager* manager = NSFileManager.defaultManager;
     NSBundle* bundle = NSBundle.mainBundle;
@@ -67,12 +66,12 @@ std::shared_ptr<FileSystem> CreateMacFileSystem() {
     NSURL* temporary = ApplicationDirectory([NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES], identity);
     NSURL* executable = bundle.executableURL.URLByDeletingLastPathComponent;
 
-    return MakeFileSystem({
+    return PrepareAppDirectories({
         .executable_directory =
-            executable == nil ? std::nullopt : std::optional<std::string>{Utf8(executable.path, "executable path")},
-        .data_directory = Utf8(data.path, "Application Support path"),
-        .cache_directory = Utf8(cache.path, "Caches path"),
-        .temporary_directory = Utf8(temporary.path, "temporary path"),
+            executable == nil ? std::nullopt : std::optional<File>{File(Utf8(executable.path, "executable path"))},
+        .data_directory = File(Utf8(data.path, "Application Support path")),
+        .cache_directory = File(Utf8(cache.path, "Caches path")),
+        .temporary_directory = File(Utf8(temporary.path, "temporary path")),
     });
   }
 }

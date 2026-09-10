@@ -70,6 +70,8 @@ application.OnActivation([](ApplicationActivation activation) {
 
 `ApplicationHandle::Clipboard()` returns the same shared `Clipboard` owned by this service on every call, without requiring an active composition after the handle has been obtained. This is a per-Runtime capability, not process-global state or a separate Clipboard Root Service. Application-service disconnection makes captured clipboard instances unavailable before the platform adapter is destroyed. The implementation lives in `src/application/clipboard.cpp`; platform integration and text-editing commands retain the existing `PlatformClipboard` boundary.
 
+`ApplicationHandle::Directories()` exposes the AppDirectories value stored directly in the application service, without a separate Root Service. Platform adapters initialize their directory roots, and the application service registers those roots with deletion safeguards before publishing them. Hosts without the capability may omit the value, and Directories() then throws std::logic_error. Retained handles and copied File values remain usable after Runtime destruction because they represent paths rather than live platform access. `CurrentDirectory()` independently queries the process working directory at each call, including outside composition and after Runtime destruction; it is not a cached or per-Runtime directory. Directory preparation and path operations remain in `src/io` and the platform file implementations.
+
 `ApplicationHandle` deliberately separates four timing contracts:
 
 - `LifecycleState()` is the observable current platform state and may coalesce before recomposition.

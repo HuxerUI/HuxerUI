@@ -2,7 +2,6 @@
 
 #include <jni.h>
 
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -46,7 +45,7 @@ std::string TemporaryPath(std::string cache_path) {
 
 } // namespace
 
-std::shared_ptr<FileSystem> CreateAndroidFileSystem(JNIEnv* environment, jobject context) {
+AppDirectories CreateAndroidAppDirectories(JNIEnv* environment, jobject context) {
   if (environment == nullptr || context == nullptr) {
     throw std::runtime_error("HuxerUI Android file system host is unavailable");
   }
@@ -96,14 +95,14 @@ std::shared_ptr<FileSystem> CreateAndroidFileSystem(JNIEnv* environment, jobject
 
   const std::string cache_path =
       AbsolutePath(environment, cache.Get(), get_absolute_path, "HuxerUI Android cache directory is unavailable");
-  return MakeFileSystem({
+  return PrepareAppDirectories({
       .executable_directory = executable
-                                  ? std::optional<std::string>{android::JavaStringToUtf8(environment, executable.Get())}
+                                  ? std::optional<File>{File(android::JavaStringToUtf8(environment, executable.Get()))}
                                   : std::nullopt,
-      .data_directory =
-          AbsolutePath(environment, data.Get(), get_absolute_path, "HuxerUI Android data directory is unavailable"),
-      .cache_directory = cache_path,
-      .temporary_directory = TemporaryPath(cache_path),
+      .data_directory = File(AbsolutePath(environment, data.Get(), get_absolute_path,
+                                          "HuxerUI Android data directory is unavailable")),
+      .cache_directory = File(cache_path),
+      .temporary_directory = File(TemporaryPath(cache_path)),
   });
 }
 

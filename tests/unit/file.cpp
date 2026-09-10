@@ -28,7 +28,7 @@ static_assert(std::copy_constructible<File>);
 static_assert(std::move_constructible<File>);
 static_assert(!std::default_initializable<File>);
 static_assert(std::constructible_from<File, const Uri&>);
-static_assert(!std::copy_constructible<FileSystem>);
+static_assert(std::copy_constructible<AppDirectories>);
 static_assert(std::is_same_v<IoResult<std::string>, Result<std::string, IoError>>);
 static_assert(std::is_same_v<IoResult<void>, Result<void, IoError>>);
 

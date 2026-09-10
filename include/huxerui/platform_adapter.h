@@ -6,6 +6,7 @@
 #include <optional>
 #include <string_view>
 
+#include <huxerui/file.h>
 #include <huxerui/scroll.h>
 #include <huxerui/text.h>
 
@@ -13,7 +14,6 @@ namespace huxerui {
 
 using UIThreadDispatcher = std::function<void(std::function<void()>)>;
 
-class FileSystem;
 class PlatformAdapter;
 class PlatformClipboard;
 class PlatformResources;
@@ -110,7 +110,11 @@ public:
   }
 
 protected:
-  virtual std::shared_ptr<FileSystem> CreateFileSystem();
+  /// @brief Prepares the application storage roots before the Runtime publishes its application service.
+  /// @return Directory values for this host, or std::nullopt when it does not provide application directories.
+  /// Overrides must complete platform storage initialization and prepare writable roots before returning.
+  /// The application service registers the returned roots with HuxerUI's deletion safeguards.
+  virtual std::optional<AppDirectories> CreateAppDirectories();
   virtual std::shared_ptr<detail::FilePickerTransport> CreateFilePickerTransport();
   virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();
   virtual std::shared_ptr<detail::LocalNotificationTransport> CreateLocalNotificationTransport();

@@ -138,12 +138,12 @@ Task<void> DownloadFile(std::shared_ptr<HttpClient> http, File output, State<Dow
 [[huxerui::composable]]
 View HttpContent() {
   auto http = UseService<HttpClient>();
-  auto file_system = UseService<FileSystem>();
+  auto application = UseApplication();
   auto tasks = UseTaskScope();
   auto request = UseState(RequestState{});
   auto download = UseState(DownloadState{});
   auto& theme = UseTheme();
-  const File download_file = file_system->Directories().temporary_directory.Child("huxerui-http-download.bin");
+  const File download_file = application.Directories().temporary_directory.Child("huxerui-http-download.bin");
 
   return ScrollView {
     Column {

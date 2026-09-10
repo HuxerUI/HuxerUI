@@ -52,7 +52,7 @@ Clipboard operations are synchronous and may enter native APIs. Do not call them
 
 ## Files and directories
 
-Obtain the runtime-installed services during composition with `UseService<FileSystem>()`, `UseService<FilePicker>()`, and `UseService<HttpClient>()`. These return shared service handles; their public constructors are not application construction APIs. Store the required handle before launching a lifetime-bound task, then capture that handle into the task rather than looking up a composition service after suspension.
+Obtain the runtime-installed services during composition with `UseService<FilePicker>()` and `UseService<HttpClient>()`. These return shared service handles; their public constructors are not application construction APIs. Store the required handle before launching a lifetime-bound task, then capture that handle into the task rather than looking up a composition service after suspension.
 
 `Bytes` from `<huxerui/data.h>` is the canonical owned binary buffer. Use `std::span<const std::byte>` only for borrowed binary input instead of introducing another application byte-container type.
 
@@ -62,7 +62,7 @@ Obtain the runtime-installed services during composition with `UseService<FileSy
 
 Use `File(const Uri&)` and `File::ToUri()` only for supported local `file:` URI conversion. `FileReference` retains access to an external file or directory; do not reconstruct a path from its display name, an Android content URI, or a browser handle.
 
-`FileSystem::Directories()` provides application data, cache, temporary, and optional executable directories. Use those instead of hardcoded OS paths.
+`UseApplication().Directories()` provides application data, cache, temporary, and optional executable directories. Use those instead of hardcoded OS paths. The getter returns captured AppDirectories values without I/O; copy File paths into tasks. A retained ApplicationHandle can query directories outside composition and after Runtime destruction, while a host without directory support reports std::logic_error. `ApplicationHandle::CurrentDirectory()` instead queries the shared process working directory on every call; it is not an application storage root.
 
 Destructive file operations require the user's intended scope. Prefer non-recursive operations unless recursive deletion is explicitly needed and the exact target is validated.
 

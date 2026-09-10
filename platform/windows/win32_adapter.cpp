@@ -557,8 +557,8 @@ public:
     return this;
   }
 
-  std::shared_ptr<FileSystem> CreateFileSystem() override {
-    return CreateWin32FileSystem();
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateWin32AppDirectories();
   }
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {

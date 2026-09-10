@@ -100,7 +100,7 @@ void EnsurePrivateDirectory(std::string_view path, uid_t user_id) {
   }
 }
 
-std::string RequiredHomeDirectory(const LinuxFileSystemEnvironment& environment) {
+std::string RequiredHomeDirectory(const LinuxAppDirectoryEnvironment& environment) {
   if (std::optional<std::string> home = ValidAbsolutePath(environment.home_directory)) {
     return std::move(*home);
   }
@@ -108,10 +108,6 @@ std::string RequiredHomeDirectory(const LinuxFileSystemEnvironment& environment)
     return std::move(*home);
   }
   throw std::runtime_error("HuxerUI Linux home directory could not be resolved");
-}
-
-std::string ApplicationChild(std::string_view base, std::string_view identity) {
-  return File(base).Child(identity).Path();
 }
 
 } // namespace
@@ -142,8 +138,8 @@ std::string ResolveLinuxExecutablePath() {
   }
 }
 
-FileSystemPaths
-ResolveLinuxFileSystemPaths(std::string_view executable_path, const LinuxFileSystemEnvironment& environment) {
+AppDirectories
+ResolveLinuxAppDirectories(std::string_view executable_path, const LinuxAppDirectoryEnvironment& environment) {
   if (executable_path.empty() || executable_path.front() != '/') {
     throw std::runtime_error("HuxerUI Linux executable path is invalid");
   }
@@ -185,32 +181,32 @@ ResolveLinuxFileSystemPaths(std::string_view executable_path, const LinuxFileSys
   }
 
   return {
-      .executable_directory = executable_directory->Path(),
-      .data_directory = ApplicationChild(*data_base, identity),
-      .cache_directory = ApplicationChild(*cache_base, identity),
-      .temporary_directory = ApplicationChild(temporary_base, identity),
+      .executable_directory = executable_directory,
+      .data_directory = File(*data_base).Child(identity),
+      .cache_directory = File(*cache_base).Child(identity),
+      .temporary_directory = File(temporary_base).Child(identity),
   };
 }
 
-std::shared_ptr<FileSystem>
-CreateLinuxFileSystem(std::string_view executable_path, LinuxFileSystemEnvironment environment) {
-  FileSystemPaths paths = ResolveLinuxFileSystemPaths(executable_path, environment);
+AppDirectories
+CreateLinuxAppDirectories(std::string_view executable_path, LinuxAppDirectoryEnvironment environment) {
+  AppDirectories directories = ResolveLinuxAppDirectories(executable_path, environment);
 
   const std::optional<std::string> runtime = ValidAbsolutePath(environment.runtime_directory);
   const bool uses_runtime_directory =
       runtime.has_value() && IsPrivateDirectory(*runtime, environment.effective_user_id);
   if (!uses_runtime_directory) {
-    const std::optional<File> application_temporary_parent = File(paths.temporary_directory).Parent();
+    const std::optional<File> application_temporary_parent = directories.temporary_directory.Parent();
     if (!application_temporary_parent.has_value()) {
       throw std::runtime_error("HuxerUI Linux temporary directory is invalid");
     }
     EnsurePrivateDirectory(application_temporary_parent->Path(), environment.effective_user_id);
   }
-  EnsurePrivateDirectory(paths.temporary_directory, environment.effective_user_id);
-  return MakeFileSystem(std::move(paths));
+  EnsurePrivateDirectory(directories.temporary_directory.Path(), environment.effective_user_id);
+  return PrepareAppDirectories(std::move(directories));
 }
 
-std::shared_ptr<FileSystem> CreateLinuxFileSystem() {
+AppDirectories CreateLinuxAppDirectories() {
   const uid_t user_id = geteuid();
   std::error_code temporary_error;
   const fs::path temporary_root = fs::temp_directory_path(temporary_error);
@@ -218,7 +214,7 @@ std::shared_ptr<FileSystem> CreateLinuxFileSystem() {
     throw std::runtime_error("HuxerUI Linux temporary directory could not be resolved");
   }
 
-  return CreateLinuxFileSystem(
+  return CreateLinuxAppDirectories(
       ResolveLinuxExecutablePath(),
       {
           .home_directory = EnvironmentVariable("HOME"),

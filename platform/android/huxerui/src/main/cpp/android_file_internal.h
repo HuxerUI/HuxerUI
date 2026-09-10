@@ -11,7 +11,6 @@
 
 namespace huxerui {
 class FileReference;
-class FileSystem;
 } // namespace huxerui
 
 namespace huxerui::detail {
@@ -28,7 +27,7 @@ struct AndroidFileReferenceProjection {
 
 [[nodiscard]] FileDropPreparation CaptureAndroidFileDrop(JNIEnv* environment, jobject operation);
 
-[[nodiscard]] std::shared_ptr<FileSystem> CreateAndroidFileSystem(JNIEnv* environment, jobject context);
+[[nodiscard]] AppDirectories CreateAndroidAppDirectories(JNIEnv* environment, jobject context);
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view, jobject context);
 [[nodiscard]] FileReference CreateAndroidFileReference(

@@ -1,10 +1,24 @@
 #include "file_reference_test_support.h"
 
 namespace huxerui::test {
+namespace {
+
+State<int> directory_revision;
+int directory_compositions = 0;
+
+View DirectoryApp() {
+  file_application = UseApplication();
+  directory_revision = UseState(0);
+  static_cast<void>(directory_revision.Get());
+  ++directory_compositions;
+  return {};
+}
+
+} // namespace
 
 TEST_CASE("FileReferencesExposePathValuesWithoutTransferringTheirAccessLifetime") {
   TemporaryDirectory temporary;
-  const File root(temporary.Paths().temporary_directory);
+  const File root(temporary.Directories().temporary_directory);
   REQUIRE(root.CreateDirectory());
   const File selected = root.Child("工程");
   bool directory = false;
@@ -47,20 +61,126 @@ TEST_CASE("FileReferencesExposePathValuesWithoutTransferringTheirAccessLifetime"
   REQUIRE(path.has_value());
 }
 
-TEST_CASE("RuntimeInstallsFileSystemAndFileAsyncOperationsResumeOnTheUIThread") {
+TEST_CASE("ApplicationProtectsDirectoriesReturnedDirectlyByACustomAdapter") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  AppDirectories directories = temporary.Directories();
+  const File root = *directories.executable_directory;
+  directories.executable_directory = root.Child("bin");
+  REQUIRE(directories.executable_directory->CreateDirectory());
+  REQUIRE(directories.data_directory.CreateDirectory());
+  REQUIRE(directories.cache_directory.CreateDirectory());
+  REQUIRE(directories.temporary_directory.CreateDirectory());
+
+  class PreparedDirectoriesPlatform final : public TestPlatform {
+  public:
+    explicit PreparedDirectoriesPlatform(AppDirectories directories) : directories_(std::move(directories)) {}
+
+  protected:
+    std::optional<AppDirectories> CreateAppDirectories() override {
+      return directories_;
+    }
+
+  private:
+    AppDirectories directories_;
+  } platform(directories);
+
+  {
+    Runtime runtime(FileApp, platform);
+    runtime.BuildFrame();
+    REQUIRE(file_application->Directories().data_directory == directories.data_directory);
+    REQUIRE_FALSE(directories.data_directory.Delete());
+    REQUIRE_FALSE(directories.cache_directory.DeleteRecursively());
+    REQUIRE_FALSE(directories.temporary_directory.DeleteRecursively());
+    REQUIRE_FALSE(directories.executable_directory->DeleteRecursively());
+    REQUIRE_FALSE(root.DeleteRecursively());
+    const File child = directories.data_directory.Child("ordinary.txt");
+    REQUIRE(child.WriteString("content"));
+    REQUIRE(child.Delete());
+  }
+  file_application.reset();
+  REQUIRE_FALSE(root.DeleteRecursively());
+}
+
+TEST_CASE("ApplicationDirectoriesRemainStableAcrossRecompositionAndRuntimeDestruction") {
+  ResetFileState();
+  directory_compositions = 0;
+  TemporaryDirectory first_temporary;
+  TemporaryDirectory second_temporary;
+  FileTestPlatform first_platform(first_temporary.Directories());
+  FileTestPlatform second_platform(second_temporary.Directories());
+  std::optional<ApplicationHandle> first_application;
+  std::optional<AppDirectories> retained_directories;
+  {
+    Runtime first_runtime(DirectoryApp, first_platform);
+    first_runtime.BuildFrame();
+    first_application = file_application;
+    REQUIRE(first_application.has_value());
+    const AppDirectories* initial = &first_application->Directories();
+    retained_directories = *initial;
+
+    directory_revision = 1;
+    first_runtime.BuildFrame();
+    REQUIRE(directory_compositions == 2);
+    REQUIRE(&first_application->Directories() == initial);
+    REQUIRE(first_application->Directories().data_directory == first_temporary.Directories().data_directory);
+
+    std::optional<ApplicationHandle> second_application;
+    {
+      Runtime second_runtime(DirectoryApp, second_platform);
+      second_runtime.BuildFrame();
+      second_application = file_application;
+      REQUIRE(second_application->Directories().data_directory == second_temporary.Directories().data_directory);
+      REQUIRE(second_application->Directories().data_directory != initial->data_directory);
+      REQUIRE(second_application->CurrentDirectory() == first_application->CurrentDirectory());
+    }
+    REQUIRE(second_application->Directories().cache_directory == second_temporary.Directories().cache_directory);
+    REQUIRE(&first_application->Directories() == initial);
+  }
+  REQUIRE(first_application->Directories().data_directory == retained_directories->data_directory);
+  first_application.reset();
+  const File file = retained_directories->data_directory.Child("after-runtime.txt");
+  REQUIRE(file.WriteString("retained path"));
+  REQUIRE(file.ReadString().Value() == "retained path");
+  REQUIRE_FALSE(retained_directories->data_directory.DeleteRecursively());
+}
+
+TEST_CASE("ApplicationCurrentDirectoryIsQueriedAtEachCall") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  TestPlatform platform;
+  {
+    Runtime runtime(FileApp, platform);
+    runtime.BuildFrame();
+  }
+  struct RestoreWorkingDirectory {
+    fs::path original = fs::current_path();
+    ~RestoreWorkingDirectory() {
+      std::error_code error;
+      fs::current_path(original, error);
+    }
+  } restore;
+  REQUIRE(file_application->CurrentDirectory() == File(Utf8Path(restore.original)));
+  const std::string directory = temporary.Directories().data_directory.Path();
+  fs::current_path(fs::path(std::u8string(directory.begin(), directory.end())).parent_path());
+  REQUIRE(file_application->CurrentDirectory() == File(Utf8Path(fs::current_path())));
+  REQUIRE(file_application->CurrentDirectory() != File(Utf8Path(restore.original)));
+}
+
+TEST_CASE("ApplicationProvidesDirectoriesAndFileAsyncOperationsResumeOnTheUIThread") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
 
-  REQUIRE(file_system);
-  REQUIRE(file_system->Directories().data_directory.IsDirectory());
-  REQUIRE(file_system->Directories().cache_directory.IsDirectory());
-  REQUIRE(file_system->Directories().temporary_directory.IsDirectory());
+  REQUIRE(file_application);
+  REQUIRE(file_application->Directories().data_directory.IsDirectory());
+  REQUIRE(file_application->Directories().cache_directory.IsDirectory());
+  REQUIRE(file_application->Directories().temporary_directory.IsDirectory());
 
   const std::thread::id ui_thread = std::this_thread::get_id();
-  File file = file_system->Directories().data_directory.Child("async.txt");
+  File file = file_application->Directories().data_directory.Child("async.txt");
   file_tasks.Launch([file]() -> Task<void> {
     if (!co_await file.WriteStringAsync("async value")) {
       file_task_complete = true;
@@ -82,11 +202,11 @@ TEST_CASE("RuntimeInstallsFileSystemAndFileAsyncOperationsResumeOnTheUIThread") 
 TEST_CASE("FileAsyncByteOperationsRetainOwnedBinaryDataUntilCompletion") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
 
-  File file = file_system->Directories().data_directory.Child("async.bin");
+  File file = file_application->Directories().data_directory.Child("async.bin");
   file_tasks.Launch([file]() -> Task<void> {
     if (!co_await file.WriteBytesAsync(Bytes{std::byte{0}, std::byte{0xFF}}) ||
         !co_await file.AppendBytesAsync(Bytes{std::byte{'a'}, std::byte{0}})) {
@@ -107,12 +227,12 @@ TEST_CASE("FileAsyncByteOperationsRetainOwnedBinaryDataUntilCompletion") {
 TEST_CASE("FileAsyncStreamsUseRequestedReadSizesAndExplicitClose") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
 
-  const File source = file_system->Directories().data_directory.Child("stream-source.bin");
-  const File destination = file_system->Directories().data_directory.Child("stream-destination.bin");
+  const File source = file_application->Directories().data_directory.Child("stream-source.bin");
+  const File destination = file_application->Directories().data_directory.Child("stream-destination.bin");
   std::vector<std::size_t> read_sizes;
   std::uint64_t copied = 0;
   file_tasks.Launch([&]() -> Task<void> {
@@ -161,10 +281,10 @@ TEST_CASE("FileAsyncStreamsUseRequestedReadSizesAndExplicitClose") {
 TEST_CASE("FilePendingOutputRetainsTheFileAfterItsOwnerIsReleased") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File file = file_system->Directories().data_directory.Child("retained-output.bin");
+  const File file = file_application->Directories().data_directory.Child("retained-output.bin");
   file_tasks.Launch([&]() -> Task<void> {
     auto opened = co_await file.OpenWriteAsync();
     REQUIRE(opened.Succeeded());
@@ -186,11 +306,11 @@ TEST_CASE("LocalReferenceStreamsPreserveOperationalReadWriteCloseAndCopyErrors")
       GENERATE(Operation::Read, Operation::Write, Operation::Close, Operation::CopyRead, Operation::CopyWrite);
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File source = file_system->Directories().data_directory.Child("error-source.bin");
-  const File destination = file_system->Directories().data_directory.Child("error-destination.bin");
+  const File source = file_application->Directories().data_directory.Child("error-source.bin");
+  const File destination = file_application->Directories().data_directory.Child("error-destination.bin");
   REQUIRE(source.WriteBytes(Bytes{std::byte{1}, std::byte{2}}));
   REQUIRE(destination.WriteBytes({}));
   std::atomic<bool> fail_read = false;
@@ -239,11 +359,11 @@ TEST_CASE("LocalReferenceStreamsPreserveOperationalReadWriteCloseAndCopyErrors")
 TEST_CASE("LocalFileReferencesProvideIncrementalAsyncStreams") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
 
-  const File file = file_system->Directories().data_directory.Child("reference-stream.bin");
+  const File file = file_application->Directories().data_directory.Child("reference-stream.bin");
   REQUIRE(file.WriteBytes(Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}}));
   FileReference reference = detail::MakeLocalFileReference(file, true);
   std::vector<std::size_t> read_sizes;
@@ -282,11 +402,11 @@ TEST_CASE("LocalFileReferencesProvideIncrementalAsyncStreams") {
 TEST_CASE("CancelingAFileTaskDropsItsContinuation") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
 
-  File file = file_system->Directories().temporary_directory.Child("canceled.txt");
+  File file = file_application->Directories().temporary_directory.Child("canceled.txt");
   TaskHandle handle = file_tasks.Launch([file]() -> Task<void> {
     static_cast<void>(co_await file.WriteStringAsync(std::string(1024 * 1024, 'x')));
     canceled_file_task_continued = true;
@@ -300,10 +420,10 @@ TEST_CASE("CancelingAFileTaskDropsItsContinuation") {
 TEST_CASE("DirectoryReferencesEnumerateRepeatedlyAndCopyBothDestinationKinds") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File source = root.Child("source");
   const File local = root.Child("local");
   const File external = root.Child("external");
@@ -354,7 +474,7 @@ TEST_CASE("DirectoryReferencesEnumerateRepeatedlyAndCopyBothDestinationKinds") {
 TEST_CASE("DirectoryCopiesIndexListingBasedDestinationsOnlyWithinOneCopy") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
   auto input = std::make_shared<ProviderReferenceState>("provider:source");
@@ -429,10 +549,10 @@ TEST_CASE("DirectoryCopiesIndexListingBasedDestinationsOnlyWithinOneCopy") {
 TEST_CASE("DirectoryReferencesRejectReadonlyConflictsOverlapAndInvalidNames") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File source = root.Child("source");
   const File destination = root.Child("destination");
   REQUIRE(source.Child("nested").CreateDirectories());
@@ -478,10 +598,10 @@ TEST_CASE("DirectoryReferencesRejectReadonlyConflictsOverlapAndInvalidNames") {
 TEST_CASE("DirectoryReferencesKeepRetainedChildrenAndRejectLinksAndRenamedChildren") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File directory = root.Child("source");
   const File destination = root.Child("destination");
   REQUIRE(directory.CreateDirectory());

@@ -1169,16 +1169,14 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
       std::make_shared<PermissionController>(platform.CreatePermissionTransport(), platform.ui_thread_dispatcher_),
       LocalNotificationService::Create(platform.CreateLocalNotificationTransport(), platform.ui_thread_dispatcher_,
                                        state_->app_resources_),
-      SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_), platform.Clipboard());
+      SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_), platform.Clipboard(),
+      platform.CreateAppDirectories());
   root.Provide(state_->application_service_);
   root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
   state_->window_service_ = std::make_shared<WindowService>(platform);
   root.Provide(state_->window_service_);
   state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*state_);
   root.Provide(state_->scene_transition_service_);
-  if (std::shared_ptr<FileSystem> file_system = platform.CreateFileSystem()) {
-    root.Provide(std::move(file_system));
-  }
   root.Provide(
       std::shared_ptr<FilePicker>(new FilePicker(platform.CreateFilePickerTransport(), platform.ui_thread_dispatcher_))
   );

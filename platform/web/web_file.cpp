@@ -97,9 +97,9 @@ EM_JS(void, PersistWebFileSystemJs, (std::uintptr_t context), {
 
 } // namespace
 
-std::shared_ptr<FileSystem> CreateWebFileSystem() {
+AppDirectories CreateWebAppDirectories() {
   // web_file.js mounts IDBFS and restores it before application startup. Reuse those ready directories
-  // rather than exposing a FileSystem while its persisted contents are still being restored.
+  // rather than publishing application directories while persisted contents are still being restored.
   val state = val::take_ownership(WebFileSystemState());
   if (state.isNull() || state.isUndefined()) {
     throw std::runtime_error("HuxerUI Web file storage was not initialized");
@@ -131,12 +131,12 @@ std::shared_ptr<FileSystem> CreateWebFileSystem() {
   }
   registered_root = persistent_root;
 
-  return MakeFileSystem({
+  return AppDirectories{
       .executable_directory = std::nullopt,
-      .data_directory = data_directory.Path(),
-      .cache_directory = cache_directory.Path(),
-      .temporary_directory = temporary_directory.Path(),
-  });
+      .data_directory = std::move(data_directory),
+      .cache_directory = std::move(cache_directory),
+      .temporary_directory = std::move(temporary_directory),
+  };
 }
 
 bool IsWebPersistentFilePath(std::string_view path) noexcept {

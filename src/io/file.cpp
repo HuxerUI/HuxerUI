@@ -200,15 +200,6 @@ std::string NormalizePath(std::string_view path) {
   return PublicPath(absolute.lexically_normal());
 }
 
-std::string CurrentDirectoryPath() {
-  std::error_code error;
-  const fs::path path = fs::current_path(error);
-  if (error) {
-    throw std::runtime_error(OperationError("current-directory query", error).message);
-  }
-  return PublicPath(path.lexically_normal());
-}
-
 std::string Name(std::string_view path) {
   return PublicPath(PlatformPath(path).filename());
 }
@@ -2394,37 +2385,35 @@ IoResult<std::string> DecodeFileUtf8(IoResult<Bytes> bytes) {
   return IoResult<std::string>(std::move(text));
 }
 
-std::shared_ptr<FileSystem> MakeFileSystem(FileSystemPaths paths) {
-  // Platform factories resolve application identity and directory locations. This shared factory
-  // ensures they exist and protects the roots; later File I/O does not route through FileSystem.
-  File data(paths.data_directory);
-  File cache(paths.cache_directory);
-  File temporary(paths.temporary_directory);
-  if (!data.CreateDirectories() || !cache.CreateDirectories() || !temporary.CreateDirectories()) {
+std::string CurrentDirectoryPath() {
+  std::error_code error;
+  const fs::path path = fs::current_path(error);
+  if (error) {
+    throw std::runtime_error(OperationError("current-directory query", error).message);
+  }
+  return PublicPath(path.lexically_normal());
+}
+
+AppDirectories PrepareAppDirectories(AppDirectories directories) {
+  // Platform factories finish storage initialization before publishing these independent path values.
+  if (!directories.data_directory.CreateDirectories() || !directories.cache_directory.CreateDirectories() ||
+      !directories.temporary_directory.CreateDirectories()) {
     throw std::runtime_error("HuxerUI could not create application file directories");
   }
-
-  std::optional<File> executable;
-  if (paths.executable_directory.has_value()) {
-    executable.emplace(*paths.executable_directory);
-    if (!executable->IsDirectory()) {
-      throw std::runtime_error("HuxerUI application executable directory is unavailable");
-    }
+  if (directories.executable_directory && !directories.executable_directory->IsDirectory()) {
+    throw std::runtime_error("HuxerUI application executable directory is unavailable");
   }
+  return directories;
+}
 
-  ProtectRoot(data.Path());
-  ProtectRoot(cache.Path());
-  ProtectRoot(temporary.Path());
-  if (executable.has_value()) {
-    ProtectRoot(executable->Path());
+void ProtectAppDirectories(const AppDirectories& directories) {
+  // Register every host's roots at the application boundary, including custom adapters.
+  ProtectRoot(directories.data_directory.Path());
+  ProtectRoot(directories.cache_directory.Path());
+  ProtectRoot(directories.temporary_directory.Path());
+  if (directories.executable_directory) {
+    ProtectRoot(directories.executable_directory->Path());
   }
-
-  return std::shared_ptr<FileSystem>(new FileSystem(AppDirectories{
-      .executable_directory = std::move(executable),
-      .data_directory = std::move(data),
-      .cache_directory = std::move(cache),
-      .temporary_directory = std::move(temporary),
-  }));
 }
 
 } // namespace huxerui::detail
@@ -2670,18 +2659,6 @@ Task<bool> File::MoveToAsync(File destination, bool overwrite) const {
       [file = *this, destination = std::move(destination), overwrite] { return file.MoveTo(destination, overwrite); },
       persist
   );
-}
-
-FileSystem::FileSystem(AppDirectories directories) : directories_(std::move(directories)) {}
-
-FileSystem::~FileSystem() = default;
-
-const AppDirectories& FileSystem::Directories() const noexcept {
-  return directories_;
-}
-
-File FileSystem::CurrentDirectory() const {
-  return File(detail::CurrentDirectoryPath());
 }
 
 } // namespace huxerui

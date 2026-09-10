@@ -108,14 +108,9 @@ public:
   virtual std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion);
 };
 
-struct FileSystemPaths {
-  std::optional<std::string> executable_directory;
-  std::string data_directory;
-  std::string cache_directory;
-  std::string temporary_directory;
-};
-
-[[nodiscard]] std::shared_ptr<FileSystem> MakeFileSystem(FileSystemPaths paths);
+[[nodiscard]] AppDirectories PrepareAppDirectories(AppDirectories directories);
+void ProtectAppDirectories(const AppDirectories& directories);
+[[nodiscard]] std::string CurrentDirectoryPath();
 [[nodiscard]] FileReference
 MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
 [[nodiscard]] IoResult<std::string> DecodeFileUtf8(IoResult<Bytes> bytes);

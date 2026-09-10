@@ -5,10 +5,10 @@ namespace huxerui::test {
 TEST_CASE("DirectoryReferencesRejectSymbolicLinkCycles") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File directory = root.Child("source");
   const File destination = root.Child("destination");
   REQUIRE(directory.CreateDirectory());
@@ -30,10 +30,10 @@ TEST_CASE("DirectoryReferencesRejectSymbolicLinkCycles") {
 TEST_CASE("FileReferencesAccessTheSelectedFileWithoutParentReadOrWritePermission") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File parent = root.Child("restricted");
   const File selected = parent.Child("selected.txt");
   const File replacement = root.Child("replacement.txt");

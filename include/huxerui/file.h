@@ -21,17 +21,14 @@ namespace huxerui {
 
 class FileReference;
 class Runtime;
-class FileSystem;
 
 namespace detail {
 class FilePickerController;
 class FilePickerTransport;
 class FileReferenceState;
 struct FileReferenceMetadata;
-struct FileSystemPaths;
 [[nodiscard]] FileReference
 MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
-[[nodiscard]] std::shared_ptr<FileSystem> MakeFileSystem(FileSystemPaths paths);
 } // namespace detail
 
 /// @brief The kind of entry reported by a file system or document provider.
@@ -603,7 +600,7 @@ private:
 };
 
 /// @brief Application-scoped local storage locations chosen by the platform and application identity.
-/// Writable roots are prepared when the service initializes, but external deletion or permission changes can
+/// Writable roots are prepared when the application initializes, but external deletion or permission changes can
 /// still make later I/O fail. On Web, these are virtual paths; use async mutations for persistent storage.
 struct AppDirectories {
   /// The executable or platform-equivalent directory when meaningful and available; it need not be writable.
@@ -614,41 +611,6 @@ struct AppDirectories {
   File cache_directory;
   /// The root for temporary working files, with no guarantee that contents survive application restarts.
   File temporary_directory;
-};
-
-/// @brief The per-Runtime service exposing platform-selected application directories and the process current path.
-/// Obtain a shared instance with UseService<FileSystem>() during composition. It supplies local File paths;
-/// external documents and directory grants belong to FilePicker and FileReference instead.
-/// @code{.cpp}
-/// Task<IoResult<std::string>> LoadSettings(std::shared_ptr<FileSystem> files) {
-///   File settings = files->Directories().data_directory.Child("settings.json");
-///   co_return co_await settings.ReadStringAsync();
-/// }
-/// @endcode
-class FileSystem final {
-public:
-  /// @brief Releases the service's directory values without deleting their on-disk contents.
-  ~FileSystem();
-
-  FileSystem(const FileSystem&) = delete;
-  FileSystem& operator=(const FileSystem&) = delete;
-  FileSystem(FileSystem&&) = delete;
-  FileSystem& operator=(FileSystem&&) = delete;
-
-  /// @brief Returns the application-directory configuration captured at initialization without performing I/O.
-  /// @return A reference valid while this FileSystem remains alive; individual File values may be copied and retained.
-  [[nodiscard]] const AppDirectories& Directories() const noexcept;
-  /// @brief Queries the process current working directory at the time of the call.
-  /// @return An absolute File path; it is not necessarily an application data or executable directory.
-  /// @throws std::runtime_error If the platform cannot determine the current working directory.
-  [[nodiscard]] File CurrentDirectory() const;
-
-private:
-  explicit FileSystem(AppDirectories directories);
-
-  AppDirectories directories_;
-
-  friend std::shared_ptr<FileSystem> detail::MakeFileSystem(detail::FileSystemPaths paths);
 };
 
 } // namespace huxerui

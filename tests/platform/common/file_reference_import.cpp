@@ -5,10 +5,10 @@ namespace huxerui::test {
 TEST_CASE("DirectoryReferencesFinalizeProviderImportsAndPreserveFailureAndCancellation") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File destination = file_system->Directories().temporary_directory.Child("destination");
+  const File destination = file_application->Directories().temporary_directory.Child("destination");
   REQUIRE(destination.CreateDirectory());
   auto input = std::make_shared<ProviderReferenceState>("provider:file");
   auto directory = std::make_shared<ProviderReferenceState>("provider:directory");

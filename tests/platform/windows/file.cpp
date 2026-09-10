@@ -49,21 +49,21 @@ private:
 
 } // namespace
 
-TEST_CASE("Win32FileSystemResolvesApplicationDirectoriesFromTheExecutableIdentity") {
+TEST_CASE("Win32AppDirectoriesResolveFromTheExecutableIdentity") {
   const fs::path executable = LR"(C:\Program Files\示例\sample.exe)";
   const fs::path local_app_data = LR"(C:\Users\测试\AppData\Local)";
 
-  const detail::FileSystemPaths paths =
-      detail::ResolveWin32FileSystemPaths(executable.wstring(), local_app_data.wstring());
+  const AppDirectories directories =
+      detail::ResolveWin32AppDirectories(executable.wstring(), local_app_data.wstring());
   const fs::path application_root = local_app_data / L"sample";
 
-  REQUIRE(paths.executable_directory == Utf8Path(executable.parent_path()));
-  REQUIRE(paths.data_directory == Utf8Path(application_root / L"data"));
-  REQUIRE(paths.cache_directory == Utf8Path(application_root / L"cache"));
-  REQUIRE(paths.temporary_directory == Utf8Path(application_root / L"temporary"));
+  REQUIRE(directories.executable_directory == File(Utf8Path(executable.parent_path())));
+  REQUIRE(directories.data_directory == File(Utf8Path(application_root / L"data")));
+  REQUIRE(directories.cache_directory == File(Utf8Path(application_root / L"cache")));
+  REQUIRE(directories.temporary_directory == File(Utf8Path(application_root / L"temporary")));
 }
 
-TEST_CASE("Win32FileSystemCreatesAndProtectsApplicationDirectories") {
+TEST_CASE("Win32AppDirectoriesAreCreatedAndProtected") {
   TemporaryDirectory temporary;
   const fs::path executable_directory = temporary.Path() / L"程序";
   const fs::path local_app_data = temporary.Path() / L"local";
@@ -71,10 +71,10 @@ TEST_CASE("Win32FileSystemCreatesAndProtectsApplicationDirectories") {
   REQUIRE(fs::create_directories(local_app_data));
   const fs::path executable = executable_directory / L"sample.exe";
 
-  std::shared_ptr<FileSystem> file_system =
-      detail::CreateWin32FileSystem(executable.wstring(), local_app_data.wstring());
-  const AppDirectories& directories = file_system->Directories();
+  const AppDirectories directories =
+      detail::CreateWin32AppDirectories(executable.wstring(), local_app_data.wstring());
 
+  detail::ProtectAppDirectories(directories);
   REQUIRE(directories.executable_directory == File(Utf8Path(executable_directory)));
   REQUIRE(directories.data_directory == File(Utf8Path(local_app_data / L"sample" / L"data")));
   REQUIRE(directories.cache_directory.IsDirectory());

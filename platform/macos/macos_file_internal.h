@@ -13,14 +13,13 @@
 
 namespace huxerui {
 class FileReference;
-class FileSystem;
 } // namespace huxerui
 
 namespace huxerui::detail {
 
 class FilePickerTransport;
 
-[[nodiscard]] std::shared_ptr<FileSystem> CreateMacFileSystem();
+[[nodiscard]] AppDirectories CreateMacAppDirectories();
 
 #ifdef __OBJC__
 [[nodiscard]] std::shared_ptr<FilePickerTransport>

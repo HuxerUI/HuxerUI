@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "application_internal.h"
+#include "io/file_internal.h"
 #include "platform_registry_internal.h"
 #include "runtime/runtime_internal.h"
 #include "system_tray_internal.h"
@@ -393,11 +394,12 @@ ApplicationService::ApplicationService(Runtime& runtime, ApplicationActivation s
                                        std::shared_ptr<PermissionController> permissions,
                                        std::shared_ptr<LocalNotificationService> local_notifications,
                                        std::shared_ptr<SystemTrayService> system_tray,
-                                       PlatformClipboard* platform_clipboard)
+                                       PlatformClipboard* platform_clipboard, std::optional<AppDirectories> directories)
     : runtime_(&runtime), startup_activation_(std::move(startup_activation)),
       lifecycle_state_(std::make_shared<StateCell<ApplicationLifecycleState>>(ApplicationLifecycleState::Active)),
       permissions_(std::move(permissions)), local_notifications_(std::move(local_notifications)),
-      system_tray_(std::move(system_tray)), clipboard_(new huxerui::Clipboard(platform_clipboard)) {
+      system_tray_(std::move(system_tray)), clipboard_(new huxerui::Clipboard(platform_clipboard)),
+      directories_(std::move(directories)) {
   ValidateApplicationActivation(startup_activation_);
   if (!permissions_) {
     throw std::invalid_argument("HuxerUI application permission controller must not be empty");
@@ -407,6 +409,9 @@ ApplicationService::ApplicationService(Runtime& runtime, ApplicationActivation s
   }
   if (!system_tray_) {
     throw std::invalid_argument("HuxerUI application system tray service must not be empty");
+  }
+  if (directories_) {
+    ProtectAppDirectories(*directories_);
   }
 }
 
@@ -479,6 +484,13 @@ const std::shared_ptr<LocalNotificationService>& ApplicationService::LocalNotifi
 
 const std::shared_ptr<Clipboard>& ApplicationService::Clipboard() const noexcept {
   return clipboard_;
+}
+
+const AppDirectories& ApplicationService::Directories() const {
+  if (!directories_) {
+    throw std::logic_error("HuxerUI application directories are not available on this host");
+  }
+  return *directories_;
 }
 
 Task<PermissionStatus> ApplicationService::CheckPermission(Permission permission) const {
@@ -588,6 +600,14 @@ ApplicationLifecycleState ApplicationHandle::LifecycleState() const {
 
 std::shared_ptr<Clipboard> ApplicationHandle::Clipboard() const noexcept {
   return service_->Clipboard();
+}
+
+const AppDirectories& ApplicationHandle::Directories() const {
+  return service_->Directories();
+}
+
+File ApplicationHandle::CurrentDirectory() const {
+  return File(detail::CurrentDirectoryPath());
 }
 
 SystemTrayHandle ApplicationHandle::SystemTray() const {

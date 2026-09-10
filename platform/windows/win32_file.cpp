@@ -56,7 +56,7 @@ std::wstring ResolveLocalAppData() {
 
 } // namespace
 
-FileSystemPaths ResolveWin32FileSystemPaths(std::wstring_view executable_path, std::wstring_view local_app_data) {
+AppDirectories ResolveWin32AppDirectories(std::wstring_view executable_path, std::wstring_view local_app_data) {
   if (executable_path.empty() || local_app_data.empty()) {
     throw std::runtime_error("HuxerUI Windows file system paths must not be empty");
   }
@@ -71,19 +71,19 @@ FileSystemPaths ResolveWin32FileSystemPaths(std::wstring_view executable_path, s
 
   const fs::path application_root = local_root / identity;
   return {
-      .executable_directory = PublicPath(executable_directory),
-      .data_directory = PublicPath(application_root / L"data"),
-      .cache_directory = PublicPath(application_root / L"cache"),
-      .temporary_directory = PublicPath(application_root / L"temporary"),
+      .executable_directory = File(PublicPath(executable_directory)),
+      .data_directory = File(PublicPath(application_root / L"data")),
+      .cache_directory = File(PublicPath(application_root / L"cache")),
+      .temporary_directory = File(PublicPath(application_root / L"temporary")),
   };
 }
 
-std::shared_ptr<FileSystem> CreateWin32FileSystem(std::wstring_view executable_path, std::wstring_view local_app_data) {
-  return MakeFileSystem(ResolveWin32FileSystemPaths(executable_path, local_app_data));
+AppDirectories CreateWin32AppDirectories(std::wstring_view executable_path, std::wstring_view local_app_data) {
+  return PrepareAppDirectories(ResolveWin32AppDirectories(executable_path, local_app_data));
 }
 
-std::shared_ptr<FileSystem> CreateWin32FileSystem() {
-  return CreateWin32FileSystem(ResolveExecutablePath(), ResolveLocalAppData());
+AppDirectories CreateWin32AppDirectories() {
+  return CreateWin32AppDirectories(ResolveExecutablePath(), ResolveLocalAppData());
 }
 
 } // namespace huxerui::detail

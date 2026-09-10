@@ -67,10 +67,10 @@ private:
 TEST_CASE("WindowsDirectoryReferencesRejectPathOnlyProviderImports") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File destination = file_system->Directories().temporary_directory.Child("destination");
+  const File destination = file_application->Directories().temporary_directory.Child("destination");
   REQUIRE(destination.CreateDirectory());
   auto input = std::make_shared<ProviderReferenceState>("provider:file");
   auto directory = std::make_shared<ProviderReferenceState>("provider:directory");
@@ -93,10 +93,10 @@ TEST_CASE("WindowsDirectoryReferencesRejectPathOnlyProviderImports") {
 TEST_CASE("WindowsDirectoryReferencesProbeWriteAccessWithoutChangingTheDirectory") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File directory = file_system->Directories().temporary_directory.Child("selected");
+  const File directory = file_application->Directories().temporary_directory.Child("selected");
   REQUIRE(directory.CreateDirectory());
   bool writable = true;
   bool expected_write = true;
@@ -146,7 +146,7 @@ TEST_CASE("WindowsDirectoryReferencesProbeWriteAccessWithoutChangingTheDirectory
 
 TEST_CASE("WindowsDirectoryReferencePathsRemainUsableAfterReleasingNativeHandles") {
   TemporaryDirectory temporary;
-  const File root(temporary.Paths().temporary_directory);
+  const File root(temporary.Directories().temporary_directory);
   const File parent = root.Child("parent");
   const File selected = parent.Child("selected");
   const File moved = root.Child("moved");
@@ -173,10 +173,10 @@ TEST_CASE("WindowsDirectoryReferencePathsRemainUsableAfterReleasingNativeHandles
 TEST_CASE("WindowsDirectoryOverwritesPreserveOriginalsAndCleanUpFailedStagingFiles") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File directory = root.Child("selected");
   const File target = directory.Child("value.txt");
   const File source = root.Child("source.txt");
@@ -218,10 +218,10 @@ TEST_CASE("WindowsDirectoryOverwritesPreserveOriginalsAndCleanUpFailedStagingFil
 TEST_CASE("WindowsDirectoryGrantsDoNotFollowReplacedRoots") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File parent = root.Child("parent");
   const File selected = parent.Child("selected");
   const File moved = root.Child("moved");
@@ -284,10 +284,10 @@ TEST_CASE("WindowsDirectoryGrantsDoNotFollowReplacedRoots") {
 TEST_CASE("WindowsDirectoryGrantsRejectDirectoriesConvertedToJunctions") {
   ResetFileState();
   TemporaryDirectory temporary;
-  FileTestPlatform platform(temporary.Paths());
+  FileTestPlatform platform(temporary.Directories());
   Runtime runtime(FileApp, platform);
   runtime.BuildFrame();
-  const File root = file_system->Directories().temporary_directory;
+  const File root = file_application->Directories().temporary_directory;
   const File selected = root.Child("selected");
   const File outside = root.Child("outside");
   const File input = root.Child("input.txt");

@@ -35,7 +35,7 @@ View DirectoryPath(std::string label, const File& directory) {
 }
 
 [[huxerui::composable]] View FilesContent() {
-  auto files = UseService<FileSystem>();
+  auto application = UseApplication();
   auto picker = UseService<FilePicker>();
   auto tasks = UseTaskScope();
   const FilePickerFilter text_filter{
@@ -58,7 +58,7 @@ View DirectoryPath(std::string label, const File& directory) {
     };
   };
   const ThemeSpec& theme = UseTheme();
-  const AppDirectories& directories = files->Directories();
+  const AppDirectories& directories = application.Directories();
   File example_file(directories.data_directory, "example.txt");
 
   return ScrollView {
@@ -265,7 +265,7 @@ View DirectoryPath(std::string label, const File& directory) {
         DirectoryPath("Data", directories.data_directory),
         DirectoryPath("Cache", directories.cache_directory),
         DirectoryPath("Temporary", directories.temporary_directory),
-        DirectoryPath("Current working directory", files->CurrentDirectory()),
+        DirectoryPath("Current working directory", application.CurrentDirectory()),
       }.With(
           Padding(theme.spacing.large),
           Spacing(theme.spacing.medium),

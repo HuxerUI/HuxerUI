@@ -5,7 +5,7 @@ Application code does not depend on operating-system path, URL, bookmark, or bro
 
 ## Application directories
 
-Use the FileSystem root service to obtain application-owned directories:
+Use `UseApplication().Directories()` to obtain application-owned directories:
 
 - data for durable application state;
 - cache for reproducible data;
@@ -13,6 +13,16 @@ Use the FileSystem root service to obtain application-owned directories:
 
 The platform adapter derives the physical location from the application identity and platform conventions.
 Do not construct these locations from environment variables in application code.
+
+```cpp
+auto application = UseApplication();
+File settings = application.Directories().data_directory.Child("settings.json");
+File working_directory = application.CurrentDirectory();
+```
+
+`Directories()` returns the paths captured at initialization without I/O. A retained ApplicationHandle can query them outside composition and after Runtime destruction; copy the required File values into asynchronous work rather than retaining references to a temporary owner.
+A custom host without application directories causes `Directories()` to throw `std::logic_error`, not to invent writable paths.
+`CurrentDirectory()` queries the process working directory on every call, independently of application storage and Runtime lifetime. All Runtime instances in one process share it; HuxerUI does not expose an operation to change it.
 
 ## Paths and files
 
@@ -69,8 +79,8 @@ File reads, writes, directory operations, copying, moving, and external imports 
 Continuation resumes on the owning Runtime thread, and cancellation prevents late delivery to an unmounted owner.
 
 ```cpp
-Task<IoResult<std::string>> LoadSettings(const std::shared_ptr<FileSystem>& files) {
-  File file(files->Directories().data_directory, "settings.json");
+Task<IoResult<std::string>> LoadSettings(File data_directory) {
+  File file(data_directory, "settings.json");
   co_return co_await file.ReadStringAsync();
 }
 ```
@@ -79,8 +89,8 @@ Use `Bytes` from `<huxerui/data.h>` for owned binary data and `std::span<const s
 Use byte operations for arbitrary payloads and string operations only for UTF-8 content.
 
 ```cpp
-Task<IoResult<Bytes>> LoadPayload(const std::shared_ptr<FileSystem>& files) {
-  File file(files->Directories().data_directory, "payload.bin");
+Task<IoResult<Bytes>> LoadPayload(File data_directory) {
+  File file(data_directory, "payload.bin");
   co_return co_await file.ReadBytesAsync();
 }
 ```

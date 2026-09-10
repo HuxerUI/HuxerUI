@@ -1144,8 +1144,8 @@ private:
     return CreateAndroidFilePickerTransport(virtual_machine_, Environment(), view_, context_);
   }
 
-  std::shared_ptr<FileSystem> CreateFileSystem() override {
-    return CreateAndroidFileSystem(Environment(), context_);
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateAndroidAppDirectories(Environment(), context_);
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {

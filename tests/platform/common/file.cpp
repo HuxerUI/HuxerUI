@@ -162,17 +162,17 @@ TEST_CASE("FileStreamsReadWriteAppendAndCopyWithCallerOwnedBuffers") {
   REQUIRE(root.OpenWrite().Error().code == IoErrorCode::IsDirectory);
 }
 
-TEST_CASE("FileSystemCreatesAndProtectsApplicationDirectories") {
+TEST_CASE("AppDirectoriesAreCreatedAndProtected") {
   TemporaryDirectory temporary;
   File root(temporary.Path());
-  std::shared_ptr<FileSystem> file_system = detail::MakeFileSystem({
-      .executable_directory = root.Path(),
-      .data_directory = root.Child("data").Path(),
-      .cache_directory = root.Child("cache").Path(),
-      .temporary_directory = root.Child("temporary").Path(),
+  const AppDirectories directories = detail::PrepareAppDirectories({
+      .executable_directory = root,
+      .data_directory = root.Child("data"),
+      .cache_directory = root.Child("cache"),
+      .temporary_directory = root.Child("temporary"),
   });
 
-  const AppDirectories& directories = file_system->Directories();
+  detail::ProtectAppDirectories(directories);
   REQUIRE(directories.executable_directory == root);
   REQUIRE(directories.data_directory.IsDirectory());
   REQUIRE(directories.cache_directory.IsDirectory());
@@ -182,20 +182,20 @@ TEST_CASE("FileSystemCreatesAndProtectsApplicationDirectories") {
   REQUIRE_FALSE(directories.temporary_directory.Delete());
   REQUIRE_FALSE(directories.temporary_directory.DeleteRecursively());
   REQUIRE_FALSE(root.DeleteRecursively());
-  REQUIRE(file_system->CurrentDirectory() == File(Utf8Path(fs::current_path())));
 }
 
-TEST_CASE("FileSystemProtectsAncestorsOfApplicationDirectories") {
+TEST_CASE("AppDirectoriesProtectTheirAncestors") {
   TemporaryDirectory temporary;
   File root(temporary.Path());
   File application_root = root.Child("application");
-  std::shared_ptr<FileSystem> file_system = detail::MakeFileSystem({
-      .data_directory = application_root.Child("data").Path(),
-      .cache_directory = application_root.Child("cache").Path(),
-      .temporary_directory = application_root.Child("temporary").Path(),
+  const AppDirectories directories = detail::PrepareAppDirectories({
+      .data_directory = application_root.Child("data"),
+      .cache_directory = application_root.Child("cache"),
+      .temporary_directory = application_root.Child("temporary"),
   });
 
-  REQUIRE(file_system->Directories().data_directory.IsDirectory());
+  detail::ProtectAppDirectories(directories);
+  REQUIRE(directories.data_directory.IsDirectory());
   REQUIRE_FALSE(application_root.DeleteRecursively());
   REQUIRE(application_root.IsDirectory());
 }

@@ -8,7 +8,7 @@ using namespace huxerui;
 
 [[huxerui::composable]] View DirectoryCopyContent() {
   auto picker = UseService<FilePicker>();
-  auto files = UseService<FileSystem>();
+  auto application = UseApplication();
   auto tasks = UseTaskScope();
   auto source = UseState(std::optional<FileReference>{});
   auto destination = UseState(std::optional<FileReference>{});
@@ -17,7 +17,7 @@ using namespace huxerui;
   auto busy = UseState(false);
   auto active = UseState(std::shared_ptr<TaskHandle>{});
   auto status = UseState(std::string("Choose a source directory, choose a destination, then copy."));
-  const File local = files->Directories().data_directory.Child("copied-directory");
+  const File local = application.Directories().data_directory.Child("copied-directory");
   const ThemeSpec& theme = UseTheme();
 
   return ScrollView {

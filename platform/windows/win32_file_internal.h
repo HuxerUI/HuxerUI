@@ -12,13 +12,11 @@
 
 namespace huxerui {
 
-class FileSystem;
 class Runtime;
 
 namespace detail {
 
 class FilePickerTransport;
-struct FileSystemPaths;
 
 class Win32FileDrop final {
 public:
@@ -33,11 +31,11 @@ private:
   Target* target_;
 };
 
-[[nodiscard]] FileSystemPaths
-ResolveWin32FileSystemPaths(std::wstring_view executable_path, std::wstring_view local_app_data);
-[[nodiscard]] std::shared_ptr<FileSystem>
-CreateWin32FileSystem(std::wstring_view executable_path, std::wstring_view local_app_data);
-[[nodiscard]] std::shared_ptr<FileSystem> CreateWin32FileSystem();
+[[nodiscard]] AppDirectories
+ResolveWin32AppDirectories(std::wstring_view executable_path, std::wstring_view local_app_data);
+[[nodiscard]] AppDirectories
+CreateWin32AppDirectories(std::wstring_view executable_path, std::wstring_view local_app_data);
+[[nodiscard]] AppDirectories CreateWin32AppDirectories();
 [[nodiscard]] std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path, bool writable = true);
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateWin32FilePickerTransport(std::function<HWND()> window_provider, UIThreadDispatcher dispatch_to_ui_thread);

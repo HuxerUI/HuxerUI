@@ -87,7 +87,7 @@ mode_t Permissions(std::string_view path) {
   return status.st_mode & 0777;
 }
 
-detail::LinuxFileSystemEnvironment
+detail::LinuxAppDirectoryEnvironment
 Environment(const TemporaryDirectory& temporary, std::string runtime_directory, uid_t user_id = geteuid()) {
   return {
       .home_directory = temporary.Path("home"),
@@ -102,29 +102,29 @@ Environment(const TemporaryDirectory& temporary, std::string runtime_directory, 
 
 } // namespace
 
-TEST_CASE("LinuxFileSystemResolvesXdgApplicationDirectories") {
+TEST_CASE("LinuxAppDirectoriesResolveXdgPaths") {
   TemporaryDirectory temporary;
   const std::string executable_directory =
       temporary.CreateDirectory("bin", fs::perms::owner_all | fs::perms::group_read);
   const std::string runtime = temporary.CreateDirectory("runtime", fs::perms::owner_all);
   const std::string executable = File(executable_directory).Child("示例程序").Path();
 
-  const detail::FileSystemPaths paths =
-      detail::ResolveLinuxFileSystemPaths(executable, Environment(temporary, runtime));
+  const AppDirectories directories =
+      detail::ResolveLinuxAppDirectories(executable, Environment(temporary, runtime));
 
-  REQUIRE(paths.executable_directory == executable_directory);
-  REQUIRE(paths.data_directory == File(temporary.Path("data")).Child("示例程序").Path());
-  REQUIRE(paths.cache_directory == File(temporary.Path("cache")).Child("示例程序").Path());
-  REQUIRE(paths.temporary_directory == File(runtime).Child("示例程序").Path());
+  REQUIRE(directories.executable_directory == File(executable_directory));
+  REQUIRE(directories.data_directory == File(temporary.Path("data")).Child("示例程序"));
+  REQUIRE(directories.cache_directory == File(temporary.Path("cache")).Child("示例程序"));
+  REQUIRE(directories.temporary_directory == File(runtime).Child("示例程序"));
 }
 
-TEST_CASE("LinuxFileSystemIgnoresInvalidXdgPathsAndUsesHomeDefaults") {
+TEST_CASE("LinuxAppDirectoriesIgnoreInvalidXdgPathsAndUseHomeDefaults") {
   TemporaryDirectory temporary;
   const std::string executable_directory = temporary.CreateDirectory("bin", fs::perms::owner_all);
   const std::string executable = File(executable_directory).Child("sample").Path();
   std::string invalid_utf8 = temporary.Path();
   invalid_utf8.append("/\xFF", 2);
-  detail::LinuxFileSystemEnvironment environment{
+  detail::LinuxAppDirectoryEnvironment environment{
       .home_directory = "relative-home",
       .passwd_home_directory = temporary.Path("passwd-home"),
       .data_home = "relative-data",
@@ -134,57 +134,56 @@ TEST_CASE("LinuxFileSystemIgnoresInvalidXdgPathsAndUsesHomeDefaults") {
       .effective_user_id = geteuid(),
   };
 
-  const detail::FileSystemPaths paths = detail::ResolveLinuxFileSystemPaths(executable, environment);
+  const AppDirectories directories = detail::ResolveLinuxAppDirectories(executable, environment);
 
-  REQUIRE(paths.data_directory == File(temporary.Path("passwd-home")).Resolve(".local/share/sample").Path());
-  REQUIRE(paths.cache_directory == File(temporary.Path("passwd-home")).Resolve(".cache/sample").Path());
+  REQUIRE(directories.data_directory == File(temporary.Path("passwd-home")).Resolve(".local/share/sample"));
+  REQUIRE(directories.cache_directory == File(temporary.Path("passwd-home")).Resolve(".cache/sample"));
   REQUIRE(
-      paths.temporary_directory == File(temporary.Path("fallback"))
-                                       .Child("huxerui-" + std::to_string(environment.effective_user_id))
-                                       .Child("sample")
-                                       .Path()
+      directories.temporary_directory == File(temporary.Path("fallback"))
+                                             .Child("huxerui-" + std::to_string(environment.effective_user_id))
+                                             .Child("sample")
   );
-  REQUIRE_THROWS_AS(detail::ResolveLinuxFileSystemPaths("relative/sample", environment), std::runtime_error);
+  REQUIRE_THROWS_AS(detail::ResolveLinuxAppDirectories("relative/sample", environment), std::runtime_error);
 }
 
-TEST_CASE("LinuxFileSystemRejectsUnsafeRuntimeDirectories") {
+TEST_CASE("LinuxAppDirectoriesRejectUnsafeRuntimeDirectories") {
   TemporaryDirectory temporary;
   const std::string executable_directory = temporary.CreateDirectory("bin", fs::perms::owner_all);
   const std::string executable = File(executable_directory).Child("sample").Path();
   const std::string runtime = temporary.CreateDirectory("runtime", fs::perms::owner_all);
-  const std::string fallback =
-      File(temporary.Path("fallback")).Child("huxerui-" + std::to_string(geteuid())).Child("sample").Path();
+  const File fallback =
+      File(temporary.Path("fallback")).Child("huxerui-" + std::to_string(geteuid())).Child("sample");
 
-  detail::LinuxFileSystemEnvironment wrong_owner =
+  detail::LinuxAppDirectoryEnvironment wrong_owner =
       Environment(temporary, runtime, geteuid() == std::numeric_limits<uid_t>::max() ? geteuid() - 1 : geteuid() + 1);
   REQUIRE(
-      detail::ResolveLinuxFileSystemPaths(executable, wrong_owner).temporary_directory !=
-      File(runtime).Child("sample").Path()
+      detail::ResolveLinuxAppDirectories(executable, wrong_owner).temporary_directory !=
+      File(runtime).Child("sample")
   );
 
   fs::permissions(fs::path(runtime), fs::perms::owner_all | fs::perms::group_read, fs::perm_options::replace);
   REQUIRE(
-      detail::ResolveLinuxFileSystemPaths(executable, Environment(temporary, runtime)).temporary_directory == fallback
+      detail::ResolveLinuxAppDirectories(executable, Environment(temporary, runtime)).temporary_directory == fallback
   );
 
   const std::string private_runtime = temporary.CreateDirectory("private-runtime", fs::perms::owner_all);
   const fs::path runtime_link = fs::path(temporary.Path()) / "runtime-link";
   fs::create_directory_symlink(fs::path(private_runtime), runtime_link);
   REQUIRE(
-      detail::ResolveLinuxFileSystemPaths(executable, Environment(temporary, Utf8Path(runtime_link)))
+      detail::ResolveLinuxAppDirectories(executable, Environment(temporary, Utf8Path(runtime_link)))
           .temporary_directory == fallback
   );
 }
 
-TEST_CASE("LinuxFileSystemCreatesAndProtectsPrivateApplicationDirectories") {
+TEST_CASE("LinuxAppDirectoriesAreCreatedAndProtected") {
   TemporaryDirectory temporary;
   const std::string executable_directory = temporary.CreateDirectory("bin", fs::perms::owner_all);
   const std::string runtime = temporary.CreateDirectory("runtime", fs::perms::owner_all);
   const std::string executable = File(executable_directory).Child("sample").Path();
 
-  std::shared_ptr<FileSystem> file_system = detail::CreateLinuxFileSystem(executable, Environment(temporary, runtime));
-  const AppDirectories& directories = file_system->Directories();
+  const AppDirectories directories = detail::CreateLinuxAppDirectories(executable, Environment(temporary, runtime));
 
+  detail::ProtectAppDirectories(directories);
   REQUIRE(directories.executable_directory == File(executable_directory));
   REQUIRE(directories.data_directory.IsDirectory());
   REQUIRE(directories.cache_directory.IsDirectory());
@@ -195,16 +194,16 @@ TEST_CASE("LinuxFileSystemCreatesAndProtectsPrivateApplicationDirectories") {
   REQUIRE_FALSE(directories.temporary_directory.DeleteRecursively());
 }
 
-TEST_CASE("LinuxFileSystemCreatesAUidIsolatedTemporaryFallback") {
+TEST_CASE("LinuxAppDirectoriesUseAUidIsolatedTemporaryFallback") {
   TemporaryDirectory temporary;
   const std::string executable_directory = temporary.CreateDirectory("bin", fs::perms::owner_all);
   const std::string fallback = temporary.CreateDirectory("fallback", fs::perms::owner_all);
   const std::string executable = File(executable_directory).Child("sample").Path();
-  detail::LinuxFileSystemEnvironment environment = Environment(temporary, {});
+  detail::LinuxAppDirectoryEnvironment environment = Environment(temporary, {});
   environment.fallback_temporary_root = fallback;
 
-  std::shared_ptr<FileSystem> file_system = detail::CreateLinuxFileSystem(executable, environment);
-  const File temporary_directory = file_system->Directories().temporary_directory;
+  const AppDirectories directories = detail::CreateLinuxAppDirectories(executable, environment);
+  const File temporary_directory = directories.temporary_directory;
   const File user_directory = *temporary_directory.Parent();
 
   REQUIRE(user_directory.Name() == "huxerui-" + std::to_string(geteuid()));
@@ -212,19 +211,19 @@ TEST_CASE("LinuxFileSystemCreatesAUidIsolatedTemporaryFallback") {
   REQUIRE(Permissions(temporary_directory.Path()) == 0700);
 }
 
-TEST_CASE("LinuxFileSystemRefusesAnInsecureTemporaryFallback") {
+TEST_CASE("LinuxAppDirectoriesRejectAnInsecureTemporaryFallback") {
   TemporaryDirectory temporary;
   const std::string executable_directory = temporary.CreateDirectory("bin", fs::perms::owner_all);
   const std::string fallback = temporary.CreateDirectory("fallback", fs::perms::owner_all);
   const std::string executable = File(executable_directory).Child("sample").Path();
-  detail::LinuxFileSystemEnvironment environment = Environment(temporary, {});
+  detail::LinuxAppDirectoryEnvironment environment = Environment(temporary, {});
   environment.fallback_temporary_root = fallback;
   static_cast<void>(temporary.CreateDirectory(
       "fallback/huxerui-" + std::to_string(geteuid()),
       fs::perms::owner_all | fs::perms::group_read
   ));
 
-  REQUIRE_THROWS_AS(detail::CreateLinuxFileSystem(executable, environment), std::runtime_error);
+  REQUIRE_THROWS_AS(detail::CreateLinuxAppDirectories(executable, environment), std::runtime_error);
 }
 
 TEST_CASE("LinuxExecutablePathDoesNotDependOnTheWorkingDirectory") {

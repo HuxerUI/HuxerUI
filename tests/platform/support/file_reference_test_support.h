@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -45,12 +46,12 @@ public:
     fs::remove_all(path_, error);
   }
 
-  [[nodiscard]] detail::FileSystemPaths Paths() const {
+  [[nodiscard]] AppDirectories Directories() const {
     return {
-        .executable_directory = Utf8Path(path_),
-        .data_directory = Utf8Path(path_ / "data"),
-        .cache_directory = Utf8Path(path_ / "cache"),
-        .temporary_directory = Utf8Path(path_ / "temporary"),
+        .executable_directory = File(Utf8Path(path_)),
+        .data_directory = File(Utf8Path(path_ / "data")),
+        .cache_directory = File(Utf8Path(path_ / "cache")),
+        .temporary_directory = File(Utf8Path(path_ / "temporary")),
     };
   }
 
@@ -67,8 +68,8 @@ struct TaskQueue {
 
 class FileTestPlatform final : public TestPlatform {
 public:
-  explicit FileTestPlatform(detail::FileSystemPaths paths)
-      : FileTestPlatform(std::make_shared<TaskQueue>(), std::move(paths)) {}
+  explicit FileTestPlatform(AppDirectories directories)
+      : FileTestPlatform(std::make_shared<TaskQueue>(), std::move(directories)) {}
 
   void RunUntil(const std::function<bool()>& complete) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -100,12 +101,12 @@ public:
   }
 
 protected:
-  std::shared_ptr<FileSystem> CreateFileSystem() override {
-    return detail::MakeFileSystem(paths_);
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return detail::PrepareAppDirectories(directories_);
   }
 
 private:
-  FileTestPlatform(std::shared_ptr<TaskQueue> queue, detail::FileSystemPaths paths)
+  FileTestPlatform(std::shared_ptr<TaskQueue> queue, AppDirectories directories)
       : TestPlatform([queue](std::function<void()> task) {
           {
             std::scoped_lock lock(queue->mutex);
@@ -113,10 +114,10 @@ private:
           }
           queue->condition.notify_one();
         }),
-        queue_(std::move(queue)), paths_(std::move(paths)) {}
+        queue_(std::move(queue)), directories_(std::move(directories)) {}
 
   std::shared_ptr<TaskQueue> queue_;
-  detail::FileSystemPaths paths_;
+  AppDirectories directories_;
 };
 
 class ProviderReferenceState final : public detail::FileReferenceState {
@@ -214,7 +215,7 @@ private:
   std::string entry_key_;
 };
 
-std::shared_ptr<FileSystem> file_system;
+std::optional<ApplicationHandle> file_application;
 TaskScope file_tasks;
 std::string async_text;
 Bytes async_bytes;
@@ -223,13 +224,13 @@ bool file_task_complete = false;
 bool canceled_file_task_continued = false;
 
 View FileApp() {
-  file_system = UseService<FileSystem>();
+  file_application = UseApplication();
   file_tasks = UseTaskScope();
   return Text("Files");
 }
 
 void ResetFileState() {
-  file_system.reset();
+  file_application.reset();
   file_tasks = {};
   async_text.clear();
   async_bytes.clear();

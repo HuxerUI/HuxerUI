@@ -1,6 +1,8 @@
 #include <catch2/catch_amalgamated.hpp>
 
 #include <cstddef>
+#include <filesystem>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -100,6 +102,20 @@ TEST_CASE("Application quit requests orderly platform termination") {
 }
 
 } // namespace
+
+TEST_CASE("Application directory queries report an unsupported host without blocking Runtime creation") {
+  ResetActivationState();
+  TestPlatform platform;
+  {
+    Runtime runtime(ApplicationCommandsApp, platform);
+    runtime.BuildFrame();
+    REQUIRE(application_handle.has_value());
+    REQUIRE_THROWS_AS(application_handle->Directories(), std::logic_error);
+    REQUIRE(application_handle->CurrentDirectory() == File(std::filesystem::current_path().generic_u8string()));
+  }
+  REQUIRE_THROWS_AS(application_handle->Directories(), std::logic_error);
+  REQUIRE(application_handle->CurrentDirectory() == File(std::filesystem::current_path().generic_u8string()));
+}
 
 TEST_CASE("Application exposes its immutable startup activation") {
   ResetActivationState();

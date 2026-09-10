@@ -61,7 +61,7 @@ ScrollPhysics PlatformAdapter::ScrollDefaults() const noexcept {
   return {};
 }
 
-std::shared_ptr<FileSystem> PlatformAdapter::CreateFileSystem() {
+std::optional<AppDirectories> PlatformAdapter::CreateAppDirectories() {
   return {};
 }
 
