@@ -85,7 +85,7 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
   );
   REQUIRE(
       build_commands[1].arguments ==
-      std::vector<std::string>{"--build", build.string(), "--config", "Debug", "--parallel"}
+      std::vector<std::string>{"--build", build.string(), "--config", "Debug"}
   );
 
   const std::filesystem::path artifact = build / "bin/sample";

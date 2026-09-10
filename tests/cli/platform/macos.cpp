@@ -25,6 +25,9 @@ TEST_CASE("HuxerUICliCreatesMacOSPackageCommands") {
                          "}\n";
 
   const std::vector<huxerui::cli::ProcessCommand> build_commands = macos->BuildCommands(context);
+  REQUIRE(build_commands.size() == 2);
+  REQUIRE(build_commands[1].arguments ==
+          std::vector<std::string>{"--build", context.build_directory.string(), "--config", "Release"});
   REQUIRE(std::find(build_commands[0].arguments.begin(), build_commands[0].arguments.end(),
                     "-DHUXERUI_PACKAGE=ON") != build_commands[0].arguments.end());
 

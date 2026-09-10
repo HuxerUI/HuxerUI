@@ -95,7 +95,6 @@ TEST_CASE("HuxerUICliCreatesStableWindowsBuildCommands") {
           context.build_directory.string(),
           "--config",
           "Release",
-          "--parallel",
       }
   );
 

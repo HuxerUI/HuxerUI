@@ -244,6 +244,7 @@ The default is `codex`; `all` selects the three distinct directories, and `none`
 An explicit list replaces the default, and aliases that share a directory are deduplicated.
 
 `huxerui mcpp build` is an independent generic mcpp frontend. It requires `mcpp.toml` in the selected source directory and invokes the `mcpp` executable directly. It does not participate in HuxerUI project discovery, alter the existing CMake and platform-driver paths, or provide HuxerUI package integration; the mcpp project owns those details.
+Desktop CMake build commands leave concurrency to CMake and its selected build tool, preserving `CMAKE_BUILD_PARALLEL_LEVEL` for callers and CI. They do not force an unnumbered `--parallel`, which becomes unlimited parallelism with Unix Makefiles.
 
 ### Create and platform add
 

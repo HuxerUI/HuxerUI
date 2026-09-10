@@ -6,6 +6,13 @@ foreach (required_variable IN ITEMS
     endif ()
 endforeach ()
 
+string(TIMESTAMP TEST_STARTED_AT "%s" UTC)
+function(report_stage description)
+    string(TIMESTAMP now "%s" UTC)
+    math(EXPR elapsed "${now} - ${TEST_STARTED_AT}")
+    message(STATUS "HuxerUI installed consumer [${elapsed}s]: ${description}")
+endfunction()
+
 get_filename_component(CMAKE_BIN_DIRECTORY "${CMAKE_COMMAND}" DIRECTORY)
 if (WIN32)
     set(ENV{PATH} "${CMAKE_BIN_DIRECTORY};$ENV{PATH}")
@@ -28,6 +35,7 @@ set(INSTALL_COMMAND
 if (BUILD_CONFIG)
     list(APPEND INSTALL_COMMAND --config "${BUILD_CONFIG}")
 endif ()
+report_stage("Install SDK")
 execute_process(
         COMMAND ${INSTALL_COMMAND}
         RESULT_VARIABLE INSTALL_RESULT
@@ -37,6 +45,7 @@ execute_process(
 if (NOT INSTALL_RESULT EQUAL 0)
     message(FATAL_ERROR "SDK installation failed:\n${INSTALL_OUTPUT}${INSTALL_ERROR}")
 endif ()
+report_stage("Relocate SDK and validate installed paths")
 file(GLOB_RECURSE INSTALLED_BUILTIN_RESOURCE_INDEXES
         "${SDK_INSTALL_ROOT}/*/huxerui/resources/huxerui/resources.bin"
 )
@@ -57,6 +66,7 @@ foreach (INSTALLED_CMAKE_FILE IN LISTS INSTALLED_CMAKE_FILES)
 endforeach ()
 
 foreach (CONSUMER_LINKAGE IN ITEMS shared static default both)
+    report_stage("Configure ${CONSUMER_LINKAGE} consumer")
     set(CONSUMER_SOURCE "${TEST_ROOT}/consumer-${CONSUMER_LINKAGE}")
     set(CONSUMER_BUILD "${TEST_ROOT}/consumer-${CONSUMER_LINKAGE}-build")
     file(MAKE_DIRECTORY "${CONSUMER_SOURCE}")
@@ -116,6 +126,7 @@ endif ()
             OUTPUT_VARIABLE CONSUMER_CONFIGURE_OUTPUT
             ERROR_VARIABLE CONSUMER_CONFIGURE_ERROR
     )
+    report_stage("Build ${CONSUMER_LINKAGE} consumer")
     execute_process(
             COMMAND "${CMAKE_COMMAND}" --build "${CONSUMER_BUILD}" --config "${BUILD_CONFIG}"
             RESULT_VARIABLE CONSUMER_BUILD_RESULT
@@ -133,6 +144,7 @@ endforeach ()
 file(GLOB_RECURSE TESTING_TARGET_EXPORTS "${SDK_ROOT}/*/cmake/HuxerUI/HuxerUITestingTargets.cmake")
 if (TESTING_TARGET_EXPORTS)
     foreach (TESTING_LINKAGE IN ITEMS default shared static)
+        report_stage("Configure ${TESTING_LINKAGE} testing consumer")
         set(TESTING_BUILD "${TEST_ROOT}/testing-${TESTING_LINKAGE}")
         set(TESTING_CONFIGURE_ARGUMENTS)
         if (NOT TESTING_LINKAGE STREQUAL "default")
@@ -149,6 +161,7 @@ if (TESTING_TARGET_EXPORTS)
         if (NOT TESTING_RESULT EQUAL 0)
             message(FATAL_ERROR "Testing consumer configure failed:\n${TESTING_OUTPUT}${TESTING_ERROR}")
         endif ()
+        report_stage("Build ${TESTING_LINKAGE} testing consumer")
         execute_process(
                 COMMAND "${CMAKE_COMMAND}" --build "${TESTING_BUILD}" --config "${BUILD_CONFIG}"
                 RESULT_VARIABLE TESTING_RESULT OUTPUT_VARIABLE TESTING_OUTPUT ERROR_VARIABLE TESTING_ERROR
@@ -156,6 +169,7 @@ if (TESTING_TARGET_EXPORTS)
         if (NOT TESTING_RESULT EQUAL 0)
             message(FATAL_ERROR "Testing consumer build failed:\n${TESTING_OUTPUT}${TESTING_ERROR}")
         endif ()
+        report_stage("Run ${TESTING_LINKAGE} testing consumer")
         execute_process(
                 COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${TESTING_BUILD}" -C "${BUILD_CONFIG}"
                         --output-on-failure --no-tests=error
@@ -165,6 +179,7 @@ if (TESTING_TARGET_EXPORTS)
             message(FATAL_ERROR "Testing consumer execution failed:\n${TESTING_OUTPUT}${TESTING_ERROR}")
         endif ()
     endforeach ()
+    report_stage("Reject conflicting testing linkage")
     execute_process(
             COMMAND "${CMAKE_COMMAND}" -S "${SOURCE_DIRECTORY}/tests/cmake/testing_consumer"
                     -B "${TEST_ROOT}/testing-conflict" -G "${HOST_GENERATOR}"
@@ -177,6 +192,7 @@ if (TESTING_TARGET_EXPORTS)
     endif ()
 endif ()
 
+report_stage("Validate installed CLI SDK discovery")
 set(HUXERUI_CLI "${SDK_ROOT}/${INSTALL_BINDIR}/huxerui${CLI_SUFFIX}")
 string(TOLOWER "${BUILD_CONFIG}" BUILD_PROFILE)
 if (NOT BUILD_PROFILE)
@@ -207,6 +223,7 @@ if (INVALID_HOME_RESULT EQUAL 0
         OR NOT INVALID_HOME_OUTPUT MATCHES "requires an installed SDK")
     message(FATAL_ERROR "Invalid HUXERUI_HOME was not rejected:\n${INVALID_HOME_OUTPUT}${INVALID_HOME_ERROR}")
 endif ()
+report_stage("Create application with installed CLI")
 execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env --unset=HUXERUI_HOME
                 "HUXERUI_SDK_ROOT=${TEST_ROOT}/missing"
@@ -253,6 +270,7 @@ set(BUILD_COMMAND
 if (NOT PLATFORM_ID STREQUAL "windows")
     list(APPEND BUILD_COMMAND --generator "${HOST_GENERATOR}")
 endif ()
+report_stage("Build application with relocated SDK")
 execute_process(
         COMMAND ${BUILD_COMMAND}
         WORKING_DIRECTORY "${PROJECT_ROOT}"
@@ -291,6 +309,7 @@ foreach (EXPECTED_CONTENT IN ITEMS
     endif ()
 endforeach ()
 
+report_stage("Reject implicit source selection")
 execute_process(
         COMMAND "${CMAKE_COMMAND}" -E env "HUXERUI_HOME=${SOURCE_DIRECTORY}"
                 "${HUXERUI_CLI}" build "${PLATFORM_ID}"
@@ -308,6 +327,7 @@ set(SOURCE_BUILD_COMMAND
 if (NOT PLATFORM_ID STREQUAL "windows")
     list(APPEND SOURCE_BUILD_COMMAND --generator "${HOST_GENERATOR}")
 endif ()
+report_stage("Build application from source")
 execute_process(COMMAND ${SOURCE_BUILD_COMMAND}
         WORKING_DIRECTORY "${PROJECT_ROOT}"
         RESULT_VARIABLE SOURCE_RESULT OUTPUT_VARIABLE SOURCE_OUTPUT ERROR_VARIABLE SOURCE_ERROR
@@ -315,6 +335,7 @@ execute_process(COMMAND ${SOURCE_BUILD_COMMAND}
 if (NOT SOURCE_RESULT EQUAL 0)
     message(FATAL_ERROR "Explicit source build without an installed SDK failed:\n${SOURCE_OUTPUT}${SOURCE_ERROR}")
 endif ()
+report_stage("Return to SDK build")
 execute_process(COMMAND ${BUILD_COMMAND}
         WORKING_DIRECTORY "${PROJECT_ROOT}"
         RESULT_VARIABLE RETURN_RESULT OUTPUT_VARIABLE RETURN_OUTPUT ERROR_VARIABLE RETURN_ERROR
@@ -322,6 +343,7 @@ execute_process(COMMAND ${BUILD_COMMAND}
 if (NOT RETURN_RESULT EQUAL 0)
     message(FATAL_ERROR "Returning to the SDK build failed:\n${RETURN_OUTPUT}${RETURN_ERROR}")
 endif ()
+report_stage("Validate incremental caches and clean up")
 file(GLOB HOME_CACHES "${PROJECT_ROOT}/.huxerui/build/home-*/*/*/CMakeCache.txt")
 list(LENGTH HOME_CACHES HOME_CACHE_COUNT)
 if (NOT HOME_CACHE_COUNT EQUAL 2)
@@ -342,3 +364,4 @@ if (SDK_HOME_INDEX LESS 0 OR SOURCE_HOME_INDEX LESS 0)
 endif ()
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
+report_stage("Complete")

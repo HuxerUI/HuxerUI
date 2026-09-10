@@ -149,6 +149,8 @@ if (TARGET huxerui_cli AND NOT HUXERUI_ENABLE_PROFILING
                     "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/installed_consumer.cmake"
     )
+    # This test performs a fresh source build in addition to relocated SDK consumer checks.
+    set_tests_properties(HuxerUIInstalledConsumerTests PROPERTIES TIMEOUT 1200)
 endif ()
 
 if (TARGET huxerui_cli AND HUXERUI_SDK_PACKAGE_FILE_NAME AND NOT HUXERUI_ENABLE_PROFILING)

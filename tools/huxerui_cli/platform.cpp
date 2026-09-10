@@ -134,7 +134,7 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
   return {
       {"cmake", std::move(configure_arguments), context.project_root},
       {"cmake",
-       {"--build", context.build_directory.string(), "--config", configuration, "--parallel"},
+       {"--build", context.build_directory.string(), "--config", configuration},
        context.project_root},
   };
 }

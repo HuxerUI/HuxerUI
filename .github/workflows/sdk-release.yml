@@ -387,6 +387,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.parallel_jobs }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -438,7 +439,7 @@ jobs:
             build/lib/libhuxerui.dylib \
             build/lib/libhuxerui_static.a
       - name: Test common contracts and tools
-        run: ctest --test-dir build -C Release --output-on-failure -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
+        run: ctest --test-dir build -C Release --verbose --output-on-failure -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
       - name: Test portable platform contracts
         if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
         run: ctest --test-dir build -C Release --output-on-failure -L portable --no-tests=error --output-junit "${{ github.workspace }}/build/portable-tests.xml"
@@ -485,6 +486,7 @@ jobs:
     env:
       CC: gcc-14
       CXX: g++-14
+      CMAKE_BUILD_PARALLEL_LEVEL: ${{ matrix.parallel_jobs }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -536,7 +538,7 @@ jobs:
         run: cmake --build build --parallel "${{ matrix.parallel_jobs }}"
       - name: Test common contracts and tools
         id: linux-common-tests
-        run: ctest --test-dir build --output-on-failure --timeout 300 -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
+        run: ctest --test-dir build --verbose --output-on-failure --timeout 300 -LE platform --no-tests=error --output-junit "${{ github.workspace }}/build/common-tests.xml"
       - name: Test portable platform contracts
         id: linux-portable-tests
         if: ${{ !cancelled() && steps.test-build.outcome == 'success' }}
