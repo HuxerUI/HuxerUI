@@ -55,6 +55,11 @@ env:
   # Pinned rather than latest: an mcpp release changes build behaviour, and a
   # green PR should stay green until someone chooses to move this line.
   MCPP_VERSION: '2026.9.10.2'
+  # The Linux clang leg. Pinned for the same reason mcpp is: a toolchain
+  # release changes what compiles, and a green PR should stay green until
+  # someone moves this line. Windows and macOS already build with clang --
+  # this axis is the one GCC otherwise hides.
+  MCPP_LLVM: 'llvm@22.1.8'
   XLINGS_NON_INTERACTIVE: '1'
 
 defaults:
@@ -255,6 +260,70 @@ jobs:
           g++ --version | head -1
           g++ -std=c++20 -fsyntax-only -Iinclude /tmp/header_only.cpp
           echo "#include <huxerui/huxerui.h> still compiles"
+
+  linux-llvm:
+    name: mcpp build (linux x86_64, clang)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-llvm-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ env.MCPP_LLVM }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-llvm-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ env.MCPP_LLVM }}-
+            mcpp-llvm-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y
+          mcpp --version
+
+      - name: Build the framework
+        run: mcpp build --toolchain "${MCPP_LLVM}"
+
+      # THIS is the step the job exists for. A library builds under either
+      # compiler; consuming it as a MODULE is where they diverge, because clang
+      # records the thread model and target-feature set in the BMI and refuses
+      # one that disagrees with the importing translation unit. When that
+      # happens `import huxerui;` yields nothing and every name in the demo is
+      # undefined -- 19 errors that name the demo and never mention the BMI.
+      #
+      # The grep runs over THIS build's output, not a second one: a repeat
+      # `mcpp build` is fully cached, emits no compile lines, and would make
+      # the assertion pass by having nothing to read.
+      - name: Build the example application, and check the BMI was loaded
+        working-directory: examples/mcpp_demo
+        run: |
+          set -o pipefail
+          mcpp build --toolchain "${MCPP_LLVM}" 2>&1 | tee build.log
+          # A configuration mismatch is a warning before it is an error, so a
+          # build can pass while the module was quietly not in effect.
+          ! grep -q 'module-file-config-mismatch' build.log \
+            || { echo "clang rejected the BMI; import huxerui; is not in effect"; exit 1; }
+          ! grep -q 'was compiled with the target feature' build.log \
+            || { echo "BMI and consumer disagree about target features"; exit 1; }
+          echo "clang loaded huxerui.pcm"
+
+      - name: Pack the library and check its shape
+        run: |
+          mcpp pack --toolchain "${MCPP_LLVM}"
+          archive=$(find target/dist -name 'huxerui-*.tar.gz' | head -1)
+          test -n "$archive" || { echo "mcpp pack produced no archive"; exit 1; }
+          echo "packed $archive"
 
   macos:
     name: mcpp build (macos arm64)

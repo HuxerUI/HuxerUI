@@ -89,6 +89,27 @@ bool probe(std::string_view module_spec, const std::string& libdir) {
         // A linker flag is not a compile flag. Routing -Wl,... to cxxflag would
         // put it on every compile line, where it is at best ignored.
         else if (token.starts_with("-Wl,"))    mcpp::link_flag(token.c_str());
+        // DIALECT FLAGS ARE NOT OURS TO EMIT. A `cxxflag` from a build program
+        // colours only this package's own translation units, and clang records
+        // the target-feature and thread-model set in the BMI it writes. A
+        // consumer compiled without them is then refused the module outright:
+        //
+        //   error: POSIX thread support was enabled in precompiled file
+        //          'huxerui.pcm' but is currently disabled
+        //   error: ... was compiled with the target feature '+sse' but the
+        //          current translation unit is not
+        //
+        // and every name in `import huxerui;` becomes undefined. GCC's check is
+        // laxer, which is why this only appeared once the build ran on clang.
+        //
+        // `-pthread` is declared as `[build] dialect_cxxflags` in mcpp.toml,
+        // which mcpp applies to every TU in the graph rather than to ours
+        // alone. The -m flags are dropped: SSE2 is baseline on x86-64, so the
+        // code generation is identical, and naming them explicitly is what put
+        // the feature list in the BMI in the first place.
+        else if (token == "-pthread")          {}
+        else if (token.starts_with("-msse") ||
+                 token.starts_with("-mfpmath")) {}
         else                                   mcpp::cxxflag(token.c_str());
     }
     return true;
