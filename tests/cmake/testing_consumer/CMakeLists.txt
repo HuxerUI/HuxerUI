@@ -22,7 +22,10 @@ endif ()
 add_executable(testing_consumer main.cpp)
 target_link_libraries(testing_consumer PRIVATE HuxerUI::testing)
 if (WIN32 AND testing_core STREQUAL "HuxerUI::huxerui")
-    huxerui_add_runtime_dependencies(testing_consumer TARGETS HuxerUI::huxerui)
+    add_custom_command(TARGET testing_consumer POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    "$<TARGET_FILE:HuxerUI::huxerui>" "$<TARGET_FILE_DIR:testing_consumer>"
+            VERBATIM)
 endif ()
 enable_testing()
 add_test(NAME InstalledTestingConsumer COMMAND testing_consumer)

@@ -802,6 +802,9 @@ function(_huxerui_runtime_verify content_directory installed_executable library_
         _huxerui_runtime_windows_crt(verify ignored ${staged_binaries})
     elseif (runtime_platform STREQUAL "macos+macho")
         set(signing_paths ${staged_binaries})
+        # Signing the main executable also seals its bundle, which must follow all nested code.
+        file(REAL_PATH "${installed_executable}" main_executable)
+        list(REMOVE_ITEM signing_paths "${main_executable}")
         foreach (file IN LISTS staged_files)
             if (IS_DIRECTORY "${file}" AND file MATCHES "\\.(framework|bundle)$")
                 list(APPEND signing_paths "${file}")
