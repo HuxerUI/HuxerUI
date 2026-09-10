@@ -4,4 +4,20 @@
 import mcpp;
 import huxerui.rules;
 
-int main() { return huxerui::rules::configure({ .resources = "resources" }) ? 0 : 1; }
+int main() {
+    return huxerui::rules::configure({
+        .resources = "resources",
+        // The Windows MSI. Silent on Linux and macOS -- the rule returns before
+        // it looks at anything when the target is not Windows.
+        //
+        // `version` is stated because mcpp tells a build program the package
+        // NAME but not its version. `upgrade_code` is a GUID chosen once and
+        // never changed: a new one per release would make every release a
+        // separate installed product rather than an upgrade of the last.
+        .installer = {
+            .target       = "huxerui_example_module_units",
+            .version      = "0.1.0",
+            .upgrade_code = "27B7A054-FFE4-48A5-92E3-5D90C0507EEB",
+        },
+    }) ? 0 : 1;
+}

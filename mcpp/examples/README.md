@@ -8,7 +8,7 @@ built by CMake.
 | | What it shows |
 |---|---|
 | [`01-import`](01-import/) | The smallest form: `import huxerui;`, one composable, **no headers anywhere** |
-| [`02-module-units`](02-module-units/) | One application across four module units, and a scope written by hand without the macro |
+| [`02-module-units`](02-module-units/) | One application across four module units, a scope written by hand without the macro, and a Windows MSI |
 | [`03-library`](03-library/) | `import` crossing a package boundary: a library package and the application that consumes it |
 
 ```bash

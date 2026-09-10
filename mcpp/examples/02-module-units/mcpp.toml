@@ -29,3 +29,13 @@ sources = []
 # Linux and macOS the table is inapplicable and the build is byte-identical.
 [resources]
 icon = "assets/app.ico"
+
+# The tool huxerui.rules runs to build the MSI. It has to be declared HERE, by
+# the package whose build program calls the rule: mcpp passes `MCPP_XPKG_*_DIR`
+# for what the building package declared, and the framework's own declaration
+# provisions the payload without making it visible here.
+#
+# Host axis, because wix.exe runs on the build machine. The `{ windows = … }`
+# value declares nothing on Linux and macOS.
+[xlings.workspace]
+"xim:wix" = { windows = "5.0.2" }

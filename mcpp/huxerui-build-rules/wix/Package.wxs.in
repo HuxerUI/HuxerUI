@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The MSI definition huxerui.rules builds. Rendered into the build directory
+  with the values an application gave `installer_options`, then handed to
+  `wix build`.
+
+  $(Executable) is the linked program, named exactly. The rule passes it with
+  `-d Executable=` from `${mcpp.target_file:…}`, which is the only thing that
+  knows where the link wrote it.
+
+  Naming the file rather than harvesting a directory is deliberate. A directory
+  bindpath that resolves to nothing produces a valid, empty, 52 KB installer
+  with no diagnostic; a `<File Source>` whose path is wrong is an error before
+  anything is written. HuxerUI's compiled resources are linked INTO the
+  executable, so the program is the whole install set.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="@@DISPLAY_NAME@@" Manufacturer="@@MANUFACTURER@@" Version="@@VERSION@@"
+           UpgradeCode="@@UPGRADE_CODE@@" Scope="perMachine">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of @@DISPLAY_NAME@@ is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <Icon Id="ApplicationIcon" SourceFile="!(bindpath.Project)\@@ICON@@" />
+    <Property Id="ARPPRODUCTICON" Value="ApplicationIcon" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="@@DISPLAY_NAME@@" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="APPLICATIONPROGRAMMENU" Name="@@DISPLAY_NAME@@" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <Component>
+        <File Id="ApplicationExecutable" Source="$(Executable)" Name="@@TARGET_FILE@@" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+    <Component Id="ApplicationShortcut" Directory="APPLICATIONPROGRAMMENU">
+      <Shortcut Id="ApplicationStartMenuShortcut" Name="@@DISPLAY_NAME@@"
+                Target="[INSTALLFOLDER]@@TARGET_FILE@@" WorkingDirectory="INSTALLFOLDER"
+                Icon="ApplicationIcon" />
+      <RemoveFolder Id="RemoveApplicationProgramMenu" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\@@MANUFACTURER@@\@@DISPLAY_NAME@@" Name="installed"
+                     Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Application" Title="@@DISPLAY_NAME@@" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+  </Package>
+</Wix>
