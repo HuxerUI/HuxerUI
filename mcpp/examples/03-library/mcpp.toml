@@ -1,7 +1,17 @@
+# c++23, and it is a workaround rather than a language requirement.
+#
+# The module unit writes `import std;`, which every implementation this project
+# builds with supports at c++20 -- the MSVC STL's named modules are documented
+# as needing /std:c++20 or later. But mcpp's clang-on-Windows path hardcodes
+# `importStdMinLevel = 23` instead of probing the STL it found
+# (mcpp-community/mcpp#603), and refuses the build below c++23.
+#
+# A module graph has exactly one standard, so this compiles huxerui at c++23
+# too. Change this line back to c++20 once #603 is fixed.
 [package]
 name        = "huxerui-example-library"
 version     = "0.1.0"
-standard    = "c++20"
+standard    = "c++23"
 description = "An application importing a HuxerUI component library"
 
 # Two edges, and only one of them is named by this application's own code.

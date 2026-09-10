@@ -116,9 +116,25 @@ View Counter() { auto count = UseState(0); … }
 global module fragment's includes do not reach whoever imports it — so
 `import huxerui;` cannot supply `<typeinfo>` the way the umbrella header does.
 `huxerui.rules` cannot force it either: `-include` prepends before `module;`,
-which is ill-formed. Importing `std` answers it without a header. It is a
-C++23 *library* feature that GCC, Clang + libc++ and the MSVC STL all provide
-in C++20 mode.
+which is ill-formed. Importing `std` answers it without a header.
+
+The std module is a C++23 *library* feature that every implementation HuxerUI
+builds with offers in C++20 mode as well — the MSVC STL's named modules are
+documented as needing `/std:c++20` or later.
+
+**Applications nonetheless pin `standard = "c++23"`, and that is a workaround.**
+mcpp's clang-on-Windows path hardcodes `importStdMinLevel = 23` rather than
+probing the STL it found, and refuses `import std;` below c++23
+([mcpp#603](https://github.com/mcpp-community/mcpp/issues/603)). A module graph
+has exactly one standard, so an application at c++23 compiles the framework at
+c++23 too; the framework's own `standard` stays c++20, which is the SDK's ABI
+baseline and what it is when it is the root. One line in each manifest changes
+back when #603 is fixed.
+
+`[toolchain] windows = "msvc@system"` would sidestep it and put both build
+systems on one compiler, and is blocked separately: a host module's BMI reaches
+`cl.exe` in clang's `name=path` spelling and the compile dies with `C1083`
+([mcpp#604](https://github.com/mcpp-community/mcpp/issues/604)).
 
 ### Macros are the exception
 

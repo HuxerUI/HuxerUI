@@ -46,10 +46,14 @@ include_dirs            = ["include", "src"]
 # `src` is implementation-only, as CMake's PRIVATE vs PUBLIC says.
 private_include_dirs    = ["src"]
 cxxflags                = ["-Wall", "-Wextra", "-Wpedantic"]
-# Applied to every TU in the graph, not just ours. `-pthread` arrives from
-# pkg-config and is a dialect flag: clang records the thread model in the BMI
-# and refuses one that disagrees with the importing TU, which reads as every
-# name in `import huxerui;` being undefined.
+# `-pthread` arrives from pkg-config with the GTK flags and is a DIALECT flag:
+# clang records the thread model in the BMI and refuses one that disagrees with
+# the importing translation unit, which reads as every name in
+# `import huxerui;` being undefined. It has to be here rather than under
+# cfg(linux) -- mcpp allows only build INPUTS in a conditional section and
+# clang records the thread model in the BMI and refuses one that disagrees with
+# the importing translation unit, which reads as every name in
+# `import huxerui;` being undefined.
 dialect_cxxflags        = ["-pthread"]
 macos_deployment_target = "12.0"
 # CMake's HUXERUI_ENABLE_PROFILING defaults ON.
@@ -136,9 +140,10 @@ defines  = ["UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN",
             "WINVER=0x0A00", "_WIN32_WINNT=0x0A00"]
 # NO MSVC-DIALECT FLAGS. mcpp builds Windows with clang targeting
 # x86_64-windows-msvc -- the MSVC ABI and the Windows SDK, not MinGW -- and its
-# GNU driver rejects `/W4` and friends. `[toolchain] windows = "msvc"` was tried
-# and hit an mcpp bug on 2026.9.8.1; not re-tested on the 2026.9.10.2 pinned
-# today, so retry it before treating this as current.
+# GNU driver rejects `/W4` and friends. `[toolchain] windows = "msvc@system"`
+# would put both build systems on one compiler and was tried; a host module's
+# BMI then reaches cl.exe in clang's `name=path` spelling and the compile dies
+# with C1083 (mcpp-community/mcpp#604). Retry when that is fixed.
 
 # WiX, for projects that build a Windows installer. Declared by the framework so
 # a consumer reaches it through the dependency edge without naming it.

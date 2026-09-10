@@ -46,6 +46,12 @@ fragment's includes do not reach whoever imports it — so `import huxerui;`
 cannot supply `<typeinfo>` the way the umbrella header does. Importing `std`
 answers it, and an application then contains no `#include` at all.
 
+The examples pin `standard = "c++23"` for it, and that is a workaround rather
+than a requirement: every implementation this project builds with offers the
+std module at C++20, but mcpp's clang-on-Windows path hardcodes a c++23 floor
+instead of probing the STL it found
+([mcpp#603](https://github.com/mcpp-community/mcpp/issues/603)).
+
 The CMake build does not compile this file. It is the mcpp build's front door;
 see [`docs/design/mcpp-build-system.md`](../docs/design/mcpp-build-system.md).
 
