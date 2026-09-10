@@ -26,6 +26,7 @@
 
 namespace huxerui::detail {
 class UiTestSession;
+struct UiSnapshotData;
 }
 
 namespace huxerui::testing {
@@ -34,7 +35,7 @@ namespace huxerui::testing {
 ///
 /// Invalid caller arguments use std::invalid_argument; wrong-thread and reentrant access use std::logic_error.
 /// Application exceptions retain their original types rather than being wrapped in this exception.
-/// Query mismatches and PumpUntil() timeouts do not themselves invalidate the fixture.
+/// Query mismatches and bounded wait failures do not themselves invalidate the fixture.
 /// @code
 /// try {
 ///   ui.Find(UiSelector::Text("Save")).Tap();
@@ -75,6 +76,9 @@ struct UiNodeInfo {
   Size size;
   /// Full transformed window-local axis-aligned bounding box in logical units, before clipping or occlusion.
   Rect bounds;
+  /// Conservative intersection with the viewport and rectangular ancestor clips; empty when not participating.
+  /// Rotation, path clips, opacity, and occlusion still require Runtime hit testing.
+  Rect visible_bounds;
   /// Effective inherited interaction availability.
   bool enabled = true;
   /// Runtime input focus, not platform accessibility focus.
@@ -263,19 +267,33 @@ struct UiDragOptions {
   UiPointerOptions pointer;
 };
 
-/// Bounds PumpUntil() by both elapsed virtual time and the number of additional frames.
-/// The predicate is checked before any frame, so an already satisfied condition needs no time advance.
+/// Bounds PumpUntil() and PumpAndSettle() by virtual time and committed frames.
+/// PumpUntil checks its predicate first; PumpAndSettle always starts by committing one frame.
 /// @code
 /// UiPumpOptions wait{.timeout = std::chrono::seconds(1), .step = std::chrono::milliseconds(10)};
 /// ui.PumpUntil([&] { return ui.Find(UiSelector::Text("Done")).Exists(); }, wait);
 /// @endcode
 struct UiPumpOptions {
-  /// Finite nonnegative virtual timeout, not a wall-clock timeout. Zero only checks the initial condition.
+  /// Finite nonnegative virtual timeout, not a wall-clock timeout. Zero forbids time advancement.
   std::chrono::duration<double> timeout{2.0};
-  /// Finite positive virtual step; the final step is shortened to the remaining duration.
+  /// Finite positive virtual step, shortened at the timeout. PumpAndSettle may jump to a later deadline.
   std::chrono::duration<double> step{0.016};
-  /// Positive limit on additional Pump calls, independent of the virtual timeout.
+  /// Positive limit on Pump calls, including PumpAndSettle's initial frame, independent of the timeout.
   std::size_t maximum_frames = 10000;
+};
+
+/// Bounds real wheel scrolling while searching a container's mounted descendants.
+/// @code
+/// auto item = list.ScrollUntil(UiSelector::Key("message.100"), {.step = {0.0F, 240.0F}});
+/// item.Tap();
+/// @endcode
+struct UiScrollOptions {
+  /// Finite, nonzero wheel delta in logical units for each attempt.
+  Point step{0.0F, 240.0F};
+  /// Finite positive virtual interval committed after each wheel update.
+  std::chrono::duration<double> interval{0.1};
+  /// Positive maximum number of wheel updates; an initially visible unique target needs none.
+  std::size_t maximum_steps = 20;
 };
 
 /// Configures one windowless fixture without changing the borrowed Application declaration.
@@ -340,14 +358,27 @@ public:
   /// Returns owning observations in mounted preorder.
   /// @return All final matches, or an empty vector when none match. Returned values are not live handles.
   [[nodiscard]] std::vector<UiNodeInfo> All() const;
-  /// Sends Down/Up at the transformed local center, pumping after each event; never retries or activates directly.
+  /// Sends Down/Up at the transformed local center, or the visible-bounds center when the former is clipped.
+  /// Pumps after each event; never retries or activates directly.
   /// Runtime hit testing, clipping, and modal routing still decide the event recipient. A successful call does not
   /// guarantee activation of the selected node. No scrolling or semantic-action fallback is performed.
   /// The original point and pointer identity are kept through recomposition; failure attempts best-effort Cancel.
   /// @param options Pointer device and identity, which must not collide with an active raw pointer.
-  /// @throws UiTestFailure If the target is not unique/enabled, lacks viewport geometry, its center lies outside
-  /// the viewport, or the pointer identity is already active.
+  /// @throws UiTestFailure If the target is not unique/enabled, lacks visible geometry, or the pointer is active.
   void Tap(UiPointerOptions options = {}) const;
+  /// Sends a wheel update at the selected visible region and pumps once without advancing time.
+  /// @param delta Finite logical content-offset delta. Touch scrolling uses UiTest::Drag instead.
+  /// @return Delta consumed by normal Runtime routing, which may include nested scroll ancestors.
+  /// @throws UiTestFailure If the target is missing, ambiguous, disabled, or outside the viewport.
+  Point ScrollBy(Point delta) const;
+  /// Repeatedly sends real wheel input until a unique descendant has visible geometry.
+  /// Mounted overscan outside the viewport does not satisfy the search. No virtual item is created directly.
+  /// @param target Selector scoped to strict descendants of this query's unique container.
+  /// @param options Finite scrolling and virtual-time bounds.
+  /// @return A reusable descendant query, resolved again by subsequent operations.
+  /// @throws UiTestFailure On ambiguity, container replacement, or exhaustion of the step bound.
+  /// @throws std::invalid_argument If delta, interval, resulting time, or step count is invalid.
+  [[nodiscard]] UiNodeQuery ScrollUntil(UiSelector target, UiScrollOptions options = {}) const;
   /// Commits text through the selected active input client and pumps once.
   /// Does not focus the editor automatically. Uses the current selection/composition through the ordinary editing
   /// protocol; controlled applications decide the resulting value instead of receiving a direct State assignment.
@@ -450,23 +481,34 @@ private:
 /// Captures survive subsequent frames and fixture destruction. They describe semantic hierarchy and render intent,
 /// excluding runtime identities, native handles, ExternalTexture pixels, and native PlatformView descendants.
 /// Secure editor values are excluded, but ordinary application text and encoded image content are not anonymized.
-/// The test runner owns comparisons, storage, and baseline approval; this type does not write files.
+/// The test runner owns assertions, storage, and baseline approval; this type does not write files.
 /// @code
 /// UiSnapshot before = ui.CaptureSnapshot();
 /// ui.Pump(std::chrono::milliseconds(100));
 /// UiSnapshot after = ui.CaptureSnapshot();
-/// bool changed = before.ToString() != after.ToString();
+/// bool changed = before != after;
 /// @endcode
 class UiSnapshot {
 public:
-  /// Returns the captured versioned representation. Does not access Runtime or advance time.
+  /// Serializes the captured structure on demand. Does not access Runtime or advance time.
   /// This is a locale-independent structural format, not JSON or an image. Equal strings do not establish
   /// native rendering equality, especially for explicitly uncaptured external or native content.
-  /// @return A reference owned by this snapshot; copy it if the string must outlive the snapshot.
-  [[nodiscard]] const std::string& ToString() const noexcept { return text_; }
+  /// @return An owning versioned string, independent of the snapshot's lifetime. No text export is cached.
+  [[nodiscard]] std::string ToString() const;
+
+  bool operator==(const UiSnapshot& other) const;
+  /// Reports named structural field changes, grouping inserted or removed subtrees.
+  /// Does not compare serialized lines. Geometry follows the export's six-decimal canonical precision.
+  /// @param expected Baseline snapshot; changes are reported from expected to this snapshot.
+  /// @return Empty when equal; otherwise a bounded human-readable report without image bytes or runtime IDs.
+  /// @code
+  /// INFO(actual.Diff(expected));
+  /// REQUIRE(actual == expected);
+  /// @endcode
+  [[nodiscard]] std::string Diff(const UiSnapshot& expected) const;
 private:
-  explicit UiSnapshot(std::string text) : text_(std::move(text)) {}
-  std::string text_;
+  explicit UiSnapshot(std::shared_ptr<const huxerui::detail::UiSnapshotData> data) : data_(std::move(data)) {}
+  std::shared_ptr<const huxerui::detail::UiSnapshotData> data_;
   friend class UiTest;
 };
 
@@ -540,6 +582,24 @@ public:
   ///              {.timeout = std::chrono::seconds(1), .step = std::chrono::milliseconds(16)});
   /// @endcode
   void PumpUntil(const std::function<bool()>& predicate, UiPumpOptions options = {});
+  /// Commits an initial frame, then follows known frame requests and queued callbacks until none remain.
+  /// Continuous frames advance by at least options.step; isolated later deadlines may be reached directly.
+  /// Includes timers and caret blinking, not just animations; does not wait for external workers or network work.
+  /// @param options Virtual timeout, minimum continuous-frame interval, and total frame bound including the initial frame.
+  /// @throws UiTestFailure If work remains at a bound; the last completed frame remains queryable.
+  /// @throws std::invalid_argument If time or frame bounds are invalid.
+  /// @code
+  /// ui.PumpAndSettle({.timeout = std::chrono::seconds(2)});
+  /// @endcode
+  void PumpAndSettle(UiPumpOptions options = {});
+  /// Returns the most recent state delivered to the testing text-input adapter, or nullopt when inactive.
+  /// Unlike completed-frame queries, this protocol observation may change immediately after raw input.
+  /// @return An owning state with session, revisions, selection, and composition; no text content or native handle.
+  /// @code
+  /// auto session = ui.ActiveTextInput();
+  /// if (session) ui.SendTextInput({session->session_id, commands});
+  /// @endcode
+  [[nodiscard]] std::optional<TextInputState> ActiveTextInput() const;
   /// Returns virtual seconds since construction.
   /// @return The current deterministic clock value; reading it does not advance time or commit a frame.
   [[nodiscard]] double Now() const;

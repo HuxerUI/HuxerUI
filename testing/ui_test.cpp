@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <locale>
 #include <sstream>
 #include <set>
 #include <thread>
@@ -12,6 +14,24 @@
 
 namespace huxerui::detail {
 namespace {
+
+constexpr std::size_t diagnostic_node_limit = 12;
+constexpr std::size_t diagnostic_text_limit = 160;
+
+std::string Quote(std::string_view value) {
+  std::ostringstream out;
+  out << '"';
+  std::size_t length = std::min(value.size(), diagnostic_text_limit);
+  while (length < value.size() && length && (static_cast<unsigned char>(value[length]) & 0xC0) == 0x80) --length;
+  for (unsigned char c : value.substr(0, length)) {
+    if (c == '"' || c == '\\') out << '\\' << static_cast<char>(c);
+    else if (c < 32 || c == 127) out << "\\x" << std::hex << std::setw(2) << std::setfill('0') << int(c) << std::dec;
+    else out << static_cast<char>(c);
+  }
+  if (length < value.size()) out << "...";
+  out << '"';
+  return out.str();
+}
 
 std::string NodeType(NodeKind kind) {
   switch (kind) {
@@ -54,6 +74,14 @@ void ValidateDuration(double duration) {
 void ValidatePoint(Point point) {
   if (!std::isfinite(point.x) || !std::isfinite(point.y))
     throw std::invalid_argument("HuxerUI testing input point must be finite");
+}
+
+void ValidatePumpOptions(const testing::UiPumpOptions& options, double now) {
+  ValidateDuration(options.timeout.count());
+  ValidateDuration(options.step.count());
+  ValidateDuration(now + options.timeout.count());
+  if (options.step.count() <= 0 || !options.maximum_frames)
+    throw std::invalid_argument("HuxerUI testing requires a positive virtual step and frame budget");
 }
 
 } // namespace
@@ -143,8 +171,11 @@ public:
         ready.swap(queue->callbacks);
       }
       adapter.time += duration;
+      // A frame consumes the previous wakeup. Tasks still pending reassert their deadline during BuildFrame.
+      adapter.frame_deadline.reset();
       for (auto& callback : ready) callback();
       const auto& commit = runtime->BuildFrame();
+      if (commit.next_frame_deadline) adapter.RequestFrameAt(*commit.next_frame_deadline);
       nodes.clear();
       if (const auto* root = InternalAccess::MountedRoot(*runtime)) {
         Collect(*root, {}, {0, 0, metrics.viewport.width, metrics.viewport.height}, true);
@@ -176,8 +207,8 @@ public:
     info.size = {node.bounds.width, node.bounds.height};
     info.bounds = TransformBounds(node.presentation.resolved_transform, node.bounds);
     info.participates_in_layout = participates && node.participates_in_layout;
-    const auto intersection = Intersection(clip, info.bounds);
-    info.in_viewport = info.participates_in_layout && intersection.width > 0 && intersection.height > 0;
+    info.visible_bounds = info.participates_in_layout ? Intersection(clip, info.bounds) : Rect{};
+    info.in_viewport = !info.visible_bounds.IsEmpty();
     switch (node.kind) {
       case NodeKind::Text: case NodeKind::Button: case NodeKind::Chip:
       case NodeKind::Checkbox: case NodeKind::RadioButton: case NodeKind::Switch:
@@ -203,74 +234,134 @@ public:
     for (const auto& child : node.children) Collect(*child, index, clip, nodes[index].info.participates_in_layout);
   }
 
-  std::vector<std::size_t> Resolve(const std::vector<testing::UiSelector>& selectors) const {
+  std::vector<std::size_t> Resolve(const std::vector<testing::UiSelector>& selectors,
+                                 std::string_view operation = "Query", bool require_one = false) const {
     Check();
     std::optional<std::size_t> scope;
     std::vector<std::size_t> matches;
     for (std::size_t depth = 0; depth < selectors.size(); ++depth) {
       matches.clear();
+      std::vector<std::size_t> candidates;
       for (std::size_t i = 0; i < nodes.size(); ++i) {
         if (scope) {
           auto parent = nodes[i].parent;
           while (parent && parent != scope) parent = nodes[*parent].parent;
           if (!parent) continue;
         }
+        if (candidates.size() < diagnostic_node_limit) candidates.push_back(i);
         if (selectors[depth].matches_(nodes[i].info)) matches.push_back(i);
       }
+      if ((require_one || depth + 1 < selectors.size()) && matches.size() != 1) {
+        std::vector<std::string> descriptions;
+        const auto& shown = matches.empty() ? candidates : matches;
+        for (auto index : shown) {
+          if (descriptions.size() == diagnostic_node_limit) break;
+          descriptions.push_back(Describe(nodes[index].info));
+        }
+        QueryFailure(operation, Chain(selectors, selectors.size() - 1) +
+            "\nFailed selector: " + selectors[depth].description_, matches.size(), descriptions);
+      }
       if (depth + 1 < selectors.size()) {
-        RequireOne(matches.size(), selectors[depth].description_);
         scope = matches.front();
       }
     }
     return matches;
   }
 
-  ObservedNode One(const std::vector<testing::UiSelector>& selectors) const {
-    const auto result = Resolve(selectors);
-    RequireOne(result.size(), selectors.back().description_);
+  ObservedNode One(const std::vector<testing::UiSelector>& selectors, std::string_view operation = "One") const {
+    const auto result = Resolve(selectors, operation, true);
     return nodes[result.front()];
   }
 
-  std::vector<const SemanticNode*> Resolve(const std::vector<testing::UiSemanticSelector>& selectors) const {
+  std::vector<const SemanticNode*> Resolve(const std::vector<testing::UiSemanticSelector>& selectors,
+                                         std::string_view operation = "Query", bool require_one = false) const {
     Check();
     std::vector<const SemanticNode*> matches;
     std::optional<SemanticNodeId> scope;
     for (std::size_t depth = 0; depth < selectors.size(); ++depth) {
       matches.clear();
+      std::vector<const SemanticNode*> candidates;
       if (semantics) {
         std::function<void(SemanticNodeId, bool)> visit = [&](SemanticNodeId id, bool descendant) {
           const auto& node = SemanticNodeAt(semantic_index, id);
+          if (descendant && candidates.size() < diagnostic_node_limit) candidates.push_back(&node);
           if (descendant && selectors[depth].matches_(node)) matches.push_back(&node);
           for (auto child : node.children) visit(child, true);
         };
         visit(scope.value_or(semantics->root), !scope.has_value());
       }
+      if ((require_one || depth + 1 < selectors.size()) && matches.size() != 1) {
+        std::vector<std::string> descriptions;
+        for (const auto* node : matches.empty() ? candidates : matches) {
+          if (descriptions.size() == diagnostic_node_limit) break;
+          std::ostringstream out;
+          out << "Semantic role=" << static_cast<int>(node->role) << " identifier=" << Quote(node->identifier)
+              << " label=" << (node->secure ? "<redacted>" : Quote(node->label))
+              << " bounds=(" << node->bounds.x << ',' << node->bounds.y << ',' << node->bounds.width << ','
+              << node->bounds.height << ") enabled=" << node->enabled << " offscreen=" << node->offscreen;
+          descriptions.push_back(out.str());
+        }
+        QueryFailure(operation, Chain(selectors, selectors.size() - 1) +
+            "\nFailed selector: " + selectors[depth].description_, matches.size(), descriptions);
+      }
       if (depth + 1 < selectors.size()) {
-        RequireOne(matches.size(), selectors[depth].description_);
         scope = matches.front()->id;
       }
     }
     return matches;
   }
 
-  const SemanticNode& One(const std::vector<testing::UiSemanticSelector>& selectors) const {
-    auto matches = Resolve(selectors);
-    RequireOne(matches.size(), selectors.back().description_);
+  const SemanticNode& One(const std::vector<testing::UiSemanticSelector>& selectors,
+                          std::string_view operation = "One") const {
+    auto matches = Resolve(selectors, operation, true);
     return *matches.front();
   }
 
-  void RequireOne(std::size_t count, const std::string& selector) const {
-    if (count == 1) return;
-    std::ostringstream message;
-    message << "HuxerUI testing expected one node for " << selector << ", found " << count
-            << "; time=" << adapter.time << ", viewport=" << metrics.viewport.width << 'x' << metrics.viewport.height;
-    for (std::size_t i = 0; i < std::min<std::size_t>(nodes.size(), 12); ++i) {
-      const auto& info = nodes[i].info;
-      message << "\n  " << info.type << " bounds=(" << info.bounds.x << ',' << info.bounds.y << ','
-              << info.bounds.width << ',' << info.bounds.height << ") enabled=" << info.enabled;
-      // Values are never included in diagnostics; even an ordinary editor can contain confidential data.
+  template <class Selector> static std::string Chain(const std::vector<Selector>& selectors, std::size_t depth) {
+    std::string result;
+    for (std::size_t i = 0; i <= depth; ++i) {
+      if (i) result += " -> ";
+      result += selectors[i].description_;
     }
+    return result;
+  }
+
+  static std::string Describe(const testing::UiNodeInfo& info) {
+    std::ostringstream out;
+    out << info.type;
+    if (info.key) std::visit([&](const auto& key) {
+      out << " key=";
+      if constexpr (std::same_as<std::decay_t<decltype(key)>, std::string>) out << Quote(key);
+      else out << key;
+    }, *info.key);
+    if (info.text) out << " text=" << Quote(*info.text);
+    out << " bounds=(" << info.bounds.x << ',' << info.bounds.y << ',' << info.bounds.width << ','
+        << info.bounds.height << ") enabled=" << info.enabled << " participating=" << info.participates_in_layout;
+    return out.str();
+  }
+
+  [[noreturn]] void QueryFailure(std::string_view operation, const std::string& selector, std::size_t count,
+                                const std::vector<std::string>& candidates) const {
+    std::ostringstream message;
+    message.imbue(std::locale::classic());
+    message << "HuxerUI testing " << operation << " expected one node, found " << count
+            << "\nQuery: " << selector << "\nViewport: " << metrics.viewport.width << 'x' << metrics.viewport.height
+            << "; time=" << adapter.time << "; semantic_revision=" << (semantics ? semantics->revision : 0)
+            << (count ? "\nCandidates:" : "\nScope excerpt:");
+    for (const auto& candidate : candidates) message << "\n  " << candidate;
+    if (count > candidates.size()) message << "\n  ... " << count - candidates.size() << " more matches";
     throw testing::UiTestFailure(message.str());
+  }
+
+  Point TargetPoint(const std::vector<testing::UiSelector>& selectors, std::string_view operation) const {
+    const auto node = One(selectors, operation);
+    if (!node.info.enabled || !node.info.in_viewport)
+      throw testing::UiTestFailure("HuxerUI testing " + std::string(operation) +
+          " requires enabled viewport geometry\nQuery: " + Chain(selectors, selectors.size() - 1) +
+          "\n  " + Describe(node.info));
+    const auto& visible = node.info.visible_bounds;
+    return visible.Contains(node.center) ? node.center
+        : Point{visible.x + visible.width * 0.5F, visible.y + visible.height * 0.5F};
   }
 
   void Pointer(const PointerEvent& event) {
@@ -317,10 +408,10 @@ public:
 
   TextInputSessionId RequireEditor(const std::vector<testing::UiSelector>& selectors) const {
     Check(true);
-    const auto node = One(selectors);
-    if (!adapter.input_session || InternalAccess::FocusedNodeIdentity(*runtime) != node.identity)
+    const auto node = One(selectors, "Edit");
+    if (!adapter.input_state || InternalAccess::FocusedNodeIdentity(*runtime) != node.identity)
       throw testing::UiTestFailure("HuxerUI testing editor must own the active text-input session");
-    return adapter.input_session;
+    return adapter.input_state->session_id;
   }
 
   void Edit(const std::vector<testing::UiSelector>& selectors, TextInputCommand command, bool replace = false) {
@@ -355,7 +446,7 @@ public:
   std::set<std::int64_t> active_pointers;
   std::shared_ptr<const SemanticFrame> semantics;
   UiSemanticIndex semantic_index;
-  std::string structure;
+  std::shared_ptr<const UiSnapshotData> structure;
 };
 
 } // namespace huxerui::detail
@@ -373,7 +464,8 @@ std::shared_ptr<huxerui::detail::UiTestSession> Session(const std::weak_ptr<huxe
 UiSelector::UiSelector(std::string description, std::function<bool(const UiNodeInfo&)> matches)
     : description_(std::move(description)), matches_(std::move(matches)) {}
 UiSelector UiSelector::Text(std::string text) {
-  return {"Text", [text = std::move(text)](const auto& node) { return node.text == text; }};
+  auto description = "Text(" + detail::Quote(text) + ")";
+  return {std::move(description), [text = std::move(text)](const auto& node) { return node.text == text; }};
 }
 UiSelector UiSelector::Value(std::string value) {
   return {"Value(<redacted>)", [value = std::move(value)](const auto& node) { return node.value == value; }};
@@ -382,7 +474,8 @@ UiSelector UiSelector::Kind(std::string type) {
   return {"Type(" + type + ")", [type](const auto& node) { return node.type == type; }};
 }
 UiSelector UiSelector::Key(std::string key) {
-  return {"Key(string)", [key = UiKey(std::move(key))](const auto& node) { return node.key == key; }};
+  auto description = "Key(" + detail::Quote(key) + ")";
+  return {std::move(description), [key = UiKey(std::move(key))](const auto& node) { return node.key == key; }};
 }
 UiSelector UiSelector::Key(std::string_view key) { return Key(std::string(key)); }
 UiSelector UiSelector::Key(const char* key) {
@@ -390,20 +483,22 @@ UiSelector UiSelector::Key(const char* key) {
   return Key(std::string(key));
 }
 UiSelector UiSelector::Key(std::int64_t key) {
-  return {"Key(signed)", [key = UiKey(key)](const auto& node) { return node.key == key; }};
+  return {"Key(signed " + std::to_string(key) + ")", [key = UiKey(key)](const auto& node) { return node.key == key; }};
 }
 UiSelector UiSelector::Key(std::uint64_t key) {
-  return {"Key(unsigned)", [key = UiKey(key)](const auto& node) { return node.key == key; }};
+  return {"Key(unsigned " + std::to_string(key) + ")", [key = UiKey(key)](const auto& node) { return node.key == key; }};
 }
 UiSelector UiSelector::Enabled(bool value) {
-  return {"Enabled", [value](const auto& n) { return n.enabled == value; }};
+  return {value ? "Enabled(true)" : "Enabled(false)", [value](const auto& n) { return n.enabled == value; }};
 }
 UiSelector UiSelector::Focused(bool value) {
-  return {"Focused", [value](const auto& n) { return n.focused == value; }};
+  return {value ? "Focused(true)" : "Focused(false)", [value](const auto& n) { return n.focused == value; }};
 }
 UiSelector UiSelector::AllOf(std::initializer_list<UiSelector> values) {
   if (!values.size()) throw std::invalid_argument("HuxerUI testing conjunction must not be empty");
-  return {"AllOf", [values = std::vector<UiSelector>(values)](const auto& n) {
+  std::string description = "AllOf(";
+  for (const auto& value : values) { if (description != "AllOf(") description += ", "; description += value.description_; }
+  return {description + ")", [values = std::vector<UiSelector>(values)](const auto& n) {
     return std::all_of(values.begin(), values.end(), [&](const auto& value) { return value.matches_(n); });
   }};
 }
@@ -411,32 +506,36 @@ UiSelector UiSelector::AllOf(std::initializer_list<UiSelector> values) {
 UiSemanticSelector::UiSemanticSelector(std::string description, std::function<bool(const SemanticNode&)> matches)
     : description_(std::move(description)), matches_(std::move(matches)) {}
 UiSemanticSelector UiSemanticSelector::Identifier(std::string value) {
-  return {"Identifier", [value = std::move(value)](const auto& n) { return n.identifier == value; }};
+  auto description = "Identifier(" + detail::Quote(value) + ")";
+  return {std::move(description), [value = std::move(value)](const auto& n) { return n.identifier == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Label(std::string value) {
-  return {"Label", [value = std::move(value)](const auto& n) { return n.label == value; }};
+  auto description = "Label(" + detail::Quote(value) + ")";
+  return {std::move(description), [value = std::move(value)](const auto& n) { return n.label == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Value(std::string value) {
   return {"Value(<redacted>)", [value = std::move(value)](const auto& n) { return !n.secure && n.value == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Role(SemanticRole value) {
-  return {"Role", [value](const auto& n) { return n.role == value; }};
+  return {"Role(" + std::to_string(static_cast<int>(value)) + ")", [value](const auto& n) { return n.role == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Enabled(bool value) {
-  return {"Enabled", [value](const auto& n) { return n.enabled == value; }};
+  return {value ? "Enabled(true)" : "Enabled(false)", [value](const auto& n) { return n.enabled == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Focused(bool value) {
-  return {"Focused", [value](const auto& n) { return n.focused == value; }};
+  return {value ? "Focused(true)" : "Focused(false)", [value](const auto& n) { return n.focused == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Selected(bool value) {
-  return {"Selected", [value](const auto& n) { return n.selected == value; }};
+  return {value ? "Selected(true)" : "Selected(false)", [value](const auto& n) { return n.selected == value; }};
 }
 UiSemanticSelector UiSemanticSelector::Checked(SemanticCheckedState value) {
-  return {"Checked", [value](const auto& n) { return n.checked == value; }};
+  return {"Checked(" + std::to_string(static_cast<int>(value)) + ")", [value](const auto& n) { return n.checked == value; }};
 }
 UiSemanticSelector UiSemanticSelector::AllOf(std::initializer_list<UiSemanticSelector> values) {
   if (!values.size()) throw std::invalid_argument("HuxerUI testing conjunction must not be empty");
-  return {"AllOf", [values = std::vector<UiSemanticSelector>(values)](const auto& n) {
+  std::string description = "AllOf(";
+  for (const auto& value : values) { if (description != "AllOf(") description += ", "; description += value.description_; }
+  return {description + ")", [values = std::vector<UiSemanticSelector>(values)](const auto& n) {
     return std::all_of(values.begin(), values.end(), [&](const auto& value) { return value.matches_(n); });
   }};
 }
@@ -459,10 +558,41 @@ std::vector<UiNodeInfo> UiNodeQuery::All() const {
 }
 void UiNodeQuery::Tap(UiPointerOptions options) const {
   auto session = Session(session_);
-  const auto node = session->One(selectors_);
-  if (!node.info.enabled || !node.info.in_viewport)
-    throw UiTestFailure("HuxerUI testing tap requires enabled, laid-out viewport geometry");
-  session->Tap(node.center, options);
+  session->Tap(session->TargetPoint(selectors_, "Tap"), options);
+}
+Point UiNodeQuery::ScrollBy(Point delta) const {
+  auto session = Session(session_);
+  session->Check(true);
+  detail::ValidatePoint(delta);
+  const Point point = session->TargetPoint(selectors_, "ScrollBy");
+  const auto consumed = session->Mutate([&] {
+    return session->runtime->HandleScrollInput({.position = point, .delta_x = delta.x, .delta_y = delta.y});
+  });
+  session->Pump(0);
+  return consumed;
+}
+UiNodeQuery UiNodeQuery::ScrollUntil(UiSelector target, UiScrollOptions options) const {
+  auto session = Session(session_);
+  session->Check(true);
+  detail::ValidatePoint(options.step);
+  detail::ValidateDuration(options.interval.count());
+  detail::ValidateDuration(session->adapter.time + options.interval.count() * options.maximum_steps);
+  if (options.step == Point{} || options.interval.count() <= 0 || !options.maximum_steps)
+    throw std::invalid_argument("HuxerUI testing ScrollUntil requires a nonzero delta, positive interval and step bound");
+  const auto identity = session->One(selectors_, "ScrollUntil").identity;
+  auto query = Find(std::move(target));
+  for (std::size_t step = 0;; ++step) {
+    if (session->One(selectors_, "ScrollUntil").identity != identity)
+      throw UiTestFailure("HuxerUI testing ScrollUntil container was replaced");
+    const auto matches = session->Resolve(query.selectors_, "ScrollUntil");
+    if (matches.size() > 1) session->One(query.selectors_, "ScrollUntil");
+    if (matches.size() == 1 && session->nodes[matches.front()].info.in_viewport) return query;
+    if (step == options.maximum_steps)
+      throw UiTestFailure("HuxerUI testing ScrollUntil exhausted " + std::to_string(step) +
+          " wheel updates\nQuery: " + session->Chain(query.selectors_, query.selectors_.size() - 1));
+    ScrollBy(options.step);
+    session->Pump(options.interval.count());
+  }
 }
 void UiNodeQuery::EnterText(std::string text) const {
   Session(session_)->Edit(selectors_, {
@@ -508,7 +638,7 @@ std::vector<SemanticNode> UiSemanticQuery::All() const {
 }
 void UiSemanticQuery::PerformSemanticAction(const SemanticAction& action) const {
   auto session = Session(session_);
-  const auto node = session->One(selectors_);
+  const auto node = session->One(selectors_, "PerformSemanticAction");
   const bool accepted = session->Mutate([&] { return session->runtime->PerformSemanticAction(node.id, action); });
   if (!accepted) throw UiTestFailure("HuxerUI testing semantic action was rejected");
   session->Pump(0);
@@ -528,12 +658,9 @@ UiSemanticQuery UiTest::FindSemantics(UiSemanticSelector selector) const {
 void UiTest::Pump(std::chrono::duration<double> duration) { session_->Pump(duration.count()); }
 void UiTest::PumpUntil(const std::function<bool()>& predicate, UiPumpOptions options) {
   session_->Check(true);
-  huxerui::detail::ValidateDuration(options.timeout.count());
-  huxerui::detail::ValidateDuration(options.step.count());
-  if (!predicate || options.step.count() <= 0 || !options.maximum_frames)
-    throw std::invalid_argument("HuxerUI testing PumpUntil requires a predicate, positive step and frame budget");
+  huxerui::detail::ValidatePumpOptions(options, Now());
+  if (!predicate) throw std::invalid_argument("HuxerUI testing PumpUntil requires a predicate");
   const double end = Now() + options.timeout.count();
-  huxerui::detail::ValidateDuration(end);
   std::size_t frames = 0;
   while (true) {
     session_->evaluating = true;
@@ -552,6 +679,39 @@ void UiTest::PumpUntil(const std::function<bool()>& predicate, UiPumpOptions opt
     if (Now() + step == Now()) throw UiTestFailure("HuxerUI testing virtual step cannot advance the clock");
     Pump(std::chrono::duration<double>(step));
   }
+}
+void UiTest::PumpAndSettle(UiPumpOptions options) {
+  session_->Check(true);
+  detail::ValidatePumpOptions(options, Now());
+  const double start = Now();
+  const double end = start + options.timeout.count();
+  std::size_t frames = 1;
+  Pump();
+  while (true) {
+    std::size_t callbacks;
+    {
+      std::scoped_lock lock(session_->queue->mutex);
+      callbacks = session_->queue->callbacks.size();
+    }
+    const auto deadline = session_->adapter.frame_deadline;
+    if (!callbacks && !deadline) return;
+    if (Now() >= end || frames >= options.maximum_frames) {
+      std::ostringstream message;
+      message.imbue(std::locale::classic());
+      message << "HuxerUI testing PumpAndSettle exhausted its budget; elapsed=" << Now() - start
+              << "; frames=" << frames << "; callbacks=" << callbacks << "; next_deadline=";
+      if (deadline) message << *deadline; else message << "none";
+      throw UiTestFailure(message.str());
+    }
+    const double next = callbacks ? Now() : std::min(end, std::max(Now() + options.step.count(), *deadline));
+    if (!callbacks && next <= Now()) throw UiTestFailure("HuxerUI testing virtual step cannot advance the clock");
+    Pump(std::chrono::duration<double>(next - Now()));
+    ++frames;
+  }
+}
+std::optional<TextInputState> UiTest::ActiveTextInput() const {
+  session_->Check();
+  return session_->adapter.input_state;
 }
 double UiTest::Now() const { session_->Check(); return session_->adapter.time; }
 void UiTest::SetWindowMetrics(WindowMetrics metrics) {

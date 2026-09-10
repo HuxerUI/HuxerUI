@@ -10,7 +10,7 @@ Public usage and limitations are documented in [Windowless UI Testing](../guide/
 `UiTestSession` owns the adapter, queue, Runtime, virtual clock, and completed-frame observations.
 Queries hold a weak session and immutable selector chains; each operation resolves again without retaining mounted pointers.
 InternalAccess supplies the full mounted root, unlike the application-only `RootNode` accessor used by existing low-level tests.
-Traversal includes layers and records parent indexes, own text, typed keys, local geometry, transformed bounds, and interaction flags.
+Traversal includes layers and records parent indexes, own text, typed keys, local geometry, transformed and conservatively clipped bounds, and interaction flags.
 Secure built-in editor clients are filtered before querying text.
 No new component switch is introduced into Runtime input dispatch.
 The session builds one ID-to-node index over its owning immutable SemanticFrame and shares it with queries and structural serialization.
@@ -29,20 +29,33 @@ Reentrant test operations fail, and PumpUntil predicates are observational.
 Ordinary input keeps the real Runtime's capture, clipping, gesture arbitration, focus, modal routing, and controlled text reducer.
 High-level pointer sequences use fixed identity and best-effort Cancel cleanup.
 Reference text is deliberately a small, internally consistent scalar model rather than a shaping engine.
-Unsupported services retain normal unavailable behavior; resources, text-input session/action tracking, clipboard, and a virtual clock are supplied by the test adapter.
-Frame requests validate their deadlines but never schedule work autonomously; Pump alone commits frames.
+Unsupported services retain normal unavailable behavior; resources, text-input state/action tracking, clipboard, and a virtual clock are supplied by the test adapter.
+Start, Update, Restart, and Stop maintain the existing TextInputState value with session checks; no separate testing input-session abstraction is introduced.
+Frame requests retain their earliest finite deadline but never schedule work autonomously; Pump alone commits frames.
+Pump consumes the previous wakeup before callbacks and BuildFrame, then retains deadlines reasserted by tasks, callbacks, or FrameCommit.
+PumpAndSettle combines that deadline with the queued callback count under bounded virtual time and total frame count, including its initial frame.
+Continuous requests advance by the minimum step; future requests can jump to their deadline, while queued callback batches need no time advance.
+This intentionally cannot distinguish a repeating animation, caret, or delayed task from other pending Runtime work and does not wait for external workers.
+ScrollUntil uses mounted identities only to detect container replacement; it sends ordinary wheel input through ScrollBy and never materializes virtual children itself.
 Window and quit requests retain the base adapter's no-op behavior.
 
 ## Capture
 
-Each committed test frame is eagerly serialized while RenderScene pointers remain valid.
-Public captures copy this owning canonical value, so raw input between frames cannot expose a partially updated tree or dangling render data.
+Each committed test frame is captured into an owning canonical named-field tree while RenderScene pointers remain valid.
+Public captures share this immutable value, so raw input between frames cannot expose a partially updated tree or dangling render data.
 Semantic and render traversal are distinct and ordered.
 Every PaintCommand alternative has an explicit serializer; an unhandled new alternative fails compilation.
-Schema 1 uses fixed six-decimal classic-locale numbers, normalized negative zero, escaped control characters, and stable command names.
+Schema 2 uses named fields, fixed six-decimal classic-locale numbers, normalized negative zero, escaped control characters, and stable command names.
 It excludes process identities, pointers, revisions, source paths, and external texture pixels.
 Encoded image bytes are retained in hexadecimal rather than identified by an address or process-local hash.
 Structural equality is not native-rendering equality.
+Equality and Diff traverse the canonical tree directly, independently of the text export.
+ToString serializes that tree on demand and returns an owning string; no duplicate text export is retained or generated during Pump.
+Diff reports field changes and entire inserted or removed subtrees, using bounded sibling lookahead and unique semantic identifiers to align nearby changes without allocating a quadratic edit matrix.
+Anonymous content falls back to order; the result does not infer stable identity across arbitrary reorders.
+Report limits bound displayed changes and value lengths, not captured content or equality; omitted differences are marked explicitly.
+Image bytes remain part of equality but produce only a content-change summary in diagnostics.
+No parser, file I/O, baseline policy, public diff model, or production cache is added.
 
 ## Distribution
 
@@ -98,4 +111,5 @@ Focused channel fixtures cover normal and failed-initialization cleanup, cancell
 `tests/cmake/testing_consumer` is a standalone installed-header consumer; configure separate builds with `HUXERUI_TEST_LINK_FORM=static` and `shared` where available, using a relocated SDK prefix.
 The installed-consumer CTest runs default and explicit link forms, preloaded core targets, repeated lookup, and conflicting-request rejection whenever the SDK includes testing.
 UI regressions also cover drag, complete keyboard activation, scoped semantic actions, animation intermediate geometry, and frame-count preservation during shutdown.
+Bounded settle, input-state synchronization, partially clipped targets, real virtual-list scrolling, query diagnostics, and structural comparison have focused public-API regressions.
 Existing low-level unit and Runtime tests remain in place.

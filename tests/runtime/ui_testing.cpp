@@ -1,6 +1,7 @@
 #include <catch2/catch_amalgamated.hpp>
 
 #include <chrono>
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -10,6 +11,8 @@
 #include <ui_test_fixture_resources.h>
 
 #include "application/platform_registry_internal.h"
+#include "external_texture_test_support.h"
+#include "image_test_support.h"
 
 namespace huxerui::test {
 namespace {
@@ -103,6 +106,24 @@ View DelayedCounter() {
 }
 
 View Empty() { return Column {}.Key("empty"); }
+
+View ScrollableItems() {
+  count = UseState(0);
+  return VirtualList(100, [](std::size_t index) {
+    return Button("Item " + std::to_string(index))
+        .OnClick([value = count]() mutable { value += 1; })
+        .With(Frame{200.0F, 40.0F})
+        .Key(index);
+  }).EstimatedItemExtent(40.0F).Key("list");
+}
+
+View SnapshotItems() {
+  count = UseState(0);
+  std::vector<View> children;
+  if (count.Get()) children.push_back(Text("Inserted").With(Semantics{.identifier = "inserted"}).Key("inserted"));
+  children.push_back(Text("Stable").With(Semantics{.identifier = "stable"}).Key("stable"));
+  return Stack(std::move(children)).With(Frame{200.0F, 100.0F});
+}
 
 View FailingRoot() { throw std::runtime_error("initial composition failed"); }
 
@@ -239,12 +260,15 @@ TEST_CASE("Windowless queries expire but information and captures own their data
   Application application(Counter, {.show_debug_overlay = false});
   std::optional<UiNodeQuery> query;
   std::optional<UiSnapshot> snapshot;
+  std::string exported;
   UiNodeInfo info;
   {
     UiTest ui(application);
     query = ui.Find(UiSelector::Key("count"));
     info = query->One();
     snapshot = ui.CaptureSnapshot();
+    STATIC_REQUIRE(std::same_as<decltype(snapshot->ToString()), std::string>);
+    exported = ui.CaptureSnapshot().ToString();
     const auto before = snapshot->ToString();
     ui.Find(UiSelector::Text("Increment")).Tap();
     REQUIRE(ui.CaptureSnapshot().ToString() != before);
@@ -252,7 +276,8 @@ TEST_CASE("Windowless queries expire but information and captures own their data
   }
   REQUIRE_THROWS_AS(query->Exists(), UiTestFailure);
   REQUIRE(info.text == "0");
-  REQUIRE(snapshot->ToString().starts_with("huxerui-ui-snapshot 1"));
+  REQUIRE(snapshot->ToString().starts_with("huxerui-ui-snapshot 2"));
+  REQUIRE(exported == snapshot->ToString());
 }
 
 TEST_CASE("Windowless input helpers reject disabled controls without activating", "[ui-testing]") {
@@ -524,6 +549,285 @@ TEST_CASE("Windowless Pump exposes exact animation intermediate frames", "[ui-te
   REQUIRE(ui.CaptureSnapshot().ToString() != quarter.ToString());
   ui.Pump(500ms);
   REQUIRE(node.One().bounds.x == Catch::Approx(origin + 100.0F));
+}
+
+TEST_CASE("Windowless settle follows animation and delayed task deadlines", "[ui-testing]") {
+  SECTION("Finite animation") {
+    Application application(Animated, {.show_debug_overlay = false});
+    UiTest ui(application);
+    const float origin = ui.Find(UiSelector::Key("animated")).One().bounds.x;
+    animated = true;
+    ui.PumpAndSettle({.timeout = 2s, .step = 100ms});
+    REQUIRE(ui.Find(UiSelector::Key("animated")).One().bounds.x == Catch::Approx(origin + 100));
+    REQUIRE(ui.Now() >= 1.0);
+    const double completed = ui.Now();
+    ui.PumpAndSettle();
+    REQUIRE(ui.Now() == completed);
+  }
+  SECTION("Delayed callback") {
+    Application application(DelayedCounter, {.show_debug_overlay = false});
+    UiTest ui(application);
+    ui.FindSemantics(UiSemanticSelector::Role(SemanticRole::Button))
+        .PerformSemanticAction({SemanticActionKind::Activate, {}});
+    ui.PumpAndSettle();
+    REQUIRE(count.Get() == 1);
+    REQUIRE(ui.Now() == Catch::Approx(0.1));
+    REQUIRE(ui.Find(UiSelector::Text("1")).Exists());
+  }
+}
+
+TEST_CASE("Windowless settle bounds continuous work and preserves observations on timeout", "[ui-testing]") {
+  shutdown_frames = 0;
+  Application application([] { return Empty().With(FrameProbe{&shutdown_frames}); }, {.show_debug_overlay = false});
+  UiTest ui(application);
+  REQUIRE_THROWS_AS(ui.PumpAndSettle({.timeout = 1s, .maximum_frames = 3}), UiTestFailure);
+  REQUIRE(shutdown_frames == 4);
+  REQUIRE(ui.Find(UiSelector::Key("empty")).Exists());
+  REQUIRE_FALSE(ui.CaptureSnapshot().ToString().empty());
+  const double before = ui.Now();
+  REQUIRE_THROWS_AS(ui.PumpAndSettle({.timeout = 25ms, .step = 10ms}), UiTestFailure);
+  REQUIRE(ui.Now() - before == Catch::Approx(0.025));
+  REQUIRE_THROWS_AS(ui.PumpAndSettle({.step = 0ms}), std::invalid_argument);
+  REQUIRE_THROWS_AS(ui.PumpAndSettle({.maximum_frames = 0}), std::invalid_argument);
+  ui.Pump();
+}
+
+TEST_CASE("Windowless input observations expose composition and reject ended sessions", "[ui-testing]") {
+  Application application(Editor, {.show_debug_overlay = false});
+  UiTest ui(application);
+  REQUIRE_FALSE(ui.ActiveTextInput());
+  auto editor = ui.Find(UiSelector::Key("editor"));
+  editor.Tap();
+  const auto initial = ui.ActiveTextInput();
+  REQUIRE(initial);
+  REQUIRE(initial->session_id != 0);
+  const auto before = ui.CaptureSnapshot();
+  TextInputCommand compose;
+  compose.kind = TextInputCommandKind::UpdateComposition;
+  compose.text = "A😀";
+  REQUIRE(ui.SendTextInput({initial->session_id, {compose}}).result_code == TextInputResultCode::Ok);
+  const auto composing = ui.ActiveTextInput();
+  REQUIRE(composing);
+  REQUIRE(composing->composition == TextRange{0, 3});
+  REQUIRE(composing->selection == TextSelection{3, 3});
+  REQUIRE(composing->revision > initial->revision);
+  REQUIRE(ui.CaptureSnapshot() == before);
+  REQUIRE(editor.One().value == "");
+  ui.Pump();
+  REQUIRE(editor.One().value == "A😀");
+  TextInputCommand finish;
+  finish.kind = TextInputCommandKind::FinishComposition;
+  REQUIRE(ui.SendTextInput({initial->session_id, {finish}}).result_code == TextInputResultCode::Ok);
+  REQUIRE_FALSE(ui.ActiveTextInput()->composition);
+  REQUIRE(composing->composition == TextRange{0, 3});
+  ui.Pump();
+  ui.TapAt({790.0F, 590.0F});
+  REQUIRE_FALSE(ui.ActiveTextInput());
+  REQUIRE(ui.SendTextInput({initial->session_id, {compose}}).result_code == TextInputResultCode::SessionMismatch);
+  editor.Tap();
+  REQUIRE(ui.ActiveTextInput()->session_id != initial->session_id);
+}
+
+TEST_CASE("Windowless taps use the visible portion of clipped nodes", "[ui-testing]") {
+  Application application([] {
+    count = UseState(0);
+    return Button("Clipped").OnClick([value = count]() mutable { value += 1; })
+        .With(Frame{100.0F, 40.0F}, Offset{Point{-75.0F, 0.0F}});
+  }, {.show_debug_overlay = false});
+  UiTest ui(application, {.viewport = {100.0F, 80.0F}, .resource_provider = {}});
+  const auto button = ui.Find(UiSelector::Text("Clipped"));
+  const auto info = button.One();
+  REQUIRE(info.bounds.x + info.bounds.width * 0.5F < 0);
+  REQUIRE(info.visible_bounds.x == 0);
+  REQUIRE(info.visible_bounds.width > 0);
+  REQUIRE(info.visible_bounds.width < info.bounds.width);
+  button.Tap();
+  REQUIRE(count.Get() == 1);
+}
+
+TEST_CASE("Windowless scrolling searches virtual items through physical input", "[ui-testing]") {
+  Application application(ScrollableItems, {.show_debug_overlay = false});
+  UiTest ui(application, {.viewport = {200.0F, 120.0F}, .resource_provider = {}});
+  auto list = ui.Find(UiSelector::Key("list"));
+  REQUIRE_FALSE(list.Find(UiSelector::Key(std::size_t{30})).Exists());
+  const auto consumed = list.ScrollBy({0, 80});
+  REQUIRE(consumed.y > 0);
+  auto item = list.ScrollUntil(UiSelector::Key(std::size_t{30}), {.step = {0, 100}, .maximum_steps = 30});
+  REQUIRE(item.One().in_viewport);
+  item.Tap();
+  REQUIRE(count.Get() == 1);
+  const double found_at = ui.Now();
+  REQUIRE(list.ScrollUntil(UiSelector::Key(std::size_t{30})).One().in_viewport);
+  REQUIRE(ui.Now() == found_at);
+  REQUIRE_THROWS_AS(list.ScrollUntil(UiSelector::Key("absent"), {.maximum_steps = 2}), UiTestFailure);
+  REQUIRE_THROWS_AS(list.ScrollUntil(UiSelector::Type<Button>()), UiTestFailure);
+  REQUIRE_THROWS_AS(list.ScrollUntil(UiSelector::Key("absent"), {.step = {}}), std::invalid_argument);
+  REQUIRE(list.Exists());
+}
+
+TEST_CASE("Windowless query failures include selector values and useful scope candidates", "[ui-testing]") {
+  Application application(Scopes, {.show_debug_overlay = false});
+  UiTest ui(application);
+  try {
+    ui.Find(UiSelector::Key("first")).Find(UiSelector::Text("Missing")).Tap();
+    FAIL("Expected a query failure");
+  } catch (const UiTestFailure& failure) {
+    const std::string message = failure.what();
+    INFO(message);
+    REQUIRE(message.find("Tap expected one node, found 0") != std::string::npos);
+    REQUIRE(message.find("Key(\"first\") -> Text(\"Missing\")") != std::string::npos);
+    REQUIRE(message.find("Delete") != std::string::npos);
+    REQUIRE(message.find("Viewport:") != std::string::npos);
+  }
+  REQUIRE_THROWS_WITH(ui.Find(UiSelector::Key("action")).One(), Catch::Matchers::ContainsSubstring("found 2"));
+  REQUIRE_THROWS_WITH(ui.FindSemantics(UiSemanticSelector::Label("Missing")).One(),
+                      Catch::Matchers::ContainsSubstring("Delete"));
+}
+
+TEST_CASE("Windowless snapshot differences identify fields and own comparison data", "[ui-testing]") {
+  Application application(Counter, {.show_debug_overlay = false});
+  std::optional<UiSnapshot> baseline;
+  std::optional<UiSnapshot> changed;
+  {
+    UiTest ui(application);
+    baseline = ui.CaptureSnapshot();
+    ui.Pump();
+    REQUIRE(ui.CaptureSnapshot() == *baseline);
+    REQUIRE(ui.CaptureSnapshot().Diff(*baseline).empty());
+    ui.Find(UiSelector::Key("increment")).Tap();
+    changed = ui.CaptureSnapshot();
+    REQUIRE(*changed != *baseline);
+    const auto diff = changed->Diff(*baseline);
+    REQUIRE(diff.find("/label: \"0\" -> \"1\"") != std::string::npos);
+    REQUIRE(diff.find("/text: \"0\" -> \"1\"") != std::string::npos);
+    REQUIRE(diff.find("Increment") == std::string::npos);
+  }
+  REQUIRE_FALSE(changed->Diff(*baseline).empty());
+  UiTest recreated(application);
+  REQUIRE(recreated.CaptureSnapshot() == *baseline);
+}
+
+TEST_CASE("Windowless snapshot differences group inserted and removed subtrees", "[ui-testing]") {
+  Application application(SnapshotItems, {.show_debug_overlay = false});
+  UiTest ui(application);
+  const auto baseline = ui.CaptureSnapshot();
+  count = 1;
+  ui.Pump();
+  const auto inserted = ui.CaptureSnapshot();
+  const auto added = inserted.Diff(baseline);
+  INFO(added);
+  REQUIRE(added.find("subtree added") != std::string::npos);
+  REQUIRE(added.find("identifier=\"inserted\"") != std::string::npos);
+  REQUIRE(added.find("Stable") == std::string::npos);
+  REQUIRE(std::count(added.begin(), added.end(), '\n') < 10);
+  const auto removed = baseline.Diff(inserted);
+  REQUIRE(removed.find("subtree removed") != std::string::npos);
+  count = 0;
+  ui.Pump();
+  REQUIRE(ui.CaptureSnapshot() == baseline);
+}
+
+TEST_CASE("Windowless settle drains callback batches without inventing time", "[ui-testing]") {
+  PlatformAdapter* dispatcher = nullptr;
+  Application application(Empty, {
+    .show_debug_overlay = false,
+    .root_hooks = {[&](RootContext& root) {
+      root.RegisterPlatformModule<int>("testing/Dispatcher", [&](PlatformAdapter& adapter) {
+        dispatcher = &adapter;
+        return 0;
+      });
+      static_cast<void>(root.OpenPlatformModule<int>("testing/Dispatcher"));
+    }},
+  });
+  int calls = 0;
+  bool repeat = true;
+  std::function<void()> callback = [&] {
+    ++calls;
+    if (repeat) dispatcher->DispatchToUIThread(callback);
+  };
+  UiTest ui(application);
+  REQUIRE(dispatcher);
+  dispatcher->DispatchToUIThread(callback);
+  REQUIRE_THROWS_WITH(ui.PumpAndSettle({.maximum_frames = 3}),
+                      Catch::Matchers::ContainsSubstring("callbacks=1"));
+  REQUIRE(calls == 3);
+  REQUIRE(ui.Now() == 0);
+  repeat = false;
+  ui.PumpAndSettle();
+  REQUIRE(calls == 4);
+  REQUIRE(ui.Now() == 0);
+}
+
+TEST_CASE("Windowless snapshots retain image content and external texture geometry", "[ui-testing]") {
+  Application application([] {
+    count = UseState(0);
+    const auto extent = static_cast<std::uint32_t>(10 + count.Get());
+    return Canvas([image = ImageAsset::FromEncoded(MakeTestPng(extent, 10)),
+                   texture = MakeTestExternalTexture({static_cast<float>(extent), 10})](PaintContext& paint, Size) {
+      paint.DrawImage(image, {0, 0, 40, 40});
+      paint.DrawImage(texture, {40, 0, 40, 40});
+    }).With(Frame{80.0F, 40.0F});
+  }, {.show_debug_overlay = false});
+  std::optional<UiSnapshot> before;
+  std::optional<UiSnapshot> after;
+  {
+    UiTest ui(application);
+    before = ui.CaptureSnapshot();
+    count = 1;
+    ui.Pump();
+    after = ui.CaptureSnapshot();
+    count = 0;
+    ui.Pump();
+    REQUIRE(ui.CaptureSnapshot() == *before);
+  }
+  const auto diff = after->Diff(*before);
+  REQUIRE(diff.find("image content changed") != std::string::npos);
+  REQUIRE(diff.find("/intrinsic_size/width: 10.000000 -> 11.000000") != std::string::npos);
+  REQUIRE(diff.find("89504e47") == std::string::npos);
+  REQUIRE(before->ToString().find("89504e47") != std::string::npos);
+}
+
+TEST_CASE("Windowless snapshot reports bound display without truncating equality", "[ui-testing]") {
+  Application application([]() -> View {
+    count = UseState(0);
+    std::vector<View> children;
+    for (int i = 0; i < 100; ++i) {
+      children.push_back(Text(std::string(count.Get() ? "After " : "Before ") + std::to_string(i)).Key(i));
+    }
+    return Stack(std::move(children));
+  }, {.show_debug_overlay = false});
+  UiTest ui(application);
+  const auto before = ui.CaptureSnapshot();
+  count = 1;
+  ui.Pump();
+  const auto after = ui.CaptureSnapshot();
+  REQUIRE(after != before);
+  const auto diff = after.Diff(before);
+  REQUIRE(diff.find("additional structural changes omitted") != std::string::npos);
+  REQUIRE(std::count(diff.begin(), diff.end(), '\n') <= 65);
+  REQUIRE(after.ToString().find("After 99") != std::string::npos);
+}
+
+TEST_CASE("Windowless snapshot reports omission only beyond the difference limit", "[ui-testing]") {
+  const int differences = GENERATE(0, 63, 64, 65);
+  Application application([] {
+    count = UseState(0);
+    return Canvas([changed = count.Get()](PaintContext& paint, Size) {
+      for (int i = 0; i < 65; ++i) {
+        paint.DrawRect({static_cast<float>(i), 0, 1, 1}, i < changed ? Color::Rgb(255, 0, 0) : Color::Black());
+      }
+    }).With(Frame{65.0F, 1.0F});
+  }, {.show_debug_overlay = false});
+  UiTest ui(application);
+  const auto before = ui.CaptureSnapshot();
+  count = differences;
+  ui.Pump();
+  const auto after = ui.CaptureSnapshot();
+  const auto diff = after.Diff(before);
+  INFO(diff);
+  REQUIRE((after == before) == (differences == 0));
+  REQUIRE((diff.find("additional structural changes omitted") != std::string::npos) == (differences > 64));
+  REQUIRE(std::count(diff.begin(), diff.end(), '\n') == std::min(differences, 64) + (differences > 64 ? 1 : 0));
 }
 
 } // namespace huxerui::test

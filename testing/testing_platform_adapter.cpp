@@ -116,6 +116,7 @@ TestingPlatformAdapter::TestingPlatformAdapter(std::shared_ptr<UiTestQueue> queu
 
 void TestingPlatformAdapter::RequestFrameAt(double deadline) {
   if (!std::isfinite(deadline)) throw std::invalid_argument("HuxerUI testing frame deadline must be finite");
+  if (!frame_deadline || deadline < *frame_deadline) frame_deadline = deadline;
 }
 
 FontMetrics TestingPlatformAdapter::Metrics(const Font& font) {
@@ -153,17 +154,21 @@ bool TestingPlatformAdapter::WriteText(std::string_view text) {
 }
 
 void TestingPlatformAdapter::Start(TextInputSessionId id, const TextInputConfiguration& config,
-                                  const TextInputState&, const TextInputGeometry&) {
-  input_session = id;
+                                  const TextInputState& state, const TextInputGeometry&) {
+  input_state = state;
+  input_state->session_id = id;
   input_action = config.action;
+}
+void TestingPlatformAdapter::Update(TextInputSessionId id, const TextInputState& state, const TextInputGeometry&) {
+  if (input_state && input_state->session_id == id) input_state = state;
 }
 void TestingPlatformAdapter::Restart(TextInputSessionId id, const TextInputConfiguration& config,
                                      const TextInputState& state, const TextInputGeometry& geometry) {
-  if (id == input_session) Start(id, config, state, geometry);
+  if (input_state && id == input_state->session_id) Start(id, config, state, geometry);
 }
 void TestingPlatformAdapter::Stop(TextInputSessionId id) {
-  if (id == input_session) {
-    input_session = 0;
+  if (input_state && id == input_state->session_id) {
+    input_state.reset();
     input_action = TextInputAction::Default;
   }
 }

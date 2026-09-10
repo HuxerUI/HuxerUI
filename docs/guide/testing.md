@@ -81,10 +81,13 @@ Custom functions are not retained C++ node types and cannot be queried as such; 
 The match order is mounted preorder, including presentation layers and mounted virtualization overscan but excluding unmounted virtual items and native descendants.
 A descendant scope must resolve uniquely, even for `Exists()`.
 `One()` and targeted operations throw `UiTestFailure` on missing or ambiguous matches.
+Failures include the operation, selector values and scope, match count, viewport, virtual time, and a bounded candidate or scope excerpt.
+Editor value predicates are redacted in diagnostics.
 
 Queries re-resolve against the last completed frame and expire when the fixture is destroyed.
 `UiNodeInfo` is an owning value and remains usable after later frames or destruction.
 Its bounds are transformed window-local logical coordinates.
+`visible_bounds` intersects those bounds with the viewport and rectangular ancestor clips and is empty for nonparticipating nodes.
 `in_viewport` is only a conservative rectangular viewport/ancestor-clip check: path clips, opacity, occlusion, and modal barriers are not an interactability guarantee.
 Hidden retained content can still be found; inspect layout participation and geometry when relevant.
 
@@ -100,7 +103,7 @@ Use `Identifier`, `Label`, `Value`, `Role`, `Enabled`, `Focused`, `Selected`, `C
 
 ## Input and controlled editing
 
-`Tap()` sends pointer Down and Up at the transformed local center, pumping after each event.
+`Tap()` sends pointer Down and Up at the transformed local center, using the center of `visible_bounds` when the original center is clipped, and pumps after each event.
 It requires one enabled target with laid-out viewport geometry, but completion does not guarantee application activation: normal Runtime hit testing and modal routing decide the recipient.
 It never retries, scrolls automatically, invokes callbacks directly, or retargets Up after recomposition.
 `TapAt()` accepts a window-local point.
@@ -128,6 +131,43 @@ Selection offsets use UTF-16 units, including surrogate-pair and affinity rules.
 `ReplaceText` finishes composition and requests replacement of the complete current extent.
 Secure editor values are absent from ordinary observations and excluded from semantic value matching and structural serialization; built-in secure paint remains masked.
 
+`ActiveTextInput()` returns an owning `std::optional<TextInputState>` from the test adapter, including the active session ID, revisions, UTF-16 selection, and composition range, without exposing editor text.
+It follows the live input protocol, so it can change after raw input before the next Pump; mounted queries and snapshots still describe the last completed frame.
+Use the returned session ID to send composition commands through `SendTextInput`; ended sessions are rejected normally.
+
+```cpp
+auto input = ui.ActiveTextInput();
+if (input) {
+  TextInputCommand command;
+  command.kind = TextInputCommandKind::UpdateComposition;
+  command.text = "provisional";
+  TextInputApplyResult result = ui.SendTextInput({input->session_id, {command}});
+  ui.Pump();
+}
+```
+
+## Scrolling to mounted content
+
+`UiNodeQuery::ScrollBy(delta)` sends a wheel update at the selected visible region, returns the delta consumed by normal Runtime routing, and commits one frame without advancing time.
+Nested scroll routing remains active; touch scrolling continues to use `Drag`.
+`ScrollUntil(target, options)` repeats wheel input and virtual intervals until one matching strict descendant has visible geometry.
+Mounted overscan outside the viewport does not satisfy the search, and unmounted virtual items are reached only by scrolling the real container.
+The returned query resolves again on later operations.
+
+```cpp
+auto list = ui.Find(UiSelector::Key("messages"));
+auto item = list.ScrollUntil(UiSelector::Key("message.100"), {
+  .step = {0.0F, 240.0F},
+  .interval = std::chrono::milliseconds(100),
+  .maximum_steps = 30,
+});
+item.Tap();
+```
+
+Search fails on ambiguity, container replacement, or the step limit, while preserving completed-frame observations.
+Use a delta small enough not to skip the target, and allow enough virtual interval for the application's scroll behavior.
+Visible geometry does not guarantee that a target is enabled or unobscured.
+
 ## Frames and virtual time
 
 `Pump()` commits exactly one frame without advancing time.
@@ -150,6 +190,14 @@ Its timeout is virtual, not wall-clock time.
 It does not wait for real workers, HTTP, browser promises, or operating-system callbacks and does not claim global idleness.
 Use controlled service fixtures and let the runner yield for external work; the runner must also enforce its own wall-clock timeout.
 
+`PumpAndSettle(options)` commits an initial frame, then pumps until no queued UI callback or requested frame deadline remains.
+It drains queued callback batches at the current time, advances continuous frame requests by at least `step`, and jumps to later deadlines when appropriate, stopping at `timeout` or `maximum_frames`.
+The frame limit includes the initial frame; all limits apply even to zero-delay callback chains.
+Timers and visual feedback count as pending work, including caret blinking and repeating animations, which can exhaust the budget.
+Use `PumpUntil` for a particular business condition or `Pump(duration)` for an animation checkpoint.
+Settle failures report elapsed time, frame count, queued callback count, and the next deadline; the fixture remains available for queries and captures.
+This observes shared Runtime scheduling only and does not establish idleness of workers or native services.
+
 ## Resources and reference text
 
 Supply an owning `PlatformResources` through `UiTestOptions::resource_provider` when content needs images, raw assets, localized catalogs, or built-in icons.
@@ -166,12 +214,29 @@ Use it for deterministic shared behavior, not native typography goldens.
 ## Structural captures
 
 `CaptureSnapshot()` returns an owning `UiSnapshot` of the last completed frame without pumping.
+`operator==` compares canonical structure, and `actual.Diff(expected)` returns an empty string when equal or a bounded human-readable report of changed fields and added or removed subtrees.
+Paths identify the semantic/render hierarchy, sibling or paint-command index, and author-provided semantic identifier when present.
+For example, a changed label is reported as `.../semantic[0] identifier="save"/label: "Save" -> "Saved"`.
+Nearby unchanged siblings and unique semantic identifiers guide alignment; large reorders or simultaneously changed anonymous subtrees can fall back to positional comparison.
+The report shows expected values before actual values, abbreviates long values, summarizes image-content differences, and explicitly marks omitted changes.
+It is a diagnostic string, not a parseable patch or a textual line diff.
+
+```cpp
+const UiSnapshot expected = ui.CaptureSnapshot();
+ui.Find(UiSelector::Text("Save")).Tap();
+const UiSnapshot actual = ui.CaptureSnapshot();
+const bool unchanged = actual == expected;
+const std::string differences = actual.Diff(expected);
+```
+
 `ToString()` exposes a versioned, locale-independent textual representation of semantic hierarchy and render intent.
+It generates an owning string on demand; frames and snapshots retain only canonical structure, without a cached text export.
+Schema 2 names individual fields and uses fixed six-decimal canonical numbers for both equality and reporting.
 The representation is a structural format, not JSON or a pixel image.
 It contains transforms, clips, geometry, command order, semantic state, and encoded image content, but omits Runtime identities and native handles.
 ExternalTexture pixels and native PlatformView descendants are explicitly uncaptured; equal snapshots do not establish equality of that content or of native rendering.
 Capture strings can be large for encoded images.
-Other application text is not anonymized; runners own storage, comparisons, attachments, and explicit baseline approval.
+Other application text is not anonymized; runners own assertions, storage, attachments, and explicit baseline approval.
 The library does not write files or update baselines automatically.
 
 ## Android execution

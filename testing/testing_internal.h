@@ -42,14 +42,15 @@ public:
   bool WriteText(std::string_view text) override;
   void Start(TextInputSessionId id, const TextInputConfiguration& config, const TextInputState& state,
              const TextInputGeometry&) override;
-  void Update(TextInputSessionId, const TextInputState&, const TextInputGeometry&) override {}
+  void Update(TextInputSessionId id, const TextInputState& state, const TextInputGeometry&) override;
   void Restart(TextInputSessionId id, const TextInputConfiguration& config, const TextInputState& state,
                const TextInputGeometry& geometry) override;
   void Stop(TextInputSessionId id) override;
 
   double time = 0.0;
   ResourceConfiguration configuration;
-  TextInputSessionId input_session = 0;
+  std::optional<double> frame_deadline;
+  std::optional<TextInputState> input_state;
   TextInputAction input_action = TextInputAction::Default;
   std::optional<std::string> clipboard_text;
 
@@ -66,6 +67,6 @@ inline const SemanticNode& SemanticNodeAt(const UiSemanticIndex& index, Semantic
   return *found->second;
 }
 
-std::string CaptureUiStructure(const FrameCommit& commit, const UiSemanticIndex& semantics);
+std::shared_ptr<const UiSnapshotData> CaptureUiStructure(const FrameCommit& commit, const UiSemanticIndex& semantics);
 
 } // namespace huxerui::detail

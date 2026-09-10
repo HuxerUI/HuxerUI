@@ -52,9 +52,13 @@ std::string RunUiTestingSmoke(const std::string& package_root) noexcept {
     Require(ui.Find(UiSelector::Key("resource")).One().text == "application\n", "HuxerUI resource smoke failed");
     Require(ui.Find(UiSelector::Key("layer")).Exists(), "HuxerUI presentation smoke failed");
     const auto before = ui.CaptureSnapshot();
+    Require(!ui.ActiveTextInput(), "HuxerUI inactive input smoke failed");
+    ui.PumpAndSettle();
+    Require(ui.CaptureSnapshot() == before, "HuxerUI stable capture smoke failed");
     ui.Find(UiSelector::AllOf(UiSelector::Type<Button>(), UiSelector::Text("Increment"))).Tap();
     Require(ui.Find(UiSelector::Key("count")).One().text == "1", "HuxerUI input smoke failed");
-    Require(ui.CaptureSnapshot().ToString() != before.ToString(), "HuxerUI capture smoke failed");
+    const auto after = ui.CaptureSnapshot();
+    Require(after != before && !after.Diff(before).empty(), "HuxerUI capture smoke failed");
     return {};
   } catch (const std::exception& error) {
     return error.what();
