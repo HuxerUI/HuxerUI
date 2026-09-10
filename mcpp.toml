@@ -24,7 +24,7 @@
 # framework, the CLI core and a Catch2 main. `mcpp test --list` here lists all
 # of them. The packages that do have mcpp tests are tested from their own
 # directory, which is what CI does.
-members = ["mcpp/huxerui-source-select", "mcpp/huxerui-tools",
+members = ["mcpp/huxerui-source-select", "mcpp/huxerui-tests", "mcpp/huxerui-tools",
            "tools/codegen", "tools/resource_compiler"]
 
 [package]

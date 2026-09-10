@@ -1,0 +1,65 @@
+// The one input the suite needs that no manifest can name.
+//
+// tests/support/builtin_resources.cpp opens a COMPILED resource package at
+// HUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE. CMake sets that macro to the package
+// its own resource step produced -- a build output, so its path is only known
+// once a build directory exists. This program runs the same hrc over the same
+// framework resources and defines the macro to what it wrote.
+//
+// It is not a copy of huxerui.rules::builtin_resources(): that one is rooted at
+// the CALLING package's manifest directory, which here is mcpp/huxerui-tests
+// and holds no resources. The framework's root is what this needs, and
+// sdk_root() is how the rules hand it over.
+
+// `import std;`, not #include. huxerui.rules imports std, and a textual
+// <system_error> beside it makes GCC report `conflicting declaration 'enum
+// std::errc'` for the same entity reached two ways.
+import std;
+import mcpp;
+import huxerui.rules;
+
+int main() {
+    const std::string root = huxerui::rules::sdk_root();
+    if (root.empty()) {
+        std::cerr << "huxerui-tests: cannot locate the HuxerUI root\n";
+        return 1;
+    }
+    const std::string hrc = huxerui::rules::host_tool("hrc");
+    if (hrc.empty()) {
+        std::cerr << "huxerui-tests: hrc was not provided by the huxerui dependency\n";
+        return 1;
+    }
+
+    const std::string odir    = std::string(mcpp::out_dir()) + "/hrc";
+    const std::string src     = root + "/resources";
+    const std::string package = odir + "/builtin/package";
+
+    std::vector<std::string> inputs{ hrc };
+    std::error_code ec;
+    for (auto it = std::filesystem::recursive_directory_iterator(src, ec);
+         it != std::filesystem::recursive_directory_iterator(); ++it) {
+        if (it->is_regular_file(ec)) inputs.push_back(it->path().string());
+    }
+
+    mcpp::action a;
+    a.id          = "hrc:test-builtin";
+    a.role        = "source";
+    a.description = "builtin resources for the test suite";
+    a.arg(hrc.c_str());
+    a.arg("--root");        a.arg(src.c_str());
+    a.arg("--output");      a.arg((odir + "/builtin").c_str());
+    a.arg("--namespace");   a.arg("huxerui");
+    a.arg("--header-name"); a.arg("huxerui_builtin_resources.h");
+    for (const std::string& i : inputs) a.input(i.c_str());
+    a.output((odir + "/builtin/include/huxerui_builtin_resources.h").c_str());
+    a.output((package + "/huxerui/resources.bin").c_str());
+    a.submit();
+
+    mcpp::include_dir((odir + "/builtin/include").c_str());
+    // The quotes are escaped because ninja runs the compile line through a
+    // shell, which eats an unescaped pair and leaves the compiler reading the
+    // path as an expression -- `error: 'home' was not declared in this scope`.
+    // CMake escapes the same define for the same reason.
+    mcpp::cxxflag(("-DHUXERUI_TEST_BUILTIN_RESOURCE_PACKAGE=\\\"" + package + "\\\"").c_str());
+    return 0;
+}

@@ -179,6 +179,13 @@ jobs:
       - name: Build the example application
         working-directory: examples/mcpp_demo
         run: mcpp build
+      # The suite that says the LIBRARY works, not just that it links. Same
+      # sources tests/unit/CMakeLists.txt compiles and the same vendored
+      # Catch2, against the framework mcpp built.
+      - name: Run the unit test suite
+        working-directory: mcpp/huxerui-tests
+        run: mcpp test
+
       - name: Pack the library and check its shape
         shell: bash
         run: |
@@ -318,6 +325,15 @@ jobs:
             || { echo "BMI and consumer disagree about target features"; exit 1; }
           echo "clang loaded huxerui.pcm"
 
+      # The suite that says the LIBRARY works, not just that it links. Same
+      # sources tests/unit/CMakeLists.txt compiles and the same vendored
+      # Catch2, against the framework mcpp built.
+      - name: Run the unit test suite
+        working-directory: mcpp/huxerui-tests
+        run: mcpp test
+        env:
+          MCPP_TOOLCHAIN: ${{ env.MCPP_LLVM }}
+
       - name: Pack the library and check its shape
         run: |
           mcpp pack --toolchain "${MCPP_LLVM}"
@@ -368,6 +384,13 @@ jobs:
       - name: Build the example application
         working-directory: examples/mcpp_demo
         run: mcpp build
+      # The suite that says the LIBRARY works, not just that it links. Same
+      # sources tests/unit/CMakeLists.txt compiles and the same vendored
+      # Catch2, against the framework mcpp built.
+      - name: Run the unit test suite
+        working-directory: mcpp/huxerui-tests
+        run: mcpp test
+
       - name: Pack the library and check its shape
         shell: bash
         run: |
@@ -442,6 +465,13 @@ jobs:
           $info = $exe.VersionInfo
           Write-Host "FileVersion=$($info.FileVersion) ProductName=$($info.ProductName)"
           if (-not $info.FileVersion) { throw 'the executable carries no version resource' }
+
+      # The suite that says the LIBRARY works, not just that it links. Same
+      # sources tests/unit/CMakeLists.txt compiles and the same vendored
+      # Catch2, against the framework mcpp built.
+      - name: Run the unit test suite
+        working-directory: mcpp/huxerui-tests
+        run: mcpp test
 
       - name: Pack the library and check its shape
         shell: bash
