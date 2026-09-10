@@ -68,6 +68,21 @@ huxerui-codegen           = { path = "tools/codegen",           tools = ["hcg"],
 huxerui-resource-compiler = { path = "tools/resource_compiler", tools = ["hrc"], reexport = true }
 huxerui-build-rules       = { path = "mcpp/huxerui-build-rules", host-module = true, reexport = true }
 
+# WiX, for projects that build a Windows installer.
+#
+# HOST axis, not target: wix.exe RUNS on the build machine, and mcpp's rule for
+# which table a tool belongs in is exactly that -- the target axis is for what
+# the produced code is compiled or linked against. The GTK payloads below are
+# the other case.
+#
+# A payload declared here reaches this package's own build program. It does NOT
+# reach a CONSUMER's build program: mcpp passes `MCPP_XPKG_*_DIR` for what the
+# building package declared, so an application that asks huxerui.rules for an
+# installer declares this line too. The rule says so when the lookup comes back
+# empty.
+[xlings.workspace]
+"xim:wix" = { windows = "5.0.2" }
+
 # ---------------------------------------------------------------- Linux ----
 # Sources mirror cmake/platform/Linux.cmake.
 [target.'cfg(linux)'.build]
@@ -145,10 +160,6 @@ defines  = ["UNICODE", "_UNICODE", "NOMINMAX", "WIN32_LEAN_AND_MEAN",
 # BMI then reaches cl.exe in clang's `name=path` spelling and the compile dies
 # with C1083 (mcpp-community/mcpp#604). Retry when that is fixed.
 
-# WiX, for projects that build a Windows installer. Declared by the framework so
-# a consumer reaches it through the dependency edge without naming it.
-[target.windows.xlings.workspace]
-"xim:wix" = "5.0.2"
 
 [target.windows.runtime]
 # The tail of this list -- kernel32, gdi32, winspool, uuid, comdlg32 -- is what

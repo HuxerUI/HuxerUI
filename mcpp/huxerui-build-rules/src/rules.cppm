@@ -364,8 +364,15 @@ inline bool plan_installer(const options& opt, std::vector<edge>& out) {
 
     const auto layout = wix();
     if (layout.tool.empty()) {
-        std::cerr << "huxerui.rules: the xim:wix payload is not installed; the framework "
-                     "declares it under [target.windows.xlings.workspace]\n";
+        // `xpkg_dir` answers from `MCPP_XPKG_*_DIR`, which mcpp sets for what
+        // the BUILDING package declared. A dependency's declaration provisions
+        // the payload -- the framework's does, and the log says so -- but does
+        // not reach this build program, so an application that wants an
+        // installer names the tool it runs.
+        std::cerr << "huxerui.rules: the xim:wix payload is not visible to this build "
+                     "program. Add it to this package's manifest:\n\n"
+                     "    [xlings.workspace]\n"
+                     "    \"xim:wix\" = { windows = \"5.0.2\" }\n\n";
         return false;
     }
 

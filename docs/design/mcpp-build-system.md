@@ -226,12 +226,28 @@ huxerui::rules::configure({
 });
 ```
 
+…and one line in its manifest:
+
+```toml
+[xlings.workspace]
+"xim:wix" = { windows = "5.0.2" }
+```
+
+That line is not redundant with the framework's. `xpkg_dir` answers from
+`MCPP_XPKG_*_DIR`, which mcpp sets for what the **building** package declared;
+a dependency's declaration provisions the payload — the log says
+`Provisioning [xlings.workspace] entries (xim:wix@5.0.2)` — without making it
+visible to the consumer's build program. The rule says exactly this, and prints
+the two lines to add, when the lookup comes back empty.
+
+It is on the **host** axis because `wix.exe` runs on the build machine, which
+is mcpp's own rule for which table a tool belongs in; the GTK payloads in §5
+are the other case.
+
 The rule renders the MSI definition it ships
 (`mcpp/huxerui-build-rules/wix/Package.wxs.in`) into the build directory and
 submits **one** action, `role = "artifact"` — whose inputs are link outputs, so
-ninja sequences it after the link with no phase machinery. The WiX toolset
-comes from the `xim:wix` payload the framework declares under
-`[target.windows.xlings.workspace]`, so nothing is installed by hand.
+ninja sequences it after the link with no phase machinery.
 
 Three things make it one action rather than several:
 
