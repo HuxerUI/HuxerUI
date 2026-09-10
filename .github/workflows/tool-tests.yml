@@ -14,20 +14,32 @@ on:
   push:
     branches: [main]
     paths:
+      # What the two suites compile, and nothing else. The `!` line is last
+      # because in a paths filter the later pattern wins, so it subtracts
+      # documentation from the directories above -- a README under
+      # tools/huxerui_cli/ is not an input to either suite.
       - 'tools/codegen/**'
       - 'tools/huxerui_cli/**'
       - 'tests/codegen/**'
       - 'tests/cli/**'
-      - 'templates/**'
+      # Defines huxerui_add_test_suite, which both of them are built by.
+      - 'tests/CMakeLists.txt'
       - '.github/workflows/tool-tests.yml'
+      - '!**.[mM][dD]'
   pull_request:
     paths:
+      # What the two suites compile, and nothing else. The `!` line is last
+      # because in a paths filter the later pattern wins, so it subtracts
+      # documentation from the directories above -- a README under
+      # tools/huxerui_cli/ is not an input to either suite.
       - 'tools/codegen/**'
       - 'tools/huxerui_cli/**'
       - 'tests/codegen/**'
       - 'tests/cli/**'
-      - 'templates/**'
+      # Defines huxerui_add_test_suite, which both of them are built by.
+      - 'tests/CMakeLists.txt'
       - '.github/workflows/tool-tests.yml'
+      - '!**.[mM][dD]'
   workflow_dispatch:
 
 concurrency:
