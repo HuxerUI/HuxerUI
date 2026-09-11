@@ -13,11 +13,14 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <concepts>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -132,6 +135,233 @@ TextDirection ResolveTextDirection(std::wstring_view text, TextDirection request
   }
   return TextDirection::LeftToRight;
 }
+
+using RegisteredFontBytes = std::vector<std::byte>;
+
+// In-memory byte source for one registered family. The font file key carries the
+// address of the payload holder cached with the family collection, so the file
+// loader can serve every registered family while streams stay independent owners.
+class RegisteredFontStream final : public IDWriteFontFileStream {
+public:
+  explicit RegisteredFontStream(std::shared_ptr<const RegisteredFontBytes> data) : data_(std::move(data)) {}
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+    if (!object) {
+      return E_POINTER;
+    }
+    *object = nullptr;
+    if (!IsEqualIID(iid, __uuidof(IUnknown)) && !IsEqualIID(iid, __uuidof(IDWriteFontFileStream))) {
+      return E_NOINTERFACE;
+    }
+    *object = static_cast<IDWriteFontFileStream*>(this);
+    AddRef();
+    return S_OK;
+  }
+
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG remaining = --references_;
+    if (remaining == 0) {
+      delete this;
+    }
+    return remaining;
+  }
+
+  HRESULT STDMETHODCALLTYPE ReadFileFragment(const void** fragment_start, UINT64 file_offset, UINT64 fragment_size,
+      void** fragment_context) override {
+    if (!fragment_start || !fragment_context) {
+      return E_POINTER;
+    }
+    *fragment_context = nullptr;
+    const UINT64 size = static_cast<UINT64>(data_->size());
+    if (file_offset > size || fragment_size > size - file_offset) {
+      return E_FAIL;
+    }
+    *fragment_start = data_->data() + static_cast<std::size_t>(file_offset);
+    return S_OK;
+  }
+
+  void STDMETHODCALLTYPE ReleaseFileFragment(void*) override {}
+
+  HRESULT STDMETHODCALLTYPE GetFileSize(UINT64* file_size) override {
+    if (!file_size) {
+      return E_POINTER;
+    }
+    *file_size = static_cast<UINT64>(data_->size());
+    return S_OK;
+  }
+
+  // In-memory payloads carry no file time; DirectWrite tolerates the failure and skips timestamp caching.
+  HRESULT STDMETHODCALLTYPE GetLastWriteTime(UINT64*) override { return E_NOTIMPL; }
+
+private:
+  std::shared_ptr<const RegisteredFontBytes> data_;
+  std::atomic<ULONG> references_{1};
+};
+
+// Decodes font file keys into streams over the cached family payload.
+class RegisteredFontFileLoader final : public IDWriteFontFileLoader {
+public:
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+    if (!object) {
+      return E_POINTER;
+    }
+    *object = nullptr;
+    if (!IsEqualIID(iid, __uuidof(IUnknown)) && !IsEqualIID(iid, __uuidof(IDWriteFontFileLoader))) {
+      return E_NOINTERFACE;
+    }
+    *object = static_cast<IDWriteFontFileLoader*>(this);
+    AddRef();
+    return S_OK;
+  }
+
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG remaining = --references_;
+    if (remaining == 0) {
+      delete this;
+    }
+    return remaining;
+  }
+
+  HRESULT STDMETHODCALLTYPE CreateStreamFromKey(const void* key, UINT32 key_size, IDWriteFontFileStream** stream)
+      override {
+    if (!stream) {
+      return E_POINTER;
+    }
+    *stream = nullptr;
+    if (!key || key_size != sizeof(const void*)) {
+      return E_INVALIDARG;
+    }
+    const void* holder = nullptr;
+    std::memcpy(&holder, key, sizeof(holder));
+    const auto* data = static_cast<const std::shared_ptr<const RegisteredFontBytes>*>(holder);
+    if (!data || !*data) {
+      return E_FAIL;
+    }
+    *stream = new RegisteredFontStream(*data);
+    return S_OK;
+  }
+
+private:
+  std::atomic<ULONG> references_{1};
+};
+
+// Yields the single custom font file a family collection is built from.
+class RegisteredFontFileEnumerator final : public IDWriteFontFileEnumerator {
+public:
+  RegisteredFontFileEnumerator(IDWriteFactory* factory, const void* key, UINT32 key_size)
+      : factory_(factory), key_(key), key_size_(key_size) {}
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+    if (!object) {
+      return E_POINTER;
+    }
+    *object = nullptr;
+    if (!IsEqualIID(iid, __uuidof(IUnknown)) && !IsEqualIID(iid, __uuidof(IDWriteFontFileEnumerator))) {
+      return E_NOINTERFACE;
+    }
+    *object = static_cast<IDWriteFontFileEnumerator*>(this);
+    AddRef();
+    return S_OK;
+  }
+
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG remaining = --references_;
+    if (remaining == 0) {
+      delete this;
+    }
+    return remaining;
+  }
+
+  HRESULT STDMETHODCALLTYPE MoveNext(BOOL* has_current_file) override {
+    if (!has_current_file) {
+      return E_POINTER;
+    }
+    if (walked_) {
+      current_file_.Reset();
+      *has_current_file = FALSE;
+      return S_OK;
+    }
+    walked_ = true;
+    const HRESULT result = factory_->CreateCustomFontFileReference(key_, key_size_, current_file_.GetAddressOf());
+    if (FAILED(result)) {
+      current_file_.Reset();
+      *has_current_file = FALSE;
+      return result;
+    }
+    *has_current_file = TRUE;
+    return S_OK;
+  }
+
+  HRESULT STDMETHODCALLTYPE GetCurrentFontFile(IDWriteFontFile** font_file) override {
+    if (!font_file) {
+      return E_POINTER;
+    }
+    *font_file = nullptr;
+    if (!current_file_) {
+      return E_FAIL;
+    }
+    *font_file = current_file_.Get();
+    (*font_file)->AddRef();
+    return S_OK;
+  }
+
+private:
+  ComPtr<IDWriteFactory> factory_;
+  const void* key_ = nullptr;
+  UINT32 key_size_ = 0;
+  bool walked_ = false;
+  ComPtr<IDWriteFontFile> current_file_;
+  std::atomic<ULONG> references_{1};
+};
+
+// Vends enumerators for collection builds; the key reaches the enumerator unchanged.
+class RegisteredFontCollectionLoader final : public IDWriteFontCollectionLoader {
+public:
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
+    if (!object) {
+      return E_POINTER;
+    }
+    *object = nullptr;
+    if (!IsEqualIID(iid, __uuidof(IUnknown)) && !IsEqualIID(iid, __uuidof(IDWriteFontCollectionLoader))) {
+      return E_NOINTERFACE;
+    }
+    *object = static_cast<IDWriteFontCollectionLoader*>(this);
+    AddRef();
+    return S_OK;
+  }
+
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG remaining = --references_;
+    if (remaining == 0) {
+      delete this;
+    }
+    return remaining;
+  }
+
+  HRESULT STDMETHODCALLTYPE CreateEnumeratorFromKey(IDWriteFactory* factory, const void* key, UINT32 key_size,
+      IDWriteFontFileEnumerator** enumerator) override {
+    if (!factory || !enumerator) {
+      return E_POINTER;
+    }
+    *enumerator = nullptr;
+    if (!key || key_size != sizeof(const void*)) {
+      return E_INVALIDARG;
+    }
+    *enumerator = new RegisteredFontFileEnumerator(factory, key, key_size);
+    return S_OK;
+  }
+
+private:
+  std::atomic<ULONG> references_{1};
+};
 
 } // namespace
 
@@ -441,6 +671,20 @@ struct Win32Renderer::State {
     std::size_t cost = 0;
   };
 
+  struct CustomFontCollection {
+    // The payload holder address is the custom font file key, so it must stay at
+    // this address while the collection lives; std::map nodes never relocate.
+    std::shared_ptr<const RegisteredFontBytes> data;
+    ComPtr<IDWriteFontCollection> collection;
+    // DirectWrite matches text formats by the font's internal family name, which
+    // differs from the generated registry key the collection was built for.
+    std::wstring family_name;
+  };
+
+  ~State() {
+    ReleaseCustomFonts();
+  }
+
   TextLayoutMetrics
   MeasureText(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
     ValidateParagraphLength(text);
@@ -617,7 +861,112 @@ struct Win32Renderer::State {
     return L"Segoe UI";
   }
 
-  ComPtr<IDWriteTextFormat> CreateTextFormat(const Font& font, std::string_view locale = {}) const {
+  // Registers the two loaders the custom collection pipeline needs, once per state.
+  void EnsureCustomFontLoaders() {
+    if (custom_font_file_loader_) {
+      return;
+    }
+    custom_font_file_loader_.Attach(new RegisteredFontFileLoader());
+    custom_font_collection_loader_.Attach(new RegisteredFontCollectionLoader());
+    ThrowIfFailed(
+        write_factory_->RegisterFontFileLoader(custom_font_file_loader_.Get()),
+        "HuxerUI could not register a custom DirectWrite font file loader"
+    );
+    ThrowIfFailed(
+        write_factory_->RegisterFontCollectionLoader(custom_font_collection_loader_.Get()),
+        "HuxerUI could not register a custom DirectWrite font collection loader"
+    );
+  }
+
+  // Reads the internal family name DirectWrite matches text formats against;
+  // prefers the en-us localized name and falls back to the first entry.
+  static std::wstring InternalFamilyName(IDWriteFontCollection& collection) {
+    if (collection.GetFontFamilyCount() == 0) {
+      return {};
+    }
+    ComPtr<IDWriteFontFamily> family;
+    ThrowIfFailed(
+        collection.GetFontFamily(0, family.GetAddressOf()),
+        "HuxerUI could not access a custom DirectWrite font family"
+    );
+    ComPtr<IDWriteLocalizedStrings> names;
+    ThrowIfFailed(
+        family->GetFamilyNames(names.GetAddressOf()),
+        "HuxerUI could not read custom DirectWrite family names"
+    );
+    if (names->GetCount() == 0) {
+      return {};
+    }
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    static_cast<void>(names->FindLocaleName(L"en-us", &index, &exists));
+    if (exists == FALSE) {
+      index = 0;
+    }
+    UINT32 length = 0;
+    ThrowIfFailed(
+        names->GetStringLength(index, &length),
+        "HuxerUI could not measure a custom DirectWrite family name"
+    );
+    std::wstring name(length, L'\0');
+    ThrowIfFailed(
+        names->GetString(index, name.data(), length + 1),
+        "HuxerUI could not read a custom DirectWrite family name"
+    );
+    return name;
+  }
+
+  // Returns the collection for a font carrying payload bytes, together with the font's internal
+  // family name, or an empty match when the system collection must serve it. Families without
+  // payloads are not cached so later payload fonts are honored.
+  CustomFontCollection CustomFontCollectionFor(const Font& font) {
+    if (font.FamilyKind() != FontFamilyKind::Named) {
+      return {};
+    }
+    const std::wstring family = Utf8ToWide(font.FamilyName());
+    const auto cached = custom_fonts_.find(family);
+    if (cached != custom_fonts_.end()) {
+      return cached->second;
+    }
+    const FontData* payload = InternalAccess::FontPayload(font);
+    if (payload == nullptr) {
+      return {};
+    }
+    EnsureCustomFontLoaders();
+    CustomFontCollection& entry = custom_fonts_[family];
+    entry.data = std::make_shared<const RegisteredFontBytes>(payload->bytes);
+    // The key carries the payload holder address; the loaders decode it in
+    // CreateEnumeratorFromKey and CreateStreamFromKey.
+    const void* key = &entry.data;
+    ThrowIfFailed(
+        write_factory_->CreateCustomFontCollection(
+            custom_font_collection_loader_.Get(), &key, static_cast<UINT32>(sizeof(key)),
+            entry.collection.GetAddressOf()
+        ),
+        "HuxerUI could not create a custom DirectWrite font collection"
+    );
+    entry.family_name = InternalFamilyName(*entry.collection.Get());
+    if (entry.family_name.empty()) {
+      // A collection without family names cannot match text formats; drop the
+      // entry so lookups keep falling back to the system collection.
+      custom_fonts_.erase(family);
+      return {};
+    }
+    return entry;
+  }
+
+  // Collections must be released before their loaders are unregistered.
+  void ReleaseCustomFonts() noexcept {
+    custom_fonts_.clear();
+    if (write_factory_) {
+      static_cast<void>(write_factory_->UnregisterFontCollectionLoader(custom_font_collection_loader_.Get()));
+      static_cast<void>(write_factory_->UnregisterFontFileLoader(custom_font_file_loader_.Get()));
+    }
+    custom_font_collection_loader_.Reset();
+    custom_font_file_loader_.Reset();
+  }
+
+  ComPtr<IDWriteTextFormat> CreateTextFormat(const Font& font, std::string_view locale = {}) {
     wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
     std::wstring requested_locale;
     if (locale.empty()) {
@@ -629,11 +978,16 @@ struct Win32Renderer::State {
     }
 
     ComPtr<IDWriteTextFormat> format;
-    const std::wstring family = FontFamilyName(font);
+    std::wstring family = FontFamilyName(font);
+    const CustomFontCollection custom = CustomFontCollectionFor(font);
+    if (custom.collection) {
+      // The font is matched by its internal family name, not the registry key.
+      family = custom.family_name;
+    }
     ThrowIfFailed(
         write_factory_->CreateTextFormat(
             family.c_str(),
-            nullptr,
+            custom.collection.Get(),
             static_cast<DWRITE_FONT_WEIGHT>(font.Weight()),
             font.Slant() == FontSlant::Italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL,
@@ -809,12 +1163,15 @@ struct Win32Renderer::State {
     if (cached != font_metrics_.end()) {
       return cached->second;
     }
-    ComPtr<IDWriteFontCollection> collection;
-    ThrowIfFailed(
-        write_factory_->GetSystemFontCollection(collection.GetAddressOf()),
-        "HuxerUI could not access the DirectWrite font collection"
-    );
-    const std::wstring family_name = FontFamilyName(font);
+    const CustomFontCollection custom = CustomFontCollectionFor(font);
+    ComPtr<IDWriteFontCollection> collection = custom.collection;
+    if (!collection) {
+      ThrowIfFailed(
+          write_factory_->GetSystemFontCollection(collection.GetAddressOf()),
+          "HuxerUI could not access the DirectWrite font collection"
+      );
+    }
+    const std::wstring family_name = custom.collection ? custom.family_name : FontFamilyName(font);
     UINT32 family_index = 0;
     BOOL exists = FALSE;
     ThrowIfFailed(
@@ -2528,6 +2885,9 @@ struct Win32Renderer::State {
   std::vector<CachedD3D11Texture> d3d11_textures_;
   std::uint64_t external_texture_draw_epoch_ = 0;
   std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
+  std::map<std::wstring, CustomFontCollection> custom_fonts_;
+  ComPtr<RegisteredFontFileLoader> custom_font_file_loader_;
+  ComPtr<RegisteredFontCollectionLoader> custom_font_collection_loader_;
   std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
   std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;
   std::size_t paragraph_bytes_ = 0;
@@ -2555,6 +2915,7 @@ void Win32Renderer::Discard() noexcept {
   state_->paragraph_bytes_ = 0;
   state_->text_runs_.clear();
   state_->font_metrics_.clear();
+  state_->ReleaseCustomFonts();
   state_->wic_factory_.Reset();
   state_->write_factory_.Reset();
   state_->d2d_factory_.Reset();

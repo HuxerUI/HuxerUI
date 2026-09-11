@@ -1075,6 +1075,11 @@ public:
     RequestFrameAt(Now());
   }
 
+  void FontsReady() {
+    renderer_.FontsReady();
+    RequestFrameAt(Now());
+  }
+
 private:
   void Schedule(double deadline) {
     ScheduleWebFrame(session_id_, deadline);
@@ -1278,6 +1283,18 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_application_lifecycle(std::uintptr_t sessi
 
 EMSCRIPTEN_KEEPALIVE void huxerui_web_image_ready(std::uintptr_t session_id) {
   huxerui::detail::DispatchWebSession(session_id, "image update", [](auto& platform) { platform.ImageReady(); });
+}
+
+EMSCRIPTEN_KEEPALIVE void huxerui_web_font_ready() {
+  // Font registration is process-wide and the loader carries no session id, so every mounted session repaints.
+  std::vector<std::uintptr_t> session_ids;
+  session_ids.reserve(huxerui::detail::Sessions().size());
+  for (const auto& entry : huxerui::detail::Sessions()) {
+    session_ids.push_back(entry.first);
+  }
+  for (const std::uintptr_t session_id : session_ids) {
+    huxerui::detail::DispatchWebSession(session_id, "font update", [](auto& platform) { platform.FontsReady(); });
+  }
 }
 
 EMSCRIPTEN_KEEPALIVE void huxerui_web_pointer(std::uintptr_t session_id, int type, std::int32_t pointer_id, float x,

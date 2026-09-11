@@ -19,6 +19,8 @@ import android.graphics.LinearGradient;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.graphics.Typeface;
+import android.graphics.fonts.Font;
+import android.graphics.fonts.FontFamily;
 import android.os.Debug;
 import android.os.SystemClock;
 import android.os.Build;
@@ -51,10 +53,14 @@ import android.view.inputmethod.InputMethodManager;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 public final class HuxerUIView extends ViewGroup {
@@ -164,6 +170,7 @@ public final class HuxerUIView extends ViewGroup {
     private final Path scratchPath = new Path();
     private final LruCache<PathKey, Path> pathCache = new LruCache<>(128);
     private final LruCache<FontKey, Typeface> fontCache = new LruCache<>(32);
+    private final Map<String, byte[]> registeredFontData = new HashMap<>();
     private static final int PARAGRAPH_CACHE_BUDGET = 8 * 1024 * 1024;
     private final LruCache<ParagraphKey, HuxerUITextLayout> paragraphCache =
             new LruCache<ParagraphKey, HuxerUITextLayout>(PARAGRAPH_CACHE_BUDGET) {
@@ -2226,6 +2233,52 @@ public final class HuxerUIView extends ViewGroup {
         }
     }
 
+    // Called from C++ when the scene references a data-carrying Font: payload bytes arrive once per
+    // generated family and stay available for this view's lifetime.
+    private void registerFontData(String family, byte[] data) {
+        if (family != null && data != null && data.length > 0) {
+            registeredFontData.put(family, data);
+        }
+    }
+
+    private Typeface resolveNamedTypeface(String familyName) {
+        // Families pushed from data-carrying Font values resolve through the
+        // per-view payload transport; unknown names fall back to the system
+        // family table.
+        byte[] data = registeredFontData.get(familyName);
+        if (data != null && data.length > 0) {
+            Typeface registered = createTypefaceFromData(familyName, data);
+            if (registered != null) {
+                return registered;
+            }
+        }
+        return Typeface.create(familyName, Typeface.NORMAL);
+    }
+
+    private Typeface createTypefaceFromData(String familyName, byte[] data) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ByteBuffer buffer = ByteBuffer.allocateDirect(data.length);
+                buffer.put(data);
+                buffer.rewind();
+                Font font = new Font.Builder(buffer).build();
+                FontFamily family = new FontFamily.Builder(font).build();
+                return new Typeface.CustomFallbackBuilder(family).build();
+            }
+            File cacheDir = new File(getContext().getCacheDir(), "huxerui_fonts");
+            if (!cacheDir.exists() && !cacheDir.mkdirs()) {
+                return null;
+            }
+            File fontFile = new File(cacheDir, familyName + ".ttf");
+            try (FileOutputStream output = new FileOutputStream(fontFile)) {
+                output.write(data);
+            }
+            return Typeface.createFromFile(fontFile);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     private Typeface resolveTypeface(int familyKind, String familyName, int weight, int slant) {
         FontKey key = new FontKey(familyKind, familyName, weight, slant);
         Typeface typeface = fontCache.get(key);
@@ -2234,7 +2287,7 @@ public final class HuxerUIView extends ViewGroup {
             if (familyKind == FONT_FAMILY_MONOSPACE) {
                 base = Typeface.MONOSPACE;
             } else if (familyKind == FONT_FAMILY_NAMED) {
-                base = Typeface.create(familyName, Typeface.NORMAL);
+                base = resolveNamedTypeface(familyName);
             } else {
                 base = Typeface.DEFAULT;
             }

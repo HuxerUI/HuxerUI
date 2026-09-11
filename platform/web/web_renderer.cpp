@@ -7,11 +7,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <mutex>
 #include <numbers>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -138,7 +141,43 @@ EM_JS(emscripten::EM_VAL, GetWebImage, (std::uintptr_t session_id, std::uint64_t
   }
   return Emval.toHandle(image || null);
 });
+
+EM_JS(
+    void,
+    RequestWebFontLoad,
+    (const char* family, const void* data, std::size_t size),
+    {
+      const bytes = HEAPU8.slice(data, data + size);
+      const face = new FontFace(UTF8ToString(family), bytes);
+      document.fonts.add(face);
+      face.load()
+          .then(() => Module._huxerui_web_font_ready())
+          .catch((error) => {
+            document.fonts.delete(face);
+            console.error("HuxerUI Web font load failed", error);
+          });
+    }
+);
 // clang-format on
+
+// Registered font bytes load asynchronously through the FontFace API, and the payload buffer is read
+// from the Font value each time, so each family is offered to the browser exactly once; the ready
+// notification flushes layouts that were measured against fallback metrics.
+void RequestRegisteredWebFont(const Font& font) {
+  static std::mutex mutex;
+  static std::unordered_set<std::string> attempted;
+  const std::string name(font.FamilyName());
+  {
+    const std::lock_guard<std::mutex> lock(mutex);
+    if (!attempted.insert(name).second) {
+      return;
+    }
+  }
+  const FontData* payload = InternalAccess::FontPayload(font);
+  if (payload != nullptr && !payload->bytes.empty()) {
+    RequestWebFontLoad(name.c_str(), payload->bytes.data(), payload->bytes.size());
+  }
+}
 
 float NumberProperty(const val& object, const char* name, float fallback) {
   const val value = object[name];
@@ -167,6 +206,8 @@ std::string CssFont(const Font& font) {
     family = "ui-monospace, monospace";
     break;
   case FontFamilyKind::Named:
+    // Kick the FontFace load before the font string names the family; the first paint falls back until it is ready.
+    RequestRegisteredWebFont(font);
     family.reserve(font.FamilyName().size() + 2);
     family.push_back('"');
     for (const char value : font.FamilyName()) {
@@ -824,6 +865,13 @@ void WebRenderer::SetViewport(Size viewport, float display_scale) {
 }
 
 void WebRenderer::Invalidate() noexcept {
+  force_redraw_ = true;
+}
+
+void WebRenderer::FontsReady() noexcept {
+  // Layout geometry materialized while the family was unregistered or loading, so cached paragraphs cannot be reused.
+  paragraph_cache_.clear();
+  paragraph_bytes_ = 0;
   force_redraw_ = true;
 }
 

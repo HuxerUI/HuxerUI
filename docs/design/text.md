@@ -10,6 +10,9 @@ Platform adapters own platform font resolution, shaping, paragraph layout, glyph
 Platform font, glyph, layout, and brush objects never enter a View, PaintCommand, RenderScene, or application state value.
 
 `AttributedText`, `Font`, `TextStyle`, `TextShapingOptions`, and `TextLayoutOptions` compare by value.
+The one exception is a Font built from font-file payload data through `Font::FromRawAsset` or `Font::FromFile`:
+its payload is shared immutable data, so copies of one value stay equal while two separately created values
+with identical bytes compare unequal; request properties alone still compare by value.
 A value change therefore participates naturally in View reconciliation, layout invalidation, PaintSequence invalidation, and renderer cache lookup without a separate generation counter or manual invalidation API.
 
 ## Font and style

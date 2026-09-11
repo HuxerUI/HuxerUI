@@ -1561,6 +1561,13 @@ bool detail::PointerInteraction::CommitPendingTouchFocus(PointerSession& session
   if (!session.focus_pending) {
     return false;
   }
+  // A pending-focus touch that scrolled past the slop is a drag, not a tap:
+  // committing would raise the keyboard for text clients after every scroll.
+  if (session.focus_slop_exceeded) {
+    session.focus_pending = false;
+    session.pending_focus_identity.reset();
+    return false;
+  }
   session.focus_pending = false;
   const std::optional<std::uint64_t> pending = std::exchange(session.pending_focus_identity, std::nullopt);
 
@@ -1652,6 +1659,7 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
   if (primary) {
     if (event.device_kind == PointerDeviceKind::Touch) {
       session.focus_pending = true;
+      session.focus_slop_exceeded = false;
       session.pending_focus_identity = focus_target;
     } else {
       runtime_state_.owner_.SetFocusedNode(focus_target, false);
@@ -1853,8 +1861,12 @@ void detail::PointerInteraction::HandlePointerMove(const PointerEvent& event, bo
     RecordScrollVelocitySample(session, event.position, runtime_state_.platform_->Now());
     const float distance_x = event.position.x - session.down_position.x;
     const float distance_y = event.position.y - session.down_position.y;
-    if (!session.owner.has_value() &&
-        std::max(std::abs(distance_x), std::abs(distance_y)) >= detail::touch_gesture_slop) {
+    const bool slop_exceeded =
+        std::max(std::abs(distance_x), std::abs(distance_y)) >= detail::touch_gesture_slop;
+    if (slop_exceeded) {
+      session.focus_slop_exceeded = true;
+    }
+    if (!session.owner.has_value() && slop_exceeded) {
       session.focus_pending = false;
       session.pending_focus_identity.reset();
     }

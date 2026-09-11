@@ -1,9 +1,13 @@
 #include <huxerui/text.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cmath>
+#include <cstdint>
+#include <fstream>
 #include <functional>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -22,6 +26,45 @@ void RequireFontSize(float size) {
   if (!std::isfinite(size) || size <= 0.0F) {
     throw std::invalid_argument("HuxerUI font size must be finite and greater than zero");
   }
+}
+
+// FNV-1a over the payload; collisions collapse distinct fonts onto one generated name, which 64 bits
+// makes negligible for application font sets.
+std::uint64_t HashFontBytes(const std::vector<std::byte>& bytes) {
+  std::uint64_t hash = 14695981039346656037ULL;
+  for (const std::byte byte : bytes) {
+    hash ^= static_cast<std::uint64_t>(byte);
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+// Builds the shared immutable payload under a content-derived family name so every platform resolves
+// the value before its system family table. Each construction owns a distinct payload instance even
+// when the bytes are identical; hosts that resolve fonts by name receive the payload bytes through
+// their own per-view transport keyed by this family name.
+std::shared_ptr<const detail::FontData> MakeFontPayload(std::vector<std::byte> bytes) {
+  const std::string family = "huxerui-font-" + std::to_string(HashFontBytes(bytes));
+  return std::make_shared<const detail::FontData>(detail::FontData{family, std::move(bytes)});
+}
+
+std::vector<std::byte> ReadFontFileBytes(std::string_view path) {
+  std::ifstream file(std::string(path), std::ios::binary);
+  if (!file) {
+    return {};
+  }
+  file.seekg(0, std::ios::end);
+  const std::streamoff size = file.tellg();
+  if (size <= 0) {
+    return {};
+  }
+  file.seekg(0, std::ios::beg);
+  std::vector<std::byte> bytes(static_cast<std::size_t>(size));
+  file.read(reinterpret_cast<char*>(bytes.data()), size);
+  if (file.gcount() != size) {
+    return {};
+  }
+  return bytes;
 }
 
 struct TextBody {
@@ -157,7 +200,11 @@ std::vector<TextStyleRange> NormalizeStyles(const TextBody& body, std::vector<Te
 } // namespace
 
 Font::Font(FontFamilyKind family_kind, std::string family_name, float size)
-    : family_kind_(family_kind), family_name_(std::move(family_name)), size_(size) {
+    : Font(family_kind, std::move(family_name), size, nullptr) {}
+
+Font::Font(FontFamilyKind family_kind, std::string family_name, float size,
+    std::shared_ptr<const detail::FontData> data)
+    : family_kind_(family_kind), family_name_(std::move(family_name)), size_(size), data_(std::move(data)) {
   RequireFontSize(size);
   if (family_kind_ == FontFamilyKind::Named && family_name_.empty()) {
     throw std::invalid_argument("HuxerUI named font family must not be empty");
@@ -174,6 +221,33 @@ Font Font::Monospace(float size) {
 
 Font Font::Named(std::string family, float size) {
   return Font{FontFamilyKind::Named, std::move(family), size};
+}
+
+Font Font::FromRawAsset(const RawAsset& data, float size) {
+  Bytes bytes;
+  try {
+    bytes = data.ReadBytes(true);
+  } catch (const std::exception& exception) {
+    throw std::invalid_argument(std::string("HuxerUI Font::FromRawAsset could not read font data: ") + exception.what());
+  }
+  if (bytes.empty()) {
+    throw std::invalid_argument("HuxerUI Font::FromRawAsset font data must not be empty");
+  }
+  const auto payload = MakeFontPayload(std::move(bytes));
+  return Font{FontFamilyKind::Named, payload->family, size, std::move(payload)};
+}
+
+Font Font::FromFile(std::string_view path, float size) {
+  std::vector<std::byte> bytes = ReadFontFileBytes(path);
+  if (bytes.empty()) {
+    throw std::invalid_argument("HuxerUI Font::FromFile could not read a non-empty font file");
+  }
+  const auto payload = MakeFontPayload(std::move(bytes));
+  return Font{FontFamilyKind::Named, payload->family, size, std::move(payload)};
+}
+
+const detail::FontData* detail::InternalAccess::FontPayload(const Font& font) noexcept {
+  return font.data_.get();
 }
 
 Font Font::WithSize(float size) const {

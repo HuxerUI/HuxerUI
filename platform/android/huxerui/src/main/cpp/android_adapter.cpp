@@ -780,6 +780,7 @@ public:
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
+    renderer_.DeliverFontData(environment, view_, font);
     jbyteArray family = ToByteArray(environment, font.FamilyName());
     if (family == nullptr) {
       return {};
@@ -824,6 +825,7 @@ public:
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
+    renderer_.DeliverFontData(environment, view_, style.font);
     jbyteArray bytes = ToByteArray(environment, text);
     jbyteArray family = ToByteArray(environment, style.font.FamilyName());
     jbyteArray locale = ToByteArray(environment, options.locale);
@@ -891,7 +893,8 @@ public:
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
-    auto attributes = AndroidTextAttributes(environment, text, style);
+    renderer_.DeliverFontData(environment, view_, style.font);
+    auto attributes = AndroidTextAttributes(environment, renderer_, view_, text, style);
     if (!attributes) {
       return {};
     }
@@ -950,7 +953,8 @@ public:
     if (environment == nullptr || view_ == nullptr) {
       return {};
     }
-    auto attributes = AndroidTextAttributes(environment, text, style);
+    renderer_.DeliverFontData(environment, view_, style.font);
+    auto attributes = AndroidTextAttributes(environment, renderer_, view_, text, style);
     if (!attributes) {
       return {};
     }

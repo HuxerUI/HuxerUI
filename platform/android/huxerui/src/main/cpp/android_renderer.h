@@ -5,6 +5,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <set>
+#include <string>
 #include <vector>
 
 #include <huxerui/android/jni.h>
@@ -15,8 +17,11 @@
 
 namespace huxerui::detail {
 
+class AndroidRenderer;
+
 android::LocalRef<jbyteArray>
-AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const TextStyle& base);
+AndroidTextAttributes(JNIEnv* environment, AndroidRenderer& renderer, jobject view, const AttributedText& text,
+    const TextStyle& base);
 
 class AndroidTextureLayers;
 
@@ -24,6 +29,10 @@ class AndroidRenderer final {
 public:
   void Initialize(JNIEnv* environment, jclass view_class);
   void SetTextureLayers(AndroidTextureLayers* texture_layers) noexcept;
+  // Pushes payload bytes of a data-carrying Font to the view once per generated family name; hosts
+  // that resolve fonts by name receive the bytes through this per-view transport instead of a
+  // process-wide registry, and the delivered-name record dies with the renderer and its view.
+  void DeliverFontData(JNIEnv* environment, jobject view, const Font& font);
   void BeginDraw();
   void DrawSlice(
       JNIEnv* environment,
@@ -88,9 +97,12 @@ private:
   jmethodID pop_opacity_ = nullptr;
   jmethodID push_transform_ = nullptr;
   jmethodID pop_transform_ = nullptr;
+  jmethodID register_font_data_ = nullptr;
   std::vector<CachedExternalTexture> external_textures_;
   AndroidTextureLayers* texture_layers_ = nullptr;
   std::uint64_t draw_epoch_ = 0;
+  // Generated family names whose payload bytes already crossed to the view.
+  std::set<std::string> delivered_font_families_;
 };
 
 } // namespace huxerui::detail

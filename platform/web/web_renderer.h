@@ -22,6 +22,7 @@ public:
 
   void SetViewport(Size viewport, float display_scale);
   void Invalidate() noexcept;
+  void FontsReady() noexcept;
   [[nodiscard]] bool TakeInvalidation() noexcept;
   void BeginFrame();
 

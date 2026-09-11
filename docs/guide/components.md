@@ -20,6 +20,19 @@ return Text("مرحبا")
 Canvas `DrawText`, `DrawTextRun`, and `DrawTextRuns` calls inherit the Canvas node Locale only for entries whose shaping locale is empty.
 TextMeasurer has no implicit Environment lookup; pass a locale explicitly when custom composition measurement needs it.
 
+### Custom fonts
+
+`Font::FromRawAsset` and `Font::FromFile` create font values from font file bytes, and every platform renderer resolves them before the system family table.
+Data comes from a `RawAsset` or a readable file path, and construction reads the payload immediately; the `Font` value retains the bytes as shared immutable payload data, so the payload lives exactly as long as the Font values referencing it.
+Each value carries a stable generated family name derived from the payload content, and copies of one value stay equal while separately created values with identical bytes remain distinct values.
+
+```cpp
+auto raw = UseRawResource(RawResource("app", "raw/fonts/MapleMono.ttf"));
+return Text("Maple").Style(TextStyle{.font = Font::FromRawAsset(raw, 14.0F)});
+```
+
+Families without payload data keep the per-platform system lookup.
+
 ### Attributed paragraphs and links
 
 Use one `Text` for a paragraph with mixed character styles. `AttributedText` is an immutable shared value, not a tree of span Views:

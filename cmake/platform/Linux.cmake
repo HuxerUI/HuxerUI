@@ -6,6 +6,9 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(HUXERUI_GTK4 REQUIRED IMPORTED_TARGET gtk4>=4.14)
 pkg_check_modules(HUXERUI_EPOXY REQUIRED IMPORTED_TARGET epoxy>=1.5)
 pkg_check_modules(HUXERUI_GIO REQUIRED IMPORTED_TARGET gio-2.0)
+# Pango resolves fonts through fontconfig; the renderer registers custom
+# families through the font map's fontconfig configuration
+pkg_check_modules(HUXERUI_FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
 pkg_check_modules(HUXERUI_LIBSOUP QUIET IMPORTED_TARGET libsoup-3.0>=3.0)
 if (NOT TARGET PkgConfig::HUXERUI_LIBSOUP)
     message(FATAL_ERROR
@@ -28,17 +31,20 @@ set(HUXERUI_PLATFORM_INCLUDE_DIRECTORIES
         ${HUXERUI_GTK4_INCLUDE_DIRS}
         ${HUXERUI_EPOXY_INCLUDE_DIRS}
         ${HUXERUI_GIO_INCLUDE_DIRS}
+        ${HUXERUI_FONTCONFIG_INCLUDE_DIRS}
         ${HUXERUI_LIBSOUP_INCLUDE_DIRS}
 )
 set(HUXERUI_PLATFORM_COMPILE_OPTIONS
         ${HUXERUI_GTK4_CFLAGS_OTHER}
         ${HUXERUI_EPOXY_CFLAGS_OTHER}
         ${HUXERUI_GIO_CFLAGS_OTHER}
+        ${HUXERUI_FONTCONFIG_CFLAGS_OTHER}
         ${HUXERUI_LIBSOUP_CFLAGS_OTHER}
 )
 set(HUXERUI_PLATFORM_LINK_LIBRARIES
         PkgConfig::HUXERUI_GTK4
         PkgConfig::HUXERUI_EPOXY
         PkgConfig::HUXERUI_GIO
+        PkgConfig::HUXERUI_FONTCONFIG
         PkgConfig::HUXERUI_LIBSOUP
 )

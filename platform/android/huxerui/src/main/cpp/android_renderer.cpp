@@ -181,19 +181,45 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
   pop_opacity_ = environment->GetMethodID(view_class, "popOpacity", "(Landroid/graphics/Canvas;)V");
   push_transform_ = environment->GetMethodID(view_class, "pushTransform", "(Landroid/graphics/Canvas;FFFFFF)V");
   pop_transform_ = environment->GetMethodID(view_class, "popTransform", "(Landroid/graphics/Canvas;)V");
+  register_font_data_ = environment->GetMethodID(view_class, "registerFontData", "(Ljava/lang/String;[B)V");
 
   if (draw_brush_rect_ == nullptr || draw_text_ == nullptr || draw_text_runs_ == nullptr || draw_image_ == nullptr ||
       draw_external_texture_ == nullptr || draw_circle_ == nullptr || draw_line_ == nullptr || draw_arc_ == nullptr ||
       draw_border_ == nullptr || draw_shadow_ == nullptr || fill_brush_path_ == nullptr ||
       stroke_brush_path_ == nullptr || draw_path_shadow_ == nullptr || push_clip_ == nullptr ||
-      push_path_clip_ == nullptr || pop_clip_ == nullptr ||
-      push_opacity_ == nullptr || pop_opacity_ == nullptr || push_transform_ == nullptr || pop_transform_ == nullptr) {
+      push_path_clip_ == nullptr || pop_clip_ == nullptr || push_opacity_ == nullptr || pop_opacity_ == nullptr ||
+      push_transform_ == nullptr || pop_transform_ == nullptr || register_font_data_ == nullptr) {
     throw std::runtime_error("HuxerUI Android renderer methods do not match the platform backend");
   }
 }
 
 void AndroidRenderer::SetTextureLayers(AndroidTextureLayers* texture_layers) noexcept {
   texture_layers_ = texture_layers;
+}
+
+void AndroidRenderer::DeliverFontData(JNIEnv* environment, jobject view, const Font& font) {
+  if (register_font_data_ == nullptr || view == nullptr) {
+    return;
+  }
+  const FontData* payload = InternalAccess::FontPayload(font);
+  if (payload == nullptr || payload->bytes.empty()) {
+    return;
+  }
+  if (!delivered_font_families_.insert(payload->family).second) {
+    return;
+  }
+  // Generated family names are ASCII, so NewStringUTF round-trips them exactly.
+  jstring family = environment->NewStringUTF(payload->family.c_str());
+  auto data = android::BytesToJavaByteArray(environment, payload->bytes);
+  if (family == nullptr || !data) {
+    delivered_font_families_.erase(payload->family);
+    if (family != nullptr) {
+      environment->DeleteLocalRef(family);
+    }
+    return;
+  }
+  environment->CallVoidMethod(view, register_font_data_, family, data.Get());
+  environment->DeleteLocalRef(family);
 }
 
 void AndroidRenderer::BeginDraw() {
@@ -365,7 +391,7 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 }
 
 void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command) {
-  auto attributes = AndroidTextAttributes(environment, command.text, command.style);
+  auto attributes = AndroidTextAttributes(environment, *this, view, command.text, command.style);
   if (!attributes) {
     return;
   }
@@ -409,6 +435,7 @@ void AndroidRenderer::RenderCommand(
     return std::pair{offset, static_cast<jint>(value.size())};
   };
   for (const TextRun& run : command.runs) {
+    DeliverFontData(environment, view, run.style.font);
     const auto text_range = append(text_data, run.text);
     const auto family_range = append(metadata, run.style.font.FamilyName());
     const auto locale_range = append(metadata, run.shaping.locale);
@@ -834,11 +861,16 @@ void AndroidRenderer::DrawSlice(
 
 // Wire format shared with HuxerUIView.attributedText: ten little-endian 32-bit fields, then UTF-8 font-family bytes.
 // Text ranges use UTF-16 offsets, matching Java String indices; the font-family length counts bytes instead.
+// Every style encoded here resolves its family by name in Java, so data-carrying fonts deliver
+// their payload bytes to the per-view transport while the runs are materialized.
 android::LocalRef<jbyteArray>
-AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const TextStyle& base) {
+AndroidTextAttributes(
+    JNIEnv* environment, AndroidRenderer& renderer, jobject view, const AttributedText& text, const TextStyle& base
+) {
   if (text.Length() > std::numeric_limits<jint>::max()) {
     throw std::invalid_argument("HuxerUI Android paragraph exceeds the supported length");
   }
+  renderer.DeliverFontData(environment, view, base.font);
   std::vector<std::byte> bytes;
   const auto append = [&](std::uint32_t value) {
     for (unsigned shift = 0; shift < 32; shift += 8) {
@@ -848,6 +880,7 @@ AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const Tex
   if (!text.StyleRanges().empty()) {
     for (const auto& run : ResolveTextRuns(text, base)) {
       const auto& font = run.style.font;
+      renderer.DeliverFontData(environment, view, font);
       append(static_cast<std::uint32_t>(run.range.start));
       append(static_cast<std::uint32_t>(run.range.end));
       append(std::bit_cast<std::uint32_t>(font.Size()));

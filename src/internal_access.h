@@ -233,6 +233,14 @@ struct InternalAccess {
 
 #pragma endregion
 
+#pragma region Font
+
+  // Returns the font-file payload carried by font, or nullptr for System, Monospace, and ordinary Named fonts.
+  // The result borrows the Font value's shared payload; keep the Font alive while the payload is in use.
+  [[nodiscard]] static const FontData* FontPayload(const Font& font) noexcept;
+
+#pragma endregion
+
 #pragma region StringVariant
 
   static const std::variant<std::string, StringResource>& StringValue(const StringVariant& value) noexcept;
