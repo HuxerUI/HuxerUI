@@ -64,6 +64,8 @@ path arrive through the dependency edge: a dependency's `build.mcpp` emits
 `link-lib` / `link-search` that reach the **final** link, so an application
 never restates them. `mcpp/examples/` holds three worked examples.
 
+On Windows with the MSVC ABI, the application templates and examples keep `main()` and place GUI subsystem and CRT entry linker directives in that entry source. Double-clicking the resulting executable does not create a console; standard output and standard error have no automatically created console. Keep these directives in the application entry rather than package-wide link flags, which also affect tests and consumers. See [Platform interfaces](../docs/design/mcpp-build-system.md#6-platform-interfaces) for the build-system boundary.
+
 ## Three things worth knowing before editing
 
 **The GTK stack is NOT the machine's.** mcpp compiles with its own toolchain and

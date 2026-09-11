@@ -205,6 +205,8 @@ either: `CMAKE_CXX_STANDARD_LIBRARIES` adds kernel32, gdi32, winspool, uuid and
 comdlg32 implicitly, and mcpp links exactly what the manifest names. Omitting
 them surfaces at the link as `undefined symbol: CreateDIBSection`.
 
+Windows application templates and examples select the GUI subsystem and `mainCRTStartup` with MSVC-compatible linker directives in their `main.cpp` entry, preserving CRT initialization and the portable `main()` signature without creating a console. This selection belongs to the entry object: mcpp currently has no per-target link flags, and package-level `ldflags` or `link-flag` directives also reach tests and consumers. `huxerui.rules::configure()` therefore does not emit these flags, since component libraries use it too. CMake makes the equivalent selection on each application target in `huxerui_add_app`.
+
 **macOS.** `.mm` is a first-class source kind but is not in the default glob,
 so `platform/macos/*.mm` is listed explicitly. `frameworks` is a **top-level**
 `[runtime]` key — the per-target vocabulary is `libraries` only, and a

@@ -171,7 +171,7 @@ function(huxerui_add_windows_installer target_name)
             NOMINMAX
             WIN32_LEAN_AND_MEAN
     )
-    set_target_properties(${target_name} PROPERTIES WIN32_EXECUTABLE TRUE)
+    set_property(TARGET ${target_name} PROPERTY HUXERUI_WINDOWS_CRT_ENTRY wWinMainCRTStartup)
     add_custom_command(TARGET ${target_name} POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     "${HUXERUI_WIX_BOOTSTRAPPER_RUNTIME}"

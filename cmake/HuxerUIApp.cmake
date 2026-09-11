@@ -203,6 +203,17 @@ function(huxerui_add_app target_name)
         add_executable(${target_name} ${HUXERUI_APP_SOURCES})
     endif ()
 
+    if (WIN32)
+        set_target_properties(${target_name} PROPERTIES WIN32_EXECUTABLE TRUE)
+        if (MSVC)
+            # Preserve CRT initialization and the portable main() entry.
+            set_property(TARGET ${target_name} PROPERTY HUXERUI_WINDOWS_CRT_ENTRY mainCRTStartup)
+            target_link_options(${target_name} PRIVATE
+                    "LINKER:/ENTRY:$<TARGET_PROPERTY:${target_name},HUXERUI_WINDOWS_CRT_ENTRY>"
+            )
+        endif ()
+    endif ()
+
     set_property(TARGET ${target_name} PROPERTY
             HUXERUI_APPLICATION_INSTALL_COMPONENT
             "${HUXERUI_APP_INSTALL_COMPONENT}"

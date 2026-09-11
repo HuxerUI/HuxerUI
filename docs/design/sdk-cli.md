@@ -345,6 +345,7 @@ Desktop builds configure the root CMake project and then build it.
 Fresh Linux and macOS builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
 Windows discovers the latest Visual Studio installation that provides the C++ x64 tools without constraining its product version, imports its developer environment, and explicitly selects MSVC.
 Fresh Windows builds use Ninja when available and NMake otherwise; an existing Windows cache retains its compatible generator while the compiler remains MSVC.
+`huxerui_add_app` selects the Windows GUI subsystem on the application target only. MSVC applications retain `main()` through `mainCRTStartup`; the installer helper selects `wWinMainCRTStartup` through the private `HUXERUI_WINDOWS_CRT_ENTRY` target property for its existing `wWinMain()` entry. Both paths preserve CRT initialization. The framework's public link interface carries no subsystem or entry-point option, and Runtime does not allocate or hide a console.
 The Windows SDK packages matching Debug and Release shared and static libraries so the CLI's default Debug profile and explicit Release profile use the corresponding MSVC runtime.
 `--generator` applies to Linux, macOS, and Web builds. Windows, Android, and iOS reject it because their platform drivers own the supported generator and toolchain selection.
 
