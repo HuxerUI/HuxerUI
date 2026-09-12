@@ -33,6 +33,7 @@ int parent_menu_clicks = 0;
 int exiting_layer_clicks = 0;
 int exiting_layer_pointer_cancels = 0;
 int quarantined_background_pointer_ups = 0;
+int debug_guidelines_app_compositions = 0;
 LayerId reentrant_drag_layer;
 std::vector<std::string> reentrant_drag_events;
 constexpr Color nested_menu_color = Color::Rgb(40, 150, 90);
@@ -210,6 +211,32 @@ View RetainedLayerEnvironmentApp() {
 View DebugOverlayApp() {
   ++layer_app_compositions;
   return Button("debug application").With(huxerui::Frame{240.0F, 120.0F}).OnClick([] { ++layer_background_clicks; });
+}
+
+View DebugGuidelinesApp() {
+  ++debug_guidelines_app_compositions;
+  return Column {
+    Row {
+      Spacer().With(huxerui::Frame{.width = 28.0F, .height = 20.0F}),
+      Spacer().With(huxerui::Frame{.width = 36.0F, .height = 24.0F}),
+    }.With(Spacing{12.0F}, CrossAlign{CrossAxisAlignment::Center}),
+    ScrollView(Text("scroll content").With(huxerui::Frame{.width = 90.0F, .height = 100.0F}))
+        .With(huxerui::Frame{.width = 90.0F, .height = 36.0F}),
+  }.With(
+      huxerui::Frame{.width = 180.0F, .height = 130.0F},
+      Padding{10.0F},
+      Spacing{8.0F},
+      MainAlign{MainAxisAlignment::Center},
+      CrossAlign{CrossAxisAlignment::Center},
+      ClipChildren{}
+  );
+}
+
+void ActivateDebugControl(Runtime& runtime, std::string_view label) {
+  const auto frame = runtime.BuildCommit().semantic_frame;
+  const auto control = std::ranges::find(frame->nodes, label, &SemanticNode::label);
+  REQUIRE(control != frame->nodes.end());
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(control->id, SemanticAction{SemanticActionKind::Activate, {}}));
 }
 
 View LayerKeyCollisionApp() {
@@ -1775,6 +1802,183 @@ TEST_CASE("TestDebugMetricsSamplesPaintedFramesAndProcessUsage") {
   REQUIRE(next_sample.painted_frame_count == 1);
   REQUIRE(next_sample.fps == 1.0F);
   REQUIRE(next_sample.average_commit_time_ms == 3.0F);
+}
+
+TEST_CASE("TestDebugOverlayTogglesApplicationLayoutGuides") {
+  debug_guidelines_app_compositions = 0;
+  AppOptions options;
+  options.show_debug_overlay = true;
+
+  TestPlatform platform;
+  Runtime runtime{DebugGuidelinesApp, platform, std::move(options)};
+  runtime.SetWindowMetrics({.viewport = {360.0F, 320.0F}});
+  runtime.BuildFrame();
+  REQUIRE(debug_guidelines_app_compositions == 1);
+
+  ClickAt(runtime, {330.0F, 30.0F}, 130);
+  const FlattenedScene& expanded = runtime.BuildFrame();
+  const std::optional<Rect> toggle_label = FindPresentedTextRect(expanded, "Layout guides");
+  REQUIRE(toggle_label.has_value());
+  REQUIRE(ContainsText(expanded, "OFF"));
+
+  ClickAt(
+      runtime,
+      {toggle_label->x + toggle_label->width * 0.5F, toggle_label->y + toggle_label->height * 0.5F},
+      131
+  );
+  const FlattenedScene& visible = runtime.BuildFrame();
+  REQUIRE(ContainsText(visible, "ON"));
+  REQUIRE(debug_guidelines_app_compositions == 1);
+  REQUIRE(FindRectWithColor(visible, Color::Rgb(251, 191, 36, 0.28F)) != nullptr);
+  REQUIRE(FindRectWithColor(visible, Color::Rgb(236, 72, 153, 0.3F)) != nullptr);
+  REQUIRE(std::ranges::any_of(visible.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(45, 212, 191, 0.9F);
+  }));
+  REQUIRE(std::ranges::any_of(visible.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(251, 191, 36, 0.9F);
+  }));
+  REQUIRE(std::ranges::any_of(visible.Commands(), [](const PaintCommand& command) {
+    const auto* line = std::get_if<huxerui::DrawLineCommand>(&command);
+    return line != nullptr && line->color == Color::Rgb(74, 222, 128, 0.9F);
+  }));
+  REQUIRE(std::ranges::any_of(visible.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(96, 165, 250, 0.95F);
+  }));
+  REQUIRE(std::ranges::any_of(visible.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(248, 113, 113, 0.95F);
+  }));
+
+  const std::optional<Rect> visible_toggle_label = FindPresentedTextRect(visible, "Layout guides");
+  REQUIRE(visible_toggle_label.has_value());
+  ClickAt(
+      runtime,
+      {
+          visible_toggle_label->x + visible_toggle_label->width * 0.5F,
+          visible_toggle_label->y + visible_toggle_label->height * 0.5F,
+      },
+      132
+  );
+  const FlattenedScene& hidden = runtime.BuildFrame();
+  REQUIRE(ContainsText(hidden, "OFF"));
+  REQUIRE(debug_guidelines_app_compositions == 1);
+  REQUIRE_FALSE(std::ranges::any_of(hidden.Commands(), [](const PaintCommand& command) {
+    const auto* border = std::get_if<DrawBorderCommand>(&command);
+    return border != nullptr && border->color == Color::Rgb(45, 212, 191, 0.9F);
+  }));
+}
+
+TEST_CASE("TestDebugLayoutGuidesIncludeWrapperPadding") {
+  TestPlatform platform;
+  Runtime runtime{[]() -> View {
+    return Column {
+      Scope([] { return Column {}; })
+          .With(huxerui::Frame{120.0F, 70.0F}, Padding{EdgeInsets{.top = 8.0F}}),
+      ProvideEnvironment(
+          LayerEnvironmentValue{7},
+          Scope([] { return Column {}; })
+              .With(huxerui::Frame{100.0F, 50.0F}, Padding{EdgeInsets{.right = 6.0F}})
+      ),
+    };
+  }, platform, AppOptions{.show_debug_overlay = true}};
+  runtime.SetWindowMetrics({.viewport = {360.0F, 320.0F}});
+  ActivateDebugControl(runtime, "DEBUG");
+  ActivateDebugControl(runtime, "Layout guides");
+
+  const FlattenedScene& scene = runtime.BuildFrame();
+  std::vector<Rect> padding;
+  for (const PaintCommand& command : scene.Commands()) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
+    if (rect && BrushIsColor(rect->brush, Color::Rgb(251, 191, 36, 0.28F))) {
+      padding.push_back(rect->rect);
+    }
+  }
+  REQUIRE(padding == std::vector<Rect>{{0.0F, 0.0F, 120.0F, 8.0F}, {94.0F, 70.0F, 6.0F, 50.0F}});
+}
+
+TEST_CASE("TestDebugLayoutGuidesDoNotFillRotatedEmptyPadding") {
+  static bool empty_content;
+  empty_content = GENERATE(false, true);
+  TestPlatform platform;
+  Runtime runtime{[]() -> View {
+    return Column {
+      Row {}.With(
+          huxerui::Frame{80.0F, 40.0F},
+          Padding{empty_content ? EdgeInsets{.top = 40.0F} : EdgeInsets{.left = 10.0F}},
+          Rotation{45.0F}
+      ),
+    };
+  }, platform, AppOptions{.show_debug_overlay = true}};
+  runtime.SetWindowMetrics({.viewport = {360.0F, 320.0F}});
+  ActivateDebugControl(runtime, "DEBUG");
+  ActivateDebugControl(runtime, "Layout guides");
+
+  const FlattenedScene& scene = runtime.BuildFrame();
+  REQUIRE(std::ranges::count_if(scene.Commands(), [](const PaintCommand& command) {
+    const auto* rect = std::get_if<DrawRectCommand>(&command);
+    return rect && BrushIsColor(rect->brush, Color::Rgb(251, 191, 36, 0.28F));
+  }) == 1);
+  REQUIRE((FindBorderWithColor(scene, Color::Rgb(251, 191, 36, 0.9F)) == nullptr) == empty_content);
+}
+
+TEST_CASE("TestDebugLayoutGuidesTrackGeometryAndReplacementWithoutBlockingInput") {
+  static State<bool> replaced;
+  static State<float> width;
+  static State<Point> offset;
+  static int clicks;
+  clicks = 0;
+  TestPlatform platform;
+  Runtime runtime{[]() -> View {
+    replaced = UseState(false);
+    width = UseState(60.0F);
+    offset = UseState(Point{40.0F, 60.0F});
+    if (replaced.Get()) {
+      return Text("replacement");
+    }
+    return Column {
+      Row {}.With(huxerui::Frame{width.Get(), 40.0F}, Offset{offset.Get()}, Padding{8.0F})
+          .OnClick([] { ++clicks; }),
+    };
+  }, platform, AppOptions{.show_debug_overlay = true}};
+  runtime.SetWindowMetrics({.viewport = {360.0F, 320.0F}});
+  ActivateDebugControl(runtime, "DEBUG");
+  ActivateDebugControl(runtime, "Layout guides");
+  runtime.BuildFrame();
+  platform.AdvanceTime(1.0);
+  runtime.BuildFrame();
+  runtime.BuildFrame();
+  REQUIRE_FALSE(std::ranges::any_of(runtime.LastCommit().render_frame.damage.rects, [](Rect rect) {
+    return rect.Contains({350.0F, 310.0F});
+  }));
+  ActivateDebugControl(runtime, "DEBUG");
+
+  const auto has_bounds = [](const FlattenedScene& scene, Rect expected) {
+    return std::ranges::any_of(scene.Commands(), [expected](const PaintCommand& command) {
+      const auto* border = std::get_if<DrawBorderCommand>(&command);
+      return border && border->color == Color::Rgb(45, 212, 191, 0.9F) && border->rect == expected;
+    });
+  };
+  REQUIRE(has_bounds(runtime.BuildFrame(), {40.0F, 60.0F, 60.0F, 40.0F}));
+  ClickAt(runtime, {50.0F, 70.0F}, 133);
+  REQUIRE(clicks == 1);
+  width = 100.0F;
+  offset = Point{80.0F, 90.0F};
+  const FlattenedScene& moved = runtime.BuildFrame();
+  REQUIRE(has_bounds(moved, {80.0F, 90.0F, 100.0F, 40.0F}));
+  REQUIRE_FALSE(has_bounds(moved, {40.0F, 60.0F, 60.0F, 40.0F}));
+
+  replaced = true;
+  const FlattenedScene& replacement = runtime.BuildFrame();
+  REQUIRE(ContainsText(replacement, "replacement"));
+  REQUIRE_FALSE(has_bounds(replacement, {80.0F, 90.0F, 100.0F, 40.0F}));
+  REQUIRE(FindRectWithColor(replacement, Color::Rgb(251, 191, 36, 0.28F)) == nullptr);
+  runtime.BuildFrame();
+  REQUIRE_FALSE(runtime.LastCommit().next_frame_deadline.has_value());
+  REQUIRE_FALSE(runtime.LastCommit().render_frame.damage.full);
+  REQUIRE(runtime.LastCommit().render_frame.damage.rects.empty());
 }
 
 TEST_CASE("TestDebugOverlayDefaultMatchesBuildConfiguration") {

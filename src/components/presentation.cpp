@@ -1298,6 +1298,280 @@ constexpr Color debug_panel_secondary = Color::Rgb(164, 174, 190);
 constexpr Color debug_metric_background = Color::Rgb(255, 255, 255, 0.065F);
 constexpr Color debug_shadow_color = Color::Rgb(0, 0, 0, 0.42F);
 constexpr Color debug_live_color = Color::Rgb(67, 209, 125);
+constexpr Color debug_layout_bounds_color = Color::Rgb(45, 212, 191, 0.9F);
+constexpr Color debug_layout_padding_color = Color::Rgb(251, 191, 36, 0.28F);
+constexpr Color debug_layout_content_color = Color::Rgb(251, 191, 36, 0.9F);
+constexpr Color debug_layout_gap_color = Color::Rgb(236, 72, 153, 0.3F);
+constexpr Color debug_layout_alignment_color = Color::Rgb(74, 222, 128, 0.9F);
+constexpr Color debug_layout_scroll_color = Color::Rgb(96, 165, 250, 0.95F);
+constexpr Color debug_layout_clip_color = Color::Rgb(248, 113, 113, 0.95F);
+
+struct DebugGuideLine {
+  Point start;
+  Point end;
+
+  bool operator==(const DebugGuideLine&) const = default;
+};
+
+struct DebugLayoutSnapshot {
+  std::vector<Rect> bounds;
+  std::vector<Rect> padding;
+  std::vector<Rect> content;
+  std::vector<Rect> gaps;
+  std::vector<DebugGuideLine> alignments;
+  std::vector<Rect> scrolls;
+  std::vector<Rect> clips;
+
+  bool operator==(const DebugLayoutSnapshot&) const = default;
+};
+
+struct DebugLayoutGuidelines {
+  bool visible = false;
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool operator==(const DebugLayoutGuidelines&) const = default;
+};
+
+std::optional<Rect> WindowBoundsInOverlay(const ViewNode& overlay, Rect bounds) {
+  const std::optional<Point> top_left = overlay.WindowToLocal({bounds.x, bounds.y});
+  const std::optional<Point> top_right = overlay.WindowToLocal({bounds.x + bounds.width, bounds.y});
+  const std::optional<Point> bottom_left = overlay.WindowToLocal({bounds.x, bounds.y + bounds.height});
+  const std::optional<Point> bottom_right =
+      overlay.WindowToLocal({bounds.x + bounds.width, bounds.y + bounds.height});
+  if (!top_left.has_value() || !top_right.has_value() || !bottom_left.has_value() || !bottom_right.has_value()) {
+    return std::nullopt;
+  }
+  const float minimum_x = std::min({top_left->x, top_right->x, bottom_left->x, bottom_right->x});
+  const float minimum_y = std::min({top_left->y, top_right->y, bottom_left->y, bottom_right->y});
+  const float maximum_x = std::max({top_left->x, top_right->x, bottom_left->x, bottom_right->x});
+  const float maximum_y = std::max({top_left->y, top_right->y, bottom_left->y, bottom_right->y});
+  return Rect{minimum_x, minimum_y, maximum_x - minimum_x, maximum_y - minimum_y};
+}
+
+void AppendDebugRect(std::vector<Rect>& destination, const ViewNode& overlay, Rect window_bounds) {
+  const std::optional<Rect> bounds = WindowBoundsInOverlay(overlay, window_bounds);
+  if (bounds.has_value() && !bounds->IsEmpty()) {
+    destination.push_back(*bounds);
+  }
+}
+
+void AppendDebugLocalRect(std::vector<Rect>& destination, const ViewNode& overlay, const detail::MountedNode& source,
+                          Rect local_bounds) {
+  if (local_bounds.IsEmpty()) {
+    return;
+  }
+  AppendDebugRect(destination, overlay, source.LocalToWindowBounds(local_bounds));
+}
+
+void AppendDebugLine(std::vector<DebugGuideLine>& destination, const ViewNode& overlay,
+                     const detail::MountedNode& source, Point local_start, Point local_end) {
+  const std::optional<Point> start = overlay.WindowToLocal(source.LocalToWindow(local_start));
+  const std::optional<Point> end = overlay.WindowToLocal(source.LocalToWindow(local_end));
+  if (start.has_value() && end.has_value() && *start != *end) {
+    destination.push_back({*start, *end});
+  }
+}
+
+std::optional<float> MainAlignmentPosition(MainAxisAlignment alignment, float leading, float extent) {
+  switch (alignment) {
+  case MainAxisAlignment::Start:
+    return leading;
+  case MainAxisAlignment::Center:
+    return leading + extent * 0.5F;
+  case MainAxisAlignment::End:
+    return leading + extent;
+  case MainAxisAlignment::SpaceBetween:
+  case MainAxisAlignment::SpaceAround:
+  case MainAxisAlignment::SpaceEvenly:
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+float CrossAlignmentPosition(CrossAxisAlignment alignment, float leading, float extent) {
+  switch (alignment) {
+  case CrossAxisAlignment::Start:
+  case CrossAxisAlignment::Stretch:
+    return leading;
+  case CrossAxisAlignment::Center:
+    return leading + extent * 0.5F;
+  case CrossAxisAlignment::End:
+    return leading + extent;
+  }
+  return leading;
+}
+
+void CollectDebugPadding(DebugLayoutSnapshot& snapshot, const ViewNode& overlay, const detail::MountedNode& source) {
+  const Rect bounds = source.Bounds();
+  const Rect content = source.ContentBounds();
+  const EdgeInsets padding = source.resolved_padding;
+  if (padding.top <= 0.0F && padding.right <= 0.0F && padding.bottom <= 0.0F && padding.left <= 0.0F) {
+    return;
+  }
+  AppendDebugLocalRect(snapshot.content, overlay, source, content);
+  AppendDebugLocalRect(snapshot.padding, overlay, source, {bounds.x, bounds.y, bounds.width, padding.top});
+  AppendDebugLocalRect(snapshot.padding, overlay, source,
+                       {bounds.x + bounds.width - padding.right, content.y, padding.right, content.height});
+  AppendDebugLocalRect(snapshot.padding, overlay, source,
+                       {bounds.x, bounds.y + bounds.height - padding.bottom, bounds.width, padding.bottom});
+  AppendDebugLocalRect(snapshot.padding, overlay, source, {bounds.x, content.y, padding.left, content.height});
+}
+
+void CollectDebugAxisLayout(DebugLayoutSnapshot& snapshot, const ViewNode& overlay, const detail::MountedNode& source,
+                            bool vertical) {
+  std::vector<const detail::MountedNode*> children;
+  children.reserve(source.children.size());
+  for (const auto& child : source.children) {
+    if (child->participates_in_layout) {
+      children.push_back(child.get());
+    }
+  }
+  if (children.empty()) {
+    return;
+  }
+
+  const Rect content = source.ContentBounds();
+  for (std::size_t index = 1; index < children.size(); ++index) {
+    const detail::MountedNode& previous = *children[index - 1];
+    const detail::MountedNode& current = *children[index];
+    if (vertical) {
+      const float leading = previous.layout_offset.y + previous.bounds.height;
+      const float trailing = current.layout_offset.y;
+      if (trailing > leading) {
+        AppendDebugLocalRect(snapshot.gaps, overlay, source, {content.x, leading, content.width, trailing - leading});
+      }
+    } else {
+      const float leading = previous.layout_offset.x + previous.bounds.width;
+      const float trailing = current.layout_offset.x;
+      if (trailing > leading) {
+        AppendDebugLocalRect(snapshot.gaps, overlay, source, {leading, content.y, trailing - leading, content.height});
+      }
+    }
+  }
+
+  if (const std::optional<float> main = MainAlignmentPosition(source.MainAlignment(), vertical ? content.y : content.x,
+                                                              vertical ? content.height : content.width);
+      main.has_value()) {
+    if (vertical) {
+      AppendDebugLine(snapshot.alignments, overlay, source, {content.x, *main}, {content.x + content.width, *main});
+    } else {
+      AppendDebugLine(snapshot.alignments, overlay, source, {*main, content.y}, {*main, content.y + content.height});
+    }
+  }
+  const float cross = CrossAlignmentPosition(source.CrossAlignment(), vertical ? content.x : content.y,
+                                             vertical ? content.width : content.height);
+  if (vertical) {
+    AppendDebugLine(snapshot.alignments, overlay, source, {cross, content.y}, {cross, content.y + content.height});
+  } else {
+    AppendDebugLine(snapshot.alignments, overlay, source, {content.x, cross}, {content.x + content.width, cross});
+  }
+  if (source.CrossAlignment() == CrossAxisAlignment::Stretch) {
+    if (vertical) {
+      AppendDebugLine(snapshot.alignments, overlay, source, {content.x + content.width, content.y},
+                      {content.x + content.width, content.y + content.height});
+    } else {
+      AppendDebugLine(snapshot.alignments, overlay, source, {content.x, content.y + content.height},
+                      {content.x + content.width, content.y + content.height});
+    }
+  }
+}
+
+void CollectDebugLayout(DebugLayoutSnapshot& snapshot, const ViewNode& overlay, const detail::MountedNode& source) {
+  if (!source.participates_in_layout) {
+    return;
+  }
+  if (source.kind != detail::NodeKind::Scope && source.kind != detail::NodeKind::Environment) {
+    AppendDebugRect(snapshot.bounds, overlay, source.PresentationBounds());
+  }
+  CollectDebugPadding(snapshot, overlay, source);
+
+  if (source.layout_descriptor != nullptr) {
+    if (source.layout_descriptor->type == typeid(Column)) {
+      CollectDebugAxisLayout(snapshot, overlay, source, true);
+    } else if (source.layout_descriptor->type == typeid(Row)) {
+      CollectDebugAxisLayout(snapshot, overlay, source, false);
+    }
+  }
+  if (source.scroll_state != nullptr) {
+    AppendDebugLocalRect(snapshot.scrolls, overlay, source, source.ContentBounds());
+  }
+  for (const ClipShape& clip : source.presentation.children_clips) {
+    AppendDebugLocalRect(snapshot.clips, overlay, source, detail::InternalAccess::ClipBounds(clip));
+  }
+  if (source.properties.clip_children) {
+    AppendDebugLocalRect(snapshot.clips, overlay, source, source.Bounds());
+  }
+
+  for (const auto& child : source.children) {
+    CollectDebugLayout(snapshot, overlay, *child);
+  }
+}
+
+class DebugLayoutGuidelinesExtension final : public NodeExtension {
+public:
+  DebugLayoutGuidelinesExtension(ViewNode& node, const DebugLayoutGuidelines& modifier) : visible_(modifier.visible) {
+    static_cast<void>(node);
+  }
+
+  void Update(ViewNode& node, const DebugLayoutGuidelines& modifier) {
+    static_cast<void>(node);
+    if (visible_ == modifier.visible) {
+      return;
+    }
+    visible_ = modifier.visible;
+    InvalidatePaint(PaintInvalidation::Content);
+  }
+
+  [[nodiscard]] PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
+    DebugLayoutSnapshot next;
+    const auto& mounted = static_cast<const detail::MountedNode&>(node);
+    if (visible_ && mounted.runtime != nullptr) {
+      if (const detail::MountedNode* root = detail::InternalAccess::RootNode(*mounted.runtime)) {
+        CollectDebugLayout(next, node, *root);
+      }
+    }
+    if (snapshot_ == next) {
+      return PaintInvalidation::None;
+    }
+    snapshot_ = std::move(next);
+    return PaintInvalidation::Content;
+  }
+
+  void PaintBehindContent(const ViewNode& node, PaintContext& context) const override {
+    static_cast<void>(node);
+    for (const Rect& bounds : snapshot_.padding) {
+      context.DrawRect(bounds, debug_layout_padding_color);
+    }
+    for (const Rect& bounds : snapshot_.gaps) {
+      context.DrawRect(bounds, debug_layout_gap_color);
+    }
+    for (const Rect& bounds : snapshot_.bounds) {
+      context.DrawBorder(bounds, debug_layout_bounds_color, StrokeStyle{.width = 1.0F});
+    }
+    for (const Rect& bounds : snapshot_.content) {
+      context.DrawBorder(bounds, debug_layout_content_color, StrokeStyle{.width = 1.0F, .dash_pattern = {4.0F, 3.0F}});
+    }
+    for (const DebugGuideLine& alignment : snapshot_.alignments) {
+      context.DrawLine(alignment.start, alignment.end, debug_layout_alignment_color,
+                       StrokeStyle{.width = 1.0F, .dash_pattern = {3.0F, 3.0F}});
+    }
+    for (const Rect& bounds : snapshot_.scrolls) {
+      context.DrawBorder(bounds, debug_layout_scroll_color, StrokeStyle{.width = 2.0F, .dash_pattern = {7.0F, 3.0F}});
+    }
+    for (const Rect& bounds : snapshot_.clips) {
+      context.DrawBorder(bounds, debug_layout_clip_color, StrokeStyle{.width = 2.0F, .dash_pattern = {2.0F, 3.0F}});
+    }
+  }
+
+private:
+  bool visible_ = false;
+  DebugLayoutSnapshot snapshot_;
+};
+
+const detail::ModifierDescriptor& DebugLayoutGuidelines::Descriptor() {
+  return detail::ModifierDescriptorFor<DebugLayoutGuidelines, DebugLayoutGuidelinesExtension>();
+}
 
 struct DebugSampler {
   std::shared_ptr<detail::DebugMetricsState> metrics;
@@ -1392,7 +1666,8 @@ View DebugMetricCard(std::string label, std::string value, std::string detail, C
 View DebugPanel(
     const detail::DebugMetricsSnapshot& snapshot,
     const std::shared_ptr<detail::DebugMetricsState>& metrics,
-    State<detail::DebugMetricsSnapshot> snapshot_state
+    State<detail::DebugMetricsSnapshot> snapshot_state,
+    State<bool> layout_guidelines
 ) {
   const std::string fps =
       snapshot.painted_frame_count == 0 ? "Idle" : std::to_string(static_cast<int>(std::lround(snapshot.fps)));
@@ -1429,6 +1704,24 @@ View DebugPanel(
       DebugMetricCard("CPU", cpu, "Process / all cores", Color::Rgb(255, 183, 77)),
       DebugMetricCard("MEMORY", memory, "Process footprint", Color::Rgb(186, 132, 255)),
     }.With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
+    Row {
+      Text("Layout guides").Style(TextStyle{Font::System(11.0F), debug_panel_foreground}),
+      Spacer().With(Grow{}),
+      Text(layout_guidelines.Get() ? "ON" : "OFF")
+          .Style(TextStyle{Font::System(10.0F).WithWeight(FontWeight::SemiBold),
+                           layout_guidelines.Get() ? debug_live_color : debug_panel_secondary}),
+    }.With(
+        huxerui::Frame{.height = 30.0F},
+        Padding{EdgeInsets::Symmetric(8.0F, 6.0F)},
+        Background{debug_metric_background},
+        CornerRadius{8.0F},
+        Semantics{
+            .role = SemanticRole::Button,
+            .label = "Layout guides",
+            .state_description = layout_guidelines.Get() ? "On" : "Off",
+            .descendants = SemanticDescendantPolicy::Exclude,
+        }
+    ).OnClick([layout_guidelines] { layout_guidelines = !layout_guidelines.Get(); }),
     Text(footer).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
   }.With(
       panel_frame,
@@ -2256,14 +2549,15 @@ public:
         [metrics = std::move(metrics)] {
           auto expanded = UseState(false);
           auto snapshot = UseState(DebugMetricsSnapshot{});
+          auto layout_guidelines = UseState(false);
           std::vector<View> children;
           if (expanded.Get()) {
-            children.push_back(DebugPanel(snapshot.Get(), metrics, snapshot));
+            children.push_back(DebugPanel(snapshot.Get(), metrics, snapshot, layout_guidelines));
           } else {
             children.push_back(Spacer());
           }
           children.push_back(DebugRibbon(expanded, snapshot));
-          return DebugOverlayLayout {std::move(children)};
+          return DebugOverlayLayout {std::move(children)}.With(DebugLayoutGuidelines{layout_guidelines.Get()});
         },
         {},
         std::move(placement)
