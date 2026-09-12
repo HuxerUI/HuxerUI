@@ -22,6 +22,7 @@
 #include <huxerui/scroll.h>
 #include <huxerui/semantics.h>
 #include <huxerui/text_input.h>
+#include <huxerui/theme.h>
 #include <huxerui/view.h>
 
 namespace huxerui::detail {
@@ -312,6 +313,8 @@ struct UiTestOptions {
   EdgeInsets safe_area{};
   /// Authoritative test locale and density, independent of native defaults.
   ResourceConfiguration resources{};
+  /// Authoritative system appearance reported to the application under test.
+  SystemColorScheme system_color_scheme = SystemColorScheme::Light;
   /// Optional owning payload provider; the resources field above determines test locale and density.
   /// The provider's Configuration() is not used. No provider means no packaged payloads, not a filesystem search.
   std::shared_ptr<PlatformResources> resource_provider;

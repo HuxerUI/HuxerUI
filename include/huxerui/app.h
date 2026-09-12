@@ -42,6 +42,7 @@ struct DragEvent;
 class FilePicker;
 class ApplicationHandle;
 struct ResourceConfiguration;
+enum class SystemColorScheme;
 
 /// Represents an ordinary application launch without an external payload.
 struct LaunchActivation {
@@ -396,6 +397,11 @@ public:
   [[nodiscard]] bool IsWindowDragRegion(Point position) const;
   /// Updates platform resource configuration such as locale, display scale, and accessibility preferences.
   void UpdateResourceConfiguration(ResourceConfiguration configuration);
+  /// Publishes the host's system color scheme preference.
+  ///
+  /// Platform hosts call this when the system appearance changes. Components reading UseSystemColorScheme()
+  /// recompose with the new value.
+  void UpdateSystemColorScheme(SystemColorScheme color_scheme);
   /// Builds and commits pending composition, layout, semantics, animation, and rendering work.
   ///
   /// The returned reference is owned by Runtime and remains valid until the next frame build or Runtime destruction.

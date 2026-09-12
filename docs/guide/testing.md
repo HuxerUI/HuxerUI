@@ -205,6 +205,7 @@ Deploy the application's generated resource package, including built-in assets, 
 The provider implements ordinary `OpenRead` and may open packaged files through `File::OpenRead` or provide fixture streams.
 `UiTestOptions::resources` determines locale and density consistently, overriding the provider's configuration.
 Call `UpdateResourceConfiguration()` or `SetWindowMetrics()` and then Pump to publish observations for the new configuration.
+`UiTestOptions::system_color_scheme` determines the value `UseSystemColorScheme()` reports to the application under test, independent of the host appearance.
 
 The reference text profile uses one scalar cell per decoded Unicode scalar, with advance `font.size * 0.6`, ascent `font.size`, and line height `font.size * 1.25`.
 It supports newline-separated hard lines and scalar wrapping except under `NoWrap`, and keeps caret/selection/hit positions on UTF-16 scalar boundaries.

@@ -112,7 +112,8 @@ TestingPlatformAdapter::TestingPlatformAdapter(std::shared_ptr<UiTestQueue> queu
     : PlatformAdapter([queue = std::move(queue)](std::function<void()> callback) {
         std::scoped_lock lock(queue->mutex);
         if (!queue->closed) queue->callbacks.push_back(std::move(callback));
-      }), configuration(options.resources), resources_(options.resource_provider) {}
+      }), configuration(options.resources), system_color_scheme(options.system_color_scheme),
+      resources_(options.resource_provider) {}
 
 void TestingPlatformAdapter::RequestFrameAt(double deadline) {
   if (!std::isfinite(deadline)) throw std::invalid_argument("HuxerUI testing frame deadline must be finite");

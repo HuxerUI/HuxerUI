@@ -20,6 +20,7 @@
 
 #include <huxerui/app.h>
 #include <huxerui/ios/platform_registry.h>
+#include <huxerui/theme.h>
 
 #include "ios_application_internal.h"
 #include "ios_file_internal.h"
@@ -570,6 +571,12 @@ public:
     }
   }
 
+  void UpdateSystemColorScheme() {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateSystemColorScheme(QuerySystemColorScheme());
+    }
+  }
+
   void InvalidateTextInputGeometry() {
     if (text_input_ && text_input_->IsActive()) {
       [view_ setNeedsLayout];
@@ -715,6 +722,13 @@ public:
     UIScreen* screen = view_.window.screen == nil ? UIScreen.mainScreen : view_.window.screen;
     const float scale = screen == nil ? 1.0F : static_cast<float>(screen.scale);
     return {std::move(locale), scale};
+  }
+
+  SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    if (view_ == nil || view_.traitCollection.userInterfaceStyle != UIUserInterfaceStyleDark) {
+      return SystemColorScheme::Light;
+    }
+    return SystemColorScheme::Dark;
   }
 
   std::optional<InputStream> OpenRead(std::string_view package_path) override {
@@ -942,6 +956,7 @@ UIViewController* GetUIKitViewController(PlatformAdapter& adapter) {
   [super traitCollectionDidChange:previousTraitCollection];
   if (huxeruiAdapter != nullptr) {
     huxeruiAdapter->UpdateResourceConfiguration();
+    huxeruiAdapter->UpdateSystemColorScheme();
   }
 }
 

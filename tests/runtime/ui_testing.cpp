@@ -107,6 +107,12 @@ View DelayedCounter() {
 
 View Empty() { return Column {}.Key("empty"); }
 
+View SystemScheme() {
+  HUXERUI_SCOPE({
+    return Text(UseSystemColorScheme() == SystemColorScheme::Dark ? "dark" : "light").Key("scheme");
+  });
+}
+
 View ScrollableItems() {
   count = UseState(0);
   return VirtualList(100, [](std::size_t index) {
@@ -371,6 +377,12 @@ TEST_CASE("Windowless resources use generated packages and explicit configuratio
   ui.UpdateResourceConfiguration({.locale = Locale::FromLanguageTag("de")});
   ui.Pump();
   REQUIRE(ui.Find(UiSelector::Key("locale")).One().text == "de");
+}
+
+TEST_CASE("Windowless fixtures report the configured system color scheme", "[ui-testing]") {
+  Application application(SystemScheme, {.show_debug_overlay = false});
+  UiTest ui(application, {.system_color_scheme = SystemColorScheme::Dark});
+  REQUIRE(ui.Find(UiSelector::Key("scheme")).One().text == "dark");
 }
 
 TEST_CASE("Windowless queries enforce creating-thread access", "[ui-testing]") {
