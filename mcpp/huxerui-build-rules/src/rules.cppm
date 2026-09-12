@@ -233,6 +233,11 @@ inline std::vector<edge> plan_codegen(std::span<const std::string> sources) {
 // dep_dir() -- the dependency's SOURCE root. `resources/` is source, so it is
 // reachable; the compiled package is not. Recompiling 44 files / 196 KB is the
 // cost of not inventing a channel mcpp deliberately does not have.
+//
+// Each resource root is one directory input. Enumerating every file makes the
+// bounded action payload grow with both the resource count and the absolute
+// package path, so an otherwise identical index dependency can fail only
+// because it was unpacked under a deeper prefix.
 inline std::vector<edge> plan_resources(const options& opt) {
     std::vector<edge> out;
     const std::string hrc = host_tool("hrc");
@@ -245,12 +250,6 @@ inline std::vector<edge> plan_resources(const options& opt) {
     std::vector<std::string> packages;
 
     if (std::filesystem::exists(builtin_src)) {
-        std::vector<std::string> inputs{ hrc };
-        std::error_code ec;
-        for (auto it = std::filesystem::recursive_directory_iterator(builtin_src, ec);
-             it != std::filesystem::recursive_directory_iterator(); ++it) {
-            if (it->is_regular_file(ec)) inputs.push_back(it->path().string());
-        }
         out.push_back(edge{
             .id          = "hrc:builtin",
             .role        = "source",
@@ -259,7 +258,7 @@ inline std::vector<edge> plan_resources(const options& opt) {
                              "--output", odir + "/builtin",
                              "--namespace", "huxerui",
                              "--header-name", "huxerui_builtin_resources.h" },
-            .inputs      = inputs,
+            .inputs      = { hrc, builtin_src },
             .outputs     = { odir + "/builtin/include/huxerui_builtin_resources.h",
                              odir + "/builtin/package/huxerui/resources.bin" },
         });
@@ -278,12 +277,6 @@ inline std::vector<edge> plan_resources(const options& opt) {
         // hrc as "resource root is not a directory: resources".
         const std::string app_src =
             (std::filesystem::path(mcpp::manifest_dir()) / opt.resources).string();
-        std::vector<std::string> inputs{ hrc };
-        std::error_code ec;
-        for (auto it = std::filesystem::recursive_directory_iterator(app_src, ec);
-             it != std::filesystem::recursive_directory_iterator(); ++it) {
-            if (it->is_regular_file(ec)) inputs.push_back(it->path().string());
-        }
         out.push_back(edge{
             .id          = "hrc:app",
             .role        = "source",
@@ -291,7 +284,7 @@ inline std::vector<edge> plan_resources(const options& opt) {
             .command     = { hrc, "--root", app_src,
                              "--output", odir + "/app",
                              "--namespace", ns },
-            .inputs      = inputs,
+            .inputs      = { hrc, app_src },
             .outputs     = { odir + "/app/package/huxerui/resources.bin" },
         });
         packages.push_back(odir + "/app/package");
