@@ -30,12 +30,16 @@ Customize each container and its foreground together to preserve readable contra
 Reading it subscribes the current scope; when the platform reports a preference change, subscribed scopes recompose with the new value.
 Platforms without an appearance preference report `Light`.
 
-Select the theme family from the preference at the application root:
+`ThemeMode` expresses the application's choice: `Automatic` follows the platform preference, while `Light` and `Dark` pin the appearance explicitly.
+`UseColorScheme(mode)` resolves the mode during composition; with the default `ThemeMode::Automatic` it follows the platform and recomposes on changes, and explicit modes never observe the platform preference.
+
+Select the theme family at the application root, storing an explicit user choice in ordinary state when the application offers an override:
 
 ```cpp
 [[huxerui::composable]]
 View Root() {
-  if (UseSystemColorScheme() == SystemColorScheme::Dark) {
+  const ThemeMode mode = settings.theme_mode.Get(); // ThemeMode::Automatic follows the platform
+  if (UseColorScheme(mode) == SystemColorScheme::Dark) {
     return FlatDarkTheme {
       Content(),
     };
@@ -46,7 +50,6 @@ View Root() {
 }
 ```
 
-Theme selection remains an application decision: store an explicit user choice in ordinary state and prefer it over the system value when the application offers an override.
 UI tests control the reported preference through `UiTestOptions::system_color_scheme`.
 
 ## Component styles

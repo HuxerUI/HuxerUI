@@ -58,6 +58,16 @@ enum class SystemColorScheme {
   Dark,
 };
 
+/// Selects a light or dark appearance, optionally following the host platform.
+///
+/// Automatic resolves to the platform's current SystemColorScheme and tracks later changes, matching the
+/// convention of SystemBarContentBrightness::Automatic. Resolve a mode during composition with UseColorScheme().
+enum class ThemeMode {
+  Automatic,
+  Light,
+  Dark,
+};
+
 namespace detail {
 
 struct SystemColorSchemeEnvironment {
@@ -678,6 +688,20 @@ inline const ThemeSpec& UseTheme() {
 /// Reading subscribes the current scope; the scope recomposes when the platform reports a preference change.
 inline SystemColorScheme UseSystemColorScheme() {
   return UseEnvironment<detail::SystemColorSchemeEnvironment>().value;
+}
+
+/// Resolves a ThemeMode to a concrete color scheme during composition.
+///
+/// ThemeMode::Automatic (the default) follows UseSystemColorScheme() and recomposes on platform changes;
+/// explicit Light or Dark modes return immediately without observing the platform preference.
+inline SystemColorScheme UseColorScheme(ThemeMode mode = ThemeMode::Automatic) {
+  if (mode == ThemeMode::Light) {
+    return SystemColorScheme::Light;
+  }
+  if (mode == ThemeMode::Dark) {
+    return SystemColorScheme::Dark;
+  }
+  return UseSystemColorScheme();
 }
 
 class Theme final : public detail::TypedView<Theme> {

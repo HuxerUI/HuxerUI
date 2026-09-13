@@ -491,6 +491,7 @@ export namespace huxerui {
     using huxerui::TextWrap;
     using huxerui::Theme;
     using huxerui::ThemeDefinition;
+    using huxerui::ThemeMode;
     using huxerui::ThemeSpec;
     using huxerui::TimePicker;
     using huxerui::TimePickerEvents;
@@ -528,6 +529,7 @@ export namespace huxerui {
     using huxerui::UrlActivation;
     using huxerui::UseApplication;
     using huxerui::UseBottomSheet;
+    using huxerui::UseColorScheme;
     using huxerui::UseDialog;
     using huxerui::UseEnvironment;
     using huxerui::UseEvents;

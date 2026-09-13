@@ -648,4 +648,56 @@ TEST_CASE("UpdateSystemColorSchemeRecomposesSubscribers") {
   REQUIRE(system_color_scheme_compositions > initial_compositions);
 }
 
+ThemeMode requested_theme_mode = ThemeMode::Automatic;
+SystemColorScheme observed_resolved_scheme = SystemColorScheme::Light;
+int resolved_scheme_compositions = 0;
+
+View ResolvedColorSchemeReader() {
+  HUXERUI_SCOPE({
+    observed_resolved_scheme = UseColorScheme(requested_theme_mode);
+    ++resolved_scheme_compositions;
+    return Text("resolved scheme");
+  });
+}
+
+TEST_CASE("UseColorSchemeFollowsSystemByDefault") {
+  requested_theme_mode = ThemeMode::Automatic;
+  resolved_scheme_compositions = 0;
+  observed_resolved_scheme = SystemColorScheme::Light;
+  TestPlatform platform;
+  platform.system_color_scheme = SystemColorScheme::Dark;
+  Runtime runtime{ResolvedColorSchemeReader, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(observed_resolved_scheme == SystemColorScheme::Dark);
+  const int initial_compositions = resolved_scheme_compositions;
+
+  runtime.UpdateSystemColorScheme(SystemColorScheme::Light);
+  runtime.BuildFrame();
+  REQUIRE(observed_resolved_scheme == SystemColorScheme::Light);
+  REQUIRE(resolved_scheme_compositions > initial_compositions);
+}
+
+TEST_CASE("UseColorSchemeHonorsExplicitModesWithoutObservingSystem") {
+  TestPlatform platform;
+  platform.system_color_scheme = SystemColorScheme::Dark;
+
+  requested_theme_mode = ThemeMode::Light;
+  resolved_scheme_compositions = 0;
+  Runtime light_runtime{ResolvedColorSchemeReader, platform};
+  light_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  light_runtime.BuildFrame();
+  REQUIRE(observed_resolved_scheme == SystemColorScheme::Light);
+  const int light_compositions = resolved_scheme_compositions;
+  light_runtime.UpdateSystemColorScheme(SystemColorScheme::Light);
+  light_runtime.BuildFrame();
+  REQUIRE(resolved_scheme_compositions == light_compositions);
+
+  requested_theme_mode = ThemeMode::Dark;
+  Runtime dark_runtime{ResolvedColorSchemeReader, platform};
+  dark_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  dark_runtime.BuildFrame();
+  REQUIRE(observed_resolved_scheme == SystemColorScheme::Dark);
+}
+
 } // namespace huxerui::test
