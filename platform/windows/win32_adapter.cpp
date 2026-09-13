@@ -4,6 +4,11 @@
 #include <ole2.h>
 #include <psapi.h>
 
+// rpcndr.h defines `small` as char for MIDL; theme scheme structs declare a `small` member.
+#if defined(small)
+#undef small
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
