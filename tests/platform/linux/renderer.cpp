@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <vector>
 
 #include <huxerui/paint.h>
 #include <huxerui/text.h>
@@ -732,6 +733,40 @@ TEST_CASE("LinuxTextLayoutCaretHitTestingPreservesAlignedBidiGeometry") {
       }
     }
   }
+}
+
+TEST_CASE("LinuxTextMeasurementCacheReturnsIdenticalMetricsAcrossEvictions") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  std::vector<std::string> texts;
+  texts.reserve(300);
+  for (int index = 0; index < 300; ++index) {
+    texts.push_back("message " + std::to_string(index) +
+                    " with enough text to wrap a few times inside a narrow viewport");
+  }
+
+  // More distinct texts than the cache holds, so later passes measure through
+  // forced evictions; every pass must produce identical metrics either way.
+  const auto measure = [&renderer, &texts](std::size_t index) {
+    const float width = 120.0F + static_cast<float>(index % 7) * 40.0F;
+    return renderer.MeasureText(texts[index], style, width, {.wrap = TextWrap::Word}).size;
+  };
+
+  std::vector<Size> first;
+  first.reserve(texts.size());
+  for (std::size_t index = 0; index < texts.size(); ++index) {
+    first.push_back(measure(index));
+  }
+  for (std::size_t pass = 0; pass < 3; ++pass) {
+    for (std::size_t index = 0; index < texts.size(); ++index) {
+      const Size size = measure(index);
+      REQUIRE(size.width == first[index].width);
+      REQUIRE(size.height == first[index].height);
+    }
+  }
+  renderer.Discard();
 }
 
 } // namespace huxerui::test
