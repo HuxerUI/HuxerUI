@@ -566,7 +566,7 @@ public:
     }
   }
 
-  void SystemColorSchemeChanged() {
+  void UpdateSystemColorScheme() {
     if (runtime_ != nullptr) {
       runtime_->UpdateSystemColorScheme(QuerySystemColorScheme());
     }
@@ -1134,7 +1134,7 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 - (void)viewDidChangeEffectiveAppearance {
   [super viewDidChangeEffectiveAppearance];
   if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->SystemColorSchemeChanged();
+    huxeruiAdapter->UpdateSystemColorScheme();
   }
 }
 
