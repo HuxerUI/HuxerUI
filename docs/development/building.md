@@ -88,6 +88,14 @@ It builds source libraries by default; `-PhuxeruiTestingSdk=/absolute/path/to/sd
 The test module packages its own native dependencies and assets without changing `:HuxerUI` or an example application.
 See [Android execution](../guide/testing.md#android-execution) for the resource and runner contract.
 
+## Debug overlay
+
+`AppOptions::show_debug_overlay` installs the built-in debug overlay above application content. It defaults to enabled in Debug builds and disabled in Release builds. Click the top-right `DEBUG` ribbon to open its metrics panel, then use `Layout guides` to inspect the mounted application tree.
+
+The guide colors distinguish cyan node bounds, amber padding and content bounds, pink Row and Column gaps, green alignment axes, blue scroll viewports, and red clipping bounds. The debug overlay's own controls are excluded from inspection, and changing the overlay does not recompose the application root.
+
+Rectangular guides show axis-aligned presentation bounds, so rotated geometry is enclosed by a rectangle. Collection covers the mounted application root, including padding on Scope nodes; separately presented layers are not included.
+
 ## Runtime profiling
 
 Source builds default to `HUXERUI_ENABLE_PROFILING=ON`, making private Runtime diagnostics available to source applications and repository examples.

@@ -180,10 +180,10 @@ struct AppOptions {
   /// Width thresholds used by `UseViewportClass()`.
   ViewportBreakpoints viewport_breakpoints{};
 #if defined(NDEBUG)
-  /// Whether Runtime installs the built-in debug overlay above application root hooks.
+  /// Whether Runtime installs the built-in performance and layout debug overlay above application root hooks.
   bool show_debug_overlay = false;
 #else
-  /// Whether Runtime installs the built-in debug overlay above application root hooks.
+  /// Whether Runtime installs the built-in performance and layout debug overlay above application root hooks.
   bool show_debug_overlay = true;
 #endif
   /// Ordered application root extensions installed for every Runtime.
