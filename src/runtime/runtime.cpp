@@ -1158,6 +1158,7 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   state_->semantics_ = std::make_unique<SemanticTree>(*state_);
   const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
   state_->root_environment_->Set(resource_configuration.locale);
+  state_->root_environment_->Set(detail::SystemColorSchemeEnvironment{platform.QuerySystemColorScheme()});
   root.Provide(state_->app_resources_);
 #if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
   if (auto profiler = CreateRuntimeProfiler()) {
@@ -1600,6 +1601,10 @@ void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   static_cast<void>(state_->root_environment_->Update(configuration.locale));
   ReconcileWindowControls();
   state_->text_->InvalidateOverlay();
+}
+
+void Runtime::UpdateSystemColorScheme(SystemColorScheme color_scheme) {
+  static_cast<void>(state_->root_environment_->Update(detail::SystemColorSchemeEnvironment{color_scheme}));
 }
 
 const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {

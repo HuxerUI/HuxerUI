@@ -23,6 +23,7 @@
 #include <huxerui/app.h>
 #include <huxerui/gesture.h>
 #include <huxerui/macos/platform_registry.h>
+#include <huxerui/theme.h>
 
 #include "appkit_accessibility.h"
 #include "appkit_platform_view.h"
@@ -371,6 +372,16 @@ public:
     return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
   }
 
+  SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    @autoreleasepool {
+      NSAppearanceName name = [NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[
+        NSAppearanceNameAqua,
+        NSAppearanceNameDarkAqua,
+      ]];
+      return [name isEqualToString:NSAppearanceNameDarkAqua] ? SystemColorScheme::Dark : SystemColorScheme::Light;
+    }
+  }
+
   void SetPointerCursor(PointerCursorKind kind) override {
     if (view_ != nil) {
       [view_ setHuxerUIPointerCursor:MacPointerCursor(kind)];
@@ -552,6 +563,12 @@ public:
   void UpdateResourceConfiguration() {
     if (runtime_ != nullptr) {
       runtime_->UpdateResourceConfiguration(Configuration());
+    }
+  }
+
+  void UpdateSystemColorScheme() {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateSystemColorScheme(QuerySystemColorScheme());
     }
   }
 
@@ -1111,6 +1128,13 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
     huxeruiAdapter->UpdateResourceConfiguration();
     huxeruiAdapter->InvalidateAppKitSurface();
     huxeruiAdapter->WindowGeometryChanged();
+  }
+}
+
+- (void)viewDidChangeEffectiveAppearance {
+  [super viewDidChangeEffectiveAppearance];
+  if (huxeruiAdapter != nullptr) {
+    huxeruiAdapter->UpdateSystemColorScheme();
   }
 }
 

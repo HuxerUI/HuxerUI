@@ -19,6 +19,8 @@
 #include <utility>
 #include <vector>
 
+#include <huxerui/theme.h>
+
 #include <emscripten.h>
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
@@ -730,6 +732,10 @@ EM_JS(
           }
         });
         listen(window, "resize", resize);
+        const colorSchemeQuery = matchMedia("(prefers-color-scheme: dark)");
+        listen(colorSchemeQuery, "change", () => {
+          Module._huxerui_web_color_scheme(session_id);
+        });
         const updateLifecycle = () => {
           const state = document.hidden ? 2 : document.hasFocus() ? 0 : 1;
           Module._huxerui_web_application_lifecycle(session_id, state);
@@ -903,6 +909,22 @@ public:
     return WebNow();
   }
 
+  SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    try {
+      const val window = val::global("window");
+      if (window.isUndefined() || window["matchMedia"].isUndefined()) {
+        return SystemColorScheme::Light;
+      }
+      const val query = window.call<val>("matchMedia", std::string("(prefers-color-scheme: dark)"));
+      if (query.isUndefined() || query.isNull() || query["matches"].isUndefined()) {
+        return SystemColorScheme::Light;
+      }
+      return query["matches"].as<bool>() ? SystemColorScheme::Dark : SystemColorScheme::Light;
+    } catch (...) {
+      return SystemColorScheme::Light;
+    }
+  }
+
   void SetPointerCursor(PointerCursorKind kind) override {
     SetWebPointerCursor(session_id_, static_cast<int>(kind));
   }
@@ -971,6 +993,12 @@ public:
     if (runtime_ != nullptr) {
       runtime_->SetWindowMetrics({.viewport = viewport_});
       runtime_->UpdateResourceConfiguration(configuration);
+    }
+  }
+
+  void UpdateSystemColorScheme() {
+    if (runtime_ != nullptr) {
+      runtime_->UpdateSystemColorScheme(QuerySystemColorScheme());
     }
   }
 
@@ -1273,6 +1301,12 @@ huxerui_web_platform_view_move_focus(std::uintptr_t session_id, std::uint32_t to
 EMSCRIPTEN_KEEPALIVE void huxerui_web_application_lifecycle(std::uintptr_t session_id, int state) {
   huxerui::detail::DispatchWebSession(session_id, "application lifecycle update", [=](auto& platform) {
     platform.UpdateApplicationLifecycleState(state);
+  });
+}
+
+EMSCRIPTEN_KEEPALIVE void huxerui_web_color_scheme(std::uintptr_t session_id) {
+  huxerui::detail::DispatchWebSession(session_id, "color scheme update", [](auto& platform) {
+    platform.UpdateSystemColorScheme();
   });
 }
 

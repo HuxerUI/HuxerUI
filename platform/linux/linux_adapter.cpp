@@ -32,6 +32,7 @@
 #include <huxerui/clipboard.h>
 #include <huxerui/file.h>
 #include <huxerui/resource.h>
+#include <huxerui/theme.h>
 #include <huxerui/window.h>
 
 #include "io/file_internal.h"
@@ -53,6 +54,8 @@ namespace {
 
 constexpr float kDipsPerScrollStep = 40.0F;
 constexpr float kResizeBorderDips = 6.0F;
+// XDG settings portal color-scheme values: 0 = no preference, 1 = prefer dark, 2 = prefer light.
+constexpr guint32 kXdgColorSchemePreferDark = 1;
 
 const char* LinuxPointerCursorName(PointerCursorKind kind) noexcept {
   switch (kind) {
@@ -375,6 +378,17 @@ class LinuxPlatformAdapter final : public PlatformAdapter, public PlatformClipbo
 public:
   LinuxPlatformAdapter() : LinuxPlatformAdapter(InitializeGtk()) {}
 
+  ~LinuxPlatformAdapter() override {
+    if (session_bus_ != nullptr && color_scheme_subscription_ != 0) {
+      g_dbus_connection_signal_unsubscribe(session_bus_, color_scheme_subscription_);
+    }
+    if (portal_cancellable_ != nullptr) {
+      g_cancellable_cancel(portal_cancellable_);
+      g_object_unref(portal_cancellable_);
+    }
+    g_clear_object(&session_bus_);
+  }
+
   int Run(Runtime& runtime, const WindowOptions& options) {
     runtime_ = &runtime;
     text_input_.SetRuntime(runtime_);
@@ -495,6 +509,48 @@ public:
         .memory_usage_bytes = resident_pages * static_cast<std::uint64_t>(page_size),
         .processor_count = static_cast<std::uint32_t>(std::max(1L, processor_count)),
     };
+  }
+
+  SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    if (session_bus_ == nullptr) {
+      return SystemColorScheme::Light;
+    }
+    GError* error = nullptr;
+    GVariant* reply = g_dbus_connection_call_sync(
+        session_bus_,
+        "org.freedesktop.portal.Desktop",
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Settings",
+        "Read",
+        g_variant_new("(ss)", "org.freedesktop.appearance", "color-scheme"),
+        G_VARIANT_TYPE("(v)"),
+        G_DBUS_CALL_FLAGS_NONE,
+        1000,
+        portal_cancellable_,
+        &error
+    );
+    if (error != nullptr) {
+      g_error_free(error);
+    }
+    if (reply == nullptr) {
+      return SystemColorScheme::Light;
+    }
+    GVariant* value = nullptr;
+    g_variant_get(reply, "(v)", &value);
+    g_variant_unref(reply);
+    while (value != nullptr && g_variant_is_of_type(value, G_VARIANT_TYPE_VARIANT)) {
+      GVariant* inner = g_variant_get_variant(value);
+      g_variant_unref(value);
+      value = inner;
+    }
+    guint32 scheme = 0;
+    if (value != nullptr && g_variant_is_of_type(value, G_VARIANT_TYPE_UINT32)) {
+      scheme = g_variant_get_uint32(value);
+    }
+    if (value != nullptr) {
+      g_variant_unref(value);
+    }
+    return scheme == kXdgColorSchemePreferDark ? SystemColorScheme::Dark : SystemColorScheme::Light;
   }
 
   void RequestWindowCommand(WindowCommand command) override {
@@ -651,7 +707,28 @@ public:
 
 private:
   explicit LinuxPlatformAdapter(std::shared_ptr<LinuxUIThreadDispatcher> dispatcher)
-      : PlatformAdapter(dispatcher->Bind()), ui_dispatcher_(std::move(dispatcher)) {}
+      : PlatformAdapter(dispatcher->Bind()), ui_dispatcher_(std::move(dispatcher)) {
+    GError* error = nullptr;
+    session_bus_ = g_bus_get_sync(G_BUS_TYPE_SESSION, nullptr, &error);
+    if (error != nullptr) {
+      g_error_free(error);
+    }
+    if (session_bus_ != nullptr) {
+      portal_cancellable_ = g_cancellable_new();
+      color_scheme_subscription_ = g_dbus_connection_signal_subscribe(
+          session_bus_,
+          "org.freedesktop.portal.Desktop",
+          "org.freedesktop.portal.Settings",
+          "SettingChanged",
+          "/org/freedesktop/portal/desktop",
+          "org.freedesktop.appearance",
+          G_DBUS_SIGNAL_FLAGS_MATCH_ARG0_NAMESPACE,
+          PortalSettingChanged,
+          this,
+          nullptr
+      );
+    }
+  }
 
   void CreateWindow(const WindowOptions& options, Size initial_size) {
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
@@ -1035,6 +1112,26 @@ private:
     }
   }
 
+  static void PortalSettingChanged(GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar*,
+      GVariant* parameters, gpointer data) {
+    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    const gchar* setting_namespace = nullptr;
+    const gchar* setting_key = nullptr;
+    GVariant* setting_value = nullptr;
+    g_variant_get(parameters, "(&s&sv)", &setting_namespace, &setting_key, &setting_value);
+    if (setting_value != nullptr) {
+      g_variant_unref(setting_value);
+    }
+    if (g_strcmp0(setting_key, "color-scheme") != 0) {
+      return;
+    }
+    self.DispatchToUIThread([&self] {
+      if (self.runtime_ != nullptr) {
+        self.runtime_->UpdateSystemColorScheme(self.QuerySystemColorScheme());
+      }
+    });
+  }
+
   void PressPointer(GdkEvent* event, guint platform_button, Point position) {
     suppress_pointer_release_ = false;
     const PointerButton button = TranslatePointerButton(platform_button);
@@ -1188,6 +1285,9 @@ private:
 
   std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
   Runtime* runtime_ = nullptr;
+  GDBusConnection* session_bus_ = nullptr;
+  GCancellable* portal_cancellable_ = nullptr;
+  guint color_scheme_subscription_ = 0;
   GtkWindow* window_ = nullptr;
   GtkWidget* drawing_area_ = nullptr;
   GdkToplevel* toplevel_ = nullptr;

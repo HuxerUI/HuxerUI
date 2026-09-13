@@ -546,6 +546,7 @@ private:
     write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
     resource_locale_ = environment->GetMethodID(view_class, "resourceLocale", "()[B");
     resource_scale_ = environment->GetMethodID(view_class, "resourceScale", "()F");
+    system_dark_mode_ = environment->GetMethodID(view_class, "systemDarkMode", "()Z");
     process_pss_bytes_ = environment->GetMethodID(view_class, "processPssBytes", "()J");
     set_system_bars_content_brightness_ =
         environment->GetMethodID(view_class, "setSystemBarsContentBrightness", "(II)V");
@@ -556,7 +557,7 @@ private:
         create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
         restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
         read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr || resource_locale_ == nullptr ||
-        resource_scale_ == nullptr || process_pss_bytes_ == nullptr ||
+        resource_scale_ == nullptr || system_dark_mode_ == nullptr || process_pss_bytes_ == nullptr ||
         set_system_bars_content_brightness_ == nullptr || set_pointer_cursor_ == nullptr) {
       if (environment->ExceptionCheck()) {
         environment->ExceptionClear();
@@ -1023,6 +1024,18 @@ public:
     };
   }
 
+  SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || view_ == nullptr) {
+      return SystemColorScheme::Light;
+    }
+    const jboolean dark = environment->CallBooleanMethod(view_, system_dark_mode_);
+    if (environment->ExceptionCheck()) {
+      return SystemColorScheme::Light;
+    }
+    return dark == JNI_TRUE ? SystemColorScheme::Dark : SystemColorScheme::Light;
+  }
+
   ResourceConfiguration Configuration() const override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
@@ -1229,6 +1242,7 @@ private:
   jmethodID write_clipboard_text_ = nullptr;
   jmethodID resource_locale_ = nullptr;
   jmethodID resource_scale_ = nullptr;
+  jmethodID system_dark_mode_ = nullptr;
   jmethodID process_pss_bytes_ = nullptr;
   jmethodID set_system_bars_content_brightness_ = nullptr;
   jmethodID set_pointer_cursor_ = nullptr;
@@ -1270,6 +1284,7 @@ public:
 
   void UpdateResourceConfiguration(std::string language_tag, float display_scale) {
     runtime_.UpdateResourceConfiguration({Locale::FromLanguageTag(language_tag), display_scale});
+    runtime_.UpdateSystemColorScheme(platform_.QuerySystemColorScheme());
   }
 
   void BeginDraw() {

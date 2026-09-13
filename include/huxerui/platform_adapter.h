@@ -21,6 +21,7 @@ class PlatformTextInput;
 struct GestureSettings;
 enum class PointerCursorKind;
 enum class SystemBarContentBrightness;
+enum class SystemColorScheme;
 enum class WindowCommand;
 
 namespace detail {
@@ -94,6 +95,12 @@ public:
   virtual std::optional<ProcessMetrics> QueryProcessMetrics() noexcept {
     return std::nullopt;
   }
+
+  /// Returns the host's current system color scheme preference.
+  ///
+  /// Platforms without an appearance preference report Light. Adapters notify Runtime of preference changes
+  /// through Runtime::UpdateSystemColorScheme.
+  virtual SystemColorScheme QuerySystemColorScheme() const noexcept;
 
   // Embedded adapters without native-window authority may ignore desktop window commands.
   virtual void RequestWindowCommand(WindowCommand command) {

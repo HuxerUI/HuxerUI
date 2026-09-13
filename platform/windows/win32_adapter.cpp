@@ -4,6 +4,11 @@
 #include <ole2.h>
 #include <psapi.h>
 
+// rpcndr.h defines `small` as char for MIDL; theme scheme structs declare a `small` member.
+#if defined(small)
+#undef small
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -24,6 +29,7 @@
 #include <vector>
 
 #include <huxerui/app.h>
+#include <huxerui/theme.h>
 
 #include "application/platform_frame_internal.h"
 #include "resources/resource_internal.h"
@@ -603,6 +609,21 @@ public:
         .memory_usage_bytes = static_cast<std::uint64_t>(counters.WorkingSetSize),
         .processor_count = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(system_info.dwNumberOfProcessors)),
     };
+  }
+
+  SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    DWORD apps_use_light_theme = 1;
+    DWORD size = sizeof(apps_use_light_theme);
+    const LSTATUS status = RegGetValueW(
+        HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        L"AppsUseLightTheme",
+        RRF_RT_REG_DWORD,
+        nullptr,
+        &apps_use_light_theme,
+        &size
+    );
+    return status == ERROR_SUCCESS && apps_use_light_theme == 0 ? SystemColorScheme::Dark : SystemColorScheme::Light;
   }
 
   void RequestWindowCommand(WindowCommand command) override {
@@ -1377,6 +1398,7 @@ private:
       break;
     case WM_SETTINGCHANGE:
       runtime_->UpdateResourceConfiguration(Configuration());
+      runtime_->UpdateSystemColorScheme(QuerySystemColorScheme());
       return 0;
     case WM_DISPLAYCHANGE:
       renderer_.ResetDeviceResources();

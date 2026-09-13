@@ -1004,6 +1004,11 @@ public final class HuxerUIView extends ViewGroup {
         return getResources().getDisplayMetrics().density;
     }
 
+    private boolean systemDarkMode() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+                == Configuration.UI_MODE_NIGHT_YES;
+    }
+
     private long processPssBytes() {
         return Debug.getPss() * 1024L;
     }

@@ -24,6 +24,31 @@ Nested themes affect only their subtree.
 `tertiary_container` and `on_tertiary_container` provide a contrasting tonal accent, used by the Material TimePicker's AM/PM selection.
 Customize each container and its foreground together to preserve readable contrast in light and dark themes.
 
+## System appearance
+
+`UseSystemColorScheme()` returns the host platform's current appearance preference as `SystemColorScheme::Light` or `SystemColorScheme::Dark`.
+Reading it subscribes the current scope; when the platform reports a preference change, subscribed scopes recompose with the new value.
+Platforms without an appearance preference report `Light`.
+
+Select the theme family from the preference at the application root:
+
+```cpp
+[[huxerui::composable]]
+View Root() {
+  if (UseSystemColorScheme() == SystemColorScheme::Dark) {
+    return FlatDarkTheme {
+      Content(),
+    };
+  }
+  return FlatTheme {
+    Content(),
+  };
+}
+```
+
+Theme selection remains an application decision: store an explicit user choice in ordinary state and prefer it over the system value when the application offers an override.
+UI tests control the reported preference through `UiTestOptions::system_color_scheme`.
+
 ## Component styles
 
 Each built-in component resolves its typed style from the closest Theme.

@@ -418,6 +418,7 @@ export namespace huxerui {
     using huxerui::SwitchStyle;
     using huxerui::SystemBarContentBrightness;
     using huxerui::SystemBarsAppearance;
+    using huxerui::SystemColorScheme;
     using huxerui::SystemTrayHandle;
     using huxerui::SystemTrayOptions;
     using huxerui::TabIndicatorSizing;
@@ -544,6 +545,7 @@ export namespace huxerui {
     using huxerui::UseState;
     using huxerui::UseStateList;
     using huxerui::UseString;
+    using huxerui::UseSystemColorScheme;
     using huxerui::UseTaskScope;
     using huxerui::UseTextMeasurer;
     using huxerui::UseTheme;

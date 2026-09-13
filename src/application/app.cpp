@@ -1,5 +1,6 @@
 #include <huxerui/app.h>
 #include <huxerui/gesture.h>
+#include <huxerui/theme.h>
 
 #include <algorithm>
 #include <memory>
@@ -59,6 +60,10 @@ GestureSettings PlatformAdapter::GestureDefaults() const noexcept {
 
 ScrollPhysics PlatformAdapter::ScrollDefaults() const noexcept {
   return {};
+}
+
+SystemColorScheme PlatformAdapter::QuerySystemColorScheme() const noexcept {
+  return SystemColorScheme::Light;
 }
 
 std::optional<AppDirectories> PlatformAdapter::CreateAppDirectories() {

@@ -50,6 +50,28 @@ struct ColorScheme {
   bool operator==(const ColorScheme&) const = default;
 };
 
+/// Reports the host platform's preferred light or dark appearance.
+///
+/// Platforms without an appearance preference report Light. Read the current value with UseSystemColorScheme().
+enum class SystemColorScheme {
+  Light,
+  Dark,
+};
+
+namespace detail {
+
+struct SystemColorSchemeEnvironment {
+  SystemColorScheme value = SystemColorScheme::Light;
+
+  static SystemColorSchemeEnvironment Default() {
+    return {};
+  }
+
+  bool operator==(const SystemColorSchemeEnvironment&) const = default;
+};
+
+} // namespace detail
+
 struct TypographyScheme {
   float body_large = 16.0F;
   float body_medium = 14.0F;
@@ -649,6 +671,13 @@ private:
 
 inline const ThemeSpec& UseTheme() {
   return UseEnvironment<ThemeSpec>();
+}
+
+/// Returns the host platform's current system color scheme preference.
+///
+/// Reading subscribes the current scope; the scope recomposes when the platform reports a preference change.
+inline SystemColorScheme UseSystemColorScheme() {
+  return UseEnvironment<detail::SystemColorSchemeEnvironment>().value;
 }
 
 class Theme final : public detail::TypedView<Theme> {

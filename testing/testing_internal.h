@@ -12,6 +12,7 @@
 #include <huxerui/clipboard.h>
 #include <huxerui/platform_adapter.h>
 #include <huxerui/testing/ui_test.h>
+#include <huxerui/theme.h>
 
 namespace huxerui::detail {
 
@@ -37,6 +38,7 @@ public:
   PlatformClipboard* Clipboard() noexcept override { return this; }
   PlatformResources* Resources() noexcept override { return this; }
   ResourceConfiguration Configuration() const override { return configuration; }
+  SystemColorScheme QuerySystemColorScheme() const noexcept override { return system_color_scheme; }
   std::optional<InputStream> OpenRead(std::string_view path) override;
   std::optional<std::string> ReadText() override { return clipboard_text; }
   bool WriteText(std::string_view text) override;
@@ -49,6 +51,7 @@ public:
 
   double time = 0.0;
   ResourceConfiguration configuration;
+  SystemColorScheme system_color_scheme = SystemColorScheme::Light;
   std::optional<double> frame_deadline;
   std::optional<TextInputState> input_state;
   TextInputAction input_action = TextInputAction::Default;

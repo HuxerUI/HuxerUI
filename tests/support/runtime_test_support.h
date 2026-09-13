@@ -294,6 +294,10 @@ public:
     runtime_.UpdateResourceConfiguration(std::move(configuration));
   }
 
+  void UpdateSystemColorScheme(huxerui::SystemColorScheme color_scheme) {
+    runtime_.UpdateSystemColorScheme(color_scheme);
+  }
+
   const FlattenedScene& BuildFrame() {
     flattened_scene_.Update(BuildCommit().render_frame);
     return flattened_scene_;
@@ -810,6 +814,10 @@ public:
     return process_metrics;
   }
 
+  huxerui::SystemColorScheme QuerySystemColorScheme() const noexcept override {
+    return system_color_scheme;
+  }
+
   void RequestWindowCommand(huxerui::WindowCommand command) override {
     window_commands.push_back(command);
   }
@@ -834,6 +842,7 @@ public:
   std::optional<std::pair<huxerui::SystemBarContentBrightness, huxerui::SystemBarContentBrightness>>
       system_bar_brightness;
   std::optional<huxerui::ProcessMetrics> process_metrics;
+  huxerui::SystemColorScheme system_color_scheme = huxerui::SystemColorScheme::Light;
   std::vector<huxerui::WindowCommand> window_commands;
   int application_quit_requests = 0;
   std::shared_ptr<TestSystemTrayTransport> system_tray_transport;
