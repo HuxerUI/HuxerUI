@@ -243,7 +243,20 @@ The accepted identifiers are `codex`, `claude`, `antigravity`, `opencode`, `comm
 The default is `codex`; `all` selects the three distinct directories, and `none` disables Skill creation.
 An explicit list replaces the default, and aliases that share a directory are deduplicated.
 
-`huxerui mcpp build` is an independent generic mcpp frontend. It requires `mcpp.toml` in the selected source directory and invokes the `mcpp` executable directly. It does not participate in HuxerUI project discovery, alter the existing CMake and platform-driver paths, or provide HuxerUI package integration; the mcpp project owns those details.
+`huxerui mcpp build` is an independent generic mcpp frontend, kept for compatibility. It requires `mcpp.toml` in the selected source directory and invokes the `mcpp` executable directly.
+
+### mcpp projects
+
+A project created with `--build mcpp` — `mcpp.toml` and `build.mcpp`, no `CMakeLists.txt` — is discovered like a CMake project and drives mcpp instead. Its platforms are `[package] platforms` (mcpp says `emscripten` where the CLI says `web`), and `create --platform` narrows that list rather than writing shell directories. The verbs map onto mcpp's, with a platform as a target row and a distribution format:
+
+| Platform | `build` / `run` target | `package` format |
+|---|---|---|
+| linux, windows, macos | the host's architecture on that OS | `appimage`, `msi`, `app` |
+| web | `wasm32-emscripten`; `run` packs and serves the directory | `web` |
+| android | `x86_64-linux-android`, or `aarch64-linux-android` for a physical `--device`; `run` passes `--format apk` | `apk` |
+| ios | `aarch64-ios-sim`, or `aarch64-ios` for a physical `--device` (build only) | `app` |
+
+`--profile release` is `mcpp --release`. `--generator`, `--java-home` and `--source` are refused with the reason: the toolchain, the JDK and the HuxerUI dependency are mcpp's, a payload's and the manifest's. `doctor` prints the rows and runs `mcpp self doctor`; `setup` has nothing to install, because payloads arrive on first use. The CMake platform drivers are not involved and are unchanged; the mapping is `tools/huxerui_cli/mcpp_backend.cpp`.
 Desktop CMake build commands leave concurrency to CMake and its selected build tool, preserving `CMAKE_BUILD_PARALLEL_LEVEL` for callers and CI. They do not force an unnumbered `--parallel`, which becomes unlimited parallelism with Unix Makefiles.
 
 ### Create and platform add
@@ -345,7 +358,7 @@ Desktop builds configure the root CMake project and then build it.
 Fresh Linux and macOS builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
 Windows discovers the latest Visual Studio installation that provides the C++ x64 tools without constraining its product version, imports its developer environment, and explicitly selects MSVC.
 Fresh Windows builds use Ninja when available and NMake otherwise; an existing Windows cache retains its compatible generator while the compiler remains MSVC.
-`huxerui_add_app` selects the Windows GUI subsystem on the application target only. MSVC applications retain `main()` through `mainCRTStartup`; the installer helper selects `wWinMainCRTStartup` through the private `HUXERUI_WINDOWS_CRT_ENTRY` target property for its existing `wWinMain()` entry. Both paths preserve CRT initialization. The framework's public link interface carries no subsystem or entry-point option, and Runtime does not allocate or hide a console.
+`huxerui_add_app` selects the Windows GUI subsystem on the application target only. MSVC applications retain `main()` through `mainCRTStartup`; the installer helper selects `wWinMainCRTStartup` through the private `HUXERUI_WINDOWS_CRT_ENTRY` target property for its existing `wWinMain()` entry. Both paths preserve CRT initialization. The mcpp build states the same selection declaratively, as `[targets.<name>] windows_subsystem = "windows"`. The framework's public link interface carries no subsystem or entry-point option, and Runtime does not allocate or hide a console.
 The Windows SDK packages matching Debug and Release shared and static libraries so the CLI's default Debug profile and explicit Release profile use the corresponding MSVC runtime.
 `--generator` applies to Linux, macOS, and Web builds. Windows, Android, and iOS reject it because their platform drivers own the supported generator and toolchain selection.
 

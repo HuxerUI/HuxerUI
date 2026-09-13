@@ -25,3 +25,9 @@ gcm.cache/
 traces/
 __pycache__/
 *.pyc
+
+# Working design notes for agents; never committed.
+.agents/
+
+# mcpp resolution records; every dependency here is pinned exactly in its manifest.
+mcpp.lock

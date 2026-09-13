@@ -1,0 +1,22 @@
+# The distribution formats -- msi, appimage, app, apk, web -- as `mcpp:plugins`'
+# dist members, configured the HuxerUI way. The members declare the payloads
+# they run on their own feature axes, and a host module's declaration reaches
+# every build program it is compiled into, so no application names xim:wix,
+# xim:appimagetool or the Android build tools.
+
+[package]
+name        = "huxerui-build-rules-dist"
+namespace   = "huxerui"
+version     = "0.3.0"
+description = "mcpp build rules for HuxerUI: the distribution formats"
+license     = "MIT"
+
+# 0.9.1 is the floor: dist-apk links an application's res/ as its base
+# resources (0.9.0 linked it as an overlay, so no launcher icon could reach an
+# APK) and pins xim:android-platform 36-r2, the level platform/android's Java
+# host compiles against.
+[build-dependencies.mcpp]
+plugins = { version = "0.9.1", features = ["dist-wix", "dist-appimage", "dist-apple", "dist-apk", "dist-web"], host-module = true }
+
+[lib]
+path = "src/dist.cppm"

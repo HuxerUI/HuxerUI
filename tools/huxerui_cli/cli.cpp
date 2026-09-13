@@ -18,6 +18,7 @@
 #include "process_runner.h"
 #include "project.h"
 #include "mcpp/mcpp.h"
+#include "mcpp_backend.h"
 
 namespace huxerui::cli {
 namespace {
@@ -61,6 +62,10 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] "
             "[--source <path>] [--java-home <path>]\n"
          << "  huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]\n"
+         << "\n"
+         << "In an mcpp project (mcpp.toml + build.mcpp), build, run, package and doctor drive\n"
+         << "mcpp: build is `mcpp build --target`, run is `mcpp run --target [--format]`, package\n"
+         << "is `mcpp pack --target --format`; a platform is its target row.\n"
          << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] "
             "[--source <path>] [--java-home <path>]\n"
          << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] "
@@ -458,16 +463,9 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   } else {
     throw UsageError("--build must be cmake or mcpp");
   }
-  if (build_system == BuildSystem::Mcpp) {
-    // mcpp builds Linux, Windows and macOS from one manifest and has no
-    // platform shells; the three platforms CMake owns alone -- Android, iOS and
-    // Web -- are outside mcpp's target language, so a platform list here would
-    // promise something the build cannot keep.
-    if (platform_specified) {
-      throw UsageError("--build mcpp projects have no platform shells; omit --platform");
-    }
-    platform_list.reset();
-  } else if (template_name) {
+  // An mcpp project has no platform shells: every row is one manifest, and
+  // `--platform` narrows `[package] platforms` rather than writing directories.
+  if (build_system != BuildSystem::Mcpp && template_name) {
     // `templates/` is the mcpp package-template tree. A CMake project is
     // rendered from tools/huxerui_cli/templates, which has no such vocabulary,
     // and silently ignoring the option would be worse than refusing it.
@@ -546,9 +544,15 @@ int RunPlatform(std::span<const std::string_view> arguments, const std::filesyst
   }
 
   const Project project = DiscoverProject(working_directory);
-  const ProjectTemplate project_template = LoadProjectTemplate(project);
   const std::vector<const PlatformDriver*> platforms = ResolvePlatforms(arguments[2]);
-  AddProjectPlatforms(project, project_template, platforms);
+  if (project.build_system == BuildSystem::Mcpp) {
+    // No shells to generate: an mcpp project's platforms are the rows its
+    // manifest declares, so adding one is adding it to that list.
+    AddMcppProjectPlatforms(project, platforms);
+  } else {
+    const ProjectTemplate project_template = LoadProjectTemplate(project);
+    AddProjectPlatforms(project, project_template, platforms);
+  }
 
   output << "Updated platforms:";
   for (const PlatformDriver* platform : platforms) {
@@ -586,6 +590,18 @@ int RunDoctor(std::span<const std::string_view> arguments, const std::filesystem
     }
   } else {
     output << "Project: " << project->root.string() << '\n';
+    if (project->build_system == BuildSystem::Mcpp) {
+      // mcpp's own doctor answers for the toolchains and payloads; what the CLI
+      // adds is the project's rows, and that nothing else has to be installed.
+      output << "Build system: mcpp\n";
+      output << "Platforms:";
+      for (const std::string& id : project->platforms) {
+        output << ' ' << id;
+      }
+      output << "\nPayloads (NDK, emsdk, JDK, simulators) are installed by mcpp on first use; iOS needs Xcode.\n";
+      ExecuteCommands(std::vector{ProcessCommand{"mcpp", {"self", "doctor"}, project->root}}, output);
+      return failed ? 1 : 0;
+    }
     if (!std::filesystem::is_regular_file(project->root / "CMakeLists.txt")) {
       output << "[error] missing CMakeLists.txt\n";
       failed = true;
@@ -934,9 +950,132 @@ std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::
   return ready.front();
 }
 
+// ---------------------------------------------------------------- mcpp projects --
+//
+// The CMake path's verbs, mapped onto mcpp's. A platform is a target row and a
+// distribution format (mcpp_backend.h); nothing here is HuxerUI-specific, so the
+// mapping is a table and the commands are three.
+
+void RejectCMakeOnlyOptions(const BuildOptions& options) {
+  if (!options.cmake_generator.empty()) {
+    throw UsageError("--generator selects a CMake generator; an mcpp project's toolchain is mcpp's");
+  }
+  if (options.java_home) {
+    throw UsageError("--java-home is a Gradle setting; an mcpp project's JDK is a payload mcpp installs");
+  }
+  if (options.source) {
+    throw UsageError("--source selects a HuxerUI checkout for CMake; an mcpp project names its HuxerUI in mcpp.toml");
+  }
+}
+
+std::vector<std::string> ResolveMcppPlatformIds(const Project& project, const BuildOptions& options,
+                                                std::string_view command) {
+  std::vector<std::string> ids;
+  if (!options.platforms) {
+    const std::string host(CurrentHostId());
+    if (std::find(project.platforms.begin(), project.platforms.end(), host) == project.platforms.end()) {
+      throw UsageError("build requires a platform when the current host platform is not enabled");
+    }
+    ids.push_back(host);
+  } else if (*options.platforms == "all") {
+    ids = project.platforms;
+  } else {
+    for (const PlatformDriver* platform : ResolvePlatforms(*options.platforms)) {
+      ids.emplace_back(platform->Id());
+    }
+  }
+  if (!command.empty() && ids.size() != 1) {
+    throw UsageError(std::string(command) + " accepts exactly one platform");
+  }
+  for (const std::string& id : ids) {
+    if (std::find(project.platforms.begin(), project.platforms.end(), id) == project.platforms.end()) {
+      throw std::runtime_error("platform is not enabled by this project's [package] platforms: " + id);
+    }
+    const PlatformDriver* driver = FindPlatformDriver(id);
+    if (driver != nullptr && !driver->SupportsCurrentHost()) {
+      throw std::runtime_error("platform " + id + " cannot be built from host " + std::string(CurrentHostId()));
+    }
+  }
+  return ids;
+}
+
+McppTarget McppTargetFor(std::string_view platform_id, BuildOptions& options, std::ostream& output) {
+  bool physical = false;
+  if (!options.device.empty()) {
+    const PlatformDriver* driver = FindPlatformDriver(platform_id);
+    if (driver == nullptr || !driver->SupportsDeviceDiscovery()) {
+      throw UsageError("--device is not supported for platform " + std::string(platform_id));
+    }
+    options.selected_device = SelectDevice(*driver, options.device);
+    if (options.selected_device) {
+      physical = options.selected_device->kind == DeviceKind::Physical;
+      output << "Device: " << options.selected_device->id << '\n';
+    }
+  }
+  const McppTarget target = ResolveMcppTarget(platform_id, physical, McppHostArchitecture());
+  if (target.triple.empty()) {
+    throw std::runtime_error("no mcpp target row for platform " + std::string(platform_id));
+  }
+  return target;
+}
+
+int RunMcppBuild(const Project& project, BuildOptions& options, std::ostream& output) {
+  RejectCMakeOnlyOptions(options);
+  const bool release = options.profile == "release";
+  for (const std::string& id : ResolveMcppPlatformIds(project, options, {})) {
+    const McppTarget target = McppTargetFor(id, options, output);
+    output << "Building " << id << " (" << target.triple << ", " << options.profile << ")\n";
+    ExecuteCommands(std::vector{McppBuildCommand(project.root, target, release)}, output);
+  }
+  return 0;
+}
+
+int RunMcppApplication(const Project& project, BuildOptions& options, std::ostream& output) {
+  RejectCMakeOnlyOptions(options);
+  const bool release = options.profile == "release";
+  const std::string id = ResolveMcppPlatformIds(project, options, "run").front();
+  const McppTarget target = McppTargetFor(id, options, output);
+  if (id == "web") {
+    // A browser application is served, not executed: pack the static
+    // directory, then hand it to Python's server when there is one.
+    ExecuteCommands(std::vector{McppPackCommand(project.root, target, release)}, output);
+    const std::filesystem::path directory = McppWebOutputDirectory(project.root);
+    output << "Web output: " << directory.string() << '\n';
+    if (!FindExecutable("python3")) {
+      output << "Serve that directory with any static HTTP server (a file: URL is unsupported).\n";
+      return 0;
+    }
+    output << "Serving http://127.0.0.1:8080/ (Ctrl-C stops the server)\n";
+    ExecuteCommands(std::vector{ProcessCommand{
+        "python3", {"-m", "http.server", "8080", "--bind", "127.0.0.1", "--directory", directory.string()}, {}}},
+        output);
+    return 0;
+  }
+  output << "Running " << id << " (" << target.triple << ")\n";
+  ExecuteCommands(std::vector{McppRunCommand(project.root, target, release)}, output);
+  return 0;
+}
+
+int RunMcppPackage(const Project& project, BuildOptions& options, std::ostream& output) {
+  RejectCMakeOnlyOptions(options);
+  const bool release = options.profile == "release";
+  for (const std::string& id : ResolveMcppPlatformIds(project, options, {})) {
+    const McppTarget target = McppTargetFor(id, options, output);
+    output << "Packaging " << id << " (" << target.triple << ", " << target.format << ")\n";
+    ExecuteCommands(std::vector{McppPackCommand(project.root, target, release)}, output);
+  }
+  return 0;
+}
+
 int RunBuild(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
              const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, {});
+  // An mcpp project is driven before the CMake options are looked at: it has
+  // no build home, and a bad `--source` is a CMake project's error to report.
+  if (const std::optional<Project> found = TryDiscoverProject(working_directory);
+      found && found->build_system == BuildSystem::Mcpp) {
+    return RunMcppBuild(ResolveApplicationProject(*found), options, output);
+  }
   const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
@@ -956,6 +1095,12 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
 int RunApplication(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
                    const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "run");
+  // An mcpp project is driven before the CMake options are looked at: it has
+  // no build home, and a bad `--source` is a CMake project's error to report.
+  if (const std::optional<Project> found = TryDiscoverProject(working_directory);
+      found && found->build_system == BuildSystem::Mcpp) {
+    return RunMcppApplication(ResolveApplicationProject(*found), options, output);
+  }
   const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
@@ -1067,11 +1212,17 @@ void PublishPackageArtifacts(std::span<const PackageArtifact> artifacts, const s
 int RunPackage(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
                const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "package");
-  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   if (!options.profile_explicit) {
     options.profile = "release";
   }
   options.package = true;
+  // An mcpp project is driven before the CMake options are looked at: it has
+  // no build home, and a bad `--source` is a CMake project's error to report.
+  if (const std::optional<Project> found = TryDiscoverProject(working_directory);
+      found && found->build_system == BuildSystem::Mcpp) {
+    return RunMcppPackage(ResolveApplicationProject(*found), options, output);
+  }
+  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());

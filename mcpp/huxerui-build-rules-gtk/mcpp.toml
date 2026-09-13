@@ -1,0 +1,66 @@
+# The Linux GTK stack, as the one place it is declared for build programs.
+#
+# `xpkg_dir` answers only for payloads the building package declared, and a
+# host module's `[xlings.workspace]` counts as that package's own; this
+# package is compiled into every HuxerUI application's and library's build
+# program, so its table is what `huxerui::rules::linux_gtk()` resolves there.
+# It is the ONLY place the table lives: the framework's own build reaches it
+# the same way, and huxerui-build-check fails if the root manifest grows a
+# second copy or this one loses a module the probe asks for.
+
+[package]
+name        = "huxerui-build-rules-gtk"
+namespace   = "huxerui"
+version     = "0.3.0"
+description = "mcpp build rules for HuxerUI: the Linux GTK stack"
+license     = "MIT"
+
+[lib]
+path = "src/gtk.cppm"
+
+# The transitive `.pc` closure of the four modules the probe asks for -- gtk4,
+# epoxy, gio-2.0 (glib), libsoup-3.0 -- pinned exactly. pkg-config searches
+# these payloads and nothing else, so every `Requires:` must resolve here; the
+# closure is spelled out rather than left to the recipes' own `deps` because
+# only declared payloads are visible to a build program, and exact pins are
+# what make two machines build the same binary.
+[target.'cfg(all(linux, not(env = "android")))'.xlings.workspace]
+# direct
+"xim:gtk4" = "4.16.13"
+"xim:libepoxy" = "1.5.10"
+"xim:libsoup" = "3.6.6"
+"xim:glib" = "2.88.3"
+# transitive: what those four Require
+"xim:cairo" = "1.18.4"
+"xim:expat" = "2.6.2"
+"xim:fontconfig" = "2.15.0.1"
+"xim:freetype" = "2.13.2"
+"xim:fribidi" = "1.0.13"
+"xim:gdk-pixbuf" = "2.44.8"
+"xim:graphene" = "1.10.8"
+"xim:graphite2" = "1.3.14"
+"xim:harfbuzz" = "14.4.0"
+"xim:libX11" = "1.8.10"
+"xim:libXau" = "1.0.11"
+"xim:libXdmcp" = "1.1.5"
+"xim:libXext" = "1.3.6"
+"xim:libXft" = "2.3.9"
+"xim:libXrender" = "0.9.11"
+"xim:libdatrie" = "0.2.14"
+"xim:libffi" = "3.4.4"
+"xim:libglvnd" = "1.7.0.1"
+"xim:libjpeg-turbo" = "3.2.0"
+"xim:libpng" = "1.6.43"
+"xim:libpsl" = "0.23.3"
+"xim:libselinux" = "3.11"
+"xim:libthai" = "0.1.30"
+"xim:libtiff" = "4.7.2"
+"xim:libxcb" = "1.17.0"
+"xim:nghttp2" = "1.70.0"
+"xim:pango" = "1.52.1"
+"xim:pcre2" = "10.42"
+"xim:pixman" = "0.42.2"
+"xim:sqlite" = "3.53.4"
+"xim:util-linux" = "2.40.2"
+"xim:xorgproto" = "2024.1"
+"xim:zlib" = "1.3.1"

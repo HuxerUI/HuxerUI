@@ -1,42 +1,52 @@
-# c++23, and it is a workaround rather than a language requirement.
-#
-# The module unit writes `import std;`, which every implementation this project
-# builds with supports at c++20. mcpp's clang-on-Windows path hardcodes a
-# c++23 floor instead of probing the STL it found (mcpp-community/mcpp#603) and
-# refuses the build below it.
-#
-# A module graph has exactly one standard, so this compiles huxerui at c++23
-# too. Change this line back to c++20 once #603 is fixed.
+# c++23 is a workaround: mcpp's clang-on-Windows path refuses `import std;`
+# below it (mcpp-community/mcpp#603). One standard per module graph, so this
+# compiles HuxerUI at c++23 too; back to c++20 once #603 is fixed.
 [package]
 name     = "{{project.name}}"
 version  = "0.1.0"
 standard = "c++23"
+platforms = ["linux", "windows", "macos", "ios", "android", "emscripten"]
 
-# The EXACT package identity, not a bare name: namespace omission means
-# `mcpplibs` only, and mcpp's bare-name fallback is deprecated
-# ("This fallback is removed in 2026.9"). {{self.name}} renders the selector,
-# which carries the namespace.
+# The exact package identity (namespace included); a bare name searches
+# `mcpplibs` only.
 [dependencies]
 {{self.name}} = "{{self.version}}"
 
 [targets.{{project.name}}]
-kind = "bin"
+# `app`: an executable on the desktop rows, a `.js` launcher on the Web, the
+# shared object the Java host loads on Android.
+kind = "app"
 main = "src/main.cpp"
+# No console window behind the application on Windows; inert elsewhere.
+windows_subsystem = "windows"
 
 [build]
-# huxerui.rules owns the source selection: a build program can ADD a source but
-# cannot replace one, so a package that also globbed src/**/*.cpp would link
-# both the original and the transformed copy of every composable.
+ios_deployment_target = "15.0"
+# huxerui.rules selects the sources (build.mcpp); a glob here would compile the
+# original beside every hcg-transformed composable.
 sources = []
 
-# The Windows executable's icon and the version metadata its Properties dialog
-# shows. FILEVERSION, ProductName, FileDescription and CompanyName all default
-# from [package], so this one line is the whole thing.
-#
-# ONLY PE TARGETS COMPILE THIS. On Linux and macOS the table is inapplicable --
-# no resource units, no diagnostics, byte-identical build -- so it is written
-# unconditionally and needs no cfg(windows) predicate. The file's existence IS
-# checked on every target, which is what catches a typo on the Linux build
-# rather than on the Windows one.
+# The Windows icon and version resource; the metadata defaults from [package],
+# and the table is inert on every other target.
 [resources]
 icon = "assets/app.ico"
+
+# The Web build's exception model; HuxerUI requires it, and only a root can
+# state it.
+[target.'cfg(os = "emscripten")'.abi]
+exceptions = true
+
+# `mcpp run --target <row> --format apk|app` packages and hands the result to
+# the row's runner (xim:android-platform-tools, xim:apple-simulator-tools).
+[target.x86_64-linux-android]
+min_api_level = 23
+runner = ["adb-run"]
+[target.aarch64-linux-android]
+min_api_level = 23
+[target.aarch64-ios-sim]
+runner = ["simctl-run"]
+# llvm@20.1.7, not the row's default 22.1.8: 22's libc++ headers reference
+# runtime symbols the SDK's libc++.dylib does not export (HuxerUI design §9).
+toolchain = "llvm@20.1.7"
+[target.aarch64-ios]
+toolchain = "llvm@20.1.7"

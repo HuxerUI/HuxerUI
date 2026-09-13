@@ -164,6 +164,36 @@ TEST_CASE("ResourceCompilerAcceptsACustomGeneratedHeaderName") {
   );
 }
 
+TEST_CASE("ResourceCompilerWritesTheResourcesModule") {
+  TemporaryDirectory temporary;
+  const std::filesystem::path root = temporary.Path() / "assets";
+  const std::filesystem::path output = temporary.Path() / "output";
+  Write(root / "strings" / "default.properties", "title = Hello\n");
+  Write(root / "raw" / "data" / "model.json", "{}");
+
+  huxerui::resource_compiler::CompileOptions options{root, output, "test_app"};
+  options.module_name = "test_app.resources";
+  huxerui::resource_compiler::Compile(options);
+
+  // The module names what the header names, and nothing but `import huxerui;` above it.
+  const std::string module = Read(output / "modules" / "test_app_resources.cppm");
+  REQUIRE(module.find("export module test_app.resources;") != std::string::npos);
+  REQUIRE(module.find("import huxerui;") != std::string::npos);
+  REQUIRE(module.find("export namespace test_app {") != std::string::npos);
+  REQUIRE(module.find("inline const huxerui::RawResource data_model_json{\"test_app\", \"raw/data/model.json\"};") !=
+          std::string::npos);
+  REQUIRE(module.find("inline const huxerui::StringResource title{\"test_app\", \"strings/title\"};") != std::string::npos);
+  REQUIRE(module.find("#include") == std::string::npos);
+  REQUIRE(std::filesystem::exists(output / "include" / "test_app_resources.h"));
+
+  huxerui::resource_compiler::Compile({root, output, "test_app"});
+  REQUIRE_FALSE(std::filesystem::exists(output / "modules"));
+
+  options.module_name = "test app";
+  REQUIRE_THROWS_WITH(huxerui::resource_compiler::Compile(options),
+                      "resource module name must be dotted identifiers: test app");
+}
+
 TEST_CASE("ResourceCompilerRejectsInvalidMessagePlaceholders") {
   TemporaryDirectory temporary;
   const std::filesystem::path root = temporary.Path() / "assets";

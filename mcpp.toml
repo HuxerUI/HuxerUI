@@ -21,9 +21,12 @@ version     = "0.3.0"
 # whole module graph, so this is imposed on every consumer too.
 standard    = "c++20"
 description = "HuxerUI declarative cross-platform UI framework"
-license     = "Apache-2.0"
-repo        = "https://github.com/Sunrisepeak/HuxerUI"
-platforms   = ["linux", "windows", "macos"]
+license     = "MIT"
+repo        = "https://github.com/HuxerUI/HuxerUI"
+# Every row the mcpp build serves. Android is `env = "android"` on `os =
+# "linux"` and Web is `emscripten`, which is the spelling the cfg() selectors
+# below already use.
+platforms   = ["linux", "windows", "macos", "ios", "android", "emscripten"]
 
 # The public module. It lives outside `src/` because `src/` is private
 # implementation and this file is API.
@@ -46,18 +49,22 @@ include_dirs            = ["include", "src"]
 # `src` is implementation-only, as CMake's PRIVATE vs PUBLIC says.
 private_include_dirs    = ["src"]
 cxxflags                = ["-Wall", "-Wextra", "-Wpedantic"]
-# `-pthread` arrives from pkg-config with the GTK flags and is a DIALECT flag:
-# clang records the thread model in the BMI and refuses one that disagrees with
-# the importing translation unit, which reads as every name in
-# `import huxerui;` being undefined. It has to be here rather than under
-# cfg(linux) -- mcpp allows only build INPUTS in a conditional section and
-# clang records the thread model in the BMI and refuses one that disagrees with
-# the importing translation unit, which reads as every name in
-# `import huxerui;` being undefined.
-dialect_cxxflags        = ["-pthread"]
 macos_deployment_target = "12.0"
+# The iOS floor platforms.md states; carried by the effective triple on the
+# iOS rows and ignored everywhere else.
+ios_deployment_target   = "15.0"
 # CMake's HUXERUI_ENABLE_PROFILING defaults ON.
 defines                 = ["HUXERUI_ENABLE_PROFILING=1"]
+
+# The exception model is a property of the whole artifact (clang records it in
+# the BMI and refuses an importer that disagrees). Emscripten's default is off
+# and HuxerUI validates with exceptions, so every Web root states
+# `[target.'cfg(os = "emscripten")'.abi] exceptions = true` -- the templates
+# do -- and this refuses one that does not (mcpp 2026.9.13.1+; older engines
+# ignore it silently). No thread switch: nothing in the graph carries
+# `-pthread`, and the payload glibc has pthread in libc.
+[target.'cfg(os = "emscripten")']
+requires_abi = { exceptions = true }
 
 # BUILD-dependencies: none of these reaches the artifact. hcg and hrc run on the
 # build machine and produce sources; the rule module is compiled into build.mcpp
@@ -68,83 +75,18 @@ huxerui-codegen           = { path = "tools/codegen",           tools = ["hcg"],
 huxerui-resource-compiler = { path = "tools/resource_compiler", tools = ["hrc"], reexport = true }
 huxerui-build-rules       = { path = "mcpp/huxerui-build-rules", host-module = true, reexport = true }
 
-# WiX, for projects that build a Windows installer.
-#
-# HOST axis, not target: wix.exe RUNS on the build machine, and mcpp's rule for
-# which table a tool belongs in is exactly that -- the target axis is for what
-# the produced code is compiled or linked against. The GTK payloads below are
-# the other case.
-#
-# A payload declared here reaches this package's own build program. It does NOT
-# reach a CONSUMER's build program: mcpp passes `MCPP_XPKG_*_DIR` for what the
-# building package declared, so an application that asks huxerui.rules for an
-# installer declares this line too. The rule says so when the lookup comes back
-# empty.
-[xlings.workspace]
-"xim:wix" = { windows = "5.0.2" }
-
 # ---------------------------------------------------------------- Linux ----
 # Sources mirror cmake/platform/Linux.cmake.
-[target.'cfg(linux)'.build]
+# `linux` alone would also be true for Android, which is `env = "android"` on
+# `os = "linux"`; the GTK sources and the 37 GTK payloads below are for the
+# desktop only, so every Linux section excludes that env.
+[target.'cfg(all(linux, not(env = "android")))'.build]
 sources = ["platform/linux/*.cpp"]
-
-# THE GTK STACK COMES FROM XLINGS, NOT FROM THE MACHINE.
-#
-# mcpp compiles with its own toolchain and its own glibc. Reaching for the
-# host's GTK mixes two C libraries in one binary: `pkg-config --cflags gtk4` on
-# Debian emits the system multiarch include dir, the payload glibc's <time.h>
-# then finds the SYSTEM's <bits/time.h>, and every core TU fails with
-# `'time' has not been declared in '::'`. build.mcpp points PKG_CONFIG_LIBDIR at
-# these payloads only. CMake keeps using the distribution's packages, as
-# cmake/platform/Linux.cmake requires -- the two answer "where does GTK come
-# from" differently on purpose.
-#
-# The list is the transitive .pc closure of gtk4 + epoxy + libsoup, pinned. A
-# missing entry surfaces as `Package <x> was not found in the pkg-config search
-# path`, which names what to add.
-#
-# TARGET AXIS, not top-level `[xlings.workspace]`: these are what the produced
-# code is compiled and linked against, which is the form mcpp recommends. The
-# cost is that `mcpp emit xpkg` derives a descriptor's consumer dependencies
-# from the top-level table only, so a PUBLISHED package carries none of this --
-# see docs/design/mcpp-build-system.md.
-[target.'cfg(linux)'.xlings.workspace]
-"xim:cairo" = "1.18.4"
-"xim:expat" = "2.6.2"
-"xim:fontconfig" = "2.15.0.1"
-"xim:freetype" = "2.13.2"
-"xim:fribidi" = "1.0.13"
-"xim:gdk-pixbuf" = "2.44.8"
-"xim:glib" = "2.88.3"
-"xim:graphene" = "1.10.8"
-"xim:gtk4" = "4.16.13"
-"xim:harfbuzz" = "14.4.0"
-"xim:libX11" = "1.8.10"
-"xim:libXau" = "1.0.11"
-"xim:libXdmcp" = "1.1.5"
-"xim:libXext" = "1.3.6"
-"xim:libXft" = "2.3.9"
-"xim:libXrender" = "0.9.11"
-"xim:libdatrie" = "0.2.14"
-"xim:libepoxy" = "1.5.10"
-"xim:libffi" = "3.4.4"
-"xim:libglvnd" = "1.7.0.1"
-"xim:libjpeg-turbo" = "3.2.0"
-"xim:libpng" = "1.6.43"
-"xim:libpsl" = "0.23.3"
-"xim:libselinux" = "3.11"
-"xim:libsoup" = "3.6.6"
-"xim:libthai" = "0.1.30"
-"xim:libtiff" = "4.7.2"
-"xim:libxcb" = "1.17.0"
-"xim:nghttp2" = "1.70.0"
-"xim:pango" = "1.52.1"
-"xim:pcre2" = "10.42"
-"xim:pixman" = "0.42.2"
-"xim:sqlite" = "3.53.4"
-"xim:util-linux" = "2.40.2"
-"xim:xorgproto" = "2024.1"
-"xim:zlib" = "1.3.1"
+# The GTK stack comes from xlings, not the machine (mcpp compiles against its
+# own glibc, and a host GTK's headers pull the host's <bits/time.h> into every
+# core TU). The payload table lives once, in mcpp/huxerui-build-rules-gtk's
+# manifest: a host module's declaration provisions the payloads and reaches
+# every build program, this one included, so nothing is declared here.
 
 # -------------------------------------------------------------- Windows ----
 [target.windows.build]
@@ -179,11 +121,45 @@ cxxflags = ["-fobjc-arc"]
 # ordinary linkage.
 ldflags  = ["-weak_framework", "UniformTypeIdentifiers"]
 
-# frameworks is a TOP-LEVEL [runtime] key -- the per-target vocabulary is
-# `libraries` only, and a [target.macos.runtime] frameworks entry is ignored,
-# failing at link on macOS alone. Unconditional is correct: the engine renders
-# it only for Mach-O.
+# The frameworks macOS and iOS share stay at the top level, rendered only for
+# Mach-O; the ones that exist in one SDK and not the other -- AppKit is not in
+# the iOS SDK, UIKit is not in the macOS one -- sit under their target's
+# runtime table (mcpp 2026.9.12.3+), which appends to this list.
 [runtime]
-frameworks = ["AppKit", "AVFoundation", "Carbon", "CoreGraphics", "CoreImage",
-              "CoreText", "CoreVideo", "ImageIO", "Foundation", "Metal",
-              "MetalPerformanceShaders", "QuartzCore", "UserNotifications"]
+frameworks = ["AVFoundation", "CoreGraphics", "CoreImage", "CoreText", "CoreVideo",
+              "Foundation", "ImageIO", "Metal", "MetalPerformanceShaders",
+              "QuartzCore", "UserNotifications"]
+[target.macos.runtime]
+frameworks = ["AppKit", "Carbon"]
+
+# ------------------------------------------------------------------ iOS ----
+# Sources mirror cmake/platform/IOS.cmake. The deployment floor is
+# `[build] ios_deployment_target` above; the simulator and device rows share
+# everything here.
+[target.'cfg(os = "ios")'.build]
+sources  = ["platform/ios/*.mm"]
+cxxflags = ["-fobjc-arc"]
+ldflags  = ["-weak_framework", "UniformTypeIdentifiers"]
+[target.'cfg(os = "ios")'.runtime]
+frameworks = ["CoreFoundation", "MobileCoreServices", "UIKit"]
+
+# -------------------------------------------------------------- Android ----
+# Sources mirror cmake/platform/Android.cmake. An application on this row is
+# a shared object the Java host loads (`kind = "app"`); the JNI entry points
+# live in these sources and are exported like every other ELF symbol.
+[target.'cfg(env = "android")'.build]
+sources = ["platform/android/huxerui/src/main/cpp/*.cpp"]
+[target.'cfg(env = "android")'.runtime]
+libraries = ["android", "EGL", "GLESv2", "log"]
+
+# ------------------------------------------------------------------ Web ----
+# Sources mirror cmake/platform/Web.cmake. `-fexceptions` is not here: it is
+# the artifact's exception model, stated by the root as `abi.exceptions` and
+# required above. The `--pre-js` files need absolute paths and come from
+# build.mcpp; the resources are preloaded from there too.
+[target.'cfg(os = "emscripten")'.build]
+sources = ["platform/web/*.cpp"]
+ldflags = ["--bind", "--no-entry", "-lidbfs.js",
+           "-sMODULARIZE=1", "-sEXPORT_ES6=1", "-sEXPORT_NAME=createHuxerUIApp",
+           "-sEXPORTED_RUNTIME_METHODS=stringToNewUTF8", "-sENVIRONMENT=web",
+           "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=1048576", "-sNO_EXIT_RUNTIME=1"]

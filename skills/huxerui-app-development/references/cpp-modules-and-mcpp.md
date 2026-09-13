@@ -14,9 +14,9 @@ sources in the manifest. `[[huxerui::composable]]` means exactly what it means
 under CMake.
 
 Recognise it by `mcpp.toml` beside a `build.mcpp`, or by `import huxerui;` in a
-source. Such a project has no `CMakeLists.txt` and no `platform/` shell, and
-`huxerui build` / `run` / `package` do not drive it — `mcpp build` and
-`mcpp run` do.
+source. Such a project has no `CMakeLists.txt` and no `platform/` shell;
+`mcpp build`, `mcpp run` and `mcpp pack` drive it, and
+`huxerui build` / `run` / `package <platform>` map onto them.
 
 ## What the project looks like
 
@@ -96,6 +96,19 @@ mcpp run              # build, then run the bin target
 mcpp test             # every tests/**/*.cpp, each its own program
 mcpp build --workspace
 ```
+
+A platform is a target row of the same manifest, and a distributable is a
+format of `mcpp pack`; the toolchains and payloads (NDK, emsdk, JDK,
+simulator tools, packaging tools) are installed by mcpp on first use:
+
+```bash
+mcpp build --target wasm32-emscripten
+mcpp pack  --target x86_64-linux-android --format apk
+mcpp run   --target x86_64-linux-android --format apk   # adb-run
+huxerui package windows                                  # mcpp pack --format msi
+```
+
+[Six Platforms with mcpp](../../../docs/guide/mcpp.md) lists every row and format.
 
 A toolchain is selected once rather than per command — `mcpp test` and
 `mcpp pack` take no `--toolchain` flag:

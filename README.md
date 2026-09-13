@@ -106,8 +106,9 @@ Modules all the way down. `import huxerui;` replaces the umbrella header,
 each other by `import` rather than through a header and a list of sources.
 
 [mcpp](https://github.com/mcpp-community/mcpp) builds it, from one manifest for
-Linux, Windows and macOS, with the toolchain and the GTK stack provisioned
-rather than assumed.
+Linux, Windows, macOS, iOS, Android and the Web, with the toolchains and
+payloads provisioned rather than assumed, and `mcpp pack --format
+msi|appimage|app|apk|web` produces what a user installs.
 
 ```bash
 huxerui create app hello_huxer --build mcpp
@@ -152,8 +153,9 @@ application and a reusable component library from the same command. The whole
 manifest is one dependency line, and `mcpp new hello_huxer --template
 huxerui.huxerui` instantiates the same project without the HuxerUI CLI.
 
-See [Developing with C++20/23 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
-and the three worked applications in [`mcpp/examples`](mcpp/examples/).
+See [Six Platforms with mcpp](docs/guide/mcpp.md) for the path from environment
+to distribution, [C++20/23 modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md)
+for what the code looks like, and the three worked applications in [`mcpp/examples`](mcpp/examples/).
 
 Explore complete application demos in [HuxerUI-Demos](https://github.com/HuxerUI/HuxerUI-Demos), or browse the [examples](examples/) for focused API usage.
 

@@ -20,7 +20,7 @@ namespace   = "huxerui"
 version     = "0.3.0"
 standard    = "c++23"
 description = "Repository tooling: the module-shell generator and the build-parity check"
-license     = "Apache-2.0"
+license     = "MIT"
 
 [dependencies]
 huxerui-source-select = { path = "../huxerui-source-select" }

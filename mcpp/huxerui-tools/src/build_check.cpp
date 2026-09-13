@@ -136,7 +136,7 @@ void check_platform(const std::filesystem::path& root, const toml::table& manife
     // --- libraries ---------------------------------------------------------
     const std::vector<std::string> cmake_libraries =
         sources::cmake_list(text, "HUXERUI_PLATFORM_LINK_LIBRARIES");
-    if (selector == "windows") {
+    if (selector == "windows" || selector == "cfg(env = \"android\")") {
         std::set<std::string> declared;
         if (const toml::table* runtime = (*target)["runtime"].as_table()) {
             for (const std::string& v : string_array(*runtime, "libraries")) declared.insert(v);
@@ -159,9 +159,14 @@ void check_platform(const std::filesystem::path& root, const toml::table& manife
         if (!missing.empty())
             fail(std::string(cmake_file) + ": libraries missing from [target.windows.runtime]: " +
                  join(missing));
-    } else if (selector == "macos") {
+    } else if (selector == "macos" || selector == "cfg(os = \"ios\")") {
+        // The shared frameworks are top-level; the ones only one SDK has sit
+        // under the target's own runtime table, which appends.
         std::set<std::string> declared;
         if (const toml::table* runtime = manifest["runtime"].as_table()) {
+            for (const std::string& v : string_array(*runtime, "frameworks")) declared.insert(v);
+        }
+        if (const toml::table* runtime = (*target)["runtime"].as_table()) {
             for (const std::string& v : string_array(*runtime, "frameworks")) declared.insert(v);
         }
         std::string ldflags;
@@ -226,6 +231,9 @@ void check_one_template(const std::filesystem::path& root,
         const std::filesystem::path& path = it->path();
         const std::string relative = std::filesystem::relative(path, root, ec).generic_string();
         const std::string text = read(path);
+        // A binary asset -- a texture, an icon -- is copied verbatim and can
+        // carry any byte pair; only text is scanned for tokens.
+        if (text.find('\0') != std::string::npos) continue;
 
         if (path.extension() == ".h" || path.extension() == ".hpp")
             fail(relative + ": an mcpp project is module-style and should carry no headers");
@@ -277,35 +285,36 @@ void check_one_template(const std::filesystem::path& root,
     }
 }
 
-// The MSI definition huxerui.rules ships is XML, and WiX parses it strictly.
-// An XML comment may not contain `--`, which is the dash a prose comment
-// reaches for; the failure is `error WIX0104: Not a valid source file` on
-// Windows only, after a full framework build.
-void check_wix_template(const std::filesystem::path& root) {
-    const std::filesystem::path wxs =
-        root / "mcpp" / "huxerui-build-rules" / "wix" / "Package.wxs.in";
-    if (!std::filesystem::is_regular_file(wxs)) {
-        fail("mcpp/huxerui-build-rules/wix/Package.wxs.in is missing");
+// The Linux payload table lives once, in the gtk rule package: a host module's
+// declaration reaches every build program, the framework's included. The root
+// manifest must not grow a second copy, and the rule package's must keep the
+// four modules the probe asks for.
+std::map<std::string, std::string> linux_payloads(const toml::table& manifest) {
+    std::map<std::string, std::string> out;
+    const toml::node_view<const toml::node> section =
+        manifest["target"]["cfg(all(linux, not(env = \"android\")))"]["xlings"]["workspace"];
+    if (const toml::table* table = section.as_table()) {
+        for (const auto& [key, value] : *table) {
+            if (const auto version = value.value<std::string>()) out.emplace(std::string(key.str()), *version);
+        }
+    }
+    return out;
+}
+
+void check_linux_payloads(const std::filesystem::path& root, const toml::table& manifest) {
+    toml::table rules;
+    try {
+        rules = toml::parse_file((root / "mcpp/huxerui-build-rules-gtk/mcpp.toml").string());
+    } catch (const toml::parse_error& error) {
+        fail(std::string("mcpp/huxerui-build-rules-gtk/mcpp.toml does not parse: ") + std::string(error.description()));
         return;
     }
-    const std::string text = read(wxs);
-    std::size_t at = 0;
-    while ((at = text.find("<!--", at)) != std::string::npos) {
-        const std::size_t end = text.find("-->", at + 4);
-        if (end == std::string::npos) {
-            fail("Package.wxs.in has an unterminated XML comment");
-            return;
-        }
-        if (text.substr(at + 4, end - at - 4).find("--") != std::string::npos)
-            fail("Package.wxs.in has `--` inside an XML comment, which WIX0104 refuses");
-        at = end + 3;
-    }
-    // Every token the rule renders has to exist, or the definition silently
-    // stops carrying what it names.
-    for (std::string_view token : { "@@DISPLAY_NAME@@", "@@MANUFACTURER@@", "@@VERSION@@",
-                                    "@@UPGRADE_CODE@@", "@@ICON@@", "@@TARGET_FILE@@" }) {
-        if (text.find(token) == std::string::npos)
-            fail("Package.wxs.in no longer uses " + std::string(token));
+    if (!linux_payloads(manifest).empty())
+        fail("mcpp.toml declares Linux payloads; the table lives in mcpp/huxerui-build-rules-gtk/mcpp.toml alone");
+    const auto rule = linux_payloads(rules);
+    for (const char* direct : { "xim:gtk4", "xim:libepoxy", "xim:libsoup", "xim:glib" }) {
+        if (!rule.contains(direct))
+            fail(std::string("mcpp/huxerui-build-rules-gtk/mcpp.toml lacks ") + direct + ", which linux_gtk() probes");
     }
 }
 
@@ -380,11 +389,14 @@ int main(int argc, char** argv) {
 
     check_standard(root, manifest);
     check_core_sources(root, manifest);
-    check_platform(root, manifest, "Linux.cmake", "cfg(linux)");
+    check_platform(root, manifest, "Linux.cmake", "cfg(all(linux, not(env = \"android\")))");
     check_platform(root, manifest, "Windows.cmake", "windows");
     check_platform(root, manifest, "MacOS.cmake", "macos");
+    check_platform(root, manifest, "Android.cmake", "cfg(env = \"android\")");
+    check_platform(root, manifest, "IOS.cmake", "cfg(os = \"ios\")");
+    check_platform(root, manifest, "Web.cmake", "cfg(os = \"emscripten\")");
+    check_linux_payloads(root, manifest);
     check_package_template(root);
-    check_wix_template(root);
 
     if (!failures.empty()) {
         std::cerr << "mcpp/CMake parity check FAILED:\n\n";

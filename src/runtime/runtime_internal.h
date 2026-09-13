@@ -1,6 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <any>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -485,6 +489,18 @@ struct Runtime::State {
   Runtime& owner_;
   RootFactory root_factory_;
   PlatformAdapter* platform_;
+  // HUXERUI_SMOKE_EXIT_MS. The timer thread is owned, not detached: ~State
+  // wakes it and joins it before the platform it dispatches to can go away.
+  // The flag covers the other half -- the quit it dispatched, which runs on
+  // the UI thread and may be delivered after this state is gone.
+  struct SmokeExit {
+    std::mutex mutex;
+    std::condition_variable wake;
+    bool stop = false;
+    std::thread thread;
+  };
+  std::unique_ptr<SmokeExit> smoke_exit_;
+  std::shared_ptr<std::atomic<bool>> alive_ = std::make_shared<std::atomic<bool>>(true);
   UIThreadDispatcher ui_thread_dispatcher_;
   ViewportBreakpoints viewport_breakpoints_;
   std::shared_ptr<detail::WindowState> window_;
