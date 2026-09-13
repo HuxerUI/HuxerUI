@@ -59,7 +59,16 @@ import java.util.Objects;
 
 public final class HuxerUIView extends ViewGroup {
     static {
-        System.loadLibrary("huxerui");
+        // The framework is a separate libhuxerui.so under Gradle and is linked
+        // into the application's own library under mcpp, where the JNI entry
+        // points are already resolvable once that library is loaded. A missing
+        // libhuxerui.so is therefore not an error here; a missing symbol later
+        // is, and names what is absent.
+        try {
+            System.loadLibrary("huxerui");
+        } catch (UnsatisfiedLinkError ignored) {
+            // Linked into the application library.
+        }
     }
 
     private static final int POINTER_DOWN = 0;

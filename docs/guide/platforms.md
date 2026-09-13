@@ -194,6 +194,8 @@ The `example_external_texture` Linux target creates and updates only the reusabl
 The Web backend uses Emscripten, WebAssembly, Canvas 2D, browser input events, hidden text controls for IME, Fetch for HTTP, and browser-managed file storage.
 
 Generated projects use the Emscripten version pinned by the installed HuxerUI SDK.
+
+An mcpp project builds for the Web with `mcpp build --target wasm32-emscripten` and produces the static directory with `mcpp pack --target wasm32-emscripten --format web`; emsdk is a payload mcpp installs on first use, and the CLI's `huxerui build web` / `huxerui package web` map to the same commands.
 Run the generated output through `huxerui run web` or another HTTP server; loading the files directly with a `file:` URL is unsupported.
 On Termux, `huxerui run web` starts a Python standard-library server on an available loopback port and passes the generated entry URL to `termux-open`; it does not use ADB or Emscripten's Android-device mode.
 The pinned Emscripten tools, Python, and `termux-open` must be available on `PATH`.
@@ -219,6 +221,8 @@ HuxerUI-rendered content does not have a semantic DOM accessibility bridge; DOM 
 
 The Android backend requires API 23 or later and uses an Android View host, Canvas, StaticLayout, InputConnection, JNI, and platform accessibility APIs.
 The generated Gradle project links the SDK-provided Android shared library and application C++ library for each configured ABI.
+
+An mcpp project needs no Gradle: `mcpp build --target x86_64-linux-android` builds the application as the shared object the Java host loads, `mcpp pack --target x86_64-linux-android --format apk` assembles and debug-signs the APK with the framework's Java host compiled in, and `mcpp run --target x86_64-linux-android --format apk` installs and launches it through `adb-run`. The NDK, build tools, platform jar and JDK are payloads mcpp installs on first use; the CLI's `huxerui run android` maps to the same command.
 
 Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, and a compatible emulator or device.
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, FileReference payloads, and ExternalTexture are translated at the Android host boundary.
@@ -289,6 +293,8 @@ Termux diagnosis and setup do not require `sdkmanager`, platform-tools, or ADB b
 
 The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
 Build on macOS with Xcode 26 or later and an installed simulator runtime or paired device; release CI uses Xcode 26.2. This toolchain requirement does not raise the iOS 15 deployment target.
+
+An mcpp project needs no Xcode project: `mcpp build --target aarch64-ios-sim`, `mcpp pack --target aarch64-ios-sim --format app` and `mcpp run --target aarch64-ios-sim --format app` build, bundle and launch on a booted simulator through `simctl-run`. Xcode itself is still required, because Apple's SDK is located rather than installed; device builds (`aarch64-ios`) link but are not signed or installed by the mcpp path.
 
 ```bash
 huxerui devices ios

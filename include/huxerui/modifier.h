@@ -384,7 +384,14 @@ struct NodeExtensionHandle {
   std::size_t extension_index = 0;
   const ModifierDescriptor* descriptor = nullptr;
 
-  bool operator==(const NodeExtensionHandle&) const = default;
+  // Written out, not `= default`: a defaulted operator== makes clang report this
+  // 24-byte type trivially comparable, the MSVC STL's vectorized std::find then
+  // takes it and fails to compile (microsoft/STL#6294). Default it again when
+  // that bug is fixed.
+  bool operator==(const NodeExtensionHandle& other) const {
+    return node_identity == other.node_identity && extension_index == other.extension_index &&
+        descriptor == other.descriptor;
+  }
 };
 
 struct ModifierSpec {

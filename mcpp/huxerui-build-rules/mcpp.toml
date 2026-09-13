@@ -10,7 +10,7 @@ name        = "huxerui-build-rules"
 namespace   = "huxerui"
 version     = "0.3.0"
 description = "mcpp build rules for HuxerUI: composable codegen and resource compilation"
-license     = "Apache-2.0"
+license     = "MIT"
 
 # The pure half, split out so `mcpp test` can cover it: this package imports
 # mcpp and therefore cannot be built outside a build program's compile.
@@ -18,6 +18,13 @@ license     = "Apache-2.0"
 # not import it, which is why nothing needs `reexport` here.
 [build-dependencies]
 huxerui-source-select = { path = "../huxerui-source-select", host-module = true }
+
+# The two halves a consumer reaches through this module: the distribution
+# formats and the Linux GTK stack. `reexport` is what lets `import
+# huxerui.rules;` see what this interface re-exports from them.
+[build-dependencies.huxerui]
+huxerui-build-rules-dist = { path = "../huxerui-build-rules-dist", host-module = true, reexport = true }
+huxerui-build-rules-gtk  = { path = "../huxerui-build-rules-gtk",  host-module = true, reexport = true }
 
 [lib]
 # The module this package publishes is `huxerui.rules`; the package name is

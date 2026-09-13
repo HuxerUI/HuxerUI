@@ -13,7 +13,9 @@ project.
 
 | | CMake | mcpp |
 |---|---|---|
-| Platforms | Linux, Windows, macOS, Android, iOS, Web | Linux, Windows, macOS |
+| Platforms | Linux, Windows, macOS, Android, iOS, Web | Linux, Windows, macOS, Android, iOS, Web |
+| Distribution | Gradle, Xcode, WiX bootstrapper, SDK archives | `mcpp pack --format msi\|appimage\|app\|apk\|web` |
+| Store signing, Kotlin, iOS devices | yes | no — the CMake path keeps them |
 | Consumption | `#include <huxerui/huxerui.h>` | `import huxerui;` *and* the headers |
 | Linux dependencies | the distribution's packages | xlings payloads |
 | Toolchain | the host's | mcpp's own, per target |
@@ -136,6 +138,19 @@ systems on one compiler, and is blocked separately: a host module's BMI reaches
 `cl.exe` in clang's `name=path` spelling and the compile dies with `C1083`
 ([mcpp#604](https://github.com/mcpp-community/mcpp/issues/604)).
 
+### Resources are a module too
+
+`hrc` writes the accessor header a CMake project includes
+(`<namespace>_resources.h`) and, for the mcpp build, the same declarations as
+a module interface unit, `<namespace>.resources` — `export module
+app.resources; import huxerui; export namespace app { … }`. The rule declares
+that unit to mcpp as a generated module interface (`provides`/`imports` on
+the hrc edge, the mechanism hcg's transformed units use), so a module-style
+application writes `import app.resources;` and no header at all. A
+header-style package gets the header only: the rule
+forces `<typeinfo>` and the scope prelude into its translation units, and a
+forced include before `export module` is what no compiler accepts.
+
 ### Macros are the exception
 
 `HUXERUI_SCOPE` and friends are macros, and macros do not cross a module
@@ -180,6 +195,26 @@ which keeps the host out entirely. They are declared on the **target** axis
 (`[target.'cfg(linux)'.xlings.workspace]`) because they are what the produced
 code is compiled and linked against.
 
+### The table is declared once, and a library calls the rule
+
+`xpkg_dir` answers only for payloads the *building* package declared, and a
+host module's `[xlings.workspace]` counts as that package's own. So the 37
+entries live in `mcpp/huxerui-build-rules-gtk/mcpp.toml` — the rule package is
+a host module compiled into the framework's, every application's and every
+library's build program — and nowhere else; measured: with the root
+manifest's copy removed, the framework builds, the example runs and its
+RPATH is byte-identical. `huxerui::rules::linux_gtk(link)` runs the pkg-config
+probe wherever it is called: the framework's `build.mcpp` calls it with
+`link` (the `-l`/`-L` half reaches every consumer's final link), and a
+library whose own sources include GTK headers calls it without, because the
+`-I` half of a dependency's probe colours the dependency's translation units
+only. Lib-Live2D's GL surface is that library, and its manifest declares no
+GTK. Four of the entries are what the probe asks for (`gtk4`, `libepoxy`,
+`libsoup`, `glib`); the other 33 are their `.pc` `Requires` closure, spelled
+out because pkg-config searches the declared payloads and nothing else, and
+pinned exactly because that is what makes two machines build one binary.
+`huxerui-build-check` fails if the root manifest grows a second copy.
+
 ### Dialect flags belong to the whole graph
 
 `pkg-config --cflags gtk4` also emits `-pthread -msse -msse2 -mfpmath=sse`. A
@@ -191,9 +226,13 @@ BMI it writes and refuses one that disagrees, which surfaces as every name in
 module. GCC's check is laxer, which is the only reason this held together until
 the build ran on clang.
 
-`-pthread` is therefore `[build] dialect_cxxflags`, which mcpp applies to every
-translation unit in the graph. The `-m` flags are dropped: SSE2 is baseline on
-x86-64, so naming them explicitly only put a feature list in the BMI.
+All of them are dropped. The `-m` flags because SSE2 is baseline on x86-64, so
+naming them explicitly only put a feature list in the BMI; `-pthread` because
+nothing needs it — no translation unit in the graph carries it, so every BMI
+agrees, and the payload glibc (2.44) has pthread in libc, so `std::thread`
+links and runs without it. It was `[build] dialect_cxxflags` until 2026-09-13,
+which reached every consumer's translation units too; §7a records why the
+typed replacement was not adopted either.
 
 ## 6. Platform interfaces
 
@@ -205,7 +244,7 @@ either: `CMAKE_CXX_STANDARD_LIBRARIES` adds kernel32, gdi32, winspool, uuid and
 comdlg32 implicitly, and mcpp links exactly what the manifest names. Omitting
 them surfaces at the link as `undefined symbol: CreateDIBSection`.
 
-Windows application templates and examples select the GUI subsystem and `mainCRTStartup` with MSVC-compatible linker directives in their `main.cpp` entry, preserving CRT initialization and the portable `main()` signature without creating a console. This selection belongs to the entry object: mcpp currently has no per-target link flags, and package-level `ldflags` or `link-flag` directives also reach tests and consumers. `huxerui.rules::configure()` therefore does not emit these flags, since component libraries use it too. CMake makes the equivalent selection on each application target in `huxerui_add_app`.
+Windows application templates and examples select the GUI subsystem with `[targets.<name>] windows_subsystem = "windows"` (mcpp 2026.9.12.2+, mcpp-community/mcpp#618), which preserves CRT initialization and the portable `main()` signature without creating a console. mcpp renders `/SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup` on the MSVC ABI and `-mwindows` on the GNU one, and nothing at all on ELF and Mach-O. It is a per-target field rather than a package-level `ldflags` or `link-flag` entry because those channels also reach tests and consumers; `huxerui.rules::configure()` therefore still emits no such flag, since component libraries use it too. Until that mcpp release the same selection was made with `#pragma comment(linker, ...)` in each entry source, which only ever worked on the MSVC ABI. CMake makes the equivalent selection on each application target in `huxerui_add_app`.
 
 **macOS.** `.mm` is a first-class source kind but is not in the default glob,
 so `platform/macos/*.mm` is listed explicitly. `frameworks` is a **top-level**
@@ -213,73 +252,124 @@ so `platform/macos/*.mm` is listed explicitly. `frameworks` is a **top-level**
 `[target.macos.runtime] frameworks` entry is ignored, failing at link on macOS
 alone. Unconditional is correct: the engine renders it only for Mach-O.
 
-## 7. The Windows installer
+## 7. Distribution formats
 
-An application asks for an MSI in its build program, and gets one:
+`mcpp pack` owns the mechanism and the two universal shapes, `tar` and `dir`;
+every other format lives in a package that declares it and is reached with
+`mcpp pack --format <name>`. The packages here are the `dist-*` members of
+`mcpp:plugins` (0.9.1 is the floor), and `huxerui.rules` is what puts them on
+every application's build program: it is a host module that `huxerui`
+re-exports, so an application names neither the members nor the payloads they
+run.
+
+| Format | Row | Member | Runs through |
+|---|---|---|---|
+| `msi` | Windows | `dist-wix` (`xim:wix`) | — |
+| `appimage` | Linux | `dist-appimage` (`xim:appimagetool`) | — |
+| `app` | macOS, iOS | `dist-apple` (Xcode's toolchain) | `simctl-run` on the simulator |
+| `apk` | Android | `dist-apk` (`xim:android-build-tools`, `xim:android-platform`, `xim:jdk-temurin`, `xim:android-debug-keystore`) | `adb-run` |
+| `web` | Web | `dist-web` (a static directory) | any static HTTP server |
+
+**Provided on the row, with nothing stated.** The rule calls
+`mcpp::provides_pack_format(...)` for the format of the row it is building,
+on every build, so `mcpp pack --format apk` on a fresh `huxerui create --build
+mcpp` project produces a debug-signed APK and `mcpp pack --format appimage`
+an AppImage with a placeholder icon; `mcpp pack --format apk` on a Linux
+desktop build is an *unknown* format, which is the true answer. A member's
+plan is a no-op until `mcpp::pack_format()` names its format, so a plain
+`mcpp build` produces no installer and no bundle. The `configure()` options
+only change what a format produces:
 
 ```cpp
 huxerui::rules::configure({
+    .target    = "myapp",
     .resources = "resources",
-    .installer = {
-        .target       = "myapp",
-        .version      = "1.2.3",
-        .upgrade_code = "27B7A054-FFE4-48A5-92E3-5D90C0507EEB",
-    },
+    .installer = { .upgrade_code = "27B7A054-FFE4-48A5-92E3-5D90C0507EEB" },
+    .appimage  = { .icon = "assets/app.png", .categories = { "Graphics" } },
+    .apple     = { .bundle_id = "org.example.myapp", .icon = "assets/AppIcon" },
+    .android   = { .application_id = "org.example.myapp" },
+    .web       = { .title = "My App" },
 });
 ```
 
-…and one line in its manifest:
+Every field has a default the member derives from `[package]` — the version,
+the bundle identifier and the application id from the namespace and name, the
+upgrade code deterministically from the package identity, the manufacturer
+from the authors. `target` is the one value worth stating: mcpp tells a build
+program the package name and not its targets, and the desktop `.resources`
+directory (§3) is named after the target.
 
-```toml
-[xlings.workspace]
-"xim:wix" = { windows = "5.0.2" }
-```
+**What the rule adds to each member.** The Web page is the rule's own
+template (`mcpp/huxerui-build-rules-dist/web/index.html.in`), which imports the
+MODULARIZE launcher the emscripten section exports and mounts the application;
+an application replaces it with `.web.template_file`. The APK is dist-apk's
+level 1: the framework's Java host (`platform/android/huxerui/src/main/java`)
+is the first source root, the application's `android/java` the second when it
+exists, `android/res` its resources when it has one (else the launcher icon
+set the SDK's Gradle template ships, `tools/huxerui_cli/templates/platform/
+android/app/app/src/main/res`, so the icon lives once in the repository; an
+application's own `res/` replaces it whole and carries `@mipmap/ic_launcher`),
+and the launcher Activity is `org.huxerui.HuxerUIActivity` unless the
+application names a subclass. The
+manifest the rule ships names the application's library in
+`org.huxerui.app_library`, which is how the Activity loads the application's
+shared object before the framework's `HuxerUIView` looks for `libhuxerui.so`
+— under mcpp the two are one file. The `.app` bundle needs nothing from the
+rule beyond the target: the resources are deployed into `HuxerUI/` by §3, and
+`platform/macos` falls back to that directory beside the executable when the
+bundle carries no `Resources/`.
 
-That line is not redundant with the framework's. `xpkg_dir` answers from
-`MCPP_XPKG_*_DIR`, which mcpp sets for what the **building** package declared;
-a dependency's declaration provisions the payload — the log says
-`Provisioning [xlings.workspace] entries (xim:wix@5.0.2)` — without making it
-visible to the consumer's build program. The rule says exactly this, and prints
-the two lines to add, when the lookup comes back empty.
+**When a member declines, the build says why.** A member's plan reports its
+reason on stderr, which mcpp discards when the build program succeeds — so
+`mcpp pack --format apk` used to fail as `no action claimed --format 'apk'`
+with the reason gone. The rule repeats it through `mcpp::warning` whenever the
+declined format is the one `mcpp pack` asked for:
+`huxerui.rules: dist-apk declined this build: unknown manifest template token`.
 
-It is on the **host** axis because `wix.exe` runs on the build machine, which
-is mcpp's own rule for which table a tool belongs in; the GTK payloads in §5
-are the other case.
+**The API level the Java host compiles against.** dist-apk pins
+`xim:android-platform` at 35 on its own feature axis; the framework's Java
+uses API 36 (`Build.VERSION_CODES.BAKLAVA`, the accessibility
+`CHECKED_STATE_*` set), the `compileSdk` its Gradle build states. The rule
+package pins 36 on the Android rows, and mcpp resolves the two by distance —
+the declaration nearer the artifact wins — with a warning that names both.
+That warning is expected on every Android build until the member's own pin
+moves.
 
-The rule renders the MSI definition it ships
-(`mcpp/huxerui-build-rules/wix/Package.wxs.in`) into the build directory and
-submits **one** action, `role = "artifact"` — whose inputs are link outputs, so
-ninja sequences it after the link with no phase machinery.
+**The branded Windows bundle is not built.** `Bundle.wxs` in the CMake path
+wraps the MSI in a WiX bootstrapper application, which is a second HuxerUI
+program — `platform/windows/windows_installer.cpp` plus a per-application UI
+and ten locales. dist-wix produces the MSI; the bootstrapper stays with
+CMake.
 
-Three things make it one action rather than several:
+## 7a. The artifact's ABI switches: exceptions on the Web, threads nowhere
 
-- **No staging.** The program is passed to WiX as a preprocessor variable,
-  `-d Executable=${mcpp.target_file:<target>}`, and the definition names it with
-  `<File Source="$(Executable)" />`. An earlier version harvested a directory
-  bindpath instead and produced a valid, empty, 52 KB installer when the path
-  resolved to nothing — with no diagnostic. A `<File Source>` whose path is
-  wrong is an error before anything is written.
-- **No resource copying.** HuxerUI's compiled resources are linked into the
-  executable; moving the whole `out/hrc` tree away and running the program
-  confirms it. The install set is the executable and the DLLs beside it.
-- **No path arithmetic.** `${mcpp.target_file:<target>}` is what mcpp expands
-  to the link output. A build program is told neither the target triple nor the
-  fingerprint, so the placeholder is the only way to name it — and an unknown
-  target is refused rather than expanded to an empty path.
+Two properties of an artifact cannot differ between its translation units:
+clang records the thread model and the exception model in the BMI it writes
+and refuses an importer that disagrees, which surfaces as every name in
+`import huxerui;` being undefined. mcpp's typed form is `[target.<selector>.abi]
+threads / exceptions` on the **root** manifest, applied to the standard library
+prebuild, the scan, every translation unit and the link; a dependency states
+what it needs with `requires_abi`, on the target axis since 2026.9.12.3, and a
+root that does not satisfy it is refused before anything compiles.
 
-CI reads the MSI's `File` table rather than judging the installer by its size:
-an installer that carries nothing and one that carries the wrong file are both
-plausible sizes, and only the table says which file is in it.
+**Exceptions.** Emscripten's default is off and HuxerUI validates arguments
+with exceptions, so `mcpp.toml` carries `[target.'cfg(os = "emscripten")']
+requires_abi = { exceptions = true }` and every application manifest the
+templates write carries the matching `abi` table. A root that lacks it is
+refused naming the member and the selector; without the refusal the failure is
+at run time, `Aborted(Assertion failed: Exception thrown, but exception
+catching is not enabled)`, and names neither.
 
-Silent on Linux and macOS: the rule returns before it reads anything when the
-target is not Windows.
+**Threads.** Not required and not set, and the reason is what §5 measured: no
+translation unit carries `-pthread` any more, so the BMIs agree, and the payload
+glibc has pthread in libc. Requiring the switch would also have put an `abi`
+table on this package for its own root build, which the engine reports in every
+consumer's build as a table only the root decides; a requirement nothing needs
+is not worth a warning everything sees.
 
-**The branded bundle is not built.** `Bundle.wxs` in the CMake path wraps the
-MSI in a WiX **bootstrapper application**, which is a second HuxerUI program —
-`platform/windows/windows_installer.cpp` (896 lines) plus a per-application UI
-and ten locales, linking `balutil.lib` and `dutil.lib` from the same payload.
-`wix_paths()` already resolves those, so nothing structural is missing; it is
-unbuilt, not blocked.
+An older engine (2026.9.12.2 and before) ignores a target-axis `requires_abi`
+silently, which is why mcpp/README.md states 2026.9.13.1 as the floor rather
+than relying on the refusal to reach an old client.
 
 ## 8. Verification
 
@@ -303,25 +393,79 @@ shows only where GCC is the default and clang is the exception.
 
 ## 9. Known gaps
 
-**Android, iOS and Web** are outside mcpp's target language today, and CMake
-remains the only path to them. Web is the one that has been taken up with
-upstream —
-[mcpp#597](https://github.com/mcpp-community/mcpp/issues/597) sets out what an
-Emscripten target needs and why a rule package cannot supply it. Android and
-iOS have not been raised.
+The engine-side items below are filed together as mcpp-community/mcpp#630, with what each would let this build delete.
+
+**Store signing, Kotlin and iOS devices stay with CMake.** The mcpp path
+packages what a developer installs — an MSI, an AppImage, an unsigned `.app`, a
+debug-signed APK, a static Web directory — and stops there. A release-signed
+APK, a notarised `.app`, an AndroidX dependency or an iOS device build goes
+through the Gradle and Xcode shells the CMake path keeps, which the mcpp path
+does not replace and does not touch.
+
+**A library's resources stay with the library.** `configure()` in a library's
+build program compiles `.resources` for the library's own accessor header and
+deploys nothing; the application's package merges the builtin and its own
+resources only. Merging a dependency's would need the application's build
+program to enumerate its HuxerUI library dependencies, which mcpp offers no
+channel for. Lib-Live2D's string catalogue is the one case today and is not
+read by its code.
+
+**The iOS rows are pinned to llvm@20.1.7 and link Apple's builtins.** The
+row's default llvm 22.1.8 compiles against its own libc++ headers while the
+program links the SDK's `libc++.dylib`, which does not export what 22's
+headers reference (`__atomic_*_global_table`, `__hash_memory`); 20's headers
+reference only what Xcode 26's libc++ has, so every application manifest pins
+the row. `@available` compiles to `__isPlatformVersionAtLeast` from
+compiler-rt's iOS builtins, which the engine does not link; the framework's
+build program locates `libclang_rt.iossim.a` (the payload, else Xcode's
+through xcrun) and puts it on the link line. Both are the engine's row to
+absorb; until it does, the pin is a line every iOS application carries.
+
+**macOS and iOS programs are not staged.** `mcpp pack` builds a program's
+staged tree by running it under the target's dynamic linker with
+`LD_TRACE_LOADED_OBJECTS`, which dyld ignores, and 2026.9.13.1 refuses
+rather than attempts it in every `--mode`: "no staged tree for --format app:
+cannot package the Mach-O program … until macOS support lands". dist-apple
+then bundles the bare executable, and nothing `mcpp::deploy` placed — the
+resource package under `HuxerUI/`, a library's shader libraries — reaches
+the bundle. The macOS and iOS rows build and link (iOS: see above) and the
+`.app` is produced; a runnable bundle with resources waits on the engine.
+
+**On macOS, a deployed directory is beside the executable, not a resource.**
+dist-apple copies the staged tree into `Contents/MacOS/`, so
+`NSBundle` resource lookups (`URLForResource:subdirectory:`) do not find
+what `mcpp::deploy` placed; HuxerUI's own AppKit adapter falls back to the
+executable's directory, and a library relying on `NSBundle` — Cubism's Metal
+shader loader reads `FrameworkMetallibs/` that way — needs dist-apple to
+learn a resource destination. The iOS bundle is flat and unaffected.
+
+**A universal APK is one ABI at a time.** `mcpp pack` hands a format provider
+one staged tree for one target; an APK with `lib/arm64-v8a` and `lib/x86_64`
+needs two.
+
+**`[target.<triple>] min_api_level` is reported as unsupported.** The engine
+reads it (mcpp `toml.cppm:2636`) and the Android build honours it, but the
+unknown-key sweep for a triple that is not the resolved target does not list
+it, so every non-Android build prints a warning for the two Android rows. An
+engine inconsistency; the key stays because the Android build needs it.
+
+**A cached host tool outlives its source.** mcpp caches `hcg` and `hrc` per
+package version and host toolchain, so a change to a tool's source under a
+`path` or `git` dependency is invisible until its package version moves —
+measured when the depfile flag reached `hrc` and a consumer's cached binary
+refused it. `tools/resource_compiler` is 0.3.1 for that reason; a tool change
+bumps its own version.
 
 **A published package carries no consumer dependencies.** `mcpp emit xpkg`
 derives a descriptor's `xpm.<platform>.deps` from the top-level
-`[xlings.workspace]` only, and the GTK payloads are declared on the target axis
-because that is what they are, and mcpp's own guidance says so: *for anything
-the produced code is compiled or linked against, the target axis is the
-recommended form*. Declaring them on both axes satisfies the descriptor, but
-the host-axis copy is right only by accident — it states a target fact about
-the build machine, and stops being right the first time the package is
-cross-compiled. Until mcpp derives consumer dependencies from the target axis,
-a published `huxerui.huxerui` would resolve and then fail to link on a machine
-without the payloads. Path and git dependencies are unaffected — they provision the target
-axis, which is what `mcpp/examples/` relies on.
+`[xlings.workspace]` only, and the GTK payloads are declared by the rule
+package on the target axis, because that is what they are: *for anything the
+produced code is compiled or linked against, the target axis is the
+recommended form*. Until mcpp derives consumer dependencies from a host
+module's target axis, a published `huxerui.huxerui` would resolve and then
+fail to link on a machine without the payloads. Path and git dependencies
+are unaffected — they provision the graph's declarations, which is what
+`mcpp/examples/` and Lib-Live2D rely on.
 
 **`tests/runtime` and `tests/platform` are not in the mcpp suite.** They reach
 fixtures a CMake step generates, and each needs an mcpp equivalent before it

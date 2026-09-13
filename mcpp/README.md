@@ -64,7 +64,7 @@ path arrive through the dependency edge: a dependency's `build.mcpp` emits
 `link-lib` / `link-search` that reach the **final** link, so an application
 never restates them. `mcpp/examples/` holds three worked examples.
 
-On Windows with the MSVC ABI, the application templates and examples keep `main()` and place GUI subsystem and CRT entry linker directives in that entry source. Double-clicking the resulting executable does not create a console; standard output and standard error have no automatically created console. Keep these directives in the application entry rather than package-wide link flags, which also affect tests and consumers. See [Platform interfaces](../docs/design/mcpp-build-system.md#6-platform-interfaces) for the build-system boundary.
+On Windows the application templates and examples keep a portable `int main()` and declare `windows_subsystem = "windows"` on their `[targets.*]` executable (mcpp 2026.9.12.2+). Double-clicking the resulting executable does not create a console; standard output and standard error have no automatically created console. The key reaches that executable's link alone, which is why it is not `[build] ldflags` -- that channel also reaches the test binaries and consumers. See [Platform interfaces](../docs/design/mcpp-build-system.md#6-platform-interfaces) for the build-system boundary.
 
 ## Three things worth knowing before editing
 
@@ -91,6 +91,55 @@ consumer is given `dep_dir()`, the dependency's *source* root -- and inventing
 one would mean writing into a package root that may be read-only. 44 files /
 196 KB, incrementally cached; the alternatives are enumerated in the plan.
 
+## Six platforms, one manifest
+
+A module-style application names its resources with `import app.resources;`: hrc
+writes that module beside the header, and the rule declares it to mcpp as a
+generated module interface (design §4). The Linux GTK payload table lives once,
+in `mcpp/huxerui-build-rules-gtk/mcpp.toml` (design §5).
+
+The framework's `mcpp.toml` carries one section per target row, and an
+application builds for any of them by naming the row:
+
+```bash
+mcpp build --target x86_64-linux-gnu            # or aarch64-macos, x86_64-windows-msvc
+mcpp build --target wasm32-emscripten
+mcpp build --target aarch64-ios-sim
+mcpp build --target x86_64-linux-android
+```
+
+NDK, emsdk, JDK, simulator and emulator tooling are xlings payloads mcpp
+installs on first use; iOS additionally needs Xcode on the machine, because
+Apple's SDK is located rather than installed. **Floor: mcpp 2026.9.13.1 and
+`mcpp:plugins` 0.9.1** — the manifest keys this build relies on
+(`kind = "app"`, `mcpp::deploy`, per-target `frameworks`, `abi.exceptions`,
+`requires_abi` on the target axis) do not exist or are silently ignored below
+that, and the templates say so in a comment.
+
+## Distribution formats
+
+`mcpp pack --format <name>` produces what a user installs, and `mcpp run
+--target <row> --format <name>` packages and runs it where it runs:
+
+| Row | Format | Runs through |
+|---|---|---|
+| Windows | `msi` | — |
+| Linux | `appimage` | — |
+| macOS, iOS simulator | `app` — the executable only, until mcpp stages Mach-O programs (design §9) | `simctl-run` (iOS) |
+| Android | `apk` | `adb-run` |
+| Web | `web` (a static directory) | any static HTTP server |
+
+Every format is a member of `mcpp:plugins` reached through `huxerui.rules`,
+which provides each one on the row it serves without being asked: a fresh
+project packs every format with nothing but `.target` in its build program,
+and `configure({ .installer, .appimage, .apple, .android, .web })` only
+changes what a format produces. The members declare the payloads they run, so
+an application declares none.
+See [Distribution formats](../docs/design/mcpp-build-system.md#7-distribution-formats).
+
+A smoke run — `HUXERUI_SMOKE_EXIT_MS=3000 mcpp run` — exits 0 after the delay
+once the application has started, which is what CI asserts on each row.
+
 ## Packaging
 
 ```bash
@@ -104,11 +153,10 @@ It is per-leg by construction: a package for another platform comes from that
 platform's runner, and `mcpp pack` says so when `[package] platforms` claims one
 that was not packed.
 
-**This is not the release SDK.** That one covers six platforms and ships a CMake
-package config for CMake consumers; `mcpp pack` produces the three legs mcpp
-builds, for mcpp consumers. `cmake/HuxerUISdk.cmake` and `scripts/package_sdk.sh`
-keep owning the release -- the script also *builds* the Android, Web and iOS
-artifacts, which mcpp cannot.
+**This is not the release SDK.** That one ships a CMake package config for
+CMake consumers and is produced by `cmake/HuxerUISdk.cmake` and
+`scripts/package_sdk.sh`; `mcpp pack` at the root produces the library for
+mcpp consumers, one leg per runner.
 
 ## Parity
 

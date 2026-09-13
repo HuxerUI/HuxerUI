@@ -1,0 +1,30 @@
+# The Java host library, one file per line. huxerui.rules re-runs the build
+# program when this list changes: a Java root inside a dependency gets no
+# rerun glob (its file set is fixed by the dependency's version), and a
+# `path` dependency -- this repository's own examples -- is the case where
+# the set changes without a version. huxerui-build-check keeps it current.
+HuxerUIAccessibilityProvider.java
+HuxerUIActivity.java
+HuxerUIApplicationActivation.java
+HuxerUIBufferReference.java
+HuxerUIExternalTexture.java
+HuxerUIFileDrop.java
+HuxerUIFilePicker.java
+HuxerUIFileReference.java
+HuxerUIHttpRequest.java
+HuxerUIInputConnection.java
+HuxerUILocalNotification.java
+HuxerUILocalNotificationContent.java
+HuxerUILocalNotificationLayout.java
+HuxerUILocalNotificationLayoutProvider.java
+HuxerUILocalNotificationReceiver.java
+HuxerUIPermission.java
+HuxerUIPlatformChannel.java
+HuxerUIPlatformModule.java
+HuxerUIPlatformView.java
+HuxerUIShadowRenderer.java
+HuxerUISurfaceStream.java
+HuxerUITextLayout.java
+HuxerUITextureLayer.java
+HuxerUIView.java
+PlatformPayload.java

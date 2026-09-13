@@ -18,7 +18,7 @@ namespace   = "huxerui"
 version     = "0.3.0"
 standard    = "c++20"
 description = "The HuxerUI test suite, compiled against the mcpp-built framework"
-license     = "Apache-2.0"
+license     = "MIT"
 
 [dependencies]
 huxerui = { path = "../.." }

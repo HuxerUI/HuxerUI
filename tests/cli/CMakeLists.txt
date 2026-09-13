@@ -14,7 +14,7 @@ function(huxerui_add_cli_test_suite target_name test_name)
 endfunction()
 huxerui_add_cli_test_suite(huxerui_cli_tests HuxerUICliTests
         LABELS tools cli
-        SOURCES commands.cpp project.cpp sdk.cpp process.cpp
+        SOURCES commands.cpp project.cpp sdk.cpp process.cpp mcpp_backend.cpp
 )
 huxerui_add_cli_test_suite(huxerui_cli_windows_tests HuxerUICliWindowsTests
         LABELS tools cli platform windows portable

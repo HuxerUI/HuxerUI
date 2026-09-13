@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The manifest huxerui.rules hands dist-apk for a HuxerUI application.
+
+     The six tokens are the values only the build knows; everything else is
+     the same document the CMake-path templates carry. An application that needs
+     more (permissions, URL schemes, a notification receiver) copies this
+     file into its tree and names it with `.android = { .manifest_template }`.
+
+     `org.huxerui.app_library` is how HuxerUIActivity finds the library that
+     holds the application: under mcpp the framework and the application are
+     one shared object named after the `app` target, and there is no Java of the
+     application's own to load it from. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="{{application_id}}">
+    <uses-sdk android:minSdkVersion="{{min_sdk}}" android:targetSdkVersion="{{target_sdk}}"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <application
+        android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="{{label}}"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <meta-data android:name="org.huxerui.app_library" android:value="{{lib_name}}"/>
+        <activity
+            android:name="{{activity}}"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

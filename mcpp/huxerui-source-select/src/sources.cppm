@@ -169,102 +169,43 @@ struct module_interface {
 
 // The layout `xim:wix` installs, expressed once.
 //
-// Each of WiX's three NuGet payloads keeps its own directory shape under a
-// subdirectory of the package root, so these are the upstream-documented paths
-// rather than a repackaging. They are here rather than in the rule so they can
-// be tested: a wrong path surfaces on Windows only, at link time, as a missing
-// .lib -- and there is no Windows machine on the way to that discovery.
-struct wix_layout {
-    std::string tool;                   // wix.exe
-    std::string bootstrapper_include;   // BootstrapperApplication.h and friends
-    std::string bootstrapper_lib;       // balutil.lib
-    std::string bootstrapper_runtime;   // mbanative.dll, deployed beside the BA
-    std::string dutil_include;          // dutil.h and friends
-    std::string dutil_lib;              // dutil.lib
-};
-
-// ------------------------------------------------------------- installer --
-
-// A WiX UpgradeCode is a GUID, and getting it wrong is not loud: WiX accepts a
-// malformed one as a literal and the MSI then never upgrades in place, which
-// shows up as two entries in Add/Remove Programs on a user's machine rather
-// than as a build failure here.
-[[nodiscard]] inline bool is_upgrade_code(std::string_view value) {
-    if (value.size() != 36) return false;
-    for (std::size_t i = 0; i < value.size(); ++i) {
-        const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
-        if (dash) {
-            if (value[i] != '-') return false;
-        } else if (!std::isxdigit(static_cast<unsigned char>(value[i]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-struct msi_inputs {
-    std::string wix;             // wix.exe, from the xim:wix payload
-    std::string package_wxs;     // the rendered definition, absolute
-    std::string project_dir;     // holds the icon, absolute
-    std::string out;             // the .msi to write, absolute
-    std::string executable;      // the linked program, as mcpp names it
-};
-
-// The `wix build` argv.
+// --------------------------------------------------------------- resources --
 //
-// The program is passed as a preprocessor variable rather than through a
-// directory bindpath. A bindpath that resolves to nothing yields a valid,
-// empty installer and no diagnostic; a `<File Source>` whose path is wrong is
-// an error. `Project` stays a bindpath because it holds the icon, which the
-// manifest names and the rule has already checked exists.
-[[nodiscard]] inline std::vector<std::string> msi_arguments(const msi_inputs& in) {
-    return {
-        in.wix, "build", in.package_wxs,
-        "-arch", "x64",
-        "-d", "Executable=" + in.executable,
-        "-bindpath", "Project=" + in.project_dir,
-        "-out", in.out,
+// The package paths hrc will write for a resource root, predicted before it
+// runs. `mcpp::deploy` copies one declared output at a time and a copy edge
+// has to name its input, so the rule declares every payload as an output of
+// the hrc action and deploys each one; this is the mapping tools/resource_
+// compiler/compiler.cpp's Discover() applies, kept as short as it is there so
+// the two cannot drift far: images keep their relative path except that an
+// SVG is compiled to `.huxv`, raw files keep theirs, strings live only in the
+// index, and the index is always `huxerui/resources.bin`.
+[[nodiscard]] inline std::vector<std::string> resource_outputs(const std::filesystem::path& root,
+                                                               std::string_view ns) {
+    std::vector<std::string> out;
+    std::error_code ec;
+    const auto walk = [&](const char* sub, auto&& accept) {
+        const std::filesystem::path dir = root / sub;
+        if (!std::filesystem::is_directory(dir, ec)) return;
+        for (auto it = std::filesystem::recursive_directory_iterator(dir, ec);
+             it != std::filesystem::recursive_directory_iterator(); ++it) {
+            if (!it->is_regular_file(ec)) continue;
+            std::filesystem::path rel = std::filesystem::relative(it->path(), dir, ec);
+            if (ec) continue;
+            if (auto packaged = accept(rel); packaged)
+                out.push_back("huxerui/" + std::string(ns) + "/" + sub + "/" + packaged->generic_string());
+        }
     };
-}
-
-// Replaces every @@TOKEN@@ in the shipped Package.wxs. An unresolved token is
-// an error rather than a literal: WiX would accept `@@VERSION@@` as a version
-// string and fail somewhere less obvious.
-[[nodiscard]] inline std::string render_wxs(
-        std::string_view text,
-        const std::vector<std::pair<std::string, std::string>>& values,
-        std::string& error) {
-    std::string out;
-    std::size_t cursor = 0;
-    while (cursor < text.size()) {
-        const std::size_t open = text.find("@@", cursor);
-        if (open == std::string_view::npos) { out.append(text.substr(cursor)); break; }
-        out.append(text.substr(cursor, open - cursor));
-        const std::size_t close = text.find("@@", open + 2);
-        if (close == std::string_view::npos) {
-            error = "unterminated @@ token"; return {};
-        }
-        const std::string_view key = text.substr(open + 2, close - open - 2);
-        const auto it = std::ranges::find_if(values, [&](const auto& kv) { return kv.first == key; });
-        if (it == values.end()) {
-            error = "unknown token '" + std::string(key) + "'"; return {};
-        }
-        out.append(it->second);
-        cursor = close + 2;
-    }
+    walk("images", [](std::filesystem::path rel) -> std::optional<std::filesystem::path> {
+        std::string ext = rel.extension().string();
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext == ".svg") return rel.replace_extension(".huxv");
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg") return rel;
+        return std::nullopt;
+    });
+    walk("raw", [](std::filesystem::path rel) -> std::optional<std::filesystem::path> { return rel; });
+    std::ranges::sort(out);
+    out.push_back("huxerui/resources.bin");
     return out;
-}
-
-[[nodiscard]] inline wix_layout wix_paths(std::string_view root) {
-    const std::string r(root);
-    return wix_layout{
-        .tool                 = r + "/tool/tools/net6.0/any/wix.exe",
-        .bootstrapper_include = r + "/bootstrapper/build/native/include",
-        .bootstrapper_lib     = r + "/bootstrapper/build/native/v14/x64/balutil.lib",
-        .bootstrapper_runtime = r + "/bootstrapper/runtimes/win-x64/native/mbanative.dll",
-        .dutil_include        = r + "/dutil/build/native/include",
-        .dutil_lib            = r + "/dutil/build/native/v14/x64/dutil.lib",
-    };
 }
 
 // ------------------------------------------------------------ CMake reading --

@@ -4,4 +4,13 @@
 import mcpp;
 import huxerui.rules;
 
-int main() { return huxerui::rules::configure({}) ? 0 : 1; }
+int main() {
+    return huxerui::rules::configure({
+        // The `app` target: names the `<target>.resources` directory the desktop
+        // runtime reads and the program every distribution format packages.
+        // mcpp tells a build program the package name and not its targets.
+        // Nothing else: the MSI, AppImage, .app, Web page and APK are all
+        // produced from this with `mcpp pack --format <name>`.
+        .target = "huxerui_example_import",
+    }) ? 0 : 1;
+}

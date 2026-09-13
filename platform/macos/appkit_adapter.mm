@@ -724,7 +724,18 @@ public:
       if (relative == nil) {
         throw std::logic_error("HuxerUI macOS resource path is not valid UTF-8");
       }
+      // A CMake bundle stages the package under Contents/Resources/HuxerUI. A
+      // bundle `mcpp pack --format app` assembles lays the deployed tree out
+      // beside the executable under Contents/MacOS, and an executable that is
+      // no bundle at all reads beside itself too, so the second root is tried
+      // when the first is not a directory.
       NSURL* root = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"HuxerUI" isDirectory:YES];
+      BOOL is_directory = NO;
+      if (![NSFileManager.defaultManager fileExistsAtPath:root.path isDirectory:&is_directory] || !is_directory) {
+        root = [[NSBundle.mainBundle.executableURL URLByDeletingLastPathComponent]
+            URLByAppendingPathComponent:@"HuxerUI"
+                                isDirectory:YES];
+      }
       NSURL* url = [root URLByAppendingPathComponent:relative];
       const char* path = url.fileSystemRepresentation;
       if (path == nullptr) {

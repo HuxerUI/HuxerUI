@@ -4,10 +4,10 @@
 [package]
 name        = "huxerui-resource-compiler"
 namespace   = "huxerui"
-version     = "0.3.0"
+version     = "0.3.2"
 standard    = "c++20"
 description = "hrc -- the HuxerUI resource compiler"
-license     = "Apache-2.0"
+license     = "MIT"
 
 [targets.hrc]
 kind = "bin"

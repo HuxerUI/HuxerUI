@@ -1,5 +1,7 @@
 #include "project.h"
 
+#include "mcpp_backend.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -346,8 +348,26 @@ std::vector<GeneratedFile> McppApplicationProjectFiles(const ProjectTemplateCont
   if (manifest == files.end()) {
     throw std::logic_error("templates/app renders no mcpp.toml");
   }
-  manifest->content = McppPathDependency(manifest->content, huxerui_home);
+  // A template that pins HuxerUI by git revision itself (one its library
+  // was built against) keeps its lines; the rewrite is for the rendered
+  // version line.
+  if (manifest->content.find("\nhuxerui.huxerui = \"") != std::string::npos) {
+    manifest->content = McppPathDependency(manifest->content, huxerui_home);
+  }
   return files;
+}
+
+/// Narrows the template's `[package] platforms` to the platforms `--platform` selected.
+std::string McppSelectedPlatforms(std::string content, std::span<const std::string> platform_ids) {
+  if (platform_ids.empty()) {
+    return content;
+  }
+  const std::size_t at = content.find("\nplatforms = [");
+  if (at == std::string::npos) {
+    throw std::logic_error("templates/app/mcpp.toml.in declares no [package] platforms");
+  }
+  const std::size_t end = content.find(']', at);
+  return content.substr(0, at + 1) + McppPlatformsLine(platform_ids) + content.substr(end + 1);
 }
 
 std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext& context) {
@@ -681,9 +701,10 @@ Project DiscoverProject(const std::filesystem::path& start) {
     current = parent;
   }
   if (!mcpp_root.empty()) {
-    throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
-                             " -- build it with `mcpp build` and run it with `mcpp run`: " +
-                             mcpp_root.string());
+    // The same project shape the CMake path sees, with the platforms read
+    // from the manifest rather than from shell directories: the commands map
+    // onto mcpp's, and everything platform-specific is mcpp's target row.
+    return Project{mcpp_root, McppProjectPlatforms(mcpp_root / "mcpp.toml"), {}, BuildSystem::Mcpp};
   }
   throw std::runtime_error("no HuxerUI project found from " + start.string());
 }
@@ -736,6 +757,13 @@ ProjectTemplate LoadProjectTemplate(const Project& project) {
 }
 
 Project ResolveApplicationProject(const Project& project) {
+  if (project.build_system == BuildSystem::Mcpp) {
+    const std::filesystem::path preview = project.root / "examples/preview";
+    if (IsMcppProjectRoot(preview) && std::filesystem::is_directory(project.root / "include")) {
+      return Project{preview, McppProjectPlatforms(preview / "mcpp.toml"), {}, BuildSystem::Mcpp};
+    }
+    return project;
+  }
   if (std::filesystem::is_regular_file(project.root / "examples/preview/CMakeLists.txt") &&
       std::filesystem::is_directory(project.root / "include")) {
     return InspectProjectRoot(project.root / "examples/preview");
@@ -753,9 +781,8 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
   }
   const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
   const ProjectTemplateContext& context = ProjectContext(project_template);
-  // An mcpp project has no platform shells: mcpp builds Linux, Windows and
-  // macOS from one manifest, and the three platforms CMake owns alone --
-  // Android, iOS and Web -- are outside mcpp's target language entirely.
+  // An mcpp project has no platform shells: one manifest carries every row,
+  // and a platform selection only narrows `[package] platforms`.
   if (build_system == BuildSystem::CMake && library == nullptr && application_platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
   }
@@ -783,7 +810,17 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
     const std::string_view selected =
         !template_name.empty() ? template_name
                                : (library != nullptr ? std::string_view("library") : std::string_view("app"));
-    WriteFiles(temporary, McppApplicationProjectFiles(context, huxerui_home, selected));
+    std::vector<std::string> platform_ids;
+    for (const PlatformDriver* platform : application_platforms) {
+      platform_ids.emplace_back(platform->Id());
+    }
+    std::vector<GeneratedFile> files = McppApplicationProjectFiles(context, huxerui_home, selected);
+    for (GeneratedFile& file : files) {
+      if (file.path.generic_string() == "mcpp.toml") {
+        file.content = McppSelectedPlatforms(std::move(file.content), platform_ids);
+      }
+    }
+    WriteFiles(temporary, files);
     CopyApplicationDevelopmentSkill(temporary, skill_source, agent_skill_directories);
     std::filesystem::rename(temporary, destination);
     cleanup.Commit();
@@ -819,6 +856,34 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 
 std::string_view McppPackageVersion() noexcept {
   return HUXERUI_CLI_VERSION;
+}
+
+void AddMcppProjectPlatforms(const Project& project, std::span<const PlatformDriver* const> platforms) {
+  if (platforms.empty()) {
+    throw std::invalid_argument("at least one platform is required");
+  }
+  const std::filesystem::path manifest = project.root / "mcpp.toml";
+  std::string content = ReadFile(manifest);
+  if (content.find("\nplatforms = [") == std::string::npos) {
+    throw std::runtime_error(manifest.string() + " declares no [package] platforms");
+  }
+  std::vector<std::string> ids = project.platforms;
+  bool added = false;
+  for (const PlatformDriver* platform : platforms) {
+    if (std::find(ids.begin(), ids.end(), platform->Id()) == ids.end()) {
+      ids.emplace_back(platform->Id());
+      added = true;
+    }
+  }
+  if (!added) {
+    throw std::runtime_error("every requested platform is already declared in " + manifest.string());
+  }
+  content = McppSelectedPlatforms(std::move(content), ids);
+  std::ofstream stream(manifest, std::ios::binary | std::ios::trunc);
+  if (!stream) {
+    throw std::runtime_error("cannot write " + manifest.string());
+  }
+  stream << content;
 }
 
 void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,

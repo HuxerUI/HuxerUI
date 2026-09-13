@@ -43,12 +43,15 @@ enum class AgentSkillDirectory {
 
 /// Discovered HuxerUI project and its platform directories.
 struct Project {
-  /// Project root containing `CMakeLists.txt`.
+  /// Project root containing `CMakeLists.txt`, or `mcpp.toml` and `build.mcpp`.
   std::filesystem::path root;
-  /// Recognized platform directory names.
+  /// Recognized platform directory names, or the platforms an mcpp package declares.
   std::vector<std::string> platforms;
   /// Unrecognized entries found in the platform directory.
   std::vector<std::string> unknown_platforms;
+  /// The build system that drives the project. An mcpp project has no platform shells: its platforms are
+  /// `[package] platforms`, and build, run and package map to `mcpp build`, `mcpp run` and `mcpp pack`.
+  BuildSystem build_system = BuildSystem::CMake;
 };
 
 /// Checks whether a name is valid for a generated application project.
@@ -143,5 +146,12 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 /// @throws std::runtime_error if every requested platform is already complete or publication fails.
 void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_template,
     std::span<const PlatformDriver* const> platforms);
+
+/// Adds platforms to an mcpp project's `[package] platforms`.
+/// @param project Existing mcpp project.
+/// @param platforms Platform drivers to declare; `web` is written as mcpp's `emscripten`.
+/// @throws std::invalid_argument if no platform is supplied.
+/// @throws std::runtime_error if the manifest declares no platforms or already declares every one requested.
+void AddMcppProjectPlatforms(const Project& project, std::span<const PlatformDriver* const> platforms);
 
 } // namespace huxerui::cli

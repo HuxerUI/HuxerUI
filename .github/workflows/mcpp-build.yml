@@ -33,6 +33,9 @@ on:
       - 'platform/linux/**'
       - 'platform/windows/**'
       - 'platform/macos/**'
+      - 'platform/android/**'
+      - 'platform/ios/**'
+      - 'platform/web/**'
       - 'resources/**'
       # Read by huxerui-build-check, which compares the two build systems.
       - 'cmake/platform/**'
@@ -74,6 +77,9 @@ on:
       - 'platform/linux/**'
       - 'platform/windows/**'
       - 'platform/macos/**'
+      - 'platform/android/**'
+      - 'platform/ios/**'
+      - 'platform/web/**'
       - 'resources/**'
       # Read by huxerui-build-check, which compares the two build systems.
       - 'cmake/platform/**'
@@ -106,7 +112,7 @@ permissions:
 env:
   # Pinned rather than latest: an mcpp release changes build behaviour, and a
   # green PR should stay green until someone chooses to move this line.
-  MCPP_VERSION: '2026.9.10.2'
+  MCPP_VERSION: '2026.9.13.1'
   # The Linux clang leg. Pinned for the same reason mcpp is: a toolchain
   # release changes what compiles, and a green PR should stay green until
   # someone moves this line. Windows and macOS already build with clang --
@@ -147,9 +153,12 @@ jobs:
           xlings install "mcpp@${MCPP_VERSION}" -y || true
 
       - name: Select the pinned mcpp
+        # A restored cache keeps whichever mcpp was active when it was saved;
+        # `--use` activates the pinned one.
         run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
 
       # The tooling is built by mcpp rather than written in Python: a
       # repository that offers mcpp as a first-class build system should not
@@ -213,9 +222,12 @@ jobs:
           echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
 
       - name: Select the pinned mcpp
+        # A restored cache keeps whichever mcpp was active when it was saved;
+        # `--use` activates the pinned one.
         run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
 
       # The framework: 67 core sources, platform/linux, the builtin resource
       # header (hrc) and the C++20 module shell. mcpp provisions the GTK
@@ -234,6 +246,41 @@ jobs:
             echo "--- $example"
             ( cd "$example" && mcpp build )
           done
+      # The package the runtime reads is deployed beside the executable by
+      # huxerui.rules (one `mcpp::deploy` per payload); this is the assertion
+      # that the desktop path has resources at run time at all.
+      - name: Assert the resource package is beside the executable
+        working-directory: mcpp/examples/01-import
+        run: |
+          exe=$(find target -type f -name huxerui_example_import -path '*/bin/*' | head -1)
+          test -n "$exe" || { echo "01 produced no executable"; exit 1; }
+          res="$(dirname "$exe")/huxerui_example_import.resources"
+          test -f "$res/huxerui/resources.bin" || { echo "no resource index under $res"; exit 1; }
+          test -f "$res/huxerui/huxerui/images/check.huxv" || { echo "a builtin payload is missing under $res"; exit 1; }
+          echo "resources deployed: $(find "$res" -type f | wc -l) files"
+
+      # The application starts, lays out, paints and exits 0 on its own:
+      # HUXERUI_SMOKE_EXIT_MS is the delay, and a crash before it keeps the
+      # status a crash produces. The window needs a display; Xvfb is one.
+      - name: Smoke-run the example
+        working-directory: mcpp/examples/01-import
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb > /dev/null
+          exe=$(find target -type f -name huxerui_example_import -path '*/bin/*' | head -1)
+          HUXERUI_SMOKE_EXIT_MS=4000 timeout 120 xvfb-run -a "$exe" 2>&1 | tee smoke.log
+          grep -q 'HuxerUI smoke exit' smoke.log || { echo "the example did not reach the smoke exit"; exit 1; }
+
+      # The AppImage is mcpp:plugins' dist-appimage, reached through
+      # huxerui.rules; the payload it runs is declared by the member itself.
+      - name: Pack the example as an AppImage
+        working-directory: mcpp/examples/01-import
+        run: |
+          mcpp pack --format appimage
+          image=$(find target -name '*.AppImage' | head -1)
+          test -n "$image" || { echo "no AppImage was produced"; exit 1; }
+          test "$(stat -c %s "$image")" -gt 1048576 || { echo "the AppImage is implausibly small"; exit 1; }
+          echo "packed $image ($(stat -c %s "$image") bytes)"
+
       # The suite that says the LIBRARY works, not just that it links. Same
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
@@ -358,7 +405,7 @@ jobs:
       # be a per-command environment variable for two of the three.
       - name: Select the pinned mcpp and make clang the default toolchain
         run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
           mcpp --version
           # `default` selects; it does not install. On a cold cache the next
           # command is `error: llvm@22.1.8 is not installed`.
@@ -436,9 +483,12 @@ jobs:
           echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
 
       - name: Select the pinned mcpp
+        # A restored cache keeps whichever mcpp was active when it was saved;
+        # `--use` activates the pinned one.
         run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
 
       # 25 Objective-C++ sources compiled with -fobjc-arc, and the frameworks
       # from the top-level [runtime] table -- which the engine renders only for
@@ -477,6 +527,195 @@ jobs:
           echo "$list" | grep -qE 'lib/.+/(libhuxerui\.a|huxerui\.lib)' \
             || { echo "the package carries no library"; exit 1; }
           echo "package carries headers, the module interface and a library"
+  # ---------------------------------------------------------------- Web ----
+  # The Emscripten row. The framework is built as example 01's dependency
+  # rather than at the root: the artifact's exception model is stated by the
+  # root, and the application is the root that states it. emsdk is a payload
+  # mcpp installs on first use.
+  web:
+    name: mcpp build (wasm32-emscripten)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-web-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-web-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-web-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Select the pinned mcpp
+        # A restored cache keeps whichever mcpp was active when it was saved;
+        # `--use` activates the pinned one.
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
+
+      - name: Build the example for the Web
+        working-directory: mcpp/examples/01-import
+        run: mcpp build --target wasm32-emscripten
+
+      # dist-web writes the launcher, the implicit .wasm, the preloaded
+      # resources and the page huxerui.rules ships into one static directory.
+      - name: Pack the static directory and check its shape
+        working-directory: mcpp/examples/01-import
+        run: |
+          mcpp pack --target wasm32-emscripten --format web
+          web=$(find target -type d -name web -path '*out/web' | head -1)
+          test -n "$web" || { echo "dist-web produced no directory"; exit 1; }
+          for f in index.html huxerui_example_import.js huxerui_example_import.wasm huxerui_example_import.data; do
+            test -f "$web/$f" || { echo "the Web directory lacks $f"; exit 1; }
+          done
+          magic=$(head -c 4 "$web/huxerui_example_import.wasm" | od -An -tx1 | tr -d ' \n')
+          test "$magic" = "0061736d" || { echo "the .wasm is not a WebAssembly module (magic $magic)"; exit 1; }
+          grep -q 'createHuxerUIApp' "$web/index.html" || { echo "the page does not load the launcher"; exit 1; }
+          echo "web directory: $(ls "$web" | tr '\n' ' ')"
+
+  # ---------------------------------------------------------- iOS simulator ----
+  # The simulator row: the compiler is the llvm payload, the SDK is Xcode's,
+  # located rather than installed. dist-apple assembles the flat bundle and
+  # simctl-run (xim:apple-simulator-tools) installs and launches it.
+  ios-sim:
+    name: mcpp build (aarch64-ios-sim)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-ios-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-ios-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-ios-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Select the pinned mcpp
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
+
+      - name: Build the example for the simulator
+        working-directory: mcpp/examples/01-import
+        run: mcpp build --target aarch64-ios-sim
+
+      # mcpp 2026.9.13.1 does not stage a Mach-O program (it would have to run
+      # it to trace its dynamic closure), so dist-apple bundles the executable
+      # alone and nothing deployed -- the resource package -- reaches it; the
+      # simulator run needs those resources. Both assertions run the day the
+      # engine stages; until then the step says which state the run is in.
+      - name: Pack the bundle and check its shape
+        working-directory: mcpp/examples/01-import
+        run: |
+          mcpp pack --target aarch64-ios-sim --format app 2>&1 | tee pack.log
+          app=$(find target -type d -name '*.app' | head -1)
+          test -n "$app" || { echo "dist-apple produced no bundle"; exit 1; }
+          test -f "$app/huxerui_example_import" || { echo "the bundle carries no executable"; exit 1; }
+          plutil -p "$app/Info.plist" | tee plist.txt
+          grep -q '"MinimumOSVersion" => "15.0"' plist.txt || { echo "MinimumOSVersion is not the manifest's 15.0"; exit 1; }
+          if grep -q 'no staged tree' pack.log; then
+            echo "staged=no" >> "$GITHUB_ENV"
+            echo "bundle: $app -- executable only (mcpp does not stage Mach-O programs yet)"
+          else
+            echo "staged=yes" >> "$GITHUB_ENV"
+            test -f "$app/HuxerUI/huxerui/resources.bin" || { echo "the engine staged, but the resource package is not in the bundle"; exit 1; }
+            echo "bundle: $app"
+          fi
+
+      - name: Smoke-run on the simulator
+        if: env.staged == 'yes'
+        working-directory: mcpp/examples/01-import
+        run: |
+          HUXERUI_SMOKE_EXIT_MS=5000 timeout 600 mcpp run --target aarch64-ios-sim --format app 2>&1 | tee smoke.log
+          grep -q 'HuxerUI smoke exit' smoke.log || { echo "the example did not reach the smoke exit on the simulator"; exit 1; }
+
+  android:
+    name: mcpp build (x86_64-linux-android)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Cache xlings and mcpp
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+          key: mcpp-android-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            mcpp-android-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
+            mcpp-android-${{ runner.os }}-${{ runner.arch }}-v2-
+
+      - name: Install xlings and mcpp
+        run: |
+          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
+            curl -fsSL https://d2learn.org/xlings-install.sh | bash
+          fi
+          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+
+      - name: Select the pinned mcpp
+        # A restored cache keeps whichever mcpp was active when it was saved;
+        # `--use` activates the pinned one.
+        run: |
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
+
+
+      - name: Build the example for Android
+        working-directory: mcpp/examples/01-import
+        run: mcpp build --target x86_64-linux-android
+
+      - name: Pack the APK and check its contents
+        working-directory: mcpp/examples/01-import
+        run: |
+          mcpp pack --target x86_64-linux-android --format apk
+          apk=$(find target -name '*.apk' | grep -v base.apk | head -1)
+          test -n "$apk" || { echo "dist-apk produced no APK"; exit 1; }
+          unzip -Z1 "$apk" | tee contents.txt
+          # The launcher icon is the SDK's unless the application supplies android/res.
+          for f in lib/x86_64/libhuxerui_example_import.so assets/huxerui/resources.bin classes.dex AndroidManifest.xml \
+                   resources.arsc res/mipmap-anydpi-v26/ic_launcher.xml; do
+            grep -qx "$f" contents.txt || { echo "the APK lacks $f"; exit 1; }
+          done
+          grep -qE '^META-INF/.*\.(RSA|EC)$' contents.txt || { echo "the APK is not signed"; exit 1; }
+          apksigner=$(find ~/.mcpp/registry/data/xpkgs -name apksigner -type f | head -1)
+          test -n "$apksigner" && "$apksigner" verify --print-certs "$apk" | head -3
+          aapt2=$(find ~/.mcpp/registry/data/xpkgs -name aapt2 -type f | head -1)
+          "$aapt2" dump badging "$apk" | tee badging.txt | grep -E "^(application:|targetSdkVersion)"
+          grep -q "^application-icon" badging.txt || { echo "the manifest names no launcher icon"; exit 1; }
+          grep -q "targetSdkVersion:'36'" badging.txt || { echo "targetSdkVersion is not 36"; exit 1; }
+          echo "apk: $apk"
+
   windows:
     name: mcpp build (windows x86_64)
     runs-on: windows-2022
@@ -512,7 +751,7 @@ jobs:
       - name: Select the pinned mcpp
         shell: pwsh
         run: |
-          xlings install "mcpp@$env:MCPP_VERSION" -y
+          xlings install "mcpp@$env:MCPP_VERSION" -y --use
           mcpp --version
 
       - name: Build the framework
@@ -545,10 +784,16 @@ jobs:
           if (-not $info.FileVersion) { throw 'the executable carries no version resource' }
 
       # The installer, built by huxerui.rules through the WiX toolset the
-      # framework declares as an xlings payload. `role = "artifact"` is what
-      # sequences it after the link -- its input is the executable above -- and
-      # `bindpath.Application=bin` is what lets it harvest the link directory
-      # without a staging step.
+      # framework declares as an xlings payload. It is a `mcpp pack --format`
+      # provider (mcpp 2026.9.11.1+), so a plain `mcpp build` above produces no
+      # MSI and this step asks for one; `role = "artifact"` is what sequences it
+      # after the link, and the program is named rather than harvested.
+      - name: Build the MSI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: mcpp/examples/02-module-units
+        run: mcpp pack --format msi
+
       - name: Assert the MSI was produced
         if: runner.os == 'Windows'
         shell: pwsh
@@ -583,9 +828,6 @@ jobs:
           if ($exe.Size -lt 1MB) { throw "the installed executable is $($exe.Size) bytes, which is not the application" }
 
           # The definition the rule rendered, kept beside it for inspection.
-          $wxs = Get-ChildItem -Recurse -Filter 'Package.wxs' target | Select-Object -First 1
-          if (-not $wxs) { throw 'the rendered Package.wxs is missing' }
-          if ((Get-Content $wxs.FullName -Raw) -match '@@') { throw 'the Package.wxs has unresolved tokens' }
 
       # The suite that says the LIBRARY works, not just that it links. Same
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
@@ -641,9 +883,13 @@ jobs:
           xlings install "mcpp@${MCPP_VERSION}" -y || true
 
       - name: Select the pinned mcpp
+        # A restored cache keeps whichever mcpp was active when it was saved;
+        # `--use` activates the pinned one.
         run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+          xlings install "mcpp@${MCPP_VERSION}" -y --use
+          mcpp --version | tee version.txt
+          grep -q "${MCPP_VERSION}" version.txt || { echo "mcpp ${MCPP_VERSION} is not the active mcpp"; exit 1; }
+
 
       # The CLI is a CMake artifact; only its dependencies are needed here, not
       # the framework's.

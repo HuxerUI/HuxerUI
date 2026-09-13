@@ -73,6 +73,8 @@ huxerui mcpp build --source ../my-mcpp-project
 
 This command invokes mcpp directly and does not change the existing HuxerUI CMake build or platform commands. It is a generic mcpp entry point; the mcpp project remains responsible for its own sources, dependencies, and framework integration.
 
+In a project created with `--build mcpp`, the ordinary verbs drive mcpp for the named platform: `huxerui build android` is `mcpp build --target x86_64-linux-android`, `huxerui run android` is `mcpp run --target … --format apk`, `huxerui package windows` is `mcpp pack --target … --format msi`, and `huxerui doctor` asks `mcpp self doctor`. See [Six Platforms with mcpp](mcpp.md).
+
 The CLI passes the selected framework home through its process environment and build arguments without writing it into platform configuration files. Direct Android Studio builds require `HUXERUI_HOME` in the IDE's environment; direct Xcode builds require it in the IDE's environment or explicit build settings, such as `Config/Local.xcconfig`. An already running IDE does not inherit the CLI's temporary environment or remember its last `--source` selection.
 
 Android and iOS accept a device selected from:

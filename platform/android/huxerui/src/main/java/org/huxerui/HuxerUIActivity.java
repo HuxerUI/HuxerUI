@@ -2,6 +2,8 @@ package org.huxerui;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -21,9 +23,31 @@ public class HuxerUIActivity extends Activity {
     private HuxerUIView contentView;
     private Object backCallback;
 
+    /**
+     * Loads the native library that holds the application, when the manifest names one.
+     *
+     * A Gradle project loads it from its own Activity subclass; an mcpp project has no
+     * Java of its own and names the library in a {@code org.huxerui.app_library}
+     * meta-data entry instead, which the build writes from the target's name. Without
+     * the entry this is a no-op, so both projects share this Activity.
+     */
+    private void loadApplicationLibrary() {
+        try {
+            final ApplicationInfo info =
+                    getPackageManager().getApplicationInfo(getPackageName(), PackageManager.GET_META_DATA);
+            final String library = info.metaData == null ? null : info.metaData.getString("org.huxerui.app_library");
+            if (library != null && !library.isEmpty()) {
+                System.loadLibrary(library);
+            }
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // The running package is always findable; nothing to load.
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        loadApplicationLibrary();
         configureEdgeToEdgeWindow();
         contentView = new HuxerUIView(this);
         contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);

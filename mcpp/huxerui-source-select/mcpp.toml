@@ -10,7 +10,7 @@ name        = "huxerui-source-select"
 namespace   = "huxerui"
 version     = "0.3.0"
 description = "Source selection and composable detection for the HuxerUI build rules"
-license     = "Apache-2.0"
+license     = "MIT"
 
 [lib]
 path = "src/sources.cppm"
