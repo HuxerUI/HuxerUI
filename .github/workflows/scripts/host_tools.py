@@ -220,8 +220,8 @@ def smoke(directory):
         generated = root / "generated.cpp"
         run(hcg, "--input", str(source), "--output", str(generated))
         text = generated.read_text(encoding="utf-8")
-        if "[[huxerui::composable]]" in text or any(marker not in text for marker in (
-            "HUXERUI_SCOPE_BEGIN", "HUXERUI_SCOPE_END", 'Text("Hello")',
+        if "[[huxerui::composable]]" in text or "HUXERUI_SCOPE" in text or any(marker not in text for marker in (
+            "return ::huxerui::Scope([=]() -> ::huxerui::View {", "});", 'Text("Hello")',
         )):
             raise ValueError("HuxerUI host tools: codegen smoke output is incorrect")
         resources = root / "resources"
