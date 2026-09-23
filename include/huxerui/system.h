@@ -119,7 +119,7 @@ struct LocalNotification {
   /// This is a logical identifier used for replacement, cancellation, and activation rather than a native handle,
   /// integer tag, or request identifier.
   std::string identifier;
-  /// Optional title resolved when submitted against the Environment captured by `LocalNotificationHandle`.
+  /// Optional title resolved against the effective resource configuration when ShowAsync or ScheduleAsync is called.
   StringVariant title;
   /// Optional body resolved with the title. An accepted schedule retains the resolved strings.
   StringVariant body;
@@ -149,14 +149,15 @@ struct NotificationActivation {
 
 /// Provides application access to local operating-system notifications for the current Runtime.
 ///
-/// Obtain this handle during composition through `UseApplication().LocalNotifications()` and capture it into
-/// UI-thread event handlers or Tasks. The handle captures the current Environment for localized content resolution.
+/// Obtain this handle through `UseApplication().LocalNotifications()` and capture it into application-thread event
+/// handlers or Tasks. Each operation captures its calling source; ShowAsync and ScheduleAsync resolve localized
+/// content when called. Acquiring a handle does not capture a UI or Environment.
 /// Authorization checks run independently; authorization requests, presentation, scheduling, and cancellation retain
-/// submission order within one Runtime. Awaiting Tasks resume through the Runtime's UI dispatcher.
+/// submission order within one Runtime. Awaiting Tasks resume through the application dispatcher.
 ///
 /// Native application configuration and final product policy remain application-shell responsibilities. A captured
-/// handle remains safe after Runtime destruction and then reports no capabilities and `Unavailable` operation results.
-/// Destroying a Runtime does not withdraw notifications or schedules already accepted by the operating system.
+/// handle survives UiWindow destruction. After Runtime retirement it reports no capabilities and `Unavailable`
+/// operation results. Runtime retirement does not withdraw notifications or schedules accepted by the operating system.
 class LocalNotificationHandle final {
 public:
   /// Returns the connected host's current independent capability snapshot.
@@ -220,12 +221,9 @@ public:
   [[nodiscard]] Task<LocalNotificationOperationStatus> CancelAsync(std::string_view identifier) const;
 
 private:
-  LocalNotificationHandle(std::shared_ptr<detail::LocalNotificationService> service,
-                          std::shared_ptr<const Environment> environment)
-      : service_(std::move(service)), environment_(std::move(environment)) {}
+  explicit LocalNotificationHandle(std::shared_ptr<detail::LocalNotificationService> service) : service_(std::move(service)) {}
 
   std::shared_ptr<detail::LocalNotificationService> service_;
-  std::shared_ptr<const Environment> environment_;
 
   friend class ApplicationHandle;
 };
@@ -236,7 +234,7 @@ namespace windows {
 /// Registers an application-owned URL scheme for the current executable and Windows user.
 ///
 /// Call explicitly from application entry code, normally before RunApplication(). Creates a persistent
-/// HKCU registration with a quoted executable path and URL argument; no installer, administrator, COM, or Runtime
+/// HKCU registration with a quoted executable path and URL argument; no installer, administrator, COM, or UiWindow
 /// is required. Repeated registration by the same executable may update its display name. Other executables,
 /// non-protocol keys, and machine-wide registrations are rejected rather than replaced. The user's default-app
 /// choice is never changed, so registration does not guarantee that Windows will route every URL to this app.
@@ -265,7 +263,7 @@ void UnregisterUrlScheme(std::string_view scheme);
 ///
 /// Called synchronously on the host UI thread when a template is submitted, including when scheduling it, not at
 /// delivery time. Parameters are borrowed for the call only; title/body are resolved UTF-8 and data is the submitted
-/// resource-free snapshot. Do not retain references, block on I/O, or capture composition/Runtime-owned state.
+/// resource-free snapshot. Do not retain references, block on I/O, or capture composition/UiWindow-owned state.
 /// Return nullopt for an unknown template (Unavailable). Empty, malformed, oversized XML or a thrown exception causes
 /// Failed. Return one UTF-8 `<toast>` document with one `<visual>` and `<binding template="ToastGeneric">`, escaping
 /// dynamic text and attributes. DTDs and external entities are forbidden. Image resources must remain accessible until
@@ -286,7 +284,7 @@ using LocalNotificationTemplateProvider =
 /// Only one identity may be configured per process until explicitly unregistered. Repeated registration is allowed
 /// for the same executable; an identity owned by another executable or a machine-wide COM registration is rejected.
 /// Creates a current-user Start menu shortcut named after app_id, or preserves a matching shortcut at that path.
-/// Other shortcut locations are not searched or modified. No administrator privileges, installer, Runtime, or
+/// Other shortcut locations are not searched or modified. No administrator privileges, installer, UiWindow, or
 /// notification submission is required.
 /// Persistent registration survives process exit so scheduled notifications and later clicks can launch the app.
 /// This operation does not grant notification permission or guarantee visible delivery.
@@ -328,5 +326,4 @@ void UnregisterLocalNotifications(std::string_view app_id, std::string_view acti
 
 } // namespace windows
 #endif
-
 } // namespace huxerui

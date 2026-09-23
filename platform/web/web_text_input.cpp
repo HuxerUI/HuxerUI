@@ -419,15 +419,15 @@ WebTextInput::~WebTextInput() {
   TextInputs().erase(web_session_id_);
 }
 
-void WebTextInput::SetRuntime(Runtime* runtime) noexcept {
-  runtime_ = runtime;
+void WebTextInput::SetUiWindow(UiWindow* ui_window) noexcept {
+  ui_window_ = ui_window;
 }
 
 void WebTextInput::Reset() noexcept {
   if (event_token_ != 0) {
     DeactivateWebTextInput(web_session_id_, event_token_);
   }
-  runtime_ = nullptr;
+  ui_window_ = nullptr;
   session_id_ = 0;
   event_token_ = 0;
   configuration_ = {};
@@ -493,7 +493,7 @@ void WebTextInput::RequestShow(TextInputSessionId session_id) {
 }
 
 bool WebTextInput::Accepts(std::uint32_t event_token) const noexcept {
-  return runtime_ != nullptr && session_id_ != 0 && event_token != 0 && event_token == event_token_;
+  return ui_window_ != nullptr && session_id_ != 0 && event_token != 0 && event_token == event_token_;
 }
 
 std::uint32_t WebTextInput::NextEventToken() noexcept {
@@ -505,10 +505,10 @@ std::uint32_t WebTextInput::NextEventToken() noexcept {
 }
 
 void WebTextInput::Activate(const TextInputGeometry& geometry) {
-  if (runtime_ == nullptr || geometry.result_code != TextInputResultCode::Ok) {
+  if (ui_window_ == nullptr || geometry.result_code != TextInputResultCode::Ok) {
     return;
   }
-  const TextInputContext context = runtime_->QueryTextInputContext(session_id_, 0, 0);
+  const TextInputContext context = ui_window_->QueryTextInputContext(session_id_, 0, 0);
   if (context.result_code != TextInputResultCode::Ok) {
     return;
   }
@@ -531,10 +531,10 @@ void WebTextInput::Activate(const TextInputGeometry& geometry) {
 }
 
 void WebTextInput::Synchronize(const TextInputGeometry& geometry) {
-  if (runtime_ == nullptr || geometry.result_code != TextInputResultCode::Ok || event_token_ == 0) {
+  if (ui_window_ == nullptr || geometry.result_code != TextInputResultCode::Ok || event_token_ == 0) {
     return;
   }
-  const TextInputContext context = runtime_->QueryTextInputContext(session_id_, 0, 0);
+  const TextInputContext context = ui_window_->QueryTextInputContext(session_id_, 0, 0);
   if (context.result_code != TextInputResultCode::Ok) {
     return;
   }
@@ -551,15 +551,15 @@ void WebTextInput::Synchronize(const TextInputGeometry& geometry) {
 }
 
 void WebTextInput::Apply(std::vector<TextInputCommand> commands) {
-  if (runtime_ == nullptr || commands.empty()) {
+  if (ui_window_ == nullptr || commands.empty()) {
     return;
   }
   TextInputCommandBatch batch;
   batch.session_id = session_id_;
   batch.commands = std::move(commands);
-  const TextInputApplyResult result = runtime_->HandleTextInputCommands(batch);
+  const TextInputApplyResult result = ui_window_->HandleTextInputCommands(batch);
   if (result.result_code != TextInputResultCode::Ok && session_id_ != 0) {
-    Synchronize(runtime_->QueryTextInputGeometry(session_id_, state_.selection.Range()));
+    Synchronize(ui_window_->QueryTextInputGeometry(session_id_, state_.selection.Range()));
   }
 }
 
@@ -626,7 +626,7 @@ void WebTextInput::PerformAction(std::uint32_t event_token, TextInputAction acti
   if (!Accepts(event_token)) {
     return;
   }
-  runtime_->PerformTextInputAction(session_id_, action);
+  ui_window_->PerformTextInputAction(session_id_, action);
 }
 
 } // namespace huxerui::detail

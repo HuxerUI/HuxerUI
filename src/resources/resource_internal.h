@@ -64,11 +64,17 @@ public:
   [[nodiscard]] InputStream OpenRead(std::string_view package_path);
 
   void UpdateConfiguration(ResourceConfiguration configuration);
-  [[nodiscard]] ResourceConfiguration Configuration() const;
+  [[nodiscard]] ResourceConfiguration Configuration(bool observe = true) const;
+  /// Resolves application defaults, original-window overrides, and local Locale for the calling context.
+  /// @param observe Whether configuration dependencies should subscribe the active composition.
+  /// @return An owned effective configuration; ordinary Resources Get methods pass false.
+  [[nodiscard]] ResourceConfiguration EffectiveConfiguration(bool observe) const;
   [[nodiscard]] RawAsset Resolve(RawResource resource);
-  [[nodiscard]] ResolvedImageAsset ResolveImage(ImageResource resource, const Locale& locale);
-  [[nodiscard]] ImageAsset Resolve(ImageResource resource, const Locale& locale);
-  [[nodiscard]] VectorAsset ResolveVector(ImageResource resource, const Locale& locale);
+  [[nodiscard]] ResolvedImageAsset ResolveImage(ImageResource resource, const Locale& locale,
+                                                std::optional<float> display_scale = {});
+  [[nodiscard]] ImageAsset Resolve(ImageResource resource, const Locale& locale, std::optional<float> display_scale = {});
+  [[nodiscard]] VectorAsset ResolveVector(ImageResource resource, const Locale& locale,
+                                          std::optional<float> display_scale = {});
   [[nodiscard]] ResolvedStringResource Resolve(const StringResource& resource, const Locale& locale) const;
 
 private:
@@ -95,9 +101,9 @@ bool NeedsResourceResolution(const ImageVariant& value) noexcept;
 bool NeedsResourceResolution(const VisualFill& fill) noexcept;
 bool IsBlankStringVariantLiteral(const StringVariant& value) noexcept;
 void ValidateImageVariant(const ImageVariant& image);
-ResolvedImageAsset ResolveImage(const ImageVariant& image, AppResources& resources, const Locale& locale);
+ResolvedImageAsset ResolveImage(const ImageVariant& image, AppResources& resources, const Locale& locale,
+                                 std::optional<float> display_scale = {});
 ResolvedImageAsset UseImageVariant(const ImageVariant& image);
-std::shared_ptr<AppResources> RequireAppResources(std::shared_ptr<const Environment> environment);
 Locale ResolveResourceLocale(std::shared_ptr<const Environment> environment, const AppResources& resources);
 
 } // namespace huxerui::detail

@@ -107,25 +107,51 @@ private:
 
 } // namespace
 
-TestingPlatformAdapter::TestingPlatformAdapter(std::shared_ptr<UiTestQueue> queue,
+TestingWindow::TestingWindow(std::shared_ptr<UiTestQueue> queue,
                                                const testing::UiTestOptions& options)
-    : PlatformAdapter([queue = std::move(queue)](std::function<void()> callback) {
+    : Runtime([queue](std::function<void()> callback) {
         std::scoped_lock lock(queue->mutex);
         if (!queue->closed) queue->callbacks.push_back(std::move(callback));
       }), configuration(options.resources), resources_(options.resource_provider) {}
 
-void TestingPlatformAdapter::RequestFrameAt(double deadline) {
+std::chrono::steady_clock::time_point TestingWindow::TimerNow() const noexcept {
+  return std::chrono::steady_clock::time_point(
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(time)));
+}
+
+std::function<void()> TestingWindow::ScheduleTimerAt(
+    std::chrono::steady_clock::time_point deadline, std::function<void()> callback) {
+  auto entry = std::make_shared<std::function<void()>>(std::move(callback));
+  timers_.emplace(std::chrono::duration<double>(deadline.time_since_epoch()).count(), entry);
+  return [entry] { *entry = {}; };
+}
+
+void TestingWindow::DeliverTimers() {
+  std::vector<std::function<void()>> ready;
+  while (!timers_.empty() && timers_.begin()->first <= time) {
+    ready.push_back(std::move(*timers_.begin()->second));
+    timers_.erase(timers_.begin());
+  }
+  for (auto& callback : ready) if (callback) callback();
+}
+
+std::optional<double> TestingWindow::NextTimerDeadline() {
+  while (!timers_.empty() && !*timers_.begin()->second) timers_.erase(timers_.begin());
+  return timers_.empty() ? std::nullopt : std::optional(timers_.begin()->first);
+}
+
+void TestingWindow::RequestFrameAt(double deadline) {
   if (!std::isfinite(deadline)) throw std::invalid_argument("HuxerUI testing frame deadline must be finite");
   if (!frame_deadline || deadline < *frame_deadline) frame_deadline = deadline;
 }
 
-FontMetrics TestingPlatformAdapter::Metrics(const Font& font) {
+FontMetrics TestingWindow::Metrics(const Font& font) {
   const float size = font.Size();
   return {.ascent = size, .descent = size * 0.25F, .underline_position = size * 0.1F,
           .underline_thickness = 1.0F, .strike_through_position = size * 0.4F, .strike_through_thickness = 1.0F};
 }
 
-TextRunMetrics TestingPlatformAdapter::MeasureRun(std::string_view text, const TextStyle& style,
+TextRunMetrics TestingWindow::MeasureRun(std::string_view text, const TextStyle& style,
                                                 const TextShapingOptions&) {
   ReferenceTextLayout layout(text, style.font.Size(), std::numeric_limits<float>::infinity(), {});
   const auto metrics = Metrics(style.font);
@@ -133,40 +159,40 @@ TextRunMetrics TestingPlatformAdapter::MeasureRun(std::string_view text, const T
   return {width, {0, -metrics.ascent, width, metrics.LineHeight()}, metrics};
 }
 
-TextLayoutMetrics TestingPlatformAdapter::MeasureText(const AttributedText& text, const TextStyle& style,
+TextLayoutMetrics TestingWindow::MeasureText(const AttributedText& text, const TextStyle& style,
                                                     float width, const TextLayoutOptions& options) {
   return ReferenceTextLayout(text.PlainText(), style.font.Size(), width, options).Metrics();
 }
 
-std::unique_ptr<TextLayout> TestingPlatformAdapter::CreateTextLayout(const AttributedText& text, const TextStyle& style,
+std::unique_ptr<TextLayout> TestingWindow::CreateTextLayout(const AttributedText& text, const TextStyle& style,
                                                                   float width, const TextLayoutOptions& options) {
   return std::make_unique<ReferenceTextLayout>(text.PlainText(), style.font.Size(), width, options);
 }
 
-std::optional<InputStream> TestingPlatformAdapter::OpenRead(std::string_view path) {
+std::optional<InputStream> TestingWindow::OpenRead(std::string_view path) {
   return resources_ ? resources_->OpenRead(path) : std::nullopt;
 }
 
-bool TestingPlatformAdapter::WriteText(std::string_view text) {
+bool TestingWindow::WriteText(std::string_view text) {
   if (!Utf16Length(text)) return false;
   clipboard_text = text;
   return true;
 }
 
-void TestingPlatformAdapter::Start(TextInputSessionId id, const TextInputConfiguration& config,
+void TestingWindow::Start(TextInputSessionId id, const TextInputConfiguration& config,
                                   const TextInputState& state, const TextInputGeometry&) {
   input_state = state;
   input_state->session_id = id;
   input_action = config.action;
 }
-void TestingPlatformAdapter::Update(TextInputSessionId id, const TextInputState& state, const TextInputGeometry&) {
+void TestingWindow::Update(TextInputSessionId id, const TextInputState& state, const TextInputGeometry&) {
   if (input_state && input_state->session_id == id) input_state = state;
 }
-void TestingPlatformAdapter::Restart(TextInputSessionId id, const TextInputConfiguration& config,
+void TestingWindow::Restart(TextInputSessionId id, const TextInputConfiguration& config,
                                      const TextInputState& state, const TextInputGeometry& geometry) {
   if (input_state && id == input_state->session_id) Start(id, config, state, geometry);
 }
-void TestingPlatformAdapter::Stop(TextInputSessionId id) {
+void TestingWindow::Stop(TextInputSessionId id) {
   if (input_state && id == input_state->session_id) {
     input_state.reset();
     input_action = TextInputAction::Default;

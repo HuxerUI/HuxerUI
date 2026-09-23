@@ -52,7 +52,7 @@ public:
   [[nodiscard]] std::uint64_t Revision() const noexcept {
     return revision_.load(std::memory_order_acquire);
   }
-  /// Returns whether at least one live Runtime currently displays this texture in its committed RenderScene.
+  /// Returns whether at least one live UiWindow currently displays this texture in its committed RenderScene.
   ///
   /// This is a production hint, not an ownership or lifecycle signal. It may change after any frame commit, and the
   /// producer remains responsible for starting, pausing, and finishing its own work.
@@ -63,7 +63,7 @@ protected:
   ///
   /// Platform subclasses call this once from their constructor. Invalid dimensions throw std::invalid_argument.
   explicit ExternalTexture(Size intrinsic_size);
-  /// Commits one already-published mailbox frame to the shared revision and schedules every active Runtime.
+  /// Commits one already-published mailbox frame to the shared revision and schedules every active UiWindow.
   ///
   /// A concrete Publish operation first stores a complete stable frame, then calls this function exactly once. The
   /// function may be called from the producer context supported by that concrete texture.

@@ -44,7 +44,7 @@ std::string RunUiTestingSmoke(const std::string& package_root) noexcept {
   try {
     Application application(Content, {
       .show_debug_overlay = false,
-      .root_hooks = {[](RootContext& root) {
+      .window_hooks = {[](WindowContext& root) {
         root.Layers().Attach({}, [] { return Text("Presentation layer").Key("layer"); });
       }},
     });

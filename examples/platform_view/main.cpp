@@ -78,6 +78,6 @@ const Application application{
             .title = "HuxerUI PlatformView",
             .initial_size = {720.0F, 440.0F},
         },
-        .root_hooks = {example::InstallPlatformTextField},
+        .application_hooks = {example::InstallPlatformTextField},
     }
 };

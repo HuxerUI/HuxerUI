@@ -218,7 +218,7 @@ void ConfigureDialog(IFileDialog* dialog, const PlatformDialogFilter& filter, FI
 
 class Win32OpenPickerOperation final : public std::enable_shared_from_this<Win32OpenPickerOperation> {
 public:
-  Win32OpenPickerOperation(FilePickerOpenCompletion completion, UIThreadDispatcher dispatcher)
+  Win32OpenPickerOperation(FilePickerOpenCompletion completion, UiThreadDispatcher dispatcher)
       : completion_(std::move(completion)), dispatcher_(std::move(dispatcher)) {}
 
   void Start(FilePickerFilter filter, bool multiple, HWND owner, bool directory = false,
@@ -326,7 +326,7 @@ private:
 
   ComPtr<IFileOpenDialog> dialog_;
   FilePickerOpenCompletion completion_;
-  UIThreadDispatcher dispatcher_;
+  UiThreadDispatcher dispatcher_;
   // Open dialog state stays on the UI thread because both Start() and Cancel() use the same dispatcher.
   bool canceled_ = false;
   bool finished_ = false;
@@ -450,7 +450,7 @@ private:
   bool finished_ = false;
 };
 
-void DispatchNoThrow(const UIThreadDispatcher& dispatcher, std::function<void()> operation) noexcept {
+void DispatchNoThrow(const UiThreadDispatcher& dispatcher, std::function<void()> operation) noexcept {
   try {
     dispatcher(std::move(operation));
   } catch (...) {
@@ -459,7 +459,7 @@ void DispatchNoThrow(const UIThreadDispatcher& dispatcher, std::function<void()>
 
 class Win32FilePickerTransport final : public FilePickerTransport {
 public:
-  Win32FilePickerTransport(std::function<HWND()> window_provider, UIThreadDispatcher dispatch_to_ui_thread)
+  Win32FilePickerTransport(std::function<HWND()> window_provider, UiThreadDispatcher dispatch_to_ui_thread)
       : window_provider_(std::move(window_provider)), dispatch_to_ui_thread_(std::move(dispatch_to_ui_thread)) {
     if (!dispatch_to_ui_thread_) {
       throw std::invalid_argument("HuxerUI Windows FilePicker requires a UI thread dispatcher");
@@ -481,7 +481,7 @@ public:
     dispatch_to_ui_thread_([operation, window_provider, filter = std::move(filter), multiple]() mutable {
       operation->Start(std::move(filter), multiple, window_provider ? window_provider() : nullptr);
     });
-    const UIThreadDispatcher dispatcher = dispatch_to_ui_thread_;
+    const UiThreadDispatcher dispatcher = dispatch_to_ui_thread_;
     return [operation, dispatcher] { DispatchNoThrow(dispatcher, [operation] { operation->Cancel(); }); };
   }
 
@@ -505,13 +505,13 @@ public:
     dispatch_to_ui_thread_([operation, window_provider, options = std::move(options)]() mutable {
       operation->Start(std::move(options), window_provider ? window_provider() : nullptr);
     });
-    const UIThreadDispatcher dispatcher = dispatch_to_ui_thread_;
+    const UiThreadDispatcher dispatcher = dispatch_to_ui_thread_;
     return [operation, dispatcher] { DispatchNoThrow(dispatcher, [operation] { operation->Cancel(); }); };
   }
 
 private:
   std::function<HWND()> window_provider_;
-  UIThreadDispatcher dispatch_to_ui_thread_;
+  UiThreadDispatcher dispatch_to_ui_thread_;
 };
 
 } // namespace
@@ -521,7 +521,7 @@ std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_p
 }
 
 std::shared_ptr<FilePickerTransport>
-CreateWin32FilePickerTransport(std::function<HWND()> window_provider, UIThreadDispatcher dispatch_to_ui_thread) {
+CreateWin32FilePickerTransport(std::function<HWND()> window_provider, UiThreadDispatcher dispatch_to_ui_thread) {
   return std::make_shared<Win32FilePickerTransport>(std::move(window_provider), std::move(dispatch_to_ui_thread));
 }
 

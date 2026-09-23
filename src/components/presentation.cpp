@@ -10,13 +10,12 @@
 
 #include <huxerui/animation.h>
 #include <huxerui/app.h>
-#include <huxerui/root.h>
 #include <huxerui/theme.h>
 #include <huxerui/window.h>
 
 #include "huxerui_builtin_resources.h"
 #include "internal_access.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "resources/resource_internal.h"
 #include "tooltip_internal.h"
 
@@ -174,8 +173,8 @@ DebugMetricsSnapshot DebugMetricsState::Sample(double timestamp) noexcept {
     }
   }
 
-  if (platform_ != nullptr) {
-    const std::optional<ProcessMetrics> process = platform_->QueryProcessMetrics();
+  if (runtime_ != nullptr) {
+    const std::optional<ProcessMetrics> process = runtime_->QueryProcessMetrics();
     if (process.has_value()) {
       snapshot.memory_usage_bytes = process->memory_usage_bytes;
       if (previous_process_metrics_.has_value()) {
@@ -2238,7 +2237,7 @@ private:
 
 class DebugOverlayInstaller {
 public:
-  static void Install(RootContext& root, std::shared_ptr<DebugMetricsState> metrics) {
+  static void Install(WindowContext& root, std::shared_ptr<DebugMetricsState> metrics) {
     LayerPlacement placement;
     placement.kind = LayerPlacementKind::Fill;
     placement.safe_area_policy = LayerSafeAreaPolicy::Ignore;
@@ -2326,7 +2325,7 @@ private:
   std::optional<LayerId> layer_;
 };
 
-void InstallBuiltinPresentation(RootContext& root) {
+void InstallBuiltinPresentation(WindowContext& root) {
   root.Provide(std::make_shared<ToastService>(root.Layers()));
   root.Provide(std::make_shared<SnackBarService>(root.Layers()));
   root.Provide(std::make_shared<DialogService>(root.Layers()));
@@ -2336,7 +2335,7 @@ void InstallBuiltinPresentation(RootContext& root) {
   InstallTooltip(root);
 }
 
-void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> metrics) {
+void InstallDebugOverlay(WindowContext& root, std::shared_ptr<DebugMetricsState> metrics) {
   DebugOverlayInstaller::Install(root, std::move(metrics));
 }
 

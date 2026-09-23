@@ -103,7 +103,7 @@ It belongs to TaskScope because an external thread has no active TaskExecution f
 ## Execution and awaiting
 
 Task uses `std::suspend_always` for initial suspension.
-TaskScope queues the first resume through the owning platform's `UIThreadDispatcher`, which must enqueue rather than invoke inline.
+TaskScope queues the first resume through the owning platform's `UiThreadDispatcher`, which must enqueue rather than invoke inline.
 Code before the first suspension therefore runs on the owning UI thread without re-entering Lifecycle setup or an event callback.
 
 Awaiting one HuxerUI Task from another transfers the child coroutine into the same launched execution.
@@ -124,7 +124,7 @@ The native executor uses a FIFO queue and a bounded number of C++ worker threads
 Its implementation leaves one reported logical processor available where possible, never creates more than four workers, and falls back to two workers when the processor count is unknown.
 The queue is not bounded because blocking the UI thread or rejecting otherwise valid Tasks would require another public overload and failure policy.
 
-RunWorker resumes through the awaiting TaskExecution and UIThreadDispatcher.
+RunWorker resumes through the awaiting TaskExecution and UiThreadDispatcher.
 A value or `void` completion continues on the owning UI thread, while a worker exception is rethrown from the `co_await` expression on that thread.
 The callable must not access State, Views, composition facilities, or UI-affine platform objects.
 Platform thread initialization such as COM apartments, JNI attachment, or platform-object lifetime scopes remains the responsibility of code that explicitly uses those platform APIs.
@@ -181,15 +181,15 @@ The explicit `std::chrono::duration<double>` form remains available.
 The duration is a minimum wait rather than a precise wakeup guarantee.
 Negative, non-finite, and NaN durations throw `std::invalid_argument` synchronously when Delay is called.
 Zero remains asynchronous and resumes in a later UI scheduling cycle.
-Delay uses the PlatformAdapter monotonic clock, so wall-clock and time-zone changes do not affect it.
+Delay uses the Runtime's monotonic application timer, so wall-clock and time-zone changes do not affect it.
 
-Runtime owns one deadline-ordered delay queue shared by all TaskScopes in that Runtime.
-Registering an earlier deadline requests one platform wakeup through the existing `RequestFrameAt()` contract.
-At the beginning of that frame, Runtime removes every due registration before resuming their Task executions on the UI thread; a resumed task that awaits `Delay(0ms)` therefore cannot run that second continuation in the same batch.
-Any remaining earliest deadline schedules the next wakeup.
-This produces no continuously active frames, platform-specific Task implementation, background thread, or public timer service.
+Runtime owns one deadline-ordered timer queue shared by all TaskScopes in that application.
+On native desktop and mobile hosts, one lazy worker waits for deadlines and posts expired callbacks to the application thread; it never resumes Tasks or touches State itself.
+Web supplies a native timer implementation.
+Canceling a suspended Delay removes its pending callback, including one whose application-thread delivery has already been queued.
+An elapsed or zero-duration deadline still resumes asynchronously on the application thread, independently of any mounted UiWindow or display frame.
 
-Delay is aligned with the UI frame scheduler and may resume on the next available display frame after its deadline.
+The application dispatcher and platform scheduling may delay a continuation beyond its deadline.
 It is appropriate for UI feedback, retry backoff, polling, and presentation lifetime, but not for audio, video, sampling, or other high-precision timing.
 
 ## Scope ownership
@@ -197,20 +197,23 @@ It is appropriate for UI feedback, retry backoff, polling, and presentation life
 UseTaskScope requires an active composition and does not allocate an ordered state slot.
 Every call in the same RecomposeScope returns a handle to the same lazily created TaskScope.
 An ordinary helper contributes to its caller's scope, while `[[huxerui::composable]]` creates an independent TaskScope lifetime.
+`UseApplicationTaskScope()` acquires the original Runtime's shared scope from application hooks or ordinary application-thread work; its tasks survive window retirement and close at Runtime shutdown.
 Launch and Post are side effects and are rejected during view composition; application code starts work from committed Lifecycle setup, event callbacks, or other post-composition owners.
 
 Compatible recomposition, a changed returned root View, and keyed movement retain the TaskScope and its running tasks.
-Successfully unmounting the scope, evicting a virtual item, or destroying Runtime closes the TaskScope and cancels all remaining tasks.
+Successfully unmounting the scope, evicting a virtual item, or retiring its UiWindow closes the composition TaskScope and cancels all remaining tasks.
 Virtual item state caching does not retain TaskScope or running coroutine frames.
 
 TaskScope closure is committed with scope retirement rather than performed during speculative reconciliation.
-Runtime drains Lifecycle cleanup first and then closes the retired TaskScope, so explicit resource cleanup remains deterministic before the structured cancellation fallback.
-Runtime teardown closes all TaskScopes before releasing Root Services and PlatformModule state.
+UiWindow drains Lifecycle cleanup first and then closes the retired composition TaskScope, so explicit resource cleanup remains deterministic before the structured cancellation fallback.
+UiWindow retirement closes its remaining composition TaskScopes before releasing window services and PlatformModule instances; Runtime retirement closes the application TaskScope before releasing application services and modules.
 
 Copies of TaskScope may outlive their RecomposeScope, but a closed TaskScope cannot launch new work or deliver new posts.
+Closing also releases the scope's captured Environment, so retaining a closed handle does not retain Environment-owned objects.
+An already executing callback or Task retains its own context until the callback returns or the Task reaches deferred cancellation.
 Launch on an empty or closed handle throws `std::logic_error`.
 Post on an empty handle throws `std::logic_error`, while Post on a closed handle is ignored so a late external completion remains harmless.
-UseTaskScope also fails explicitly when a custom PlatformAdapter does not provide a UIThreadDispatcher.
+UseTaskScope also fails explicitly when its UiWindow lacks a UiThreadDispatcher.
 
 ## Cancellation
 
@@ -287,17 +290,17 @@ The public API does not add an error callback, failure State, Task result query,
 RunWorker transports an exception back to its awaiting Task before applying the same rule.
 A Post callback has no awaiting Task, so an exception escaping it terminates at the non-throwing UI delivery boundary.
 
-Lifecycle setup exceptions continue to propagate from `Runtime::BuildFrame()`.
+Lifecycle setup exceptions continue to propagate from `UiWindow::BuildFrame()`.
 Lifecycle accepts an ordinary `void` cleanup callable; cleanup runs inside the framework's non-throwing teardown boundary, so an exception escaping cleanup terminates the process.
 The framework does not silently discard cleanup failures.
 
 ## Platform boundary
 
-PlatformAdapter retains the UIThreadDispatcher already supplied by every supported production adapter and shares copies with PlatformChannel, ExternalTexture, and TaskScope.
+The platform-derived Runtime supplies an application dispatcher; each platform-derived UiWindow supplies its UI dispatcher for window-bound work. TaskScope captures the dispatcher and execution context appropriate to its owner.
 No new platform callback, event protocol, or platform-specific Task implementation is introduced.
 
 Windows continues to use its private window message, Apple platforms use the main dispatch queue, Linux uses its event-loop dispatcher, Web uses the browser event loop, and Android uses its owning HuxerUIView dispatcher.
-Delay additionally reuses PlatformAdapter's existing monotonic `Now()` and absolute `RequestFrameAt()` contracts, so every platform receives the same scheduling and cancellation model without another timer boundary.
+Delay uses `Runtime::TimerNow()` and `Runtime::ScheduleTimerAt()`; frame scheduling remains a separate UiWindow operation.
 
 Native desktop and mobile builds use the shared C++ worker executor.
 Web does not silently run RunWorker on its main event loop; without a genuine Worker or pthread execution boundary, awaiting RunWorker throws an explicit unavailable-capability `std::runtime_error`.

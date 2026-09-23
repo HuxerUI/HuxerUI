@@ -197,7 +197,7 @@ namespace huxerui::ios {
 ///     .connect = ConnectMapController,
 ///     .disconnect = DisconnectMapController,
 /// };
-/// root.RegisterPlatformView<MapProperties, MapController>("Map", std::move(factory));
+/// context.RegisterPlatformView<MapProperties, MapController>("Map", std::move(factory));
 /// @endcode
 ///
 /// @tparam Properties Controlled declarative state, or void when the View has no properties.
@@ -223,16 +223,16 @@ struct UIKitViewFactory {
   std::function<void(const std::shared_ptr<void>&, const PlatformValue&)> disconnect;
 };
 
-UIViewController* GetUIKitViewController(PlatformAdapter& adapter);
+UIViewController* GetUIKitViewController(UiWindow& ui_window);
 
 #if defined(__OBJC__)
 class ObjectiveCPlatformViewInstance;
 
-PlatformChannel CreateObjectiveCPlatformModule(PlatformAdapter& adapter, UIViewController* owner,
+PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, UIViewController* owner,
                                                id<HUXUIKitPlatformModuleFactory> factory,
                                                PlatformPayload options);
 std::shared_ptr<ObjectiveCPlatformViewInstance>
-CreateObjectiveCPlatformView(PlatformAdapter& adapter, UIViewController* owner,
+CreateObjectiveCPlatformView(UiWindow& ui_window, UIViewController* owner,
                              id<HUXUIKitPlatformViewFactory> factory, PlatformPayload properties,
                              PlatformEventEmitter events, bool update_required, bool channel_required);
 UIView* GetObjectiveCPlatformView(const std::shared_ptr<ObjectiveCPlatformViewInstance>& instance);
@@ -254,15 +254,14 @@ template <class Properties> PlatformPayload EncodeObjectiveCPlatformViewProperti
 template <class Properties, class Controller>
 huxerui::detail::PlatformViewFactoryRegistration
 EraseObjectiveCPlatformViewFactory(ios::ObjectiveCPlatformViewFactory<Properties, Controller> source_value,
-                                   PlatformAdapter& adapter) {
+                                   UiWindow& ui_window) {
   auto source =
       std::make_shared<ios::ObjectiveCPlatformViewFactory<Properties, Controller>>(std::move(source_value));
-  PlatformAdapter* platform_adapter = &adapter;
   auto factory = std::make_shared<UIKitViewFactory>();
-  factory->create = [source, platform_adapter](UIViewController* owner, const PlatformValue& properties,
+  factory->create = [source, ui_window = &ui_window](UIViewController* owner, const PlatformValue& properties,
                                                PlatformEventEmitter events) {
     return std::static_pointer_cast<void>(CreateObjectiveCPlatformView(
-        *platform_adapter, owner, source->factory, EncodeObjectiveCPlatformViewProperties<Properties>(properties),
+        *ui_window, owner, source->factory, EncodeObjectiveCPlatformViewProperties<Properties>(properties),
         std::move(events), !std::same_as<Properties, void>, !std::same_as<Controller, void>));
   };
   factory->view = [](const std::shared_ptr<void>& instance) {
@@ -347,24 +346,24 @@ ErasePlatformViewFactory(ios::PlatformViewFactory<Properties, Instance, Controll
 
 /// Adapts a direct Objective-C++ PlatformModule factory to the platform-neutral registry callable contract.
 template <class Module> struct PlatformModuleFactory<Module, void> {
-  std::function<Module(PlatformAdapter&, UIViewController*)> create;
+  std::function<Module(UiWindow&, UIViewController*)> create;
 
-  Module operator()(PlatformAdapter& adapter) {
+  Module operator()(UiWindow& ui_window) {
     if (!create) {
       throw std::logic_error("HuxerUI iOS PlatformModule factory must provide create");
     }
-    return create(adapter, detail::GetUIKitViewController(adapter));
+    return create(ui_window, detail::GetUIKitViewController(ui_window));
   }
 };
 
 template <class Module, class Options> struct PlatformModuleFactory {
-  std::function<Module(PlatformAdapter&, UIViewController*, const Options&)> create;
+  std::function<Module(UiWindow&, UIViewController*, const Options&)> create;
 
-  Module operator()(PlatformAdapter& adapter, const Options& options) {
+  Module operator()(UiWindow& ui_window, const Options& options) {
     if (!create) {
       throw std::logic_error("HuxerUI iOS PlatformModule factory must provide create");
     }
-    return create(adapter, detail::GetUIKitViewController(adapter), options);
+    return create(ui_window, detail::GetUIKitViewController(ui_window), options);
   }
 };
 
@@ -375,12 +374,12 @@ template <class Module> struct ObjectiveCPlatformModuleFactory<Module, void> {
   __strong id<HUXUIKitPlatformModuleFactory> factory = nil;
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(PlatformAdapter& adapter) {
+  Module operator()(UiWindow& ui_window) {
     if (factory == nil || !create) {
       throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory is incomplete");
     }
     PlatformChannel channel =
-        detail::CreateObjectiveCPlatformModule(adapter, detail::GetUIKitViewController(adapter), factory, {});
+        detail::CreateObjectiveCPlatformModule(ui_window, detail::GetUIKitViewController(ui_window), factory, {});
     try {
       return create(channel);
     } catch (...) {
@@ -396,12 +395,12 @@ template <class Module, class Options> struct ObjectiveCPlatformModuleFactory {
   __strong id<HUXUIKitPlatformModuleFactory> factory = nil;
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(PlatformAdapter& adapter, const Options& options) {
+  Module operator()(UiWindow& ui_window, const Options& options) {
     if (factory == nil || !create) {
       throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory is incomplete");
     }
     PlatformChannel channel = detail::CreateObjectiveCPlatformModule(
-        adapter, detail::GetUIKitViewController(adapter), factory, huxerui::detail::EncodePlatformValue(options));
+        ui_window, detail::GetUIKitViewController(ui_window), factory, huxerui::detail::EncodePlatformValue(options));
     try {
       return create(channel);
     } catch (...) {
@@ -415,8 +414,8 @@ template <class Properties> struct ObjectiveCPlatformViewFactory<Properties, voi
   __strong id<HUXUIKitPlatformViewFactory> factory = nil;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    return detail::EraseObjectiveCPlatformViewFactory(std::move(*this), adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    return detail::EraseObjectiveCPlatformViewFactory(std::move(*this), ui_window);
   }
   friend class huxerui::detail::PlatformRegistry;
 };
@@ -427,8 +426,8 @@ template <class Properties, class Controller> struct ObjectiveCPlatformViewFacto
   std::function<void(const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    return detail::EraseObjectiveCPlatformViewFactory(std::move(*this), adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    return detail::EraseObjectiveCPlatformViewFactory(std::move(*this), ui_window);
   }
   friend class huxerui::detail::PlatformRegistry;
 };
@@ -441,8 +440,8 @@ template <class Instance> struct PlatformViewFactory<void, Instance, void> {
   std::function<void(Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -457,8 +456,8 @@ template <class Instance, class Controller> struct PlatformViewFactory<void, Ins
   std::function<void(Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -472,8 +471,8 @@ template <class Properties, class Instance> struct PlatformViewFactory<Propertie
   std::function<void(Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -489,8 +488,8 @@ template <class Properties, class Instance, class Controller> struct PlatformVie
   std::function<void(Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;

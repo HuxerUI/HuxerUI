@@ -4,7 +4,7 @@ This document defines the HuxerUI Web backend contract, including application st
 
 ## Goals
 
-- Reuse the existing Runtime, View model, layout, input state machines, animation, text editing protocol, RenderScene, and PaintCommand types without a Web-specific Runtime.
+- Reuse the shared Runtime and UiWindow behavior, View model, layout, input state machines, animation, text editing protocol, RenderScene, and PaintCommand types through Web-derived Runtime and UiWindow classes.
 - Keep the static `Application` declaration and shared application source unchanged across Web and other supported targets.
 - Produce an ES module and WebAssembly application that can be mounted into a browser-owned host element.
 - Preserve logical coordinates, retained PaintSequences, Runtime damage, controlled text editing, typed resources, and platform-owned services.
@@ -31,13 +31,13 @@ Exact offscreen group-opacity compositing, clipboard operations outside browser 
 
 ## Ownership
 
-The Web backend follows the same Runtime and PlatformAdapter boundary as other platform backends:
+The Web backend follows the same Runtime and UiWindow boundary as other platform backends:
 
 | Layer | Responsibility |
 |---|---|
-| Shared Runtime | Composition, reconciliation, layout, focus, interaction, scrolling, text editing behavior, animation, PaintSequence recording, RenderScene construction, and damage |
-| WebSession | Internal ownership of one WebPlatformAdapter and one Runtime for a mounted host element |
-| WebPlatformAdapter | Monotonic time, frame requests, UI-thread dispatch, viewport coordination, and browser service capabilities |
+| WebRuntime | One application service and factory catalog, application dispatch, timers, resources, and browser service capabilities |
+| WebUiWindow | One mounted host element's composition, reconciliation, layout, focus, interaction, frame requests, text input, RenderScene, and damage |
+| JavaScript session | DOM observers and event listeners for one mounted host element, addressed by a validated session ID |
 | WebRenderer | RenderScene traversal, Canvas state, damage replay, path conversion, image decode entries, and renderer caches |
 | Web `VideoFrameTexture` | Main-thread WebCodecs `VideoFrame` validation, cloning, latest-frame ownership, and finish state |
 | WebPlatformViews | DOM factory lifecycle, retained Canvas slices, placement, ordering, hit arbitration, and focus synchronization |
@@ -48,7 +48,7 @@ The Web backend follows the same Runtime and PlatformAdapter boundary as other p
 | Web file storage | IDBFS restoration, stable application identity, serial asynchronous operations, explicit persistence completion, and MEMFS temporary data |
 | ES module integration | Storage initialization, host lookup, composition-root creation, asynchronous startup, resize observation, browser events, DOM objects, and exported mount and disposal operations |
 
-There is one internal `WebSession` containing one `Runtime` and one `WebPlatformAdapter` per mounted host element. Multiple sessions may use the same registered `Application` without sharing Runtime state, focus, layout, resources, or input sessions.
+The WebAssembly module owns one WebRuntime for the registered Application and one WebUiWindow per mounted host element. Mounted windows share application services and the factory catalog while retaining separate composition, focus, layout, renderer caches, and input sessions.
 Browser History is document-global, so at most one mounted `BrowserNavigationStack` owns URL synchronization.
 Mounting another session whose root also declares `BrowserNavigationStack` is rejected; additional sessions in that document use ordinary routed stacks.
 
@@ -75,12 +75,12 @@ Startup occurs in this order:
 
 - Instantiate the Emscripten module, mount its application-specific IDBFS subtree, restore IndexedDB contents, create data, cache, and temporary directories, and complete packaged-resource preload into the virtual filesystem.
 - Await `document.fonts.ready` in the JavaScript entry point.
-- Resolve the target host, create its composition root and base Canvas, and create WebPlatformAdapter and Runtime from the uniquely registered Application.
+- Initialize WebRuntime for the uniquely registered Application if needed, then resolve the target host, create its composition root and base Canvas, and attach a WebUiWindow.
 - Create the JavaScript session record and install browser observers and event listeners.
 - Apply the initial CSS-pixel viewport and ResourceConfiguration.
 - Request the initial frame.
 
-The returned session ID owns explicit disposal. Disposal cancels timers and animation-frame callbacks, removes DOM listeners, PlatformViews, Canvas slices, the composition root, and hidden input elements, releases renderer caches, ends active text input, destroys Runtime, and invalidates the session ID.
+The returned session ID owns explicit disposal. Disposal cancels that window's animation-frame callbacks, removes DOM listeners, PlatformViews, Canvas slices, the composition root, and hidden input elements, releases renderer caches, ends active text input, retires its UiWindow, and invalidates the session ID. The shared WebRuntime remains until application shutdown.
 
 The initial distribution contains an HTML entry point when requested by SDK tooling, an ES module, a WebAssembly module, and optional preloaded resource data. The framework library remains a static or object dependency of the final WebAssembly application; ordinary Emscripten shared-library and dynamic-module modes are not part of the backend contract.
 
@@ -98,7 +98,7 @@ The project-owned Web shell keeps its HTML and host-element mount code under `pl
 
 ## Viewport and display scale
 
-Runtime logical coordinates map to CSS pixels. The composition root's CSS size defines the Runtime viewport, while each Canvas backing bitmap width and height are the rounded CSS dimensions multiplied by `devicePixelRatio`.
+UiWindow logical coordinates map to CSS pixels. The composition root's CSS size defines that UiWindow's viewport, while each Canvas backing bitmap width and height are the rounded CSS dimensions multiplied by `devicePixelRatio`.
 
 The renderer applies the display scale at the Canvas boundary, so layout, pointer positions, text geometry, PaintCommands, and damage remain in logical coordinates. `ResourceConfiguration::display_scale` uses the same value for image variant resolution.
 
@@ -106,13 +106,13 @@ The renderer applies the display scale at the Canvas boundary, so layout, pointe
 
 ## Frame scheduling
 
-`WebPlatformAdapter::Now()` uses the browser monotonic performance clock expressed in seconds.
+`WebUiWindow::Now()` uses the browser monotonic performance clock expressed in seconds.
 
 `RequestFrameAt()` coalesces immediate requests into one `requestAnimationFrame` callback. A future absolute deadline arms one browser timer; when the deadline becomes eligible, the timer requests an animation frame rather than building and presenting outside the browser rendering phase.
 
-The animation-frame callback builds one `FrameCommit`, presents its `RenderFrame`, then schedules `next_frame_deadline`. Re-entry is prevented with the same pending-build and pending-paint invariants used by platform adapters.
+The animation-frame callback builds one `FrameCommit`, presents its `RenderFrame`, then schedules `next_frame_deadline`. Re-entry is prevented with the same pending-build and pending-paint invariants used by other UiWindow backends.
 
-When a document becomes visible after animation frames were suspended, the Web integration requests a new frame. Runtime time remains monotonic, so retained animations advance to the current time rather than replaying every missed frame.
+When a document becomes visible after animation frames were suspended, the Web integration requests a new frame. UiWindow time remains monotonic, so retained animations advance to the current time rather than replaying every missed frame.
 
 ## Canvas rendering
 
@@ -126,7 +126,7 @@ The renderer uses a narrow bridge without defining another serialized render mod
 
 Paths map to browser `Path2D` or direct Canvas path operations. Renderer-owned caches may retain converted paths by stable PaintSequence revision when profiling justifies it.
 
-Decoded images are asynchronous browser values. WebRenderer assigns an internal loading entry to an ImageAsset, copies encoded bytes before an asynchronous decoder can observe movable WebAssembly memory, and creates an ImageBitmap. A pending image is skipped for the current replay. Completion validates the session, stores the decoded value in a 64 MiB renderer-owned LRU cache, and requests another frame through WebPlatformAdapter. Decode failure retries at bounded delays and becomes terminal after three attempts for that session, while the negative cache remains count-bounded.
+Decoded images are asynchronous browser values. WebRenderer assigns an internal loading entry to an ImageAsset, copies encoded bytes before an asynchronous decoder can observe movable WebAssembly memory, and creates an ImageBitmap. A pending image is skipped for the current replay. Completion validates the session, stores the decoded value in a 64 MiB renderer-owned LRU cache, and requests another frame through WebUiWindow. Decode failure retries at bounded delays and becomes terminal after three attempts for that session, while the negative cache remains count-bounded.
 
 WebGPU, Skia, or another renderer may later implement the same RenderScene contract. None requires changes to View, Canvas, PaintCommand, Runtime, or application source.
 
@@ -216,14 +216,14 @@ The initial locale derives from `navigator.language` and is normalized through t
 
 ## PlatformModule
 
-Web uses the surface-owned internal `PlatformRegistry` and strongly typed library Module APIs without adding a JavaScript factory registry or a second registration entry point.
-Libraries may register a direct C++ factory or adapt one linked JavaScript factory object with `web::JavaScriptPlatformModuleFactory<Module, Options>` from an explicit RootHook.
-The RootHook passes the actual `emscripten::val` factory object and constructs the exact C++ Module facade from the supplied `PlatformChannel`; `mountHuxerUIApp()` does not perform registration.
+Web uses the Runtime-owned internal `PlatformRegistry` and strongly typed library Module APIs without adding a JavaScript factory registry or a second registration entry point.
+Libraries may register a direct C++ factory or adapt one linked JavaScript factory object with `web::JavaScriptPlatformModuleFactory<Module, Options>` from an explicit application hook.
+The hook passes the actual `emscripten::val` factory object and constructs the exact C++ Module facade from the supplied `PlatformChannel`; `mountHuxerUIApp()` does not perform registration.
 The public Module chooses its own synchronous, asynchronous, callback, stream, and error conventions; no proxy inheritance or dynamic call API appears in that public contract.
 Options, arguments, results, and events cross the JavaScript boundary as immutable `Module.HuxerUI.PlatformPayload` values using the shared HUXP envelope, while callbacks, promises, and DOM objects remain outside the payload and shared application code.
 Libraries that require JavaScript dependencies express those link inputs through their own Emscripten target configuration; the HuxerUI library graph does not parse or reproduce JavaScript package metadata.
 
-The WebPlatformAdapter supplies the shared `UIThreadDispatcher` through the browser event loop.
+WebRuntime and WebUiWindow dispatch work through the browser event loop.
 Platform Result and Event endpoints may be invoked during a browser callback, but typed application callbacks always run asynchronously after the initiating stack has unwound.
 Closing an instance invalidates its pending calls and event routes before a queued task can observe application state, while the bridge or direct Module implementation owns any cancellation behavior exposed by its library API.
 
@@ -234,7 +234,7 @@ Its ColorStream remains a direct C++ implementation because ExternalTexture payl
 
 DOM-backed PlatformView is implemented and follows final RenderScene paint order rather than one DOM overlay above the complete Canvas.
 `PlacePlatformViewCommand` divides the scene into nonempty HuxerUI Canvas slices and DOM PlatformView placements.
-WebPlatformAdapter consumes the shared internal `RenderComposition` before drawing and retains compatible Canvas elements and DOM objects across frames.
+WebUiWindow consumes the shared internal `RenderComposition` before drawing and retains compatible Canvas elements and DOM objects across frames.
 
 Web PlatformView libraries register either a direct strongly typed Emscripten C++ factory or `web::JavaScriptPlatformViewFactory<Properties, Controller>` under the same stable UTF-8 registration names as other platform backends.
 A direct C++ factory receives the concrete Properties and typed `PlatformEventEmitter` without payload encoding.
@@ -266,12 +266,12 @@ Factories must keep their visual content within the returned subtree; the adapte
 ## Accessibility and semantics
 
 Canvas pixels alone do not provide a browser accessibility tree.
-Runtime publishes the platform-neutral `SemanticFrame` defined by [Semantics and Accessibility Design](semantics.md), but the Web adapter does not expose that frame through semantic DOM.
+UiWindow publishes the platform-neutral `SemanticFrame` defined by [Semantics and Accessibility Design](semantics.md), but the Web backend does not expose that frame through semantic DOM.
 PlatformView elements retain their built-in DOM accessibility, while HuxerUI-rendered content has no browser accessibility bridge.
 
 ## Future work
 
-- Add PWA activation and lifecycle integration without moving application navigation policy into PlatformAdapter.
+- Add PWA activation and lifecycle integration without moving application navigation policy into Runtime or UiWindow.
 - Consider workers and OffscreenCanvas only after profiling demonstrates a material main-thread bottleneck and ownership across threads is defined.
 
 ## Threading
@@ -305,7 +305,7 @@ Unavailable browsers, operating systems, and mobile IMEs are reported explicitly
 
 ## Invariants
 
-- Web adds a PlatformAdapter and renderer, not another Runtime or component implementation.
+- Web derives one Runtime and one UiWindow type and uses the shared component implementation.
 - Ordinary Views render through RenderScene and Canvas rather than DOM.
 - DOM use is limited to browser services, text measurement, text input, and PlatformView.
 - PlatformViews and Canvas slices share one isolated composition root and follow RenderScene paint order.

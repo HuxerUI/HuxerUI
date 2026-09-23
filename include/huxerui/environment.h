@@ -13,7 +13,7 @@
 namespace huxerui {
 
 class Environment;
-class Runtime;
+class UiWindow;
 
 enum class ViewportClass {
   Compact,
@@ -58,6 +58,11 @@ void SetEnvironmentValue(
 );
 void MergeEnvironment(Environment& target, const Environment& source);
 const std::any* FindLocalEnvironmentValue(const Environment& environment, std::type_index key);
+/// Reads only one Environment level without adding entries or composition subscriptions.
+/// @param environment Level to inspect; parent traversal is left to the caller.
+/// @param key Exact stored C++ type key.
+/// @return Borrowed local value or null when absent; valid only while the environment/value remains alive.
+const std::any* PeekLocalEnvironmentValue(const Environment& environment, std::type_index key);
 const std::shared_ptr<const Environment>& EnvironmentParent(const Environment& environment) noexcept;
 } // namespace detail
 
@@ -109,18 +114,35 @@ private:
   );
   friend void detail::MergeEnvironment(Environment& target, const Environment& source);
   friend const std::any* detail::FindLocalEnvironmentValue(const Environment& environment, std::type_index key);
+  friend const std::any* detail::PeekLocalEnvironmentValue(const Environment& environment, std::type_index key);
   friend const std::shared_ptr<const Environment>& detail::EnvironmentParent(const Environment& environment) noexcept;
-  friend class Runtime;
+  friend class UiWindow;
 };
 
 namespace detail {
 
+/// Reads effective Environment from active composition or captured callback provenance.
+/// @return Retained environment, possibly null for application-only work.
+/// This internal lookup does not make composition-only UseEnvironment calls valid outside composition.
 std::shared_ptr<const Environment> CurrentEnvironment();
+/// Searches an explicit Environment chain for a typed value.
+/// @param environment Starting level, possibly null; its parents are searched in order.
+/// @param key Exact C++ type key.
+/// @return Borrowed value or null; this overload supports internal event/service lookups with explicit provenance.
 const std::any* FindEnvironmentValue(std::shared_ptr<const Environment> environment, std::type_index key);
+/// Resolves a typed value from the currently composing scope.
+/// @param key Exact Environment type key.
+/// @return Borrowed value or null for the caller's default-value fallback.
+/// @throws std::logic_error Without active composition, even when an event has captured an Environment.
 const std::any* FindEnvironmentValue(std::type_index key);
 
 } // namespace detail
 
+/// Reads an inherited Environment value during active composition.
+/// @tparam Value Copyable, equality-comparable value type with a static Default() factory.
+/// @return A borrowed inherited value or stable default; copy values needed after composition into callbacks.
+/// @throws std::logic_error Outside active composition or when the stored value has an incompatible type.
+/// Does not allocate an ordered State slot. UseTheme follows the same composition boundary.
 template <EnvironmentValue Value> const Value& UseEnvironment() {
   if (const std::any* value = detail::FindEnvironmentValue(typeid(Value))) {
     if (const auto* typed = std::any_cast<Value>(value)) {

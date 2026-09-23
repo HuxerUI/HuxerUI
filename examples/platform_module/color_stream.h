@@ -5,7 +5,7 @@
 
 #include <huxerui/external_texture.h>
 #include <huxerui/platform_registry.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 namespace huxerui::example {
 
@@ -32,6 +32,6 @@ protected:
 };
 
 std::shared_ptr<ColorStreamService> UseColorStream();
-void InstallColorStream(RootContext& root);
+void InstallColorStream(ApplicationContext& root);
 
 } // namespace huxerui::example

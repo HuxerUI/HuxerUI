@@ -958,7 +958,7 @@ TEST_CASE("DestroyingTheRuntimeClosesTheLinuxPortalRequestAndIgnoresALateRespons
   runtime_picker_resumed = false;
 
   {
-    Runtime runtime(LinuxFileReferenceApp, platform);
+    UiWindow runtime(LinuxFileReferenceApp, platform);
     runtime.BuildFrame();
     reference_tasks.Launch([picker = runtime_file_picker]() -> Task<void> {
       static_cast<void>(co_await picker->OpenFileAsync());
@@ -1028,7 +1028,7 @@ TEST_CASE("LinuxFilePickerUsesThePortalForReferencesSavingAndCancellation") {
   LinuxFilePickerTestPlatform platform(ui_tasks, transport);
   runtime_file_picker.reset();
   reference_tasks = {};
-  Runtime runtime(LinuxFileReferenceApp, platform);
+  UiWindow runtime(LinuxFileReferenceApp, platform);
   runtime.BuildFrame();
   reference_text.reset();
   reference_imported = false;

@@ -11,7 +11,7 @@
 #include <vector>
 
 #include <huxerui/app.h>
-#include <huxerui/platform_adapter.h>
+#include <huxerui/app.h>
 #include <huxerui/system.h>
 
 namespace huxerui::detail {
@@ -24,7 +24,7 @@ struct Win32NotificationInbox;
 // The process owns COM activation; adapters only borrow its notification transport.
 class Win32LocalNotificationHost final {
 public:
-  explicit Win32LocalNotificationHost(UIThreadDispatcher dispatcher);
+  explicit Win32LocalNotificationHost(UiThreadDispatcher dispatcher);
   ~Win32LocalNotificationHost();
   Win32LocalNotificationHost(const Win32LocalNotificationHost&) = delete;
   Win32LocalNotificationHost& operator=(const Win32LocalNotificationHost&) = delete;

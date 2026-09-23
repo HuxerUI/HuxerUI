@@ -20,7 +20,7 @@
 namespace huxerui {
 
 class FileReference;
-class Runtime;
+class UiWindow;
 
 namespace detail {
 class FilePickerController;
@@ -69,7 +69,7 @@ enum class FileWriteMode {
 /// picker- or provider-owned entries that cannot be represented by an application-accessible local path.
 ///
 /// Synchronous methods perform I/O on the calling thread. Async methods return lazy tasks to await within
-/// a TaskScope execution; native I/O runs on workers and continuations resume on the owning Runtime thread.
+/// a TaskScope execution; native I/O runs on workers and continuations resume on the owning application thread.
 /// Tasks retain the path and owned arguments. Cancelling a task suppresses result delivery but does not
 /// guarantee that queued or running local I/O stops, and never rolls back writes.
 ///
@@ -515,7 +515,7 @@ struct SaveFileOptions {
   FilePickerFilter filter;
 };
 
-/// @brief The per-Runtime service for system file selection, directory selection, and file export.
+/// @brief The per-UiWindow service for system file selection, directory selection, and file export.
 /// Obtain a shared instance with UseService<FilePicker>() during composition. Capability queries do not
 /// present UI or request permission. Picker tasks are lazy; launch their owning TaskScope operation from a
 /// user event. Presentations share a queue within this service, while FileReference I/O does not use that queue.
@@ -596,7 +596,7 @@ private:
 
   std::shared_ptr<detail::FilePickerController> controller_;
 
-  friend class Runtime;
+  friend class UiWindow;
 };
 
 /// @brief Application-scoped local storage locations chosen by the platform and application identity.

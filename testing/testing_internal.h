@@ -3,6 +3,7 @@
 #include <deque>
 #include <functional>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -10,7 +11,7 @@
 #include <vector>
 
 #include <huxerui/clipboard.h>
-#include <huxerui/platform_adapter.h>
+#include <huxerui/app.h>
 #include <huxerui/testing/ui_test.h>
 
 namespace huxerui::detail {
@@ -21,12 +22,22 @@ struct UiTestQueue {
   bool closed = false;
 };
 
-class TestingPlatformAdapter final : public PlatformAdapter, public PlatformTextInput,
+/// In-memory backend combining Runtime and one UiWindow for deterministic UI tests.
+/// The test session controls both lifetimes and a single virtual clock, so ordinary timers advance without wall time.
+class TestingWindow final : public UiWindow, public Runtime, public PlatformTextInput,
                                     public PlatformClipboard, public PlatformResources {
 public:
-  TestingPlatformAdapter(std::shared_ptr<UiTestQueue> queue, const testing::UiTestOptions& options);
+  TestingWindow(std::shared_ptr<UiTestQueue> queue, const testing::UiTestOptions& options);
   void RequestFrameAt(double deadline) override;
   double Now() const noexcept override { return time; }
+  std::chrono::steady_clock::time_point TimerNow() const noexcept override;
+  std::function<void()> ScheduleTimerAt(std::chrono::steady_clock::time_point deadline,
+                                        std::function<void()> callback) override;
+  /// Delivers due ordinary timers at the current virtual clock value on the test application thread.
+  void DeliverTimers();
+  /// Finds the next live ordinary timer for deterministic test-time advancement.
+  /// @return Deadline in virtual seconds, or nullopt when no live timer remains.
+  std::optional<double> NextTimerDeadline();
   FontMetrics Metrics(const Font& font) override;
   TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions&) override;
   TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float width,
@@ -55,6 +66,8 @@ public:
   std::optional<std::string> clipboard_text;
 
 private:
+  void OnRuntimeStopped() override {}
+  std::multimap<double, std::shared_ptr<std::function<void()>>> timers_;
   std::shared_ptr<PlatformResources> resources_;
 };
 

@@ -15,7 +15,7 @@
 
 namespace huxerui {
 
-class Runtime;
+class UiWindow;
 
 namespace detail {
 struct ModifierDescriptor;
@@ -23,10 +23,10 @@ struct SemanticBuilderState;
 class SemanticTree;
 } // namespace detail
 
-/// Identifies a Runtime-owned semantic entity; zero is invalid.
+/// Identifies a UiWindow-owned semantic entity; zero is invalid.
 ///
 /// IDs remain stable while the same mounted node or compatible virtual child survives. They are not application
-/// keys, automation identifiers, or process-global handles, and must not be persisted across Runtime lifetimes.
+/// keys, automation identifiers, or process-global handles, and must not be persisted across UiWindow lifetimes.
 using SemanticNodeId = std::uint64_t;
 
 /// Describes a control's meaning to assistive technology, independently of its appearance.
@@ -70,7 +70,7 @@ enum class SemanticRole {
   Menu,
   /// One command, checkable option, or submenu entry in a Menu.
   MenuItem,
-  /// A dialog surface; modal isolation is owned by Runtime, not implied by this role.
+  /// A dialog surface; modal isolation is owned by UiWindow, not implied by this role.
   Dialog,
   /// A group of application navigation destinations.
   Navigation,
@@ -176,7 +176,7 @@ struct SemanticCollectionItem {
 /// earlier values. View modifiers apply left to right after component defaults and NodeExtension contributions.
 /// User-facing strings resolve through the effective Locale; identifier is never localized.
 ///
-/// These declarations do not implement interactions. Runtime remains authoritative for enabled state, input focus,
+/// These declarations do not implement interactions. UiWindow remains authoritative for enabled state, input focus,
 /// editable selection, scrolling, secure text, visibility, and geometry. Do not copy protected text into labels, hints,
 /// errors, or other application-authored metadata: secure-field redaction cannot identify secrets in such metadata.
 ///
@@ -198,7 +198,7 @@ struct Semantics {
   std::optional<SemanticRole> role{};
   /// Accessible name, kept separate from the current value, hint, and validation error.
   std::optional<StringVariant> label{};
-  /// Human-readable current value; secure text-input values are removed by Runtime.
+  /// Human-readable current value; secure text-input values are removed by UiWindow.
   std::optional<StringVariant> value{};
   /// Prompt for an empty value, not a substitute for a persistent label.
   std::optional<StringVariant> placeholder{};
@@ -251,7 +251,7 @@ struct Semantics {
 enum class SemanticActionKind : std::uint8_t {
   /// Invokes the primary command, toggle, or selection behavior.
   Activate,
-  /// Requests Runtime input focus, not the screen reader's independent accessibility focus.
+  /// Requests UiWindow input focus, not the screen reader's independent accessibility focus.
   Focus,
   /// Requests replacement text carried by a UTF-8 std::string.
   SetText,
@@ -290,9 +290,9 @@ enum class SemanticActionKind : std::uint8_t {
   return index <= static_cast<std::uint8_t>(SemanticActionKind::Custom) ? std::uint64_t{1} << index : 0;
 }
 
-/// Carries a platform-neutral request to Runtime::PerformSemanticAction() or NodeExtension::OnSemanticAction().
+/// Carries a platform-neutral request to UiWindow::PerformSemanticAction() or NodeExtension::OnSemanticAction().
 ///
-/// The value alternative must match kind. Runtime rejects invalid payloads, stale targets, and unavailable actions;
+/// The value alternative must match kind. UiWindow rejects invalid payloads, stale targets, and unavailable actions;
 /// the component still validates its own domain constraints and emits controlled-value proposals.
 /// @code
 /// SemanticAction activate{SemanticActionKind::Activate, std::monostate{}};
@@ -313,11 +313,11 @@ struct SemanticAction {
 /// Platform adapters read these values from a published SemanticFrame; applications declare Semantics instead of
 /// editing snapshots. Strings are resolved UTF-8, and absent optional states remain distinct from false states.
 struct SemanticNode {
-  /// Nonzero Runtime identity, independent of the node's position in SemanticFrame::nodes.
+  /// Nonzero UiWindow identity, independent of the node's position in SemanticFrame::nodes.
   SemanticNodeId id = 0;
   /// Parent identity, absent for the synthetic host root.
   std::optional<SemanticNodeId> parent{};
-  /// Runtime-owned PlatformView anchor identity for bridging a native accessibility subtree.
+  /// UiWindow-owned PlatformView anchor identity for bridging a native accessibility subtree.
   std::optional<std::uint64_t> platform_view_identity{};
   /// Child identities in accessibility traversal order; entries are IDs, not vector indices.
   std::vector<SemanticNodeId> children{};
@@ -367,7 +367,7 @@ struct SemanticNode {
   SemanticLiveRegion live_region = SemanticLiveRegion::None;
   /// Effective availability; virtual children also inherit the mounted owner's disabled state.
   bool enabled = true;
-  /// Runtime keyboard/input focus, not platform accessibility focus.
+  /// UiWindow keyboard/input focus, not platform accessibility focus.
   bool focused = false;
   /// Whether the mounted text-input configuration accepts multiple lines.
   bool multiline = false;
@@ -388,9 +388,9 @@ struct SemanticNode {
 /// Owns a complete semantic snapshot from the same committed layout and state as its FrameCommit.
 ///
 /// Retain the FrameCommit::semantic_frame shared pointer while querying nodes. Publication is immutable; mutating a
-/// copy does not update Runtime. The nodes array is flat, and hierarchy is expressed by node IDs, not array indices.
+/// copy does not update UiWindow. The nodes array is flat, and hierarchy is expressed by node IDs, not array indices.
 struct SemanticFrame {
-  /// Monotonically increasing revision within a Runtime; unchanged semantic output keeps its existing revision.
+  /// Monotonically increasing revision within a UiWindow; unchanged semantic output keeps its existing revision.
   std::uint64_t revision = 0;
   /// Identity of the synthetic host root contained in nodes.
   SemanticNodeId root = 0;
@@ -442,7 +442,7 @@ public:
   /// Declares or updates the mounted owner's contribution for local ID zero.
   ///
   /// Repeated calls merge supplied fields. Application Semantics modifiers take precedence over this contribution,
-  /// and Runtime-owned state remains authoritative. Call this before adding actions for local ID zero.
+  /// and UiWindow-owned state remains authoritative. Call this before adding actions for local ID zero.
   /// @param semantics Owner properties, resolved using the mounted owner's environment and resource service.
   /// @throws std::invalid_argument If supplied range, selection, heading, scroll, or span metadata is invalid.
   void SetOwner(Semantics semantics);
@@ -474,7 +474,7 @@ public:
   /// Advertises a standard action handled by this extension's OnSemanticAction().
   ///
   /// Repeating the same declaration is harmless, but two extensions must not claim the same owner action.
-  /// Runtime suppresses advertised actions when the effective target is disabled.
+  /// UiWindow suppresses advertised actions when the effective target is disabled.
   /// @param local_id Zero after SetOwner(), or a nonzero child ID already supplied to AddChild().
   /// @param action Standard action kind; use AddCustomAction() for Custom.
   /// @throws std::invalid_argument If action is Custom or an invalid enum value.

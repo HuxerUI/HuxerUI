@@ -242,7 +242,7 @@ struct MotionAdvanceResult {
   bool operator==(const MotionAdvanceResult&) const = default;
 };
 
-/// Retains and advances one scalar animation using Runtime frame timing.
+/// Retains and advances one scalar animation using UiWindow frame timing.
 ///
 /// MotionController is useful inside NodeExtension implementations and other retained framework behavior. Application
 /// state remains authoritative; declarative Views normally use AnimateTo() with a presentation modifier instead.
@@ -308,8 +308,8 @@ public:
     AnimateTo(target, AnimationSpec(std::forward<Spec>(animation)), playback);
   }
 
-  /// Advances from one Runtime frame, honoring FrameInfo::reduced_motion, and reports required scheduling.
-  /// @param frame Runtime timestamp and reduced-motion policy for this advance.
+  /// Advances from one UiWindow frame, honoring FrameInfo::reduced_motion, and reports required scheduling.
+  /// @param frame UiWindow timestamp and reduced-motion policy for this advance.
   /// @return Value-change and scheduling information to propagate from NodeExtension::OnFrame().
   MotionAdvanceResult Advance(const FrameInfo& frame) noexcept;
 
@@ -940,7 +940,7 @@ private:
 
 /// Starts window scene transitions and owns the optional geometry anchor associated with one composable call site.
 ///
-/// The mutation must synchronously update authoritative application state so Runtime can capture the old scene and
+/// The mutation must synchronously update authoritative application state so UiWindow can capture the old scene and
 /// compose its replacement. When reduced motion is enabled, the mutation still runs but the visual transition is
 /// skipped.
 /// @code

@@ -46,7 +46,7 @@ View MacNextTextFieldApp() {
 TEST_CASE("TestMacTextInputClientMapsCompositionAndCommands") {
   @autoreleasepool {
     TestPlatform platform;
-    auto runtime = std::make_unique<Runtime>(MacTextFieldApp, platform);
+    auto runtime = std::make_unique<UiWindow>(MacTextFieldApp, platform);
     NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 80.0)];
     auto input = std::make_unique<detail::MacTextInput>(runtime->CoreRuntime(), view);
     platform.platform_text_input = input.get();
@@ -102,7 +102,7 @@ TEST_CASE("TestMacTextInputClientMapsCompositionAndCommands") {
 TEST_CASE("TestMacTextInputClientPreservesWordEditingSelectors") {
   @autoreleasepool {
     TestPlatform platform;
-    auto runtime = std::make_unique<Runtime>(MacTextFieldApp, platform);
+    auto runtime = std::make_unique<UiWindow>(MacTextFieldApp, platform);
     NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 80.0)];
     auto input = std::make_unique<detail::MacTextInput>(runtime->CoreRuntime(), view);
     platform.platform_text_input = input.get();
@@ -132,7 +132,7 @@ TEST_CASE("TestMacTextInputClientPreservesWordEditingSelectors") {
 TEST_CASE("TestMacTextInputRoutesHistoryShortcutsBeforeInterpretation") {
   @autoreleasepool {
     TestPlatform platform;
-    auto runtime = std::make_unique<Runtime>(MacTextFieldApp, platform);
+    auto runtime = std::make_unique<UiWindow>(MacTextFieldApp, platform);
     NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 80.0)];
     auto input = std::make_unique<detail::MacTextInput>(runtime->CoreRuntime(), view);
     platform.platform_text_input = input.get();
@@ -181,7 +181,7 @@ TEST_CASE("TestMacTextInputRoutesHistoryShortcutsBeforeInterpretation") {
 TEST_CASE("TestMacSecureTextInputDoesNotExposeAttributedText") {
   @autoreleasepool {
     TestPlatform platform;
-    auto runtime = std::make_unique<Runtime>(MacSecureTextFieldApp, platform);
+    auto runtime = std::make_unique<UiWindow>(MacSecureTextFieldApp, platform);
     NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 80.0)];
     auto input = std::make_unique<detail::MacTextInput>(runtime->CoreRuntime(), view);
     platform.platform_text_input = input.get();
@@ -207,7 +207,7 @@ TEST_CASE("TestMacTextInputNextSelectorUsesRuntimeFocusAction") {
   @autoreleasepool {
     mac_first_submissions = 0;
     TestPlatform platform;
-    auto runtime = std::make_unique<Runtime>(MacNextTextFieldApp, platform);
+    auto runtime = std::make_unique<UiWindow>(MacNextTextFieldApp, platform);
     NSView* view = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 100.0)];
     auto input = std::make_unique<detail::MacTextInput>(runtime->CoreRuntime(), view);
     platform.platform_text_input = input.get();

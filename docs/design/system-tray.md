@@ -12,7 +12,7 @@ This document defines application-level system tray presentation, window visibil
 - Let applications independently handle platform minimize and close requests.
 - Preserve normal platform behavior when a tray host is unavailable.
 - Keep availability observable because Linux tray hosts may appear or disappear at runtime.
-- Keep operating-system objects and protocols behind PlatformAdapter transports.
+- Keep operating-system objects and protocols behind Runtime-owned transports.
 
 ## Non-goals
 
@@ -34,7 +34,7 @@ The responsibilities are divided as follows:
 
 `ApplicationHandle` is the public application-shell facade. It groups activation, lifecycle, termination, and system tray capabilities without becoming a generic service locator. HTTP, files, clipboard, presentation layers, and other independent services keep their existing entry points. Internally, the application service owns the focused system tray service, so application-level capabilities share one lifetime and one public entry point.
 
-One Runtime owns one logical application tray presentation. `SystemTrayHandle::Show()` creates or replaces that presentation rather than allocating another tray item. `ApplicationHandle::SystemTray()` captures a private declaration-owner identity from the current composition scope. Repeated calls through that owner update the same presentation, while a competing active owner is invalid. `Hide()` releases only the calling owner's presentation. This prevents an unmounting stale component from removing a replacement owned elsewhere without adding a public registration type.
+One Runtime owns one logical application tray presentation. `SystemTrayHandle::Show()` creates or replaces that presentation rather than allocating another tray item. All handles acquired from that application address the same service, independently of composition or window lifetime. The latest `Show()` replaces the presentation, and `Hide()` removes it regardless of which handle last called `Show()`. Application code coordinates presentation updates; there is no per-component presentation owner.
 
 ## Shared menu declarations
 
@@ -61,8 +61,7 @@ public:
   void Show(ImageVariant icon, SystemTrayOptions options = {}) const;
   void Hide() const;
 
-  template <class... Dependencies>
-  void OnActivate(std::function<void()> handler, Dependencies&&... dependencies) const;
+  void OnActivate(std::function<void()> handler) const;
 };
 
 class ApplicationHandle {
@@ -71,15 +70,19 @@ public:
 };
 ```
 
-The icon is required and uses the existing `ImageVariant` resource model. It must resolve to `ImageAsset`; `VectorAsset` produces `std::invalid_argument` before platform dispatch because platform tray APIs consume raster imagery. The same rule applies to optional platform menu icons. Tooltip and menu labels use `StringVariant` and resolve against the Environment captured by `ApplicationHandle::SystemTray()`. Recomposition can submit `Show()` again when resource configuration changes. An empty or unresolved required icon is invalid caller input.
+The icon is required and uses the existing `ImageVariant` resource model. It must resolve to `ImageAsset`; `VectorAsset` produces `std::invalid_argument` before platform dispatch because platform tray APIs consume raster imagery. The same rule applies to optional platform menu icons. Tooltip and menu labels use `StringVariant` and resolve against the application's resource configuration. The service refreshes the retained presentation when that configuration changes. An empty or unresolved required icon is invalid caller input.
 
-`Show()` is idempotent application-level presentation. Its first call creates the desired item and later calls atomically replace icon, tooltip, menu declarations, and callbacks. `Hide()` clears the desired presentation and removes any platform item. Runtime shutdown also removes the platform item, so explicit cleanup is not required for process safety.
+`Show()` is idempotent application-level presentation. Its first call creates the desired item and later calls atomically replace icon, tooltip, menu declarations, and menu callbacks. `Hide()` clears the desired presentation and removes any platform item. Neither operation changes the primary activation handler. Runtime shutdown also removes the platform item, so explicit cleanup is not required for process safety.
 
 When the platform is temporarily unavailable, `Show()` retains the desired presentation without pretending that an item is visible. The service presents it when availability returns. `Hide()` while unavailable clears the retained presentation and prevents later creation.
 
 `IsAvailable()` reports whether the current host can display the desired item. Reading it during composition subscribes the current scope to later changes. It remains callable outside composition as a current-value query, which allows a committed window request handler to choose its fallback at request time.
 
-`OnActivate()` follows the same `Lifecycle()`-bound connection model as `ApplicationHandle::OnActivation()`. One Runtime has at most one committed tray activation handler. It is invoked on the Runtime UI thread for the platform's primary tray activation. Context activation displays the declared platform menu. Empty handlers and competing committed handlers are invalid.
+`SystemTrayHandle::OnActivate()` registers one primary tray activation handler for the application's remaining lifetime, normally from an `ApplicationHook`. Registration runs on the original application's thread and requires neither composition nor an existing window. An empty handler throws `std::invalid_argument`; duplicate registration through any handle, a disconnected application, or an incorrect application thread/context throws `std::logic_error`. Registration does not show a tray item and does not return a connection token.
+
+The handler runs in the application's context on its thread while the tray is available and a presentation is active. It survives `Show()`, `Hide()`, and window retirement, and is released when Runtime disconnects. It is not a composition hook: do not register it on each recomposition or expect component unmount to disconnect it. Context activation displays the declared platform menu.
+
+Registration does not capture a window context. For a fixed target, capture a `WindowHandle` obtained while that window is available; the handle does not keep the native window alive, and its commands become harmless after window retirement. For a target that can change, capture an application-owned window controller or ViewModel that explicitly binds and unbinds the intended window. `UseWindow()` inside the tray callback cannot discover a default window. Window selection and creation remain application policy.
 
 ## Window visibility
 
@@ -150,39 +153,40 @@ Platforms that do not own a terminable desktop application may ignore the reques
 
 ## Composed behavior
 
-An application declares tray ownership in a component Lifecycle and combines current capability with independent window request handlers:
+This single-window example installs the tray once through `application_hooks`. Its application-owned controller receives the window handle while the root is mounted; window request handlers remain composition-bound:
 
 ```cpp
-[[huxerui::composable]]
-View AppRoot() {
-  const auto window = UseWindow();
+struct AppWindowController {
+  std::optional<WindowHandle> window;
+
+  void Activate() const {
+    if (window) window->Activate();
+  }
+};
+
+void InstallTray(ApplicationContext& context) {
+  auto windows = std::make_shared<AppWindowController>();
+  context.Provide(windows);
   const auto application = UseApplication();
   const auto tray = application.SystemTray();
-
-  tray.OnActivate([window] {
-    window.Activate();
+  tray.OnActivate([windows] { windows->Activate(); });
+  tray.Show(images::application, {
+      .tooltip = strings::application_name,
+      .menu = {
+          MenuItem(strings::show_window, [windows] { windows->Activate(); }),
+          MenuSection{},
+          MenuItem(strings::quit, [application] { application.Quit(); }),
+      },
   });
+}
 
-  Lifecycle([tray, window, application] {
-    tray.Show(
-        images::application,
-        SystemTrayOptions{
-            .tooltip = strings::application_name,
-            .menu = {
-                MenuItem(strings::show_window, [window] {
-                  window.Activate();
-                }),
-                MenuSection{},
-                MenuItem(strings::quit, [application] {
-                  application.Quit();
-                }),
-            },
-        }
-    );
-
-    return [tray] {
-      tray.Hide();
-    };
+View AppRoot() {
+  const auto window = UseWindow();
+  const auto tray = UseApplication().SystemTray();
+  const auto windows = UseService<AppWindowController>();
+  Lifecycle([windows, window] {
+    windows->window = window;
+    return [windows] { windows->window.reset(); };
   });
 
   window.OnMinimizeRequest([tray, window] {
@@ -203,6 +207,8 @@ View AppRoot() {
 
   return ApplicationContent();
 }
+
+const Application application{AppRoot, {.application_hooks = {InstallTray}}};
 ```
 
 The same declaration works on unsupported hosts. `IsAvailable()` remains false and the window requests continue through their normal platform behavior, preventing an unreachable hidden application.
@@ -211,12 +217,12 @@ The same declaration works on unsupported hosts. `IsAvailable()` remains false a
 
 The internal application service owns one focused system tray sub-service. `ApplicationHandle::SystemTray()` therefore does not throw merely because a platform lacks a transport. A missing transport produces an unavailable service without exposing another Root Service entry point.
 
-`PlatformAdapter` creates an implementation-only system tray transport. The transport owns platform handles, object registrations, and menu objects. It receives resolved immutable presentation data and reports availability, primary activation, and generation-scoped menu commands. Each desktop transport delivers callbacks from its platform UI event loop before the shared service touches state or invokes application code.
+The platform-derived `Runtime` creates an implementation-only system tray transport. The transport owns platform handles, object registrations, and menu objects. It receives resolved immutable presentation data and reports availability, primary activation, and generation-scoped menu commands. Transport events enter the application's dispatch queue before the shared service touches state or invokes application code.
 
 The application-owned system tray service owns:
 
-- Desired application presentation and captured Environment.
-- Declaration-owner identity and exclusive presentation ownership.
+- Desired application presentation.
+- One application-lifetime primary activation handler.
 - Availability observation.
 - Resource resolution and presentation generations.
 - Menu callback lookup and stale-command rejection.
@@ -265,14 +271,14 @@ Web, Android, iOS, embedded hosts, and future platforms without a tray transport
 
 ## Validation
 
-Focused shared tests cover retained availability, lazy transport connection, presentation replacement, hidden and stale event rejection, lifecycle cleanup, raster enforcement, application quit forwarding, and window request arbitration.
+Focused shared tests cover retained availability, lazy transport connection, single-handler registration, application-thread validation, registration from window installation, presentation replacement, hidden and stale event rejection, explicit window capture, shutdown cleanup, raster enforcement, application quit forwarding, and window request arbitration.
 
 Platform-focused validation should cover Explorer restart and keyboard activation on Windows, AppKit status-item and menu lifecycle on macOS, and watcher loss, host recovery, D-Bus menu activation, and icon byte order on Linux. Manual validation covers platform menu appearance, accessibility, focus restoration, foreground activation restrictions, and the absence of an unreachable hidden-window state.
 
 ## Invariants
 
 - System tray presentation is application-owned and not a `WindowOptions` field.
-- One Runtime has one logical tray presentation, one active presentation owner, and at most one activation handler.
+- One Runtime has one logical tray presentation and at most one application-lifetime activation handler.
 - Window minimize and close policies remain independent.
 - Unsupported or temporarily unavailable tray hosts preserve platform window behavior.
 - `Hide()` never destroys Runtime or mounted application state.

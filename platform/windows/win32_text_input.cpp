@@ -72,10 +72,10 @@ struct Win32TextInput::State {
   }
 
   TextInputGeometry QueryTextInputGeometry() const {
-    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+    if (ui_window_ == nullptr || text_input_session_id_ == 0) {
       return {};
     }
-    return runtime_->QueryTextInputGeometry(text_input_session_id_, text_input_state_.selection.Range());
+    return ui_window_->QueryTextInputGeometry(text_input_session_id_, text_input_state_.selection.Range());
   }
 
   void UpdateImePosition(const TextInputGeometry& geometry) {
@@ -137,23 +137,23 @@ struct Win32TextInput::State {
   }
 
   TextInputApplyResult ApplyTextInputCommands(std::vector<TextInputCommand> commands) {
-    if (runtime_ == nullptr || text_input_session_id_ == 0 || commands.empty()) {
+    if (ui_window_ == nullptr || text_input_session_id_ == 0 || commands.empty()) {
       return {};
     }
     TextInputCommandBatch batch;
     batch.session_id = text_input_session_id_;
     batch.commands = std::move(commands);
-    return runtime_->HandleTextInputCommands(batch);
+    return ui_window_->HandleTextInputCommands(batch);
   }
 
   bool BeginImeComposition() {
-    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+    if (ui_window_ == nullptr || text_input_session_id_ == 0) {
       return false;
     }
     ime_composing_ = true;
     UpdateImePosition(QueryTextInputGeometry());
 
-    const TextInputContext context = runtime_->QueryTextInputContext(text_input_session_id_, 0, 0);
+    const TextInputContext context = ui_window_->QueryTextInputContext(text_input_session_id_, 0, 0);
     if (context.result_code != TextInputResultCode::Ok || context.composition.has_value()) {
       return context.result_code == TextInputResultCode::Ok;
     }
@@ -166,7 +166,7 @@ struct Win32TextInput::State {
   }
 
   bool UpdateImeComposition(LPARAM flags) {
-    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+    if (ui_window_ == nullptr || text_input_session_id_ == 0) {
       return false;
     }
     HIMC context = ImmGetContext(window_);
@@ -186,7 +186,7 @@ struct Win32TextInput::State {
       return true;
     }
 
-    const TextInputContext input_context = runtime_->QueryTextInputContext(text_input_session_id_, 0, 0);
+    const TextInputContext input_context = ui_window_->QueryTextInputContext(text_input_session_id_, 0, 0);
     if (input_context.result_code != TextInputResultCode::Ok) {
       return false;
     }
@@ -231,13 +231,13 @@ struct Win32TextInput::State {
   }
 
   bool EndImeComposition() {
-    if (runtime_ == nullptr || text_input_session_id_ == 0) {
+    if (ui_window_ == nullptr || text_input_session_id_ == 0) {
       return false;
     }
     ime_composing_ = false;
     pending_high_surrogate_ = 0;
 
-    const TextInputContext context = runtime_->QueryTextInputContext(text_input_session_id_, 0, 0);
+    const TextInputContext context = ui_window_->QueryTextInputContext(text_input_session_id_, 0, 0);
     if (context.result_code != TextInputResultCode::Ok || !context.composition.has_value()) {
       return context.result_code == TextInputResultCode::Ok;
     }
@@ -296,7 +296,7 @@ struct Win32TextInput::State {
     return result.result_code == TextInputResultCode::Ok;
   }
 
-  Runtime* runtime_ = nullptr;
+  UiWindow* ui_window_ = nullptr;
   HWND window_ = nullptr;
   float dpi_scale_ = 1.0F;
   TextInputSessionId text_input_session_id_ = 0;
@@ -310,8 +310,8 @@ Win32TextInput::Win32TextInput() : state_(std::make_unique<State>()) {}
 
 Win32TextInput::~Win32TextInput() = default;
 
-void Win32TextInput::SetRuntime(Runtime* runtime) noexcept {
-  state_->runtime_ = runtime;
+void Win32TextInput::SetUiWindow(UiWindow* ui_window) noexcept {
+  state_->ui_window_ = ui_window;
 }
 
 void Win32TextInput::SetWindow(HWND window) noexcept {
@@ -323,7 +323,7 @@ void Win32TextInput::SetDpiScale(float scale) noexcept {
 }
 
 void Win32TextInput::Reset() noexcept {
-  state_->runtime_ = nullptr;
+  state_->ui_window_ = nullptr;
   state_->window_ = nullptr;
   state_->text_input_session_id_ = 0;
   state_->text_input_state_ = {};

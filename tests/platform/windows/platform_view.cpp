@@ -348,12 +348,12 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
 
   WindowsPlatformViewTestPlatform platform;
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([](RootContext& root) {
+  options.application_hooks.push_back([](ApplicationContext& root) {
     root.RegisterPlatformView<WindowsPlatformViewProperties, int>("test/WindowsView",
                                                                   ControlledWindowsPlatformViewFactory());
     root.RegisterPlatformView<void>("test/PropertylessWindowsView", WindowsPropertylessPlatformViewFactory());
   });
-  Runtime runtime(WindowsPlatformViewApp, platform, std::move(options));
+  UiWindow runtime(WindowsPlatformViewApp, platform, std::move(options));
   runtime.SetWindowMetrics({{240.0F, 160.0F}});
 
   PlatformViewTestWindow window;
@@ -429,7 +429,7 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE(GetFocus() == windows_platform_view_edit);
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.CoreRuntime());
+  accessibility.SetUiWindow(&runtime.CoreRuntime());
   accessibility.SetWindow(window.Handle());
   accessibility.Commit(focused.semantic_frame, &platform_views);
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> semantic_root;
@@ -526,14 +526,14 @@ TEST_CASE("WindowsPlatformViewsDisposeInstancesWhenViewCreationFails") {
 
   WindowsPlatformViewTestPlatform platform;
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([](RootContext& root) {
+  options.application_hooks.push_back([](ApplicationContext& root) {
     auto factory = WindowsPlatformViewFactory();
     factory.view = [](const std::shared_ptr<PlatformViewState>&) -> HWND {
       throw std::runtime_error("test view failure");
     };
     root.RegisterPlatformView<WindowsPlatformViewProperties>("test/FailingWindowsView", std::move(factory));
   });
-  Runtime runtime(FailingWindowsPlatformViewApp, platform, std::move(options));
+  UiWindow runtime(FailingWindowsPlatformViewApp, platform, std::move(options));
   runtime.SetWindowMetrics({{240.0F, 160.0F}});
 
   PlatformViewTestWindow window;

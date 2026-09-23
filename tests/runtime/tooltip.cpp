@@ -149,7 +149,7 @@ View MultipleHoverApp() {
   };
 }
 
-void MovePointer(Runtime& runtime, Point position) {
+void MovePointer(UiWindow& runtime, Point position) {
   runtime.HandlePointerEvent({PointerEventType::Move, 1, position, huxerui::PointerDeviceKind::Mouse});
 }
 
@@ -157,7 +157,7 @@ void MovePointer(Runtime& runtime, Point position) {
 
 TEST_CASE("TestTooltipShowsAfterHoverDelayAndDismissesAfterExitDelay") {
   TestPlatform platform;
-  Runtime runtime{TooltipApp, platform};
+  UiWindow runtime{TooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   REQUIRE(FindText(runtime.BuildFrame(), "Tooltip message") == nullptr);
 
@@ -179,7 +179,7 @@ TEST_CASE("TestTooltipShowsAfterHoverDelayAndDismissesAfterExitDelay") {
 
 TEST_CASE("TestTooltipRequiresStationaryHoverAndRestartsAfterMovement") {
   TestPlatform platform;
-  Runtime runtime{TooltipApp, platform};
+  UiWindow runtime{TooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -207,7 +207,7 @@ TEST_CASE("TestTooltipRequiresStationaryHoverAndRestartsAfterMovement") {
 
 TEST_CASE("TestTooltipRemainsVisibleWhileItsSurfaceIsHovered") {
   TestPlatform platform;
-  Runtime runtime{TooltipApp, platform};
+  UiWindow runtime{TooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -234,7 +234,7 @@ TEST_CASE("TestTooltipRemainsVisibleWhileItsSurfaceIsHovered") {
 
 TEST_CASE("TestTooltipShowsForKeyboardFocusAndContributesTargetHint") {
   TestPlatform platform;
-  Runtime runtime{TooltipApp, platform};
+  UiWindow runtime{TooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -260,7 +260,7 @@ TEST_CASE("TestTooltipShowsForKeyboardFocusAndContributesTargetHint") {
 TEST_CASE("TestTooltipLongPressCancelsTargetClick") {
   tooltip_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{TooltipApp, platform};
+  UiWindow runtime{TooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -284,7 +284,7 @@ TEST_CASE("TestTooltipLongPressCancelsTargetClick") {
 
 TEST_CASE("TestPlainTooltipSchedulesTouchReleaseAndDismissal") {
   TestPlatform platform;
-  Runtime runtime{PlainTooltipApp, platform};
+  UiWindow runtime{PlainTooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -309,7 +309,7 @@ TEST_CASE("TestPlainTooltipSchedulesTouchReleaseAndDismissal") {
 
 TEST_CASE("TestTooltipTouchCancellationDismissesVisibleSurface") {
   TestPlatform platform;
-  Runtime runtime{PlainTooltipApp, platform};
+  UiWindow runtime{PlainTooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -327,7 +327,7 @@ TEST_CASE("TestTooltipTouchCancellationDismissesVisibleSurface") {
 
 TEST_CASE("TestTooltipRetainsTouchOwnershipUntilEveryAcceptedPointerEnds") {
   TestPlatform platform;
-  Runtime runtime{PlainTooltipApp, platform};
+  UiWindow runtime{PlainTooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -347,7 +347,7 @@ TEST_CASE("TestTooltipRetainsTouchOwnershipUntilEveryAcceptedPointerEnds") {
 TEST_CASE("TestTooltipPreservesOrdinaryTouchActivation") {
   tooltip_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{TooltipApp, platform};
+  UiWindow runtime{TooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -359,7 +359,7 @@ TEST_CASE("TestTooltipPreservesOrdinaryTouchActivation") {
 
 TEST_CASE("TestTooltipCanHoverDisabledTarget") {
   TestPlatform platform;
-  Runtime runtime{DisabledTooltipApp, platform};
+  UiWindow runtime{DisabledTooltipApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -374,7 +374,7 @@ TEST_CASE("TestTooltipUpdatesCompatiblyAndDismissesWhenTargetUnmounts") {
   tooltip_target_visible = State<bool>{};
   tooltip_use_updated_message = State<bool>{};
   TestPlatform platform;
-  Runtime runtime{TooltipLifecycleApp, platform};
+  UiWindow runtime{TooltipLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -397,7 +397,7 @@ TEST_CASE("TestTooltipUpdatesCompatiblyAndDismissesWhenTargetUnmounts") {
 TEST_CASE("TestTooltipCompilesThemeStyleBeforeUpdatingItsExtension") {
   tooltip_style_mode = State<int>{};
   TestPlatform platform;
-  Runtime runtime{DynamicTooltipStyleApp, platform};
+  UiWindow runtime{DynamicTooltipStyleApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -426,7 +426,7 @@ TEST_CASE("TestTooltipCompilesThemeStyleBeforeUpdatingItsExtension") {
 
 TEST_CASE("TestOnlyOneTooltipIsVisiblePerWindow") {
   TestPlatform platform;
-  Runtime runtime{MultipleTooltipTargetsApp, platform};
+  UiWindow runtime{MultipleTooltipTargetsApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -444,7 +444,7 @@ TEST_CASE("TestRuntimeDispatchesHoverToEveryExtensionOnDeepestNode") {
   first_hovered = false;
   second_hovered = false;
   TestPlatform platform;
-  Runtime runtime{MultipleHoverApp, platform};
+  UiWindow runtime{MultipleHoverApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -468,7 +468,7 @@ TEST_CASE("TestTooltipRejectsEmptyLiteralAndInvalidStyle") {
     definition.Set(style);
     return Theme {std::move(definition), Text("Target").With(Tooltip("Message"))};
   };
-  REQUIRE_THROWS_AS(Runtime(invalid, platform).BuildFrame(), std::invalid_argument);
+  REQUIRE_THROWS_AS(UiWindow(invalid, platform).BuildFrame(), std::invalid_argument);
 }
 
 } // namespace huxerui::test

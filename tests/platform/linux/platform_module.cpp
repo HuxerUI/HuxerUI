@@ -31,13 +31,16 @@ View LinuxPlatformModuleApp() {
 
 AppOptions LinuxPlatformModuleOptions() {
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back(example::InstallTimer);
+  options.application_hooks = {example::InstallTimer};
+  options.window_hooks.push_back([](WindowContext& root) {
+    root.Provide(OpenPlatformModule<std::shared_ptr<example::TimerService>>(example::timer::type));
+  });
   return options;
 }
 
 template <class Predicate>
 bool RunDispatcherUntil(
-    detail::LinuxUIThreadDispatcher& dispatcher, Predicate&& predicate, std::chrono::milliseconds timeout
+    detail::LinuxUiThreadDispatcher& dispatcher, Predicate&& predicate, std::chrono::milliseconds timeout
 ) {
   static_cast<void>(dispatcher);
   const auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -51,13 +54,13 @@ bool RunDispatcherUntil(
   return std::invoke(predicate);
 }
 
-void RunDispatcherFor(detail::LinuxUIThreadDispatcher& dispatcher, std::chrono::milliseconds duration) {
+void RunDispatcherFor(detail::LinuxUiThreadDispatcher& dispatcher, std::chrono::milliseconds duration) {
   static_cast<void>(RunDispatcherUntil(dispatcher, [] { return false; }, duration));
 }
 
 TEST_CASE("LinuxUIThreadDispatcherWakesMainContextAndPreservesOrder") {
-  detail::LinuxUIThreadDispatcher dispatcher;
-  UIThreadDispatcher post = dispatcher.Bind();
+  detail::LinuxUiThreadDispatcher dispatcher;
+  UiThreadDispatcher post = dispatcher.Bind();
   const std::thread::id ui_thread = std::this_thread::get_id();
   std::vector<int> order;
   bool ran_inline = false;
@@ -82,9 +85,9 @@ TEST_CASE("LinuxUIThreadDispatcherWakesMainContextAndPreservesOrder") {
 
 TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {
   linux_timer_service.reset();
-  detail::LinuxUIThreadDispatcher dispatcher;
+  detail::LinuxUiThreadDispatcher dispatcher;
   TestPlatform platform(dispatcher.Bind());
-  Runtime runtime(LinuxPlatformModuleApp, platform, LinuxPlatformModuleOptions());
+  UiWindow runtime(LinuxPlatformModuleApp, platform, LinuxPlatformModuleOptions());
   runtime.SetWindowMetrics({{320.0F, 200.0F}});
   static_cast<void>(runtime.BuildRenderFrame());
   const std::shared_ptr<example::TimerService> timer = linux_timer_service.lock();
@@ -143,7 +146,7 @@ TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {
 
 TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
   linux_timer_service.reset();
-  detail::LinuxUIThreadDispatcher dispatcher;
+  detail::LinuxUiThreadDispatcher dispatcher;
   TestPlatform platform(dispatcher.Bind());
   bool first_replaced = false;
   bool second_completed = false;
@@ -152,7 +155,7 @@ TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
   bool cancelled_ticked = false;
   std::weak_ptr<example::TimerService> service_lifetime;
   {
-    Runtime runtime(LinuxPlatformModuleApp, platform, LinuxPlatformModuleOptions());
+    UiWindow runtime(LinuxPlatformModuleApp, platform, LinuxPlatformModuleOptions());
     runtime.SetWindowMetrics({{320.0F, 200.0F}});
     static_cast<void>(runtime.BuildRenderFrame());
     std::shared_ptr<example::TimerService> timer = linux_timer_service.lock();

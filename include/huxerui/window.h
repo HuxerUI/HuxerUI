@@ -5,16 +5,96 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <typeindex>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include <huxerui/color.h>
+#include <huxerui/environment.h>
 #include <huxerui/geometry.h>
+#include <huxerui/layer.h>
 #include <huxerui/lifecycle.h>
 #include <huxerui/resource.h>
 #include <huxerui/view.h>
 
 namespace huxerui {
+
+class UiWindow;
+
+namespace detail {
+/// Rejects a window service key already owned by the application's service table.
+/// @param type Exact C++ key about to be installed by WindowContext::Provide.
+void ValidateRootServiceType(std::type_index type);
+} // namespace detail
+
+/// Installs services and presentation layers for one UiWindow before its first composition.
+/// The context is borrowed only during a WindowHook callback on the application thread. Window services remain
+/// available
+/// through that window's composition and captured event contexts, then disconnect when the window retires.
+/// Application services and factory registrations belong to ApplicationContext.
+/// @code{.cpp}
+/// void InstallWindow(WindowContext& context) {
+///   context.Provide(std::make_shared<WindowPresenter>(context.Layers()));
+/// }
+///
+/// const Application application{App, {.window_hooks = {InstallWindow}}};
+/// @endcode
+class WindowContext {
+public:
+  /// Installs one service for this window's lifetime.
+  /// @tparam Service Exact type used by UseService; base classes are not registered implicitly.
+  /// @param service Non-null shared instance owned by the window and any retained caller copies.
+  /// @throws std::invalid_argument If service is null.
+  /// @throws std::logic_error If the type was already provided in this window or conflicts with an application service.
+  template <class Service> void Provide(std::shared_ptr<Service> service) {
+    if (!service) {
+      throw std::invalid_argument("HuxerUI root service must not be empty");
+    }
+    detail::ValidateRootServiceType(typeid(Service));
+    if (!service_types_->insert(typeid(Service)).second) {
+      throw std::logic_error("HuxerUI root service type was provided more than once");
+    }
+    services_->push_back(service);
+    detail::SetEnvironmentValue(*environment_, typeid(Service), std::move(service));
+  }
+
+  /// Borrows this window's presentation-layer controller during service installation.
+  /// @return Controller owned by this UiWindow; a service using it must respect window retirement.
+  LayerController& Layers() noexcept {
+    return *layers_;
+  }
+
+private:
+  WindowContext(
+      LayerController& layers, Environment& environment, std::unordered_set<std::type_index>& service_types,
+      std::vector<std::shared_ptr<void>>& services
+  ) : layers_(&layers), environment_(&environment), service_types_(&service_types), services_(&services) {}
+
+  LayerController* layers_;
+  Environment* environment_;
+  std::unordered_set<std::type_index>* service_types_;
+  std::vector<std::shared_ptr<void>>* services_;
+
+  friend class UiWindow;
+};
+
+/// A callback borrowing WindowContext during installation of one UiWindow.
+/// Hooks run in AppOptions declaration order on the application thread before first composition. Do not retain the
+/// context argument. Throwing aborts window initialization and releases services already installed for that window.
+using WindowHook = std::function<void(WindowContext&)>;
+
+
+/// Foreground state of one native window or scene, independently of application-wide lifecycle.
+/// Read it through WindowHandle::LifecycleState; observe distinct queued changes through OnLifecycleChanged.
+enum class WindowLifecycleState {
+  /// The attachment is foreground and accepts user interaction.
+  Active,
+  /// The attachment remains visible but is not the active input surface.
+  Inactive,
+  /// The attachment is hidden, minimized, or otherwise outside foreground presentation.
+  Background,
+};
 
 namespace detail {
 struct ModifierDescriptor;
@@ -33,7 +113,7 @@ enum class WindowChromeMode {
   Custom, ///< Lets application content occupy title-bar space while HuxerUI preserves native window behavior.
 };
 
-/// A top-level window operation understood by PlatformAdapter and WindowHandle.
+/// A top-level window operation understood by UiWindow and WindowHandle.
 enum class WindowCommand {
   Minimize,      ///< Requests the platform's minimized state.
   Maximize,      ///< Requests the platform's maximized or equivalent zoomed state.
@@ -122,10 +202,10 @@ struct WindowOptions {
   /// unconstrained by HuxerUI; the platform may still enforce a larger native minimum.
   std::optional<Size> minimum_size{};
 
-  /// The stable root safe-area policy for this Runtime. Individual pages may still override SystemBarsAppearance.
+  /// The stable root safe-area policy for this UiWindow. Individual pages may still override SystemBarsAppearance.
   WindowContentMode content_mode = WindowContentMode::SafeArea;
 
-  /// The stable title-bar ownership policy for this Runtime.
+  /// The stable title-bar ownership policy for this UiWindow.
   WindowChromeMode chrome_mode = WindowChromeMode::System;
 
   /// The preferred logical height in Custom mode. HuxerUI preserves any larger platform control minimum.
@@ -140,7 +220,7 @@ struct WindowOptions {
 
 /// Current platform-submitted window geometry in logical units.
 ///
-/// PlatformAdapter implementations update all fields atomically through Runtime::SetWindowMetrics(). These metrics
+/// UiWindow implementations update all fields atomically through UiWindow::SetWindowMetrics(). These metrics
 /// describe the actual host viewport and are not clamped to WindowOptions::minimum_size.
 struct WindowMetrics {
   /// The complete logical drawing surface after any platform-owned IME viewport adjustment.
@@ -262,9 +342,9 @@ public:
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
-/// A lightweight handle for the current Runtime's top-level window operations.
+/// A lightweight handle for the current UiWindow's top-level window operations.
 ///
-/// Commands request native operations and do not mutate Runtime placement state directly. Minimize and close handlers
+/// Commands request native operations and do not mutate UiWindow placement state directly. Minimize and close handlers
 /// are tied to the calling composition scope through Lifecycle: returning true consumes the request, while returning
 /// false continues the platform's default operation.
 ///
@@ -285,6 +365,30 @@ public:
 /// @endcode
 class WindowHandle {
 public:
+  /// Reads this window's current native foreground state on the application thread.
+  /// @return The latest state; reading during composition subscribes the current scope to changes.
+  /// The returned value describes only this window, not the aggregate ApplicationHandle lifecycle.
+  [[nodiscard]] WindowLifecycleState LifecycleState() const;
+
+  /// Observes distinct window transitions while the declaring composition Lifecycle is mounted.
+  /// @tparam Dependencies Values compared by Lifecycle when deciding whether to reconnect the handler.
+  /// @param handler Nonempty callback receiving queued states on the application thread without initial-state replay.
+  /// @param dependencies Captured ordinary values requiring handler replacement when changed.
+  /// Multiple observers may coexist; retiring the window discards its pending transitions.
+  /// @throws std::invalid_argument If handler is empty.
+  /// @code{.cpp}
+  /// const auto window = UseWindow();
+  /// const auto current = window.LifecycleState();
+  /// window.OnLifecycleChanged([](WindowLifecycleState state) { HandleVisibility(state); });
+  /// @endcode
+  template <class... Dependencies>
+  void OnLifecycleChanged(std::function<void(WindowLifecycleState)> handler, Dependencies&&... dependencies) const {
+    if (!handler) throw std::invalid_argument("HuxerUI window lifecycle handler must not be empty");
+    Lifecycle([window = *this, handler = std::move(handler)]() mutable {
+      return window.ConnectLifecycle(std::move(handler));
+    }, std::forward<Dependencies>(dependencies)...);
+  }
+
   /// Makes the native window visible without otherwise changing placement.
   void Show() const;
 
@@ -341,6 +445,10 @@ private:
 
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler) const;
+  /// Registers a window transition observer for the composition-owned Lifecycle wrapper.
+  /// @param handler Nonempty callback tied to this handle's original window service.
+  /// @return A callback that disconnects this observer; it is safe after the service is retired.
+  [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(WindowLifecycleState)> handler) const;
 
   explicit WindowHandle(std::shared_ptr<detail::WindowService> service) : service_(std::move(service)) {}
 
@@ -349,10 +457,11 @@ private:
   friend WindowHandle UseWindow();
 };
 
-/// Returns a lightweight handle for the current Runtime window.
-///
-/// Call UseWindow() only from an active composition scope. A reusable function that calls it directly should be marked
-/// [[huxerui::composable]].
+/// Returns a handle for the UiWindow in the current composition or captured window callback context.
+/// @return A handle retaining that window's service, without extending the native window's lifetime.
+/// @throws std::logic_error If no live window context exists; an application-only callback has no default window.
+/// Methods that install composition-owned handlers still require an active composition scope. Mark reusable functions
+/// that call such hooks with [[huxerui::composable]].
 WindowHandle UseWindow();
 
 } // namespace huxerui

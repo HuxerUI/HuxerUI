@@ -588,12 +588,12 @@ public:
   GestureSettings settings;
 };
 
-void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, Point position,
+void Pointer(UiWindow& runtime, PointerEventType type, std::int64_t pointer_id, Point position,
              PointerDeviceKind device = PointerDeviceKind::Mouse) {
   runtime.HandlePointerEvent({type, pointer_id, position, device});
 }
 
-void Pointer(Runtime& runtime, PointerEventType type, std::int64_t pointer_id, Point position,
+void Pointer(UiWindow& runtime, PointerEventType type, std::int64_t pointer_id, Point position,
              PointerButton changed_button, PointerButton pressed_buttons) {
   runtime.HandlePointerEvent({type, pointer_id, position, PointerDeviceKind::Mouse, changed_button, pressed_buttons});
 }
@@ -639,7 +639,7 @@ TEST_CASE("PointerButton masks report changed and pressed buttons") {
 TEST_CASE("Secondary pointer requests the deepest context menu after raw Up") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerButtonApp, platform};
+  UiWindow runtime{PointerButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -661,7 +661,7 @@ TEST_CASE("Secondary pointer requests the deepest context menu after raw Up") {
 TEST_CASE("Middle button and mouse chords remain raw pointer input") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerButtonApp, platform};
+  UiWindow runtime{PointerButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -690,7 +690,7 @@ TEST_CASE("Middle button and mouse chords remain raw pointer input") {
 TEST_CASE("Context menu candidate does not transfer to an ancestor") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerButtonApp, platform};
+  UiWindow runtime{PointerButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -705,7 +705,7 @@ TEST_CASE("Context menu candidate does not transfer to an ancestor") {
 TEST_CASE("Keyboard context menu uses the focused View center") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerButtonApp, platform};
+  UiWindow runtime{PointerButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -728,7 +728,7 @@ TEST_CASE("Keyboard context menu uses the focused View center") {
 TEST_CASE("PointerIntercept can own Down before raw delivery and retained recognizers") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -743,7 +743,7 @@ TEST_CASE("PointerIntercept can own Down before raw delivery and retained recogn
 TEST_CASE("An accepted PointerIntercept continues receiving mouse chords") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -769,7 +769,7 @@ TEST_CASE("An accepted PointerIntercept continues receiving mouse chords") {
 TEST_CASE("A pending PointerIntercept can accept a mouse chord") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
   pointer_intercept_mode = 4;
@@ -796,7 +796,7 @@ TEST_CASE("A pending PointerIntercept can accept a mouse chord") {
 TEST_CASE("PointerIntercept can take a pending sequence and cancel its raw target once") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
   pointer_intercept_mode = 1;
@@ -818,7 +818,7 @@ TEST_CASE("PointerIntercept can take a pending sequence and cancel its raw targe
 TEST_CASE("PointerIntercept false keeps ordinary raw delivery active") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
   pointer_intercept_mode = 2;
@@ -841,7 +841,7 @@ TEST_CASE("PointerIntercept false keeps ordinary raw delivery active") {
 TEST_CASE("PointerIntercept candidates resolve deepest first and cancel pending competitors") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{NestedPointerInterceptApp, platform};
+  UiWindow runtime{NestedPointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -859,7 +859,7 @@ TEST_CASE("PointerIntercept candidates resolve deepest first and cancel pending 
 TEST_CASE("Removing a pending PointerIntercept cancels the raw sequence without calling the removed handler") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
   pointer_intercept_mode = 2;
@@ -876,7 +876,7 @@ TEST_CASE("Removing a pending PointerIntercept cancels the raw sequence without 
 TEST_CASE("A throwing PointerIntercept quarantines its sequence") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{PointerInterceptApp, platform};
+  UiWindow runtime{PointerInterceptApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
   pointer_intercept_mode = 3;
@@ -892,7 +892,7 @@ TEST_CASE("A throwing PointerIntercept quarantines its sequence") {
 TEST_CASE("MultiTap shares successful taps with Click and preserves output order") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{MultiTapApp, platform};
+  UiWindow runtime{MultiTapApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -909,7 +909,7 @@ TEST_CASE("MultiTap shares successful taps with Click and preserves output order
 TEST_CASE("MultiTap resets an incomplete sequence after movement cancellation") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{MultiTapApp, platform};
+  UiWindow runtime{MultiTapApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -926,7 +926,7 @@ TEST_CASE("MultiTap resets an incomplete sequence after movement cancellation") 
 TEST_CASE("MultiTap recognizes an extension-only target inside a scroll view") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{ExtensionOnlyMultiTapApp, platform};
+  UiWindow runtime{ExtensionOnlyMultiTapApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -943,7 +943,7 @@ TEST_CASE("MultiTap recognizes an extension-only target inside a scroll view") {
 TEST_CASE("A rejected descendant tap falls back to an eligible ancestor") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{NestedTapFallbackApp, platform};
+  UiWindow runtime{NestedTapFallbackApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -957,7 +957,7 @@ TEST_CASE("A rejected descendant tap falls back to an eligible ancestor") {
 TEST_CASE("LongPress accepts at its deadline and owns the terminal event") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{LongPressApp, platform};
+  UiWindow runtime{LongPressApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -979,7 +979,7 @@ TEST_CASE("LongPress accepts at its deadline and owns the terminal event") {
 TEST_CASE("LongPress rejects early release and reports cancellation only after acceptance") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{LongPressApp, platform};
+  UiWindow runtime{LongPressApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -999,7 +999,7 @@ TEST_CASE("LongPress rejects early release and reports cancellation only after a
 TEST_CASE("Drag reports frozen local deltas and velocity outside its bounds") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DragApp, platform};
+  UiWindow runtime{DragApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1023,7 +1023,7 @@ TEST_CASE("Drag reports frozen local deltas and velocity outside its bounds") {
 TEST_CASE("Delayed Drag starts with a rebased zero translation") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DelayedDragApp, platform};
+  UiWindow runtime{DelayedDragApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1042,7 +1042,7 @@ TEST_CASE("Delayed Drag starts with a rebased zero translation") {
 TEST_CASE("Transform atomically owns both pointers and reports incremental geometry") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{TransformApp, platform};
+  UiWindow runtime{TransformApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1093,7 +1093,7 @@ TEST_CASE("Transform atomically owns both pointers and reports incremental geome
 TEST_CASE("Transform rebases pointer-set changes and cancels the shared recognition once") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{TransformApp, platform};
+  UiWindow runtime{TransformApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1121,7 +1121,7 @@ TEST_CASE("Transform rebases pointer-set changes and cancels the shared recognit
 TEST_CASE("Transform does not combine pointers from different device kinds") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{TransformApp, platform};
+  UiWindow runtime{TransformApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1137,7 +1137,7 @@ TEST_CASE("Transform does not combine pointers from different device kinds") {
 TEST_CASE("Disabling an active Transform cancels its shared recognition once") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{TransformLifecycleApp, platform};
+  UiWindow runtime{TransformLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1158,7 +1158,7 @@ TEST_CASE("Disabling an active Transform cancels its shared recognition once") {
 TEST_CASE("A throwing Transform handler quarantines every owned pointer") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{TransformApp, platform};
+  UiWindow runtime{TransformApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1178,11 +1178,11 @@ TEST_CASE("A throwing Transform handler quarantines every owned pointer") {
   REQUIRE(gesture_events == std::vector<std::string>{"started", "canceled"});
 }
 
-TEST_CASE("Gesture defaults are snapshotted from PlatformAdapter") {
+TEST_CASE("Gesture defaults are snapshotted from UiWindow") {
   ResetGestureEvents();
   GesturePlatform platform;
   platform.settings.pointer_slop = 20.0F;
-  Runtime runtime{DragApp, platform};
+  UiWindow runtime{DragApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1196,7 +1196,7 @@ TEST_CASE("Gesture defaults are snapshotted from PlatformAdapter") {
 TEST_CASE("An active Drag snapshots its modifier configuration across compatible reconciliation") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{ConfigurableDragApp, platform};
+  UiWindow runtime{ConfigurableDragApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1216,7 +1216,7 @@ TEST_CASE("An active Drag snapshots its modifier configuration across compatible
 TEST_CASE("Drag keeps its frozen local coordinates while its target moves") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{MovingDragApp, platform};
+  UiWindow runtime{MovingDragApp, platform};
   runtime.SetWindowMetrics({.viewport = {180.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1231,7 +1231,7 @@ TEST_CASE("Drag keeps its frozen local coordinates while its target moves") {
 TEST_CASE("Nested gestures resolve in deterministic deepest-node order") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{NestedDragApp, platform};
+  UiWindow runtime{NestedDragApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1244,7 +1244,7 @@ TEST_CASE("Nested gestures resolve in deterministic deepest-node order") {
 TEST_CASE("Typed drag-and-drop preserves source and target lifecycle order") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DragDropApp, platform};
+  UiWindow runtime{DragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1266,7 +1266,7 @@ TEST_CASE("Typed drag-and-drop preserves source and target lifecycle order") {
 TEST_CASE("Cancel exits the active drop target before canceling the source") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DragDropApp, platform};
+  UiWindow runtime{DragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1288,7 +1288,7 @@ TEST_CASE("Cancel exits the active drop target before canceling the source") {
 TEST_CASE("DragSource snapshots its payload at pointer Down and reports target-local coordinates") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{SnapshotDragDropApp, platform};
+  UiWindow runtime{SnapshotDragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1308,7 +1308,7 @@ TEST_CASE("DragSource snapshots its payload at pointer Down and reports target-l
 TEST_CASE("A rejecting nested target falls back to a compatible ancestor") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{NestedDropTargetRoot, platform};
+  UiWindow runtime{NestedDropTargetRoot, platform};
   runtime.SetWindowMetrics({.viewport = {180.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1322,7 +1322,7 @@ TEST_CASE("A rejecting nested target falls back to a compatible ancestor") {
 TEST_CASE("Drag preview is a transient layer dismissed with the session") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DragDropPreviewApp, platform};
+  UiWindow runtime{DragDropPreviewApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1339,7 +1339,7 @@ TEST_CASE("Drag preview is a transient layer dismissed with the session") {
 TEST_CASE("A compatible target enables stationary edge auto-scroll through its ancestor route") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{AutoScrollDragDropApp, platform};
+  UiWindow runtime{AutoScrollDragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1356,7 +1356,7 @@ TEST_CASE("A compatible target enables stationary edge auto-scroll through its a
 TEST_CASE("DropTarget requires exact payload type identity") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{WrongTypeDragDropApp, platform};
+  UiWindow runtime{WrongTypeDragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1372,7 +1372,7 @@ TEST_CASE("DropTarget requires exact payload type identity") {
 TEST_CASE("An active target uses its latest compatible predicate") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{UpdatingDropTargetApp, platform};
+  UiWindow runtime{UpdatingDropTargetApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1388,7 +1388,7 @@ TEST_CASE("An active target uses its latest compatible predicate") {
 TEST_CASE("An active target retains typed exit dispatch when its declaration changes type") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{RetypedDropTargetApp, platform};
+  UiWindow runtime{RetypedDropTargetApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1404,7 +1404,7 @@ TEST_CASE("An active target retains typed exit dispatch when its declaration cha
 TEST_CASE("Drag preview converts a transformed source grab point into window space") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{TransformedDragPreviewApp, platform};
+  UiWindow runtime{TransformedDragPreviewApp, platform};
   runtime.SetWindowMetrics({.viewport = {400.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1419,7 +1419,7 @@ TEST_CASE("Drag preview converts a transformed source grab point into window spa
 TEST_CASE("Removing an active DragSource closes its target and preview without calling an unmounted handler") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DragDropLifecycleApp, platform};
+  UiWindow runtime{DragDropLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1438,7 +1438,7 @@ TEST_CASE("Removing an active DragSource closes its target and preview without c
 TEST_CASE("Removing an active DropTarget clears it while the source remains owned") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DragDropLifecycleApp, platform};
+  UiWindow runtime{DragDropLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1457,7 +1457,7 @@ TEST_CASE("Removing an active DropTarget clears it while the source remains owne
 TEST_CASE("A throwing DropTarget predicate quarantines the transfer and dismisses its preview") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{ThrowingDragDropApp, platform};
+  UiWindow runtime{ThrowingDragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1479,7 +1479,7 @@ TEST_CASE("A throwing DropTarget predicate quarantines the transfer and dismisse
 TEST_CASE("A throwing DropTarget event exits the committed target before canceling the source") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{ThrowingDragDropApp, platform};
+  UiWindow runtime{ThrowingDragDropApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1505,7 +1505,7 @@ TEST_CASE("A throwing DropTarget event exits the committed target before canceli
 TEST_CASE("Disabled nodes do not create gesture recognizers") {
   ResetGestureEvents();
   TestPlatform platform;
-  Runtime runtime{DisabledDragApp, platform};
+  UiWindow runtime{DisabledDragApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1519,7 +1519,7 @@ TEST_CASE("Disabling an active gesture cancels it before later pointer delivery"
   ResetGestureEvents();
   throw_on_gesture_cancel = false;
   TestPlatform platform;
-  Runtime runtime{GestureLifecycleApp, platform};
+  UiWindow runtime{GestureLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1536,7 +1536,7 @@ TEST_CASE("Removing an active gesture quarantines the sequence without calling a
   ResetGestureEvents();
   throw_on_gesture_cancel = false;
   TestPlatform platform;
-  Runtime runtime{GestureLifecycleApp, platform};
+  UiWindow runtime{GestureLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1553,7 +1553,7 @@ TEST_CASE("A throwing cancellation handler cannot keep gesture ownership live") 
   ResetGestureEvents();
   throw_on_gesture_cancel = false;
   TestPlatform platform;
-  Runtime runtime{GestureLifecycleApp, platform};
+  UiWindow runtime{GestureLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1569,7 +1569,7 @@ TEST_CASE("A throwing cancellation handler cannot keep gesture ownership live") 
 
 TEST_CASE("Gesture declarations and platform defaults reject invalid values") {
   TestPlatform platform;
-  Runtime invalid_multi_tap{
+  UiWindow invalid_multi_tap{
       [] { return Text("invalid").With(MultiTapGesture{.count = 1}); },
       platform,
   };
@@ -1578,7 +1578,7 @@ TEST_CASE("Gesture declarations and platform defaults reject invalid values") {
 
   GesturePlatform invalid_platform;
   invalid_platform.settings.pointer_slop = std::numeric_limits<float>::quiet_NaN();
-  REQUIRE_THROWS_AS(Runtime(DragApp, invalid_platform), std::logic_error);
+  REQUIRE_THROWS_AS(UiWindow(DragApp, invalid_platform), std::logic_error);
 }
 
 } // namespace huxerui::test

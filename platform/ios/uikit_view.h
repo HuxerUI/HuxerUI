@@ -3,17 +3,17 @@
 #import <UIKit/UIKit.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
-class IosPlatformAdapter;
+class IosUiWindow;
 } // namespace huxerui::detail
 
 @interface HuxerUIView : UIView {
 @public
-  huxerui::Runtime* huxeruiRuntime;
-  huxerui::detail::IosPlatformAdapter* huxeruiAdapter;
+  huxerui::UiWindow* huxeruiWindow;
+  huxerui::detail::IosUiWindow* huxeruiPlatformWindow;
   __strong NSMutableSet<UITouch*>* huxeruiTouches;
   __strong NSMutableDictionary<NSNumber*, NSNumber*>* huxeruiPointerButtons;
   __strong id<UIDropInteractionDelegate> huxeruiFileDropDelegate;

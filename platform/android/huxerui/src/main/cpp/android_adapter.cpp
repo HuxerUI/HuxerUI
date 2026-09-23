@@ -36,6 +36,7 @@
 #include "android_text_layout.h"
 #include "android_text_input_internal.h"
 #include "application/platform_frame_internal.h"
+#include "application/application_internal.h"
 #include "resources/resource_internal.h"
 #include "io/stream_internal.h"
 #include "text/text_input_internal.h"
@@ -118,7 +119,7 @@ public:
   }
 
 private:
-  // The Java AssetManager must outlive all native assets, even after the adapter is destroyed.
+  // The Java AssetManager must outlive all native assets, even after the ui_window is destroyed.
   std::shared_ptr<AndroidAssetManager> owner_;
   AAsset* asset_ = nullptr;
 };
@@ -359,9 +360,12 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
   }
 }
 
-class AndroidUIThreadDispatcherState final {
+/// Independently retained JNI dispatch queue shared by the Runtime and outstanding dispatch handles.
+/// Worker threads may enqueue work; main-thread Drain invokes callbacks after releasing the queue mutex.
+/// Shutdown closes the queue before releasing the Java application host, so stale dispatchers become inert.
+class AndroidUiThreadDispatcherState final {
 public:
-  ~AndroidUIThreadDispatcherState() {
+  ~AndroidUiThreadDispatcherState() {
     bool attached = false;
     JNIEnv* environment = Environment(attached);
     Shutdown(environment);
@@ -370,6 +374,9 @@ public:
     }
   }
 
+  /// Prepares JNI wakeup facilities before shared application initialization.
+  /// @param environment JNI environment on the Android main thread.
+  /// @param view HuxerUIApplication host providing schedulePlatformTasks; retained through a global reference.
   void Initialize(JNIEnv* environment, jobject view) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM for UI dispatch");
@@ -393,6 +400,8 @@ public:
     }
   }
 
+  /// Enqueues a callback from any thread and coalesces Java main-Handler wakeups.
+  /// @param task Callback retained until drain or shutdown; ignored once this queue is closed.
   void Dispatch(std::function<void()> task) {
     bool schedule = false;
     {
@@ -433,6 +442,7 @@ public:
     }
   }
 
+  /// Invokes the queued batch on the Android main thread without holding the queue mutex.
   void Drain() {
     std::vector<std::function<void()>> tasks;
     {
@@ -451,18 +461,24 @@ public:
     }
   }
 
+  /// Closes dispatch and releases pending captures outside the mutex.
+  /// @param environment Valid JNI environment for releasing the host reference, or null if VM access failed.
   void Shutdown(JNIEnv* environment) {
-    std::lock_guard lock(mutex_);
-    closed_ = true;
-    scheduled_ = false;
-    tasks_.clear();
-    if (environment != nullptr && view_ != nullptr) {
-      environment->DeleteGlobalRef(view_);
-      view_ = nullptr;
+    std::vector<std::function<void()>> retired;
+    jobject host = nullptr;
+    {
+      std::lock_guard lock(mutex_);
+      closed_ = true;
+      scheduled_ = false;
+      retired.swap(tasks_);
+      host = std::exchange(view_, nullptr);
     }
+    if (environment != nullptr && host != nullptr) environment->DeleteGlobalRef(host);
   }
-
 private:
+  /// Obtains JNI access for a dispatcher call originating on any thread.
+  /// @param attached Set to true only when this call attached the thread; the caller must then detach it.
+  /// @return The thread-local JNI environment, or null if the VM is unavailable or attachment fails.
   JNIEnv* Environment(bool& attached) const {
     attached = false;
     if (virtual_machine_ == nullptr) {
@@ -489,8 +505,11 @@ private:
   bool closed_ = false;
 };
 
-UIThreadDispatcher MakeUIThreadDispatcher(const std::shared_ptr<AndroidUIThreadDispatcherState>& state) {
-  const std::weak_ptr<AndroidUIThreadDispatcherState> weak_state = state;
+/// Creates a dispatch handle that does not extend the Java host's execution lifetime.
+/// @param state Original queue retained by the Runtime.
+/// @return An any-thread enqueue callback using a weak reference; expired queues silently drop work.
+UiThreadDispatcher MakeUiThreadDispatcher(const std::shared_ptr<AndroidUiThreadDispatcherState>& state) {
+  const std::weak_ptr<AndroidUiThreadDispatcherState> weak_state = state;
   return [weak_state](std::function<void()> task) mutable {
     if (const std::shared_ptr locked_state = weak_state.lock()) {
       locked_state->Dispatch(std::move(task));
@@ -500,20 +519,234 @@ UIThreadDispatcher MakeUIThreadDispatcher(const std::shared_ptr<AndroidUIThreadD
 
 } // namespace
 
-class AndroidViewPlatformAdapter final : public PlatformAdapter,
-                                         public PlatformTextInput,
-                                         public PlatformClipboard,
-                                         public PlatformResources {
+/// Owns Java application services, global references, and the dispatcher independently of attached Android Views.
+/// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
+class AndroidRuntime final : public Runtime, public PlatformClipboard, public PlatformResources {
+  friend android::PlatformEnv android::GetPlatformEnv(Runtime& runtime);
+
 public:
-  AndroidViewPlatformAdapter(JNIEnv* environment, jobject view)
-      : AndroidViewPlatformAdapter(environment, view, std::make_shared<AndroidUIThreadDispatcherState>()) {}
+  AndroidRuntime(JNIEnv* environment, jobject host,
+                 std::shared_ptr<AndroidUiThreadDispatcherState> dispatcher)
+      : Runtime(MakeUiThreadDispatcher(dispatcher)), dispatch_state_(std::move(dispatcher)) {
+    dispatch_state_->Initialize(environment, host);
+    if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
+      throw std::runtime_error("HuxerUI could not access the Android Java VM");
+    }
+    try {
+      host_ = environment->NewGlobalRef(host);
+      android::LocalRef<jclass> type(environment, environment->GetObjectClass(host));
+      if (!host_ || !type) throw std::runtime_error("HuxerUI Android application host is unavailable");
+      const jmethodID get_context = environment->GetMethodID(type.Get(), "getContext", "()Landroid/content/Context;");
+      read_clipboard_text_ = environment->GetMethodID(type.Get(), "readClipboardText", "()[B");
+      write_clipboard_text_ = environment->GetMethodID(type.Get(), "writeClipboardText", "([B)Z");
+      resource_locale_ = environment->GetMethodID(type.Get(), "resourceLocale", "()[B");
+      resource_scale_ = environment->GetMethodID(type.Get(), "resourceScale", "()F");
+      process_pss_bytes_ = environment->GetMethodID(type.Get(), "processPssBytes", "()J");
+      stopped_ = environment->GetMethodID(type.Get(), "onRuntimeStopped", "()V");
+      if (!get_context || !read_clipboard_text_ || !write_clipboard_text_ || !resource_locale_ ||
+          !resource_scale_ || !process_pss_bytes_ || !stopped_ || environment->ExceptionCheck()) {
+        throw std::runtime_error("HuxerUI Android application methods do not match the platform backend");
+      }
+      android::LocalRef<jobject> context(environment, environment->CallObjectMethod(host, get_context));
+      if (!context || environment->ExceptionCheck()) {
+        throw std::runtime_error("HuxerUI Android application Context is unavailable");
+      }
+      context_ = environment->NewGlobalRef(context.Get());
+      if (!context_) throw std::runtime_error("HuxerUI could not retain its Android application Context");
+      asset_manager_ = std::make_shared<AndroidAssetManager>(environment, context_);
+    } catch (...) {
+      Release(environment);
+      throw;
+    }
+  }
+
+  ~AndroidRuntime() override {
+    Retire();
+    dispatch_state_->Shutdown(Environment());
+    Release(Environment());
+  }
+
+  /// Borrows the queue shared by native attachments under this Runtime.
+  /// @return Retained dispatcher state whose gate is closed before native application references are released.
+  const std::shared_ptr<AndroidUiThreadDispatcherState>& Dispatcher() const { return dispatch_state_; }
+  /// Borrows the process application Context on the application thread.
+  /// @return JNI global reference owned by this Runtime; callers must not delete it.
+  jobject Context() const noexcept { return context_; }
+  /// Returns the VM used to acquire thread-local JNI environments.
+  /// @return Process VM pointer; no JNI attachment or reference ownership is transferred.
+  JavaVM* VirtualMachine() const noexcept { return virtual_machine_; }
+  std::function<void()> on_stopped;
+  std::uint64_t identity = 0;
+  /// Initializes shared services after Java application facilities and dispatch are ready.
+  /// @param environment JNI environment on the application thread.
+  /// @param foreground Whether to deliver startup activation; false starts services without a launch event.
+  /// @param lifecycle Initial aggregate Activity state exposed during application hooks.
+  /// @param input Borrowed activation envelope; missing foreground data becomes LaunchActivation.
+  void Start(JNIEnv* environment, bool foreground, ApplicationLifecycleState lifecycle,
+      const AndroidApplicationActivationInput& input) {
+    InitializeApplication(CurrentApplication(), foreground
+        ? std::optional<ApplicationActivation>(DecodeAndroidApplicationActivation(
+              virtual_machine_, environment, context_, input).value_or(LaunchActivation{}))
+        : std::nullopt, lifecycle);
+  }
+  PlatformClipboard* Clipboard() noexcept override {
+    return this;
+  }
+
+  PlatformResources* Resources() noexcept override {
+    return this;
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+      return std::nullopt;
+    }
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || host_ == nullptr) {
+      return std::nullopt;
+    }
+    const jlong pss_bytes = environment->CallLongMethod(host_, process_pss_bytes_);
+    if (environment->ExceptionCheck() || pss_bytes < 0) {
+      return std::nullopt;
+    }
+    const long processor_count = sysconf(_SC_NPROCESSORS_ONLN);
+    return ProcessMetrics{
+        .cpu_time_seconds = TimevalSeconds(usage.ru_utime) + TimevalSeconds(usage.ru_stime),
+        .memory_usage_bytes = static_cast<std::uint64_t>(pss_bytes),
+        .processor_count = static_cast<std::uint32_t>(std::max(1L, processor_count)),
+    };
+  }
+
+  ResourceConfiguration Configuration() const override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || host_ == nullptr) {
+      return {};
+    }
+    auto* locale_bytes = static_cast<jbyteArray>(environment->CallObjectMethod(host_, resource_locale_));
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android resource locale could not be read");
+    }
+    const std::string language_tag =
+        locale_bytes == nullptr ? std::string{"en"} : FromByteArray(environment, locale_bytes);
+    if (locale_bytes != nullptr) {
+      environment->DeleteLocalRef(locale_bytes);
+    }
+    const float scale = environment->CallFloatMethod(host_, resource_scale_);
+    if (environment->ExceptionCheck()) {
+      throw std::runtime_error("HuxerUI Android resource scale could not be read");
+    }
+    return {Locale::FromLanguageTag(language_tag), scale};
+  }
+
+  std::optional<InputStream> OpenRead(std::string_view package_path) override {
+    if (!IsValidResourcePackagePath(package_path)) {
+      throw std::logic_error("HuxerUI Android resource path is invalid");
+    }
+    auto state = std::make_shared<AndroidAssetInputStreamState>(asset_manager_, package_path);
+    if (!state->IsOpen()) {
+      return std::nullopt;
+    }
+    return StreamAccess::MakeInputStream(std::move(state));
+  }
+
+  std::optional<std::string> ReadText() override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || host_ == nullptr) {
+      return std::nullopt;
+    }
+    auto* bytes = static_cast<jbyteArray>(environment->CallObjectMethod(host_, read_clipboard_text_));
+    if (bytes == nullptr || environment->ExceptionCheck()) {
+      return std::nullopt;
+    }
+    std::string text = FromByteArray(environment, bytes);
+    environment->DeleteLocalRef(bytes);
+    return text;
+  }
+
+  bool WriteText(std::string_view text) override {
+    JNIEnv* environment = Environment();
+    if (environment == nullptr || host_ == nullptr) {
+      return false;
+    }
+    jbyteArray bytes = ToByteArray(environment, text);
+    if (bytes == nullptr) {
+      return false;
+    }
+    const bool result = environment->CallBooleanMethod(host_, write_clipboard_text_, bytes) == JNI_TRUE;
+    environment->DeleteLocalRef(bytes);
+    return result && !environment->ExceptionCheck();
+  }
 
 private:
-  AndroidViewPlatformAdapter(
-      JNIEnv* environment, jobject view, std::shared_ptr<AndroidUIThreadDispatcherState> dispatch_state
-  )
-      : PlatformAdapter(MakeUIThreadDispatcher(dispatch_state)), dispatch_state_(std::move(dispatch_state)) {
-    dispatch_state_->Initialize(environment, view);
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateAndroidAppDirectories(Environment(), context_);
+  }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateAndroidHttpTransport(virtual_machine_, Environment());
+  }
+
+  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override {
+    return CreateAndroidLocalNotificationTransport(virtual_machine_, Environment(), host_);
+  }
+
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateAndroidPermissionTransport(virtual_machine_, Environment(), host_);
+  }
+
+
+  /// Borrows JNI access from an already attached calling thread without attaching a worker.
+  /// @return Thread-local JNI environment, or null when this thread cannot access the VM.
+  JNIEnv* Environment() const noexcept {
+    JNIEnv* environment = nullptr;
+    if (virtual_machine_) virtual_machine_->GetEnv(reinterpret_cast<void**>(&environment), JNI_VERSION_1_6);
+    return environment;
+  }
+
+  void OnRuntimeStopped() override {
+    JNIEnv* environment = Environment();
+    if (environment && host_) environment->CallVoidMethod(host_, stopped_);
+    if (on_stopped) on_stopped();
+  }
+
+  /// Releases application-owned Java global references after shared retirement or failed native preparation.
+  /// @param environment JNI environment on the current attached thread; null leaves reference release unavailable.
+  void Release(JNIEnv* environment) noexcept {
+    if (!environment) return;
+    if (context_) environment->DeleteGlobalRef(context_);
+    if (host_) environment->DeleteGlobalRef(host_);
+    context_ = nullptr;
+    host_ = nullptr;
+  }
+
+  std::shared_ptr<AndroidUiThreadDispatcherState> dispatch_state_;
+  JavaVM* virtual_machine_ = nullptr;
+  jobject host_ = nullptr;
+  jobject context_ = nullptr;
+  std::shared_ptr<AndroidAssetManager> asset_manager_;
+  jmethodID read_clipboard_text_ = nullptr;
+  jmethodID write_clipboard_text_ = nullptr;
+  jmethodID resource_locale_ = nullptr;
+  jmethodID resource_scale_ = nullptr;
+  jmethodID process_pss_bytes_ = nullptr;
+  jmethodID stopped_ = nullptr;
+};
+
+std::shared_ptr<AndroidRuntime> active_application;
+std::uint64_t next_application_identity = 1;
+
+/// Resolves a JNI application handle without accepting a stale generation after Runtime replacement.
+/// @param identity Original nonzero Runtime identity supplied to Java.
+/// @return A retained matching Runtime, or null; called on the Android application thread.
+std::shared_ptr<AndroidRuntime> ApplicationHost(jlong identity) {
+  return active_application && active_application->identity == static_cast<std::uint64_t>(identity)
+      ? active_application : nullptr;
+}
+/// Owns one HuxerUIView attachment and its native input/rendering state under the application Runtime.
+class AndroidUiWindow final : public UiWindow, public PlatformTextInput {
+public:
+  AndroidUiWindow(JNIEnv* environment, jobject view, AndroidRuntime& application, WindowLifecycleState lifecycle) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM");
     }
@@ -542,11 +775,8 @@ private:
     restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     stop_text_input_ = environment->GetMethodID(view_class, "stopTextInput", "(J)V");
     request_show_text_input_ = environment->GetMethodID(view_class, "requestShowTextInput", "(J)V");
-    read_clipboard_text_ = environment->GetMethodID(view_class, "readClipboardText", "()[B");
-    write_clipboard_text_ = environment->GetMethodID(view_class, "writeClipboardText", "([B)Z");
     resource_locale_ = environment->GetMethodID(view_class, "resourceLocale", "()[B");
     resource_scale_ = environment->GetMethodID(view_class, "resourceScale", "()F");
-    process_pss_bytes_ = environment->GetMethodID(view_class, "processPssBytes", "()J");
     set_system_bars_content_brightness_ =
         environment->GetMethodID(view_class, "setSystemBarsContentBrightness", "(II)V");
     set_pointer_cursor_ = environment->GetMethodID(view_class, "setHuxerUIPointerCursor", "(I)V");
@@ -555,8 +785,7 @@ private:
         font_metrics_ == nullptr || measure_text_ == nullptr || measure_text_run_ == nullptr ||
         create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
         restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
-        read_clipboard_text_ == nullptr || write_clipboard_text_ == nullptr || resource_locale_ == nullptr ||
-        resource_scale_ == nullptr || process_pss_bytes_ == nullptr ||
+        resource_locale_ == nullptr || resource_scale_ == nullptr ||
         set_system_bars_content_brightness_ == nullptr || set_pointer_cursor_ == nullptr) {
       if (environment->ExceptionCheck()) {
         environment->ExceptionClear();
@@ -597,20 +826,24 @@ private:
       throw std::runtime_error("HuxerUI could not retain the Android platform Context");
     }
     try {
-      asset_manager_ = std::make_shared<AndroidAssetManager>(environment, context_);
+      InitializeWindow(application, Configuration(), lifecycle);
+      platform_views_ = std::make_unique<AndroidPlatformViews>(
+          environment, view_, context_, renderer_, PlatformRegistry(), *this);
     } catch (...) {
+      Retire();
       environment->DeleteGlobalRef(context_);
       environment->DeleteGlobalRef(view_);
+      context_ = nullptr;
+      view_ = nullptr;
       throw;
     }
   }
 
 public:
-  ~AndroidViewPlatformAdapter() override {
+  ~AndroidUiWindow() override {
+    Retire();
+    ShutdownPlatformViews();
     JNIEnv* environment = Environment();
-    if (dispatch_state_) {
-      dispatch_state_->Shutdown(environment);
-    }
     if (environment != nullptr && context_ != nullptr) {
       environment->DeleteGlobalRef(context_);
     }
@@ -618,6 +851,239 @@ public:
       environment->DeleteGlobalRef(view_);
     }
   }
+
+  void Resize(float width, float height, float safe_left, float safe_top, float safe_right, float safe_bottom) {
+    UiWindow::SetWindowMetrics({
+        .viewport = {std::max(0.0F, width), std::max(0.0F, height)},
+        .safe_area = {
+            .top = std::max(0.0F, safe_top),
+            .right = std::max(0.0F, safe_right),
+            .bottom = std::max(0.0F, safe_bottom),
+            .left = std::max(0.0F, safe_left),
+        },
+    });
+  }
+
+  void UpdateResourceConfiguration(std::string language_tag, float display_scale) {
+    UiWindow::UpdateResourceConfiguration({Locale::FromLanguageTag(language_tag), display_scale});
+  }
+
+  std::optional<std::vector<std::uint8_t>> CommitFrame() {
+    if (BeginFrameCommit()) {
+      const FrameCommit& commit = UiWindow::BuildFrame();
+      CommitFrame(commit);
+      if (commit.semantic_frame && last_semantic_revision_ != commit.semantic_frame->revision) {
+        std::vector<std::uint8_t> encoded = EncodeAndroidSemanticFrame(*commit.semantic_frame);
+        last_semantic_revision_ = commit.semantic_frame->revision;
+        return encoded;
+      }
+    }
+    return std::nullopt;
+  }
+
+  void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y,
+      PointerButton changed_button, PointerButton pressed_buttons, KeyModifiers modifiers) {
+    UiWindow::HandlePointerEvent({
+        type,
+        pointer_id,
+        {x, y},
+        device_kind,
+        changed_button,
+        pressed_buttons,
+        modifiers,
+    });
+  }
+
+  bool Scroll(float x, float y, float delta_x, float delta_y, KeyModifiers modifiers) {
+    const Point consumed = UiWindow::HandleScrollInput({{x, y}, delta_x, delta_y, modifiers});
+    return consumed.x != 0.0F || consumed.y != 0.0F;
+  }
+
+  bool FileDrag(std::uint64_t session, int phase, Point position, FileDropOffer offer, FileDropPreparation source) {
+    switch (phase) {
+    case 0:
+      return UiWindow::HandleFileDragEntered(session, std::move(offer), position);
+    case 1:
+      return UiWindow::HandleFileDragMoved(session, std::move(offer), position);
+    case 2:
+      UiWindow::HandleFileDragExited(session);
+      return false;
+    case 3:
+      return UiWindow::HandleFileDrop(session, std::move(offer), position, std::move(source));
+    default:
+      return false;
+    }
+  }
+
+  bool KeyEvent(KeyEventType type, jint key_code, std::string text, KeyModifiers modifiers, bool repeat) {
+    return UiWindow::HandleKeyEvent({
+        type,
+        TranslateKey(key_code),
+        std::move(text),
+        modifiers,
+        repeat,
+    });
+  }
+
+  bool HandleBack(BackPhase phase, float progress) {
+    return UiWindow::HandleBack({phase, progress});
+  }
+
+  /// Converts the Java window lifecycle value at the native boundary.
+  /// @param state Active (0), inactive (1), or background (2); other values throw std::invalid_argument.
+  void UpdateWindowLifecycleState(jint state) {
+    switch (state) {
+    case 0:
+      UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Active);
+      return;
+    case 1:
+      UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
+      return;
+    case 2:
+      UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Background);
+      return;
+    default:
+      throw std::invalid_argument("HuxerUI Android application lifecycle state is invalid");
+    }
+  }
+
+  bool ApplyTextInputCommand(
+      TextInputSessionId session_id,
+      AndroidTextInputOperation operation,
+      std::string text,
+      TextOffset argument0,
+      TextOffset argument1,
+      TextOffset argument2
+  ) {
+    static_cast<void>(argument2);
+    TextInputCommandBatch batch;
+    batch.session_id = session_id;
+
+    switch (operation) {
+    case AndroidTextInputOperation::CommitText:
+    case AndroidTextInputOperation::SetComposingText: {
+      const TextInputContext context = UiWindow::QueryTextInputContext(session_id, 0, 0);
+      const std::optional<TextOffset> inserted_length = Utf16Length(text);
+      if (context.result_code != TextInputResultCode::Ok || !inserted_length.has_value()) {
+        return false;
+      }
+      const TextRange target = context.composition.value_or(context.selection.Range());
+      const std::optional<TextSelection> selection =
+          AndroidCursorSelection(context, target, *inserted_length, argument0);
+      if (!selection.has_value()) {
+        return false;
+      }
+      TextInputCommand command;
+      command.kind = operation == AndroidTextInputOperation::CommitText ? TextInputCommandKind::CommitText
+                                                                        : TextInputCommandKind::UpdateComposition;
+      command.selection_after = selection;
+      command.text = std::move(text);
+      batch.commands.push_back(std::move(command));
+      break;
+    }
+    case AndroidTextInputOperation::FinishComposing: {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::FinishComposition;
+      batch.commands.push_back(command);
+      break;
+    }
+    case AndroidTextInputOperation::SetSelection: {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::SetSelection;
+      command.selection_after = TextSelection{argument0, argument1};
+      batch.commands.push_back(command);
+      break;
+    }
+    case AndroidTextInputOperation::DeleteSurrounding:
+    case AndroidTextInputOperation::DeleteSurroundingCodePoints: {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::DeleteSurrounding;
+      command.delete_before = argument0;
+      command.delete_after = argument1;
+      command.delete_unit = operation == AndroidTextInputOperation::DeleteSurrounding ? TextInputUnit::Utf16CodeUnit
+                                                                                      : TextInputUnit::UnicodeCodePoint;
+      batch.commands.push_back(command);
+      break;
+    }
+    case AndroidTextInputOperation::SetComposingRegion: {
+      const TextInputContext context = UiWindow::QueryTextInputContext(session_id, 0, 0);
+      if (context.result_code != TextInputResultCode::Ok) {
+        return false;
+      }
+      const TextRange target{std::min(argument0, argument1), std::max(argument0, argument1)};
+      if (context.composition == target) {
+        return true;
+      }
+      if (context.composition.has_value()) {
+        TextInputCommand finish;
+        finish.kind = TextInputCommandKind::FinishComposition;
+        batch.commands.push_back(finish);
+      }
+      TextInputCommand begin;
+      begin.kind = TextInputCommandKind::BeginComposition;
+      begin.target = target;
+      batch.commands.push_back(begin);
+      break;
+    }
+    }
+
+    const TextInputApplyResult result = UiWindow::HandleTextInputCommands(batch);
+    return result.result_code == TextInputResultCode::Ok;
+  }
+
+  bool PerformTextEditingAction(TextInputSessionId session_id, TextEditingAction action) {
+    return (session_id == 0 ||
+            UiWindow::QueryTextInputContext(session_id, 0, 0).result_code == TextInputResultCode::Ok) &&
+           UiWindow::PerformTextEditingAction(action);
+  }
+
+  bool PerformSemanticAction(jint node_id, jint action_kind, std::string text, jlong argument0, jlong argument1,
+                             jdouble number, jfloat x, jfloat y, jlong custom_id) {
+    const std::optional<SemanticActionKind> semantic_action = ToSemanticAction(action_kind);
+    if (node_id <= 0 || !semantic_action.has_value()) {
+      return false;
+    }
+    SemanticAction action;
+    action.kind = *semantic_action;
+    switch (action.kind) {
+    case SemanticActionKind::SetText:
+      action.value = std::move(text);
+      break;
+    case SemanticActionKind::SetSelection:
+      action.value = TextRange{static_cast<TextOffset>(argument0), static_cast<TextOffset>(argument1)};
+      break;
+    case SemanticActionKind::SetSelected:
+      if (argument0 != 0 && argument0 != 1) {
+        return false;
+      }
+      action.value = argument0 != 0;
+      break;
+    case SemanticActionKind::SetValue:
+      action.value = static_cast<double>(number);
+      break;
+    case SemanticActionKind::Scroll:
+      action.value = Point{x, y};
+      break;
+    case SemanticActionKind::Custom:
+      action.value = static_cast<std::uint64_t>(custom_id);
+      break;
+    case SemanticActionKind::Activate:
+    case SemanticActionKind::Focus:
+    case SemanticActionKind::Increment:
+    case SemanticActionKind::Decrement:
+    case SemanticActionKind::ShowOnScreen:
+    case SemanticActionKind::Expand:
+    case SemanticActionKind::Collapse:
+    case SemanticActionKind::Dismiss:
+      action.value = std::monostate{};
+      break;
+    }
+    return UiWindow::PerformSemanticAction(static_cast<SemanticNodeId>(node_id), action);
+  }
+
+  /// Borrows the original Java View for a presentation request on the application thread.
+  /// @return UiWindow-owned JNI reference, valid only while this window attachment remains live.
+  jobject NativeView() const noexcept { return view_; }
 
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), view_ != nullptr)) {
@@ -631,7 +1097,7 @@ public:
 
   void CommitFrame(const FrameCommit& commit) {
     if (platform_views_ == nullptr) {
-      throw std::logic_error("HuxerUI Android PlatformView host is not attached to Runtime");
+      throw std::logic_error("HuxerUI Android PlatformView host is not attached to UiWindow");
     }
     platform_views_->Commit(Environment(), commit.render_frame);
     static_cast<void>(InvalidateDamage(commit.render_frame.damage));
@@ -678,27 +1144,11 @@ public:
     }
   }
 
-  void AttachRuntime(JNIEnv* environment, Runtime& runtime) {
-    platform_views_ = std::make_unique<AndroidPlatformViews>(
-        environment, view_, context_, renderer_, PlatformRegistry(), runtime
-    );
-  }
-
-  std::optional<ApplicationActivation> DecodeApplicationActivation(
-      JNIEnv* environment, const AndroidApplicationActivationInput& input
-  ) const {
-    return DecodeAndroidApplicationActivation(virtual_machine_, environment, context_, input);
-  }
-
   void ShutdownPlatformViews() {
     if (platform_views_ != nullptr) {
       platform_views_->Shutdown(Environment());
       platform_views_.reset();
     }
-  }
-
-  void DrainPlatformTasks() {
-    dispatch_state_->Drain();
   }
 
   std::optional<std::uint64_t> HitTestPlatformView(Point point) const {
@@ -739,7 +1189,7 @@ public:
   }
 
 private:
-  friend android::PlatformEnv android::GetPlatformEnv(PlatformAdapter& adapter);
+  friend android::PlatformEnv android::GetPlatformEnv(UiWindow& ui_window);
 
   void ScheduleFrame(double deadline) {
     JNIEnv* environment = Environment();
@@ -994,36 +1444,7 @@ public:
     return this;
   }
 
-  PlatformClipboard* Clipboard() noexcept override {
-    return this;
-  }
-
-  PlatformResources* Resources() noexcept override {
-    return this;
-  }
-
-  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
-    rusage usage{};
-    if (getrusage(RUSAGE_SELF, &usage) != 0) {
-      return std::nullopt;
-    }
-    JNIEnv* environment = Environment();
-    if (environment == nullptr || view_ == nullptr) {
-      return std::nullopt;
-    }
-    const jlong pss_bytes = environment->CallLongMethod(view_, process_pss_bytes_);
-    if (environment->ExceptionCheck() || pss_bytes < 0) {
-      return std::nullopt;
-    }
-    const long processor_count = sysconf(_SC_NPROCESSORS_ONLN);
-    return ProcessMetrics{
-        .cpu_time_seconds = TimevalSeconds(usage.ru_utime) + TimevalSeconds(usage.ru_stime),
-        .memory_usage_bytes = static_cast<std::uint64_t>(pss_bytes),
-        .processor_count = static_cast<std::uint32_t>(std::max(1L, processor_count)),
-    };
-  }
-
-  ResourceConfiguration Configuration() const override {
+  ResourceConfiguration Configuration() const {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
@@ -1042,45 +1463,6 @@ public:
       throw std::runtime_error("HuxerUI Android resource scale could not be read");
     }
     return {Locale::FromLanguageTag(language_tag), scale};
-  }
-
-  std::optional<InputStream> OpenRead(std::string_view package_path) override {
-    if (!IsValidResourcePackagePath(package_path)) {
-      throw std::logic_error("HuxerUI Android resource path is invalid");
-    }
-    auto state = std::make_shared<AndroidAssetInputStreamState>(asset_manager_, package_path);
-    if (!state->IsOpen()) {
-      return std::nullopt;
-    }
-    return StreamAccess::MakeInputStream(std::move(state));
-  }
-
-  std::optional<std::string> ReadText() override {
-    JNIEnv* environment = Environment();
-    if (environment == nullptr || view_ == nullptr) {
-      return std::nullopt;
-    }
-    auto* bytes = static_cast<jbyteArray>(environment->CallObjectMethod(view_, read_clipboard_text_));
-    if (bytes == nullptr || environment->ExceptionCheck()) {
-      return std::nullopt;
-    }
-    std::string text = FromByteArray(environment, bytes);
-    environment->DeleteLocalRef(bytes);
-    return text;
-  }
-
-  bool WriteText(std::string_view text) override {
-    JNIEnv* environment = Environment();
-    if (environment == nullptr || view_ == nullptr) {
-      return false;
-    }
-    jbyteArray bytes = ToByteArray(environment, text);
-    if (bytes == nullptr) {
-      return false;
-    }
-    const bool result = environment->CallBooleanMethod(view_, write_clipboard_text_, bytes) == JNI_TRUE;
-    environment->DeleteLocalRef(bytes);
-    return result && !environment->ExceptionCheck();
   }
 
   void Start(
@@ -1144,22 +1526,6 @@ private:
     return CreateAndroidFilePickerTransport(virtual_machine_, Environment(), view_, context_);
   }
 
-  std::optional<AppDirectories> CreateAppDirectories() override {
-    return CreateAndroidAppDirectories(Environment(), context_);
-  }
-
-  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
-    return CreateAndroidHttpTransport(virtual_machine_, Environment());
-  }
-
-  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override {
-    return CreateAndroidLocalNotificationTransport(virtual_machine_, Environment(), view_);
-  }
-
-  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
-    return CreateAndroidPermissionTransport(virtual_machine_, Environment(), view_);
-  }
-
   void CallTextInput(
       jmethodID method,
       TextInputSessionId session_id,
@@ -1208,12 +1574,10 @@ private:
   }
 
   AndroidRenderer renderer_;
-  std::shared_ptr<AndroidUIThreadDispatcherState> dispatch_state_;
   std::unique_ptr<AndroidPlatformViews> platform_views_;
   JavaVM* virtual_machine_ = nullptr;
   jobject view_ = nullptr;
   jobject context_ = nullptr;
-  std::shared_ptr<AndroidAssetManager> asset_manager_;
   jmethodID schedule_frame_ = nullptr;
   jmethodID invalidate_full_frame_ = nullptr;
   jmethodID font_metrics_ = nullptr;
@@ -1225,340 +1589,48 @@ private:
   jmethodID restart_text_input_ = nullptr;
   jmethodID stop_text_input_ = nullptr;
   jmethodID request_show_text_input_ = nullptr;
-  jmethodID read_clipboard_text_ = nullptr;
-  jmethodID write_clipboard_text_ = nullptr;
   jmethodID resource_locale_ = nullptr;
   jmethodID resource_scale_ = nullptr;
-  jmethodID process_pss_bytes_ = nullptr;
   jmethodID set_system_bars_content_brightness_ = nullptr;
   jmethodID set_pointer_cursor_ = nullptr;
   PlatformFrameState frame_state_;
-};
-
-class AndroidSession final {
-public:
-  AndroidSession(
-      JNIEnv* environment,
-      jobject view,
-      const Application& application,
-      const AndroidApplicationActivationInput& startup_activation
-  )
-      : platform_(environment, view),
-        runtime_(
-            application,
-            platform_,
-            platform_.DecodeApplicationActivation(environment, startup_activation).value_or(LaunchActivation{})
-        ) {
-    platform_.AttachRuntime(environment, runtime_);
-  }
-
-  ~AndroidSession() {
-    platform_.ShutdownPlatformViews();
-  }
-
-  void Resize(float width, float height, float safe_left, float safe_top, float safe_right, float safe_bottom) {
-    runtime_.SetWindowMetrics({
-        .viewport = {std::max(0.0F, width), std::max(0.0F, height)},
-        .safe_area = {
-            .top = std::max(0.0F, safe_top),
-            .right = std::max(0.0F, safe_right),
-            .bottom = std::max(0.0F, safe_bottom),
-            .left = std::max(0.0F, safe_left),
-        },
-    });
-  }
-
-  void UpdateResourceConfiguration(std::string language_tag, float display_scale) {
-    runtime_.UpdateResourceConfiguration({Locale::FromLanguageTag(language_tag), display_scale});
-  }
-
-  void BeginDraw() {
-    platform_.BeginDraw();
-  }
-
-  void DrawBase(JNIEnv* environment, jobject canvas) {
-    platform_.DrawBase(environment, canvas);
-  }
-
-  void DrawSlice(JNIEnv* environment, jobject canvas, std::size_t first_command, std::size_t command_count) {
-    platform_.DrawSlice(environment, canvas, first_command, command_count);
-  }
-
-  void SetTextureLayerSurface(
-      JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height
-  ) {
-    platform_.SetTextureLayerSurface(environment, identity, surface, pixel_width, pixel_height);
-  }
-
-  void ClearTextureLayerSurface(std::uint64_t identity) noexcept {
-    platform_.ClearTextureLayerSurface(identity);
-  }
-
-  void EndDraw() {
-    platform_.EndDraw();
-  }
-
-  void DrainPlatformTasks() {
-    platform_.DrainPlatformTasks();
-  }
-
-  std::optional<std::uint64_t> HitTestPlatformView(Point point) const {
-    return platform_.HitTestPlatformView(point);
-  }
-
-  void SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
-    platform_.SynchronizePlatformViewFocus(identity, focus_visible);
-  }
-
-  bool MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
-    return platform_.MoveFocusFromPlatformView(identity, reverse);
-  }
-
-  std::optional<std::vector<std::uint8_t>> CommitFrame() {
-    if (platform_.BeginFrameCommit()) {
-      const FrameCommit& commit = runtime_.BuildFrame();
-      platform_.CommitFrame(commit);
-      if (commit.semantic_frame && last_semantic_revision_ != commit.semantic_frame->revision) {
-        std::vector<std::uint8_t> encoded = EncodeAndroidSemanticFrame(*commit.semantic_frame);
-        last_semantic_revision_ = commit.semantic_frame->revision;
-        return encoded;
-      }
-    }
-    return std::nullopt;
-  }
-
-  void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y,
-      PointerButton changed_button, PointerButton pressed_buttons, KeyModifiers modifiers) {
-    runtime_.HandlePointerEvent({
-        type,
-        pointer_id,
-        {x, y},
-        device_kind,
-        changed_button,
-        pressed_buttons,
-        modifiers,
-    });
-  }
-
-  bool Scroll(float x, float y, float delta_x, float delta_y, KeyModifiers modifiers) {
-    const Point consumed = runtime_.HandleScrollInput({{x, y}, delta_x, delta_y, modifiers});
-    return consumed.x != 0.0F || consumed.y != 0.0F;
-  }
-
-  bool FileDrag(std::uint64_t session, int phase, Point position, FileDropOffer offer, FileDropPreparation source) {
-    switch (phase) {
-    case 0:
-      return runtime_.HandleFileDragEntered(session, std::move(offer), position);
-    case 1:
-      return runtime_.HandleFileDragMoved(session, std::move(offer), position);
-    case 2:
-      runtime_.HandleFileDragExited(session);
-      return false;
-    case 3:
-      return runtime_.HandleFileDrop(session, std::move(offer), position, std::move(source));
-    default:
-      return false;
-    }
-  }
-
-  bool KeyEvent(KeyEventType type, jint key_code, std::string text, KeyModifiers modifiers, bool repeat) {
-    return runtime_.HandleKeyEvent({
-        type,
-        TranslateKey(key_code),
-        std::move(text),
-        modifiers,
-        repeat,
-    });
-  }
-
-  bool HandleBack(BackPhase phase, float progress) {
-    return runtime_.HandleBack({phase, progress});
-  }
-
-  void HandleApplicationActivation(JNIEnv* environment, const AndroidApplicationActivationInput& input) {
-    if (std::optional<ApplicationActivation> activation = platform_.DecodeApplicationActivation(environment, input)) {
-      runtime_.HandleApplicationActivation(std::move(*activation));
-    }
-  }
-
-  void UpdateApplicationLifecycleState(jint state) {
-    switch (state) {
-    case 0:
-      runtime_.UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
-      return;
-    case 1:
-      runtime_.UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
-      return;
-    case 2:
-      runtime_.UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
-      return;
-    default:
-      throw std::invalid_argument("HuxerUI Android application lifecycle state is invalid");
-    }
-  }
-
-  bool ApplyTextInputCommand(
-      TextInputSessionId session_id,
-      AndroidTextInputOperation operation,
-      std::string text,
-      TextOffset argument0,
-      TextOffset argument1,
-      TextOffset argument2
-  ) {
-    static_cast<void>(argument2);
-    TextInputCommandBatch batch;
-    batch.session_id = session_id;
-
-    switch (operation) {
-    case AndroidTextInputOperation::CommitText:
-    case AndroidTextInputOperation::SetComposingText: {
-      const TextInputContext context = runtime_.QueryTextInputContext(session_id, 0, 0);
-      const std::optional<TextOffset> inserted_length = Utf16Length(text);
-      if (context.result_code != TextInputResultCode::Ok || !inserted_length.has_value()) {
-        return false;
-      }
-      const TextRange target = context.composition.value_or(context.selection.Range());
-      const std::optional<TextSelection> selection =
-          AndroidCursorSelection(context, target, *inserted_length, argument0);
-      if (!selection.has_value()) {
-        return false;
-      }
-      TextInputCommand command;
-      command.kind = operation == AndroidTextInputOperation::CommitText ? TextInputCommandKind::CommitText
-                                                                        : TextInputCommandKind::UpdateComposition;
-      command.selection_after = selection;
-      command.text = std::move(text);
-      batch.commands.push_back(std::move(command));
-      break;
-    }
-    case AndroidTextInputOperation::FinishComposing: {
-      TextInputCommand command;
-      command.kind = TextInputCommandKind::FinishComposition;
-      batch.commands.push_back(command);
-      break;
-    }
-    case AndroidTextInputOperation::SetSelection: {
-      TextInputCommand command;
-      command.kind = TextInputCommandKind::SetSelection;
-      command.selection_after = TextSelection{argument0, argument1};
-      batch.commands.push_back(command);
-      break;
-    }
-    case AndroidTextInputOperation::DeleteSurrounding:
-    case AndroidTextInputOperation::DeleteSurroundingCodePoints: {
-      TextInputCommand command;
-      command.kind = TextInputCommandKind::DeleteSurrounding;
-      command.delete_before = argument0;
-      command.delete_after = argument1;
-      command.delete_unit = operation == AndroidTextInputOperation::DeleteSurrounding ? TextInputUnit::Utf16CodeUnit
-                                                                                      : TextInputUnit::UnicodeCodePoint;
-      batch.commands.push_back(command);
-      break;
-    }
-    case AndroidTextInputOperation::SetComposingRegion: {
-      const TextInputContext context = runtime_.QueryTextInputContext(session_id, 0, 0);
-      if (context.result_code != TextInputResultCode::Ok) {
-        return false;
-      }
-      const TextRange target{std::min(argument0, argument1), std::max(argument0, argument1)};
-      if (context.composition == target) {
-        return true;
-      }
-      if (context.composition.has_value()) {
-        TextInputCommand finish;
-        finish.kind = TextInputCommandKind::FinishComposition;
-        batch.commands.push_back(finish);
-      }
-      TextInputCommand begin;
-      begin.kind = TextInputCommandKind::BeginComposition;
-      begin.target = target;
-      batch.commands.push_back(begin);
-      break;
-    }
-    }
-
-    const TextInputApplyResult result = runtime_.HandleTextInputCommands(batch);
-    return result.result_code == TextInputResultCode::Ok;
-  }
-
-  TextInputContext QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
-    return runtime_.QueryTextInputContext(session_id, start, length);
-  }
-
-  TextInputGeometry QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
-    return runtime_.QueryTextInputGeometry(session_id, range);
-  }
-
-  bool PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
-    return runtime_.PerformTextInputAction(session_id, action);
-  }
-
-  bool PerformTextEditingAction(TextInputSessionId session_id, TextEditingAction action) {
-    return (session_id == 0 ||
-            runtime_.QueryTextInputContext(session_id, 0, 0).result_code == TextInputResultCode::Ok) &&
-           runtime_.PerformTextEditingAction(action);
-  }
-
-  bool PerformSemanticAction(jint node_id, jint action_kind, std::string text, jlong argument0, jlong argument1,
-                             jdouble number, jfloat x, jfloat y, jlong custom_id) {
-    const std::optional<SemanticActionKind> semantic_action = ToSemanticAction(action_kind);
-    if (node_id <= 0 || !semantic_action.has_value()) {
-      return false;
-    }
-    SemanticAction action;
-    action.kind = *semantic_action;
-    switch (action.kind) {
-    case SemanticActionKind::SetText:
-      action.value = std::move(text);
-      break;
-    case SemanticActionKind::SetSelection:
-      action.value = TextRange{static_cast<TextOffset>(argument0), static_cast<TextOffset>(argument1)};
-      break;
-    case SemanticActionKind::SetSelected:
-      if (argument0 != 0 && argument0 != 1) {
-        return false;
-      }
-      action.value = argument0 != 0;
-      break;
-    case SemanticActionKind::SetValue:
-      action.value = static_cast<double>(number);
-      break;
-    case SemanticActionKind::Scroll:
-      action.value = Point{x, y};
-      break;
-    case SemanticActionKind::Custom:
-      action.value = static_cast<std::uint64_t>(custom_id);
-      break;
-    case SemanticActionKind::Activate:
-    case SemanticActionKind::Focus:
-    case SemanticActionKind::Increment:
-    case SemanticActionKind::Decrement:
-    case SemanticActionKind::ShowOnScreen:
-    case SemanticActionKind::Expand:
-    case SemanticActionKind::Collapse:
-    case SemanticActionKind::Dismiss:
-      action.value = std::monostate{};
-      break;
-    }
-    return runtime_.PerformSemanticAction(static_cast<SemanticNodeId>(node_id), action);
-  }
-
-private:
-  AndroidViewPlatformAdapter platform_;
-  Runtime runtime_;
   std::optional<std::uint64_t> last_semantic_revision_;
 };
 
-AndroidSession* Session(jlong handle) {
-  return reinterpret_cast<AndroidSession*>(static_cast<std::uintptr_t>(handle));
+
+jobject CurrentAndroidPresentationView() {
+  const auto source = CurrentExecutionContext();
+  if (!source || !source->requires_ui) return nullptr;
+  const auto ui = source->ui.lock();
+  auto* ui_window = ui ? dynamic_cast<AndroidUiWindow*>(ui->ui_window) : nullptr;
+  if (!ui_window) throw std::logic_error("HuxerUI Android presentation source is no longer attached");
+  return ui_window->NativeView();
+}
+
+AndroidUiWindow* Session(jlong handle) {
+  return reinterpret_cast<AndroidUiWindow*>(static_cast<std::uintptr_t>(handle));
 }
 
 } // namespace huxerui::detail
 
 namespace huxerui::android {
 
-PlatformEnv GetPlatformEnv(PlatformAdapter& adapter) {
-  auto* platform = dynamic_cast<huxerui::detail::AndroidViewPlatformAdapter*>(&adapter);
+PlatformEnv GetPlatformEnv(Runtime& runtime) {
+  const auto application = huxerui::detail::CurrentApplicationRuntime();
+  auto* platform = dynamic_cast<huxerui::detail::AndroidRuntime*>(&runtime);
+  if (!platform || application->owner != platform) {
+    throw std::logic_error("HuxerUI Android platform factory requires its original application host");
+  }
+  JNIEnv* environment = platform->Environment();
+  if (!environment || !platform->Context()) {
+    throw std::logic_error("HuxerUI Android application host is unavailable");
+  }
+  return {environment, platform->Context()};
+}
+
+PlatformEnv GetPlatformEnv(UiWindow& ui_window) {
+  static_cast<void>(huxerui::detail::CurrentApplicationRuntime());
+  auto* platform = dynamic_cast<huxerui::detail::AndroidUiWindow*>(&ui_window);
   if (platform == nullptr) {
     throw std::logic_error("HuxerUI Android platform factory requires an Android host");
   }
@@ -1571,21 +1643,101 @@ PlatformEnv GetPlatformEnv(PlatformAdapter& adapter) {
 
 } // namespace huxerui::android
 
-extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIView_nativeCreate(
-    JNIEnv* environment, jclass, jobject view, jint kind, jstring value, jstring name, jlong size,
+extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIApplication_nativeInitialize(
+    JNIEnv* environment, jclass, jobject host, jboolean foreground, jint lifecycle,
+    jint kind, jstring value, jstring name, jlong size, jstring content_type, jboolean writable, jbyteArray data) {
+  try {
+    if (huxerui::detail::active_application) throw std::logic_error("HuxerUI Android application is already running");
+    if (lifecycle < 0 || lifecycle > 2) throw std::invalid_argument("HuxerUI Android application lifecycle is invalid");
+    const huxerui::detail::AndroidApplicationActivationInput input{
+        .kind = kind, .value = value, .file_name = name, .file_size = size,
+        .content_type = content_type, .writable = writable, .data = data,
+    };
+    auto application = std::make_shared<huxerui::detail::AndroidRuntime>(
+        environment, host, std::make_shared<huxerui::detail::AndroidUiThreadDispatcherState>());
+    application->Start(environment, foreground == JNI_TRUE,
+        static_cast<huxerui::ApplicationLifecycleState>(lifecycle), input);
+    application->identity = huxerui::detail::next_application_identity++;
+    const auto identity = application->identity;
+    application->on_stopped = [identity] {
+      if (huxerui::detail::active_application && huxerui::detail::active_application->identity == identity) {
+        huxerui::detail::active_application.reset();
+      }
+    };
+    huxerui::detail::active_application = std::move(application);
+    return static_cast<jlong>(identity);
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+    return 0;
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeRequestShutdown(
+    JNIEnv* environment, jclass, jlong identity) {
+  try {
+    if (auto application = huxerui::detail::ApplicationHost(identity)) application->RequestShutdown();
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeDrainTasks(
+    JNIEnv* environment, jclass, jlong identity) {
+  try {
+    if (auto application = huxerui::detail::ApplicationHost(identity)) application->Dispatcher()->Drain();
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeUpdateLifecycleState(
+    JNIEnv* environment, jclass, jlong identity, jint state) {
+  try {
+    if (state < 0 || state > 2) throw std::invalid_argument("HuxerUI Android application lifecycle is invalid");
+    if (auto application = huxerui::detail::ApplicationHost(identity)) {
+      application->UpdateApplicationLifecycleState(static_cast<huxerui::ApplicationLifecycleState>(state));
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeUpdateResources(
+    JNIEnv* environment, jclass, jlong identity) {
+  try {
+    if (auto application = huxerui::detail::ApplicationHost(identity)) {
+      application->UpdateResourceConfiguration(application->Configuration());
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeHandleActivation(
+    JNIEnv* environment, jclass, jlong identity, jint kind, jstring value, jstring name, jlong size,
     jstring content_type, jboolean writable, jbyteArray data) {
   try {
-    const huxerui::detail::AndroidApplicationActivationInput startup_activation{
-        .kind = kind,
-        .value = value,
-        .file_name = name,
-        .file_size = size,
-        .content_type = content_type,
-        .writable = writable,
-        .data = data,
-    };
-    auto session = std::make_unique<huxerui::detail::AndroidSession>(
-        environment, view, huxerui::detail::CurrentApplication(), startup_activation);
+    if (auto application = huxerui::detail::ApplicationHost(identity)) {
+      const huxerui::detail::AndroidApplicationActivationInput input{
+          .kind = kind, .value = value, .file_name = name, .file_size = size,
+          .content_type = content_type, .writable = writable, .data = data,
+      };
+      if (auto activation = huxerui::detail::DecodeAndroidApplicationActivation(
+              application->VirtualMachine(), environment, application->Context(), input)) {
+        application->HandleApplicationActivation(std::move(*activation));
+      }
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+}
+extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIView_nativeCreate(
+    JNIEnv* environment, jclass, jobject view, jint lifecycle) {
+  try {
+    auto application = huxerui::detail::active_application;
+    if (!application) throw std::logic_error("HuxerUI Android application has not been initialized");
+    auto session = std::make_unique<huxerui::detail::AndroidUiWindow>(
+        environment, view, *application, static_cast<huxerui::WindowLifecycleState>(lifecycle));
     return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(session.release()));
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
@@ -1593,33 +1745,12 @@ extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIView_nativeCreate(
   }
 }
 
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeHandleApplicationActivation(
-    JNIEnv* environment, jclass, jlong handle, jint kind, jstring value, jstring name, jlong size,
-    jstring content_type, jboolean writable, jbyteArray data) {
-  try {
-    if (auto* session = huxerui::detail::Session(handle)) {
-      const huxerui::detail::AndroidApplicationActivationInput activation{
-          .kind = kind,
-          .value = value,
-          .file_name = name,
-          .file_size = size,
-          .content_type = content_type,
-          .writable = writable,
-          .data = data,
-      };
-      session->HandleApplicationActivation(environment, activation);
-    }
-  } catch (const std::exception& exception) {
-    huxerui::detail::ThrowJavaException(environment, exception.what());
-  }
-}
-
-extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateApplicationLifecycleState(
+extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeUpdateWindowLifecycleState(
     JNIEnv* environment, jclass, jlong handle, jint lifecycle_state
 ) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->UpdateApplicationLifecycleState(lifecycle_state);
+      session->UpdateWindowLifecycleState(lifecycle_state);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
@@ -1763,17 +1894,6 @@ Java_org_huxerui_HuxerUIView_nativeEndDraw(JNIEnv* environment, jclass, jlong ha
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
       session->EndDraw();
-    }
-  } catch (const std::exception& exception) {
-    huxerui::detail::ThrowJavaException(environment, exception.what());
-  }
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_org_huxerui_HuxerUIView_nativeDrainPlatformTasks(JNIEnv* environment, jclass, jlong handle) {
-  try {
-    if (auto* session = huxerui::detail::Session(handle)) {
-      session->DrainPlatformTasks();
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

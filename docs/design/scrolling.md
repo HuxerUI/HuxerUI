@@ -9,7 +9,7 @@ Each mounted scroll container owns one actual offset per supported axis.
 Momentum owns only its current velocity, while overscroll owns only a temporary presentation displacement outside the clamped content range.
 Neither value is copied into `ScrollMetrics`.
 
-Runtime owns scroll recognition and coordination without branching on concrete component types.
+UiWindow owns scroll recognition and coordination without branching on concrete component types.
 `ScrollView`, virtual layouts, and editable text configure the same mounted scroll state and use the same offset mutation path.
 Platform adapters normalize host input and report Runtime's consumption result; they do not implement nested scrolling or component behavior.
 
@@ -41,7 +41,7 @@ Returning true consumes both axes and suppresses built-in scrolling.
 Returning false runs default scroll coordination.
 The event does not capture, bubble, or join pointer-sequence arbitration.
 
-`Runtime::HandleScrollInput()` returns the actual two-dimensional delta consumed by HuxerUI.
+`UiWindow::HandleScrollInput()` returns the actual two-dimensional delta consumed by HuxerUI.
 Platform adapters suppress their host default only when at least one axis was consumed.
 An unconsumed wheel update remains available to a native parent, browser page, or platform default.
 

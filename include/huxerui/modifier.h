@@ -20,7 +20,7 @@ namespace huxerui {
 
 class Environment;
 class PaintContext;
-class Runtime;
+class UiWindow;
 class SemanticBuilder;
 class TextMeasurer;
 class TextInputClient;
@@ -41,7 +41,7 @@ struct FrameInfo {
   /// Monotonic frame timestamp in seconds.
   double timestamp = 0.0;
 
-  /// Elapsed time since the preceding frame in seconds, clamped by Runtime to a safe animation interval.
+  /// Elapsed time since the preceding frame in seconds, clamped by UiWindow to a safe animation interval.
   double delta_time = 0.0;
 
   /// Whether motion should resolve immediately for the current mounted node.
@@ -52,7 +52,7 @@ struct FrameInfo {
 
 /// Adds retained lifecycle, input, semantics, or paint behavior to one mounted View node.
 ///
-/// A custom retained modifier declares an `Extension` type derived from NodeExtension. Runtime preserves a compatible
+/// A custom retained modifier declares an `Extension` type derived from NodeExtension. UiWindow preserves a compatible
 /// extension across recomposition and calls its `Update()` method with the latest modifier value.
 /// @code
 /// struct Overlay {
@@ -146,7 +146,7 @@ public:
 
   /// Consumes part of an available nested scroll delta before mounted scroll offsets.
   ///
-  /// Runtime calls this only when the extension is attached to a scroll container participating in the transaction.
+  /// UiWindow calls this only when the extension is attached to a scroll container participating in the transaction.
   /// The returned value must be finite, follow the direction of `available`, and not exceed its magnitude.
   [[nodiscard]] virtual float OnPreScroll(ViewNode& node, Axis axis, float available, ScrollSource source) {
     static_cast<void>(node);
@@ -196,7 +196,7 @@ public:
 
   /// Returns whether this extension makes the node an input target at a node-local position.
   ///
-  /// Runtime may call this more than once while routing an event, so the implementation must be deterministic and
+  /// UiWindow may call this more than once while routing an event, so the implementation must be deterministic and
   /// free of side effects.
   [[nodiscard]] virtual bool HitTest(ViewNode& node, Point position) const {
     static_cast<void>(node);
@@ -218,7 +218,7 @@ public:
 
   /// Delivers entry, movement, and departure for this extension's active hover hit-test.
   ///
-  /// The event position is local to `node`. Runtime sends Move only when the logical pointer position changes.
+  /// The event position is local to `node`. UiWindow sends Move only when the logical pointer position changes.
   virtual void OnHover(ViewNode& node, const HoverEvent& event) {
     static_cast<void>(node);
     static_cast<void>(event);
@@ -295,7 +295,7 @@ public:
 protected:
   /// Emits a typed event through the owning node's current handler binding.
   ///
-  /// Runtime connects the extension after construction. Events target only `.On<Key>()` on the owning View; they do
+  /// UiWindow connects the extension after construction. Events target only `.On<Key>()` on the owning View; they do
   /// not bubble to ancestors or target an enclosing composition scope. Use an explicitly supplied EventEmitter when
   /// the event belongs to an outer component instead.
   ///
@@ -369,7 +369,7 @@ private:
   std::function<void(PaintInvalidation)> invalidate_paint_;
   std::function<void()> invalidate_semantics_;
 
-  friend class Runtime;
+  friend class UiWindow;
   friend struct detail::InternalAccess;
 };
 

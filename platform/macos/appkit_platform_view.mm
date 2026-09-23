@@ -19,7 +19,7 @@
 #include <huxerui/macos/platform_registry.h>
 
 #include "appkit_renderer.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 
 @interface HuxerUIPlatformSliceView : NSView {
 @public
@@ -98,7 +98,7 @@ struct SliceKeyHash {
 };
 
 struct EventRoute {
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   std::uint64_t identity = 0;
   bool active = false;
 };
@@ -233,10 +233,10 @@ bool IsDescendant(NSView* view, NSView* ancestor) {
 } // namespace
 
 struct AppKitPlatformViews::State {
-  State(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value,
-        NSWindow* host_window_value)
-      : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value), host_window(host_window_value) {
-    if (host_window == nil) {
+  State(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value,
+        NSWindow* platform_window_value)
+      : renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value), platform_window(platform_window_value) {
+    if (platform_window == nil) {
       throw std::logic_error("HuxerUI macOS PlatformView host window must not be nil");
     }
   }
@@ -244,14 +244,14 @@ struct AppKitPlatformViews::State {
   std::unique_ptr<HostedPlatformView> Create(const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
     std::shared_ptr<const macos::detail::AppKitViewFactory> factory =
-        registry->FindView<macos::detail::AppKitViewFactory>(command.Type(), command.Properties().Type(),
+        registry->FindView<macos::detail::AppKitViewFactory>(*ui_window, command.Type(), command.Properties().Type(),
                                                              command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI macOS PlatformView factory must provide create");
     }
 
     auto route = std::make_shared<EventRoute>(EventRoute{
-        runtime,
+        ui_window,
         command.Identity(),
         false,
     });
@@ -259,17 +259,17 @@ struct AppKitPlatformViews::State {
     PlatformEventEmitter events = MakePlatformEventEmitter(
         [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
-          if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
+          if (!route || ![NSThread isMainThread] || !route->active || route->ui_window == nullptr) {
             return std::nullopt;
           }
-          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->ui_window, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
-          if (!route || ![NSThread isMainThread] || !route->active || route->runtime == nullptr) {
+          if (!route || ![NSThread isMainThread] || !route->active || route->ui_window == nullptr) {
             return std::nullopt;
           }
-          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->ui_window, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();
@@ -280,7 +280,7 @@ struct AppKitPlatformViews::State {
     hosted->factory = std::move(factory);
     hosted->controller = command.Controller();
     @try {
-      NSWindow* owner_window = host_window;
+      NSWindow* owner_window = platform_window;
       if (owner_window == nil) {
         throw std::logic_error("HuxerUI macOS PlatformView host window is unavailable");
       }
@@ -347,8 +347,8 @@ struct AppKitPlatformViews::State {
 
   AppKitRenderer* renderer;
   PlatformRegistry* registry;
-  Runtime* runtime;
-  __weak NSWindow* host_window = nil;
+  UiWindow* ui_window;
+  __weak NSWindow* platform_window = nil;
   __weak NSView* root = nil;
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
@@ -358,9 +358,9 @@ struct AppKitPlatformViews::State {
   std::unordered_map<SliceKey, __strong HuxerUIPlatformSliceView*, SliceKeyHash> slices;
 };
 
-AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
-                                         NSWindow* host_window)
-    : state_(std::make_unique<State>(renderer, registry, runtime, host_window)) {}
+AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window,
+                                         NSWindow* platform_window)
+    : state_(std::make_unique<State>(renderer, registry, ui_window, platform_window)) {}
 
 AppKitPlatformViews::~AppKitPlatformViews() {
   Shutdown();
@@ -459,7 +459,7 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
     static_cast<void>(identity);
     hosted->event_route->active = true;
   }
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
   const std::optional<std::uint64_t> current_responder_identity =
       state_->IdentityForResponder(root.window.firstResponder);
   if (focused_identity.has_value()) {
@@ -469,13 +469,13 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
         [root.window makeFirstResponder:root];
       }
       state_->platform_view_focus_identity.reset();
-      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
       if ([root.window makeFirstResponder:focused->second->view]) {
         state_->platform_view_focus_identity = focused_identity;
       } else {
         state_->platform_view_focus_identity.reset();
-        InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+        InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
       }
     } else {
       state_->platform_view_focus_identity = focused_identity;
@@ -507,10 +507,10 @@ void AppKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect) {
 }
 
 NSView* AppKitPlatformViews::HitTest(Point point) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return nil;
   }
-  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*state_->runtime, point);
+  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*state_->ui_window, point);
   if (!identity.has_value()) {
     return nil;
   }
@@ -528,7 +528,7 @@ NSView* AppKitPlatformViews::AccessibilityView(std::uint64_t identity) const {
 
 bool AppKitPlatformViews::BeginFocusTraversal(NSResponder* responder, bool reverse) {
   state_->pending_focus_traversal.reset();
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return false;
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
@@ -544,15 +544,15 @@ void AppKitPlatformViews::EndFocusTraversal() {
 }
 
 void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return;
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
   if (identity.has_value()) {
     state_->platform_view_focus_identity = identity;
-    if (InternalAccess::FocusedPlatformView(*state_->runtime) != identity) {
+    if (InternalAccess::FocusedPlatformView(*state_->ui_window) != identity) {
       const bool focus_visible = state_->pending_focus_traversal.has_value();
-      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, identity, focus_visible);
     }
     return;
   }
@@ -561,17 +561,17 @@ void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
   if (!previous_platform_view_focus.has_value()) {
     return;
   }
-  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*state_->ui_window);
   if (focused != previous_platform_view_focus) {
     return;
   }
   if (state_->pending_focus_traversal.has_value() && state_->pending_focus_traversal->first == *focused) {
     const bool reverse = state_->pending_focus_traversal->second;
     state_->pending_focus_traversal.reset();
-    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->runtime, *focused, reverse));
+    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *focused, reverse));
     return;
   }
-  InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+  InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
 }
 
 void AppKitPlatformViews::Shutdown() {
@@ -581,7 +581,7 @@ void AppKitPlatformViews::Shutdown() {
   for (auto& [identity, hosted] : state_->hosted) {
     static_cast<void>(identity);
     hosted->event_route->active = false;
-    hosted->event_route->runtime = nullptr;
+    hosted->event_route->ui_window = nullptr;
   }
   for (auto& [key, slice] : state_->slices) {
     static_cast<void>(key);
@@ -596,7 +596,7 @@ void AppKitPlatformViews::Shutdown() {
   state_->pending_focus_traversal.reset();
   state_->frame = nullptr;
   state_->root = nil;
-  state_->runtime = nullptr;
+  state_->ui_window = nullptr;
 }
 
 } // namespace huxerui::detail

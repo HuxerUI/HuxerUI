@@ -49,7 +49,7 @@ Content length is therefore omitted for chunked responses and when automatic con
 The shared state clears a native total if delivered bytes exceed it.
 
 Transport callbacks may arrive on any thread.
-The shared state coalesces pending upload observations and resumes through the Task execution's `UIThreadDispatcher`.
+The shared state coalesces pending upload observations and resumes through the Task execution's `UiThreadDispatcher`.
 Application progress callbacks and code after every HTTP `co_await` run on the owning Runtime UI thread.
 If a progress callback throws, the current Task rethrows that exception and the operation is canceled.
 

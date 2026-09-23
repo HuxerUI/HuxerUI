@@ -105,7 +105,7 @@ View MaterialDarkThemeApp() {
 
 TEST_CASE("TestThemeProviderUpdatesNestedContent") {
   TestPlatform platform;
-  Runtime runtime{ThemeApp, platform};
+  UiWindow runtime{ThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -162,7 +162,7 @@ TEST_CASE("TestThemeProviderUpdatesNestedContent") {
 
 TEST_CASE("TestFlatDarkThemeAndSemanticTextRoles") {
   TestPlatform platform;
-  Runtime runtime{FlatDarkThemeApp, platform};
+  UiWindow runtime{FlatDarkThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -247,7 +247,7 @@ TEST_CASE("TestFlatThemeHoverAndPressedIndication") {
   REQUIRE(SolidFillColor(dark_dialog_style.background)->red == dark.colors.surface.red);
 
   TestPlatform platform;
-  Runtime runtime{FlatThemeInteractionApp, platform};
+  UiWindow runtime{FlatThemeInteractionApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "flat interaction");
@@ -478,7 +478,7 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
 
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{MaterialThemeApp, platform};
+  UiWindow runtime{MaterialThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* button = FindText(initial, "material button");
@@ -569,7 +569,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
       .key = Key::Space,
   });
 
-  Runtime dark_runtime{MaterialDarkThemeApp, platform};
+  TestPlatform dark_runtime_platform{platform.platform_resources};
+  UiWindow dark_runtime{MaterialDarkThemeApp, dark_runtime_platform};
   dark_runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   const FlattenedScene& dark_display = dark_runtime.BuildFrame();
   const DrawTextCommand* dark_button = FindText(dark_display, "material dark button");
@@ -579,7 +580,8 @@ TEST_CASE("TestMaterialThemeDefinitionsAndIndication") {
   REQUIRE(SolidBrushColor(dark_background->brush) != nullptr);
   REQUIRE(SolidBrushColor(dark_background->brush)->red == dark.colors.primary.red);
 
-  Runtime toggle_runtime{MaterialToggleApp, platform};
+  TestPlatform toggle_runtime_platform{platform.platform_resources};
+  UiWindow toggle_runtime{MaterialToggleApp, toggle_runtime_platform};
   toggle_runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   toggle_runtime.BuildFrame();
   const detail::MountedNode* toggle_root = toggle_runtime.RootNode();

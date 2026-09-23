@@ -130,7 +130,7 @@ TEST_CASE("MacExternalTexturePublishesLatestFrameThroughAppKitRenderer") {
     CVPixelBufferRelease(green);
 
     TestPlatform platform;
-    Runtime runtime{MacExternalTextureApp, platform};
+    UiWindow runtime{MacExternalTextureApp, platform};
     runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
     const RenderFrame& initial = runtime.BuildRenderFrame();
     detail::AppKitRenderer renderer;
@@ -209,7 +209,7 @@ TEST_CASE("MacMetalTextureCopiesPublishedFramesForEveryRenderer") {
     ReplaceMetalPixels(source, SolidMetalPixels({0, 255, 0, 255}));
     mac_external_texture = texture;
     TestPlatform platform;
-    Runtime runtime{MacExternalTextureApp, platform};
+    UiWindow runtime{MacExternalTextureApp, platform};
     runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
     const RenderFrame& initial = runtime.BuildRenderFrame();
     detail::AppKitRenderer renderer;
@@ -263,7 +263,7 @@ TEST_CASE("MacMetalTextureAppliesOriginAndAlphaMetadata") {
     const auto texture = std::make_shared<macos::MetalTexture>(Size{2.0F, 2.0F});
     mac_external_texture = texture;
     TestPlatform platform;
-    Runtime runtime{MacExternalTextureApp, platform};
+    UiWindow runtime{MacExternalTextureApp, platform};
     runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
     detail::AppKitRenderer renderer;
 

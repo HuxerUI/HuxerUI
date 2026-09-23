@@ -4,7 +4,7 @@
 
 A component is an ordinary function returning `View`. The application root is supplied directly to `Application` and already owns a scope.
 
-Use `[[huxerui::composable]]` on a reusable function that directly calls composition-bound facilities such as `UseState`, `UseEnvironment`, `UseTheme`, `UseEvents`, `UseApplication`, `UseTaskScope`, `UseNavigation`, or presentation hooks. Also mark a reusable component when it needs an independent recomposition boundary so State changes observed inside it recompose that component instead of its caller. Do not annotate every component for performance by default, and do not annotate the app root.
+Use `[[huxerui::composable]]` on a reusable function that directly calls composition-bound facilities such as `UseState`, `UseEnvironment`, `UseTheme`, `UseEvents`, `UseTaskScope`, `UseNavigation`, or presentation hooks. `UseApplication()` alone also works in ordinary application-thread functions. Mark a reusable component when it needs an independent recomposition boundary so State changes observed inside it recompose that component instead of its caller. Do not annotate every component for performance by default, and do not annotate the app root.
 
 Define annotated functions in `.cpp`, `.cc`, or `.cxx` source files so composable code generation can transform them. Do not place an annotated definition only in a header.
 
@@ -108,9 +108,9 @@ tasks.Launch([]() -> Task<void> {
 });
 ```
 
-`UseApplication()` returns the current Runtime's `ApplicationHandle`. Its `StartupActivation()` exposes the cold-start `ApplicationActivation`, whose alternatives are `LaunchActivation`, `UrlActivation`, `FileActivation`, and `NotificationActivation`. `UrlActivation::url` is a validated `Uri`, `FileActivation` retains platform-granted `FileReference` capabilities, and `NotificationActivation` carries a stable application-owned local-notification identifier. Its `OnActivation(...)` receives only later activations while the declaring composition lifetime is mounted.
+`UseApplication()` returns the current Runtime's `ApplicationHandle`. Its `StartupActivation()` exposes the cold-start `ApplicationActivation`, whose alternatives are `LaunchActivation`, `UrlActivation`, `FileActivation`, and `NotificationActivation`. `UrlActivation::url` is a validated `Uri`, `FileActivation` retains platform-granted `FileReference` capabilities, and `NotificationActivation` carries a stable application-owned local-notification identifier. Register one application-lifetime handler for later activations with `ApplicationContext::OnActivation()` in `AppOptions::application_hooks`.
 
-`ApplicationHandle::LifecycleState()` reads and subscribes to the current `ApplicationLifecycleState`; use `ApplicationHandle::OnLifecycleChange(...)` when every ordered transition matters. Obtain the handle with `UseApplication()`, register callbacks during composition, and keep navigation or file-opening policy in application state.
+`ApplicationHandle::LifecycleState()` reads and subscribes to the current `ApplicationLifecycleState` during composition. Use `ApplicationContext::OnLifecycleChanged()` for application-lifetime observation or `ApplicationHandle::OnLifecycleChanged()` for a mounted composition observer. Keep navigation or file-opening policy in application state.
 
 `ApplicationHandle::CheckPermissionAsync()`, `RequestPermissionAsync()`, and `OpenPermissionSettingsAsync()` expose typed camera and microphone authorization through the owning Task execution.
 Await them from a `TaskScope`; the continuation resumes on its UI thread and may update `State` directly.

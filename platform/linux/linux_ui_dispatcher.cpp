@@ -8,18 +8,23 @@
 
 namespace huxerui::detail {
 
-struct LinuxUIThreadDispatcher::State {
+/// Retains the GMainContext and a synchronized admission gate for outstanding dispatcher callbacks.
+struct LinuxUiThreadDispatcher::State {
   State() : context(g_main_context_ref(g_main_context_default())) {}
 
   ~State() {
     g_main_context_unref(context);
   }
 
+  /// GLib-source-owned callback with a weak gate, so queued work cannot revive a retired application.
   struct PendingTask {
     std::weak_ptr<State> state;
     std::function<void()> task;
   };
 
+  /// Schedules one idle source from any thread and wakes the application main context.
+  /// @param self Original dispatch state used weakly by the source's delivery callback.
+  /// @param task Callback retained by the source until delivery or source destruction.
   void Post(const std::shared_ptr<State>& self, std::function<void()> task) {
     {
       std::lock_guard lock(mutex);
@@ -67,18 +72,18 @@ struct LinuxUIThreadDispatcher::State {
   bool active = true;
 };
 
-LinuxUIThreadDispatcher::LinuxUIThreadDispatcher() : state_(std::make_shared<State>()) {}
+LinuxUiThreadDispatcher::LinuxUiThreadDispatcher() : state_(std::make_shared<State>()) {}
 
-LinuxUIThreadDispatcher::~LinuxUIThreadDispatcher() {
+LinuxUiThreadDispatcher::~LinuxUiThreadDispatcher() {
   Shutdown();
 }
 
-UIThreadDispatcher LinuxUIThreadDispatcher::Bind() const {
+UiThreadDispatcher LinuxUiThreadDispatcher::Bind() const {
   const std::shared_ptr<State> state = state_;
   return [state](std::function<void()> task) { state->Post(state, std::move(task)); };
 }
 
-void LinuxUIThreadDispatcher::Shutdown() noexcept {
+void LinuxUiThreadDispatcher::Shutdown() noexcept {
   state_->Shutdown();
 }
 

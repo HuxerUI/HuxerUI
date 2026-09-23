@@ -6,11 +6,11 @@
 #include <limits>
 #include <utility>
 
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 #include <huxerui/state.h>
 #include <huxerui/theme.h>
 
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "transition_internal.h"
 #include "internal_access.h"
 #include "application/window_internal.h"

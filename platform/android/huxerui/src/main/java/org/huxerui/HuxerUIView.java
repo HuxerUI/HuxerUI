@@ -2,7 +2,6 @@ package org.huxerui;
 
 import android.content.ClipData;
 import android.content.ClipDescription;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -19,7 +18,6 @@ import android.graphics.LinearGradient;
 import android.graphics.RadialGradient;
 import android.graphics.Shader;
 import android.graphics.Typeface;
-import android.os.Debug;
 import android.os.SystemClock;
 import android.os.Build;
 import android.text.Layout;
@@ -138,20 +136,18 @@ public final class HuxerUIView extends ViewGroup {
         AutoCloseable request(DragEvent event);
     }
 
-    public interface PermissionLauncher {
-        void request(String permission, int requestCode);
-
-        boolean openSettings();
-    }
-
-    public enum ApplicationLifecycleState {
+    /**
+     * Visibility and activation of this native window attachment, independent of aggregate application lifecycle.
+     * ACTIVE accepts input, INACTIVE is visible without focus, and BACKGROUND is not presented.
+     */
+    public enum WindowLifecycleState {
         ACTIVE(0),
         INACTIVE(1),
         BACKGROUND(2);
 
         private final int nativeValue;
 
-        ApplicationLifecycleState(int nativeValue) {
+        WindowLifecycleState(int nativeValue) {
             this.nativeValue = nativeValue;
         }
     }
@@ -184,8 +180,7 @@ public final class HuxerUIView extends ViewGroup {
     private final int[] screenLocation = new int[2];
     private final HuxerUIAccessibilityProvider accessibilityProvider;
     private final HuxerUIFilePicker filePicker;
-    private final HuxerUIPermission permission;
-    private final HuxerUILocalNotification localNotification;
+    private HuxerUIApplication application;
     private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
     private final LongSparseArray<HuxerUITextureLayer> textureLayers = new LongSparseArray<>();
     private final SparseIntArray pointerButtons = new SparseIntArray();
@@ -210,14 +205,6 @@ public final class HuxerUIView extends ViewGroup {
             }
         }
     };
-    private final Runnable platformTasksCallback = new Runnable() {
-        @Override
-        public void run() {
-            if (nativeHandle != 0L) {
-                nativeDrainPlatformTasks(nativeHandle);
-            }
-        }
-    };
 
     private long nativeHandle;
     private boolean frameScheduled;
@@ -236,7 +223,8 @@ public final class HuxerUIView extends ViewGroup {
     private boolean fileDropStarted;
     private boolean fileDropHover;
     private String[] fileDropTypes = new String[0];
-    private PermissionLauncher permissionLauncher;
+    private HuxerUIApplication.PermissionLauncher permissionLauncher;
+    private long presentationIdentity = 1;
     private long[] platformComposition = EMPTY_PLATFORM_COMPOSITION;
     private boolean nativeDrawing;
     private boolean applyingPlatformViewFocus;
@@ -245,7 +233,7 @@ public final class HuxerUIView extends ViewGroup {
     private boolean platformTabKeyHandled;
     private HuxerUIApplicationActivation startupApplicationActivation;
     private final ArrayList<HuxerUIApplicationActivation> pendingApplicationActivations = new ArrayList<>();
-    private ApplicationLifecycleState applicationLifecycleState = ApplicationLifecycleState.ACTIVE;
+    private WindowLifecycleState windowLifecycleState = WindowLifecycleState.ACTIVE;
 
     private boolean updateTextInputGeometry() {
         if (inputConnection != null) {
@@ -266,8 +254,6 @@ public final class HuxerUIView extends ViewGroup {
         super(context, attributes, defaultStyleAttribute);
         accessibilityProvider = new HuxerUIAccessibilityProvider(this);
         filePicker = new HuxerUIFilePicker(this);
-        permission = new HuxerUIPermission(this);
-        localNotification = new HuxerUILocalNotification(this);
         density = getResources().getDisplayMetrics().density;
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -383,23 +369,37 @@ public final class HuxerUIView extends ViewGroup {
         return filePicker.dispatchResult(requestCode, resultCode, data);
     }
 
-    public void setPermissionLauncher(PermissionLauncher launcher) {
+    /**
+     * Replaces the presentation endpoint for requests originating from this View on the main thread.
+     * @param launcher Activity-owned operations, or null to remove presentation support.
+     * Pending requests belonging to the previous launcher are invalidated and its generation is advanced.
+     */
+    public void setPermissionLauncher(HuxerUIApplication.PermissionLauncher launcher) {
         if (permissionLauncher == launcher) {
             return;
         }
+        HuxerUIApplication owner = HuxerUIApplication.current();
+        if (owner != null) owner.retireLauncher(permissionLauncher);
+        ++presentationIdentity;
         permissionLauncher = launcher;
-        permission.launcherChanged();
-        localNotification.launcherChanged();
     }
 
+    /**
+     * Forwards an Activity permission completion to the active application host on the main thread.
+     * @param requestCode Correlation code from the launcher's original request.
+     * @param permissions Android permission names returned by the Activity.
+     * @param grantResults Corresponding Android grant results, possibly empty on cancellation.
+     * @return Whether the application recognized and consumed this completion.
+     */
     public boolean dispatchPermissionResult(int requestCode, String[] permissions, int[] grantResults) {
-        if (localNotification.dispatchPermissionResult(requestCode)) {
-            return true;
-        }
-        return permission.dispatchResult(requestCode, permissions, grantResults);
+        HuxerUIApplication owner = HuxerUIApplication.current();
+        return owner != null && owner.dispatchPermissionResult(requestCode, permissions, grantResults);
     }
-
-    /** Sets the Intent normalized as startup input for the next Runtime created by this View. */
+    /**
+     * Supplies input once on attachment: startup for a new Runtime, a later activation for an existing Runtime.
+     * @param intent Initial Intent, or null; do not replay it for an Activity recreation.
+     * @throws IllegalStateException If this View already has a native attachment.
+     */
     public void setStartupApplicationIntent(Intent intent) {
         if (nativeHandle != 0L) {
             throw new IllegalStateException(
@@ -408,7 +408,11 @@ public final class HuxerUIView extends ViewGroup {
         startupApplicationActivation = HuxerUIApplicationActivation.fromIntent(getContext(), intent);
     }
 
-    /** Delivers a supported later Intent to this View's Runtime, retaining it until attachment when necessary. */
+    /**
+     * Delivers a later supported Intent to the application, queueing it until View attachment when necessary.
+     * @param intent New activation Intent, or null; hosts are responsible for avoiding duplicate delivery.
+     * @return Whether the Intent decoded to a supported activation and was delivered or queued.
+     */
     public boolean dispatchApplicationIntent(Intent intent) {
         HuxerUIApplicationActivation activation = HuxerUIApplicationActivation.fromIntent(getContext(), intent);
         if (activation == null) {
@@ -422,11 +426,43 @@ public final class HuxerUIView extends ViewGroup {
         return true;
     }
 
-    /** Updates the application lifecycle represented by this View's Runtime. */
-    public void setApplicationLifecycleState(ApplicationLifecycleState state) {
-        applicationLifecycleState = Objects.requireNonNull(state);
+    /**
+     * {@inheritDoc}
+     * Updates this window's native lifecycle after Android focus changes.
+     * @param hasWindowFocus Whether the containing window now has input focus.
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        super.onWindowFocusChanged(hasWindowFocus);
+        updateWindowLifecycle();
+    }
+
+    /**
+     * {@inheritDoc}
+     * @param visibility Android visibility of the containing window; used to update the attachment's lifecycle.
+     */
+    @Override
+    protected void onWindowVisibilityChanged(int visibility) {
+        super.onWindowVisibilityChanged(visibility);
+        updateWindowLifecycle();
+    }
+
+    /**
+     * Derives window lifecycle from Android visibility and focus on the main thread.
+     */
+    private void updateWindowLifecycle() {
+        setWindowLifecycleState(getWindowVisibility() != VISIBLE ? WindowLifecycleState.BACKGROUND
+                : hasWindowFocus() ? WindowLifecycleState.ACTIVE : WindowLifecycleState.INACTIVE);
+    }
+
+    /**
+     * Publishes this attachment's lifecycle independently of application Activity aggregation.
+     * @param state Non-null window state supplied on the main thread; retained for future native attachment.
+     */
+    public void setWindowLifecycleState(WindowLifecycleState state) {
+        windowLifecycleState = Objects.requireNonNull(state);
         if (nativeHandle != 0L) {
-            nativeUpdateApplicationLifecycleState(nativeHandle, state.nativeValue);
+            nativeUpdateWindowLifecycleState(nativeHandle, state.nativeValue);
         }
     }
 
@@ -434,46 +470,19 @@ public final class HuxerUIView extends ViewGroup {
         return filePickerLauncher;
     }
 
-    PermissionLauncher permissionLauncher() {
+    /**
+     * Borrows this View's explicit presentation endpoint on the main thread.
+     * @return The configured launcher, or null; callers check native attachment and visibility separately.
+     */
+    HuxerUIApplication.PermissionLauncher permissionLauncher() {
         return permissionLauncher;
     }
 
-    int checkPermission(int permissionKind) {
-        return permission.check(permissionKind);
-    }
-
-    void requestPermission(long nativeHandle, int permissionKind) {
-        permission.request(nativeHandle, permissionKind);
-    }
-
-    boolean openPermissionSettings(int permissionKind) {
-        return permission.openSettings(permissionKind);
-    }
-
-    int localNotificationCapabilities() {
-        return localNotification.capabilities();
-    }
-
-    int checkLocalNotificationAuthorization() {
-        return localNotification.checkAuthorization();
-    }
-
-    void requestLocalNotificationAuthorization(long nativeHandle) {
-        localNotification.requestAuthorization(nativeHandle);
-    }
-
-    int showLocalNotification(String identifier, String title, String body, String templateIdentifier, byte[] data) {
-        return localNotification.show(identifier, title, body, templateIdentifier, data);
-    }
-
-    int scheduleLocalNotification(String identifier, String title, String body, String templateIdentifier,
-                                  byte[] data, long deliveryTimeMillis) {
-        return localNotification.schedule(identifier, title, body, templateIdentifier, data, deliveryTimeMillis);
-    }
-
-    int cancelLocalNotification(String identifier) {
-        return localNotification.cancel(identifier);
-    }
+    /**
+     * Identifies the current View presentation endpoint for stale-request checks.
+     * @return Generation incremented when the launcher is replaced or the View detaches.
+     */
+    long presentationIdentity() { return presentationIdentity; }
 
     HuxerUIFilePicker.Operation prepareOpenDirectory(long nativeHandle, boolean writable) {
         return filePicker.prepareDirectory(nativeHandle, writable);
@@ -505,9 +514,16 @@ public final class HuxerUIView extends ViewGroup {
         observer.addOnGlobalFocusChangeListener(platformViewFocusListener);
         requestFocus();
         if (nativeHandle == 0L) {
-            nativeHandle = createNativeRuntime(startupApplicationActivation);
+            boolean applicationAlreadyRunning = HuxerUIApplication.current() != null;
+            application = HuxerUIApplication.initialize(getContext(), startupApplicationActivation, true);
+            application.attach(this);
+            updateWindowLifecycle();
+            nativeHandle = nativeCreate(this, windowLifecycleState.nativeValue);
+            if (applicationAlreadyRunning && startupApplicationActivation != null) {
+                application.dispatchActivation(startupApplicationActivation);
+            }
             startupApplicationActivation = null;
-            nativeUpdateApplicationLifecycleState(nativeHandle, applicationLifecycleState.nativeValue);
+            updateWindowLifecycle();
             resizeRuntime(getWidth(), getHeight());
             for (HuxerUIApplicationActivation activation : pendingApplicationActivations) {
                 handleNativeApplicationActivation(activation);
@@ -527,7 +543,6 @@ public final class HuxerUIView extends ViewGroup {
             observer.removeOnGlobalFocusChangeListener(platformViewFocusListener);
         }
         removeCallbacks(frameCallback);
-        removeCallbacks(platformTasksCallback);
         if (shadowRenderer != null) {
             shadowRenderer.clear();
             shadowRenderer = null;
@@ -541,10 +556,9 @@ public final class HuxerUIView extends ViewGroup {
             inputConnection.deactivate();
             inputConnection = null;
         }
-        if (nativeHandle != 0L) {
-            nativeDestroy(nativeHandle);
-            nativeHandle = 0L;
-        }
+        releaseWindow();
+        if (application != null) application.detach(this);
+        application = null;
         accessibilityProvider.reset();
         super.onDetachedFromWindow();
     }
@@ -967,28 +981,6 @@ public final class HuxerUIView extends ViewGroup {
         return (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
     }
 
-    private byte[] readClipboardText() {
-        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard == null || !clipboard.hasPrimaryClip()) {
-            return null;
-        }
-        ClipData clip = clipboard.getPrimaryClip();
-        if (clip == null || clip.getItemCount() == 0) {
-            return null;
-        }
-        CharSequence text = clip.getItemAt(0).coerceToText(getContext());
-        return text == null ? null : text.toString().getBytes(StandardCharsets.UTF_8);
-    }
-
-    private boolean writeClipboardText(byte[] utf8) {
-        ClipboardManager clipboard = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard == null) {
-            return false;
-        }
-        clipboard.setPrimaryClip(ClipData.newPlainText("HuxerUI", new String(utf8, StandardCharsets.UTF_8)));
-        return true;
-    }
-
     private byte[] resourceLocale() {
         Configuration configuration = getResources().getConfiguration();
         Locale locale = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !configuration.getLocales().isEmpty()
@@ -1002,10 +994,6 @@ public final class HuxerUIView extends ViewGroup {
 
     private float resourceScale() {
         return getResources().getDisplayMetrics().density;
-    }
-
-    private long processPssBytes() {
-        return Debug.getPss() * 1024L;
     }
 
     private void resizeRuntime(int width, int height) {
@@ -1426,10 +1414,6 @@ public final class HuxerUIView extends ViewGroup {
         } else {
             postDelayed(frameCallback, delayMilliseconds);
         }
-    }
-
-    private void schedulePlatformTasks() {
-        post(platformTasksCallback);
     }
 
     private void setHuxerUIPointerCursor(int kind) {
@@ -2323,26 +2307,29 @@ public final class HuxerUIView extends ViewGroup {
         canvas.drawBitmap(bitmap, source, rect, paint);
     }
 
-    private long createNativeRuntime(HuxerUIApplicationActivation activation) {
-        if (activation == null) {
-            return nativeCreate(this, 0, null, null, -1L, null, false, null);
+    /**
+     * Cancels scheduled frames and retires the original native UiWindow on the main thread.
+     */
+    void releaseWindow() {
+        removeCallbacks(frameCallback);
+        frameScheduled = false;
+        if (nativeHandle != 0L) {
+            nativeDestroy(nativeHandle);
+            nativeHandle = 0L;
         }
-        return nativeCreate(this, activation.kind, activation.value, activation.name, activation.size,
-                activation.contentType, activation.writable, activation.data);
     }
 
     private void handleNativeApplicationActivation(HuxerUIApplicationActivation activation) {
-        nativeHandleApplicationActivation(nativeHandle, activation.kind, activation.value, activation.name,
-                activation.size, activation.contentType, activation.writable, activation.data);
+        if (application != null) application.dispatchActivation(activation);
     }
 
-    private static native long nativeCreate(HuxerUIView view, int activationKind, String activationValue,
-            String fileName, long fileSize, String contentType, boolean writable, byte[] data);
-
-    private static native void nativeHandleApplicationActivation(long handle, int activationKind,
-            String activationValue, String fileName, long fileSize, String contentType, boolean writable, byte[] data);
-
-    private static native void nativeUpdateApplicationLifecycleState(long handle, int lifecycleState);
+    private static native long nativeCreate(HuxerUIView view, int lifecycleState);
+    /**
+     * Publishes native attachment activity without changing the application's aggregate lifecycle.
+     * @param handle Original native UiWindow handle.
+     * @param lifecycleState WindowLifecycleState wire value: active (0), inactive (1), or background (2).
+     */
+    private static native void nativeUpdateWindowLifecycleState(long handle, int lifecycleState);
 
     private static native void nativeDestroy(long handle);
 
@@ -2369,7 +2356,6 @@ public final class HuxerUIView extends ViewGroup {
 
     private static native void nativeEndDraw(long handle);
 
-    private static native void nativeDrainPlatformTasks(long handle);
 
     private static native long nativeHitTestPlatformView(long handle, float x, float y);
 

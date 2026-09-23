@@ -639,7 +639,7 @@ enum class AnchorAlignment {
 
 /// Describes the preferred side and alignment of an anchored presentation.
 struct AnchorPlacement {
-  /// Preferred side; Runtime may flip it when the requested side does not fit.
+  /// Preferred side; UiWindow may flip it when the requested side does not fit.
   AnchorSide side = AnchorSide::Below;
   /// Alignment along the anchor's cross axis.
   AnchorAlignment alignment = AnchorAlignment::Start;

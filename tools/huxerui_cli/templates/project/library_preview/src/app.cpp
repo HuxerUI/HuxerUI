@@ -13,8 +13,6 @@ const Application application{
         .window = {
             .title = "@PROJECT_NAME@",
         },
-        .root_hooks = {
-            @LIBRARY_NAMESPACE@::Install,
-        },
+        .application_hooks = {@LIBRARY_NAMESPACE@::Install},
     }
 };

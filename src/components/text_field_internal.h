@@ -13,7 +13,7 @@
 #include <huxerui/vector.h>
 
 namespace huxerui {
-class PlatformAdapter;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -73,6 +73,6 @@ struct TextFieldModifier {
   static bool LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right);
 };
 
-[[nodiscard]] Size MeasureTextField(MountedNode& node, PlatformAdapter& platform, Constraints constraints);
+[[nodiscard]] Size MeasureTextField(MountedNode& node, UiWindow& ui_window, Constraints constraints);
 
 } // namespace huxerui::detail

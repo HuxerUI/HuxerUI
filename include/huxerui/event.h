@@ -63,7 +63,7 @@ struct InteractionEvent {
   Type type = Type::Press;
   /// Input source for the complete press lifecycle.
   Source source = Source::Pointer;
-  /// Runtime-unique identifier retained by the matching Release or Cancel transition.
+  /// UiWindow-unique identifier retained by the matching Release or Cancel transition.
   std::uint64_t press_id = 0;
   /// Node-local pointer position, or an empty value for keyboard interaction.
   std::optional<Point> position;
@@ -192,7 +192,7 @@ struct KeyModifiers {
 
 /// Carries normalized pointer input in logical coordinates.
 ///
-/// The receiving API defines the coordinate space. Runtime input and ViewEvents use the window coordinate space, while
+/// The receiving API defines the coordinate space. UiWindow input and ViewEvents use the window coordinate space, while
 /// retained gesture APIs may provide a node-local position.
 struct PointerEvent {
   /// Lifecycle phase represented by this event.
@@ -508,17 +508,18 @@ struct ViewEvents {
 
   /// Offers an otherwise unhandled key press to the focused View.
   ///
-  /// Component-owned NodeExtension handling runs first. Return true to prevent Runtime and platform defaults, or use
+  /// Component-owned NodeExtension handling runs first. Return true to prevent UiWindow and platform defaults, or use
   /// KeyIntercept when parent policy must run before the component.
   struct KeyDown : Event<bool(const KeyEvent&)> {};
   /// Offers an otherwise unhandled key release to the focused View.
   ///
-  /// Component-owned NodeExtension handling runs first. Return true to prevent Runtime and platform defaults, or use
+  /// Component-owned NodeExtension handling runs first. Return true to prevent UiWindow and platform defaults, or use
   /// KeyIntercept when parent policy must run before the component.
   struct KeyUp : Event<bool(const KeyEvent&)> {};
-  /// Offers a key event from the active focus scope before focused component and Runtime defaults.
+  /// Offers a key event from the active focus scope before focused component and UiWindow defaults.
   ///
-  /// Runtime visits handlers from the active focus-scope root through the focused View, stopping when one returns true.
+  /// UiWindow visits handlers from the active focus-scope root through the focused View, stopping when one returns
+  /// true.
   /// Use this event for shortcuts or parent policy that must override a focused component. It is not a bubbling event.
   /// @code
   /// page.On<ViewEvents::KeyIntercept>([](const KeyEvent& event) {
@@ -696,13 +697,49 @@ private:
   std::function<Result(Arguments...)> function_;
 };
 
-using EventBindings = std::unordered_map<std::type_index, std::shared_ptr<EventHandlerBase>>;
+struct ExecutionContext;
+
+/// Installs callback provenance on the current thread and restores the previous context on scope exit.
+/// A null source leaves the current context unchanged. The guard owns no native object, does not dispatch work, and
+/// does not validate availability; the callback owner must enforce its thread and retirement rules before delivery.
+class ExecutionGuard final {
+public:
+  explicit ExecutionGuard(std::shared_ptr<ExecutionContext> source);
+  ~ExecutionGuard();
+  ExecutionGuard(const ExecutionGuard&) = delete;
+  ExecutionGuard& operator=(const ExecutionGuard&) = delete;
+private:
+  std::shared_ptr<ExecutionContext> previous_;
+};
+
+/// Typed event handlers plus the provenance of the declaration that installed them.
+/// The captured context preserves the original application, window, and Environment outside composition. Equality
+/// compares only handler bindings; reconciliation refreshes provenance separately, including after handler removal.
+struct EventBindings : std::unordered_map<std::type_index, std::shared_ptr<EventHandlerBase>> {
+  using Map = std::unordered_map<std::type_index, std::shared_ptr<EventHandlerBase>>;
+  using Map::Map;
+  // Handlers execute with their declaring window and Environment, even when invoked outside composition.
+  std::shared_ptr<ExecutionContext> execution_context;
+
+  bool operator==(const EventBindings& other) const {
+    return static_cast<const Map&>(*this) == static_cast<const Map&>(other);
+  }
+};
 
 template <class Key> bool HasEventBinding(const EventBindings& bindings) {
   return bindings.contains(typeid(Key));
 }
 
+/// Invokes a matching handler with its captured declaration context on the caller's thread.
+/// @tparam Key Exact typed event key.
+/// @tparam Arguments Argument types compatible with the event signature.
+/// @param bindings Handler table and original execution context captured during declaration.
+/// @param arguments Values forwarded to the selected handler for this invocation.
+/// @return For void events, whether a compatible handler ran; otherwise the handler result wrapped in std::optional.
+/// Missing or incompatible handlers produce false/an empty optional. Thread/lifetime validation belongs to the caller;
+/// installing provenance does not make UseEnvironment or other composition-only hooks legal inside an event.
 template <EventKey Key, class... Arguments> auto EmitEvent(const EventBindings& bindings, Arguments&&... arguments) {
+  ExecutionGuard guard(bindings.execution_context);
   using Result = EventResult<Key>;
   const auto found = bindings.find(typeid(Key));
   if (found == bindings.end()) {

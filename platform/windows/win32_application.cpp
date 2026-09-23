@@ -50,7 +50,7 @@ namespace huxerui::detail {
 struct Win32NotificationInbox {
   std::mutex mutex;
   std::deque<NotificationActivation> pending;
-  UIThreadDispatcher dispatcher;
+  UiThreadDispatcher dispatcher;
   std::function<void(NotificationActivation)> handler;
   HANDLE arrived = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   bool closed = false;
@@ -1071,7 +1071,7 @@ std::optional<std::wstring> BuildWin32NotificationXml(const ResolvedLocalNotific
     if (winrt::to_string(result).size() > max_notification_xml_bytes) {
       throw std::invalid_argument("HuxerUI Windows notification XML exceeds 5 KiB");
     }
-    // Persist the completed XML, never the provider. Scheduled delivery and cold clicks need no originating Runtime.
+    // Persist the completed XML, never the provider. Scheduled delivery and cold clicks need no originating UiWindow.
     return std::wstring(result);
   }
   // The versioned envelope and Base64 alphabet are ASCII and need no XML escaping or UTF-16 round trip.
@@ -1085,7 +1085,7 @@ std::optional<std::wstring> BuildWin32NotificationXml(const ResolvedLocalNotific
 #endif
 }
 
-Win32LocalNotificationHost::Win32LocalNotificationHost(UIThreadDispatcher dispatcher) {
+Win32LocalNotificationHost::Win32LocalNotificationHost(UiThreadDispatcher dispatcher) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
   static_cast<void>(dispatcher);
 #else
@@ -1155,7 +1155,7 @@ std::optional<NotificationActivation> Win32LocalNotificationHost::WaitForActivat
   if (!transport_ || !inbox_) {
     return std::nullopt;
   }
-  // A COM-only launch must receive real content before creating a Runtime/window. Pump STA calls with a bounded wait.
+  // A COM-only launch must receive real content before creating a UiWindow/window. Pump STA calls with a bounded wait.
   DWORD index = 0;
   if (FAILED(CoWaitForMultipleHandles(COWAIT_DISPATCH_CALLS | COWAIT_DISPATCH_WINDOW_MESSAGES, 10000, 1,
                                       &inbox_->arrived, &index))) {

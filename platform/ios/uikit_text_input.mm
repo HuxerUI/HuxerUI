@@ -196,8 +196,8 @@ void ApplyCommittedText(
 
 class UIKitTextInputState {
 public:
-  UIKitTextInputState(Runtime& runtime, HuxerUIView* host_view, UIKitTextInput& text_input)
-      : runtime_(&runtime), input_view_([[HuxerUITextInputView alloc] initWithHostView:host_view]) {
+  UIKitTextInputState(UiWindow& ui_window, HuxerUIView* host_view, UIKitTextInput& text_input)
+      : ui_window_(&ui_window), input_view_([[HuxerUITextInputView alloc] initWithHostView:host_view]) {
     input_view_->huxeruiTextInput = &text_input;
     [host_view.superview addSubview:input_view_];
   }
@@ -226,7 +226,7 @@ public:
       result.result_code = TextInputResultCode::SessionMismatch;
       return result;
     }
-    return runtime_->QueryTextInputContext(session_id_, start, length);
+    return ui_window_->QueryTextInputContext(session_id_, start, length);
   }
 
   TextInputGeometry QueryGeometry(TextRange range) const {
@@ -235,7 +235,7 @@ public:
       result.result_code = TextInputResultCode::SessionMismatch;
       return result;
     }
-    return runtime_->QueryTextInputGeometry(session_id_, range);
+    return ui_window_->QueryTextInputGeometry(session_id_, range);
   }
 
   TextInputPositionResult QueryPosition(Point point) const {
@@ -244,7 +244,7 @@ public:
       result.result_code = TextInputResultCode::SessionMismatch;
       return result;
     }
-    return runtime_->QueryTextInputPosition(session_id_, point);
+    return ui_window_->QueryTextInputPosition(session_id_, point);
   }
 
   id<UITextInput> Responder() const noexcept {
@@ -257,7 +257,7 @@ public:
     }
     applying_command_ = true;
     try {
-      TextInputApplyResult result = runtime_->HandleTextInputCommands({session_id_, {std::move(command)}});
+      TextInputApplyResult result = ui_window_->HandleTextInputCommands({session_id_, {std::move(command)}});
       applying_command_ = false;
       return result;
     } catch (...) {
@@ -267,7 +267,7 @@ public:
   }
 
   bool PerformAction(TextInputAction action) {
-    return IsActive() && runtime_->PerformTextInputAction(session_id_, action);
+    return IsActive() && ui_window_->PerformTextInputAction(session_id_, action);
   }
 
   void Start(
@@ -358,7 +358,7 @@ public:
   }
 
 private:
-  Runtime* runtime_ = nullptr;
+  UiWindow* ui_window_ = nullptr;
   __strong HuxerUITextInputView* input_view_ = nil;
   TextInputSessionId session_id_ = 0;
   TextInputConfiguration configuration_;
@@ -366,8 +366,8 @@ private:
   bool applying_command_ = false;
 };
 
-UIKitTextInput::UIKitTextInput(Runtime& runtime, HuxerUIView* view)
-    : state_(std::make_unique<UIKitTextInputState>(runtime, view, *this)) {}
+UIKitTextInput::UIKitTextInput(UiWindow& ui_window, HuxerUIView* view)
+    : state_(std::make_unique<UIKitTextInputState>(ui_window, view, *this)) {}
 
 UIKitTextInput::~UIKitTextInput() = default;
 

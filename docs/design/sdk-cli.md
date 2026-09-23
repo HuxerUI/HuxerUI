@@ -17,7 +17,7 @@ This document defines the HuxerUI SDK and CLI ownership model, the project workf
 - Source checkout use is an override of the same SDK contract, not a separate integration model.
 - HuxerUI built-in resources, library resources, and application resources produce one ordered final `resources.bin` per application.
 - Generated library topology contains only ordered library targets and resolved source roots; it never mirrors platform configuration.
-- Runtime ownership remains one shared `Runtime` and one `PlatformAdapter` per application surface.
+- Each application owns one platform-derived `Runtime`; each attached surface owns one platform-derived `UiWindow`.
 
 These decisions keep direct CMake use viable and prevent a second project model from drifting away from platform tools.
 
@@ -431,7 +431,7 @@ Missing required dependencies, conflicting destinations, invalid architectures, 
 Windows uses WiX v5 Burn and MSI as the installation engine.
 Burn owns detection, planning, caching, elevation, apply, cancellation, rollback, repair, uninstall, and restart semantics.
 HuxerUI owns only the bootstrapper application's interface and presentation.
-The bootstrapper application is a normal out-of-process HuxerUI executable using the existing Windows `PlatformAdapter` and shared `Runtime`; it is not a Runtime subclass, embedded MSI UI, NSIS child window, PlatformView, or PlatformModule.
+The bootstrapper application is a normal out-of-process HuxerUI executable using the existing Windows Runtime and UiWindow implementations; it is not an installer-specific host, embedded MSI UI, NSIS child window, PlatformView, or PlatformModule.
 
 The generated Windows shell contains editable installer source and resources under `platform/windows/package`.
 Its interface text uses the installer target's ordinary HuxerUI string resources and the Runtime's one locale configuration; the required default catalog supplies fallback text, and language or region catalogs use the same resolution chain as application resources.
@@ -796,7 +796,7 @@ huxerui_use_library(example_camera_kit
 )
 ```
 
-The preview installs the same public RootHook that a consuming application uses:
+The preview installs the same public application hook that a consuming application uses:
 
 ```cpp
 #include <huxerui/huxerui.h>
@@ -813,7 +813,7 @@ View App() {
 const Application application{
     App,
     {
-        .root_hooks = {
+        .application_hooks = {
             camera_kit::Install,
         },
     }
@@ -831,7 +831,7 @@ huxerui open ios
 There is no separate library preview Runtime or `library run` build path.
 The preview is a real HuxerUI application consuming the common library through CMake.
 Its Android Gradle application consumes the library's Gradle library, and its iOS Xcode application consumes the library's Swift package through the generated aggregator.
-These paths validate platform dependency resolution, mergeable platform declarations where supported, explicit RootHook installation, PlatformView behavior, and nonvisual service lifecycle through the same path used by an external application.
+These paths validate platform dependency resolution, mergeable platform declarations where supported, explicit application-hook installation, PlatformView behavior, and nonvisual service lifecycle through the same path used by an external application.
 Common C++ tests, platform-package tests, and the preview application remain complementary rather than replacing one another.
 
 The library repository declares its common C++ target and resources in CMake rather than adding a HuxerUI-specific JSON or YAML manifest:
@@ -941,7 +941,7 @@ Windows, Linux, and Web library sources join the common target directly from the
 Web libraries select C++ and Emscripten glue from their own CMake target and declare any JavaScript link inputs there; the CLI does not translate JavaScript package metadata into the common library graph.
 
 Runtime installation remains explicit C++ application policy.
-An application includes the library's public header and places its typed installer directly in `AppOptions::root_hooks`:
+An application includes the library's public header and places its typed installer directly in `AppOptions::application_hooks`:
 
 ```cpp
 #include <camerakit/camerakit.h>
@@ -949,14 +949,14 @@ An application includes the library's public header and places its typed install
 const Application application{
     App,
     {
-        .root_hooks = {
+        .application_hooks = {
             camera_kit::Install,
         },
     }
 };
 ```
 
-There is no generated installer header, hidden application-entry rewriting, or generic runtime library registry. The process-level `Application` registers only its root and `AppOptions`; library installation remains explicit through `root_hooks`.
+There is no generated installer header, hidden application-entry rewriting, or generic runtime library registry. The process-level `Application` registers only its root and `AppOptions`; library installation remains explicit through `application_hooks`.
 Generated platform attachment files remain build output rather than another editable project or runtime plugin list.
 
 Platform dependencies remain expressed in their owning ecosystem.
@@ -999,19 +999,19 @@ Callbacks, arbitrary C++ objects, and system handles never enter the payload; an
 BufferReference retains an address-stable CPU memory range without copying or serializing its bytes; producer synchronization and frame metadata remain library responsibilities.
 Android and Apple bridge this capability; Web rejects it explicitly. Windows and Linux libraries use the C++ type directly.
 
-A library's RootHook explicitly registers each visual or nonvisual factory under a nonempty case-sensitive UTF-8 name such as `WebView`, `web/WebView`, or `audio/Player`.
+A library's application hook explicitly registers each visual or nonvisual factory under a nonempty case-sensitive UTF-8 name such as `WebView`, `web/WebView`, or `audio/Player`.
 Names have no required separator, hierarchy, prefix, or grammar beyond valid UTF-8; `/` is only an optional library naming convention.
 The two factory kinds share one type namespace, so duplicate or kind-conflicting registration fails during library installation.
 Library registration does not use a generated header, hidden application-entry rewriting, editable metadata bundle, or process-global static initializer.
-The library's documented Install function remains an ordinary RootHook selected explicitly by the application.
+The library's documented Install function remains an ordinary `ApplicationHook` selected explicitly by the application.
 The library may implement that public Install function once, provide mutually exclusive platform definitions, or delegate to any common and platform helpers it chooses.
 Registration accepts a compatible direct callable, retained object, framework bridge adapter, or library-owned adapter; HuxerUI does not require a public factory base class, a `CreateXxxFactory()` convention, or one construction pattern across platforms.
 
-`RootContext::RegisterPlatformModule()`, `RegisterPlatformView()`, and typed `OpenPlatformModule<Module>()` are the only C++ RootHook registry operations; the internal registry has no public accessor.
+`ApplicationContext::RegisterPlatformModule()` and `RegisterPlatformView()` are the only C++ factory-registration operations; the internal catalog has no public accessor. The typed free `OpenPlatformModule<Module>()` creates instances outside composition after registration.
 A nonvisual factory returns the exact registered Module handle, which may be a value facade, move-only owner, shared interface pointer, or another library-defined RAII type.
-An installer may wrap or provide that handle as a shared service through `root.Provide()`, but service ownership is optional.
+An installer may provide a shared instance through `ApplicationContext::Provide()` or `WindowContext::Provide()` according to its lifetime, but service ownership is optional.
 A component-scoped library API instead uses the typed free `OpenPlatformModule<Module>(name, options)` operation defined by [PlatformModule ownership](architecture.md#platformmodule-ownership) from committed `Lifecycle` setup and releases its instance through the returned cleanup.
-Runtime resolves that operation through the declaring scope's surface registry only for the duration of setup; it does not expose a process-global registry or remain callable from composition, event handlers, asynchronous callbacks, or cleanup.
+Runtime resolves that operation through the original application execution context and its frozen factory catalog. It is also callable from application/window hooks and ordinary application-thread callbacks outside composition; a UiWindow factory requires the original live window context.
 Both ownership forms retain the library's own typed API and deterministic teardown without exposing wire payloads to application code.
 Applications do not register factories, call the low-level open operations, or use string method names directly; concrete library services, components, and optional `UseXxx()` hooks hide those details.
 There is no generic `UsePlatformModule`, public provider, application-visible generic instance, or mandatory PlatformModule service base class.
@@ -1026,23 +1026,23 @@ Direct C++ implementations attach without a proxy.
 Android Java, Web JavaScript, and Apple Objective-C/Swift implementations may compose the common call channel without changing the public Controller API.
 Controller replacement reconnects the retained PlatformView without resending Properties, and unmount disconnects it before invalidating calls and disposing the platform instance.
 
-RootHooks are the only PlatformModule and PlatformView registration entry point.
+Application hooks are the only PlatformModule and PlatformView registration entry point.
 Android provides Java and Kotlin `PlatformViewFactory`, `PlatformView`, `PlatformModuleFactory`, and `PlatformModule` interfaces for the common JNI class adapter, while a platform source may register a custom JNI-backed factory instead.
 Apple libraries register direct Objective-C++ factories or actual Objective-C/Swift factory objects through the iOS or macOS adapter, while Web libraries register direct Emscripten C++ factories or actual JavaScript factory objects.
-All forms still enter the same Core registry from one RootHook.
+All forms still enter the same Runtime catalog from one application hook.
 The Android common language interfaces use `create`, View access, `update`, `invoke`, and `dispose`, with narrow `PlatformEventEmitter`, `PlatformResult`, and optional `PlatformCancellation` endpoints instead of generic Module or View Context objects.
 The common bridge owns request identity, late-result rejection, thread transfer, invalidation, and binary payload conversion.
 Each cross-language instance and every direct PlatformView factory receives one framework-owned emitter.
 The Apple adapters preserve the same result, cancellation, late-delivery, and disposal rules independently in their UIKit and AppKit implementations.
 Libraries do not define one native callback for each event, and per-invocation Result completion remains distinct from instance-level event emission.
-Factories are surface-owned registrations that may create multiple independently owned instances; successful instances dispose exactly once, failed creation publishes no event, and platform host values are explicit per-platform factory parameters rather than a universal Context abstraction.
+Factories are application-owned registrations that may create multiple independently owned instances; successful instances dispose exactly once, failed creation publishes no event, and platform host values are explicit per-platform factory parameters rather than a universal Context abstraction.
 The platform package makes those implementations linkable but does not register them through an application host, application delegate, `mountHuxerUIApp()`, generated registrant, or global initializer.
 
-The Runtime-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
-Platform-package attachment only makes a library's platform implementation available to the platform application target; the library's explicit RootHook still installs its factories and services without another runtime API or composition mode.
+The UiWindow-side PlatformView lifecycle, exact RenderComposition ordering, typed events, nonvisual instance protocol, and ExternalTexture ownership are defined in [Architecture Design](architecture.md#platform-content-integration) rather than duplicated here.
+Platform-package attachment only makes a library's platform implementation available to the platform application target; the library's explicit application hook still registers its factories, while application and window hooks install services at their respective lifetimes.
 A PlatformView factory must preserve the shared ordering, clipping, input, focus, and accessibility contract; a platform implementation that cannot do so fails explicitly instead of moving the platform object to a global foreground or background plane.
 Library-owned typed services and component-lifetime wrappers keep boundary conversion and stable method names behind their concrete APIs.
-Windows posts a coalesced private message to its application HWND, the macOS and iOS adapters supply a `UIThreadDispatcher` backed by the platform main queue, Linux attaches idle sources to the owning GLib main context, Web queues work through the browser event loop, and Android dispatches through its owning `HuxerUIView`. `example_platform_module` provides source-level Windows thread-pool timer, Foundation, Linux `timerfd`, Emscripten interval, and Java integrations behind one typed service. On Windows, Apple platforms, Linux, Web, and Android it additionally returns an `ExternalTexture` from a typed service and publishes copied RGBA, `CVPixelBuffer`, cloned WebCodecs `VideoFrame`, or `Bitmap` frames without per-frame PlatformModule callbacks.
+Windows posts a coalesced private message to its application HWND, the macOS and iOS adapters supply a `UiThreadDispatcher` backed by the platform main queue, Linux attaches idle sources to the owning GLib main context, Web queues work through the browser event loop, and Android dispatches through its owning `HuxerUIView`. `example_platform_module` provides source-level Windows thread-pool timer, Foundation, Linux `timerfd`, Emscripten interval, and Java integrations behind one typed service. On Windows, Apple platforms, Linux, Web, and Android it additionally returns an `ExternalTexture` from a typed service and publishes copied RGBA, `CVPixelBuffer`, cloned WebCodecs `VideoFrame`, or `Bitmap` frames without per-frame PlatformModule callbacks.
 
 Camera or video may still use PlatformView when a platform interactive hierarchy is required and the platform implementation satisfies that contract.
 Pure high-frequency visual output normally uses ExternalTexture because it remains an ordinary renderer command and supports unrestricted HuxerUI transforms, clipping, opacity, and paint interleaving without a platform input subtree.
@@ -1101,8 +1101,7 @@ Setup tests must use controlled tool discovery and process execution fixtures, v
 ## Invariants
 
 - One static `Application` declaration per final application binary.
-- One shared Runtime implementation.
-- One `PlatformAdapter` boundary per application surface.
+- One platform-derived Runtime per application and one platform-derived UiWindow per attached surface.
 - Public identity remains `huxerui`, `<huxerui/huxerui.h>`, and `HuxerUI::huxerui`.
 - CMake owns common C++ targets and resource generation.
 - Every platform configures the application repository root `CMakeLists.txt`.

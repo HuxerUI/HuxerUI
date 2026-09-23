@@ -219,7 +219,7 @@ TEST_CASE("LifecycleRunsAfterCommitAndRestartsOnlyWhenItsStateDependencyChanges"
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleStateApp, platform);
+  UiWindow runtime(LifecycleStateApp, platform);
 
   REQUIRE(lifecycle_setups == 0);
   runtime.BuildFrame();
@@ -241,7 +241,7 @@ TEST_CASE("LifecycleObservesStateListVersions") {
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleListApp, platform);
+  UiWindow runtime(LifecycleListApp, platform);
 
   runtime.BuildFrame();
   lifecycle_list_dependency.PushBack(2);
@@ -255,7 +255,7 @@ TEST_CASE("LifecycleComparesOrdinaryValueDependencies") {
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   TestPlatform platform;
-  Runtime runtime(LifecyclePlainDependencyApp, platform);
+  UiWindow runtime(LifecyclePlainDependencyApp, platform);
 
   runtime.BuildFrame();
   lifecycle_plain_dependency = 2;
@@ -272,7 +272,7 @@ TEST_CASE("LifecycleComparesOrdinaryValueDependencies") {
 TEST_CASE("LifecycleStateWritesScheduleTheNextFrame") {
   lifecycle_setup_state_compositions = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleSetupStateApp, platform);
+  UiWindow runtime(LifecycleSetupStateApp, platform);
 
   runtime.BuildFrame();
   REQUIRE(lifecycle_setup_state.Get());
@@ -285,7 +285,7 @@ TEST_CASE("LifecycleStateWritesScheduleTheNextFrame") {
 TEST_CASE("LifecycleCleanupStateWritesScheduleTheNextFrame") {
   lifecycle_cleanup_state_compositions = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleCleanupStateApp, platform);
+  UiWindow runtime(LifecycleCleanupStateApp, platform);
 
   runtime.BuildFrame();
   lifecycle_child_visible = false;
@@ -302,7 +302,7 @@ TEST_CASE("LifecycleCleansUpWhenItsScopeUnmountsAndWhenRuntimeIsDestroyed") {
   lifecycle_cleanups = 0;
   TestPlatform platform;
   {
-    Runtime runtime(LifecycleUnmountApp, platform);
+    UiWindow runtime(LifecycleUnmountApp, platform);
     runtime.BuildFrame();
     REQUIRE(lifecycle_setups == 1);
 
@@ -316,7 +316,8 @@ TEST_CASE("LifecycleCleansUpWhenItsScopeUnmountsAndWhenRuntimeIsDestroyed") {
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   {
-    Runtime runtime(LifecycleStateApp, platform);
+    TestPlatform replacement_platform;
+    UiWindow runtime(LifecycleStateApp, replacement_platform);
     runtime.BuildFrame();
   }
   REQUIRE(lifecycle_setups == 1);
@@ -327,7 +328,7 @@ TEST_CASE("LifecycleCleansUpWhenACommittedCompositionOmitsItsDeclaration") {
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleConditionalApp, platform);
+  UiWindow runtime(LifecycleConditionalApp, platform);
 
   runtime.BuildFrame();
   lifecycle_child_visible = false;
@@ -341,7 +342,7 @@ TEST_CASE("LifecycleRestartsWhenAVirtualizedScopeIsEvictedAndRealizedAgain") {
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleVirtualListApp, platform);
+  UiWindow runtime(LifecycleVirtualListApp, platform);
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   runtime.BuildFrame();
@@ -360,7 +361,7 @@ TEST_CASE("LifecyclePreservesKeyedScopesWhenItemsMove") {
   lifecycle_setups = 0;
   lifecycle_cleanups = 0;
   TestPlatform platform;
-  Runtime runtime(LifecycleKeyedApp, platform);
+  UiWindow runtime(LifecycleKeyedApp, platform);
 
   runtime.BuildFrame();
   REQUIRE(lifecycle_setups == 2);
@@ -373,7 +374,7 @@ TEST_CASE("LifecyclePreservesKeyedScopesWhenItemsMove") {
 TEST_CASE("LifecycleCleansUpInReverseOrderBeforeStartingChangedDependencies") {
   lifecycle_events.clear();
   TestPlatform platform;
-  Runtime runtime(LifecycleOrderingApp, platform);
+  UiWindow runtime(LifecycleOrderingApp, platform);
 
   runtime.BuildFrame();
   REQUIRE(lifecycle_events == std::vector<std::string>{"setup-a", "setup-b"});
@@ -398,7 +399,7 @@ TEST_CASE("LifecycleDiscardsDeclarationsFromFailedComposition") {
   lifecycle_cleanups = 0;
   lifecycle_composition_failed = true;
   TestPlatform platform;
-  Runtime runtime(LifecycleFailureApp, platform);
+  UiWindow runtime(LifecycleFailureApp, platform);
 
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
   REQUIRE(lifecycle_setups == 0);
@@ -420,7 +421,7 @@ TEST_CASE("LifecyclePropagatesSetupExceptionsAndCanRetryAfterInvalidation") {
   lifecycle_cleanups = 0;
   lifecycle_setup_throws = true;
   TestPlatform platform;
-  Runtime runtime(LifecycleSetupFailureApp, platform);
+  UiWindow runtime(LifecycleSetupFailureApp, platform);
 
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::runtime_error);
   REQUIRE(lifecycle_setups == 0);
@@ -438,7 +439,7 @@ TEST_CASE("LifecyclePropagatesDependencyComparisonExceptionsBeforeCleanup") {
   lifecycle_cleanups = 0;
   lifecycle_dependency_comparison_throws = false;
   TestPlatform platform;
-  Runtime runtime(LifecycleThrowingDependencyApp, platform);
+  UiWindow runtime(LifecycleThrowingDependencyApp, platform);
 
   runtime.BuildFrame();
   REQUIRE(lifecycle_setups == 1);
@@ -457,6 +458,28 @@ TEST_CASE("LifecyclePropagatesDependencyComparisonExceptionsBeforeCleanup") {
 
 TEST_CASE("LifecycleRequiresAnActiveComposition") {
   REQUIRE_THROWS_AS(Lifecycle([] {}), std::logic_error);
+}
+
+TEST_CASE("Lifecycle cleanup retains the declaring subtree resource context after unmount") {
+  static State<bool> visible;
+  static std::vector<Locale> locales;
+  locales.clear();
+  TestPlatform platform;
+  UiWindow runtime([]() -> View {
+    visible = UseState(true);
+    if (!visible.Get()) return Text("empty");
+    return ProvideEnvironment(Locale::FromLanguageTag("fr-FR"), Scope([&] {
+      Lifecycle([&] {
+        locales.push_back(UseService<Resources>()->Configuration().locale);
+        return [&] { locales.push_back(UseService<Resources>()->Configuration().locale); };
+      });
+      return Text("localized");
+    }));
+  }, platform);
+  runtime.BuildFrame();
+  visible = false;
+  runtime.BuildFrame();
+  REQUIRE(locales == std::vector<Locale>{Locale::FromLanguageTag("fr-FR"), Locale::FromLanguageTag("fr-FR")});
 }
 
 } // namespace huxerui::test

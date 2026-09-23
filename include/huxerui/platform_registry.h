@@ -24,7 +24,8 @@
 
 namespace huxerui {
 
-class PlatformAdapter;
+class UiWindow;
+class Runtime;
 class PlatformChannel;
 class PlatformEventEmitter;
 
@@ -432,29 +433,56 @@ template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescrip
 
 class PlatformChannelState;
 class PlatformChannelEndpoint;
-PlatformChannelEndpoint MakePlatformChannelEndpoint(PlatformAdapter& adapter);
+/// Creates an asynchronous channel endpoint bound to one window's execution lifetime.
+/// @param ui_window Live original window, accessed on the application thread.
+/// @return An endpoint whose delivery preserves this window context and stops when it retires.
+PlatformChannelEndpoint MakePlatformChannelEndpoint(UiWindow& ui_window);
+/// Creates an application channel that does not require a window.
+/// @param runtime Live original Runtime, accessed on its application thread.
+/// @return An endpoint whose delivery uses application context and stops at Runtime shutdown.
+PlatformChannelEndpoint MakePlatformChannelEndpoint(Runtime& runtime);
+/// Resolves the window associated with the current composition or captured execution context.
+/// @return The borrowed original window, or null for application-only context; never chooses a replacement window.
+/// @throws std::logic_error If an explicitly captured window or its Runtime is no longer valid.
+UiWindow* CurrentUiWindow();
 
 PlatformEventEmitter MakePlatformEventEmitter(
     std::function<std::optional<PlatformValue>(std::type_index, PlatformValue)> emit_direct,
     std::function<std::optional<PlatformPayload>(std::string, PlatformPayload)> emit_payload
 );
 
-/// Owns all PlatformModule and PlatformView registrations for one surface.
-///
-/// RootContext is the public registration facade. This internal owner enforces one case-sensitive name space, exact
-/// C++ type matching, and registration immutability after root installation completes.
+/// Application-owned factory catalog populated during application_hooks and frozen before ordinary dispatch begins.
+/// Module factories declare their lifetime through exactly one Runtime& or UiWindow& parameter. Native View factories
+/// are prepared for the mounting window. This catalog is accessed on the application thread, even after freezing.
 class PlatformRegistry final {
 public:
-  explicit PlatformRegistry(PlatformAdapter& adapter) : adapter_(&adapter) {}
+  explicit PlatformRegistry(Runtime& runtime) : runtime_(&runtime) {}
 
+  /// Registers a module factory without construction options.
+  /// @tparam Module Exact movable result type returned by the factory.
+  /// @tparam Factory Callable accepting exactly one of Runtime& and UiWindow&.
+  /// @param name Nonempty UTF-8 identifier unique across module and View registrations.
+  /// @param factory Callable retained by this catalog; invoked when the module is opened.
   template <class Module, class Factory> void RegisterModule(std::string name, Factory factory) {
     RegisterModuleImpl<Module, void>(std::move(name), std::move(factory));
   }
 
+  /// Registers a module factory taking typed construction options.
+  /// @tparam Module Exact movable factory result.
+  /// @tparam Options Exact options type required when opening the module.
+  /// @tparam Factory Callable accepting Runtime& or UiWindow&, followed by const Options&.
+  /// @param name Nonempty UTF-8 identifier unique across this catalog.
+  /// @param factory Callable retained until application shutdown.
   template <class Module, class Options, class Factory> void RegisterModule(std::string name, Factory factory) {
     RegisterModuleImpl<Module, Options>(std::move(name), std::move(factory));
   }
 
+  /// Retains a platform View factory for preparation against each mounting window.
+  /// @tparam Properties Controlled value type, or void; non-void types must be movable and equality comparable.
+  /// @tparam Controller Command handle type, or void, with the same value requirements as Properties.
+  /// @tparam Factory Copyable native factory exposing Erase(UiWindow&).
+  /// @param name Nonempty UTF-8 identifier unique across this catalog.
+  /// @param factory Value copied before preparation so its window binding remains local to each mount.
   template <class Properties, class Controller = void, class Factory>
   void RegisterView(std::string name, Factory factory) {
     if constexpr (!std::same_as<Properties, void>) {
@@ -463,26 +491,45 @@ public:
     if constexpr (!std::same_as<Controller, void>) {
       static_assert(std::move_constructible<Controller> && std::equality_comparable<Controller>);
     }
-    PlatformViewFactoryRegistration erased = std::move(factory).Erase(*adapter_);
-    RegisterViewValue(std::move(name), typeid(Properties), typeid(Controller), std::move(erased));
+    auto stored = std::make_shared<const Factory>(std::move(factory));
+    RegisterViewValue(std::move(name), typeid(Properties), typeid(Controller),
+                      [stored](UiWindow& ui) { return Factory(*stored).Erase(ui); });
   }
 
+  /// Opens a new module instance using the registered host kind.
+  /// @tparam Module Exact registered result type.
+  /// @param name Registered identifier; this overload requires a factory with no options.
+  /// @return The factory's value; opening a window factory requires a live current window.
   template <class Module> [[nodiscard]] Module OpenModule(std::string name) {
     return OpenModuleValue(std::move(name), typeid(Module), typeid(void), nullptr).template Take<Module>();
   }
 
+  /// Opens a module with typed options borrowed only for the synchronous factory invocation.
+  /// @tparam Module Exact registered result type.
+  /// @tparam Options Exact registered options type.
+  /// @param name Registered module identifier.
+  /// @param options Construction data moved into temporary type-erased storage.
+  /// @return The value produced by the matching factory.
   template <class Module, class Options> [[nodiscard]] Module OpenModule(std::string name, Options options) {
     PlatformValue value = PlatformValue::Store(std::move(options));
     return OpenModuleValue(std::move(name), typeid(Module), typeid(Options), &value).template Take<Module>();
   }
 
+  /// Prepares a native View factory against its actual mounting window.
+  /// @tparam Factory Expected backend factory representation.
+  /// @param ui Live mounting window on the application thread.
+  /// @param name Registered View identifier.
+  /// @param properties_type Exact declared properties type, including typeid(void).
+  /// @param controller_type Exact declared controller type, including typeid(void).
+  /// @return A retained prepared factory; mismatched registration types throw std::logic_error.
   template <class Factory>
-  [[nodiscard]] std::shared_ptr<const Factory> FindView(std::string_view name, std::type_index properties_type,
+  [[nodiscard]] std::shared_ptr<const Factory> FindView(UiWindow& ui, std::string_view name, std::type_index properties_type,
                                                         std::type_index controller_type) const {
-    PlatformViewFactoryRegistration factory = FindViewValue(name, properties_type, controller_type, typeid(Factory));
+    PlatformViewFactoryRegistration factory = FindViewValue(ui, name, properties_type, controller_type, typeid(Factory));
     return std::static_pointer_cast<const Factory>(std::move(factory.factory));
   }
 
+  /// Prevents further registration after application_hooks; existing factories remain available until shutdown.
   void Freeze() noexcept {
     frozen_ = true;
   }
@@ -539,26 +586,64 @@ private:
     std::type_index secondary_type;
   };
 
+  /// Type-erased module recipe whose concrete model chooses the declared Runtime or UiWindow host.
   class ModuleRegistration : public Registration {
   public:
     ModuleRegistration(std::type_index module_type, std::type_index options_type)
         : Registration(Kind::Module, module_type, options_type) {}
-    [[nodiscard]] virtual ModuleInstance Open(PlatformAdapter& adapter, const PlatformValue* options) = 0;
+    /// Invokes this module recipe in the current application context.
+    /// @param runtime Catalog owner used by application factories.
+    /// @param options Null for an optionless recipe; otherwise the already type-checked construction value.
+    /// @return The exact registered module value in movable erased storage.
+    [[nodiscard]] virtual ModuleInstance Open(Runtime& runtime, const PlatformValue* options) = 0;
   };
 
+  /// Selects one host kind from the factory signature without retaining a second binding table.
+  /// @tparam Module Exact factory result type.
+  /// @tparam Options Registered construction data type, or void.
+  /// @tparam Factory Callable accepting exactly one supported host signature.
   template <class Module, class Options, class Factory>
   class ModuleRegistrationModel final : public ModuleRegistration {
   public:
     explicit ModuleRegistrationModel(Factory factory)
         : ModuleRegistration(typeid(Module), typeid(Options)), factory_(std::move(factory)) {}
 
-    [[nodiscard]] ModuleInstance Open(PlatformAdapter& adapter, const PlatformValue* options) override {
+    [[nodiscard]] ModuleInstance Open(Runtime& runtime, const PlatformValue* options) override {
+      constexpr bool application_host = [] {
+        if constexpr (std::same_as<Options, void>) {
+          return std::invocable<Factory&, Runtime&>;
+        } else {
+          return std::invocable<Factory&, Runtime&, const Options&>;
+        }
+      }();
+      if constexpr (application_host) {
+        return Invoke(runtime, options);
+      } else {
+        UiWindow* ui = CurrentUiWindow();
+        if (!ui) {
+          throw std::logic_error("HuxerUI PlatformModule requires a live UI host");
+        }
+        return Invoke(*ui, options);
+      }
+    }
+
+  private:
+    /// Adapts the already selected host and optional erased options to the factory's exact signature.
+    /// @tparam Host Runtime for application factories or UiWindow for window factories.
+    /// @param host Original live host, borrowed for this invocation.
+    /// @param options Null when Options is void; otherwise storage containing exactly Options.
+    /// @return The movable factory result with its registered type preserved.
+    template <class Host> ModuleInstance Invoke(Host& host, const PlatformValue* options) {
       if constexpr (std::same_as<Options, void>) {
         static_cast<void>(options);
-        return ModuleInstance(Module(std::invoke(factory_, adapter)));
+        static_assert(std::same_as<std::invoke_result_t<Factory&, Host&>, Module>,
+                      "HuxerUI PlatformModule factory must return exactly Module");
+        return ModuleInstance(std::invoke(factory_, host));
       } else {
         const Options& value = options->Get<Options>();
-        return ModuleInstance(Module(std::invoke(factory_, adapter, value)));
+        static_assert(std::same_as<std::invoke_result_t<Factory&, Host&, const Options&>, Module>,
+                      "HuxerUI PlatformModule factory must return exactly Module");
+        return ModuleInstance(std::invoke(factory_, host, value));
       }
     }
 
@@ -569,20 +654,21 @@ private:
   class ViewRegistration final : public Registration {
   public:
     ViewRegistration(std::type_index properties_type, std::type_index controller_type,
-                     PlatformViewFactoryRegistration factory)
+                     std::function<PlatformViewFactoryRegistration(UiWindow&)> factory)
         : Registration(Kind::View, properties_type, controller_type), factory(std::move(factory)) {}
 
-    PlatformViewFactoryRegistration factory;
+    std::function<PlatformViewFactoryRegistration(UiWindow&)> factory;
   };
 
   template <class Module, class Options, class Factory> void RegisterModuleImpl(std::string name, Factory factory) {
     static_assert(std::move_constructible<Module>);
     if constexpr (std::same_as<Options, void>) {
-      static_assert(std::invocable<Factory&, PlatformAdapter&>,
-                    "HuxerUI PlatformModule factory must accept PlatformAdapter&");
+      static_assert(std::invocable<Factory&, UiWindow&> != std::invocable<Factory&, Runtime&>,
+                    "HuxerUI PlatformModule factory must accept exactly one host type");
     } else {
-      static_assert(std::invocable<Factory&, PlatformAdapter&, const Options&>,
-                    "HuxerUI PlatformModule factory must accept PlatformAdapter& and its Options");
+      static_assert(std::invocable<Factory&, UiWindow&, const Options&> !=
+                        std::invocable<Factory&, Runtime&, const Options&>,
+                    "HuxerUI PlatformModule factory must accept exactly one host type and its Options");
     }
     RegisterValue(std::move(name),
                   std::make_unique<ModuleRegistrationModel<Module, Options, Factory>>(std::move(factory)));
@@ -590,20 +676,22 @@ private:
 
   void RegisterValue(std::string name, std::unique_ptr<Registration> registration);
   void RegisterViewValue(std::string name, std::type_index properties_type, std::type_index controller_type,
-                         PlatformViewFactoryRegistration factory);
+                         std::function<PlatformViewFactoryRegistration(UiWindow&)> factory);
   [[nodiscard]] ModuleInstance OpenModuleValue(std::string name, std::type_index module_type,
                                                std::type_index options_type, const PlatformValue* options);
-  [[nodiscard]] PlatformViewFactoryRegistration FindViewValue(std::string_view name, std::type_index properties_type,
+  [[nodiscard]] PlatformViewFactoryRegistration FindViewValue(UiWindow& ui, std::string_view name, std::type_index properties_type,
                                                               std::type_index controller_type,
                                                               std::type_index factory_type) const;
 
-  PlatformAdapter* adapter_;
+  Runtime* runtime_;
   std::unordered_map<std::string, std::unique_ptr<Registration>> registrations_;
   bool frozen_ = false;
 };
 
-PlatformRegistry* CurrentLifecyclePlatformRegistry() noexcept;
-PlatformRegistry* SetLifecyclePlatformRegistry(PlatformRegistry* registry) noexcept;
+/// Obtains the current application's catalog for imperative module creation.
+/// @return The application-owned catalog, borrowed for the current application-thread invocation.
+/// @throws std::logic_error During composition or without a valid application context.
+PlatformRegistry& CurrentPlatformRegistry();
 
 } // namespace detail
 
@@ -679,9 +767,11 @@ private:
 /// A shared asynchronous request and event channel for a cross-language platform instance.
 ///
 /// PlatformChannel is a bridge convenience, not a PlatformModule base class. A library normally wraps it in its own
-/// strongly typed C++ service or Controller. Invocations and event delivery are serialized through the owning
-/// PlatformAdapter's UI dispatcher. Cancel invalidates a request before asking the platform implementation to cancel,
+/// strongly typed C++ service or Controller. Invocations, results, and events run on the application thread with
+/// the instance's original Runtime or UiWindow context. Delivery to a retired host is discarded. Cancel invalidates
+/// a request before asking the platform implementation to cancel,
 /// Close rejects new work, cancels pending requests, detaches events, and disposes the platform instance.
+/// Native cancellation and disposal retain their queued cleanup path after the execution context retires.
 ///
 /// Primitive C++ values are encoded automatically. Structured argument, result, and event types provide static
 /// Encode/Decode operations at their type definition:
@@ -778,10 +868,14 @@ private:
   friend class detail::PlatformChannelEndpoint;
 };
 
-/// Opens a registered PlatformModule from committed Lifecycle setup.
+/// Opens a registered PlatformModule outside composition from an initialized application context.
 ///
-/// This helper is intended for component-owned Lifecycle instances. Root installers may instead use the equivalent
-/// RootContext member. The requested Module type and registration name must exactly match the registered factory.
+/// Use from WindowHook, committed Lifecycle setup, or ordinary application work after factory installation.
+/// The Module type and name must match the factory; UiWindow factories require the caller's live window context.
+/// @tparam Module Exact registered factory result type.
+/// @param name Registered module identifier whose factory takes no construction options.
+/// @return A new module value created by its declared Runtime or UiWindow factory.
+/// @throws std::logic_error During composition, without the required live host, or for a name/type mismatch.
 ///
 /// Example:
 /// @code
@@ -791,20 +885,18 @@ private:
 /// });
 /// @endcode
 template <class Module> Module OpenPlatformModule(std::string name) {
-  detail::PlatformRegistry* registry = detail::CurrentLifecyclePlatformRegistry();
-  if (registry == nullptr) {
-    throw std::logic_error("HuxerUI OpenPlatformModule must be called from committed Lifecycle setup");
-  }
-  return registry->template OpenModule<Module>(std::move(name));
+  return detail::CurrentPlatformRegistry().OpenModule<Module>(std::move(name));
 }
 
-/// Opens a registered PlatformModule with strongly typed construction options from committed Lifecycle setup.
+/// Opens a registered module outside composition using its exact construction-options type.
+/// @tparam Module Exact result type installed through ApplicationContext::RegisterPlatformModule.
+/// @tparam Options Exact registered options type; borrowed by the factory only during this call.
+/// @param name Registered nonempty UTF-8 module identifier.
+/// @param options Construction value moved into the invocation's temporary storage.
+/// @return A new module value bound to the factory's declared Runtime or current UiWindow host.
+/// @throws std::logic_error During composition, without the required live host, or for a name/type mismatch.
 template <class Module, class Options> Module OpenPlatformModule(std::string name, Options options) {
-  detail::PlatformRegistry* registry = detail::CurrentLifecyclePlatformRegistry();
-  if (registry == nullptr) {
-    throw std::logic_error("HuxerUI OpenPlatformModule must be called from committed Lifecycle setup");
-  }
-  return registry->template OpenModule<Module, Options>(std::move(name), std::move(options));
+  return detail::CurrentPlatformRegistry().OpenModule<Module, Options>(std::move(name), std::move(options));
 }
 
 } // namespace huxerui

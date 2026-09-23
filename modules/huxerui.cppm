@@ -31,7 +31,9 @@ export namespace huxerui {
     using huxerui::AppOptions;
     using huxerui::Application;
     using huxerui::ApplicationActivation;
+    using huxerui::ApplicationContext;
     using huxerui::ApplicationHandle;
+    using huxerui::ApplicationHook;
     using huxerui::ApplicationLifecycleState;
     using huxerui::ArcDirection;
     using huxerui::ArcSize;
@@ -277,7 +279,6 @@ export namespace huxerui {
     using huxerui::Permission;
     using huxerui::PermissionStatus;
     using huxerui::PlacePlatformViewCommand;
-    using huxerui::PlatformAdapter;
     using huxerui::PlatformChannel;
     using huxerui::PlatformClipboard;
     using huxerui::PlatformError;
@@ -333,11 +334,10 @@ export namespace huxerui {
     using huxerui::Required;
     using huxerui::ResourceConfiguration;
     using huxerui::ResourceId;
+    using huxerui::Resources;
     using huxerui::Result;
     using huxerui::RippleEffect;
-    using huxerui::RootContext;
     using huxerui::RootFactory;
-    using huxerui::RootHook;
     using huxerui::Rotation;
     using huxerui::RouteNavigationController;
     using huxerui::Row;
@@ -522,10 +522,12 @@ export namespace huxerui {
     using huxerui::TreeViewStyle;
     using huxerui::TweenSpec;
     using huxerui::TypographyScheme;
-    using huxerui::UIThreadDispatcher;
+    using huxerui::UiThreadDispatcher;
+    using huxerui::UiWindow;
     using huxerui::Uri;
     using huxerui::UrlActivation;
     using huxerui::UseApplication;
+    using huxerui::UseApplicationTaskScope;
     using huxerui::UseBottomSheet;
     using huxerui::UseDialog;
     using huxerui::UseEnvironment;
@@ -577,8 +579,11 @@ export namespace huxerui {
     using huxerui::WindowChromeMode;
     using huxerui::WindowCommand;
     using huxerui::WindowContentMode;
+    using huxerui::WindowContext;
     using huxerui::WindowDragRegion;
     using huxerui::WindowHandle;
+    using huxerui::WindowHook;
+    using huxerui::WindowLifecycleState;
     using huxerui::WindowMetrics;
     using huxerui::WindowOptions;
     using huxerui::WindowTitleBar;

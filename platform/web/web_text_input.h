@@ -7,7 +7,7 @@
 #include <huxerui/text_input.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -20,7 +20,9 @@ public:
   WebTextInput(const WebTextInput&) = delete;
   WebTextInput& operator=(const WebTextInput&) = delete;
 
-  void SetRuntime(Runtime* runtime) noexcept;
+  /// Binds native callbacks to their shared window state on the application thread.
+  /// @param ui_window Borrowed original window, or null to clear the binding before its destruction.
+  void SetUiWindow(UiWindow* ui_window) noexcept;
   void Reset() noexcept;
 
   void Start(
@@ -54,7 +56,7 @@ private:
   void Apply(std::vector<TextInputCommand> commands);
 
   std::uintptr_t web_session_id_ = 0;
-  Runtime* runtime_ = nullptr;
+  UiWindow* ui_window_ = nullptr;
   TextInputSessionId session_id_ = 0;
   std::uint32_t event_token_ = 0;
   TextInputConfiguration configuration_;

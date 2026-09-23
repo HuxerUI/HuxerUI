@@ -98,7 +98,7 @@ View MutableTitleBarBackgroundApp() {
 TEST_CASE("WindowSafeAreaModeConstrainsApplicationContent") {
   window_compositions = 0;
   TestPlatform platform;
-  Runtime runtime(WindowContentApp, platform);
+  UiWindow runtime(WindowContentApp, platform);
   runtime.SetWindowMetrics({
       .viewport = {200.0F, 120.0F},
       .safe_area = {.top = 20.0F, .right = 12.0F, .bottom = 10.0F, .left = 8.0F},
@@ -127,7 +127,7 @@ TEST_CASE("WindowEdgeToEdgeModeLetsViewsConsumeSelectedInsets") {
   AppOptions options;
   options.show_debug_overlay = false;
   options.window.content_mode = WindowContentMode::EdgeToEdge;
-  Runtime runtime(SelectiveSafeAreaApp, platform, options);
+  UiWindow runtime(SelectiveSafeAreaApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {200.0F, 120.0F},
       .safe_area = {.top = 20.0F, .right = 12.0F, .bottom = 10.0F, .left = 8.0F},
@@ -148,7 +148,7 @@ TEST_CASE("WindowEdgeToEdgeModeLetsViewsConsumeSelectedInsets") {
 
 TEST_CASE("WindowAppearanceResolvesAutomaticSystemBarBrightnessOnce") {
   TestPlatform platform;
-  Runtime runtime(WindowAppearanceApp, platform);
+  UiWindow runtime(WindowAppearanceApp, platform);
   runtime.SetWindowMetrics({
       .viewport = {200.0F, 120.0F},
       .safe_area = {.top = 20.0F, .bottom = 10.0F},
@@ -172,7 +172,7 @@ TEST_CASE("WindowAppearanceResolvesAutomaticSystemBarBrightnessOnce") {
 TEST_CASE("WindowAppearanceChangesDoNotRerecordApplicationPaint") {
   use_light_status_bar = false;
   TestPlatform platform;
-  Runtime runtime(MutableWindowAppearanceApp, platform);
+  UiWindow runtime(MutableWindowAppearanceApp, platform);
   runtime.SetWindowMetrics({
       .viewport = {200.0F, 120.0F},
       .safe_area = {.top = 20.0F, .bottom = 10.0F},
@@ -196,7 +196,7 @@ TEST_CASE("WindowAppearanceChangesDoNotRerecordApplicationPaint") {
 TEST_CASE("WindowTitleBarReservesSystemControlsWithoutRecomposition") {
   title_bar_compositions = 0;
   TestPlatform platform;
-  Runtime runtime(WindowTitleBarApp, platform);
+  UiWindow runtime(WindowTitleBarApp, platform);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 40.0F, .left_inset = 20.0F, .right_inset = 60.0F},
@@ -225,7 +225,7 @@ TEST_CASE("WindowTitleBarReservesSystemControlsWithoutRecomposition") {
 
 TEST_CASE("WindowTitleBarDragRegionDefersToInteractiveChildren") {
   TestPlatform platform;
-  Runtime runtime(WindowTitleBarApp, platform);
+  UiWindow runtime(WindowTitleBarApp, platform);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 40.0F, .left_inset = 20.0F, .right_inset = 60.0F},
@@ -243,7 +243,7 @@ TEST_CASE("WindowTitleBarDragRegionDefersToInteractiveChildren") {
 
 TEST_CASE("WindowMetricsRejectInvalidValues") {
   TestPlatform platform;
-  Runtime runtime(WindowContentApp, platform);
+  UiWindow runtime(WindowContentApp, platform);
   REQUIRE_THROWS_AS(runtime.SetWindowMetrics({.viewport = {-1.0F, 100.0F}}), std::invalid_argument);
   REQUIRE_THROWS_AS(
       runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}, .safe_area = {.top = -1.0F}}),
@@ -265,33 +265,37 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
   );
 
   AppOptions invalid_options;
+  const auto construct_window = [&] {
+    TestPlatform invalid_platform;
+    UiWindow window(WindowContentApp, invalid_platform, invalid_options);
+  };
   invalid_options.show_debug_overlay = false;
   invalid_options.window.content_mode = static_cast<WindowContentMode>(99);
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.content_mode = WindowContentMode::SafeArea;
   invalid_options.window.chrome_mode = static_cast<WindowChromeMode>(99);
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.chrome_mode = WindowChromeMode::System;
   invalid_options.window.title_bar_height = 0.0F;
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.title_bar_height = 40.0F;
   invalid_options.window.initial_size.width = 0.0F;
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.initial_size = {520.0F, std::numeric_limits<float>::infinity()};
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.initial_size = {520.0F, 360.0F};
   invalid_options.window.minimum_size = Size{0.0F, 240.0F};
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.minimum_size = Size{320.0F, -1.0F};
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.minimum_size = Size{std::numeric_limits<float>::quiet_NaN(), 240.0F};
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.minimum_size = Size{320.0F, std::numeric_limits<float>::infinity()};
-  REQUIRE_THROWS_AS(Runtime(WindowContentApp, platform, invalid_options), std::invalid_argument);
+  REQUIRE_THROWS_AS(construct_window(), std::invalid_argument);
   invalid_options.window.minimum_size = Size{640.0F, 480.0F};
-  REQUIRE_NOTHROW(Runtime(WindowContentApp, platform, invalid_options));
+  REQUIRE_NOTHROW(construct_window());
   TestPlatform invalid_appearance_platform;
-  Runtime invalid_appearance{
+  UiWindow invalid_appearance{
       +[]() -> View {
         return Stack {}.With(huxerui::SystemBarsAppearance{
             .status_bar_content = static_cast<SystemBarContentBrightness>(99),
@@ -306,7 +310,7 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
 TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
   window_handle.reset();
   TestPlatform platform;
-  Runtime runtime(WindowCommandsApp, platform);
+  UiWindow runtime(WindowCommandsApp, platform);
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -350,7 +354,7 @@ TEST_CASE("Window request handlers independently suppress platform and public de
   minimize_requests = 0;
   close_requests = 0;
   TestPlatform platform;
-  Runtime runtime(WindowRequestsApp, platform);
+  UiWindow runtime(WindowRequestsApp, platform);
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -372,7 +376,7 @@ TEST_CASE("CustomWindowChromeProvidesStandardCaptionControls") {
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
   options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
-  Runtime runtime(WindowCommandsApp, platform, options);
+  UiWindow runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
@@ -392,7 +396,7 @@ TEST_CASE("CustomWindowChromeCollapsesControlsWhenPlatformMetricsDisappear") {
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
   options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
-  Runtime runtime(WindowCommandsApp, platform, options);
+  UiWindow runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
@@ -420,7 +424,7 @@ TEST_CASE("CustomWindowChromeRerecordsCaptionGlyphsWhenTitleBarBackgroundChanges
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
   options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
-  Runtime runtime(MutableTitleBarBackgroundApp, platform, options);
+  UiWindow runtime(MutableTitleBarBackgroundApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
@@ -446,7 +450,7 @@ TEST_CASE("CustomWindowChromeUpdatesTheMaximizeGlyphFromPlatformState") {
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
   options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
-  Runtime runtime(WindowCommandsApp, platform, options);
+  UiWindow runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
@@ -493,7 +497,7 @@ TEST_CASE("CustomWindowChromeUsesConfiguredCaptionLabels") {
       .toggle_maximize = "Toggle window size",
       .close = "Close window",
   };
-  Runtime runtime(WindowCommandsApp, platform, options);
+  UiWindow runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
@@ -518,7 +522,7 @@ TEST_CASE("CustomWindowChromePaintsStateLayerBehindCaptionGlyph") {
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
   options.window.caption_labels = {"Minimize", "Maximize or restore", "Close"};
-  Runtime runtime(WindowCommandsApp, platform, options);
+  UiWindow runtime(WindowCommandsApp, platform, options);
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
@@ -544,7 +548,7 @@ TEST_CASE("WindowHandleBecomesInactiveAfterRuntimeDestruction") {
   window_handle.reset();
   TestPlatform platform;
   {
-    Runtime runtime(WindowCommandsApp, platform);
+    UiWindow runtime(WindowCommandsApp, platform);
     runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
     runtime.BuildFrame();
   }
@@ -552,6 +556,64 @@ TEST_CASE("WindowHandleBecomesInactiveAfterRuntimeDestruction") {
   REQUIRE(window_handle.has_value());
   window_handle->Close();
   REQUIRE(platform.window_commands.empty());
+}
+
+namespace {
+std::size_t lifecycle_window_slot = 0;
+std::vector<WindowHandle> lifecycle_windows;
+std::vector<std::vector<WindowLifecycleState>> lifecycle_transitions;
+int lifecycle_secondary_calls = 0;
+
+View WindowLifecycleApp() {
+  const auto window = UseWindow();
+  const auto slot = lifecycle_window_slot;
+  lifecycle_windows.push_back(window);
+  window.OnLifecycleChanged([slot](WindowLifecycleState state) {
+    lifecycle_transitions.at(slot).push_back(state);
+    REQUIRE(UseWindow().LifecycleState() == lifecycle_windows.at(slot).LifecycleState());
+  });
+  window.OnLifecycleChanged([](WindowLifecycleState) { ++lifecycle_secondary_calls; });
+  return {};
+}
+}
+
+TEST_CASE("Window lifecycle remains local and delivers each live observer without frames") {
+  lifecycle_windows.clear();
+  lifecycle_transitions = {{}, {}};
+  lifecycle_secondary_calls = 0;
+  TestPlatform application_platform;
+  TestPlatform first_platform;
+  TestPlatform second_platform;
+  Application application(WindowLifecycleApp, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, application_platform, LaunchActivation{}, ApplicationLifecycleState::Active);
+  UiWindow first(runtime, first_platform);
+  auto second = std::make_unique<UiWindow>(runtime, second_platform);
+  first.SetWindowMetrics({.viewport = {320, 240}});
+  second->SetWindowMetrics({.viewport = {320, 240}});
+  lifecycle_window_slot = 0;
+  first.BuildFrame();
+  lifecycle_window_slot = 1;
+  second->BuildFrame();
+  application_platform.RunPlatformModuleTasks();
+  REQUIRE(lifecycle_secondary_calls == 0);
+  first.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+  first.UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
+  first.UpdateWindowLifecycleState(WindowLifecycleState::Background);
+  first.UpdateWindowLifecycleState(WindowLifecycleState::Background);
+  second->UpdateWindowLifecycleState(WindowLifecycleState::Active);
+  REQUIRE(lifecycle_windows[0].LifecycleState() == WindowLifecycleState::Background);
+  REQUIRE(lifecycle_windows[1].LifecycleState() == WindowLifecycleState::Active);
+  REQUIRE(UseApplication().LifecycleState() == ApplicationLifecycleState::Active);
+  REQUIRE(lifecycle_secondary_calls == 0);
+  application_platform.RunPlatformModuleTasks();
+  REQUIRE(lifecycle_transitions[0] == std::vector<WindowLifecycleState>{WindowLifecycleState::Active,
+      WindowLifecycleState::Inactive, WindowLifecycleState::Background});
+  REQUIRE(lifecycle_transitions[1] == std::vector<WindowLifecycleState>{WindowLifecycleState::Active});
+  REQUIRE(lifecycle_secondary_calls == 4);
+  second->UpdateWindowLifecycleState(WindowLifecycleState::Background);
+  second.reset();
+  application_platform.RunPlatformModuleTasks();
+  REQUIRE(lifecycle_secondary_calls == 4);
 }
 
 } // namespace huxerui::test

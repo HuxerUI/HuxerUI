@@ -239,7 +239,7 @@ TEST_CASE("PlatformViewValidatesItsRegisteredType") {
 
 TEST_CASE("PlatformViewUsesOrdinaryLayoutAndRetainsItsPlacement") {
   TestPlatform platform;
-  Runtime runtime(PlatformViewApp, platform);
+  UiWindow runtime(PlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const PlacePlatformViewCommand first = FindPlatformView(runtime.BuildRenderFrame());
@@ -260,7 +260,7 @@ TEST_CASE("PlatformViewUsesOrdinaryLayoutAndRetainsItsPlacement") {
 
 TEST_CASE("PlatformView follows RefreshBox descendant presentation without replacement") {
   TestPlatform platform;
-  Runtime runtime(RefreshPlatformViewApp, platform);
+  UiWindow runtime(RefreshPlatformViewApp, platform);
   runtime.SetWindowMetrics({{100.0F, 100.0F}});
 
   const detail::RenderComposition refreshing = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);
@@ -279,7 +279,7 @@ TEST_CASE("PlatformView follows RefreshBox descendant presentation without repla
 
 TEST_CASE("PlatformViewTracksControllerReplacementAndRemovalIndependently") {
   TestPlatform platform;
-  Runtime runtime(ControlledPlatformViewApp, platform);
+  UiWindow runtime(ControlledPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const PlacePlatformViewCommand first = FindPlatformView(runtime.BuildRenderFrame());
@@ -304,7 +304,7 @@ TEST_CASE("PlatformViewTracksControllerReplacementAndRemovalIndependently") {
 
 TEST_CASE("PlatformViewHasNoIntrinsicSize") {
   TestPlatform platform;
-  Runtime runtime(ZeroPlatformViewApp, platform);
+  UiWindow runtime(ZeroPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   REQUIRE(FindPlatformView(runtime.BuildRenderFrame()).Bounds() == Rect{});
@@ -312,7 +312,7 @@ TEST_CASE("PlatformViewHasNoIntrinsicSize") {
 
 TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
   TestPlatform platform;
-  Runtime runtime(PlatformViewApp, platform);
+  UiWindow runtime(PlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const FrameCommit& initial = runtime.BuildCommit();
@@ -341,7 +341,7 @@ TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
   REQUIRE_FALSE(detail::InternalAccess::FocusedPlatformView(runtime.CoreRuntime()).has_value());
 
   TestPlatform non_focusable_platform;
-  Runtime non_focusable(NonFocusablePlatformViewApp, non_focusable_platform);
+  UiWindow non_focusable(NonFocusablePlatformViewApp, non_focusable_platform);
   non_focusable.SetWindowMetrics({{300.0F, 200.0F}});
   const FrameCommit& non_focusable_frame = non_focusable.BuildCommit();
   const PlacePlatformViewCommand& non_focusable_placement = FindPlatformView(non_focusable_frame.render_frame);
@@ -362,7 +362,7 @@ TEST_CASE("PlatformViewPublishesItsSemanticAnchorAndSynchronizesFocus") {
 
 TEST_CASE("PlatformViewTypeChangesReplaceTheMountedLeaf") {
   TestPlatform platform;
-  Runtime runtime(ReplacedPlatformViewApp, platform);
+  UiWindow runtime(ReplacedPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const PlacePlatformViewCommand first = FindPlatformView(runtime.BuildRenderFrame());
@@ -376,7 +376,7 @@ TEST_CASE("PlatformViewTypeChangesReplaceTheMountedLeaf") {
 TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") {
   received_platform_event = 0;
   TestPlatform platform;
-  Runtime runtime(EventPlatformViewApp, platform);
+  UiWindow runtime(EventPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
@@ -438,12 +438,12 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
 TEST_CASE("PlatformViewPayloadDoesNotClaimTextureFrameOwnership") {
   platform_view_external_texture = MakeTestExternalTexture({32.0F, 18.0F});
   TestPlatform platform;
-  Runtime runtime(HiddenTexturePlatformViewApp, platform);
+  UiWindow runtime(HiddenTexturePlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   runtime.BuildRenderFrame();
 
   TestPlatform other_platform;
-  Runtime other_runtime(HiddenTexturePlatformViewApp, other_platform);
+  UiWindow other_runtime(HiddenTexturePlatformViewApp, other_platform);
   other_runtime.BuildRenderFrame();
 }
 
@@ -451,7 +451,7 @@ TEST_CASE("PlatformViewTransportsExternalTextureEventsBySharedIdentity") {
   received_platform_texture = {};
   const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({32.0F, 18.0F});
   TestPlatform platform;
-  Runtime runtime(TextureEventPlatformViewApp, platform);
+  UiWindow runtime(TextureEventPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
@@ -469,7 +469,7 @@ TEST_CASE("PlatformViewTransportsExternalTextureEventsBySharedIdentity") {
 
   received_platform_texture = {};
   TestPlatform other_platform;
-  Runtime other_runtime(TextureEventPlatformViewApp, other_platform);
+  UiWindow other_runtime(TextureEventPlatformViewApp, other_platform);
   other_runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand other_placement = FindPlatformView(other_runtime.BuildRenderFrame());
   static_cast<void>(detail::InternalAccess::DispatchPlatformViewEvent(
@@ -480,7 +480,7 @@ TEST_CASE("PlatformViewTransportsExternalTextureEventsBySharedIdentity") {
 
 TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
   TestPlatform platform;
-  Runtime runtime(PlatformViewApp, platform);
+  UiWindow runtime(PlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
@@ -489,7 +489,7 @@ TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
   REQUIRE_FALSE(detail::InternalAccess::HitTestPlatformView(runtime.CoreRuntime(), {100.0F, 20.0F}).has_value());
 
   TestPlatform covered_platform;
-  Runtime covered(CoveredPlatformViewApp, covered_platform);
+  UiWindow covered(CoveredPlatformViewApp, covered_platform);
   covered.SetWindowMetrics({{300.0F, 200.0F}});
   covered.BuildRenderFrame();
   REQUIRE_FALSE(detail::InternalAccess::HitTestPlatformView(covered.CoreRuntime(), {20.0F, 20.0F}).has_value());
@@ -497,7 +497,7 @@ TEST_CASE("PlatformViewParticipatesInSharedFrontmostHitTesting") {
 
 TEST_CASE("PlatformViewOwnsTheCursorOverItsNativeContent") {
   TestPlatform platform;
-  Runtime runtime(CursorPlatformViewApp, platform);
+  UiWindow runtime(CursorPlatformViewApp, platform);
   runtime.SetWindowMetrics({{100.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
@@ -511,7 +511,7 @@ TEST_CASE("PlatformViewOwnsTheCursorOverItsNativeContent") {
 TEST_CASE("PlatformViewOwnsHoverOverItsNativeContent") {
   platform_view_hover_events = 0;
   TestPlatform platform;
-  Runtime runtime(HoverPlatformViewApp, platform);
+  UiWindow runtime(HoverPlatformViewApp, platform);
   runtime.SetWindowMetrics({{80.0F, 80.0F}});
   runtime.BuildRenderFrame();
 
@@ -525,7 +525,7 @@ TEST_CASE("PlatformViewOwnsHoverOverItsNativeContent") {
 TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to the current UI") {
   received_platform_event = 0;
   TestPlatform platform;
-  Runtime runtime(IndexedPlatformViewApp, platform);
+  UiWindow runtime(IndexedPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const RenderFrame& initial_frame = runtime.BuildRenderFrame();
@@ -557,7 +557,7 @@ TEST_CASE("IndexedPages retains an inactive PlatformView without exposing it to 
 
 TEST_CASE("RenderCompositionPreservesDrawingAndPlatformViewOrder") {
   TestPlatform platform;
-  Runtime runtime(OrderedPlatformViewApp, platform);
+  UiWindow runtime(OrderedPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const detail::RenderComposition composition = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);
@@ -578,7 +578,7 @@ TEST_CASE("RenderCompositionPreservesDrawingAndPlatformViewOrder") {
 
 TEST_CASE("RenderCompositionDoesNotCreateSlicesBetweenAdjacentPlatformViews") {
   TestPlatform platform;
-  Runtime runtime(AdjacentPlatformViewApp, platform);
+  UiWindow runtime(AdjacentPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const detail::RenderComposition composition = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);
@@ -589,7 +589,7 @@ TEST_CASE("RenderCompositionDoesNotCreateSlicesBetweenAdjacentPlatformViews") {
 
 TEST_CASE("RenderCompositionRejectsAControllerBoundToMultiplePlatformViews") {
   TestPlatform platform;
-  Runtime runtime(DuplicateControllerPlatformViewApp, platform);
+  UiWindow runtime(DuplicateControllerPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   REQUIRE_THROWS_AS(detail::BuildRenderComposition(runtime.BuildRenderFrame().scene), std::logic_error);
@@ -597,7 +597,7 @@ TEST_CASE("RenderCompositionRejectsAControllerBoundToMultiplePlatformViews") {
 
 TEST_CASE("RenderCompositionRejectsRotatedPlatformViews") {
   TestPlatform platform;
-  Runtime runtime(RotatedPlatformViewApp, platform);
+  UiWindow runtime(RotatedPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const RenderFrame& frame = runtime.BuildRenderFrame();
 
@@ -609,7 +609,7 @@ TEST_CASE("RenderCompositionRejectsRotatedPlatformViews") {
 
 TEST_CASE("RenderCompositionRejectsGroupOpacityAroundPlatformViews") {
   TestPlatform platform;
-  Runtime runtime(TranslucentPlatformViewApp, platform);
+  UiWindow runtime(TranslucentPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const RenderFrame& frame = runtime.BuildRenderFrame();
 
@@ -621,7 +621,7 @@ TEST_CASE("RenderCompositionRejectsGroupOpacityAroundPlatformViews") {
 
 TEST_CASE("KeyedPlatformViewsRetainIdentityWhenMoved") {
   TestPlatform platform;
-  Runtime runtime(KeyedPlatformViewApp, platform);
+  UiWindow runtime(KeyedPlatformViewApp, platform);
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
 
   const detail::RenderComposition first = detail::BuildRenderComposition(runtime.BuildRenderFrame().scene);

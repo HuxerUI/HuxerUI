@@ -118,7 +118,7 @@ It does not need separate Possible, Accepted, Rejected, Completed, and Canceled 
 
 Ordinary recognizers belong to one PointerSession.
 A multi-pointer recognizer may be referenced by several sessions, while each session still stores its own recognition index as owner.
-Runtime resolves every session that references the same recognizer before publishing output, so shared recognition does not require a pointer-group registry, a second router, or another public ownership type.
+UiWindow resolves every session that references the same recognizer before publishing output, so shared recognition does not require a pointer-group registry, a second router, or another public ownership type.
 
 Recognitions are collected from the deepest mounted node toward the root.
 `ViewEvents::PointerIntercept` is first on its mounted node when present.
@@ -126,7 +126,7 @@ Retained-modifier recognitions on the same node follow reverse declaration order
 The node's built-in Tap or Scroll recognition follows its retained-modifier recognitions.
 The first recognition to return Accept in that deterministic order owns the sequence.
 
-Runtime resolves immediate recognizers before publishing raw Down.
+UiWindow resolves immediate recognizers before publishing raw Down.
 If a retained pointer extension returns Capture or consumes Down, it can win without exposing a transient raw Down/Cancel pair that did not exist before this design.
 Otherwise Runtime installs the pending PointerSession before publishing raw Down, so a handler that dismisses a Layer can safely quarantine that same session without invalidating stack-local ownership state.
 
@@ -461,8 +461,8 @@ struct GestureSettings {
 };
 ```
 
-PlatformAdapter supplies available system values and shared fallbacks for unavailable settings.
-The macOS adapter maps the system double-click interval; adapters without a stable platform equivalent retain the shared fallback.
+The platform-derived UiWindow supplies available system values and shared fallbacks for unavailable settings.
+The macOS window maps the system double-click interval; hosts without a stable platform equivalent retain the shared fallback.
 Individual modifiers override only their optional fields.
 Each new recognizer snapshots its effective values, so compatible modifier updates do not reinterpret an active sequence.
 
@@ -528,7 +528,7 @@ Touch input does not produce Hover.
 Runtime retains one hover-capable pointer identity, device kind, latest window position, and the currently matched public handlers and retained extensions.
 This is one projection of the existing pointer hit route rather than a `HoverSession`, registry, or second input path.
 An exact duplicate host position does not emit Move.
-After final presentation geometry settles, Runtime resolves the same retained position again so recomposition, layout, clipping, transforms, layer dismissal, and unmount can emit Enter or Leave without synthetic movement.
+After final presentation geometry settles, UiWindow resolves the same retained position again so recomposition, layout, clipping, transforms, layer dismissal, and unmount can emit Enter or Leave without synthetic movement.
 
 A View with only a Hover handler is eligible for the Hover route but not the ordinary pointer route, so a visual hover overlay does not block Click or raw input behind it.
 Disabled Views remain eligible because Hover describes pointer presence rather than activation.
@@ -550,12 +550,12 @@ Cursor resolution reuses the pointer route traversal with cursor declarations as
 
 Runtime scans the committed hit route from deepest node to root and uses the first explicit declaration.
 An explicit `PointerCursorKind::Default` stops ancestor fallback, and a disabled View participates in cursor resolution because the declaration describes presentation rather than interaction ownership.
-If the deepest hit node is a `PlatformView`, Runtime resolves the HuxerUI surface to `Default` and the native view hierarchy owns the actual cursor.
+If the deepest hit node is a `PlatformView`, UiWindow resolves the HuxerUI surface to `Default` and the native view hierarchy owns the actual cursor.
 
 Mouse and pen movement retain the latest window position.
-Runtime resolves the cursor both when input arrives and after final presentation geometry settles in `BuildFrame()`, so recomposition, transforms, layout changes, or a dynamic `State<PointerCursorKind>` update the cursor under a stationary pointer.
+UiWindow resolves the cursor both when input arrives and after final presentation geometry settles in `BuildFrame()`, so recomposition, transforms, layout changes, or a dynamic `State<PointerCursorKind>` update the cursor under a stationary pointer.
 Touch input does not change cursor state, and pointer cancellation restores `Default`.
-Runtime sends only the resolved kind through `PlatformAdapter::SetPointerCursor()`; platform adapters own native mapping and unsupported hosts may ignore it.
+UiWindow sends only the resolved kind through its virtual `SetPointerCursor()` operation; platform implementations own native mapping and unsupported hosts may ignore it.
 
 This design does not add a resolver callback, cursor controller, pointer context, or duplicate hit-test implementation.
 Custom Canvas content computes a `PointerCursorKind` into ordinary State and declares it with `.With(PointerCursor(kind))`.
@@ -568,7 +568,7 @@ PlatformView wins Down
     → Runtime creates no HuxerUI session
 
 HuxerUI wins Down
-    → Runtime owns the complete sequence
+    → UiWindow owns the complete sequence
     → no PlatformView receives it
 ```
 
@@ -603,7 +603,7 @@ Captured Environment affects the layer's mounted declarations and event handlers
 
 The final button Up completes the owner and removes the session.
 Platform Cancel, capture loss, window deactivation, or device loss first terminates pointer ownership and then removes the session.
-Runtime destruction discards sessions before mounted nodes without invoking application callbacks during teardown.
+UiWindow retirement discards sessions before mounted nodes without invoking application callbacks during teardown.
 
 Disable, subtree deactivation, modifier removal, incompatible replacement, or unmount terminates recognition without retaining callbacks from declarations that no longer exist.
 If the recognized modifier remains mounted, an accepted recognizer receives Canceled.

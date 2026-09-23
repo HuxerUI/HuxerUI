@@ -357,7 +357,7 @@ public:
 };
 ```
 
-Runtime initializes the application service's directory values before application RootHooks run:
+Runtime initializes the application service's directory values before application hooks run:
 
 ```cpp
 auto application = UseApplication();
@@ -621,9 +621,9 @@ Platform application metadata remains owned by the shell: Android intent filters
 ## Runtime and local ownership
 
 The internal application service stores optional AppDirectories values directly, without a separate shared service or disconnection protocol.
-PlatformAdapter::CreateAppDirectories() supplies the prepared values; its default implementation returns no directories for hosts without that capability.
+Runtime::CreateAppDirectories() supplies the prepared values; its default implementation returns no directories for hosts without that capability.
 Platform factories retain their identity resolution and platform-specific initialization. PrepareAppDirectories() is a shared helper for creating and validating the AppDirectories values they return; Web returns the directory values already initialized by its storage bootstrap.
-The application service always calls ProtectAppDirectories() for supplied values, including those returned directly by custom adapters. This registers process-local deletion safeguards without repeating platform initialization or creating directories.
+The application service always calls ProtectAppDirectories() for supplied values, including those returned directly by custom Runtime subclasses. This registers process-local deletion safeguards without repeating platform initialization or creating directories.
 
 Each `File` stores only a normalized absolute UTF-8 local path and remains usable after its originating ApplicationHandle, Runtime, or component has gone out of scope.
 Local operations are private implementation functions rather than a polymorphic provider interface.
@@ -641,7 +641,7 @@ Web uses the browser event loop and its persistent-storage completion callback i
 
 An asynchronous call validates caller-owned values before returning its lazy Task.
 Once awaited from a launched HuxerUI Task, platform implementations perform filesystem work away from the UI thread, while Web schedules it through the browser event loop.
-Every implementation resumes through the owning `TaskExecution` and `UIThreadDispatcher`.
+Every implementation resumes through the owning `TaskExecution` and `UiThreadDispatcher`.
 Code after `co_await` may therefore update State directly.
 
 Canceling the owning `TaskHandle`, retiring its TaskScope, or destroying Runtime detaches the continuation.

@@ -18,6 +18,7 @@
 #include "android_file_internal.h"
 #include "io/file_internal.h"
 
+
 namespace huxerui::detail {
 
 namespace {
@@ -65,6 +66,24 @@ void ClearJavaException(JNIEnv* environment) noexcept {
   if (environment != nullptr && environment->ExceptionCheck()) {
     environment->ExceptionClear();
   }
+}
+
+/// Captures the native endpoint generation for the current original-window or application presentation source.
+/// @param virtual_machine VM used to acquire JNI access for this application-thread call.
+/// @param host Java HuxerUIApplication service host retained by the transport.
+/// @param method Cached presentationIdentity(HuxerUIView) method ID.
+/// @return Endpoint generation, or zero when JNI facilities are unavailable.
+/// @throws std::runtime_error If Java cannot resolve the endpoint identity.
+std::uint64_t ReadPresentationIdentity(JavaVM* virtual_machine, jobject host, jmethodID method) {
+  JniEnvironment attached(virtual_machine);
+  JNIEnv* environment = attached.Get();
+  if (!environment || !host || !method) return 0;
+  const auto identity = environment->CallLongMethod(host, method, CurrentAndroidPresentationView());
+  if (environment->ExceptionCheck()) {
+    ClearJavaException(environment);
+    throw std::runtime_error("HuxerUI could not capture the Android presentation endpoint");
+  }
+  return static_cast<std::uint64_t>(identity);
 }
 
 PermissionStatus ToPermissionStatus(jint status) noexcept {
@@ -148,9 +167,10 @@ public:
     view_class_ = static_cast<jclass>(environment->NewGlobalRef(local_class));
     environment->DeleteLocalRef(local_class);
     check_ = environment->GetMethodID(view_class_, "checkPermission", "(I)I");
-    request_ = environment->GetMethodID(view_class_, "requestPermission", "(JI)V");
-    open_settings_ = environment->GetMethodID(view_class_, "openPermissionSettings", "(I)Z");
-    if (view_class_ == nullptr || check_ == nullptr || request_ == nullptr || open_settings_ == nullptr ||
+    presentation_identity_ = environment->GetMethodID(view_class_, "presentationIdentity", "(Lorg/huxerui/HuxerUIView;)J");
+    request_ = environment->GetMethodID(view_class_, "requestPermission", "(JILorg/huxerui/HuxerUIView;)V");
+    open_settings_ = environment->GetMethodID(view_class_, "openPermissionSettings", "(ILorg/huxerui/HuxerUIView;)Z");
+    if (view_class_ == nullptr || presentation_identity_ == nullptr || check_ == nullptr || request_ == nullptr || open_settings_ == nullptr ||
         environment->ExceptionCheck()) {
       ClearJavaException(environment);
       Release(environment);
@@ -161,6 +181,10 @@ public:
   ~AndroidPermissionTransport() override {
     JniEnvironment attached(virtual_machine_);
     Release(attached.Get());
+  }
+
+  std::uint64_t PresentationIdentity() const override {
+    return ReadPresentationIdentity(virtual_machine_, view_, presentation_identity_);
   }
 
   std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) override {
@@ -187,6 +211,7 @@ public:
       completion(PermissionStatus::Unavailable);
       return {};
     }
+    jobject source = CurrentAndroidPresentationView();
     auto operation = std::make_shared<AndroidPermissionOperation>(std::move(completion));
     auto native_handle = std::make_unique<AndroidPermissionOperationHandle>(operation);
     AndroidPermissionOperationHandle* transferred_handle = native_handle.release();
@@ -194,7 +219,7 @@ public:
         view_,
         request_,
         static_cast<jlong>(reinterpret_cast<std::uintptr_t>(transferred_handle)),
-        static_cast<jint>(permission));
+        static_cast<jint>(permission), source);
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);
       std::unique_ptr<AndroidPermissionOperationHandle> owner(transferred_handle);
@@ -212,7 +237,8 @@ public:
       return {};
     }
     const bool opened =
-        environment->CallBooleanMethod(view_, open_settings_, static_cast<jint>(permission)) == JNI_TRUE;
+        environment->CallBooleanMethod(view_, open_settings_, static_cast<jint>(permission),
+                                       CurrentAndroidPresentationView()) == JNI_TRUE;
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);
       completion(false);
@@ -241,6 +267,7 @@ private:
   jobject view_ = nullptr;
   jclass view_class_ = nullptr;
   jmethodID check_ = nullptr;
+  jmethodID presentation_identity_ = nullptr;
   jmethodID request_ = nullptr;
   jmethodID open_settings_ = nullptr;
 };
@@ -352,15 +379,17 @@ public:
       throw std::runtime_error("HuxerUI Android local notification View class could not be retained");
     }
     capabilities_ = environment->GetMethodID(view_class_, "localNotificationCapabilities", "()I");
+    presentation_identity_ = environment->GetMethodID(view_class_, "presentationIdentity", "(Lorg/huxerui/HuxerUIView;)J");
     check_authorization_ = environment->GetMethodID(view_class_, "checkLocalNotificationAuthorization", "()I");
-    request_authorization_ = environment->GetMethodID(view_class_, "requestLocalNotificationAuthorization", "(J)V");
+    request_authorization_ = environment->GetMethodID(
+        view_class_, "requestLocalNotificationAuthorization", "(JLorg/huxerui/HuxerUIView;)V");
     show_ = environment->GetMethodID(view_class_, "showLocalNotification",
                                      "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[B)I");
     schedule_ =
         environment->GetMethodID(view_class_, "scheduleLocalNotification",
                                  "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;[BJ)I");
     cancel_ = environment->GetMethodID(view_class_, "cancelLocalNotification", "(Ljava/lang/String;)I");
-    if (capabilities_ == nullptr || check_authorization_ == nullptr || request_authorization_ == nullptr ||
+    if (capabilities_ == nullptr || presentation_identity_ == nullptr || check_authorization_ == nullptr || request_authorization_ == nullptr ||
         show_ == nullptr || schedule_ == nullptr || cancel_ == nullptr || environment->ExceptionCheck()) {
       ClearJavaException(environment);
       Release(environment);
@@ -371,6 +400,10 @@ public:
   ~AndroidLocalNotificationTransport() override {
     JniEnvironment attached(virtual_machine_);
     Release(attached.Get());
+  }
+
+  std::uint64_t PresentationIdentity() const override {
+    return ReadPresentationIdentity(virtual_machine_, view_, presentation_identity_);
   }
 
   LocalNotificationCapabilities Capabilities() const noexcept override {
@@ -412,11 +445,12 @@ public:
       return {};
     }
     // Share only the one-shot completion holder; notification authorization keeps its own native request lifetime.
+    jobject source = CurrentAndroidPresentationView();
     auto operation = std::make_shared<AndroidPermissionOperation>(std::move(completion));
     auto native_handle = std::make_unique<AndroidPermissionOperationHandle>(operation);
     AndroidPermissionOperationHandle* transferred_handle = native_handle.release();
     environment->CallVoidMethod(view_, request_authorization_,
-                                static_cast<jlong>(reinterpret_cast<std::uintptr_t>(transferred_handle)));
+                                static_cast<jlong>(reinterpret_cast<std::uintptr_t>(transferred_handle)), source);
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);
       std::unique_ptr<AndroidPermissionOperationHandle> owner(transferred_handle);
@@ -533,6 +567,7 @@ private:
   jobject view_ = nullptr;
   jclass view_class_ = nullptr;
   jmethodID capabilities_ = nullptr;
+  jmethodID presentation_identity_ = nullptr;
   jmethodID check_authorization_ = nullptr;
   jmethodID request_authorization_ = nullptr;
   jmethodID show_ = nullptr;

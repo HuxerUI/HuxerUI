@@ -2,42 +2,42 @@
 
 ## Ownership
 
-The optional `testing/` implementation links one ordinary core and creates the existing Runtime with a `TestingPlatformAdapter`.
-There is no Runtime subclass, production per-frame query cache, test-ID property, or second authoritative mounted tree.
+The optional `testing/` implementation links one ordinary core and uses `TestingWindow`, an in-memory Runtime and UiWindow backend.
+There is no separate adapter, production per-frame query cache, test-ID property, or second authoritative mounted tree.
 The explicit `<huxerui/testing/ui_test.h>` include is an intentional exception to the production umbrella rule.
 Public usage and limitations are documented in [Windowless UI Testing](../guide/testing.md).
 
-`UiTestSession` owns the adapter, queue, Runtime, virtual clock, and completed-frame observations.
+`UiTestSession` owns the testing backend, queue, virtual clock, and completed-frame observations.
 Queries hold a weak session and immutable selector chains; each operation resolves again without retaining mounted pointers.
 InternalAccess supplies the full mounted root, unlike the application-only `RootNode` accessor used by existing low-level tests.
 Traversal includes layers and records parent indexes, own text, typed keys, local geometry, transformed and conservatively clipped bounds, and interaction flags.
 Secure built-in editor clients are filtered before querying text.
-No new component switch is introduced into Runtime input dispatch.
+No new component switch is introduced into UiWindow input dispatch.
 The session builds one ID-to-node index over its owning immutable SemanticFrame and shares it with queries and structural serialization.
 Internal semantic matches borrow nodes; only public observations copy their data.
 
-The queue accepts posts from other threads but only the creating thread executes callbacks and Runtime operations.
+The queue accepts posts from other threads but only the creating thread executes callbacks and Runtime or UiWindow operations.
 One Pump moves the entry callback batch, advances the shared virtual clock, runs the batch, and calls BuildFrame once.
 An over-budget batch fails rather than draining indefinitely.
-Normal destruction and initialization failure use the same shutdown path: tear down Runtime while the adapter remains alive, execute queued cancellation/disposal callbacks on the owning thread, and close the shared queue.
+Normal destruction and initialization failure use the same shutdown path: retire UiWindow before Runtime while the testing backend remains alive, execute queued cancellation/disposal callbacks on the owning thread, and close the shared queue.
 The cleanup drain does not build frames or wait for workers and uses `maximum_callbacks_per_frame` as its total callback budget, including callbacks posted by other cleanup callbacks.
 Cleanup exceptions are contained so destruction cannot throw and an initialization failure retains its original exception.
 Once the queue is empty or the budget is exhausted, remaining callback captures are released outside its mutex and late posts are rejected.
 Callback delivery after closure is ignored.
 Reentrant test operations fail, and PumpUntil predicates are observational.
 
-Ordinary input keeps the real Runtime's capture, clipping, gesture arbitration, focus, modal routing, and controlled text reducer.
+Ordinary input keeps the real UiWindow's capture, clipping, gesture arbitration, focus, modal routing, and controlled text reducer.
 High-level pointer sequences use fixed identity and best-effort Cancel cleanup.
 Reference text is deliberately a small, internally consistent scalar model rather than a shaping engine.
-Unsupported services retain normal unavailable behavior; resources, text-input state/action tracking, clipboard, and a virtual clock are supplied by the test adapter.
+Unsupported services retain normal unavailable behavior; resources, text-input state/action tracking, clipboard, and a virtual clock are supplied by the testing backend.
 Start, Update, Restart, and Stop maintain the existing TextInputState value with session checks; no separate testing input-session abstraction is introduced.
 Frame requests retain their earliest finite deadline but never schedule work autonomously; Pump alone commits frames.
 Pump consumes the previous wakeup before callbacks and BuildFrame, then retains deadlines reasserted by tasks, callbacks, or FrameCommit.
 PumpAndSettle combines that deadline with the queued callback count under bounded virtual time and total frame count, including its initial frame.
 Continuous requests advance by the minimum step; future requests can jump to their deadline, while queued callback batches need no time advance.
-This intentionally cannot distinguish a repeating animation, caret, or delayed task from other pending Runtime work and does not wait for external workers.
+This intentionally cannot distinguish a repeating animation, caret, or delayed task from other pending window or application work and does not wait for external workers.
 ScrollUntil uses mounted identities only to detect container replacement; it sends ordinary wheel input through ScrollBy and never materializes virtual children itself.
-Window and quit requests retain the base adapter's no-op behavior.
+Window and quit requests retain the testing backend's no-op behavior.
 
 ## Capture
 

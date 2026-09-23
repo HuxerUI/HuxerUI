@@ -2,19 +2,24 @@
 
 #include <memory>
 
-#include <huxerui/platform_adapter.h>
+#include <huxerui/app.h>
 
 namespace huxerui::detail {
 
-class LinuxUIThreadDispatcher final {
+/// Application-owned main-context dispatcher independent of any GTK window.
+/// Retained Bind callbacks may outlive this owner; Shutdown makes their pending and future work inert.
+class LinuxUiThreadDispatcher final {
 public:
-  LinuxUIThreadDispatcher();
-  ~LinuxUIThreadDispatcher();
+  LinuxUiThreadDispatcher();
+  ~LinuxUiThreadDispatcher();
 
-  LinuxUIThreadDispatcher(const LinuxUIThreadDispatcher&) = delete;
-  LinuxUIThreadDispatcher& operator=(const LinuxUIThreadDispatcher&) = delete;
+  LinuxUiThreadDispatcher(const LinuxUiThreadDispatcher&) = delete;
+  LinuxUiThreadDispatcher& operator=(const LinuxUiThreadDispatcher&) = delete;
 
-  [[nodiscard]] UIThreadDispatcher Bind() const;
+  /// Acquires an asynchronous posting callback for the retained default GLib main context.
+  /// @return An any-thread callback retaining the dispatch gate without retaining a Runtime or GTK window.
+  [[nodiscard]] UiThreadDispatcher Bind() const;
+  /// Closes the dispatch gate before application facilities retire; pending GLib sources skip their callbacks.
   void Shutdown() noexcept;
 
 private:

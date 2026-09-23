@@ -19,8 +19,9 @@
 #include <utility>
 #include <vector>
 
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "task_internal.h"
+#include "application/application_internal.h"
 
 namespace huxerui::detail {
 
@@ -116,93 +117,18 @@ public:
   std::deque<std::weak_ptr<WorkerOperation>> queued;
 };
 
-class TaskDelayScheduler final : public std::enable_shared_from_this<TaskDelayScheduler> {
-public:
-  explicit TaskDelayScheduler(PlatformAdapter& platform)
-      : platform_(&platform), ui_thread_(std::this_thread::get_id()) {}
-
-  std::function<void()> Schedule(double duration_seconds, std::function<void()> callback) {
-    if (std::this_thread::get_id() != ui_thread_) {
-      throw std::logic_error("HuxerUI Delay() must be awaited on its UI thread");
-    }
-    const double deadline = platform_->Now() + duration_seconds;
-    auto entry = std::make_shared<Entry>();
-    entry->callback = std::move(callback);
-    const std::shared_ptr<TaskDelayScheduler> scheduler = shared_from_this();
-    std::function<void()> cancellation = [scheduler, entry] { scheduler->Cancel(entry); };
-    const bool request_wakeup = entries_.empty() || deadline < entries_.begin()->first;
-    entry->position = entries_.emplace(deadline, entry);
-    if (request_wakeup) {
-      try {
-        platform_->RequestFrameAt(deadline);
-      } catch (...) {
-        entries_.erase(*entry->position);
-        entry->position.reset();
-        throw;
-      }
-    }
-
-    return cancellation;
-  }
-
-  void Advance(double timestamp) {
-    if (std::this_thread::get_id() != ui_thread_) {
-      throw std::logic_error("HuxerUI task delays must advance on their UI thread");
-    }
-
-    std::vector<std::function<void()>> callbacks;
-    const auto due_end = entries_.upper_bound(timestamp);
-    callbacks.reserve(static_cast<std::size_t>(std::distance(entries_.begin(), due_end)));
-    for (auto current = entries_.begin(); current != due_end; ++current) {
-      const std::shared_ptr<Entry>& entry = current->second;
-      entry->position.reset();
-      callbacks.push_back(std::move(entry->callback));
-    }
-    entries_.erase(entries_.begin(), due_end);
-
-    for (auto& callback : callbacks) {
-      callback();
-    }
-    if (!entries_.empty()) {
-      platform_->RequestFrameAt(entries_.begin()->first);
-    }
-  }
-
-private:
-  struct Entry;
-  using Entries = std::multimap<double, std::shared_ptr<Entry>>;
-
-  struct Entry {
-    std::optional<Entries::iterator> position;
-    std::function<void()> callback;
-  };
-
-  void Cancel(const std::shared_ptr<Entry>& entry) noexcept {
-    if (!entry->position.has_value()) {
-      return;
-    }
-    entries_.erase(*entry->position);
-    entry->position.reset();
-    entry->callback = {};
-  }
-
-  PlatformAdapter* platform_;
-  std::thread::id ui_thread_;
-  Entries entries_;
-};
-
 class TaskExecution final : public std::enable_shared_from_this<TaskExecution> {
 public:
   TaskExecution(
       std::weak_ptr<TaskScopeState> scope,
       std::uint64_t identity,
-      UIThreadDispatcher dispatcher,
-      std::shared_ptr<TaskDelayScheduler> delay_scheduler,
-      std::thread::id ui_thread,
+      UiThreadDispatcher dispatcher,
+      std::thread::id ui_thread, std::shared_ptr<ExecutionContext> context,
       std::coroutine_handle<Task<void>::promise_type> coroutine
   )
       : scope_(std::move(scope)), identity_(identity), dispatcher_(std::move(dispatcher)),
-        delay_scheduler_(std::move(delay_scheduler)), ui_thread_(ui_thread), coroutine_(coroutine) {}
+        ui_thread_(ui_thread), context_(std::move(context)),
+        coroutine_(coroutine) {}
 
   ~TaskExecution() {
     if (coroutine_) {
@@ -212,27 +138,35 @@ public:
 
   void Start();
   void Cancel() noexcept;
-  void CloseOnUI() noexcept;
+  /// Closes this execution during owner retirement on the application thread, deferring destruction while running.
+  void CloseOnUi() noexcept;
   void QueueCompletion() noexcept;
   void QueueResume(std::coroutine_handle<> coroutine) noexcept;
   std::function<void()> ScheduleDelay(double duration_seconds, std::coroutine_handle<> coroutine);
 
 private:
-  [[nodiscard]] bool IsUIThread() const noexcept {
+  /// Checks the application's owning thread, whether this scope is application-wide or composition-owned.
+  /// @return True when immediate coroutine cancellation is permitted without dispatching to another thread.
+  [[nodiscard]] bool IsUiThread() const noexcept {
     return std::this_thread::get_id() == ui_thread_;
   }
 
   void PostNoexcept(std::function<void()> callback) noexcept;
-  void ResumeOnUI(std::coroutine_handle<> coroutine) noexcept;
-  void CancelOnUI() noexcept;
-  void CompleteOnUI() noexcept;
+  /// Resumes a suspended coroutine on the owning thread under its original execution context.
+  /// @param coroutine Awaiting frame still owned by this execution; ignored when null, complete, or canceled.
+  void ResumeOnUi(std::coroutine_handle<> coroutine) noexcept;
+  /// Destroys a suspended coroutine under its original context and removes it from the scope; never destroys a running
+  /// frame.
+  void CancelOnUi() noexcept;
+  /// Retires a completed coroutine under its original context; an unhandled Task exception terminates the process.
+  void CompleteOnUi() noexcept;
   void DetachFromScope() noexcept;
 
   std::weak_ptr<TaskScopeState> scope_;
   std::uint64_t identity_;
-  UIThreadDispatcher dispatcher_;
-  std::shared_ptr<TaskDelayScheduler> delay_scheduler_;
+  UiThreadDispatcher dispatcher_;
   std::thread::id ui_thread_;
+  std::shared_ptr<ExecutionContext> context_;
   std::coroutine_handle<Task<void>::promise_type> coroutine_;
   std::atomic<bool> cancellation_requested_ = false;
   bool running_ = false;
@@ -240,11 +174,11 @@ private:
 
 class TaskScopeState final : public std::enable_shared_from_this<TaskScopeState> {
 public:
-  TaskScopeState(UIThreadDispatcher dispatcher, std::shared_ptr<TaskDelayScheduler> delay_scheduler)
-      : dispatcher_(std::move(dispatcher)), delay_scheduler_(std::move(delay_scheduler)),
-        ui_thread_(std::this_thread::get_id()) {
+  TaskScopeState(UiThreadDispatcher dispatcher, std::shared_ptr<ExecutionContext> context)
+      : dispatcher_(std::move(dispatcher)),
+        ui_thread_(std::this_thread::get_id()), context_(std::move(context)), application_(context_->application) {
     if (!dispatcher_) {
-      throw std::logic_error("HuxerUI UseTaskScope() requires a UIThreadDispatcher");
+      throw std::logic_error("HuxerUI UseTaskScope() requires a UiThreadDispatcher");
     }
   }
 
@@ -256,8 +190,10 @@ public:
       throw std::logic_error("HuxerUI TaskScope::Launch() must be called on its UI thread");
     }
     {
-      std::scoped_lock lock(mutex_);
-      if (closed_) {
+      std::unique_lock lock(mutex_);
+      const auto application = application_.lock();
+      if (closed_ || !application || !application->accepts_tasks) {
+        lock.unlock();
         if (coroutine) {
           coroutine.destroy();
         }
@@ -275,8 +211,7 @@ public:
           shared_from_this(),
           identity,
           dispatcher_,
-          delay_scheduler_,
-          ui_thread_,
+          ui_thread_, context_,
           coroutine
       );
     } catch (...) {
@@ -296,7 +231,8 @@ public:
 
   void Post(std::function<void()> callback) {
     std::unique_lock lock(mutex_);
-    if (closed_) {
+    const auto application = application_.lock();
+    if (closed_ || !application || !application->accepts_tasks) {
       return;
     }
     const std::uint64_t identity = next_post_identity_++;
@@ -309,7 +245,8 @@ public:
         }
       });
     } catch (...) {
-      posts_.erase(identity);
+      auto discarded = posts_.extract(identity);
+      lock.unlock();
       throw;
     }
   }
@@ -332,8 +269,10 @@ public:
     auto tasks = std::move(tasks_);
     for (auto& [identity, execution] : tasks) {
       static_cast<void>(identity);
-      execution->CloseOnUI();
+      execution->CloseOnUi();
     }
+    // Active callbacks and Tasks retain their own context until they finish or reach deferred cancellation.
+    context_.reset();
   }
 
 private:
@@ -341,7 +280,8 @@ private:
     std::function<void()> callback;
     {
       std::scoped_lock lock(mutex_);
-      if (closed_) {
+      const auto application = application_.lock();
+      if (closed_ || !application || !application->accepts_tasks) {
         return;
       }
       const auto found = posts_.find(identity);
@@ -351,12 +291,14 @@ private:
       callback = std::move(found->second);
       posts_.erase(found);
     }
+    ExecutionGuard guard(context_);
     callback();
   }
 
-  UIThreadDispatcher dispatcher_;
-  std::shared_ptr<TaskDelayScheduler> delay_scheduler_;
+  UiThreadDispatcher dispatcher_;
   std::thread::id ui_thread_;
+  std::shared_ptr<ExecutionContext> context_;
+  const std::weak_ptr<ApplicationRuntimeState> application_;
   std::mutex mutex_;
   bool closed_ = false;
   std::uint64_t next_identity_ = 1;
@@ -416,7 +358,7 @@ void TaskExecution::Start() {
   std::weak_ptr<TaskExecution> weak = shared_from_this();
   dispatcher_([weak] {
     if (auto execution = weak.lock()) {
-      execution->ResumeOnUI(execution->coroutine_);
+      execution->ResumeOnUi(execution->coroutine_);
     }
   });
 }
@@ -425,28 +367,28 @@ void TaskExecution::Cancel() noexcept {
   if (cancellation_requested_.exchange(true)) {
     return;
   }
-  if (IsUIThread() && !running_) {
-    CancelOnUI();
+  if (IsUiThread() && !running_) {
+    CancelOnUi();
     return;
   }
   std::weak_ptr<TaskExecution> weak = shared_from_this();
   PostNoexcept([weak] {
     if (auto execution = weak.lock()) {
-      execution->CancelOnUI();
+      execution->CancelOnUi();
     }
   });
 }
 
-void TaskExecution::CloseOnUI() noexcept {
+void TaskExecution::CloseOnUi() noexcept {
   cancellation_requested_ = true;
-  CancelOnUI();
+  CancelOnUi();
 }
 
 void TaskExecution::QueueCompletion() noexcept {
   std::weak_ptr<TaskExecution> weak = shared_from_this();
   PostNoexcept([weak] {
     if (auto execution = weak.lock()) {
-      execution->CompleteOnUI();
+      execution->CompleteOnUi();
     }
   });
 }
@@ -455,52 +397,59 @@ void TaskExecution::QueueResume(std::coroutine_handle<> coroutine) noexcept {
   std::weak_ptr<TaskExecution> weak = shared_from_this();
   PostNoexcept([weak, coroutine] {
     if (auto execution = weak.lock()) {
-      execution->ResumeOnUI(coroutine);
+      execution->ResumeOnUi(coroutine);
     }
   });
 }
 
 std::function<void()> TaskExecution::ScheduleDelay(double duration_seconds, std::coroutine_handle<> coroutine) {
-  std::weak_ptr<TaskExecution> weak = shared_from_this();
-  return delay_scheduler_->Schedule(duration_seconds, [weak, coroutine] {
-    if (auto execution = weak.lock()) {
-      execution->ResumeOnUI(coroutine);
-    }
-  });
+  const auto application = context_->application.lock();
+  if (!application || !application->owner) {
+    throw std::logic_error("HuxerUI Delay() application Runtime is retired");
+  }
+  application->RequireThread();
+  Runtime& runtime = *application->owner;
+  const auto deadline = runtime.TimerNow() +
+      std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(duration_seconds));
+  return runtime.ScheduleTimerAt(deadline, [weak = weak_from_this(), coroutine] { ResumeTask(weak, coroutine); });
 }
 
-void TaskExecution::ResumeOnUI(std::coroutine_handle<> coroutine) noexcept {
+void TaskExecution::ResumeOnUi(std::coroutine_handle<> coroutine) noexcept {
   const auto self = shared_from_this();
-  if (cancellation_requested_) {
-    CancelOnUI();
+  const auto application = context_->application.lock();
+  if (cancellation_requested_ || !application || !application->accepts_tasks) {
+    CancelOnUi();
     return;
   }
   if (!coroutine || coroutine.done()) {
     return;
   }
+  ExecutionGuard guard(context_);
   running_ = true;
   coroutine.resume();
   running_ = false;
   if (cancellation_requested_ && coroutine_) {
-    CancelOnUI();
+    CancelOnUi();
   }
 }
 
-void TaskExecution::CancelOnUI() noexcept {
+void TaskExecution::CancelOnUi() noexcept {
   if (running_ || !coroutine_) {
     return;
   }
   const auto self = shared_from_this();
+  ExecutionGuard guard(context_);
   DetachFromScope();
   auto coroutine = std::exchange(coroutine_, {});
   coroutine.destroy();
 }
 
-void TaskExecution::CompleteOnUI() noexcept {
+void TaskExecution::CompleteOnUi() noexcept {
   if (!coroutine_ || !coroutine_.done()) {
     return;
   }
   const auto self = shared_from_this();
+  ExecutionGuard guard(context_);
   std::exception_ptr exception;
   try {
     coroutine_.promise().RethrowException();
@@ -520,14 +469,6 @@ void TaskExecution::DetachFromScope() noexcept {
     scope->Detach(identity_);
   }
   scope_.reset();
-}
-
-std::shared_ptr<TaskDelayScheduler> MakeTaskDelayScheduler(PlatformAdapter& platform) {
-  return std::make_shared<TaskDelayScheduler>(platform);
-}
-
-void AdvanceTaskDelays(const std::shared_ptr<TaskDelayScheduler>& scheduler, double timestamp) {
-  scheduler->Advance(timestamp);
 }
 
 void EnqueueWorkerOperation(std::function<void()> operation, const char* api_name) {
@@ -602,8 +543,8 @@ std::size_t WorkerConcurrency() noexcept {
 }
 
 std::shared_ptr<TaskScopeState>
-MakeTaskScopeState(UIThreadDispatcher dispatcher, std::shared_ptr<TaskDelayScheduler> delay_scheduler) {
-  return std::make_shared<TaskScopeState>(std::move(dispatcher), std::move(delay_scheduler));
+MakeTaskScopeState(UiThreadDispatcher dispatcher, std::shared_ptr<ExecutionContext> context) {
+  return std::make_shared<TaskScopeState>(std::move(dispatcher), std::move(context));
 }
 
 void CloseTaskScope(const std::shared_ptr<TaskScopeState>& scope) noexcept {

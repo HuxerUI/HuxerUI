@@ -27,7 +27,7 @@ int mac_platform_view_frame_sets = 0;
 @interface HuxerUITestPlatformRootView : NSView {
 @public
   huxerui::detail::AppKitPlatformViews* huxeruiPlatformViews;
-  huxerui::Runtime* huxeruiRuntime;
+  huxerui::UiWindow* huxeruiRuntime;
 }
 @end
 
@@ -264,10 +264,10 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
 
     MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([](RootContext& root) {
+    options.application_hooks.push_back([](ApplicationContext& root) {
       root.RegisterPlatformView<MacPlatformViewProperties, int>("test/MacView", MacTestFactory());
     });
-    Runtime runtime(MacPlatformViewApp, platform, std::move(options));
+    UiWindow runtime(MacPlatformViewApp, platform, std::move(options));
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
 
     detail::AppKitRenderer renderer;
@@ -351,10 +351,10 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
 
     MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([](RootContext& root) {
+    options.application_hooks.push_back([](ApplicationContext& root) {
       root.RegisterPlatformView<MacPlatformViewProperties, int>("test/MacView", MacTestFactory());
     });
-    Runtime runtime(MacPlatformViewApp, platform, std::move(options));
+    UiWindow runtime(MacPlatformViewApp, platform, std::move(options));
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
 
     detail::AppKitRenderer renderer;
@@ -398,10 +398,10 @@ TEST_CASE("MacPlatformViewsTraverseBetweenHostedTextFieldAndRuntimeFocus") {
 
     MacPlatformViewTestPlatform platform;
     AppOptions options{.show_debug_overlay = false};
-    options.root_hooks.push_back([](RootContext& root) {
+    options.application_hooks.push_back([](ApplicationContext& root) {
       root.RegisterPlatformView<MacPlatformViewProperties>("test/MacTextField", MacTextFieldFactory());
     });
-    Runtime runtime(MacPlatformTextFieldFocusApp, platform, std::move(options));
+    UiWindow runtime(MacPlatformTextFieldFocusApp, platform, std::move(options));
     runtime.SetWindowMetrics({{200.0F, 120.0F}});
 
     detail::AppKitRenderer renderer;

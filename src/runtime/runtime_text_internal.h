@@ -83,7 +83,7 @@ struct TextSelectionOverlay {
 
 class TextInteraction final {
 public:
-  explicit TextInteraction(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
+  explicit TextInteraction(UiWindow::State& runtime_state) : runtime_state_(runtime_state) {}
 
   bool BringTextInputIntoView();
   void StopTextInputSession(TextInputEndReason reason);
@@ -124,7 +124,7 @@ private:
   std::optional<TextSelectionGeometry> QueryFocusedTextSelectionGeometry() const;
   void ShowTextSelectionOverlay(bool show_handles);
 
-  Runtime::State& runtime_state_;
+  UiWindow::State& runtime_state_;
   std::optional<ActiveTextInputSession> text_input_session_;
   TextSelectionGestureState text_selection_gesture_;
   // Re-hit the retained pointer position after the next layout has consumed an auto-scroll offset change.

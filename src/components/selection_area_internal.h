@@ -9,8 +9,7 @@
 #include <huxerui/text.h>
 
 namespace huxerui {
-class PlatformAdapter;
-class Runtime;
+class UiWindow;
 struct WindowTitleBarMetrics;
 }
 
@@ -64,7 +63,7 @@ struct TextSelectionBlockKey {
   using Value = TextBlockId;
 };
 
-Size MeasureSelectionArea(MountedNode& node, PlatformAdapter& platform, Runtime& runtime,
+Size MeasureSelectionArea(MountedNode& node, UiWindow& ui_window,
     const Constraints& constraints, EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics);
 
 } // namespace huxerui::detail

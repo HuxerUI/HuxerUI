@@ -8,7 +8,7 @@
 #include <unordered_set>
 #include <variant>
 
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "internal_access.h"
 #include "resources/resource_internal.h"
 #include "runtime_text_internal.h"

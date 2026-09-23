@@ -2,11 +2,11 @@
 
 namespace huxerui {
 
-class RootContext;
+class WindowContext;
 
 namespace detail {
 
-void InstallTooltip(RootContext& root);
+void InstallTooltip(WindowContext& root);
 
 } // namespace detail
 } // namespace huxerui

@@ -39,7 +39,7 @@ It does not become another focus target or parallel open callback.
 
 ## Popup interaction
 
-The popup does not trap or move Runtime focus.
+The popup does not trap or move UiWindow focus.
 Real keyboard focus and the native input session stay on TextField while one optional active suggestion is retained in the popup state.
 Up and Down choose the next enabled suggestion without wrapping and reveal it through the existing ScrollController.
 Enter accepts an active suggestion; otherwise TextField performs ordinary submission.

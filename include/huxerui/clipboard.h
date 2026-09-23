@@ -12,7 +12,7 @@ class ApplicationService;
 
 /// @brief Identifies a semantic editing command for the currently focused text client.
 ///
-/// Runtime uses these values for keyboard shortcuts and framework-rendered selection menus. Whether an action is
+/// UiWindow uses these values for keyboard shortcuts and framework-rendered selection menus. Whether an action is
 /// available depends on the focused client, its current selection, its read-only or secure configuration, and the
 /// platform clipboard capability.
 enum class TextEditingAction {
@@ -51,8 +51,8 @@ struct TextSelectionMenuLabels {
 
 /// @brief Defines the platform boundary for synchronous plain-text clipboard access.
 ///
-/// These methods run synchronously on the Runtime's UI thread. A supporting PlatformAdapter returns a stable instance
-/// from PlatformAdapter::Clipboard() whose lifetime covers the Runtime. Implementations must not retain borrowed
+/// These methods run synchronously on the application thread. A supporting Runtime returns a stable instance
+/// from Runtime::Clipboard() whose lifetime covers the connected Runtime. Implementations must not retain borrowed
 /// string views. Application code obtains Clipboard through ApplicationHandle instead of retaining this platform
 /// capability.
 class PlatformClipboard {
@@ -73,10 +73,10 @@ public:
 /// @brief Provides application access to the current Runtime's plain-text clipboard.
 ///
 /// The application service owns one shared Clipboard per Runtime. Obtain it with UseApplication().Clipboard()
-/// during composition and capture the shared pointer into UI-thread event handlers. Calls are synchronous and may
+/// and capture the shared pointer into application-thread event handlers or Tasks. Calls are synchronous and may
 /// enter native clipboard APIs, so they must not run on application worker threads.
 ///
-/// A captured service may outlive its Runtime. After Runtime destruction it remains safe to call but reports
+/// A captured service survives UiWindow destruction. After Runtime retirement it remains safe to call but reports
 /// unavailable results. Platforms without synchronous application clipboard access, including Web, behave the same
 /// way; browser-managed TextField copy, cut, and paste remain independent of this service.
 ///
@@ -98,7 +98,7 @@ public:
   Clipboard& operator=(Clipboard&&) = delete;
 
   /// @brief Tests whether the Runtime has a synchronous platform clipboard capability.
-  /// @return True while a supporting platform adapter and its Runtime are connected. A true result does not
+  /// @return True while a supporting platform Runtime is connected. A true result does not
   /// guarantee that a subsequent operation will succeed because platform access may fail transiently.
   [[nodiscard]] bool IsAvailable() const noexcept;
 

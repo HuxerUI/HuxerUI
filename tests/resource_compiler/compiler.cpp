@@ -473,7 +473,7 @@ TEST_CASE("SvgResourcesCompileToTypedVectorPayloads") {
 
   huxerui::test::TestPlatform platform;
   platform.platform_resources = &platform_resources;
-  huxerui::test::Runtime runtime{VectorResourceApp, platform};
+  huxerui::test::UiWindow runtime{VectorResourceApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const huxerui::test::FlattenedScene& scene = runtime.BuildFrame();
   REQUIRE(std::ranges::any_of(scene.Commands(), [](const huxerui::PaintCommand& command) {

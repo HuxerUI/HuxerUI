@@ -582,7 +582,7 @@ struct TextEvents {
 
 /// Synchronous platform text measurement shared by components, layout, and custom drawing.
 ///
-/// Calls run on the Runtime's host thread. Retain returned value metrics, not the service reference, beyond the
+/// Calls run on the UiWindow's host thread. Retain returned value metrics, not the service reference, beyond the
 /// current composition, layout, or geometry-preparation operation. Platform font engines may differ in metrics.
 /// Web's Canvas backend does not promise mixed bidirectional or cross-run shaping equivalent to non-Web backends.
 /// Measurement reads only the supplied shaping options, not the active Environment.
@@ -624,7 +624,7 @@ public:
   }
 };
 
-/// Obtains the current Runtime's text measurer during composition.
+/// Obtains the current UiWindow's text measurer during composition.
 ///
 /// Use this from an application root, composable component, or a custom hook called by one.
 /// Do not retain the returned reference in State or an asynchronous callback; keep the returned metrics instead.

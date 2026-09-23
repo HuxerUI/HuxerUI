@@ -91,8 +91,8 @@ A finite `max_width` still constrains the reported paragraph width; it does not 
 `TextWrap::Word` additionally introduces automatic line breaks to satisfy a finite `max_width`.
 Both modes report all resulting hard and automatic lines through `line_count`, `first_baseline`, and `last_baseline`.
 
-The active `PlatformAdapter` is exposed through a private root text-measurer service whose lifetime is owned by Runtime.
-Components can obtain it with `UseTextMeasurer()` without depending on PlatformAdapter or platform API types.
+The active UiWindow supplies a private text-measurer capability for its mounted UI lifetime.
+Components can obtain it with `UseTextMeasurer()` without depending on native platform API types.
 Built-in layout and editing code use the same service contract directly through the host boundary.
 `TextMeasurer` calls occur synchronously on the Runtime and platform host thread.
 `NodeExtension::PrepareGeometry()` receives the same active measurer after final presentation geometry is resolved.
@@ -251,7 +251,7 @@ Plain and attributed declarations normalize into the same mounted paragraph repr
 The generic State formatting constructor excludes attributed values, which have a dedicated Text input path.
 Ordinary controls retain their existing public plain-label inputs even when internal paragraph services accept attributed data.
 
-TextMeasurer, PlatformAdapter text-layout creation, and DrawText consume the same attributed paragraph contract.
+TextMeasurer, UiWindow text-layout creation, and DrawText consume the same attributed paragraph contract.
 Plain-string convenience calls delegate to that contract rather than retaining a second virtual implementation.
 DrawTextRuns remains the exact-run operation for callers that already own line layout and is not an attributed-paragraph fallback.
 

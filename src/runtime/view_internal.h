@@ -191,7 +191,7 @@ struct ViewProperties {
   HorizontalAlignment horizontal_alignment = HorizontalAlignment::Start;
   VerticalAlignment vertical_alignment = VerticalAlignment::Start;
   float disabled_opacity = 0.42F;
-  // Runtime resolves this declaration against final window-edge geometry after layout and presentation transforms.
+  // UiWindow resolves this declaration against final window-edge geometry after layout and presentation transforms.
   std::optional<SystemBarsAppearance> system_bars_appearance;
 
   bool operator==(const ViewProperties&) const = default;
@@ -299,7 +299,7 @@ inline bool PlatformViewControllerEqual(const std::shared_ptr<const PlatformView
 }
 
 // ViewSpec is View's transient copy-on-write declaration. NodeKind selects the component-specific payloads;
-// fields unrelated to that kind stay at their defaults and are ignored by the corresponding Runtime stages.
+// fields unrelated to that kind stay at their defaults and are ignored by the corresponding UiWindow stages.
 using ViewDefaults = void (*)(ViewSpec&, const std::shared_ptr<const Environment>&);
 
 using ViewText = std::variant<StringVariant, AttributedText>;
@@ -331,7 +331,7 @@ struct ViewSpec {
   std::vector<ModifierSpec> modifiers;
   // Component Theme resolution supplies this value to a retained DefaultIndication declaration.
   std::optional<Indication> default_indication;
-  // Environment nodes retain only their local declaration values; Runtime attaches the inherited parent at mount.
+  // Environment nodes retain only their local declaration values; UiWindow attaches the inherited parent at mount.
   std::optional<Environment> local_environment;
   std::optional<bool> chip_selection;
   bool pointer_events_enabled = true;

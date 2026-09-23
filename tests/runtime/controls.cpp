@@ -451,7 +451,7 @@ View DisabledSliderApp() {
 
 TEST_CASE("TestMaterialSwitchStateLayerFollowsTheAnimatedThumb") {
   TestPlatform platform;
-  Runtime runtime{MaterialControlledSwitchApp, platform};
+  UiWindow runtime{MaterialControlledSwitchApp, platform};
   runtime.SetWindowMetrics({.viewport = {80.0F, 64.0F}});
   runtime.BuildFrame();
 
@@ -483,7 +483,7 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
 
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{MaterialLabeledToggleApp, platform};
+  UiWindow runtime{MaterialLabeledToggleApp, platform};
   runtime.SetWindowMetrics({.viewport = {560.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -559,7 +559,7 @@ TEST_CASE("TestLabeledTogglesUseVisualSpacingAndOneActivationTarget") {
 TEST_CASE("TestLabeledToggleGeometryUsesContentBounds") {
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{MaterialPaddedLabeledToggleApp, platform};
+  UiWindow runtime{MaterialPaddedLabeledToggleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -599,7 +599,7 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
 
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{ToggleApp, platform};
+  UiWindow runtime{ToggleApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -765,7 +765,7 @@ TEST_CASE("TestActionSelectableAndDisabledChips") {
   disabled_chip_changes = 0;
 
   TestPlatform platform;
-  Runtime runtime{ChipApp, platform};
+  UiWindow runtime{ChipApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -835,7 +835,7 @@ TEST_CASE("TestActionSelectableAndDisabledChips") {
 
 TEST_CASE("TestMaterialChipGeometryAndColors") {
   TestPlatform platform;
-  Runtime runtime{MaterialChipApp, platform};
+  UiWindow runtime{MaterialChipApp, platform};
   runtime.SetWindowMetrics({.viewport = {260.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -865,7 +865,7 @@ TEST_CASE("TestMaterialChipGeometryAndColors") {
 
 TEST_CASE("TestMaterialSelectableChipTransitionsBetweenPresentAndAbsentBorders") {
   TestPlatform platform;
-  Runtime runtime{MaterialSelectableChipApp, platform};
+  UiWindow runtime{MaterialSelectableChipApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 64.0F}});
   runtime.BuildFrame();
 
@@ -911,7 +911,7 @@ TEST_CASE("TestMaterialSelectableChipTransitionsBetweenPresentAndAbsentBorders")
 
 TEST_CASE("TestHorizontalAndVerticalDividerGeometry") {
   TestPlatform platform;
-  Runtime runtime{DividerApp, platform};
+  UiWindow runtime{DividerApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -941,7 +941,7 @@ TEST_CASE("SegmentedButton preserves layout and controlled interaction contracts
   rejected_segmented_button_changes = 0;
 
   TestPlatform platform;
-  Runtime runtime{SegmentedButtonApp, platform};
+  UiWindow runtime{SegmentedButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -1054,7 +1054,7 @@ TEST_CASE("SegmentedButton preserves layout and controlled interaction contracts
 
 TEST_CASE("TestSegmentedButtonPreservesOnlyOuterAsymmetricCorners") {
   TestPlatform platform;
-  Runtime runtime{AsymmetricSegmentedButtonApp, platform};
+  UiWindow runtime{AsymmetricSegmentedButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 64.0F}});
   runtime.BuildFrame();
 
@@ -1080,7 +1080,7 @@ TEST_CASE("TestMaterialSegmentedButtonStyleAndValidation") {
   );
 
   TestPlatform platform;
-  Runtime runtime{MaterialSegmentedButtonApp, platform};
+  UiWindow runtime{MaterialSegmentedButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1147,7 +1147,7 @@ TEST_CASE("TestTabsSelectionOverflowAndKeyboard") {
   tabs_changes = 0;
 
   TestPlatform platform;
-  Runtime runtime{TabsApp, platform};
+  UiWindow runtime{TabsApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1225,7 +1225,7 @@ TEST_CASE("TestMaterialTabsStyleAndValidation") {
   REQUIRE_THROWS_AS(Tabs(std::vector<TabItem>{TabItem::IconOnly(ImageAsset{}, "Invalid")}, 0), std::invalid_argument);
 
   TestPlatform platform;
-  Runtime runtime{MaterialTabsApp, platform};
+  UiWindow runtime{MaterialTabsApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1275,7 +1275,7 @@ TEST_CASE("TestMaterialTabsStyleAndValidation") {
   REQUIRE(flat_style.divider_height == 0.0F);
 
   TestPlatform overflow_platform;
-  Runtime overflow{MaterialTabsApp, overflow_platform};
+  UiWindow overflow{MaterialTabsApp, overflow_platform};
   overflow.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   const std::vector<DrawRectCommand> overflow_rectangles = DrawRectangles(overflow.BuildFrame());
   REQUIRE_FALSE(std::ranges::any_of(overflow_rectangles, [&style](const DrawRectCommand& rectangle) {
@@ -1296,7 +1296,7 @@ TEST_CASE("TestChipAndSegmentedButtonIconContent") {
   );
 
   TestPlatform platform;
-  Runtime runtime{MaterialIconControlsApp, platform};
+  UiWindow runtime{MaterialIconControlsApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1353,7 +1353,7 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
   icon_button_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{MaterialIconButtonApp, platform};
+  UiWindow runtime{MaterialIconButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1393,7 +1393,7 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
   REQUIRE(icon_button_clicks == 1);
 
   TestPlatform flat_platform;
-  Runtime flat_runtime{FlatIconButtonApp, flat_platform};
+  UiWindow flat_runtime{FlatIconButtonApp, flat_platform};
   flat_runtime.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   flat_runtime.BuildFrame();
   const auto* flat_root = flat_runtime.RootNode();
@@ -1413,7 +1413,7 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
 TEST_CASE("TestDisabledRadioButtonDoesNotSelect") {
   radio_changes = 0;
   TestPlatform platform;
-  Runtime runtime{DisabledRadioButtonApp, platform};
+  UiWindow runtime{DisabledRadioButtonApp, platform};
   runtime.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   runtime.BuildFrame();
   const auto* radio = runtime.RootNode();
@@ -1438,7 +1438,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
 
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime determinate{DeterminateProgressCircleApp, platform};
+  UiWindow determinate{DeterminateProgressCircleApp, platform};
   determinate.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const FlattenedScene& initial = determinate.BuildFrame();
   const auto initial_arcs = arcs(initial);
@@ -1463,11 +1463,13 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
   REQUIRE(std::abs(updated_arcs[1].sweep_angle - pi * 1.5F) < 0.001F);
   REQUIRE(determinate.RootNode()->children[0]->identity == identity);
 
-  Runtime empty{EmptyProgressCircleApp, platform};
+  TestPlatform empty_platform{platform.platform_resources};
+  UiWindow empty{EmptyProgressCircleApp, empty_platform};
   empty.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   REQUIRE(arcs(empty.BuildFrame()).size() == 1);
 
-  Runtime full{FullProgressCircleApp, platform};
+  TestPlatform full_platform{platform.platform_resources};
+  UiWindow full{FullProgressCircleApp, full_platform};
   full.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto full_arcs = arcs(full.BuildFrame());
   REQUIRE(full_arcs.size() == 2);
@@ -1475,7 +1477,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
 
   TestPlatform animated_platform;
   animated_platform.platform_resources = BuiltinTestResources();
-  Runtime animated{IndeterminateProgressCircleApp, animated_platform};
+  UiWindow animated{IndeterminateProgressCircleApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const int requests_before = animated_platform.requested_frames;
   const auto animated_initial = arcs(animated.BuildFrame());
@@ -1491,7 +1493,7 @@ TEST_CASE("TestProgressCircleDrawingStateAndAnimation") {
 
   TestPlatform reduced_platform;
   reduced_platform.platform_resources = BuiltinTestResources();
-  Runtime reduced{ReducedMotionProgressCircleApp, reduced_platform};
+  UiWindow reduced{ReducedMotionProgressCircleApp, reduced_platform};
   reduced.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const int reduced_requests_before = reduced_platform.requested_frames;
   const auto reduced_arcs = arcs(reduced.BuildFrame());
@@ -1515,7 +1517,7 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
 
   TestPlatform determinate_platform;
   determinate_platform.platform_resources = BuiltinTestResources();
-  Runtime determinate{MaterialDeterminateProgressCircleApp, determinate_platform};
+  UiWindow determinate{MaterialDeterminateProgressCircleApp, determinate_platform};
   determinate.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto determinate_arcs = arcs(determinate.BuildFrame());
   REQUIRE(determinate_arcs.size() == 2);
@@ -1531,7 +1533,7 @@ TEST_CASE("TestMaterialProgressCircleUsesVisibleGapAndPulsingArcMotion") {
 
   TestPlatform animated_platform;
   animated_platform.platform_resources = BuiltinTestResources();
-  Runtime animated{MaterialIndeterminateProgressCircleApp, animated_platform};
+  UiWindow animated{MaterialIndeterminateProgressCircleApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {64.0F, 64.0F}});
   const auto initial = arcs(animated.BuildFrame());
   REQUIRE(initial.size() == 1);
@@ -1551,7 +1553,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
 
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime determinate{DeterminateProgressBarApp, platform};
+  UiWindow determinate{DeterminateProgressBarApp, platform};
   determinate.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const auto initial_rectangles = DrawRectangles(determinate.BuildFrame());
   REQUIRE(initial_rectangles.size() == 2);
@@ -1575,11 +1577,13 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
   REQUIRE(updated_rectangles[1].rect.width == style.width * 0.75F);
   REQUIRE(determinate.RootNode()->children[0]->identity == identity);
 
-  Runtime empty{EmptyProgressBarApp, platform};
+  TestPlatform empty_platform{platform.platform_resources};
+  UiWindow empty{EmptyProgressBarApp, empty_platform};
   empty.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   REQUIRE(DrawRectangles(empty.BuildFrame()).size() == 1);
 
-  Runtime full{FullProgressBarApp, platform};
+  TestPlatform full_platform{platform.platform_resources};
+  UiWindow full{FullProgressBarApp, full_platform};
   full.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const auto full_rectangles = DrawRectangles(full.BuildFrame());
   REQUIRE(full_rectangles.size() == 2);
@@ -1587,7 +1591,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
 
   TestPlatform animated_platform;
   animated_platform.platform_resources = BuiltinTestResources();
-  Runtime animated{IndeterminateProgressBarApp, animated_platform};
+  UiWindow animated{IndeterminateProgressBarApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const int requests_before = animated_platform.requested_frames;
   const auto animated_initial = DrawRectangles(animated.BuildFrame());
@@ -1629,7 +1633,7 @@ TEST_CASE("TestProgressBarDrawingStateAndAnimation") {
 
   TestPlatform reduced_platform;
   reduced_platform.platform_resources = BuiltinTestResources();
-  Runtime reduced{ReducedMotionProgressBarApp, reduced_platform};
+  UiWindow reduced{ReducedMotionProgressBarApp, reduced_platform};
   reduced.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   const int reduced_requests_before = reduced_platform.requested_frames;
   const auto reduced_rectangles = DrawRectangles(reduced.BuildFrame());
@@ -1642,7 +1646,7 @@ TEST_CASE("TestProgressBarStyleChangesSpeedWithoutResettingPhase") {
   const ProgressBarStyle style = ProgressBarStyle::Default();
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{AdjustableProgressBarApp, platform};
+  UiWindow runtime{AdjustableProgressBarApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 20.0F}});
   runtime.BuildFrame();
 
@@ -1669,7 +1673,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
   TestPlatform determinate_platform;
   determinate_platform.platform_resources = BuiltinTestResources();
-  Runtime determinate{MaterialDeterminateProgressBarApp, determinate_platform};
+  UiWindow determinate{MaterialDeterminateProgressBarApp, determinate_platform};
   determinate.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   const FlattenedScene& determinate_scene = determinate.BuildFrame();
   const detail::MountedNode* progress_node = FindMountedKind(*determinate.RootNode(), detail::NodeKind::ProgressBar);
@@ -1701,7 +1705,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
   TestPlatform animated_platform;
   animated_platform.platform_resources = BuiltinTestResources();
-  Runtime animated{MaterialIndeterminateProgressBarApp, animated_platform};
+  UiWindow animated{MaterialIndeterminateProgressBarApp, animated_platform};
   animated.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   animated.BuildFrame();
   animated_platform.AdvanceTime(style.animation_duration * 0.6);
@@ -1714,7 +1718,7 @@ TEST_CASE("TestMaterialProgressBarUsesSeparatedTrackStopAndSegmentedMotion") {
 
   TestPlatform reduced_platform;
   reduced_platform.platform_resources = BuiltinTestResources();
-  Runtime reduced{ReducedMotionMaterialProgressBarApp, reduced_platform};
+  UiWindow reduced{ReducedMotionMaterialProgressBarApp, reduced_platform};
   reduced.SetWindowMetrics({.viewport = {280.0F, 20.0F}});
   const int requests_before = reduced_platform.requested_frames;
   const FlattenedScene& reduced_scene = reduced.BuildFrame();
@@ -1732,7 +1736,7 @@ TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
   const SliderStyle style = SliderStyle::Default();
 
   TestPlatform platform;
-  Runtime runtime{SliderApp, platform};
+  UiWindow runtime{SliderApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -1858,7 +1862,7 @@ TEST_CASE("TestMaterialSliderUsesSplitTrackAndVerticalHandle") {
   const ThemeDefinition definition = huxerui::MaterialThemeDefinition();
   const SliderStyle style = ThemeDefinitionValue<SliderStyle>(definition);
   TestPlatform platform;
-  Runtime runtime{MaterialSliderApp, platform};
+  UiWindow runtime{MaterialSliderApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1908,7 +1912,7 @@ TEST_CASE("Slider pointer adjustment preserves proposals across controlled write
   slider_lifecycle_events.clear();
   accept_slider_proposals = true;
   TestPlatform platform;
-  Runtime runtime{SliderLifecycleApp, platform};
+  UiWindow runtime{SliderLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   REQUIRE(slider_lifecycle_events.empty());
@@ -1933,7 +1937,7 @@ TEST_CASE("Slider unchanged pointer clicks commit and rejected proposals remain 
   slider_lifecycle_events.clear();
   accept_slider_proposals = false;
   TestPlatform platform;
-  Runtime runtime{SliderLifecycleApp, platform};
+  UiWindow runtime{SliderLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   lifecycle_slider_value = 0.0F;
@@ -1955,7 +1959,7 @@ TEST_CASE("Slider cancellation terminates once without rollback") {
   slider_lifecycle_events.clear();
   accept_slider_proposals = true;
   TestPlatform platform;
-  Runtime runtime{SliderLifecycleApp, platform};
+  UiWindow runtime{SliderLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   const Rect bounds = runtime.RootNode()->PresentationBounds();
@@ -1993,7 +1997,7 @@ TEST_CASE("Slider ignores another pointer and does not emit a destructor event")
   slider_lifecycle_events.clear();
   accept_slider_proposals = true;
   TestPlatform platform;
-  Runtime runtime{SliderLifecycleApp, platform};
+  UiWindow runtime{SliderLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   const Rect bounds = runtime.RootNode()->PresentationBounds();
@@ -2016,7 +2020,7 @@ TEST_CASE("Slider keyboard repeats and accessibility adjustments commit independ
   slider_lifecycle_events.clear();
   accept_slider_proposals = true;
   TestPlatform platform;
-  Runtime runtime{SliderLifecycleApp, platform};
+  UiWindow runtime{SliderLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab});
@@ -2042,7 +2046,7 @@ TEST_CASE("Slider keyboard repeats and accessibility adjustments commit independ
 TEST_CASE("TestDisabledSliderIgnoresPointerInput") {
   slider_changes = 0;
   TestPlatform platform;
-  Runtime runtime{DisabledSliderApp, platform};
+  UiWindow runtime{DisabledSliderApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 

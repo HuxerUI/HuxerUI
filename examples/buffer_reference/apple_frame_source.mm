@@ -84,13 +84,12 @@ namespace demo = huxerui::example::buffer_reference;
 
 namespace huxerui::example::buffer_reference {
 
-void Install(RootContext& root) {
+void Install(ApplicationContext& root) {
   apple::ObjectiveCPlatformModuleFactory<std::shared_ptr<FrameSource>> factory{
       .factory = [HuxerUIExampleFrameSourceFactory new],
       .create = CreateBridgeSource,
   };
   root.RegisterPlatformModule<std::shared_ptr<FrameSource>>(module_name, std::move(factory));
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<FrameSource>>(module_name));
 }
 
 } // namespace huxerui::example::buffer_reference

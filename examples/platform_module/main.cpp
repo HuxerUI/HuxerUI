@@ -130,10 +130,18 @@ AppOptions Options() {
       .initial_size = {720.0F, 440.0F},
 #endif
   };
-  options.root_hooks.push_back(example::InstallTimer);
+  options.application_hooks = {
+      example::InstallTimer,
 #if defined(HUXERUI_EXAMPLE_COLOR_STREAM)
-  options.root_hooks.push_back(example::InstallColorStream);
+      example::InstallColorStream,
 #endif
+  };
+  options.window_hooks.push_back([](WindowContext& root) {
+    root.Provide(OpenPlatformModule<std::shared_ptr<example::TimerService>>(example::timer::type));
+#if defined(HUXERUI_EXAMPLE_COLOR_STREAM)
+    root.Provide(OpenPlatformModule<std::shared_ptr<example::ColorStreamService>>(example::color_stream::type));
+#endif
+  });
   return options;
 }
 

@@ -762,7 +762,7 @@ View RecoveringModifierApp() {
 
 TEST_CASE("TestUseStateAndStateUpdate") {
   TestPlatform platform;
-  Runtime runtime{CounterApp, platform};
+  UiWindow runtime{CounterApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const FlattenedScene& initial = runtime.BuildFrame();
@@ -790,7 +790,7 @@ TEST_CASE("TestStateOperatorsUseTheEqualityAwareWritePath") {
   operator_state_compositions = 0;
 
   TestPlatform platform;
-  Runtime runtime{StateOperatorApp, platform};
+  UiWindow runtime{StateOperatorApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE(FirstText(runtime.BuildFrame()) == "8");
   REQUIRE(operator_state_compositions == 1);
@@ -843,7 +843,7 @@ TEST_CASE("TestStateOperatorsSupportStringEnumAndCustomValues") {
   compound_operator_state = State<SubtractAssignableStateValue>{};
 
   TestPlatform platform;
-  Runtime runtime{StateOperatorTypesApp, platform};
+  UiWindow runtime{StateOperatorTypesApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE(FirstText(runtime.BuildFrame()) == "base:1:3:10");
 
@@ -873,7 +873,7 @@ TEST_CASE("TestStateUpdateSupportsMoveOnlyValuesAndPostfixCopiesOnce") {
   copy_counted_operator_state = State<CopyCountedStateValue>{};
 
   TestPlatform platform;
-  Runtime runtime{MoveOnlyStateOperatorApp, platform};
+  UiWindow runtime{MoveOnlyStateOperatorApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE(FirstText(runtime.BuildFrame()) == "5:8");
 
@@ -896,7 +896,7 @@ TEST_CASE("TestStateListMutatesInPlaceAndInvalidatesObservedScopes") {
   state_list_compositions = 0;
 
   TestPlatform platform;
-  Runtime runtime{StateListApp, platform};
+  UiWindow runtime{StateListApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -947,12 +947,13 @@ TEST_CASE("TestStateListSupportsEmptyInitializationAndOnlyTracksReads") {
   unobserved_state_list_compositions = 0;
 
   TestPlatform platform;
-  Runtime empty_runtime{EmptyStateListApp, platform};
+  UiWindow empty_runtime{EmptyStateListApp, platform};
   empty_runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   REQUIRE(FirstText(empty_runtime.BuildFrame()) == "0");
   REQUIRE(empty_state_list.Empty());
 
-  Runtime unobserved_runtime{UnobservedStateListApp, platform};
+  TestPlatform unobserved_runtime_platform{platform.platform_resources};
+  UiWindow unobserved_runtime{UnobservedStateListApp, unobserved_runtime_platform};
   unobserved_runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   unobserved_runtime.BuildFrame();
   REQUIRE(unobserved_state_list_compositions == 1);
@@ -973,7 +974,7 @@ TEST_CASE("TestViewportClassRecomposesOnlyAcrossConfiguredBreakpoints") {
   observed_viewport_class = ViewportClass::Compact;
 
   TestPlatform platform;
-  Runtime runtime{
+  UiWindow runtime{
       ViewportClassApp,
       platform,
       {
@@ -1005,10 +1006,11 @@ TEST_CASE("TestViewportClassRecomposesOnlyAcrossConfiguredBreakpoints") {
   REQUIRE(viewport_compositions == 3);
   REQUIRE(observed_viewport_class == ViewportClass::Expanded);
 
+  TestPlatform invalid_platform;
   REQUIRE_THROWS_AS(
-      Runtime(
+      UiWindow(
           ViewportClassApp,
-          platform,
+          invalid_platform,
           {
               .viewport_breakpoints = ViewportBreakpoints{600.0F, 600.0F},
               .show_debug_overlay = false,
@@ -1022,7 +1024,7 @@ TEST_CASE("TestRootCompositionRecoversAfterException") {
   root_composition_should_throw = false;
 
   TestPlatform platform;
-  Runtime runtime{RecoveringRootApp, platform};
+  UiWindow runtime{RecoveringRootApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1047,7 +1049,7 @@ TEST_CASE("TestChildReconciliationRecoversAfterException") {
   child_composition_should_throw = false;
 
   TestPlatform platform;
-  Runtime runtime{RecoveringChildApp, platform};
+  UiWindow runtime{RecoveringChildApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1085,7 +1087,7 @@ TEST_CASE("TestModifierReconciliationPreservesExtensionsOnException") {
   extension_destroys = 0;
 
   TestPlatform platform;
-  Runtime runtime{RecoveringModifierApp, platform};
+  UiWindow runtime{RecoveringModifierApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1114,7 +1116,7 @@ TEST_CASE("TestModifierReconciliationPreservesExtensionsOnException") {
 
 TEST_CASE("TestLayoutAndHitTest") {
   TestPlatform platform;
-  Runtime runtime{CounterApp, platform};
+  UiWindow runtime{CounterApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1129,7 +1131,7 @@ TEST_CASE("TestLayoutAndHitTest") {
 
 TEST_CASE("TestViewCopyOnWrite") {
   TestPlatform platform;
-  Runtime runtime{CopyOnWriteApp, platform};
+  UiWindow runtime{CopyOnWriteApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1142,7 +1144,7 @@ TEST_CASE("TestViewCopyOnWrite") {
 
 TEST_CASE("ViewDeclarationsResolveInheritedStylesDuringReconciliation") {
   TestPlatform platform;
-  Runtime runtime{ReconciliationThemeApp, platform};
+  UiWindow runtime{ReconciliationThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1178,7 +1180,7 @@ TEST_CASE("ViewDeclarationsResolveInheritedStylesDuringReconciliation") {
 TEST_CASE("EnvironmentBoundaryRetainsIdentityWithoutOwningARecomposeScope") {
   environment_boundary_should_throw = false;
   TestPlatform platform;
-  Runtime runtime{EnvironmentBoundaryApp, platform};
+  UiWindow runtime{EnvironmentBoundaryApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1219,7 +1221,7 @@ TEST_CASE("EnvironmentEntriesInvalidateOnlyTheirExactReaders") {
   viewport_environment_compositions = 0;
   locale_environment_compositions = 0;
   TestPlatform platform;
-  Runtime runtime{PreciseEnvironmentDependencyApp, platform};
+  UiWindow runtime{PreciseEnvironmentDependencyApp, platform};
   runtime.SetWindowMetrics({.viewport = {500.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1246,7 +1248,7 @@ TEST_CASE("EnvironmentBoundaryRecoversAfterDescendantCompositionFailure") {
   environment_boundary_should_throw = false;
 
   TestPlatform platform;
-  Runtime runtime{EnvironmentBoundaryApp, platform};
+  UiWindow runtime{EnvironmentBoundaryApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1272,7 +1274,7 @@ TEST_CASE("EnvironmentBoundaryRecoversAfterDescendantCompositionFailure") {
 
 TEST_CASE("OneViewDeclarationResolvesIndependentlyUnderDifferentThemes") {
   TestPlatform platform;
-  Runtime runtime{SharedDeclarationThemeApp, platform};
+  UiWindow runtime{SharedDeclarationThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1289,7 +1291,7 @@ TEST_CASE("OneViewDeclarationResolvesIndependentlyUnderDifferentThemes") {
 
 TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
   TestPlatform platform;
-  Runtime runtime{TextStyleApp, platform};
+  UiWindow runtime{TextStyleApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1309,7 +1311,7 @@ TEST_CASE("PropertyModifiersApplyOncePerMountedDeclarationResolution") {
   REQUIRE(property_modifier_applications == 0);
 
   TestPlatform platform;
-  Runtime runtime{PropertyModifierApp, platform};
+  UiWindow runtime{PropertyModifierApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1330,7 +1332,7 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
 
   TestPlatform platform;
   {
-    Runtime runtime{ModifierApp, platform};
+    UiWindow runtime{ModifierApp, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     runtime.BuildFrame();
 
@@ -1371,7 +1373,8 @@ TEST_CASE("TestModifierReconciliationAndCopyOnWrite") {
   }
   REQUIRE(extension_destroys == 1);
 
-  Runtime copy_runtime{ModifierCopyOnWriteApp, platform};
+  TestPlatform copy_platform;
+  UiWindow copy_runtime{ModifierCopyOnWriteApp, copy_platform};
   copy_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   copy_runtime.BuildFrame();
   const auto* copy_root = copy_runtime.RootNode();
@@ -1384,7 +1387,7 @@ TEST_CASE("TestNonComparableModifierUpdatesConservatively") {
   opaque_extension_updates = 0;
 
   TestPlatform platform;
-  Runtime runtime{OpaqueModifierApp, platform};
+  UiWindow runtime{OpaqueModifierApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(opaque_extension_updates == 0);
@@ -1396,7 +1399,7 @@ TEST_CASE("TestNonComparableModifierUpdatesConservatively") {
 
 TEST_CASE("TestScopeStateIsolation") {
   TestPlatform platform;
-  Runtime runtime{ScopedCountersApp, platform};
+  UiWindow runtime{ScopedCountersApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1416,7 +1419,7 @@ TEST_CASE("TestScopeStateIsolation") {
 
 TEST_CASE("TestStatePassedIntoScope") {
   TestPlatform platform;
-  Runtime runtime{SharedStateApp, platform};
+  UiWindow runtime{SharedStateApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1433,7 +1436,7 @@ TEST_CASE("TestStatePassedIntoScope") {
 
 TEST_CASE("TestKeyedScopeIdentity") {
   TestPlatform platform;
-  Runtime runtime{KeyedScopesApp, platform};
+  UiWindow runtime{KeyedScopesApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 320.0F}});
   runtime.BuildFrame();
 
@@ -1457,7 +1460,7 @@ TEST_CASE("TestKeyedScopeIdentity") {
 
 TEST_CASE("TestDuplicateSiblingKeys") {
   TestPlatform platform;
-  Runtime runtime{DuplicateKeyApp, platform};
+  UiWindow runtime{DuplicateKeyApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   bool rejected = false;
@@ -1471,7 +1474,7 @@ TEST_CASE("TestDuplicateSiblingKeys") {
 
 TEST_CASE("TestRepeatedUseStateCallSite") {
   TestPlatform platform;
-  Runtime runtime{RepeatedUseStateApp, platform};
+  UiWindow runtime{RepeatedUseStateApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1497,7 +1500,7 @@ TEST_CASE("TestLocalScopeRecomposition") {
   right_scope_compositions = 0;
 
   TestPlatform platform;
-  Runtime runtime{LocalRecompositionApp, platform};
+  UiWindow runtime{LocalRecompositionApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 320.0F}});
   runtime.BuildFrame();
 
@@ -1526,7 +1529,7 @@ TEST_CASE("TestScopeReceivesUpdatedProps") {
   prop_scope_compositions = 0;
 
   TestPlatform platform;
-  Runtime runtime{PropUpdateApp, platform};
+  UiWindow runtime{PropUpdateApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -1549,7 +1552,7 @@ TEST_CASE("TestTypedScopeEvents") {
   saved_event_emitter = {};
 
   TestPlatform platform;
-  Runtime runtime{EventApp, platform};
+  UiWindow runtime{EventApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1594,7 +1597,7 @@ TEST_CASE("NodeExtensionsEmitThroughCurrentOwnerBindings") {
   received.clear();
   handler_lifetime.reset();
   TestPlatform platform;
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     View view = Text("source").With(NodeEventProbe{});
     if (mode == 2) {
       return view;
@@ -1655,7 +1658,7 @@ TEST_CASE("NodeExtensionEventsStayWithKeyedNodesAndRebindAfterReplacement") {
   received.clear();
   TestPlatform platform;
   {
-    Runtime runtime{[]() -> View {
+    UiWindow runtime{[]() -> View {
       const auto item = [](int key) -> View {
         View view = Text("item").Key(key).On<SearchSubmitted>([key, revision = mode](std::string) {
           received = std::to_string(key) + ":" + std::to_string(revision);
@@ -1722,7 +1725,7 @@ TEST_CASE("NodeExtensionEventsUseInputAndSemanticCallbacksWithoutBubbling") {
   enabled = true;
   bind_handler = true;
   TestPlatform platform;
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     View target = Text("source").With(Frame{100.0F, 40.0F}, Enabled{enabled}, NodeEventProbe{});
     if (bind_handler) {
       target = std::move(target).On<SearchSubmitted>([](std::string) { ++received; });
@@ -1763,7 +1766,7 @@ TEST_CASE("NodeExtensionEventsUseInputAndSemanticCallbacksWithoutBubbling") {
 TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {
   observed_text_measurer = nullptr;
   TestPlatform platform;
-  Runtime runtime{TextMeasurerApp, platform};
+  UiWindow runtime{TextMeasurerApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -1772,7 +1775,7 @@ TEST_CASE("TestRuntimeProvidesPlatformTextMeasurer") {
 
 TEST_CASE("ViewFactoriesBindTypedArgumentsAcrossCompositionWrappers") {
   TestPlatform platform;
-  Runtime runtime{ParameterizedFactoryApp, platform};
+  UiWindow runtime{ParameterizedFactoryApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
 
   REQUIRE(ContainsText(runtime.BuildFrame(), "bound 42"));
@@ -1820,7 +1823,7 @@ TEST_CASE("TestNestedEnvironment") {
   observed_environment_values.clear();
 
   TestPlatform platform;
-  Runtime runtime{EnvironmentApp, platform};
+  UiWindow runtime{EnvironmentApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 

@@ -133,7 +133,7 @@ struct LinuxTextInput::State {
   }
 
   bool IsActive() const noexcept {
-    return runtime != nullptr && session_id != 0 && !configuration.read_only;
+    return ui_window != nullptr && session_id != 0 && !configuration.read_only;
   }
 
   TextInputApplyResult Apply(std::vector<TextInputCommand> commands) {
@@ -141,7 +141,7 @@ struct LinuxTextInput::State {
       return {};
     }
     TextInputCommandBatch batch{.session_id = session_id, .commands = std::move(commands)};
-    return runtime->HandleTextInputCommands(batch);
+    return ui_window->HandleTextInputCommands(batch);
   }
 
   void UpdateContext() {
@@ -169,7 +169,7 @@ struct LinuxTextInput::State {
     }
     const TextOffset selection_start = state.selection.Range().start;
     const TextOffset context_start = std::max<TextOffset>(0, selection_start - 2048);
-    const TextInputContext surrounding = runtime->QueryTextInputContext(session_id, context_start, 4096);
+    const TextInputContext surrounding = ui_window->QueryTextInputContext(session_id, context_start, 4096);
     if (surrounding.result_code != TextInputResultCode::Ok) {
       return;
     }
@@ -277,7 +277,7 @@ struct LinuxTextInput::State {
     return self.Apply({std::move(deletion)}).result_code == TextInputResultCode::Ok;
   }
 
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   GtkIMContext* context = nullptr;
   GtkWidget* widget = nullptr;
   TextInputSessionId session_id = 0;
@@ -292,8 +292,8 @@ LinuxTextInput::LinuxTextInput() : state_(std::make_unique<State>()) {}
 
 LinuxTextInput::~LinuxTextInput() = default;
 
-void LinuxTextInput::SetRuntime(Runtime* runtime) noexcept {
-  state_->runtime = runtime;
+void LinuxTextInput::SetUiWindow(UiWindow* ui_window) noexcept {
+  state_->ui_window = ui_window;
 }
 
 void LinuxTextInput::SetClientWidget(GtkWidget* widget) {
@@ -327,7 +327,7 @@ void LinuxTextInput::Reset() noexcept {
     gtk_im_context_set_client_widget(state_->context, nullptr);
   }
   state_->widget = nullptr;
-  state_->runtime = nullptr;
+  state_->ui_window = nullptr;
   state_->session_id = 0;
   state_->focused = false;
   state_->composing = false;

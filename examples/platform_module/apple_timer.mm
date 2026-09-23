@@ -251,7 +251,7 @@ id<HUXAppKitPlatformModuleFactory> CreateAppleTimerFactory() {
   return [HuxerUIExampleTimerFactory new];
 }
 
-void InstallTimer(RootContext& root) {
+void InstallTimer(ApplicationContext& root) {
 #if TARGET_OS_IOS
   ios::ObjectiveCPlatformModuleFactory<std::shared_ptr<TimerService>> factory{
 #else
@@ -261,7 +261,6 @@ void InstallTimer(RootContext& root) {
       .create = CreateAppleTimerService,
   };
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, std::move(factory));
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

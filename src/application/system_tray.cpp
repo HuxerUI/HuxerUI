@@ -5,6 +5,7 @@
 
 #include "resources/resource_internal.h"
 #include "system_tray_internal.h"
+#include "application_internal.h"
 
 namespace huxerui::detail {
 
@@ -17,7 +18,8 @@ SystemTrayService::SystemTrayService(
     std::shared_ptr<SystemTrayTransport> transport, std::shared_ptr<AppResources> resources
 )
     : transport_(std::move(transport)), resources_(std::move(resources)),
-      available_(std::make_shared<StateCell<bool>>(transport_ != nullptr && transport_->IsAvailable())) {
+      available_(std::make_shared<StateCell<bool>>(transport_ != nullptr && transport_->IsAvailable())),
+      execution_(CurrentExecutionContext()) {
   if (!resources_) {
     throw std::invalid_argument("HuxerUI system tray resource service must not be empty");
   }
@@ -39,7 +41,13 @@ void SystemTrayService::EnsureInitialized() {
     }
     transport_->SetEventHandler([service](SystemTrayEvent event) {
       if (const auto active = service.lock()) {
-        active->HandleEvent(event);
+        const auto application = active->execution_->application.lock();
+        if (application) application->Post([service, event] {
+          if (const auto current = service.lock()) {
+            ExecutionGuard guard(current->execution_);
+            current->HandleEvent(event);
+          }
+        });
       }
     });
   } catch (...) {
@@ -49,29 +57,24 @@ void SystemTrayService::EnsureInitialized() {
 }
 
 bool SystemTrayService::IsAvailable() {
+  ValidateApplicationCall(execution_);
   EnsureInitialized();
   ObserveState(available_);
   return available_->value;
 }
 
-void SystemTrayService::Show(
-    std::uint64_t owner, ImageVariant icon, SystemTrayOptions options, std::shared_ptr<const Environment> environment
-) {
+void SystemTrayService::Show(ImageVariant icon, SystemTrayOptions options) {
+  const auto application = execution_->application.lock();
+  if (!application) throw std::logic_error("HuxerUI system tray application is disconnected");
+  ValidateApplicationCall(execution_);
+  ExecutionGuard guard(execution_);
   if (!connected_) {
     return;
   }
-  if (owner == 0) {
-    throw std::logic_error("HuxerUI system tray owner is invalid");
-  }
-  if (desired_.has_value() && desired_->owner != owner) {
-    throw std::logic_error("HuxerUI system tray presentation already has an active owner");
-  }
   ValidateImageVariant(icon);
   DesiredPresentation desired{
-      .owner = owner,
       .icon = std::move(icon),
       .options = std::move(options),
-      .environment = std::move(environment),
   };
   std::unordered_map<std::uint64_t, std::function<void()>> callbacks;
   std::uint64_t next_command = next_command_;
@@ -86,8 +89,9 @@ void SystemTrayService::Show(
   next_command_ = next_command;
 }
 
-void SystemTrayService::Hide(std::uint64_t owner) noexcept {
-  if (!desired_.has_value() || desired_->owner != owner) {
+void SystemTrayService::Hide() {
+  ValidateApplicationCall(execution_);
+  if (!desired_.has_value()) {
     return;
   }
   desired_.reset();
@@ -98,9 +102,10 @@ void SystemTrayService::Hide(std::uint64_t owner) noexcept {
   }
 }
 
-std::function<void()> SystemTrayService::ConnectActivate(std::function<void()> handler) {
-  if (!connected_) {
-    return {};
+void SystemTrayService::OnActivate(std::function<void()> handler) {
+  ValidateApplicationCall(execution_);
+  if (!connected_ || execution_->application.expired()) {
+    throw std::logic_error("HuxerUI system tray application is disconnected");
   }
   if (!handler) {
     throw std::invalid_argument("HuxerUI system tray activation handler must not be empty");
@@ -109,15 +114,7 @@ std::function<void()> SystemTrayService::ConnectActivate(std::function<void()> h
     throw std::logic_error("HuxerUI system tray activation handler is already connected");
   }
   EnsureInitialized();
-  activation_connection_ = next_connection_++;
   activation_handler_ = std::move(handler);
-  const std::uint64_t connection = activation_connection_;
-  std::weak_ptr<SystemTrayService> service = weak_from_this();
-  return [service, connection] {
-    if (const auto active = service.lock()) {
-      active->DisconnectActivate(connection);
-    }
-  };
 }
 
 void SystemTrayService::Disconnect() noexcept {
@@ -130,7 +127,6 @@ void SystemTrayService::Disconnect() noexcept {
   desired_.reset();
   callbacks_.clear();
   activation_handler_ = {};
-  activation_connection_ = 0;
   initialized_ = false;
   if (available_->value) {
     available_->value = false;
@@ -151,7 +147,8 @@ void SystemTrayService::Disconnect() noexcept {
 }
 
 void SystemTrayService::HandleEvent(const SystemTrayEvent& event) {
-  if (!connected_) {
+  const auto application = execution_->application.lock();
+  if (!connected_ || !application || !application->accepts_tasks) {
     return;
   }
   switch (event.type) {
@@ -167,13 +164,15 @@ void SystemTrayService::HandleEvent(const SystemTrayEvent& event) {
     break;
   case SystemTrayEventType::Activate:
     if (available_->value && desired_.has_value() && activation_handler_) {
-      activation_handler_();
+      auto handler = activation_handler_;
+      handler();
     }
     break;
   case SystemTrayEventType::Command:
     if (event.generation == generation_) {
       if (const auto found = callbacks_.find(event.command); found != callbacks_.end()) {
-        found->second();
+        auto handler = found->second;
+        handler();
       }
     }
     break;
@@ -202,8 +201,9 @@ ResolvedSystemTrayPresentation SystemTrayService::ResolvePresentation(
     std::uint64_t& next_command,
     std::unordered_map<std::uint64_t, std::function<void()>>& callbacks
 ) {
-  const Locale locale = ResolveResourceLocale(desired.environment, *resources_);
-  ResolvedImageAsset icon = ResolveImage(desired.icon, *resources_, locale);
+  const auto configuration = resources_->Configuration(false);
+  const auto& locale = configuration.locale;
+  ResolvedImageAsset icon = ResolveImage(desired.icon, *resources_, locale, configuration.display_scale);
   if (!std::holds_alternative<ImageAsset>(icon)) {
     throw std::invalid_argument("HuxerUI system tray icon must resolve to an ImageAsset");
   }
@@ -212,17 +212,18 @@ ResolvedSystemTrayPresentation SystemTrayService::ResolvePresentation(
   presentation.tooltip = ResolveString(desired.options.tooltip, *resources_, locale);
   presentation.generation = generation;
   if (!desired.options.menu.empty()) {
-    presentation.menu = ResolveMenu(desired.options.menu, locale, next_command, callbacks);
+    presentation.menu = ResolveMenu(desired.options.menu, configuration, next_command, callbacks);
   }
   return presentation;
 }
 
 std::vector<ResolvedSystemTrayMenuEntry> SystemTrayService::ResolveMenu(
     const std::vector<MenuEntry>& entries,
-    const Locale& locale,
+    const ResourceConfiguration& configuration,
     std::uint64_t& next_command,
     std::unordered_map<std::uint64_t, std::function<void()>>& callbacks
 ) {
+  const auto& locale = configuration.locale;
   if (entries.empty()) {
     throw std::invalid_argument("HuxerUI menu must contain at least one item");
   }
@@ -251,7 +252,7 @@ std::vector<ResolvedSystemTrayMenuEntry> SystemTrayService::ResolveMenu(
       throw std::invalid_argument("HuxerUI menu item label must not be empty");
     }
     if (item.icon_.has_value()) {
-      ResolvedImageAsset icon = ResolveImage(*item.icon_, *resources_, locale);
+      ResolvedImageAsset icon = ResolveImage(*item.icon_, *resources_, locale, configuration.display_scale);
       if (!std::holds_alternative<ImageAsset>(icon)) {
         throw std::invalid_argument("HuxerUI system tray menu icon must resolve to an ImageAsset");
       }
@@ -265,7 +266,7 @@ std::vector<ResolvedSystemTrayMenuEntry> SystemTrayService::ResolveMenu(
       callbacks.emplace(resolved.command, *action);
     } else {
       resolved.children =
-          ResolveMenu(std::get<std::vector<MenuEntry>>(item.destination_), locale, next_command, callbacks);
+          ResolveMenu(std::get<std::vector<MenuEntry>>(item.destination_), configuration, next_command, callbacks);
     }
     result.emplace_back(std::move(resolved));
     previous_was_section = false;
@@ -274,14 +275,6 @@ std::vector<ResolvedSystemTrayMenuEntry> SystemTrayService::ResolveMenu(
     throw std::invalid_argument("HuxerUI menu section must separate two items");
   }
   return result;
-}
-
-void SystemTrayService::DisconnectActivate(std::uint64_t connection) noexcept {
-  if (activation_connection_ != connection) {
-    return;
-  }
-  activation_handler_ = {};
-  activation_connection_ = 0;
 }
 
 } // namespace huxerui::detail
@@ -293,15 +286,15 @@ bool SystemTrayHandle::IsAvailable() const {
 }
 
 void SystemTrayHandle::Show(ImageVariant icon, SystemTrayOptions options) const {
-  service_->Show(owner_, std::move(icon), std::move(options), environment_);
+  service_->Show(std::move(icon), std::move(options));
 }
 
 void SystemTrayHandle::Hide() const {
-  service_->Hide(owner_);
+  service_->Hide();
 }
 
-std::function<void()> SystemTrayHandle::ConnectActivate(std::function<void()> handler) const {
-  return service_->ConnectActivate(std::move(handler));
+void SystemTrayHandle::OnActivate(std::function<void()> handler) const {
+  service_->OnActivate(std::move(handler));
 }
 
 } // namespace huxerui

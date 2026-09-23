@@ -8,7 +8,7 @@
 #include <huxerui/semantics.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -17,7 +17,7 @@ class UIKitPlatformViews;
 
 class UIKitAccessibility final {
 public:
-  UIKitAccessibility(Runtime& runtime, UIView* root, UIKitPlatformViews& platform_views, id<UITextInput> text_input);
+  UIKitAccessibility(UiWindow& ui_window, UIView* root, UIKitPlatformViews& platform_views, id<UITextInput> text_input);
   ~UIKitAccessibility();
 
   UIKitAccessibility(const UIKitAccessibility&) = delete;

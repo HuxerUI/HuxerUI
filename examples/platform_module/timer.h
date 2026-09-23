@@ -7,7 +7,7 @@
 #include <variant>
 
 #include <huxerui/platform_registry.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 namespace huxerui::example {
 
@@ -39,6 +39,6 @@ protected:
 };
 
 std::shared_ptr<TimerService> UseTimer();
-void InstallTimer(RootContext& root);
+void InstallTimer(ApplicationContext& root);
 
 } // namespace huxerui::example

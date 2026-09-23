@@ -8,8 +8,9 @@
 #include <huxerui/modifier.h>
 
 #include "huxerui_builtin_resources.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "window_internal.h"
+#include "application_internal.h"
 
 namespace huxerui {
 
@@ -176,17 +177,66 @@ bool IsValidSystemBarsAppearance(const SystemBarsAppearance& appearance) noexcep
          valid_brightness(appearance.status_bar_content) && valid_brightness(appearance.navigation_bar_content);
 }
 
-WindowService::WindowService(PlatformAdapter& platform) : platform_(&platform) {}
+WindowService::WindowService(UiWindow& ui_window)
+    : ui_window_(&ui_window), application_(CurrentApplicationRuntime()) {}
+
+WindowLifecycleState WindowService::LifecycleState() const {
+  return lifecycle_state_.Get();
+}
+
+void WindowService::UpdateLifecycleState(WindowLifecycleState state) {
+  if (state != WindowLifecycleState::Active && state != WindowLifecycleState::Inactive &&
+      state != WindowLifecycleState::Background) {
+    throw std::invalid_argument("HuxerUI window lifecycle state is invalid");
+  }
+  if (!ui_window_ || lifecycle_state_.Get() == state) return;
+  lifecycle_state_ = state;
+  if (lifecycle_handlers_.empty()) return;
+  std::vector<std::uint64_t> recipients;
+  for (const auto& [identity, handler] : lifecycle_handlers_) {
+    static_cast<void>(handler);
+    recipients.push_back(identity);
+  }
+  const std::weak_ptr<WindowService> weak = weak_from_this();
+  if (const auto application = application_.lock()) {
+    application->Post([weak, state, recipients = std::move(recipients)] {
+      if (const auto service = weak.lock(); service && service->ui_window_) {
+        for (const auto identity : recipients) {
+          if (const auto found = service->lifecycle_handlers_.find(identity);
+              found != service->lifecycle_handlers_.end()) {
+            auto handler = found->second;
+            handler(state);
+          }
+        }
+      }
+    });
+  }
+}
+
+std::function<void()> WindowService::ConnectLifecycle(std::function<void(WindowLifecycleState)> handler) {
+  if (!handler) throw std::invalid_argument("HuxerUI window lifecycle handler must not be empty");
+  if (!ui_window_) throw std::logic_error("HuxerUI window is disconnected");
+  const auto identity = next_connection_++;
+  lifecycle_handlers_.emplace(identity,
+      [source = CurrentExecutionContext(), handler = std::move(handler)](WindowLifecycleState state) {
+        ExecutionGuard guard(source);
+        handler(state);
+      });
+  const std::weak_ptr<WindowService> weak = weak_from_this();
+  return [weak, identity] {
+    if (const auto service = weak.lock()) service->lifecycle_handlers_.erase(identity);
+  };
+}
 
 void WindowService::Request(WindowCommand command) {
-  if (platform_ == nullptr) {
+  if (ui_window_ == nullptr) {
     return;
   }
   if ((command == WindowCommand::Minimize || command == WindowCommand::Close) &&
       HandleRequest(command)) {
     return;
   }
-  platform_->RequestWindowCommand(command);
+  ui_window_->RequestWindowCommand(command);
 }
 
 bool WindowService::HandleRequest(WindowCommand command) {
@@ -207,7 +257,10 @@ WindowService::ConnectRequest(WindowCommand command, std::function<bool()> handl
     throw std::logic_error("HuxerUI window request handler is already connected");
   }
   request.connection = next_connection_++;
-  request.handler = std::move(handler);
+  request.handler = [source = CurrentExecutionContext(), handler = std::move(handler)] {
+    ExecutionGuard guard(source);
+    return handler();
+  };
   const std::uint64_t connection = request.connection;
   std::weak_ptr<WindowService> service = weak_from_this();
   return [service, command, connection] {
@@ -243,9 +296,10 @@ void WindowService::DisconnectRequest(WindowCommand command, std::uint64_t conne
 }
 
 void WindowService::Disconnect() noexcept {
-  platform_ = nullptr;
+  ui_window_ = nullptr;
   minimize_handler_ = {};
   close_handler_ = {};
+  lifecycle_handlers_.clear();
 }
 
 } // namespace detail
@@ -341,6 +395,14 @@ LayoutResult WindowTitleBar::Measure(LayoutContext& context, ViewNode& node, Con
 
 void WindowHandle::Show() const {
   service_->Request(WindowCommand::Show);
+}
+
+WindowLifecycleState WindowHandle::LifecycleState() const {
+  return service_->LifecycleState();
+}
+
+std::function<void()> WindowHandle::ConnectLifecycle(std::function<void(WindowLifecycleState)> handler) const {
+  return service_->ConnectLifecycle(std::move(handler));
 }
 
 void WindowHandle::Hide() const {

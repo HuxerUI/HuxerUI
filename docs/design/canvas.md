@@ -121,7 +121,7 @@ Canvas([](PaintContext& paint, Size size) {
 Canvas has no intrinsic size.
 Its size comes from `Frame`, `Grow`, or parent constraints.
 The painter receives the content size after Padding and always uses a content-local origin of `(0, 0)`.
-For the uncommon case where Canvas itself has Padding, Runtime records a translation around the callback; a zero-Padding Canvas records no extra transform.
+For the uncommon case where Canvas itself has Padding, UiWindow records a translation around the callback; a zero-Padding Canvas records no extra transform.
 
 The node's Shadow and Background paint before the callback and continue to use the complete node bounds.
 Foreground NodeExtensions and focus visuals paint afterward.

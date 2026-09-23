@@ -2,7 +2,7 @@
 
 This document defines the implemented ownership and public contract for transient interaction state, indication visuals, resource-backed and gradient fills, and their retained paint ordering.
 
-Runtime owns interaction recognition and ordered interaction edges. Retained indication consumes that state without becoming another input recognizer.
+UiWindow owns interaction recognition and ordered interaction edges. Retained indication consumes that state without becoming another input recognizer.
 The shared gesture-recognition and competition model is specified separately in [Gesture Recognition and Arbitration Design](gestures.md).
 
 ## Goals
@@ -117,7 +117,7 @@ A pointer target starts the interaction for ordinary Click and pointer-event sur
 
 When no ordinary target exists, an extension gesture that accepts Observe or Capture may establish the interaction on its owning node.
 
-Runtime produces exactly one terminal Release or Cancel for every accepted Press.
+UiWindow produces exactly one terminal Release or Cancel for every accepted Press.
 
 Scroll arbitration, native cancellation, replacement of an existing pointer ID, disabling, focus loss for a keyboard press, subtree deactivation, and unmount all terminate the corresponding interaction through the same path.
 

@@ -630,7 +630,7 @@ TEST_CASE("ImageResourceScopesObserveDisplayScalePrecisely") {
   resources.assets.emplace("huxerui/test/images/density@2x.png", image_2x);
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{ResourceConfigurationDependencyApp, platform};
+  UiWindow runtime{ResourceConfigurationDependencyApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
 
   runtime.BuildFrame();
@@ -667,7 +667,7 @@ TEST_CASE("DirectLiteralResourceHelpersDoNotObserveResourceConfiguration") {
   TestPlatform platform;
   platform.platform_resources = &resources;
   direct_image_asset = ImageAsset::FromEncoded(MakeTestPng(20, 10));
-  Runtime runtime{DirectLiteralResourceHelperApp, platform};
+  UiWindow runtime{DirectLiteralResourceHelperApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "literal");
@@ -721,7 +721,7 @@ TEST_CASE("MountedTextAndCanvasInheritLocaleWithoutSubscribingExplicitShaping") 
   );
   ShapingRecordingPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{InheritedTextShapingApp, platform};
+  UiWindow runtime{InheritedTextShapingApp, platform};
   runtime.SetWindowMetrics({.viewport = {400.0F, 700.0F}});
 
   const auto find_paragraph = [](const FlattenedScene& scene, std::string_view text) {
@@ -877,7 +877,7 @@ TEST_CASE("LiteralTextFieldsDoNotObserveResourceConfiguration") {
   resources.assets.emplace(detail::resource_index_path, EncodeIndex({}));
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{LiteralTextFieldResourceDependencyApp, platform};
+  UiWindow runtime{LiteralTextFieldResourceDependencyApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
 
   runtime.BuildFrame();
@@ -895,7 +895,7 @@ TEST_CASE("LiteralSemanticsDoNotObserveResourceConfiguration") {
   resources.assets.emplace(detail::resource_index_path, EncodeIndex({}));
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{LiteralSemanticsResourceDependencyApp, platform};
+  UiWindow runtime{LiteralSemanticsResourceDependencyApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
 
   runtime.BuildFrame();
@@ -930,7 +930,7 @@ TEST_CASE("ResourceSemanticsObserveLocalePrecisely") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{ResourceSemanticsDependencyApp, platform};
+  UiWindow runtime{ResourceSemanticsDependencyApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
 
   const auto contains_label = [](const FrameCommit& frame, std::string_view label) {
@@ -972,8 +972,9 @@ TEST_CASE("TooltipCompileObservesOnlyResourceBackedMessages") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime literal{LiteralTooltipDependencyApp, platform};
-  Runtime localized{ResourceTooltipDependencyApp, platform};
+  UiWindow literal{LiteralTooltipDependencyApp, platform};
+  TestPlatform localized_platform{platform.platform_resources};
+  UiWindow localized{ResourceTooltipDependencyApp, localized_platform};
   literal.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   localized.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
 
@@ -1031,7 +1032,7 @@ TEST_CASE("VirtualItemsRetainResourceDependenciesOnTheirDeclaringScope") {
   resources.assets.emplace("huxerui/test/images/density@2x.png", image_2x);
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{VirtualResourceConfigurationDependencyApp, platform};
+  UiWindow runtime{VirtualResourceConfigurationDependencyApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
 
   runtime.BuildFrame();
@@ -1109,7 +1110,7 @@ TEST_CASE("RuntimeRefreshesLocalizedResourcesWhenPlatformContextChanges") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{LocalizedResourceApp, platform};
+  UiWindow runtime{LocalizedResourceApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "你好，Ada");
@@ -1162,7 +1163,7 @@ TEST_CASE("DialogDefaultsResolveFrameworkResourcesAndTrackLocale") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{FrameworkDialogResourceApp, platform};
+  UiWindow runtime{FrameworkDialogResourceApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(resource_dialog.has_value());
@@ -1203,7 +1204,7 @@ TEST_CASE("ValidationDefaultsResolveFrameworkResourcesAndTrackLocale") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{FrameworkValidationResourceApp, platform};
+  UiWindow runtime{FrameworkValidationResourceApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
 
   REQUIRE(ContainsText(runtime.BuildFrame(), "此字段为必填项"));
@@ -1283,7 +1284,7 @@ TEST_CASE("TextSelectionLabelsResolveFrameworkResourcesAndTrackLocale") {
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
   platform.platform_resources = &resources;
-  Runtime runtime{FrameworkSelectionResourceApp, platform};
+  UiWindow runtime{FrameworkSelectionResourceApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -1301,7 +1302,7 @@ TEST_CASE("TextSelectionLabelsResolveFrameworkResourcesAndTrackLocale") {
   TestPlatform partial_platform;
   partial_platform.platform_clipboard = &clipboard;
   partial_platform.platform_resources = &resources;
-  Runtime partial_runtime{PartialSelectionLabelsResourceApp, partial_platform};
+  UiWindow partial_runtime{PartialSelectionLabelsResourceApp, partial_platform};
   partial_runtime.SetWindowMetrics({.viewport = {280.0F, 120.0F}});
   partial_runtime.BuildFrame();
   partial_runtime.HandlePointerEvent({PointerEventType::Down, 902, {20.0F, 20.0F}, PointerDeviceKind::Touch});
@@ -1359,7 +1360,7 @@ TEST_CASE("TextAndControlsResolveStringResourcesDirectly") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{DirectLocalizedResourceApp, platform};
+  UiWindow runtime{DirectLocalizedResourceApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 160.0F}});
 
   const FlattenedScene& scene = runtime.BuildFrame();
@@ -1391,7 +1392,7 @@ TEST_CASE("TextFieldResourceFailurePreservesTheCommittedExtensionValue") {
   );
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{TextFieldResourceFailureApp, platform};
+  UiWindow runtime{TextFieldResourceFailureApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1455,7 +1456,7 @@ TEST_CASE("MenuItemsResolveStringAndImageResources") {
 
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{ResourceMenuApp, platform};
+  UiWindow runtime{ResourceMenuApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(resource_menu.has_value());
@@ -1496,7 +1497,7 @@ TEST_CASE("PresentedStringVariantsRefreshWhenTheResourceConfigurationChanges") {
 
   TestPlatform platform;
   platform.platform_resources = &resources;
-  Runtime runtime{ResourceMenuApp, platform};
+  UiWindow runtime{ResourceMenuApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(resource_menu.has_value());
@@ -1583,7 +1584,7 @@ TEST_CASE("WindowCaptionLabelsRefreshWhenTheResourceConfigurationChanges") {
   options.show_debug_overlay = false;
   options.window.chrome_mode = WindowChromeMode::Custom;
   options.window.caption_labels.minimize = StringResource("test", "strings/minimize_window");
-  Runtime runtime{LocalizedWindowControlsApp, platform, options};
+  UiWindow runtime{LocalizedWindowControlsApp, platform, options};
   runtime.SetWindowMetrics({
       .viewport = {300.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 40.0F, .right_inset = 138.0F},
@@ -1631,11 +1632,12 @@ TEST_CASE("LocalizedResourcesRequireTheDefaultArgumentSchema") {
   TestPlatform platform;
   platform.platform_resources = &resources;
 
-  Runtime missing{MissingResourceArgumentsApp, platform};
+  UiWindow missing{MissingResourceArgumentsApp, platform};
   missing.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   REQUIRE_THROWS_AS(missing.BuildFrame(), std::invalid_argument);
 
-  Runtime extra{ExtraResourceArgumentsApp, platform};
+  TestPlatform extra_platform{platform.platform_resources};
+  UiWindow extra{ExtraResourceArgumentsApp, extra_platform};
   extra.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   REQUIRE_THROWS_AS(extra.BuildFrame(), std::invalid_argument);
 }
@@ -1719,7 +1721,7 @@ private:
 };
 
 struct ResourceTaskQueue {
-  UIThreadDispatcher Dispatcher() {
+  UiThreadDispatcher Dispatcher() {
     return [this](std::function<void()> task) {
       {
         std::scoped_lock lock(mutex);
@@ -1764,7 +1766,7 @@ TEST_CASE("RawResourceLookupAndRecompositionDoNotOpenThePayload") {
     ++compositions;
     return Text(std::to_string(revision.Get()));
   };
-  Runtime runtime{ResourceTestRoot, platform};
+  UiWindow runtime{ResourceTestRoot, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   runtime.BuildFrame();
   first = current;
@@ -1884,7 +1886,7 @@ TEST_CASE("RawResourceAsyncOpenRetainsAssetAndDeliversCallerSizedReads") {
     asset = UseRawResource(lazy_resource);
     return Text("resources");
   };
-  Runtime runtime{ResourceTestRoot, platform};
+  UiWindow runtime{ResourceTestRoot, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   runtime.BuildFrame();
   auto opened = asset.OpenReadAsync();
@@ -1944,7 +1946,7 @@ TEST_CASE("RawResourceAsyncFailuresAndRetainedMemoryUseTheSameContract") {
     tasks = UseTaskScope();
     return Text("resources");
   };
-  Runtime runtime{ResourceTestRoot, platform};
+  UiWindow runtime{ResourceTestRoot, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   runtime.BuildFrame();
   bool complete = false;
@@ -2029,7 +2031,7 @@ TEST_CASE("RawResourceCancellationReleasesAnInFlightOpenOrReadWithoutDelivery") 
     asset = UseRawResource(lazy_resource);
     return Text("resources");
   };
-  Runtime runtime{ResourceTestRoot, platform};
+  UiWindow runtime{ResourceTestRoot, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
   runtime.BuildFrame();
   bool delivered = false;
@@ -2078,7 +2080,7 @@ TEST_CASE("RawResourceRuntimeDestructionDisconnectsEvenRetainedServices") {
       retained_service = UseService<detail::AppResources>();
       return Text("resources");
     };
-    Runtime runtime{ResourceTestRoot, platform};
+    UiWindow runtime{ResourceTestRoot, platform};
     runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
     runtime.BuildFrame();
     opened.emplace(asset.OpenRead());

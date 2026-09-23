@@ -6,7 +6,7 @@ TEST_CASE("DirectoryReferencesFinalizeProviderImportsAndPreserveFailureAndCancel
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File destination = file_application->Directories().temporary_directory.Child("destination");
   REQUIRE(destination.CreateDirectory());

@@ -23,6 +23,7 @@ namespace huxerui {
 namespace detail {
 
 class RecomposeScope;
+struct ApplicationRuntimeState;
 struct LifecycleDependencyAccess;
 
 class CompositionDependency {
@@ -34,6 +35,9 @@ public:
   std::unordered_set<std::uint64_t> pending_readers;
 };
 
+/// Shared observable-cell identity with an immutable original application binding after first attachment.
+/// Subscribers are weak and globally identified across windows. The weak application does not keep native facilities
+/// alive; application_bound distinguishes a never-bound cell from an expired binding that must not be replaced.
 class StateCellBase : public CompositionDependency {
 public:
   ~StateCellBase() override = default;
@@ -41,6 +45,8 @@ public:
   [[nodiscard]] virtual std::type_index Type() const noexcept = 0;
 
   std::uint64_t version = 0;
+  std::weak_ptr<ApplicationRuntimeState> application;
+  bool application_bound = false;
 };
 
 template <class T> class StateCell final : public StateCellBase {
@@ -94,6 +100,14 @@ std::vector<std::ranges::range_value_t<Range>> CollectStateListValues(Range&& ra
 }
 
 void ObserveState(const std::shared_ptr<StateCellBase>& cell);
+/// Binds an unbound observable cell to the current application without retaining that Runtime.
+/// @param cell New or already bound cell; binding it to a different application is rejected.
+/// @throws std::logic_error If the current application/thread is invalid or an existing binding differs.
+void BindStateLifetime(StateCellBase& cell);
+/// Checks an existing cell's original application and thread before reading or mutating it.
+/// @param cell Cell whose weak application binding must still be valid; never rebound by validation.
+/// @throws std::logic_error If the binding expired, stopped, differs from the current context, or uses another thread.
+void ValidateStateLifetime(const StateCellBase& cell);
 void NotifyState(const std::shared_ptr<StateCellBase>& cell);
 void ObserveDependency(const std::shared_ptr<CompositionDependency>& dependency);
 void BeginDependencyChange(const std::shared_ptr<CompositionDependency>& dependency);
@@ -105,19 +119,45 @@ UseStateCell(std::type_index type, const std::source_location& location, std::sh
 
 } // namespace detail
 
+/// A shared observable cell bound to the original application's lifetime and thread.
+/// @tparam T Stored value type. Copies of State share the same cell rather than duplicating the value.
+/// Get/conversion reads subscribe an active composition; writes invalidate its observers. Ordinary application-thread
+/// reads do not require composition. Retaining a cell does not keep its Runtime alive or let it bind to a new Runtime.
+///
+/// Construct State values in application models during application_hooks or later application work. An empty State
+/// needs no Runtime; directly creating a value creates a fresh cell each time, while UseState remembers composition
+/// identity.
+/// @code{.cpp}
+/// struct DemoViewModel {
+///   State<int> count{0};
+/// };
+/// // During an ApplicationHook or later application-thread work:
+/// auto model = std::make_shared<DemoViewModel>();
+/// UseApplicationTaskScope().Post([model] { ++model->count; });
+/// @endcode
 template <class T> class State {
 public:
   using ValueType = T;
 
   State() = default;
 
-  explicit State(std::shared_ptr<detail::StateCell<T>> cell) : cell_(std::move(cell)) {}
+  explicit State(T initial) : State(std::make_shared<detail::StateCell<T>>(std::move(initial))) {}
+
+  explicit State(std::shared_ptr<detail::StateCell<T>> cell) : cell_(std::move(cell)) {
+    if (cell_) {
+      detail::BindStateLifetime(*cell_);
+    }
+  }
 
   State(const State&) = default;
   State(State&&) noexcept = default;
   State& operator=(const State&) = default;
   State& operator=(State&&) noexcept = default;
 
+  /// Reads the current cell and subscribes the active composition, if any.
+  /// @return A borrowed reference to the cell's current value; mutation or cell destruction may invalidate it.
+  /// @throws std::logic_error If empty, accessed from another thread/application, or its original application has
+  /// stopped.
   [[nodiscard]] const T& Get() const {
     EnsureValid();
     detail::ObserveState(cell_);
@@ -141,6 +181,7 @@ public:
     }
   }
 
+  /// Reports whether this handle contains a cell, not whether its application lifetime is still active.
   [[nodiscard]] bool IsValid() const noexcept {
     return static_cast<bool>(cell_);
   }
@@ -295,6 +336,7 @@ private:
     if (!cell_) {
       throw std::logic_error("HuxerUI state is empty");
     }
+    detail::ValidateStateLifetime(*cell_);
   }
 
   std::shared_ptr<detail::StateCell<T>> cell_;
@@ -307,7 +349,11 @@ public:
 
   StateList() = default;
 
-  explicit StateList(std::shared_ptr<detail::StateListCell<T>> cell) : cell_(std::move(cell)) {}
+  explicit StateList(std::shared_ptr<detail::StateListCell<T>> cell) : cell_(std::move(cell)) {
+    if (cell_) {
+      detail::BindStateLifetime(*cell_);
+    }
+  }
 
   StateList(const StateList&) = default;
   StateList(StateList&&) noexcept = default;
@@ -435,6 +481,7 @@ private:
     if (!cell_) {
       throw std::logic_error("HuxerUI StateList is invalid");
     }
+    detail::ValidateStateLifetime(*cell_);
   }
 
   void EnsureIndex(std::size_t index) const {

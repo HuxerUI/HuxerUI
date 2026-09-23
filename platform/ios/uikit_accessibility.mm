@@ -301,12 +301,12 @@ bool StructureChanged(const SemanticFrame& previous, const SemanticFrame& curren
 
 struct UIKitAccessibility::State {
   State(
-      Runtime& runtime_value,
+      UiWindow& ui_window_value,
       UIView* root_value,
       UIKitPlatformViews& platform_views_value,
       id<UITextInput> text_input_value
   )
-      : runtime(&runtime_value), root(root_value), platform_views(&platform_views_value), text_input(text_input_value) {
+      : ui_window(&ui_window_value), root(root_value), platform_views(&platform_views_value), text_input(text_input_value) {
   }
 
   const SemanticNode* Node(SemanticNodeId id) const noexcept {
@@ -317,7 +317,7 @@ struct UIKitAccessibility::State {
     return found == node_indices.end() ? nullptr : &frame->nodes[found->second];
   }
 
-  Runtime* runtime;
+  UiWindow* ui_window;
   __weak UIView* root;
   UIKitPlatformViews* platform_views;
   __weak id<UITextInput> text_input;
@@ -463,16 +463,16 @@ void RemoveStaleNodes(
 } // namespace
 
 UIKitAccessibility::UIKitAccessibility(
-    Runtime& runtime, UIView* root, UIKitPlatformViews& platform_views, id<UITextInput> text_input
+    UiWindow& ui_window, UIView* root, UIKitPlatformViews& platform_views, id<UITextInput> text_input
 )
-    : state_(std::make_unique<State>(runtime, root, platform_views, text_input)) {}
+    : state_(std::make_unique<State>(ui_window, root, platform_views, text_input)) {}
 
 UIKitAccessibility::~UIKitAccessibility() {
   Shutdown();
 }
 
 void UIKitAccessibility::Commit(std::shared_ptr<const SemanticFrame> frame, bool platform_views_changed) {
-  if (!state_ || state_->runtime == nullptr || state_->root == nil || !frame) {
+  if (!state_ || state_->ui_window == nullptr || state_->root == nil || !frame) {
     return;
   }
   const std::shared_ptr<const SemanticFrame> previous = state_->frame;
@@ -649,7 +649,7 @@ void UIKitAccessibility::Shutdown() {
 }
 
 bool UIKitAccessibility::PerformDefault(SemanticNodeId id) {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return false;
   }
   const SemanticNode* node = state_->Node(id);
@@ -669,23 +669,23 @@ bool UIKitAccessibility::PerformDefault(SemanticNodeId id) {
 }
 
 bool UIKitAccessibility::Perform(SemanticNodeId id, SemanticActionKind action) {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return false;
   }
   const SemanticNode* node = state_->Node(id);
   if (node == nullptr || !node->enabled || !HasAction(*node, action)) {
     return false;
   }
-  return state_->runtime->PerformSemanticAction(id, {action, std::monostate{}});
+  return state_->ui_window->PerformSemanticAction(id, {action, std::monostate{}});
 }
 
 bool UIKitAccessibility::PerformSelection(SemanticNodeId id, bool selected) {
-  return state_ && state_->runtime != nullptr &&
-         state_->runtime->PerformSemanticAction(id, {SemanticActionKind::SetSelected, selected});
+  return state_ && state_->ui_window != nullptr &&
+         state_->ui_window->PerformSemanticAction(id, {SemanticActionKind::SetSelected, selected});
 }
 
 bool UIKitAccessibility::PerformCustom(SemanticNodeId id, std::uint64_t action_id) {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return false;
   }
   const SemanticNode* node = state_->Node(id);
@@ -695,11 +695,11 @@ bool UIKitAccessibility::PerformCustom(SemanticNodeId id, std::uint64_t action_i
       })) {
     return false;
   }
-  return state_->runtime->PerformSemanticAction(id, {SemanticActionKind::Custom, action_id});
+  return state_->ui_window->PerformSemanticAction(id, {SemanticActionKind::Custom, action_id});
 }
 
 bool UIKitAccessibility::PerformScroll(SemanticNodeId id, UIAccessibilityScrollDirection direction) {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return false;
   }
 
@@ -721,7 +721,7 @@ bool UIKitAccessibility::PerformScroll(SemanticNodeId id, UIAccessibilityScrollD
   const bool horizontal = node->scroll->axis == Axis::Horizontal;
   const float delta = std::max(48.0F, node->scroll->viewport_extent * 0.8F) * sign;
   const Point offset = horizontal ? Point{delta, 0.0F} : Point{0.0F, delta};
-  if (!state_->runtime->PerformSemanticAction(node->id, {SemanticActionKind::Scroll, offset})) {
+  if (!state_->ui_window->PerformSemanticAction(node->id, {SemanticActionKind::Scroll, offset})) {
     return false;
   }
   state_->pending_scroll = node->id;

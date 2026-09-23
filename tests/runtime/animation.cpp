@@ -88,7 +88,7 @@ View UndampedSceneTransitionApp() {
 
 TEST_CASE("TransitionProjectsOneProgressOntoPresentationProperties") {
   TestPlatform platform;
-  Runtime runtime{SynchronizedTransitionApp, platform};
+  UiWindow runtime{SynchronizedTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
   REQUIRE(runtime.RootNode()->render_node.opacity == Catch::Approx(0.5F));
@@ -104,7 +104,7 @@ TEST_CASE("TransitionProjectsOneProgressOntoPresentationProperties") {
 
 TEST_CASE("SceneTransitionPublishesFrozenAndLiveSceneComposition") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   const RenderFrame& initial = runtime.BuildRenderFrame();
   REQUIRE(initial.scene.root != nullptr);
@@ -132,7 +132,7 @@ TEST_CASE("SceneTransitionPublishesFrozenAndLiveSceneComposition") {
 
 TEST_CASE("SceneTransitionRequiresASynchronousInteractionForImplicitOrigin") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
 
@@ -145,7 +145,7 @@ TEST_CASE("SceneTransitionRequiresASynchronousInteractionForImplicitOrigin") {
 
 TEST_CASE("SceneTransitionReplacementKeepsTheNewTreeAuthoritative") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   const std::uint64_t live_root_identity = runtime.BuildRenderFrame().scene.root->id;
 
@@ -169,7 +169,7 @@ TEST_CASE("SceneTransitionReplacementKeepsTheNewTreeAuthoritative") {
 TEST_CASE("SceneTransitionRetainedHandleRejectsRequestsAfterRuntimeDestruction") {
   TestPlatform platform;
   {
-    Runtime runtime{SceneTransitionApp, platform};
+    UiWindow runtime{SceneTransitionApp, platform};
     runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
     runtime.BuildRenderFrame();
     ClickAt(runtime, {20.0F, 20.0F});
@@ -186,7 +186,7 @@ TEST_CASE("SceneTransitionRetainedHandleRejectsRequestsAfterRuntimeDestruction")
 
 TEST_CASE("SceneTransitionCancelsWhenViewportChanges") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   const std::uint64_t live_root_identity = runtime.BuildRenderFrame().scene.root->id;
 
@@ -199,7 +199,7 @@ TEST_CASE("SceneTransitionCancelsWhenViewportChanges") {
 
 TEST_CASE("SceneTransitionPaintsFrozenFallbackAboveLivePlatformViewScene") {
   TestPlatform platform;
-  Runtime runtime{PlatformSceneTransitionApp, platform};
+  UiWindow runtime{PlatformSceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   const RenderFrame& initial = runtime.BuildRenderFrame();
   REQUIRE(initial.scene.root != nullptr);
@@ -216,7 +216,7 @@ TEST_CASE("SceneTransitionPaintsFrozenFallbackAboveLivePlatformViewScene") {
 
 TEST_CASE("SceneTransitionAnchorCanUnmountAndMountAgain") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionAnchorLifecycleApp, platform};
+  UiWindow runtime{SceneTransitionAnchorLifecycleApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
 
@@ -228,14 +228,14 @@ TEST_CASE("SceneTransitionAnchorCanUnmountAndMountAgain") {
 
 TEST_CASE("SceneTransitionAnchorRejectsSimultaneousMounts") {
   TestPlatform platform;
-  Runtime runtime{DuplicateSceneTransitionAnchorApp, platform};
+  UiWindow runtime{DuplicateSceneTransitionAnchorApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   REQUIRE_THROWS_AS(runtime.BuildRenderFrame(), std::logic_error);
 }
 
 TEST_CASE("SceneTransitionRejectsAnUndampedSpring") {
   TestPlatform platform;
-  Runtime runtime{UndampedSceneTransitionApp, platform};
+  UiWindow runtime{UndampedSceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
 
@@ -273,7 +273,7 @@ struct FailingSceneEffect {
 
 TEST_CASE("SceneTransitionEvaluatesCustomClipsTransformsAndOrder") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
   interaction_scene_transition->Run(TransitionSpec{ClippedSceneEffect{}, TweenSpec{1.0, Easing::Linear}}, [] {});
@@ -291,7 +291,7 @@ TEST_CASE("SceneTransitionEvaluatesCustomClipsTransformsAndOrder") {
 
 TEST_CASE("SceneTransitionRejectsReentryAndPreservesWritesOnMutationFailure") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
   bool inner_mutation = false;
@@ -309,7 +309,7 @@ TEST_CASE("SceneTransitionRejectsReentryAndPreservesWritesOnMutationFailure") {
 
 TEST_CASE("SceneTransitionValidatesOriginBeforeMutationAndRecoversFromEffectFailure") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
   bool mutated = false;
@@ -328,7 +328,7 @@ TEST_CASE("SceneTransitionValidatesOriginBeforeMutationAndRecoversFromEffectFail
 
 TEST_CASE("SceneTransitionReplacesCommittedVisualAcrossSameFrameRequests") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   const auto identity = runtime.BuildRenderFrame().scene.root->id;
   const TransitionSpec effect{FadeTransition{}, TweenSpec{1.0}};
@@ -350,7 +350,7 @@ TEST_CASE("SceneTransitionReplacesCommittedVisualAcrossSameFrameRequests") {
 
 TEST_CASE("SceneTransitionReducedMotionRunsMutationWithoutRetainingVisuals") {
   TestPlatform platform;
-  Runtime runtime([]() -> View {
+  UiWindow runtime([]() -> View {
     auto theme = FlatLightThemeSpec();
     theme.motion.reduced_motion = true;
     return FlatTheme{theme, Scope(SceneTransitionApp)};
@@ -416,7 +416,7 @@ std::vector<std::string> PaintedLabels(const FlattenedScene& scene) {
 TEST_CASE("NodePresentationKeepsStableSiblingPaintAndHitOrderAcrossUpdates") {
   TestPlatform platform;
   presentation_test_clicked = 0;
-  Runtime runtime([]() -> View {
+  UiWindow runtime([]() -> View {
     auto order = UseState(2);
     auto visible = UseState(true);
     auto modifier = UseState(true);
@@ -473,7 +473,7 @@ TEST_CASE("NodePresentationKeepsStableSiblingPaintAndHitOrderAcrossUpdates") {
 TEST_CASE("NodePresentationIntersectsShapeClipsForPointerAndWindowHitTesting") {
   TestPlatform platform;
   presentation_test_clicked = 0;
-  Runtime pointer_runtime([]() -> View {
+  UiWindow pointer_runtime([]() -> View {
     const TestNodePresentation rectangle{0, {ClipShape::Rectangle({0.0F, 0.0F, 50.0F, 100.0F})}};
     const TestNodePresentation circle{0, {ClipShape::Circle({50.0F, 50.0F}, 30.0F)}};
     return Stack {
@@ -488,13 +488,14 @@ TEST_CASE("NodePresentationIntersectsShapeClipsForPointerAndWindowHitTesting") {
   ClickAt(pointer_runtime, {5.0F, 5.0F});
   REQUIRE(presentation_test_clicked == 1);
 
-  Runtime drag_runtime([]() -> View {
+  TestPlatform drag_platform{platform.platform_resources};
+  UiWindow drag_runtime([]() -> View {
     const TestNodePresentation rectangle{0, {ClipShape::Rectangle({0.0F, 0.0F, 50.0F, 100.0F})}};
     const TestNodePresentation circle{0, {ClipShape::Circle({50.0F, 50.0F}, 30.0F)}};
     return Stack {
       Text("Drag").With(Frame{100.0F, 100.0F}, WindowDragRegion{}),
     }.With(rectangle, circle, Offset{Point{10.0F, 0.0F}});
-  }, platform);
+  }, drag_platform);
   drag_runtime.SetWindowMetrics({
       .viewport = {120.0F, 100.0F},
       .title_bar = WindowTitleBarMetrics{.height = 100.0F},
@@ -558,7 +559,7 @@ std::vector<std::uint64_t> UniqueRenderIdentities(const RenderNode& root) {
 
 TEST_CASE("SceneFragmentsRetainUniqueStableInstancesAndSynchronizedDecorations") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
   interaction_scene_transition->Run(TransitionSpec{SplitSceneEffect{}, TweenSpec{1.0, Easing::Linear}}, [] {
@@ -589,7 +590,7 @@ TEST_CASE("SceneFragmentsRetainUniqueStableInstancesAndSynchronizedDecorations")
 
 TEST_CASE("SceneDecorationFailureValidatesBeforeMutationAndReleasesActiveVisuals") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildRenderFrame();
   bool mutated = false;
@@ -644,7 +645,7 @@ TEST_CASE("FragmentCopiesAndFrozenScenesPreserveOutputBeyondFormerRetentionLimit
 
 TEST_CASE("SceneFragmentReplacementKeepsIdentitiesUniqueAndReleasesVisualsOnCompletion") {
   TestPlatform platform;
-  Runtime runtime{SceneTransitionApp, platform};
+  UiWindow runtime{SceneTransitionApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   const auto live_identity = runtime.BuildRenderFrame().scene.root->id;
   const TransitionSpec effect{SplitSceneEffect{}, TweenSpec{1.0}};
@@ -732,7 +733,7 @@ View NodeExtensionPruningApp() {
 
 TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
   TestPlatform platform;
-  Runtime runtime{AnimationApp, platform};
+  UiWindow runtime{AnimationApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -768,7 +769,7 @@ TEST_CASE("TestAnimatedOffsetAndOpacityModifiers") {
 
 TEST_CASE("TestAnimatedScaleAndRotationModifiers") {
   TestPlatform platform;
-  Runtime runtime{TransformAnimationApp, platform};
+  UiWindow runtime{TransformAnimationApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 200.0F}});
   runtime.BuildFrame();
 
@@ -814,7 +815,7 @@ TEST_CASE("TestTransformedControlUsesVisualHitRegion") {
   transformed_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{TransformedHitTestApp, platform};
+  UiWindow runtime{TransformedHitTestApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   runtime.BuildFrame();
 
@@ -835,7 +836,7 @@ TEST_CASE("TestTransformedControlUsesVisualHitRegion") {
 TEST_CASE("TestClickIndicationUsesPointerObservation") {
   indication_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{IndicationApp, platform};
+  UiWindow runtime{IndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -866,7 +867,7 @@ TEST_CASE("TestClickIndicationUsesPointerObservation") {
 
 TEST_CASE("TestModifierPresentationGeometry") {
   TestPlatform platform;
-  Runtime runtime{PresentedIndicationApp, platform};
+  UiWindow runtime{PresentedIndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -909,7 +910,7 @@ TEST_CASE("TestModifierPresentationGeometry") {
 TEST_CASE("TestExplicitIndicationOverridesAutomaticDefault") {
   indication_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{ExplicitIndicationApp, platform};
+  UiWindow runtime{ExplicitIndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -924,7 +925,7 @@ TEST_CASE("TestExplicitIndicationOverridesAutomaticDefault") {
 
 TEST_CASE("TestNodeExtensionFrameSubtreeCache") {
   TestPlatform platform;
-  Runtime runtime{NodeExtensionPruningApp, platform};
+  UiWindow runtime{NodeExtensionPruningApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 

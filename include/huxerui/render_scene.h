@@ -31,7 +31,7 @@ struct RenderNode {
   Transform2D children_transform;
   // Content and foreground commands use this node's local logical coordinates.
   PaintSequence content;
-  // Child pointers are non-owning and remain valid until the next Runtime frame construction or Runtime destruction.
+  // Child pointers are non-owning and remain valid until the next UiWindow frame construction or UiWindow destruction.
   std::vector<const RenderNode*> children;
   PaintSequence foreground;
   // True when a recorded paint sequence or at least one descendant contributes visible output.
@@ -41,7 +41,8 @@ struct RenderNode {
 };
 
 struct RenderScene {
-  // The root pointer is non-owning and remains valid until the next Runtime frame construction or Runtime destruction.
+  // The root pointer is non-owning and remains valid until the next UiWindow frame construction or UiWindow
+  // destruction.
   const RenderNode* root = nullptr;
 };
 
@@ -54,7 +55,7 @@ struct DamageRegion {
 };
 
 struct RenderFrame {
-  // The scene and all referenced records remain valid until the next Runtime frame construction or destruction.
+  // The scene and all referenced records remain valid until the next UiWindow frame construction or destruction.
   RenderScene scene;
   DamageRegion damage;
   std::uint64_t revision = 0;
@@ -64,7 +65,7 @@ struct FrameCommit {
   // Couples the frame to present with the earliest follow-up build requested while producing it. The platform commits
   // the render frame before scheduling this absolute deadline, avoiding frame construction re-entry during a build.
   RenderFrame render_frame;
-  // Immutable semantic data may be retained by platform accessibility objects across later Runtime commits.
+  // Immutable semantic data may be retained by platform accessibility objects across later UiWindow commits.
   std::shared_ptr<const SemanticFrame> semantic_frame;
   // Absolute deadline in the platform adapter's monotonic clock.
   std::optional<double> next_frame_deadline;

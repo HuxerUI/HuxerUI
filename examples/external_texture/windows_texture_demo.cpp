@@ -189,7 +189,7 @@ private:
 
 namespace huxerui::example {
 
-void InstallTextureDemo(RootContext& root) {
+void InstallTextureDemo(WindowContext& root) {
   root.Provide<TextureDemo>(std::make_shared<WindowsTextureDemo>());
 }
 

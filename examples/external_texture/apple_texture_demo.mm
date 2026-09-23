@@ -191,7 +191,7 @@ private:
 
 namespace huxerui::example {
 
-void InstallTextureDemo(RootContext& root) {
+void InstallTextureDemo(WindowContext& root) {
   auto demo = std::make_shared<AppleTextureDemo>();
   demo->SetRunning(true);
   root.Provide<TextureDemo>(std::move(demo));

@@ -21,12 +21,10 @@ set(HUXERUI_PUBLIC_HEADERS
         modifier.h
         navigation.h
         paint.h
-        platform_adapter.h
         platform_registry.h
         presentation.h
         render_scene.h
         resource.h
-        root.h
         scroll.h
         semantics.h
         state.h

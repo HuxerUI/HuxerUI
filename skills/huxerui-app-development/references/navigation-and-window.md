@@ -45,6 +45,8 @@ On Windows, register an application-owned custom URL scheme with `windows::Regis
 
 `UseApplication().SystemTray()` returns the application-level tray handle, and `UseApplication().Quit()` requests orderly application termination. Check `IsAvailable()` before hiding the last visible window because unsupported hosts and temporarily unavailable Linux tray hosts report `false`.
 
-Declare tray presentation in `Lifecycle(...)`: call `Show(icon, options)` during setup and `Hide()` from cleanup. `SystemTrayOptions` reuses `MenuEntry`, `MenuItem`, and `MenuSection`; tray and menu icons are `ImageVariant` values that must resolve to raster `ImageAsset` values. Register primary activation through `OnActivate(...)`, commonly restoring the window with `WindowHandle::Activate()`.
+Install application-wide tray behavior once, normally in an `ApplicationHook`. `SystemTrayHandle::Show(icon, options)` creates or replaces the shared presentation, and `Hide()` removes it. `SystemTrayOptions` reuses `MenuEntry`, `MenuItem`, and `MenuSection`; tray and menu icons are `ImageVariant` values that must resolve to raster `ImageAsset` values.
+
+Register primary activation through `SystemTrayHandle::OnActivate(handler)` on the application's thread. It retains one nonempty handler until Runtime shutdown, rejects duplicate registration, and survives presentation changes and window retirement. It is not a composition-lifetime hook and does not capture the current window context. Capture a specific `WindowHandle`, or an application-owned window controller that binds and unbinds the intended window, rather than calling `UseWindow()` inside the tray callback.
 
 Compose minimize-to-tray behavior from the tray handle and window request handlers. When the tray is unavailable, return `false` so minimize and close retain their normal platform behavior. Do not create a second menu model, a `PlatformModule`, or platform-specific tray code for ordinary application use.

@@ -12,7 +12,7 @@
 
 #include "runtime/gesture_internal.h"
 #include "internal_access.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "resources/resource_internal.h"
 #include "tooltip_internal.h"
 
@@ -666,7 +666,7 @@ void TooltipTouchRecognizer::Canceled(MountedNode&, NodeExtension& extension,
   static_cast<TooltipExtension&>(extension).CancelTouch(input.event.pointer_id);
 }
 
-void InstallTooltip(RootContext& root) {
+void InstallTooltip(WindowContext& root) {
   root.Provide(std::make_shared<TooltipService>(root.Layers()));
 }
 

@@ -209,6 +209,6 @@ Derive from `Layout<Derived>` for a layout over ordinary children.
 Measure children only through `LayoutContext`, return a constrained size, and record placements in `LayoutResult`.
 
 Derive from `VirtualLayout<Derived>` for a demand-driven logical item source.
-Runtime owns item reconciliation, keys, saved state, clipping, input, semantics, scrolling, and cleanup; the custom layout owns visible-range selection and placement.
+UiWindow owns item reconciliation, keys, saved state, clipping, input, semantics, scrolling, and cleanup; the custom layout owns visible-range selection and placement.
 
 See [Extending HuxerUI](extending.md) for the extension contracts.

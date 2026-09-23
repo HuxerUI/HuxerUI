@@ -36,7 +36,7 @@ namespace huxerui::windows {
 ///     .update = UpdateTextField,
 ///     .dispose = DisposeTextField,
 /// };
-/// root.RegisterPlatformView<TextFieldProperties>("TextField", std::move(factory));
+/// context.RegisterPlatformView<TextFieldProperties>("TextField", std::move(factory));
 /// @endcode
 ///
 /// @tparam Properties Controlled declarative state, or void when the View has no properties.
@@ -112,8 +112,8 @@ template <class Instance> struct PlatformViewFactory<void, Instance, void> {
   std::function<void(Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 
@@ -129,8 +129,8 @@ template <class Instance, class Controller> struct PlatformViewFactory<void, Ins
   std::function<void(Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 
@@ -145,8 +145,8 @@ template <class Properties, class Instance> struct PlatformViewFactory<Propertie
   std::function<void(Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 
@@ -163,8 +163,8 @@ template <class Properties, class Instance, class Controller> struct PlatformVie
   std::function<void(Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 

@@ -112,7 +112,11 @@ An example teaches one primary capability; `example_ui_gallery` remains the comp
 
 ## Architecture and ownership
 
-The shared C++ core owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction semantics, animation state, and RenderScene generation. Each platform host view uses one shared `Runtime` and one `PlatformAdapter`, which owns platform lifecycle, frame scheduling, event conversion, text services, clipboard integration, and scene rendering. Runtime never depends on operating-system types; do not add Runtime subclasses, platform Runtime variants, or concrete-component branches in Runtime.
+One platform-derived `Runtime` owns application services, event dispatch, ordinary timers, and the frozen platform factory catalog. Each native UI attachment uses one platform-derived `UiWindow` associated with that Runtime. UiWindow owns composition, state observation, reconciliation, mounted nodes, layout, virtualization, interaction, animation, and RenderScene generation. Shared algorithms are non-virtual; virtual methods implement genuine native operations such as frame scheduling, text services, and rendering. Shared declarations contain no operating-system types or concrete-component branches. Do not add adapter objects that forward between these bases and platform subclasses.
+
+Initialize shared application or window state only after its derived native facilities are ready. Derived destructors retire shared state before native members are released; base constructors and destructors must not depend on virtual dispatch to derived native facilities. Keep small platform state directly on its owner. Use independently retained state only when callbacks or public handles require an independent lifetime.
+
+Install application services and factories through `ApplicationContext` in `AppOptions::application_hooks`; WindowHook remains for per-UI services and layers. Application hooks run once per Runtime in declaration order, then services and factories freeze before queued work or window initialization begins. Application State and all attached UIs use one application thread. Frozen service acquisition may occur on other threads, but service methods retain their own threading rules. Retained capabilities must not silently bind to a replacement Runtime after shutdown.
 
 Add a platform capability only for a genuine platform service, and fix behavior at the narrowest layer that owns it.
 
@@ -131,7 +135,7 @@ Do not create a public header per trivial control or grow `view.h` with unrelate
 
 Organize shared implementation in `src/runtime`, `src/components`, `src/text`, `src/graphics`, `src/resources`, `src/application`, and `src/io`. Keep private headers beside their subsystem and use paths relative to `src` for cross-directory private includes. Keep `src/internal_access.h` at the shared root and retain the existing build targets.
 
-Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep declaration and component-construction support in `view_internal.h`, retained node types and operations in `mounted_node_internal.h`, and Runtime state and coordination in `runtime_internal.h`. Runtime may include the mounted-node header and the mounted-node header may include the View header; reverse dependencies are not allowed.
+Use a focused `*_internal.h` for feature contracts shared by several implementations. Keep declaration and component-construction support in `view_internal.h`, retained node types and operations in `mounted_node_internal.h`, and Runtime state and coordination in `ui_window_internal.h`. Runtime may include the mounted-node header and the mounted-node header may include the View header; reverse dependencies are not allowed.
 
 ## Public API and state
 

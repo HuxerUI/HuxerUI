@@ -409,31 +409,253 @@ private:
 
 } // namespace
 
-class Win32PlatformAdapter final : public huxerui::PlatformAdapter,
-                                   public huxerui::PlatformClipboard,
-                                   public huxerui::PlatformResources {
+/// Owns process services and a hidden facilities HWND independently of visible WindowsUiWindow attachments.
+/// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
+class WindowsRuntime final : public huxerui::Runtime, public PlatformResources, public PlatformClipboard {
 public:
-  Win32PlatformAdapter(Win32UIThreadDispatcher& ui_dispatcher, std::wstring window_class_name,
-                       Win32WindowReady on_window_ready, std::shared_ptr<LocalNotificationTransport> notifications)
-      : PlatformAdapter(ui_dispatcher.Bind()), ui_dispatcher_(ui_dispatcher),
-        window_class_name_(std::move(window_class_name)), on_window_ready_(std::move(on_window_ready)),
-        notifications_(std::move(notifications)) {
+  WindowsRuntime(Win32UiThreadDispatcher& dispatcher, std::shared_ptr<LocalNotificationTransport> notifications)
+      : Runtime(dispatcher.Bind()), notifications_(std::move(notifications)) {
+    win32_api_.ConfigureProcessDpiAwareness();
+    window_class_ = L"HuxerUI.ApplicationFacilities." + std::to_wstring(reinterpret_cast<std::uintptr_t>(this));
+    WNDCLASSW window_class{};
+    window_class.lpfnWndProc = WindowProcedure;
+    window_class.hInstance = GetModuleHandleW(nullptr);
+    window_class.lpszClassName = window_class_.c_str();
+    if (!RegisterClassW(&window_class)) {
+      throw std::runtime_error("HuxerUI could not register its application facilities window");
+    }
+    window_ = CreateWindowExW(WS_EX_TOOLWINDOW, window_class_.c_str(), L"", WS_POPUP,
+                              0, 0, 0, 0, nullptr, nullptr, window_class.hInstance, this);
+    if (!window_) {
+      UnregisterClassW(window_class_.c_str(), window_class.hInstance);
+      throw std::runtime_error("HuxerUI could not create its application facilities window");
+    }
+  }
+
+  ~WindowsRuntime() override {
+    Retire();
+    if (system_tray_) {
+      system_tray_->SetWindow(nullptr);
+    }
+    DestroyWindow(window_);
+    UnregisterClassW(window_class_.c_str(), GetModuleHandleW(nullptr));
+  }
+
+  /// Starts shared services after the facilities HWND and dispatcher are available.
+  /// @param application Declaration retained by the application runner for this Runtime's lifetime.
+  /// @param activation Initial native activation delivered after application hooks, on the application thread.
+  void Start(const Application& application, ApplicationActivation activation) {
+    InitializeApplication(application, std::move(activation));
+  }
+  /// Aggregates visible, non-minimized process windows, including windows created outside HuxerUI.
+  /// The facilities tool window is excluded; call on the Win32 application thread after native state changes.
+  void UpdateLifecycleState() {
+    if (!IsInitialized()) return;
+    ApplicationLifecycleState lifecycle = ApplicationLifecycleState::Background;
+    EnumWindows([](HWND window, LPARAM parameter) -> BOOL {
+      DWORD process = 0;
+      GetWindowThreadProcessId(window, &process);
+      if (process != GetCurrentProcessId() || !IsWindowVisible(window) || IsIconic(window) ||
+          (GetWindowLongPtrW(window, GWL_EXSTYLE) & WS_EX_TOOLWINDOW)) return TRUE;
+      auto& state = *reinterpret_cast<ApplicationLifecycleState*>(parameter);
+      if (window == GetForegroundWindow()) {
+        state = ApplicationLifecycleState::Active;
+        return FALSE;
+      }
+      state = ApplicationLifecycleState::Inactive;
+      return TRUE;
+    }, reinterpret_cast<LPARAM>(&lifecycle));
+    Runtime::UpdateApplicationLifecycleState(lifecycle);
+  }
+  PlatformClipboard* Clipboard() noexcept override {
+    return this;
+  }
+
+  PlatformResources* Resources() noexcept override {
+    return this;
+  }
+
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateWin32AppDirectories();
+  }
+
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateWin32HttpTransport();
+  }
+
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateWin32PermissionTransport();
+  }
+
+  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override { return notifications_; }
+
+  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
+    if (!system_tray_) {
+      system_tray_ = std::make_shared<Win32SystemTrayTransport>();
+      system_tray_->SetWindow(window_);
+    }
+    return system_tray_;
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    FILETIME created{};
+    FILETIME exited{};
+    FILETIME kernel{};
+    FILETIME user{};
+    if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) == FALSE) {
+      return std::nullopt;
+    }
+    PROCESS_MEMORY_COUNTERS counters{};
+    counters.cb = sizeof(counters);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)) == FALSE) {
+      return std::nullopt;
+    }
+    SYSTEM_INFO system_info{};
+    GetSystemInfo(&system_info);
+    return ProcessMetrics{
+        .cpu_time_seconds = FileTimeSeconds(kernel) + FileTimeSeconds(user),
+        .memory_usage_bytes = static_cast<std::uint64_t>(counters.WorkingSetSize),
+        .processor_count = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(system_info.dwNumberOfProcessors)),
+    };
+  }
+
+  ResourceConfiguration Configuration() const override {
+    wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
+    Locale locale = Locale::Default();
+    if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) > 0) {
+      locale = Locale::FromLanguageTag(WideToUtf8(locale_name));
+    }
+    const UINT dpi = win32_api_.SystemDpi();
+    return {std::move(locale), static_cast<float>(dpi) / kDipsPerInch};
+  }
+
+  std::optional<InputStream> OpenRead(std::string_view package_path) override {
+    if (!IsValidResourcePackagePath(package_path)) {
+      throw std::logic_error("HuxerUI Windows resource path is invalid");
+    }
+    std::wstring executable_path(32768, L'\0');
+    const DWORD length =
+        GetModuleFileNameW(nullptr, executable_path.data(), static_cast<DWORD>(executable_path.size()));
+    if (length == 0 || length >= executable_path.size()) {
+      throw std::logic_error("HuxerUI Windows executable path could not be resolved");
+    }
+    executable_path.resize(length);
+    std::filesystem::path resource_root(executable_path);
+    resource_root.replace_extension(L".resources");
+    const std::wstring wide_package_path = Utf8ToWide(package_path);
+    if (wide_package_path.empty()) {
+      throw std::logic_error("HuxerUI Windows resource path is not valid UTF-8");
+    }
+    const std::filesystem::path path = resource_root / std::filesystem::path(wide_package_path);
+    return OpenPackageFile(path);
+  }
+
+  std::optional<std::string> ReadText() override {
+    if (window_ == nullptr || !OpenClipboard(window_)) {
+      return std::nullopt;
+    }
+    struct ClipboardCloser {
+      ~ClipboardCloser() {
+        CloseClipboard();
+      }
+    } closer;
+
+    HANDLE handle = GetClipboardData(CF_UNICODETEXT);
+    if (handle == nullptr) {
+      return std::nullopt;
+    }
+    const auto* text = static_cast<const wchar_t*>(GlobalLock(handle));
+    if (text == nullptr) {
+      return std::nullopt;
+    }
+    const std::string result = WideToUtf8(text);
+    GlobalUnlock(handle);
+    return result;
+  }
+
+  bool WriteText(std::string_view text) override {
+    if (window_ == nullptr || !OpenClipboard(window_)) {
+      return false;
+    }
+    struct ClipboardCloser {
+      ~ClipboardCloser() {
+        CloseClipboard();
+      }
+    } closer;
+
+    const std::wstring wide = Utf8ToWide(text);
+    const SIZE_T size = (wide.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (memory == nullptr) {
+      return false;
+    }
+    void* destination = GlobalLock(memory);
+    if (destination == nullptr) {
+      GlobalFree(memory);
+      return false;
+    }
+    std::memcpy(destination, wide.c_str(), size);
+    GlobalUnlock(memory);
+    if (!EmptyClipboard() || SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
+      GlobalFree(memory);
+      return false;
+    }
+    return true;
+  }
+
+protected:
+  void OnRuntimeStopped() override { PostQuitMessage(0); }
+
+private:
+  static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
+    auto* runtime = reinterpret_cast<WindowsRuntime*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+      runtime = static_cast<WindowsRuntime*>(reinterpret_cast<CREATESTRUCTW*>(l_param)->lpCreateParams);
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(runtime));
+    }
+    if (runtime) {
+      if (runtime->system_tray_) {
+        if (const auto handled = runtime->system_tray_->HandleMessage(message, w_param, l_param)) {
+          return *handled;
+        }
+      }
+      if (message == WM_SETTINGCHANGE && runtime->IsInitialized()) {
+        runtime->UpdateResourceConfiguration(runtime->Configuration());
+      }
+    }
+    return DefWindowProcW(window, message, w_param, l_param);
+  }
+
+  HWND window_ = nullptr;
+  std::wstring window_class_;
+  Win32Api win32_api_;
+  std::shared_ptr<Win32SystemTrayTransport> system_tray_;
+  std::shared_ptr<LocalNotificationTransport> notifications_;
+};
+
+/// Owns one visible Win32 window, its rendering/text facilities, and the shared UiWindow state.
+class WindowsUiWindow final : public huxerui::UiWindow {
+public:
+  WindowsUiWindow(Win32UiThreadDispatcher& ui_dispatcher, std::wstring window_class_name,
+                  Win32WindowReady on_window_ready)
+      : ui_dispatcher_(ui_dispatcher), window_class_name_(std::move(window_class_name)),
+        on_window_ready_(std::move(on_window_ready)) {
     win32_api_.ConfigureProcessDpiAwareness();
   }
 
-  int Run(huxerui::Runtime& runtime, const WindowOptions& options) {
-    runtime_ = &runtime;
-    accessibility_.SetRuntime(runtime_);
-    text_input_.SetRuntime(runtime_);
+  ~WindowsUiWindow() override { Retire(); Cleanup(); }
+
+  int Run(Runtime& application, const WindowOptions& options) {
 
     try {
       renderer_.Initialize();
       RegisterWindowClass();
-      CreateApplicationWindow(options);
+      CreateApplicationWindow(application, options);
       if (on_window_ready_) {
         on_window_ready_(ui_dispatcher_.Bind(), window_);
       }
-      runtime_->UpdateResourceConfiguration(Configuration());
+      UiWindow::UpdateResourceConfiguration(Configuration());
 
       ShowWindow(window_, SW_SHOW);
       UpdateApplicationLifecycleState(
@@ -462,14 +684,14 @@ public:
 
       const int exit_code = static_cast<int>(message.wParam);
       Cleanup();
-      runtime_ = nullptr;
+
       if (failure_) {
         std::rethrow_exception(failure_);
       }
       return exit_code;
     } catch (...) {
       Cleanup();
-      runtime_ = nullptr;
+
       throw;
     }
   }
@@ -549,62 +771,9 @@ public:
     return &text_input_;
   }
 
-  PlatformClipboard* Clipboard() noexcept override {
-    return this;
-  }
-
-  PlatformResources* Resources() noexcept override {
-    return this;
-  }
-
-  std::optional<AppDirectories> CreateAppDirectories() override {
-    return CreateWin32AppDirectories();
-  }
-
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
     return CreateWin32FilePickerTransport([this] { return window_; }, ui_dispatcher_.Bind());
   }
-
-  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
-    return CreateWin32HttpTransport();
-  }
-
-  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
-    return CreateWin32PermissionTransport();
-  }
-
-  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override { return notifications_; }
-
-  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
-    if (!system_tray_) {
-      system_tray_ = std::make_shared<Win32SystemTrayTransport>();
-      system_tray_->SetWindow(window_);
-    }
-    return system_tray_;
-  }
-
-  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
-    FILETIME created{};
-    FILETIME exited{};
-    FILETIME kernel{};
-    FILETIME user{};
-    if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user) == FALSE) {
-      return std::nullopt;
-    }
-    PROCESS_MEMORY_COUNTERS counters{};
-    counters.cb = sizeof(counters);
-    if (GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)) == FALSE) {
-      return std::nullopt;
-    }
-    SYSTEM_INFO system_info{};
-    GetSystemInfo(&system_info);
-    return ProcessMetrics{
-        .cpu_time_seconds = FileTimeSeconds(kernel) + FileTimeSeconds(user),
-        .memory_usage_bytes = static_cast<std::uint64_t>(counters.WorkingSetSize),
-        .processor_count = std::max<std::uint32_t>(1, static_cast<std::uint32_t>(system_info.dwNumberOfProcessors)),
-    };
-  }
-
   void RequestWindowCommand(WindowCommand command) override {
     if (window_ == nullptr) {
       return;
@@ -612,101 +781,28 @@ public:
     PostMessageW(window_, kWindowCommandMessage, static_cast<WPARAM>(command), 0);
   }
 
-  void RequestApplicationQuit() override {
-    if (window_ != nullptr) {
-      performing_close_ = true;
-      SendMessageW(window_, WM_CLOSE, 0, 0);
-    }
+
+
+  ResourceConfiguration Configuration() const {
+    ResourceConfiguration configuration = static_cast<WindowsRuntime&>(ApplicationRuntime()).Configuration();
+    configuration.display_scale = static_cast<float>(window_ != nullptr ? win32_api_.WindowDpi(window_) : win32_api_.SystemDpi()) / kDipsPerInch;
+    return configuration;
   }
-
-  ResourceConfiguration Configuration() const override {
-    wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
-    Locale locale = Locale::Default();
-    if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) > 0) {
-      locale = Locale::FromLanguageTag(WideToUtf8(locale_name));
-    }
-    const UINT dpi = window_ != nullptr ? win32_api_.WindowDpi(window_) : win32_api_.SystemDpi();
-    return {std::move(locale), static_cast<float>(dpi) / kDipsPerInch};
-  }
-
-  std::optional<InputStream> OpenRead(std::string_view package_path) override {
-    if (!IsValidResourcePackagePath(package_path)) {
-      throw std::logic_error("HuxerUI Windows resource path is invalid");
-    }
-    std::wstring executable_path(32768, L'\0');
-    const DWORD length =
-        GetModuleFileNameW(nullptr, executable_path.data(), static_cast<DWORD>(executable_path.size()));
-    if (length == 0 || length >= executable_path.size()) {
-      throw std::logic_error("HuxerUI Windows executable path could not be resolved");
-    }
-    executable_path.resize(length);
-    std::filesystem::path resource_root(executable_path);
-    resource_root.replace_extension(L".resources");
-    const std::wstring wide_package_path = Utf8ToWide(package_path);
-    if (wide_package_path.empty()) {
-      throw std::logic_error("HuxerUI Windows resource path is not valid UTF-8");
-    }
-    const std::filesystem::path path = resource_root / std::filesystem::path(wide_package_path);
-    return OpenPackageFile(path);
-  }
-
-  std::optional<std::string> ReadText() override {
-    if (window_ == nullptr || !OpenClipboard(window_)) {
-      return std::nullopt;
-    }
-    struct ClipboardCloser {
-      ~ClipboardCloser() {
-        CloseClipboard();
-      }
-    } closer;
-
-    HANDLE handle = GetClipboardData(CF_UNICODETEXT);
-    if (handle == nullptr) {
-      return std::nullopt;
-    }
-    const auto* text = static_cast<const wchar_t*>(GlobalLock(handle));
-    if (text == nullptr) {
-      return std::nullopt;
-    }
-    const std::string result = WideToUtf8(text);
-    GlobalUnlock(handle);
-    return result;
-  }
-
-  bool WriteText(std::string_view text) override {
-    if (window_ == nullptr || !OpenClipboard(window_)) {
-      return false;
-    }
-    struct ClipboardCloser {
-      ~ClipboardCloser() {
-        CloseClipboard();
-      }
-    } closer;
-
-    const std::wstring wide = Utf8ToWide(text);
-    const SIZE_T size = (wide.size() + 1) * sizeof(wchar_t);
-    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, size);
-    if (memory == nullptr) {
-      return false;
-    }
-    void* destination = GlobalLock(memory);
-    if (destination == nullptr) {
-      GlobalFree(memory);
-      return false;
-    }
-    std::memcpy(destination, wide.c_str(), size);
-    GlobalUnlock(memory);
-    if (!EmptyClipboard() || SetClipboardData(CF_UNICODETEXT, memory) == nullptr) {
-      GlobalFree(memory);
-      return false;
-    }
-    return true;
-  }
-
 private:
   void UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
-    if (runtime_ != nullptr) {
-      runtime_->UpdateApplicationLifecycleState(lifecycle_state);
+    if (IsInitialized()) {
+      switch (lifecycle_state) {
+      case ApplicationLifecycleState::Active:
+        UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Active);
+        break;
+      case ApplicationLifecycleState::Inactive:
+        UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
+        break;
+      case ApplicationLifecycleState::Background:
+        UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Background);
+        break;
+      }
+      static_cast<WindowsRuntime&>(ApplicationRuntime()).UpdateLifecycleState();
     }
   }
 
@@ -715,7 +811,7 @@ private:
     WNDCLASSEXW window_class{
         sizeof(WNDCLASSEXW),
         CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
-        &Win32PlatformAdapter::WindowProcedure,
+        &WindowsUiWindow::WindowProcedure,
         0,
         0,
         instance_,
@@ -732,7 +828,7 @@ private:
     }
   }
 
-  void CreateApplicationWindow(const WindowOptions& options) {
+  void CreateApplicationWindow(Runtime& application, const WindowOptions& options) {
     dpi_ = static_cast<float>(win32_api_.SystemDpi());
     const float scale = DpiScale();
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
@@ -768,12 +864,17 @@ private:
     if (window_ == nullptr) {
       throw std::runtime_error("HuxerUI could not create its Windows application window");
     }
+    dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
+    auto configuration = application.Resources()->Configuration();
+    configuration.display_scale = DpiScale();
+    InitializeWindow(application, configuration);
+    accessibility_.SetUiWindow(this);
+    text_input_.SetUiWindow(this);
     platform_views_ =
-        std::make_unique<Win32PlatformViews>(instance_, window_, PlatformRegistry(), *runtime_,
+        std::make_unique<Win32PlatformViews>(instance_, window_, PlatformRegistry(), *this,
                                              [this](HWND source, UINT message, WPARAM w_param, LPARAM l_param) {
                                                return HandleOverlayMessage(source, message, w_param, l_param);
                                              });
-    ui_dispatcher_.Attach(window_);
     if (custom_chrome_) {
       first_nc_calc_ = false;
       if (!SetWindowPos(
@@ -790,12 +891,12 @@ private:
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     accessibility_.SetDpiScale(DpiScale());
-    file_drop_ = std::make_unique<Win32FileDrop>(window_, *runtime_, [this] { return DpiScale(); });
+    file_drop_ = std::make_unique<Win32FileDrop>(window_, *this, [this] { return DpiScale(); });
   }
 
   void Cleanup() noexcept {
+    Retire();
     file_drop_.reset();
-    ui_dispatcher_.Shutdown();
     text_input_.Reset();
     committed_frame_ = nullptr;
     accessibility_.Reset();
@@ -848,7 +949,7 @@ private:
   }
 
   void UpdateRuntimeViewport() {
-    if (runtime_ == nullptr || window_ == nullptr) {
+    if (!IsInitialized() || window_ == nullptr) {
       return;
     }
     RECT client{};
@@ -858,7 +959,7 @@ private:
         static_cast<float>(client.right - client.left) / scale,
         static_cast<float>(client.bottom - client.top) / scale,
     };
-    runtime_->SetWindowMetrics({
+    UiWindow::SetWindowMetrics({
         .viewport = viewport,
         .title_bar = QueryTitleBarMetrics(viewport),
     });
@@ -899,7 +1000,7 @@ private:
     if (!frame_state_.BeginCommit()) {
       return;
     }
-    const FrameCommit& commit = runtime_->BuildFrame();
+    const FrameCommit& commit = UiWindow::BuildFrame();
     committed_frame_ = &commit.render_frame;
     const bool has_platform_views = platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale());
     const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
@@ -1009,7 +1110,7 @@ private:
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
                    PointerButton pressed_buttons = PointerButton::None) {
     last_pointer_position_ = position;
-    runtime_->HandlePointerEvent({
+    UiWindow::HandlePointerEvent({
         type,
         0,
         position,
@@ -1021,7 +1122,7 @@ private:
   }
 
   void CancelPointer() {
-    if (runtime_ == nullptr) {
+    if (!IsInitialized()) {
       return;
     }
     SendPointer(PointerEventType::Cancel, last_pointer_position_);
@@ -1149,13 +1250,13 @@ private:
     case WM_MOUSEWHEEL: {
       const float delta =
           static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
-      const Point consumed = runtime_->HandleScrollInput({ScreenPoint(l_param), 0.0F, -delta, CurrentKeyModifiers()});
+      const Point consumed = UiWindow::HandleScrollInput({ScreenPoint(l_param), 0.0F, -delta, CurrentKeyModifiers()});
       return consumed.x != 0.0F || consumed.y != 0.0F ? std::optional<LRESULT>{0} : std::nullopt;
     }
     case WM_MOUSEHWHEEL: {
       const float delta =
           static_cast<float>(GET_WHEEL_DELTA_WPARAM(w_param)) / static_cast<float>(WHEEL_DELTA) * 120.0F;
-      const Point consumed = runtime_->HandleScrollInput({ScreenPoint(l_param), delta, 0.0F, CurrentKeyModifiers()});
+      const Point consumed = UiWindow::HandleScrollInput({ScreenPoint(l_param), delta, 0.0F, CurrentKeyModifiers()});
       return consumed.x != 0.0F || consumed.y != 0.0F ? std::optional<LRESULT>{0} : std::nullopt;
     }
     default:
@@ -1174,7 +1275,7 @@ private:
       if (const LRESULT resize = ResizeHitTest(l_param); resize != HTCLIENT) {
         return resize;
       }
-      return runtime_ != nullptr && runtime_->IsWindowDragRegion(ScreenPoint(l_param)) ? HTCAPTION : HTCLIENT;
+      return IsInitialized() && UiWindow::IsWindowDragRegion(ScreenPoint(l_param)) ? HTCAPTION : HTCLIENT;
     }
     if (message == WM_SETCURSOR && LOWORD(l_param) == HTCLIENT) {
       ApplyPointerCursor();
@@ -1218,7 +1319,7 @@ private:
   }
 
   bool SendKey(KeyEventType type, WPARAM virtual_key, LPARAM key_data) {
-    return runtime_->HandleKeyEvent({
+    return UiWindow::HandleKeyEvent({
         type,
         TranslateKey(virtual_key, key_data),
         type == KeyEventType::Down && !text_input_.Active() ? TranslateKeyText(virtual_key, key_data) : std::string{},
@@ -1228,11 +1329,6 @@ private:
   }
 
   LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-    if (system_tray_) {
-      if (const std::optional<LRESULT> handled = system_tray_->HandleMessage(message, w_param, l_param)) {
-        return *handled;
-      }
-    }
     if (custom_chrome_ && message == WM_NCCALCSIZE) {
       // User32 must observe the first captioned-window calculation before the client takes ownership of the frame.
       if (first_nc_calc_) {
@@ -1285,7 +1381,7 @@ private:
           return resize;
         }
         const Point position = ScreenPoint(l_param);
-        return runtime_ != nullptr && runtime_->IsWindowDragRegion(position) ? HTCAPTION : HTCLIENT;
+        return IsInitialized() && UiWindow::IsWindowDragRegion(position) ? HTCAPTION : HTCLIENT;
       }
       break;
     case WM_CREATE:
@@ -1296,10 +1392,6 @@ private:
       return 0;
     case WM_DESTROY:
       file_drop_.reset();
-      if (system_tray_) {
-        system_tray_->SetWindow(nullptr);
-      }
-      ui_dispatcher_.Shutdown();
       text_input_.SetWindow(nullptr);
       accessibility_.Reset();
       if (platform_views_) {
@@ -1307,20 +1399,18 @@ private:
       }
       window_ = nullptr;
       committed_frame_ = nullptr;
-      PostQuitMessage(0);
+      ApplicationRuntime().RequestShutdown();
       return 0;
     case WM_CLOSE:
-      if (performing_close_) {
-        performing_close_ = false;
-        break;
-      }
-      if (runtime_ != nullptr && runtime_->HandleWindowRequest(WindowCommand::Close)) {
+      if (!performing_close_ && IsInitialized() && UiWindow::HandleWindowRequest(WindowCommand::Close)) {
         return 0;
       }
-      break;
+      performing_close_ = false;
+      ApplicationRuntime().RequestShutdown();
+      return 0;
     case WM_SYSCOMMAND:
-      if ((w_param & 0xFFF0U) == SC_MINIMIZE && runtime_ != nullptr &&
-          runtime_->HandleWindowRequest(WindowCommand::Minimize)) {
+      if ((w_param & 0xFFF0U) == SC_MINIMIZE && IsInitialized() &&
+          UiWindow::HandleWindowRequest(WindowCommand::Minimize)) {
         return 0;
       }
       break;
@@ -1364,7 +1454,7 @@ private:
           SWP_NOACTIVATE | SWP_NOZORDER
       );
       UpdateRuntimeViewport();
-      runtime_->UpdateResourceConfiguration(Configuration());
+      UiWindow::UpdateResourceConfiguration(Configuration());
       RequestFrameAt(Now());
       return 0;
     }
@@ -1376,7 +1466,7 @@ private:
       }
       break;
     case WM_SETTINGCHANGE:
-      runtime_->UpdateResourceConfiguration(Configuration());
+      UiWindow::UpdateResourceConfiguration(Configuration());
       return 0;
     case WM_DISPLAYCHANGE:
       renderer_.ResetDeviceResources();
@@ -1400,7 +1490,7 @@ private:
       if (!activation.has_value()) {
         return FALSE;
       }
-      runtime_->HandleApplicationActivation(std::move(*activation));
+      ApplicationRuntime().HandleApplicationActivation(std::move(*activation));
       return TRUE;
     }
     case Win32Accessibility::action_message:
@@ -1432,9 +1522,6 @@ private:
       if (frame_state_.FrameBuildPending()) {
         CommitFrameAndInvalidate();
       }
-      return 0;
-    case Win32UIThreadDispatcher::task_message:
-      ui_dispatcher_.RunPending();
       return 0;
     case kWindowCommandMessage:
       ExecuteWindowCommand(static_cast<WindowCommand>(w_param));
@@ -1526,27 +1613,24 @@ private:
   }
 
   static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-    Win32PlatformAdapter* adapter = reinterpret_cast<Win32PlatformAdapter*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    WindowsUiWindow* ui_window = reinterpret_cast<WindowsUiWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
       const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-      adapter = static_cast<Win32PlatformAdapter*>(create->lpCreateParams);
-      adapter->window_ = window;
-      if (adapter->system_tray_) {
-        adapter->system_tray_->SetWindow(window);
-      }
-      adapter->accessibility_.SetWindow(window);
-      adapter->text_input_.SetWindow(window);
-      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(adapter));
+      ui_window = static_cast<WindowsUiWindow*>(create->lpCreateParams);
+      ui_window->window_ = window;
+      ui_window->accessibility_.SetWindow(window);
+      ui_window->text_input_.SetWindow(window);
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(ui_window));
     }
-    if (adapter == nullptr) {
+    if (ui_window == nullptr) {
       return DefWindowProcW(window, message, w_param, l_param);
     }
 
     try {
-      return adapter->HandleMessage(window, message, w_param, l_param);
+      return ui_window->HandleMessage(window, message, w_param, l_param);
     } catch (...) {
-      if (!adapter->failure_) {
-        adapter->failure_ = std::current_exception();
+      if (!ui_window->failure_) {
+        ui_window->failure_ = std::current_exception();
       }
       PostQuitMessage(1);
       return 0;
@@ -1557,7 +1641,6 @@ private:
     SetCursor(LoadCursorW(nullptr, Win32PointerCursorResource(pointer_cursor_kind_)));
   }
 
-  huxerui::Runtime* runtime_ = nullptr;
   HINSTANCE instance_ = nullptr;
   ATOM class_atom_ = 0;
   HWND window_ = nullptr;
@@ -1580,15 +1663,13 @@ private:
   std::exception_ptr failure_;
   std::optional<double> timer_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
-  Win32UIThreadDispatcher& ui_dispatcher_;
+  Win32UiThreadDispatcher& ui_dispatcher_;
   std::wstring window_class_name_;
   Win32WindowReady on_window_ready_;
   Win32Api win32_api_;
   Win32Renderer renderer_;
   std::unique_ptr<Win32PlatformViews> platform_views_;
   std::unique_ptr<Win32FileDrop> file_drop_;
-  std::shared_ptr<Win32SystemTrayTransport> system_tray_;
-  std::shared_ptr<LocalNotificationTransport> notifications_;
 };
 
 int RunWin32PlatformApplication(const Application& application, Win32WindowReady on_window_ready) {
@@ -1601,7 +1682,7 @@ int RunWin32PlatformApplication(const Application& application, Win32WindowReady
     return 0;
   }
   Win32COMApartment com_apartment;
-  Win32UIThreadDispatcher ui_dispatcher;
+  Win32UiThreadDispatcher ui_dispatcher;
   Win32LocalNotificationHost notifications(ui_dispatcher.Bind());
   std::optional<NotificationActivation> notification;
   if (startup.notification_server) {
@@ -1618,16 +1699,17 @@ int RunWin32PlatformApplication(const Application& application, Win32WindowReady
     }
     startup.activation = LaunchActivation{};
   }
-  Win32PlatformAdapter platform(ui_dispatcher, window_class_name, std::move(on_window_ready),
-                                notifications.Transport());
-  Runtime runtime{application, platform, std::move(startup.activation)};
+  WindowsRuntime application_runtime(ui_dispatcher, notifications.Transport());
+  application_runtime.Start(application, std::move(startup.activation));
+  WindowsUiWindow window(ui_dispatcher, window_class_name, std::move(on_window_ready));
   notifications.SetActivationHandler(
-      [&runtime](NotificationActivation activation) { runtime.HandleApplicationActivation(std::move(activation)); });
+      [&application_runtime](NotificationActivation activation) { application_runtime.HandleApplicationActivation(std::move(activation)); });
   if (notification) {
-    runtime.HandleApplicationActivation(std::move(*notification));
+    application_runtime.HandleApplicationActivation(std::move(*notification));
   }
   try {
-    const int result = platform.Run(runtime, options);
+    ui_dispatcher.Start();
+    const int result = window.Run(application_runtime, options);
     notifications.SetActivationHandler({});
     return result;
   } catch (...) {

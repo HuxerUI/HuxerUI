@@ -25,7 +25,7 @@ View ProfilingRoot() {
 
 TEST_CASE("Profiling capture runs an ordinary application", "[.profiling-capture]") {
   TestPlatform platform;
-  Runtime runtime{ProfilingRoot, platform};
+  UiWindow runtime{ProfilingRoot, platform};
   runtime.SetWindowMetrics({.viewport = {300.0F, 200.0F}});
   REQUIRE(runtime.BuildCommit().render_frame.scene.root != nullptr);
   profile_value = 1;
@@ -77,7 +77,7 @@ void CheckTrace(const ProfileRecorder& recorder) {
 AppOptions ProfileOptions(const std::shared_ptr<ProfileRecorder>& recorder) {
   AppOptions options;
   options.show_debug_overlay = false;
-  options.root_hooks.push_back([recorder](RootContext& root) { root.Provide(recorder); });
+  options.window_hooks.push_back([recorder](WindowContext& root) { root.Provide(recorder); });
   return options;
 }
 
@@ -231,7 +231,7 @@ TEST_CASE("Profiling controls and export require a frame boundary", "[profiling]
   REQUIRE(recorder.FrameCount() == 0);
 }
 
-TEST_CASE("Nested Runtime recordings restore the previous recorder", "[profiling]") {
+TEST_CASE("Nested UiWindow recordings restore the previous recorder", "[profiling]") {
   ProfileRecorder outer{ProfileClock};
   ProfileRecorder inner{ProfileClock};
   outer.Start();
@@ -263,10 +263,10 @@ TEST_CASE("Nested Runtime recordings restore the previous recorder", "[profiling
   CheckTrace(inner);
 }
 
-TEST_CASE("Runtime profiling distinguishes mounting invalidation and cached layout", "[.profiling-runtime]") {
+TEST_CASE("UiWindow profiling distinguishes mounting invalidation and cached layout", "[.profiling-runtime]") {
   auto recorder = std::make_shared<ProfileRecorder>(ProfileClock);
   TestPlatform platform;
-  Runtime runtime{ProfilingRoot, platform, ProfileOptions(recorder)};
+  UiWindow runtime{ProfilingRoot, platform, ProfileOptions(recorder)};
   runtime.SetWindowMetrics({.viewport = {300.0F, 200.0F}});
   recorder->Start();
   runtime.BuildCommit();

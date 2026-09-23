@@ -1,7 +1,7 @@
 # Extending HuxerUI
 
 Prefer the narrowest extension point that owns the required behavior.
-HuxerUI already separates composition, layout, retained node behavior, root services, platform services, and drawing.
+HuxerUI already separates composition, layout, retained node behavior, application and window services, platform services, and drawing.
 
 ## Custom components
 
@@ -25,7 +25,7 @@ Use `void` for notifications and a value result only for synchronous decisions o
 ## Custom layouts
 
 Derive from `Layout<Derived>` when behavior is a measurement and placement policy over ordinary children.
-The `ViewNode` interface provides geometry, interaction state, and layout metadata for a Runtime-owned mounted node; application code does not create or own these nodes.
+The `ViewNode` interface provides geometry, interaction state, and layout metadata for a UiWindow-owned mounted node; application code does not create or own these nodes.
 
 ```cpp
 class SimpleRow final : public Layout<SimpleRow> {
@@ -60,7 +60,7 @@ Use typed `LayoutValue<Key>` metadata for semantics owned by the parent layout.
 Derive from `VirtualLayout<Derived>` for a demand-driven logical item source.
 The layout chooses items to realize and returns their geometry.
 
-Runtime owns declaration reconciliation, keys, retained item state, clipping, hit testing, scrolling, semantics, and cleanup.
+UiWindow owns declaration reconciliation, keys, retained item state, clipping, hit testing, scrolling, semantics, and cleanup.
 The layout must not maintain a second mounted item tree.
 
 ## Modifiers and NodeExtension
@@ -132,8 +132,8 @@ A new platform-neutral command is a framework change: it must update the command
 
 ## Root services
 
-Use a root service for a per-window capability shared by unrelated components, such as presentation, clipboard, files, HTTP, or a typed platform module.
-Install custom root behavior through the existing RootHook boundary rather than adding another global registry.
+Use a window service for a per-window capability shared by unrelated components, such as presentation or a window-bound platform module. Clipboard, files, and HTTP belong to application services and handles.
+Install shared services and platform factories through `AppOptions::application_hooks`; use `window_hooks` for window services and layers.
 
 ## PlatformModule
 
@@ -146,17 +146,17 @@ Android receives a retained `HuxerUIFileReference` with `uri()`, Apple receives 
 The platform wrappers preserve the C++ access lifetime but do not expose a second `CanWrite()` contract; shared code continues to own capability metadata and file operations.
 
 iOS and macOS libraries may implement the platform side in Objective-C or Swift through the `HuxerUIPlatform` Clang module.
-Their Objective-C++ RootHook passes the actual factory object to `ios::ObjectiveCPlatformModuleFactory` or `macos::ObjectiveCPlatformModuleFactory`, then wraps the resulting `PlatformChannel` in the library's typed service.
+Their Objective-C++ `ApplicationHook` passes the actual factory object to `ios::ObjectiveCPlatformModuleFactory` or `macos::ObjectiveCPlatformModuleFactory`, then wraps the resulting `PlatformChannel` in the library's typed service.
 The adapter's `create` callback performs that strongly typed wrapping; PlatformView reserves `connect` and `disconnect` for Controller attachment.
 The same platform headers retain the direct Objective-C++ factory path; factory class-name lookup and application-host registration are not used.
 
 Use PlatformView only when a real platform visual control must participate in HuxerUI layout and ordering.
 Use ExternalTexture when a producer supplies image frames rather than an interactive platform view.
 
-## Platform adapters
+## Platform backends
 
 Adding or changing a backend is framework work, not an application extension.
-The adapter owns lifecycle, host events, text services, accessibility mapping, resource loading, frame scheduling, and replay of the shared committed scene.
-It does not duplicate composition, layout, component state machines, or navigation policy.
+The platform-derived Runtime owns application services, event dispatch, and ordinary timers. Its platform-derived UiWindow owns host events, text services, accessibility mapping, frame scheduling, and rendering of the shared committed scene.
+Shared UiWindow code owns composition, layout, and component state machines; application code owns navigation policy.
 
 See [Architecture Design](../design/architecture.md) for subsystem ownership.

@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 
+#include <huxerui/app.h>
 #include <huxerui/semantics.h>
 #include <huxerui/theme.h>
 
@@ -338,7 +339,7 @@ const detail::ModifierDescriptor& ProgressBarVisual::Descriptor() {
 
 void ResolveProgressStateDescription(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
   if (spec.component_semantics.busy.value_or(false) && !spec.component_semantics.state_description.has_value()) {
-    std::shared_ptr<detail::AppResources> resources = detail::RequireAppResources(environment);
+    std::shared_ptr<detail::AppResources> resources = UseService<detail::AppResources>();
     const Locale locale = detail::ResolveResourceLocale(environment, *resources);
     spec.component_semantics.state_description =
         detail::ResolveString(StringVariant(strings::progress_in_progress), *resources, locale);

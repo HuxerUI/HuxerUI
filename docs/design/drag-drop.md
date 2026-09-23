@@ -209,7 +209,7 @@ source Ended with dropped = true
 An Up without an eligible target emits source Ended with dropped set to false.
 If an existing target became ineligible, Exited precedes Ended.
 
-Cancel, source invalidation, device loss, or Runtime teardown commits cancellation and closes the preview before emitting current target Exited and source Canceled.
+Cancel, source invalidation, device loss, or UiWindow retirement commits cancellation and closes the preview before emitting current target Exited and source Canceled.
 Dropped is the successful terminal counterpart of Entered, so a successful target does not also receive Exited.
 
 ## Reconciliation and invalidation
@@ -237,7 +237,7 @@ DebugOverlay remains above it at System level.
 
 The initial source-local grab point is transformed into a window-space offset before anchoring preview placement, so transformed sources do not jump the preview origin.
 Later movement updates Layer placement without recomposing preview content.
-Terminal state, source invalidation, pointer-session quarantine, and Runtime teardown dismiss the preview exactly once.
+Terminal state, source invalidation, pointer-session quarantine, and UiWindow retirement dismiss the preview exactly once.
 
 ## Nested auto-scroll
 

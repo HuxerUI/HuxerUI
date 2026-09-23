@@ -25,7 +25,7 @@ Android `content://` values, Apple security-scoped URLs, and other platform hand
 
 ## Ownership
 
-Resource ownership follows the existing Runtime, Environment, PlatformAdapter, and PaintCommand boundaries:
+Resource ownership follows the existing Runtime, UiWindow, Environment, PlatformResources, and PaintCommand boundaries:
 
 | Layer | Responsibility |
 |---|---|
@@ -98,7 +98,7 @@ There is no generated `app_resources` C++ namespace or compatibility alias.
 ## Runtime resource ownership
 
 Each Runtime root automatically owns AppResources.
-Applications do not install it manually through AppOptions or a RootHook.
+Applications do not install it manually through AppOptions or an application/window hook.
 
 The initial AppResources implementation owns the application index generated for its target.
 Ordered resource merging extends this owner to one final target index without changing the public lookup API.
@@ -258,7 +258,7 @@ Future backends likewise keep platform bundle handles, rawfile handles, installa
 
 ## Platform resource boundary
 
-PlatformAdapter exposes one optional platform resource capability:
+Runtime exposes one optional platform resource capability:
 
 ```cpp
 struct ResourceConfiguration {
@@ -279,12 +279,12 @@ public:
 };
 ```
 
-PlatformAdapter returns the capability when packaged resources are available.
+The platform-derived Runtime returns the capability when packaged resources are available.
 Using a packaged resource without an installed capability is a framework configuration error.
 
 Opening returns an independent stream without first collecting the complete payload.
 Missing payloads return `std::nullopt`; valid empty payloads return a stream that immediately reaches EOF, and other operational failures throw.
-`OpenRead()` may run on workers, and each returned stream retains the native handle and any platform owner it needs independently of the adapter.
+`OpenRead()` may run on workers, and each returned stream retains the native handle and any platform owner it needs independently of Runtime.
 `Configuration()` remains a Runtime-thread operation.
 Windows, Linux, macOS, and iOS open files beneath their existing package roots; Android uses a retained AssetManager and sequential asset reads; Web opens the preloaded virtual file.
 Android native asset-open failures expose no detailed error category and are reported as an unavailable payload.
@@ -699,7 +699,7 @@ macOS cache entries use balanced Core Foundation ownership, and destroying an An
 macOS maps source and destination rectangles while drawing the retained full CGImage, avoiding a cropped CGImage allocation per command.
 
 The current Windows, macOS, Android, and iOS backends decode synchronously on the first cache miss.
-The Web backend keeps asynchronous loading and failure state inside its renderer, draws no image while loading, and asks its PlatformAdapter to schedule a frame when decoding completes.
+The Web backend keeps asynchronous loading and failure state inside its renderer, draws no image while loading, and asks its UiWindow to schedule a frame when decoding completes.
 
 Preloading is not part of the current public resource API.
 
@@ -720,7 +720,7 @@ The Web entry integration loads the generated resource index and payload before 
 Resource lookup and localized string formatting therefore remain synchronous after application startup.
 
 Browser image decoding may complete asynchronously.
-The Web renderer keeps its loading entry, creates an ImageBitmap, and requests another frame through WebPlatformAdapter when the image becomes ready.
+The Web renderer keeps its loading entry, creates an ImageBitmap, and requests another frame through WebUiWindow when the image becomes ready.
 Decoded browser images follow the same 64 MiB renderer-owned LRU budget as platform decoded-image caches.
 The current PaintSequence remains valid because DrawImageCommand already retains immutable encoded bytes and complete geometry.
 

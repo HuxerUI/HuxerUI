@@ -423,7 +423,7 @@ struct PopTransformCommand {
 
 /// Describes one resolved native PlatformView placement for platform renderer consumption.
 ///
-/// Runtime creates this read-only command after resolving mounted identity, typed values, revisions, and final logical
+/// UiWindow creates this read-only command after resolving mounted identity, typed values, revisions, and final logical
 /// bounds. Applications do not construct it directly.
 class PlacePlatformViewCommand final {
 public:
@@ -505,7 +505,7 @@ using PaintCommand = std::variant<
 
 /// Stores one finished ordered recording of platform-neutral paint commands.
 ///
-/// Runtime retains and reuses an unchanged sequence across frames. Platform renderers read Commands() in order, honor
+/// UiWindow retains and reuses an unchanged sequence across frames. Platform renderers read Commands() in order, honor
 /// balanced clip and transform commands, and may use Bounds() for conservative culling and damage.
 class PaintSequence {
 public:

@@ -6,19 +6,15 @@
 #include <unordered_map>
 #include <utility>
 
-#include <huxerui/platform_adapter.h>
+#include <huxerui/app.h>
 
 #include "platform_registry_internal.h"
+#include "application_internal.h"
+#include "runtime/ui_window_internal.h"
 
 namespace huxerui {
 
 namespace detail {
-
-namespace {
-
-thread_local PlatformRegistry* lifecycle_platform_registry = nullptr;
-
-} // namespace
 
 class PlatformChannelState final : public std::enable_shared_from_this<PlatformChannelState> {
 public:
@@ -27,8 +23,8 @@ public:
     std::function<void()> cancel;
   };
 
-  explicit PlatformChannelState(UIThreadDispatcher ui_thread_dispatcher)
-      : dispatch_to_ui_thread_(std::move(ui_thread_dispatcher)) {
+  PlatformChannelState(UiThreadDispatcher ui_thread_dispatcher, std::shared_ptr<ExecutionContext> source)
+      : dispatch_to_ui_thread_(std::move(ui_thread_dispatcher)), source_(std::move(source)) {
     if (!dispatch_to_ui_thread_) {
       throw std::invalid_argument("HuxerUI PlatformChannel UI thread dispatcher must not be empty");
     }
@@ -70,7 +66,7 @@ public:
       throw std::invalid_argument("HuxerUI PlatformChannel completion must not be empty");
     }
 
-    UIThreadDispatcher dispatcher;
+    UiThreadDispatcher dispatcher;
     PlatformRequestId request = 0;
     {
       std::lock_guard lock(mutex_);
@@ -137,7 +133,7 @@ public:
       pending_.erase(found);
     }
     if (cancel) {
-      UIThreadDispatcher dispatcher = dispatch_to_ui_thread_;
+      UiThreadDispatcher dispatcher = dispatch_to_ui_thread_;
       try {
         dispatcher([cancel = std::move(cancel)] {
           try {
@@ -154,7 +150,7 @@ public:
   void Close() noexcept {
     std::vector<std::function<void()>> cancellations;
     std::function<void()> dispose;
-    UIThreadDispatcher dispatcher;
+    UiThreadDispatcher dispatcher;
     {
       std::lock_guard lock(mutex_);
       if (!open_) {
@@ -203,7 +199,7 @@ public:
     if (event.empty() || !IsValidUtf8(event)) {
       return;
     }
-    UIThreadDispatcher dispatcher;
+    UiThreadDispatcher dispatcher;
     {
       std::lock_guard lock(mutex_);
       if (!open_) {
@@ -231,7 +227,17 @@ public:
   }
 
 private:
+  /// Checks the captured application/window lifetime before native channel delivery.
+  /// @return True for a live original source; otherwise closes the channel and returns false.
+  bool CanDeliver() {
+    if (IsPresentationSourceAvailable(source_)) return true;
+    Close();
+    return false;
+  }
+
   void InvokeTransport(PlatformRequestId request, std::string method, PlatformPayload arguments) {
+    if (!CanDeliver()) return;
+    ExecutionGuard guard(source_);
     std::function<std::function<void()>(std::string, PlatformPayload,
                                         std::function<void(PlatformResult<PlatformPayload>)>)>
         invoke;
@@ -280,7 +286,7 @@ private:
   }
 
   void PostResult(PlatformRequestId request, PlatformResult<PlatformPayload> result) {
-    UIThreadDispatcher dispatcher;
+    UiThreadDispatcher dispatcher;
     {
       std::lock_guard lock(mutex_);
       if (!open_ || !pending_.contains(request)) {
@@ -302,6 +308,8 @@ private:
   }
 
   void DeliverResult(PlatformRequestId request, PlatformResult<PlatformPayload> result) {
+    if (!CanDeliver()) return;
+    ExecutionGuard guard(source_);
     std::function<void(PlatformResult<PlatformPayload>)> completion;
     {
       std::lock_guard lock(mutex_);
@@ -338,7 +346,8 @@ private:
   }
 
   void DrainEvents() {
-    while (true) {
+    ExecutionGuard guard(source_);
+    while (CanDeliver()) {
       std::function<void(const PlatformPayload&)> handler;
       PlatformPayload payload;
       {
@@ -365,7 +374,8 @@ private:
     }
   }
 
-  UIThreadDispatcher dispatch_to_ui_thread_;
+  UiThreadDispatcher dispatch_to_ui_thread_;
+  const std::shared_ptr<ExecutionContext> source_;
   PlatformChannelTransport transport_;
   mutable std::mutex mutex_;
   PlatformRequestId next_request_ = 1;
@@ -377,8 +387,13 @@ private:
   std::deque<std::pair<std::string, PlatformPayload>> queued_events_;
 };
 
-PlatformChannelEndpoint MakePlatformChannelEndpoint(UIThreadDispatcher dispatch_to_ui_thread) {
-  return PlatformChannelEndpoint(std::make_shared<PlatformChannelState>(std::move(dispatch_to_ui_thread)));
+PlatformChannelEndpoint MakePlatformChannelEndpoint(UiThreadDispatcher dispatch_to_ui_thread,
+                                                    std::shared_ptr<ExecutionContext> source) {
+  if (!source || !IsPresentationSourceAvailable(source)) {
+    throw std::logic_error("HuxerUI PlatformChannel requires a live execution source");
+  }
+  return PlatformChannelEndpoint(
+      std::make_shared<PlatformChannelState>(std::move(dispatch_to_ui_thread), std::move(source)));
 }
 
 PlatformChannel PlatformChannelEndpoint::Channel() const {
@@ -424,8 +439,9 @@ void PlatformRegistry::RegisterValue(std::string name, std::unique_ptr<Registrat
 }
 
 void PlatformRegistry::RegisterViewValue(std::string name, std::type_index properties_type,
-                                         std::type_index controller_type, PlatformViewFactoryRegistration factory) {
-  if (!factory.factory || factory.type == typeid(void)) {
+                                         std::type_index controller_type,
+                                         std::function<PlatformViewFactoryRegistration(UiWindow&)> factory) {
+  if (!factory) {
     throw std::invalid_argument("HuxerUI PlatformView factory must not be empty");
   }
   RegisterValue(std::move(name),
@@ -446,10 +462,10 @@ PlatformRegistry::ModuleInstance PlatformRegistry::OpenModuleValue(std::string n
   if (registration.primary_type != module_type || registration.secondary_type != options_type) {
     throw std::logic_error("HuxerUI PlatformModule registration has incompatible C++ types: " + name);
   }
-  return static_cast<ModuleRegistration&>(registration).Open(*adapter_, options);
+  return static_cast<ModuleRegistration&>(registration).Open(*runtime_, options);
 }
 
-PlatformViewFactoryRegistration PlatformRegistry::FindViewValue(std::string_view name, std::type_index properties_type,
+PlatformViewFactoryRegistration PlatformRegistry::FindViewValue(UiWindow& ui, std::string_view name, std::type_index properties_type,
                                                                 std::type_index controller_type,
                                                                 std::type_index factory_type) const {
   const auto found = registrations_.find(std::string(name));
@@ -464,20 +480,18 @@ PlatformViewFactoryRegistration PlatformRegistry::FindViewValue(std::string_view
     throw std::logic_error("HuxerUI PlatformView registration has incompatible C++ types: " + std::string(name));
   }
   const auto& view = static_cast<const ViewRegistration&>(registration);
-  if (view.factory.type != factory_type) {
-    throw std::logic_error("HuxerUI PlatformView is registered for a different platform adapter: " + std::string(name));
+  PlatformViewFactoryRegistration factory = view.factory(ui);
+  if (!factory.factory || factory.type != factory_type) {
+    throw std::logic_error("HuxerUI PlatformView is registered for a different platform window: " + std::string(name));
   }
-  return view.factory;
+  return factory;
 }
 
-PlatformRegistry* CurrentLifecyclePlatformRegistry() noexcept {
-  return lifecycle_platform_registry;
-}
-
-PlatformRegistry* SetLifecyclePlatformRegistry(PlatformRegistry* registry) noexcept {
-  PlatformRegistry* previous = lifecycle_platform_registry;
-  lifecycle_platform_registry = registry;
-  return previous;
+PlatformRegistry& CurrentPlatformRegistry() {
+  if (Composer::Current()) {
+    throw std::logic_error("HuxerUI PlatformModule cannot be opened during composition");
+  }
+  return CurrentApplicationRuntime()->registry;
 }
 
 PlatformEventEmitter MakePlatformEventEmitter(

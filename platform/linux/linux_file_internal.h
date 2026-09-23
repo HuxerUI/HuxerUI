@@ -7,19 +7,19 @@
 #include <string>
 #include <string_view>
 
-#include <huxerui/platform_adapter.h>
+#include <huxerui/app.h>
 
 typedef struct _GtkWidget GtkWidget;
 
 namespace huxerui {
 
-class Runtime;
+class UiWindow;
 
 namespace detail {
 
 class LinuxFileDrop final {
 public:
-  LinuxFileDrop(GtkWidget* widget, Runtime& runtime, UIThreadDispatcher dispatcher);
+  LinuxFileDrop(GtkWidget* widget, UiWindow& ui_window, UiThreadDispatcher dispatcher);
   ~LinuxFileDrop();
   LinuxFileDrop(const LinuxFileDrop&) = delete;
   LinuxFileDrop& operator=(const LinuxFileDrop&) = delete;

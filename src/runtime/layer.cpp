@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "internal_access.h"
 
 namespace huxerui {
@@ -21,10 +21,10 @@ void ValidateLayerOptions(const LayerOptions& options) {
 
 } // namespace
 
-LayerController::LayerController(Runtime& runtime)
+LayerController::LayerController(UiWindow& ui_window)
     : state_(
           std::make_shared<State>(State{
-              .runtime = &runtime,
+              .ui_window = &ui_window,
               .entries = {},
               .next_id = 1,
               .next_sequence = 1,
@@ -32,7 +32,7 @@ LayerController::LayerController(Runtime& runtime)
       ) {}
 
 void LayerController::Disconnect() noexcept {
-  state_->runtime = nullptr;
+  state_->ui_window = nullptr;
   state_->entries.clear();
 }
 
@@ -62,7 +62,7 @@ LayerId LayerController::AttachCaptured(
 }
 
 bool LayerController::UpdatePlacement(LayerId id, detail::LayerPlacement placement) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return false;
   }
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
@@ -73,12 +73,12 @@ bool LayerController::UpdatePlacement(LayerId id, detail::LayerPlacement placeme
     return true;
   }
   *found->placement = std::move(placement);
-  state_->runtime->InvalidateLayerPlacement(id);
+  state_->ui_window->InvalidateLayerPlacement(id);
   return true;
 }
 
 std::optional<LayerOptions> LayerController::EntryOptions(LayerId id) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return std::nullopt;
   }
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
@@ -86,7 +86,7 @@ std::optional<LayerOptions> LayerController::EntryOptions(LayerId id) const {
 }
 
 std::shared_ptr<detail::LayerTransitionState> LayerController::Transition(LayerId id) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return {};
   }
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
@@ -103,7 +103,7 @@ void LayerController::BindTransitionCompletion(
       [state = std::weak_ptr<State>(state_), transition = std::weak_ptr<detail::LayerTransitionState>(transition), id] {
         const std::shared_ptr<State> locked = state.lock();
         const std::shared_ptr<detail::LayerTransitionState> completed = transition.lock();
-        if (!locked || locked->runtime == nullptr || !completed) {
+        if (!locked || locked->ui_window == nullptr || !completed) {
           return;
         }
         const auto found = std::ranges::find(locked->entries, id, &detail::LayerEntry::id);
@@ -111,7 +111,7 @@ void LayerController::BindTransitionCompletion(
           return;
         }
         locked->entries.erase(found);
-        locked->runtime->InvalidateLayers();
+        locked->ui_window->InvalidateLayers();
       };
 }
 
@@ -131,7 +131,7 @@ bool LayerController::UpdateCaptured(
     detail::LayerPlacement placement,
     std::shared_ptr<detail::LayerTransitionState> transition
 ) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return false;
   }
   if (!content) {
@@ -159,7 +159,7 @@ bool LayerController::UpdateCaptured(
     found->transition->target_visible = true;
   }
   ++found->revision;
-  state_->runtime->InvalidateLayers();
+  state_->ui_window->InvalidateLayers();
   return true;
 }
 
@@ -173,7 +173,7 @@ LayerId LayerController::AttachCapturedReplacing(
     std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group,
     std::optional<std::uint64_t> retained_focus_identity
 ) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     throw std::logic_error("HuxerUI layer controller is disconnected");
   }
   if (!content) {
@@ -198,14 +198,14 @@ LayerId LayerController::AttachCapturedReplacing(
     found = std::ranges::find(state_->entries, *replaced, &detail::LayerEntry::id);
   }
   if (found != state_->entries.end()) {
-    state_->runtime->DeactivateLayerInput(*replaced);
+    state_->ui_window->DeactivateLayerInput(*replaced);
     *found = std::move(entry);
     BindTransitionCompletion(replacement, found->transition);
   } else {
     state_->entries.push_back(std::move(entry));
     BindTransitionCompletion(replacement, state_->entries.back().transition);
   }
-  state_->runtime->InvalidateLayers();
+  state_->ui_window->InvalidateLayers();
   return replacement;
 }
 
@@ -215,7 +215,7 @@ bool LayerController::UpdateEntry(
     ViewFactory content,
     std::optional<std::shared_ptr<const Environment>> environment
 ) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return false;
   }
   if (!content) {
@@ -239,12 +239,12 @@ bool LayerController::UpdateEntry(
     found->transition->target_visible = true;
   }
   ++found->revision;
-  state_->runtime->InvalidateLayers();
+  state_->ui_window->InvalidateLayers();
   return true;
 }
 
 bool LayerController::Dismiss(LayerId id) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return false;
   }
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);
@@ -257,18 +257,18 @@ bool LayerController::Dismiss(LayerId id) const {
     }
     found->transition->target_visible = false;
     ++found->revision;
-    state_->runtime->InvalidateLayers();
-    state_->runtime->DeactivateLayerInput(id);
+    state_->ui_window->InvalidateLayers();
+    state_->ui_window->DeactivateLayerInput(id);
     return true;
   }
   state_->entries.erase(found);
-  state_->runtime->InvalidateLayers();
-  state_->runtime->DeactivateLayerInput(id);
+  state_->ui_window->InvalidateLayers();
+  state_->ui_window->DeactivateLayerInput(id);
   return true;
 }
 
 LayerController::DismissRequestResult LayerController::RequestDismiss(LayerId id) const {
-  if (state_->runtime == nullptr) {
+  if (state_->ui_window == nullptr) {
     return {.handled = false, .dismissed = true};
   }
   const auto found = std::ranges::find(state_->entries, id, &detail::LayerEntry::id);

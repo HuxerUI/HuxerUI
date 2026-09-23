@@ -108,7 +108,7 @@ struct AppOptions {
 Platform integration replaces separate viewport updates with an atomic metric update:
 
 ```cpp
-void Runtime::SetWindowMetrics(WindowMetrics metrics);
+void UiWindow::SetWindowMetrics(WindowMetrics metrics);
 ```
 
 `SetViewport()` has been removed.
@@ -285,7 +285,7 @@ return VideoPage().With(
 
 ## Appearance resolution
 
-Runtime resolves each system bar independently after final layout and presentation geometry.
+UiWindow resolves each system bar independently after final layout and presentation geometry.
 The resolution order is:
 
 - The highest painted appearance declaration adjoining the corresponding physical edge or safe-content boundary.
@@ -349,7 +349,7 @@ Drawer modal scrims cover the complete viewport while the drawer surface owns it
 
 ## Incremental invalidation
 
-`Runtime::SetWindowMetrics()` compares the complete value before scheduling work.
+`UiWindow::SetWindowMetrics()` compares the complete value before scheduling work.
 
 When only `safe_area` changes, Runtime invalidates application-root measurement, Layer placement, affected system-bar backplane paint, and visible text-selection geometry.
 It does not recompose the application.
@@ -372,12 +372,12 @@ When it hides, the platform restores the native navigation or home-indicator ins
 BringTextInputIntoView, selection handles, the selection menu, and platform caret geometry use the final logical viewport and host-view coordinate transforms exactly as they do today.
 They do not add platform-specific SafeArea branches.
 
-## Platform adapter boundary
+## UiWindow host boundary
 
-PlatformAdapter gains one optional system-bar foreground operation rather than a new PlatformWindow abstraction.
+UiWindow exposes one optional system-bar foreground operation through `SetSystemBarsContentBrightness()`.
 The operation receives already resolved light or dark foreground values and performs no layout work.
 
-The shared Runtime owns:
+The shared UiWindow owns:
 
 - `WindowContentMode` behavior.
 - Safe-area consumption.
@@ -386,7 +386,7 @@ The shared Runtime owns:
 - appearance deduplication.
 - presentation safe bounds.
 
-Platform adapters own:
+Platform-derived UiWindow implementations own:
 
 - Full platform surface configuration.
 - viewport and safe-area collection.
@@ -476,7 +476,7 @@ Shared validation is required to cover:
 - Theme fallback and explicit appearance precedence.
 - TopAppBar and NavigationBar background contribution.
 - Automatic foreground contrast and explicit overrides.
-- deduplicated PlatformAdapter foreground updates.
+- deduplicated UiWindow foreground updates.
 - Dialog, Toast, Popup, Menu, BottomSheet, barrier, Drawer, and debug placement.
 - IME bottom-inset restoration.
 

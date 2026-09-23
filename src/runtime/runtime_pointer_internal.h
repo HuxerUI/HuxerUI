@@ -12,7 +12,7 @@ namespace huxerui::detail {
 
 class PointerInteraction final {
 public:
-  explicit PointerInteraction(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
+  explicit PointerInteraction(UiWindow::State& runtime_state) : runtime_state_(runtime_state) {}
 
   void HandlePointerEvent(const PointerEvent& event);
   bool HasContextMenuHandler(Point position) const;
@@ -69,7 +69,7 @@ private:
   void FinishDragDrop(PointerSession& session, const DragEvent& drag);
   void CancelDragDrop(PointerSession& session, const DragEvent& drag);
 
-  Runtime::State& runtime_state_;
+  UiWindow::State& runtime_state_;
   std::optional<PointerHoverState> pointer_hover_;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   std::unordered_map<std::int64_t, PointerSession> pointer_sessions_;

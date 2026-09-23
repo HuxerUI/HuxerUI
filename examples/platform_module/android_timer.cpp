@@ -73,14 +73,13 @@ private:
 
 namespace huxerui::example {
 
-void InstallTimer(RootContext& root) {
+void InstallTimer(ApplicationContext& root) {
   android::JavaPlatformModuleFactory<std::shared_ptr<TimerService>> factory;
   factory.class_name = platform_timer_class;
   factory.create = [](PlatformChannel channel) {
     return std::static_pointer_cast<TimerService>(std::make_shared<AndroidTimerService>(std::move(channel)));
   };
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, std::move(factory));
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

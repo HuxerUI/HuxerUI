@@ -13,7 +13,7 @@ class UIKitTextInputState;
 
 class UIKitTextInput final : public PlatformTextInput {
 public:
-  UIKitTextInput(Runtime& runtime, HuxerUIView* view);
+  UIKitTextInput(UiWindow& ui_window, HuxerUIView* view);
   ~UIKitTextInput() override;
 
   UIKitTextInput(const UIKitTextInput&) = delete;

@@ -191,7 +191,7 @@ windows::PlatformViewFactory<PlatformTextFieldProperties, PlatformTextFieldState
 
 } // namespace
 
-void InstallPlatformTextField(RootContext& root) {
+void InstallPlatformTextField(ApplicationContext& root) {
   root.RegisterPlatformView<PlatformTextFieldProperties>(platform_text_field::type, PlatformTextFieldFactory());
 }
 

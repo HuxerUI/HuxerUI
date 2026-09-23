@@ -30,7 +30,7 @@ struct PointerHoverState {
 enum class GestureDecision {
   // Keep recognition pending and deliver later pointer or deadline updates.
   Continue,
-  // Claim the pointer sequence. Runtime commits this recognition as the owner before publishing output.
+  // Claim the pointer sequence. UiWindow commits this recognition as the owner before publishing output.
   Accept,
   // Remove recognition from this sequence. Rejected recognition cannot become active later.
   Reject,
@@ -45,7 +45,7 @@ struct GestureRecognizerInput {
   double timestamp = 0.0;
 };
 
-// Recognition and output delivery are separate so Runtime can commit pointer ownership before application code runs.
+// Recognition and output delivery are separate so UiWindow can commit pointer ownership before application code runs.
 // Update and AdvanceDeadline may mutate tentative recognizer state, but must not publish typed events or mutate the
 // owning NodeExtension. Accepted, UpdateAccepted, Canceled, and TapAccepted are the output-delivery boundary.
 class GestureRecognizer {
@@ -53,36 +53,37 @@ public:
   virtual ~GestureRecognizer() = default;
 
   // A shared-tap recognizer is attached to the node's single TapRecognitionState instead of entering ownership
-  // resolution independently. Runtime then uses only Canceled and TapAccepted for that recognizer. This keeps Click and
+  // resolution independently. UiWindow then uses only Canceled and TapAccepted for that recognizer. This keeps Click
+  // and
   // MultiTap on the same movement, release-hit, disabled-state, and raw-target cancellation decision.
   [[nodiscard]] virtual bool SharesTap() const noexcept {
     return false;
   }
 
-  // Runtime calls Update while this recognizer is pending. Down is delivered first, followed by each Move and the
+  // UiWindow calls Update while this recognizer is pending. Down is delivered first, followed by each Move and the
   // terminal Up unless another recognizer wins. An explicit pointer Cancel uses Canceled instead. Continue preserves
   // pending recognition, Accept requests ownership, and Reject permanently removes this recognizer from the sequence.
   [[nodiscard]] virtual GestureDecision Update(const GestureRecognizerInput& input) = 0;
 
-  // Return the next absolute platform timestamp at which a pending recognizer may change its decision. Runtime scans
+  // Return the next absolute platform timestamp at which a pending recognizer may change its decision. UiWindow scans
   // all pending recognizers, coalesces their wake-ups, and does not poll recognizers that return no deadline.
   [[nodiscard]] virtual std::optional<double> Deadline() const noexcept {
     return std::nullopt;
   }
 
-  // Runtime calls AdvanceDeadline only while the recognizer remains pending. The timestamp may be later than the
+  // UiWindow calls AdvanceDeadline only while the recognizer remains pending. The timestamp may be later than the
   // requested deadline, so implementations compare rather than require equality. Recognition therefore does not
-  // depend on a synthetic pointer type or position; Runtime supplies the last committed position only if acceptance
+  // depend on a synthetic pointer type or position; UiWindow supplies the last committed position only if acceptance
   // needs to be delivered afterward.
   [[nodiscard]] virtual GestureDecision AdvanceDeadline(double timestamp) {
     static_cast<void>(timestamp);
     return GestureDecision::Continue;
   }
 
-  // Runtime calls Accepted after storing this recognizer as the session owner, canceling every competing recognizer,
+  // UiWindow calls Accepted after storing this recognizer as the session owner, canceling every competing recognizer,
   // and canceling ordinary raw-pointer delivery. A recognizer shared by several PointerSessions may receive it again
   // after another session joins; all affected owners are committed before either callback form runs. The input is the
-  // event that accepted the recognizer. For deadline acceptance, Runtime synthesizes a Move carrying the session's
+  // event that accepted the recognizer. For deadline acceptance, UiWindow synthesizes a Move carrying the session's
   // last committed position and device kind. Implementations must commit bookkeeping before invoking handlers because
   // a handler may recompose or unmount the owner.
   virtual void Accepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
@@ -91,7 +92,7 @@ public:
     static_cast<void>(input);
   }
 
-  // After acceptance, Runtime bypasses recognition and sends subsequent Move and Up events here. Delivery remains
+  // After acceptance, UiWindow bypasses recognition and sends subsequent Move and Up events here. Delivery remains
   // bound to the owner even outside the original node bounds. Up is the normal completion path; device or ownership
   // cancellation uses Canceled instead. Implementations normally publish Changed and Ended from this callback.
   virtual void UpdateAccepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
@@ -100,7 +101,7 @@ public:
     static_cast<void>(input);
   }
 
-  // Runtime calls Canceled when another recognizer wins, the platform cancels the pointer, or Runtime quarantines the
+  // UiWindow calls Canceled when another recognizer wins, the platform cancels the pointer, or UiWindow quarantines the
   // sequence after an exception. It may run before or after Accepted. A pending recognizer only discards tentative
   // state; a recognizer that published Started must publish at most one matching Canceled and clear ownership first.
   // If reconciliation removed the owning extension, its normal destruction is responsible for retained cleanup.
@@ -110,7 +111,7 @@ public:
     static_cast<void>(input);
   }
 
-  // Runtime calls TapAccepted only when SharesTap returned true and the node's common Tap recognizer won on Up. A new
+  // UiWindow calls TapAccepted only when SharesTap returned true and the node's common Tap recognizer won on Up. A new
   // consumer recognizer is created for every pointer sequence, so accumulation across taps belongs to the compatible
   // NodeExtension rather than this per-sequence object.
   virtual void TapAccepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
@@ -120,7 +121,7 @@ public:
   }
 };
 
-// DragSource recognizers expose their latest immutable event snapshot so Runtime can order source and target output
+// DragSource recognizers expose their latest immutable event snapshot so UiWindow can order source and target output
 // around session ownership, preview dismissal, and drop completion without adding callbacks to the generic recognizer.
 class DragSourceRecognizer : public GestureRecognizer {
 public:

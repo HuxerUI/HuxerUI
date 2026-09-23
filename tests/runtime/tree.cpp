@@ -106,12 +106,12 @@ struct TreeFixture {
 
 View TreeApp() { return active_tree_fixture->Build(); }
 
-void TreeKey(Runtime& runtime, Key key) {
+void TreeKey(UiWindow& runtime, Key key) {
   REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = key}));
   runtime.BuildFrame();
 }
 
-void TapAt(Runtime& runtime, Point position, PointerDeviceKind device_kind, std::int64_t pointer_id = 0) {
+void TapAt(UiWindow& runtime, Point position, PointerDeviceKind device_kind, std::int64_t pointer_id = 0) {
   runtime.HandlePointerEvent({PointerEventType::Down, pointer_id, position, device_kind});
   runtime.HandlePointerEvent({PointerEventType::Up, pointer_id, position, device_kind});
 }
@@ -197,7 +197,7 @@ const PushTransformCommand* FindDisclosureRotation(const FlattenedScene& scene) 
 TEST_CASE("TreeView separates declaration snapshots from virtual row composition", "[tree]") {
   TreeFixture fixture;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
   std::vector<int> roots(1000);
@@ -232,7 +232,7 @@ TEST_CASE("TreeView keeps expansion selection and activation controlled and dist
   TreeFixture fixture;
   fixture.accept = false;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   auto frame = runtime.BuildCommit().semantic_frame;
   const auto parent = TreeNode(*frame, "item 0").id;
@@ -272,7 +272,7 @@ TEST_CASE("TreeView keeps expansion selection and activation controlled and dist
 TEST_CASE("TreeView observes unloaded branches and restores active parent after collapse", "[tree]") {
   TreeFixture fixture;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
   fixture.children = std::vector<int>{};
@@ -311,7 +311,7 @@ TEST_CASE("TreeView observes unloaded branches and restores active parent after 
 TEST_CASE("TreeView preserves keyed anchors and row state across reorder and eviction", "[tree]") {
   TreeFixture fixture;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
   std::vector<int> roots(100);
@@ -346,7 +346,7 @@ TEST_CASE("TreeView retains nested editor semantics and focus outside the viewpo
   TreeFixture fixture;
   fixture.editors = true;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 100.0F}});
   runtime.BuildFrame();
   fixture.expanded = true;
@@ -379,7 +379,7 @@ TEST_CASE("TreeView retains nested editor semantics and focus outside the viewpo
 
 TEST_CASE("TreeView qualifies sibling keys by parent and validates configuration", "[tree]") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime valid{[]() -> View {
+  UiWindow valid{[]() -> View {
     const auto factory = [](int node) { return Text(std::to_string(node)).Key(node); };
     const auto info = [](int node) {
       return TreeItemInfo{.label = std::to_string(node), .expandable = node < 2, .expanded = node < 2};
@@ -397,10 +397,11 @@ TEST_CASE("TreeView qualifies sibling keys by parent and validates configuration
   }
   REQUIRE(ids.size() == 2);
   REQUIRE(ids[0] != ids[1]);
-  Runtime duplicate{[]() -> View {
+  TestPlatform duplicate_platform{platform.platform_resources};
+  UiWindow duplicate{[]() -> View {
     return TreeView<int>(std::vector<int>{1, 1}, [](int node) { return Text("row").Key(node); },
                          [](int) { return TreeItemInfo{.label = "row"}; });
-  }, platform};
+  }, duplicate_platform};
   REQUIRE_THROWS_AS(duplicate.BuildFrame(), std::logic_error);
   const auto factory = [](int) { return View{}; };
   const auto info = [](int) { return TreeItemInfo{.label = "row"}; };
@@ -410,15 +411,16 @@ TEST_CASE("TreeView qualifies sibling keys by parent and validates configuration
   REQUIRE_THROWS_AS(TreeView<int>({}, factory, info).CacheExtent(-1.0F), std::invalid_argument);
   const ImageVariant empty_icon = ImageAsset{};
   REQUIRE_THROWS_AS(TreeView<int>({}, factory, info).DisclosureIcon(empty_icon), std::invalid_argument);
-  Runtime empty{[]() -> View {
+  TestPlatform empty_platform{platform.platform_resources};
+  UiWindow empty{[]() -> View {
     return TreeView<int>({}, [](int) { return View{}; }, [](int) { return TreeItemInfo{.label = "row"}; });
-  }, platform};
+  }, empty_platform};
   REQUIRE_NOTHROW(empty.BuildFrame());
 }
 
 TEST_CASE("TreeView applies its configured default indication", "[tree]") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{IndicatedTreeApp, platform};
+  UiWindow runtime{IndicatedTreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   runtime.BuildFrame();
   const auto* indication = FindDefaultIndication(*runtime.RootNode());
@@ -444,7 +446,7 @@ TEST_CASE("TreeView default style uses the theme disabled opacity", "[tree]") {
 
 TEST_CASE("TreeView tints and rotates a custom disclosure icon", "[tree]") {
   TestPlatform platform;
-  Runtime runtime{CustomDisclosureIconApp, platform};
+  UiWindow runtime{CustomDisclosureIconApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const Color tint = Color::Rgb(18, 86, 140);
@@ -464,7 +466,7 @@ TEST_CASE("TreeView tints and rotates a custom disclosure icon", "[tree]") {
 
 TEST_CASE("TreeView animates disclosure rotation through retained presentation", "[tree]") {
   TestPlatform platform;
-  Runtime runtime{[] { return AnimatedDisclosureIconApp(false); }, platform};
+  UiWindow runtime{[] { return AnimatedDisclosureIconApp(false); }, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   REQUIRE(FindDisclosureRotation(runtime.BuildFrame()) == nullptr);
 
@@ -493,7 +495,7 @@ TEST_CASE("TreeView animates disclosure rotation through retained presentation",
 
 TEST_CASE("TreeView resolves disclosure rotation immediately with reduced motion", "[tree]") {
   TestPlatform platform;
-  Runtime runtime{[] { return AnimatedDisclosureIconApp(true); }, platform};
+  UiWindow runtime{[] { return AnimatedDisclosureIconApp(true); }, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -507,7 +509,7 @@ TEST_CASE("TreeView resolves disclosure rotation immediately with reduced motion
 TEST_CASE("TreeView pointer input distinguishes disclosure row selection and cancellation", "[tree]") {
   TreeFixture fixture;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
   ClickAt(runtime, {80.0F, 12.0F});
@@ -534,7 +536,7 @@ TEST_CASE("TreeView pointer input distinguishes disclosure row selection and can
 TEST_CASE("TreeView applies pointer-specific row expansion and activation conventions", "[tree]") {
   TreeFixture fixture;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -578,7 +580,7 @@ TEST_CASE("TreeView keeps nested button taps out of row activation", "[tree]") {
   TreeFixture fixture;
   fixture.buttons = true;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
   fixture.expanded = true;
@@ -602,7 +604,7 @@ TEST_CASE("TreeView keeps nested button taps out of row activation", "[tree]") {
 TEST_CASE("TreeView scroll drags cancel row selection and activation", "[tree]") {
   TreeFixture fixture;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TreeApp, platform};
+  UiWindow runtime{TreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   runtime.BuildFrame();
   std::vector<int> roots(100);

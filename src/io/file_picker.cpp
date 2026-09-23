@@ -319,7 +319,7 @@ Task<IoResult<AsyncOutputStream>> OpenReferenceOutputStream(std::shared_ptr<File
 }
 
 Task<IoResult<std::string>> ReadReferenceString(std::shared_ptr<FileReferenceState> state, FileType type) {
-  // This is a whole-file read. Decoding runs after resumption on the owning Runtime thread, unlike
+  // This is a whole-file read. Decoding runs after resumption on the owning UiWindow thread, unlike
   // File::ReadStringAsync(), which decodes inside its scheduled file operation.
   co_return DecodeFileUtf8(co_await ReadReferenceBytes(std::move(state), type));
 }
@@ -608,7 +608,7 @@ public:
 
 } // namespace
 
-// Serializes file-open, directory-open, and export presentation for one Runtime. Queue mutation is
+// Serializes file-open, directory-open, and export presentation for one UiWindow. Queue mutation is
 // confined to its UI thread; reference I/O uses its own callback bridge and never enters this queue.
 class FilePickerController final : public std::enable_shared_from_this<FilePickerController> {
 public:
@@ -617,7 +617,7 @@ public:
   )
       : transport_(std::move(transport)), dispatch_to_ui_thread_(std::move(dispatch_to_ui_thread)) {
     if (transport_ && !dispatch_to_ui_thread_) {
-      throw std::logic_error("HuxerUI FilePicker requires a UIThreadDispatcher when the platform supports picking");
+      throw std::logic_error("HuxerUI FilePicker requires a UiThreadDispatcher when the platform supports picking");
     }
   }
 

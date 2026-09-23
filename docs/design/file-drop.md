@@ -48,7 +48,7 @@ A new hover or a newer completed drop never redirects or cancels an older accept
 Compatible target recomposition preserves pending delivery and uses current event bindings; acceptance options remain those captured at physical drop.
 Unmounting or incompatibly replacing a target cancels its pending deliveries without invoking stale handlers.
 Changing hover eligibility after acceptance does not retroactively reject the accepted operation.
-Runtime destruction cancels all pending work, and late completions cannot access Runtime or resurrect a removed target.
+UiWindow retirement cancels its pending drop work, and late completions cannot access that UiWindow or resurrect a removed target.
 
 ## Shared ownership
 

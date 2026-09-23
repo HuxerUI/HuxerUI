@@ -40,18 +40,18 @@ View LibraryApp() {
 
 } // namespace
 
-TEST_CASE("LibraryResourcesAreMergedAndExplicitRootHooksInstallServices") {
+TEST_CASE("LibraryResourcesAreMergedAndExplicitWindowHooksInstallServices") {
   observed_library_value = 0;
   observed_library_only_resource.clear();
   observed_overridden_resource.clear();
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back(huxerui_test_library::Install);
-  REQUIRE(options.root_hooks.size() == 1);
+  options.window_hooks.push_back(huxerui_test_library::Install);
+  REQUIRE(options.window_hooks.size() == 1);
 
   TestPlatform platform;
   LibraryPackageResources resources;
   platform.platform_resources = &resources;
-  Runtime runtime{LibraryApp, platform, std::move(options)};
+  UiWindow runtime{LibraryApp, platform, std::move(options)};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   REQUIRE(ContainsText(runtime.BuildFrame(), "library"));
   REQUIRE(observed_library_value == 42);

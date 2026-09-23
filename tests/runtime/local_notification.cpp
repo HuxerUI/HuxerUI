@@ -132,7 +132,7 @@ public:
 class LocalNotificationTestPlatform final : public TestPlatform {
 public:
   LocalNotificationTestPlatform() = default;
-  explicit LocalNotificationTestPlatform(UIThreadDispatcher dispatch_to_ui_thread)
+  explicit LocalNotificationTestPlatform(UiThreadDispatcher dispatch_to_ui_thread)
       : TestPlatform(std::move(dispatch_to_ui_thread)) {}
 
   std::shared_ptr<detail::LocalNotificationTransport> CreateLocalNotificationTransport() override {
@@ -164,7 +164,7 @@ void ResetLocalNotificationState() {
   operation_results.clear();
 }
 
-void MountLocalNotificationApp(Runtime& runtime) {
+void MountLocalNotificationApp(UiWindow& runtime) {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(notification_handle.has_value());
@@ -229,7 +229,7 @@ TaskHandle CancelNotification(std::string identifier = "message") {
 TEST_CASE("Local notifications report unavailable without a platform transport") {
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   REQUIRE(notification_capabilities == LocalNotificationCapabilities{});
@@ -256,7 +256,7 @@ TEST_CASE("Local notification capabilities report the current transport snapshot
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
   platform.local_notification_transport = std::make_shared<TestLocalNotificationTransport>();
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   REQUIRE(notification_capabilities == LocalNotificationCapabilities{});
@@ -277,7 +277,7 @@ TEST_CASE("Local notification queries run independently while mutations preserve
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
   platform.local_notification_transport = std::make_shared<TestLocalNotificationTransport>();
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   const auto delivery_time = std::chrono::system_clock::now() + std::chrono::hours(2);
@@ -337,7 +337,7 @@ TEST_CASE("Local notification template presentation reaches immediate and schedu
   auto transport = std::make_shared<TestLocalNotificationTransport>();
   transport->immediate_operation = LocalNotificationOperationStatus::Accepted;
   platform.local_notification_transport = transport;
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   const auto delivery_time = std::chrono::system_clock::now() + std::chrono::hours(1);
@@ -369,7 +369,7 @@ TEST_CASE("Local notification operations support synchronous platform completion
   transport->immediate_operation = LocalNotificationOperationStatus::Accepted;
   platform.local_notification_transport = transport;
   {
-    Runtime runtime(LocalNotificationApp, platform);
+    UiWindow runtime(LocalNotificationApp, platform);
     MountLocalNotificationApp(runtime);
 
     CheckAuthorization();
@@ -400,7 +400,7 @@ TEST_CASE("Canceling a local notification mutation advances the ordered queue") 
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
   platform.local_notification_transport = std::make_shared<TestLocalNotificationTransport>();
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   const TaskHandle show = ShowNotification();
@@ -425,7 +425,7 @@ TEST_CASE("Canceling a queued notification prevents native submission without bl
   LocalNotificationTestPlatform platform;
   auto transport = std::make_shared<TestLocalNotificationTransport>();
   platform.local_notification_transport = transport;
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   RequestAuthorization();
@@ -455,7 +455,7 @@ TEST_CASE("Canceling a non-cancelable notification prompt preserves mutation ord
   LocalNotificationTestPlatform platform;
   platform.local_notification_transport = std::make_shared<TestLocalNotificationTransport>();
   platform.local_notification_transport->authorization_request_cancellable = false;
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   const TaskHandle request = RequestAuthorization();
@@ -478,12 +478,12 @@ TEST_CASE("Canceling a non-cancelable notification prompt preserves mutation ord
   REQUIRE(operation_results == std::vector{LocalNotificationOperationStatus::Accepted});
 }
 
-TEST_CASE("Local notification handles disconnect safely with their Runtime") {
+TEST_CASE("Local notification handles disconnect safely with their UiWindow") {
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
   platform.local_notification_transport = std::make_shared<TestLocalNotificationTransport>();
   {
-    Runtime runtime(LocalNotificationApp, platform);
+    UiWindow runtime(LocalNotificationApp, platform);
     MountLocalNotificationApp(runtime);
     ShowNotification();
     platform.RunPlatformModuleTasks();
@@ -501,7 +501,7 @@ TEST_CASE("Local notification handles disconnect safely with their Runtime") {
 TEST_CASE("Local notification methods validate application input before launching a Task") {
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
 
   REQUIRE_THROWS_AS(notification_handle->ShowAsync({.identifier = "", .title = "Title"}), std::invalid_argument);
@@ -564,7 +564,7 @@ TEST_CASE("Local notification data rejects nested buffer references without copy
 TEST_CASE("Local notification submission rejects nested retained resources before launching a Task") {
   ResetLocalNotificationState();
   LocalNotificationTestPlatform platform;
-  Runtime runtime(LocalNotificationApp, platform);
+  UiWindow runtime(LocalNotificationApp, platform);
   MountLocalNotificationApp(runtime);
   const PlatformPayload data = PlatformPayload::Object{
       {"nested", PlatformPayload::List{MakeTestExternalTexture({16.0F, 16.0F})}},
@@ -577,6 +577,58 @@ TEST_CASE("Local notification submission rejects nested retained resources befor
   REQUIRE_THROWS_AS(detail::DecodeLocalNotificationData(data.Encode().bytes), std::invalid_argument);
   REQUIRE_THROWS_AS(notification_handle->ShowAsync({.identifier = "large", .title = "Title", .data = Bytes(65536)}),
                     std::invalid_argument);
+}
+
+namespace {
+std::function<View()> notification_snapshot_root;
+View NotificationSnapshotRoot() { return notification_snapshot_root(); }
+
+Task<void> SubmitSnapshot(Task<LocalNotificationOperationStatus> request) {
+  const auto status = co_await std::move(request);
+  REQUIRE(status == LocalNotificationOperationStatus::Accepted);
+}
+} // namespace
+
+TEST_CASE("Notification text uses the call locale and survives the originating UI") {
+  LocalNotificationTestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  platform.local_notification_transport = std::make_shared<TestLocalNotificationTransport>();
+  platform.local_notification_transport->immediate_operation = LocalNotificationOperationStatus::Accepted;
+  TestPlatform first_platform;
+  TestPlatform second_platform;
+  Application application(NotificationSnapshotRoot, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, platform);
+  auto tasks = UseApplicationTaskScope();
+  std::optional<LocalNotificationHandle> notifications;
+  notification_snapshot_root = [&] {
+    notifications = UseApplication().LocalNotifications();
+    return View{};
+  };
+  auto first = std::make_unique<UiWindow>(runtime, first_platform);
+  first->UpdateResourceConfiguration({Locale::FromLanguageTag("en"), 1.0F});
+  first->BuildFrame();
+  std::optional<Task<LocalNotificationOperationStatus>> request;
+  notification_snapshot_root = [&] {
+    request = notifications->ShowAsync({
+        .identifier = "snapshot",
+        .title = StringResource("huxerui", "strings/dialog_ok"),
+    });
+    return View{};
+  };
+  auto second = std::make_unique<UiWindow>(runtime, second_platform);
+  second->UpdateResourceConfiguration({Locale::FromLanguageTag("zh"), 1.0F});
+  second->BuildFrame();
+  second->UpdateResourceConfiguration({Locale::FromLanguageTag("en"), 1.0F});
+  first.reset();
+  second.reset();
+  tasks.Launch(SubmitSnapshot(std::move(*request)));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(platform.local_notification_transport->shows.size() == 1);
+  REQUIRE(platform.local_notification_transport->shows.front().notification.title == "确定");
+  tasks.Launch(SubmitSnapshot(notifications->ShowAsync({.identifier = "headless", .title = "Ready"})));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(platform.local_notification_transport->shows.size() == 2);
+  notification_snapshot_root = {};
 }
 
 } // namespace huxerui::test

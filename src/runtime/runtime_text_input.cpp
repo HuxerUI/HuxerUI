@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "runtime_text_internal.h"
 #include "text/text_input_internal.h"
 
@@ -251,7 +251,7 @@ void detail::TextInteraction::RequestShowForNode(std::uint64_t node) {
       text_input_session_->node_identity != node) {
     return;
   }
-  if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
+  if (PlatformTextInput* text_input = runtime_state_.owner_.TextInput()) {
     text_input->RequestShow(text_input_session_->session_id);
   }
 }
@@ -388,7 +388,7 @@ void detail::TextInteraction::StopTextInputSession(TextInputEndReason reason) {
     failure = std::current_exception();
   }
 
-  if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
+  if (PlatformTextInput* text_input = runtime_state_.owner_.TextInput()) {
     try {
       text_input->Stop(session.session_id);
     } catch (...) {
@@ -446,7 +446,7 @@ void detail::TextInteraction::RefreshTextInputSession() {
           !active.published_geometry.has_value() || resolved.snapshot->geometry != active.published_geometry->geometry;
       active.configuration = configuration;
       active.state = current;
-      if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
+      if (PlatformTextInput* text_input = runtime_state_.owner_.TextInput()) {
         if (restart) {
           text_input->Restart(active.session_id, active.configuration, active.state, resolved.snapshot->geometry);
         } else if (state_changed || geometry_changed) {
@@ -503,7 +503,7 @@ void detail::TextInteraction::RefreshTextInputSession() {
   };
   try {
     TextInputGeometry geometry = QueryTextInputGeometry(session_id, initial.selection.Range());
-    if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
+    if (PlatformTextInput* text_input = runtime_state_.owner_.TextInput()) {
       text_input->Start(session_id, configuration, initial, geometry);
     }
     text_input_session_->published_geometry = MakeGeometrySnapshot(initial, *focused, std::move(geometry));
@@ -565,7 +565,7 @@ TextInputApplyResult detail::TextInteraction::HandleTextInputCommands(const Text
   active.configuration = configuration;
   active.state = current;
 
-  if (PlatformTextInput* text_input = runtime_state_.platform_->TextInput()) {
+  if (PlatformTextInput* text_input = runtime_state_.owner_.TextInput()) {
     if (restart) {
       text_input->Restart(active.session_id, active.configuration, active.state, geometry);
     } else if (update || geometry_changed) {

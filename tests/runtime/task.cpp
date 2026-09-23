@@ -31,7 +31,7 @@ static_assert(std::same_as<decltype(WorkerSequence{}.Run([](std::stop_token) { r
 
 class ThreadSafeTaskQueue {
 public:
-  UIThreadDispatcher Dispatcher() {
+  UiThreadDispatcher Dispatcher() {
     return [this](std::function<void()> callback) {
       {
         std::scoped_lock lock(mutex_);
@@ -353,7 +353,7 @@ TEST_CASE("TaskScopeLaunchIsLazyAndComposesNestedTaskValuesAndExceptions") {
   int direct_starts = 0;
   int factory_starts = 0;
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
 
   runtime.BuildFrame();
   captured_task_scope.Launch(DirectTask(&direct_starts));
@@ -382,7 +382,7 @@ TEST_CASE("DelayIsLazyAndResumesAfterItsDeadlineOnTheOwningUIThread") {
   captured_task_scope = {};
   task_value = State<int>{};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
 
@@ -393,14 +393,14 @@ TEST_CASE("DelayIsLazyAndResumesAfterItsDeadlineOnTheOwningUIThread") {
   captured_task_scope.Launch(std::move(delayed));
   REQUIRE(platform.requested_deadlines.empty());
   platform.RunPlatformModuleTasks();
-  REQUIRE(platform.requested_deadlines.back() == Catch::Approx(0.003));
+  REQUIRE(platform.requested_deadlines.empty());
 
   platform.AdvanceTime(0.002);
-  runtime.BuildFrame();
+  platform.RunPlatformModuleTasks();
   REQUIRE(task_value.Get() == 0);
 
   platform.AdvanceTime(0.001);
-  runtime.BuildFrame();
+  platform.RunPlatformModuleTasks();
   REQUIRE(task_value.Get() == 7);
   REQUIRE(resumed_thread == ui_thread);
 }
@@ -408,7 +408,7 @@ TEST_CASE("DelayIsLazyAndResumesAfterItsDeadlineOnTheOwningUIThread") {
 TEST_CASE("DelayOrdersDeadlinesAndDefersZeroDurationChains") {
   captured_task_scope = {};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   std::vector<int> completions;
 
@@ -425,21 +425,21 @@ TEST_CASE("DelayOrdersDeadlinesAndDefersZeroDurationChains") {
   platform.RunPlatformModuleTasks();
 
   platform.AdvanceTime(0.003);
-  runtime.BuildFrame();
+  platform.RunPlatformModuleTasks();
   REQUIRE(completions == std::vector<int>{1});
 
-  runtime.BuildFrame();
+  platform.RunPlatformModuleTasks();
   REQUIRE(completions == std::vector<int>{1, 2});
 
   platform.AdvanceTime(2.997);
-  runtime.BuildFrame();
+  platform.RunPlatformModuleTasks();
   REQUIRE(completions == std::vector<int>{1, 2, 3});
 }
 
 TEST_CASE("DelayCancellationPreventsLaterResumption") {
   captured_task_scope = {};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   int completions = 0;
 
@@ -451,7 +451,7 @@ TEST_CASE("DelayCancellationPreventsLaterResumption") {
   delayed.Cancel();
 
   platform.AdvanceTime(3.0);
-  runtime.BuildFrame();
+  platform.RunPlatformModuleTasks();
   REQUIRE(completions == 0);
 }
 
@@ -470,7 +470,7 @@ TEST_CASE("DelayRejectsInvalidDurations") {
 TEST_CASE("TaskHandleCancellationIsIndividualAndIgnoredHandlesRemainScopeOwned") {
   captured_task_scope = {};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
 
   int canceled_starts = 0;
@@ -495,7 +495,7 @@ TEST_CASE("TaskHandleCancellationIsIndividualAndIgnoredHandlesRemainScopeOwned")
 TEST_CASE("TaskScopeSurvivesCompatibleRecomposition") {
   captured_task_scope = {};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
 
   auto suspension = std::make_shared<ManualSuspensionState>();
@@ -519,7 +519,7 @@ TEST_CASE("TaskScopeFollowsKeyedMovementAndClosesOnlyRemovedChildren") {
       {2, std::make_shared<ManualSuspensionState>()},
   };
   TestPlatform platform;
-  Runtime runtime(TaskKeyedApp, platform);
+  UiWindow runtime(TaskKeyedApp, platform);
 
   runtime.BuildFrame();
   platform.RunPlatformModuleTasks();
@@ -538,7 +538,7 @@ TEST_CASE("TaskScopeFollowsKeyedMovementAndClosesOnlyRemovedChildren") {
 TEST_CASE("VirtualItemEvictionClosesItsTaskScope") {
   virtual_suspension = std::make_shared<ManualSuspensionState>();
   TestPlatform platform;
-  Runtime runtime(TaskVirtualListApp, platform);
+  UiWindow runtime(TaskVirtualListApp, platform);
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   runtime.BuildFrame();
@@ -556,7 +556,7 @@ TEST_CASE("UnmountClosesTaskScopeAfterLifecycleCleanupAndRejectsLaterLaunch") {
   child_task_completions = 0;
   child_cleanup_preceded_scope_cancellation = false;
   TestPlatform platform;
-  Runtime runtime(TaskUnmountApp, platform);
+  UiWindow runtime(TaskUnmountApp, platform);
 
   runtime.BuildFrame();
   platform.RunPlatformModuleTasks();
@@ -579,7 +579,7 @@ TEST_CASE("RuntimeDestructionClosesRunningTaskScopes") {
   auto suspension = std::make_shared<ManualSuspensionState>();
   TestPlatform platform;
   {
-    Runtime runtime(TaskScopeApp, platform);
+    UiWindow runtime(TaskScopeApp, platform);
     runtime.BuildFrame();
     captured_task_scope.Launch(SuspendedTask(suspension));
     platform.RunPlatformModuleTasks();
@@ -613,7 +613,7 @@ TEST_CASE("HuxerUIAwaitableRestoresTaskExecutionToTheOwningUIThread") {
       }
     }
   };
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
 
   auto suspension = std::make_shared<ManualSuspensionState>();
@@ -640,7 +640,7 @@ TEST_CASE("RunWorkerOwnsItsInvocationAndRestoresResultsAndExceptionsToTheUIThrea
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
   std::thread::id worker_thread;
@@ -684,7 +684,7 @@ TEST_CASE("RunWorkerUsesBoundedConcurrencyAndDiscardsCanceledWork") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   const std::size_t worker_count = detail::WorkerConcurrency();
   REQUIRE(worker_count > 0);
@@ -722,7 +722,7 @@ TEST_CASE("WorkerSequenceSerializesOperationsAcrossCopiedHandles") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
   std::thread::id resumed_thread;
@@ -778,7 +778,7 @@ TEST_CASE("IndependentWorkerSequencesCanUseTheSharedPoolConcurrently") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   WorkerSequence first_sequence;
   WorkerSequence second_sequence;
@@ -807,7 +807,7 @@ TEST_CASE("WorkerSequenceAndRunWorkerCanUseTheSharedPoolConcurrently") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   WorkerSequence sequence;
   WorkerGate gate;
@@ -832,7 +832,7 @@ TEST_CASE("WorkerSequenceCancellationSkipsQueuedWorkAndStopsActiveWorkCooperativ
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   WorkerSequence sequence;
   StopAwareWorkerGate active_gate;
@@ -875,7 +875,7 @@ TEST_CASE("WorkerSequencePromotesTheNextOperationAfterAnException") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   WorkerSequence sequence;
   bool caught = false;
@@ -910,7 +910,7 @@ TEST_CASE("RuntimeDestructionDiscardsARunningWorkerResult") {
   WorkerGate gate;
   bool resumed = false;
   {
-    Runtime runtime(TaskScopeApp, platform);
+    UiWindow runtime(TaskScopeApp, platform);
     runtime.BuildFrame();
     captured_task_scope.Launch([&]() -> Task<void> {
       co_await RunWorker([&gate] { gate.EnterAndWait(); });
@@ -934,7 +934,7 @@ TEST_CASE("RuntimeDestructionCancelsAWorkerSequenceAndSkipsItsQueuedWork") {
   std::atomic<bool> queued_executed = false;
   bool resumed = false;
   {
-    Runtime runtime(TaskScopeApp, platform);
+    UiWindow runtime(TaskScopeApp, platform);
     runtime.BuildFrame();
     WorkerSequence sequence;
     captured_task_scope.Launch([&, sequence]() -> Task<void> {
@@ -959,7 +959,7 @@ TEST_CASE("RuntimeDestructionCancelsAWorkerSequenceAndSkipsItsQueuedWork") {
 TEST_CASE("RunWorkerReportsUnavailableWebWorkerExecution") {
   captured_task_scope = {};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   bool unavailable = false;
 
@@ -978,7 +978,7 @@ TEST_CASE("RunWorkerReportsUnavailableWebWorkerExecution") {
 TEST_CASE("WorkerSequenceReportsUnavailableWebWorkerExecution") {
   captured_task_scope = {};
   TestPlatform platform;
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   WorkerSequence sequence;
   bool unavailable = false;
@@ -1006,7 +1006,7 @@ TEST_CASE("TaskScopePostDefersOwnedCallbacksAndPreservesExternalThreadOrder") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
-  Runtime runtime(TaskScopeApp, platform);
+  UiWindow runtime(TaskScopeApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
   std::thread::id callback_thread;
@@ -1038,7 +1038,7 @@ TEST_CASE("TaskScopePostSuppressesCallbacksAfterScopeAndRuntimeClosure") {
   ThreadSafeTaskQueue queue;
   TestPlatform platform(queue.Dispatcher());
   int callbacks = 0;
-  Runtime runtime(PostUnmountApp, platform);
+  UiWindow runtime(PostUnmountApp, platform);
   runtime.BuildFrame();
 
   captured_post_child_scope.Post([&callbacks] { ++callbacks; });
@@ -1052,7 +1052,8 @@ TEST_CASE("TaskScopePostSuppressesCallbacksAfterScopeAndRuntimeClosure") {
   REQUIRE(callbacks == 0);
 
   {
-    Runtime pending_runtime(TaskScopeApp, platform);
+    TestPlatform pending_platform(queue.Dispatcher());
+    UiWindow pending_runtime(TaskScopeApp, pending_platform);
     pending_runtime.BuildFrame();
     captured_task_scope.Post([&callbacks] { ++callbacks; });
   }
@@ -1067,26 +1068,25 @@ TEST_CASE("TaskScopeReportsInvalidUsage") {
   REQUIRE_THROWS_AS(TaskScope{}.Post([] {}), std::logic_error);
 
   TestPlatform valid_platform;
-  Runtime valid_runtime(TaskScopeApp, valid_platform);
+  UiWindow valid_runtime(TaskScopeApp, valid_platform);
   valid_runtime.BuildFrame();
   Task<void> empty;
   REQUIRE_THROWS_AS(captured_task_scope.Launch(std::move(empty)), std::logic_error);
 
-  TestPlatform platform(UIThreadDispatcher{});
-  Runtime runtime(TaskScopeApp, platform);
-  REQUIRE_THROWS_AS(runtime.BuildFrame(), std::logic_error);
+  REQUIRE_THROWS_AS(TestPlatform(UiThreadDispatcher{}), std::invalid_argument);
 
   composition_task_starts = 0;
   TestPlatform dispatched_platform;
-  Runtime composition_runtime(IllegalTaskLaunchApp, dispatched_platform);
+  UiWindow composition_runtime(IllegalTaskLaunchApp, dispatched_platform);
   REQUIRE_THROWS_AS(composition_runtime.BuildFrame(), std::logic_error);
   dispatched_platform.RunPlatformModuleTasks();
   REQUIRE(composition_task_starts == 0);
 
   composition_post_runs = 0;
-  Runtime post_runtime(IllegalTaskPostApp, dispatched_platform);
+  TestPlatform post_platform;
+  UiWindow post_runtime(IllegalTaskPostApp, post_platform);
   REQUIRE_THROWS_AS(post_runtime.BuildFrame(), std::logic_error);
-  dispatched_platform.RunPlatformModuleTasks();
+  post_platform.RunPlatformModuleTasks();
   REQUIRE(composition_post_runs == 0);
 }
 

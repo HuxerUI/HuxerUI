@@ -45,7 +45,7 @@ public:
 
   PaintInvalidation PrepareGeometry(huxerui::ViewNode& base, TextMeasurer& measurer) override {
     auto& node = static_cast<MountedNode&>(base);
-    auto* platform = dynamic_cast<PlatformAdapter*>(&measurer);
+    auto* platform = dynamic_cast<UiWindow*>(&measurer);
     const Rect content = node.ContentBounds();
     const bool links_changed = text_.LinkRanges().size() != node.text.LinkRanges().size() ||
         !std::equal(text_.LinkRanges().begin(), text_.LinkRanges().end(), node.text.LinkRanges().begin());
@@ -124,7 +124,7 @@ public:
   }
 
   void OnFocusChanged(huxerui::ViewNode&, bool focused, bool reverse) override {
-    // Runtime traverses the Text node; this extension chooses the entry link within that composite focus target.
+    // UiWindow traverses the Text node; this extension chooses the entry link within that composite focus target.
     focused_link_ = focused && reverse && !text_.LinkRanges().empty() ? text_.LinkRanges().size() - 1 : 0;
     if (!focused) {
       pressed_.reset();

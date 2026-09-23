@@ -25,9 +25,30 @@ public class HuxerUIActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         configureEdgeToEdgeWindow();
+        HuxerUIApplication.PermissionLauncher permissionLauncher = new HuxerUIApplication.PermissionLauncher() {
+            @Override
+            public void request(String permission, int requestCode) {
+                requestPermissions(new String[] {permission}, requestCode);
+            }
+
+            @Override
+            public boolean openSettings() {
+                Intent intent = new Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", getPackageName(), null));
+                startActivity(intent);
+                return true;
+            }
+        };
+        boolean applicationAlreadyRunning = HuxerUIApplication.current() != null;
+        HuxerUIApplication application = HuxerUIApplication.initialize(
+                this, applicationAlreadyRunning ? null : getIntent(), permissionLauncher);
+        // A live Runtime receives new input, while Activity recreation only reattaches its UI.
+        if (applicationAlreadyRunning && savedInstanceState == null) {
+            application.dispatchIntent(getIntent());
+        }
         contentView = new HuxerUIView(this);
-        contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
-        contentView.setStartupApplicationIntent(getIntent());
+        contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.INACTIVE);
         contentView.setSystemBarsController(this::setSystemBarsContentBrightness);
         if (Build.VERSION.SDK_INT >= 24) {
             contentView.setFileDropPermissionRequester(event -> Api24.requestFileDropPermission(this, event));
@@ -45,21 +66,7 @@ public class HuxerUIActivity extends Activity {
                 finishActivity(requestCode);
             }
         });
-        contentView.setPermissionLauncher(new HuxerUIView.PermissionLauncher() {
-            @Override
-            public void request(String permission, int requestCode) {
-                requestPermissions(new String[] {permission}, requestCode);
-            }
-
-            @Override
-            public boolean openSettings() {
-                Intent intent = new Intent(
-                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.fromParts("package", getPackageName(), null));
-                startActivity(intent);
-                return true;
-            }
-        });
+        contentView.setPermissionLauncher(permissionLauncher);
         setContentView(contentView);
         setSystemBarsContentBrightness(HuxerUIView.SYSTEM_BAR_CONTENT_DARK, HuxerUIView.SYSTEM_BAR_CONTENT_DARK);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -73,7 +80,7 @@ public class HuxerUIActivity extends Activity {
     protected void onStart() {
         super.onStart();
         if (contentView != null) {
-            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
+            contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.INACTIVE);
         }
     }
 
@@ -81,14 +88,14 @@ public class HuxerUIActivity extends Activity {
     protected void onResume() {
         super.onResume();
         if (contentView != null) {
-            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.ACTIVE);
+            contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.ACTIVE);
         }
     }
 
     @Override
     protected void onPause() {
         if (contentView != null) {
-            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.INACTIVE);
+            contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.INACTIVE);
         }
         super.onPause();
     }
@@ -96,7 +103,7 @@ public class HuxerUIActivity extends Activity {
     @Override
     protected void onStop() {
         if (contentView != null) {
-            contentView.setApplicationLifecycleState(HuxerUIView.ApplicationLifecycleState.BACKGROUND);
+            contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.BACKGROUND);
         }
         super.onStop();
     }
@@ -105,8 +112,9 @@ public class HuxerUIActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (contentView != null) {
-            contentView.dispatchApplicationIntent(intent);
+        HuxerUIApplication application = HuxerUIApplication.current();
+        if (application != null) {
+            application.dispatchIntent(intent);
         }
     }
 

@@ -8,7 +8,7 @@
 #include <stdexcept>
 #include <utility>
 
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 #include "runtime/mounted_node_internal.h"
 #include "internal_access.h"
@@ -469,7 +469,7 @@ bool TextPaintInputsEqual(const AttributedText& left, const TextStyle& left_base
   });
 }
 
-std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, PlatformAdapter& platform) {
+std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_window) {
   const float width = node.ContentBounds().width;
   const auto& style = node.properties.text_style;
   const auto& options = node.properties.text_layout_options;
@@ -483,7 +483,7 @@ std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, PlatformAdapte
   next->font = style.font;
   next->options = options;
   next->width = width;
-  next->layout = platform.CreateTextLayout(node.text, style, width, options);
+  next->layout = ui_window.CreateTextLayout(node.text, style, width, options);
   node.paragraph_layout = std::move(next);
   return node.paragraph_layout->layout;
 }

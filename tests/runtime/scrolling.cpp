@@ -422,7 +422,7 @@ TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
   scroll_clicked.clear();
 
   TestPlatform platform;
-  Runtime runtime{ScrollViewApp, platform};
+  UiWindow runtime{ScrollViewApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -502,7 +502,7 @@ TEST_CASE("Scroll input may consume the complete platform update before default 
   received_scroll_input.reset();
 
   TestPlatform platform;
-  Runtime runtime{ScrollInputApp, platform};
+  UiWindow runtime{ScrollInputApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -529,7 +529,7 @@ TEST_CASE("Scroll input may consume the complete platform update before default 
 
 TEST_CASE("Diagonal scroll input coordinates each axis independently") {
   TestPlatform platform;
-  Runtime runtime{CrossAxisNestedScrollApp, platform};
+  UiWindow runtime{CrossAxisNestedScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -542,7 +542,7 @@ TEST_CASE("Nested scroll hooks preserve pre offset post order and actual consump
   scroll_hook_calls.clear();
 
   TestPlatform platform;
-  Runtime runtime{NestedScrollHookApp, platform};
+  UiWindow runtime{NestedScrollHookApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   REQUIRE(hook_inner_scroll.ScrollTo(1000.0F));
@@ -555,13 +555,14 @@ TEST_CASE("Nested scroll hooks preserve pre offset post order and actual consump
   REQUIRE(consumed.y == 14.0F);
   REQUIRE(scroll_hook_calls == std::vector<std::string>{"outer.pre", "inner.pre", "inner.post", "outer.post"});
 
-  Runtime invalid{
+  TestPlatform invalid_platform{platform.platform_resources};
+  UiWindow invalid{
       +[]() -> View {
         return ScrollView {
           Spacer().With(huxerui::Frame{100.0F, 200.0F}),
         }.With(ScrollHook{"invalid", 20.0F, 0.0F});
       },
-      platform,
+      invalid_platform,
   };
   invalid.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   invalid.BuildFrame();
@@ -572,7 +573,7 @@ TEST_CASE("Scroll activity unifies indirect programmatic and direct changes") {
   scroll_activities.clear();
 
   TestPlatform platform;
-  Runtime runtime{ScrollActivityApp, platform};
+  UiWindow runtime{ScrollActivityApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -602,7 +603,7 @@ TEST_CASE("Direct touch overscroll keeps metrics clamped and settles its present
   scroll_activities.clear();
 
   TestPlatform platform;
-  Runtime runtime{ScrollActivityApp, platform};
+  UiWindow runtime{ScrollActivityApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -630,7 +631,7 @@ TEST_CASE("Direct touch overscroll keeps metrics clamped and settles its present
 
 TEST_CASE("Disabling an active scroll clears overscroll and cancels direct activity") {
   TestPlatform platform;
-  Runtime runtime{DisableableOverscrollApp, platform};
+  UiWindow runtime{DisableableOverscrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -646,7 +647,7 @@ TEST_CASE("Disabling an active scroll clears overscroll and cancels direct activ
 
 TEST_CASE("Reduced motion clears released overscroll without retained settlement") {
   TestPlatform platform;
-  Runtime runtime{ReducedMotionOverscrollApp, platform};
+  UiWindow runtime{ReducedMotionOverscrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -662,7 +663,7 @@ TEST_CASE("Reduced motion clears released overscroll without retained settlement
 TEST_CASE("Platform scroll defaults apply when a container has no explicit physics") {
   ScrollDefaultsPlatform platform;
   platform.scroll_defaults.overscroll_enabled = false;
-  Runtime runtime{ScrollInputApp, platform};
+  UiWindow runtime{ScrollInputApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   REQUIRE_FALSE(runtime.RootNode()->layout_values.contains(typeid(ScrollPhysics)));
@@ -676,7 +677,7 @@ TEST_CASE("Platform scroll defaults apply when a container has no explicit physi
 
 TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   TestPlatform platform;
-  Runtime runtime{HorizontalScrollViewApp, platform};
+  UiWindow runtime{HorizontalScrollViewApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -714,7 +715,7 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
   scroll_observer_compositions = 0;
 
   TestPlatform platform;
-  Runtime runtime{ControlledVirtualListApp, platform};
+  UiWindow runtime{ControlledVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   runtime.BuildFrame();
@@ -758,7 +759,7 @@ TEST_CASE("TestScrollControllerControlsVirtualListAndDisconnects") {
 
 TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   TestPlatform platform;
-  Runtime runtime{ScrollControllerExampleApp, platform};
+  UiWindow runtime{ScrollControllerExampleApp, platform};
   runtime.SetWindowMetrics({.viewport = {640.0F, 560.0F}});
   const int frames_before_build = platform.requested_frames;
   runtime.BuildFrame();
@@ -802,7 +803,7 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
 
 TEST_CASE("TestScrollControllerRefinesVariableItemAlignmentAfterRealization") {
   TestPlatform platform;
-  Runtime runtime{VariableExtentScrollApp, platform};
+  UiWindow runtime{VariableExtentScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 400.0F}});
   runtime.BuildFrame();
   REQUIRE(variable_list_scroll.ScrollToItem(1000, ScrollAlignment::End));
@@ -820,7 +821,7 @@ TEST_CASE("TestScrollControllerRefinesVariableItemAlignmentAfterRealization") {
 
 TEST_CASE("TestScrollControllerDirectScrollingCancelsPendingItemAlignment") {
   TestPlatform platform;
-  Runtime runtime{VariableExtentScrollApp, platform};
+  UiWindow runtime{VariableExtentScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 400.0F}});
   runtime.BuildFrame();
   REQUIRE(variable_list_scroll.ScrollToItem(1000, ScrollAlignment::End));
@@ -844,7 +845,7 @@ TEST_CASE("TestScrollControllerDoesNotReplayPendingAlignmentAfterRemount") {
   scroll = ScrollController{};
   visible = true;
   TestPlatform platform;
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     if (!visible) {
       return Text("Hidden");
     }
@@ -870,7 +871,7 @@ TEST_CASE("TestScrollControllerDoesNotReplayPendingAlignmentAfterRemount") {
 
 TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
   TestPlatform platform;
-  Runtime runtime{ControlledVirtualGridApp, platform};
+  UiWindow runtime{ControlledVirtualGridApp, platform};
   runtime.SetWindowMetrics({.viewport = {90.0F, 48.0F}});
   runtime.BuildFrame();
 
@@ -900,7 +901,7 @@ TEST_CASE("TestScrollControllerControlsVirtualGridItems") {
 
 TEST_CASE("TestScrollControllerControlsScrollView") {
   TestPlatform platform;
-  Runtime runtime{ControlledScrollViewApp, platform};
+  UiWindow runtime{ControlledScrollViewApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -922,7 +923,7 @@ TEST_CASE("TestScrollControllerControlsScrollView") {
 
 TEST_CASE("IndexedPages retains an independent ScrollView offset for each page") {
   TestPlatform platform;
-  Runtime runtime{IndexedScrollingApp, platform};
+  UiWindow runtime{IndexedScrollingApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -949,7 +950,7 @@ TEST_CASE("Pager uses direct drag without mapping wheel input and honors DragEna
   pager_proposals.clear();
   accept_pager_proposals = true;
   TestPlatform platform;
-  Runtime runtime{InteractivePagerApp, platform};
+  UiWindow runtime{InteractivePagerApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -996,7 +997,7 @@ TEST_CASE("Pager returns to controlled selection when a proposal is rejected") {
   pager_proposals.clear();
   accept_pager_proposals = false;
   TestPlatform platform;
-  Runtime runtime{InteractivePagerApp, platform};
+  UiWindow runtime{InteractivePagerApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1024,7 +1025,7 @@ TEST_CASE("Pager settles once after accepted dragging or rebound including repea
   pager_settlements.clear();
   accept_pager_proposals = true;
   TestPlatform platform;
-  Runtime runtime{InteractivePagerApp, platform};
+  UiWindow runtime{InteractivePagerApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
   runtime.BuildFrame();
   REQUIRE(pager_settlements.empty());
@@ -1073,8 +1074,8 @@ TEST_CASE("Pager only settles the final programmatic target after retargeting") 
   pager_proposals.clear();
   pager_settlements.clear();
   TestPlatform platform;
-  static Runtime* observed_runtime = nullptr;
-  Runtime runtime{[] {
+  static UiWindow* observed_runtime = nullptr;
+  UiWindow runtime{[] {
     return InteractivePagerApp().On<PagerEvents::Settled>([](std::size_t index) {
       const auto* root = observed_runtime->RootNode();
       REQUIRE(root->children[index]->PresentationBounds().x == Catch::Approx(0.0F));
@@ -1109,7 +1110,7 @@ TEST_CASE("Pager only settles the final programmatic target after retargeting") 
 TEST_CASE("Pager composes vertical paging with explicit reversal") {
   pager_proposals.clear();
   TestPlatform platform;
-  Runtime runtime{ReversedVerticalPagerApp, platform};
+  UiWindow runtime{ReversedVerticalPagerApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1125,7 +1126,7 @@ TEST_CASE("Pager maps semantic scrolling to one controlled page proposal") {
   pager_proposals.clear();
   accept_pager_proposals = true;
   TestPlatform platform;
-  Runtime runtime{InteractivePagerApp, platform};
+  UiWindow runtime{InteractivePagerApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1147,7 +1148,7 @@ TEST_CASE("Pager uses touch release velocity and returns after pointer cancellat
     pager_proposals.clear();
     accept_pager_proposals = true;
     TestPlatform platform;
-    Runtime runtime{InteractivePagerApp, platform};
+    UiWindow runtime{InteractivePagerApp, platform};
     runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
     runtime.BuildFrame();
 
@@ -1163,7 +1164,7 @@ TEST_CASE("Pager uses touch release velocity and returns after pointer cancellat
     pager_proposals.clear();
     accept_pager_proposals = true;
     TestPlatform platform;
-    Runtime runtime{InteractivePagerApp, platform};
+    UiWindow runtime{InteractivePagerApp, platform};
     runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
     runtime.BuildFrame();
 
@@ -1181,7 +1182,7 @@ TEST_CASE("RefreshBox transfers direct pull displacement into controlled refresh
   accept_refresh_requests = true;
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RefreshBoxApp, platform};
+  UiWindow runtime{RefreshBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1215,7 +1216,7 @@ TEST_CASE("RefreshBox ignores short, canceled, trailing, and non-drag input") {
   accept_refresh_requests = false;
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RefreshBoxApp, platform};
+  UiWindow runtime{RefreshBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1242,7 +1243,7 @@ TEST_CASE("RefreshBox preserves an active pull when controlled refreshing starts
   accept_refresh_requests = true;
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RefreshBoxApp, platform};
+  UiWindow runtime{RefreshBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1262,7 +1263,7 @@ TEST_CASE("RefreshBox exposes one localized semantic refresh action") {
   accept_refresh_requests = true;
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RefreshBoxApp, platform};
+  UiWindow runtime{RefreshBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1283,7 +1284,7 @@ TEST_CASE("RefreshBox receives only the pull remaining after nested content reac
   refresh_requests = 0;
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{NestedRefreshBoxApp, platform};
+  UiWindow runtime{NestedRefreshBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   REQUIRE(refresh_content_scroll.Offset() == 80.0F);
@@ -1300,14 +1301,14 @@ TEST_CASE("RefreshBox validates its required content") {
   REQUIRE_THROWS_AS(RefreshBox(View{}, false), std::invalid_argument);
 
   TestPlatform platform;
-  Runtime runtime{InvalidRefreshBoxStyleApp, platform};
+  UiWindow runtime{InvalidRefreshBoxStyleApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
 }
 
 TEST_CASE("TestGrowScrollViewRetainsOffsetWhenDescendantScopeRecomposes") {
   TestPlatform platform;
-  Runtime runtime{ScopedScrollViewApp, platform};
+  UiWindow runtime{ScopedScrollViewApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   auto* scroll = runtime.RootNode()->children[1].get();

@@ -141,26 +141,29 @@ struct ChannelOwner {
   ~ChannelOwner() { endpoint.Close(); }
 };
 
-void InstallShutdownProbe(RootContext& root, ShutdownProbe& probe) {
-  root.RegisterPlatformModule<std::shared_ptr<ChannelOwner>>("testing/Shutdown", [&probe](PlatformAdapter& adapter) {
-    probe.endpoint = detail::MakePlatformChannelEndpoint(adapter);
+void RegisterShutdownProbe(ApplicationContext& context, ShutdownProbe& probe) {
+  context.RegisterPlatformModule<std::shared_ptr<ChannelOwner>>("testing/Shutdown", [&probe](huxerui::UiWindow& ui_window) {
+    probe.endpoint = detail::MakePlatformChannelEndpoint(ui_window);
     probe.endpoint.Connect({
       .invoke = [&probe](std::string, PlatformPayload, std::function<void(PlatformResult<PlatformPayload>)>) {
         return [&probe] { ++probe.cancellations; };
       },
-      .dispose = [&probe, &adapter] {
+      .dispose = [&probe, &ui_window] {
         ++probe.disposals;
         probe.disposal_thread = std::this_thread::get_id();
-        adapter.DispatchToUIThread([] { throw std::runtime_error("cleanup failed"); });
-        adapter.DispatchToUIThread([&probe] { ++probe.followups; });
+        ui_window.DispatchToUiThread([] { throw std::runtime_error("cleanup failed"); });
+        ui_window.DispatchToUiThread([&probe] { ++probe.followups; });
       },
     });
-    probe.late_endpoint = detail::MakePlatformChannelEndpoint(adapter);
+    probe.late_endpoint = detail::MakePlatformChannelEndpoint(ui_window);
     auto owner = std::make_shared<ChannelOwner>();
     owner->endpoint = probe.endpoint;
     return owner;
   });
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<ChannelOwner>>("testing/Shutdown"));
+}
+
+void InstallShutdownProbe(WindowContext& root) {
+  root.Provide(OpenPlatformModule<std::shared_ptr<ChannelOwner>>("testing/Shutdown"));
 }
 
 View UnicodeText() {
@@ -348,7 +351,7 @@ TEST_CASE("Windowless queries include live root presentation layers", "[ui-testi
   LayerId id = 0;
   Application application(Counter, {
     .show_debug_overlay = false,
-    .root_hooks = {[&](RootContext& root) {
+    .window_hooks = {[&](WindowContext& root) {
       layers = root.Layers();
       id = layers->Attach({}, [] { return Text("Live layer").Key("layer"); });
     }},
@@ -416,7 +419,8 @@ TEST_CASE("Windowless shutdown delivers channel cancellation and disposal on its
   ShutdownProbe probe;
   Application application(Empty, {
     .show_debug_overlay = false,
-    .root_hooks = {[&](RootContext& root) { InstallShutdownProbe(root, probe); }},
+    .application_hooks = {[&](ApplicationContext& context) { RegisterShutdownProbe(context, probe); }},
+    .window_hooks = {[&](WindowContext& root) { InstallShutdownProbe(root); }},
   });
   {
     UiTest ui(application);
@@ -447,12 +451,13 @@ TEST_CASE("Windowless shutdown delivers channel cancellation and disposal on its
 TEST_CASE("Windowless initialization failures drain cleanup without replacing the original exception", "[ui-testing]") {
   ShutdownProbe probe;
   bool fail_hook = false;
-  SECTION("Runtime root hook fails") { fail_hook = true; }
+  SECTION("UiWindow root hook fails") { fail_hook = true; }
   SECTION("First composition fails") {}
   Application application(FailingRoot, {
     .show_debug_overlay = false,
-    .root_hooks = {[&](RootContext& root) {
-      InstallShutdownProbe(root, probe);
+    .application_hooks = {[&](ApplicationContext& context) { RegisterShutdownProbe(context, probe); }},
+    .window_hooks = {[&](WindowContext& root) {
+      InstallShutdownProbe(root);
       if (fail_hook) throw std::runtime_error("root hook failed");
     }},
   });
@@ -480,7 +485,8 @@ TEST_CASE("Windowless shutdown bounds cleanup callbacks without committing anoth
   frames = 0;
   Application application([] { return Empty().With(FrameProbe{&shutdown_frames}); }, {
     .show_debug_overlay = false,
-    .root_hooks = {[&](RootContext& root) { InstallShutdownProbe(root, probe); }},
+    .application_hooks = {[&](ApplicationContext& context) { RegisterShutdownProbe(context, probe); }},
+    .window_hooks = {[&](WindowContext& root) { InstallShutdownProbe(root); }},
   });
   {
     UiTest ui(application, {.maximum_callbacks_per_frame = 1});
@@ -728,26 +734,30 @@ TEST_CASE("Windowless snapshot differences group inserted and removed subtrees",
 }
 
 TEST_CASE("Windowless settle drains callback batches without inventing time", "[ui-testing]") {
-  PlatformAdapter* dispatcher = nullptr;
+  huxerui::UiWindow* dispatcher = nullptr;
   Application application(Empty, {
     .show_debug_overlay = false,
-    .root_hooks = {[&](RootContext& root) {
-      root.RegisterPlatformModule<int>("testing/Dispatcher", [&](PlatformAdapter& adapter) {
-        dispatcher = &adapter;
-        return 0;
-      });
-      static_cast<void>(root.OpenPlatformModule<int>("testing/Dispatcher"));
+    .application_hooks = {
+      [&](ApplicationContext& context) {
+        context.RegisterPlatformModule<int>("testing/Dispatcher", [&](huxerui::UiWindow& ui_window) {
+          dispatcher = &ui_window;
+          return 0;
+        });
+      },
+    },
+    .window_hooks = {[](WindowContext& root) {
+      static_cast<void>(OpenPlatformModule<int>("testing/Dispatcher"));
     }},
   });
   int calls = 0;
   bool repeat = true;
   std::function<void()> callback = [&] {
     ++calls;
-    if (repeat) dispatcher->DispatchToUIThread(callback);
+    if (repeat) dispatcher->DispatchToUiThread(callback);
   };
   UiTest ui(application);
   REQUIRE(dispatcher);
-  dispatcher->DispatchToUIThread(callback);
+  dispatcher->DispatchToUiThread(callback);
   REQUIRE_THROWS_WITH(ui.PumpAndSettle({.maximum_frames = 3}),
                       Catch::Matchers::ContainsSubstring("callbacks=1"));
   REQUIRE(calls == 3);

@@ -106,7 +106,10 @@ AppOptions Options() {
   AppOptions options;
   options.window = {.title = "HuxerUI Buffer Reference", .initial_size = {560.0F, 760.0F}};
 #if !defined(__EMSCRIPTEN__)
-  options.root_hooks.push_back(demo::Install);
+  options.application_hooks = {demo::Install};
+  options.window_hooks.push_back([](WindowContext& root) {
+    root.Provide(OpenPlatformModule<std::shared_ptr<demo::FrameSource>>(demo::module_name));
+  });
 #endif
   return options;
 }

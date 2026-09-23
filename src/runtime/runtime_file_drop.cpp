@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "internal_access.h"
 
 #include <algorithm>
@@ -340,7 +340,7 @@ bool detail::FileDropReceiver::HandleFileDrop(
   }
   const std::weak_ptr<State> weak_drop = drop;
   const std::weak_ptr<PendingFileDrop> weak_pending = pending;
-  const auto dispatcher = runtime_state_.ui_thread_dispatcher_;
+  const auto dispatcher = runtime_state_.application_->Dispatcher();
   if (!dispatcher) {
     drop->pending.erase(operation);
     pending->Cancel();

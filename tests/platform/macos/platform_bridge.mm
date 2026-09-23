@@ -233,6 +233,7 @@ TEST_CASE("MacObjectiveCBufferReferenceRetainsStorageWithoutCopying") {
 TEST_CASE("MacObjectiveCBufferReferenceRoundTripPreservesBackingIdentity") {
   @autoreleasepool {
     TestPlatform platform;
+    UiWindow runtime(+[]() -> View { return {}; }, platform);
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 320, 200)
                                                  styleMask:NSWindowStyleMaskBorderless
                                                    backing:NSBackingStoreBuffered defer:NO];
@@ -266,6 +267,7 @@ TEST_CASE("MacObjectiveCBufferReferenceRoundTripPreservesBackingIdentity") {
 TEST_CASE("MacObjectiveCPlatformPayloadRetainsFileReferenceAndExposesFileURL") {
   @autoreleasepool {
     TestPlatform platform;
+    UiWindow runtime(+[]() -> View { return {}; }, platform);
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 320.0, 200.0)
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
@@ -364,6 +366,7 @@ TEST_CASE("MacObjectiveCMetalTextureUsesTheExistingMailbox") {
 TEST_CASE("MacObjectiveCPlatformViewUsesOneEventAndChannelLifecycle") {
   @autoreleasepool {
     TestPlatform platform;
+    UiWindow runtime(+[]() -> View { return {}; }, platform);
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 320.0, 200.0)
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered

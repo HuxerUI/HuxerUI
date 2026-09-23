@@ -21,6 +21,7 @@
 
 #include <emscripten.h>
 #include <emscripten/bind.h>
+#include <emscripten/eventloop.h>
 #include <emscripten/val.h>
 
 #include "application/platform_frame_internal.h"
@@ -51,10 +52,10 @@ static_assert(
     "HuxerUI Web key mapping must match the Key enum order"
 );
 
-class WebSession;
+class WebUiWindow;
 
-std::unordered_map<std::uintptr_t, std::unique_ptr<WebSession>>& Sessions() {
-  static std::unordered_map<std::uintptr_t, std::unique_ptr<WebSession>> sessions;
+std::unordered_map<std::uintptr_t, std::unique_ptr<WebUiWindow>>& Sessions() {
+  static std::unordered_map<std::uintptr_t, std::unique_ptr<WebUiWindow>> sessions;
   return sessions;
 }
 
@@ -63,12 +64,14 @@ std::uintptr_t NextSessionId() noexcept {
   return next_id++;
 }
 
-WebSession* FindSession(std::uintptr_t session_id) noexcept {
+WebUiWindow* FindSession(std::uintptr_t session_id) noexcept {
   const auto found = Sessions().find(session_id);
   return found == Sessions().end() ? nullptr : found->second.get();
 }
 
-void RunWebUIThreadTask(void* context) noexcept {
+/// Consumes the callback allocation passed through Emscripten's asynchronous C callback boundary.
+/// @param context Heap-owned std::function<void()> transferred by DispatchToWebUiThread.
+void RunWebUiThreadTask(void* context) noexcept {
   std::unique_ptr<std::function<void()>> task(static_cast<std::function<void()>*>(context));
   try {
     (*task)();
@@ -76,9 +79,11 @@ void RunWebUIThreadTask(void* context) noexcept {
   }
 }
 
-void DispatchToWebUIThread(std::function<void()> task) {
+/// Schedules application work through the browser's asynchronous callback queue.
+/// @param task Owned callback transferred to RunWebUiThreadTask; never invoked inline.
+void DispatchToWebUiThread(std::function<void()> task) {
   auto pending = std::make_unique<std::function<void()>>(std::move(task));
-  emscripten_async_call(RunWebUIThreadTask, pending.get(), 0);
+  emscripten_async_call(RunWebUiThreadTask, pending.get(), 0);
   static_cast<void>(pending.release());
 }
 
@@ -861,17 +866,164 @@ private:
   ResourceConfiguration configuration_;
 };
 
-class WebPlatformAdapter final : public PlatformAdapter {
-public:
-  WebPlatformAdapter(std::uintptr_t session_id, val root, val canvas, ResourceConfiguration configuration)
-      : PlatformAdapter(DispatchToWebUIThread), session_id_(session_id), renderer_(session_id, canvas),
-        resources_(std::move(configuration)), text_input_(session_id), root_(std::move(root)),
-        base_canvas_(std::move(canvas)) {}
+ResourceConfiguration BrowserResourceConfiguration();
+ApplicationLifecycleState BrowserLifecycleState();
+/// Retires attached browser surfaces and removes process lifecycle listeners after shared Runtime shutdown.
+void StopWebApplicationHost();
 
-  void Attach(Runtime& runtime) {
-    runtime_ = &runtime;
-    text_input_.SetRuntime(runtime_);
-    platform_views_ = std::make_unique<WebPlatformViews>(renderer_, PlatformRegistry(), runtime, root_, base_canvas_);
+/// Owns browser application services and timers independently of mounted DOM window surfaces.
+/// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
+class WebRuntime final : public Runtime {
+public:
+  WebRuntime() : Runtime(DispatchToWebUiThread), resources_(BrowserResourceConfiguration()) {}
+
+  /// Initializes application services with the current browser visibility/focus state on the browser thread.
+  void Start() { InitializeApplication(CurrentApplication(), LaunchActivation{}, BrowserLifecycleState()); }
+
+  ~WebRuntime() override {
+    Retire();
+    for (const auto& [identity, timer] : timers_) {
+      emscripten_clear_timeout(identity);
+      timer->owner = nullptr;
+      timer->callback = {};
+    }
+  }
+
+  PlatformResources* Resources() noexcept override { return &resources_; }
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override { return CreateWebHttpTransport(); }
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override { return CreateWebPermissionTransport(); }
+  std::optional<AppDirectories> CreateAppDirectories() override { return CreateWebAppDirectories(); }
+
+  std::function<void()> ScheduleTimerAt(std::chrono::steady_clock::time_point deadline,
+                                        std::function<void()> callback) override {
+    auto timer = std::make_shared<Timer>();
+    timer->owner = this;
+    timer->deadline = deadline;
+    timer->callback = std::move(callback);
+    Arm(timer);
+    return [timer] {
+      if (timer->owner) {
+        emscripten_clear_timeout(timer->identity);
+        timer->owner->timers_.erase(timer->identity);
+        timer->owner = nullptr;
+        timer->callback = {};
+      }
+    };
+  }
+
+private:
+  /// Retained ordinary timer entry shared with its cancellation closure.
+  /// owner is cleared before callback delivery or retirement so cancellation cannot target a replacement Runtime.
+  struct Timer {
+    WebRuntime* owner = nullptr;
+    std::chrono::steady_clock::time_point deadline;
+    std::function<void()> callback;
+    int identity = 0;
+  };
+
+  /// Schedules the next browser timeout, splitting deadlines beyond the JavaScript timeout range.
+  /// @param timer Live entry owned by this Runtime; its deadline is measured on TimerNow's steady clock.
+  /// Called only on the browser thread. Hidden-tab throttling remains subject to browser policy.
+  void Arm(const std::shared_ptr<Timer>& timer) {
+    const double delay = std::clamp(std::chrono::duration<double, std::milli>(timer->deadline - TimerNow()).count(),
+                                    0.0, 2147483647.0);
+    timer->identity = emscripten_set_timeout([](void* context) {
+      auto* entry = static_cast<Timer*>(context);
+      auto timer = entry->owner->timers_.extract(entry->identity).mapped();
+      if (timer->owner->TimerNow() < timer->deadline) {
+        timer->owner->Arm(timer);
+        return;
+      }
+      timer->owner = nullptr;
+      auto callback = std::move(timer->callback);
+      try { callback(); } catch (const std::exception& error) {
+        emscripten_log(EM_LOG_ERROR, "HuxerUI application timer failed: %s", error.what());
+      } catch (...) {
+        emscripten_log(EM_LOG_ERROR, "HuxerUI application timer failed with an unknown exception");
+      }
+    }, delay, timer.get());
+    try {
+      timers_.emplace(timer->identity, timer);
+    } catch (...) {
+      emscripten_clear_timeout(timer->identity);
+      timer->owner = nullptr;
+      throw;
+    }
+  }
+
+  void OnRuntimeStopped() override { StopWebApplicationHost(); }
+  WebResources resources_;
+  std::unordered_map<int, std::shared_ptr<Timer>> timers_;
+};
+
+/// Reads document visibility and window focus without requiring a HuxerUI surface.
+/// @return Background for a hidden document, otherwise Active when focused or Inactive when unfocused.
+ApplicationLifecycleState BrowserLifecycleState() {
+  const auto document = val::global("document");
+  if (document["hidden"].as<bool>()) return ApplicationLifecycleState::Background;
+  return document.call<bool>("hasFocus") ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive;
+}
+
+/// Accesses the browser-thread owner of the single application Runtime.
+/// @return The owning slot, which remains empty before initialization and after host retirement.
+std::unique_ptr<WebRuntime>& WebApplication() {
+  static std::unique_ptr<WebRuntime> application;
+  return application;
+}
+
+/// Creates the browser Runtime once and installs process lifecycle listeners after successful startup.
+void InitializeWebApplication() {
+  if (WebApplication()) return;
+  WebApplication() = std::make_unique<WebRuntime>();
+  try { WebApplication()->Start(); } catch (...) { WebApplication().reset(); throw; }
+  EM_ASM({
+    const changed = () => Module._huxerui_web_application_state_changed();
+    document.addEventListener("visibilitychange", changed);
+    window.addEventListener("focus", changed);
+    window.addEventListener("blur", changed);
+    Module.huxerUIApplicationLifecycle = () => {
+      document.removeEventListener("visibilitychange", changed);
+      window.removeEventListener("focus", changed);
+      window.removeEventListener("blur", changed);
+    };
+  });
+}
+
+/// Owns one DOM surface and its text/rendering state; deferred frames wait until the JavaScript session is ready.
+class WebUiWindow final : public UiWindow {
+public:
+  WebUiWindow(std::uintptr_t session_id, val host, val root, val canvas, ResourceConfiguration configuration)
+      : session_id_(session_id), renderer_(session_id, canvas), configuration_(configuration),
+        text_input_(session_id), host_(std::move(host)), root_(std::move(root)), base_canvas_(std::move(canvas)) {
+    try {
+      InitializeWindow(*WebApplication(), configuration, static_cast<WindowLifecycleState>(BrowserLifecycleState()));
+      text_input_.SetUiWindow(this);
+      platform_views_ = std::make_unique<WebPlatformViews>(renderer_, PlatformRegistry(), *this, root_, base_canvas_);
+    } catch (...) {
+      Retire();
+      throw;
+    }
+  }
+
+  ~WebUiWindow() override {
+    Shutdown();
+    UninstallWebSession(session_id_);
+    RemoveWebSurface(root_.as_handle());
+  }
+
+  bool Initialize() {
+    const WindowOptions& options = CurrentApplication().options.window;
+    if (!InstallWebSession(
+            session_id_,
+            host_.as_handle(),
+            root_.as_handle(),
+            base_canvas_.as_handle(),
+            options.title.c_str()
+        )) {
+      return false;
+    }
+    Ready();
+    return true;
   }
 
   void Ready() {
@@ -884,13 +1036,13 @@ public:
   }
 
   void Shutdown() noexcept {
+    Retire();
     platform_ready_ = false;
     if (platform_views_) {
       platform_views_->Shutdown();
       platform_views_.reset();
     }
     text_input_.Reset();
-    runtime_ = nullptr;
   }
 
   void RequestFrameAt(double deadline) override {
@@ -926,38 +1078,18 @@ public:
     return renderer_.CreateTextLayout(text, style, max_width, options);
   }
 
-  PlatformClipboard* Clipboard() noexcept override {
-    return nullptr;
-  }
-
-  PlatformResources* Resources() noexcept override {
-    return &resources_;
-  }
-
   PlatformTextInput* TextInput() noexcept override {
     return &text_input_;
-  }
-
-  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
-    return CreateWebHttpTransport();
   }
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
     return CreateWebFilePickerTransport();
   }
 
-  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
-    return CreateWebPermissionTransport();
-  }
-
-  std::optional<AppDirectories> CreateAppDirectories() override {
-    return CreateWebAppDirectories();
-  }
-
   void Resize(float width, float height, float display_scale) {
     const Size viewport{std::max(0.0F, width), std::max(0.0F, height)};
     display_scale = std::max(1.0F, display_scale);
-    if (viewport == viewport_ && display_scale == resources_.Configuration().display_scale) {
+    if (viewport == viewport_ && display_scale == configuration_.display_scale) {
       return;
     }
     viewport_ = viewport;
@@ -965,20 +1097,20 @@ public:
     if (platform_views_) {
       platform_views_->SetViewport(viewport_, display_scale);
     }
-    ResourceConfiguration configuration = resources_.Configuration();
+    ResourceConfiguration configuration = configuration_;
     configuration.display_scale = display_scale;
-    resources_.SetConfiguration(configuration);
-    if (runtime_ != nullptr) {
-      runtime_->SetWindowMetrics({.viewport = viewport_});
-      runtime_->UpdateResourceConfiguration(configuration);
+    configuration_ = configuration;
+    if (IsInitialized()) {
+      UiWindow::SetWindowMetrics({.viewport = viewport_});
+      UiWindow::UpdateResourceConfiguration(configuration);
     }
   }
 
   void Frame() {
-    if (runtime_ == nullptr || !frame_state_.BeginCommit()) {
+    if (!IsInitialized() || !frame_state_.BeginCommit()) {
       return;
     }
-    const FrameCommit& commit = runtime_->BuildFrame();
+    const FrameCommit& commit = UiWindow::BuildFrame();
     frame_state_.BeginPaint();
     renderer_.BeginFrame();
     platform_views_->Commit(commit.render_frame);
@@ -991,17 +1123,17 @@ public:
   }
 
   void HandlePointer(PointerEvent event) {
-    if (runtime_ != nullptr) {
-      runtime_->HandlePointerEvent(event);
+    if (IsInitialized()) {
+      UiWindow::HandlePointerEvent(event);
     }
   }
 
   bool HandleFileDrag(std::uint32_t session, int phase, Point position, const val& transfer) {
-    if (runtime_ == nullptr) {
+    if (!IsInitialized()) {
       return false;
     }
     if (phase == 2) {
-      runtime_->HandleFileDragExited(session);
+      UiWindow::HandleFileDragExited(session);
       return false;
     }
     if (transfer.isNull() || transfer.isUndefined()) {
@@ -1010,40 +1142,40 @@ public:
     auto offer = ReadWebFileDropOffer(transfer);
     switch (phase) {
     case 0:
-      return runtime_->HandleFileDragEntered(session, std::move(offer), position);
+      return UiWindow::HandleFileDragEntered(session, std::move(offer), position);
     case 1:
-      return runtime_->HandleFileDragMoved(session, std::move(offer), position);
+      return UiWindow::HandleFileDragMoved(session, std::move(offer), position);
     case 3:
-      return runtime_->HandleFileDrop(session, std::move(offer), position, CaptureWebFileDrop(transfer));
+      return UiWindow::HandleFileDrop(session, std::move(offer), position, CaptureWebFileDrop(transfer));
     default:
       return false;
     }
   }
 
   bool HandleWheel(ScrollInputEvent event) {
-    const Point consumed = runtime_ != nullptr ? runtime_->HandleScrollInput(event) : Point{};
+    const Point consumed = IsInitialized() ? UiWindow::HandleScrollInput(event) : Point{};
     return consumed.x != 0.0F || consumed.y != 0.0F;
   }
 
   bool HandleKey(KeyEvent event) {
-    return runtime_ != nullptr && runtime_->HandleKeyEvent(event);
+    return IsInitialized() && UiWindow::HandleKeyEvent(event);
   }
 
   void UpdateApplicationLifecycleState(int state) {
-    if (runtime_ == nullptr) {
+    if (!IsInitialized()) {
       return;
     }
     switch (state) {
     case 0:
-      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Active);
+      UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Active);
       RequestFrameAt(Now());
       return;
     case 1:
-      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Inactive);
+      UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
       RequestFrameAt(Now());
       return;
     case 2:
-      runtime_->UpdateApplicationLifecycleState(ApplicationLifecycleState::Background);
+      UiWindow::UpdateWindowLifecycleState(WindowLifecycleState::Background);
       return;
     default:
       throw std::invalid_argument("HuxerUI Web application lifecycle state is invalid");
@@ -1055,7 +1187,7 @@ public:
   }
 
   bool HasContextMenuHandler(Point point) const {
-    return runtime_ != nullptr && runtime_->HasContextMenuHandler(point);
+    return IsInitialized() && UiWindow::HasContextMenuHandler(point);
   }
 
   void SynchronizePlatformViewFocus(std::uint32_t token, bool focus_visible) {
@@ -1081,10 +1213,10 @@ private:
   }
 
   std::uintptr_t session_id_ = 0;
-  Runtime* runtime_ = nullptr;
   WebRenderer renderer_;
-  WebResources resources_;
+  ResourceConfiguration configuration_;
   WebTextInput text_input_;
+  val host_;
   val root_;
   val base_canvas_;
   std::unique_ptr<WebPlatformViews> platform_views_;
@@ -1093,56 +1225,14 @@ private:
   bool platform_ready_ = false;
 };
 
-class WebSession final {
-public:
-  WebSession(std::uintptr_t session_id, val host, val root, val canvas, ResourceConfiguration configuration)
-      : session_id_(session_id), host_(std::move(host)), root_(std::move(root)), canvas_(std::move(canvas)),
-        platform_(session_id, root_, canvas_, configuration), runtime_(CurrentApplication(), platform_) {
-    platform_.Attach(runtime_);
-  }
-
-  ~WebSession() {
-    platform_.Shutdown();
-    UninstallWebSession(session_id_);
-    RemoveWebSurface(root_.as_handle());
-  }
-
-  bool Initialize() {
-    const WindowOptions& options = CurrentApplication().options.window;
-    if (!InstallWebSession(
-            session_id_,
-            host_.as_handle(),
-            root_.as_handle(),
-            canvas_.as_handle(),
-            options.title.c_str()
-        )) {
-      return false;
-    }
-    platform_.Ready();
-    return true;
-  }
-
-  WebPlatformAdapter& Platform() noexcept {
-    return platform_;
-  }
-
-private:
-  std::uintptr_t session_id_ = 0;
-  val host_;
-  val root_;
-  val canvas_;
-  WebPlatformAdapter platform_;
-  Runtime runtime_;
-};
-
 template <typename Callback>
 void DispatchWebSession(std::uintptr_t session_id, const char* operation, Callback&& callback) noexcept {
-  WebSession* session = FindSession(session_id);
+  WebUiWindow* session = FindSession(session_id);
   if (session == nullptr) {
     return;
   }
   try {
-    callback(session->Platform());
+    callback(*session);
   } catch (const std::exception& error) {
     emscripten_log(EM_LOG_ERROR, "HuxerUI Web %s failed: %s", operation, error.what());
     Sessions().erase(session_id);
@@ -1185,14 +1275,15 @@ std::uintptr_t MountWebSession(const std::string& selector) {
     val canvas = surface[2];
     pending_root = root;
     session_id = NextSessionId();
-    auto session = std::make_unique<WebSession>(
+    InitializeWebApplication();
+    auto session = std::make_unique<WebUiWindow>(
         session_id,
         std::move(host),
         std::move(root),
         std::move(canvas),
         BrowserResourceConfiguration()
     );
-    WebSession* inserted = session.get();
+    WebUiWindow* inserted = session.get();
     Sessions().emplace(session_id, std::move(session));
     if (!inserted->Initialize()) {
       Sessions().erase(session_id);
@@ -1220,6 +1311,20 @@ void DisposeWebSession(std::uintptr_t session_id) {
   Sessions().erase(session_id);
 }
 
+void StopWebApplicationHost() {
+  EM_ASM({
+    Module.huxerUIApplicationLifecycle?.();
+    delete Module.huxerUIApplicationLifecycle;
+  });
+  Sessions().clear();
+  WebApplication().reset();
+}
+
+/// Requests application shutdown; StopWebApplicationHost releases the owner when shared retirement completes.
+void ShutdownWebApplication() {
+  if (WebApplication()) WebApplication()->RequestShutdown();
+}
+
 } // namespace
 
 void EnsureWebPlatformLinked() {}
@@ -1227,6 +1332,16 @@ void EnsureWebPlatformLinked() {}
 } // namespace huxerui::detail
 
 extern "C" {
+
+EMSCRIPTEN_KEEPALIVE void huxerui_web_application_state_changed() {
+  try {
+    if (const auto& application = huxerui::detail::WebApplication()) {
+      application->UpdateApplicationLifecycleState(huxerui::detail::BrowserLifecycleState());
+    }
+  } catch (const std::exception& error) {
+    emscripten_log(EM_LOG_ERROR, "HuxerUI application lifecycle failed: %s", error.what());
+  }
+}
 
 EMSCRIPTEN_KEEPALIVE void huxerui_web_frame(std::uintptr_t session_id) {
   huxerui::detail::DispatchWebSession(session_id, "frame", [](auto& platform) { platform.Frame(); });
@@ -1341,6 +1456,8 @@ EMSCRIPTEN_KEEPALIVE bool huxerui_web_key(
 }
 
 EMSCRIPTEN_BINDINGS(huxerui_web) {
+  emscripten::function("initializeHuxerUI", &huxerui::detail::InitializeWebApplication);
+  emscripten::function("shutdownHuxerUI", &huxerui::detail::ShutdownWebApplication);
   emscripten::function("mountHuxerUI", &huxerui::detail::MountWebSession);
   emscripten::function("disposeHuxerUI", &huxerui::detail::DisposeWebSession);
 }

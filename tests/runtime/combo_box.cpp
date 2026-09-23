@@ -181,7 +181,7 @@ bool HasRole(const SemanticFrame& frame, SemanticRole role) {
   return std::ranges::any_of(frame.nodes, [role](const SemanticNode& node) { return node.role == role; });
 }
 
-void FocusComboBox(Runtime& runtime) {
+void FocusComboBox(UiWindow& runtime) {
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   const Rect bounds = FindRole(*frame, SemanticRole::ComboBox).bounds;
   ClickAt(runtime, {bounds.x + bounds.width * 0.5F, bounds.y + bounds.height * 0.5F});
@@ -237,9 +237,9 @@ TEST_CASE("ComboBoxValidatesItsEditingAndFactoryContracts") {
 }
 
 TEST_CASE("ComboBoxRejectsEmptyOrIndependentlyInteractivePopupContent") {
-  TestPlatform platform{BuiltinTestResources()};
   for (const auto app : {EmptySuggestionViewApp, InteractiveSuggestionViewApp, InteractiveEmptyContentApp}) {
-    Runtime runtime{app, platform};
+    TestPlatform platform{BuiltinTestResources()};
+    UiWindow runtime{app, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
     const Rect field = FindRole(*frame, SemanticRole::ComboBox).bounds;
@@ -268,11 +268,12 @@ TEST_CASE("ComboBoxProvidesFlatAndMaterialPopupStyles") {
 
 TEST_CASE("ComboBoxUsesItsDefaultOrDeclaredTrailingIcon") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime default_icon{DefaultComboBoxIconApp, platform};
+  UiWindow default_icon{DefaultComboBoxIconApp, platform};
   default_icon.SetWindowMetrics({.viewport = {260.0F, 100.0F}});
   const FlattenedScene& default_scene = default_icon.BuildFrame();
 
-  Runtime custom_icon{CustomComboBoxIconApp, platform};
+  TestPlatform custom_icon_platform{platform.platform_resources};
+  UiWindow custom_icon{CustomComboBoxIconApp, custom_icon_platform};
   custom_icon.SetWindowMetrics({.viewport = {260.0F, 100.0F}});
   const FlattenedScene& custom_scene = custom_icon.BuildFrame();
   const Color tint = TextFieldStyle::Default().trailing_icon;
@@ -288,9 +289,9 @@ TEST_CASE("ComboBoxUsesItsDefaultOrDeclaredTrailingIcon") {
 }
 
 TEST_CASE("ComboBoxRejectsInvalidThemeGeometry") {
-  TestPlatform platform{BuiltinTestResources()};
   for (invalid_combo_box_style_case = 0; invalid_combo_box_style_case < 3; ++invalid_combo_box_style_case) {
-    Runtime runtime{InvalidComboBoxStyleApp, platform};
+    TestPlatform platform{BuiltinTestResources()};
+    UiWindow runtime{InvalidComboBoxStyleApp, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   }
@@ -299,7 +300,7 @@ TEST_CASE("ComboBoxRejectsInvalidThemeGeometry") {
 TEST_CASE("ComboBoxReusesControlledTextEditingAndPublishesEditableSemantics") {
   combo_box_changes.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   FocusComboBox(runtime);
@@ -330,7 +331,7 @@ TEST_CASE("ComboBoxKeyboardNavigationSkipsDisabledSuggestionsAndProposesSelectio
   combo_box_selections.clear();
   combo_box_submissions = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(runtime);
 
@@ -373,7 +374,7 @@ TEST_CASE("ComboBoxKeyboardNavigationSkipsDisabledSuggestionsAndProposesSelectio
 
 TEST_CASE("ComboBoxPreservesSuggestionKeysAcrossReordering") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(runtime);
 
@@ -394,7 +395,7 @@ TEST_CASE("ComboBoxPointerSelectionUsesTheSameControlledProposal") {
   combo_box_changes.clear();
   combo_box_selections.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(runtime);
 
@@ -415,7 +416,7 @@ TEST_CASE("ComboBoxPointerSelectionUsesTheSameControlledProposal") {
 
 TEST_CASE("ComboBoxOutsidePressDismissesAndReleasesFieldFocus") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(runtime);
 
@@ -427,7 +428,7 @@ TEST_CASE("ComboBoxOutsidePressDismissesAndReleasesFieldFocus") {
 
 TEST_CASE("ComboBoxPreservesImeCompositionBeforeSuggestionNavigation") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(runtime);
 
@@ -451,7 +452,7 @@ TEST_CASE("ComboBoxPreservesImeCompositionBeforeSuggestionNavigation") {
 TEST_CASE("ComboBoxSubmitsWithoutAnActiveSuggestionAndDismissesExplicitly") {
   combo_box_submissions = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ComboBoxApp, platform};
+  UiWindow runtime{ComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(runtime);
 
@@ -476,7 +477,7 @@ TEST_CASE("ComboBoxExpansionEventsFollowKeyboardSelectionAndSubmission") {
   combo_box_expansion_changes.clear();
   combo_box_event_order.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ObservableComboBoxApp, platform};
+  UiWindow runtime{ObservableComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   FocusComboBox(runtime);
@@ -511,7 +512,7 @@ TEST_CASE("ComboBoxExpansionEventsFollowSemanticsOutsideDismissalAndDisable") {
   combo_box_expansion_changes.clear();
   combo_box_event_order.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ObservableComboBoxApp, platform};
+  UiWindow runtime{ObservableComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const SemanticNodeId field = FindRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ComboBox).id;
@@ -538,7 +539,7 @@ TEST_CASE("ComboBoxExpansionEventsFollowSemanticsOutsideDismissalAndDisable") {
 TEST_CASE("ComboBoxExpansionEventClosesOnUnmount") {
   combo_box_expansion_changes.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ObservableConditionalComboBoxApp, platform};
+  UiWindow runtime{ObservableConditionalComboBoxApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   FocusComboBox(runtime);
@@ -551,20 +552,22 @@ TEST_CASE("ComboBoxExpansionEventClosesOnUnmount") {
 
 TEST_CASE("ComboBoxEmptyContentAndUnmountFollowPopupLifetime") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime empty{EmptyComboBoxApp, platform};
+  UiWindow empty{EmptyComboBoxApp, platform};
   empty.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(empty);
   REQUIRE(HasRole(*empty.LastCommit().semantic_frame, SemanticRole::List));
   REQUIRE(FindText(empty.BuildFrame(), "No suggestions") != nullptr);
 
-  Runtime absent{EmptyComboBoxWithoutContentApp, platform};
+  TestPlatform absent_platform{platform.platform_resources};
+  UiWindow absent{EmptyComboBoxWithoutContentApp, absent_platform};
   absent.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(absent);
   REQUIRE_FALSE(HasRole(*absent.LastCommit().semantic_frame, SemanticRole::List));
   REQUIRE((FindRole(*absent.LastCommit().semantic_frame, SemanticRole::ComboBox).actions &
            SemanticActionMask(SemanticActionKind::Expand)) == 0);
 
-  Runtime conditional{ConditionalComboBoxApp, platform};
+  TestPlatform conditional_platform{platform.platform_resources};
+  UiWindow conditional{ConditionalComboBoxApp, conditional_platform};
   conditional.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   FocusComboBox(conditional);
   REQUIRE(HasRole(*conditional.LastCommit().semantic_frame, SemanticRole::List));

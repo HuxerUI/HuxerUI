@@ -33,7 +33,7 @@ __attribute__((objc_subclassing_restricted))
 /// Creates an empty pixel-buffer mailbox with a finite, strictly positive logical size.
 - (instancetype)initWithIntrinsicSize:(CGSize)size NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
-/// Retains pixelBuffer as the newest immutable frame and schedules every Runtime currently displaying this texture.
+/// Retains pixelBuffer as the newest immutable frame and schedules every UiWindow currently displaying this texture.
 ///
 /// Pass a different buffer for later mutable content. A null buffer or publication after finish raises an exception.
 - (void)publishPixelBuffer:(CVPixelBufferRef)pixelBuffer;
@@ -67,7 +67,7 @@ __attribute__((objc_subclassing_restricted))
 /// Creates an empty Metal mailbox with a finite, strictly positive logical size.
 - (instancetype)initWithIntrinsicSize:(CGSize)size NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
-/// Copies texture level zero as the newest frame and schedules every Runtime currently displaying this texture.
+/// Copies texture level zero as the newest frame and schedules every UiWindow currently displaying this texture.
 - (void)publishTexture:(id<MTLTexture>)texture origin:(HUXMetalTextureOrigin)origin alpha:(HUXMetalTextureAlpha)alpha
     NS_SWIFT_NAME(publish(_:origin:alpha:));
 /// Idempotently stops publication while preserving the last successfully published frame.
@@ -120,7 +120,7 @@ public:
   PixelBufferTexture(const PixelBufferTexture&) = delete;
   PixelBufferTexture& operator=(const PixelBufferTexture&) = delete;
 
-  /// Retains frame as the newest immutable image and schedules every Runtime currently displaying this texture.
+  /// Retains frame as the newest immutable image and schedules every UiWindow currently displaying this texture.
   ///
   /// A null frame throws std::invalid_argument. Publication after Finish() throws std::logic_error.
   void Publish(CVPixelBufferRef frame);
@@ -178,7 +178,7 @@ public:
   MetalTexture& operator=(const MetalTexture&) = delete;
 
 #if defined(__OBJC__)
-  /// Copies frame.texture level zero and schedules every Runtime currently displaying this texture.
+  /// Copies frame.texture level zero and schedules every UiWindow currently displaying this texture.
   ///
   /// Invalid textures throw std::invalid_argument, publication failures throw std::runtime_error, and publication
   /// after Finish() throws std::logic_error. A failed publication preserves the previous frame.

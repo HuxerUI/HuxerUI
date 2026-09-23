@@ -77,7 +77,7 @@ public:
   PixelTexture(const PixelTexture&) = delete;
   PixelTexture& operator=(const PixelTexture&) = delete;
 
-  /// Copies frame into the latest-frame mailbox and schedules every Runtime currently displaying this texture.
+  /// Copies frame into the latest-frame mailbox and schedules every UiWindow currently displaying this texture.
   ///
   /// Invalid dimensions, stride, format, or storage size throw std::invalid_argument. Publication after Finish()
   /// throws std::logic_error.
@@ -133,7 +133,7 @@ public:
   D3D11Texture(const D3D11Texture&) = delete;
   D3D11Texture& operator=(const D3D11Texture&) = delete;
 
-  /// Copies frame into a new immutable shared snapshot and schedules every Runtime displaying this texture.
+  /// Copies frame into a new immutable shared snapshot and schedules every UiWindow displaying this texture.
   ///
   /// Invalid source properties throw std::invalid_argument. Unsupported devices and GPU failures throw
   /// std::runtime_error. Publication after Finish() throws std::logic_error.

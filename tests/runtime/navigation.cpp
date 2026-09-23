@@ -350,7 +350,7 @@ void ResetNavigationTestState() {
   next_routed_page_token = 0;
 }
 
-void SettleNavigation(TestPlatform& platform, Runtime& runtime) {
+void SettleNavigation(TestPlatform& platform, UiWindow& runtime) {
   runtime.BuildFrame();
   platform.AdvanceTime(0.5);
   runtime.BuildFrame();
@@ -362,7 +362,7 @@ void SettleNavigation(TestPlatform& platform, Runtime& runtime) {
 TEST_CASE("NavigationStackPushPopRetainsPages") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   REQUIRE(ContainsText(runtime.BuildFrame(), "Root page"));
@@ -400,7 +400,7 @@ TEST_CASE("NavigationStackPushPopRetainsPages") {
 TEST_CASE("NavigationStackPredictiveBackCanCancelAndCommit") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push(DetailPage);
@@ -433,7 +433,7 @@ TEST_CASE("NavigationStackPredictiveBackCanCancelAndCommit") {
 TEST_CASE("NavigationStackSerializesDeferredPredictiveBackWithProgrammaticOperations") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -461,7 +461,7 @@ TEST_CASE("NavigationStackSerializesDeferredPredictiveBackWithProgrammaticOperat
 TEST_CASE("NavigationStackHonorsReducedMotion") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(ReducedMotionNavigationApp, platform);
+  UiWindow runtime(ReducedMotionNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -477,7 +477,7 @@ TEST_CASE("NavigationStackHonorsReducedMotion") {
 TEST_CASE("NavigationMotionEntersWideViewportWithoutDelayingMovement") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {2000.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -501,7 +501,7 @@ TEST_CASE("NavigationMotionEntersWideViewportWithoutDelayingMovement") {
 TEST_CASE("NavigationAnimationReusesPageLayoutAndPaint") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -533,7 +533,7 @@ TEST_CASE("NavigationAnimationReusesPageLayoutAndPaint") {
 TEST_CASE("NavigationStackFillsBoundedLooseConstraints") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(BoundedNavigationApp, platform);
+  UiWindow runtime(BoundedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
 
   const DrawRectCommand* background = FindRectWithColor(runtime.BuildFrame(), navigation_bounds_color);
@@ -544,7 +544,7 @@ TEST_CASE("NavigationStackFillsBoundedLooseConstraints") {
 TEST_CASE("NavigationStackGivesRepeatedFactoriesIndependentIdentity") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(RepeatedNavigationApp, platform);
+  UiWindow runtime(RepeatedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -564,7 +564,7 @@ TEST_CASE("NavigationStackGivesRepeatedFactoriesIndependentIdentity") {
 TEST_CASE("BackRequestedPrecedesNavigationPop") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push(InterceptingPage);
@@ -582,7 +582,7 @@ TEST_CASE("BackRequestedPrecedesNavigationPop") {
 TEST_CASE("NavigationStackReplaceAndQueuedOperationsUseLogicalDepth") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -604,7 +604,7 @@ TEST_CASE("NavigationStackReplaceAndQueuedOperationsUseLogicalDepth") {
 TEST_CASE("NestedNavigationConsumesBackAtTheDeepestStack") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NestedNavigationApp, platform);
+  UiWindow runtime(NestedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -633,7 +633,7 @@ TEST_CASE("NestedNavigationConsumesBackAtTheDeepestStack") {
 TEST_CASE("UseRootNavigationTargetsTheOutermostCompatibleFactoryStack") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NestedNavigationApp, platform);
+  UiWindow runtime(NestedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -652,7 +652,7 @@ TEST_CASE("UseRootNavigationTargetsTheOutermostCompatibleFactoryStack") {
 TEST_CASE("RoutedNavigationKeepsTheControlledPathAuthoritative") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(RoutedNavigationApp, platform);
+  UiWindow runtime(RoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   REQUIRE(ContainsText(runtime.BuildFrame(), "Routed root"));
@@ -701,7 +701,7 @@ TEST_CASE("RoutedNavigationKeepsTheControlledPathAuthoritative") {
 TEST_CASE("RoutedNavigationReconcilesExternalPathChangesByEqualPrefix") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(RoutedNavigationApp, platform);
+  UiWindow runtime(RoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(routed_path.has_value());
@@ -725,7 +725,7 @@ TEST_CASE("RoutedNavigationReconcilesExternalPathChangesByEqualPrefix") {
 TEST_CASE("RoutedNavigationCoalescesPendingPathChangesDuringTransitions") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(RoutedNavigationApp, platform);
+  UiWindow runtime(RoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -751,7 +751,7 @@ TEST_CASE("RoutedNavigationCoalescesPendingPathChangesDuringTransitions") {
 TEST_CASE("RoutedNavigationRefreshesResolverWithoutReplacingEqualRouteEntries") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(UpdatingRoutedResolverApp, platform);
+  UiWindow runtime(UpdatingRoutedResolverApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   runtime.BuildFrame();
@@ -769,7 +769,7 @@ TEST_CASE("RoutedNavigationRefreshesResolverWithoutReplacingEqualRouteEntries") 
 TEST_CASE("RoutedNavigationCommitsInitialDeepPathsWithoutIntermediateTransitions") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(DeepRoutedNavigationApp, platform);
+  UiWindow runtime(DeepRoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const FlattenedScene& initial = runtime.BuildFrame();
@@ -783,7 +783,7 @@ TEST_CASE("RoutedNavigationCommitsInitialDeepPathsWithoutIntermediateTransitions
 TEST_CASE("RoutedNavigationPredictiveBackMutatesThePathOnlyOnCommit") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(RoutedNavigationApp, platform);
+  UiWindow runtime(RoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   routed_navigation->Push(TestRoute{"Article"});
@@ -809,7 +809,7 @@ TEST_CASE("RoutedNavigationPredictiveBackMutatesThePathOnlyOnCommit") {
 TEST_CASE("RoutedNavigationCommitsControllerHistoryActions") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(CommittedRoutedNavigationApp, platform);
+  UiWindow runtime(CommittedRoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -843,7 +843,7 @@ TEST_CASE("RoutedNavigationCommitsControllerHistoryActions") {
 TEST_CASE("RoutedUseRootNavigationSkipsTheNearestCompatibleStack") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NestedRoutedNavigationApp, platform);
+  UiWindow runtime(NestedRoutedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(routed_navigation.has_value());
@@ -878,7 +878,7 @@ TEST_CASE("RoutedNavigationControllersValidateRootReplacementAndDisconnect") {
   RouteNavigationController<TestRoute> retained;
   {
     TestPlatform platform;
-    Runtime runtime(RoutedNavigationApp, platform);
+    UiWindow runtime(RoutedNavigationApp, platform);
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     runtime.BuildFrame();
     retained = *routed_navigation;
@@ -892,7 +892,7 @@ TEST_CASE("RoutedNavigationControllersValidateRootReplacementAndDisconnect") {
   REQUIRE_THROWS_AS(retained.SetPath(NavigationPath<TestRoute>{}), std::logic_error);
 
   TestPlatform platform;
-  Runtime missing_runtime(MissingRoutedNavigationApp, platform);
+  UiWindow missing_runtime(MissingRoutedNavigationApp, platform);
   missing_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_THROWS_AS(missing_runtime.BuildFrame(), std::logic_error);
 }
@@ -901,9 +901,9 @@ TEST_CASE("PassThroughLayerContentDoesNotInterceptApplicationBack") {
   ResetNavigationTestState();
   AppOptions options;
   options.show_debug_overlay = false;
-  options.root_hooks.push_back([](RootContext& root) { navigation_layers = root.Layers(); });
+  options.window_hooks.push_back([](WindowContext& root) { navigation_layers = root.Layers(); });
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform, std::move(options));
+  UiWindow runtime(NavigationApp, platform, std::move(options));
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(navigation.has_value());
@@ -925,7 +925,7 @@ TEST_CASE("PassThroughLayerContentDoesNotInterceptApplicationBack") {
 TEST_CASE("NavigationDeactivatesPointerInputWhenAPageIsCovered") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(InteractiveNavigationApp, platform);
+  UiWindow runtime(InteractiveNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Down, 91, {20.0F, 20.0F}});
@@ -940,7 +940,7 @@ TEST_CASE("NavigationDeactivatesFocusAndTextInputWhenAPageIsCovered") {
   NavigationPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime(NavigationTextInputApp, platform);
+  UiWindow runtime(NavigationTextInputApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Down, 92, {20.0F, 20.0F}});
@@ -954,7 +954,7 @@ TEST_CASE("NavigationDeactivatesFocusAndTextInputWhenAPageIsCovered") {
 
 TEST_CASE("UseNavigationRequiresAnEnclosingStack") {
   TestPlatform platform;
-  Runtime runtime(MissingNavigationApp, platform);
+  UiWindow runtime(MissingNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::logic_error);
 }
@@ -984,7 +984,7 @@ TEST_CASE("NavigationControllerValidatesFactoriesAndDisconnects") {
   NavigationController retained;
   {
     TestPlatform platform;
-    Runtime runtime(NavigationApp, platform);
+    UiWindow runtime(NavigationApp, platform);
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     runtime.BuildFrame();
     retained = *navigation;
@@ -1002,7 +1002,7 @@ TEST_CASE("NavigationControllerValidatesFactoriesAndDisconnects") {
 TEST_CASE("NavigationFactoriesBindTypedArguments") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(ParameterizedNavigationApp, platform);
+  UiWindow runtime(ParameterizedNavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE(ContainsText(runtime.BuildFrame(), "Parameterized root 17"));
 
@@ -1042,7 +1042,7 @@ struct PageClipEffect {
 TEST_CASE("PageTransitionOverridesThemeAndFreezesTheActiveDescription") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push(CustomPolicyPage);
@@ -1066,7 +1066,7 @@ TEST_CASE("PageTransitionOverridesThemeAndFreezesTheActiveDescription") {
 TEST_CASE("PageTransitionRecognizesTransparentRootsAndCompleteImmediateOverrides") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push([] {
@@ -1087,14 +1087,15 @@ TEST_CASE("PageTransitionRecognizesTransparentRootsAndCompleteImmediateOverrides
 
 TEST_CASE("PageTransitionRejectsDeclarationsOutsideThePageRoot") {
   TestPlatform platform;
-  Runtime standalone([] { return Text("Outside").With(PageTransition{}); }, platform);
+  UiWindow standalone([] { return Text("Outside").With(PageTransition{}); }, platform);
   standalone.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_THROWS_AS(standalone.BuildFrame(), std::invalid_argument);
-  Runtime nested([] {
+  TestPlatform nested_platform{platform.platform_resources};
+  UiWindow nested([] {
     return NavigationStack([] {
       return Column {Text("Nested").With(PageTransition{})};
     });
-  }, platform);
+  }, nested_platform);
   nested.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_THROWS_AS(nested.BuildFrame(), std::invalid_argument);
 }
@@ -1102,7 +1103,7 @@ TEST_CASE("PageTransitionRejectsDeclarationsOutsideThePageRoot") {
 TEST_CASE("PageTransitionBlocksPointerInputUntilItCompletes") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   int clicks = 0;
@@ -1128,7 +1129,7 @@ TEST_CASE("PageTransitionBlocksPointerInputUntilItCompletes") {
 TEST_CASE("PageTransitionPredictiveBackSeeksAndSettlesWithoutItsStartDelay") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push([] {
@@ -1190,7 +1191,7 @@ std::optional<Point> PageDecoration(const FlattenedScene& scene) {
 TEST_CASE("PageFragmentsBlockContentInputAndRetainOnlyOnePageState") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   int clicks = 0;
@@ -1234,7 +1235,7 @@ TEST_CASE("PageFragmentsBlockContentInputAndRetainOnlyOnePageState") {
 TEST_CASE("PageFragmentDecorationsFollowPredictiveBackAndClearAfterCancellation") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   navigation->Push([] {
@@ -1299,7 +1300,7 @@ TEST_CASE("PageFragmentsPreserveCustomMotionAndDecorationWhenPaintOutputGrows") 
   const bool decorated = GENERATE(false, true);
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   State<int> command_count;
@@ -1360,7 +1361,7 @@ TEST_CASE("PageFragmentsPreserveCustomMotionAndDecorationWhenPaintOutputGrows") 
 TEST_CASE("PageFragmentsKeepPredictiveCancellationWithLargePaintOutput") {
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   State<int> command_count;
@@ -1412,7 +1413,7 @@ TEST_CASE("PageFragmentNativeEligibilityIsResolvedBeforeGeometryAndPainting") {
   const bool initially_native = GENERATE(false, true);
   ResetNavigationTestState();
   TestPlatform platform;
-  Runtime runtime(NavigationApp, platform);
+  UiWindow runtime(NavigationApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   State<bool> show_native;
@@ -1461,7 +1462,7 @@ TEST_CASE("PageFragmentsReleaseMountedCachesWhenTheStackIsRemoved") {
   ResetNavigationTestState();
   TestPlatform platform;
   static State<bool> show_stack;
-  Runtime runtime([]() -> View {
+  UiWindow runtime([]() -> View {
     show_stack = UseState(true);
     return show_stack.Get() ? Scope(NavigationApp) : View{Text("Stack removed")};
   }, platform);
@@ -1483,7 +1484,7 @@ TEST_CASE("PageFragmentsReleaseCachesWhenAnInvisibleAncestorStopsParticipatingIn
   ResetNavigationTestState();
   TestPlatform platform;
   static State<std::size_t> selected;
-  Runtime runtime([]() -> View {
+  UiWindow runtime([]() -> View {
     selected = UseState<std::size_t>(0);
     return IndexedPages({
       Stack {

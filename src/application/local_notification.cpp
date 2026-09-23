@@ -63,10 +63,10 @@ struct LocalNotificationService::State final : public std::enable_shared_from_th
     virtual std::function<void()> Detach() noexcept = 0;
   };
 
-  State(std::shared_ptr<LocalNotificationTransport> transport, UIThreadDispatcher dispatch_to_ui_thread)
+  State(std::shared_ptr<LocalNotificationTransport> transport, UiThreadDispatcher dispatch_to_ui_thread)
       : transport(std::move(transport)), dispatch_to_ui_thread(std::move(dispatch_to_ui_thread)) {
     if (this->transport && !this->dispatch_to_ui_thread) {
-      throw std::logic_error("HuxerUI local notification transport requires a UIThreadDispatcher");
+      throw std::logic_error("HuxerUI local notification transport requires a UiThreadDispatcher");
     }
   }
 
@@ -83,7 +83,7 @@ struct LocalNotificationService::State final : public std::enable_shared_from_th
       operation->Fail();
       return;
     }
-    // Queries do not block behind prompts; mutations retain their order within this Runtime.
+    // Queries do not block behind prompts; mutations retain their order within the application.
     if (ordered) {
       queued.push_back(operation);
       StartNext();
@@ -182,8 +182,9 @@ struct LocalNotificationService::State final : public std::enable_shared_from_th
     }
   }
 
+  std::shared_ptr<ExecutionContext> application_source = CurrentApplicationRuntime()->execution;
   std::shared_ptr<LocalNotificationTransport> transport;
-  UIThreadDispatcher dispatch_to_ui_thread;
+  UiThreadDispatcher dispatch_to_ui_thread;
   std::deque<std::shared_ptr<Operation>> queued;
   std::vector<std::shared_ptr<Operation>> independent;
   std::shared_ptr<Operation> active;
@@ -335,11 +336,13 @@ template <class Result>
 Task<Result> RunLocalNotificationOperation(std::shared_ptr<LocalNotificationService::State> controller,
                                            typename LocalNotificationOperation<Result>::Starter starter, Result failure,
                                            bool ordered) {
+  ValidateApplicationCall(controller->application_source);
   co_return co_await LocalNotificationAwaiter<Result>(std::move(controller), std::move(starter), std::move(failure),
                                                       ordered);
 }
 
 Task<PermissionStatus> CheckAuthorization(std::shared_ptr<LocalNotificationService::State> state) {
+  ValidateApplicationCall(state->application_source);
   return RunLocalNotificationOperation<PermissionStatus>(
       std::move(state),
       [](LocalNotificationTransport& transport, PermissionStatusCompletion completion) {
@@ -349,9 +352,20 @@ Task<PermissionStatus> CheckAuthorization(std::shared_ptr<LocalNotificationServi
 }
 
 Task<PermissionStatus> RequestAuthorization(std::shared_ptr<LocalNotificationService::State> state) {
+  auto source = CapturePresentationContext(state->application_source);
+  const auto identity = state->transport ? state->transport->PresentationIdentity() : 0;
   return RunLocalNotificationOperation<PermissionStatus>(
       std::move(state),
-      [](LocalNotificationTransport& transport, PermissionStatusCompletion completion) {
+      [identity, source = std::move(source)](LocalNotificationTransport& transport, PermissionStatusCompletion completion) {
+        if (!IsPresentationSourceAvailable(source)) {
+          completion(PermissionStatus::Unavailable);
+          return std::function<void()>{};
+        }
+        ExecutionGuard guard(source);
+        if (identity != transport.PresentationIdentity()) {
+          completion(PermissionStatus::Unavailable);
+          return std::function<void()>{};
+        }
         return transport.RequestAuthorization(std::move(completion));
       },
       PermissionStatus::Unavailable, true);
@@ -395,13 +409,13 @@ Task<LocalNotificationOperationStatus> CancelNotification(std::shared_ptr<LocalN
 
 std::shared_ptr<LocalNotificationService>
 LocalNotificationService::Create(std::shared_ptr<LocalNotificationTransport> transport,
-                                 UIThreadDispatcher dispatch_to_ui_thread, std::shared_ptr<AppResources> resources) {
+                                 UiThreadDispatcher dispatch_to_ui_thread, std::shared_ptr<AppResources> resources) {
   return std::shared_ptr<LocalNotificationService>(
       new LocalNotificationService(std::move(transport), std::move(dispatch_to_ui_thread), std::move(resources)));
 }
 
 LocalNotificationService::LocalNotificationService(std::shared_ptr<LocalNotificationTransport> transport,
-                                                   UIThreadDispatcher dispatch_to_ui_thread,
+                                                   UiThreadDispatcher dispatch_to_ui_thread,
                                                    std::shared_ptr<AppResources> resources)
     : state_(std::make_shared<State>(std::move(transport), std::move(dispatch_to_ui_thread))),
       resources_(std::move(resources)) {
@@ -415,6 +429,7 @@ LocalNotificationService::~LocalNotificationService() {
 }
 
 LocalNotificationCapabilities LocalNotificationService::Capabilities() const {
+  ValidateApplicationCall(state_->application_source);
   return state_->Capabilities();
 }
 
@@ -427,21 +442,21 @@ Task<PermissionStatus> LocalNotificationService::RequestAuthorization() const {
 }
 
 Task<LocalNotificationOperationStatus>
-LocalNotificationService::Show(LocalNotification notification, std::shared_ptr<const Environment> environment) const {
+LocalNotificationService::Show(LocalNotification notification) const {
   // Resolve and encode before creating the lazy Task, so later locale or caller changes cannot alter its content.
-  return ShowNotification(state_, Resolve(std::move(notification), std::move(environment)));
+  return ShowNotification(state_, Resolve(std::move(notification)));
 }
 
 Task<LocalNotificationOperationStatus>
-LocalNotificationService::Schedule(LocalNotification notification, std::chrono::system_clock::time_point delivery_time,
-                                   std::shared_ptr<const Environment> environment) const {
+LocalNotificationService::Schedule(LocalNotification notification, std::chrono::system_clock::time_point delivery_time) const {
   if (delivery_time <= std::chrono::system_clock::now()) {
     throw std::invalid_argument("HuxerUI local notification delivery time must be in the future");
   }
-  return ScheduleNotification(state_, Resolve(std::move(notification), std::move(environment)), delivery_time);
+  return ScheduleNotification(state_, Resolve(std::move(notification)), delivery_time);
 }
 
 Task<LocalNotificationOperationStatus> LocalNotificationService::Cancel(std::string_view identifier) const {
+  ValidateApplicationCall(state_->application_source);
   ValidateIdentifier(identifier);
   return CancelNotification(state_, std::string(identifier));
 }
@@ -472,13 +487,13 @@ PlatformPayload DecodeLocalNotificationData(std::span<const std::byte> bytes) {
   });
 }
 
-ResolvedLocalNotification LocalNotificationService::Resolve(LocalNotification notification,
-                                                            std::shared_ptr<const Environment> environment) const {
+ResolvedLocalNotification LocalNotificationService::Resolve(LocalNotification notification) const {
   ValidateIdentifier(notification.identifier);
   if (const auto* template_presentation = std::get_if<TemplateNotificationPresentation>(&notification.presentation)) {
     ValidateTemplateIdentifier(template_presentation->identifier);
   }
-  const Locale locale = ResolveResourceLocale(std::move(environment), *resources_);
+  ValidateApplicationCall(state_->application_source);
+  const Locale locale = resources_->EffectiveConfiguration(false).locale;
   ResolvedLocalNotification resolved{
       .identifier = std::move(notification.identifier),
       .title = ResolveString(std::move(notification.title), *resources_, locale),
@@ -511,13 +526,13 @@ Task<PermissionStatus> LocalNotificationHandle::RequestAuthorizationAsync() cons
 }
 
 Task<LocalNotificationOperationStatus> LocalNotificationHandle::ShowAsync(LocalNotification notification) const {
-  return service_->Show(std::move(notification), environment_);
+  return service_->Show(std::move(notification));
 }
 
 Task<LocalNotificationOperationStatus>
 LocalNotificationHandle::ScheduleAsync(LocalNotification notification,
                                       std::chrono::system_clock::time_point delivery_time) const {
-  return service_->Schedule(std::move(notification), delivery_time, environment_);
+  return service_->Schedule(std::move(notification), delivery_time);
 }
 
 Task<LocalNotificationOperationStatus> LocalNotificationHandle::CancelAsync(std::string_view identifier) const {

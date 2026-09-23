@@ -21,66 +21,6 @@ namespace {
 
 using namespace std::chrono_literals;
 
-class DispatcherWindow final {
-public:
-  explicit DispatcherWindow(detail::Win32UIThreadDispatcher& dispatcher) : dispatcher_(&dispatcher) {
-    instance_ = GetModuleHandleW(nullptr);
-    WNDCLASSW window_class{};
-    window_class.lpfnWndProc = WindowProcedure;
-    window_class.hInstance = instance_;
-    window_class.lpszClassName = class_name;
-    class_atom_ = RegisterClassW(&window_class);
-    if (class_atom_ == 0) {
-      throw std::runtime_error("HuxerUI tests could not register the Windows dispatcher class");
-    }
-    window_ = CreateWindowExW(0, class_name, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr, instance_, dispatcher_);
-    if (window_ == nullptr) {
-      UnregisterClassW(class_name, instance_);
-      class_atom_ = 0;
-      throw std::runtime_error("HuxerUI tests could not create the Windows dispatcher window");
-    }
-  }
-
-  ~DispatcherWindow() {
-    dispatcher_->Shutdown();
-    if (window_ != nullptr) {
-      DestroyWindow(window_);
-    }
-    if (class_atom_ != 0) {
-      UnregisterClassW(class_name, instance_);
-    }
-  }
-
-  DispatcherWindow(const DispatcherWindow&) = delete;
-  DispatcherWindow& operator=(const DispatcherWindow&) = delete;
-
-  HWND Handle() const noexcept {
-    return window_;
-  }
-
-private:
-  static LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-    auto* dispatcher = reinterpret_cast<detail::Win32UIThreadDispatcher*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-      const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-      dispatcher = static_cast<detail::Win32UIThreadDispatcher*>(create->lpCreateParams);
-      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dispatcher));
-    }
-    if (dispatcher != nullptr && message == detail::Win32UIThreadDispatcher::task_message) {
-      dispatcher->RunPending();
-      return 0;
-    }
-    return DefWindowProcW(window, message, w_param, l_param);
-  }
-
-  static constexpr wchar_t class_name[] = L"HuxerUI.Tests.Win32UIThreadDispatcher";
-
-  detail::Win32UIThreadDispatcher* dispatcher_;
-  HINSTANCE instance_ = nullptr;
-  ATOM class_atom_ = 0;
-  HWND window_ = nullptr;
-};
-
 template <class Predicate> bool RunDispatcherUntil(Predicate&& predicate, std::chrono::milliseconds timeout) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!std::invoke(predicate) && std::chrono::steady_clock::now() < deadline) {
@@ -118,13 +58,16 @@ View WindowsPlatformModuleApp() {
 
 AppOptions WindowsPlatformModuleOptions() {
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back(example::InstallTimer);
+  options.application_hooks = {example::InstallTimer};
+  options.window_hooks.push_back([](WindowContext& root) {
+    root.Provide(OpenPlatformModule<std::shared_ptr<example::TimerService>>(example::timer::type));
+  });
   return options;
 }
 
-TEST_CASE("WindowsUIThreadDispatcherQueuesBeforeAttachAndPreservesOrder") {
-  detail::Win32UIThreadDispatcher dispatcher;
-  UIThreadDispatcher post = dispatcher.Bind();
+TEST_CASE("WindowsUIThreadDispatcherWorksWithoutAPresentedWindowAndPreservesOrder") {
+  detail::Win32UiThreadDispatcher dispatcher;
+  UiThreadDispatcher post = dispatcher.Bind();
   const std::thread::id ui_thread = std::this_thread::get_id();
   std::vector<int> order;
   bool ran_inline = false;
@@ -143,8 +86,9 @@ TEST_CASE("WindowsUIThreadDispatcherQueuesBeforeAttachAndPreservesOrder") {
   inside_post = false;
 
   REQUIRE(order.empty());
-  DispatcherWindow window(dispatcher);
-  dispatcher.Attach(window.Handle());
+  RunDispatcherFor(10ms);
+  REQUIRE(order.empty());
+  dispatcher.Start();
   REQUIRE(RunDispatcherUntil([&] { return order.size() == 2; }, 1s));
   REQUIRE_FALSE(ran_inline);
   REQUIRE(order == std::vector<int>{1, 2});
@@ -155,13 +99,65 @@ TEST_CASE("WindowsUIThreadDispatcherQueuesBeforeAttachAndPreservesOrder") {
   REQUIRE(order == std::vector<int>{1, 2});
 }
 
+TEST_CASE("WindowsUIThreadDispatcherRetiresPendingDeliveryDuringACallback") {
+  auto dispatcher = std::make_unique<detail::Win32UiThreadDispatcher>();
+  UiThreadDispatcher post = dispatcher->Bind();
+  dispatcher->Start();
+  auto lifetime = std::make_shared<int>(0);
+  std::weak_ptr<int> observed_lifetime = lifetime;
+  bool retired = false;
+  bool late_delivery = false;
+  post([&, lifetime] {
+    post([&, lifetime] { late_delivery = true; });
+    dispatcher.reset();
+    retired = true;
+  });
+  post([&, owned = std::move(lifetime)] { late_delivery = true; });
+  REQUIRE(RunDispatcherUntil([&] { return retired; }, 1s));
+  REQUIRE(observed_lifetime.expired());
+  post([&] { late_delivery = true; });
+  RunDispatcherFor(10ms);
+  REQUIRE_FALSE(late_delivery);
+}
+
+TEST_CASE("WindowsUIThreadDispatcherReleasesQueuedCapturesOutsideItsLock") {
+  detail::Win32UiThreadDispatcher dispatcher;
+  const UiThreadDispatcher post = dispatcher.Bind();
+  bool disposed = false;
+  bool delivered = false;
+  auto owned = std::shared_ptr<int>(new int(0), [&](int* value) {
+    delete value;
+    disposed = true;
+    post([&] { delivered = true; });
+  });
+  post([owned = std::move(owned)] {});
+  dispatcher.Shutdown();
+  REQUIRE(disposed);
+  RunDispatcherFor(10ms);
+  REQUIRE_FALSE(delivered);
+}
+
+TEST_CASE("WindowsUIThreadDispatcherQueuesReentrantSubmission") {
+  detail::Win32UiThreadDispatcher dispatcher;
+  dispatcher.Start();
+  const UiThreadDispatcher post = dispatcher.Bind();
+  std::vector<int> order;
+  post([&] {
+    order.push_back(1);
+    post([&] { order.push_back(3); });
+    RunDispatcherFor(10ms);
+  });
+  post([&] { order.push_back(2); });
+  REQUIRE(RunDispatcherUntil([&] { return order.size() == 3; }, 1s));
+  REQUIRE(order == std::vector<int>{1, 2, 3});
+}
+
 TEST_CASE("WindowsPlatformModuleUsesUIThreadWithoutInlineReentry") {
   windows_timer_service.reset();
-  detail::Win32UIThreadDispatcher dispatcher;
+  detail::Win32UiThreadDispatcher dispatcher;
   TestPlatform platform(dispatcher.Bind());
-  Runtime runtime(WindowsPlatformModuleApp, platform, WindowsPlatformModuleOptions());
-  DispatcherWindow window(dispatcher);
-  dispatcher.Attach(window.Handle());
+  UiWindow runtime(WindowsPlatformModuleApp, platform, WindowsPlatformModuleOptions());
+  dispatcher.Start();
   runtime.SetWindowMetrics({{320.0F, 200.0F}});
   static_cast<void>(runtime.BuildRenderFrame());
   const std::shared_ptr<example::TimerService> timer = windows_timer_service.lock();
@@ -221,10 +217,8 @@ TEST_CASE("WindowsPlatformModuleUsesUIThreadWithoutInlineReentry") {
 
 TEST_CASE("WindowsPlatformModuleReplacesCancelsAndDisposesThreadPoolTimer") {
   windows_timer_service.reset();
-  detail::Win32UIThreadDispatcher dispatcher;
+  detail::Win32UiThreadDispatcher dispatcher;
   TestPlatform platform(dispatcher.Bind());
-  DispatcherWindow window(dispatcher);
-  dispatcher.Attach(window.Handle());
   bool first_replaced = false;
   bool second_completed = false;
   bool ticked = false;
@@ -232,7 +226,8 @@ TEST_CASE("WindowsPlatformModuleReplacesCancelsAndDisposesThreadPoolTimer") {
   bool cancelled_ticked = false;
   std::weak_ptr<example::TimerService> service_lifetime;
   {
-    Runtime runtime(WindowsPlatformModuleApp, platform, WindowsPlatformModuleOptions());
+    UiWindow runtime(WindowsPlatformModuleApp, platform, WindowsPlatformModuleOptions());
+    dispatcher.Start();
     runtime.SetWindowMetrics({{320.0F, 200.0F}});
     static_cast<void>(runtime.BuildRenderFrame());
     std::shared_ptr<example::TimerService> timer = windows_timer_service.lock();
@@ -254,8 +249,11 @@ TEST_CASE("WindowsPlatformModuleReplacesCancelsAndDisposesThreadPoolTimer") {
     ));
     REQUIRE(RunDispatcherUntil([&] { return first_replaced && second_completed && ticked; }, 1s));
 
-    static_cast<void>(timer->Stop([](PlatformResult<std::monostate>) {}));
-    dispatcher.RunPending();
+    bool stopped = false;
+    static_cast<void>(timer->Stop([&](PlatformResult<std::monostate> result) {
+      stopped = std::holds_alternative<std::monostate>(result);
+    }));
+    REQUIRE(RunDispatcherUntil([&] { return stopped; }, 1s));
     const PlatformRequestId request = timer->Start(
         50ms,
         [&](std::uint64_t) { cancelled_ticked = true; },

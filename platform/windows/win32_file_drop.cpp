@@ -80,8 +80,8 @@ FileDropPreparation CaptureFiles(IDataObject* object) {
 
 class Win32FileDrop::Target final : public IDropTarget {
 public:
-  Target(HWND window, Runtime& runtime, std::function<float()> scale)
-      : window_(window), runtime_(&runtime), scale_(std::move(scale)) {}
+  Target(HWND platform_window, UiWindow& ui_window, std::function<float()> scale)
+      : platform_window_(platform_window), ui_window_(&ui_window), scale_(std::move(scale)) {}
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** object) override {
     if (!object) {
@@ -114,13 +114,13 @@ public:
     Leave();
     FORMATETC format = ShellFileFormat();
     offered_ = object && SUCCEEDED(object->QueryGetData(&format));
-    if (!runtime_ || !offered_ || !copy) {
+    if (!ui_window_ || !offered_ || !copy) {
       return S_OK;
     }
     ++session_;
     hovering_ = true;
     try {
-      const bool accepted = runtime_->HandleFileDragEntered(session_, {}, Position(point));
+      const bool accepted = ui_window_->HandleFileDragEntered(session_, {}, Position(point));
       *effect = copy && accepted ? DROPEFFECT_COPY : DROPEFFECT_NONE;
     } catch (...) {
       Leave();
@@ -138,15 +138,15 @@ public:
       EndHover();
       return S_OK;
     }
-    if (runtime_ && offered_) {
+    if (ui_window_ && offered_) {
       try {
         const bool entered = !hovering_;
         if (entered) {
           ++session_;
           hovering_ = true;
         }
-        const bool accepted = entered ? runtime_->HandleFileDragEntered(session_, {}, Position(point))
-                                      : runtime_->HandleFileDragMoved(session_, {}, Position(point));
+        const bool accepted = entered ? ui_window_->HandleFileDragEntered(session_, {}, Position(point))
+                                      : ui_window_->HandleFileDragMoved(session_, {}, Position(point));
         *effect = copy && accepted ? DROPEFFECT_COPY : DROPEFFECT_NONE;
       } catch (...) {
         Leave();
@@ -166,10 +166,10 @@ public:
     }
     const bool copy = (*effect & DROPEFFECT_COPY) != 0;
     *effect = DROPEFFECT_NONE;
-    if (runtime_ && offered_ && copy) {
+    if (ui_window_ && offered_ && copy) {
       try {
         auto source = CaptureFiles(object);
-        if (runtime_->HandleFileDrop(session_, {}, Position(point), std::move(source))) {
+        if (ui_window_->HandleFileDrop(session_, {}, Position(point), std::move(source))) {
           *effect = DROPEFFECT_COPY;
         }
       } catch (...) {
@@ -182,14 +182,14 @@ public:
 
   void Detach() noexcept {
     Leave();
-    runtime_ = nullptr;
+    ui_window_ = nullptr;
     scale_ = {};
   }
 
 private:
   Point Position(POINTL point) const {
     POINT client{point.x, point.y};
-    if (!ScreenToClient(window_, &client)) {
+    if (!ScreenToClient(platform_window_, &client)) {
       throw std::runtime_error("HuxerUI could not map the Windows file drop position");
     }
     const float scale = scale_();
@@ -201,9 +201,9 @@ private:
 
   void EndHover() noexcept {
     const bool hovering = std::exchange(hovering_, false);
-    if (runtime_ && hovering) {
+    if (ui_window_ && hovering) {
       try {
-        runtime_->HandleFileDragExited(session_);
+        ui_window_->HandleFileDragExited(session_);
       } catch (...) {
       }
     }
@@ -215,17 +215,17 @@ private:
   }
 
   std::atomic<ULONG> references_{1};
-  HWND window_;
-  Runtime* runtime_;
+  HWND platform_window_;
+  UiWindow* ui_window_;
   std::function<float()> scale_;
   std::uint64_t session_ = 0;
   bool offered_ = false;
   bool hovering_ = false;
 };
 
-Win32FileDrop::Win32FileDrop(HWND window, Runtime& runtime, std::function<float()> scale)
-    : window_(window), target_(new Target(window, runtime, std::move(scale))) {
-  if (FAILED(RegisterDragDrop(window_, target_))) {
+Win32FileDrop::Win32FileDrop(HWND platform_window, UiWindow& ui_window, std::function<float()> scale)
+    : platform_window_(platform_window), target_(new Target(platform_window, ui_window, std::move(scale))) {
+  if (FAILED(RegisterDragDrop(platform_window_, target_))) {
     target_->Release();
     throw std::runtime_error("HuxerUI could not register Windows file drop reception");
   }
@@ -233,7 +233,7 @@ Win32FileDrop::Win32FileDrop(HWND window, Runtime& runtime, std::function<float(
 
 Win32FileDrop::~Win32FileDrop() {
   target_->Detach();
-  static_cast<void>(RevokeDragDrop(window_));
+  static_cast<void>(RevokeDragDrop(platform_window_));
   target_->Release();
 }
 

@@ -17,7 +17,8 @@ TEST_CASE("ApplicationOptionsPreserveOmittedWindowDefaults") {
   REQUIRE_FALSE(options.window.minimum_size.has_value());
   REQUIRE(options.window.caption_labels == WindowCaptionLabels{});
   REQUIRE(options.viewport_breakpoints == ViewportBreakpoints{});
-  REQUIRE(options.root_hooks.empty());
+  REQUIRE(options.application_hooks.empty());
+  REQUIRE(options.window_hooks.empty());
 
   const WindowMetrics metrics{.viewport = {640.0F, 480.0F}};
   REQUIRE(metrics.safe_area == EdgeInsets{});

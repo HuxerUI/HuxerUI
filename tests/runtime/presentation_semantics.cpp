@@ -67,7 +67,7 @@ void ResetPresentationSemantics() {
 TEST_CASE("Dialog semantics isolate the application and honor dismiss requests") {
   ResetPresentationSemantics();
   TestPlatform platform;
-  Runtime runtime{PresentationSemanticsApp, platform};
+  UiWindow runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -103,7 +103,7 @@ TEST_CASE("Dialog semantics isolate the application and honor dismiss requests")
 TEST_CASE("Exiting dialogs immediately leave input and semantic participation") {
   ResetPresentationSemantics();
   TestPlatform platform;
-  Runtime runtime{PresentationSemanticsApp, platform};
+  UiWindow runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -133,7 +133,7 @@ TEST_CASE("Exiting dialogs immediately leave input and semantic participation") 
 TEST_CASE("Dialog semantics follow the existing cancellation policy") {
   ResetPresentationSemantics();
   TestPlatform platform;
-  Runtime runtime{PresentationSemanticsApp, platform};
+  UiWindow runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -153,7 +153,7 @@ TEST_CASE("Dialog semantics follow the existing cancellation policy") {
 TEST_CASE("Standard dialog actions remain real semantic buttons") {
   ResetPresentationSemantics();
   TestPlatform platform;
-  Runtime runtime{PresentationSemanticsApp, platform};
+  UiWindow runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -168,7 +168,7 @@ TEST_CASE("Standard dialog actions remain real semantic buttons") {
 TEST_CASE("Bottom sheets and transient feedback publish presentation semantics") {
   ResetPresentationSemantics();
   TestPlatform platform;
-  Runtime runtime{PresentationSemanticsApp, platform};
+  UiWindow runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -220,7 +220,7 @@ TEST_CASE("Menu semantics describe items and keep an expanded submenu in one mod
   ResetPresentationSemantics();
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{PresentationSemanticsApp, platform};
+  UiWindow runtime{PresentationSemanticsApp, platform};
   runtime.SetWindowMetrics({.viewport = {480.0F, 320.0F}});
   runtime.BuildFrame();
 

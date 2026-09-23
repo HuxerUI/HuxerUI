@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -24,8 +24,8 @@ std::size_t CompositionSlotKeyHash::operator()(const CompositionSlotKey& key) co
   return seed;
 }
 
-RecomposeScope::RecomposeScope(Runtime& runtime, std::uint64_t id, StateSlotStorage state_slots)
-    : runtime_(&runtime), id_(id), state_slots_(std::move(state_slots)) {}
+RecomposeScope::RecomposeScope(UiWindow& ui_window, std::uint64_t id, StateSlotStorage state_slots)
+    : ui_window_(&ui_window), id_(id), state_slots_(std::move(state_slots)), execution_(std::make_shared<ExecutionContext>()) {}
 
 RecomposeScope::~RecomposeScope() {
   for (auto& [dependency_address, weak_dependency] : dependencies_) {
@@ -43,8 +43,8 @@ RecomposeScope::~RecomposeScope() {
       }
     }
   }
-  runtime_->RetireLifecycles(*this);
-  runtime_->RetireTaskScope(std::move(task_scope_));
+  ui_window_->RetireLifecycles(*this);
+  ui_window_->RetireTaskScope(std::move(task_scope_));
 }
 
 void RecomposeScope::BeginComposition() {
@@ -114,11 +114,11 @@ void RecomposeScope::EndComposition() {
   dirty_ = invalidated_during_composition_ || observed_value_changed;
   invalidated_during_composition_ = false;
   if ((!pending_lifecycle_declarations_.empty() || !lifecycle_slots_.empty()) && !lifecycle_commit_pending_) {
-    runtime_->QueueLifecycleCommit(shared_from_this());
+    ui_window_->QueueLifecycleCommit(shared_from_this());
     lifecycle_commit_pending_ = true;
   }
   if (dirty_) {
-    runtime_->InvalidateScope(id_);
+    ui_window_->InvalidateScope(id_);
   }
 }
 
@@ -207,7 +207,7 @@ void RecomposeScope::RegisterLifecycle(LifecycleSetup setup, std::vector<Lifecyc
 
 TaskScope RecomposeScope::Tasks() {
   if (!task_scope_) {
-    task_scope_ = runtime_->CreateTaskScope();
+    task_scope_ = ui_window_->CreateTaskScope();
   }
   return TaskScope(task_scope_);
 }
@@ -228,6 +228,7 @@ void RecomposeScope::PrepareLifecycleCommit() {
 }
 
 void RecomposeScope::CommitLifecycleCleanups() noexcept {
+  ExecutionGuard guard(execution_);
   for (auto key = lifecycle_order_.rbegin(); key != lifecycle_order_.rend(); ++key) {
     auto active = lifecycle_slots_.find(*key);
     if (active == lifecycle_slots_.end() || active->second.retained_for_commit) {
@@ -239,6 +240,7 @@ void RecomposeScope::CommitLifecycleCleanups() noexcept {
 }
 
 void RecomposeScope::CommitLifecycleSetups() {
+  ExecutionGuard guard(execution_);
   const auto rebuild_order = [this] {
     lifecycle_order_.clear();
     lifecycle_order_.reserve(lifecycle_slots_.size());
@@ -254,14 +256,19 @@ void RecomposeScope::CommitLifecycleSetups() {
       if (lifecycle_slots_.contains(declaration.key)) {
         continue;
       }
-      LifecycleCleanup cleanup = declaration.setup.Run();
+      auto execution = std::make_shared<ExecutionContext>(*execution_);
+      auto cleanup = std::make_shared<LifecycleCleanup>();
+      *cleanup = declaration.setup.Run();
       try {
         auto [slot, inserted] = lifecycle_slots_.try_emplace(declaration.key);
         static_cast<void>(inserted);
         slot->second.dependencies = std::move(declaration.dependencies);
-        slot->second.cleanup = std::move(cleanup);
+        slot->second.cleanup = LifecycleCleanup([execution, cleanup] {
+          ExecutionGuard cleanup_guard(execution);
+          cleanup->Run();
+        });
       } catch (...) {
-        cleanup.Run();
+        cleanup->Run();
         throw;
       }
     }
@@ -285,7 +292,7 @@ void RecomposeScope::Invalidate() {
   if (composing_) {
     if (!invalidated_during_composition_) {
       invalidated_during_composition_ = true;
-      runtime_->InvalidateScope(id_);
+      ui_window_->InvalidateScope(id_);
     }
     return;
   }
@@ -293,10 +300,11 @@ void RecomposeScope::Invalidate() {
     return;
   }
   dirty_ = true;
-  runtime_->InvalidateScope(id_);
+  ui_window_->InvalidateScope(id_);
 }
 
 void RecomposeScope::SetEventBindings(EventBindings bindings) {
+  bindings.execution_context = bindings.empty() ? nullptr : execution_;
   event_hub_->SetBindings(std::move(bindings));
 }
 
@@ -366,7 +374,13 @@ std::shared_ptr<RecomposeScope> VirtualItemDependencyCapture::Scope() const noex
 }
 
 Composer::Composer(std::shared_ptr<RecomposeScope> scope, std::shared_ptr<const Environment> environment)
-    : scope_(std::move(scope)), environment_(std::move(environment)) {}
+    : scope_(std::move(scope)), environment_(std::move(environment)),
+      execution_(scope_ ? scope_->execution_ : std::make_shared<ExecutionContext>()) {
+  if (const auto current = CurrentExecutionContext()) {
+    *execution_ = *current;
+  }
+  execution_->environment = environment_;
+}
 
 Composer* Composer::Current() noexcept {
   return current_;
@@ -374,17 +388,21 @@ Composer* Composer::Current() noexcept {
 
 Composer& Composer::RequireCurrent() {
   if (current_ == nullptr) {
-    throw std::logic_error("UseState() must be called while HuxerUI is composing a view");
+    throw std::logic_error("HuxerUI operation requires an active composition");
   }
   return *current_;
 }
 
 void Composer::Observe(const std::shared_ptr<StateCellBase>& cell) {
-  scope_->Observe(cell);
+  if (scope_) {
+    scope_->Observe(cell);
+  }
 }
 
 void Composer::Observe(const std::shared_ptr<CompositionDependency>& dependency) {
-  scope_->Observe(dependency);
+  if (scope_) {
+    scope_->Observe(dependency);
+  }
 }
 
 std::shared_ptr<StateCellBase>
@@ -404,7 +422,7 @@ std::shared_ptr<EventHub> Composer::Events() const noexcept {
   return scope_->Events();
 }
 
-Composer::Guard::Guard(Composer& composer) : previous_(current_) {
+Composer::Guard::Guard(Composer& composer) : previous_(current_), execution_guard_(composer.execution_) {
   current_ = &composer;
 }
 

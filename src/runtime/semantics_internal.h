@@ -36,13 +36,13 @@ struct SemanticActionRoute {
 
 class SemanticTree final {
 public:
-  explicit SemanticTree(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
+  explicit SemanticTree(UiWindow::State& runtime_state) : runtime_state_(runtime_state) {}
   void BuildSemantics();
   bool PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action);
   const std::shared_ptr<const SemanticFrame>& Frame() const noexcept { return frame_; }
 
 private:
-  Runtime::State& runtime_state_;
+  UiWindow::State& runtime_state_;
   std::shared_ptr<const SemanticFrame> frame_;
   SemanticNodeId next_semantic_identity_ = 1;
   SemanticNodeId semantic_root_identity_ = 0;

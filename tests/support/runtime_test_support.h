@@ -15,13 +15,13 @@
 
 #include "application/application_internal.h"
 #include "internal_access.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "application/system_tray_internal.h"
 #include "text/text_internal.h"
 
 namespace huxerui::test {
 
-class Runtime;
+class UiWindow;
 
 PlatformResources* BuiltinTestResources();
 
@@ -264,19 +264,64 @@ private:
 
   std::vector<PaintCommand> commands_;
 
-  friend class Runtime;
+  friend class UiWindow;
 };
 
-class Runtime final {
+class RuntimeLifetime final {
 public:
-  Runtime(
+  RuntimeLifetime(const Application& application, huxerui::Runtime& runtime,
+      std::optional<ApplicationActivation> startup = LaunchActivation{},
+      ApplicationLifecycleState lifecycle = ApplicationLifecycleState::Background) : runtime_(runtime) {
+    detail::InternalAccess::InitializeRuntime(runtime_, application, std::move(startup), true, lifecycle);
+  }
+  ~RuntimeLifetime() { detail::InternalAccess::RetireRuntime(runtime_); }
+  operator huxerui::Runtime&() const { return runtime_; }
+  huxerui::Runtime& Get() const { return runtime_; }
+  void RequestShutdown() { runtime_.RequestShutdown(); }
+  void HandleApplicationActivation(ApplicationActivation activation) {
+    runtime_.HandleApplicationActivation(std::move(activation));
+  }
+  void UpdateApplicationLifecycleState(ApplicationLifecycleState state) {
+    runtime_.UpdateApplicationLifecycleState(state);
+  }
+private:
+  huxerui::Runtime& runtime_;
+};
+
+class UiWindow final {
+public:
+  UiWindow(
       huxerui::RootFactory root_factory,
-      huxerui::PlatformAdapter& platform,
+      huxerui::UiWindow& platform,
       huxerui::AppOptions options = {.show_debug_overlay = false},
       huxerui::ApplicationActivation startup_activation = huxerui::LaunchActivation{}
   )
-      : application_(root_factory, std::move(options)),
-        runtime_(application_, platform, std::move(startup_activation)) {}
+      : application_(std::make_unique<huxerui::Application>(root_factory, std::move(options))),
+        application_runtime_(&dynamic_cast<huxerui::Runtime&>(platform)), runtime_(platform) {
+    try {
+      detail::InternalAccess::InitializeRuntime(*application_runtime_, *application_, std::move(startup_activation));
+      detail::InternalAccess::InitializeWindow(runtime_, *application_runtime_);
+    } catch (...) {
+      detail::InternalAccess::RetireWindow(runtime_);
+      detail::InternalAccess::RetireRuntime(*application_runtime_);
+      throw;
+    }
+  }
+
+  UiWindow(huxerui::Runtime& application, huxerui::UiWindow& platform,
+      std::optional<ResourceConfiguration> configuration = std::nullopt,
+      WindowLifecycleState lifecycle = WindowLifecycleState::Background)
+      : application_runtime_(&application), runtime_(platform) {
+    detail::InternalAccess::InitializeWindow(runtime_, application, std::move(configuration), lifecycle);
+  }
+
+  ~UiWindow() {
+    detail::InternalAccess::RetireWindow(runtime_);
+    if (application_) detail::InternalAccess::RetireRuntime(*application_runtime_);
+  }
+
+  operator huxerui::UiWindow&() const { return runtime_; }
+  void UpdateWindowLifecycleState(WindowLifecycleState state) { runtime_.UpdateWindowLifecycleState(state); }
 
   void SetWindowMetrics(huxerui::WindowMetrics metrics) {
     runtime_.SetWindowMetrics(metrics);
@@ -310,7 +355,7 @@ public:
 
   [[nodiscard]] const FrameCommit& LastCommit() const {
     if (last_commit_ == nullptr) {
-      throw std::logic_error("HuxerUI test Runtime has not built a frame");
+      throw std::logic_error("HuxerUI test UiWindow has not built a frame");
     }
     return *last_commit_;
   }
@@ -328,11 +373,11 @@ public:
   }
 
   void HandleApplicationActivation(huxerui::ApplicationActivation activation) {
-    runtime_.HandleApplicationActivation(std::move(activation));
+    application_runtime_->HandleApplicationActivation(std::move(activation));
   }
 
   void UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState lifecycle_state) {
-    runtime_.UpdateApplicationLifecycleState(lifecycle_state);
+    application_runtime_->UpdateApplicationLifecycleState(lifecycle_state);
   }
 
   bool HandleWindowRequest(huxerui::WindowCommand command) {
@@ -375,7 +420,7 @@ public:
     return runtime_.QueryTextInputPosition(session_id, point);
   }
 
-  huxerui::Runtime& CoreRuntime() noexcept {
+  huxerui::UiWindow& CoreRuntime() noexcept {
     return runtime_;
   }
 
@@ -388,8 +433,9 @@ public:
   }
 
 private:
-  huxerui::Application application_;
-  huxerui::Runtime runtime_;
+  std::unique_ptr<huxerui::Application> application_;
+  huxerui::Runtime* application_runtime_;
+  huxerui::UiWindow& runtime_;
   FlattenedScene flattened_scene_;
   const FrameCommit* last_commit_ = nullptr;
 };
@@ -517,19 +563,43 @@ public:
   bool request_cancellable = true;
 };
 
-class TestPlatform : public huxerui::PlatformAdapter {
+class TestPlatform : public huxerui::UiWindow, public huxerui::Runtime {
 public:
   TestPlatform()
-      : PlatformAdapter([this](std::function<void()> task) { platform_module_tasks_.push_back(std::move(task)); }) {}
+      : TestPlatform([this](std::function<void()> task) { platform_module_tasks_.push_back(std::move(task)); }) {}
 
   explicit TestPlatform(huxerui::PlatformResources* resources) : TestPlatform() {
     platform_resources = resources;
   }
 
-  explicit TestPlatform(huxerui::UIThreadDispatcher dispatch_to_ui_thread)
-      : PlatformAdapter(std::move(dispatch_to_ui_thread)) {}
+  explicit TestPlatform(huxerui::UiThreadDispatcher dispatch_to_ui_thread)
+      : Runtime(std::move(dispatch_to_ui_thread)) {}
+
+  ~TestPlatform() override { huxerui::UiWindow::Retire(); huxerui::Runtime::Retire(); }
+
+  void OnRuntimeStopped() override { ++application_quit_requests; }
+
+  std::chrono::steady_clock::time_point TimerNow() const noexcept override {
+    return std::chrono::steady_clock::time_point{} +
+        std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(current_time));
+  }
+
+  std::function<void()> ScheduleTimerAt(std::chrono::steady_clock::time_point deadline, std::function<void()> callback) override {
+    auto entry = std::make_shared<std::function<void()>>(std::move(callback));
+    application_timers_.emplace(deadline, entry);
+    return [entry] { *entry = {}; };
+  }
 
   void RunPlatformModuleTasks() {
+    std::vector<std::function<void()>> ready_timers;
+    while (!application_timers_.empty() && application_timers_.begin()->first <= TimerNow()) {
+      auto entry = application_timers_.begin()->second;
+      application_timers_.erase(application_timers_.begin());
+      if (*entry) {
+        ready_timers.push_back(std::move(*entry));
+      }
+    }
+    for (auto& callback : ready_timers) callback();
     while (!platform_module_tasks_.empty()) {
       std::vector<std::function<void()>> tasks = std::move(platform_module_tasks_);
       platform_module_tasks_.clear();
@@ -750,7 +820,7 @@ public:
   }
 
   using TextMeasurer::MeasureText;
-  using PlatformAdapter::CreateTextLayout;
+  using UiWindow::CreateTextLayout;
 
   TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const TextStyle& style, float max_width,
       const TextLayoutOptions& options) override {
@@ -814,9 +884,7 @@ public:
     window_commands.push_back(command);
   }
 
-  void RequestApplicationQuit() override {
-    ++application_quit_requests;
-  }
+
 
   std::shared_ptr<huxerui::detail::SystemTrayTransport> CreateSystemTrayTransport() override {
     return system_tray_transport;
@@ -827,6 +895,7 @@ public:
   }
 
   int requested_frames = 0;
+  std::multimap<std::chrono::steady_clock::time_point, std::shared_ptr<std::function<void()>>> application_timers_;
   double current_time = 0.0;
   std::vector<double> requested_deadlines;
   std::vector<huxerui::PointerCursorKind> pointer_cursors;
@@ -846,7 +915,7 @@ private:
   std::vector<std::function<void()>> platform_module_tasks_;
 };
 
-inline void SettlePresentation(TestPlatform& platform, Runtime& runtime, double duration = 0.5) {
+inline void SettlePresentation(TestPlatform& platform, UiWindow& runtime, double duration = 0.5) {
   platform.AdvanceTime(duration);
   runtime.BuildFrame();
   // Exit completion invalidates the layer stack; the following commit removes the retained entry.
@@ -1065,7 +1134,7 @@ inline void InvokeClick(const huxerui::detail::MountedNode& node) {
   REQUIRE(huxerui::detail::EmitEvent<ViewEvents::Click>(node.event_bindings));
 }
 
-inline void ClickAt(Runtime& runtime, Point position, std::int64_t pointer_id = 0) {
+inline void ClickAt(UiWindow& runtime, Point position, std::int64_t pointer_id = 0) {
   runtime.HandlePointerEvent(
       PointerEvent{
           PointerEventType::Down,

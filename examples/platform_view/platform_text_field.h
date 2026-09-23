@@ -4,7 +4,7 @@
 
 #include <huxerui/event.h>
 #include <huxerui/platform_registry.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 #include <huxerui/view.h>
 
 namespace huxerui::example {
@@ -31,6 +31,6 @@ struct PlatformTextFieldEvents {
 };
 
 View PlatformTextField(std::string value);
-void InstallPlatformTextField(RootContext& root);
+void InstallPlatformTextField(ApplicationContext& root);
 
 } // namespace huxerui::example

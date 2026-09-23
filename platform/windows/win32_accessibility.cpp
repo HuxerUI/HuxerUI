@@ -550,12 +550,12 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
   }
 
   bool Perform(SemanticNodeId id, SemanticAction action) {
-    Runtime* current_runtime = nullptr;
+    UiWindow* current_runtime = nullptr;
     HWND current_window = nullptr;
     DWORD current_thread = 0;
     {
       std::scoped_lock lock(mutex);
-      current_runtime = runtime;
+      current_runtime = ui_window;
       current_window = window;
       current_thread = ui_thread;
     }
@@ -568,7 +568,7 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
     if (current_window == nullptr || !IsWindow(current_window)) {
       return false;
     }
-    // Runtime actions stay on the window thread even when UI Automation invokes a provider from another thread.
+    // UiWindow actions stay on the window thread even when UI Automation invokes a provider from another thread.
     ActionRequest request{id, std::move(action), false};
     SendMessageW(current_window, Win32Accessibility::action_message, 0, reinterpret_cast<LPARAM>(&request));
     return request.result;
@@ -620,7 +620,7 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
   }
 
   mutable std::mutex mutex;
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   HWND window = nullptr;
   DWORD ui_thread = GetCurrentThreadId();
   float dpi_scale = kDefaultDpiScale;
@@ -1633,9 +1633,9 @@ Win32Accessibility::~Win32Accessibility() {
   Reset();
 }
 
-void Win32Accessibility::SetRuntime(Runtime* runtime) noexcept {
+void Win32Accessibility::SetUiWindow(UiWindow* ui_window) noexcept {
   std::scoped_lock lock(state_->mutex);
-  state_->runtime = runtime;
+  state_->ui_window = ui_window;
   state_->ui_thread = GetCurrentThreadId();
 }
 
@@ -1828,7 +1828,7 @@ void Win32Accessibility::Reset() noexcept {
   {
     std::scoped_lock lock(state_->mutex);
     window = state_->window;
-    state_->runtime = nullptr;
+    state_->ui_window = nullptr;
     state_->window = nullptr;
     state_->frame.reset();
     state_->node_index.reset();
@@ -1866,12 +1866,12 @@ LRESULT Win32Accessibility::HandleActionMessage(LPARAM l_param) {
   if (request == nullptr) {
     return FALSE;
   }
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   {
     std::scoped_lock lock(state_->mutex);
-    runtime = state_->runtime;
+    ui_window = state_->ui_window;
   }
-  request->result = runtime != nullptr && runtime->PerformSemanticAction(request->id, request->action);
+  request->result = ui_window != nullptr && ui_window->PerformSemanticAction(request->id, request->action);
   return request->result ? TRUE : FALSE;
 }
 

@@ -218,7 +218,7 @@ TEST_CASE("FileReferencesWithoutLocalPathsDoNotInferOrImportOne") {
 TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
   ResetFilePickerState();
   TestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
   auto state = std::make_shared<TestFileReferenceState>(BytesFromString("\xEF\xBB\xBFhello"));
@@ -256,7 +256,7 @@ TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
 TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
   ResetFilePickerState();
   TestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
   auto state = std::make_shared<TestFileReferenceState>(BytesFromString("read only"));
@@ -275,7 +275,7 @@ TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
 TEST_CASE("RuntimeInstallsAnUnsupportedFilePickerService") {
   ResetFilePickerState();
   TestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
   REQUIRE(file_picker);
@@ -299,7 +299,7 @@ TEST_CASE("RuntimeInstallsAnUnsupportedFilePickerService") {
 TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
   ResetFilePickerState();
   FilePickerTestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
   REQUIRE_THROWS_AS(file_picker->OpenFileAsync({.extensions = {"txt"}}), std::invalid_argument);
@@ -334,7 +334,7 @@ TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
 TEST_CASE("FilePickerSerializesPlatformPresentationAndResumesOnTheUIThread") {
   ResetFilePickerState();
   FilePickerTestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
 
@@ -382,7 +382,7 @@ TEST_CASE("FilePickerSerializesPlatformPresentationAndResumesOnTheUIThread") {
 TEST_CASE("CancelingFilePickerRequestsPreservesPlatformPresentationOrder") {
   ResetFilePickerState();
   FilePickerTestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
   TaskHandle active = file_picker_tasks.Launch(CaptureOpenedFile(file_picker));
@@ -419,7 +419,7 @@ TEST_CASE("CancelingFilePickerRequestsPreservesPlatformPresentationOrder") {
 TEST_CASE("FilePickerDirectoriesShareThePresentationQueueAndRejectWrongResults") {
   ResetFilePickerState();
   FilePickerTestPlatform platform;
-  Runtime runtime(FilePickerApp, platform);
+  UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
   REQUIRE(file_picker->CanOpenDirectories());
   REQUIRE(file_picker->CanOpenDirectories(true));

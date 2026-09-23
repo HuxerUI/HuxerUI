@@ -284,7 +284,7 @@ void ResetNavigationUiState() {
 TEST_CASE("TopAppBarMeasuresSlotsAndPreservesActionBehavior") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(TopAppBarApp, platform);
+  UiWindow runtime(TopAppBarApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 100.0F}});
   REQUIRE(ContainsText(runtime.BuildFrame(), "Library"));
 
@@ -308,7 +308,7 @@ TEST_CASE("TopAppBarMeasuresSlotsAndPreservesActionBehavior") {
 
 TEST_CASE("TopAppBarCentersItsTitleWithinAvailableSlots") {
   TestPlatform platform;
-  Runtime runtime(CenteredTopAppBarApp, platform);
+  UiWindow runtime(CenteredTopAppBarApp, platform);
   runtime.SetWindowMetrics({.viewport = {360.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -322,7 +322,7 @@ TEST_CASE("TopAppBarCentersItsTitleWithinAvailableSlots") {
 
 TEST_CASE("TopAppBarConstrainsExcessActionsWithoutOverlappingLeadingContent") {
   TestPlatform platform;
-  Runtime runtime(NarrowTopAppBarApp, platform);
+  UiWindow runtime(NarrowTopAppBarApp, platform);
   runtime.SetWindowMetrics({.viewport = {140.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -342,7 +342,7 @@ TEST_CASE("TopAppBarConstrainsExcessActionsWithoutOverlappingLeadingContent") {
 
 TEST_CASE("TopAppBarPublishesOneHeadingAndPreservesActionSemantics") {
   TestPlatform platform;
-  Runtime runtime(TopAppBarApp, platform);
+  UiWindow runtime(TopAppBarApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 100.0F}});
   const FrameCommit& commit = runtime.BuildCommit();
   REQUIRE(commit.semantic_frame);
@@ -367,7 +367,7 @@ TEST_CASE("TopAppBarPublishesOneHeadingAndPreservesActionSemantics") {
 TEST_CASE("NavigationSelectionControlsEmitTypedChanges") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(NavigationBarApp, platform);
+  UiWindow runtime(NavigationBarApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   REQUIRE(ContainsText(scene, "Home"));
@@ -386,7 +386,7 @@ TEST_CASE("NavigationSelectionControlsEmitTypedChanges") {
 TEST_CASE("NavigationBarKeyboardSelectionSkipsDisabledItems") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(NavigationBarApp, platform);
+  UiWindow runtime(NavigationBarApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const std::optional<Rect> home = FindPresentedTextRect(scene, "Home");
@@ -399,7 +399,7 @@ TEST_CASE("NavigationBarKeyboardSelectionSkipsDisabledItems") {
 
 TEST_CASE("NavigationPaneExpandedConfigurationUpdatesItsComposedContent") {
   TestPlatform platform;
-  Runtime expanded_runtime(ExpandedNavigationPaneApp, platform);
+  UiWindow expanded_runtime(ExpandedNavigationPaneApp, platform);
   expanded_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE(ContainsText(expanded_runtime.BuildFrame(), "Home"));
   const detail::MountedNode* expanded_root = expanded_runtime.RootNode();
@@ -409,7 +409,7 @@ TEST_CASE("NavigationPaneExpandedConfigurationUpdatesItsComposedContent") {
   REQUIRE(expanded_item->LayoutSize().width == Catch::Approx(304.0F));
 
   TestPlatform compact_platform;
-  Runtime compact_runtime(CompactNavigationPaneWithoutIconsApp, compact_platform);
+  UiWindow compact_runtime(CompactNavigationPaneWithoutIconsApp, compact_platform);
   compact_runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_THROWS_AS(compact_runtime.BuildFrame(), std::invalid_argument);
 }
@@ -417,7 +417,7 @@ TEST_CASE("NavigationPaneExpandedConfigurationUpdatesItsComposedContent") {
 TEST_CASE("NavigationPaneExpandedConfigurationUpdatesAfterRecomposition") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(DynamicNavigationPaneApp, platform);
+  UiWindow runtime(DynamicNavigationPaneApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "Home"));
   REQUIRE(navigation_pane_expanded.has_value());
@@ -429,7 +429,7 @@ TEST_CASE("NavigationPaneExpandedConfigurationUpdatesAfterRecomposition") {
 TEST_CASE("DrawerBackClosesTheTopDrawerBeforeApplicationContent") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(DrawerApp, platform);
+  UiWindow runtime(DrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {480.0F, 320.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(drawer_open.has_value());
@@ -496,7 +496,7 @@ TEST_CASE("DrawerBackClosesTheTopDrawerBeforeApplicationContent") {
 TEST_CASE("DrawerEdgeDragRequestsControlledOpening") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(DrawerApp, platform);
+  UiWindow runtime(DrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {480.0F, 320.0F}});
   runtime.BuildFrame();
   REQUIRE(drawer_open.has_value());
@@ -510,7 +510,7 @@ TEST_CASE("DrawerEdgeDragRequestsControlledOpening") {
 TEST_CASE("DrawerLayoutAdaptsModalAndInlinePlacementByViewportClass") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(ResponsiveDrawerApp, platform);
+  UiWindow runtime(ResponsiveDrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {720.0F, 480.0F}});
   runtime.BuildFrame();
 
@@ -590,7 +590,7 @@ TEST_CASE("DrawerLayoutAdaptsModalAndInlinePlacementByViewportClass") {
 TEST_CASE("DrawerLayoutAutomaticallyRevealsPersistentDrawersAfterExpansion") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(ResponsiveDrawerApp, platform);
+  UiWindow runtime(ResponsiveDrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {480.0F, 480.0F}});
   runtime.BuildFrame();
 
@@ -630,7 +630,7 @@ TEST_CASE("DrawerLayoutAutomaticallyRevealsPersistentDrawersAfterExpansion") {
 TEST_CASE("InlineDrawersRemainVisibleWithoutChangingControlledModalState") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(ResponsiveDrawerApp, platform);
+  UiWindow runtime(ResponsiveDrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {840.0F, 480.0F}});
   runtime.BuildFrame();
   REQUIRE(responsive_start_open.has_value());
@@ -654,7 +654,7 @@ TEST_CASE("InlineDrawersRemainVisibleWithoutChangingControlledModalState") {
 TEST_CASE("ResponsiveDrawerStateSurvivesACompactResize") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(ResponsiveDrawerApp, platform);
+  UiWindow runtime(ResponsiveDrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {840.0F, 480.0F}});
   runtime.BuildFrame();
   REQUIRE(responsive_start_open.has_value());
@@ -683,7 +683,7 @@ TEST_CASE("ResponsiveDrawerStateSurvivesACompactResize") {
 TEST_CASE("DrawerLayoutFallsBackFromTheEndWhenLocalWidthIsConstrained") {
   ResetNavigationUiState();
   TestPlatform platform;
-  Runtime runtime(ConstrainedResponsiveDrawerApp, platform);
+  UiWindow runtime(ConstrainedResponsiveDrawerApp, platform);
   runtime.SetWindowMetrics({.viewport = {840.0F, 480.0F}});
   runtime.BuildFrame();
 
@@ -758,7 +758,7 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   REQUIRE(material_drawer.motion.has_value());
 
   TestPlatform top_bar_platform;
-  Runtime top_bar_runtime(MaterialTopAppBarApp, top_bar_platform);
+  UiWindow top_bar_runtime(MaterialTopAppBarApp, top_bar_platform);
   top_bar_runtime.SetWindowMetrics({.viewport = {320.0F, 100.0F}});
   top_bar_runtime.BuildFrame();
   const detail::MountedNode* top_bar_root = top_bar_runtime.RootNode();
@@ -769,7 +769,7 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   REQUIRE(top_bar->properties.background == MaterialLightThemeSpec().colors.surface);
 
   TestPlatform bar_platform;
-  Runtime bar_runtime(MaterialNavigationBarApp, bar_platform);
+  UiWindow bar_runtime(MaterialNavigationBarApp, bar_platform);
   bar_runtime.SetWindowMetrics({.viewport = {320.0F, 80.0F}});
   bar_runtime.BuildFrame();
   const detail::MountedNode* bar_root = bar_runtime.RootNode();
@@ -781,7 +781,7 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   REQUIRE(bar_indicator->properties.corner_radii.top_left == 16.0F);
 
   TestPlatform pane_platform;
-  Runtime pane_runtime(MaterialNavigationPaneApp, pane_platform);
+  UiWindow pane_runtime(MaterialNavigationPaneApp, pane_platform);
   pane_runtime.SetWindowMetrics({.viewport = {360.0F, 240.0F}});
   pane_runtime.BuildFrame();
   const detail::MountedNode* pane_root = pane_runtime.RootNode();
@@ -793,7 +793,7 @@ TEST_CASE("BuiltInThemesProvideNavigationSelectionAndDrawerStyles") {
   REQUIRE(pane_indicator->properties.corner_radii.top_left == 28.0F);
 
   TestPlatform drawer_platform;
-  Runtime drawer_runtime(MaterialDrawerApp, drawer_platform);
+  UiWindow drawer_runtime(MaterialDrawerApp, drawer_platform);
   drawer_runtime.SetWindowMetrics({.viewport = {800.0F, 240.0F}});
   drawer_runtime.BuildFrame();
   const detail::MountedNode* drawer_root = drawer_runtime.RootNode();

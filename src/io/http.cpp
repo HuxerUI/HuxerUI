@@ -12,12 +12,28 @@
 #include <utility>
 
 #include "http_internal.h"
+#include "application/application_internal.h"
 #include "runtime/task_internal.h"
 #include "stream_internal.h"
 
 namespace huxerui::detail {
 
 namespace {
+
+/// Validates an HTTP operation against the application that originally created its client.
+/// @param original Weak binding retained by the client or operation, never rebound after shutdown.
+/// @return The original live state on its application thread.
+/// @throws std::logic_error If expired/stopped or used from another thread/application context.
+std::shared_ptr<ApplicationRuntimeState> RequireHttpApplication(
+    const std::weak_ptr<ApplicationRuntimeState>& original) {
+  const auto application = original.lock();
+  if (!application) throw std::logic_error("HuxerUI HTTP application lifetime has ended");
+  ValidateApplicationCall(application->execution);
+  if (application->phase == ApplicationRuntimeState::Phase::Stopped) {
+    throw std::logic_error("HuxerUI HTTP application lifetime has ended");
+  }
+  return application;
+}
 
 bool IsHeaderNameCharacter(unsigned char value) noexcept {
   if ((value >= '0' && value <= '9') || (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z')) {
@@ -126,9 +142,10 @@ struct HttpOpenEvent {
 
 class HttpOperationState final : public AsyncInputStreamState, public std::enable_shared_from_this<HttpOperationState> {
 public:
-  HttpOperationState(std::shared_ptr<HttpTransport> transport, HttpRequest request, bool require_incremental_response,
+  HttpOperationState(std::weak_ptr<ApplicationRuntimeState> application, std::shared_ptr<HttpTransport> transport,
+                     HttpRequest request, bool require_incremental_response,
                      std::function<void(HttpProgress)> progress)
-      : transport_(std::move(transport)), request_(std::move(request)),
+      : application_(std::move(application)), transport_(std::move(transport)), request_(std::move(request)),
         require_incremental_response_(require_incremental_response), progress_(std::move(progress)),
         upload_total_(static_cast<std::uint64_t>(request_.body.size())) {}
 
@@ -239,6 +256,7 @@ public:
   }
 
   void RequireReadable() {
+    static_cast<void>(RequireHttpApplication(application_));
     std::scoped_lock lock(mutex_);
     if (canceled_) {
       throw std::logic_error("HuxerUI HTTP response stream is canceled");
@@ -302,6 +320,7 @@ public:
       operation = std::move(operation_);
       cancel_operation = !transport_terminal_;
     }
+    MarkFailed();
     if (operation && cancel_operation) {
       operation->Cancel();
     }
@@ -518,6 +537,7 @@ private:
   }
 
   mutable std::mutex mutex_;
+  std::weak_ptr<ApplicationRuntimeState> application_;
   std::shared_ptr<HttpTransport> transport_;
   HttpRequest request_;
   bool require_incremental_response_ = false;
@@ -625,9 +645,11 @@ private:
   std::shared_ptr<HttpOperationState> state_;
 };
 
-Task<HttpResult<HttpResponseStream>> OpenHttpStream(std::shared_ptr<HttpTransport> transport, HttpRequest request,
+Task<HttpResult<HttpResponseStream>> OpenHttpStream(std::weak_ptr<ApplicationRuntimeState> original,
+                                                    std::shared_ptr<HttpTransport> transport, HttpRequest request,
                                                     bool require_incremental_response,
                                                     std::function<void(HttpProgress)> progress) {
+  const auto application = RequireHttpApplication(original);
   if (!transport) {
     co_return HttpResult<HttpResponseStream>(HttpError{
         HttpErrorCode::Unsupported,
@@ -635,8 +657,10 @@ Task<HttpResult<HttpResponseStream>> OpenHttpStream(std::shared_ptr<HttpTranspor
     });
   }
 
-  auto state = std::make_shared<HttpOperationState>(std::move(transport), std::move(request),
+  auto state = std::make_shared<HttpOperationState>(original, std::move(transport), std::move(request),
                                                     require_incremental_response, std::move(progress));
+  std::erase_if(application->http_operations, [](const auto& operation) { return operation.expired(); });
+  application->http_operations.push_back(state);
   while (true) {
     HttpOpenEvent event = co_await HttpOpenAwaiter(state);
     if (event.progress.has_value()) {
@@ -653,6 +677,7 @@ Task<HttpResult<HttpResponseStream>> OpenHttpStream(std::shared_ptr<HttpTranspor
 }
 
 Task<IoResult<Bytes>> ReadHttpStream(HttpReadCancellation cancellation, std::size_t maximum_bytes) {
+  cancellation.State()->RequireReadable();
   auto data = co_await HttpReadAwaiter(cancellation.State(), maximum_bytes);
   if (!data.Succeeded() || data.Value().empty()) {
     cancellation.Finish(true);
@@ -664,10 +689,11 @@ Task<IoResult<Bytes>> ReadHttpStream(HttpReadCancellation cancellation, std::siz
   co_return data;
 }
 
-Task<HttpResult<HttpResponse>> SendHttpRequest(std::shared_ptr<HttpTransport> transport, HttpRequest request,
+Task<HttpResult<HttpResponse>> SendHttpRequest(std::weak_ptr<ApplicationRuntimeState> application,
+                                               std::shared_ptr<HttpTransport> transport, HttpRequest request,
                                                std::function<void(HttpProgress)> progress) {
   HttpResult<HttpResponseStream> stream_result =
-      co_await OpenHttpStream(std::move(transport), std::move(request), false, std::move(progress));
+      co_await OpenHttpStream(application, std::move(transport), std::move(request), false, std::move(progress));
   if (!stream_result.Succeeded()) {
     co_return HttpResult<HttpResponse>(std::move(stream_result.Error()));
   }
@@ -701,6 +727,13 @@ Task<HttpResult<HttpResponse>> SendHttpRequest(std::shared_ptr<HttpTransport> tr
 Task<IoResult<Bytes>> HttpOperationState::ReadAsync(std::size_t maximum_bytes) {
   RequireReadable();
   return ReadHttpStream(HttpReadCancellation(shared_from_this()), maximum_bytes);
+}
+
+void DisconnectHttpOperations(ApplicationRuntimeState& application) noexcept {
+  for (const auto& weak : application.http_operations) {
+    if (const auto operation = weak.lock()) operation->Cancel();
+  }
+  application.http_operations.clear();
 }
 
 } // namespace huxerui::detail
@@ -751,19 +784,24 @@ AsyncInputStream& HttpResponseStream::Body() {
   return body_;
 }
 
-HttpClient::HttpClient(std::shared_ptr<detail::HttpTransport> transport) : transport_(std::move(transport)) {}
+HttpClient::HttpClient() : HttpClient(detail::CurrentApplicationRuntime()->http_transport) {}
+
+HttpClient::HttpClient(std::shared_ptr<detail::HttpTransport> transport)
+    : transport_(std::move(transport)), application_(detail::CurrentApplicationRuntime()) {}
 
 HttpClient::~HttpClient() = default;
 
 Task<HttpResult<HttpResponse>> HttpClient::SendAsync(HttpRequest request, std::function<void(HttpProgress)> progress) const {
+  static_cast<void>(detail::RequireHttpApplication(application_));
   detail::ValidateHttpRequest(request);
-  return detail::SendHttpRequest(transport_, std::move(request), std::move(progress));
+  return detail::SendHttpRequest(application_, transport_, std::move(request), std::move(progress));
 }
 
 Task<HttpResult<HttpResponseStream>>
 HttpClient::SendStreamAsync(HttpRequest request, std::function<void(HttpProgress)> progress) const {
+  static_cast<void>(detail::RequireHttpApplication(application_));
   detail::ValidateHttpRequest(request);
-  return detail::OpenHttpStream(transport_, std::move(request), true, std::move(progress));
+  return detail::OpenHttpStream(application_, transport_, std::move(request), true, std::move(progress));
 }
 
 } // namespace huxerui

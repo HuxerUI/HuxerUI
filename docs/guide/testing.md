@@ -104,7 +104,7 @@ Use `Identifier`, `Label`, `Value`, `Role`, `Enabled`, `Focused`, `Selected`, `C
 ## Input and controlled editing
 
 `Tap()` sends pointer Down and Up at the transformed local center, using the center of `visible_bounds` when the original center is clipped, and pumps after each event.
-It requires one enabled target with laid-out viewport geometry, but completion does not guarantee application activation: normal Runtime hit testing and modal routing decide the recipient.
+It requires one enabled target with laid-out viewport geometry, but completion does not guarantee application activation: normal UiWindow hit testing and modal routing decide the recipient.
 It never retries, scrolls automatically, invokes callbacks directly, or retargets Up after recomposition.
 `TapAt()` accepts a window-local point.
 Both default to touch with pointer ID 1; `UiPointerOptions` selects another device or unused pointer ID.
@@ -174,7 +174,7 @@ Visible geometry does not guarantee that a target is enabled or unobscured.
 `Pump(100ms)` advances virtual time once and commits one frame at that time; it does not replay intermediate frames.
 An entry snapshot of queued UI callbacks runs before the frame; callbacks posted while that batch is running wait for a later Pump.
 Each batch has a finite callback budget.
-Ordinary Runtime frame requests, animation state, and `Delay` use the same clock.
+UiWindow frame requests and animation state use the test clock, while `Delay` uses the corresponding Runtime timer clock.
 
 ```cpp
 using namespace std::chrono_literals;

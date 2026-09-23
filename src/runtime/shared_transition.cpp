@@ -144,7 +144,7 @@ Rect SafeClip(const PushClipCommand& clip) {
 }
 
 std::optional<Rect> OwnerClip(MountedNode& owner) {
-  auto* root = InternalAccess::MountedRoot(*owner.runtime);
+  auto* root = InternalAccess::MountedRoot(*owner.ui_window);
   const auto inverse = InverseTransform(owner.presentation.resolved_transform);
   if (!root || !inverse || !AxisAligned(*inverse)) { return std::nullopt; }
   std::optional<Rect> result;
@@ -226,25 +226,25 @@ SharedTransitionSession::SharedTransitionSession(bool navigation) : navigation_(
 SharedTransitionSession::~SharedTransitionSession() = default;
 
 void SharedTransitionSession::Bind(MountedNode& owner) {
-  runtime_ = owner.runtime;
+  ui_window_ = owner.ui_window;
   owner_id_ = owner.identity;
 }
 
 void SharedTransitionSession::Unbind() noexcept {
   Clear();
-  runtime_ = nullptr;
+  ui_window_ = nullptr;
   owner_id_ = 0;
 }
 
 MountedNode* SharedTransitionSession::Owner() const {
-  if (!runtime_) { return nullptr; }
-  auto* root = const_cast<MountedNode*>(InternalAccess::MountedRoot(*runtime_));
+  if (!ui_window_) { return nullptr; }
+  auto* root = const_cast<MountedNode*>(InternalAccess::MountedRoot(*ui_window_));
   return root ? FindNode(*root, owner_id_) : nullptr;
 }
 
 bool SharedTransitionSession::Blocked() const {
-  if (!runtime_) { return false; }
-  auto* root = const_cast<MountedNode*>(InternalAccess::MountedRoot(*runtime_));
+  if (!ui_window_) { return false; }
+  auto* root = const_cast<MountedNode*>(InternalAccess::MountedRoot(*ui_window_));
   bool blocked = false;
   const auto visit = [&](auto&& self, MountedNode& node, bool inherited) -> bool {
     if (NavigationBoundary(node)) { inherited = false; }
@@ -440,7 +440,7 @@ void SharedTransitionSession::Match(MountedNode& owner) {
   ready_ = true;
   bounds_ = owner.bounds;
   owner_transform_ = owner.presentation.resolved_transform;
-  const auto* root = InternalAccess::MountedRoot(*owner.runtime);
+  const auto* root = InternalAccess::MountedRoot(*owner.ui_window);
   viewport_ = root ? Size{root->bounds.width, root->bounds.height} : Size{};
 }
 
@@ -520,7 +520,7 @@ void SharedTransitionSession::PrepareRender(MountedNode& owner) {
       StopDescendants(owner);
       Match(owner);
     }
-    const auto* root = InternalAccess::MountedRoot(*owner.runtime);
+    const auto* root = InternalAccess::MountedRoot(*owner.ui_window);
     const Size viewport = root ? Size{root->bounds.width, root->bounds.height} : Size{};
     if (!active_ || owner.bounds != bounds_ || viewport != viewport_ ||
         owner.presentation.resolved_transform != owner_transform_) { Clear(); return; }
@@ -530,7 +530,7 @@ void SharedTransitionSession::PrepareRender(MountedNode& owner) {
     Clear();
     owner.presentation.overlay = nullptr;
     owner.exclude_input = false;
-    InternalAccess::RequestFrame(*owner.runtime);
+    InternalAccess::RequestFrame(*owner.ui_window);
     throw;
   }
 }
@@ -559,7 +559,7 @@ void SharedTransitionState::Run(AnimationSpec animation, std::function<void()> m
   }
   if (!mutation) { throw std::invalid_argument("HuxerUI shared transition mutation must not be empty"); }
   ValidateTransitionTiming(animation, 0.0);
-  Runtime* const runtime = owner->runtime;
+  UiWindow* const ui_window = owner->ui_window;
   const bool animate = !IsImmediateTransitionTiming(animation, 0.0) && !owner->reduced_motion && !session.Blocked();
   auto previous = animate ? session.CaptureCommitted(*owner) : std::vector<SharedVisual>{};
   mutating_ = true;
@@ -569,7 +569,7 @@ void SharedTransitionState::Run(AnimationSpec animation, std::function<void()> m
   } catch (...) {
     mutating_ = false;
     session.Clear();
-    InternalAccess::RequestFrame(*runtime);
+    InternalAccess::RequestFrame(*ui_window);
     throw;
   }
   mutating_ = false;
@@ -577,7 +577,7 @@ void SharedTransitionState::Run(AnimationSpec animation, std::function<void()> m
   started_ = false;
   if (animate && mounted_) { session.BeginLocal(std::move(previous)); }
   else { session.Clear(); }
-  InternalAccess::RequestFrame(*runtime);
+  InternalAccess::RequestFrame(*ui_window);
 }
 
 NodeExtension::FrameResult SharedTransitionState::Advance(MountedNode& owner, const FrameInfo& frame) {

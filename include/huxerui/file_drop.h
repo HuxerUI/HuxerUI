@@ -52,7 +52,7 @@ struct FileDropEvent {
   bool operator==(const FileDropEvent&) const = default;
 };
 
-/// Typed hover notifications and asynchronous file reception results, delivered on the Runtime UI thread.
+/// Typed hover notifications and asynchronous file reception results, delivered on the UiWindow UI thread.
 /// References passed to handlers are borrowed for that invocation; copy FileReference values to retain access.
 struct FileDropEvents {
   /// The node became the selected receiver of an eligible offer.
@@ -72,7 +72,7 @@ namespace detail {
 class FileDropTargetExtension;
 using FileDropCompletion = std::function<void(IoResult<std::vector<FileReference>>)>;
 // Captures host access before the native callback ends. Preparation may complete on any thread;
-// Runtime defers delivery and owns best-effort cancellation until completion or unmount.
+// UiWindow defers delivery and owns best-effort cancellation until completion or unmount.
 using FileDropPreparation = std::function<std::function<void()>(FileDropCompletion)>;
 }
 

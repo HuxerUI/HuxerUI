@@ -19,7 +19,7 @@ namespace {
 
 class LinuxDropPreparation final : public std::enable_shared_from_this<LinuxDropPreparation> {
 public:
-  LinuxDropPreparation(GdkDrop* drop, UIThreadDispatcher dispatcher)
+  LinuxDropPreparation(GdkDrop* drop, UiThreadDispatcher dispatcher)
       : drop_(GDK_DROP(g_object_ref(drop))), dispatcher_(std::move(dispatcher)) {}
 
   ~LinuxDropPreparation() {
@@ -122,7 +122,7 @@ private:
 
   GdkDrop* drop_;
   GCancellable* cancellable_ = g_cancellable_new();
-  UIThreadDispatcher dispatcher_;
+  UiThreadDispatcher dispatcher_;
   FileDropCompletion completion_;
   std::shared_ptr<std::atomic<bool>> canceled_ = std::make_shared<std::atomic<bool>>(false);
   bool finished_ = false;
@@ -131,8 +131,8 @@ private:
 } // namespace
 
 struct LinuxFileDrop::State {
-  State(GtkWidget* target, Runtime& owner, UIThreadDispatcher dispatch)
-      : widget(GTK_WIDGET(g_object_ref(target))), runtime(owner), dispatcher(std::move(dispatch)) {
+  State(GtkWidget* target, UiWindow& owner, UiThreadDispatcher dispatch)
+      : widget(GTK_WIDGET(g_object_ref(target))), ui_window(owner), dispatcher(std::move(dispatch)) {
     controller = gtk_drop_target_async_new(gdk_content_formats_new_for_gtype(GDK_TYPE_FILE_LIST), GDK_ACTION_COPY);
     g_signal_connect(controller, "drag-enter", G_CALLBACK(Entered), this);
     g_signal_connect(controller, "drag-motion", G_CALLBACK(Moved), this);
@@ -158,7 +158,7 @@ struct LinuxFileDrop::State {
       g_object_unref(current);
       current = nullptr;
       try {
-        runtime.HandleFileDragExited(session);
+        ui_window.HandleFileDragExited(session);
       } catch (...) {
       }
     }
@@ -173,7 +173,7 @@ struct LinuxFileDrop::State {
     self.current = GDK_DROP(g_object_ref(drop));
     ++self.session;
     try {
-      return self.runtime.HandleFileDragEntered(self.session, {}, {static_cast<float>(x), static_cast<float>(y)})
+      return self.ui_window.HandleFileDragEntered(self.session, {}, {static_cast<float>(x), static_cast<float>(y)})
                  ? GDK_ACTION_COPY : static_cast<GdkDragAction>(0);
     } catch (...) {
       self.Leave();
@@ -185,7 +185,7 @@ struct LinuxFileDrop::State {
     auto& self = *static_cast<State*>(data);
     try {
       return self.current == drop && (gdk_drop_get_actions(drop) & GDK_ACTION_COPY) &&
-                     self.runtime.HandleFileDragMoved(self.session, {}, {static_cast<float>(x), static_cast<float>(y)})
+                     self.ui_window.HandleFileDragMoved(self.session, {}, {static_cast<float>(x), static_cast<float>(y)})
                  ? GDK_ACTION_COPY : static_cast<GdkDragAction>(0);
     } catch (...) {
       self.Leave();
@@ -210,7 +210,7 @@ struct LinuxFileDrop::State {
       auto operation = std::make_shared<LinuxDropPreparation>(drop, self.dispatcher);
       std::erase_if(self.pending, [](const auto& weak) { return weak.expired(); });
       self.pending.push_back(operation);
-      const bool accepted = self.runtime.HandleFileDrop(
+      const bool accepted = self.ui_window.HandleFileDrop(
           self.session, {}, {static_cast<float>(x), static_cast<float>(y)},
           {[operation](FileDropCompletion completion) {
             try {
@@ -232,15 +232,15 @@ struct LinuxFileDrop::State {
 
   GtkWidget* widget;
   GtkDropTargetAsync* controller;
-  Runtime& runtime;
-  UIThreadDispatcher dispatcher;
+  UiWindow& ui_window;
+  UiThreadDispatcher dispatcher;
   GdkDrop* current = nullptr;
   std::uint64_t session = 0;
   std::vector<std::weak_ptr<LinuxDropPreparation>> pending;
 };
 
-LinuxFileDrop::LinuxFileDrop(GtkWidget* widget, Runtime& runtime, UIThreadDispatcher dispatcher)
-    : state_(std::make_unique<State>(widget, runtime, std::move(dispatcher))) {}
+LinuxFileDrop::LinuxFileDrop(GtkWidget* widget, UiWindow& ui_window, UiThreadDispatcher dispatcher)
+    : state_(std::make_unique<State>(widget, ui_window, std::move(dispatcher))) {}
 
 LinuxFileDrop::~LinuxFileDrop() = default;
 

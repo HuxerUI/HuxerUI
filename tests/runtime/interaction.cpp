@@ -429,7 +429,7 @@ TEST_CASE("TestBuiltInPointerEventsAndClickLifecycle") {
   pointer_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{PointerInputApp, platform};
+  UiWindow runtime{PointerInputApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -567,7 +567,7 @@ View CursorOverlayPointerTargetApp() {
 TEST_CASE("HoverEventReportsNestedEnterMoveAndLeaveForMouseAndPenOnly") {
   received_hover_events.clear();
   TestPlatform platform;
-  Runtime runtime{HoverEventApp, platform};
+  UiWindow runtime{HoverEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -619,7 +619,7 @@ TEST_CASE("HoverEventReportsNestedEnterMoveAndLeaveForMouseAndPenOnly") {
 TEST_CASE("HoverEventTracksGeometryChangesUnderAStationaryPointer") {
   received_hover_events.clear();
   TestPlatform platform;
-  Runtime runtime{DynamicHoverEventApp, platform};
+  UiWindow runtime{DynamicHoverEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Move, 32, {50.0F, 20.0F}});
@@ -643,7 +643,7 @@ TEST_CASE("HoverEventDoesNotTurnAVisualOverlayIntoAnInputTarget") {
   covered_pointer_clicks = 0;
   received_hover_events.clear();
   TestPlatform platform;
-  Runtime runtime{HoverOverlayPointerTargetApp, platform};
+  UiWindow runtime{HoverOverlayPointerTargetApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -656,7 +656,7 @@ TEST_CASE("HoverEventDoesNotTurnAVisualOverlayIntoAnInputTarget") {
 
 TEST_CASE("PointerCursorResolvesTheDeepestExplicitDeclaration") {
   TestPlatform platform;
-  Runtime runtime{PointerCursorApp, platform};
+  UiWindow runtime{PointerCursorApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   runtime.BuildFrame();
 
@@ -686,7 +686,7 @@ TEST_CASE("PointerCursorResolvesTheDeepestExplicitDeclaration") {
 
 TEST_CASE("PointerCursorTracksRecompositionUnderAStationaryPointer") {
   TestPlatform platform;
-  Runtime runtime{DynamicPointerCursorApp, platform};
+  UiWindow runtime{DynamicPointerCursorApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Move, 3, {50.0F, 20.0F}});
@@ -705,7 +705,7 @@ TEST_CASE("PointerCursorTracksRecompositionUnderAStationaryPointer") {
 TEST_CASE("PointerCursorDoesNotTurnAVisualOverlayIntoAnInputTarget") {
   covered_pointer_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{CursorOverlayPointerTargetApp, platform};
+  UiWindow runtime{CursorOverlayPointerTargetApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -719,7 +719,7 @@ TEST_CASE("TestNodeExtensionHitOwnsTopmostPointerBranch") {
   covered_pointer_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{ExtensionPointerTargetApp, platform};
+  UiWindow runtime{ExtensionPointerTargetApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -732,7 +732,7 @@ TEST_CASE("TestPointerExceptionQuarantinesThePhysicalSequence") {
   exceptional_pointer_ups = 0;
 
   TestPlatform platform;
-  Runtime runtime{ExceptionalPointerInputApp, platform};
+  UiWindow runtime{ExceptionalPointerInputApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -746,7 +746,7 @@ TEST_CASE("TestPointerExceptionQuarantinesThePhysicalSequence") {
 TEST_CASE("TestRuntimePublishesOrderedInteractionEvents") {
   recorded_interactions.clear();
   TestPlatform platform;
-  Runtime runtime{InteractionEventApp, platform};
+  UiWindow runtime{InteractionEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -773,7 +773,7 @@ TEST_CASE("TestRuntimePublishesOrderedInteractionEvents") {
 TEST_CASE("TestMultiplePointersRetainPressedStateUntilTheLastRelease") {
   recorded_interactions.clear();
   TestPlatform platform;
-  Runtime runtime{InteractionEventApp, platform};
+  UiWindow runtime{InteractionEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -795,7 +795,7 @@ TEST_CASE("TestMultiplePointersRetainPressedStateUntilTheLastRelease") {
 TEST_CASE("TestCapturedPointerPublishesInteractionRelease") {
   recorded_interactions.clear();
   TestPlatform platform;
-  Runtime runtime{CapturedInteractionEventApp, platform};
+  UiWindow runtime{CapturedInteractionEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -810,7 +810,7 @@ TEST_CASE("TestCapturedPointerPublishesInteractionRelease") {
 TEST_CASE("TestCapturedPointerPublishesInteractionCancel") {
   recorded_interactions.clear();
   TestPlatform platform;
-  Runtime runtime{CapturedInteractionEventApp, platform};
+  UiWindow runtime{CapturedInteractionEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -826,7 +826,7 @@ TEST_CASE("TestCapturedPointerPublishesInteractionCancel") {
 TEST_CASE("TestObservedPointerPublishesOneInteractionLifecycle") {
   recorded_interactions.clear();
   TestPlatform platform;
-  Runtime runtime{ObservedInteractionEventApp, platform};
+  UiWindow runtime{ObservedInteractionEventApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -841,7 +841,7 @@ TEST_CASE("TestObservedPointerPublishesOneInteractionLifecycle") {
 TEST_CASE("TestActivationImplementationDoesNotInvalidateEqualExtensions") {
   stable_extension_updates = 0;
   TestPlatform platform;
-  Runtime runtime{StableActivationExtensionApp, platform};
+  UiWindow runtime{StableActivationExtensionApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -856,7 +856,7 @@ TEST_CASE("TestConsecutivePointerClicksDoNotSuppressActivation") {
   pointer_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{PointerInputApp, platform};
+  UiWindow runtime{PointerInputApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -886,7 +886,7 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
   drag_item_cancels = 0;
 
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -979,7 +979,7 @@ TEST_CASE("TestPointerDragScrollingAndClickArbitration") {
 
 TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1048,7 +1048,7 @@ TEST_CASE("TestTouchDragContinuesWithMomentumAndCancelsOnPress") {
 
 TEST_CASE("TestDefaultTouchMomentumCarriesReleaseVelocity") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1098,7 +1098,7 @@ TEST_CASE("TestDefaultTouchMomentumCarriesReleaseVelocity") {
 
 TEST_CASE("TestTouchMomentumUsesRecentMovementInsteadOfOnlyTheFinalDelta") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1121,7 +1121,7 @@ TEST_CASE("TestTouchMomentumUsesRecentMovementInsteadOfOnlyTheFinalDelta") {
 
 TEST_CASE("TestTouchMomentumTracksReleaseAcceleration") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1142,7 +1142,7 @@ TEST_CASE("TestTouchMomentumTracksReleaseAcceleration") {
 
 TEST_CASE("TestTouchMomentumDoesNotReverseAfterMonotonicDeceleration") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1163,7 +1163,7 @@ TEST_CASE("TestTouchMomentumDoesNotReverseAfterMonotonicDeceleration") {
 
 TEST_CASE("TestTouchMomentumDoesNotStartAfterReleasePause") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1181,7 +1181,7 @@ TEST_CASE("TestTouchMomentumDoesNotStartAfterReleasePause") {
 
 TEST_CASE("TestTouchMomentumIgnoresStaleMovementSamples") {
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1198,7 +1198,7 @@ TEST_CASE("TestTouchMomentumIgnoresStaleMovementSamples") {
 
 TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   TestPlatform platform;
-  Runtime touch{DragScrollApp, platform};
+  UiWindow touch{DragScrollApp, platform};
   touch.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   touch.BuildFrame();
   REQUIRE(drag_scroll.ScrollTo(drag_scroll.MaxOffset() - 5.0F));
@@ -1235,7 +1235,7 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   REQUIRE(drag_scroll.Offset() == drag_scroll.MaxOffset());
 
   TestPlatform mouse_platform;
-  Runtime mouse{DragScrollApp, mouse_platform};
+  UiWindow mouse{DragScrollApp, mouse_platform};
   mouse.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   mouse.BuildFrame();
   mouse.HandlePointerEvent(
@@ -1270,7 +1270,7 @@ TEST_CASE("TestMomentumStopsAtBoundaryAndDoesNotStartForMouse") {
   REQUIRE(drag_scroll.Offset() == mouse_offset);
 
   TestPlatform horizontal_platform;
-  Runtime horizontal{HorizontalDragScrollApp, horizontal_platform};
+  UiWindow horizontal{HorizontalDragScrollApp, horizontal_platform};
   horizontal.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   horizontal.BuildFrame();
   horizontal.HandlePointerEvent(
@@ -1310,7 +1310,7 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
       .fling_enabled = false,
   };
   TestPlatform platform;
-  Runtime runtime{ConfiguredDragScrollApp, platform};
+  UiWindow runtime{ConfiguredDragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent(
@@ -1345,7 +1345,7 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
   REQUIRE(configured_drag_scroll.Offset() == released_offset);
 
   TestPlatform invalid_platform;
-  Runtime invalid{
+  UiWindow invalid{
       +[]() -> View {
         return VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
             .With(ScrollPhysics{
@@ -1361,7 +1361,7 @@ TEST_CASE("TestScrollPhysicsConfiguresAndValidatesMomentum") {
 
 TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
   TestPlatform platform;
-  Runtime runtime{HorizontalDragScrollApp, platform};
+  UiWindow runtime{HorizontalDragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -1403,7 +1403,7 @@ TEST_CASE("TestHorizontalPointerDragUsesDominantAxis") {
 
 TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
   TestPlatform platform;
-  Runtime runtime{NestedDragScrollApp, platform};
+  UiWindow runtime{NestedDragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1442,7 +1442,7 @@ TEST_CASE("TestNestedPointerDragPassesRemainingDelta") {
 
 TEST_CASE("TestNestedScrollInputPassesRemainingDelta") {
   TestPlatform platform;
-  Runtime runtime{NestedDragScrollApp, platform};
+  UiWindow runtime{NestedDragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1474,7 +1474,7 @@ TEST_CASE("TestNestedScrollInputPassesRemainingDelta") {
 
 TEST_CASE("TestNestedMomentumPassesRemainingVelocity") {
   TestPlatform platform;
-  Runtime runtime{NestedDragScrollApp, platform};
+  UiWindow runtime{NestedDragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1524,7 +1524,7 @@ TEST_CASE("TestNestedMomentumPassesRemainingVelocity") {
 
 TEST_CASE("TestApplyOnlyModifiersDoNotReplaceNodeExtensions") {
   TestPlatform platform;
-  Runtime runtime{ModifierReconciliationApp, platform};
+  UiWindow runtime{ModifierReconciliationApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1550,7 +1550,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   drag_item_cancels = 0;
 
   TestPlatform platform;
-  Runtime vertical{DragScrollApp, platform};
+  UiWindow vertical{DragScrollApp, platform};
   vertical.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& vertical_display = vertical.BuildFrame();
 
@@ -1612,7 +1612,8 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(moved_vertical_bar.has_value());
   REQUIRE(std::abs(moved_vertical_bar->thumb.y - 33.0F) < 0.01F);
 
-  Runtime horizontal{HorizontalDragScrollApp, platform};
+  TestPlatform horizontal_platform{platform.platform_resources};
+  UiWindow horizontal{HorizontalDragScrollApp, horizontal_platform};
   horizontal.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   const FlattenedScene& horizontal_display = horizontal.BuildFrame();
   const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode());
@@ -1648,13 +1649,14 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   );
   REQUIRE(std::abs(horizontal_drag_scroll.Offset() - 1671.4286F) < 0.01F);
 
-  Runtime short_content{ShortScrollBarApp, platform};
+  TestPlatform short_content_platform{platform.platform_resources};
+  UiWindow short_content{ShortScrollBarApp, short_content_platform};
   short_content.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   short_content.BuildFrame();
   REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode()));
 
   TestPlatform invalid_style_platform;
-  Runtime invalid_style{
+  UiWindow invalid_style{
       +[]() -> View {
         return VirtualList(std::size_t{1}, [](std::size_t) { return Text("Item"); })
             .With(huxerui::ScrollBar{
@@ -1668,7 +1670,8 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   invalid_style.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   REQUIRE_THROWS_AS(invalid_style.BuildFrame(), std::invalid_argument);
 
-  Runtime themed{ThemedScrollBarApp, platform};
+  TestPlatform themed_platform{platform.platform_resources};
+  UiWindow themed{ThemedScrollBarApp, themed_platform};
   themed.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   themed.BuildFrame();
   const auto* themed_root = themed.RootNode();
@@ -1680,7 +1683,8 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(themed_bar->style.minimum_thumb_extent == 30.0F);
   REQUIRE(themed_bar->style.corner_radius == 4.5F);
 
-  Runtime dark{FlatDarkScrollBarApp, platform};
+  TestPlatform dark_platform{platform.platform_resources};
+  UiWindow dark{FlatDarkScrollBarApp, dark_platform};
   dark.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   dark.BuildFrame();
   const auto* dark_root = dark.RootNode();
@@ -1694,7 +1698,8 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(dark_bar->style.fade_in_duration == static_cast<float>(dark_theme.motion.fast));
 
   alternate_scroll_bar_style = State<bool>{};
-  Runtime dynamic{DynamicScrollBarApp, platform};
+  TestPlatform dynamic_platform{platform.platform_resources};
+  UiWindow dynamic{DynamicScrollBarApp, dynamic_platform};
   dynamic.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   dynamic.BuildFrame();
   const auto* dynamic_node = dynamic.RootNode()->children[0]->children[0].get();
@@ -1713,7 +1718,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
 TEST_CASE("TestDefaultIndicationConsumesCompiledThemeValue") {
   alternate_default_indication = State<bool>{};
   TestPlatform platform;
-  Runtime runtime{DynamicDefaultIndicationApp, platform};
+  UiWindow runtime{DynamicDefaultIndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1745,7 +1750,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   drag_item_cancels = 0;
 
   TestPlatform platform;
-  Runtime runtime{DragScrollApp, platform};
+  UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
@@ -1998,7 +2003,7 @@ View FocusDialogApp() {
 
 TEST_CASE("TestFlatSliderRetainsThemeFocusRing") {
   TestPlatform platform;
-  Runtime runtime{FlatSliderFocusApp, platform};
+  UiWindow runtime{FlatSliderFocusApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 64.0F}});
   runtime.BuildFrame();
   runtime.HandleKeyEvent(KeyEvent{.type = KeyEventType::Down, .key = Key::Tab});
@@ -2013,7 +2018,7 @@ TEST_CASE("TestFlatSliderRetainsThemeFocusRing") {
 
 TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
   TestPlatform platform;
-  Runtime runtime{ThemedIndicationApp, platform};
+  UiWindow runtime{ThemedIndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -2073,7 +2078,7 @@ TEST_CASE("TestThemeDrivesHoverAndPressedIndication") {
 
 TEST_CASE("TestPressedInteractionFallsBackToAvailableHoverLayer") {
   TestPlatform platform;
-  Runtime runtime{FallbackIndicationApp, platform};
+  UiWindow runtime{FallbackIndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -2087,7 +2092,7 @@ TEST_CASE("TestPressedInteractionFallsBackToAvailableHoverLayer") {
 
 TEST_CASE("TestIndicationReplacesResolvedBorderAndCornerRadii") {
   TestPlatform platform;
-  Runtime runtime{SurfaceIndicationApp, platform};
+  UiWindow runtime{SurfaceIndicationApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
 
   const Color normal_border = Color::Rgb(160, 40, 60);
@@ -2110,7 +2115,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   underlying_clicks = 0;
 
   TestPlatform platform;
-  Runtime overlay{DisabledHitTestApp, platform};
+  UiWindow overlay{DisabledHitTestApp, platform};
   overlay.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = overlay.BuildFrame();
   const DrawTextCommand* disabled = FindText(scene, "disabled overlay");
@@ -2133,7 +2138,8 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
   REQUIRE(disabled_clicks == 0);
   REQUIRE(underlying_clicks == 0);
 
-  Runtime subtree{DisabledSubtreeApp, platform};
+  TestPlatform subtree_platform{platform.platform_resources};
+  UiWindow subtree{DisabledSubtreeApp, subtree_platform};
   subtree.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& subtree_display = subtree.BuildFrame();
   const auto* subtree_root = subtree.RootNode();
@@ -2161,7 +2167,7 @@ TEST_CASE("TestEnabledInheritanceAndHitTestBlocking") {
 
 TEST_CASE("TestDisabledButtonStyleChangeInvalidatesContentPaint") {
   TestPlatform platform;
-  Runtime runtime{DisabledButtonStyleUpdateApp, platform};
+  UiWindow runtime{DisabledButtonStyleUpdateApp, platform};
   runtime.SetWindowMetrics({.viewport = {180.0F, 64.0F}});
 
   const Color initial = Color::Rgb(30, 80, 170);
@@ -2183,7 +2189,7 @@ TEST_CASE("TestFocusTraversalKeyboardAndThemeVisuals") {
   disabled_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{FocusApp, platform};
+  UiWindow runtime{FocusApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   runtime.BuildFrame();
 
@@ -2290,7 +2296,7 @@ TEST_CASE("TestKeyRoutingConsumptionAndActivation") {
   routed_keyboard_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{KeyRoutingApp, platform};
+  UiWindow runtime{KeyRoutingApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
   const auto send_key = [&runtime](KeyEventType type, Key key) {
@@ -2340,7 +2346,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
   focus_changes.clear();
 
   TestPlatform platform;
-  Runtime runtime{FocusApp, platform};
+  UiWindow runtime{FocusApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   const DrawTextCommand* first = FindText(initial, "first");
@@ -2393,7 +2399,7 @@ TEST_CASE("TestPointerFocusDoesNotPaintFocusRing") {
 
 TEST_CASE("TestFocusableViewWithoutClickPaintsFocusRing") {
   TestPlatform platform;
-  Runtime runtime{FocusOnlyApp, platform};
+  UiWindow runtime{FocusOnlyApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 180.0F}});
   runtime.BuildFrame();
 
@@ -2408,7 +2414,7 @@ TEST_CASE("TestFocusableViewWithoutClickPaintsFocusRing") {
 TEST_CASE("TestVisualFillIndicationAndFocusRingValidateDuringViewResolution") {
   const auto rejects = [](RootFactory factory) {
     TestPlatform platform;
-    Runtime runtime{factory, platform};
+    UiWindow runtime{factory, platform};
     runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   };
@@ -2434,7 +2440,7 @@ TEST_CASE("TestVisualFillIndicationAndFocusRingValidateDuringViewResolution") {
   });
 
   TestPlatform platform;
-  Runtime runtime{InvalidFocusRingApp, platform};
+  UiWindow runtime{InvalidFocusRingApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
 }
@@ -2446,7 +2452,7 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
   second_dialog_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{FocusDialogApp, platform};
+  UiWindow runtime{FocusDialogApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 

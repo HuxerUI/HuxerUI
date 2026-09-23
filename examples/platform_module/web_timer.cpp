@@ -76,7 +76,7 @@ private:
 
 namespace huxerui::example {
 
-void InstallTimer(RootContext& root) {
+void InstallTimer(ApplicationContext& root) {
   web::JavaScriptPlatformModuleFactory<std::shared_ptr<TimerService>> factory{
       .factory = emscripten::val::module_property(platform_timer_factory_name),
       .create = [](PlatformChannel channel) {
@@ -84,7 +84,6 @@ void InstallTimer(RootContext& root) {
       },
   };
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, std::move(factory));
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

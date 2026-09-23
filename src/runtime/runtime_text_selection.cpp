@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
 #include "text/text_input_internal.h"
@@ -64,22 +64,22 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
     detail::MountedNode* focused =
         detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    return client && client->CanPerformTextEditingAction(action, runtime_state_.platform_->Clipboard());
+    return client && client->CanPerformTextEditingAction(action, runtime_state_.application_->owner->Clipboard());
   }
   const detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
   switch (action) {
   case TextEditingAction::Cut:
     return !session.configuration.read_only && !session.configuration.secure && !selection.IsCollapsed() &&
-           runtime_state_.platform_->Clipboard() != nullptr;
+           runtime_state_.application_->owner->Clipboard() != nullptr;
   case TextEditingAction::Copy:
     return !session.configuration.secure && !selection.IsCollapsed() &&
-           runtime_state_.platform_->Clipboard() != nullptr;
+           runtime_state_.application_->owner->Clipboard() != nullptr;
   case TextEditingAction::Paste: {
     if (session.configuration.read_only) {
       return false;
     }
-    PlatformClipboard* clipboard = runtime_state_.platform_->Clipboard();
+    PlatformClipboard* clipboard = runtime_state_.application_->owner->Clipboard();
     return clipboard != nullptr && clipboard->ReadText().has_value();
   }
   case TextEditingAction::SelectAll: {
@@ -99,7 +99,7 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
     detail::MountedNode* focused =
         detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    if (!client || !client->PerformTextEditingAction(action, runtime_state_.platform_->Clipboard())) {
+    if (!client || !client->PerformTextEditingAction(action, runtime_state_.application_->owner->Clipboard())) {
       return false;
     }
     focused->foreground_paint_dirty = true;
@@ -107,7 +107,7 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
   }
   detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
-  PlatformClipboard* clipboard = runtime_state_.platform_->Clipboard();
+  PlatformClipboard* clipboard = runtime_state_.application_->owner->Clipboard();
 
   if (action == TextEditingAction::Copy || action == TextEditingAction::Cut) {
     if (!CanPerformTextEditingAction(action) || clipboard == nullptr) {

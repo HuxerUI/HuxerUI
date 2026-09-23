@@ -1,8 +1,9 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "transition_internal.h"
 #include "internal_access.h"
 #include "text/text_internal.h"
 #include "application/application_internal.h"
+#include "application/platform_registry_internal.h"
 #include "graphics/external_texture_internal.h"
 #include "resources/resource_internal.h"
 #include "runtime_pointer_internal.h"
@@ -707,6 +708,12 @@ void ApplyViewDeclaration(MountedNode& mounted, ViewSpec& compiled, std::shared_
   mounted.virtual_layout_descriptor = compiled.virtual_layout_descriptor;
   mounted.layout_values = std::move(compiled.layout_values);
   mounted.event_bindings = std::move(compiled.event_bindings);
+  if (!mounted.event_bindings.empty()) {
+    if (const auto context = CurrentExecutionContext()) {
+      mounted.event_bindings.execution_context = std::make_shared<ExecutionContext>(*context);
+      mounted.event_bindings.execution_context->environment = environment;
+    }
+  }
   mounted.activation = std::move(compiled.activation);
   mounted.environment = std::move(environment);
   mounted.reduced_motion = ResolveThemeSpec(mounted.environment).motion.reduced_motion;
@@ -828,7 +835,7 @@ void DispatchScrollActivity(MountedNode& node, const ScrollActivity& activity) {
   }
 }
 
-// Traversal direction lets composite extensions choose their entry item without exposing their structure to Runtime.
+// Traversal direction lets composite extensions choose their entry item without exposing their structure to UiWindow.
 void DispatchFocusChanged(MountedNode& node, bool focused, bool reverse = false) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (entry.extension) {
@@ -1034,91 +1041,157 @@ bool IsVirtualLayoutNode(const MountedNode& node) noexcept {
   return node.kind == NodeKind::VirtualLayout;
 }
 
-void InternalAccess::InvalidateRoot(Runtime& runtime) {
-  runtime.InvalidateRoot();
+void InternalAccess::InvalidateRoot(UiWindow& ui_window) {
+  ui_window.InvalidateRoot();
 }
 
-const MountedNode* InternalAccess::RootNode(const Runtime& runtime) noexcept {
-  return runtime.RootNode();
+const MountedNode* InternalAccess::RootNode(const UiWindow& ui_window) noexcept {
+  return ui_window.RootNode();
 }
 
-const MountedNode* InternalAccess::MountedRoot(const Runtime& runtime) noexcept {
-  return runtime.state_->mounted_root_.get();
+const MountedNode* InternalAccess::MountedRoot(const UiWindow& ui_window) noexcept {
+  return ui_window.state_->mounted_root_.get();
 }
 
-const ScrollPhysics& InternalAccess::DefaultScrollPhysics(const Runtime& runtime) noexcept {
-  return runtime.state_->default_scroll_physics_;
+const ScrollPhysics& InternalAccess::DefaultScrollPhysics(const UiWindow& ui_window) noexcept {
+  return ui_window.state_->default_scroll_physics_;
 }
 
-void InternalAccess::NotifyScrollActivity(Runtime& runtime, MountedNode& node, const ScrollActivity& activity) {
-  runtime.NotifyScrollActivity(node, activity);
+void InternalAccess::NotifyScrollActivity(UiWindow& ui_window, MountedNode& node, const ScrollActivity& activity) {
+  ui_window.NotifyScrollActivity(node, activity);
 }
 
-void InternalAccess::RequestFrame(Runtime& runtime) {
-  runtime.RequestFrame();
+void InternalAccess::RequestFrame(UiWindow& ui_window) {
+  ui_window.RequestFrame();
 }
 
-void InternalAccess::FocusNode(Runtime& runtime, std::uint64_t identity) {
-  runtime.SetFocusedNode(identity, true);
+void InternalAccess::FocusNode(UiWindow& ui_window, std::uint64_t identity) {
+  ui_window.SetFocusedNode(identity, true);
 }
 
-std::optional<std::uint64_t> InternalAccess::FocusedNodeIdentity(const Runtime& runtime) noexcept {
-  return runtime.state_->focused_node_identity_;
+std::optional<std::uint64_t> InternalAccess::FocusedNodeIdentity(const UiWindow& ui_window) noexcept {
+  return ui_window.state_->focused_node_identity_;
 }
 
-void InternalAccess::InvalidateLayout(Runtime& runtime, MountedNode& node) {
-  runtime.InvalidateLayout(node);
+void InternalAccess::InvalidateLayout(UiWindow& ui_window, MountedNode& node) {
+  ui_window.InvalidateLayout(node);
 }
 
-std::optional<std::uint64_t> InternalAccess::HitTestPlatformView(const Runtime& runtime, Point position) {
-  return runtime.HitTestPlatformView(position);
+std::optional<std::uint64_t> InternalAccess::HitTestPlatformView(const UiWindow& ui_window, Point position) {
+  return ui_window.HitTestPlatformView(position);
 }
 
-std::optional<std::uint64_t> InternalAccess::FocusedPlatformView(const Runtime& runtime) {
-  return runtime.FocusedPlatformView();
+std::optional<std::uint64_t> InternalAccess::FocusedPlatformView(const UiWindow& ui_window) {
+  return ui_window.FocusedPlatformView();
 }
 
 void
-InternalAccess::SynchronizePlatformViewFocus(Runtime& runtime, std::optional<std::uint64_t> identity, bool focus_visible) {
-  runtime.SynchronizePlatformViewFocus(identity, focus_visible);
+InternalAccess::SynchronizePlatformViewFocus(UiWindow& ui_window, std::optional<std::uint64_t> identity, bool focus_visible) {
+  ui_window.SynchronizePlatformViewFocus(identity, focus_visible);
 }
 
-bool InternalAccess::MoveFocusFromPlatformView(Runtime& runtime, std::uint64_t identity, bool reverse) {
-  return runtime.MoveFocusFromPlatformView(identity, reverse);
+bool InternalAccess::MoveFocusFromPlatformView(UiWindow& ui_window, std::uint64_t identity, bool reverse) {
+  return ui_window.MoveFocusFromPlatformView(identity, reverse);
 }
 
 std::optional<PlatformPayload> InternalAccess::DispatchPlatformViewEvent(
-    Runtime& runtime, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
+    UiWindow& ui_window, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
 ) {
-  return runtime.DispatchPlatformViewEvent(identity, name, payload);
+  return ui_window.DispatchPlatformViewEvent(identity, name, payload);
 }
 
 std::optional<PlatformValue> InternalAccess::DispatchPlatformViewEvent(
-    Runtime& runtime, std::uint64_t identity, std::type_index key, const PlatformValue& value
+    UiWindow& ui_window, std::uint64_t identity, std::type_index key, const PlatformValue& value
 ) {
-  return runtime.DispatchPlatformViewEvent(identity, key, value);
+  return ui_window.DispatchPlatformViewEvent(identity, key, value);
 }
 
 } // namespace huxerui::detail
 
 namespace huxerui {
 
+Runtime& UiWindow::ApplicationRuntime() const {
+  if (!application_runtime_)
+    throw std::logic_error("HuxerUI UI window is not initialized");
+  return *application_runtime_;
+}
+
+detail::PlatformRegistry& UiWindow::PlatformRegistry() {
+  return ApplicationRuntime().state_->registry;
+}
+
+void UiWindow::DispatchToUiThread(std::function<void()> task) const {
+  ApplicationRuntime().DispatchToApplicationThread(std::move(task));
+}
+
+double UiWindow::Now() const noexcept {
+  return application_runtime_
+             ? std::chrono::duration<double>(application_runtime_->TimerNow().time_since_epoch()).count()
+             : 0;
+}
+
+GestureSettings UiWindow::GestureDefaults() const noexcept {
+  return {};
+}
+
+ScrollPhysics UiWindow::ScrollDefaults() const noexcept {
+  return {};
+}
+
+std::shared_ptr<detail::FilePickerTransport> UiWindow::CreateFilePickerTransport() {
+  return {};
+}
+
+std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(std::string_view text, const TextStyle& style,
+                                                               float max_width, const TextLayoutOptions& options) {
+  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+}
+
+std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(const AttributedText& text, const TextStyle& style,
+                                                               float max_width, const TextLayoutOptions& options) {
+  static_cast<void>(text);
+  static_cast<void>(style);
+  static_cast<void>(max_width);
+  static_cast<void>(options);
+  return {};
+}
+
 using namespace detail;
 
-Runtime::State::State(Runtime& owner, const Application& application, PlatformAdapter& platform)
-    : owner_(owner), root_factory_(application.root_factory), platform_(&platform),
-      ui_thread_dispatcher_(platform.ui_thread_dispatcher_),
+UiWindow::State::State(UiWindow& owner, const Application& application)
+    : owner_(owner), root_factory_(application.root_factory),
       viewport_breakpoints_(application.options.viewport_breakpoints),
       window_(std::make_shared<WindowState>(application.options.window)),
-      root_scope_(std::make_shared<RecomposeScope>(owner, 1)), layer_controller_(owner) {}
+      root_scope_(std::make_shared<RecomposeScope>(owner, NextCompositionIdentity())), layer_controller_(owner) {}
 
-Runtime::State::~State() = default;
+UiWindow::State::~State() = default;
 
-Runtime::Runtime(const Application& application, PlatformAdapter& platform, ApplicationActivation startup_activation) {
+UiWindow::UiWindow() = default;
+
+bool UiWindow::IsInitialized() const noexcept {
+  return state_ && state_->initialized_ && !state_->retired_;
+}
+
+void UiWindow::InitializeWindow(Runtime& application_runtime, std::optional<ResourceConfiguration> configuration,
+                                WindowLifecycleState initial_lifecycle) {
+  if (state_)
+    throw std::logic_error("HuxerUI UI window has already been initialized");
+  const auto application_state = application_runtime.state_;
+  if (!application_state)
+    throw std::logic_error("HuxerUI UI window requires an initialized Runtime");
+  application_state->RequireThread();
+  if (application_state->phase != ApplicationRuntimeState::Phase::Running) {
+    throw std::logic_error("HuxerUI UI requires a running application Runtime");
+  }
+  const Application& application = *application_state->declaration;
+  if (configuration && (!std::isfinite(configuration->display_scale) || configuration->display_scale <= 0)) {
+    throw std::invalid_argument("HuxerUI UI resource display scale must be finite and positive");
+  }
+  ExecutionGuard application_guard(application_state->execution);
   ValidateViewportBreakpoints(application.options.viewport_breakpoints);
-  const GestureSettings gesture_settings = platform.GestureDefaults();
+  const GestureSettings gesture_settings = GestureDefaults();
   detail::ValidateGestureSettings(gesture_settings);
-  const ScrollPhysics scroll_physics = platform.ScrollDefaults();
+  const ScrollPhysics scroll_physics = ScrollDefaults();
   detail::ValidateScrollPhysics(scroll_physics);
   const WindowOptions& window_options = application.options.window;
   if (!std::isfinite(window_options.initial_size.width) || window_options.initial_size.width <= 0.0F ||
@@ -1141,75 +1214,111 @@ Runtime::Runtime(const Application& application, PlatformAdapter& platform, Appl
   if (!std::isfinite(window_options.title_bar_height) || window_options.title_bar_height <= 0.0F) {
     throw std::invalid_argument("HuxerUI window title-bar height must be finite and positive");
   }
-  state_ = std::make_unique<State>(*this, application, platform);
-  state_->gesture_settings_ = gesture_settings;
-  state_->default_scroll_physics_ = scroll_physics;
-  state_->task_delay_scheduler_ = detail::MakeTaskDelayScheduler(platform);
-  state_->root_environment_ = std::make_shared<Environment>();
-  state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
-  RootContext root{
-      state_->layer_controller_,   platform.PlatformRegistry(), *state_->root_environment_,
-      state_->root_service_types_, state_->root_services_,
-  };
-  state_->app_resources_ = std::make_shared<AppResources>(platform.Resources());
-  state_->text_ = std::make_unique<TextInteraction>(*state_);
-  state_->pointer_ = std::make_unique<PointerInteraction>(*state_);
-  state_->file_drop_ = std::make_unique<FileDropReceiver>(*state_);
-  state_->semantics_ = std::make_unique<SemanticTree>(*state_);
-  const ResourceConfiguration resource_configuration = state_->app_resources_->Configuration();
-  state_->root_environment_->Set(resource_configuration.locale);
-  root.Provide(state_->app_resources_);
+  try {
+    application_runtime_ = &application_runtime;
+    external_texture_frame_requester_ =
+        std::make_shared<ExternalTextureFrameRequester>(*this, application_state->Dispatcher());
+    state_ = std::make_unique<State>(*this, application);
+    state_->application_ = application_state;
+    state_->ui_execution_ = std::make_shared<UiExecutionState>();
+    state_->ui_execution_->ui_window = this;
+    state_->execution_ = std::make_shared<ExecutionContext>();
+    state_->execution_->application = application_state;
+    state_->execution_->ui = state_->ui_execution_;
+    state_->execution_->requires_ui = true;
+    ExecutionGuard ui_guard(state_->execution_);
+    state_->gesture_settings_ = gesture_settings;
+    state_->default_scroll_physics_ = scroll_physics;
+    state_->root_environment_ = std::make_shared<Environment>();
+    state_->execution_->environment = state_->root_environment_;
+    state_->root_environment_->Set(detail::ViewportEnvironment{state_->viewport_class_});
+    WindowContext root{
+        state_->layer_controller_,
+        *state_->root_environment_,
+        state_->root_service_types_,
+        state_->root_services_,
+    };
+    state_->app_resources_ = application_state->resources;
+    state_->text_ = std::make_unique<TextInteraction>(*state_);
+    state_->pointer_ = std::make_unique<PointerInteraction>(*state_);
+    state_->file_drop_ = std::make_unique<FileDropReceiver>(*state_);
+    state_->semantics_ = std::make_unique<SemanticTree>(*state_);
+    const ResourceConfiguration resource_configuration =
+        configuration.value_or(state_->app_resources_->Configuration());
+    state_->ui_execution_->configuration = resource_configuration;
+    state_->root_environment_->Set(resource_configuration.locale);
+
 #if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
-  if (auto profiler = CreateRuntimeProfiler()) {
-    root.Provide(std::move(profiler));
-  }
-#endif
-  state_->application_service_ = std::make_shared<ApplicationService>(
-      *this, std::move(startup_activation),
-      std::make_shared<PermissionController>(platform.CreatePermissionTransport(), platform.ui_thread_dispatcher_),
-      LocalNotificationService::Create(platform.CreateLocalNotificationTransport(), platform.ui_thread_dispatcher_,
-                                       state_->app_resources_),
-      SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->app_resources_), platform.Clipboard(),
-      platform.CreateAppDirectories());
-  root.Provide(state_->application_service_);
-  root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{&platform}));
-  state_->window_service_ = std::make_shared<WindowService>(platform);
-  root.Provide(state_->window_service_);
-  state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*state_);
-  root.Provide(state_->scene_transition_service_);
-  root.Provide(
-      std::shared_ptr<FilePicker>(new FilePicker(platform.CreateFilePickerTransport(), platform.ui_thread_dispatcher_))
-  );
-  root.Provide(std::shared_ptr<HttpClient>(new HttpClient(platform.CreateHttpTransport())));
-  InstallBuiltinPresentation(root);
-  for (const RootHook& hook : application.options.root_hooks) {
-    if (!hook) {
-      throw std::invalid_argument("HuxerUI root hook must not be empty");
+    if (auto profiler = CreateRuntimeProfiler()) {
+      root.Provide(std::move(profiler));
     }
-    hook(root);
+#endif
+    root.Provide(std::make_shared<TextMeasurerService>(TextMeasurerService{this}));
+    state_->window_service_ = std::make_shared<WindowService>(*this);
+    state_->window_service_->UpdateLifecycleState(initial_lifecycle);
+    root.Provide(state_->window_service_);
+    state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*state_);
+    root.Provide(state_->scene_transition_service_);
+    root.Provide(
+        std::shared_ptr<FilePicker>(new FilePicker(CreateFilePickerTransport(), application_state->Dispatcher()))
+    );
+
+    InstallBuiltinPresentation(root);
+    for (const WindowHook& hook : application.options.window_hooks) {
+      if (!hook) {
+        throw std::invalid_argument("HuxerUI root hook must not be empty");
+      }
+      hook(root);
+    }
+    if (application.options.show_debug_overlay) {
+      state_->debug_metrics_ = std::make_shared<DebugMetricsState>(*application_state->owner);
+      InstallDebugOverlay(root, state_->debug_metrics_);
+    }
+    std::erase_if(application_state->uis, [](const auto& weak) {
+      const auto ui = weak.lock();
+      return !ui || !ui->ui_window;
+    });
+    application_state->uis.push_back(state_->ui_execution_);
+    state_->initialized_ = true;
+  } catch (...) {
+    Retire();
+    throw;
   }
-  if (application.options.show_debug_overlay) {
-    state_->debug_metrics_ = std::make_shared<DebugMetricsState>(platform);
-    InstallDebugOverlay(root, state_->debug_metrics_);
-  }
-  platform.PlatformRegistry().Freeze();
 }
 
-Runtime::~Runtime() {
-  state_->app_resources_->Disconnect();
-  state_->file_drop_->DisconnectFileDrop();
+UiWindow::~UiWindow() {
+  Retire();
+  if (external_texture_frame_requester_)
+    external_texture_frame_requester_->Close();
+}
+
+void UiWindow::Retire() noexcept {
+  if (!state_ || state_->retired_) {
+    return;
+  }
+  ExecutionGuard guard(state_->execution_);
+  state_->retired_ = true;
+  if (state_->file_drop_) {
+    state_->file_drop_->DisconnectFileDrop();
+  }
   try {
-    state_->text_->StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
+    if (state_->text_) {
+      state_->text_->StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
+    }
   } catch (...) {
   }
-  DeactivateExternalTextures(
-      state_->committed_scene_snapshot_, state_->platform_->external_texture_frame_requester_
-  );
-  state_->pointer_->Disconnect();
+  DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->owner_.external_texture_frame_requester_);
+  if (state_->pointer_) {
+    state_->pointer_->Disconnect();
+  }
   state_->layer_controller_.Disconnect();
-  state_->application_service_->Disconnect();
-  state_->window_service_->Disconnect();
-  state_->scene_transition_service_->Disconnect();
+
+  if (state_->window_service_) {
+    state_->window_service_->Disconnect();
+  }
+  if (state_->scene_transition_service_) {
+    state_->scene_transition_service_->Disconnect();
+  }
   DiscardLifecycleCommits();
   state_->mounted_root_.reset();
   state_->root_scope_.reset();
@@ -1218,43 +1327,61 @@ Runtime::~Runtime() {
   }
   state_->retired_lifecycle_cleanups_.clear();
   CommitTaskScopes();
+  // Retained callback environments must not keep their own root services alive after UI retirement.
+  if (state_->root_environment_) {
+    for (const auto type : state_->root_service_types_) {
+      if (PeekLocalEnvironmentValue(*state_->root_environment_, type)) {
+        SetEnvironmentValue(*state_->root_environment_, type, {});
+      }
+    }
+  }
   state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
   state_->root_services_.clear();
+  if (state_->execution_) {
+    state_->execution_->environment.reset();
+  }
+  if (state_->ui_execution_) {
+    state_->ui_execution_->ui_window = nullptr;
+  }
+  external_texture_frame_requester_->Close();
 }
 
-TextInputApplyResult Runtime::HandleTextInputCommands(const TextInputCommandBatch& batch) {
+TextInputApplyResult UiWindow::HandleTextInputCommands(const TextInputCommandBatch& batch) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->text_->HandleTextInputCommands(batch);
 }
 
-bool Runtime::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
+bool UiWindow::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->text_->PerformTextInputAction(session_id, action);
 }
 
 TextInputContext
-Runtime::QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
+UiWindow::QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const {
   return state_->text_->QueryTextInputContext(session_id, start, length);
 }
 
-TextInputGeometry Runtime::QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
+TextInputGeometry UiWindow::QueryTextInputGeometry(TextInputSessionId session_id, TextRange range) const {
   return state_->text_->QueryTextInputGeometry(session_id, range);
 }
 
-TextInputPositionResult Runtime::QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
+TextInputPositionResult UiWindow::QueryTextInputPosition(TextInputSessionId session_id, Point point) const {
   return state_->text_->QueryTextInputPosition(session_id, point);
 }
 
-bool Runtime::CanPerformTextEditingAction(TextEditingAction action) const {
+bool UiWindow::CanPerformTextEditingAction(TextEditingAction action) const {
   return state_->text_->CanPerformTextEditingAction(action);
 }
 
-bool Runtime::PerformTextEditingAction(TextEditingAction action) {
+bool UiWindow::PerformTextEditingAction(TextEditingAction action) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->text_->PerformTextEditingAction(action);
 }
 
-std::uint64_t Runtime::BeginInteraction(detail::MountedNode& node, InteractionEvent::Source source,
+std::uint64_t UiWindow::BeginInteraction(detail::MountedNode& node, InteractionEvent::Source source,
                                         std::optional<Point> position) {
   const std::uint64_t press_id = state_->next_press_id_++;
   ++node.active_press_count;
@@ -1264,7 +1391,7 @@ std::uint64_t Runtime::BeginInteraction(detail::MountedNode& node, InteractionEv
   return press_id;
 }
 
-void Runtime::EndInteraction(detail::MountedNode& node, InteractionEvent::Type type,
+void UiWindow::EndInteraction(detail::MountedNode& node, InteractionEvent::Type type,
                              InteractionEvent::Source source, std::uint64_t press_id,
                              std::optional<Point> position) {
   if (node.active_press_count > 0) {
@@ -1275,49 +1402,51 @@ void Runtime::EndInteraction(detail::MountedNode& node, InteractionEvent::Type t
   UpdateInteraction(node, interaction, InteractionEvent{type, source, press_id, position});
 }
 
-void Runtime::HandlePointerEvent(const PointerEvent& event) {
+void UiWindow::HandlePointerEvent(const PointerEvent& event) {
+  ExecutionGuard execution_guard(state_->execution_);
   state_->pointer_->HandlePointerEvent(event);
 }
 
-bool Runtime::HasContextMenuHandler(Point position) const {
+bool UiWindow::HasContextMenuHandler(Point position) const {
   return state_->pointer_->HasContextMenuHandler(position);
 }
 
-bool Runtime::HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position) {
+bool UiWindow::HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->file_drop_->HandleFileDragEntered(session, std::move(offer), position);
 }
 
-bool Runtime::HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position) {
+bool UiWindow::HandleFileDragMoved(std::uint64_t session, FileDropOffer offer, Point position) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->file_drop_->HandleFileDragMoved(session, std::move(offer), position);
 }
 
-void Runtime::HandleFileDragExited(std::uint64_t session) {
+void UiWindow::HandleFileDragExited(std::uint64_t session) {
+  ExecutionGuard execution_guard(state_->execution_);
   state_->file_drop_->HandleFileDragExited(session);
 }
 
-bool Runtime::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position,
+bool UiWindow::HandleFileDrop(std::uint64_t session, FileDropOffer offer, Point position,
                              detail::FileDropPreparation prepare) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->file_drop_->HandleFileDrop(session, std::move(offer), position, std::move(prepare));
 }
 
-void Runtime::BuildSemantics() {
+void UiWindow::BuildSemantics() {
   state_->semantics_->BuildSemantics();
   state_->frame_commit_.semantic_frame = state_->semantics_->Frame();
 }
 
-bool Runtime::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action) {
+bool UiWindow::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->semantics_->PerformSemanticAction(node_id, action);
 }
 
-void Runtime::RequestApplicationQuit() {
-  state_->platform_->RequestApplicationQuit();
-}
-
-void Runtime::QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope) {
+void UiWindow::QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope) {
   state_->lifecycle_commits_.push_back(scope);
 }
 
-void Runtime::RetireLifecycles(detail::RecomposeScope& scope) noexcept {
+void UiWindow::RetireLifecycles(detail::RecomposeScope& scope) noexcept {
   for (auto key = scope.lifecycle_order_.rbegin(); key != scope.lifecycle_order_.rend(); ++key) {
     auto slot = scope.lifecycle_slots_.find(*key);
     if (slot == scope.lifecycle_slots_.end()) {
@@ -1333,7 +1462,7 @@ void Runtime::RetireLifecycles(detail::RecomposeScope& scope) noexcept {
   scope.lifecycle_order_.clear();
 }
 
-void Runtime::CommitLifecycles() {
+void UiWindow::CommitLifecycles() {
   std::vector<std::weak_ptr<detail::RecomposeScope>> commits = std::move(state_->lifecycle_commits_);
   state_->lifecycle_commits_.clear();
 
@@ -1352,19 +1481,9 @@ void Runtime::CommitLifecycles() {
         active->CommitLifecycleCleanups();
       }
     }
-    detail::PlatformRegistry* previous_registry =
-        detail::SetLifecyclePlatformRegistry(&state_->platform_->PlatformRegistry());
-    try {
-      for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
-        if (auto active = scope.lock()) {
-          active->CommitLifecycleSetups();
-        }
-      }
-    } catch (...) {
-      detail::SetLifecyclePlatformRegistry(previous_registry);
-      throw;
+    for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
+      if (auto active = scope.lock()) active->CommitLifecycleSetups();
     }
-    detail::SetLifecyclePlatformRegistry(previous_registry);
   } catch (...) {
     for (const std::weak_ptr<detail::RecomposeScope>& scope : commits) {
       if (auto active = scope.lock()) {
@@ -1375,7 +1494,7 @@ void Runtime::CommitLifecycles() {
   }
 }
 
-void Runtime::DiscardLifecycleCommits() noexcept {
+void UiWindow::DiscardLifecycleCommits() noexcept {
   for (const std::weak_ptr<detail::RecomposeScope>& scope : state_->lifecycle_commits_) {
     if (auto active = scope.lock()) {
       active->DiscardLifecycleCommit();
@@ -1384,11 +1503,25 @@ void Runtime::DiscardLifecycleCommits() noexcept {
   state_->lifecycle_commits_.clear();
 }
 
-std::shared_ptr<detail::TaskScopeState> Runtime::CreateTaskScope() {
-  return detail::MakeTaskScopeState(state_->platform_->ui_thread_dispatcher_, state_->task_delay_scheduler_);
+std::shared_ptr<detail::TaskScopeState> UiWindow::CreateTaskScope() {
+  return detail::MakeTaskScopeState(state_->application_->Dispatcher(), detail::CurrentExecutionContext());
 }
 
-void Runtime::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noexcept {
+detail::PlatformChannelEndpoint detail::MakePlatformChannelEndpoint(UiWindow& ui_window) {
+  // Window hooks can create channels before initialization admits native callbacks.
+  if (!ui_window.state_ || ui_window.state_->retired_ || !ui_window.state_->ui_execution_) {
+    throw std::logic_error("HuxerUI PlatformChannel requires a live UiWindow");
+  }
+  ui_window.state_->application_->RequireThread();
+  auto source = CurrentExecutionContext();
+  if (!source || !source->requires_ui || source->ui.lock() != ui_window.state_->ui_execution_) {
+    source = ui_window.state_->execution_;
+  }
+  return MakePlatformChannelEndpoint(ui_window.state_->application_->native_dispatcher,
+                                      std::make_shared<ExecutionContext>(*source));
+}
+
+void UiWindow::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noexcept {
   if (!scope) {
     return;
   }
@@ -1399,14 +1532,15 @@ void Runtime::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noe
   }
 }
 
-void Runtime::CommitTaskScopes() noexcept {
+void UiWindow::CommitTaskScopes() noexcept {
   for (const std::shared_ptr<detail::TaskScopeState>& scope : state_->retired_task_scopes_) {
     detail::CloseTaskScope(scope);
   }
   state_->retired_task_scopes_.clear();
 }
 
-void Runtime::SetWindowMetrics(WindowMetrics metrics) {
+void UiWindow::SetWindowMetrics(WindowMetrics metrics) {
+  ExecutionGuard execution_guard(state_->execution_);
   ValidateWindowMetrics(metrics);
   if (state_->window_->metrics == metrics) {
     return;
@@ -1438,12 +1572,12 @@ void Runtime::SetWindowMetrics(WindowMetrics metrics) {
   RequestFrame();
 }
 
-bool Runtime::IsWindowDragRegion(Point position) const {
+bool UiWindow::IsWindowDragRegion(Point position) const {
   return state_->window_->metrics.title_bar.has_value() && state_->mounted_root_ &&
          detail::HitTestWindowDragRegion(*state_->mounted_root_, position);
 }
 
-std::optional<std::uint64_t> Runtime::HitTestPlatformView(Point position) const {
+std::optional<std::uint64_t> UiWindow::HitTestPlatformView(Point position) const {
   if (!state_->mounted_root_) {
     return std::nullopt;
   }
@@ -1455,7 +1589,7 @@ std::optional<std::uint64_t> Runtime::HitTestPlatformView(Point position) const 
   return target->kind == detail::NodeKind::PlatformView ? std::optional{target->identity} : std::nullopt;
 }
 
-std::optional<std::uint64_t> Runtime::FocusedPlatformView() const {
+std::optional<std::uint64_t> UiWindow::FocusedPlatformView() const {
   if (!state_->focused_node_identity_.has_value() || !state_->mounted_root_) {
     return std::nullopt;
   }
@@ -1466,7 +1600,7 @@ std::optional<std::uint64_t> Runtime::FocusedPlatformView() const {
   return state_->focused_node_identity_;
 }
 
-void Runtime::SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
+void UiWindow::SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
   if (identity.has_value()) {
     if (!state_->mounted_root_) {
       return;
@@ -1483,7 +1617,7 @@ void Runtime::SynchronizePlatformViewFocus(std::optional<std::uint64_t> identity
   }
 }
 
-bool Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
+bool UiWindow::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
   if (FocusedPlatformView() != identity) {
     return false;
   }
@@ -1494,9 +1628,10 @@ bool Runtime::MoveFocusFromPlatformView(std::uint64_t identity, bool reverse) {
   });
 }
 
-std::optional<PlatformPayload> Runtime::DispatchPlatformViewEvent(
+std::optional<PlatformPayload> UiWindow::DispatchPlatformViewEvent(
     std::uint64_t identity, std::string_view name, const PlatformPayload& payload
 ) {
+  ExecutionGuard execution_guard(state_->execution_);
   if (!state_->mounted_root_) {
     return std::nullopt;
   }
@@ -1519,9 +1654,10 @@ std::optional<PlatformPayload> Runtime::DispatchPlatformViewEvent(
   }
 }
 
-std::optional<PlatformValue> Runtime::DispatchPlatformViewEvent(
+std::optional<PlatformValue> UiWindow::DispatchPlatformViewEvent(
     std::uint64_t identity, std::type_index key, const PlatformValue& value
 ) {
+  ExecutionGuard execution_guard(state_->execution_);
   if (!state_->mounted_root_) {
     return std::nullopt;
   }
@@ -1544,40 +1680,40 @@ std::optional<PlatformValue> Runtime::DispatchPlatformViewEvent(
 
 // Requests raised while a frame is being built are retained for its FrameCommit instead of re-entering the platform
 // scheduler. Requests raised outside a build notify the platform immediately.
-void Runtime::RequestFrame() {
-  const double now = state_->platform_->Now();
+void UiWindow::RequestFrame() {
+  const double now = state_->owner_.Now();
   if (!state_->frame_requested_ || state_->frame_request_deadline_ > now) {
     state_->frame_requested_ = true;
     state_->frame_request_deadline_ = now;
     if (!state_->building_frame_) {
-      state_->platform_->RequestFrameAt(now);
+      state_->owner_.RequestFrameAt(now);
     }
   }
 }
 
-void Runtime::RequestFrameAfter(double delay_seconds) {
+void UiWindow::RequestFrameAfter(double delay_seconds) {
   if (!std::isfinite(delay_seconds)) {
     return;
   }
   delay_seconds = std::max(0.0, delay_seconds);
-  const double deadline = state_->platform_->Now() + delay_seconds;
+  const double deadline = state_->owner_.Now() + delay_seconds;
   if (!state_->frame_requested_ || deadline < state_->frame_request_deadline_) {
     state_->frame_requested_ = true;
     state_->frame_request_deadline_ = deadline;
     if (!state_->building_frame_) {
-      state_->platform_->RequestFrameAt(deadline);
+      state_->owner_.RequestFrameAt(deadline);
     }
   }
 }
 
-void Runtime::NotifyScrollActivity(detail::MountedNode& node, const ScrollActivity& activity) {
+void UiWindow::NotifyScrollActivity(detail::MountedNode& node, const ScrollActivity& activity) {
   DispatchScrollActivity(node, activity);
   state_->text_->NotifyScrollActivity(node, activity);
   RequestFrame();
 }
 
-const FrameCommit& Runtime::BuildFrame() {
-  const double timestamp = state_->platform_->Now();
+const FrameCommit& UiWindow::BuildFrame() {
+  const double timestamp = state_->owner_.Now();
   const double delta_time = state_->previous_frame_timestamp_.has_value()
                                 ? std::clamp(timestamp - *state_->previous_frame_timestamp_, 0.0, 0.25)
                                 : 0.0;
@@ -1592,33 +1728,43 @@ const FrameCommit& Runtime::BuildFrame() {
   }
 }
 
-void Runtime::UpdateResourceConfiguration(ResourceConfiguration configuration) {
-  if (state_->app_resources_->Configuration() == configuration) {
+void UiWindow::UpdateResourceConfiguration(ResourceConfiguration configuration) {
+  ExecutionGuard execution_guard(state_->execution_);
+  if (!std::isfinite(configuration.display_scale) || configuration.display_scale <= 0) {
+    throw std::invalid_argument("HuxerUI resource display scale must be finite and positive");
+  }
+  if (state_->ui_execution_->configuration == configuration) {
     return;
   }
-  state_->app_resources_->UpdateConfiguration(configuration);
+  BeginDependencyChange(state_->ui_execution_->configuration_dependency);
+  state_->ui_execution_->configuration = configuration;
+  CommitDependencyChange(state_->ui_execution_->configuration_dependency);
   static_cast<void>(state_->root_environment_->Update(configuration.locale));
   ReconcileWindowControls();
   state_->text_->InvalidateOverlay();
 }
 
-const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
+const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
+  if (state_->retired_) {
+    return state_->frame_commit_;
+  }
+  ExecutionGuard execution_guard(state_->execution_);
   HUXERUI_PROFILE_FRAME(*state_->root_environment_);
   HUXERUI_PROFILE_STAGE(profile_stage, Compose);
   detail::DebugMetricsState* const debug_metrics = state_->debug_metrics_.get();
-  const double build_started_at = debug_metrics != nullptr ? state_->platform_->Now() : 0.0;
+  const double build_started_at = debug_metrics != nullptr ? state_->owner_.Now() : 0.0;
   const auto record_debug_commit = [&] {
     if (debug_metrics == nullptr) {
       return;
     }
     debug_metrics->RecordCommit(
-        std::max(0.0, state_->platform_->Now() - build_started_at),
+        std::max(0.0, state_->owner_.Now() - build_started_at),
         state_->frame_commit_.render_frame.damage,
         state_->window_->metrics.viewport
     );
   };
   if (!std::isfinite(frame.timestamp)) {
-    frame.timestamp = state_->platform_->Now();
+    frame.timestamp = state_->owner_.Now();
   }
   if (!std::isfinite(frame.delta_time)) {
     frame.delta_time = 0.0;
@@ -1626,8 +1772,8 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   frame.delta_time = std::clamp(frame.delta_time, 0.0, 0.25);
   // Consume the scheduled frame before callbacks run so callbacks can retain a new request in this commit.
   state_->frame_requested_ = false;
-  detail::AdvanceTaskDelays(state_->task_delay_scheduler_, frame.timestamp);
-  state_->application_service_->DispatchPending();
+
+
   state_->previous_frame_timestamp_ = frame.timestamp;
   // Application and LayerStack composition are independent so transient presentation never executes the root factory.
   if (state_->application_dirty_) {
@@ -1655,7 +1801,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     state_->frame_commit_.render_frame.scene.root = nullptr;
     state_->frame_commit_.render_frame.damage = {};
     DeactivateExternalTextures(
-        state_->committed_scene_snapshot_, state_->platform_->external_texture_frame_requester_
+        state_->committed_scene_snapshot_, state_->owner_.external_texture_frame_requester_
     );
     state_->has_committed_scene_snapshot_ = false;
     ++state_->frame_commit_.render_frame.revision;
@@ -1684,7 +1830,6 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   MeasureNode(
       *state_->mounted_root_,
       constraints,
-      *state_->platform_,
       *this,
       state_->window_->metrics.safe_area,
       state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
@@ -1711,7 +1856,6 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
       MeasureNode(
           *state_->mounted_root_,
           constraints,
-          *state_->platform_,
           *this,
           state_->window_->metrics.safe_area,
           state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
@@ -1722,7 +1866,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   }
   // Extensions prepare node-local geometry after the final layout. Text input geometry is then converted to host-view
   // coordinates while the platform IME session is synchronized.
-  PrepareExtensionGeometry(*state_->mounted_root_, *state_->platform_);
+  PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
   // Anchors can be nested inside other anchored layers. Settle the bounded dependency chain in this commit so a child
   // presentation does not retain geometry from its parent's previous placement.
   const detail::MountedNode* const committed_layer_stack = FindLayerStack(*state_->mounted_root_);
@@ -1735,14 +1879,13 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
     MeasureNode(
         *state_->mounted_root_,
         constraints,
-        *state_->platform_,
         *this,
         state_->window_->metrics.safe_area,
         state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
     );
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
     ResolvePresentationTree(*state_->mounted_root_);
-    PrepareExtensionGeometry(*state_->mounted_root_, *state_->platform_);
+    PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
   }
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();
@@ -1791,7 +1934,7 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
       state_->committed_scene_snapshot_,
       state_->committed_viewport_,
       state_->has_committed_scene_snapshot_,
-      state_->platform_->external_texture_frame_requester_
+      state_->owner_.external_texture_frame_requester_
   );
   if (scene_transition_was_active) {
     state_->frame_commit_.render_frame.damage.full = true;
@@ -1813,26 +1956,26 @@ const FrameCommit& Runtime::BuildFrame(FrameInfo frame) {
   return state_->frame_commit_;
 }
 
-void Runtime::HandleApplicationActivation(ApplicationActivation activation) {
-  state_->application_service_->Enqueue(std::move(activation));
+void UiWindow::UpdateWindowLifecycleState(WindowLifecycleState lifecycle_state) {
+  state_->application_->RequireThread();
+  if (state_->retired_) return;
+  ExecutionGuard guard(state_->execution_);
+  state_->window_service_->UpdateLifecycleState(lifecycle_state);
 }
 
-void Runtime::UpdateApplicationLifecycleState(ApplicationLifecycleState lifecycle_state) {
-  state_->application_service_->UpdateLifecycleState(lifecycle_state);
-}
-
-bool Runtime::HandleWindowRequest(WindowCommand command) {
+bool UiWindow::HandleWindowRequest(WindowCommand command) {
+  ExecutionGuard execution_guard(state_->execution_);
   return state_->window_service_->HandleRequest(command);
 }
 
-const detail::MountedNode* Runtime::RootNode() const noexcept {
+const detail::MountedNode* UiWindow::RootNode() const noexcept {
   if (!state_->mounted_root_) {
     return nullptr;
   }
   return FindApplicationRoot(*state_->mounted_root_);
 }
 
-void Runtime::RefreshInteractionTree() {
+void UiWindow::RefreshInteractionTree() {
   if (!state_->mounted_root_) {
     state_->focused_node_identity_.reset();
     state_->focus_visible_ = false;
@@ -1897,14 +2040,14 @@ void Runtime::RefreshInteractionTree() {
   ResolveFocusedFlags(*state_->mounted_root_, state_->focused_node_identity_, state_->focus_visible_);
 }
 
-detail::MountedNode* Runtime::ActiveFocusTrapRoot() {
+detail::MountedNode* UiWindow::ActiveFocusTrapRoot() {
   if (!state_->mounted_root_) {
     return nullptr;
   }
   return FindTopmostFocusTrap(*state_->mounted_root_);
 }
 
-std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route) {
+std::optional<std::uint64_t> UiWindow::ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route) {
   std::optional<std::uint64_t> candidate;
   for (auto node = route.rbegin(); node != route.rend(); ++node) {
     if ((*node)->interaction.enabled && (*node)->focusable) {
@@ -1940,11 +2083,13 @@ std::optional<std::uint64_t> Runtime::ResolvePointerFocusTarget(const std::vecto
   return focusable.empty() ? std::nullopt : std::optional{focusable.front()->identity};
 }
 
-bool Runtime::HandleBack() {
+bool UiWindow::HandleBack() {
+  ExecutionGuard execution_guard(state_->execution_);
   return HandleBack(BackEvent{});
 }
 
-bool Runtime::HandleBack(const BackEvent& incoming) {
+bool UiWindow::HandleBack(const BackEvent& incoming) {
+  ExecutionGuard execution_guard(state_->execution_);
   BackEvent event = incoming;
   if (!std::isfinite(event.progress)) {
     event.progress = event.phase == BackPhase::Commit ? 1.0F : 0.0F;
@@ -2067,7 +2212,7 @@ bool Runtime::HandleBack(const BackEvent& incoming) {
   return handled;
 }
 
-void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible, bool reverse) {
+void UiWindow::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible, bool reverse) {
   if (identity.has_value()) {
     if (!state_->mounted_root_) {
       identity.reset();
@@ -2131,7 +2276,7 @@ void Runtime::SetFocusedNode(std::optional<std::uint64_t> identity, std::optiona
   RequestFrame();
 }
 
-void Runtime::MoveFocus(bool reverse, bool wrap) {
+void UiWindow::MoveFocus(bool reverse, bool wrap) {
   if (!state_->mounted_root_) {
     return;
   }
@@ -2174,7 +2319,7 @@ void Runtime::MoveFocus(bool reverse, bool wrap) {
   SetFocusedNode((*current)->identity, true, reverse);
 }
 
-bool Runtime::UpdateNodeExtensions(
+bool UiWindow::UpdateNodeExtensions(
     detail::MountedNode& node,
     const FrameInfo& frame,
     bool& needs_frame,
@@ -2230,7 +2375,7 @@ bool Runtime::UpdateNodeExtensions(
   return interaction_changed;
 }
 
-void Runtime::BindExtensions(detail::MountedNode& node) {
+void UiWindow::BindExtensions(detail::MountedNode& node) {
   for (NodeExtensionEntry& entry : node.extensions) {
     if (!entry.extension) {
       continue;
@@ -2257,7 +2402,8 @@ void Runtime::BindExtensions(detail::MountedNode& node) {
   }
 }
 
-Point Runtime::HandleScrollInput(const ScrollInputEvent& event) {
+Point UiWindow::HandleScrollInput(const ScrollInputEvent& event) {
+  ExecutionGuard execution_guard(state_->execution_);
   if (!state_->mounted_root_) {
     return {};
   }
@@ -2298,7 +2444,8 @@ Point Runtime::HandleScrollInput(const ScrollInputEvent& event) {
   return consumed;
 }
 
-bool Runtime::HandleKeyEvent(const KeyEvent& event) {
+bool UiWindow::HandleKeyEvent(const KeyEvent& event) {
+  ExecutionGuard execution_guard(state_->execution_);
   if (!state_->mounted_root_) {
     return false;
   }
@@ -2459,7 +2606,7 @@ bool Runtime::HandleKeyEvent(const KeyEvent& event) {
   return false;
 }
 
-bool Runtime::DispatchKeyboardContextMenu() {
+bool UiWindow::DispatchKeyboardContextMenu() {
   if (!state_->mounted_root_ || !state_->focused_node_identity_.has_value()) {
     return false;
   }
@@ -2486,17 +2633,17 @@ bool Runtime::DispatchKeyboardContextMenu() {
   return false;
 }
 
-void Runtime::InvalidateRoot() {
+void UiWindow::InvalidateRoot() {
   state_->application_dirty_ = true;
   RequestFrame();
 }
 
-void Runtime::InvalidateLayers() {
+void UiWindow::InvalidateLayers() {
   state_->layers_dirty_ = true;
   RequestFrame();
 }
 
-void Runtime::DeactivateLayerInput(LayerId id) {
+void UiWindow::DeactivateLayerInput(LayerId id) {
   if (!state_->mounted_root_) {
     return;
   }
@@ -2517,7 +2664,7 @@ void Runtime::DeactivateLayerInput(LayerId id) {
   }
 }
 
-void Runtime::InvalidateLayerPlacement(LayerId id) {
+void UiWindow::InvalidateLayerPlacement(LayerId id) {
   if (state_->mounted_root_) {
     if (detail::MountedNode* layer = FindLayerEntryNode(*state_->mounted_root_, id)) {
       MarkLayoutDirtyPath(*state_->mounted_root_, layer->identity);
@@ -2530,21 +2677,21 @@ void Runtime::InvalidateLayerPlacement(LayerId id) {
   RequestFrame();
 }
 
-void Runtime::InvalidateScope(std::uint64_t scope_id) {
+void UiWindow::InvalidateScope(std::uint64_t scope_id) {
   if (scope_id == state_->root_scope_->Id()) {
     state_->application_dirty_ = true;
   }
   RequestFrame();
 }
 
-void Runtime::InvalidateLayout(detail::MountedNode& mounted) {
+void UiWindow::InvalidateLayout(detail::MountedNode& mounted) {
   if (state_->mounted_root_) {
     MarkLayoutDirtyPath(*state_->mounted_root_, mounted.identity);
   }
   RequestFrame();
 }
 
-bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
+bool UiWindow::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   if (mounted.kind == NodeKind::Scope && mounted.recompose_scope && mounted.recompose_scope->IsDirty()) {
     const bool layout_changed = ComposeScope(mounted);
     mounted.render_structure_dirty = mounted.render_structure_dirty || layout_changed;
@@ -2562,7 +2709,7 @@ bool Runtime::RecomposeDirtyScopes(detail::MountedNode& mounted) {
   return layout_changed;
 }
 
-void Runtime::EnsureRootStructure() {
+void UiWindow::EnsureRootStructure() {
   if (state_->mounted_root_) {
     if (!FindWindowBackplane(*state_->mounted_root_) || !FindApplicationContent(*state_->mounted_root_) ||
         !FindLayerStack(*state_->mounted_root_) ||
@@ -2609,7 +2756,7 @@ void Runtime::EnsureRootStructure() {
   }
 }
 
-void Runtime::ReconcileWindowControls() {
+void UiWindow::ReconcileWindowControls() {
   if (!state_->mounted_root_ || state_->window_->chrome_mode != WindowChromeMode::Custom) {
     return;
   }
@@ -2628,7 +2775,7 @@ void Runtime::ReconcileWindowControls() {
   Reconcile(*found, controls.spec_, state_->root_environment_);
 }
 
-void Runtime::CommitWindowAppearance() {
+void UiWindow::CommitWindowAppearance() {
   if (!state_->mounted_root_) {
     return;
   }
@@ -2675,7 +2822,7 @@ void Runtime::CommitWindowAppearance() {
   };
   if (state_->window_->committed_system_bar_brightness != brightness) {
     state_->window_->committed_system_bar_brightness = brightness;
-    state_->platform_->SetSystemBarsContentBrightness(brightness.first, brightness.second);
+    state_->owner_.SetSystemBarsContentBrightness(brightness.first, brightness.second);
   }
   std::optional<Color> title_bar_background;
   if (application != nullptr && metrics.title_bar.has_value()) {
@@ -2699,7 +2846,7 @@ void Runtime::CommitWindowAppearance() {
   }
 }
 
-void Runtime::ComposeApplication() {
+void UiWindow::ComposeApplication() {
   state_->application_dirty_ = false;
   bool scope_composing = false;
 
@@ -2740,7 +2887,7 @@ void Runtime::ComposeApplication() {
   }
 }
 
-void Runtime::ComposeLayers() {
+void UiWindow::ComposeLayers() {
   state_->layers_dirty_ = false;
   EnsureRootStructure();
   detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
@@ -2817,7 +2964,7 @@ void Runtime::ComposeLayers() {
   }
 }
 
-bool Runtime::ComposeScope(detail::MountedNode& mounted) {
+bool UiWindow::ComposeScope(detail::MountedNode& mounted) {
   mounted.child_paint_order.clear();
   if (!mounted.scope_factory) {
     const bool layout_changed = !mounted.children.empty();
@@ -2833,7 +2980,7 @@ bool Runtime::ComposeScope(detail::MountedNode& mounted) {
   );
   HUXERUI_PROFILE_COUNT(Scopes);
   if (!mounted.recompose_scope) {
-    mounted.recompose_scope = std::make_shared<RecomposeScope>(*this, state_->next_scope_identity_++);
+    mounted.recompose_scope = std::make_shared<RecomposeScope>(*this, NextCompositionIdentity());
   }
   mounted.recompose_scope->SetEventBindings(mounted.event_bindings);
 
@@ -2868,7 +3015,7 @@ bool Runtime::ComposeScope(detail::MountedNode& mounted) {
   }
 }
 
-bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming,
+bool UiWindow::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std::shared_ptr<ViewSpec>& incoming,
                         const std::shared_ptr<const Environment>& environment) {
   HUXERUI_PROFILE_SCOPE(profile_reconcile, Reconcile, mounted ? mounted->identity : 0);
   HUXERUI_PROFILE_COUNT(Reconciles);
@@ -2956,7 +3103,7 @@ bool Runtime::Reconcile(std::unique_ptr<detail::MountedNode>& mounted, const std
 }
 
 std::unique_ptr<detail::MountedNode>
-Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<const Environment>& environment) {
+UiWindow::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<const Environment>& environment) {
   HUXERUI_PROFILE_SCOPE(profile_mount, Mount, 0);
   HUXERUI_PROFILE_COUNT(Mounts);
   std::shared_ptr<Environment> owned_environment;
@@ -2969,7 +3116,7 @@ Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<
   }
   ViewSpec compiled = CompileViewSpec(*incoming, mounted_environment, *state_->app_resources_);
   auto mounted = std::make_unique<detail::MountedNode>();
-  mounted->runtime = this;
+  mounted->ui_window = this;
   mounted->identity = state_->next_node_identity_++;
   HUXERUI_PROFILE_NODE(profile_mount, mounted->identity);
   mounted->owned_environment = std::move(owned_environment);
@@ -2998,7 +3145,7 @@ Runtime::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr<
   return mounted;
 }
 
-bool Runtime::ReconcileChildren(
+bool UiWindow::ReconcileChildren(
     std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children, const std::vector<View>& incoming_children,
     const std::shared_ptr<const Environment>& environment
 ) {
@@ -3074,7 +3221,7 @@ bool Runtime::ReconcileChildren(
   return layout_changed;
 }
 
-bool Runtime::ReconcileLayerChildren(
+bool UiWindow::ReconcileLayerChildren(
     std::vector<std::unique_ptr<detail::MountedNode>>& mounted_children,
     const std::vector<std::pair<View, std::shared_ptr<const Environment>>>& incoming_children
 ) {
@@ -3151,8 +3298,8 @@ bool Runtime::ReconcileLayerChildren(
 
 namespace huxerui::detail {
 
-VirtualMeasureSession::VirtualMeasureSession(Runtime& runtime, MountedNode& owner)
-    : runtime_(&runtime), owner_(&owner), previous_nodes_(std::move(owner.children)),
+VirtualMeasureSession::VirtualMeasureSession(UiWindow& ui_window, MountedNode& owner)
+    : ui_window_(&ui_window), owner_(&owner), previous_nodes_(std::move(owner.children)),
       previous_realized_indices_(std::move(owner.virtual_state->realized_indices)) {
   previous_node_identities_.reserve(previous_nodes_.size());
   for (const auto& node : previous_nodes_) {
@@ -3190,11 +3337,11 @@ void VirtualMeasureSession::RestoreItemState(MountedNode& mounted, VirtualItemSt
 
   if (mounted.kind == NodeKind::Scope && state.state_slots) {
     mounted.recompose_scope = std::make_shared<RecomposeScope>(
-        *runtime_,
-        runtime_->state_->next_scope_identity_++,
+        *ui_window_,
+        NextCompositionIdentity(),
         std::move(*state.state_slots)
     );
-    runtime_->ComposeScope(mounted);
+    ui_window_->ComposeScope(mounted);
   }
 
   std::vector<bool> restored(state.children.size(), false);
@@ -3296,7 +3443,7 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
 
   if (!node || declaration_created) {
     VirtualItemDependencyCapture::Guard dependency_guard{*state.dependency_capture};
-    runtime_->Reconcile(node, item.spec_, owner_->environment);
+    ui_window_->Reconcile(node, item.spec_, owner_->environment);
   }
   if (retained_state.has_value()) {
     RestoreItemState(*node, *retained_state);
@@ -3382,7 +3529,7 @@ void VirtualMeasureSession::CommitRealization(const std::vector<VirtualLayoutRes
   owner_->child_paint_order.clear();
   owner_->children = std::move(next);
   owner_->virtual_state->realized_indices = std::move(next_indices);
-  runtime_->state_->extension_tree_dirty_ = runtime_->state_->extension_tree_dirty_ || structure_changed;
+  ui_window_->state_->extension_tree_dirty_ = ui_window_->state_->extension_tree_dirty_ || structure_changed;
   committed_ = true;
 }
 
@@ -3404,6 +3551,17 @@ void VirtualMeasureSession::RestoreOwner() noexcept {
       );
     }
   }
+}
+
+void InternalAccess::InitializeWindow(
+    UiWindow& ui_window, Runtime& runtime, std::optional<ResourceConfiguration> configuration,
+    WindowLifecycleState lifecycle
+) {
+  ui_window.InitializeWindow(runtime, std::move(configuration), lifecycle);
+}
+
+void InternalAccess::RetireWindow(UiWindow& ui_window) noexcept {
+  ui_window.Retire();
 }
 
 } // namespace huxerui::detail

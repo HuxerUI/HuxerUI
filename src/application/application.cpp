@@ -11,7 +11,7 @@
 #include "application_internal.h"
 #include "io/file_internal.h"
 #include "platform_registry_internal.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "system_tray_internal.h"
 #include "runtime/task_internal.h"
 
@@ -77,10 +77,10 @@ struct PermissionController::State final : public std::enable_shared_from_this<S
     virtual std::function<void()> Detach() noexcept = 0;
   };
 
-  State(std::shared_ptr<PermissionTransport> transport, UIThreadDispatcher dispatch_to_ui_thread)
+  State(std::shared_ptr<PermissionTransport> transport, UiThreadDispatcher dispatch_to_ui_thread)
       : transport(std::move(transport)), dispatch_to_ui_thread(std::move(dispatch_to_ui_thread)) {
     if (this->transport && !this->dispatch_to_ui_thread) {
-      throw std::logic_error("HuxerUI permission transport requires a UIThreadDispatcher");
+      throw std::logic_error("HuxerUI permission transport requires a UiThreadDispatcher");
     }
   }
 
@@ -169,8 +169,9 @@ struct PermissionController::State final : public std::enable_shared_from_this<S
     }
   }
 
+  std::shared_ptr<ExecutionContext> application_source = CurrentApplicationRuntime()->execution;
   std::shared_ptr<PermissionTransport> transport;
-  UIThreadDispatcher dispatch_to_ui_thread;
+  UiThreadDispatcher dispatch_to_ui_thread;
   std::deque<std::shared_ptr<Operation>> queued;
   std::shared_ptr<Operation> active;
   bool connected = true;
@@ -328,10 +329,12 @@ private:
 template <class Result>
 Task<Result> RunPermissionOperation(std::shared_ptr<PermissionController::State> controller,
     typename PermissionOperation<Result>::Starter starter, Result failure, bool interactive) {
+  ValidateApplicationCall(controller->application_source);
   co_return co_await PermissionAwaiter<Result>(std::move(controller), std::move(starter), std::move(failure), interactive);
 }
 
 Task<PermissionStatus> CheckPermission(std::shared_ptr<PermissionController::State> state, Permission permission) {
+  ValidateApplicationCall(state->application_source);
   return RunPermissionOperation<PermissionStatus>(
       std::move(state),
       [permission](PermissionTransport& transport, PermissionStatusCompletion completion) {
@@ -342,29 +345,49 @@ Task<PermissionStatus> CheckPermission(std::shared_ptr<PermissionController::Sta
 }
 
 Task<PermissionStatus> RequestPermission(std::shared_ptr<PermissionController::State> state, Permission permission) {
+  auto source = CapturePresentationContext(state->application_source);
+  const auto identity = state->transport ? state->transport->PresentationIdentity() : 0;
   return RunPermissionOperation<PermissionStatus>(
       std::move(state),
-      [permission](PermissionTransport& transport, PermissionStatusCompletion completion) {
+      [permission, identity, source = std::move(source)](PermissionTransport& transport, PermissionStatusCompletion completion) {
+        if (!IsPresentationSourceAvailable(source)) {
+          completion(PermissionStatus::Unavailable);
+          return std::function<void()>{};
+        }
+        ExecutionGuard guard(source);
+        if (identity != transport.PresentationIdentity()) {
+          completion(PermissionStatus::Unavailable);
+          return std::function<void()>{};
+        }
         return transport.Request(permission, std::move(completion));
       },
-      PermissionStatus::Unavailable,
-      true);
+      PermissionStatus::Unavailable, true);
 }
 
 Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::State> state, Permission permission) {
+  auto source = CapturePresentationContext(state->application_source);
+  const auto identity = state->transport ? state->transport->PresentationIdentity() : 0;
   return RunPermissionOperation<bool>(
       std::move(state),
-      [permission](PermissionTransport& transport, PermissionSettingsCompletion completion) {
+      [permission, identity, source = std::move(source)](PermissionTransport& transport, PermissionSettingsCompletion completion) {
+        if (!IsPresentationSourceAvailable(source)) {
+          completion(false);
+          return std::function<void()>{};
+        }
+        ExecutionGuard guard(source);
+        if (identity != transport.PresentationIdentity()) {
+          completion(false);
+          return std::function<void()>{};
+        }
         return transport.OpenSettings(permission, std::move(completion));
       },
-      false,
-      true);
+      false, true);
 }
 
 } // namespace
 
 PermissionController::PermissionController(std::shared_ptr<PermissionTransport> transport,
-    UIThreadDispatcher dispatch_to_ui_thread)
+    UiThreadDispatcher dispatch_to_ui_thread)
     : state_(std::make_shared<State>(std::move(transport), std::move(dispatch_to_ui_thread))) {}
 
 PermissionController::~PermissionController() {
@@ -390,17 +413,20 @@ void PermissionController::Disconnect() noexcept {
   state_->Disconnect();
 }
 
-ApplicationService::ApplicationService(Runtime& runtime, ApplicationActivation startup_activation,
+ApplicationService::ApplicationService(Runtime& runtime, std::optional<ApplicationActivation> startup_activation, ApplicationLifecycleState initial_lifecycle,
                                        std::shared_ptr<PermissionController> permissions,
                                        std::shared_ptr<LocalNotificationService> local_notifications,
                                        std::shared_ptr<SystemTrayService> system_tray,
                                        PlatformClipboard* platform_clipboard, std::optional<AppDirectories> directories)
     : runtime_(&runtime), startup_activation_(std::move(startup_activation)),
-      lifecycle_state_(std::make_shared<StateCell<ApplicationLifecycleState>>(ApplicationLifecycleState::Active)),
+      lifecycle_state_(std::make_shared<StateCell<ApplicationLifecycleState>>(initial_lifecycle)),
       permissions_(std::move(permissions)), local_notifications_(std::move(local_notifications)),
       system_tray_(std::move(system_tray)), clipboard_(new huxerui::Clipboard(platform_clipboard)),
       directories_(std::move(directories)) {
-  ValidateApplicationActivation(startup_activation_);
+  if (startup_activation_) {
+    ValidateApplicationActivation(*startup_activation_);
+  }
+  ValidateApplicationLifecycleState(initial_lifecycle);
   if (!permissions_) {
     throw std::invalid_argument("HuxerUI application permission controller must not be empty");
   }
@@ -415,7 +441,7 @@ ApplicationService::ApplicationService(Runtime& runtime, ApplicationActivation s
   }
 }
 
-const ApplicationActivation& ApplicationService::StartupActivation() const noexcept {
+const std::optional<ApplicationActivation>& ApplicationService::StartupActivation() const noexcept {
   return startup_activation_;
 }
 
@@ -438,7 +464,7 @@ std::function<void()> ApplicationService::ConnectActivation(std::function<void(A
   activation_connection_ = next_connection_++;
   activation_handler_ = std::move(handler);
   if (!pending_activations_.empty()) {
-    runtime_->RequestFrame();
+    runtime_->RequestEventDispatch();
   }
 
   const std::uint64_t connection = activation_connection_;
@@ -455,17 +481,16 @@ ApplicationService::ConnectLifecycle(std::function<void(ApplicationLifecycleStat
   if (!handler) {
     throw std::invalid_argument("HuxerUI application lifecycle handler must not be empty");
   }
-  if (lifecycle_handler_) {
-    throw std::logic_error("HuxerUI application lifecycle handler is already connected");
-  }
   if (runtime_ == nullptr) {
     throw std::logic_error("HuxerUI application lifecycle handle is disconnected");
   }
 
-  lifecycle_connection_ = next_connection_++;
-  lifecycle_handler_ = std::move(handler);
-
-  const std::uint64_t connection = lifecycle_connection_;
+  const std::uint64_t connection = next_connection_++;
+  lifecycle_handlers_.emplace(connection,
+      [source = CurrentExecutionContext(), handler = std::move(handler)](ApplicationLifecycleState state) {
+        ExecutionGuard guard(source);
+        handler(state);
+      });
   std::weak_ptr<ApplicationService> service = weak_from_this();
   return [service = std::move(service), connection] {
     if (const std::shared_ptr<ApplicationService> active = service.lock()) {
@@ -507,7 +532,7 @@ Task<bool> ApplicationService::OpenPermissionSettings(Permission permission) con
 
 void ApplicationService::Quit() const {
   if (runtime_ != nullptr) {
-    runtime_->RequestApplicationQuit();
+    runtime_->RequestShutdown();
   }
 }
 
@@ -517,7 +542,7 @@ void ApplicationService::Enqueue(ApplicationActivation activation) {
     return;
   }
   pending_activations_.push_back(std::move(activation));
-  runtime_->RequestFrame();
+  runtime_->RequestEventDispatch();
 }
 
 void ApplicationService::UpdateLifecycleState(ApplicationLifecycleState lifecycle_state) {
@@ -528,28 +553,41 @@ void ApplicationService::UpdateLifecycleState(ApplicationLifecycleState lifecycl
   lifecycle_state_->value = lifecycle_state;
   ++lifecycle_state_->version;
   NotifyState(lifecycle_state_);
-  if (lifecycle_handler_) {
-    pending_lifecycle_states_.push_back(lifecycle_state);
-    runtime_->RequestFrame();
+  if (!lifecycle_handlers_.empty()) {
+    LifecycleDelivery delivery{lifecycle_state, {}};
+    for (const auto& [identity, handler] : lifecycle_handlers_) {
+      static_cast<void>(handler);
+      delivery.recipients.push_back(identity);
+    }
+    pending_lifecycle_states_.push_back(std::move(delivery));
+    runtime_->RequestEventDispatch();
   }
 }
 
 void ApplicationService::DispatchPending() {
-  // Snapshot both channels before invoking application code so reentrant submissions wait for the next frame.
+  if (!runtime_) return;
+  const auto application = runtime_->state_;
+  // Snapshot both channels so reentrant submissions wait for a later application dispatch turn.
   const std::size_t activation_count = pending_activations_.size();
   const std::size_t lifecycle_count = pending_lifecycle_states_.size();
   if (activation_handler_) {
-    for (std::size_t index = 0; index < activation_count; ++index) {
+    for (std::size_t index = 0; index < activation_count && !pending_activations_.empty() && activation_handler_; ++index) {
+      if (!application->accepts_tasks) return;
       ApplicationActivation activation = std::move(pending_activations_.front());
       pending_activations_.pop_front();
-      activation_handler_(std::move(activation));
+      auto handler = activation_handler_;
+      handler(std::move(activation));
     }
   }
-  if (lifecycle_handler_) {
-    for (std::size_t index = 0; index < lifecycle_count; ++index) {
-      const ApplicationLifecycleState lifecycle_state = pending_lifecycle_states_.front();
-      pending_lifecycle_states_.pop_front();
-      lifecycle_handler_(lifecycle_state);
+  for (std::size_t index = 0; index < lifecycle_count && !pending_lifecycle_states_.empty(); ++index) {
+    LifecycleDelivery delivery = std::move(pending_lifecycle_states_.front());
+    pending_lifecycle_states_.pop_front();
+    for (const auto identity : delivery.recipients) {
+      if (!application->accepts_tasks) return;
+      if (const auto found = lifecycle_handlers_.find(identity); found != lifecycle_handlers_.end()) {
+        auto handler = found->second;
+        handler(delivery.state);
+      }
     }
   }
 }
@@ -563,9 +601,8 @@ void ApplicationService::Disconnect() noexcept {
   pending_activations_.clear();
   pending_lifecycle_states_.clear();
   activation_handler_ = {};
-  lifecycle_handler_ = {};
+  lifecycle_handlers_.clear();
   activation_connection_ = 0;
-  lifecycle_connection_ = 0;
 }
 
 void ApplicationService::DisconnectActivationHandler(std::uint64_t connection) noexcept {
@@ -577,20 +614,14 @@ void ApplicationService::DisconnectActivationHandler(std::uint64_t connection) n
 }
 
 void ApplicationService::DisconnectLifecycleHandler(std::uint64_t connection) noexcept {
-  if (lifecycle_connection_ != connection) {
-    return;
-  }
-  // Ordered transitions belong to the mounted handler; LifecycleState remains authoritative after it disconnects.
-  pending_lifecycle_states_.clear();
-  lifecycle_handler_ = {};
-  lifecycle_connection_ = 0;
+  lifecycle_handlers_.erase(connection);
 }
 
 } // namespace huxerui::detail
 
 namespace huxerui {
 
-const ApplicationActivation& ApplicationHandle::StartupActivation() const noexcept {
+const std::optional<ApplicationActivation>& ApplicationHandle::StartupActivation() const noexcept {
   return service_->StartupActivation();
 }
 
@@ -611,15 +642,11 @@ File ApplicationHandle::CurrentDirectory() const {
 }
 
 SystemTrayHandle ApplicationHandle::SystemTray() const {
-  return SystemTrayHandle{
-      service_->SystemTray(),
-      detail::CurrentEnvironment(),
-      detail::Composer::RequireCurrent().ScopeId(),
-  };
+  return SystemTrayHandle{service_->SystemTray()};
 }
 
 LocalNotificationHandle ApplicationHandle::LocalNotifications() const {
-  return LocalNotificationHandle{service_->LocalNotifications(), detail::CurrentEnvironment()};
+  return LocalNotificationHandle{service_->LocalNotifications()};
 }
 
 Task<PermissionStatus> ApplicationHandle::CheckPermissionAsync(Permission permission) const {
@@ -638,10 +665,6 @@ void ApplicationHandle::Quit() const {
   service_->Quit();
 }
 
-std::function<void()>
-ApplicationHandle::ConnectActivation(std::function<void(ApplicationActivation)> handler) const {
-  return service_->ConnectActivation(std::move(handler));
-}
 
 std::function<void()>
 ApplicationHandle::ConnectLifecycle(std::function<void(ApplicationLifecycleState)> handler) const {

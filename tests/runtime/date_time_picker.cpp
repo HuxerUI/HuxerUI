@@ -279,7 +279,7 @@ TEST_CASE("TimePickerValidatesTimeOfDayAndStep") {
 TEST_CASE("DatePickerExposesControlledDatesAndSkipsDisabledKeyboardTargets") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{DatePickerApp, platform};
+  UiWindow runtime{DatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
@@ -307,7 +307,7 @@ TEST_CASE("DatePickerExposesControlledDatesAndSkipsDisabledKeyboardTargets") {
 TEST_CASE("DatePickerSemanticCellsRespectDisabledDatesAndEmitControlledChanges") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{DatePickerApp, platform};
+  UiWindow runtime{DatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
@@ -330,7 +330,7 @@ TEST_CASE("DatePickerSemanticCellsRespectDisabledDatesAndEmitControlledChanges")
 TEST_CASE("DatePickerYearGridKeepsBrowsingSeparateFromControlledSelection") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{YearDatePickerApp, platform};
+  UiWindow runtime{YearDatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
@@ -360,7 +360,7 @@ TEST_CASE("DatePickerYearGridPreservesValidGeometryWhenNarrowedAndRestored") {
       picker_locale = locale;
       date_changes = 0;
       TestPlatform platform{BuiltinTestResources()};
-      Runtime runtime{StyledDatePickerApp, platform};
+      UiWindow runtime{StyledDatePickerApp, platform};
       runtime.SetWindowMetrics({.viewport = {420.0F, 440.0F}});
       const auto initial = runtime.BuildCommit().semantic_frame;
       const std::string choose_year = locale == "ar" ? "اختيار السنة" : "Choose year";
@@ -402,7 +402,7 @@ TEST_CASE("DatePickerYearGridPreservesValidGeometryWhenNarrowedAndRestored") {
 
 TEST_CASE("DatePickerYearPagesRemainReachableAtRangeBoundaries") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{BoundedYearDatePickerApp, platform};
+  UiWindow runtime{BoundedYearDatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
@@ -429,7 +429,7 @@ TEST_CASE("DatePickerYearPagesRemainReachableAtRangeBoundaries") {
 TEST_CASE("DatePickerMonthPagingKeepsKeyboardDateSelectable") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{EndBoundedDatePickerApp, platform};
+  UiWindow runtime{EndBoundedDatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
@@ -445,7 +445,7 @@ TEST_CASE("DatePickerMonthPagingKeepsKeyboardDateSelectable") {
 TEST_CASE("TimePickerClockFaceEmitsHourAndMinuteProposals") {
   time_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TimePickerApp, platform};
+  UiWindow runtime{TimePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> hours = runtime.BuildCommit().semantic_frame;
@@ -487,7 +487,7 @@ TEST_CASE("TimePickerClockFaceEmitsHourAndMinuteProposals") {
 TEST_CASE("TimePickerMarksHoursWithoutSelectableMinutesDisabled") {
   time_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{UnavailableHourTimePickerApp, platform};
+  UiWindow runtime{UnavailableHourTimePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
@@ -508,7 +508,7 @@ TEST_CASE("TimePickerMarksHoursWithoutSelectableMinutesDisabled") {
 
 TEST_CASE("TimePickerKeyboardHoursChooseTheNearestAvailableMinute") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{HourFallbackTimePickerApp, platform};
+  UiWindow runtime{HourFallbackTimePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
@@ -523,7 +523,7 @@ TEST_CASE("PickersRepeatRejectedProposalsAndRespectDisabledRecomposition") {
   date_changes = 0;
   time_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{RejectedPickersApp, platform};
+  UiWindow runtime{RejectedPickersApp, platform};
   runtime.SetWindowMetrics({.viewport = {760.0F, 440.0F}});
 
   for (int attempt = 0; attempt < 2; ++attempt) {
@@ -560,7 +560,7 @@ TEST_CASE("PickersReleasePointerCaptureOnCancel") {
   TestPlatform platform{BuiltinTestResources()};
   SECTION("Calendar cancellation does not select the released date") {
     date_changes = 0;
-    Runtime runtime{DatePickerApp, platform};
+    UiWindow runtime{DatePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
     const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
     const Rect date = FindNode(*frame, SemanticRole::GridCell, "March 18, 2024").bounds;
@@ -572,7 +572,7 @@ TEST_CASE("PickersReleasePointerCaptureOnCancel") {
   }
   SECTION("Clock cancellation ends the live drag without advancing the dial") {
     time_changes = 0;
-    Runtime runtime{TimePickerApp, platform};
+    UiWindow runtime{TimePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
     const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
     const Rect hour = FindNode(*frame, SemanticRole::GridCell, "3").bounds;
@@ -589,7 +589,7 @@ TEST_CASE("PickersReleasePointerCaptureOnCancel") {
 TEST_CASE("TimePickerTouchSelectionUsesClockGeometry") {
   time_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{TimePickerApp, platform};
+  UiWindow runtime{TimePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
 
   const std::shared_ptr<const SemanticFrame> hours = runtime.BuildCommit().semantic_frame;
@@ -631,25 +631,28 @@ TEST_CASE("TimePickerTouchSelectionUsesClockGeometry") {
 TEST_CASE("PickersResolveLocalizedCalendarAndHourCyclePresentation") {
   TestPlatform platform{BuiltinTestResources()};
 
-  Runtime english{EnglishTimePickerApp, platform};
+  UiWindow english{EnglishTimePickerApp, platform};
   english.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
   const FlattenedScene& english_scene = english.BuildFrame();
   REQUIRE(FindText(english_scene, "01") != nullptr);
   REQUIRE(FindText(english_scene, "PM") != nullptr);
 
-  Runtime british{BritishTimePickerApp, platform};
+  TestPlatform british_platform{platform.platform_resources};
+  UiWindow british{BritishTimePickerApp, british_platform};
   british.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
   const FlattenedScene& british_scene = british.BuildFrame();
   REQUIRE(FindText(british_scene, "13") != nullptr);
   REQUIRE(FindText(british_scene, "PM") == nullptr);
 
-  Runtime british_calendar{BritishDatePickerApp, platform};
+  TestPlatform british_calendar_platform{platform.platform_resources};
+  UiWindow british_calendar{BritishDatePickerApp, british_calendar_platform};
   british_calendar.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
   const std::shared_ptr<const SemanticFrame> british_dates = british_calendar.BuildCommit().semantic_frame;
   const SemanticNode& monday = FindNode(*british_dates, SemanticRole::GridCell, "March 11, 2024");
   REQUIRE(monday.collection_item->column_index == 0);
 
-  Runtime chinese{ChinesePickersApp, platform};
+  TestPlatform chinese_platform{platform.platform_resources};
+  UiWindow chinese{ChinesePickersApp, chinese_platform};
   chinese.SetWindowMetrics({.viewport = {760.0F, 440.0F}});
   const FlattenedScene& chinese_scene = chinese.BuildFrame();
   REQUIRE(FindText(chinese_scene, "2024\xE5\xB9\xB4" "3\xE6\x9C\x88") != nullptr);
@@ -660,7 +663,7 @@ TEST_CASE("PickersResolveLocalizedCalendarAndHourCyclePresentation") {
 
 TEST_CASE("DatePickerValidationRemainsApplicationOwned") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{InvalidDatePickerApp, platform};
+  UiWindow runtime{InvalidDatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 440.0F}});
 
   const FlattenedScene& scene = runtime.BuildFrame();
@@ -726,7 +729,7 @@ TEST_CASE("PickersRefreshLocalizedLabelsWhenTheLocaleChanges") {
     const char* pm;
   };
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{LocalizedPickersApp, platform};
+  UiWindow runtime{LocalizedPickersApp, platform};
   runtime.SetWindowMetrics({.viewport = {820.0F, 480.0F}});
   runtime.BuildFrame();
   for (const Labels& labels : {
@@ -771,7 +774,7 @@ TEST_CASE("DatePickerChevronsPointInTheVisualPagingDirection") {
   for (const std::string locale : {"en-US", "ar"}) {
     picker_locale = locale;
     TestPlatform platform{BuiltinTestResources()};
-    Runtime runtime{StyledDatePickerApp, platform};
+    UiWindow runtime{StyledDatePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {420.0F, 440.0F}});
     const FlattenedScene& scene = runtime.BuildFrame();
     std::vector<DrawLineCommand> lines;
@@ -804,7 +807,7 @@ TEST_CASE("TimePickerPaintsIndependentFieldsAndOnePeriodGroup") {
        }) {
     picker_theme = theme;
     TestPlatform platform{BuiltinTestResources()};
-    Runtime runtime{StyledTimePickerApp, platform};
+    UiWindow runtime{StyledTimePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {500.0F, 520.0F}});
     const FlattenedScene& scene = runtime.BuildFrame();
     const DrawTextCommand* hour = FindText(scene, "01");
@@ -854,7 +857,7 @@ TEST_CASE("TimePickerMeasuresTheEntireHeaderAndOmitsThePeriodIn24HourLocales") {
   for (const std::string locale : {"en-US", "en-GB"}) {
     picker_locale = locale;
     TestPlatform platform{BuiltinTestResources()};
-    Runtime runtime{StyledTimePickerApp, platform};
+    UiWindow runtime{StyledTimePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {600.0F, 520.0F}});
     const FlattenedScene& scene = runtime.BuildFrame();
     const bool use_12_hour = locale == "en-US";
@@ -879,7 +882,7 @@ TEST_CASE("TimePickerRejectsInvalidHeaderGeometry") {
     picker_theme = FlatThemeDefinition();
     picker_theme.Set(style);
     TestPlatform platform{BuiltinTestResources()};
-    Runtime runtime{StyledTimePickerApp, platform};
+    UiWindow runtime{StyledTimePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {420.0F, 440.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   }
@@ -887,7 +890,7 @@ TEST_CASE("TimePickerRejectsInvalidHeaderGeometry") {
 
 TEST_CASE("DateAndTimePickerValidationKeepsAnOutlineOnBorderlessThemes") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     return MaterialTheme {
       Row {
         huxerui::DatePicker(Date{std::chrono::year{2024}, std::chrono::March, std::chrono::day{16}})
@@ -908,7 +911,7 @@ TEST_CASE("DateAndTimePickerValidationKeepsAnOutlineOnBorderlessThemes") {
 TEST_CASE("DatePickerRangeUpdatesClampBrowsingWithoutChangingSelection") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ChangingRangeDatePickerApp, platform};
+  UiWindow runtime{ChangingRangeDatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 440.0F}});
   const auto initial = runtime.BuildCommit().semantic_frame;
   REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
@@ -947,7 +950,7 @@ TEST_CASE("DatePickerRangeUpdatesClampBrowsingWithoutChangingSelection") {
 TEST_CASE("DatePickerRangeUpdatesKeepYearBrowsingReachable") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ChangingRangeDatePickerApp, platform};
+  UiWindow runtime{ChangingRangeDatePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {420.0F, 440.0F}});
   const auto initial = runtime.BuildCommit().semantic_frame;
   REQUIRE(runtime.CoreRuntime().PerformSemanticAction(
@@ -975,7 +978,7 @@ TEST_CASE("TimePickerPeriodButtonsCommitOnlyOnMatchingRelease") {
   for (const auto device : {PointerDeviceKind::Mouse, PointerDeviceKind::Touch}) {
     time_changes = 0;
     TestPlatform platform{BuiltinTestResources()};
-    Runtime runtime{TimePickerApp, platform};
+    UiWindow runtime{TimePickerApp, platform};
     runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
     const auto initial = runtime.BuildCommit().semantic_frame;
     const Rect am = FindNode(*initial, SemanticRole::Button, "AM").bounds;
@@ -1008,7 +1011,7 @@ TEST_CASE("TimePickerPeriodButtonsCommitOnlyOnMatchingRelease") {
 TEST_CASE("TimePickerPeriodAvailabilityUpdatesPaintInputAndSemanticsTogether") {
   time_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ChangingAvailabilityTimePickerApp, platform};
+  UiWindow runtime{ChangingAvailabilityTimePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
   const auto initial = runtime.BuildCommit().semantic_frame;
   const SemanticNode& am = FindNode(*initial, SemanticRole::Button, "AM");
@@ -1041,7 +1044,7 @@ TEST_CASE("TimePickerPeriodAvailabilityUpdatesPaintInputAndSemanticsTogether") {
 
 TEST_CASE("TimePickerReusesMeasuredLabelsAndRefreshesAvailabilityOnRecomposition") {
   PickerMeasuringPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ChangingAvailabilityTimePickerApp, platform};
+  UiWindow runtime{ChangingAvailabilityTimePickerApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 420.0F}});
   const auto initial = runtime.BuildCommit().semantic_frame;
   const SemanticNodeId hour = FindNode(*initial, SemanticRole::GridCell, "2").id;
@@ -1077,7 +1080,7 @@ TEST_CASE("TimePickerReusesMeasuredLabelsAndRefreshesAvailabilityOnRecomposition
 TEST_CASE("DatePickerEmptyMonthsDoNotActivateAnOffscreenDate") {
   date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     selected_date = UseState(Date{std::chrono::year{2024}, std::chrono::March, std::chrono::day{16}});
     return huxerui::DatePicker(selected_date)
         .DisabledDates([](Date value) { return value.month() == std::chrono::April; })

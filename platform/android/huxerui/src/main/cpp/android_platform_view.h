@@ -11,7 +11,7 @@
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -21,7 +21,7 @@ class AndroidRenderer;
 class AndroidPlatformViews final {
 public:
   AndroidPlatformViews(JNIEnv* environment, jobject root, jobject context, AndroidRenderer& renderer,
-                       PlatformRegistry& registry, Runtime& runtime);
+                       PlatformRegistry& registry, UiWindow& ui_window);
   ~AndroidPlatformViews();
 
   AndroidPlatformViews(const AndroidPlatformViews&) = delete;

@@ -135,8 +135,8 @@ NSNumber* AccessibilityCheckedValue(huxerui::SemanticCheckedState checked) {
 
 namespace huxerui::detail {
 
-MacAccessibility::MacAccessibility(Runtime& runtime, NSView* root_view, AppKitPlatformViews& platform_views) noexcept
-    : runtime_(&runtime), root_view_(root_view), platform_views_(&platform_views) {}
+MacAccessibility::MacAccessibility(UiWindow& ui_window, NSView* root_view, AppKitPlatformViews& platform_views) noexcept
+    : ui_window_(&ui_window), root_view_(root_view), platform_views_(&platform_views) {}
 
 MacAccessibility::~MacAccessibility() {
   for (HuxerUIAccessibilityElement* element in elements_.allValues) {
@@ -283,7 +283,7 @@ NSRect MacAccessibility::Frame(SemanticNodeId id) const {
 }
 
 bool MacAccessibility::PerformAction(SemanticNodeId id, SemanticAction action) {
-  return runtime_ != nullptr && runtime_->PerformSemanticAction(id, action);
+  return ui_window_ != nullptr && ui_window_->PerformSemanticAction(id, action);
 }
 
 } // namespace huxerui::detail

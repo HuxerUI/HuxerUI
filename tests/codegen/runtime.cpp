@@ -4,11 +4,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "internal_access.h"
 
 namespace {
@@ -16,17 +18,22 @@ namespace {
 using huxerui::Application;
 using huxerui::DrawTextCommand;
 using huxerui::FrameCommit;
-using huxerui::PlatformAdapter;
+using huxerui::UiWindow;
 using huxerui::RenderFrame;
 using huxerui::RenderNode;
-using huxerui::Runtime;
 using huxerui::Size;
 using huxerui::State;
 using huxerui::Text;
 using huxerui::UseState;
 using huxerui::View;
-class TestPlatform final : public PlatformAdapter {
+class TestPlatform final : public UiWindow, public huxerui::Runtime {
 public:
+  TestPlatform()
+      : Runtime([this](std::function<void()> callback) { pending.push_back(std::move(callback)); }) {}
+
+  ~TestPlatform() override { UiWindow::Retire(); Runtime::Retire(); }
+  void OnRuntimeStopped() override {}
+  std::vector<std::function<void()>> pending;
   void RequestFrameAt(double deadline) override {
     static_cast<void>(deadline);
     ++requested_frames;
@@ -153,10 +160,12 @@ View GeneratedGrowApp() {
 
 } // namespace
 
-TEST_CASE("Generated scopes run in Runtime") {
+TEST_CASE("Generated scopes run in UiWindow") {
   TestPlatform platform;
   Application application{GeneratedApp, {.show_debug_overlay = false}};
-  Runtime runtime{application, platform};
+  huxerui::detail::InternalAccess::InitializeRuntime(platform, application);
+  huxerui::detail::InternalAccess::InitializeWindow(platform, platform);
+  UiWindow& runtime = platform;
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   REQUIRE(FirstText(runtime.BuildFrame()) == "3");
@@ -172,7 +181,9 @@ TEST_CASE("Generated scopes run in Runtime") {
 TEST_CASE("Generated scopes expose recomposed parent layout values") {
   TestPlatform platform;
   Application application{GeneratedGrowApp, {.show_debug_overlay = false}};
-  Runtime runtime{application, platform};
+  huxerui::detail::InternalAccess::InitializeRuntime(platform, application);
+  huxerui::detail::InternalAccess::InitializeWindow(platform, platform);
+  UiWindow& runtime = platform;
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 

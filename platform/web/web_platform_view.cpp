@@ -21,7 +21,7 @@
 
 #include <huxerui/web/platform_registry.h>
 
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 #include "web_renderer.h"
 
 namespace huxerui::detail {
@@ -76,8 +76,8 @@ struct SliceKeyHash {
 using LayerKey = std::variant<SliceKey, std::uint64_t>;
 
 struct EventRoute {
-  Runtime* runtime = nullptr;
-  // Value-returning events are synchronous, so a route may enter Runtime only from its owning UI thread.
+  UiWindow* ui_window = nullptr;
+  // Value-returning events are synchronous, so a route may enter UiWindow only from its owning UI thread.
   std::thread::id ui_thread;
   std::uint64_t identity = 0;
   bool active = false;
@@ -197,9 +197,9 @@ struct HostedPlatformView {
 } // namespace
 
 struct WebPlatformViews::State {
-  State(WebRenderer& renderer_value, PlatformRegistry& registry_value, Runtime& runtime_value,
+  State(WebRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value,
         val root_value, val base_canvas_value)
-      : renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value),
+      : renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value),
         root(std::move(root_value)), base_canvas(std::move(base_canvas_value)) {}
 
   std::uint32_t AllocateToken() {
@@ -216,31 +216,31 @@ struct WebPlatformViews::State {
 
   std::unique_ptr<HostedPlatformView> Create(const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
-    std::shared_ptr<const web::detail::WebElementFactory> factory = registry->FindView<web::detail::WebElementFactory>(
+    std::shared_ptr<const web::detail::WebElementFactory> factory = registry->FindView<web::detail::WebElementFactory>(*ui_window,
         command.Type(), command.Properties().Type(), command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI Web PlatformView factory must provide create");
     }
 
     auto route =
-        std::make_shared<EventRoute>(EventRoute{runtime, std::this_thread::get_id(), command.Identity(), false});
+        std::make_shared<EventRoute>(EventRoute{ui_window, std::this_thread::get_id(), command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
     PlatformEventEmitter events = MakePlatformEventEmitter(
         [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
           if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
-              route->runtime == nullptr) {
+              route->ui_window == nullptr) {
             return std::nullopt;
           }
-          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->ui_window, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
           if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
-              route->runtime == nullptr) {
+              route->ui_window == nullptr) {
             return std::nullopt;
           }
-          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->ui_window, route->identity, name, payload);
         });
 
     auto hosted = std::make_unique<HostedPlatformView>();
@@ -337,7 +337,7 @@ struct WebPlatformViews::State {
 
   WebRenderer* renderer;
   PlatformRegistry* registry;
-  Runtime* runtime;
+  UiWindow* ui_window;
   val root;
   val base_canvas;
   Size viewport;
@@ -350,9 +350,9 @@ struct WebPlatformViews::State {
   std::vector<LayerKey> order;
 };
 
-WebPlatformViews::WebPlatformViews(WebRenderer& renderer, PlatformRegistry& registry, Runtime& runtime,
+WebPlatformViews::WebPlatformViews(WebRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window,
                                    val root, val base_canvas)
-    : state_(std::make_unique<State>(renderer, registry, runtime, std::move(root), std::move(base_canvas))) {}
+    : state_(std::make_unique<State>(renderer, registry, ui_window, std::move(root), std::move(base_canvas))) {}
 
 WebPlatformViews::~WebPlatformViews() {
   Shutdown();
@@ -484,15 +484,15 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     hosted->event_route->active = true;
   }
 
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
   if (focused_identity.has_value()) {
     const auto focused = state_->hosted.find(*focused_identity);
     if (focused == state_->hosted.end() || !focused->second->placement.has_value() ||
         focused->second->placement->hidden) {
-      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
     } else if (!WebPlatformElementContainsFocus(focused->second->element.as_handle()) &&
                !FocusWebPlatformElement(focused->second->element.as_handle())) {
-      InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
     }
   } else {
     const bool platform_view_focused = std::ranges::any_of(state_->hosted, [](const auto& entry) {
@@ -524,27 +524,27 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
 }
 
 void WebPlatformViews::SynchronizeFocus(std::uint32_t token, bool focus_visible) {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return;
   }
-  InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, state_->IdentityForToken(token), focus_visible);
+  InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, state_->IdentityForToken(token), focus_visible);
 }
 
 bool WebPlatformViews::HitTest(std::uint32_t token, Point point) const {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return false;
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
-  return identity.has_value() && InternalAccess::HitTestPlatformView(*state_->runtime, point) == identity;
+  return identity.has_value() && InternalAccess::HitTestPlatformView(*state_->ui_window, point) == identity;
 }
 
 void WebPlatformViews::MoveFocus(std::uint32_t token, bool reverse) {
-  if (!state_ || state_->runtime == nullptr) {
+  if (!state_ || state_->ui_window == nullptr) {
     return;
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
   if (identity.has_value()) {
-    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->runtime, *identity, reverse));
+    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *identity, reverse));
   }
 }
 
@@ -555,7 +555,7 @@ void WebPlatformViews::Shutdown() noexcept {
   for (auto& [identity, hosted] : state_->hosted) {
     static_cast<void>(identity);
     hosted->event_route->active = false;
-    hosted->event_route->runtime = nullptr;
+    hosted->event_route->ui_window = nullptr;
   }
   state_->hosted.clear();
   state_->identities_by_token.clear();
@@ -569,7 +569,7 @@ void WebPlatformViews::Shutdown() noexcept {
   state_->slices.clear();
   state_->base_slice.reset();
   state_->order.clear();
-  state_->runtime = nullptr;
+  state_->ui_window = nullptr;
 }
 
 } // namespace huxerui::detail

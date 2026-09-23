@@ -52,7 +52,7 @@ The controller does not cache authorization state, publish observers, or mirror 
 Queries may run independently.
 Requests and settings transitions are serialized because supported hosts permit only one application-owned permission interaction at a time.
 
-Every transport completion is posted through the owning `UIThreadDispatcher` before the awaiting Task resumes.
+Every transport completion is posted through the owning `UiThreadDispatcher` before the awaiting Task resumes.
 Application code may therefore update `State` directly after `co_await`.
 Canceling the owning Task detaches its continuation and invokes the platform cancellation callback when one exists.
 An operation with a cancellation callback relinquishes its serialized interaction slot when that callback runs.

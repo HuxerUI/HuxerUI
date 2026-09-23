@@ -395,6 +395,6 @@ const Application application{
             .minimum_size = Size{720.0F, 460.0F},
         },
         .show_debug_overlay = false,
-        .root_hooks = {InstallInstallerSession},
+        .window_hooks = {InstallInstallerSession},
     },
 };

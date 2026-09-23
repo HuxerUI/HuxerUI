@@ -89,15 +89,16 @@ void ValidatePumpOptions(const testing::UiPumpOptions& options, double now) {
 class UiTestSession {
 public:
   explicit UiTestSession(const Application& application, const testing::UiTestOptions& options)
-      : queue(std::make_shared<UiTestQueue>()), adapter(queue, options), owner(std::this_thread::get_id()),
+      : queue(std::make_shared<UiTestQueue>()), window(queue, options), owner(std::this_thread::get_id()),
         maximum_callbacks(options.maximum_callbacks_per_frame) {
     try {
       if (!maximum_callbacks) throw std::invalid_argument("HuxerUI testing callback budget must be positive");
-      runtime = std::make_unique<Runtime>(application, adapter, options.activation);
+      InternalAccess::InitializeRuntime(window, application, options.activation);
+      InternalAccess::InitializeWindow(window, window);
       metrics.viewport = options.viewport;
       metrics.safe_area = options.safe_area;
-      runtime->SetWindowMetrics(metrics);
-      runtime->UpdateResourceConfiguration(options.resources);
+      window.SetWindowMetrics(metrics);
+      window.UiWindow::UpdateResourceConfiguration(options.resources);
       Pump(0);
     } catch (...) {
       Shutdown();
@@ -109,8 +110,9 @@ public:
 
   void Shutdown() noexcept {
     busy = true;
-    runtime.reset();
-    // Runtime teardown can enqueue transport cancellation and disposal while the adapter is still alive.
+    InternalAccess::RetireWindow(window);
+    InternalAccess::RetireRuntime(window);
+    // UiWindow teardown can enqueue transport cancellation and disposal while the window is still alive.
     for (std::size_t processed = 0; processed < maximum_callbacks; ++processed) {
       std::function<void()> callback;
       {
@@ -161,7 +163,7 @@ public:
   void Pump(double duration) {
     Check(true);
     ValidateDuration(duration);
-    ValidateDuration(adapter.time + duration);
+    ValidateDuration(window.time + duration);
     Mutate([&] {
       std::deque<std::function<void()>> ready;
       {
@@ -170,14 +172,15 @@ public:
           throw testing::UiTestFailure("HuxerUI testing frame callback budget exceeded");
         ready.swap(queue->callbacks);
       }
-      adapter.time += duration;
-      // A frame consumes the previous wakeup. Tasks still pending reassert their deadline during BuildFrame.
-      adapter.frame_deadline.reset();
+      window.time += duration;
+      window.DeliverTimers();
+      // A frame consumes the previous rendering wakeup.
+      window.frame_deadline.reset();
       for (auto& callback : ready) callback();
-      const auto& commit = runtime->BuildFrame();
-      if (commit.next_frame_deadline) adapter.RequestFrameAt(*commit.next_frame_deadline);
+      const auto& commit = window.BuildFrame();
+      if (commit.next_frame_deadline) window.RequestFrameAt(*commit.next_frame_deadline);
       nodes.clear();
-      if (const auto* root = InternalAccess::MountedRoot(*runtime)) {
+      if (const auto* root = InternalAccess::MountedRoot(window)) {
         Collect(*root, {}, {0, 0, metrics.viewport.width, metrics.viewport.height}, true);
       }
       semantics = commit.semantic_frame;
@@ -346,7 +349,7 @@ public:
     message.imbue(std::locale::classic());
     message << "HuxerUI testing " << operation << " expected one node, found " << count
             << "\nQuery: " << selector << "\nViewport: " << metrics.viewport.width << 'x' << metrics.viewport.height
-            << "; time=" << adapter.time << "; semantic_revision=" << (semantics ? semantics->revision : 0)
+            << "; time=" << window.time << "; semantic_revision=" << (semantics ? semantics->revision : 0)
             << (count ? "\nCandidates:" : "\nScope excerpt:");
     for (const auto& candidate : candidates) message << "\n  " << candidate;
     if (count > candidates.size()) message << "\n  ... " << count - candidates.size() << " more matches";
@@ -366,7 +369,7 @@ public:
 
   void Pointer(const PointerEvent& event) {
     ValidatePoint(event.position);
-    Mutate([&] { runtime->HandlePointerEvent(event); });
+    Mutate([&] { window.HandlePointerEvent(event); });
     if (event.type == PointerEventType::Down) active_pointers.insert(event.pointer_id);
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel)
       active_pointers.erase(event.pointer_id);
@@ -382,7 +385,7 @@ public:
       // Preserve the original failure even when cancellation itself throws in application code.
       event.type = PointerEventType::Cancel;
       event.pressed_buttons = PointerButton::None;
-      try { runtime->HandlePointerEvent(event); } catch (...) {}
+      try { window.HandlePointerEvent(event); } catch (...) {}
       active_pointers.erase(event.pointer_id);
       throw;
     }
@@ -409,16 +412,16 @@ public:
   TextInputSessionId RequireEditor(const std::vector<testing::UiSelector>& selectors) const {
     Check(true);
     const auto node = One(selectors, "Edit");
-    if (!adapter.input_state || InternalAccess::FocusedNodeIdentity(*runtime) != node.identity)
+    if (!window.input_state || InternalAccess::FocusedNodeIdentity(window) != node.identity)
       throw testing::UiTestFailure("HuxerUI testing editor must own the active text-input session");
-    return adapter.input_state->session_id;
+    return window.input_state->session_id;
   }
 
   void Edit(const std::vector<testing::UiSelector>& selectors, TextInputCommand command, bool replace = false) {
     const auto session = RequireEditor(selectors);
     std::vector<TextInputCommand> commands;
     if (replace) {
-      const auto context = runtime->QueryTextInputContext(session, 0, 0);
+      const auto context = window.QueryTextInputContext(session, 0, 0);
       if (context.result_code != TextInputResultCode::Ok)
         throw testing::UiTestFailure("HuxerUI testing editor cannot report its text extent");
       commands.push_back({
@@ -427,15 +430,14 @@ public:
       command.target = TextRange{0, context.total_length};
     }
     commands.push_back(std::move(command));
-    const auto result = Mutate([&] { return runtime->HandleTextInputCommands({session, std::move(commands)}); });
+    const auto result = Mutate([&] { return window.HandleTextInputCommands({session, std::move(commands)}); });
     if (result.result_code != TextInputResultCode::Ok)
       throw testing::UiTestFailure("HuxerUI testing text-input command was rejected");
     Pump(0);
   }
 
   std::shared_ptr<UiTestQueue> queue;
-  TestingPlatformAdapter adapter;
-  std::unique_ptr<Runtime> runtime;
+  TestingWindow window;
   WindowMetrics metrics;
   std::thread::id owner;
   std::size_t maximum_callbacks;
@@ -566,7 +568,7 @@ Point UiNodeQuery::ScrollBy(Point delta) const {
   detail::ValidatePoint(delta);
   const Point point = session->TargetPoint(selectors_, "ScrollBy");
   const auto consumed = session->Mutate([&] {
-    return session->runtime->HandleScrollInput({.position = point, .delta_x = delta.x, .delta_y = delta.y});
+    return session->window.HandleScrollInput({.position = point, .delta_x = delta.x, .delta_y = delta.y});
   });
   session->Pump(0);
   return consumed;
@@ -576,7 +578,7 @@ UiNodeQuery UiNodeQuery::ScrollUntil(UiSelector target, UiScrollOptions options)
   session->Check(true);
   detail::ValidatePoint(options.step);
   detail::ValidateDuration(options.interval.count());
-  detail::ValidateDuration(session->adapter.time + options.interval.count() * options.maximum_steps);
+  detail::ValidateDuration(session->window.time + options.interval.count() * options.maximum_steps);
   if (options.step == Point{} || options.interval.count() <= 0 || !options.maximum_steps)
     throw std::invalid_argument("HuxerUI testing ScrollUntil requires a nonzero delta, positive interval and step bound");
   const auto identity = session->One(selectors_, "ScrollUntil").identity;
@@ -613,7 +615,7 @@ void UiNodeQuery::Submit() const {
   auto session = Session(session_);
   const auto id = session->RequireEditor(selectors_);
   const bool accepted = session->Mutate([&] {
-    return session->runtime->PerformTextInputAction(id, session->adapter.input_action);
+    return session->window.PerformTextInputAction(id, session->window.input_action);
   });
   if (!accepted) throw UiTestFailure("HuxerUI testing text action was rejected");
   session->Pump(0);
@@ -639,7 +641,7 @@ std::vector<SemanticNode> UiSemanticQuery::All() const {
 void UiSemanticQuery::PerformSemanticAction(const SemanticAction& action) const {
   auto session = Session(session_);
   const auto node = session->One(selectors_, "PerformSemanticAction");
-  const bool accepted = session->Mutate([&] { return session->runtime->PerformSemanticAction(node.id, action); });
+  const bool accepted = session->Mutate([&] { return session->window.PerformSemanticAction(node.id, action); });
   if (!accepted) throw UiTestFailure("HuxerUI testing semantic action was rejected");
   session->Pump(0);
 }
@@ -693,7 +695,9 @@ void UiTest::PumpAndSettle(UiPumpOptions options) {
       std::scoped_lock lock(session_->queue->mutex);
       callbacks = session_->queue->callbacks.size();
     }
-    const auto deadline = session_->adapter.frame_deadline;
+    auto deadline = session_->window.frame_deadline;
+    const auto timer_deadline = session_->window.NextTimerDeadline();
+    if (timer_deadline && (!deadline || *timer_deadline < *deadline)) deadline = timer_deadline;
     if (!callbacks && !deadline) return;
     if (Now() >= end || frames >= options.maximum_frames) {
       std::ostringstream message;
@@ -711,30 +715,30 @@ void UiTest::PumpAndSettle(UiPumpOptions options) {
 }
 std::optional<TextInputState> UiTest::ActiveTextInput() const {
   session_->Check();
-  return session_->adapter.input_state;
+  return session_->window.input_state;
 }
-double UiTest::Now() const { session_->Check(); return session_->adapter.time; }
+double UiTest::Now() const { session_->Check(); return session_->window.time; }
 void UiTest::SetWindowMetrics(WindowMetrics metrics) {
   session_->Mutate([&] {
-    session_->runtime->SetWindowMetrics(metrics);
+    session_->window.SetWindowMetrics(metrics);
     session_->metrics = metrics;
   });
 }
 void UiTest::UpdateResourceConfiguration(ResourceConfiguration configuration) {
   session_->Mutate([&] {
-    session_->runtime->UpdateResourceConfiguration(configuration);
-    session_->adapter.configuration = std::move(configuration);
+    session_->window.UiWindow::UpdateResourceConfiguration(configuration);
+    session_->window.configuration = std::move(configuration);
   });
 }
 void UiTest::SendPointer(const PointerEvent& event) { session_->Pointer(event); }
 Point UiTest::SendScroll(const ScrollInputEvent& event) {
-  return session_->Mutate([&] { return session_->runtime->HandleScrollInput(event); });
+  return session_->Mutate([&] { return session_->window.HandleScrollInput(event); });
 }
 bool UiTest::SendKey(const KeyEvent& event) {
-  return session_->Mutate([&] { return session_->runtime->HandleKeyEvent(event); });
+  return session_->Mutate([&] { return session_->window.HandleKeyEvent(event); });
 }
 TextInputApplyResult UiTest::SendTextInput(const TextInputCommandBatch& batch) {
-  return session_->Mutate([&] { return session_->runtime->HandleTextInputCommands(batch); });
+  return session_->Mutate([&] { return session_->window.HandleTextInputCommands(batch); });
 }
 void UiTest::TapAt(Point position, UiPointerOptions options) { session_->Tap(position, options); }
 void UiTest::PressKey(Key key, KeyModifiers modifiers) {
@@ -760,7 +764,7 @@ void UiTest::Drag(Point start, Point end, UiDragOptions options) {
     const double origin = Now();
     for (std::size_t i = 1; i <= options.segments; ++i) {
       const auto fraction = static_cast<double>(i) / static_cast<double>(options.segments);
-      session_->adapter.time = origin + options.duration.count() * fraction;
+      session_->window.time = origin + options.duration.count() * fraction;
       event.type = PointerEventType::Move;
       event.changed_button = PointerButton::None;
       event.position = {std::lerp(start.x, end.x, static_cast<float>(fraction)),

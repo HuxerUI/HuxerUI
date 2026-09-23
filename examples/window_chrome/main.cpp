@@ -4,32 +4,45 @@
 
 using namespace huxerui;
 
+struct WindowChromeViewModel {
+  std::optional<WindowHandle> window;
+
+  void ShowWindow() const {
+    if (window) window->Activate();
+  }
+};
+
+void InstallWindowChrome(ApplicationContext& context) {
+  auto model = std::make_shared<WindowChromeViewModel>();
+  context.Provide(model);
+  const auto application = UseApplication();
+  const auto tray = application.SystemTray();
+  tray.OnActivate([model] { model->ShowWindow(); });
+  tray.Show(window_chrome::images::tray, {
+      .tooltip = "HuxerUI Window Chrome",
+      .menu = {
+          MenuItem("Show window", [model] { model->ShowWindow(); }),
+          MenuSection{},
+          MenuItem("Quit", [application] { application.Quit(); }),
+      },
+  });
+}
 [[huxerui::composable]]
 View WindowChromeDemo() {
   const ThemeSpec& theme = UseTheme();
   const ApplicationHandle application = UseApplication();
   const WindowHandle window = UseWindow();
+  const auto model = UseService<WindowChromeViewModel>();
+  Lifecycle([model, window] {
+    model->window = window;
+    return [model] { model->window.reset(); };
+  });
   const SystemTrayHandle tray = application.SystemTray();
   const bool tray_available = tray.IsAvailable();
   auto exit_dialog_open = UseState(false);
   auto toast = UseToast();
   auto dialog = UseDialog();
 
-  tray.OnActivate([window] { window.Activate(); });
-  Lifecycle([application, tray, window] {
-    tray.Show(
-        window_chrome::images::tray,
-        SystemTrayOptions{
-            .tooltip = "HuxerUI Window Chrome",
-            .menu = {
-                MenuItem("Show window", [window] { window.Activate(); }),
-                MenuSection{},
-                MenuItem("Quit", [application] { application.Quit(); }),
-            },
-        }
-    );
-    return [tray] { tray.Hide(); };
-  });
   Lifecycle([window, tray_available] {
     if (!tray_available) {
       window.Show();
@@ -122,7 +135,7 @@ View WindowChromeDemo() {
         Divider(),
         Column {
           Text("Application-defined window shell", TextRole::Title),
-          Text("The title bar, window requests, and system tray share application-level services."),
+          Text("Window controls belong to this window; the system tray remains available for the application lifetime."),
           Text(tray_available ? "System tray is available" : "System tray is unavailable", TextRole::Label)
               .With(Foreground(tray_available ? theme.colors.primary : theme.colors.error)),
           Text("Minimize hides the window when the tray is available. Activating the tray icon restores it."),
@@ -153,5 +166,6 @@ const Application application{
             .title_bar_height = 48.0F,
         },
         .show_debug_overlay = false,
+        .application_hooks = {InstallWindowChrome},
     }
 };

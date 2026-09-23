@@ -7,7 +7,7 @@
 #include <huxerui/text_input.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -20,7 +20,9 @@ public:
   Win32TextInput(const Win32TextInput&) = delete;
   Win32TextInput& operator=(const Win32TextInput&) = delete;
 
-  void SetRuntime(Runtime* runtime) noexcept;
+  /// Binds native callbacks to their shared window state on the application thread.
+  /// @param ui_window Borrowed original window, or null to clear the binding before its destruction.
+  void SetUiWindow(UiWindow* ui_window) noexcept;
   void SetWindow(HWND window) noexcept;
   void SetDpiScale(float scale) noexcept;
   void Reset() noexcept;

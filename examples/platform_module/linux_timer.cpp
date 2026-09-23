@@ -36,8 +36,8 @@ struct PendingStart {
 };
 
 struct LinuxTimerState : huxerui::example::TimerService {
-  static std::shared_ptr<LinuxTimerState> Create(huxerui::PlatformAdapter& adapter) {
-    auto state = std::shared_ptr<LinuxTimerState>(new LinuxTimerState(adapter));
+  static std::shared_ptr<LinuxTimerState> Create(huxerui::UiWindow& ui_window) {
+    auto state = std::shared_ptr<LinuxTimerState>(new LinuxTimerState(ui_window));
     LinuxTimerState* state_pointer = state.get();
     state->worker = std::thread([state_pointer] { state_pointer->Run(); });
     return state;
@@ -175,7 +175,7 @@ struct LinuxTimerState : huxerui::example::TimerService {
   }
 
 private:
-  explicit LinuxTimerState(huxerui::PlatformAdapter& adapter_value) : adapter(&adapter_value) {
+  explicit LinuxTimerState(huxerui::UiWindow& window_value) : ui_window(&window_value) {
     timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     if (timer_fd < 0) {
       throw std::runtime_error("HuxerUI example could not create the Linux platform timer");
@@ -191,7 +191,7 @@ private:
   template <class Result, class Value>
   void Complete(std::function<void(huxerui::PlatformResult<Result>)> completion, Value&& value) {
     huxerui::PlatformResult<Result> result(std::forward<Value>(value));
-    adapter->DispatchToUIThread(
+    ui_window->DispatchToUiThread(
         [completion = std::move(completion), result = std::move(result)]() mutable { completion(std::move(result)); });
   }
 
@@ -291,7 +291,7 @@ private:
       if (read_failed) {
         return false;
       }
-      adapter->DispatchToUIThread(
+      ui_window->DispatchToUiThread(
           [completion = std::move(first_completion), handler = std::move(handler), next_tick]() mutable {
             if (completion) {
               completion(next_tick);
@@ -333,7 +333,7 @@ private:
 
   int timer_fd = -1;
   int stop_fd = -1;
-  huxerui::PlatformAdapter* adapter = nullptr;
+  huxerui::UiWindow* ui_window = nullptr;
   std::thread worker;
   std::mutex mutex;
   std::function<void(std::uint64_t)> tick_handler;
@@ -349,11 +349,10 @@ private:
 
 namespace huxerui::example {
 
-void InstallTimer(RootContext& root) {
-  root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](PlatformAdapter& adapter) {
-    return std::static_pointer_cast<TimerService>(LinuxTimerState::Create(adapter));
+void InstallTimer(ApplicationContext& root) {
+  root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](UiWindow& ui_window) {
+    return std::static_pointer_cast<TimerService>(LinuxTimerState::Create(ui_window));
   });
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<TimerService>>(timer::type));
 }
 
 } // namespace huxerui::example

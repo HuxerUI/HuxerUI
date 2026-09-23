@@ -57,7 +57,7 @@ RenderedTextOpacity(const RenderNode& node, std::string_view text, float inherit
   return std::nullopt;
 }
 
-View RootHookApp() {
+View WindowHookApp() {
   HUXERUI_SCOPE({
     observed_root_service_value = UseService<TestRootService>()->value;
     return Button("application").OnClick([] { ++root_app_clicks; });
@@ -190,7 +190,7 @@ View DeclarativeDialogMotionApp() {
 
 } // namespace
 
-TEST_CASE("TestRootHooksServicesAndLayers") {
+TEST_CASE("TestWindowHooksServicesAndLayers") {
   installed_root_service.reset();
   observed_root_service_value = 0;
   root_app_clicks = 0;
@@ -199,7 +199,7 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
 
   huxerui::AppOptions options;
   options.show_debug_overlay = false;
-  options.root_hooks.push_back([](huxerui::RootContext& root) {
+  options.window_hooks.push_back([](huxerui::WindowContext& root) {
     installed_root_service = std::make_shared<TestRootService>(TestRootService{
         &root.Layers(),
         42,
@@ -208,7 +208,7 @@ TEST_CASE("TestRootHooksServicesAndLayers") {
   });
 
   TestPlatform platform;
-  Runtime runtime{RootHookApp, platform, std::move(options)};
+  UiWindow runtime{WindowHookApp, platform, std::move(options)};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
   REQUIRE(observed_root_service_value == 42);
@@ -284,7 +284,7 @@ TEST_CASE("TestViewportClassRecomposesExistingLayersAcrossBreakpoints") {
 
   AppOptions options;
   options.show_debug_overlay = false;
-  options.root_hooks.push_back([](RootContext& root) {
+  options.window_hooks.push_back([](WindowContext& root) {
     installed_root_service = std::make_shared<TestRootService>(TestRootService{
         &root.Layers(),
         0,
@@ -293,7 +293,7 @@ TEST_CASE("TestViewportClassRecomposesExistingLayersAcrossBreakpoints") {
   });
 
   TestPlatform platform;
-  Runtime runtime{RootHookApp, platform, std::move(options)};
+  UiWindow runtime{WindowHookApp, platform, std::move(options)};
   runtime.SetWindowMetrics({.viewport = {480.0F, 600.0F}});
   runtime.BuildFrame();
 
@@ -322,7 +322,7 @@ TEST_CASE("TestToastAndDialogPresentation") {
   saved_dialog_context.reset();
 
   TestPlatform platform;
-  Runtime runtime{PresentationThemeApp, platform};
+  UiWindow runtime{PresentationThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   REQUIRE(saved_toast.has_value());
@@ -413,7 +413,7 @@ TEST_CASE("TestToastRejectsAnEmptyLiteralBeforeAttachingALayer") {
   saved_toast.reset();
 
   TestPlatform platform;
-  Runtime runtime{PresentationApp, platform};
+  UiWindow runtime{PresentationApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -425,7 +425,7 @@ TEST_CASE("TestToastRetainsItsLayerUntilExitMotionCompletes") {
   saved_toast.reset();
 
   TestPlatform platform;
-  Runtime runtime{MaterialPresentationApp, platform};
+  UiWindow runtime{MaterialPresentationApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
 
@@ -444,7 +444,7 @@ TEST_CASE("TestSnackBarValidatesRequestsBeforePresentation") {
   saved_snack_bar.reset();
 
   TestPlatform platform;
-  Runtime runtime{SnackBarApp, platform};
+  UiWindow runtime{SnackBarApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 200.0F}});
   runtime.BuildFrame();
 
@@ -463,7 +463,7 @@ TEST_CASE("TestSnackBarAtomicallyReplacesRequestsAndGuardsReentrantActions") {
   std::optional<LayerId> replacement;
 
   TestPlatform platform;
-  Runtime runtime{MaterialSnackBarApp, platform};
+  UiWindow runtime{MaterialSnackBarApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 220.0F}});
   runtime.BuildFrame();
 
@@ -506,7 +506,7 @@ TEST_CASE("TestSnackBarTimeoutPausesForHoverFocusAndApplicationLifecycle") {
   saved_snack_bar.reset();
 
   TestPlatform platform;
-  Runtime runtime{SnackBarApp, platform};
+  UiWindow runtime{SnackBarApp, platform};
   runtime.SetWindowMetrics({.viewport = {360.0F, 220.0F}});
   runtime.BuildFrame();
 
@@ -560,7 +560,7 @@ TEST_CASE("TestCommandDialogUpdateRefreshesCapturedEnvironmentAndBarrier") {
   saved_dialogs.reset();
 
   TestPlatform platform;
-  Runtime runtime{DialogUpdateEnvironmentApp, platform};
+  UiWindow runtime{DialogUpdateEnvironmentApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -591,7 +591,7 @@ TEST_CASE("TestStandardDialogUsesDefaultLabelsAndTwoActions") {
   positive_dialog_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{PresentationThemeApp, platform};
+  UiWindow runtime{PresentationThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -631,7 +631,7 @@ TEST_CASE("TestStandardDialogKeepsNaturalWidthAndRejectsEmptyLiteralContent") {
   saved_dialogs.reset();
 
   TestPlatform platform;
-  Runtime runtime{MaterialPresentationApp, platform};
+  UiWindow runtime{MaterialPresentationApp, platform};
   runtime.SetWindowMetrics({.viewport = {800.0F, 480.0F}});
   runtime.BuildFrame();
 
@@ -651,7 +651,7 @@ TEST_CASE("TestMaterialDialogActionUsesThemeRipple") {
   saved_dialogs.reset();
 
   TestPlatform platform;
-  Runtime runtime{MaterialPresentationApp, platform};
+  UiWindow runtime{MaterialPresentationApp, platform};
   runtime.SetWindowMetrics({.viewport = {640.0F, 360.0F}});
   runtime.BuildFrame();
 
@@ -695,7 +695,7 @@ TEST_CASE("TestPresentationThemeControlsDialogLayoutAndVerticalPlacement") {
   saved_dialogs.reset();
 
   TestPlatform platform;
-  Runtime runtime{ThemedPresentationPolicyApp, platform};
+  UiWindow runtime{ThemedPresentationPolicyApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
@@ -735,7 +735,7 @@ TEST_CASE("TestDialogRetainsExitPresentationWithoutRetainingInput") {
   first_dialog_clicks = 0;
 
   TestPlatform platform;
-  Runtime runtime{PresentationThemeApp, platform};
+  UiWindow runtime{PresentationThemeApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -769,7 +769,7 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
   saved_dialogs.reset();
 
   TestPlatform platform;
-  Runtime runtime{FlatDarkPresentationApp, platform};
+  UiWindow runtime{FlatDarkPresentationApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -795,7 +795,7 @@ TEST_CASE("TestFlatDarkPresentationStyles") {
 
 TEST_CASE("TestDeclarativeDialogModifier") {
   TestPlatform platform;
-  Runtime runtime{DeclarativeDialogApp, platform};
+  UiWindow runtime{DeclarativeDialogApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -835,7 +835,7 @@ TEST_CASE("TestDeclarativeDialogModifier") {
 
 TEST_CASE("TestDeclarativeDialogMotionStyleUpdatesWithoutReentering") {
   TestPlatform platform;
-  Runtime runtime{DeclarativeDialogMotionApp, platform};
+  UiWindow runtime{DeclarativeDialogMotionApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -870,7 +870,7 @@ TEST_CASE("TestDeclarativeDialogMotionStyleUpdatesWithoutReentering") {
 
 TEST_CASE("TestDeclarativeDialogCanRemoveMotionWhileReentering") {
   TestPlatform platform;
-  Runtime runtime{DeclarativeDialogMotionApp, platform};
+  UiWindow runtime{DeclarativeDialogMotionApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <map>
 #include <optional>
 #include <utility>
 
@@ -10,11 +11,12 @@
 namespace huxerui {
 
 class Environment;
-class PlatformAdapter;
+class UiWindow;
 
 namespace detail {
 
 struct MountedNode;
+struct ApplicationRuntimeState;
 
 inline Size ResolveInitialWindowSize(const WindowOptions& options) noexcept {
   if (!options.minimum_size.has_value()) {
@@ -42,13 +44,24 @@ struct WindowState {
 
 class WindowService : public std::enable_shared_from_this<WindowService> {
 public:
-  explicit WindowService(PlatformAdapter& platform);
+  explicit WindowService(UiWindow& ui_window);
 
   void Request(WindowCommand command);
   [[nodiscard]] bool HandleRequest(WindowCommand command);
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler);
   void Disconnect() noexcept;
+  /// Reads the current native window state and subscribes active composition.
+  /// @return This window's state, independent of application foreground aggregation.
+  [[nodiscard]] WindowLifecycleState LifecycleState() const;
+  /// Updates this window and queues distinct transitions through the original application dispatcher.
+  /// @param state Native window/scene state on the application thread; equal values produce no event.
+  /// Recipient identities are captured at submission so later observers do not receive earlier transitions.
+  void UpdateLifecycleState(WindowLifecycleState state);
+  /// Connects one observer to future window transitions.
+  /// @param handler Nonempty application-thread callback; the current value is not replayed.
+  /// @return Idempotent disconnection callback using weak service ownership; retiring the window also drops delivery.
+  [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(WindowLifecycleState)> handler);
 
 private:
   struct RequestHandler {
@@ -59,10 +72,13 @@ private:
   RequestHandler& Handler(WindowCommand command);
   void DisconnectRequest(WindowCommand command, std::uint64_t connection) noexcept;
 
-  PlatformAdapter* platform_;
+  UiWindow* ui_window_;
   RequestHandler minimize_handler_;
   RequestHandler close_handler_;
   std::uint64_t next_connection_ = 1;
+  State<WindowLifecycleState> lifecycle_state_{WindowLifecycleState::Background};
+  std::map<std::uint64_t, std::function<void(WindowLifecycleState)>> lifecycle_handlers_;
+  std::weak_ptr<ApplicationRuntimeState> application_;
 };
 
 View MakeWindowControls(

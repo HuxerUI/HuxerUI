@@ -137,7 +137,7 @@ struct FileDropFixture {
   }
 };
 
-void MountDropApp(Runtime& runtime) {
+void MountDropApp(UiWindow& runtime) {
   runtime.SetWindowMetrics({.viewport = {250.0F, 160.0F}});
   runtime.BuildFrame();
 }
@@ -202,7 +202,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop final filters use suffix or MIME ma
 
   TestPlatform platform;
   ManualFileDrop source;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   file_drop_options = std::move(options);
   runtime.BuildFrame();
@@ -227,7 +227,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop final filters use suffix or MIME ma
 
 TEST_CASE_METHOD(FileDropFixture, "File drop offers retain unknown metadata and enforce known count") {
   TestPlatform platform;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   file_drop_options = FileDropOptions{.content_types = {"image/*"}, .allows_multiple = false};
   runtime.BuildFrame();
@@ -243,7 +243,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop offers retain unknown metadata and 
 
 TEST_CASE_METHOD(FileDropFixture, "File drop separates hover from deferred successful delivery") {
   TestPlatform platform;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   auto access = std::make_shared<DroppedFileState>();
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
@@ -265,7 +265,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop separates hover from deferred succe
 
 TEST_CASE_METHOD(FileDropFixture, "File drop final rejection delivers failure without a partial batch") {
   TestPlatform platform;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   file_drop_options = FileDropOptions{.extensions = {"png"}};
   runtime.BuildFrame();
@@ -284,7 +284,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop final rejection delivers failure wi
 
 TEST_CASE_METHOD(FileDropFixture, "File drop freezes acceptance and position but uses compatible current handlers") {
   TestPlatform platform;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   file_drop_translation = Point{10.0F, 5.0F};
   file_drop_options = FileDropOptions{.extensions = {"png"}};
@@ -307,7 +307,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop freezes acceptance and position but
 TEST_CASE_METHOD(FileDropFixture, "File drop cancels removed targets and ignores late completion") {
   TestPlatform platform;
   ManualFileDrop source;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
   REQUIRE(runtime.CoreRuntime().HandleFileDrop(1, {}, drop_point, source.Source()));
@@ -325,7 +325,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop teardown cancels preparation and di
   TestPlatform platform;
   ManualFileDrop source;
   {
-    Runtime runtime{FileDropApp, platform};
+    UiWindow runtime{FileDropApp, platform};
     MountDropApp(runtime);
     REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
     REQUIRE(runtime.CoreRuntime().HandleFileDrop(1, {}, drop_point, source.Source()));
@@ -340,7 +340,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop concurrent pending deliveries do no
   TestPlatform platform;
   ManualFileDrop first;
   ManualFileDrop second;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
   REQUIRE(runtime.CoreRuntime().HandleFileDrop(1, {}, drop_point, first.Source()));
@@ -359,12 +359,17 @@ TEST_CASE_METHOD(FileDropFixture, "File drop concurrent pending deliveries do no
   REQUIRE(file_drop_events.back() == "exited");
 }
 
-TEST_CASE_METHOD(FileDropFixture, "File drop preparation may complete off the Runtime thread") {
+TEST_CASE_METHOD(FileDropFixture, "File drop preparation may complete off the UiWindow thread") {
   std::vector<std::function<void()>> queued;
   TestPlatform platform{[&queued](auto task) { queued.push_back(std::move(task)); }};
   ManualFileDrop source;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
+  while (!queued.empty()) {
+    auto batch = std::move(queued);
+    queued.clear();
+    for (auto& callback : batch) callback();
+  }
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
   REQUIRE(runtime.CoreRuntime().HandleFileDrop(1, {}, drop_point, source.Source()));
   std::thread worker([&source] { source.Complete(); });
@@ -379,7 +384,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop nested targets fall back and update
   file_drop_nested = true;
   file_drop_child_accepts = false;
   TestPlatform platform;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, {30.0F, 30.0F}));
   REQUIRE(file_drop_events.back() == "parent entered");
@@ -393,7 +398,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop nested targets fall back and update
 
 TEST_CASE_METHOD(FileDropFixture, "File drop handler and predicate exceptions quarantine hover") {
   TestPlatform platform;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   SECTION("predicate") {
     file_drop_throw_predicate = true;
@@ -412,7 +417,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop handler and predicate exceptions qu
 TEST_CASE_METHOD(FileDropFixture, "File drop rejects invalid coordinates and does not start unaccepted sources") {
   TestPlatform platform;
   ManualFileDrop source;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   REQUIRE_FALSE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, {std::numeric_limits<float>::quiet_NaN(), 0.0F}));
   REQUIRE_FALSE(runtime.CoreRuntime().HandleFileDrop(1, {}, {240.0F, 140.0F}, source.Source()));
@@ -424,7 +429,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop auto-scroll follows the clipped rou
   static std::optional<ScrollController> scroll;
   scroll.reset();
   TestPlatform platform;
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     scroll = UseScrollController();
     return ScrollView {
       Text("Files").With(huxerui::Frame{100.0F, 300.0F}, FileDropTarget::Accepts()),
@@ -447,7 +452,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop auto-scroll follows the clipped rou
 TEST_CASE_METHOD(FileDropFixture, "File drop reports preparation exceptions and accepts subsequent drops") {
   TestPlatform platform;
   ManualFileDrop next;
-  Runtime runtime{FileDropApp, platform};
+  UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
   REQUIRE(runtime.CoreRuntime().HandleFileDrop(1, {}, drop_point, [](auto) -> std::function<void()> {

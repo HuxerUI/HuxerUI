@@ -181,7 +181,7 @@ public:
     if (activity.phase == ScrollPhase::End && mode_ == Mode::Dragging) {
       mode_ = Mode::AwaitingCommit;
       proposal_emitted_ = false;
-      detail::InternalAccess::RequestFrame(*mounted.runtime);
+      detail::InternalAccess::RequestFrame(*mounted.ui_window);
       return;
     }
     if (activity.phase == ScrollPhase::Cancel && mode_ == Mode::Dragging) {
@@ -332,8 +332,8 @@ private:
   }
 
   void InvalidateLayout(detail::MountedNode& node) {
-    if (node.runtime) {
-      detail::InternalAccess::InvalidateLayout(*node.runtime, node);
+    if (node.ui_window) {
+      detail::InternalAccess::InvalidateLayout(*node.ui_window, node);
     }
   }
 

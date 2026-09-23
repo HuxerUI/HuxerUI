@@ -189,7 +189,7 @@ const detail::DefaultIndication* FindDefaultIndication(const detail::MountedNode
   return nullptr;
 }
 
-void OpenSelect(Runtime& runtime) {
+void OpenSelect(UiWindow& runtime) {
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   const SemanticNode& select = FindRole(*frame, SemanticRole::ComboBox);
   ClickAt(runtime, {select.bounds.x + select.bounds.width * 0.5F, select.bounds.y + select.bounds.height * 0.5F});
@@ -211,10 +211,10 @@ TEST_CASE("SelectValidatesItsControlledIndex") {
 }
 
 TEST_CASE("SelectRejectsInvalidFactoryResults") {
-  TestPlatform platform{BuiltinTestResources()};
   for (const auto app :
        {EmptySelectItemApp, UnlabeledSelectItemApp, InteractiveSelectItemApp, NestedInteractiveSelectItemApp}) {
-    Runtime runtime{app, platform};
+    TestPlatform platform{BuiltinTestResources()};
+    UiWindow runtime{app, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   }
@@ -222,7 +222,7 @@ TEST_CASE("SelectRejectsInvalidFactoryResults") {
 
 TEST_CASE("SelectValidationPreservesItsFluentSurface") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{InvalidSelectApp, platform};
+  UiWindow runtime{InvalidSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const SemanticNode& select = FindRole(*runtime.LastCommit().semantic_frame, SemanticRole::ComboBox);
@@ -234,7 +234,7 @@ TEST_CASE("SelectValidationPreservesItsFluentSurface") {
 
 TEST_CASE("SelectConfigurationUpdatesThroughRecomposition") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ReconfiguredSelectApp, platform};
+  UiWindow runtime{ReconfiguredSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
 
   runtime.BuildFrame();
@@ -253,7 +253,7 @@ TEST_CASE("SelectConfigurationUpdatesThroughRecomposition") {
 
 TEST_CASE("CopiedSelectConfigurationsRemainIndependent") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{CopiedSelectConfigurationApp, platform};
+  UiWindow runtime{CopiedSelectConfigurationApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   runtime.BuildFrame();
@@ -266,9 +266,9 @@ TEST_CASE("CopiedSelectConfigurationsRemainIndependent") {
 }
 
 TEST_CASE("SelectRejectsInvalidThemeGeometry") {
-  TestPlatform platform{BuiltinTestResources()};
   for (invalid_select_style_case = 0; invalid_select_style_case < 3; ++invalid_select_style_case) {
-    Runtime runtime{InvalidSelectStyleApp, platform};
+    TestPlatform platform{BuiltinTestResources()};
+    UiWindow runtime{InvalidSelectStyleApp, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 120.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   }
@@ -296,7 +296,7 @@ TEST_CASE("SelectProvidesFlatAndMaterialLightAndDarkStyles") {
 
 TEST_CASE("SelectUsesTheThemeIndicationAndForegroundAcrossItsPopup") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ThemedSelectApp, platform};
+  UiWindow runtime{ThemedSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   const detail::MountedNode* root = runtime.RootNode();
@@ -315,7 +315,7 @@ TEST_CASE("SelectUsesTheThemeIndicationAndForegroundAcrossItsPopup") {
 TEST_CASE("SelectOpensAnAccessibleChoiceListAndEmitsControlledChanges") {
   select_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const std::shared_ptr<const SemanticFrame> collapsed = runtime.BuildCommit().semantic_frame;
@@ -364,7 +364,7 @@ TEST_CASE("SelectOpensAnAccessibleChoiceListAndEmitsControlledChanges") {
 
 TEST_CASE("SelectSemanticActivateTogglesItsPopup") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   const SemanticNodeId collapsed_id = FindRole(*runtime.BuildCommit().semantic_frame, SemanticRole::ComboBox).id;
@@ -387,7 +387,7 @@ TEST_CASE("SelectSemanticActivateTogglesItsPopup") {
 
 TEST_CASE("DisabledSelectCannotOpenAndDynamicDisableDismissesItsPopup") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime disabled{DisabledSelectApp, platform};
+  UiWindow disabled{DisabledSelectApp, platform};
   disabled.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> disabled_frame = disabled.BuildCommit().semantic_frame;
   const SemanticNode& disabled_select = FindRole(*disabled_frame, SemanticRole::ComboBox);
@@ -396,7 +396,8 @@ TEST_CASE("DisabledSelectCannotOpenAndDynamicDisableDismissesItsPopup") {
   ClickAt(disabled, {disabled_select.bounds.x + 4.0F, disabled_select.bounds.y + 4.0F});
   REQUIRE_FALSE(HasRole(*disabled.BuildCommit().semantic_frame, SemanticRole::List));
 
-  Runtime dynamic{SelectApp, platform};
+  TestPlatform dynamic_platform{platform.platform_resources};
+  UiWindow dynamic{SelectApp, dynamic_platform};
   dynamic.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(dynamic);
   REQUIRE(HasRole(*dynamic.LastCommit().semantic_frame, SemanticRole::List));
@@ -410,7 +411,7 @@ TEST_CASE("DisabledSelectCannotOpenAndDynamicDisableDismissesItsPopup") {
 TEST_CASE("SelectUnmountDismissesItsPopup") {
   select_events.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{ConditionalSelectApp, platform};
+  UiWindow runtime{ConditionalSelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(runtime);
   REQUIRE(HasRole(*runtime.LastCommit().semantic_frame, SemanticRole::List));
@@ -426,7 +427,7 @@ TEST_CASE("SelectUnmountDismissesItsPopup") {
 TEST_CASE("Select expansion events observe transitions and precede selection changes") {
   select_events.clear();
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildCommit();
   REQUIRE(select_events.empty());
@@ -468,7 +469,7 @@ TEST_CASE("Select expansion events observe transitions and precede selection cha
 
 TEST_CASE("SelectClearsItsActiveChoiceWhenEveryItemIsDisabled") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(runtime);
 
@@ -486,9 +487,9 @@ TEST_CASE("Select closes a stale popup during resize without relying on unsolici
   std::optional<LayerController> layers;
   AppOptions options;
   options.show_debug_overlay = false;
-  options.root_hooks.push_back([&](RootContext& root) { layers = root.Layers(); });
+  options.window_hooks.push_back([&](WindowContext& root) { layers = root.Layers(); });
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{[]() -> View {
+  UiWindow runtime{[]() -> View {
     ThemeSpec theme = FlatLightThemeSpec();
     theme.motion.reduced_motion = true;
     return Theme {ThemeDefinition{theme}, SelectApp()};
@@ -529,7 +530,7 @@ TEST_CASE("Select closes a stale popup during resize without relying on unsolici
 TEST_CASE("SelectPointerChoiceCommitsAndRestoresTriggerFocus") {
   select_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   OpenSelect(runtime);
   const std::shared_ptr<const SemanticFrame> expanded = runtime.LastCommit().semantic_frame;
@@ -546,7 +547,7 @@ TEST_CASE("SelectPointerChoiceCommitsAndRestoresTriggerFocus") {
 
 TEST_CASE("SelectPointerCancelDoesNotOpenItsPopup") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   const Rect bounds = FindRole(*frame, SemanticRole::ComboBox).bounds;
@@ -562,7 +563,7 @@ TEST_CASE("SelectPointerCancelDoesNotOpenItsPopup") {
 TEST_CASE("SelectKeyboardSkipsDisabledItemsAndCancelDoesNotChangeSelection") {
   select_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   OpenSelect(runtime);
@@ -589,7 +590,7 @@ TEST_CASE("SelectKeyboardSkipsDisabledItemsAndCancelDoesNotChangeSelection") {
 TEST_CASE("SelectPreservesAKeyedActiveItemAcrossReordering") {
   select_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   OpenSelect(runtime);
@@ -619,7 +620,7 @@ TEST_CASE("SelectPreservesAKeyedActiveItemAcrossReordering") {
 TEST_CASE("SelectFallsBackWhenItsActiveKeyedItemIsRemoved") {
   select_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{SelectApp, platform};
+  UiWindow runtime{SelectApp, platform};
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
 
   OpenSelect(runtime);

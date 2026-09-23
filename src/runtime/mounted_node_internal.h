@@ -240,10 +240,10 @@ struct NodePresentation {
   const RenderNode* overlay = nullptr;
 };
 
-// MountedNode is the retained counterpart of ViewSpec. Runtime reads copied component payloads only from matching
+// MountedNode is the retained counterpart of ViewSpec. UiWindow reads copied component payloads only from matching
 // NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
 struct MountedNode final : public huxerui::ViewNode {
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   NodeKind kind = NodeKind::Layout;
   std::uint64_t identity = 0;
   std::optional<ViewKey> key;
@@ -549,14 +549,13 @@ NodeExtension* FindExtension(MountedNode& root, const NodeExtensionHandle& handl
 void ActivateNode(MountedNode& node);
 bool ContainsNodeIdentity(const MountedNode& root, std::uint64_t identity);
 std::optional<bool> DeclaredEnabled(const MountedNode& node, std::uint64_t identity, bool parent_enabled = true);
-void AutoScrollDropTarget(Runtime& runtime, const std::unique_ptr<MountedNode>& root,
+void AutoScrollDropTarget(UiWindow& ui_window, const std::unique_ptr<MountedNode>& root,
                           std::uint64_t target_identity, Point window_position, const FrameInfo& frame);
 
 Size MeasureNode(
     MountedNode& node,
     const Constraints& constraints,
-    PlatformAdapter& platform,
-    Runtime& runtime,
+    UiWindow& ui_window,
     EdgeInsets safe_area = {},
     const WindowTitleBarMetrics* title_bar_metrics = nullptr
 );

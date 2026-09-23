@@ -68,7 +68,7 @@ TEST_CASE("WindowsDirectoryReferencesRejectPathOnlyProviderImports") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File destination = file_application->Directories().temporary_directory.Child("destination");
   REQUIRE(destination.CreateDirectory());
@@ -94,7 +94,7 @@ TEST_CASE("WindowsDirectoryReferencesProbeWriteAccessWithoutChangingTheDirectory
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File directory = file_application->Directories().temporary_directory.Child("selected");
   REQUIRE(directory.CreateDirectory());
@@ -174,7 +174,7 @@ TEST_CASE("WindowsDirectoryOverwritesPreserveOriginalsAndCleanUpFailedStagingFil
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File root = file_application->Directories().temporary_directory;
   const File directory = root.Child("selected");
@@ -219,7 +219,7 @@ TEST_CASE("WindowsDirectoryGrantsDoNotFollowReplacedRoots") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File root = file_application->Directories().temporary_directory;
   const File parent = root.Child("parent");
@@ -285,7 +285,7 @@ TEST_CASE("WindowsDirectoryGrantsRejectDirectoriesConvertedToJunctions") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File root = file_application->Directories().temporary_directory;
   const File selected = root.Child("selected");

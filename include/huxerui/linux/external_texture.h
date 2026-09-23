@@ -58,7 +58,7 @@ public:
   GdkTexture(const GdkTexture&) = delete;
   GdkTexture& operator=(const GdkTexture&) = delete;
 
-  /// Retains frame as the latest immutable GDK texture and schedules every Runtime displaying this texture.
+  /// Retains frame as the latest immutable GDK texture and schedules every UiWindow displaying this texture.
   ///
   /// A null frame throws std::invalid_argument. Publication after Finish() throws std::logic_error. Publish may be
   /// called from a producer thread because GdkTexture is immutable and thread-safe. Replacing a frame may release the
@@ -192,7 +192,7 @@ public:
   PixelTexture(const PixelTexture&) = delete;
   PixelTexture& operator=(const PixelTexture&) = delete;
 
-  /// Copies frame into the latest-frame mailbox and schedules every Runtime currently displaying this texture.
+  /// Copies frame into the latest-frame mailbox and schedules every UiWindow currently displaying this texture.
   ///
   /// Invalid dimensions, stride, format, or storage size throw std::invalid_argument. Publication after Finish()
   /// throws std::logic_error.

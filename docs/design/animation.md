@@ -23,7 +23,7 @@ Each layer has one responsibility:
 - Animated modifiers and `Transition` project retained progress onto presentation properties without recomposition.
 - Components and scene transitions choose semantic motion while reusing the same executor.
 
-Animation advances during Runtime frame construction. It never asks a platform renderer to invent timing, interpolate framework state, or recompose a component for every frame.
+Animation advances during UiWindow frame construction. It never asks a platform renderer to invent timing, interpolate framework state, or recompose a component for every frame.
 
 ## Timing and playback
 
@@ -117,7 +117,7 @@ return Button("Dark theme")
 `RunAt()` accepts a window-local logical point for callers that already own pointer geometry.
 `Run()` with a circular reveal uses the final bounds of the retained anchor, while Fade does not require an anchor.
 
-`RunFromCurrentInteraction()` resolves a circular reveal from the Runtime's current synchronous interaction origin:
+`RunFromCurrentInteraction()` resolves a circular reveal from the UiWindow's current synchronous interaction origin:
 
 ```cpp
 return Button("Dark theme").OnClick([scene_transition, dark] {
@@ -154,7 +154,7 @@ Whole-scene transitions are one-shot. Their public descriptions expose an option
 
 ### FrozenScene
 
-`FrozenScene` is private render data retained by Runtime's SceneTransitionService. It deep-copies the committed `RenderNode` hierarchy and each `PaintSequence`, assigns independent node identities, and keeps immutable Image and vector resource ownership shared. It contains no mounted nodes, scopes, Environment, event handlers, semantics, text-input clients, or platform objects.
+`FrozenScene` is private render data retained by the window's SceneTransitionService. It deep-copies the committed `RenderNode` hierarchy and each `PaintSequence`, assigns independent node identities, and keeps immutable Image and vector resource ownership shared. It contains no mounted nodes, scopes, Environment, event handlers, semantics, text-input clients, or platform objects.
 
 `DrawExternalTextureCommand` retains its producer, so frozen geometry can continue to display the producer's newest pixels. `PlacePlatformViewCommand` is not copied into a frozen scene. A PlatformView remains live in the new tree and does not participate in group opacity or circular clipping. When a live scene contains a PlatformView, custom and built-in effects therefore degrade to fading the frozen render scene over the unmodified live scene. A PlatformView removed by the mutation disappears immediately because stale platform handles are never retained or simulated.
 
@@ -162,7 +162,7 @@ Whole-scene transitions are one-shot. Their public descriptions expose an option
 
 ### Scene composition
 
-SceneTransitionService owns the active snapshot, motion controller, and synthetic render wrappers as one optional active transition, without a separate implementation-state allocation. It reads the committed render frame and window through the shared Runtime::State context. Runtime advances the service at the scene-composition boundary and combines its scheduling result with the rest of the frame. Disconnecting the service clears its context pointer, releases active transition data, and rejects subsequent requests from retained handles.
+SceneTransitionService owns the active snapshot, motion controller, and synthetic render wrappers as one optional active transition, without a separate implementation-state allocation. It reads the committed render frame and window through the shared UiWindow::State context. UiWindow advances the service at the scene-composition boundary and combines its scheduling result with the rest of the frame. Disconnecting the service clears its context pointer, releases active transition data, and rejects subsequent requests from retained handles.
 
 A fade scene transition without a PlatformView uses two synthetic render wrappers: old opacity is `1 - progress`, new opacity is `progress`. A circular reveal draws the old frozen composite normally and places the live composite beneath one circular child clip on an otherwise empty wrapper. It does not require a separate whole-subtree clip primitive or inverse and even-odd clipping.
 
@@ -177,7 +177,7 @@ Ordinary View insertion and removal animation is deferred. It requires an explic
 Navigation keeps its own page-stack and Back semantics. It may share timing primitives and controllers, but a scene transition does not push pages, retain navigation scopes, or alter route history.
 
 SceneTransition does not depend on Button, Select, Menu, or the event system.
-Runtime owns the temporary interaction origin, while the transition service copies the resolved Point into the ordinary one-shot SceneTransitionRequest before executing the mutation.
+UiWindow owns the temporary interaction origin, while the transition service copies the resolved Point into the ordinary one-shot SceneTransitionRequest before executing the mutation.
 
 ## Validation
 
@@ -285,7 +285,7 @@ struct LiftTransition {
 ```
 
 Examples using `std::clamp` require `<algorithm>` in addition to the public HuxerUI declarations.
-Evaluate must not call composition hooks, mutate State, retain node or Runtime references, or perform business actions.
+Evaluate must not call composition hooks, mutate State, retain node or UiWindow references, or perform business actions.
 The framework may evaluate the same input more than once; invocation count and order are not lifecycle notifications.
 The owner continues to control frame scheduling, validation, damage, and resource release.
 
@@ -438,14 +438,14 @@ SharedElement, SharedBounds, SharedTransitionHandle, and SharedTransitionScope l
 ClipShape construction and geometric queries live in `src/graphics/path.cpp`; ClipShape-to-RenderClip conversion lives in shared rendering support. Both reuse InternalAccess only where private shape data is required.
 `src/runtime/transition_internal.h` declares the shared transition session, effect-evaluation re-entry guard, timing helpers, and FrozenScene capture contracts used across transition implementations. Snapshot copying remains in render.cpp beside render-tree assembly. TransitionSpec and local shared transitions reuse the same timing validation and immediate-completion checks.
 Navigation retains page selection, progress, and cleanup; SceneTransitionService retains scene capture and composition; shared rendering code owns visual subtree copies and damage.
-Runtime does not gain concrete component branches, a second animation scheduler, or a public transition registry.
+UiWindow does not gain concrete component branches, a second animation scheduler, or a public transition registry.
 Declarative modifier configuration may live in ViewSpec; mutable running state and captured active configuration belong to the existing subsystem owners or NodeExtensions.
 NodePresentation retains intersecting ClipShape values and optional fragment descriptions for descendants in node-local coordinates. Ordinary pointer and window-drag hit testing share the geometric clip check; page content remains disabled during navigation motion, so fragment rendering introduces no alternate input-coordinate tree. RenderClip is produced only when generating render data.
 NodePresentation::z_index controls sibling stacking independently from layout and mounted child order. Equal values preserve declaration order; child_paint_order stores the resolved child indices shared by rendering and reverse-order hit traversal. Navigation assigns z_index only to its transition participants; no public ZIndex modifier is provided.
 
 Ordinary View insertion/removal, layout animation, three-dimensional effects, and filters remain outside this extension.
 
-Acceptance requires deterministic tests for effect value equality, default immediate completion, valid and invalid timing, endpoint behavior, reversal of both roles and order, finite overshoot, clipping, reduced motion, mutation exceptions, forbidden scene re-entry, rapid replacement, Runtime destruction, viewport invalidation, and bounded retained resources.
+Acceptance requires deterministic tests for effect value equality, default immediate completion, valid and invalid timing, endpoint behavior, reversal of both roles and order, finite overshoot, clipping, reduced motion, mutation exceptions, forbidden scene re-entry, rapid replacement, UiWindow retirement, viewport invalidation, and bounded retained resources.
 Navigation-specific validation is recorded in [Navigation](navigation.md#transition-validation).
 ClipShape tests cover factory validation, copying and value equality, path fill rules, empty versus absent clipping, coordinate-space behavior, and conversion into the existing rectangle/path rendering representation.
 Static page content must not recompose, remeasure, or rerecord clean PaintSequences during effect-only frames; custom effect geometry may still require its own per-frame calculation.
@@ -521,9 +521,9 @@ Pair draw order follows the destination's paint order for local, Push, and Repla
 The private SharedTransitionSession owns pair metadata, immutable subtree captures, and synthetic render wrappers; Navigation or SharedTransitionState owns operation progress.
 transition_internal.h declares the session contract shared with Navigation; local state, visual metadata, and pair definitions remain in shared_transition.cpp.
 NodePresentation carries temporary render suppression and a borrowed overlay reference; input exclusion belongs to MountedNode's interaction state and preserves declarative enabled styling.
-Runtime calls the internal PrepareSharedTransitions entry after layout and presentation geometry settle, before input/semantics publication and scene assembly.
+UiWindow calls the internal PrepareSharedTransitions entry after layout and presentation geometry settle, before input/semantics publication and scene assembly.
 The shared-transition implementation prepares participating sessions directly and releases hidden sessions without adding a general extension lifecycle interface or cached capability pointer. Local sessions end when no valid pairs remain; input exclusion is resolved once per node from its active local sessions after preparation.
-Runtime itself does not inspect marker or component types.
+UiWindow itself does not inspect marker or component types.
 
 Capture reuses ordinary content and foreground recording, retaining complete paint even when a navigation page is visually displaced or transparent.
 Successful pairs suppress the real source/destination drawing before page fragments copy their render sources.
@@ -542,7 +542,7 @@ Navigation page content remains non-interactive during its operation; a local sc
 | Own node clip | Retain it with the captured content |
 | Unrequested target geometry/content change, including keyed child replacement/reordering, or navigation participant replacement | End the affected pair and restore surviving originals |
 | Owner coordinate space, viewport, or visibility changes | Release shared visuals; navigation may continue its ordinary page effect |
-| Completion, failure, scope removal, or Runtime destruction | Clear published links and release retained paint resources |
+| Completion, failure, scope removal, or UiWindow retirement | Clear published links and release retained paint resources |
 
 Subtrees are captured once per operation, not laid out or rerecorded for each animation sample.
 Per-frame work validates participating geometry/content and updates bounds, opacity, and render revisions; its cost depends on the participating tree and captured drawing.

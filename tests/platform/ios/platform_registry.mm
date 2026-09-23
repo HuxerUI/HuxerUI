@@ -4,7 +4,7 @@
 #include <utility>
 
 #include <huxerui/ios/platform_registry.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 namespace {
 
@@ -18,9 +18,9 @@ struct DirectViewInstance {
   __strong UIView* view = nil;
 };
 
-void RegisterDirectFactories(huxerui::RootContext& root) {
+void RegisterDirectFactories(huxerui::ApplicationContext& root) {
   huxerui::ios::PlatformModuleFactory<int> module_factory{
-      .create = [](huxerui::PlatformAdapter&, UIViewController*) { return 1; },
+      .create = [](huxerui::UiWindow&, UIViewController*) { return 1; },
   };
   root.RegisterPlatformModule<int>("test/DirectModule", std::move(module_factory));
 
@@ -37,6 +37,6 @@ void RegisterDirectFactories(huxerui::RootContext& root) {
 
 } // namespace
 
-void HuxerUITestIOSDirectPlatformFactories(huxerui::RootContext& root) {
+void HuxerUITestIOSDirectPlatformFactories(huxerui::ApplicationContext& root) {
   RegisterDirectFactories(root);
 }

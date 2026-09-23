@@ -105,7 +105,7 @@ template <class T> ErasedLayoutValue MakeErasedLayoutValue(T&& value) {
 }
 } // namespace detail
 
-/// Public interface to a Runtime-owned node in the mounted View tree.
+/// Public interface to a UiWindow-owned node in the mounted View tree.
 ///
 /// Custom layouts and NodeExtension callbacks receive this interface; application code does not create or own mounted
 /// nodes. Child ranges, references, and metadata pointers are borrowed and must not be retained across reconciliation.
@@ -352,7 +352,7 @@ protected:
 
 /// Measures children and exposes window geometry for one custom layout measurement callback.
 ///
-/// Measure children through this context rather than calling their layout policies directly. Runtime owns measurement
+/// Measure children through this context rather than calling their layout policies directly. UiWindow owns measurement
 /// caching and child lifetimes. The context and its borrowed values must not escape the current Measure callback.
 class LayoutContext {
 public:
@@ -398,8 +398,8 @@ private:
 
 /// Describes a custom layout's measured content size and the children participating in that layout.
 ///
-/// Runtime passes the layout constraints with the owning node's resolved Padding already removed. Return a content
-/// size satisfying those constraints and place children relative to the content origin; Runtime adds the owning node's
+/// UiWindow passes the layout constraints with the owning node's resolved Padding already removed. Return a content
+/// size satisfying those constraints and place children relative to the content origin; UiWindow adds the owning node's
 /// Padding to both the outer size and child origins. Do not add it again in the layout policy.
 ///
 /// This example requires `<huxerui/view.h>`, which declares Layout and the ordinary View types:

@@ -310,7 +310,7 @@ void ResetTextInputProbes() {
   text_activations = 0;
 }
 
-void FocusNext(Runtime& runtime) {
+void FocusNext(UiWindow& runtime) {
   runtime.HandleKeyEvent(
       KeyEvent{
           KeyEventType::Down,
@@ -328,7 +328,7 @@ TEST_CASE("TestTextInputSessionFollowsFocus") {
   platform.platform_text_input = &text_input;
 
   {
-    Runtime runtime{TwoTextClientsApp, platform};
+    UiWindow runtime{TwoTextClientsApp, platform};
     runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
     runtime.BuildFrame();
 
@@ -356,7 +356,7 @@ TEST_CASE("TestExitingDialogStopsAndCanRestoreTextInput") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{DialogTextInputApp, platform};
+  UiWindow runtime{DialogTextInputApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
   runtime.BuildFrame();
   REQUIRE(text_input_dialog.has_value());
@@ -392,7 +392,7 @@ TEST_CASE("TestTextInputSessionSurvivesRecompositionAndSynchronizesState") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{TwoTextClientsApp, platform};
+  UiWindow runtime{TwoTextClientsApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
@@ -428,7 +428,7 @@ TEST_CASE("TestTextInputActionValidatesSessionConfigurationAndClientHandling") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{TwoTextClientsApp, platform};
+  UiWindow runtime{TwoTextClientsApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
@@ -456,7 +456,7 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{TwoTextClientsApp, platform};
+  UiWindow runtime{TwoTextClientsApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
@@ -502,7 +502,7 @@ TEST_CASE("TestTextInputCommandsAndQueriesRejectStaleSessions") {
 TEST_CASE("TestTextInputRejectsContentChangesWithoutStateRevision") {
   ResetTextInputProbes();
   TestPlatform platform;
-  Runtime runtime{TwoTextClientsApp, platform};
+  UiWindow runtime{TwoTextClientsApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
@@ -515,7 +515,7 @@ TEST_CASE("TestTextInputRejectsInvalidGeometry") {
   ResetTextInputProbes();
   first_text_client->invalid_geometry = true;
   TestPlatform platform;
-  Runtime runtime{TwoTextClientsApp, platform};
+  UiWindow runtime{TwoTextClientsApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -530,7 +530,7 @@ TEST_CASE("TestPointerUpdatesSelectionBeforeStartingTextInput") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{PointerTextClientApp, platform};
+  UiWindow runtime{PointerTextClientApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -553,7 +553,7 @@ TEST_CASE("TestTextInputClientReplacementAndRemovalCloseSessions") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime replacement{ReplaceTextClientApp, platform};
+  UiWindow replacement{ReplaceTextClientApp, platform};
   replacement.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   replacement.BuildFrame();
   FocusNext(replacement);
@@ -569,7 +569,7 @@ TEST_CASE("TestTextInputClientReplacementAndRemovalCloseSessions") {
   ProbePlatformTextInput removal_text_input;
   TestPlatform removal_platform;
   removal_platform.platform_text_input = &removal_text_input;
-  Runtime removal{RemoveTextClientApp, removal_platform};
+  UiWindow removal{RemoveTextClientApp, removal_platform};
   removal.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   removal.BuildFrame();
   FocusNext(removal);
@@ -588,7 +588,7 @@ TEST_CASE("TestTextInputClientHandlesKeysBeforeGenericEvents") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{TextKeyClientApp, platform};
+  UiWindow runtime{TextKeyClientApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
@@ -612,7 +612,7 @@ TEST_CASE("TestReadOnlyTextInputConfigurationDoesNotOpenKeyboard") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
 
-  Runtime runtime{TextKeyClientApp, platform};
+  UiWindow runtime{TextKeyClientApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   FocusNext(runtime);
@@ -635,7 +635,7 @@ TEST_CASE("TestReadOnlyTextInputConfigurationDoesNotOpenKeyboard") {
 TEST_CASE("TestFocusableNodeRejectsMultipleTextInputClients") {
   ResetTextInputProbes();
   TestPlatform platform;
-  Runtime runtime{MultipleTextClientsApp, platform};
+  UiWindow runtime{MultipleTextClientsApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 

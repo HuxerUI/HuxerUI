@@ -14,7 +14,7 @@ class MacTextInputState;
 
 class MacTextInput final : public PlatformTextInput {
 public:
-  MacTextInput(Runtime& runtime, NSView* view);
+  MacTextInput(UiWindow& ui_window, NSView* view);
   ~MacTextInput() override;
 
   MacTextInput(const MacTextInput&) = delete;

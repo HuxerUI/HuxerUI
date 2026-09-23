@@ -31,7 +31,6 @@ class TaskExecution;
 class TaskScopeState;
 class WorkerOperation;
 class WorkerSequenceState;
-
 void NotifyTaskCompleted(const std::weak_ptr<TaskExecution>& execution) noexcept;
 void EnqueueWorkerOperation(std::function<void()> operation, const char* api_name = "RunWorker()");
 void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_handle<> coroutine) noexcept;
@@ -735,11 +734,13 @@ template <class Factory> Task<void> InvokeTaskFactory(Factory factory) {
 
 } // namespace detail
 
-/// Owns asynchronous child Tasks for one composition scope.
+/// Owns asynchronous child Tasks for one composition scope or application lifetime.
 ///
-/// Obtain this copyable handle with `UseTaskScope()`. Compatible recomposition retains it; unmount, scope replacement,
-/// virtual-item eviction, or Runtime teardown closes it and cancels every child. Launch work only after composition,
-/// such as from Lifecycle setup or an event callback.
+/// Obtain a composition handle with `UseTaskScope()` or an application handle with `UseApplicationTaskScope()`.
+/// Compatible recomposition retains a composition scope; unmount, scope replacement, virtual-item eviction, or
+/// UiWindow teardown closes it and cancels every child. The application scope closes at Runtime shutdown.
+/// A retained closed handle no longer owns its captured Environment; active callbacks keep it until they return.
+/// Launch work only after composition, such as from Lifecycle setup or an event callback.
 ///
 /// Prefer the factory overload for coroutine lambdas so the factory captures remain owned for the child Task lifetime.
 /// Ignoring the returned TaskHandle creates a scope-owned fire-and-forget child that is still canceled with the scope.
@@ -803,6 +804,7 @@ private:
   std::shared_ptr<detail::TaskScopeState> state_;
 
   friend class detail::RecomposeScope;
+  friend TaskScope UseApplicationTaskScope();
 };
 
 /// Returns the TaskScope owned by the currently composing RecomposeScope.
@@ -811,9 +813,25 @@ private:
 /// composition, or without a platform UI-thread dispatcher, throws `std::logic_error`.
 TaskScope UseTaskScope();
 
+/// Acquires the original application's shared ordinary Task scope on its application thread.
+/// @return A retained scope whose tasks survive UI retirement and close during application shutdown.
+/// @throws std::logic_error If no valid application context exists or shutdown has begun.
+/// Can be used during application_hooks and outside composition; launch still follows TaskScope's composition
+/// restrictions.
+/// This scope grants no OS background execution rights. HuxerUI awaitables resume on the application thread, so a
+/// completed worker result may update State directly; worker code itself must not read or write State.
+/// @code{.cpp}
+/// const auto tasks = UseApplicationTaskScope();
+/// tasks.Launch([model]() -> Task<void> {
+///   const int count = co_await RunWorker(CountItems);
+///   model->count = count;
+/// });
+/// @endcode
+TaskScope UseApplicationTaskScope();
+
 /// Suspends for at least the requested duration and resumes on the owning UI thread.
 ///
-/// Delay is lazy, uses the Runtime's frame scheduler rather than a worker thread, and accepts standard duration values.
+/// Delay is lazy, uses the application's monotonic timer independently of UI frames, and accepts standard durations.
 /// Zero still resumes asynchronously; negative or non-finite durations throw `std::invalid_argument`.
 ///
 /// @code

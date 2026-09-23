@@ -11,7 +11,7 @@
 
 namespace huxerui {
 
-class Runtime;
+class UiWindow;
 class Environment;
 
 namespace detail {
@@ -26,7 +26,7 @@ struct LayerPlacement;
 /// Identifiers are stable for the lifetime of an entry and are used by Update() and Dismiss().
 using LayerId = std::uint64_t;
 
-/// Produces declarative View content when Runtime composes a retained presentation.
+/// Produces declarative View content when UiWindow composes a retained presentation.
 using ViewFactory = std::function<View()>;
 
 /// Selects the paint and input ordering group for a layer entry.
@@ -82,8 +82,8 @@ struct LayerOptions {
 /// Attached content captures the current Environment. Prefer typed presentation services such as UseDialog(),
 /// UsePopup(), and UseToast() when their semantics fit; use this controller for application-specific layers.
 /// @code
-/// RootHook InstallGlobalBanner() {
-///   return [](RootContext& root) {
+/// WindowHook InstallGlobalBanner() {
+///   return [](WindowContext& root) {
 ///     root.Layers().Attach(
 ///         {.level = LayerLevel::System, .pointer_policy = LayerPointerPolicy::PassThrough},
 ///         [] { return GlobalBanner(); }
@@ -99,7 +99,7 @@ public:
   /// Attaches content and returns its new identifier.
   ///
   /// Throws std::invalid_argument for an empty factory or incompatible options, and std::logic_error after the
-  /// controller disconnects from its Runtime.
+  /// controller disconnects from its UiWindow.
   LayerId Attach(LayerOptions options, ViewFactory content) const;
 
   /// Binds copyable factory arguments and attaches the resulting content.
@@ -191,12 +191,12 @@ private:
   DismissRequestResult RequestDismiss(LayerId id) const;
   void BindTransitionCompletion(LayerId id, const std::shared_ptr<detail::LayerTransitionState>& transition) const;
 
-  explicit LayerController(Runtime& runtime);
+  explicit LayerController(UiWindow& ui_window);
   void Disconnect() noexcept;
 
   std::shared_ptr<State> state_;
 
-  friend class Runtime;
+  friend class UiWindow;
   friend struct detail::InternalAccess;
 };
 

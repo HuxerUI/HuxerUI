@@ -33,11 +33,11 @@ View WebView(WebViewProperties properties) {
 
 Properties are one complete immutable strongly typed snapshot.
 The no-properties form is `PlatformView(name)`.
-Register the exact Properties and optional Controller types with `RootContext::RegisterPlatformView()` from one RootHook.
+Register the exact Properties and optional Controller types with `ApplicationContext::RegisterPlatformView()` from one application hook.
 Registration names are nonempty case-sensitive UTF-8 identities and do not require `/`.
 Use one feature-owned type constant for both the component declaration and every selected platform registration rather than repeating the string literal.
 Keep the name, raw `PlatformView` declaration, platform factory types, and registration inside that owning feature.
-A reusable library or a feature with platform-selected implementations may expose one `InstallWebView(RootContext&)`; an app-local one-off implementation may register from its existing RootHook without adding an installer abstraction.
+A reusable library or a feature with platform-selected implementations may expose one `InstallWebView(ApplicationContext&)`; an app-local one-off implementation may register from an existing application hook without adding an installer abstraction.
 Page code uses `WebView(...)` and typed events or Controllers only.
 
 Events need no separate registration list.
@@ -67,19 +67,19 @@ Use the active platform's public `platform_registry.h` factory contract:
 `PlatformValue` is the public low-level in-process carrier used by RenderScene and platform factory adaptation to retain exact C++ Properties, Controller, and event value types.
 It never crosses a platform-language boundary, and ordinary components and direct factories use their concrete types rather than constructing it themselves.
 
-Registry installation supplies the owning `PlatformAdapter&` only to the factory's internal binding operation.
-Direct create, update, Controller, and disposal callbacks receive their exact platform handles and typed values rather than the adapter.
+Registry installation prepares the factory for each mounting `UiWindow&`; the application catalog retains only the factory declaration.
+Direct create, update, Controller, and disposal callbacks receive their exact platform handles and typed values.
 
 Android's common Java/Kotlin adapter uses `.class_name` for the Java factory class.
 When a Controller exists, its `.connect` callback attaches the framework-owned `PlatformChannel` to the exact C++ Controller and `.disconnect` detaches it.
 Web's common JavaScript structural adapter uses `.factory` for the actual `emscripten::val` factory object; a `*_factory_name` string may only identify the module property used to obtain that object.
 Properties use `Module.HuxerUI.PlatformPayload`, and events use one framework-owned emitter.
 iOS and macOS expose `UIKitPlatformViewFactory` or `AppKitPlatformViewFactory`, their View protocols, payload endpoints, and cancellation endpoints through the `HuxerUIPlatform` Clang module.
-The Objective-C++ RootHook sets `.factory` to the actual Objective-C or Swift factory object in `ios::ObjectiveCPlatformViewFactory<Properties, Controller>` or `macos::ObjectiveCPlatformViewFactory<Properties, Controller>`.
+The Objective-C++ application hook sets `.factory` to the actual Objective-C or Swift factory object in `ios::ObjectiveCPlatformViewFactory<Properties, Controller>` or `macos::ObjectiveCPlatformViewFactory<Properties, Controller>`.
 Its `connect` callback attaches the returned `PlatformChannel` to the exact library Controller, and `disconnect` detaches that Controller before View disposal.
 Factories receive the owning `UIViewController` or `NSWindow`; they return the stable detached View and never attach it themselves.
 Direct Objective-C++ factories remain available through `ios::PlatformViewFactory` and `macos::PlatformViewFactory` without a payload round trip.
-Every path still registers once through the library RootHook; application hosts, delegates, and Web mount calls do not form a second registry.
+Every path still registers once through the library application hook; application hosts, delegates, and Web mount calls do not form a second registry.
 The Web JavaScript `PlatformPayload` bridge does not transport `ExternalTexture`; direct Emscripten C++ PlatformView factories still retain exact Properties, and the direct C++ ExternalTexture path remains available without another data channel.
 
 Factories own create, update, optional Controller connect/disconnect, and dispose symmetry.

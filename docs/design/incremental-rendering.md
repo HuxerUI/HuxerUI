@@ -238,7 +238,7 @@ Invalidation dependencies are explicit:
 
 The current conservative rule marks the node's own content and foreground records after its size changes, but it does not mark descendant records.
 
-Frame requests outside `Runtime::BuildFrame()` schedule work through the platform's absolute monotonic deadline interface.
+Frame requests outside `UiWindow::BuildFrame()` schedule work through the platform's absolute monotonic deadline interface.
 A frame request does not mean that layout or paint is dirty.
 Invalidation outside frame construction requests a frame so callers cannot leave dirty state unscheduled.
 
@@ -506,7 +506,7 @@ struct FrameCommit {
 };
 ```
 
-`RenderScene` remains valid until the next frame construction or Runtime destruction, while the immutable `SemanticFrame` may be retained across later commits.
+`RenderScene` remains valid until the next frame construction or UiWindow retirement, while the immutable `SemanticFrame` may be retained across later commits.
 The platform must finish synchronous traversal before returning unless it explicitly retains a versioned immutable snapshot.
 
 ## Damage tracking
@@ -541,7 +541,7 @@ This design introduced the following coordinated breaking changes:
 
 - Replace ambiguous mounted-node absolute geometry with local geometry queries.
 - Record `NodeExtension` painting through local `PaintContext` operations.
-- Replace the flat `Runtime::BuildFrame()` DisplayList result with a committed RenderFrame containing `RenderScene` and `DamageRegion`.
+- Replace the flat `UiWindow::BuildFrame()` DisplayList result with a committed RenderFrame containing `RenderScene` and `DamageRegion`.
 - Change every platform renderer from flat command iteration to retained scene traversal.
 - Keep `PaintCommand` as the platform-neutral immutable drawing primitive.
 

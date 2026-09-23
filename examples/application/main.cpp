@@ -33,9 +33,9 @@ std::string PlatformActivationSummary() {
 #if defined(_WIN32)
   return "Windows accepts one URL or a command line containing only existing files.";
 #elif defined(__ANDROID__)
-  return "Android maps supported URLs, document URIs, and local-notification Intents into an Activity Runtime.";
+  return "Android maps supported URLs, document URIs, and local-notification Intents into the application Runtime.";
 #elif defined(__APPLE__)
-  return "Apple application callbacks map registered URL schemes and text documents into the current Runtime.";
+  return "Apple application callbacks map registered URL schemes and text documents into the application Runtime.";
 #else
   return "The current platform uses the shared application activation boundary when its shell provides a mapping.";
 #endif
@@ -157,7 +157,7 @@ View PermissionCard(const ApplicationHandle& application, TaskScope tasks) {
   auto status = UseState(std::string{"not checked"});
   const ThemeSpec& theme = UseTheme();
   return Column {
-    Text("Runtime permission", TextRole::Title),
+    Text("Camera permission", TextRole::Title),
     Text("Camera: " + status.Get(), TextRole::Label).With(Foreground(theme.colors.primary)),
     Text("The native application shell owns privacy declarations and final permission policy."),
     Button("Check camera").OnClick([=] {
@@ -187,26 +187,37 @@ View PermissionCard(const ApplicationHandle& application, TaskScope tasks) {
   );
 }
 
+struct DemoViewModel {
+  State<std::vector<std::string>> activations{std::vector<std::string>{}};
+  State<TextFilePreview> preview{TextFilePreview{}};
+  State<std::uint64_t> preview_generation{0};
+};
+
+void InstallApplication(ApplicationContext& context) {
+  auto model = std::make_shared<DemoViewModel>();
+  context.Provide(model);
+  const auto application = UseApplication();
+  const auto tasks = UseApplicationTaskScope();
+  if (const auto& startup = application.StartupActivation()) {
+    model->activations = std::vector<std::string>{"Startup: " + DescribeActivation(*startup)};
+    UpdateTextFilePreview(*startup, tasks, model->preview, model->preview_generation);
+  }
+  context.OnActivation([model, tasks](ApplicationActivation activation) {
+    model->activations.Update([&](auto& values) { values.push_back("Subsequent: " + DescribeActivation(activation)); });
+    UpdateTextFilePreview(activation, tasks, model->preview, model->preview_generation);
+  });
+}
+
 [[huxerui::composable]] View ApplicationContent() {
   const ApplicationHandle application = UseApplication();
-  const ApplicationActivation startup_activation = application.StartupActivation();
+  const auto model = UseService<DemoViewModel>();
   const ApplicationLifecycleState lifecycle_state = application.LifecycleState();
   auto tasks = UseTaskScope();
   auto lifecycle_transitions =
       UseStateList<std::string>({"Initially observed: " + DescribeLifecycleState(lifecycle_state)});
-  auto activations = UseStateList<std::string>({"Startup: " + DescribeActivation(startup_activation)});
-  auto preview = UseState(TextFilePreview{});
-  auto preview_generation = UseState<std::uint64_t>(0);
-
-  Lifecycle([=] { UpdateTextFilePreview(startup_activation, tasks, preview, preview_generation); });
-  application.OnLifecycleChange([=](ApplicationLifecycleState state) {
+  application.OnLifecycleChanged([=](ApplicationLifecycleState state) {
     lifecycle_transitions.PushBack("Transition: " + DescribeLifecycleState(state));
   });
-  application.OnActivation([=](ApplicationActivation activation) {
-    activations.PushBack("Subsequent: " + DescribeActivation(activation));
-    UpdateTextFilePreview(activation, tasks, preview, preview_generation);
-  });
-
   const ThemeSpec& theme = UseTheme();
   return ScrollView {
     Column {
@@ -223,20 +234,20 @@ View PermissionCard(const ApplicationHandle& application, TaskScope tasks) {
           CornerRadius(theme.shapes.medium)
       ),
       Text(
-          "StartupActivation is immutable for this Runtime. Later platform activations enter the same application "
+          "StartupActivation is immutable for this application lifetime. Later platform activations enter the same application "
           "policy through OnActivation."
       ),
       Text(PlatformActivationSummary()),
       Text(PlatformActivationHint()),
       Column {
-        ForEach(activations, [](const std::string& activation) { return Text(activation); }),
+        ForEach(model->activations.Get(), [](const std::string& activation) { return Text(activation); }),
       }.With(
           Padding(theme.spacing.large),
           Spacing(theme.spacing.small),
           Background(theme.colors.surface_container_low),
           CornerRadius(theme.shapes.medium)
       ),
-      TextFilePreviewCard(preview),
+      TextFilePreviewCard(model->preview.Get()),
       PermissionCard(application, tasks),
     }.With(
         Padding(theme.spacing.extra_large),
@@ -258,6 +269,7 @@ AppOptions Options() {
       .title = "HuxerUI Application",
       .initial_size = {720.0F, 520.0F},
   };
+  options.application_hooks = {InstallApplication};
   return options;
 }
 

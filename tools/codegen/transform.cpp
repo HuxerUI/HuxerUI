@@ -711,7 +711,9 @@ void ValidateCompositionCalls(
     }
     const auto identifier = ReadIdentifier(source, cursor);
     cursor = identifier->end;
-    if (!IsUseCallName(identifier->text) || IsMemberCall(source, identifier->begin)) {
+    if (!IsUseCallName(identifier->text) || IsMemberCall(source, identifier->begin) ||
+        identifier->text == "UseApplication" || identifier->text == "UseApplicationTaskScope" ||
+        identifier->text == "UseService" || identifier->text == "UseWindow") {
       continue;
     }
     std::size_t arguments = SkipTrivia(source, identifier->end);

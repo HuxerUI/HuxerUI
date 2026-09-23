@@ -9,7 +9,7 @@
 
 #include <huxerui/data.h>
 #include <huxerui/platform_registry.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 namespace huxerui::example::buffer_reference {
 
@@ -47,6 +47,6 @@ public:
 };
 
 std::shared_ptr<FrameSource> CreateBridgeSource(PlatformChannel channel);
-void Install(RootContext& root);
+void Install(ApplicationContext& root);
 
 } // namespace huxerui::example::buffer_reference

@@ -44,7 +44,7 @@ namespace huxerui {
 
 class Environment;
 class PaintContext;
-class Runtime;
+class UiWindow;
 struct TreeViewStyle;
 
 /// Selects the theme typography role used by Text when no explicit TextStyle overrides it.
@@ -202,7 +202,7 @@ private:
   std::shared_ptr<detail::ViewSpec> spec_;
 
   friend View ProvideEnvironment(Environment environment, View content);
-  friend class Runtime;
+  friend class UiWindow;
   friend class detail::VirtualMeasureSession;
   friend struct detail::InternalAccess;
 };
@@ -618,7 +618,7 @@ private:
 
 /// Base declaration for layouts that eagerly own ordinary child Views.
 ///
-/// A custom Derived type supplies a static Measure function. Runtime owns reconciliation and calls the layout policy
+/// A custom Derived type supplies a static Measure function. UiWindow owns reconciliation and calls the layout policy
 /// with the current children and constraints.
 template <class Derived> class Layout : public detail::TypedView<Derived> {
 public:
@@ -1450,7 +1450,7 @@ class Column final : public Layout<Column> {
 public:
   using Layout::Layout;
 
-  /// Implements Column measurement for Runtime and custom layout composition.
+  /// Implements Column measurement for UiWindow and custom layout composition.
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
@@ -1459,7 +1459,7 @@ class Row final : public Layout<Row> {
 public:
   using Layout::Layout;
 
-  /// Implements Row measurement for Runtime and custom layout composition.
+  /// Implements Row measurement for UiWindow and custom layout composition.
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
@@ -1468,7 +1468,7 @@ class Flow final : public Layout<Flow> {
 public:
   using Layout::Layout;
 
-  /// Implements Flow measurement for Runtime and custom layout composition.
+  /// Implements Flow measurement for UiWindow and custom layout composition.
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
@@ -1477,7 +1477,7 @@ class Stack final : public Layout<Stack> {
 public:
   using Layout::Layout;
 
-  /// Implements Stack measurement for Runtime and custom layout composition.
+  /// Implements Stack measurement for UiWindow and custom layout composition.
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
@@ -1494,7 +1494,7 @@ public:
   IndexedPages(std::vector<View> pages, const State<std::size_t>& selected_index)
       : IndexedPages(std::move(pages), selected_index.Get()) {}
 
-  /// Implements selected-page measurement for Runtime.
+  /// Implements selected-page measurement for UiWindow.
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
@@ -1592,7 +1592,7 @@ public:
   /// Sets the non-negative offscreen extent retained around the viewport.
   VirtualList CacheExtent(float extent) &&;
 
-  /// Implements virtual range measurement and placement for Runtime.
+  /// Implements virtual range measurement and placement for UiWindow.
   static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints);
   /// Resolves the content offset required to align a logical item in the viewport.
   static std::optional<float>
@@ -1626,7 +1626,7 @@ public:
   /// Assigns each item a positive span that is clamped to the resolved column count.
   VirtualGrid ItemSpans(std::vector<std::size_t> spans) &&;
 
-  /// Implements virtual grid range measurement and placement for Runtime.
+  /// Implements virtual grid range measurement and placement for UiWindow.
   static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints);
   /// Resolves the content offset required to align a logical item row in the viewport.
   static std::optional<float>

@@ -181,6 +181,27 @@ None of these APIs requests or guarantees platform background execution.
 ## Application state
 
 `Application` declares the process-level root and options.
+Use `AppOptions::application_hooks` to compose application installers and `AppOptions::window_hooks` to compose per-window installers:
+
+```cpp
+const Application application{
+    App,
+    {
+        .application_hooks = {InstallApplicationServices, RegisterPlatformFactories},
+        .window_hooks = {InstallWindowServices, InstallLayers},
+    },
+};
+```
+
+Each `ApplicationHook` receives a borrowed `ApplicationContext` and runs once per Runtime on the application thread, in declaration order, after built-in application services are ready.
+Later hooks can acquire services and open application-level platform modules installed by earlier hooks.
+Only after every hook succeeds do services and factories freeze and queued application work become eligible to run; window initialization follows application installation.
+Each `WindowHook` instead receives `WindowContext` and runs once for each UiWindow before its first composition, including replacement windows.
+Both lists may be empty, but an empty callback entry throws `std::invalid_argument` during initialization.
+An application hook failure skips remaining application hooks, releases installed application services, and discards queued application work.
+A window hook failure skips remaining window hooks and releases services installed for that window.
+Do not retain either context after its callback returns.
+
 The root can observe application lifecycle state and receive cold-start or later activation containing URLs, external files, or stable local-notification identifiers.
 Navigation and file handling remain application policy; the platform shell only normalizes and delivers activation data.
 
@@ -212,6 +233,7 @@ An unknown template returns `Unavailable` rather than silently using the system 
 
 On desktop, its `SystemTray()` sub-handle presents one tray item and `Quit()` requests orderly application termination.
 Tray declarations reuse `MenuItem`, `MenuEntry`, and `MenuSection`; their `ImageVariant` icons must resolve to raster `ImageAsset` values.
+Register primary tray activation once through `SystemTrayHandle::OnActivate(handler)`, normally in an `ApplicationHook`. This application-lifetime registration requires the original application's thread, rejects empty or duplicate handlers, and survives `Show()`, `Hide()`, and window retirement. It does not capture a window context: capture a specific `WindowHandle` or an application-owned service that selects the target window instead of calling `UseWindow()` inside the handler.
 `UseWindow()` supplies independent visibility commands and lifecycle-bound minimize and close request handlers, allowing an application to compose minimize-to-tray behavior while preserving the normal window action when no tray host is available.
 
 See [Application Permissions](../design/permissions.md) for status meanings, native declarations, and platform limitations.
@@ -219,7 +241,7 @@ See [Local Notifications](../design/local-notifications.md) for notification aut
 
 ## Runtime model
 
-The shared Runtime owns composition, reconciliation, layout, interaction, scrolling, animation, semantics, and retained scene generation.
+Each UiWindow owns composition, reconciliation, layout, interaction, scrolling, animation, semantics, and retained scene generation. Its Runtime owns application services, dispatch, and ordinary timers.
 Platform adapters own platform lifecycle, frame scheduling, event conversion, text services, supported accessibility bridges, and scene rendering.
 
 ```text

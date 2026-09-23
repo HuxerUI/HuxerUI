@@ -34,8 +34,8 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
 
 struct AppleColorStreamState : huxerui::example::ColorStreamService,
                                std::enable_shared_from_this<AppleColorStreamState> {
-  explicit AppleColorStreamState(huxerui::PlatformAdapter& adapter_value)
-      : adapter(&adapter_value),
+  explicit AppleColorStreamState(huxerui::UiWindow& window_value)
+      : ui_window(&window_value),
         texture(std::make_shared<huxerui_apple::PixelBufferTexture>(huxerui::Size{320.0F, 180.0F})) {}
 
   ~AppleColorStreamState() override {
@@ -101,13 +101,13 @@ struct AppleColorStreamState : huxerui::example::ColorStreamService,
       throw std::logic_error("HuxerUI example Apple color stream must be used on the main thread");
     }
     Start();
-    adapter->DispatchToUIThread([completion = std::move(completion), texture = texture]() mutable {
+    ui_window->DispatchToUiThread([completion = std::move(completion), texture = texture]() mutable {
       completion(std::move(texture));
     });
     return ++request_id;
   }
 
-  huxerui::PlatformAdapter* adapter;
+  huxerui::UiWindow* ui_window;
   std::shared_ptr<huxerui_apple::PixelBufferTexture> texture;
   __strong NSTimer* timer = nil;
   std::uint32_t phase = 0;
@@ -118,11 +118,10 @@ struct AppleColorStreamState : huxerui::example::ColorStreamService,
 
 namespace huxerui::example {
 
-void InstallColorStream(RootContext& root) {
-  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](PlatformAdapter& adapter) {
-    return std::static_pointer_cast<ColorStreamService>(std::make_shared<AppleColorStreamState>(adapter));
+void InstallColorStream(ApplicationContext& root) {
+  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](UiWindow& ui_window) {
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<AppleColorStreamState>(ui_window));
   });
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type));
 }
 
 } // namespace huxerui::example

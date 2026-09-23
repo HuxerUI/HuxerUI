@@ -14,12 +14,13 @@ final class HuxerUIPermission {
 
     private static final int REQUEST_CODE = 0x4851;
 
-    private final HuxerUIView view;
+    private final android.content.Context context;
+    private HuxerUIApplication.PermissionLauncher activeLauncher;
     private long activeNativeHandle;
     private String activePermission;
 
-    HuxerUIPermission(HuxerUIView view) {
-        this.view = view;
+    HuxerUIPermission(android.content.Context context) {
+        this.context = context;
     }
 
     int check(int permission) {
@@ -27,14 +28,14 @@ final class HuxerUIPermission {
         if (name == null || !isDeclared(name)) {
             return UNAVAILABLE;
         }
-        return view.getContext().checkSelfPermission(name) == PackageManager.PERMISSION_GRANTED ? GRANTED : DENIED;
+        return context.checkSelfPermission(name) == PackageManager.PERMISSION_GRANTED ? GRANTED : DENIED;
     }
 
-    void request(long nativeHandle, int permission) {
+    void request(long nativeHandle, int permission, HuxerUIApplication.PermissionLauncher launcher) {
         String name = permissionName(permission);
         int status = check(permission);
-        if (status == GRANTED || status == UNAVAILABLE || view.permissionLauncher() == null) {
-            int result = view.permissionLauncher() == null && status != GRANTED ? UNAVAILABLE : status;
+        if (status == GRANTED || status == UNAVAILABLE || launcher == null) {
+            int result = launcher == null && status != GRANTED ? UNAVAILABLE : status;
             nativeComplete(nativeHandle, result);
             return;
         }
@@ -44,8 +45,9 @@ final class HuxerUIPermission {
         }
         activeNativeHandle = nativeHandle;
         activePermission = name;
+        activeLauncher = launcher;
         try {
-            view.permissionLauncher().request(name, REQUEST_CODE);
+            launcher.request(name, REQUEST_CODE);
         } catch (RuntimeException exception) {
             complete(UNAVAILABLE);
         }
@@ -69,19 +71,23 @@ final class HuxerUIPermission {
         return true;
     }
 
-    boolean openSettings(int permission) {
-        if (permissionName(permission) == null || view.permissionLauncher() == null) {
+    boolean openSettings(int permission, HuxerUIApplication.PermissionLauncher launcher) {
+        if (permissionName(permission) == null || launcher == null) {
             return false;
         }
         try {
-            return view.permissionLauncher().openSettings();
+            return launcher.openSettings();
         } catch (RuntimeException exception) {
             return false;
         }
     }
 
-    void launcherChanged() {
-        if (view.permissionLauncher() == null && activeNativeHandle != 0L) {
+    /**
+     * Completes a pending request as unavailable when its original presentation endpoint is removed.
+     * @param launcher Exact former endpoint, checked on the main thread; other requests are unaffected.
+     */
+    void launcherRemoved(HuxerUIApplication.PermissionLauncher launcher) {
+        if (launcher == activeLauncher && activeNativeHandle != 0L) {
             complete(UNAVAILABLE);
         }
     }
@@ -100,8 +106,8 @@ final class HuxerUIPermission {
     @SuppressWarnings("deprecation")
     private boolean isDeclared(String permission) {
         try {
-            PackageInfo info = view.getContext().getPackageManager().getPackageInfo(
-                    view.getContext().getPackageName(), PackageManager.GET_PERMISSIONS);
+            PackageInfo info = context.getPackageManager().getPackageInfo(
+                    context.getPackageName(), PackageManager.GET_PERMISSIONS);
             if (info.requestedPermissions == null) {
                 return false;
             }
@@ -120,6 +126,7 @@ final class HuxerUIPermission {
         long nativeHandle = activeNativeHandle;
         activeNativeHandle = 0L;
         activePermission = null;
+        activeLauncher = null;
         nativeComplete(nativeHandle, status);
     }
 

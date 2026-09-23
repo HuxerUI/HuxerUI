@@ -19,10 +19,24 @@ struct PlatformEnv {
   jobject context = nullptr;
 };
 
-/// Returns the UI-thread JNI environment and Android Context owned by the supplied Android PlatformAdapter.
-///
-/// Throws std::logic_error when adapter does not belong to an Android host or the call is not on its UI thread.
-[[nodiscard]] PlatformEnv GetPlatformEnv(PlatformAdapter& adapter);
+/// Borrows JNI facilities from the supplied Android window on its application thread.
+/// @param ui_window Live original Android window hosting the factory.
+/// @return The current thread's JNIEnv and the window's Android Context; do not retain either borrowed reference.
+/// @throws std::logic_error If the backend or calling thread does not match.
+/// Use a JNI global reference when a created instance needs the Context after the factory returns.
+[[nodiscard]] PlatformEnv GetPlatformEnv(UiWindow& ui_window);
+
+/// Borrows application JNI facilities without requiring an attached HuxerUI window.
+/// @param runtime Live original Android Runtime, accessed on its application thread.
+/// @return The thread-local JNIEnv and application Context; retain Context only through an explicit global reference.
+/// @throws std::logic_error If the backend or calling thread does not match.
+/// @code{.cpp}
+/// context.RegisterPlatformModule<std::shared_ptr<DeviceService>>("Device", [](Runtime& runtime) {
+///   const android::PlatformEnv env = android::GetPlatformEnv(runtime);
+///   return CreateDeviceService(env.jni, env.context);
+/// });
+/// @endcode
+[[nodiscard]] PlatformEnv GetPlatformEnv(Runtime& runtime);
 
 /// Describes the direct C++/JNI lifecycle of one registered Android PlatformView type.
 ///
@@ -45,7 +59,7 @@ struct PlatformEnv {
 ///     .update = UpdateTextView,
 ///     .dispose = DisposeTextView,
 /// };
-/// root.RegisterPlatformView<TextProperties>("TextView", std::move(factory));
+/// context.RegisterPlatformView<TextProperties>("TextView", std::move(factory));
 /// @endcode
 ///
 /// @tparam Properties Controlled declarative state, or void when the View has no properties.
@@ -65,7 +79,7 @@ template <class Properties, class Instance, class Controller = void> struct Plat
 /// android::JavaPlatformViewFactory<TextProperties> factory{
 ///     .class_name = "org.example.PlatformTextField",
 /// };
-/// root.RegisterPlatformView<TextProperties>("TextField", std::move(factory));
+/// context.RegisterPlatformView<TextProperties>("TextField", std::move(factory));
 /// @endcode
 ///
 /// @tparam Properties Controlled C++ state encoded for the Java factory, or void for Null.
@@ -78,7 +92,11 @@ class JavaPlatformModuleFactoryState;
 class JavaPlatformViewFactoryState;
 class JavaPlatformViewInstance;
 
-std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(PlatformAdapter& adapter,
+/// Prepares a Java module factory against the application host without requiring a HuxerUIView.
+/// @param runtime Original Android Runtime, accessed on its application thread.
+/// @param class_name Fully qualified public Java factory class with a public no-argument constructor.
+/// @return Retained factory state bound to the original application's channel endpoint.
+std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(Runtime& runtime,
                                                                                  std::string class_name);
 PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModuleFactoryState>& factory,
                                          PlatformPayload options);
@@ -93,7 +111,7 @@ struct AndroidViewFactory {
   std::function<void(JNIEnv*, const std::shared_ptr<void>&, const PlatformValue&)> disconnect;
 };
 
-std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(PlatformAdapter& adapter,
+std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(UiWindow& ui_window,
                                                                              std::string class_name);
 std::shared_ptr<JavaPlatformViewInstance>
 CreateJavaPlatformView(const std::shared_ptr<JavaPlatformViewFactoryState>& factory, PlatformPayload properties,
@@ -117,9 +135,9 @@ template <class Properties> PlatformPayload EncodeJavaPlatformViewProperties(con
 template <class Properties, class Controller>
 huxerui::detail::PlatformViewFactoryRegistration
 EraseJavaPlatformViewFactory(android::JavaPlatformViewFactory<Properties, Controller> source_value,
-                             PlatformAdapter& adapter) {
+                             UiWindow& ui_window) {
   auto source = std::make_shared<android::JavaPlatformViewFactory<Properties, Controller>>(std::move(source_value));
-  auto prepared = PrepareJavaPlatformViewFactory(adapter, source->class_name);
+  auto prepared = PrepareJavaPlatformViewFactory(ui_window, source->class_name);
   auto factory = std::make_shared<AndroidViewFactory>();
   factory->create = [prepared](JNIEnv*, jobject, const PlatformValue& properties, PlatformEventEmitter events) {
     return std::static_pointer_cast<void>(
@@ -212,47 +230,47 @@ ErasePlatformViewFactory(android::PlatformViewFactory<Properties, Instance, Cont
 
 /// Adapts a direct C++/JNI PlatformModule factory to the platform-neutral registry callable contract.
 ///
-/// The callback receives the owning PlatformAdapter, the current UI-thread JNIEnv*, the borrowed Android Context, and
+/// The callback receives the owning UiWindow, the current UI-thread JNIEnv*, the borrowed Android Context, and
 /// typed Options when present. It returns the library's exact strongly typed Module facade; no PlatformPayload or
 /// PlatformChannel is introduced on this direct path.
 ///
 /// Example:
 /// @code
 /// android::PlatformModuleFactory<std::shared_ptr<CameraService>, CameraOptions> factory{
-///     .create = [](PlatformAdapter& adapter, JNIEnv* env, jobject context, const CameraOptions& options) {
-///       return CreateCameraService(adapter, env, context, options);
+///     .create = [](UiWindow& ui_window, JNIEnv* env, jobject context, const CameraOptions& options) {
+///       return CreateCameraService(ui_window, env, context, options);
 ///     },
 /// };
-/// root.RegisterPlatformModule<std::shared_ptr<CameraService>, CameraOptions>("Camera", std::move(factory));
+/// context.RegisterPlatformModule<std::shared_ptr<CameraService>, CameraOptions>("Camera", std::move(factory));
 /// @endcode
 ///
-/// @tparam Module Exact C++ value returned by RootContext::OpenPlatformModule.
+/// @tparam Module Exact C++ value returned by OpenPlatformModule.
 /// @tparam Options Optional strongly typed construction options, or void when none are required.
 template <class Module, class Options = void> struct PlatformModuleFactory;
 
 /// Direct C++/JNI PlatformModule factory without construction Options.
 template <class Module> struct PlatformModuleFactory<Module, void> {
-  std::function<Module(PlatformAdapter&, JNIEnv*, jobject)> create;
+  std::function<Module(UiWindow&, JNIEnv*, jobject)> create;
 
-  Module operator()(PlatformAdapter& adapter) {
+  Module operator()(UiWindow& ui_window) {
     if (!create) {
       throw std::logic_error("HuxerUI Android PlatformModule factory must provide create");
     }
-    const PlatformEnv env = GetPlatformEnv(adapter);
-    return create(adapter, env.jni, env.context);
+    const PlatformEnv env = GetPlatformEnv(ui_window);
+    return create(ui_window, env.jni, env.context);
   }
 };
 
 /// Direct C++/JNI PlatformModule factory with strongly typed construction Options.
 template <class Module, class Options> struct PlatformModuleFactory {
-  std::function<Module(PlatformAdapter&, JNIEnv*, jobject, const Options&)> create;
+  std::function<Module(UiWindow&, JNIEnv*, jobject, const Options&)> create;
 
-  Module operator()(PlatformAdapter& adapter, const Options& options) {
+  Module operator()(UiWindow& ui_window, const Options& options) {
     if (!create) {
       throw std::logic_error("HuxerUI Android PlatformModule factory must provide create");
     }
-    const PlatformEnv env = GetPlatformEnv(adapter);
-    return create(adapter, env.jni, env.context, options);
+    const PlatformEnv env = GetPlatformEnv(ui_window);
+    return create(ui_window, env.jni, env.context, options);
   }
 };
 
@@ -271,10 +289,10 @@ template <class Module, class Options> struct PlatformModuleFactory {
 /// factory.create = [](PlatformChannel channel) {
 ///   return std::make_shared<AndroidTimerService>(std::move(channel));
 /// };
-/// root.RegisterPlatformModule<std::shared_ptr<TimerService>>("Timer", std::move(factory));
+/// context.RegisterPlatformModule<std::shared_ptr<TimerService>>("Timer", std::move(factory));
 /// @endcode
 ///
-/// @tparam Module Exact C++ value returned by RootContext::OpenPlatformModule.
+/// @tparam Module Exact C++ value returned by OpenPlatformModule.
 /// @tparam Options Optional payload-encodable construction options, or void for Null.
 template <class Module, class Options = void> struct JavaPlatformModuleFactory;
 
@@ -283,12 +301,16 @@ template <class Module> struct JavaPlatformModuleFactory<Module, void> {
   std::string class_name;
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(PlatformAdapter& adapter) {
+  /// Creates an application-bound Java module and wraps its channel in the registered C++ facade.
+  /// @param runtime Original application host supplied by the frozen catalog, on its application thread.
+  /// @return The exact Module value produced by create; no HuxerUI window is required.
+  /// @throws std::logic_error If create is empty or the original native host cannot be used.
+  Module operator()(Runtime& runtime) {
     if (!create) {
       throw std::logic_error("HuxerUI Android Java PlatformModule factory is incomplete");
     }
     if (!state_) {
-      state_ = detail::PrepareJavaPlatformModuleFactory(adapter, class_name);
+      state_ = detail::PrepareJavaPlatformModuleFactory(runtime, class_name);
     }
     PlatformChannel channel = detail::CreateJavaPlatformModule(state_, {});
     try {
@@ -310,12 +332,17 @@ template <class Module, class Options> struct JavaPlatformModuleFactory {
   std::string class_name;
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(PlatformAdapter& adapter, const Options& options) {
+  /// Creates a Java module with typed options encoded for the native factory invocation.
+  /// @param runtime Original application host supplied by the frozen catalog, on its application thread.
+  /// @param options Construction data borrowed only during this call and encoded into an owned payload.
+  /// @return The exact Module facade wrapping this instance's application-bound PlatformChannel.
+  /// A factory object remains associated with the first Runtime for which it was prepared.
+  Module operator()(Runtime& runtime, const Options& options) {
     if (!create) {
       throw std::logic_error("HuxerUI Android Java PlatformModule factory is incomplete");
     }
     if (!state_) {
-      state_ = detail::PrepareJavaPlatformModuleFactory(adapter, class_name);
+      state_ = detail::PrepareJavaPlatformModuleFactory(runtime, class_name);
     }
     PlatformChannel channel = detail::CreateJavaPlatformModule(state_, huxerui::detail::EncodePlatformValue(options));
     try {
@@ -335,8 +362,8 @@ template <class Properties> struct JavaPlatformViewFactory<Properties, void> {
   std::string class_name;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    return detail::EraseJavaPlatformViewFactory(std::move(*this), adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    return detail::EraseJavaPlatformViewFactory(std::move(*this), ui_window);
   }
   friend class huxerui::detail::PlatformRegistry;
 };
@@ -348,8 +375,8 @@ template <class Properties, class Controller> struct JavaPlatformViewFactory {
   std::function<void(const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    return detail::EraseJavaPlatformViewFactory(std::move(*this), adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    return detail::EraseJavaPlatformViewFactory(std::move(*this), ui_window);
   }
   friend class huxerui::detail::PlatformRegistry;
 };
@@ -361,8 +388,8 @@ template <class Instance> struct PlatformViewFactory<void, Instance, void> {
   std::function<void(JNIEnv*, Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -377,8 +404,8 @@ template <class Instance, class Controller> struct PlatformViewFactory<void, Ins
   std::function<void(JNIEnv*, Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -392,8 +419,8 @@ template <class Properties, class Instance> struct PlatformViewFactory<Propertie
   std::function<void(JNIEnv*, Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -409,8 +436,8 @@ template <class Properties, class Instance, class Controller> struct PlatformVie
   std::function<void(JNIEnv*, Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;

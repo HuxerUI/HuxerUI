@@ -31,7 +31,7 @@ namespace huxerui::web {
 ///     .update = UpdateEditor,
 ///     .dispose = DisposeEditor,
 /// };
-/// root.RegisterPlatformView<EditorProperties>("Editor", std::move(factory));
+/// context.RegisterPlatformView<EditorProperties>("Editor", std::move(factory));
 /// @endcode
 ///
 /// @tparam Properties Controlled declarative state, or void when the View has no properties.
@@ -41,8 +41,9 @@ template <class Properties, class Instance, class Controller = void> struct Plat
 
 /// Adapts a JavaScript PlatformModule factory object to a strongly typed C++ Module facade.
 ///
-/// The JavaScript factory is supplied directly by the library's RootHook; HuxerUI does not maintain a second
-/// JavaScript registration table. Options cross the language boundary through PlatformPayload, while the adapter's
+/// The JavaScript factory is supplied directly by the library's ApplicationContext installer; HuxerUI does not maintain
+/// a second
+/// JavaScript registration table. Options cross the language boundary through PlatformPayload, while the ui_window's
 /// C++ create callback wraps the created instance's PlatformChannel in the library's exact Module type. The JavaScript
 /// factory object provides `create(options, events)`. Its returned instance provides `invoke(method, arguments,
 /// result)`, may return a cancellation function from invoke, and provides `dispose()`.
@@ -55,10 +56,10 @@ template <class Properties, class Instance, class Controller = void> struct Plat
 ///       return std::make_shared<WebTimerService>(std::move(channel));
 ///     },
 /// };
-/// root.RegisterPlatformModule<std::shared_ptr<TimerService>>("Timer", std::move(factory));
+/// context.RegisterPlatformModule<std::shared_ptr<TimerService>>("Timer", std::move(factory));
 /// @endcode
 ///
-/// @tparam Module Exact C++ value returned by RootContext::OpenPlatformModule.
+/// @tparam Module Exact C++ value returned by OpenPlatformModule.
 /// @tparam Options Optional payload-encodable construction options, or void for Null.
 template <class Module, class Options = void> struct JavaScriptPlatformModuleFactory;
 
@@ -75,7 +76,7 @@ template <class Module, class Options = void> struct JavaScriptPlatformModuleFac
 /// web::JavaScriptPlatformViewFactory<EditorProperties> factory{
 ///     .factory = emscripten::val::module_property("exampleEditorFactory"),
 /// };
-/// root.RegisterPlatformView<EditorProperties>("Editor", std::move(factory));
+/// context.RegisterPlatformView<EditorProperties>("Editor", std::move(factory));
 /// @endcode
 ///
 /// @tparam Properties Controlled payload-encodable state, or void for Null.
@@ -96,10 +97,10 @@ struct WebElementFactory {
 
 class JavaScriptPlatformViewInstance;
 
-PlatformChannel CreateJavaScriptPlatformModule(PlatformAdapter& adapter, const emscripten::val& factory,
+PlatformChannel CreateJavaScriptPlatformModule(UiWindow& ui_window, const emscripten::val& factory,
                                                 PlatformPayload options);
 std::shared_ptr<JavaScriptPlatformViewInstance>
-CreateJavaScriptPlatformView(PlatformAdapter& adapter, const emscripten::val& factory, PlatformPayload properties,
+CreateJavaScriptPlatformView(UiWindow& ui_window, const emscripten::val& factory, PlatformPayload properties,
                              PlatformEventEmitter events, bool update_required, bool channel_required);
 emscripten::val GetJavaScriptPlatformView(const std::shared_ptr<JavaScriptPlatformViewInstance>& instance);
 void UpdateJavaScriptPlatformView(const std::shared_ptr<JavaScriptPlatformViewInstance>& instance,
@@ -120,13 +121,12 @@ template <class Properties> PlatformPayload EncodeJavaScriptPlatformViewProperti
 template <class Properties, class Controller>
 huxerui::detail::PlatformViewFactoryRegistration
 EraseJavaScriptPlatformViewFactory(web::JavaScriptPlatformViewFactory<Properties, Controller> source_value,
-                                   PlatformAdapter& adapter) {
+                                   UiWindow& ui_window) {
   auto source = std::make_shared<web::JavaScriptPlatformViewFactory<Properties, Controller>>(std::move(source_value));
-  PlatformAdapter* platform_adapter = &adapter;
   auto factory = std::make_shared<WebElementFactory>();
-  factory->create = [source, platform_adapter](const PlatformValue& properties, PlatformEventEmitter events) {
+  factory->create = [source, ui_window = &ui_window](const PlatformValue& properties, PlatformEventEmitter events) {
     return std::static_pointer_cast<void>(CreateJavaScriptPlatformView(
-        *platform_adapter, source->factory, EncodeJavaScriptPlatformViewProperties<Properties>(properties),
+        *ui_window, source->factory, EncodeJavaScriptPlatformViewProperties<Properties>(properties),
         std::move(events), !std::same_as<Properties, void>, !std::same_as<Controller, void>));
   };
   factory->view = [](const std::shared_ptr<void>& instance) {
@@ -213,11 +213,11 @@ template <class Module> struct JavaScriptPlatformModuleFactory<Module, void> {
   emscripten::val factory = emscripten::val::undefined();
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(PlatformAdapter& adapter) {
+  Module operator()(UiWindow& ui_window) {
     if (!create) {
       throw std::logic_error("HuxerUI Web JavaScript PlatformModule factory is incomplete");
     }
-    PlatformChannel channel = detail::CreateJavaScriptPlatformModule(adapter, factory, {});
+    PlatformChannel channel = detail::CreateJavaScriptPlatformModule(ui_window, factory, {});
     try {
       return create(channel);
     } catch (...) {
@@ -234,12 +234,12 @@ template <class Module, class Options> struct JavaScriptPlatformModuleFactory {
   emscripten::val factory = emscripten::val::undefined();
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(PlatformAdapter& adapter, const Options& options) {
+  Module operator()(UiWindow& ui_window, const Options& options) {
     if (!create) {
       throw std::logic_error("HuxerUI Web JavaScript PlatformModule factory is incomplete");
     }
     PlatformChannel channel =
-        detail::CreateJavaScriptPlatformModule(adapter, factory, huxerui::detail::EncodePlatformValue(options));
+        detail::CreateJavaScriptPlatformModule(ui_window, factory, huxerui::detail::EncodePlatformValue(options));
     try {
       return create(channel);
     } catch (...) {
@@ -254,8 +254,8 @@ template <class Properties> struct JavaScriptPlatformViewFactory<Properties, voi
   emscripten::val factory = emscripten::val::undefined();
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    return detail::EraseJavaScriptPlatformViewFactory(std::move(*this), adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    return detail::EraseJavaScriptPlatformViewFactory(std::move(*this), ui_window);
   }
   friend class huxerui::detail::PlatformRegistry;
 };
@@ -267,8 +267,8 @@ template <class Properties, class Controller> struct JavaScriptPlatformViewFacto
   std::function<void(const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    return detail::EraseJavaScriptPlatformViewFactory(std::move(*this), adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    return detail::EraseJavaScriptPlatformViewFactory(std::move(*this), ui_window);
   }
   friend class huxerui::detail::PlatformRegistry;
 };
@@ -280,8 +280,8 @@ template <class Instance> struct PlatformViewFactory<void, Instance, void> {
   std::function<void(Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 
@@ -297,8 +297,8 @@ template <class Instance, class Controller> struct PlatformViewFactory<void, Ins
   std::function<void(Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 
@@ -313,8 +313,8 @@ template <class Properties, class Instance> struct PlatformViewFactory<Propertie
   std::function<void(Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 
@@ -331,8 +331,8 @@ template <class Properties, class Instance, class Controller> struct PlatformVie
   std::function<void(Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(PlatformAdapter& adapter) && {
-    static_cast<void>(adapter);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
+    static_cast<void>(ui_window);
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
 

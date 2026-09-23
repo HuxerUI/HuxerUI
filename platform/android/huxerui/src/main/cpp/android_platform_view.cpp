@@ -22,15 +22,15 @@
 
 #include "android_external_texture_internal.h"
 #include "android_renderer.h"
-#include "runtime/runtime_internal.h"
+#include "runtime/ui_window_internal.h"
 
 namespace huxerui::detail {
 
 namespace {
 
 struct EventRoute {
-  Runtime* runtime = nullptr;
-  // Value-returning events are synchronous, so a route may enter Runtime only from its owning UI thread.
+  UiWindow* ui_window = nullptr;
+  // Value-returning events are synchronous, so a route may enter UiWindow only from its owning UI thread.
   std::thread::id ui_thread;
   std::uint64_t identity = 0;
   bool active = false;
@@ -63,8 +63,8 @@ void ClearJavaException(JNIEnv* environment) {
 
 struct AndroidPlatformViews::State {
   State(JNIEnv* environment, jobject root_value, jobject context_value, AndroidRenderer& renderer_value,
-        PlatformRegistry& registry_value, Runtime& runtime_value)
-      : context(context_value), renderer(&renderer_value), registry(&registry_value), runtime(&runtime_value) {
+        PlatformRegistry& registry_value, UiWindow& ui_window_value)
+      : context(context_value), renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value) {
     if (environment->GetJavaVM(&virtual_machine) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM for PlatformView hosting");
     }
@@ -116,31 +116,31 @@ struct AndroidPlatformViews::State {
   std::unique_ptr<HostedPlatformView> Create(JNIEnv* environment, const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
     std::shared_ptr<const android::detail::AndroidViewFactory> factory =
-        registry->FindView<android::detail::AndroidViewFactory>(command.Type(), command.Properties().Type(),
+        registry->FindView<android::detail::AndroidViewFactory>(*ui_window, command.Type(), command.Properties().Type(),
                                                                 command.Controller().Type());
     if (!factory->create) {
       throw std::logic_error("HuxerUI Android PlatformView factory must provide create");
     }
 
     auto route =
-        std::make_shared<EventRoute>(EventRoute{runtime, std::this_thread::get_id(), command.Identity(), false});
+        std::make_shared<EventRoute>(EventRoute{ui_window, std::this_thread::get_id(), command.Identity(), false});
     const std::weak_ptr<EventRoute> weak_route = route;
     PlatformEventEmitter events = MakePlatformEventEmitter(
         [weak_route](std::type_index key, PlatformValue value) -> std::optional<PlatformValue> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
           if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
-              route->runtime == nullptr) {
+              route->ui_window == nullptr) {
             return std::nullopt;
           }
-          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, key, value);
+          return InternalAccess::DispatchPlatformViewEvent(*route->ui_window, route->identity, key, value);
         },
         [weak_route](std::string name, PlatformPayload payload) -> std::optional<PlatformPayload> {
           const std::shared_ptr<EventRoute> route = weak_route.lock();
           if (!route || route->ui_thread != std::this_thread::get_id() || !route->active ||
-              route->runtime == nullptr) {
+              route->ui_window == nullptr) {
             return std::nullopt;
           }
-          return InternalAccess::DispatchPlatformViewEvent(*route->runtime, route->identity, name, payload);
+          return InternalAccess::DispatchPlatformViewEvent(*route->ui_window, route->identity, name, payload);
         });
 
     auto hosted_view = std::make_unique<HostedPlatformView>();
@@ -281,7 +281,7 @@ struct AndroidPlatformViews::State {
   jobject context = nullptr;
   AndroidRenderer* renderer = nullptr;
   PlatformRegistry* registry = nullptr;
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   const RenderFrame* frame = nullptr;
   std::optional<RenderSlice> base_slice;
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedPlatformView>> hosted;
@@ -295,8 +295,8 @@ struct AndroidPlatformViews::State {
 };
 
 AndroidPlatformViews::AndroidPlatformViews(JNIEnv* environment, jobject root, jobject context,
-                                           AndroidRenderer& renderer, PlatformRegistry& registry, Runtime& runtime)
-    : state_(std::make_unique<State>(environment, root, context, renderer, registry, runtime)) {}
+                                           AndroidRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window)
+    : state_(std::make_unique<State>(environment, root, context, renderer, registry, ui_window)) {}
 
 AndroidPlatformViews::~AndroidPlatformViews() {
   if (state_) {
@@ -426,7 +426,7 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
     hosted_view->event_route->active = true;
   }
 
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->runtime);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
   if (focused_identity.has_value() &&
       *focused_identity > static_cast<std::uint64_t>(std::numeric_limits<jlong>::max())) {
     throw std::overflow_error("HuxerUI Android PlatformView focus identity exceeds the JNI range");
@@ -439,7 +439,7 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
     throw std::logic_error("HuxerUI Android PlatformView host failed to synchronize focus");
   }
   if (focused_identity.has_value() && focus_applied != JNI_TRUE) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, std::nullopt, false);
+    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
   }
 }
 
@@ -484,20 +484,20 @@ void AndroidPlatformViews::ClearTextureLayerSurface(std::uint64_t identity) noex
 }
 
 std::optional<std::uint64_t> AndroidPlatformViews::HitTest(Point point) const {
-  return state_->runtime == nullptr ? std::nullopt : InternalAccess::HitTestPlatformView(*state_->runtime, point);
+  return state_->ui_window == nullptr ? std::nullopt : InternalAccess::HitTestPlatformView(*state_->ui_window, point);
 }
 
 void AndroidPlatformViews::SynchronizeFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
-  if (state_->runtime != nullptr) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->runtime, identity, focus_visible);
+  if (state_->ui_window != nullptr) {
+    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, identity, focus_visible);
   }
 }
 
 bool AndroidPlatformViews::MoveFocus(std::uint64_t identity, bool reverse) {
-  if (state_->runtime == nullptr || InternalAccess::FocusedPlatformView(*state_->runtime) != identity) {
+  if (state_->ui_window == nullptr || InternalAccess::FocusedPlatformView(*state_->ui_window) != identity) {
     return false;
   }
-  return InternalAccess::MoveFocusFromPlatformView(*state_->runtime, identity, reverse);
+  return InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, identity, reverse);
 }
 
 void AndroidPlatformViews::Shutdown(JNIEnv* environment) {
@@ -505,7 +505,7 @@ void AndroidPlatformViews::Shutdown(JNIEnv* environment) {
     return;
   }
   for (auto& [identity, hosted_view] : state_->hosted) {
-    hosted_view->event_route->runtime = nullptr;
+    hosted_view->event_route->ui_window = nullptr;
     state_->Dispose(environment, identity, *hosted_view);
   }
   state_->hosted.clear();
@@ -513,7 +513,7 @@ void AndroidPlatformViews::Shutdown(JNIEnv* environment) {
   state_->texture_layers.reset();
   state_->frame = nullptr;
   state_->base_slice.reset();
-  state_->runtime = nullptr;
+  state_->ui_window = nullptr;
   state_->context = nullptr;
   environment->DeleteGlobalRef(state_->root);
   state_->root = nullptr;

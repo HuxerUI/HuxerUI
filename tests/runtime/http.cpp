@@ -270,7 +270,7 @@ static_assert(std::is_nothrow_move_constructible_v<HttpResult<HttpResponseStream
 TEST_CASE("HttpClientSendsOneTypedOperationAndAggregatesItsPullReads") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
   const Bytes request_body{std::byte{'{'}, std::byte{0}, std::byte{0xFF}, std::byte{'}'}};
@@ -324,7 +324,7 @@ TEST_CASE("HttpClientHandlesTransportCompletionDuringStart") {
   ResetHttpState();
   HttpTestPlatform platform;
   platform.transport->FailNextStart({HttpErrorCode::Transport, "HuxerUI HTTP request failed immediately"});
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpResult(http_client, {.url = "https://example.test/immediate"}));
@@ -338,7 +338,7 @@ TEST_CASE("HttpClientHandlesTransportCompletionDuringStart") {
 TEST_CASE("HttpClientRejectsBodyBeforeResponseMetadata") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/body-before-response"}));
@@ -359,7 +359,7 @@ TEST_CASE("HttpClientRejectsBodyBeforeResponseMetadata") {
 TEST_CASE("HttpClientRejectsCompletionBeforeResponseMetadata") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/complete-before-response"}));
@@ -379,7 +379,7 @@ TEST_CASE("HttpClientRejectsCompletionBeforeResponseMetadata") {
 TEST_CASE("HttpClientReturnsStreamingHeadersBeforeRequestingBodyData") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/stream"}));
@@ -414,7 +414,7 @@ TEST_CASE("HttpClientReturnsStreamingHeadersBeforeRequestingBodyData") {
 TEST_CASE("HttpResponseStreamHonorsRequestedReadSizesWithoutExtraPlatformReads") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/large"}));
@@ -453,7 +453,7 @@ TEST_CASE("HttpResponseStreamHonorsRequestedReadSizesWithoutExtraPlatformReads")
 TEST_CASE("HttpResponseStreamAllowsOnePendingReadTaskBeforeItStarts") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/abandoned"}));
@@ -472,7 +472,7 @@ TEST_CASE("HttpResponseStreamAllowsOnePendingReadTaskBeforeItStarts") {
 TEST_CASE("HttpSuspendedBodyReadCancellationStopsTransportAndDropsLateData") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/canceled-read"}));
   platform.RunPlatformModuleTasks();
@@ -495,7 +495,7 @@ TEST_CASE("HttpCopyCancellationStopsTransportDuringEitherEndpointOperation") {
   const bool waiting_for_output = GENERATE(false, true);
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/canceled-copy"}));
   platform.RunPlatformModuleTasks();
@@ -526,7 +526,7 @@ TEST_CASE("HttpCopyCancellationStopsTransportDuringEitherEndpointOperation") {
 TEST_CASE("HttpUnstartedCopyReleasesBothEndpointsWithoutCancelingThem") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/unstarted-copy"}));
   platform.RunPlatformModuleTasks();
@@ -551,7 +551,7 @@ TEST_CASE("HttpUnstartedCopyReleasesBothEndpointsWithoutCancelingThem") {
 TEST_CASE("HttpResponseStreamCancelsOnDestructionAndRejectsMovedFromAccess") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/moved"}));
@@ -570,7 +570,7 @@ TEST_CASE("HttpResponseStreamCancelsOnDestructionAndRejectsMovedFromAccess") {
 TEST_CASE("HttpProgressIsMonotonicAndRunsOnTheRuntimeUIThread") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
   const std::thread::id ui_thread = std::this_thread::get_id();
 
@@ -613,7 +613,7 @@ TEST_CASE("HttpProgressIsMonotonicAndRunsOnTheRuntimeUIThread") {
 TEST_CASE("HttpProgressExceptionsCancelAndRethrowFromTheTask") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpProgressException(http_client));
@@ -642,7 +642,7 @@ TEST_CASE("HttpErrorsRemainOnTheSideOfTheResponseBoundaryWhereTheyOccur") {
                       : code == HttpErrorCode::Unsupported ? IoErrorCode::Unsupported : IoErrorCode::Io;
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/pre-head"}));
@@ -670,7 +670,7 @@ TEST_CASE("HttpErrorsRemainOnTheSideOfTheResponseBoundaryWhereTheyOccur") {
 TEST_CASE("HttpClientCancellationStopsTheSinglePlatformOperationAndDropsLateEvents") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   TaskHandle request = http_tasks.Launch(CaptureHttpResult(http_client, {.url = "https://example.test/slow"}));
@@ -688,7 +688,7 @@ TEST_CASE("HttpClientCancellationStopsTheSinglePlatformOperationAndDropsLateEven
 TEST_CASE("HttpClientValidatesPortableRequestConfigurationBeforeLaunch") {
   ResetHttpState();
   HttpTestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   REQUIRE_NOTHROW(static_cast<void>(http_client->SendAsync({.url = "HTTPS://example.test"})));
@@ -720,7 +720,7 @@ TEST_CASE("HttpClientValidatesPortableRequestConfigurationBeforeLaunch") {
 TEST_CASE("HttpClientReportsUnsupportedAdaptersThroughBothTaskShapes") {
   ResetHttpState();
   TestPlatform platform;
-  Runtime runtime(HttpApp, platform);
+  UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
   http_tasks.Launch(CaptureHttpResult(http_client, {.url = "https://example.test"}));
@@ -731,6 +731,51 @@ TEST_CASE("HttpClientReportsUnsupportedAdaptersThroughBothTaskShapes") {
   http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test"}));
   platform.RunPlatformModuleTasks();
   REQUIRE(http_error == HttpErrorCode::Unsupported);
+}
+
+TEST_CASE("HTTP handles and idle response streams retain their original application lifetime") {
+  ResetHttpState();
+  HttpTestPlatform platform;
+  {
+    UiWindow runtime(HttpApp, platform);
+    runtime.BuildFrame();
+    http_tasks.Launch(CaptureHttpStream(http_client, {.url = "https://example.test/idle"}));
+    platform.RunPlatformModuleTasks();
+    platform.transport->Respond(0, {.url = "https://example.test/idle", .status_code = 200});
+    platform.RunPlatformModuleTasks();
+    REQUIRE(http_stream.has_value());
+    REQUIRE_FALSE(platform.transport->Canceled(0));
+  }
+  REQUIRE(platform.transport->Canceled(0));
+  REQUIRE(http_stream->StatusCode() == 200);
+  REQUIRE_THROWS_AS(http_stream->Body().ReadAsync(1), std::logic_error);
+  const auto original = http_client;
+  HttpTestPlatform replacement_platform;
+  UiWindow replacement(HttpApp, replacement_platform);
+  replacement.BuildFrame();
+  REQUIRE_THROWS_AS(original->SendAsync({.url = "https://example.test/stale"}), std::logic_error);
+  REQUIRE(replacement_platform.transport->CallCount() == 0);
+}
+
+TEST_CASE("Destroying an HTTP wrapper does not cancel its already constructed request") {
+  ResetHttpState();
+  HttpTestPlatform platform;
+  UiWindow runtime(HttpApp, platform);
+  runtime.BuildFrame();
+  http_tasks.Launch([]() -> Task<void> {
+    auto wrapper = std::make_unique<HttpClient>();
+    auto request = wrapper->SendAsync({.url = "https://example.test/owned"});
+    wrapper.reset();
+    auto result = co_await std::move(request);
+    REQUIRE(result.Succeeded());
+    ++http_completions;
+  });
+  platform.RunPlatformModuleTasks();
+  platform.transport->Respond(0, {.url = "https://example.test/owned", .status_code = 204});
+  platform.transport->Complete(0);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(http_completions == 1);
+  REQUIRE_FALSE(platform.transport->Canceled(0));
 }
 
 } // namespace huxerui::test

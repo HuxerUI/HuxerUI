@@ -14,9 +14,9 @@
 
 namespace huxerui {
 
-/// Identity of one Runtime-owned text-input session.
+/// Identity of one UiWindow-owned text-input session.
 ///
-/// Active IDs are nonzero, increase monotonically, and are not reused during a Runtime's lifetime. Zero means no
+/// Active IDs are nonzero, increase monotonically, and are not reused during a UiWindow's lifetime. Zero means no
 /// active session. Platform callbacks must carry the captured ID so delayed input cannot reach a different client.
 using TextInputSessionId = std::uint64_t;
 
@@ -156,7 +156,7 @@ struct TextInputCommand {
 ///
 /// Each command sees the preceding command's result. A rejected command leaves the entire batch unapplied;
 /// a successful batch publishes at most one resulting value change. Empty batches are rejected.
-/// A platform adapter routes the batch through Runtime, not directly to a retained client pointer.
+/// A platform adapter routes the batch through UiWindow, not directly to a retained client pointer.
 /// With the active session_id and a non-composing value "Hello", this batch requests "Hio" with the caret at offset 2:
 /// @code
 /// TextInputCommand select;
@@ -167,7 +167,7 @@ struct TextInputCommand {
 /// const TextInputCommandBatch batch{session_id, {select, replace}};
 /// @endcode
 struct TextInputCommandBatch {
-  /// Active session captured by the platform callback; Runtime rejects stale IDs before calling the client.
+  /// Active session captured by the platform callback; UiWindow rejects stale IDs before calling the client.
   TextInputSessionId session_id = 0;
   /// Nonempty commands in platform operation order.
   std::vector<TextInputCommand> commands;
@@ -223,7 +223,7 @@ enum class TextInputAction {
   Newline,
 };
 
-/// Platform input configuration supplied by the client and synchronized by Runtime.
+/// Platform input configuration supplied by the client and synchronized by UiWindow.
 ///
 /// Keyboard hints do not replace application validation. Changing an active client's configuration can restart its
 /// platform input connection without creating a new HuxerUI session.
@@ -241,7 +241,7 @@ struct TextInputConfiguration {
   bool secure = false;
   /// Requests platform spelling correction or suggestions where supported and allowed by secure-input policy.
   bool autocorrect = true;
-  /// Disallows editing and prevents Runtime from opening a text-input session; selection can remain available.
+  /// Disallows editing and prevents UiWindow from opening a text-input session; selection can remain available.
   bool read_only = false;
 
   bool operator==(const TextInputConfiguration&) const = default;
@@ -261,7 +261,7 @@ enum class TextInputResultCode {
 
 /// Additional platform input synchronization requested after an accepted batch.
 ///
-/// Runtime also detects revision, configuration, and geometry changes; None does not suppress that synchronization.
+/// UiWindow also detects revision, configuration, and geometry changes; None does not suppress that synchronization.
 enum class TextInputSyncAction {
   /// No additional synchronization requested.
   None,
@@ -271,7 +271,7 @@ enum class TextInputSyncAction {
   Restart,
 };
 
-/// Why Runtime ends a client's text-input session; not an instruction to cancel provisional text.
+/// Why UiWindow ends a client's text-input session; not an instruction to cancel provisional text.
 enum class TextInputEndReason {
   /// Focus moved away from the owning node or host.
   FocusLost,
@@ -281,19 +281,19 @@ enum class TextInputEndReason {
   Disabled,
   /// The client became read-only.
   ReadOnly,
-  /// The owning Runtime is shutting down.
+  /// The owning UiWindow is shutting down.
   RuntimeDestroyed,
 };
 
 /// Whether focused text-key handling consumed an event.
 enum class TextInputKeyResult {
-  /// Allows Runtime to continue normal key routing.
+  /// Allows UiWindow to continue normal key routing.
   Unhandled,
   /// Stops further handling of the event, even when no text changed.
   Handled,
 };
 
-/// Lightweight client snapshot for Runtime/platform synchronization, without an authoritative text mirror.
+/// Lightweight client snapshot for UiWindow/platform synchronization, without an authoritative text mirror.
 ///
 /// Revisions must not decrease within a session. They are synchronization counters, not command preconditions or
 /// application document versions. For example, moving the caret advances revision only; replacing text advances
@@ -302,9 +302,9 @@ struct TextInputState {
   /// Active client session, or zero when inactive.
   TextInputSessionId session_id = 0;
   /// Advances for observable text, selection, composition, or client-owned geometry changes.
-  /// Internal editor scrolling counts; ancestor layout, scrolling, and transforms are tracked by Runtime.
+  /// Internal editor scrolling counts; ancestor layout, scrolling, and transforms are tracked by UiWindow.
   std::uint64_t revision = 0;
-  /// Advances only when text content changes, together with revision; allows Runtime to invalidate text layout.
+  /// Advances only when text content changes, together with revision; allows UiWindow to invalidate text layout.
   std::uint64_t content_revision = 0;
   /// Current directed selection in absolute UTF-16 text offsets.
   TextSelection selection;
@@ -314,7 +314,7 @@ struct TextInputState {
   bool operator==(const TextInputState&) const = default;
 };
 
-/// Result of applying a batch; Runtime reads TextInputClient::State() to determine whether anything changed.
+/// Result of applying a batch; UiWindow reads TextInputClient::State() to determine whether anything changed.
 struct TextInputApplyResult {
   /// Acceptance or failure of the complete batch.
   TextInputResultCode result_code = TextInputResultCode::Rejected;
@@ -351,7 +351,7 @@ struct TextInputContext {
 
 /// Caret and range geometry in logical units, derived from the same layout used to draw text.
 ///
-/// TextInputClient returns node-local rectangles; Runtime transforms them once to host-view coordinates before
+/// TextInputClient returns node-local rectangles; UiWindow transforms them once to host-view coordinates before
 /// returning them to a platform adapter. Successful rectangles must be finite with nonnegative sizes.
 struct TextInputGeometry {
   /// Whether geometry is available; only Ok makes the rectangles meaningful.
@@ -380,14 +380,14 @@ struct TextInputPositionResult {
 
 /// Editable component capability exposed by NodeExtension::GetTextInputClient().
 ///
-/// The client owns text, selection, composition, and edit semantics. Runtime owns focus and session routing;
+/// The client owns text, selection, composition, and edit semantics. UiWindow owns focus and session routing;
 /// PlatformTextInput owns the platform input connection. Custom editors may keep their own document model instead of a
 /// TextEditingValue. Ordinary applications use TextField and do not implement this interface.
 ///
-/// Expose one stable shared client per focusable node. Runtime retains it for the active session and can call
+/// Expose one stable shared client per focusable node. UiWindow retains it for the active session and can call
 /// EndTextInput() after its extension is detached; the client must not rely on a dangling node or extension pointer.
-/// Methods run synchronously on the Runtime's host thread. Geometry and hit-test points are node-local logical units,
-/// not window coordinates or physical pixels; Runtime performs the node/host transform.
+/// Methods run synchronously on the UiWindow's host thread. Geometry and hit-test points are node-local logical units,
+/// not window coordinates or physical pixels; UiWindow performs the node/host transform.
 /// @see TextSelectionClient
 class TextInputClient {
 public:
@@ -398,8 +398,8 @@ public:
   /// Returns a snapshot without changing the document or synchronization counters.
   /// @return Current session, revisions, selection, and composition, obeying TextInputState's revision contract.
   [[nodiscard]] virtual TextInputState State() const = 0;
-  /// Associates this client with a newly allocated Runtime session before platform input starts.
-  /// @param session_id Nonzero ID supplied by Runtime; do not generate or replace it in the client.
+  /// Associates this client with a newly allocated UiWindow session before platform input starts.
+  /// @param session_id Nonzero ID supplied by UiWindow; do not generate or replace it in the client.
   /// @return Initial valid state carrying exactly session_id.
   virtual TextInputState BeginTextInput(TextInputSessionId session_id) = 0;
   /// Applies the entire batch atomically, publishing at most one resulting change.
@@ -439,7 +439,7 @@ public:
   /// Notifies the client that scrolling changed its own or an ancestor viewport geometry.
   /// The default does nothing. An editor may suppress automatic caret reveal after deliberate viewport scrolling.
   virtual void ViewportScrolled() {}
-  /// Releases session bookkeeping after Runtime ends focus or input ownership.
+  /// Releases session bookkeeping after UiWindow ends focus or input ownership.
   /// @param session_id Session being ended; ignore a stale ID rather than ending a newer session.
   /// @param reason Why the session ended, not a request to cancel composition.
   /// Finish active composition by keeping provisional text and clearing its marker; explicit cancellation is a
@@ -450,7 +450,7 @@ public:
 /// Visible selection geometry in the owning node's local logical coordinates.
 /// An endpoint can be absent because its logical block is outside the viewport.
 ///
-/// Missing geometry does not clear logical selection. Runtime positions handles and the toolbar from the available
+/// Missing geometry does not clear logical selection. UiWindow positions handles and the toolbar from the available
 /// rectangles; all three may be absent while a logical selection remains outside the viewport.
 struct TextSelectionGeometry {
   /// Caret-like rectangle at the ordered selection start, independent of anchor/active direction, when available.
@@ -498,7 +498,7 @@ public:
   /// @return Whether selection changed; false when there is nothing to clear.
   /// Read-only clients remove their logical selection. Editors collapse it to the active endpoint, preserving
   /// affinity and publishing the change through their usual controlled editing path. No visible geometry is required.
-  /// Runtime uses this after a confirmed touch tap elsewhere, not when scrolling merely hides the selection UI.
+  /// UiWindow uses this after a confirmed touch tap elsewhere, not when scrolling merely hides the selection UI.
   virtual bool ClearSelection() = 0;
   /// Selects the word or selectable text unit at a gesture position.
   /// @param position Point in the owning node's local logical coordinates.
@@ -512,19 +512,19 @@ public:
   virtual bool ExtendSelection(Point position, bool start_handle) = 0;
   /// @return Available node-local anchors, or std::nullopt when no logical selection or editor caret exists.
   /// Return TextSelectionGeometry{} for an existing selection whose geometry is temporarily unavailable, such as
-  /// fully virtualized-away text. Runtime preserves menu intent for that value; std::nullopt ends the old menu.
+  /// fully virtualized-away text. UiWindow preserves menu intent for that value; std::nullopt ends the old menu.
   [[nodiscard]] virtual std::optional<TextSelectionGeometry> QuerySelectionGeometry() const = 0;
   /// @return The color used to paint the shared selection handles.
   [[nodiscard]] virtual Color SelectionHandleColor() const noexcept = 0;
 };
 
-/// Optional platform text-input connection supplied by PlatformAdapter::TextInput().
+/// Optional platform text-input connection supplied by UiWindow::TextInput().
 ///
-/// Runtime calls this capability on the host thread. State and geometry in each call come from the same snapshot;
+/// UiWindow calls this capability on the host thread. State and geometry in each call come from the same snapshot;
 /// geometry is relative to the HuxerUI host view in logical units, not node-local or physical screen coordinates.
 /// The adapter converts it to the input API's coordinates as needed and tolerates geometry whose result is not Ok.
 ///
-/// Platform callbacks route commands and queries through Runtime with a captured session ID. Do not retain a raw
+/// Platform callbacks route commands and queries through UiWindow with a captured session ID. Do not retain a raw
 /// TextInputClient pointer or treat a platform text cache as the authoritative document. Secure configuration must
 /// prevent surrounding/extracted text disclosure even when trusted internal context contains the real text.
 /// For a node translated by (20, 30) with no scale or rotation, a local caret at (4, 6) arrives here at (24, 36).
@@ -537,7 +537,7 @@ public:
   /// @param configuration Keyboard hints and input policy for this client.
   /// @param state Initial client state carrying session_id.
   /// @param geometry Initial host-view caret and range geometry, possibly unavailable.
-  /// Use the supplied geometry rather than querying Runtime again solely to recover the current caret.
+  /// Use the supplied geometry rather than querying UiWindow again solely to recover the current caret.
   virtual void Start(TextInputSessionId session_id, const TextInputConfiguration& configuration,
       const TextInputState& state, const TextInputGeometry& geometry) = 0;
   /// Refreshes the existing platform input connection without restarting its composition.
@@ -558,7 +558,7 @@ public:
   virtual void Stop(TextInputSessionId session_id) = 0;
   /// Requests software-keyboard visibility without changing focus or creating a new input session.
   /// @param session_id Existing active session; ignore stale IDs.
-  /// Runtime uses this for a confirmed tap on an already focused client. Hiding a keyboard does not end that
+  /// UiWindow uses this for a confirmed tap on an already focused client. Hiding a keyboard does not end that
   /// session; platforms without a software keyboard can retain the default no-op implementation.
   virtual void RequestShow(TextInputSessionId session_id) {
     static_cast<void>(session_id);

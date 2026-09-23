@@ -6,9 +6,9 @@ This document defines the application-facing boundary for startup activation, su
 
 - Describe ordinary launch, URL activation, file activation, and local-notification activation with platform-neutral typed values.
 - Make the startup activation available during the first root composition.
-- Deliver subsequent activations in FIFO order on the target Runtime's UI thread.
+- Deliver subsequent activations in FIFO order on the target Runtime's application thread.
 - Keep application routing, document policy, and window selection application-owned.
-- Reuse Root Service, Lifecycle, State, and ordinary Runtime frame scheduling.
+- Reuse the application service, Lifecycle, State, and application-thread dispatch.
 - Provide lifecycle state on the same focused application handle without turning it into a general service bag.
 
 ## Non-goals
@@ -50,51 +50,52 @@ The generic syntax and serialization contract belongs to [URI and Local File URI
 
 The closed variant prevents invalid combinations of unrelated optional fields. Future share inputs require a separately reviewed alternative rather than a generic `PlatformPayload` escape hatch. [Local Notifications](local-notifications.md) follows that rule with one typed notification activation alternative.
 
-## ApplicationHandle
+## Application hooks and ApplicationHandle
 
-Runtime automatically installs an internal application Root Service. Components access its public lightweight facade through `UseApplication()`:
+Runtime installs the application service before running `AppOptions::application_hooks`. The hooks register application-lifetime handlers before queued work or any window initializes:
+
+```cpp
+void InstallApplication(ApplicationContext& context) {
+  if (const auto& startup = UseApplication().StartupActivation()) {
+    HandleActivation(*startup);
+  }
+  context.OnActivation([](ApplicationActivation activation) {
+    HandleActivation(std::move(activation));
+  });
+  context.OnLifecycleChanged([](ApplicationLifecycleState state) {
+    PersistOrPauseFor(state);
+  });
+}
+
+const Application application{App, {.application_hooks = {InstallApplication}}};
+```
+
+Components and application-thread callbacks access the service through `UseApplication()`. A composition can read the immutable startup value to derive its initial UI and observe lifecycle transitions for its own mounted lifetime. Imperative startup routing belongs in one-time application setup as shown above, not in recomposition:
 
 ```cpp
 auto application = UseApplication();
 
 UpdateForLifecycle(application.LifecycleState());
-application.OnLifecycleChange([](ApplicationLifecycleState state) {
+application.OnLifecycleChanged([](ApplicationLifecycleState state) {
   PersistOrPauseFor(state);
 });
-HandleActivation(application.StartupActivation());
-
-application.OnActivation([](ApplicationActivation activation) {
-  HandleActivation(std::move(activation));
-});
+const auto& startup = application.StartupActivation();
 ```
 
-`ApplicationHandle::Clipboard()` returns the same shared `Clipboard` owned by this service on every call, without requiring an active composition after the handle has been obtained. This is a per-Runtime capability, not process-global state or a separate Clipboard Root Service. Application-service disconnection makes captured clipboard instances unavailable before the platform adapter is destroyed. The implementation lives in `src/application/clipboard.cpp`; platform integration and text-editing commands retain the existing `PlatformClipboard` boundary.
+`ApplicationHandle::Clipboard()` returns the same shared `Clipboard` owned by this service on every call, without requiring an active composition after the handle has been obtained. This is a per-Runtime capability, not process-global state or a separate Clipboard Root Service. Application-service disconnection makes captured clipboard instances unavailable before the platform Runtime is destroyed. The implementation lives in `src/application/clipboard.cpp`; platform integration and text-editing commands retain the existing `PlatformClipboard` boundary.
 
-`ApplicationHandle::Directories()` exposes the AppDirectories value stored directly in the application service, without a separate Root Service. Platform adapters initialize their directory roots, and the application service registers those roots with deletion safeguards before publishing them. Hosts without the capability may omit the value, and Directories() then throws std::logic_error. Retained handles and copied File values remain usable after Runtime destruction because they represent paths rather than live platform access. `CurrentDirectory()` independently queries the process working directory at each call, including outside composition and after Runtime destruction; it is not a cached or per-Runtime directory. Directory preparation and path operations remain in `src/io` and the platform file implementations.
+`ApplicationHandle::Directories()` exposes the AppDirectories value stored directly in the application service, without a separate Root Service. Platform Runtime implementations initialize their directory roots, and the application service registers those roots with deletion safeguards before publishing them. Hosts without the capability may omit the value, and Directories() then throws std::logic_error. Retained handles and copied File values remain usable after Runtime destruction because they represent paths rather than live platform access. `CurrentDirectory()` independently queries the process working directory at each call, including outside composition and after Runtime destruction; it is not a cached or per-Runtime directory. Directory preparation and path operations remain in `src/io` and the platform file implementations.
 
-`ApplicationHandle` deliberately separates four timing contracts:
+The application API separates four timing contracts:
 
 - `LifecycleState()` is the observable current platform state and may coalesce before recomposition.
-- `OnLifecycleChange()` preserves each distinct transition while its declaring component Lifecycle is mounted.
+- `ApplicationHandle::OnLifecycleChanged()` preserves each distinct transition while its declaring component Lifecycle is mounted. `ApplicationContext::OnLifecycleChanged()` observes transitions until Runtime shutdown.
 - `StartupActivation()` is immutable for the Runtime lifetime and is available during the first root composition.
-- `OnActivation()` receives only activations submitted after that Runtime was created and never replays the startup value.
+- `ApplicationContext::OnActivation()` receives only activations submitted after that Runtime was created and never replays the startup value.
 
 This distinction lets applications tell cold startup from subsequent activation without adding a flag to every payload. Applications may still route both paths through one policy function when their behavior is identical.
 
-`OnActivation()` is a composition declaration backed by `Lifecycle()`. One Runtime may have one committed activation handler. The handler connection is installed only after a successful frame commit and is removed when its declaration disappears, its owning scope unmounts, a listed dependency changes, or Runtime shuts down.
-
-Captured controlled handles such as `State` and navigation controllers normally remain stable. A callback that captures an ordinary changing value lists it after the handler so the committed connection receives the latest successful value:
-
-```cpp
-application.OnActivation(
-    [workspace](ApplicationActivation activation) {
-      OpenInWorkspace(workspace, std::move(activation));
-    },
-    workspace
-);
-```
-
-An empty handler is invalid. A second simultaneously committed handler is also invalid because two independent owners could import the same file or issue conflicting navigation changes.
+`ApplicationContext::OnActivation()` installs one application-lifetime handler per Runtime. It can update application-owned State or services without depending on a mounted window. An empty handler is invalid, and a second handler is rejected because two independent owners could import the same file or issue conflicting navigation changes. The application hook runs once during Runtime initialization; the handler remains connected until shutdown.
 
 ## Startup activation
 
@@ -104,32 +105,32 @@ The platform application shell resolves the startup input before constructing Ru
 platform launch input
     -> normalize ApplicationActivation
     -> construct Runtime with startup activation
-    -> install the internal application Root Service
+    -> install the application service and run application_hooks
     -> compose the application root
     -> read ApplicationHandle::StartupActivation()
-    -> commit the first correct frame
+    -> commit the first UI frame
 ```
 
 Runtime defaults to `LaunchActivation` when a platform host does not supply another value. A URL, file collection, or notification identifier selected as startup input is validated before the first composition. The startup value never changes after construction.
 
 Some native systems expose a launch-causing input only through a delegate callback after application launch.
 Such input does not retroactively replace `StartupActivation()`; the platform shell queues it and submits it through the subsequent activation path after Runtime construction.
-iOS and macOS User Notifications follow this rule, so a notification interaction is observed through `OnActivation()` even when it launched the process.
+iOS and macOS User Notifications follow this rule, so a notification interaction is observed through `ApplicationContext::OnActivation()` even when it launched the process.
 
 ## Subsequent activation
 
-A platform host submits a later value through `Runtime::HandleApplicationActivation()` on the owning UI thread:
+A platform host submits a later value through `Runtime::HandleApplicationActivation()` on the application thread:
 
 ```text
 platform callback
     -> select target Runtime
-    -> enqueue activation and request a frame
-    -> snapshot the queue length at frame start
-    -> invoke the committed application handler in FIFO order
-    -> recompose affected State subscribers in that frame
+    -> enqueue activation and request application dispatch
+    -> snapshot the queue length when dispatch begins
+    -> invoke the application-lifetime handler in FIFO order
+    -> invalidate affected State subscribers for UI recomposition
 ```
 
-The queue retains values while no handler is committed. Connecting a handler requests another frame when queued work exists. The frame processes only the activations present when dispatch starts; a handler that submits another activation leaves it for the next frame, preventing recursive dispatch and starvation. Equal consecutive values are not deduplicated.
+The queue retains values while no handler is installed. Connecting a handler requests dispatch when queued work exists. Each dispatch processes only the activations present when it starts; a handler that submits another activation leaves it for a later dispatch turn, preventing recursive delivery and starvation. Equal consecutive values are not deduplicated. Delivery does not require a mounted UiWindow.
 
 Runtime validates, queues, schedules, and delivers activations. It does not parse URLs, open documents, choose a window, inspect NavigationStack, or decide whether an activation is accepted.
 
@@ -153,7 +154,7 @@ Browser URL changes remain connected directly to the controlled route path throu
 
 ## Runtime ownership
 
-There is no public `ApplicationSession`, session identifier, registry, or target selector. A Runtime already defines the composition and delivery boundary required by the shared implementation.
+There is no public `ApplicationSession`, session identifier, registry, or target selector. A Runtime defines the application-service and delivery boundary; each attached UiWindow owns its own composition.
 
 The platform application shell owns target selection:
 
@@ -178,16 +179,18 @@ enum class ApplicationLifecycleState {
 };
 
 ApplicationLifecycleState ApplicationHandle::LifecycleState() const;
-void ApplicationHandle::OnLifecycleChange(
-    std::function<void(ApplicationLifecycleState)> handler
+void ApplicationContext::OnLifecycleChanged(std::function<void(ApplicationLifecycleState)> handler);
+template <class... Dependencies>
+void ApplicationHandle::OnLifecycleChanged(
+    std::function<void(ApplicationLifecycleState)> handler, Dependencies&&... dependencies
 ) const;
 ```
 
-Lifecycle remains distinct from activation semantics. It exposes a current value that may coalesce and a mounted stream of distinct state transitions, whereas activation is an ordered external-input stream that must not deduplicate. Window focus, minimization, window commands, and title-bar state remain owned by `UseWindow()`.
+Lifecycle remains distinct from activation semantics. It exposes a current value that may coalesce and an ordered stream of distinct state transitions, whereas activation is an ordered external-input stream that must not deduplicate. Window focus, minimization, window commands, and title-bar state remain owned by `UseWindow()`.
 
 Reading `LifecycleState()` during composition subscribes only the current scope. `Runtime::UpdateApplicationLifecycleState()` validates platform input, ignores an equal value, stores the latest distinct value, and invalidates subscribed scopes through the existing State dependency mechanism.
 
-`OnLifecycleChange()` uses the same component `Lifecycle()` connection model as `OnActivation()`, with one Runtime-level handler owned by its declaring component Lifecycle rather than a public observer list. While connected, every distinct transition enters a private FIFO before frame delivery. A transition that cannot be presented while the application is backgrounded remains queued and is delivered when frame processing resumes; the coalesced `LifecycleState()` may already contain a later value. Disconnecting the declaring Lifecycle drops its undelivered transitions, because an unmounted component no longer owns side effects. Connecting later begins with future transitions and reads the current value through `LifecycleState()` instead of replaying stale history.
+Both `OnLifecycleChanged()` entry points support multiple observers. The `ApplicationContext` form remains connected until Runtime shutdown; the `ApplicationHandle` form uses `Lifecycle()` and disconnects when its declaring composition Lifecycle unmounts or its dependencies change. Each distinct transition records the observers connected when it occurs and enters a private FIFO for application-thread dispatch, even if no window is mounted or the application is backgrounded. Disconnecting an observer drops its undelivered transitions; connecting later receives only future transitions. Read `LifecycleState()` for the current value, which may already reflect a later transition when callbacks run.
 
 The implemented platform mappings are:
 
@@ -246,7 +249,7 @@ The AppKit shell installs its application delegate before finishing native launc
 The same shell installs its User Notifications delegate before finishing native launch.
 Only a primary interaction with a HuxerUI-created local notification becomes `NotificationActivation`.
 If the delegate responds before Runtime construction, the shell retains that value as a subsequent-only entry in the ordered platform activation queue and submits it through `Runtime::HandleApplicationActivation()` after construction instead of consuming it as `StartupActivation()`.
-Warm and cold notification interactions therefore share the `OnActivation()` path.
+Warm and cold notification interactions therefore share the `ApplicationContext::OnActivation()` path.
 
 File activations reuse the security-scoped macOS `FileReference` implementation. The platform decoder retains capabilities and validated `Uri` values only; it does not inspect routes or copy documents into application storage.
 
@@ -259,7 +262,7 @@ The current UIKit shell is application-delegate based and does not declare scene
 UIKit installs its User Notifications delegate during `willFinishLaunchingWithOptions`.
 Only a primary interaction with a HuxerUI-created local notification becomes `NotificationActivation`.
 User Notifications delivers that response after host launch; if Runtime does not yet exist, the adapter retains the value and submits it through `Runtime::HandleApplicationActivation()` immediately after construction.
-The immutable startup value remains `LaunchActivation` or the independently decoded URL/file activation, while both warm and cold notification interactions are observed through `OnActivation()`.
+The immutable startup value remains `LaunchActivation` or the independently decoded URL/file activation, while both warm and cold notification interactions are observed through `ApplicationContext::OnActivation()`.
 
 The launch-options URL alone does not contain `UIApplicationOpenURLOptionsOpenInPlaceKey`, so it is never used to guess document ownership or suppress the callback that carries that information. Equal URLs opened later remain distinct activations as required by the shared queue.
 
@@ -279,21 +282,21 @@ Embedded platform views do not consume an enclosing application shell's activati
 ## Implementation ownership
 
 - `<huxerui/app.h>` owns activation values, lifecycle state, `ApplicationHandle`, `UseApplication()`, and the Runtime boundary.
-- `src/application/application.cpp` owns validation, observation, lifecycle-bound connections, FIFO delivery, and handle behavior.
+- `src/application/application.cpp` owns validation, observation, handler connections, FIFO delivery, and handle behavior.
 - `src/application/application_internal.h` is the private contract shared with Runtime.
-- `src/runtime/runtime.cpp` installs the service and invokes queue delivery before application recomposition.
+- `src/application/application_runtime.cpp` installs the service and schedules application-thread queue delivery independently of UiWindow composition.
 - Platform application shells own platform input normalization and target selection.
 
-The implementation does not add Runtime subclasses, an Access type, a public service, a callback registry, or a second application state store.
+The application capability does not add a separate session, public service, callback registry, or second application state store.
 
 ## Invariants
 
 - Startup activation is immutable and visible during the first application composition.
 - Subsequent activation never replays the startup value.
 - URL and file activations contain non-empty payloads.
-- One Runtime has at most one committed activation handler.
-- Subsequent activations are delivered in FIFO order on the Runtime UI thread.
-- Activations submitted by a handler are deferred to the next frame.
+- One Runtime has at most one application-lifetime activation handler.
+- Subsequent activations are delivered in FIFO order on the application thread without requiring a UiWindow.
+- Activations submitted by a handler are deferred to a later dispatch turn.
 - Platform types never enter the shared activation value.
 - Runtime never interprets application URLs, files, routes, or window policy.
 - Windows forwards only external URL and file payloads; ordinary launches remain independent.

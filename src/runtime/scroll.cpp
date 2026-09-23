@@ -324,11 +324,11 @@ ScrollMetrics ResolveScrollMetrics(const MountedNode& node) noexcept {
 }
 
 void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhase phase, float delta) {
-  if (!node.runtime) {
+  if (!node.ui_window) {
     return;
   }
   InternalAccess::NotifyScrollActivity(
-      *node.runtime, node, ScrollActivity{source, phase, ScrollAxis(node), delta, ResolveScrollMetrics(node)}
+      *node.ui_window, node, ScrollActivity{source, phase, ScrollAxis(node), delta, ResolveScrollMetrics(node)}
   );
 }
 
@@ -407,8 +407,8 @@ bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect) {
 const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node) {
   const auto binding = node.layout_values.find(typeid(ScrollPhysics));
   if (binding == node.layout_values.end()) {
-    if (node.runtime) {
-      return InternalAccess::DefaultScrollPhysics(*node.runtime);
+    if (node.ui_window) {
+      return InternalAccess::DefaultScrollPhysics(*node.ui_window);
     }
     static const ScrollPhysics fallback;
     return fallback;
@@ -455,14 +455,14 @@ void ScrollMotion::Stop(MountedNode& node, ScrollPhase phase) {
   if (mode == Mode::Momentum) {
     NotifyScrollNodeActivity(node, ScrollSource::Momentum, phase, 0.0F);
   }
-  if (overscroll != 0.0F && node.runtime) {
+  if (overscroll != 0.0F && node.ui_window) {
     const bool settling = mode == Mode::OverscrollSettlement;
     const ScrollSource source = settling ? ScrollSource::Overscroll : ScrollSource::Drag;
     NotifyScrollNodeActivity(node, source, ScrollPhase::Update, -overscroll);
     if (settling) {
       NotifyScrollNodeActivity(node, source, phase, 0.0F);
     }
-    InternalAccess::RequestFrame(*node.runtime);
+    InternalAccess::RequestFrame(*node.ui_window);
   }
 }
 
@@ -488,8 +488,8 @@ bool ScrollMotion::StartOverscrollSettlement(MountedNode& node) {
   previous_timestamp_.reset();
   mode_ = Mode::OverscrollSettlement;
   NotifyScrollNodeActivity(node, ScrollSource::Overscroll, ScrollPhase::Begin, 0.0F);
-  if (node.runtime) {
-    InternalAccess::RequestFrame(*node.runtime);
+  if (node.ui_window) {
+    InternalAccess::RequestFrame(*node.ui_window);
   }
   return true;
 }

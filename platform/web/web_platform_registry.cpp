@@ -341,15 +341,15 @@ public:
   val element = val::undefined();
 };
 
-PlatformChannel CreateJavaScriptPlatformModule(PlatformAdapter& adapter, const val& factory, PlatformPayload options) {
-  const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(adapter);
+PlatformChannel CreateJavaScriptPlatformModule(UiWindow& ui_window, const val& factory, PlatformPayload options) {
+  const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
   std::shared_ptr state = CreateInstance(factory, std::move(options), endpoint.Events(), true, "PlatformModule");
   ConnectInstance(endpoint, state);
   return endpoint.Channel();
 }
 
 std::shared_ptr<JavaScriptPlatformViewInstance>
-CreateJavaScriptPlatformView(PlatformAdapter& adapter, const val& factory, PlatformPayload properties,
+CreateJavaScriptPlatformView(UiWindow& ui_window, const val& factory, PlatformPayload properties,
                              PlatformEventEmitter events, bool update_required, bool channel_required) {
   auto result = std::make_shared<JavaScriptPlatformViewInstance>();
   result->state = CreateInstance(factory, std::move(properties), std::move(events), channel_required, "PlatformView");
@@ -361,7 +361,7 @@ CreateJavaScriptPlatformView(PlatformAdapter& adapter, const val& factory, Platf
     throw std::logic_error("HuxerUI Web JavaScript PlatformView instance must provide element");
   }
   if (channel_required) {
-    const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(adapter);
+    const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
     ConnectInstance(endpoint, result->state);
     result->channel = endpoint.Channel();
   }

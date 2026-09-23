@@ -530,7 +530,7 @@ View AdaptiveAxisVirtualListApp() {
 
 TEST_CASE("TestForEachStateSurvivesScrolling") {
   TestPlatform platform;
-  Runtime runtime{StatefulForEachScrollApp, platform};
+  UiWindow runtime{StatefulForEachScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -571,7 +571,7 @@ TEST_CASE("TestVirtualListVirtualization") {
   virtual_item_factory_calls = 0;
 
   TestPlatform platform;
-  Runtime runtime{VirtualListApp, platform};
+  UiWindow runtime{VirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -624,7 +624,8 @@ TEST_CASE("TestVirtualListVirtualization") {
   REQUIRE(root->scroll_state->offset_y == 19900.0F);
   REQUIRE(root->virtual_state->realized_indices.back() == 999);
 
-  Runtime state_runtime{VirtualStateListApp, platform};
+  TestPlatform state_runtime_platform{platform.platform_resources};
+  UiWindow state_runtime{VirtualStateListApp, state_runtime_platform};
   state_runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   const FlattenedScene& state_list = state_runtime.BuildFrame();
   REQUIRE(FirstText(state_list) == "7");
@@ -635,7 +636,7 @@ TEST_CASE("TestVirtualListVirtualization") {
 
 TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
   TestPlatform platform;
-  Runtime runtime{StatefulVirtualListApp, platform};
+  UiWindow runtime{StatefulVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -685,7 +686,7 @@ TEST_CASE("TestVirtualListStateSurvivesCacheEviction") {
 
 TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
   TestPlatform platform;
-  Runtime runtime{ReorderableStatefulVirtualListApp, platform};
+  UiWindow runtime{ReorderableStatefulVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -732,7 +733,7 @@ TEST_CASE("TestVirtualListStateSurvivesKeyRemovalAndReinsertion") {
 
 TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
   TestPlatform platform;
-  Runtime runtime{UnkeyedStatefulVirtualListApp, platform};
+  UiWindow runtime{UnkeyedStatefulVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -778,7 +779,7 @@ TEST_CASE("TestVirtualListPrunesOutOfRangeIndexState") {
 
 TEST_CASE("TestVariableVirtualListMeasurementAndAnchor") {
   TestPlatform platform;
-  Runtime runtime{VariableVirtualListApp, platform};
+  UiWindow runtime{VariableVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -819,7 +820,7 @@ TEST_CASE("TestVariableVirtualListMeasurementAndAnchor") {
 
 TEST_CASE("TestVariableVirtualListRefinesEstimatedExtent") {
   TestPlatform platform;
-  Runtime runtime{TinyVariableVirtualListApp, platform};
+  UiWindow runtime{TinyVariableVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -831,7 +832,7 @@ TEST_CASE("TestVariableVirtualListRefinesEstimatedExtent") {
 
 TEST_CASE("TestVariableVirtualListRetainsMetricsAcrossItemDeclarationRefresh") {
   TestPlatform platform;
-  Runtime runtime{RedeclaredVariableVirtualListApp, platform};
+  UiWindow runtime{RedeclaredVariableVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
   runtime.BuildFrame();
 
@@ -861,7 +862,7 @@ TEST_CASE("TestVariableVirtualListRetainsMetricsAcrossItemDeclarationRefresh") {
 
 TEST_CASE("TestVirtualListCommitsScrollCorrectionAfterFinalParentMeasurement") {
   TestPlatform platform;
-  Runtime runtime{RemeasuredVirtualListApp, platform};
+  UiWindow runtime{RemeasuredVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
   runtime.BuildFrame();
 
@@ -880,7 +881,7 @@ TEST_CASE("TestVirtualListCommitsScrollCorrectionAfterFinalParentMeasurement") {
 
 TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
   TestPlatform platform;
-  Runtime runtime{FixedHorizontalVirtualListApp, platform};
+  UiWindow runtime{FixedHorizontalVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -910,7 +911,7 @@ TEST_CASE("TestFixedHorizontalVirtualListLayoutAndScrolling") {
 
 TEST_CASE("TestVariableHorizontalVirtualListMeasurementAndScrolling") {
   TestPlatform platform;
-  Runtime runtime{VariableHorizontalVirtualListApp, platform};
+  UiWindow runtime{VariableHorizontalVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -940,7 +941,7 @@ TEST_CASE("TestVariableHorizontalVirtualListMeasurementAndScrolling") {
 
 TEST_CASE("TestHorizontalVirtualListStateSurvivesCacheEviction") {
   TestPlatform platform;
-  Runtime runtime{StatefulHorizontalVirtualListApp, platform};
+  UiWindow runtime{StatefulHorizontalVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -980,7 +981,7 @@ TEST_CASE("TestHorizontalVirtualListStateSurvivesCacheEviction") {
 
 TEST_CASE("TestCustomVirtualLayoutProtocol") {
   TestPlatform platform;
-  Runtime runtime{CustomVirtualLayoutApp, platform};
+  UiWindow runtime{CustomVirtualLayoutApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
 
@@ -1023,7 +1024,7 @@ TEST_CASE("TestVirtualLayoutSkipsCleanPolicyAndStableItemMeasurement") {
   virtual_strip_measure_calls = 0;
 
   TestPlatform platform;
-  Runtime runtime{NestedCustomVirtualLayoutApp, platform};
+  UiWindow runtime{NestedCustomVirtualLayoutApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1091,7 +1092,7 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
   virtual_grid_factory_calls = 0;
 
   TestPlatform platform;
-  Runtime runtime{CustomVirtualGridApp, platform};
+  UiWindow runtime{CustomVirtualGridApp, platform};
   runtime.SetWindowMetrics({.viewport = {90.0F, 40.0F}});
   const FrameCommit& initial_commit = runtime.BuildCommit();
 
@@ -1196,7 +1197,7 @@ TEST_CASE("TestCustomVirtualGridProtocol") {
 
 TEST_CASE("VirtualCollectionResultRejectsItemMetadataWithoutCollection") {
   TestPlatform platform;
-  Runtime runtime{OrphanSemanticItemApp, platform};
+  UiWindow runtime{OrphanSemanticItemApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   REQUIRE_THROWS_AS(runtime.BuildCommit(), std::logic_error);
@@ -1204,7 +1205,7 @@ TEST_CASE("VirtualCollectionResultRejectsItemMetadataWithoutCollection") {
 
 TEST_CASE("VirtualCollectionResultRejectsItemMetadataOutsideCollectionBounds") {
   TestPlatform platform;
-  Runtime runtime{OutOfBoundsSemanticItemApp, platform};
+  UiWindow runtime{OutOfBoundsSemanticItemApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
 
   REQUIRE_THROWS_AS(runtime.BuildCommit(), std::logic_error);
@@ -1214,7 +1215,7 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
   built_in_grid_factory_calls = 0;
 
   TestPlatform platform;
-  Runtime runtime{BuiltInVirtualGridApp, platform};
+  UiWindow runtime{BuiltInVirtualGridApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 48.0F}});
   runtime.BuildFrame();
 
@@ -1307,7 +1308,7 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
 
 TEST_CASE("TestVariableVirtualGridMeasurementAndAnchor") {
   TestPlatform platform;
-  Runtime runtime{VariableVirtualGridApp, platform};
+  UiWindow runtime{VariableVirtualGridApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   runtime.BuildFrame();
 
@@ -1350,7 +1351,7 @@ TEST_CASE("TestVariableVirtualGridMeasurementAndAnchor") {
 
 TEST_CASE("TestVariableVirtualGridRetainsMetricsAcrossItemDeclarationRefresh") {
   TestPlatform platform;
-  Runtime runtime{RedeclaredVariableVirtualGridApp, platform};
+  UiWindow runtime{RedeclaredVariableVirtualGridApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
   runtime.BuildFrame();
 
@@ -1380,7 +1381,7 @@ TEST_CASE("TestVariableVirtualGridRetainsMetricsAcrossItemDeclarationRefresh") {
 
 TEST_CASE("TestVirtualListAxisChangePreservesAnchorAndIdentity") {
   TestPlatform platform;
-  Runtime runtime{AdaptiveAxisVirtualListApp, platform};
+  UiWindow runtime{AdaptiveAxisVirtualListApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   runtime.BuildFrame();
 

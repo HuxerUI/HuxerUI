@@ -39,7 +39,7 @@ public:
   BitmapTexture(const BitmapTexture&) = delete;
   BitmapTexture& operator=(const BitmapTexture&) = delete;
 
-  /// Publishes bitmap as the newest frame and schedules every Runtime currently displaying this texture.
+  /// Publishes bitmap as the newest frame and schedules every UiWindow currently displaying this texture.
   ///
   /// environment must belong to the calling thread, and bitmap must be a non-recycled android.graphics.Bitmap with
   /// positive pixel dimensions. HuxerUI retains the object; its pixels remain immutable and it must not be recycled

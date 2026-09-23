@@ -26,11 +26,10 @@ private:
 
 } // namespace
 
-void Install(RootContext& root) {
-  root.RegisterPlatformModule<std::shared_ptr<FrameSource>>(module_name, [](PlatformAdapter&) {
+void Install(ApplicationContext& root) {
+  root.RegisterPlatformModule<std::shared_ptr<FrameSource>>(module_name, [](UiWindow&) {
     return std::static_pointer_cast<FrameSource>(std::make_shared<DirectSource>());
   });
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<FrameSource>>(module_name));
 }
 
 } // namespace huxerui::example::buffer_reference

@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include <huxerui/platform_adapter.h>
+#include <huxerui/app.h>
 
 #include "external_texture_internal.h"
 
@@ -35,7 +35,7 @@ void detail::ExternalTextureFrameRequester::SetActive(const std::shared_ptr<Exte
 }
 
 void detail::ExternalTextureFrameRequester::RequestFrame() {
-  UIThreadDispatcher dispatch;
+  UiThreadDispatcher dispatch;
   {
     std::lock_guard lock(mutex_);
     if (closed_ || request_pending_ || !dispatch_to_ui_thread_) {
@@ -58,7 +58,7 @@ void detail::ExternalTextureFrameRequester::RequestFrame() {
         return;
       }
       try {
-        requester->adapter_->RequestFrameAt(requester->adapter_->Now());
+        requester->ui_window_->RequestFrameAt(requester->ui_window_->Now());
       } catch (...) {
       }
     });
@@ -72,7 +72,7 @@ void detail::ExternalTextureFrameRequester::Close() noexcept {
   std::lock_guard lock(mutex_);
   closed_ = true;
   request_pending_ = false;
-  adapter_ = nullptr;
+  ui_window_ = nullptr;
   dispatch_to_ui_thread_ = {};
 }
 

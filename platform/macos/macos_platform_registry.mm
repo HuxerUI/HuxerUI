@@ -737,7 +737,7 @@ public:
   bool channel_connected = false;
 };
 
-PlatformChannel CreateObjectiveCPlatformModule(PlatformAdapter& adapter, NSWindow* owner,
+PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, NSWindow* owner,
                                                id<HUXAppKitPlatformModuleFactory> factory,
                                                PlatformPayload options) {
   if (owner == nil) {
@@ -746,7 +746,7 @@ PlatformChannel CreateObjectiveCPlatformModule(PlatformAdapter& adapter, NSWindo
   if (factory == nil || ![factory respondsToSelector:@selector(createWithWindow:options:events:)]) {
     throw std::invalid_argument("HuxerUI macOS Objective-C PlatformModule factory must provide create");
   }
-  const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(adapter);
+  const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
   HUXMacPlatformEventEmitter* events = [[HUXMacPlatformEventEmitter alloc] initWithEvents:endpoint.Events()];
   __strong id<HUXPlatformModule> instance = nil;
   @try {
@@ -769,7 +769,7 @@ PlatformChannel CreateObjectiveCPlatformModule(PlatformAdapter& adapter, NSWindo
 }
 
 std::shared_ptr<ObjectiveCPlatformViewInstance>
-CreateObjectiveCPlatformView(PlatformAdapter& adapter, NSWindow* owner,
+CreateObjectiveCPlatformView(UiWindow& ui_window, NSWindow* owner,
                              id<HUXAppKitPlatformViewFactory> factory, PlatformPayload properties,
                              PlatformEventEmitter events, bool update_required, bool channel_required) {
   if (owner == nil) {
@@ -810,7 +810,7 @@ CreateObjectiveCPlatformView(PlatformAdapter& adapter, NSWindow* owner,
   result->state = std::make_shared<ObjectiveCInstanceState>(instance, event_endpoint);
   result->view = view;
   if (channel_required) {
-    const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(adapter);
+    const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
     ConnectInstance(endpoint, result->state);
     result->channel = endpoint.Channel();
     result->channel_connected = true;

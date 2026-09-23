@@ -53,7 +53,7 @@ TEST_CASE("ApplicationProvidesStableClipboardOutsideComposition") {
   platform_clipboard.text = "initial";
   TestPlatform platform;
   platform.platform_clipboard = &platform_clipboard;
-  Runtime runtime(ClipboardApp, platform);
+  UiWindow runtime(ClipboardApp, platform);
   runtime.BuildFrame();
 
   REQUIRE(clipboard_service);
@@ -70,7 +70,7 @@ TEST_CASE("ApplicationProvidesStableClipboardOutsideComposition") {
 TEST_CASE("UnsupportedClipboardServiceReturnsUnavailableResults") {
   ResetClipboardService();
   TestPlatform platform;
-  Runtime runtime(ClipboardApp, platform);
+  UiWindow runtime(ClipboardApp, platform);
   runtime.BuildFrame();
 
   REQUIRE(clipboard_service);
@@ -84,7 +84,7 @@ TEST_CASE("ClipboardRejectsInvalidUtf8BeforeCallingThePlatform") {
   TestClipboard platform_clipboard;
   TestPlatform platform;
   platform.platform_clipboard = &platform_clipboard;
-  Runtime runtime(ClipboardApp, platform);
+  UiWindow runtime(ClipboardApp, platform);
   runtime.BuildFrame();
 
   const std::string invalid_utf8{"\xC3\x28", 2};
@@ -102,7 +102,7 @@ TEST_CASE("ClipboardServiceDisconnectsWhenRuntimeIsDestroyed") {
   TestPlatform platform;
   platform.platform_clipboard = &platform_clipboard;
   {
-    Runtime runtime(ClipboardApp, platform);
+    UiWindow runtime(ClipboardApp, platform);
     runtime.BuildFrame();
     REQUIRE(clipboard_service->IsAvailable());
   }
@@ -123,11 +123,11 @@ TEST_CASE("ApplicationClipboardUsesItsOwningPlatformAndLifetime") {
   TestPlatform second_platform;
   first_platform.platform_clipboard = &first_clipboard;
   second_platform.platform_clipboard = &second_clipboard;
-  Runtime first_runtime(ClipboardApp, first_platform);
+  UiWindow first_runtime(ClipboardApp, first_platform);
   first_runtime.BuildFrame();
   const auto first_service = clipboard_service;
   {
-    Runtime second_runtime(ClipboardApp, second_platform);
+    UiWindow second_runtime(ClipboardApp, second_platform);
     second_runtime.BuildFrame();
     REQUIRE(clipboard_service != first_service);
     REQUIRE(first_service->WriteText("first"));

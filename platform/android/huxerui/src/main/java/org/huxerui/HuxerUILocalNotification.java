@@ -55,14 +55,13 @@ final class HuxerUILocalNotification {
     private static final int REQUEST_CODE = 0x4852;
     private static final int NOTIFICATION_ID = 0x4855;
 
-    private final HuxerUIView view;
+    private HuxerUIApplication.PermissionLauncher activeLauncher;
     private final Context context;
     private final Configuration configuration;
     private long activeNativeHandle;
 
-    HuxerUILocalNotification(HuxerUIView view) {
-        this.view = view;
-        context = view.getContext().getApplicationContext();
+    HuxerUILocalNotification(Context context) {
+        this.context = context.getApplicationContext();
         configuration = Configuration.load(context);
     }
 
@@ -98,7 +97,7 @@ final class HuxerUILocalNotification {
         return checkAuthorization(context, configuration);
     }
 
-    void requestAuthorization(long nativeHandle) {
+    void requestAuthorization(long nativeHandle, HuxerUIApplication.PermissionLauncher launcher) {
         int status = checkAuthorization();
         if (status == GRANTED || status == UNAVAILABLE_AUTHORIZATION || Build.VERSION.SDK_INT < 33) {
             nativeCompleteAuthorization(nativeHandle, status);
@@ -108,13 +107,14 @@ final class HuxerUILocalNotification {
             nativeCompleteAuthorization(nativeHandle, status);
             return;
         }
-        if (view.permissionLauncher() == null || activeNativeHandle != 0L) {
+        if (launcher == null || activeNativeHandle != 0L) {
             nativeCompleteAuthorization(nativeHandle, UNAVAILABLE_AUTHORIZATION);
             return;
         }
         activeNativeHandle = nativeHandle;
+        activeLauncher = launcher;
         try {
-            view.permissionLauncher().request(Manifest.permission.POST_NOTIFICATIONS, REQUEST_CODE);
+            launcher.request(Manifest.permission.POST_NOTIFICATIONS, REQUEST_CODE);
         } catch (RuntimeException exception) {
             completeAuthorization(UNAVAILABLE_AUTHORIZATION);
         }
@@ -128,8 +128,12 @@ final class HuxerUILocalNotification {
         return true;
     }
 
-    void launcherChanged() {
-        if (view.permissionLauncher() == null && activeNativeHandle != 0L) {
+    /**
+     * Completes a pending request as unavailable when its original presentation endpoint is removed.
+     * @param launcher Exact former endpoint, checked on the main thread; other requests are unaffected.
+     */
+    void launcherRemoved(HuxerUIApplication.PermissionLauncher launcher) {
+        if (launcher == activeLauncher && activeNativeHandle != 0L) {
             completeAuthorization(UNAVAILABLE_AUTHORIZATION);
         }
     }
@@ -263,6 +267,7 @@ final class HuxerUILocalNotification {
     private void completeAuthorization(int status) {
         long nativeHandle = activeNativeHandle;
         activeNativeHandle = 0L;
+        activeLauncher = null;
         nativeCompleteAuthorization(nativeHandle, status);
     }
 

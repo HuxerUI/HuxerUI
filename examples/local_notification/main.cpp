@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
 
 using namespace huxerui;
 
@@ -365,17 +366,28 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
   );
 }
 
+struct NotificationViewModel {
+  State<std::vector<std::string>> activations{std::vector<std::string>{}};
+};
+
+void InstallNotifications(ApplicationContext& context) {
+  auto model = std::make_shared<NotificationViewModel>();
+  if (const auto& startup = UseApplication().StartupActivation()) {
+    model->activations = std::vector<std::string>{"Startup: " + DescribeNotificationActivation(*startup)};
+  }
+  context.Provide(model);
+  // Apple notification responses may arrive after application initialization on a cold launch.
+  context.OnActivation([model](ApplicationActivation activation) {
+    model->activations.Update([&](auto& values) {
+      values.push_back("Subsequent: " + DescribeNotificationActivation(activation));
+    });
+  });
+}
+
 [[huxerui::composable]] View LocalNotificationContent() {
   const ApplicationHandle application = UseApplication();
   auto tasks = UseTaskScope();
-  auto activations = UseStateList<std::string>({
-      "Startup: " + DescribeNotificationActivation(application.StartupActivation()),
-  });
-
-  // Apple notification responses arrive through OnActivation even when the interaction launches the process.
-  application.OnActivation([=](ApplicationActivation activation) {
-    activations.PushBack("Subsequent: " + DescribeNotificationActivation(activation));
-  });
+  const auto activations = UseService<NotificationViewModel>()->activations;
 
   const ThemeSpec& theme = UseTheme();
   return ScrollView {
@@ -388,7 +400,7 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
       Column {
         Text("Notification activation data", TextRole::Title),
         Text("Startup and subsequent activations are shown here. Data is the submitted snapshot, not live app state."),
-        ForEach(activations, [](const std::string& activation) { return Text(activation); }),
+        ForEach(activations.Get(), [](const std::string& activation) { return Text(activation); }),
       }.With(
           Padding(theme.spacing.large),
           Spacing(theme.spacing.small),
@@ -412,6 +424,7 @@ View App() {
 
 AppOptions Options() {
   AppOptions options;
+  options.application_hooks = {InstallNotifications};
   options.window = {
       .title = "HuxerUI Local Notifications",
       .initial_size = {720.0F, 720.0F},

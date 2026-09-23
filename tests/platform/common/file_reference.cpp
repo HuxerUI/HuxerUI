@@ -86,7 +86,7 @@ TEST_CASE("ApplicationProtectsDirectoriesReturnedDirectlyByACustomAdapter") {
   } platform(directories);
 
   {
-    Runtime runtime(FileApp, platform);
+    UiWindow runtime(FileApp, platform);
     runtime.BuildFrame();
     REQUIRE(file_application->Directories().data_directory == directories.data_directory);
     REQUIRE_FALSE(directories.data_directory.Delete());
@@ -112,7 +112,7 @@ TEST_CASE("ApplicationDirectoriesRemainStableAcrossRecompositionAndRuntimeDestru
   std::optional<ApplicationHandle> first_application;
   std::optional<AppDirectories> retained_directories;
   {
-    Runtime first_runtime(DirectoryApp, first_platform);
+    UiWindow first_runtime(DirectoryApp, first_platform);
     first_runtime.BuildFrame();
     first_application = file_application;
     REQUIRE(first_application.has_value());
@@ -127,7 +127,7 @@ TEST_CASE("ApplicationDirectoriesRemainStableAcrossRecompositionAndRuntimeDestru
 
     std::optional<ApplicationHandle> second_application;
     {
-      Runtime second_runtime(DirectoryApp, second_platform);
+      UiWindow second_runtime(DirectoryApp, second_platform);
       second_runtime.BuildFrame();
       second_application = file_application;
       REQUIRE(second_application->Directories().data_directory == second_temporary.Directories().data_directory);
@@ -150,7 +150,7 @@ TEST_CASE("ApplicationCurrentDirectoryIsQueriedAtEachCall") {
   TemporaryDirectory temporary;
   TestPlatform platform;
   {
-    Runtime runtime(FileApp, platform);
+    UiWindow runtime(FileApp, platform);
     runtime.BuildFrame();
   }
   struct RestoreWorkingDirectory {
@@ -171,7 +171,7 @@ TEST_CASE("ApplicationProvidesDirectoriesAndFileAsyncOperationsResumeOnTheUIThre
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
 
   REQUIRE(file_application);
@@ -203,7 +203,7 @@ TEST_CASE("FileAsyncByteOperationsRetainOwnedBinaryDataUntilCompletion") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
 
   File file = file_application->Directories().data_directory.Child("async.bin");
@@ -228,7 +228,7 @@ TEST_CASE("FileAsyncStreamsUseRequestedReadSizesAndExplicitClose") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
 
   const File source = file_application->Directories().data_directory.Child("stream-source.bin");
@@ -282,7 +282,7 @@ TEST_CASE("FilePendingOutputRetainsTheFileAfterItsOwnerIsReleased") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File file = file_application->Directories().data_directory.Child("retained-output.bin");
   file_tasks.Launch([&]() -> Task<void> {
@@ -307,7 +307,7 @@ TEST_CASE("LocalReferenceStreamsPreserveOperationalReadWriteCloseAndCopyErrors")
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File source = file_application->Directories().data_directory.Child("error-source.bin");
   const File destination = file_application->Directories().data_directory.Child("error-destination.bin");
@@ -360,7 +360,7 @@ TEST_CASE("LocalFileReferencesProvideIncrementalAsyncStreams") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
 
   const File file = file_application->Directories().data_directory.Child("reference-stream.bin");
@@ -403,7 +403,7 @@ TEST_CASE("CancelingAFileTaskDropsItsContinuation") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
 
   File file = file_application->Directories().temporary_directory.Child("canceled.txt");
@@ -421,7 +421,7 @@ TEST_CASE("DirectoryReferencesEnumerateRepeatedlyAndCopyBothDestinationKinds") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File root = file_application->Directories().temporary_directory;
   const File source = root.Child("source");
@@ -475,7 +475,7 @@ TEST_CASE("DirectoryCopiesIndexListingBasedDestinationsOnlyWithinOneCopy") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   auto input = std::make_shared<ProviderReferenceState>("provider:source");
   auto output = std::make_shared<ProviderReferenceState>("provider:destination");
@@ -550,7 +550,7 @@ TEST_CASE("DirectoryReferencesRejectReadonlyConflictsOverlapAndInvalidNames") {
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File root = file_application->Directories().temporary_directory;
   const File source = root.Child("source");
@@ -599,7 +599,7 @@ TEST_CASE("DirectoryReferencesKeepRetainedChildrenAndRejectLinksAndRenamedChildr
   ResetFileState();
   TemporaryDirectory temporary;
   FileTestPlatform platform(temporary.Directories());
-  Runtime runtime(FileApp, platform);
+  UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
   const File root = file_application->Directories().temporary_directory;
   const File directory = root.Child("source");

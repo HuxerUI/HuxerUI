@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include <huxerui/root.h>
+#include <huxerui/window.h>
 #include <huxerui/task.h>
 
 namespace huxerui::detail {
@@ -197,16 +197,16 @@ private:
 /// A reusable function that calls this composition-bound facility should be marked with the composable attribute.
 InstallerHandle UseInstaller();
 
-/// Installs the current process installer session into a Runtime root.
+/// Installs the current process installer session into a UiWindow root.
 ///
 /// Add this hook exactly once to the `Application` used by `RunInstallerApplication()`:
 /// @code
 /// const Application application{
 ///     InstallerApp,
-///     {.root_hooks = {windows::InstallInstallerSession}},
+///     {.window_hooks = {windows::InstallInstallerSession}},
 /// };
 /// @endcode
-void InstallInstallerSession(RootContext& root);
+void InstallInstallerSession(WindowContext& root);
 
 /// Connects the process application to the WiX Burn engine and runs its HuxerUI interface.
 ///

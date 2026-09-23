@@ -107,7 +107,7 @@ public:
     return *this;
   }
 
-  // Collection metadata follows the same realized placement commit, so Runtime never materializes semantic-only items.
+  // Collection metadata follows the same realized placement commit, so UiWindow never materializes semantic-only items.
   VirtualLayoutResult& Place(ViewNode& item, Point offset, SemanticCollectionItem collection_item) {
     placements_.push_back({&item, offset, std::move(collection_item)});
     return *this;

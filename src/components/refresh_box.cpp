@@ -282,8 +282,8 @@ private:
     displacement_.AnimateTo(0.0F, behavior_.style.settle_motion);
     UpdateAllowedSources(node);
     InvalidateSemantics();
-    if (node.runtime) {
-      detail::InternalAccess::RequestFrame(*node.runtime);
+    if (node.ui_window) {
+      detail::InternalAccess::RequestFrame(*node.ui_window);
     }
   }
 

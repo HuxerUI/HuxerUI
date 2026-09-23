@@ -1,5 +1,5 @@
 #include "huxerui_builtin_resources.h"
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "components/indication_internal.h"
 #include "graphics/paint_internal.h"
 #include "resources/resource_internal.h"
@@ -606,8 +606,8 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
   for (TextEditingAction action : overlay.actions) {
     const std::string_view label = LabelForAction(labels, action);
     overlay.action_labels.emplace_back(label);
-    const Size label_size = runtime_state_.platform_
-                                ->MeasureText(
+    const Size label_size = runtime_state_.owner_
+                                .MeasureText(
                                     label,
                                     toolbar_text_style,
                                     std::numeric_limits<float>::infinity(),

@@ -199,6 +199,17 @@ TEST_CASE("Use-prefixed function declarations are not composition calls") {
   REQUIRE(result.source == source);
 }
 
+TEST_CASE("Ambient application and window facilities do not require composition") {
+  const std::string source = "void Install(ApplicationContext& context) {\n"
+                             "  auto application = UseApplication();\n"
+                             "  auto tasks = UseApplicationTaskScope();\n"
+                             "  auto service = huxerui::UseService<Service>();\n"
+                             "}\n"
+                             "void Click() { auto window = UseWindow(); }\n";
+  REQUIRE(TransformSource(source, "application_start.cpp").source == source);
+  REQUIRE_THROWS_AS(TransformSource("void Click() { auto state = UseState(0); }", "event.cpp"), TransformError);
+}
+
 TEST_CASE("Explicit Scope lambdas provide a composition context") {
   const std::string source = "View Counter() {\n"
                              "  return Scope([] {\n"

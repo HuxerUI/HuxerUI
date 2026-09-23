@@ -429,7 +429,7 @@ bool DamageContains(const DamageRegion& damage, Rect bounds) {
 TEST_CASE("RuntimePublishesStableRenderSceneNodes") {
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RenderSceneApp, platform};
+  UiWindow runtime{RenderSceneApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first_frame = runtime.BuildRenderFrame();
@@ -477,7 +477,7 @@ TEST_CASE("RuntimePublishesStableRenderSceneNodes") {
 TEST_CASE("ClipChildrenPublishesARoundedClipAndRestrictsDescendantHitTesting") {
   clipped_child_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{ClipChildrenApp, platform};
+  UiWindow runtime{ClipChildrenApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -508,7 +508,7 @@ TEST_CASE("ClipChildrenPublishesARoundedClipAndRestrictsDescendantHitTesting") {
 
 TEST_CASE("ClipChildrenPublishesAPathClipForAsymmetricCornerRadii") {
   TestPlatform platform;
-  Runtime runtime{AsymmetricClipChildrenApp, platform};
+  UiWindow runtime{AsymmetricClipChildrenApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -525,7 +525,7 @@ TEST_CASE("ClipChildrenPublishesAPathClipForAsymmetricCornerRadii") {
 
 TEST_CASE("FullCornerRadiusProducesMatchingCapsulePaintAndChildClip") {
   TestPlatform platform;
-  Runtime runtime{FullCornerClipChildrenApp, platform};
+  UiWindow runtime{FullCornerClipChildrenApp, platform};
   runtime.SetWindowMetrics({.viewport = {120.0F, 40.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -553,7 +553,7 @@ TEST_CASE("CornerRadiusConstructorsPreserveCornerGeometry") {
 
 TEST_CASE("ClipChildrenUsesTheResolvedIndicationCornerRadii") {
   TestPlatform platform;
-  Runtime runtime{AnimatedClipChildrenApp, platform};
+  UiWindow runtime{AnimatedClipChildrenApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   runtime.BuildRenderFrame();
 
@@ -573,7 +573,7 @@ TEST_CASE("ClipChildrenUsesTheResolvedIndicationCornerRadii") {
 TEST_CASE("OverflowingChildrenRemainInteractiveUntilClipChildrenIsApplied") {
   overflowing_child_clicks = 0;
   TestPlatform platform;
-  Runtime runtime{OverflowChildHitTestApp, platform};
+  UiWindow runtime{OverflowChildHitTestApp, platform};
   runtime.SetWindowMetrics({.viewport = {140.0F, 100.0F}});
 
   runtime.BuildRenderFrame();
@@ -588,7 +588,7 @@ TEST_CASE("OverflowingChildrenRemainInteractiveUntilClipChildrenIsApplied") {
 
 TEST_CASE("ScrollViewRetainsContainerAndContentClips") {
   TestPlatform platform;
-  Runtime runtime{ClippedScrollViewApp, platform};
+  UiWindow runtime{ClippedScrollViewApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -609,7 +609,7 @@ TEST_CASE("ScrollViewRetainsContainerAndContentClips") {
 
 TEST_CASE("RenderSceneRerecordsOnlyChangedDeclarativePaint") {
   TestPlatform platform;
-  Runtime runtime{PaintReuseApp, platform};
+  UiWindow runtime{PaintReuseApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first_frame = runtime.BuildRenderFrame();
@@ -647,7 +647,7 @@ TEST_CASE("RenderSceneRerecordsOnlyChangedDeclarativePaint") {
 
 TEST_CASE("PresentationAnimationReusesPaintSequences") {
   TestPlatform platform;
-  Runtime runtime{PresentationReuseApp, platform};
+  UiWindow runtime{PresentationReuseApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
@@ -679,7 +679,7 @@ TEST_CASE("PresentationAnimationReusesPaintSequences") {
 TEST_CASE("FrameCommitSeparatesRuntimeWorkFromPlatformScheduling") {
   TestPlatform platform;
   platform.current_time = 12.5;
-  Runtime runtime{PresentationReuseApp, platform};
+  UiWindow runtime{PresentationReuseApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildCommit();
 
@@ -699,7 +699,7 @@ TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
   render_scene_external_texture = texture;
   render_scene_external_texture_visible = true;
   TestPlatform platform;
-  Runtime runtime{ExternalTextureRenderApp, platform};
+  UiWindow runtime{ExternalTextureRenderApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
@@ -738,7 +738,7 @@ TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
   REQUIRE(platform.requested_frames == requests_after_hiding);
 
   TestPlatform other_platform;
-  Runtime other_runtime{ExternalTextureRenderApp, other_platform};
+  UiWindow other_runtime{ExternalTextureRenderApp, other_platform};
   render_scene_external_texture_visible = true;
   runtime.InvalidateRoot();
   runtime.BuildRenderFrame();
@@ -756,7 +756,7 @@ TEST_CASE("ExternalTextureFramesReusePaintAndDamageOnlyTheVisibleTexture") {
 
 TEST_CASE("InFramePaintInvalidationDoesNotScheduleRedundantWork") {
   TestPlatform platform;
-  Runtime runtime{FramePaintInvalidationApp, platform};
+  UiWindow runtime{FramePaintInvalidationApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const FrameCommit& commit = runtime.BuildCommit();
@@ -770,7 +770,7 @@ TEST_CASE("ExtensionGeometryUsesBorrowedTextMeasurerAndInvalidatesOnlyWhenMeasur
   geometry_measured_text_width = 0.0F;
   TestPlatform platform;
   expected_geometry_text_measurer = &platform;
-  Runtime runtime{GeometryMeasurementApp, platform};
+  UiWindow runtime{GeometryMeasurementApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   runtime.BuildRenderFrame();
@@ -846,7 +846,7 @@ TEST_CASE("MountedNodeExposesPaddingDeflatedContentBounds") {
 TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RetainedOpacityApp, platform};
+  UiWindow runtime{RetainedOpacityApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
@@ -883,7 +883,7 @@ TEST_CASE("OpacityAnimationUpdatesOnlyTheOwningRenderNode") {
 
 TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
   TestPlatform platform;
-  Runtime runtime{RetainedScrollApp, platform};
+  UiWindow runtime{RetainedScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 60.0F}});
   runtime.BuildRenderFrame();
 
@@ -922,7 +922,7 @@ TEST_CASE("ScrollViewUpdatesOnlyItsRetainedChildrenTransform") {
 TEST_CASE("ViewportChangesProduceFullDamage") {
   TestPlatform platform;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{RenderSceneApp, platform};
+  UiWindow runtime{RenderSceneApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
@@ -945,7 +945,7 @@ TEST_CASE("ViewportChangesProduceFullDamage") {
 
 TEST_CASE("RemovedAndInsertedNodesDamageTheirCommittedBounds") {
   TestPlatform platform;
-  Runtime runtime{RemovalDamageApp, platform};
+  UiWindow runtime{RemovalDamageApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first_frame = runtime.BuildRenderFrame();
@@ -967,7 +967,7 @@ TEST_CASE("RemovedAndInsertedNodesDamageTheirCommittedBounds") {
 
 TEST_CASE("ReorderedRenderChildrenDamageTheirSharedBounds") {
   TestPlatform platform;
-  Runtime runtime{ChildOrderDamageApp, platform};
+  UiWindow runtime{ChildOrderDamageApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
@@ -989,7 +989,7 @@ TEST_CASE("ReorderedRenderChildrenDamageTheirSharedBounds") {
 
 TEST_CASE("ClipChangesDamageOldAndNewClippedSubtreeBounds") {
   TestPlatform platform;
-  Runtime runtime{ClipDamageApp, platform};
+  UiWindow runtime{ClipDamageApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
   runtime.BuildRenderFrame();
 
@@ -1001,7 +1001,7 @@ TEST_CASE("ClipChangesDamageOldAndNewClippedSubtreeBounds") {
 
 TEST_CASE("OffscreenParentsRemainVisibleWhenAnOverflowingChildIsVisible") {
   TestPlatform platform;
-  Runtime runtime{OverflowingChildApp, platform};
+  UiWindow runtime{OverflowingChildApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -1021,7 +1021,7 @@ TEST_CASE("OffscreenParentsRemainVisibleWhenAnOverflowingChildIsVisible") {
 
 TEST_CASE("OffscreenClipsKeepOverflowingChildrenInvisible") {
   TestPlatform platform;
-  Runtime runtime{ClippedOverflowingChildApp, platform};
+  UiWindow runtime{ClippedOverflowingChildApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -1041,7 +1041,7 @@ TEST_CASE("OffscreenClipsKeepOverflowingChildrenInvisible") {
 
 TEST_CASE("PaintBoundsKeepOffscreenNodesVisibleWhenTheirCommandsOverflowIntoTheViewport") {
   TestPlatform platform;
-  Runtime runtime{OverflowingPaintApp, platform};
+  UiWindow runtime{OverflowingPaintApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
@@ -1065,7 +1065,7 @@ TEST_CASE("PaintBoundsKeepOffscreenNodesVisibleWhenTheirCommandsOverflowIntoTheV
 
 TEST_CASE("ShadowsPaintBehindContentAndInvalidateTheirOverflow") {
   TestPlatform platform;
-  Runtime runtime{ShadowApp, platform};
+  UiWindow runtime{ShadowApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
@@ -1096,7 +1096,7 @@ TEST_CASE("ShadowsPaintBehindContentAndInvalidateTheirOverflow") {
 TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
   canvas_paint_count = 0;
   TestPlatform platform;
-  Runtime runtime{CanvasApp, platform};
+  UiWindow runtime{CanvasApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& first = runtime.BuildRenderFrame();
@@ -1132,7 +1132,7 @@ TEST_CASE("CanvasRecordsInContentLocalCoordinatesAndReusesCleanPaint") {
 
 TEST_CASE("AncestorClipsHideOverflowingPaintOutsideTheirViewport") {
   TestPlatform platform;
-  Runtime runtime{ClippedOverflowingPaintApp, platform};
+  UiWindow runtime{ClippedOverflowingPaintApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
 
   const RenderFrame& frame = runtime.BuildRenderFrame();
@@ -1150,7 +1150,7 @@ TEST_CASE("ShadowModifierRejectsInvalidValues") {
   const auto rejects = [](Shadow shadow) {
     invalid_shadow = shadow;
     TestPlatform platform;
-    Runtime runtime{InvalidShadowApp, platform};
+    UiWindow runtime{InvalidShadowApp, platform};
     runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   };

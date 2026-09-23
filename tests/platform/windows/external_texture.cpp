@@ -229,7 +229,7 @@ TEST_CASE("WindowsExternalTexturePublicationSchedulesDamageThroughItsBoundRuntim
   const auto texture = std::make_shared<windows::PixelTexture>(Size{2.0F, 2.0F});
   scheduled_texture = texture;
   TestPlatform platform;
-  Runtime runtime{WindowsExternalTextureApp, platform};
+  UiWindow runtime{WindowsExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
   static_cast<void>(runtime.BuildRenderFrame());
 
@@ -312,7 +312,7 @@ TEST_CASE("WindowsD3D11TextureRetriesContentionAndRendersAcrossDevicesAfterReset
   const auto texture = std::make_shared<windows::D3D11Texture>(Size{2.0F, 2.0F});
   scheduled_texture = texture;
   TestPlatform platform;
-  Runtime runtime{WindowsExternalTextureApp, platform};
+  UiWindow runtime{WindowsExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
   static_cast<void>(runtime.BuildRenderFrame());
 

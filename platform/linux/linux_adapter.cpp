@@ -323,16 +323,16 @@ std::optional<GdkSurfaceEdge> ResizeEdge(Point point, Size viewport, bool maximi
   return std::nullopt;
 }
 
-std::shared_ptr<LinuxUIThreadDispatcher> InitializeGtk() {
+std::shared_ptr<LinuxUiThreadDispatcher> InitializeGtk() {
   if (g_getenv("GTK_A11Y") == nullptr) {
-    // The Linux adapter does not yet publish Runtime semantics through GTK. Avoid exposing a misleading host-only
+    // The Linux adapter does not yet publish UiWindow semantics through GTK. Avoid exposing a misleading host-only
     // accessibility tree, while preserving an explicit backend selected by the application or its environment.
     static_cast<void>(g_setenv("GTK_A11Y", "none", FALSE));
   }
   if (gtk_init_check() == FALSE) {
     throw std::runtime_error("HuxerUI Linux could not initialize GTK");
   }
-  return std::make_shared<LinuxUIThreadDispatcher>();
+  return std::make_shared<LinuxUiThreadDispatcher>();
 }
 
 using HuxerUICanvasSnapshot = void (*)(GtkSnapshot* snapshot, int width, int height, gpointer data);
@@ -371,81 +371,51 @@ GtkWidget* CreateHuxerUICanvas(HuxerUICanvasSnapshot snapshot, gpointer data) {
 
 } // namespace
 
-class LinuxPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
+/// Owns application services and observes GTK toplevel state on the retained main-context dispatcher.
+/// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
+class LinuxRuntime final : public Runtime, public PlatformClipboard, public PlatformResources {
 public:
-  LinuxPlatformAdapter() : LinuxPlatformAdapter(InitializeGtk()) {}
+  explicit LinuxRuntime(std::shared_ptr<LinuxUiThreadDispatcher> dispatcher)
+      : Runtime(dispatcher->Bind()), dispatcher_(std::move(dispatcher)) {}
+  ~LinuxRuntime() override {
+    Retire();
+    StopObservingLifecycle();
+    dispatcher_->Shutdown();
+  }
+  /// Borrows the application dispatcher for window attachments.
+  /// @return Retained main-context dispatcher; its callback gate closes when this Runtime retires.
+  const std::shared_ptr<LinuxUiThreadDispatcher>& Dispatcher() const { return dispatcher_; }
+  /// Reports whether shared shutdown has completed on the GTK application thread.
+  /// @return True after OnRuntimeStopped marks the native loop ready to exit.
+  bool Stopped() const noexcept { return stopped_; }
 
-  int Run(Runtime& runtime, const WindowOptions& options) {
-    runtime_ = &runtime;
-    text_input_.SetRuntime(runtime_);
-    try {
-      renderer_.Initialize();
-      const Size initial_size = ResolveInitialWindowSize(options);
-      CreateWindow(options, initial_size);
-      runtime_->UpdateResourceConfiguration(Configuration());
-      UpdateRuntimeViewport(initial_size);
-      running_ = true;
-      gtk_window_present(window_);
-      gtk_widget_grab_focus(GTK_WIDGET(drawing_area_));
-      RequestFrameAt(Now());
-      while (running_) {
-        g_main_context_iteration(nullptr, TRUE);
+  /// Initializes services and begins observing GTK toplevel additions/removals.
+  /// @param application Declaration that outlives this Runtime, accessed on the GTK application thread.
+  void Start(const Application& application) {
+    InitializeApplication(application);
+    windows_ = gtk_window_get_toplevels();
+    g_signal_connect(windows_, "items-changed", G_CALLBACK(WindowsChanged), this);
+    ObserveWindows();
+  }
+
+  /// Aggregates mapped, non-minimized GTK toplevels into application activity on the main thread.
+  /// Native GTK windows participate even when they do not contain a HuxerUI attachment.
+  void UpdateLifecycleState() {
+    auto lifecycle = ApplicationLifecycleState::Background;
+    GListModel* windows = gtk_window_get_toplevels();
+    for (guint index = 0; index < g_list_model_get_n_items(windows); ++index) {
+      auto* window = GTK_WINDOW(g_list_model_get_item(windows, index));
+      GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window));
+      const bool minimized = surface && GDK_IS_TOPLEVEL(surface) &&
+          (gdk_toplevel_get_state(GDK_TOPLEVEL(surface)) & GDK_TOPLEVEL_STATE_MINIMIZED);
+      if (gtk_widget_get_mapped(GTK_WIDGET(window)) && !minimized) {
+        lifecycle = gtk_window_is_active(window) ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive;
       }
-      Cleanup();
-      runtime_ = nullptr;
-      if (failure_) {
-        std::rethrow_exception(failure_);
-      }
-      return 0;
-    } catch (...) {
-      Cleanup();
-      runtime_ = nullptr;
-      throw;
+      g_object_unref(window);
+      if (lifecycle == ApplicationLifecycleState::Active) break;
     }
+    Runtime::UpdateApplicationLifecycleState(lifecycle);
   }
-
-  void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled =
-            frame_state_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
-      ScheduleFrame(*scheduled);
-    }
-  }
-
-  double Now() const noexcept override {
-    using Clock = std::chrono::steady_clock;
-    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
-  }
-
-  void SetPointerCursor(PointerCursorKind kind) override {
-    if (drawing_area_ != nullptr) {
-      gtk_widget_set_cursor_from_name(GTK_WIDGET(drawing_area_), LinuxPointerCursorName(kind));
-    }
-  }
-
-  FontMetrics Metrics(const Font& font) override {
-    return renderer_.Metrics(font);
-  }
-
-  TextRunMetrics MeasureRun(
-      std::string_view text, const TextStyle& style, const TextShapingOptions& options
-  ) override {
-    return renderer_.MeasureRun(text, style, options);
-  }
-
-  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
-      const TextLayoutOptions& options) override {
-    return renderer_.MeasureText(text, style, max_width, options);
-  }
-
-  std::unique_ptr<TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
-      float max_width, const TextLayoutOptions& options) override {
-    return renderer_.CreateTextLayout(text, style, max_width, options);
-  }
-
-  PlatformTextInput* TextInput() noexcept override {
-    return &text_input_;
-  }
-
   PlatformClipboard* Clipboard() noexcept override {
     return this;
   }
@@ -456,10 +426,6 @@ public:
 
   std::optional<AppDirectories> CreateAppDirectories() override {
     return CreateLinuxAppDirectories();
-  }
-
-  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
-    return CreateLinuxFilePickerTransport([this] { return X11WindowId(); });
   }
 
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
@@ -497,61 +463,6 @@ public:
     };
   }
 
-  void RequestWindowCommand(WindowCommand command) override {
-    if (window_ == nullptr) {
-      return;
-    }
-    switch (command) {
-    case WindowCommand::Minimize:
-      performing_minimize_ = true;
-      gtk_window_minimize(window_);
-      break;
-    case WindowCommand::Maximize:
-      gtk_window_maximize(window_);
-      break;
-    case WindowCommand::Restore:
-      gtk_window_unminimize(window_);
-      gtk_window_unmaximize(window_);
-      break;
-    case WindowCommand::ToggleMaximize:
-      gtk_window_is_maximized(window_) ? gtk_window_unmaximize(window_) : gtk_window_maximize(window_);
-      break;
-    case WindowCommand::Close:
-      performing_close_ = true;
-      gtk_window_close(window_);
-      break;
-    case WindowCommand::Show:
-      gtk_widget_set_visible(GTK_WIDGET(window_), TRUE);
-      break;
-    case WindowCommand::Hide:
-      gtk_widget_set_visible(GTK_WIDGET(window_), FALSE);
-      break;
-    case WindowCommand::Activate:
-      gtk_window_present(window_);
-      break;
-    }
-  }
-
-  void RequestApplicationQuit() override {
-    running_ = false;
-    if (window_ != nullptr) {
-      performing_close_ = true;
-      gtk_window_close(window_);
-    }
-  }
-
-  bool DispatchWindowRequest(WindowCommand command) noexcept {
-    try {
-      return runtime_ != nullptr && runtime_->HandleWindowRequest(command);
-    } catch (...) {
-      if (!failure_) {
-        failure_ = std::current_exception();
-      }
-      running_ = false;
-      return true;
-    }
-  }
-
   ResourceConfiguration Configuration() const override {
     const char* const* languages = g_get_language_names();
     std::string language = languages != nullptr && languages[0] != nullptr ? languages[0] : "en";
@@ -559,10 +470,7 @@ public:
       language.resize(dot);
     }
     std::replace(language.begin(), language.end(), '_', '-');
-    const float scale = drawing_area_ != nullptr
-                            ? static_cast<float>(gtk_widget_get_scale_factor(GTK_WIDGET(drawing_area_)))
-                            : 1.0F;
-    return {Locale::FromLanguageTag(std::move(language)), std::max(1.0F, scale)};
+    return {Locale::FromLanguageTag(std::move(language)), 1.0F};
   }
 
   std::optional<InputStream> OpenRead(std::string_view package_path) override {
@@ -574,10 +482,10 @@ public:
   }
 
   std::optional<std::string> ReadText() override {
-    if (drawing_area_ == nullptr || clipboard_read_active_) {
+    if (gdk_display_get_default() == nullptr || clipboard_read_active_) {
       return std::nullopt;
     }
-    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(drawing_area_));
+    GdkDisplay* display = gdk_display_get_default();
     GdkClipboard* clipboard = gdk_display_get_clipboard(display);
     struct ReadState {
       ~ReadState() {
@@ -641,17 +549,227 @@ public:
   }
 
   bool WriteText(std::string_view text) override {
-    if (drawing_area_ == nullptr) {
+    if (gdk_display_get_default() == nullptr) {
       return false;
     }
-    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(drawing_area_));
+    GdkDisplay* display = gdk_display_get_default();
     gdk_clipboard_set_text(gdk_display_get_clipboard(display), std::string(text).c_str());
     return true;
   }
 
+  std::filesystem::path ResourceRoot() const {
+    if (const char* override_directory = std::getenv("HUXERUI_RESOURCES_DIR")) {
+      return std::filesystem::path(override_directory);
+    }
+    std::filesystem::path root(ResolveLinuxExecutablePath());
+    root.replace_extension(".resources");
+    return root;
+  }
+
 private:
-  explicit LinuxPlatformAdapter(std::shared_ptr<LinuxUIThreadDispatcher> dispatcher)
-      : PlatformAdapter(dispatcher->Bind()), ui_dispatcher_(std::move(dispatcher)) {}
+  /// Rebuilds lifecycle observation when the GTK toplevel model changes.
+  /// @param data Original LinuxRuntime supplied when registering the GTK signal.
+  static void WindowsChanged(GListModel*, guint, guint, guint, gpointer data) {
+    static_cast<LinuxRuntime*>(data)->ObserveWindows();
+  }
+  /// Adds native surface-state observation when a GTK window is realized.
+  /// @param data Original LinuxRuntime supplied when registering the GTK signal.
+  static void WindowRealized(GtkWidget*, gpointer data) {
+    static_cast<LinuxRuntime*>(data)->ObserveWindows();
+  }
+  /// Refreshes aggregate lifecycle when a native window is mapped or unmapped.
+  /// @param data Original LinuxRuntime supplied when registering the GTK signal.
+  static void WindowMappingChanged(GtkWidget*, gpointer data) {
+    auto& self = *static_cast<LinuxRuntime*>(data);
+    if (self.IsInitialized()) self.UpdateLifecycleState();
+  }
+  /// Forwards GTK focus/minimize property changes to aggregate lifecycle updates.
+  /// @param data Original LinuxRuntime supplied when registering the GTK signal.
+  static void WindowStateChanged(GObject*, GParamSpec*, gpointer data) {
+    WindowMappingChanged(nullptr, data);
+  }
+  /// Disconnects window/surface signals and releases their retained GObjects on the GTK application thread.
+  void ClearWindowObservers() {
+    for (auto* object : observed_windows_) {
+      g_signal_handlers_disconnect_by_data(object, this);
+      g_object_unref(object);
+    }
+    observed_windows_.clear();
+  }
+  /// Rebuilds observers for current GTK toplevels and immediately refreshes aggregate application lifecycle.
+  void ObserveWindows() {
+    ClearWindowObservers();
+    for (guint index = 0; index < g_list_model_get_n_items(windows_); ++index) {
+      auto* window = GTK_WINDOW(g_list_model_get_item(windows_, index));
+      observed_windows_.push_back(G_OBJECT(window));
+      g_signal_connect(window, "realize", G_CALLBACK(WindowRealized), this);
+      g_signal_connect(window, "map", G_CALLBACK(WindowMappingChanged), this);
+      g_signal_connect(window, "unmap", G_CALLBACK(WindowMappingChanged), this);
+      g_signal_connect(window, "notify::is-active", G_CALLBACK(WindowStateChanged), this);
+      GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window));
+      if (surface && GDK_IS_TOPLEVEL(surface)) {
+        observed_windows_.push_back(G_OBJECT(g_object_ref(surface)));
+        g_signal_connect(surface, "notify::state", G_CALLBACK(WindowStateChanged), this);
+      }
+    }
+    if (IsInitialized()) UpdateLifecycleState();
+  }
+  /// Stops toplevel and native surface observation before Runtime retirement releases native services.
+  void StopObservingLifecycle() {
+    if (windows_) g_signal_handlers_disconnect_by_data(windows_, this);
+    windows_ = nullptr;
+    ClearWindowObservers();
+  }
+  void OnRuntimeStopped() override {
+    StopObservingLifecycle();
+    stopped_ = true;
+  }
+  std::shared_ptr<LinuxUiThreadDispatcher> dispatcher_;
+  GListModel* windows_ = nullptr;
+  std::vector<GObject*> observed_windows_;
+  bool stopped_ = false;
+  bool clipboard_read_active_ = false;
+};
+
+/// Owns one GTK window and its rendering/input facilities while sharing its application Runtime.
+class LinuxUiWindow final : public UiWindow {
+public:
+  explicit LinuxUiWindow(std::shared_ptr<LinuxUiThreadDispatcher> dispatcher)
+      : ui_dispatcher_(std::move(dispatcher)) {}
+  ~LinuxUiWindow() override { Retire(); Cleanup(); }
+
+  ResourceConfiguration Configuration() const {
+    auto configuration = static_cast<LinuxRuntime&>(ApplicationRuntime()).Configuration();
+    if (drawing_area_) configuration.display_scale = static_cast<float>(gtk_widget_get_scale_factor(drawing_area_));
+    return configuration;
+  }
+
+  int Run(Runtime& application, const WindowOptions& options) {
+    try {
+      renderer_.Initialize();
+      const Size initial_size = ResolveInitialWindowSize(options);
+      CreateWindow(options, initial_size);
+      auto configuration = application.Resources()->Configuration();
+      configuration.display_scale = static_cast<float>(gtk_widget_get_scale_factor(drawing_area_));
+      InitializeWindow(application, configuration);
+      text_input_.SetUiWindow(this);
+      file_drop_ = std::make_unique<LinuxFileDrop>(GTK_WIDGET(drawing_area_), *this, ui_dispatcher_->Bind());
+      UiWindow::UpdateResourceConfiguration(Configuration());
+      UpdateRuntimeViewport(initial_size);
+      running_ = true;
+      gtk_window_present(window_);
+      gtk_widget_grab_focus(GTK_WIDGET(drawing_area_));
+      RequestFrameAt(Now());
+      while (running_ && !static_cast<LinuxRuntime&>(ApplicationRuntime()).Stopped()) {
+        g_main_context_iteration(nullptr, TRUE);
+      }
+      Cleanup();
+
+      if (failure_) {
+        std::rethrow_exception(failure_);
+      }
+      return 0;
+    } catch (...) {
+      Cleanup();
+
+      throw;
+    }
+  }
+
+  void RequestFrameAt(double deadline) override {
+    if (const std::optional<double> scheduled =
+            frame_state_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
+      ScheduleFrame(*scheduled);
+    }
+  }
+
+  double Now() const noexcept override {
+    using Clock = std::chrono::steady_clock;
+    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+  }
+
+  void SetPointerCursor(PointerCursorKind kind) override {
+    if (drawing_area_ != nullptr) {
+      gtk_widget_set_cursor_from_name(GTK_WIDGET(drawing_area_), LinuxPointerCursorName(kind));
+    }
+  }
+
+  FontMetrics Metrics(const Font& font) override {
+    return renderer_.Metrics(font);
+  }
+
+  TextRunMetrics MeasureRun(
+      std::string_view text, const TextStyle& style, const TextShapingOptions& options
+  ) override {
+    return renderer_.MeasureRun(text, style, options);
+  }
+
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options) override {
+    return renderer_.MeasureText(text, style, max_width, options);
+  }
+
+  std::unique_ptr<TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options) override {
+    return renderer_.CreateTextLayout(text, style, max_width, options);
+  }
+
+  PlatformTextInput* TextInput() noexcept override {
+    return &text_input_;
+  }
+
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
+    return CreateLinuxFilePickerTransport([this] { return X11WindowId(); });
+  }
+
+  void RequestWindowCommand(WindowCommand command) override {
+    if (window_ == nullptr) {
+      return;
+    }
+    switch (command) {
+    case WindowCommand::Minimize:
+      performing_minimize_ = true;
+      gtk_window_minimize(window_);
+      break;
+    case WindowCommand::Maximize:
+      gtk_window_maximize(window_);
+      break;
+    case WindowCommand::Restore:
+      gtk_window_unminimize(window_);
+      gtk_window_unmaximize(window_);
+      break;
+    case WindowCommand::ToggleMaximize:
+      gtk_window_is_maximized(window_) ? gtk_window_unmaximize(window_) : gtk_window_maximize(window_);
+      break;
+    case WindowCommand::Close:
+      performing_close_ = true;
+      gtk_window_close(window_);
+      break;
+    case WindowCommand::Show:
+      gtk_widget_set_visible(GTK_WIDGET(window_), TRUE);
+      break;
+    case WindowCommand::Hide:
+      gtk_widget_set_visible(GTK_WIDGET(window_), FALSE);
+      break;
+    case WindowCommand::Activate:
+      gtk_window_present(window_);
+      break;
+    }
+  }
+
+  bool DispatchWindowRequest(WindowCommand command) noexcept {
+    try {
+      return IsInitialized() && UiWindow::HandleWindowRequest(command);
+    } catch (...) {
+      if (!failure_) {
+        failure_ = std::current_exception();
+      }
+      running_ = false;
+      return true;
+    }
+  }
+
+private:
 
   void CreateWindow(const WindowOptions& options, Size initial_size) {
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
@@ -719,7 +837,6 @@ private:
     g_signal_connect(focus, "enter", G_CALLBACK(FocusEntered), this);
     g_signal_connect(focus, "leave", G_CALLBACK(FocusLeft), this);
     gtk_widget_add_controller(GTK_WIDGET(drawing_area_), focus);
-    file_drop_ = std::make_unique<LinuxFileDrop>(GTK_WIDGET(drawing_area_), *runtime_, ui_dispatcher_->Bind());
   }
 
   void ScheduleFrame(double deadline) {
@@ -738,10 +855,10 @@ private:
 
   void CommitFrame() {
     frame_source_ = 0;
-    if (runtime_ == nullptr || !frame_state_.BeginCommit()) {
+    if (!IsInitialized() || !frame_state_.BeginCommit()) {
       return;
     }
-    const FrameCommit& commit = runtime_->BuildFrame();
+    const FrameCommit& commit = UiWindow::BuildFrame();
     committed_frame_ = &commit.render_frame;
     frame_state_.MarkPaintPending();
     gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
@@ -776,7 +893,7 @@ private:
   }
 
   void UpdateRuntimeViewport(Size viewport) {
-    if (runtime_ == nullptr || viewport.width <= 0.0F || viewport.height <= 0.0F) {
+    if (!IsInitialized() || viewport.width <= 0.0F || viewport.height <= 0.0F) {
       return;
     }
     WindowMetrics metrics{.viewport = viewport, .safe_area = {}, .title_bar = std::nullopt};
@@ -785,7 +902,7 @@ private:
           custom_title_bar_height_, viewport, window_ != nullptr && gtk_window_is_maximized(window_)
       );
     }
-    runtime_->SetWindowMetrics(metrics);
+    UiWindow::SetWindowMetrics(metrics);
   }
 
   void UpdateRuntimeViewport() {
@@ -826,20 +943,20 @@ private:
   }
 
   void UpdateLifecycleState() {
-    if (runtime_ == nullptr || window_ == nullptr) {
+    if (!IsInitialized() || window_ == nullptr) {
       return;
     }
     const bool mapped = gtk_widget_get_mapped(GTK_WIDGET(window_)) != FALSE;
     const bool active = gtk_window_is_active(window_) != FALSE;
     const bool minimized = toplevel_ != nullptr &&
                            (gdk_toplevel_get_state(toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
-    runtime_->UpdateApplicationLifecycleState(
-        ResolveLinuxApplicationLifecycleState(mapped, active, minimized)
-    );
+    UiWindow::UpdateWindowLifecycleState(!mapped || minimized ? WindowLifecycleState::Background
+        : active ? WindowLifecycleState::Active : WindowLifecycleState::Inactive);
+    static_cast<LinuxRuntime&>(ApplicationRuntime()).UpdateLifecycleState();
   }
 
   bool BeginWindowOperation(GdkEvent* event, guint button, Point point) {
-    if (!custom_chrome_ || window_ == nullptr || runtime_ == nullptr || event == nullptr) {
+    if (!custom_chrome_ || window_ == nullptr || !IsInitialized() || event == nullptr) {
       return false;
     }
     GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
@@ -860,7 +977,7 @@ private:
       gdk_toplevel_begin_resize(GDK_TOPLEVEL(surface), *edge, device, static_cast<int>(button), point.x, point.y, time);
       return true;
     }
-    if (runtime_->IsWindowDragRegion(point)) {
+    if (UiWindow::IsWindowDragRegion(point)) {
       gdk_toplevel_begin_move(GDK_TOPLEVEL(surface), device, static_cast<int>(button), point.x, point.y, time);
       return true;
     }
@@ -869,11 +986,11 @@ private:
 
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
       PointerButton pressed_buttons = PointerButton::None, KeyModifiers modifiers = {}) {
-    if (runtime_ == nullptr) {
+    if (!IsInitialized()) {
       return;
     }
     last_pointer_position_ = position;
-    runtime_->HandlePointerEvent({
+    UiWindow::HandlePointerEvent({
         type,
         0,
         position,
@@ -894,25 +1011,16 @@ private:
   }
 
   bool SendKey(KeyEventType type, guint key_value, GdkModifierType state, GdkEvent* event, bool repeat = false) {
-    if (runtime_ == nullptr) {
+    if (!IsInitialized()) {
       return false;
     }
-    return runtime_->HandleKeyEvent({
+    return UiWindow::HandleKeyEvent({
         type,
         TranslateKey(UnmodifiedKeyValue(event, key_value)),
         type == KeyEventType::Down ? KeyText(key_value, state) : std::string{},
         TranslateModifiers(state),
         repeat,
     });
-  }
-
-  std::filesystem::path ResourceRoot() const {
-    if (const char* override_directory = std::getenv("HUXERUI_RESOURCES_DIR")) {
-      return std::filesystem::path(override_directory);
-    }
-    std::filesystem::path root(ResolveLinuxExecutablePath());
-    root.replace_extension(".resources");
-    return root;
   }
 
   unsigned long X11WindowId() const noexcept {
@@ -930,12 +1038,13 @@ private:
   }
 
   void Cleanup() noexcept {
+    Retire();
     file_drop_.reset();
     if (frame_source_ != 0) {
       g_source_remove(frame_source_);
       frame_source_ = 0;
     }
-    ui_dispatcher_->Shutdown();
+
     text_input_.Reset();
     DetachToplevelState();
     key_tracker_.Reset();
@@ -949,29 +1058,28 @@ private:
   }
 
   static gboolean FrameReady(gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->CommitFrame();
+    static_cast<LinuxUiWindow*>(data)->CommitFrame();
     return G_SOURCE_REMOVE;
   }
 
   static void Snapshot(GtkSnapshot* snapshot, int width, int height, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.UpdateRuntimeViewport({static_cast<float>(width), static_cast<float>(height)});
     self.DrawFrame(snapshot);
   }
 
   static gboolean CloseRequested(GtkWindow*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     if (!self.performing_close_ && self.DispatchWindowRequest(WindowCommand::Close)) {
       return TRUE;
     }
     self.performing_close_ = false;
-    self.text_input_.Reset();
-    self.running_ = false;
-    return FALSE;
+    self.ApplicationRuntime().RequestShutdown();
+    return TRUE;
   }
 
   static void ClientWidgetDestroyed(GtkWidget* widget, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.text_input_.Reset();
     if (self.drawing_area_ != nullptr && GTK_WIDGET(self.drawing_area_) == widget) {
       self.drawing_area_ = nullptr;
@@ -979,10 +1087,12 @@ private:
   }
 
   static void Destroyed(GtkWidget*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.CancelPointer();
     self.key_tracker_.Reset();
-    self.running_ = false;
+    if (!static_cast<LinuxRuntime&>(self.ApplicationRuntime()).Stopped()) {
+      self.ApplicationRuntime().RequestShutdown();
+    }
     self.toplevel_ = nullptr;
     self.toplevel_state_handler_ = 0;
     self.window_ = nullptr;
@@ -990,24 +1100,24 @@ private:
   }
 
   static void WindowMapped(GtkWidget*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.AttachToplevelState();
     self.UpdateLifecycleState();
   }
 
   static void WindowUnmapped(GtkWidget*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.CancelPointer();
     self.key_tracker_.Reset();
     self.UpdateLifecycleState();
   }
 
   static void WindowActiveChanged(GObject*, GParamSpec*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->UpdateLifecycleState();
+    static_cast<LinuxUiWindow*>(data)->UpdateLifecycleState();
   }
 
   static void ToplevelStateChanged(GObject*, GParamSpec*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     const bool minimized = self.toplevel_ != nullptr &&
                            (gdk_toplevel_get_state(self.toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
     if (minimized && !self.minimized_) {
@@ -1023,13 +1133,13 @@ private:
   }
 
   static void WindowMaximizedChanged(GObject*, GParamSpec*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->UpdateRuntimeViewport();
+    static_cast<LinuxUiWindow*>(data)->UpdateRuntimeViewport();
   }
 
   static void ScaleChanged(GObject*, GParamSpec*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (self.runtime_ != nullptr) {
-      self.runtime_->UpdateResourceConfiguration(self.Configuration());
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    if (self.IsInitialized()) {
+      self.UiWindow::UpdateResourceConfiguration(self.Configuration());
       self.UpdateRuntimeViewport();
       self.RequestFrameAt(self.Now());
     }
@@ -1075,7 +1185,7 @@ private:
     if (!gdk_event_get_position(event, &x, &y)) {
       return FALSE;
     }
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     if (self.window_ != nullptr) {
       double offset_x = 0.0;
       double offset_y = 0.0;
@@ -1098,7 +1208,7 @@ private:
   }
 
   static void TouchPressed(GtkGestureClick* gesture, int, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
     const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
     const Point position{static_cast<float>(x), static_cast<float>(y)};
@@ -1106,43 +1216,43 @@ private:
   }
 
   static void TouchReleased(GtkGestureClick* gesture, int, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     const guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(gesture));
     self.ReleasePointer(event, button, {static_cast<float>(x), static_cast<float>(y)});
   }
 
   static void PointerCanceled(GtkGesture*, GdkEventSequence*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->CancelPointer();
+    static_cast<LinuxUiWindow*>(data)->CancelPointer();
   }
 
   static void PointerEntered(GtkEventControllerMotion* controller, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
         self.pressed_buttons_,
         TranslateModifiers(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller))));
   }
 
   static void PointerMoved(GtkEventControllerMotion* controller, double x, double y, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
         self.pressed_buttons_,
         TranslateModifiers(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller))));
   }
 
   static void PointerLeft(GtkEventControllerMotion*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     if (self.pressed_buttons_ == PointerButton::None) {
       self.SendPointer(PointerEventType::Cancel, self.last_pointer_position_);
     }
   }
 
   static gboolean Scrolled(GtkEventControllerScroll* controller, double dx, double dy, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
-    if (self.runtime_ != nullptr) {
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    if (self.IsInitialized()) {
       GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
       const GdkModifierType state = event ? gdk_event_get_modifier_state(event) : GdkModifierType{};
-      const Point consumed = self.runtime_->HandleScrollInput({
+      const Point consumed = self.UiWindow::HandleScrollInput({
           self.last_pointer_position_,
           static_cast<float>(dx * kDipsPerScrollStep),
           static_cast<float>(dy * kDipsPerScrollStep),
@@ -1156,7 +1266,7 @@ private:
   static gboolean KeyPressed(
       GtkEventControllerKey* controller, guint key_value, guint key_code, GdkModifierType state, gpointer data
   ) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
     const LinuxKeyPressResult press =
         self.key_tracker_.Press(key_code, self.text_input_.FilterKeyEvent(event));
@@ -1169,7 +1279,7 @@ private:
   static void KeyReleased(
       GtkEventControllerKey* controller, guint key_value, guint key_code, GdkModifierType state, gpointer data
   ) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
     if (self.key_tracker_.Release(key_code, self.text_input_.FilterKeyEvent(event))) {
       static_cast<void>(self.SendKey(KeyEventType::Up, key_value, state, event));
@@ -1177,17 +1287,17 @@ private:
   }
 
   static void FocusEntered(GtkEventControllerFocus*, gpointer data) {
-    static_cast<LinuxPlatformAdapter*>(data)->text_input_.SetFocus(true);
+    static_cast<LinuxUiWindow*>(data)->text_input_.SetFocus(true);
   }
 
   static void FocusLeft(GtkEventControllerFocus*, gpointer data) {
-    auto& self = *static_cast<LinuxPlatformAdapter*>(data);
+    auto& self = *static_cast<LinuxUiWindow*>(data);
     self.text_input_.SetFocus(false);
     self.key_tracker_.Reset();
   }
 
-  std::shared_ptr<LinuxUIThreadDispatcher> ui_dispatcher_;
-  Runtime* runtime_ = nullptr;
+  std::shared_ptr<LinuxUiThreadDispatcher> ui_dispatcher_;
+
   GtkWindow* window_ = nullptr;
   GtkWidget* drawing_area_ = nullptr;
   GdkToplevel* toplevel_ = nullptr;
@@ -1206,16 +1316,16 @@ private:
   float custom_title_bar_height_ = 0.0F;
   PointerButton pressed_buttons_ = PointerButton::None;
   bool suppress_pointer_release_ = false;
-  bool clipboard_read_active_ = false;
   Point last_pointer_position_;
   LinuxKeyTracker key_tracker_;
   std::exception_ptr failure_;
 };
 
 int RunPlatformApplication(const Application& application) {
-  LinuxPlatformAdapter platform;
-  Runtime runtime{application, platform};
-  return platform.Run(runtime, application.options.window);
+  LinuxRuntime runtime(InitializeGtk());
+  runtime.Start(application);
+  LinuxUiWindow window(runtime.Dispatcher());
+  return window.Run(runtime, application.options.window);
 }
 
 } // namespace huxerui::detail

@@ -77,7 +77,7 @@ struct ProfileEvent {
   std::uint32_t frame = 0;
 };
 
-// A recorder belongs to one Runtime on its UI thread. Recording controls and export run between frames.
+// A recorder belongs to one UiWindow on its UI thread. Recording controls and export run between frames.
 class ProfileRecorder final {
 public:
   using Clock = std::int64_t (*)() noexcept;

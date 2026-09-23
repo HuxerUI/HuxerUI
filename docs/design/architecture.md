@@ -5,13 +5,13 @@ Code examples match the current public API unless a section explicitly documents
 
 The ViewSpec compilation, Environment dependency, and `[[huxerui::composable]]` function model is specified in [View Composition and Environment Design](view-composition.md).
 
-HuxerUI uses the `Platform` prefix for framework abstractions that cross the shared-runtime boundary, including PlatformAdapter, PlatformView, PlatformModule, and their lifecycle state. Concrete operating-system objects keep their exact API names, such as `UIView`, `NSView`, `HWND`, and `HTMLElement`. Feature and type names do not use `Native` as a synonym for `Platform`; lowercase native remains valid when it describes operating-system behavior or an ecosystem term such as a Java native method or Gradle `externalNativeBuild`.
+HuxerUI uses the `Platform` prefix for platform-integrated values such as PlatformView and PlatformModule. The host boundary consists of platform-derived Runtime and UiWindow classes. Concrete operating-system objects keep their exact API names, such as `UIView`, `NSView`, `HWND`, and `HTMLElement`. Feature and type names do not use `Native` as a synonym for `Platform`; lowercase native remains valid when it describes operating-system behavior or an ecosystem term such as a Java native method or Gradle `externalNativeBuild`.
 
 The design has four goals:
 
 - Keep the common View API small and declarative.
 - Give built-in and third-party features the same extension mechanisms.
-- Preserve mounted state across recomposition without adding feature-specific branches to `Runtime`.
+- Preserve mounted state across recomposition without adding feature-specific branches to `UiWindow`.
 - Reuse the existing Scope, Composer, reconciliation, layout, event, and virtual layout systems.
 
 ## Architecture overview
@@ -35,10 +35,9 @@ The application declares one process-level root and options value:
 const Application application{App};
 ```
 
-`RuntimeRoot` is synthesized by the Runtime. It is not a public layout component and does not require applications to wrap their root View.
+`RuntimeRoot` is synthesized by each UiWindow. It is not a public layout component and does not require applications to wrap their root View.
 
-`PlatformAdapter`, `UIThreadDispatcher`, and `ProcessMetrics` form the public host-capability boundary in `platform_adapter.h`.
-`app.h` includes that boundary for application and Runtime declarations, while platform helpers that need only host scheduling or services include `platform_adapter.h` directly.
+`app.h` declares the shared Runtime and UiWindow bases, `UiThreadDispatcher`, and `ProcessMetrics`. Platform implementations derive from these bases and override native operations without inserting a forwarding adapter.
 
 The main data flow is:
 
@@ -58,28 +57,43 @@ frame, measure, layout, hit testing, and paint
 RenderScene
 ```
 
-## Runtime subsystem ownership
+## Application and window installation
 
-Runtime is the lifetime owner and frame-transaction coordinator of one mounted surface, not the implementation of every surface-wide behavior. Its host-facing input methods remain the platform boundary; their presence does not require the receiving subsystem's state or algorithms to be members of Runtime.
+`Application` stores its root factory and immutable `AppOptions`; construction does not execute installation callbacks.
+`AppOptions::application_hooks` is an ordered list of `ApplicationHook` callbacks taking `ApplicationContext&`.
+Runtime invokes the list once on the application thread after its native facilities and built-in application services are ready, including startup without any UiWindow.
+Every hook shares the same application service table and platform factory catalog, so later hooks can use earlier registrations; duplicate service types and factory names retain their existing rejection rules.
+Services and factories freeze only after the entire list completes successfully, before queued work is delivered or windows initialize.
+An empty list performs no custom installation; an empty callback entry throws `std::invalid_argument`.
+Any hook exception propagates after the existing Runtime retirement path releases partial application state and pending work, and remaining hooks are not invoked.
+
+`AppOptions::window_hooks` remains the ordered list of `WindowHook` callbacks taking `WindowContext&` for per-window services and layers.
+Each UiWindow invokes that list during its own initialization before first composition; attaching or replacing a window does not repeat application hooks.
+Both context references are borrowed only for their callback duration, and hook invocation is never triggered by recomposition or foreground/background transitions.
+
+## Runtime and UiWindow subsystem ownership
+
+Runtime owns one application's services, frozen factory catalog, event dispatch, and ordinary timers. Each attached UiWindow owns its mounted surface and coordinates frame transactions. Its host-facing input methods are the native window boundary; their presence does not require every input algorithm to be a UiWindow member.
 
 | Owner | State and behavior |
 | --- | --- |
-| Runtime | Root Environment and services, composition and reconciliation, mounted-node and scope identity, focus and focus traps, keyboard and Back ordering, frame scheduling, commit and teardown order |
+| Runtime | Application services, factory catalog, application dispatch, timers, and shutdown order |
+| UiWindow | Root Environment and window services, composition and reconciliation, mounted-node and scope identity, focus and focus traps, keyboard and Back ordering, frame scheduling, commit and window teardown order |
 | PointerInteraction | Physical pointer sessions, raw delivery and capture, hover and cursor, recognition arbitration, and in-process drag-and-drop |
 | TextInteraction | Logical IME sessions, protocol validation and geometry synchronization, editing actions, selection behavior, and the selection overlay |
 | FileDropReceiver | External hover, target eligibility, independently accepted pending deliveries, completion and cancellation |
 | SemanticTree | Semantic identity allocation, committed semantic output, and action routes; node-associated identities remain on MountedNode |
 | SceneTransitionService | Frozen scenes, active transition state, animation advancement, and scene composition |
 
-These are private concrete collaborators, not Runtime subclasses, application Root Services, or a dynamically registered behavior pipeline. SceneTransitionService retains its existing handle-facing service role. Node-local retained behavior continues to use NodeExtension and existing text and gesture capabilities. TextField and other clients retain their own controlled editing state; TextInteraction does not mirror documents.
+These are private concrete UiWindow collaborators, not additional host subclasses, application services, or a dynamically registered behavior pipeline. SceneTransitionService retains its existing handle-facing service role. Node-local retained behavior continues to use NodeExtension and existing text and gesture capabilities. TextField and other clients retain their own controlled editing state; TextInteraction does not mirror documents.
 
-Composition, reconciliation, and lifecycle retirement share the mounted-tree transaction and remain in Runtime. Layout, rendering, hit-route construction, coordinate conversion, and scrolling reuse their existing algorithms rather than acquiring parallel manager classes. FileDropReceiver and PointerInteraction share route and edge-scroll operations, not session ownership: an external drag has no local recognizer, source, or preview.
+Composition, reconciliation, and lifecycle retirement share the mounted-tree transaction and remain in UiWindow. Layout, rendering, hit-route construction, coordinate conversion, and scrolling reuse their existing algorithms rather than acquiring parallel manager classes. FileDropReceiver and PointerInteraction share route and edge-scroll operations, not session ownership: an external drag has no local recognizer, source, or preview.
 
-Runtime::State is the single shared internal context for Runtime and its collaborators. Each collaborator receives that context directly rather than retaining a separate list of platform, mounted-tree, focus, Environment, resource, and peer references. It reads shared runtime data and calls peer operations through the context, while pointer sessions, IME sessions, semantic routes, and active transition data remain private to their responsible subsystem. Focus changes, invalidation, and frame requests still invoke Runtime operations through the context's owner; assigning fields is not a substitute for those coordinated operations.
+UiWindow::State is the shared internal context for mounted-tree collaborators. Each collaborator receives that context directly rather than retaining a separate list of window, mounted-tree, focus, Environment, resource, and peer references. It reads shared window data and calls peer operations through the context, while pointer sessions, IME sessions, semantic routes, and active transition data remain private to their responsible subsystem. Focus changes, invalidation, and frame requests still invoke UiWindow operations through the context's owner; assigning fields is not a substitute for those coordinated operations.
 
 Stable node identities and NodeExtensionHandle values cross callbacks and frames; raw mounted references are temporary and must be resolved again after callbacks that can invalidate their owners. Cooperation uses ordinary methods without a second Context wrapper, callback registration layer, or service locator.
 
-Private collaborators store ordinary state directly; implementation hiding is not a separate ownership boundary. Runtime keeps its public-header PImpl and owns the shared context for the entire mounted lifetime. Ordinary collaborators hold a non-owning context reference; the handle-retainable SceneTransitionService holds a pointer cleared on disconnect. Asynchronous file deliveries capture a dispatcher copy and weak pending-operation state, never the shared Runtime context.
+Private collaborators store ordinary state directly; implementation hiding is not a separate ownership boundary. UiWindow keeps the shared context for the mounted lifetime. Ordinary collaborators hold a non-owning context reference; the handle-retainable SceneTransitionService holds a pointer cleared on disconnect. Asynchronous file deliveries capture a dispatcher copy and weak pending-operation state, never the shared UiWindow context.
 
 Shared implementation is organized one directory below `src/` by responsibility:
 
@@ -95,15 +109,15 @@ Shared implementation is organized one directory below `src/` by responsibility:
 
 These directories organize existing implementation responsibilities within the same build targets. Private headers stay with their owning subsystem; cross-directory includes use paths relative to `src/`, whose root remains the single shared private include directory. `internal_access.h` stays at that root. Concrete operating-system backends remain under `platform/`.
 
-`runtime/view.cpp` owns View declaration mutation, copy-on-write, compilation, and generic construction support. Reusable property modifiers, ScrollBar, and ScrollPhysics configuration live in `runtime/modifier.cpp`. Built-in containers share `components/containers.cpp`: Row, Column, Flow, Stack, Spacer, IndexedPages, ScrollView, VirtualList, and VirtualGrid keep their construction, configuration, layout policies, and private measurement caches together. Generic layout execution and virtual-node management remain in Runtime. `runtime/scroll.cpp` owns scroll geometry, physics, motion, nested scrolling transactions, ScrollController, and its mounted connection. Window title-bar measurement lives in `application/window.cpp`. Text construction, defaults, and link behavior live in `components/text.cpp`. Other component constructors, defaults, private layouts, and retained behavior live together under `components/`. Shared declaration support, looping progress phase, and the progress-circle paint contract remain in `view_internal.h`; the paint implementation lives in `components/progress.cpp`.
+`runtime/view.cpp` owns View declaration mutation, copy-on-write, compilation, and generic construction support. Reusable property modifiers, ScrollBar, and ScrollPhysics configuration live in `runtime/modifier.cpp`. Built-in containers share `components/containers.cpp`: Row, Column, Flow, Stack, Spacer, IndexedPages, ScrollView, VirtualList, and VirtualGrid keep their construction, configuration, layout policies, and private measurement caches together. Generic layout execution and virtual-node management remain in UiWindow. `runtime/scroll.cpp` owns scroll geometry, physics, motion, nested scrolling transactions, ScrollController, and its mounted connection. Window title-bar measurement lives in `application/window.cpp`. Text construction, defaults, and link behavior live in `components/text.cpp`. Other component constructors, defaults, private layouts, and retained behavior live together under `components/`. Shared declaration support, looping progress phase, and the progress-circle paint contract remain in `view_internal.h`; the paint implementation lives in `components/progress.cpp`.
 
-Private implementation layering progresses from View declarations to retained nodes and then Runtime coordination: `view_internal.h` owns declarations and component-construction support, `mounted_node_internal.h` adds retained node state and node operations, and `runtime_internal.h` adds composition and per-window coordination. Include dependencies point only toward the lower layer: Runtime may include the mounted-node header, and the mounted-node header may include the View header. Feature contracts such as pointer, text, and semantics remain focused headers and do not create a second umbrella include. FileDropReceiver's declaration belongs to Runtime coordination in `runtime_internal.h`.
+Private implementation layering progresses from View declarations to retained nodes and then UiWindow coordination: `view_internal.h` owns declarations and component-construction support, `mounted_node_internal.h` adds retained node state and node operations, and `ui_window_internal.h` adds composition and per-window coordination. Include dependencies point only toward the lower layer: UiWindow may include the mounted-node header, and the mounted-node header may include the View header. Feature contracts such as pointer, text, and semantics remain focused headers and do not create a second umbrella include. FileDropReceiver's declaration belongs to UiWindow coordination in `ui_window_internal.h`.
 
 Shared access bridges use one non-template `detail::InternalAccess`, including access-helper operations and presentation services' private LayerController operations. Public headers only forward-declare this friend; `src/internal_access.h` declares its static entry points without including retained-node or Runtime-state definitions, and each implementation remains in its owning source file. This is not a mandatory route for internal calls: established ownership and cooperation remain direct, including Runtime's State owner, RecomposeScope, LayerController, and NodeExtension lifecycle binding. Direct field-sharing friendships remain unchanged. Existing access helpers belong to InternalAccess even when a helper function only reads a field.
 
 InternalAccess does not own state, register services, or add another dispatch protocol. Forwarders preserve the original operation's validation, invalidation, and lifecycle ordering. Public template facilities that need inline access, such as Lifecycle's State dependency capture, keep their header-visible helper rather than including a source-private header.
 
-Runtime preserves explicit ordering at input, tree-update, geometry, frame, and shutdown boundaries. Focus has one authoritative owner; text and pointer code request transitions rather than keeping synchronized focus copies. Text input synchronization after an event remains immediate when required, while published layout geometry waits for final layout and presentation transforms, including caret reveal and anchored-layer settlement. Time-dependent collaborators contribute frame requests through the existing scheduler; BuildFrame never directly arms the platform scheduler.
+UiWindow preserves explicit ordering at input, tree-update, geometry, frame, and window-retirement boundaries. Focus has one authoritative owner; text and pointer code request transitions rather than keeping synchronized focus copies. Text input synchronization after an event remains immediate when required, while published layout geometry waits for final layout and presentation transforms, including caret reveal and anchored-layer settlement. Time-dependent collaborators contribute frame requests through the existing scheduler; BuildFrame never directly arms the platform scheduler.
 
 Pointer ownership is committed before competing recognizers are canceled and before accepted output reaches application code. Recognition decisions do not publish accepted behavior. Text selection uses the same ownership boundary; its overlay may consume a sequence without entering node recognition, but PointerInteraction remains responsible for that physical sequence and its terminal cancellation. Multi-pointer acceptance commits every participating owner before callbacks run. Failed input is quarantined rather than retried against a partially changed route.
 
@@ -268,15 +282,15 @@ An unchanged declaration retains its active cleanup, while a changed dependency 
 A successfully omitted declaration cleans up, and scope teardown cleans active declarations in reverse declaration order.
 
 Composition records declarations without invoking application callbacks.
-After reconciliation, layout, semantics, RenderScene generation, and damage calculation succeed, Runtime cleans changed and retired declarations in reverse composition order and then runs new setups in declaration order.
+After reconciliation, layout, semantics, RenderScene generation, and damage calculation succeed, UiWindow cleans changed and retired declarations in reverse composition order and then runs new setups in declaration order.
 Failed composition discards pending declarations without disturbing active resources.
 State writes from setup or cleanup schedule a subsequent frame rather than re-entering composition.
 Lifecycle accepts ordinary `void` cleanup callables, while its internal cleanup boundary remains non-throwing.
-Setup exceptions retain the Runtime's normal `BuildFrame()` propagation behavior, and an escaping cleanup exception terminates the process.
+Setup exceptions retain UiWindow's normal `BuildFrame()` propagation behavior, and an escaping cleanup exception terminates the process.
 
 Virtual item caching preserves State slots only.
 Evicting a mounted virtual scope therefore runs cleanup, while realizing it again restores State and runs a new setup.
-Runtime teardown destroys mounted scopes and drains lifecycle cleanup before releasing Root Services.
+UiWindow teardown destroys mounted scopes and drains lifecycle cleanup before releasing its window services.
 
 ## Structured task scope
 
@@ -284,8 +298,8 @@ Runtime teardown destroys mounted scopes and drains lifecycle cleanup before rel
 The scope retains launched `Task<void>` executions across compatible recomposition and keyed movement.
 Successful scope retirement queues TaskScope closure for the same commit boundary as Lifecycle retirement, while failed composition leaves active tasks unchanged.
 
-Runtime performs retired Lifecycle cleanup before closing the corresponding TaskScopes, then releases Root Services and platform state.
-TaskScope uses the owning PlatformAdapter's existing UIThreadDispatcher for initial execution, HuxerUI awaitable resumption, and lifecycle-bound external-thread posting.
+UiWindow performs retired Lifecycle cleanup before closing the corresponding composition TaskScopes, then releases window services and native state.
+TaskScope uses its owning Runtime or UiWindow dispatcher for initial execution, HuxerUI awaitable resumption, and lifecycle-bound external-thread posting.
 RunWorker, WorkerSequence, and non-Web local File asynchronous operations share one bounded process-wide C++ worker executor, while platform-native asynchronous transports keep their existing owners.
 WorkerSequence contributes per-instance FIFO admission and cooperative cancellation without owning threads or adding Runtime state.
 Worker execution is process-local and does not imply platform background execution.
@@ -293,8 +307,8 @@ The Task model does not add Runtime branches to State, EventBindings, Lifecycle 
 
 The complete public and execution contract is defined in [Task and Structured Concurrency Design](tasks.md).
 
-The built-in HttpClient Root Service is the first platform asynchronous API built directly on Task.
-It uses one private HttpTransport capability from PlatformAdapter, preserves HTTP values in shared C++, and resumes platform completions through the owning Task execution without routing requests through PlatformModule.
+The built-in application HttpClient is a platform asynchronous API built directly on Task.
+It uses one private HttpTransport capability from Runtime, preserves HTTP values in shared C++, and resumes platform completions through the owning Task execution without routing requests through PlatformModule.
 The complete request, cancellation, error, and backend contract is defined in [HTTP Client Design](http.md).
 
 ## NodeExtension lifecycle
@@ -387,7 +401,7 @@ protected:
 Custom child measurement and placement belong to `Layout<Derived>` or `VirtualLayout<Derived>`.
 
 `NodeExtension::EmitEvent<Key>()` synchronously dispatches through the owning node's current typed event binding.
-Runtime binds a non-owning reference to the existing `MountedNode::event_bindings` map after extension construction and before mounted callbacks; compatible reconciliation replaces the map's contents without changing its address.
+UiWindow binds a non-owning reference to the existing `MountedNode::event_bindings` map after extension construction and before mounted callbacks; compatible reconciliation replaces the map's contents without changing its address.
 Extensions are destroyed before their owner's bindings, and keyed movement preserves the same owner association.
 No per-extension binding map, EventHub, scope, or event registry is created.
 The operation reuses `detail::EmitEvent()` while matching `EventEmitter::Emit()` public return semantics: `void` for notifications and `std::optional<Result>` for decisions, with no notification or an empty optional when unconnected or unhandled.
@@ -411,14 +425,14 @@ It reports exactly which retained paint sequence changed.
 This phase lets geometry-dependent extensions retain value snapshots without storing raw mounted-node references or forcing unrelated clean PaintSequences to rerecord.
 
 During either paint callback, extensions append node-local PaintCommands through `PaintContext`.
-Runtime stores the resulting content or foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene.
+UiWindow stores the resulting content or foreground PaintSequence on the node's RenderNode, and platform renderers apply the inherited layout and presentation transform while traversing RenderScene.
 Corner radii remain declaration values until a concrete paint, clip, path, shadow caster, or hit-test rectangle is known.
 The shared geometry boundary scales overconstrained radii proportionally, so fills, borders, descendant clips, and pointer containment apply the same circular-corner normalization on every renderer.
-Paint may extend beyond `Bounds()` unless an explicit clip limits it, and Runtime derives render visibility from recorded PaintSequence bounds and visible descendants.
+Paint may extend beyond `Bounds()` unless an explicit clip limits it, and UiWindow derives render visibility from recorded PaintSequence bounds and visible descendants.
 `PresentationBounds()` is the transformed axis-aligned host-view logical layout bounds.
 Pointer positions delivered to `NodeExtension::HitTest()` and `OnPointer()` are mapped back into the node's local coordinate space.
 
-An extension whose `HitTest()` returns true keeps its node on the topmost pointer route and prevents lower visual branches from receiving that pointer. Runtime may query `HitTest()` while constructing the route and again before dispatch, so implementations keep it deterministic and free of side effects.
+An extension whose `HitTest()` returns true keeps its node on the topmost pointer route and prevents lower visual branches from receiving that pointer. UiWindow may query `HitTest()` while constructing the route and again before dispatch, so implementations keep it deterministic and free of side effects.
 
 Every matching hover extension on the deepest hit node receives the complete `HoverEvent` through `OnHover()` rather than competing for one exclusive hover slot.
 Public Hover handlers on the resolved ancestor route receive their own node-local Enter, Move, and Leave lifecycle without turning those Views into ordinary pointer targets.
@@ -433,7 +447,7 @@ The existing `LayoutContext` and `VirtualLayoutContext` remain because they repr
 
 ## ViewNode capabilities
 
-`ViewNode` is the public interface to a Runtime-owned node in the mounted View tree. The internal `detail::MountedNode` implements this interface and owns the retained state; both names refer to the same object. Node references, child ranges, and metadata pointers are borrowed and must not be retained across reconciliation.
+`ViewNode` is the public interface to a UiWindow-owned node in the mounted View tree. The internal `detail::MountedNode` implements this interface and owns the retained state; both names refer to the same object. Node references, child ranges, and metadata pointers are borrowed and must not be retained across reconciliation.
 
 The node accessors are public virtual functions implemented directly by `detail::MountedNode`. `Children()` remains a non-virtual range helper, and the typed metadata and cache templates use the protected `FindLayoutValue()` and `EnsureCacheEntry()` virtual hooks. Both `ChildAt()` overloads check bounds in the mounted implementation and throw `std::out_of_range` for an invalid index.
 
@@ -470,7 +484,7 @@ public:
 
 `Bounds()` has a zero origin and the node's complete layout size, including Padding. `ContentBounds()` deflates that rectangle by the resolved Padding and clamps its dimensions to at least zero. `LayoutOffset()` is parent-relative. `PresentationBounds()` and the local/window conversion operations derive from the resolved ancestor transform chain for platform-boundary queries and diagnostics. Rectangle conversion returns a window-space axis-aligned bound, and inverse point conversion returns no value for a non-invertible transform. `PrepareGeometry()` observes the final resolved transform for the current frame; earlier extension callbacks may observe the previous resolution.
 
-It does not expose Runtime ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()` and uses its protected paint invalidation operation when retained visual state changes. General application-facing measure and layout invalidation APIs are deferred.
+It does not expose UiWindow ownership, Environment storage, reconciliation internals, or direct child insertion and removal. A `NodeExtension` requests a continuing frame or a delayed wake-up through the `FrameResult` returned from `OnFrame()` and uses its protected paint invalidation operation when retained visual state changes. General application-facing measure and layout invalidation APIs are deferred.
 
 ## Frame lifecycle
 
@@ -498,19 +512,19 @@ invalidate and present platform damage
 schedule the returned deadline
 ```
 
-The current Runtime reuses clean measurement and placement results, retains clean content and foreground PaintSequences, and changes a RenderNode revision only when its commands or scene properties change. PaintSequence revisions and lightweight committed-scene snapshots produce conservative DamageRegion rectangles. Node-extension frame traversal caches whether a subtree contains any extensions and skips extension-free subtrees. A modifier that is waiting for a delayed transition schedules one wake-up rather than running empty frames.
-Runtime may request a platform frame when state changes outside frame construction, but never calls the platform scheduler from inside `BuildFrame()`.
+UiWindow reuses clean measurement and placement results, retains clean content and foreground PaintSequences, and changes a RenderNode revision only when its commands or scene properties change. PaintSequence revisions and lightweight committed-scene snapshots produce conservative DamageRegion rectangles. Node-extension frame traversal caches whether a subtree contains any extensions and skips extension-free subtrees. A modifier that is waiting for a delayed transition schedules one wake-up rather than running empty frames.
+UiWindow may request a platform frame when state changes outside frame construction, but never calls the platform scheduler from inside `BuildFrame()`.
 Continuous animation and delayed extension work are returned in `FrameCommit::next_frame_deadline`, allowing each host to present the current commit before arming the next frame.
 
-Runtime calls fixed node and modifier lifecycle functions. It does not contain branches for concrete features such as ScrollBar, Ripple, Dialog, or a particular animation.
+UiWindow calls fixed node and modifier lifecycle functions. It does not contain branches for concrete features such as ScrollBar, Ripple, Dialog, or a particular animation.
 
 The retained scene and incremental invalidation architecture are defined in [Incremental Layout and Rendering Design](incremental-rendering.md).
 Local geometry, the scene boundary, PaintSequence reuse, transform and opacity presentation updates, retained ScrollView movement, layout and virtual-realization caching, equality-aware modifier and layout-value diffs, and precise shared-runtime damage are implemented.
 Windows and macOS consume shared DamageRegion output for platform partial redraw.
 Android retains the same shared damage calculation and committed-scene path but currently invalidates its complete `HuxerUIView`.
 
-The semantics pipeline is a parallel Runtime output rather than a RenderScene branch.
-After reconciliation and final presentation geometry, Runtime resolves component declarations, NodeExtension contributions, application overrides, focus, visibility, and secure-data policy into one immutable owning `SemanticFrame`.
+The semantics pipeline is a parallel UiWindow output rather than a RenderScene branch.
+After reconciliation and final presentation geometry, UiWindow resolves component declarations, NodeExtension contributions, application overrides, focus, visibility, and secure-data policy into one immutable owning `SemanticFrame`.
 `FrameCommit` publishes a shared pointer to that frame beside `RenderFrame`, allowing platform accessibility objects to retain committed data without retaining MountedNode pointers.
 The complete declaration, frame, action, identity, virtualization, security, and platform mapping contract is defined in [Semantics and Accessibility Design](semantics.md).
 
@@ -520,7 +534,7 @@ Libraries provide three platform integration forms:
 
 | Requirement | Integration |
 | --- | --- |
-| Permission, Audio, Camera control, or another nonvisual capability | Registered PlatformModule instance owned by a component Lifecycle or typed Root Service |
+| Permission, Audio, Camera control, or another nonvisual capability | Registered PlatformModule instance owned by a component Lifecycle or typed application/window service |
 | WebView, map, document preview, or another platform interactive hierarchy | Registered PlatformView factory and a real leaf View |
 | Camera preview, video decode, or another high-frequency visual stream | ExternalTexture composed by the HuxerUI renderer |
 
@@ -531,30 +545,34 @@ This does not introduce a Runtime subclass, a public Library base class, platfor
 
 ### PlatformRegistry contract
 
-Every surface owns one internal `PlatformRegistry` with a single case-sensitive UTF-8 name space for PlatformModule and PlatformView registrations.
+Every Runtime owns one internal `PlatformRegistry` with a single case-sensitive UTF-8 name space for PlatformModule and PlatformView registrations.
 The registry records the registration kind, exact C++ value types, and an arbitrary compatible direct factory or platform-language bridge.
-It rejects empty names, duplicate names across both registration kinds, incompatible C++ value types, and mutation after root installation completes.
+It rejects empty names, duplicate names across both registration kinds, incompatible C++ value types, and mutation after application installation completes.
 Registration names have no required separator, hierarchy, prefix, or grammar beyond being nonempty valid UTF-8; `web/WebView`, `WebView`, and a reverse-domain name are equally valid library contracts.
 Using `/` to group names is an optional library convention and never changes lookup or ownership semantics.
 The registry is not a public service locator, a process-global singleton, or an application-selectable composition mode.
 
-`RootContext` exposes only the operations required by explicit library installers and root-owned instances:
+`ApplicationContext` exposes factory registration and application-service installation during `application_hooks`:
 
 ```cpp
-root.RegisterPlatformModule<AudioPlayer, AudioPlayerOptions>("audio/Player", audio_factory);
-root.RegisterPlatformView<WebViewProperties, WebViewController>("web/WebView", web_view_factory);
+context.RegisterPlatformModule<AudioPlayer, AudioPlayerOptions>("audio/Player", audio_factory);
+context.RegisterPlatformView<WebViewProperties, WebViewController>("web/WebView", web_view_factory);
+```
 
-auto player = root.OpenPlatformModule<AudioPlayer>(
+Outside composition, a caller in the original application or window context opens a registered Module with the typed free function:
+
+```cpp
+auto player = OpenPlatformModule<AudioPlayer>(
     "audio/Player",
     AudioPlayerOptions{.session = session}
 );
 ```
 
-There is no `root.Platform()` accessor and no public generic `Register`, `Find`, or arbitrary `std::any` entry point.
+There is no public registry accessor or generic `Register`, `Find`, or arbitrary `std::any` entry point.
 Each registration binds its exact Module type and optional Options type or its exact Properties type and optional Controller type.
 Those types are inferred from a compatible direct factory or stated by a typed bridge adapter, so registration and opening validate the C++ contract without enumerating business methods or events.
 The registered Module type is the exact handle returned by its factory and open operations; it may be a value facade, move-only owner, shared interface pointer, or another library-defined RAII type.
-Root Service ownership is optional rather than the PlatformModule object model.
+Service ownership is optional rather than the PlatformModule object model.
 Applications consume a library's concrete service, component, or `UseXxx()` API rather than opening modules or spelling registered names directly.
 
 Registration names remain necessary because Java, Kotlin, Objective-C, Swift, JavaScript, C++, and future platform languages need one stable rendezvous identity.
@@ -565,7 +583,7 @@ The registry constrains factory behavior, not how a library constructs or organi
 A library may register a direct callable, a retained factory object, a framework bridge adapter, or its own adapter that satisfies the same creation and lifecycle contract.
 It may define one shared Install function, provide the same public Install function from mutually exclusive platform sources, or split common and platform installation into private helpers.
 HuxerUI does not require a public factory base class, a `CreateXxxFactory()` convention, a Backend or Service type, or the same internal construction pattern on every platform.
-The application still selects one documented RootHook without platform-specific registration code.
+The application still selects the library's documented `ApplicationHook` without platform-specific registration code.
 
 ### Strongly typed C++ path
 
@@ -575,10 +593,9 @@ Windows and Linux factories do not encode Options, Properties, requests, results
 It is shared by RenderScene and platform factory adaptation but never crosses a language boundary; ordinary components and direct factories continue to use their concrete Properties, Controller, Options, and event types.
 Registry erasure never exposes `std::any`, unchecked casts, or a dynamic call API to library code.
 
-Every direct PlatformModule factory receives the owning surface's non-owning `PlatformAdapter&`, followed by `const Options&` when the Module declares Options.
-This is the single host-capability dependency for direct factories; there is no alternate no-adapter signature or second factory context.
-The adapter remains surface-owned and a Module must not retain it beyond that surface's lifetime.
-PlatformView factory erasure also binds against the owning adapter, while direct create, update, Controller, and disposal callbacks receive only their exact platform handles and typed values.
+Every direct PlatformModule factory declares exactly one host parameter, `Runtime&` or `UiWindow&`, followed by `const Options&` when the Module declares Options.
+The choice sets the required lifetime: a Runtime factory can open without a window, while a UiWindow factory requires the caller's live original window context. Neither host reference may be retained beyond its owner's lifetime.
+PlatformView factory erasure prepares against each mounting UiWindow, while direct create, update, Controller, and disposal callbacks receive their exact platform handles and typed values.
 
 PlatformModule is an ordinary library-defined C++ object or interface.
 The library chooses virtual functions, a concrete value, callbacks, pimpl, or its own type erasure and independently chooses synchronous returns, Task or Future values, callbacks, streams, and error types:
@@ -626,8 +643,8 @@ Direct C++ calls use their concrete parameters and return values without a paylo
 ### PlatformModule ownership
 
 Registration and instance ownership are separate.
-RootHooks register immutable factories before first composition, while each strongly typed Module instance belongs to the application abstraction that opens it.
-A typed Root Service may own one shared window-lifetime instance, but a component may instead open an independent instance in `Lifecycle` setup and release it during cleanup.
+Application hooks register immutable factories before any window composition, while each strongly typed Module instance belongs to the application abstraction that opens it.
+A typed window service may own one shared window-lifetime instance, but a component may instead open an independent instance in `Lifecycle` setup and release it during cleanup.
 Options are present only when the library contract requires them:
 
 ```cpp
@@ -650,17 +667,16 @@ Lifecycle(
 );
 ```
 
-The free `OpenPlatformModule(name, options)` operation is valid only while Runtime is executing a committed `Lifecycle` setup.
-The declaring `RecomposeScope` already identifies its Runtime, and Runtime installs a scoped internal lifecycle execution context containing that surface's `PlatformRegistry` while invoking setup.
+The free `OpenPlatformModule(name, options)` operation is valid outside composition during application hooks, window hooks, committed `Lifecycle` setup, and ordinary application-thread work after factory installation.
+The current execution context identifies the original Runtime and, when needed, its live UiWindow.
 The operation resolves the registered name, verifies the PlatformModule kind and concrete Options type, and creates a new instance through the selected direct C++ factory or platform-language bridge.
-The execution context is restored after setup, is never a process-global registry, and does not remain available to composition, event handlers, asynchronous callbacks, or cleanup.
-Calling the free operation without an active Lifecycle setup is a framework usage error.
+The execution context is never a process-global registry. Window-bound factories fail after their original UiWindow retires rather than selecting a replacement.
+Calling the free operation during composition or without the required live host is a framework usage error.
 
 Registry freeze prevents later factory mutation but never prevents repeated instance creation.
 The returned exact Module handle owns its direct implementation or cross-language bridge through the library's ordinary RAII model.
 Capturing it in the returned cleanup gives dependency replacement and component unmount the ordinary Lifecycle cleanup order; the instance implementation owns any requests, subscriptions, and cancellation behavior required by its own API.
-RootHooks use `RootContext::OpenPlatformModule(name, options)` instead because `RootContext` already identifies the same surface registry directly.
-These are two lifetime-specific access paths to one registry rather than separate Module systems.
+Application and window hooks use the same free `OpenPlatformModule()` operation when they need to create an instance after its factory has been registered.
 
 A library may wrap component ownership in a typed custom hook such as `UseAudioPlayer(options)`.
 Such a hook uses stable composition state for any returned handle, opens and attaches the low-level instance from Lifecycle setup, and detaches it during cleanup.
@@ -691,7 +707,7 @@ HuxerUI does not inspect or prescribe its internal storage, inheritance, indirec
 Calling `.Controller(controller)` creates a framework-internal typed binding for that value; the Controller does not embed a binding, State, pimpl, Access helper, Backend, or Connection required by HuxerUI.
 The factory adapter receives the exact Controller type and defines how its mounted instance attaches and detaches.
 The framework erases the binding only inside retained storage after validating the registered Controller type and preserves its stable identity across compatible reconciliation.
-Runtime and the platform adapter retain the mounted implementation only while the PlatformView is committed, so the framework binding never keeps an unmounted platform object alive.
+UiWindow and its native backend retain the mounted implementation only while the PlatformView is committed, so the framework binding never keeps an unmounted platform object alive.
 
 A Controller may be declared before its PlatformView mounts and becomes connected only after the candidate platform instance commits.
 One Controller may be connected to at most one committed PlatformView at a time; a second simultaneous attachment is a framework usage error.
@@ -709,7 +725,7 @@ Both forms attach through the internal typed Controller binding and therefore sh
 Platform events remain ordinary HuxerUI Event Keys and use `Event<Result(Arguments...)>`.
 An event with several fields carries one owning, non-reference structured `T` rather than a multi-argument signature, giving every platform boundary one value to validate and decode.
 Every `.On<Key>(handler)` call creates the typed EventBinding and, when the Key provides platform-boundary metadata, records its stable event name and concrete argument type in the same binding.
-This behavior belongs to generic event binding construction rather than a PlatformView-specific Runtime branch, so fluent calls before or after ordinary View modifiers cannot lose the descriptor.
+This behavior belongs to generic event binding construction rather than a PlatformView-specific UiWindow branch, so fluent calls before or after ordinary View modifiers cannot lose the descriptor.
 Multiple event types require multiple `.On<Key>()` calls and no parallel event list.
 
 The Event Key inherits `Event<Result(Arguments...)>`, which already provides `Signature`; it never redeclares that alias.
@@ -778,7 +794,7 @@ A direct C++ Module may expose ordinary callbacks or state without either endpoi
 ### PlatformPayload boundary
 
 `PlatformPayload` is the value model used by HuxerUI's common bridge when data crosses between C++ and another platform language.
-It does not appear in ordinary PlatformView construction, direct C++ factory signatures, direct C++ method handlers, typed Root Service APIs, or Windows and Linux parameter flow.
+It does not appear in ordinary PlatformView construction, direct C++ factory signatures, direct C++ method handlers, typed service APIs, or Windows and Linux parameter flow.
 The presence of static `Encode()` or `Decode()` members does not imply that they run for a direct C++ implementation or a library-owned bridge with explicit typed boundary conversion.
 
 The corresponding structured C++ type is the single owner of its boundary schema:
@@ -955,17 +971,17 @@ Application callback objects never enter the envelope, and Objective-C, Java, Ja
 Framework codes reserve the `huxerui/` prefix and library codes use a library-owned prefix.
 A bridge failure that prevents a library result from being represented becomes a stable framework error rather than escaping through another language runtime.
 
-### RootHook platform registration
+### ApplicationHook platform registration
 
-RootHooks are the only PlatformModule and PlatformView registration entry point.
+Application hooks are the only PlatformModule and PlatformView registration entry point.
 Android, Apple, and Web applications do not repeat library registration in their host view, application delegate, or mount call, and platform packages do not mutate a process-global registry during static initialization.
-The selected library RootHook registers either a direct factory or a bridge descriptor, and Runtime freezes the completed surface registry before first composition.
+The selected library application hook registers either a direct factory or a bridge descriptor, and Runtime freezes the completed application catalog before any window composes.
 
 Android supplies common Java and Kotlin `PlatformViewFactory`, `PlatformView`, `PlatformModuleFactory`, and `PlatformModule` interfaces plus a JNI bridge adapter that resolves a library implementation class through the host application ClassLoader.
 Web supplies JavaScript structural factories through `web::JavaScriptPlatformModuleFactory` and `web::JavaScriptPlatformViewFactory`, while retaining its direct Emscripten C++ factory path.
 Apple libraries register either direct Objective-C++ factories or actual Objective-C/Swift factory objects through the platform-specific adapter.
-Factories and instances are separate because one surface registration may create multiple independently owned View or Module instances.
-One registered factory belongs to its surface registry, may create many independent instances, owns no created instance, and is released when that registry tears down.
+Factories and instances are separate because one application registration may create multiple independently owned View or Module instances.
+One registered factory belongs to its Runtime catalog, may create many independent instances, owns no created instance, and is released when that Runtime tears down.
 Every successfully created instance is disposed exactly once; a failed creation has no instance disposal and publishes no event.
 
 Common platform-language adapters expose only the event, result, and cancellation endpoints required by the boundary.
@@ -982,7 +998,7 @@ When a supported platform needs an owning host object, its protocol receives tha
 | iOS | Owning `UIViewController` | Owning `UIViewController` |
 
 These are explicit platform protocol parameters rather than fields of a universal Context object.
-The platform shell establishes every required owner before Runtime executes RootHooks, and a required host's absence is an integration failure rather than a nullable or partially initialized Context.
+The platform shell establishes application-level native facilities before Runtime executes application hooks and window-level facilities before UiWindow executes window hooks. A factory requiring a UiWindow cannot open without the original live window context.
 A future platform defines only the narrow host values required by its own factory contracts and does not widen the shared API.
 A PlatformView exposes its platform View, `update`, `invoke`, and `dispose`.
 A PlatformModule exposes `invoke` and `dispose`; `invoke` receives its method, arguments, and one `PlatformResult`, then returns an optional `PlatformCancellation`.
@@ -1015,7 +1031,7 @@ Libraries that require a genuinely synchronous boundary operation may supply the
 The optional C++ `PlatformChannel` is the reusable implementation of that transport contract.
 It exposes named invocation, typed payload encoding and decoding helpers, typed event subscription, cancellation, and close semantics without becoming a PlatformModule base class or a public registry lookup result.
 A library-defined Module or Controller may retain a channel internally, wrap it in any API shape, or ignore it and use a custom bridge.
-Invocation, transport cancellation, and transport disposal are always scheduled in submission order through the owning adapter's `UIThreadDispatcher`.
+Invocation, transport cancellation, and transport disposal are always scheduled in submission order through the owning adapter's `UiThreadDispatcher`.
 `Invoke` allocates and returns its request identity before platform work begins, while `Cancel` and `Close` invalidate C++ delivery synchronously.
 A canceled queued invocation is skipped; cancellation discovered while invocation is in progress runs on that same platform thread before a queued dispose, and all late results or events are ignored.
 
@@ -1118,24 +1134,24 @@ export const webViewFactory = {
 ```
 
 The returned `element` is non-null and initially unparented, the adapter alone attaches it, and the implementation retains the supplied emitter for repeated events.
-The factory object is linked and loaded before RootHooks execute, then the RootHook passes its actual `emscripten::val` to `web::JavaScriptPlatformViewFactory`; `mountHuxerUIApp()` does not register it.
+The factory object is linked and loaded before application hooks execute, then the hook passes its actual `emscripten::val` to `web::JavaScriptPlatformViewFactory`; `mountHuxerUIApp()` does not register it.
 
 The Android adapter owns binary payload transfer, instance creation, updates, invocations, events, results, cancellation, and disposal.
 A class-based adapter uses a public no-argument constructor and resolves through the host ClassLoader rather than `FindClass` from an arbitrary thread.
-PlatformView registration prepares its Java factory when the RootHook registers the View; PlatformModule registration resolves its Java factory lazily when the Module is first opened.
+PlatformView registration retains its Java factory for preparation in each mounting UiWindow; PlatformModule registration resolves its Java factory lazily when the Module is first opened.
 Each successful creation validates the returned instance contract, and PlatformView `invoke` is required only when the registered C++ View has a Controller.
 The Android SDK publishes consumer keep rules for any implementation class referenced by stable runtime name so shrinking cannot rename or remove it.
 A library may instead register its own JNI-backed factory when the common class adapter does not fit.
 
-The C++ RootHook selects the common class adapter explicitly with `android::JavaPlatformModuleFactory<Module, Options>` or `android::JavaPlatformViewFactory<Properties, Controller>`.
+The C++ application hook selects the common class adapter explicitly with `android::JavaPlatformModuleFactory<Module, Options>` or `android::JavaPlatformViewFactory<Properties, Controller>`.
 Their callback fields use `std::function` directly: the Module adapter constructs the exact Module from a `PlatformChannel`, while the View adapter connects that channel to the exact Controller.
 HuxerUI does not add callback aliases or require a proxy base.
 
 An Objective-C++ Apple library may register a direct strongly typed callable like a Windows implementation or adapt a conforming Objective-C/Swift factory object.
 The adapter always receives the actual factory object; runtime class lookup, a generated registrant, and application-delegate registration are not supported paths.
 
-Web selects either its direct Emscripten C++ path or `web::JavaScriptPlatformModuleFactory` and `web::JavaScriptPlatformViewFactory` in the RootHook.
-The JavaScript factories are linked before RootHooks execute and passed as actual `emscripten::val` objects, so the framework does not add a name-based JavaScript registry and `mountHuxerUIApp()` remains outside registration.
+Web selects either its direct Emscripten C++ path or `web::JavaScriptPlatformModuleFactory` and `web::JavaScriptPlatformViewFactory` in the application hook.
+The JavaScript factories are linked before application hooks execute and passed as actual `emscripten::val` objects, so the framework does not add a name-based JavaScript registry and `mountHuxerUIApp()` remains outside registration.
 Windows and Linux normally register direct strongly typed C++ factories.
 
 Factory and bridge construction remain library decisions on every platform.
@@ -1147,7 +1163,7 @@ Android, Web, and Apple common-bridge instances plus direct PlatformView factori
 The common PlatformView adapter uses Create, Update, Invoke, Result, Cancel, Event, and Dispose when its library exposes imperative commands; a declaration without a Controller has no application path to those commands.
 The common PlatformModule adapter uses Create, Invoke, Result, Event, Cancel, and Dispose, while a direct C++ Module or library-owned bridge uses its ordinary library-defined methods.
 An adapter that supports asynchronous invocation owns monotonically assigned internal request identities and ignores late results after cancellation or teardown.
-The platform adapter's `UIThreadDispatcher` preserves UI-thread delivery and event order without invoking callbacks inline from platform drawing, reconciliation, or a foreign-language call stack.
+The owning UiWindow's `UiThreadDispatcher` preserves UI-thread delivery and event order without invoking callbacks inline from platform drawing, reconciliation, or a foreign-language call stack.
 Events produced while creating a visual candidate remain queued until that candidate enters the committed RenderComposition; failed candidates publish nothing.
 Disposal rejects new calls, cancels pending requests, detaches event delivery, and then releases platform state.
 PlatformView creation, update, attachment, placement, removal, and disposal run on the owning UI thread.
@@ -1160,8 +1176,8 @@ Disposal rejects new invocations, invalidates endpoints, cancels outstanding wor
 ### PlatformView
 
 PlatformView is a real built-in leaf View rather than a modifier.
-Runtime owns its mounted identity, compatible reconciliation, measurement, final geometry, visibility, hit-testing boundary, focus participation, semantic anchor, and unmount timing.
-The platform adapter owns the corresponding `NSView`, `UIView`, Android `View`, `HWND`, DOM element, or equivalent platform object.
+UiWindow owns its mounted identity, compatible reconciliation, measurement, final geometry, visibility, hit-testing boundary, focus participation, semantic anchor, and unmount timing.
+The native backend owns the corresponding `NSView`, `UIView`, Android `View`, `HWND`, DOM element, or equivalent platform object.
 
 The low-level declaration has only the registration name and complete controlled properties:
 
@@ -1189,7 +1205,7 @@ Changing only the Controller detaches the previous binding and attaches the new 
 PlatformView measurement remains platform-neutral and never creates or synchronously measures a platform object during shared layout.
 PlatformView has zero intrinsic logical size under loose constraints; ordinary parent constraints and size modifiers such as `Frame` produce its final axis-aligned layout bounds.
 A concrete library may require dimensions or derive a Frame from controlled application data.
-Platform intrinsic-content changes do not mutate mounted geometry behind Runtime or start an adapter-to-layout feedback loop.
+Platform intrinsic-content changes do not mutate mounted geometry behind UiWindow or start a native-to-layout feedback loop.
 
 PlatformView follows final RenderScene paint order rather than a separate platform plane or a component-tree depth number.
 Content, children, foreground painting, sibling order, and LayerStack entries therefore determine PlatformView composition in exactly the same order as ordinary HuxerUI drawing.
@@ -1204,7 +1220,7 @@ One mounted identity contributes exactly one placement to a committed scene, and
 The surrounding RenderNode supplies the accumulated transform, clip, visibility, and paint position in the same way it does for every other PaintCommand.
 
 `FrameCommit` remains a `RenderFrame` and `SemanticFrame`; it does not gain a parallel `PlatformViewFrame`.
-Before raster presentation, a shared internal builder traverses the committed RenderScene for the platform adapter and derives an immutable `RenderComposition`.
+Before raster presentation, a shared internal builder traverses the committed RenderScene for the native backend and derives an immutable `RenderComposition`.
 The shared builder owns ordering and state-boundary semantics so platform renderers do not independently reinterpret command order.
 The composition is an ordered sequence of HuxerUI render slices and resolved PlatformView placements:
 
@@ -1233,7 +1249,7 @@ A property revision sends the complete controlled Properties to the compatible i
 Factories should validate an Update before mutating observable platform state and apply the complete controlled value idempotently.
 Replacement prepares the new instance before retiring the old one.
 A factory exception is a library integration error that aborts the platform commit; adapters contain platform exceptions at their boundary but do not attempt to roll back arbitrary library-owned platform state.
-Runtime shutdown detaches input, focus, and accessibility bridges, destroys PlatformViews and adapter-owned composition resources, and only then releases library Root Services in their existing reverse installation order.
+UiWindow retirement detaches input, focus, and accessibility bridges, destroys PlatformViews and native composition resources, and then releases its window services. Application services remain owned by Runtime until application retirement.
 
 Initial PlatformView presentation supports translation, axis-aligned layout, rectangular clipping, visibility, and deterministic ordering among PlatformViews.
 Arbitrary rotation, path clipping, group opacity spanning a PlatformView, backdrop filters, and offscreen effects are unsupported until every platform can preserve their semantics.
@@ -1241,11 +1257,11 @@ The framework rejects unsupported declarations instead of approximating them sil
 Exact z-order does not imply support for an otherwise unsupported visual effect.
 
 Platform pointer, keyboard, IME, and internal gesture handling remain inside the PlatformView hierarchy when the PlatformView is the active hit target.
-Runtime hit testing and the committed `RenderComposition` use the same front-to-back order, so visually higher HuxerUI content wins before a covered PlatformView receives platform input.
+UiWindow hit testing and the committed `RenderComposition` use the same front-to-back order, so visually higher HuxerUI content wins before a covered PlatformView receives platform input.
 Platform slice hosts remain hit-test transparent outside HuxerUI interactive regions instead of blocking the complete PlatformView rectangle below them.
-Once the PlatformView wins hit testing, its platform hierarchy owns pointer sequences and gestures until completion or cancellation; the host does not duplicate those events into Runtime.
+Once the PlatformView wins hit testing, its platform hierarchy owns pointer sequences and gestures until completion or cancellation; the host does not duplicate those events into UiWindow.
 Focus traversal treats the PlatformView as one HuxerUI leaf, and platform focus changes synchronize that leaf without exposing platform responder objects.
-A focused platform text editor owns its platform text service; Runtime suspends any HuxerUI text-input session until focus returns.
+A focused platform text editor owns its platform text service; UiWindow suspends any HuxerUI text-input session until focus returns.
 
 The semantic tree contains one PlatformView anchor at the mounted position.
 The platform accessibility adapter attaches the platform object's accessibility root beneath that anchor, preserves its position among HuxerUI semantic siblings, and excludes duplicate HuxerUI descendants.
@@ -1258,7 +1274,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | Windows | One transparent DirectComposition surface replays every HuxerUI slice, while child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
 | macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
 | Linux | PlatformView hosting is not implemented. |
-| Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The adapter coordinates DOM event targeting with Runtime hit testing. |
+| Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The Web host coordinates DOM event targeting with UiWindow hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
 
@@ -1318,13 +1334,13 @@ Creation, update, disposal, placement, focus changes, and `PlatformEventEmitter`
 The emitter dispatches through the active mounted event route synchronously and returns no result from an inactive route.
 
 A single framework-private transparent input-shield HWND covers the client area while PlatformViews are present.
-It asks Runtime for the committed frontmost hit target.
+It asks UiWindow for the committed frontmost hit target.
 When a PlatformView wins, the shield returns `HTTRANSPARENT` so the same-thread child HWND receives ordinary pointer input; when HuxerUI content wins, the shield routes input through the existing adapter path and prevents the covered child HWND from receiving it.
 Pointer capture remains with the side that won the initial sequence.
 
-Runtime-directed PlatformView focus selects the root HWND or its first focusable descendant.
+UiWindow-directed PlatformView focus selects the root HWND or its first focusable descendant.
 After Win32 message dispatch, the adapter maps `GetFocus()` back through each hosted root and its descendants and synchronizes the matching mounted identity.
-Tab traversal remains within standard child HWNDs while a next tab stop exists, then crosses the PlatformView boundary through Runtime focus order.
+Tab traversal remains within standard child HWNDs while a next tab stop exists, then crosses the PlatformView boundary through UiWindow focus order.
 A focused HWND editor owns Win32 text services and suspends the HuxerUI text-input session until focus returns to a HuxerUI editor.
 The UI Automation adapter exposes the hosted HWND provider below the existing PlatformView semantic anchor rather than publishing both as sibling roots.
 
@@ -1397,13 +1413,13 @@ The command contains no frame revision, so publishing a frame does not make a cl
 Adding the command requires explicit handling in every renderer; a backend must not silently draw an empty rectangle.
 
 Frame production does not write application State, recompose a scope, or rerecord an otherwise clean PaintSequence.
-The concrete texture accepts frame publication from its supported producer context, atomically advances the shared revision, replaces its latest immutable frame snapshot, and requests at most one platform frame from each committed Runtime that currently displays it.
-Runtime records visible texture uses while publishing the RenderScene and retains a committed snapshot of each identity, revision, and transformed destination.
+The concrete texture accepts frame publication from its supported producer context, atomically advances the shared revision, replaces its latest immutable frame snapshot, and requests at most one platform frame from each committed UiWindow that currently displays it.
+UiWindow records visible texture uses while publishing the RenderScene and retains a committed snapshot of each identity, revision, and transformed destination.
 On the next BuildFrame it compares revisions with that snapshot, damages every changed visible destination, and advances the RenderFrame revision while retaining the PaintSequence and RenderNode structure.
 The same texture may appear in several nodes; each visible destination participates independently in damage.
 
 ExternalTexture uses a latest-wins mailbox rather than an unbounded frame queue.
-The capture or decoder thread never waits for Runtime, intermediate frames may be dropped, and a renderer acquires the newest frame available when processing damaged content.
+The capture or decoder thread never waits for UiWindow, intermediate frames may be dropped, and a renderer acquires the newest frame available when processing damaged content.
 The mailbox retains one immutable latest frame and each active renderer may retain the snapshot it imported.
 Acquisition does not remove the mailbox value, so several renderers or windows can consume the same publication independently.
 If no newer frame is ready during an unrelated redraw, the renderer reuses its last imported resource.
@@ -1412,21 +1428,21 @@ After `Finish()`, rendering freezes on the last published frame until the final 
 
 Committed visibility controls scheduling rather than production ownership.
 When no committed visible command references the texture, publication updates the mailbox but does not continuously wake the UI.
-`IsActive()` reports whether at least one live Runtime currently displays the texture, but Runtime does not own or pause the producer automatically.
+`IsActive()` reports whether at least one live UiWindow currently displays the texture, but UiWindow does not own or pause the producer automatically.
 Becoming visible through an ordinary application frame schedules the newest published revision without requiring a new Publish call.
-Visibility is a private weak subscription from each PlatformAdapter, not a single surface binding.
-The same texture may be displayed by several Runtimes; unmounting one removes only that Runtime's subscription.
+Visibility is a private weak subscription from each UiWindow, not a single application binding.
+The same texture may be displayed by several UiWindows; unmounting one removes only that UiWindow's subscription.
 
 Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
 The shared command retains only the abstract identity and immutable drawing data, while each renderer casts to its matching concrete platform type and uses that type's private mailbox interface.
 Each backend chooses a platform-specific direct-import path when its renderer and producer share a compatible graphics API and otherwise uses a bounded platform-owned conversion path.
-The API promises no copy through shared Runtime; it does not claim universal zero-copy on CoreGraphics, Android Canvas, or a GSK renderer that must convert an incompatible GDK texture.
+The API promises no copy through shared UiWindow code; it does not claim universal zero-copy on CoreGraphics, Android Canvas, or a GSK renderer that must convert an incompatible GDK texture.
 The Apple implementations accept `CVPixelBufferRef` and use Core Image conversion compatible with their existing renderers.
 The Android API 23 path keeps Canvas as the primary renderer and draws retained `Bitmap` frames directly.
 `GlTexture::PublishCurrent()` reads level-zero `GL_TEXTURE_2D` content from the current EGL context, duplicates an optional native acquire fence, and synchronously converts it once into a compositor-owned premultiplied 2D texture without CPU readback.
 Without an acquire fence the call waits for producer GL work; after `PublishCurrent()` returns, the source texture storage is no longer retained and may be reused or deleted.
 `SurfaceStreamTexture` creates a producer-facing `Surface`, latches its SurfaceTexture on the private EGL thread, applies the SurfaceTexture transform, and converts each ready OES image once into the same immutable internal representation.
-Revision advances only after that import completes, so Runtime never observes a revision whose frame is not drawable.
+Revision advances only after that import completes, so UiWindow never observes a revision whose frame is not drawable.
 Each GPU draw occurrence owns an internal non-interactive TextureView output while it remains in the committed scene.
 The Android renderer encounters that ordinary `DrawExternalTextureCommand` during Canvas replay, renders its selected source rectangle into the TextureView surface, and invokes `drawChild()` under the current Canvas transform, clip, and save-layer stack.
 This platform-private child does not become a PlatformView, public View, accessibility node, or shared RenderComposition layer.
@@ -1440,7 +1456,7 @@ The Linux `GdkTexture` implementation remains the advanced path that retains one
 The custom GTK widget snapshots ordinary PaintCommands as ordered Cairo nodes and ExternalTexture commands as ordered GDK texture nodes under the same transform, clip, path-fill, opacity, content, child, and foreground structure.
 GTK 4.14 is the minimum because path clips use the 4.14 Snapshot fill API; the GDK GL texture builder used for GPU frames is available from GTK 4.12.
 GDK owns final GL and DMA-BUF presentation import and format negotiation; the concrete Linux ExternalTexture owns its appropriate synchronization and native resource lifetime.
-HuxerUI does not expose file descriptors, GL names, EGL objects, Vulkan objects, or display-server handles in Runtime or PaintCommand.
+HuxerUI does not expose file descriptors, GL names, EGL objects, Vulkan objects, or display-server handles in UiWindow or PaintCommand.
 The Windows `PixelTexture` implementation copies the same borrowed formats into premultiplied BGRA storage, updates a retained Direct2D bitmap once per physical frame, and preserves the last CPU frame across D3D device recreation.
 It reuses the bitmap allocation while pixel dimensions remain unchanged.
 `D3D11Texture::Publish()` accepts a completed one-mip, one-slice, single-sampled BGRA8 default-usage texture, copies it once into a new HuxerUI-owned NT-handle shared resource, waits for that copy, and publishes only the immutable snapshot.
@@ -1456,13 +1472,13 @@ Because `emscripten::val` is thread-affine, texture construction, publication, f
 The Canvas renderer clones the latest mailbox frame at most once per physical frame, shares that renderer-owned clone across every Canvas slice, maps logical crop coordinates through `displayWidth` and `displayHeight`, and closes replaced or inactive clones.
 WebCodecs may share the clone's underlying media resource, but Canvas drawing and browser color conversion may still copy, so this backend does not claim zero-copy.
 
-GPU-native expansion remains backend-owned rather than copying Android's TextureView mechanism into shared Runtime.
+GPU-native expansion remains backend-owned rather than copying Android's TextureView mechanism into shared UiWindow code.
 Each platform preserves its primary renderer and introduces native composition only when that renderer cannot import the producer inline.
 
 Payloads and retained PaintCommands share the same opaque texture lifetime without a registration record.
 Unmount first removes committed drawing references and visibility subscriptions.
 Renderer caches are weakly keyed and release imported frames when the owning renderer prunes the entry or is destroyed; platform mailbox resources are released when the texture loses its final owner.
-Runtime destruction releases RenderScene and platform-content frames before Root Services are destroyed in reverse registration order.
+UiWindow retirement releases RenderScene and platform-content frames before its window services; Runtime releases application services when the application retires.
 
 ExternalTexture is visual content, not a PlatformView interaction or accessibility subtree.
 Image semantics apply unless the library supplies a more specific HuxerUI semantic declaration, and controls layered over a Camera preview remain ordinary HuxerUI nodes.
@@ -1498,26 +1514,26 @@ PointerEvent
     ↓
 hit testing and gesture arbitration
     ↓
-Runtime-owned mounted InteractionState and ordered InteractionEvent
+UiWindow-owned mounted InteractionState and ordered InteractionEvent
     ↓
 retained NodeExtension::OnInteraction
     ↓
 Indication animation and phase-specific paint invalidation
 ```
 
-Each accepted Press receives a Runtime-unique `press_id`. Release and Cancel retain that identifier, and pointer Press position is node-local. The mounted snapshot coalesces effective enabled, hover, focus, focus-visible, and aggregate pressed facts while pointer and keyboard sessions preserve ordered interaction edges. Runtime submits complete next snapshots through one internal update path before notifying retained extensions. This supports multiple simultaneous pointers and multiple active ripple instances without turning Indication into an input recognizer.
+Each accepted Press receives a UiWindow-unique `press_id`. Release and Cancel retain that identifier, and pointer Press position is node-local. The mounted snapshot coalesces effective enabled, hover, focus, focus-visible, and aggregate pressed facts while pointer and keyboard sessions preserve ordered interaction edges. UiWindow submits complete next snapshots through one internal update path before notifying retained extensions. This supports multiple simultaneous pointers and multiple active ripple instances without turning Indication into an input recognizer.
 
 `OnClick()` and `.On<ViewEvents::Click>()` register the same typed event and make an ordinary View participate in click interaction. Intrinsic controls such as Button, IconButton, and Chip own their activation capability and default indication independently of whether an application registers a handler; `Enabled(false)` explicitly disables them. Flat themes use state layers, while Material themes combine state layers with ripple. `InteractionScheme` provides one complete default `Indication` and one `FocusRing`; a typed component style may provide an explicit `Indication` when its surface differs from the theme-wide treatment. Reduced-motion themes snap those transitions.
 
 `Enabled` is a semantic modifier. Effective enabled state is resolved from the root toward its descendants, so a child cannot re-enable itself beneath a disabled parent. Disabled controls remain hit-test barriers without receiving pointer, scroll, focus, or Click interaction. A control that directly establishes the disabled boundary uses its component-specific disabled state colors. A non-control boundary applies disabled group opacity once; inherited descendants keep their enabled paint colors so the subtree is not dimmed again.
 
-`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. Runtime owns one focused mounted-node identity, dispatches `FocusChanged`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space publishes ordered keyboard Press and Release interactions and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit left and right Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring, disabled opacity, and indication motion resolve from Theme.
+`Focusable` lets a custom View participate in the window focus order. Button is focusable by default. UiWindow owns one focused mounted-node identity, dispatches `FocusChanged`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space publishes ordered keyboard Press and Release interactions and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit left and right Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring, disabled opacity, and indication motion resolve from Theme.
 
 `Key` identifies portable keys independently of layout-resolved `KeyEvent::text`. Left and right modifiers, main-row and numeric-keypad keys, punctuation, international keys, and F1 through F24 remain distinct. Modifier booleans intentionally report their collapsed active state. Release events have empty text and are never repeats; unmapped keys still travel through the route as `Key::Unknown`.
 
-Keyboard dispatch has one ordered decision path: platform text/IME filtering, `KeyIntercept` from the active focus-scope root to the focused View, the focused text client, focused-node `NodeExtension::OnKey`, the focused View's `KeyDown` or `KeyUp`, Runtime defaults, and finally the platform default. Every decision stage returns `true` only when it consumes the event. `KeyIntercept` stops its root-to-target traversal at the first true result and does not bubble. `KeyDown` and `KeyUp` are direct focused-target events, so a parent that must override component behavior uses `KeyIntercept` instead of a second routing convention.
+Keyboard dispatch has one ordered decision path: platform text/IME filtering, `KeyIntercept` from the active focus-scope root to the focused View, the focused text client, focused-node `NodeExtension::OnKey`, the focused View's `KeyDown` or `KeyUp`, UiWindow defaults, and finally the platform default. Every decision stage returns `true` only when it consumes the event. `KeyIntercept` stops its root-to-target traversal at the first true result and does not bubble. `KeyDown` and `KeyUp` are direct focused-target events, so a parent that must override component behavior uses `KeyIntercept` instead of a second routing convention.
 
-Runtime defaults own Escape/Back, Tab traversal, keyboard context menus, and Enter or Space activation. A consumed Space release cancels any pending keyboard Press without emitting Click. `Runtime::HandleKeyEvent` returns the final consumption result to the adapter, which suppresses its native default only for a handled event. A PlatformView keeps ordinary keys inside its native subtree; when an implemented host reports that Tab reached the native focus boundary, it re-enters this same Runtime key path rather than calling focus movement directly.
+UiWindow defaults own Escape/Back, Tab traversal, keyboard context menus, and Enter or Space activation. A consumed Space release cancels any pending keyboard Press without emitting Click. `UiWindow::HandleKeyEvent` returns the final consumption result to the platform host, which suppresses its native default only for a handled event. A PlatformView keeps ordinary keys inside its native subtree; when an implemented host reports that Tab reached the native focus boundary, it re-enters this same UiWindow key path rather than calling focus movement directly.
 
 The topmost modal Layer is the active focus traversal root. Opening a nested modal captures the current focus, and dismissing it restores the previously focused mounted node when that node still exists and remains enabled.
 
@@ -1531,7 +1547,7 @@ When a pointer drag crosses the scroll threshold, the selected scroll container 
 return Button("Save").With(Indication{});
 ```
 
-`Brush` owns the closed Color, linear-gradient, and radial-gradient source vocabulary shared by rectangle fills and Path fills or strokes. `VisualFill` stores either a Brush or an image fill and is shared by generic `Background` and indication layers. Generic `Border` remains independent so transparent surfaces can be outlined. Runtime resolves image resources during mounted reconciliation, while platform renderers execute only immutable paint commands.
+`Brush` owns the closed Color, linear-gradient, and radial-gradient source vocabulary shared by rectangle fills and Path fills or strokes. `VisualFill` stores either a Brush or an image fill and is shared by generic `Background` and indication layers. Generic `Border` remains independent so transparent surfaces can be outlined. UiWindow resolves image resources during mounted reconciliation, while platform renderers execute only immutable paint commands.
 
 Retained extensions paint through `PaintBehindContent` and `PaintAboveContent`. The content sequence contains shadow, normal background, behind-content indication, resolved border, and node content; children retain their own sequences; the foreground sequence contains above-content indication and focus ring. Mounted nodes keep only the authoritative interaction snapshot, aggregate Press count, current animated border and radii, and an optional geometry-resolved indication bounds override.
 
@@ -1562,7 +1578,7 @@ return VirtualList(items, ItemView).With(
 - Thumb geometry and pointer handling.
 - Foreground painting.
 
-Scroll activity, hover, and drag update this modifier. Runtime does not retain ScrollBar-specific animation or pointer functions.
+Scroll activity, hover, and drag update this modifier. UiWindow does not retain ScrollBar-specific animation or pointer functions.
 
 ## Environment
 
@@ -1593,7 +1609,7 @@ return ProvideEnvironment(GreetingLocale{"fr"}, Content());
 Use a semantic wrapper when two ambient values share the same underlying representation. Primitive or third-party representation types are not separate Environment keys by themselves.
 
 An Environment used as a public value is a detached declaration.
-Runtime mounts that declaration into a stable shared Environment, installs its inherited parent, and updates its private typed entries in place during compatible reconciliation:
+UiWindow mounts that declaration into a stable shared Environment, installs its inherited parent, and updates its private typed entries in place during compatible reconciliation:
 
 ```cpp
 class Environment {
@@ -1618,7 +1634,7 @@ Environment carries:
 
 Theme and services reuse Environment rather than introducing parallel tree propagation systems.
 
-The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `Runtime::SetWindowMetrics()` updates that entry only when the resolved viewport class changes, and normal dependency tracking invalidates the exact application or layer scopes that observed it. Exact viewport and safe-area dimensions do not become raw Environment values: measurement receives them through `Constraints` and the layout-time safe-area context, while repeated changes inside one class remain incremental layout work rather than composition dependencies.
+The public `UseViewportClass()` read resolves an internal Environment value with Compact, Medium, and Expanded states. `AppOptions::viewport_breakpoints` owns the two increasing width boundaries. `UiWindow::SetWindowMetrics()` updates that entry only when the resolved viewport class changes, and normal dependency tracking invalidates the exact application or layer scopes that observed it. Exact viewport and safe-area dimensions do not become raw Environment values: measurement receives them through `Constraints` and the layout-time safe-area context, while repeated changes inside one class remain incremental layout work rather than composition dependencies.
 
 ## Theme
 
@@ -1635,7 +1651,7 @@ return Theme {
 ```
 
 The Theme node stores one ordinary child declaration and does not create a RecomposeScope.
-Built-in primitives retain raw semantic inputs and resolve final component values when Runtime reconciles them under the mounted Theme Environment.
+Built-in primitives retain raw semantic inputs and resolve final component values when UiWindow reconciles them under the mounted Theme Environment.
 A component whose implementation directly calls `UseTheme()` or `UseEnvironment()` is composable because the read belongs to its own composition lifetime.
 
 ### Theme systems
@@ -1687,7 +1703,7 @@ ScrollBarStyle
 
 Third-party components can define their own style keys without extending a single global style registry.
 
-Material, flat, and third-party themes are ordinary View declarations, not Runtime types or Runtime subclasses.
+Material, flat, and third-party themes are ordinary View declarations, not UiWindow types or UiWindow subclasses.
 
 The built-in Flat and Material systems provide complete light and dark boundaries:
 
@@ -1739,15 +1755,15 @@ generic initial values
 `LayoutValue` remains a separate parent-child metadata and component-layout configuration channel rather than a ViewProperties precedence layer.
 Component-owned layout configuration may be completed with resolved Theme values during its default projection.
 
-A complete Theme establishes a design system boundary. A Theme override inherits unspecified values from its parent. Runtime does not branch on Material, flat, liquid, or third-party theme identity.
+A complete Theme establishes a design system boundary. A Theme override inherits unspecified values from its parent. UiWindow does not branch on Material, flat, liquid, or third-party theme identity.
 
 `ThemeDefinition{ThemeSpec}` establishes a complete boundary. `ThemeDefinition{}` only contributes its typed component values, so a nested style override does not replace the parent `ThemeSpec`. Text, Button, Dialog, Toast, SnackBar, ScrollBar, and default indications derive their semantic defaults from the nearest complete `ThemeSpec`. Component style lookup stops at that complete boundary, while a component-only `ThemeDefinition` continues to inherit from its parent.
 
-Built-in component modules supply one internal defaults operation on their ViewSpec declarations rather than adding concrete component branches to Runtime or inserting synthetic defaults into the user modifier sequence. A third-party composed component defines a typed style value, registers it with `ThemeDefinition::Set()`, and reads it with `UseEnvironment<CustomStyle>()` inside its composable function. It does not register a global NodeKind or extend a Runtime style table.
+Built-in component modules supply one internal defaults operation on their ViewSpec declarations rather than adding concrete component branches to UiWindow or inserting synthetic defaults into the user modifier sequence. A third-party composed component defines a typed style value, registers it with `ThemeDefinition::Set()`, and reads it with `UseEnvironment<CustomStyle>()` inside its composable function. It does not register a global NodeKind or extend a UiWindow style table.
 
 Built-in elevation styles keep `Shadow::offset` and `Shadow::spread` at zero so elevation remains a platform-neutral ambient effect. Custom drawing and explicit `Shadow` modifiers retain directional offset and spread when a design calls for a drop shadow rather than semantic elevation.
 
-Material theme definitions map stable semantic roles into typed component styles. Surface-container colors, typography roles, and shape roles remain in `ThemeSpec`; control geometry, component-specific disabled colors, interaction target sizes, presentation motion, and surface composition remain in their owning styles. Runtime and platform renderers receive only the resolved View and PaintCommand data and never branch on Material identity.
+Material theme definitions map stable semantic roles into typed component styles. Surface-container colors, typography roles, and shape roles remain in `ThemeSpec`; control geometry, component-specific disabled colors, interaction target sizes, presentation motion, and surface composition remain in their owning styles. UiWindow and platform renderers receive only the resolved View and PaintCommand data and never branch on Material identity.
 
 Text uses `TextRole::Body`, `TextRole::Label`, and `TextRole::Title` to select the corresponding typography token. A component `TextStyle` value can still replace the complete Text style for a local subtree.
 
@@ -1799,7 +1815,7 @@ enum class LayerCancelPolicy {
 };
 ```
 
-`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient feedback such as Toast and SnackBar. `System` contains ordinary HuxerUI diagnostic UI such as the debug ribbon and performance panel. Runtime-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
+`Presentation` contains Dialog, BottomSheet, Popup, and Menu entries. Entries at the same level follow attachment order, so a Menu opened from a Dialog appears above that Dialog. `Notification` contains transient feedback such as Toast and SnackBar. `System` contains ordinary HuxerUI diagnostic UI such as the debug ribbon and performance panel. UiWindow-owned `FrameworkOverlay` content, including text-selection handles and the editing toolbar, remains outside the public layer stack and is painted after it.
 
 Layer options separate stacking, pointer behavior, focus containment, and dismissal:
 
@@ -1817,13 +1833,13 @@ struct LayerOptions {
 
 Pointer `PassThrough` never participates in hit testing. `Content` allows uncovered areas to reach lower layers. `Barrier` consumes input outside the presented content and optionally requests dismissal. A dismissible or colored barrier requires `Barrier`.
 
-Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the system window. Toast, SnackBar, and passive diagnostic content pass through. [Navigation](navigation.md) extends this Runtime-owned chain after layers with application Back handlers, nested page stacks, and a captured predictive Back transaction. Only a completely unhandled request reaches the platform fallback.
+Back routing checks the framework-owned text-selection overlay first and then visits public layers from top to bottom. `LayerCancelPolicy::PassThrough` continues to a lower entry, `Consume` stops without dismissal, and `Dismiss` invokes `on_dismiss_request` or removes the entry when no callback is present. Dialog, BottomSheet, Popup, and Menu map `dismiss_on_cancel = false` to `Consume`, so a visible interactive presentation never lets Back close content behind it or leave the system window. Toast, SnackBar, and passive diagnostic content pass through. [Navigation](navigation.md) extends this UiWindow-owned chain after layers with application Back handlers, nested page stacks, and a captured predictive Back transaction. Only a completely unhandled request reaches the platform fallback.
 
-Desktop adapters map Escape through key dispatch. Android's full-screen `HuxerUIActivity` owns one lifecycle-bound Back callback, maps API 34 predictive phases to `BackEvent`, and asks Runtime before invoking its platform fallback. API 23 through 33 and an embedded `HuxerUIView` retain the Commit-only `handleBack()` entry point. Runtime never pushes Back-handler state into a platform adapter.
+Desktop backends map Escape through key dispatch. Android's full-screen `HuxerUIActivity` owns one lifecycle-bound Back callback, maps API 34 predictive phases to `BackEvent`, and asks UiWindow before invoking its platform fallback. API 23 through 33 and an embedded `HuxerUIView` retain the Commit-only `handleBack()` entry point. UiWindow never pushes Back-handler state into a separate adapter.
 
 Focus follows actual paint order rather than raw insertion order. Layer options and application-owned modal surfaces such as a presented Drawer project onto the same internal node-level focus trap. A closing modal retains its trap until its exit animation finishes. The topmost enabled trap excludes lower entries and application content from focus traversal while still allowing higher System content to interact. Dismissing Menu over Dialog restores Dialog focus; dismissing Dialog or Drawer then restores the previous application focus when that node is still valid.
 
-`LayerController::State` owns layer entries, identifiers, and attachment sequence. `LayerController` mutates that shared state directly and asks Runtime to invalidate the layer stack. Runtime owns the corresponding mounted nodes, layout, interaction tree, and RenderScene state. Disconnecting the controller clears retained factories and makes copies that outlive Runtime fail safely.
+`LayerController::State` owns layer entries, identifiers, and attachment sequence. `LayerController` mutates that shared state directly and asks its UiWindow to invalidate the layer stack. UiWindow owns the corresponding mounted nodes, layout, interaction tree, and RenderScene state. Disconnecting the controller clears retained factories and makes copies that outlive the window fail safely.
 
 Application and layer invalidation remain separate:
 
@@ -1835,7 +1851,7 @@ dirty scope       -> recompose only that mounted scope
 
 Attaching, updating, or dismissing a LayerEntry must not execute the application root factory. Each entry owns an independent `RecomposeScope`. Application composition may attach an entry that is included later in the same frame. Mutations after the layer snapshot schedule another frame instead of recursively composing layers. The mounted Layer entry records the id, exit participation, and semantic modal-group identity from that snapshot, so geometry and semantics in one FrameCommit never mix the mounted tree with newer controller state.
 
-Concrete presentation policy remains outside Runtime. Typed per-window services build entries on the common controller:
+Concrete presentation policy remains outside UiWindow. Typed per-window services build entries on the common controller:
 
 ```text
 UseToast()       -> Notification, pass-through, timed bottom placement
@@ -1849,7 +1865,7 @@ UseMenu()        -> Presentation, anchored menu semantics and focus
 
 These typed handles are the primary public interaction model for command-oriented presentation. Tooltip uses the same LayerController through a retained target modifier and private per-window service because it is target-owned behavior rather than an imperative action. Having several discoverable `UseXxx()` functions does not create several layer systems; each service shares LayerController, ordering, Environment capture, focus, input, and invalidation. The design does not add a generic `UsePresentation()`, public `UseModal()`, `UseLayers()`, or declarative portal solely to reduce the number of typed entry points.
 
-`UseXxx()` captures the current Environment while composing and returns a lightweight handle that can be retained by an event callback. Showing content later uses that captured Theme, Locale, resources, and third-party values. Services installed through RootHook use the root Environment unless their typed handle captures a narrower one.
+Presentation `UseXxx()` captures the current Environment while composing and returns a lightweight handle that can be retained by an event callback. Showing content later uses that captured Theme, Locale, resources, and third-party values. Services installed through a window hook use that window's root Environment unless their typed handle captures a narrower one.
 
 Popup and Menu handles expose a retained anchor modifier and point-based presentation:
 
@@ -1873,76 +1889,36 @@ Menu is structurally distinct from Popup. Its public input is a recursive sequen
 
 Dialog and BottomSheet use their own typed handles rather than a shared public Modal mode. They share private barrier, focus, Cancel, dismissal, Environment, and retained Layer transition machinery, while their layout, surface, motion, and options remain component-specific. Dialog resolves placement and motion from `DialogStyle`, while BottomSheet owns an adaptive-width bottom surface that translates from the window edge. When its style exposes a drag handle, a retained handle extension captures the pointer and shares its downward offset with the surface motion extension; cancellation or a short release settles to the edge, while a release beyond the bounded distance threshold follows the layer's `on_dismiss_request` contract and settles if that request leaves the layer visible. The command-oriented `UseDialog()` path remains the primary ergonomic model.
 
-The built-in debug overlay attaches one persistent System entry after root hooks have installed application services and global components. Its dark-red top-right `DEBUG` ribbon toggles an upper-left metrics panel within the entry's own state. Both are composed from ordinary Views against the complete viewport without applying safe-area or title-bar insets; the ribbon is one rotated component clipped by the viewport rather than separately positioned background and label geometry. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. Runtime records painted-frame count, frame-commit time, and damage ratio in a dedicated debug metrics state. PlatformAdapter optionally supplies cumulative process CPU time, a platform-preferred process-memory footprint, and logical processor count so interval utilization can be derived without platform state leaking into LayerController.
+The built-in debug overlay attaches one persistent System entry after window hooks have installed services and global components. Its dark-red top-right `DEBUG` ribbon toggles an upper-left metrics panel within the entry's own state. Both are composed from ordinary Views against the complete viewport without applying safe-area or title-bar insets; the ribbon is one rotated component clipped by the viewport rather than separately positioned background and label geometry. Toggling or sampling the panel must not reconcile the application root or damage the full viewport. UiWindow records painted-frame count, frame-commit time, and damage ratio in a dedicated debug metrics state. UiWindow optionally supplies cumulative process CPU time, a platform-preferred process-memory footprint, and logical processor count so interval utilization can be derived without platform state leaking into LayerController.
 
-The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling Runtime accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
+The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling UiWindow accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
 
 LayerController entries without a transition are removed immediately. Dialog, BottomSheet, Menu, Toast, and SnackBar entries with configured motion first become non-interactive, retain their presentation state through the exit animation, and are removed after completion. Modal barriers remain until actual removal, so focus cannot be restored and content behind a visually exiting modal cannot be activated early.
 
-## RootHook
+## ApplicationHook and WindowHook
 
-A RootHook installs per-window services or persistent global components before the first application composition:
+`ApplicationHook` receives a borrowed `ApplicationContext` once per Runtime. It provides application-lifetime services and registers PlatformModule and PlatformView factories in the one application catalog. Factories freeze after all application hooks complete, before queued work or window initialization.
 
-```cpp
-using RootHook = std::function<void(RootContext&)>;
-```
+`WindowHook` receives a borrowed `WindowContext` for each UiWindow before its first composition. It provides window-lifetime services and can attach persistent entries through that window's `LayerController`; it does not register factories. The typed free `OpenPlatformModule()` operation can open an already registered module outside composition in either hook when its required Runtime or UiWindow host is available.
 
-`RootContext` exposes root services, layers, and the narrow platform registration operations:
-
-```cpp
-class RootContext {
-public:
-  template <class Service>
-  void Provide(std::shared_ptr<Service> service);
-
-  LayerController& Layers();
-
-  template <class Module, class Factory>
-  void RegisterPlatformModule(std::string name, Factory factory);
-
-  template <class Module, class Options, class Factory>
-  void RegisterPlatformModule(std::string name, Factory factory);
-
-  template <class Properties, class Factory>
-  void RegisterPlatformView(std::string name, Factory factory);
-
-  template <class Properties, class Controller, class Factory>
-  void RegisterPlatformView(std::string name, Factory factory);
-
-  template <class Module>
-  Module OpenPlatformModule(std::string name);
-
-  template <class Module, class Options>
-  Module OpenPlatformModule(std::string name, Options options);
-};
-```
-
-These operations forward to the surface-owned internal `PlatformRegistry` and expose no generic lookup or registry accessor.
-They do not discover compile-time libraries, download dependencies, expose system handles, or provide an application-facing string service lookup.
-
-Installation uses `AppOptions`:
+Installation uses the two `AppOptions` lists:
 
 ```cpp
 const Application application{
     App,
     {
-        .root_hooks = {
-            InstallXxxToast(),
-        },
+        .application_hooks = {InstallPlatformFactories},
+        .window_hooks = {InstallXxxToast(), InstallGlobalBanner()},
     },
 };
 ```
 
-A service hook can be a function:
+A per-window service hook can capture options:
 
 ```cpp
-RootHook InstallXxxToast(XxxToastOptions options = {})
-{
-  return [options](RootContext& root) {
-    root.Provide(
-        std::make_shared<XxxToastService>(
-            root.Layers(),
-            options));
+WindowHook InstallXxxToast(XxxToastOptions options = {}) {
+  return [options](WindowContext& context) {
+    context.Provide(std::make_shared<XxxToastService>(context.Layers(), options));
   };
 }
 ```
@@ -1950,33 +1926,33 @@ RootHook InstallXxxToast(XxxToastOptions options = {})
 A persistent global component can attach through `LayerController`:
 
 ```cpp
-RootHook InstallGlobalBanner()
-{
-  return [](RootContext& root) {
-    root.Layers().Attach(
+WindowHook InstallGlobalBanner() {
+  return [](WindowContext& context) {
+    context.Layers().Attach(
         LayerOptions{
             .level = LayerLevel::System,
             .pointer_policy = LayerPointerPolicy::PassThrough,
         },
-        GlobalBanner);
+        GlobalBanner
+    );
   };
 }
 ```
 
-Services are stored in the root Environment and retrieved through a typed helper:
+Window services are stored in that window's root Environment and retrieved through a typed helper:
 
 ```cpp
 auto service = UseService<XxxToastService>();
 ```
 
-Duplicate service types are rejected rather than silently replaced.
+Duplicate service types are rejected rather than silently replaced, including a window service that conflicts with an application service.
 
-Root hooks run once in declaration order. Runtime owns the provided services and attached entries. On window destruction, Runtime removes content and layers before destroying services in reverse registration order. A service uses its destructor to release external subscriptions.
+Hooks run in declaration order within their own lists. Runtime owns application services and factories; UiWindow owns its provided window services and attached layers. On window retirement, UiWindow removes mounted content and layers before releasing window services. A service uses its destructor to release external subscriptions.
 
-HuxerUI installs its built-in Toast, SnackBar, Tooltip, Dialog, BottomSheet, Popup, and Menu services for every Runtime before application root hooks run. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; root hooks remain the extension mechanism for third-party services and global components. When `AppOptions::show_debug_overlay` is enabled, Runtime installs the built-in DebugOverlay after all root hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
+HuxerUI installs its built-in Toast, SnackBar, Tooltip, Dialog, BottomSheet, Popup, and Menu services for each UiWindow. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; window hooks remain the extension mechanism for third-party per-window services and global components. When `AppOptions::show_debug_overlay` is enabled, UiWindow installs the built-in DebugOverlay after window hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
 
 Detailed performance diagnostics are a private source-build capability controlled by `HUXERUI_ENABLE_PROFILING`, which defaults to on for source builds and is explicitly disabled for SDK packaging.
-When compiled in, detailed capture is enabled by default, and a root service owns one bounded recorder per recording Runtime; a library-owned thread-local pointer routes nested instrumentation during that Runtime's frame and restores the previous recorder across nested Runtime calls.
+When compiled in, detailed capture is enabled by default, and a window-owned recorder captures its frames; a library-owned thread-local pointer routes nested instrumentation during that frame and restores the previous recorder across nested calls.
 The optional `HUXERUI_PROFILE` selects `overview`, `detailed`, or `off`; an unset or empty value uses `detailed`.
 The optional `HUXERUI_PROFILE_DIRECTORY` overrides the default working-directory `traces/` location resolved at Runtime creation without changing the recording mode.
 Output-directory initialization failures disable capture for that Runtime and report a diagnostic without preventing application startup.
@@ -1987,9 +1963,8 @@ Recording and capture export do not introduce a public Profiler API, code-genera
 With profiling compiled out, neither the recorder nor its instrumentation arguments, storage, timers, or activation checks are present; the existing DebugOverlay contract is unchanged.
 See [Runtime profiling](../development/building.md#runtime-profiling) for source-build activation and capture limits.
 
-RootHook does not provide:
+Neither hook provides:
 
-- Direct Runtime access.
 - Direct MountedNode insertion.
 - Per-frame callbacks.
 - Root replacement.
@@ -2014,7 +1989,7 @@ semantic request
     Layer entry, focus, barrier, dismissal, and scheduling
 ```
 
-Runtime and LayerController only implement the final contract. Typed services resolve the captured Theme, compose the themed content, and attach it to the shared LayerStack. No layer or Runtime code checks whether a Theme is Material, Flat, iOS, MIUI, or third-party.
+UiWindow and LayerController only implement the final contract. Typed services resolve the captured Theme, compose the themed content, and attach it to the shared layer stack. No layer or UiWindow code checks whether a Theme is Material, Flat, iOS, MIUI, or third-party.
 
 `ThemeDefinition` continues to carry typed component styles. A presentation style is a complete value description rather than only a color bundle. Depending on the component, it may describe:
 
@@ -2130,7 +2105,7 @@ Toast stays passive and message-only. Actionable feedback uses SnackBar rather t
 
 `SnackBarStyle` controls the surface, message typography, action appearance, adaptive spacing, size constraints, viewport margins, and enter and exit motion. `SnackBarOptions` owns request duration, including an indefinite presentation when duration is absent.
 
-The SnackBar service owns one active request per Runtime. A new request creates a new Layer id and atomically replaces the previous Layer entry, so no frame exposes two SnackBars and stale ids, timers, or action callbacks cannot affect the replacement. An action first dismisses its owning request and then invokes the application callback, which makes a callback that immediately shows another SnackBar well-defined.
+The SnackBar service owns one active request per UiWindow. A new request creates a new Layer id and atomically replaces the previous Layer entry, so no frame exposes two SnackBars and stale ids, timers, or action callbacks cannot affect the replacement. An action first dismisses its owning request and then invokes the application callback, which makes a callback that immediately shows another SnackBar well-defined.
 
 Timed dismissal uses retained frame timing rather than an application thread. It pauses while the surface or action is hovered, while the action is focused or pressed, and while the application is not active. SnackBar remains non-modal, does not trap or steal focus, and passes Back to lower presentation and navigation handlers.
 
@@ -2149,7 +2124,7 @@ return Button("Save")
 
 `UseToast()` returns a lightweight handle bound to the current window and captures the current Environment. A Toast shown from a nested Theme uses that Theme by default.
 
-The Toast service creates one LayerEntry per call and manages its duration. The Runtime layer stack owns composition, input behavior, and removal. Queueing and deduplication are deferred policies.
+The Toast service creates one LayerEntry per call and manages its duration. The UiWindow layer stack owns composition, input behavior, and removal. Queueing and deduplication are deferred policies.
 
 There is no process-global `Toast::Show()` because it would be ambiguous in multi-window and multi-Runtime applications.
 
@@ -2266,16 +2241,16 @@ The current extension points are:
 | Custom interaction visual | `Indication` and `NodeExtension::OnInteraction` |
 | Custom text input or selection | `TextInputClient`, `TextSelectionClient`, and `NodeExtension` |
 | Custom theme | Typed values in `ThemeDefinition` and a direct Theme View boundary |
-| Per-window service | RootHook and `RootContext::Provide()` |
-| Platform nonvisual session | Registered PlatformModule opened by Lifecycle setup or a RootHook owner |
-| Global component | RootHook and `LayerController` |
-| Typed presentation library | A service backed by the Runtime LayerStack |
+| Per-window service | WindowHook and `WindowContext::Provide()` |
+| Platform nonvisual session | Registered PlatformModule opened by Lifecycle setup or an application/window hook owner |
+| Global component | WindowHook and `LayerController` |
+| Typed presentation library | A window service backed by the UiWindow layer stack |
 | Platform interactive hierarchy | PlatformView factory, PlacePlatformViewCommand, and internal RenderComposition |
 | Live camera or video content | ExternalTexture and DrawExternalTextureCommand |
 
 Built-in and third-party implementations use the same lifecycle and storage models.
 The semantics extension keeps the same model: a reusable `Semantics` property modifier supplies author declarations, while a semantic-capable NodeExtension may contribute dynamic properties, stable virtual semantic children, and semantic-only action handling.
-Runtime resolves both into one committed tree instead of adding a separate accessibility plugin host.
+UiWindow resolves both into one committed tree instead of adding a separate accessibility plugin host.
 See [Semantics and Accessibility Design](semantics.md).
 
 ## Performance rules
@@ -2296,7 +2271,7 @@ The architecture follows these rules:
 - PlatformView composition reuses compatible platform slice representations, avoids per-slice surfaces on single-surface adapters, and does not split a scene that contains no PlatformViews.
 
 Incremental layout and retained rendering are specified separately in [Incremental Layout and Rendering Design](incremental-rendering.md).
-The implemented pipeline coordinates mounted geometry, extension painting, Runtime frame output, and platform renderers under that contract.
+The implemented pipeline coordinates mounted geometry, extension painting, UiWindow frame output, and platform renderers under that contract.
 
 ## Deliberately omitted abstractions
 
@@ -2305,7 +2280,7 @@ The current design does not introduce:
 - `ModifierHost`.
 - A Lifecycle modifier or node-bound component effect.
 - A context class for every modifier lifecycle phase.
-- Runtime branches for ScrollBar, Ripple, Dialog, or concrete animations.
+- UiWindow branches for ScrollBar, Ripple, Dialog, or concrete animations.
 - `OverlayBehavior`.
 - Separate Overlay and Presentation runtime trees.
 - A Host type for every global component.
@@ -2314,10 +2289,10 @@ The current design does not introduce:
 - A public parallel ServiceRegistry.
 - A public Library base class or runtime plugin registry.
 - A generic platform-handle variant shared across platforms.
-- Per-frame pixel callbacks through Runtime.
+- Per-frame pixel callbacks through UiWindow.
 - Theme class inheritance.
-- Runtime checks for Material, flat, liquid, or third-party themes.
+- UiWindow checks for Material, flat, liquid, or third-party themes.
 - Process-global Toast or Dialog singletons.
-- Dynamic RootHook installation and removal.
+- Dynamic application or window hook installation and removal.
 - Arbitrary numeric layer z-index.
 - Automatic interpolation of an entire Theme.

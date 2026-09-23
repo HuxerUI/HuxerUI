@@ -587,7 +587,9 @@ using PlatformResultCompletion = std::function<void(PlatformResult<PlatformPaylo
 
 class JavaBridgeSupport {
 public:
-  JavaBridgeSupport(PlatformAdapter& adapter, JNIEnv* environment, jobject context) : endpoint_adapter_(&adapter) {
+  template <class Host>
+  JavaBridgeSupport(Host& host, JNIEnv* environment, jobject context)
+      : create_endpoint_([&host] { return huxerui::detail::MakePlatformChannelEndpoint(host); }) {
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM for platform bridging");
     }
@@ -636,7 +638,7 @@ public:
   }
 
   [[nodiscard]] huxerui::detail::PlatformChannelEndpoint NewEndpoint() const {
-    return huxerui::detail::MakePlatformChannelEndpoint(*endpoint_adapter_);
+    return create_endpoint_();
   }
 
   [[nodiscard]] jobject Context() const noexcept {
@@ -694,7 +696,7 @@ public:
   }
 
 private:
-  PlatformAdapter* endpoint_adapter_ = nullptr;
+  std::function<huxerui::detail::PlatformChannelEndpoint()> create_endpoint_;
   JavaVM* virtual_machine_ = nullptr;
   jobject context_ = nullptr;
   jclass emitter_class_ = nullptr;
@@ -825,9 +827,9 @@ void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
 
 class JavaPlatformModuleFactoryState final {
 public:
-  JavaPlatformModuleFactoryState(PlatformAdapter& adapter, std::string class_name) {
-    const PlatformEnv env = GetPlatformEnv(adapter);
-    bridge = std::make_shared<JavaBridgeSupport>(adapter, env.jni, env.context);
+  JavaPlatformModuleFactoryState(Runtime& runtime, std::string class_name) {
+    const PlatformEnv env = GetPlatformEnv(runtime);
+    bridge = std::make_shared<JavaBridgeSupport>(runtime, env.jni, env.context);
     LocalRef<jclass> implementation_class(env.jni, ResolveClass(env.jni, env.context, class_name));
     LocalRef<jobject> local_factory(
         env.jni, ConstructFactory(env.jni, implementation_class.Get(), "org/huxerui/HuxerUIPlatformModule$Factory"));
@@ -857,9 +859,9 @@ public:
 
 class JavaPlatformViewFactoryState final {
 public:
-  JavaPlatformViewFactoryState(PlatformAdapter& adapter, std::string class_name) {
-    const PlatformEnv env = GetPlatformEnv(adapter);
-    bridge = std::make_shared<JavaBridgeSupport>(adapter, env.jni, env.context);
+  JavaPlatformViewFactoryState(UiWindow& ui_window, std::string class_name) {
+    const PlatformEnv env = GetPlatformEnv(ui_window);
+    bridge = std::make_shared<JavaBridgeSupport>(ui_window, env.jni, env.context);
     LocalRef<jclass> implementation_class(env.jni, ResolveClass(env.jni, env.context, class_name));
     LocalRef<jobject> local_factory(
         env.jni, ConstructFactory(env.jni, implementation_class.Get(), "org/huxerui/HuxerUIPlatformView$Factory"));
@@ -909,9 +911,9 @@ public:
   jmethodID update = nullptr;
 };
 
-std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(PlatformAdapter& adapter,
+std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(Runtime& runtime,
                                                                                  std::string class_name) {
-  return std::make_shared<JavaPlatformModuleFactoryState>(adapter, std::move(class_name));
+  return std::make_shared<JavaPlatformModuleFactoryState>(runtime, std::move(class_name));
 }
 
 PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModuleFactoryState>& factory,
@@ -955,9 +957,9 @@ PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModul
   return endpoint.Channel();
 }
 
-std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(PlatformAdapter& adapter,
+std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(UiWindow& ui_window,
                                                                              std::string class_name) {
-  return std::make_shared<JavaPlatformViewFactoryState>(adapter, std::move(class_name));
+  return std::make_shared<JavaPlatformViewFactoryState>(ui_window, std::move(class_name));
 }
 
 std::shared_ptr<JavaPlatformViewInstance>

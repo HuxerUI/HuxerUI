@@ -142,7 +142,7 @@ private:
 };
 
 std::shared_ptr<huxerui::example::TextureDemo>
-CreateAndroidTextureDemo(huxerui::PlatformAdapter&, JNIEnv* environment, jobject context) {
+CreateAndroidTextureDemo(huxerui::UiWindow&, JNIEnv* environment, jobject context) {
   JavaVM* virtual_machine = nullptr;
   if (environment->GetJavaVM(&virtual_machine) != JNI_OK || virtual_machine == nullptr) {
     throw std::runtime_error("HuxerUI example could not access the Java VM");
@@ -194,14 +194,17 @@ std::shared_ptr<AndroidTextureDemo> LockDemo(jlong bridge) noexcept {
 
 namespace huxerui::example {
 
-void InstallTextureDemo(RootContext& root) {
+void RegisterTextureDemo(ApplicationContext& root) {
   root.RegisterPlatformModule<std::shared_ptr<TextureDemo>>(
       texture_demo_module,
       android::PlatformModuleFactory<std::shared_ptr<TextureDemo>>{
           .create = CreateAndroidTextureDemo,
       }
   );
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<TextureDemo>>(texture_demo_module));
+}
+
+void InstallTextureDemo(WindowContext& root) {
+  root.Provide(OpenPlatformModule<std::shared_ptr<TextureDemo>>(texture_demo_module));
 }
 
 } // namespace huxerui::example

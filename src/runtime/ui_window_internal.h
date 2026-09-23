@@ -31,12 +31,12 @@
 
 #include "mounted_node_internal.h"
 #include "semantics_internal.h"
+#include "application/application_internal.h"
 
 namespace huxerui::detail {
 
 class AppResources;
 struct FrozenScene;
-class TaskDelayScheduler;
 struct WindowState;
 class WindowService;
 class PointerInteraction;
@@ -44,7 +44,7 @@ class TextInteraction;
 
 class FileDropReceiver final {
 public:
-  explicit FileDropReceiver(Runtime::State& runtime_state) : runtime_state_(runtime_state) {}
+  explicit FileDropReceiver(UiWindow::State& runtime_state) : runtime_state_(runtime_state) {}
   ~FileDropReceiver();
 
   bool HandleFileDragEntered(std::uint64_t session, FileDropOffer offer, Point position);
@@ -59,7 +59,7 @@ private:
   void RefreshFileDropTarget(bool emit_moved);
   void FinishFileDrop(std::uint64_t operation, IoResult<std::vector<FileReference>> result);
 
-  Runtime::State& runtime_state_;
+  UiWindow::State& runtime_state_;
   std::shared_ptr<State> state_;
 };
 
@@ -109,14 +109,14 @@ struct DebugMetricsSnapshot {
 
 class DebugMetricsState {
 public:
-  explicit DebugMetricsState(PlatformAdapter& platform) : platform_(&platform) {}
+  explicit DebugMetricsState(Runtime& runtime) : runtime_(&runtime) {}
 
   void RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept;
   void ResetSampling() noexcept;
   DebugMetricsSnapshot Sample(double timestamp) noexcept;
 
 private:
-  PlatformAdapter* platform_;
+  Runtime* runtime_;
   bool window_initialized_ = false;
   double window_started_at_ = 0.0;
   std::size_t painted_frame_count_ = 0;
@@ -128,8 +128,8 @@ private:
   double previous_process_timestamp_ = 0.0;
 };
 
-void InstallBuiltinPresentation(RootContext& root);
-void InstallDebugOverlay(RootContext& root, std::shared_ptr<DebugMetricsState> metrics);
+void InstallBuiltinPresentation(WindowContext& root);
+void InstallDebugOverlay(WindowContext& root, std::shared_ptr<DebugMetricsState> metrics);
 
 enum class LayerPlacementKind : std::uint8_t {
   Natural,
@@ -266,7 +266,7 @@ struct SceneTransitionAnchorState {
 
 class SceneTransitionService {
 public:
-  explicit SceneTransitionService(Runtime::State& runtime_state) : runtime_state_(&runtime_state) {}
+  explicit SceneTransitionService(UiWindow::State& runtime_state) : runtime_state_(&runtime_state) {}
 
   SceneTransitionService(const SceneTransitionService&) = delete;
   SceneTransitionService& operator=(const SceneTransitionService&) = delete;
@@ -294,14 +294,14 @@ private:
   };
 
   void ClearActive() noexcept;
-  Runtime::State* runtime_state_;
+  UiWindow::State* runtime_state_;
   std::optional<ActiveTransition> active_;
   bool mutating_ = false;
 };
 
 class VirtualMeasureSession {
 public:
-  VirtualMeasureSession(Runtime& runtime, MountedNode& owner);
+  VirtualMeasureSession(UiWindow& ui_window, MountedNode& owner);
   ~VirtualMeasureSession();
 
   VirtualMeasureSession(const VirtualMeasureSession&) = delete;
@@ -317,7 +317,7 @@ private:
   void SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index);
   void RestoreOwner() noexcept;
 
-  Runtime* runtime_;
+  UiWindow* ui_window_;
   MountedNode* owner_;
   std::vector<std::unique_ptr<MountedNode>> previous_nodes_;
   std::vector<std::size_t> previous_realized_indices_;
@@ -331,7 +331,7 @@ private:
 
 class RecomposeScope final : public std::enable_shared_from_this<RecomposeScope> {
 public:
-  RecomposeScope(Runtime& runtime, std::uint64_t id, StateSlotStorage state_slots = {});
+  RecomposeScope(UiWindow& ui_window, std::uint64_t id, StateSlotStorage state_slots = {});
   ~RecomposeScope();
 
   void BeginComposition();
@@ -378,7 +378,7 @@ private:
   void CommitLifecycleSetups();
   void DiscardLifecycleCommit() noexcept;
 
-  Runtime* runtime_;
+  UiWindow* ui_window_;
   std::uint64_t id_;
   bool dirty_ = true;
   bool composing_ = false;
@@ -402,8 +402,10 @@ private:
   > retained_dependencies_;
   std::unordered_map<StateCellBase*, std::uint64_t> observed_versions_;
   std::shared_ptr<EventHub> event_hub_ = std::make_shared<EventHub>();
+  std::shared_ptr<ExecutionContext> execution_;
 
-  friend class huxerui::Runtime;
+  friend class huxerui::UiWindow;
+  friend class Composer;
 };
 
 class Composer {
@@ -440,12 +442,14 @@ public:
 
   private:
     Composer* previous_;
+    ExecutionGuard execution_guard_;
   };
 
 private:
   static thread_local Composer* current_;
   std::shared_ptr<RecomposeScope> scope_;
   std::shared_ptr<const Environment> environment_;
+  std::shared_ptr<ExecutionContext> execution_;
 };
 
 struct FocusTrapFrame {
@@ -472,20 +476,26 @@ struct BackTarget {
 namespace huxerui {
 
 struct LayerController::State {
-  Runtime* runtime = nullptr;
+  UiWindow* ui_window = nullptr;
   std::vector<detail::LayerEntry> entries;
   LayerId next_id = 1;
   std::uint64_t next_sequence = 1;
 };
 
-struct Runtime::State {
-  State(Runtime& owner, const Application& application, PlatformAdapter& platform);
+/// Per-attachment composition, interaction, and rendering state owned by one UiWindow.
+/// Application services stay on Runtime; execution_ records the original window context for retained callbacks.
+/// Shared retirement clears native access before the derived window releases its platform members.
+struct UiWindow::State {
+  State(UiWindow& owner, const Application& application);
   ~State();
 
-  Runtime& owner_;
+  UiWindow& owner_;
+  std::shared_ptr<detail::ApplicationRuntimeState> application_;
+  std::shared_ptr<detail::UiExecutionState> ui_execution_;
+  std::shared_ptr<detail::ExecutionContext> execution_;
+  bool initialized_ = false;
+  bool retired_ = false;
   RootFactory root_factory_;
-  PlatformAdapter* platform_;
-  UIThreadDispatcher ui_thread_dispatcher_;
   ViewportBreakpoints viewport_breakpoints_;
   std::shared_ptr<detail::WindowState> window_;
   ViewportClass viewport_class_ = ViewportClass::Compact;
@@ -495,7 +505,6 @@ struct Runtime::State {
   std::unordered_set<std::type_index> root_service_types_;
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
-  std::shared_ptr<detail::ApplicationService> application_service_;
   std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
   std::shared_ptr<detail::WindowService> window_service_;
   std::shared_ptr<detail::SceneTransitionService> scene_transition_service_;
@@ -508,7 +517,6 @@ struct Runtime::State {
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
   std::vector<detail::LifecycleCleanup> retired_lifecycle_cleanups_;
   std::vector<std::shared_ptr<detail::TaskScopeState>> retired_task_scopes_;
-  std::shared_ptr<detail::TaskDelayScheduler> task_delay_scheduler_;
   FrameCommit frame_commit_;
   detail::RenderDamageSnapshot committed_scene_snapshot_;
   Size committed_viewport_;
@@ -522,7 +530,6 @@ struct Runtime::State {
   double frame_request_deadline_ = 0.0;
   std::optional<double> previous_frame_timestamp_;
   std::uint64_t next_node_identity_ = 1;
-  std::uint64_t next_scope_identity_ = 2;
   std::uint64_t next_press_id_ = 1;
   std::optional<Point> current_interaction_origin_;
   std::unique_ptr<detail::FileDropReceiver> file_drop_;

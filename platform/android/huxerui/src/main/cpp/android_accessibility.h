@@ -27,7 +27,7 @@ enum class AndroidSemanticAction : std::int32_t {
   SetSelected = 13,
 };
 
-// Android reserves negative virtual view IDs and exposes only 32-bit IDs. Runtime semantic identities are encoded
+// Android reserves negative virtual view IDs and exposes only 32-bit IDs. UiWindow semantic identities are encoded
 // directly after an exact range check so stale actions can be validated without a second identity registry.
 [[nodiscard]] std::vector<std::uint8_t> EncodeAndroidSemanticFrame(const SemanticFrame& frame);
 

@@ -10,6 +10,7 @@
 #include <variant>
 
 #include <huxerui/layer.h>
+#include <huxerui/app.h>
 #include <huxerui/layout.h>
 #include <huxerui/modifier.h>
 #include <huxerui/paint.h>
@@ -22,7 +23,9 @@
 
 namespace huxerui {
 class NavigationItem;
+class UiWindow;
 class Runtime;
+class Application;
 class SharedBounds;
 class SharedElement;
 class SharedTransitionScope;
@@ -41,6 +44,28 @@ struct VirtualCollectionSemantics;
 // Public headers only declare this friend. Implementations stay with the subsystem owning each operation.
 // Existing ownership, internal cooperation, and direct field sharing do not need a forwarding function here.
 struct InternalAccess {
+  /// Initializes shared application state after the backend's native services are ready.
+  /// @param runtime Original platform or testing Runtime, called on its application thread.
+  /// @param application Declaration providing startup options and the root factory.
+  /// @param startup_activation Initial activation, or nullopt for a background-only start.
+  /// @param hosted Whether to publish the service table for context-free acquisition; false isolates test hosts.
+  /// @param lifecycle Native process state visible to application hooks.
+  static void InitializeRuntime(Runtime& runtime, const Application& application,
+      std::optional<ApplicationActivation> startup_activation = LaunchActivation{}, bool hosted = false, ApplicationLifecycleState lifecycle = ApplicationLifecycleState::Active);
+  /// Disconnects application services and callbacks before native Runtime members are destroyed.
+  /// @param runtime Original owner; repeated retirement is harmless and must run on its application thread.
+  static void RetireRuntime(Runtime& runtime) noexcept;
+  /// Attaches shared window state after native text, rendering, and scheduling facilities are usable.
+  /// @param ui_window Native attachment to initialize on the application's thread.
+  /// @param runtime Live application owner that outlives this attachment.
+  /// @param configuration Initial window resources, or nullopt to use the application's configuration.
+  /// @param lifecycle Initial visibility/activation state exposed to WindowHooks.
+  static void InitializeWindow(UiWindow& ui_window, Runtime& runtime,
+      std::optional<ResourceConfiguration> configuration = std::nullopt,
+      WindowLifecycleState lifecycle = WindowLifecycleState::Background);
+  /// Retires shared UI state while native window facilities are still alive.
+  /// @param ui_window Original attachment; retirement is idempotent and stays on the application thread.
+  static void RetireWindow(UiWindow& ui_window) noexcept;
 #pragma region View
 
   static const std::optional<std::variant<std::int64_t, std::uint64_t, std::string>>&
@@ -48,28 +73,28 @@ struct InternalAccess {
 
 #pragma endregion
 
-#pragma region Runtime
+#pragma region UiWindow
 
-  static void InvalidateRoot(Runtime& runtime);
+  static void InvalidateRoot(UiWindow& ui_window);
   // Returns the application content root inside the runtime-owned containers.
-  static const MountedNode* RootNode(const Runtime& runtime) noexcept;
+  static const MountedNode* RootNode(const UiWindow& ui_window) noexcept;
   // Returns the complete mounted tree, including runtime-owned containers.
-  static const MountedNode* MountedRoot(const Runtime& runtime) noexcept;
-  static const ScrollPhysics& DefaultScrollPhysics(const Runtime& runtime) noexcept;
-  static void NotifyScrollActivity(Runtime& runtime, MountedNode& node, const ScrollActivity& activity);
-  static void RequestFrame(Runtime& runtime);
-  static void FocusNode(Runtime& runtime, std::uint64_t identity);
-  static std::optional<std::uint64_t> FocusedNodeIdentity(const Runtime& runtime) noexcept;
-  static void InvalidateLayout(Runtime& runtime, MountedNode& node);
-  static std::optional<std::uint64_t> HitTestPlatformView(const Runtime& runtime, Point position);
-  static std::optional<std::uint64_t> FocusedPlatformView(const Runtime& runtime);
-  static void SynchronizePlatformViewFocus(Runtime& runtime, std::optional<std::uint64_t> identity, bool focus_visible);
-  static bool MoveFocusFromPlatformView(Runtime& runtime, std::uint64_t identity, bool reverse);
+  static const MountedNode* MountedRoot(const UiWindow& ui_window) noexcept;
+  static const ScrollPhysics& DefaultScrollPhysics(const UiWindow& ui_window) noexcept;
+  static void NotifyScrollActivity(UiWindow& ui_window, MountedNode& node, const ScrollActivity& activity);
+  static void RequestFrame(UiWindow& ui_window);
+  static void FocusNode(UiWindow& ui_window, std::uint64_t identity);
+  static std::optional<std::uint64_t> FocusedNodeIdentity(const UiWindow& ui_window) noexcept;
+  static void InvalidateLayout(UiWindow& ui_window, MountedNode& node);
+  static std::optional<std::uint64_t> HitTestPlatformView(const UiWindow& ui_window, Point position);
+  static std::optional<std::uint64_t> FocusedPlatformView(const UiWindow& ui_window);
+  static void SynchronizePlatformViewFocus(UiWindow& ui_window, std::optional<std::uint64_t> identity, bool focus_visible);
+  static bool MoveFocusFromPlatformView(UiWindow& ui_window, std::uint64_t identity, bool reverse);
   static std::optional<PlatformPayload> DispatchPlatformViewEvent(
-      Runtime& runtime, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
+      UiWindow& ui_window, std::uint64_t identity, std::string_view name, const PlatformPayload& payload
   );
   static std::optional<PlatformValue>
-  DispatchPlatformViewEvent(Runtime& runtime, std::uint64_t identity, std::type_index key, const PlatformValue& value);
+  DispatchPlatformViewEvent(UiWindow& ui_window, std::uint64_t identity, std::type_index key, const PlatformValue& value);
 
 #pragma endregion
 

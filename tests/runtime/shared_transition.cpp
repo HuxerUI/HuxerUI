@@ -44,7 +44,7 @@ View SharedBox(float width = 40.0F, float offset = 0.0F, bool crossfade = false,
   return crossfade ? std::move(box).With(SharedBounds("item")) : std::move(box).With(SharedElement("item"));
 }
 
-void BeginLocal(SharedTransitionHandle handle, const std::function<void()>& mutation, Runtime& runtime) {
+void BeginLocal(SharedTransitionHandle handle, const std::function<void()>& mutation, UiWindow& runtime) {
   handle.Run(TweenSpec{1.0, Easing::Linear}, mutation);
   runtime.BuildRenderFrame();
   runtime.BuildRenderFrame();
@@ -85,7 +85,7 @@ TEST_CASE("SharedLocalTransitionMatchesTheSameNodeWithoutRecomposingEachFrame") 
           .OnClick([&] { ++clicks; }),
     }.With(Frame{240.0F, 100.0F}, transition.Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   REQUIRE(SharedRectangles(runtime.BuildRenderFrame()).size() == 1);
   BeginLocal(*handle, [&] { expanded = true; }, runtime);
@@ -124,7 +124,7 @@ TEST_CASE("SharedLocalOpacityIsAppliedOnceThroughPlaybackAndInterruption") {
         }.With(Frame{200.0F, 80.0F}, Opacity(0.5F), handle->Scope()),
       }.With(Opacity(0.8F));
     };
-    Runtime runtime(SharedRoot, platform);
+    UiWindow runtime(SharedRoot, platform);
     runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     REQUIRE(SharedRectangles(runtime.BuildRenderFrame())[0].opacity == Catch::Approx(0.24F));
     BeginLocal(*handle, [&] { expanded = true; }, runtime);
@@ -167,7 +167,7 @@ TEST_CASE("SharedLocalChildReorderingInvalidatesCapturedContent") {
       Spacer().With(Frame{1.0F, 1.0F}),
     }.With(Frame{200.0F, 80.0F}, handle->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildRenderFrame();
   BeginLocal(*handle, [&] { expanded = true; }, runtime);
@@ -191,7 +191,7 @@ TEST_CASE("SharedLocalBoundsSurviveSourceReplacementAndReleaseInterruptedVisuals
       SharedBox(40.0F + 20.0F * state.Get(), 50.0F * state.Get(), true).Key(state.Get()),
     }.With(Frame{300.0F, 100.0F}, handle->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {300.0F, 100.0F}});
   runtime.BuildRenderFrame();
   BeginLocal(*handle, [&] { value = 1; }, runtime);
@@ -222,7 +222,7 @@ TEST_CASE("SharedLocalRequestsCoalesceVisualsButExecuteEveryMutation") {
     handle = UseSharedTransition();
     return Stack {SharedBox(40.0F, 30.0F * value.Get())}.With(Frame{200.0F, 80.0F}, handle->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildRenderFrame();
   int mutations = 0;
@@ -246,7 +246,7 @@ TEST_CASE("SharedLocalScopeValidatesAttachmentTimingAndMutationReentry") {
     View view = Stack {SharedBox()}.With(Frame{160.0F, 80.0F});
     return attached.Get() ? std::move(view).With(handle->Scope()) : std::move(view);
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildRenderFrame();
   int mutations = 0;
@@ -283,7 +283,7 @@ TEST_CASE("SharedLocalFailedRebindingPreservesTheExistingScope") {
       Stack {SharedBox()}.With(Frame{200.0F, 80.0F}, second->Scope()),
     };
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 160.0F}});
   runtime.BuildRenderFrame();
   invalid = true;
@@ -303,7 +303,7 @@ TEST_CASE("SharedNavigationUsesCanonicalBoundsAndPredictiveCancellation") {
       return Stack {SharedBox()};
     });
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 180.0F}});
   runtime.BuildRenderFrame();
   controller->Push([]() -> View {
@@ -349,7 +349,7 @@ TEST_CASE("SharedLocalDuplicateAndOverlappingMarkersFailWithoutHidingRealContent
           : View{Row {SharedBox(), SharedBox()}};
       return Stack {std::move(content)}.With(Frame{240.0F, 100.0F}, handle->Scope());
     };
-    Runtime runtime(SharedRoot, platform);
+    UiWindow runtime(SharedRoot, platform);
     runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
     runtime.BuildRenderFrame();
     if (overlap) {
@@ -380,7 +380,7 @@ TEST_CASE("SharedLocalNestedScopesUseTheActiveOperationRange") {
           .With(Frame{200.0F, 80.0F}, inner->Scope()),
     }.With(Frame{200.0F, 80.0F}, outer->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildRenderFrame();
   BeginLocal(*inner, [&] { value = true; }, runtime);
@@ -416,7 +416,7 @@ TEST_CASE("SharedLocalScopesOnTheSameNodeKeepInputExcludedUntilTheActiveScopeFin
         SharedBox(40.0F, value.Get() ? 100.0F : 0.0F).OnClick([&] { ++clicks; }),
       }.With(Frame{200.0F, 80.0F}, first->Scope(), second->Scope());
     };
-    Runtime runtime(SharedRoot, platform);
+    UiWindow runtime(SharedRoot, platform);
     runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime.BuildRenderFrame();
     BeginLocal(use_second ? *second : *first, [&] { value = true; }, runtime);
@@ -451,7 +451,7 @@ TEST_CASE("SharedLocalIndependentScopesCanReuseKeysAndAnimateConcurrently") {
       Stack {SharedBox(40.0F, second.Get() ? 80.0F : 0.0F)}.With(Frame{200.0F, 80.0F}, b->Scope()),
     };
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 160.0F}});
   runtime.BuildRenderFrame();
   a->Run(TweenSpec{1.0, Easing::Linear}, [&] { first = true; });
@@ -481,7 +481,7 @@ TEST_CASE("SharedLocalGeometryChangesAndHiddenScopesReleaseVisuals") {
         Text("Other"),
       }, static_cast<std::size_t>(selected.Get()));
     };
-    Runtime runtime(SharedRoot, platform);
+    UiWindow runtime(SharedRoot, platform);
     runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime.BuildRenderFrame();
     BeginLocal(*handle, [&] { value = true; }, runtime);
@@ -516,7 +516,7 @@ TEST_CASE("SharedLocalSkipsUnsupportedAndUnmatchedContentWithoutBlockingInput") 
       }
       return Stack {std::move(content)}.With(Frame{200.0F, 80.0F}, handle->Scope());
     };
-    Runtime runtime(SharedRoot, platform);
+    UiWindow runtime(SharedRoot, platform);
     runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
     runtime.BuildRenderFrame();
     handle->Run(TweenSpec{1.0}, [&] { value = true; });
@@ -554,7 +554,7 @@ TEST_CASE("SharedNavigationRemovesOriginalsBeforePageFragmentsAreCopied") {
   shared_root_factory = [&]() -> View {
     return NavigationStack([&]() -> View { navigation = UseNavigation(); return Stack {SharedBox()}; });
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildRenderFrame();
   navigation->Push([]() -> View {
@@ -589,7 +589,7 @@ TEST_CASE("SharedInvalidSampleRestoresContentAndEndsTheOperation") {
                 SharedElement("item").BoundsTransform(InvalidSharedBounds{})),
     }.With(Frame{200.0F, 100.0F}, handle->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildRenderFrame();
   BeginLocal(*handle, [&] { value = true; }, runtime);
@@ -613,7 +613,7 @@ TEST_CASE("SharedLocalImmediateAndReducedMotionExecuteWithoutRetention") {
         return Stack {SharedBox(40.0F, value.Get() ? 60.0F : 0.0F)}.With(Frame{200.0F, 100.0F}, handle->Scope());
       })};
     };
-    Runtime runtime(SharedRoot, platform);
+    UiWindow runtime(SharedRoot, platform);
     runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
     runtime.BuildRenderFrame();
     int mutations = 0;
@@ -636,7 +636,7 @@ TEST_CASE("SharedLocalMutationFailurePreservesWritesAndAllowsAnotherOperation") 
     handle = UseSharedTransition();
     return Stack {SharedBox(40.0F, value.Get() ? 80.0F : 0.0F)}.With(Frame{200.0F, 100.0F}, handle->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildRenderFrame();
   REQUIRE_THROWS_AS(handle->Run(TweenSpec{1.0}, [&] {
@@ -668,7 +668,7 @@ TEST_CASE("SharedLocalDoesNotCrossNestedNavigationBoundaries") {
       NavigationStack([&]() -> View { return Stack {SharedBox()}; }).With(Frame{200.0F, 60.0F}),
     }.With(Frame{200.0F, 100.0F}, handle->Scope());
   };
-  Runtime runtime(SharedRoot, platform);
+  UiWindow runtime(SharedRoot, platform);
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildRenderFrame();
   BeginLocal(*handle, [&] { value = true; }, runtime);
@@ -705,7 +705,7 @@ TEST_CASE("SharedLocalReleasesCapturedConfigurationAfterCompletionAndDestruction
       }.With(Frame{200.0F, 100.0F}, handle->Scope());
     };
     {
-      Runtime runtime(SharedRoot, platform);
+      UiWindow runtime(SharedRoot, platform);
       runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
       runtime.BuildRenderFrame();
       BeginLocal(*handle, [&] { value = true; }, runtime);

@@ -10,7 +10,7 @@
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -19,7 +19,7 @@ class UIKitRenderer;
 
 class UIKitPlatformViews final {
 public:
-  UIKitPlatformViews(UIKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime);
+  UIKitPlatformViews(UIKitRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window);
   ~UIKitPlatformViews();
 
   UIKitPlatformViews(const UIKitPlatformViews&) = delete;

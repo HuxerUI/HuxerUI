@@ -680,7 +680,7 @@ void ResetTextFieldState() {
   text_field_trailing_icon_clicks = 0;
 }
 
-void Pointer(Runtime& runtime, PointerEventType type, float x, float y = 20.0F) {
+void Pointer(UiWindow& runtime, PointerEventType type, float x, float y = 20.0F) {
   runtime.HandlePointerEvent({
       type,
       700,
@@ -800,7 +800,7 @@ View CenterAlignedTextFieldApp() {
 TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{EmptyTextFieldApp, platform};
+  UiWindow runtime{EmptyTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -845,7 +845,7 @@ TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
 TEST_CASE("TextFieldUsesOneInheritedOrExplicitShapingContractForEveryTextPath") {
   ResetTextFieldState();
   ShapingTextLayoutPlatform platform;
-  Runtime runtime{TextFieldShapingApp, platform};
+  UiWindow runtime{TextFieldShapingApp, platform};
   runtime.SetWindowMetrics({.viewport = {300.0F, 340.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -910,7 +910,7 @@ TEST_CASE("TextFieldUsesOneInheritedOrExplicitShapingContractForEveryTextPath") 
 TEST_CASE("TextFieldAlignmentUsesOneLayoutContractForPlaceholderGeometry") {
   const auto render = [](RootFactory factory) {
     TestPlatform platform;
-    Runtime runtime{factory, platform};
+    UiWindow runtime{factory, platform};
     runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
     const DrawTextCommand* placeholder = FindText(runtime.BuildFrame(), "Aligned placeholder");
     REQUIRE(placeholder != nullptr);
@@ -930,7 +930,7 @@ TEST_CASE("TextFieldAlignmentUsesOneLayoutContractForPlaceholderGeometry") {
 
 TEST_CASE("TextFieldDefaultsSingleLineToCenterAndMultilineToTop") {
   TestPlatform platform;
-  Runtime runtime{DefaultAlignedTextFieldsApp, platform};
+  UiWindow runtime{DefaultAlignedTextFieldsApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 200.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -946,7 +946,7 @@ TEST_CASE("TextFieldDefaultsSingleLineToCenterAndMultilineToTop") {
 
 TEST_CASE("TextFieldUsesTheBoundedEditorWidthForAlignedSingleLineGeometry") {
   RecordingTextLayoutPlatform platform;
-  Runtime runtime{CenterAlignedTextFieldApp, platform};
+  UiWindow runtime{CenterAlignedTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const DrawTextCommand* text = FindText(scene, "Centered value that overflows the editor");
@@ -961,7 +961,7 @@ TEST_CASE("TextFieldUsesTheBoundedEditorWidthForAlignedSingleLineGeometry") {
 
 TEST_CASE("TestTextFieldUsesThemeCaretWidth") {
   TestPlatform flat_platform;
-  Runtime flat{EmptyTextFieldApp, flat_platform};
+  UiWindow flat{EmptyTextFieldApp, flat_platform};
   flat.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   flat.BuildFrame();
   Pointer(flat, PointerEventType::Down, 20.0F);
@@ -969,7 +969,7 @@ TEST_CASE("TestTextFieldUsesThemeCaretWidth") {
   REQUIRE(FindTextFieldCaret(flat.BuildFrame(), flat_style.caret, flat_style.caret_width) != nullptr);
 
   TestPlatform material_platform;
-  Runtime material{MaterialLabeledTextFieldApp, material_platform};
+  UiWindow material{MaterialLabeledTextFieldApp, material_platform};
   material.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   material.BuildFrame();
   Pointer(material, PointerEventType::Down, 40.0F);
@@ -979,7 +979,7 @@ TEST_CASE("TestTextFieldUsesThemeCaretWidth") {
 
 TEST_CASE("TestTextFieldPreservesIndependentPlaceholderFont") {
   TestPlatform platform;
-  Runtime runtime{IndependentPlaceholderFontApp, platform};
+  UiWindow runtime{IndependentPlaceholderFontApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -992,7 +992,7 @@ TEST_CASE("TestTextFieldPreservesIndependentPlaceholderFont") {
 
 TEST_CASE("TestTextFieldResolvesThemeDefaultVariantStyle") {
   TestPlatform platform;
-  Runtime runtime{DefaultVariantTextFieldStyleApp, platform};
+  UiWindow runtime{DefaultVariantTextFieldStyleApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1005,7 +1005,7 @@ TEST_CASE("TestTextFieldResolvesThemeDefaultVariantStyle") {
 
 TEST_CASE("TestMaterialTextFieldFloatsLabelAndRevealsPlaceholderOnFocus") {
   TestPlatform platform;
-  Runtime runtime{MaterialLabeledTextFieldApp, platform};
+  UiWindow runtime{MaterialLabeledTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
 
@@ -1047,7 +1047,7 @@ TEST_CASE("TestMaterialTextFieldFloatsLabelAndRevealsPlaceholderOnFocus") {
 
 TEST_CASE("TestReducedMotionTextFieldFloatsLabelWithoutTransition") {
   TestPlatform platform;
-  Runtime runtime{ReducedMotionMaterialLabeledTextFieldApp, platform};
+  UiWindow runtime{ReducedMotionMaterialLabeledTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   ThemeSpec theme = MaterialLightThemeSpec();
   theme.motion.reduced_motion = true;
@@ -1067,7 +1067,7 @@ TEST_CASE("TestReducedMotionTextFieldFloatsLabelWithoutTransition") {
 
 TEST_CASE("TestMaterialTextFieldSupportsOutlinedVariant") {
   TestPlatform platform;
-  Runtime runtime{MaterialOutlinedLabeledTextFieldApp, platform};
+  UiWindow runtime{MaterialOutlinedLabeledTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
@@ -1107,7 +1107,7 @@ TEST_CASE("TestMaterialTextFieldSupportsOutlinedVariant") {
 
 TEST_CASE("TestMaterialTextFieldSupportsStandardVariant") {
   TestPlatform platform;
-  Runtime runtime{MaterialStandardLabeledTextFieldApp, platform};
+  UiWindow runtime{MaterialStandardLabeledTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
@@ -1123,7 +1123,7 @@ TEST_CASE("TestMaterialTextFieldSupportsStandardVariant") {
 
 TEST_CASE("TestFlatTextFieldLaysOutAndTintsDecorativeIcons") {
   TestPlatform platform;
-  Runtime runtime{FlatLabeledIconTextFieldApp, platform};
+  UiWindow runtime{FlatLabeledIconTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const TextFieldStyle style = TextFieldStyle::Default();
@@ -1158,7 +1158,7 @@ TEST_CASE("TestFlatTextFieldLaysOutAndTintsDecorativeIcons") {
 
 TEST_CASE("TestTextFieldCanHideItsVisualLabelWithoutDroppingSemantics") {
   TestPlatform platform;
-  Runtime runtime{FlatHiddenVisualLabelTextFieldApp, platform};
+  UiWindow runtime{FlatHiddenVisualLabelTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const TextFieldStyle style = TextFieldStyle::Default();
@@ -1193,7 +1193,7 @@ TEST_CASE("TestTextFieldIconsOffsetSharedInputGeometry") {
   TextFieldPlatformInput plain_text_input;
   TestPlatform plain_platform;
   plain_platform.platform_text_input = &plain_text_input;
-  Runtime plain{FlatLabeledTextFieldApp, plain_platform};
+  UiWindow plain{FlatLabeledTextFieldApp, plain_platform};
   plain.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   plain.BuildFrame();
   Pointer(plain, PointerEventType::Down, 50.0F);
@@ -1202,7 +1202,7 @@ TEST_CASE("TestTextFieldIconsOffsetSharedInputGeometry") {
   TextFieldPlatformInput icon_text_input;
   TestPlatform icon_platform;
   icon_platform.platform_text_input = &icon_text_input;
-  Runtime icons{FlatLabeledIconTextFieldApp, icon_platform};
+  UiWindow icons{FlatLabeledIconTextFieldApp, icon_platform};
   icons.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   icons.BuildFrame();
   Pointer(icons, PointerEventType::Down, 50.0F);
@@ -1220,7 +1220,7 @@ TEST_CASE("TestTextFieldIconsOffsetSharedInputGeometry") {
 
 TEST_CASE("TestMaterialTextFieldUsesIndependentIconStateColors") {
   TestPlatform platform;
-  Runtime runtime{MaterialInvalidIconTextFieldApp, platform};
+  UiWindow runtime{MaterialInvalidIconTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const TextFieldStyle style = ThemeDefinitionValue<TextFieldStyle>(MaterialThemeDefinition());
@@ -1238,7 +1238,7 @@ TEST_CASE("TestMaterialTextFieldUsesIndependentIconStateColors") {
 
 TEST_CASE("TestFlatTextFieldSupportsFilledVariant") {
   TestPlatform platform;
-  Runtime runtime{FlatFilledTextFieldApp, platform};
+  UiWindow runtime{FlatFilledTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
   const TextFieldStyle style = TextFieldStyle::Default();
@@ -1264,7 +1264,7 @@ TEST_CASE("TestTextFieldRejectsEmptyIconAssets") {
 TEST_CASE("TestTextFieldTrailingIconUsesTypedPointerAndSemanticActivation") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{InteractiveTrailingIconTextFieldApp, platform};
+  UiWindow runtime{InteractiveTrailingIconTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
 
   const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
@@ -1304,7 +1304,7 @@ TEST_CASE("TestTextFieldTrailingIconUsesTypedPointerAndSemanticActivation") {
   REQUIRE_FALSE(password_visible.Get());
 
   TestPlatform disabled_platform;
-  Runtime disabled{DisabledTrailingIconTextFieldApp, disabled_platform};
+  UiWindow disabled{DisabledTrailingIconTextFieldApp, disabled_platform};
   disabled.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   const std::shared_ptr<const SemanticFrame> disabled_frame = disabled.BuildCommit().semantic_frame;
   const auto disabled_action = std::ranges::find_if(disabled_frame->nodes, [](const SemanticNode& node) {
@@ -1326,7 +1326,7 @@ TEST_CASE("TestTextFieldTrailingIconUsesTypedPointerAndSemanticActivation") {
 TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{InvalidTextFieldApp, platform};
+  UiWindow runtime{InvalidTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1356,7 +1356,7 @@ TEST_CASE("TestTextFieldValidationRendersSupportingMessageAndErrorBorder") {
 TEST_CASE("TestMaterialSecureTextFieldReservesValidationHeight") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{MaterialSecureInvalidTextFieldApp, platform};
+  UiWindow runtime{MaterialSecureInvalidTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1379,7 +1379,7 @@ TEST_CASE("TestMaterialSecureTextFieldReservesValidationHeight") {
 TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessage") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{InvalidTextFieldApp, platform};
+  UiWindow runtime{InvalidTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1404,7 +1404,7 @@ TEST_CASE("TestInvalidTextFieldDoesNotDrawASecondFocusRingAroundSupportingMessag
 
 TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
   TestPlatform hover_platform;
-  Runtime hovered{MaterialEmptyTextFieldApp, hover_platform};
+  UiWindow hovered{MaterialEmptyTextFieldApp, hover_platform};
   hovered.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   hovered.BuildFrame();
   hovered.HandlePointerEvent({
@@ -1428,7 +1428,7 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
   );
 
   TestPlatform invalid_platform;
-  Runtime invalid{MaterialSecureInvalidTextFieldApp, invalid_platform};
+  UiWindow invalid{MaterialSecureInvalidTextFieldApp, invalid_platform};
   invalid.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   invalid.BuildFrame();
   Pointer(invalid, PointerEventType::Down, 20.0F);
@@ -1445,7 +1445,7 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
   REQUIRE(error_caret != nullptr);
 
   TestPlatform disabled_platform;
-  Runtime disabled{MaterialDisabledTextFieldApp, disabled_platform};
+  UiWindow disabled{MaterialDisabledTextFieldApp, disabled_platform};
   disabled.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   const FlattenedScene& disabled_scene = disabled.BuildFrame();
   const DrawTextCommand* placeholder = FindText(disabled_scene, "Disabled placeholder");
@@ -1470,7 +1470,7 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
   REQUIRE(field->render_node.opacity == 1.0F);
 
   TestPlatform selected_platform;
-  Runtime selected{MaterialDisabledSelectedTextFieldApp, selected_platform};
+  UiWindow selected{MaterialDisabledSelectedTextFieldApp, selected_platform};
   selected.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   REQUIRE(FindRectWithColor(selected.BuildFrame(), style.selection) == nullptr);
 }
@@ -1478,7 +1478,7 @@ TEST_CASE("TestMaterialTextFieldUsesHoverErrorAndDisabledStateColors") {
 TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{InvalidTextFieldApp, platform};
+  UiWindow runtime{InvalidTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -1505,7 +1505,7 @@ TEST_CASE("TestTextFieldDoesNotApplyGenericHoverIndication") {
 TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{ValidTextFieldApp, platform};
+  UiWindow runtime{ValidTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1517,7 +1517,7 @@ TEST_CASE("TestTextFieldValidResultDoesNotReserveSupportingSpace") {
 TEST_CASE("TestTextFieldPendingResultRendersNeutralSupportingMessage") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{PendingTextFieldApp, platform};
+  UiWindow runtime{PendingTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1539,7 +1539,7 @@ TEST_CASE("TestSecureTextFieldMasksGraphemesAndPreservesEditingOffsets") {
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
   platform.platform_text_input = &text_input;
-  Runtime runtime{SecureTextFieldApp, platform};
+  UiWindow runtime{SecureTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -1626,7 +1626,7 @@ TEST_CASE("TestTextFieldSubmissionActionsUseOneRuntimePath") {
     TextFieldPlatformInput text_input;
     TestPlatform platform;
     platform.platform_text_input = &text_input;
-    Runtime runtime{SubmissionTextFieldApp, platform};
+    UiWindow runtime{SubmissionTextFieldApp, platform};
     runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
     runtime.BuildFrame();
     Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -1643,7 +1643,7 @@ TEST_CASE("TestTextFieldNextSubmitsAndMovesFocusWithoutWrapping") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{NextTextFieldApp, platform};
+  UiWindow runtime{NextTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 100.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 20.0F);
@@ -1687,7 +1687,7 @@ TEST_CASE("TestTextFieldPointerSelectionPrecedesPlatformStart") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1707,7 +1707,7 @@ TEST_CASE("TestAccessibleTextFieldEditingDoesNotRequireFocusOrANativeSession") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const auto frame = runtime.BuildCommit().semantic_frame;
   const auto field = std::ranges::find(frame->nodes, SemanticRole::TextField, &SemanticNode::role);
@@ -1727,7 +1727,7 @@ TEST_CASE("TestAccessibleTextFieldEditingSynchronizesAnActivePlatformSession") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   const auto field = std::ranges::find(frame->nodes, SemanticRole::TextField, &SemanticNode::role);
@@ -1766,7 +1766,7 @@ TEST_CASE("ThemeSwitchPreservesFocusedTextFieldEditingStateAndExtensions") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{ThemeSwitchTextFieldApp, platform};
+  UiWindow runtime{ThemeSwitchTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1812,7 +1812,7 @@ TEST_CASE("TestTextFieldPresentationMovementUpdatesImeGeometryWithoutLayout") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{OffsetTextFieldApp, platform};
+  UiWindow runtime{OffsetTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -1848,7 +1848,7 @@ TEST_CASE("TestTextFieldPresentationMovementUpdatesImeGeometryWithoutLayout") {
 TEST_CASE("TestTextFieldHardwareEditingUsesTextClusters") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -1878,7 +1878,7 @@ TEST_CASE("TestTextFieldHardwareEditingUsesTextClusters") {
 TEST_CASE("TestTextFieldUsesPlatformWordNavigationAndDeletion") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{KeyboardTextFieldApp, platform};
+  UiWindow runtime{KeyboardTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 230.0F);
@@ -1944,7 +1944,7 @@ TEST_CASE("TestTextFieldUsesPlatformWordNavigationAndDeletion") {
 TEST_CASE("TestTextFieldUndoRedoMergesContinuousTyping") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -1997,7 +1997,7 @@ TEST_CASE("TestTextFieldUndoRedoMergesContinuousTyping") {
 TEST_CASE("TestTextFieldUndoSeparatesTimedAndRepositionedEdits") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2058,7 +2058,7 @@ TEST_CASE("TestTextFieldUndoSeparatesTimedAndRepositionedEdits") {
 TEST_CASE("TestTextFieldUndoRedoMergesAdjacentDeletion") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{UndoDeletionTextFieldApp, platform};
+  UiWindow runtime{UndoDeletionTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 230.0F);
@@ -2095,7 +2095,7 @@ TEST_CASE("TestTextFieldUndoTreatsCompositionAsOneEdit") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2138,7 +2138,7 @@ TEST_CASE("TestTextFieldUndoCancelsActiveCompositionFirst") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2161,7 +2161,7 @@ TEST_CASE("TestTextFieldUndoCancelsActiveCompositionFirst") {
 TEST_CASE("TestTextFieldExternalTextReplacementClearsUndoHistory") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2187,7 +2187,7 @@ TEST_CASE("TestTextFieldExternalTextReplacementClearsUndoHistory") {
 TEST_CASE("TestTextFieldExternalSelectionPreservesHistoryAndNewEditsClearRedo") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2237,7 +2237,7 @@ TEST_CASE("TestTextFieldUndoKeepsPasteSeparateFromTyping") {
   clipboard.text = "p";
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{UndoTextFieldApp, platform};
+  UiWindow runtime{UndoTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2270,7 +2270,7 @@ TEST_CASE("TestTextFieldUndoKeepsPasteSeparateFromTyping") {
 TEST_CASE("TestTextFieldMaxLengthCountsGraphemeClusters") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{LimitedTextFieldApp, platform};
+  UiWindow runtime{LimitedTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2294,7 +2294,7 @@ TEST_CASE("TestTextFieldMaxLengthCountsGraphemeClusters") {
 TEST_CASE("TestTextFieldMaxLengthTruncatesReplacementAndPreservesUndo") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{LimitedTextFieldApp, platform};
+  UiWindow runtime{LimitedTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2330,7 +2330,7 @@ TEST_CASE("TestTextFieldMaxLengthTruncatesReplacementAndPreservesUndo") {
 TEST_CASE("TestTextFieldMaxLengthPreservesExternalOverLimitValuesAndAllowsDeletion") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{OverLimitTextFieldApp, platform};
+  UiWindow runtime{OverLimitTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 150.0F);
@@ -2352,7 +2352,7 @@ TEST_CASE("TestTextFieldMaxLengthPreservesExternalOverLimitValuesAndAllowsDeleti
 TEST_CASE("TestTextFieldMaxLengthAllowsCompositionOverflowUntilFinish") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{LimitedTextFieldApp, platform};
+  UiWindow runtime{LimitedTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F);
@@ -2373,7 +2373,7 @@ TEST_CASE("TestTextFieldMaxLengthAllowsCompositionOverflowUntilFinish") {
 TEST_CASE("TestMultilineTextFieldWrapsAndGrowsWithoutAHeight") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{GrowingMultilineTextFieldApp, platform};
+  UiWindow runtime{GrowingMultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   const FlattenedScene& scene = runtime.BuildFrame();
 
@@ -2388,7 +2388,7 @@ TEST_CASE("TestMultilineTextFieldWrapsAndGrowsWithoutAHeight") {
 TEST_CASE("TestMultilineTextFieldEditingInvalidatesLayout") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{GrowingMultilineTextFieldApp, platform};
+  UiWindow runtime{GrowingMultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -2411,7 +2411,7 @@ TEST_CASE("TestMultilineTextFieldEditingInvalidatesLayout") {
 TEST_CASE("TestIdenticalTextFieldRecompositionKeepsLayoutCache") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{StableTextFieldApp, platform};
+  UiWindow runtime{StableTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -2425,7 +2425,7 @@ TEST_CASE("TestIdenticalTextFieldRecompositionKeepsLayoutCache") {
 TEST_CASE("TestTextFieldSelectionChangeKeepsLayoutCache") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{KeyboardTextFieldApp, platform};
+  UiWindow runtime{KeyboardTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {280.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 100.0F);
@@ -2449,12 +2449,13 @@ TEST_CASE("TestMultilineTextFieldAppliesIntrinsicLineLimits") {
   ResetTextFieldState();
   TestPlatform platform;
 
-  Runtime minimum{MinimumLinesTextFieldApp, platform};
+  UiWindow minimum{MinimumLinesTextFieldApp, platform};
   minimum.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   minimum.BuildFrame();
   REQUIRE(minimum.RootNode()->children.front()->bounds.height == 76.0F);
 
-  Runtime maximum{MaximumLinesTextFieldApp, platform};
+  TestPlatform maximum_platform;
+  UiWindow maximum{MaximumLinesTextFieldApp, maximum_platform};
   maximum.SetWindowMetrics({.viewport = {200.0F, 140.0F}});
   maximum.BuildFrame();
   const auto* field = maximum.RootNode()->children.front().get();
@@ -2466,7 +2467,7 @@ TEST_CASE("TestMultilineTextFieldAppliesIntrinsicLineLimits") {
 TEST_CASE("TestTextFieldParentHeightOverridesIntrinsicLineLimits") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{FixedHeightLinesTextFieldApp, platform};
+  UiWindow runtime{FixedHeightLinesTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -2484,7 +2485,7 @@ TEST_CASE("TestMultilineTextFieldNavigatesLinesAndKeepsCaretVisible") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -2542,7 +2543,7 @@ TEST_CASE("TestMultilineTextFieldNavigatesLinesAndKeepsCaretVisible") {
 TEST_CASE("TestTextFieldPaintDoesNotMutateScrollState") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -2576,7 +2577,7 @@ TEST_CASE("TestTextFieldPaintDoesNotMutateScrollState") {
 TEST_CASE("TestMultilineTextFieldNavigatesLinePageAndDocumentBoundaries") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 38.0F);
@@ -2655,7 +2656,7 @@ TEST_CASE("TestMultilineTextFieldNavigatesLinePageAndDocumentBoundaries") {
 TEST_CASE("TestSingleLineTextFieldUsesTouchDragForHorizontalScroll") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{ScrollableSingleLineTextFieldApp, platform};
+  UiWindow runtime{ScrollableSingleLineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -2675,7 +2676,7 @@ TEST_CASE("TestSingleLineTextFieldUsesTouchDragForHorizontalScroll") {
 TEST_CASE("TestSingleLineTextFieldKeepsMouseDragSelectionSemantics") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{ScrollableSingleLineTextFieldApp, platform};
+  UiWindow runtime{ScrollableSingleLineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -2693,7 +2694,7 @@ TEST_CASE("TestSingleLineTextFieldScrollUpdatesImeGeometryAndEditingRevealsCaret
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{ScrollableSingleLineTextFieldApp, platform};
+  UiWindow runtime{ScrollableSingleLineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -2737,7 +2738,7 @@ TEST_CASE("TestSingleLineTextFieldScrollUpdatesImeGeometryAndEditingRevealsCaret
 TEST_CASE("TestMultilineTextFieldEnterInsertsNewlineInsteadOfSubmitting") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
 
@@ -2755,7 +2756,7 @@ TEST_CASE("TestMultilineTextFieldEnterInsertsNewlineInsteadOfSubmitting") {
 TEST_CASE("TestMultilineTextFieldWheelScrollDoesNotRevealCaretUntilEditingResumes") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
@@ -2785,7 +2786,7 @@ TEST_CASE("TestMultilineTextFieldScrollUpdatesImeGeometry") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
@@ -2813,7 +2814,7 @@ TEST_CASE("TestMultilineTextFieldScrollDuringCompositionDoesNotRestartInput") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
@@ -2841,7 +2842,7 @@ TEST_CASE("TestMultilineTextFieldScrollDuringCompositionDoesNotRestartInput") {
 TEST_CASE("TestMultilineTextFieldPassesRemainingWheelDeltaToParent") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{NestedMultilineTextFieldApp, platform};
+  UiWindow runtime{NestedMultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {80.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 20.0F, 18.0F);
@@ -2867,7 +2868,7 @@ TEST_CASE("TestMultilineTextFieldPassesRemainingWheelDeltaToParent") {
 TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection") {
   ResetTextFieldState();
   TestPlatform touch_platform;
-  Runtime touch{MultilineTextFieldApp, touch_platform};
+  UiWindow touch{MultilineTextFieldApp, touch_platform};
   touch.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   touch.BuildFrame();
   touch.HandlePointerEvent({
@@ -2886,7 +2887,7 @@ TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection"
 
   ResetTextFieldState();
   TestPlatform mouse_platform;
-  Runtime mouse{MultilineTextFieldApp, mouse_platform};
+  UiWindow mouse{MultilineTextFieldApp, mouse_platform};
   mouse.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   mouse.BuildFrame();
   mouse.HandlePointerEvent({
@@ -2908,7 +2909,7 @@ TEST_CASE("TestMultilineTextFieldUsesTouchDragForScrollAndMouseDragForSelection"
 TEST_CASE("TestMultilineTextFieldSelectionDragScrollsAtViewportEdge") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{MultilineTextFieldApp, platform};
+  UiWindow runtime{MultilineTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({
@@ -2933,7 +2934,7 @@ TEST_CASE("TestTextFieldClipboardShortcutsUseEditingActions") {
   TextFieldClipboard clipboard;
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 55.0F);
@@ -2971,7 +2972,7 @@ TEST_CASE("TestTextFieldClipboardShortcutsUseEditingActions") {
 TEST_CASE("TestTextFieldDragSelectionAndGeometry") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3005,7 +3006,7 @@ TEST_CASE("TestTextFieldSelectionOverlayUsesThemeAndLocalizedLabels") {
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{TextSelectionOverlayApp, platform};
+  UiWindow runtime{TextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3086,7 +3087,7 @@ TEST_CASE("TestTextSelectionOverlayKeepsSelectionActionsAfterSelectAll") {
   TextFieldClipboard clipboard;
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{TextSelectionOverlayApp, platform};
+  UiWindow runtime{TextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3134,7 +3135,7 @@ TEST_CASE("TestTextSelectionOverlayHandlesBackBeforePlatformFallback") {
   TextFieldClipboard clipboard;
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{TextSelectionOverlayApp, platform};
+  UiWindow runtime{TextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3158,7 +3159,7 @@ TEST_CASE("TestTextFieldSelectionHandleDragExtendsSelection") {
   TextFieldClipboard clipboard;
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{TextSelectionOverlayApp, platform};
+  UiWindow runtime{TextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3211,7 +3212,7 @@ TEST_CASE("TestEmptyTextFieldLongPressShowsPasteAtCaret") {
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{EmptyTextFieldApp, platform};
+  UiWindow runtime{EmptyTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3254,7 +3255,7 @@ TEST_CASE("TestMaterialTextSelectionMenuKeepsRippleThroughDismissal") {
   TestPlatform platform;
   platform.platform_clipboard = &clipboard;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{MaterialTextSelectionOverlayApp, platform};
+  UiWindow runtime{MaterialTextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3320,7 +3321,7 @@ TEST_CASE("TestTextSelectionCanceledLongPressCannotFocusOrPublishAnOverlay") {
   platform.platform_text_input = &text_input;
   platform.platform_clipboard = &clipboard;
   platform.platform_resources = BuiltinTestResources();
-  Runtime runtime{TextSelectionOverlayApp, platform};
+  UiWindow runtime{TextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
 
@@ -3349,7 +3350,7 @@ TEST_CASE("TestTextSelectionLongPressRevalidatesAfterStartingNativeInput") {
   TestPlatform platform;
   platform.platform_text_input = &text_input;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{TextSelectionOverlayApp, platform};
+  UiWindow runtime{TextSelectionOverlayApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
   bool reuse_pointer = false;
@@ -3383,8 +3384,8 @@ TEST_CASE("TestTextSelectionAcceptanceRevalidatesAfterCancelingCompetitors") {
   platform.platform_clipboard = &clipboard;
   platform.platform_resources = BuiltinTestResources();
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([on_cancel](RootContext& root) { root.Provide(on_cancel); });
-  Runtime runtime{
+  options.window_hooks.push_back([on_cancel](WindowContext& root) { root.Provide(on_cancel); });
+  UiWindow runtime{
       []() -> View {
         const auto callback = UseService<std::function<void()>>();
         return Column {
@@ -3457,12 +3458,12 @@ TEST_CASE("TestTextSelectionCanceledDoubleTapRetiresOnlyReleasedSequences") {
   auto clicks = std::make_shared<int>(0);
   std::function<void()> on_cancel;
   AppOptions options{.show_debug_overlay = false};
-  options.root_hooks.push_back([&layers, clicks](RootContext& root) {
+  options.window_hooks.push_back([&layers, clicks](WindowContext& root) {
     layers = root.Layers();
     root.Provide(clicks);
   });
   TestPlatform platform;
-  Runtime runtime{
+  UiWindow runtime{
       []() -> View {
         const auto count = UseService<int>();
         return Button("Background").OnClick([count] { ++*count; }).With(huxerui::Frame{180.0F, 40.0F});
@@ -3519,7 +3520,7 @@ TEST_CASE("TestTextSelectionCanceledDoubleTapRetiresOnlyReleasedSequences") {
 TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime mouse{TextSelectionOverlayApp, platform};
+  UiWindow mouse{TextSelectionOverlayApp, platform};
   mouse.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   mouse.BuildFrame();
   ClickAt(mouse, {70.0F, 20.0F}, 707);
@@ -3536,7 +3537,7 @@ TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
   TextFieldClipboard touch_clipboard;
   TestPlatform touch_platform;
   touch_platform.platform_clipboard = &touch_clipboard;
-  Runtime touch{TextSelectionOverlayApp, touch_platform};
+  UiWindow touch{TextSelectionOverlayApp, touch_platform};
   touch.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   touch.BuildFrame();
   touch.HandlePointerEvent({
@@ -3572,7 +3573,7 @@ TEST_CASE("TestTextFieldDoubleClickAndDoubleTapSelectWords") {
 TEST_CASE("TestTextFieldTouchTapCancelsRangeThroughOneControlledUpdate") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
   runtime.BuildFrame();
   text_field_value = TextEditingValue::FromText("alpha beta");
@@ -3609,7 +3610,7 @@ TEST_CASE("TestTextFieldImeCommandsAndAuthoritativeReplacement") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 55.0F);
@@ -3646,7 +3647,7 @@ TEST_CASE("TestTextFieldImeCommandsAndAuthoritativeReplacement") {
 TEST_CASE("TestTextFieldPointerSelectionYieldsToParentScroll") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{ScrollableTextFieldApp, platform};
+  UiWindow runtime{ScrollableTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3662,7 +3663,7 @@ TEST_CASE("TestTextFieldPointerSelectionYieldsToParentScroll") {
 TEST_CASE("TestFocusedSingleLineTextFieldAllowsAncestorWheelScrollUntilEditingResumes") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{ScrollableTextFieldApp, platform};
+  UiWindow runtime{ScrollableTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3691,7 +3692,7 @@ TEST_CASE("TestTouchMovementDoesNotFocusANonScrollableTextField") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{TextFieldApp, platform};
+  UiWindow runtime{TextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3708,7 +3709,7 @@ TEST_CASE("TestTouchScrollOverTextFieldDoesNotFocusOrStartTextInput") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{ScrollableTextFieldApp, platform};
+  UiWindow runtime{ScrollableTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3745,7 +3746,7 @@ TEST_CASE("TestTouchTapStartsTextInputOnReleaseAndRetapRequestsKeyboard") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{ScrollableTextFieldApp, platform};
+  UiWindow runtime{ScrollableTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3791,7 +3792,7 @@ TEST_CASE("TestTouchDragOverFocusedTextFieldDoesNotRequestKeyboard") {
   TextFieldPlatformInput text_input;
   TestPlatform platform;
   platform.platform_text_input = &text_input;
-  Runtime runtime{ScrollableTextFieldApp, platform};
+  UiWindow runtime{ScrollableTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -3837,7 +3838,7 @@ TEST_CASE("TestTouchDragOverFocusedTextFieldDoesNotRequestKeyboard") {
 TEST_CASE("TestTextFieldScrollsIntoReducedViewport") {
   ResetTextFieldState();
   TestPlatform platform;
-  Runtime runtime{OccludedTextFieldApp, platform};
+  UiWindow runtime{OccludedTextFieldApp, platform};
   runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
   runtime.BuildFrame();
 

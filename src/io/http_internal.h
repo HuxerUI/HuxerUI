@@ -11,6 +11,10 @@
 
 namespace huxerui::detail {
 
+/// Cancels active and idle HTTP operations while the application's native transport is still alive.
+/// @param application Original application whose weak operation registrations are disconnected on its owning thread.
+void DisconnectHttpOperations(ApplicationRuntimeState& application) noexcept;
+
 struct HttpTransportResponse {
   std::string url;
   int status_code = 0;

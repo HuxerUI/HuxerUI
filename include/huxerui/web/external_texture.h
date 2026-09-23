@@ -37,7 +37,7 @@ public:
   VideoFrameTexture(const VideoFrameTexture&) = delete;
   VideoFrameTexture& operator=(const VideoFrameTexture&) = delete;
 
-  /// Clones an open VideoFrame into the latest-frame mailbox and schedules every Runtime displaying this texture.
+  /// Clones an open VideoFrame into the latest-frame mailbox and schedules every UiWindow displaying this texture.
   ///
   /// Ownership of the caller's frame does not change, so it may be closed immediately after this function returns.
   /// An invalid or closed frame throws std::invalid_argument; publication after Finish() throws std::logic_error.

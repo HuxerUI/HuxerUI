@@ -19,6 +19,7 @@ namespace huxerui {
 namespace detail {
 class HttpOperationState;
 class HttpTransport;
+struct ApplicationRuntimeState;
 } // namespace detail
 
 /// HTTP request methods supported by HttpClient.
@@ -199,49 +200,57 @@ private:
   friend class detail::HttpOperationState;
 };
 
-/// The per-window HTTP service backed by the current platform networking stack.
+/// A client backed by its originating application's platform networking stack.
 ///
-/// Obtain the shared service with UseService<HttpClient>() during composition, capture it into a Task launched from
-/// UseTaskScope(), and call SendAsync() or SendStreamAsync() directly. HTTP already owns its platform-appropriate
-/// asynchronous path, so it must not be wrapped in RunWorker(). Task continuations and progress callbacks run on the
-/// owning Runtime UI thread and may update captured State directly without TaskScope::Post().
+/// Construct on the active application thread after Runtime initialization begins, for example in an ApplicationHook.
+/// Direct construction needs no UseService call or registration, so a business client can own HttpClient as a member.
+/// UseService<HttpClient>() provides the framework's shared instance when no wrapper is needed. Each client remains
+/// bound to its original Runtime and does not extend that Runtime's lifetime or attach to a replacement application.
 ///
-/// Example:
-/// @code
-/// Task<void> LoadProfile(const std::shared_ptr<HttpClient>& http) {
-///   HttpResult<HttpResponse> result = co_await http->SendAsync(
-///       {.url = "https://api.example.com/profile"},
-///       [](HttpProgress progress) {
-///         if (progress.kind == HttpProgressKind::Download) {
-///           UpdateDownloadProgress(progress.transferred_bytes, progress.total_bytes);
-///         }
-///       });
-///   if (!result.Succeeded()) {
-///     ReportHttpError(result.Error());
-///     co_return;
+/// SendAsync and SendStreamAsync already perform asynchronous I/O; do not wrap them in RunWorker. Their continuations
+/// and progress callbacks run on the application's thread and may update captured State directly. Launch their returned
+/// Tasks through a composition or application TaskScope, according to the desired cancellation lifetime.
+///
+/// @code{.cpp}
+/// class ProfileClient {
+/// public:
+///   Task<HttpResult<HttpResponse>> Load() const {
+///     return http_.SendAsync({.url = base_url_ + "/profile"});
 ///   }
-///   HttpResponse response = std::move(result).Value();
-///   UseProfileBytes(std::move(response.body));
-/// }
+///
+/// private:
+///   std::string base_url_ = "https://api.example.com";
+///   HttpClient http_;
+/// };
+///
+/// AppOptions options{
+///     .application_hooks = {
+///         [](ApplicationContext& context) { context.Provide(std::make_shared<ProfileClient>()); },
+///     },
+/// };
 /// @endcode
 class HttpClient final {
 public:
+  HttpClient();
   /// Destroys the service handle. In-flight operations retain the platform transport until they finish or are canceled.
   ~HttpClient();
 
-  /// HttpClient is a Runtime-owned service handle and cannot be copied or moved.
+  /// HttpClient is an application-bound transport handle and cannot be copied or moved.
   HttpClient(const HttpClient&) = delete;
   HttpClient& operator=(const HttpClient&) = delete;
   HttpClient(HttpClient&&) = delete;
   HttpClient& operator=(HttpClient&&) = delete;
 
-  /// Sends request and buffers the complete final response body. progress is optional and observes upload and download
-  /// transfer on the owning Runtime UI thread. Invalid request configuration throws std::invalid_argument
-  /// synchronously; platform failures are returned through HttpResult<HttpResponse>.
+  /// Sends a request and buffers its complete final response body.
+  /// @param request Absolute URL, method, headers, and body owned by the resulting operation.
+  /// @param progress Optional upload/download observer called on the application thread.
+  /// @return A lazy Task producing the response or an HttpError; launch or await it in a live TaskScope.
+  /// @throws std::invalid_argument Synchronously if the request configuration is invalid.
+  /// @throws std::logic_error If the originating application is no longer usable or the thread/context is wrong.
   [[nodiscard]] Task<HttpResult<HttpResponse>> SendAsync(HttpRequest request, std::function<void(HttpProgress)> progress = {}) const;
 
   /// Sends request and returns after final response headers are available. progress is optional and observes upload and
-  /// consumed download bytes on the owning Runtime UI thread. Invalid request configuration throws
+  /// consumed download bytes on the owning application thread. Invalid request configuration throws
   /// std::invalid_argument synchronously; pre-header platform failures are returned through
   /// HttpResult<HttpResponseStream>. Later body operations return IoResult.
   ///
@@ -260,6 +269,7 @@ private:
   explicit HttpClient(std::shared_ptr<detail::HttpTransport> transport);
 
   std::shared_ptr<detail::HttpTransport> transport_;
+  std::weak_ptr<detail::ApplicationRuntimeState> application_;
 
   friend class Runtime;
 };

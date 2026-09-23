@@ -190,8 +190,8 @@ This keeps the control appearance aligned with the surface actually painted bene
 
 ## Window commands
 
-`UseWindow()` returns a lightweight handle bound to the current Runtime window, following the established root-service handle pattern used by presentation APIs.
-It does not expose `HWND`, `NSWindow`, X11 handles, or another PlatformAdapter.
+`UseWindow()` returns a lightweight handle bound to the current UiWindow, following the established window-service handle pattern used by presentation APIs.
+It does not expose `HWND`, `NSWindow`, X11 handles, or another host bridge.
 
 The initial command surface is:
 
@@ -227,7 +227,7 @@ Applications may mark another mounted region explicitly.
 The platform adapter queries committed geometry through:
 
 ```cpp
-bool Runtime::IsWindowDragRegion(Point position) const;
+bool UiWindow::IsWindowDragRegion(Point position) const;
 ```
 
 The query is read-only and uses the mounted tree represented by the currently committed frame.
@@ -276,7 +276,7 @@ Native hit testing follows this order:
 
 - Resolve framework caption-control bounds, including `HTMAXBUTTON` behavior required for Windows 11 Snap Layout.
 - Resolve the remaining resize edges and corners.
-- Convert the remaining screen point to client logical coordinates and query `Runtime::IsWindowDragRegion()`.
+- Convert the remaining screen point to client logical coordinates and query `UiWindow::IsWindowDragRegion()`.
 - Return `HTCAPTION` for an application drag region and `HTCLIENT` otherwise.
 
 The maximize region still reports `HTMAXBUTTON` so Windows can expose Snap Layout.
@@ -298,9 +298,9 @@ The standard AppKit traffic lights remain installed, native, and accessible.
 The adapter resolves title-bar height from the application preference and AppKit's unobscured content layout, then vertically centers the native traffic-light group without changing its size, horizontal placement, or spacing.
 It derives the left content inset from the resulting standard window-button frames converted into HuxerUI view coordinates.
 It refreshes those metrics when the window frame, screen, backing scale, or full-screen state changes.
-View-size changes synchronously commit the pending Runtime frame before AppKit presents the expanded bounds, while `drawRect:` remains a presentation-only callback.
+View-size changes synchronously commit the pending UiWindow frame before AppKit presents the expanded bounds, while `drawRect:` remains a presentation-only callback.
 
-Drag initiation remains an AppKit window operation selected by `Runtime::IsWindowDragRegion()`.
+Drag initiation remains an AppKit window operation selected by `UiWindow::IsWindowDragRegion()`.
 HuxerUI passes the original mouse-down event to `performWindowDragWithEvent:` and does not move the window by accumulating pointer deltas.
 Traffic-light clicks remain native and do not round-trip through Runtime.
 Application-invoked `UseWindow()` commands map directly to AppKit minimize, zoom or restore, and close operations; maximize means the macOS zoomed state rather than full screen.
@@ -322,7 +322,7 @@ Their geometry is submitted as a `WindowTitleBarMetrics.right_inset` of three ti
 Linux metric resolution prefers `AppOptions::window.title_bar_height`, enforces a 32-DIP minimum height, clamps to the viewport, reports zero left inset, caps the right inset at the viewport width, and tracks the maximized state.
 
 Native drag and edge or corner resize use `gdk_toplevel_begin_move()` and `gdk_toplevel_begin_resize()` with the device, button, local coordinates, and timestamp from the initiating GTK gesture.
-Hit testing resolves resize edges before `Runtime::IsWindowDragRegion()`, while shared caption controls consume their own pointer input before a drag can begin.
+Hit testing resolves resize edges before `UiWindow::IsWindowDragRegion()`, while shared caption controls consume their own pointer input before a drag can begin.
 
 The custom client area uses a fixed 6-DIP resize border and skips resize edges while maximized.
 

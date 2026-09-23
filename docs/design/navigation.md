@@ -3,7 +3,7 @@
 This document defines explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, Back routing, typed route paths, Web URL history, and application activation integration.
 
 Factory navigation is deliberately factory-driven and imperative at the navigation boundary.
-Typed-route navigation preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared Runtime.
+Typed-route navigation preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared UiWindow.
 
 Custom page transitions are implemented as described in [Page transition customization](#page-transition-customization).
 [Shared-element transitions](#shared-element-transitions) use the common navigation and local matching engine.
@@ -34,7 +34,7 @@ The current factory navigation implementation does not provide:
 - Navigation-specific `OnAppear`, `OnDisappear`, or other component lifecycle callbacks.
 - Automatic cross-page layout animation or intermediate subtree reflow.
 - Automatic suspension or serialization of covered page state.
-- Browser History integration in the shared Runtime.
+- Browser History integration in the shared UiWindow.
 - An iOS edge gesture owned unconditionally by an embedded HuxerUI View.
 
 Saveable state, route serialization, and navigation-aware lifecycle effects build on this contract after their independent ownership rules are defined.
@@ -79,7 +79,7 @@ An arbitrary View cannot be converted reliably into a MenuItem because it may re
 Applications keep their direct action list intentionally small and use the existing Menu service for secondary actions.
 A future automatic overflow feature requires a reusable structured command model shared by toolbars, menus, and shortcuts rather than a TopAppBar-only item type.
 
-The [Window Insets and System Bars Design](window-insets.md) gives Runtime one full-window geometry contract.
+The [Window Insets and System Bars Design](window-insets.md) gives UiWindow one full-window geometry contract.
 TopAppBar consumes its top and horizontal insets when they remain available in edge-to-edge content and contributes its themed background to the status region without duplicating platform inset handling.
 Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing behavior remain deferred until shared nested-scroll coordination exists.
 
@@ -118,7 +118,7 @@ The retained drawer extension owns only transient modal drag and animation progr
 It applies the modal panel transform and scrim opacity as presentation changes, so those animations do not require per-frame recomposition, measurement, layout, or PaintSequence recording.
 
 A modal drawer marks its overlay subtree as a focus trap from opening until its exit animation finishes, while a persistent inline drawer remains visible and participates in ordinary focus traversal regardless of the controlled modal state.
-Runtime resolves the highest painted enabled trap generically, so Layer presentation and application drawers share focus confinement and restoration rather than maintaining separate mechanisms.
+UiWindow resolves the highest painted enabled trap generically, so Layer presentation and application drawers share focus confinement and restoration rather than maintaining separate mechanisms.
 Back resolution likewise walks application nodes once in reverse paint order, checking a node's explicit Back event before its retained extensions.
 This lets an open drawer consume Back before underlying page content while a page-local Back handler still precedes its enclosing NavigationStack.
 
@@ -191,7 +191,7 @@ The API deliberately uses `Push`, `Pop`, and `Replace` rather than `PushPage` an
 An empty page factory is invalid and throws `std::invalid_argument`.
 `Push` or `Replace` through a disconnected controller throws `std::logic_error`, matching operations that require a live owner.
 Read-only queries return zero or false after disconnection, and `Pop` returns false.
-Controller operations run on the Runtime UI thread and do not add cross-thread synchronization to navigation state.
+Controller operations run on the application thread owning UiWindow and do not add cross-thread synchronization to navigation state.
 
 `UseNavigation()` resolves the nearest NavigationStack from the current Environment.
 Calling it outside a NavigationStack throws `std::logic_error` with an English HuxerUI diagnostic.
@@ -234,7 +234,7 @@ Pop-to, reset, and result-returning navigation remain deferred until concrete ap
 ## Why pages are factories
 
 `View` is a transient declaration value and is not retained application state.
-A page factory allows Runtime to create and recompose a page under the NavigationStack's Environment and independent RecomposeScope at the correct time.
+A page factory allows UiWindow to create and recompose a page under the NavigationStack's Environment and independent RecomposeScope at the correct time.
 
 The following form is intentionally unsupported:
 
@@ -285,7 +285,7 @@ NavigationStack therefore remains an explicit stateful container rather than syn
 
 Each NavigationStack owns one shared private navigation state.
 The stack scope holds the strong reference, while public NavigationController copies hold weak references so a page factory that captures its controller cannot form a cycle through the controller state.
-Controller mutations invalidate only that NavigationStack scope through its retained invalidation binding; they do not retain Runtime directly or recompose the application root.
+Controller mutations invalidate only that NavigationStack scope through its retained invalidation binding; they do not retain UiWindow directly or recompose the application root.
 
 The controller is provided through a private typed Environment value while each page factory composes.
 Nested NavigationStacks override that value for their descendants, so `UseNavigation()` always returns the nearest active stack.
@@ -396,7 +396,7 @@ During a predictive Pop:
 - Commit completes the Pop and enables the revealed page after settling.
 - The container continues receiving predictive Back updates and cancellation.
 
-Runtime uses shared disabled-subtree input cleanup rather than a navigation-specific `DeactivateNavigationInput()` path.
+UiWindow uses shared disabled-subtree input cleanup rather than a navigation-specific `DeactivateNavigationInput()` path.
 The shared cleanup cancels pointer capture and observers, clears hover, clears focus that belongs to the disabled subtree, and ends an owned text-input session with `TextInputEndReason::FocusLost`.
 
 ## Focus and text input
@@ -494,9 +494,9 @@ struct BackEvent {
 };
 ```
 
-Runtime retains `bool HandleBack()` as the ordinary Commit convenience and adds `bool HandleBack(const BackEvent& event)` for predictive integration.
+UiWindow retains `bool HandleBack()` as the ordinary Commit convenience and adds `bool HandleBack(const BackEvent& event)` for predictive integration.
 
-Runtime routes Back in this order:
+UiWindow routes Back in this order:
 
 ```text
 framework-owned TextSelectionOverlay
@@ -506,11 +506,11 @@ framework-owned TextSelectionOverlay
     -> platform fallback
 ```
 
-Runtime captures the selected consumer at Begin.
+UiWindow captures the selected consumer at Begin.
 Update, Cancel, and Commit target the same consumer rather than rerunning routing against a tree that may have changed during the gesture.
-If the captured mounted target disappears, Runtime ends the transaction safely without dereferencing stale state or unexpectedly falling through to a system window close.
+If the captured mounted target disappears, UiWindow ends the transaction safely without dereferencing stale state or unexpectedly falling through to a system window close.
 
-NodeExtension gains a general Back capability instead of Runtime checking for a Navigation component type:
+NodeExtension gains a general Back capability instead of UiWindow checking for a Navigation component type:
 
 ```cpp
 class NodeExtension {
@@ -558,7 +558,7 @@ View EditorPage() {
 ```
 
 The presence of a BackRequested handler consumes that Back transaction.
-Runtime selects the handler at Begin but invokes it only at Commit.
+UiWindow selects the handler at Begin but invokes it only at Commit.
 Cancel does not invoke application code.
 
 A guarded page does not display a predictive page preview because the destination is not authoritative until the handler decides whether to Pop.
@@ -583,7 +583,7 @@ Android uses the richest available platform callback while retaining API 23 as t
 - A completely unhandled Commit invokes the Activity's platform fallback.
 
 The full-screen HuxerUIActivity owns callback registration and Activity fallback behavior.
-An embedded HuxerUIView exposes the Runtime Back operations but does not finish its containing Activity or assume ownership of another navigation system.
+An embedded HuxerUIView exposes the UiWindow Back operations but does not finish its containing Activity or assume ownership of another navigation system.
 
 iOS does not install an unconditional edge recognizer.
 A full-screen integration may later map an owned edge-pan gesture to the same BackEvent phases, while an embedded View must not steal a UIViewController navigation controller's interactive-pop gesture.
@@ -916,7 +916,7 @@ Controller Pop uses `history.back()` when the current entry was created by the s
 One `BrowserNavigationStack` may own a browser document's History at a time.
 Mounting another session whose root also declares `BrowserNavigationStack` is rejected; additional sessions in that document use ordinary `NavigationStack` values.
 
-Browser History must not be exposed through PlatformAdapter because it is application navigation policy rather than a renderer, text, clipboard, or frame-scheduling capability.
+Browser History remains outside the generic Runtime and UiWindow host operations because it is application navigation policy rather than a renderer, text, clipboard, or frame-scheduling capability.
 A focused Web navigation bridge supplies the routed controller's typed history-commit policy without introducing JavaScript types into shared headers.
 The policy commits the accepted canonical browser location and the corresponding controlled State update as one operation, while direct State writes remain replace-only synchronization.
 
@@ -1050,7 +1050,7 @@ Application activation integration requires platform tests for cold-start delive
 - Factory entries make no serialization, URL, or restoration claim.
 - Route paths resolve into the same private page-entry engine rather than creating another navigator.
 - Application activation selects a target Runtime before it requests route state and never targets an arbitrary committed View.
-- Browser URL policy remains outside shared Runtime and PlatformAdapter.
+- Browser URL policy remains outside the shared Runtime and UiWindow host contracts.
 
 ## Page transition customization
 

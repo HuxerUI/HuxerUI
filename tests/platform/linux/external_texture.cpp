@@ -347,7 +347,7 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
 
   rendered_texture = texture;
   TestPlatform platform;
-  Runtime runtime{LinuxGlTextureRenderApp, platform};
+  UiWindow runtime{LinuxGlTextureRenderApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
   const RenderFrame& frame = runtime.BuildRenderFrame();
   detail::LinuxRenderer renderer;
@@ -359,7 +359,8 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
 
   renderer.Discard();
   rendered_texture = top_left_texture;
-  Runtime top_left_runtime{LinuxGlTextureRenderApp, platform};
+  TestPlatform top_left_platform;
+  UiWindow top_left_runtime{LinuxGlTextureRenderApp, top_left_platform};
   top_left_runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
   const RenderFrame& top_left_frame = top_left_runtime.BuildRenderFrame();
   detail::LinuxRenderer top_left_renderer;
@@ -442,7 +443,7 @@ TEST_CASE("LinuxPixelTextureRendersCropDestinationOpacityAndRetainedFramesThroug
   texture->Publish({2, 1, 8, linux::PixelFormat::Rgba8888, red_green});
 
   TestPlatform platform;
-  Runtime runtime{LinuxExternalTextureRenderApp, platform};
+  UiWindow runtime{LinuxExternalTextureRenderApp, platform};
   runtime.SetWindowMetrics({.viewport = {5.0F, 4.0F}});
   const RenderFrame& frame = runtime.BuildRenderFrame();
   detail::LinuxRenderer renderer;
@@ -493,7 +494,7 @@ TEST_CASE("LinuxGdkTextureRendersCropDestinationOpacityAndRetainedFramesThroughG
   g_object_unref(first_frame);
 
   TestPlatform platform;
-  Runtime runtime{LinuxExternalTextureRenderApp, platform};
+  UiWindow runtime{LinuxExternalTextureRenderApp, platform};
   runtime.SetWindowMetrics({.viewport = {5.0F, 4.0F}});
   const RenderFrame& frame = runtime.BuildRenderFrame();
   detail::LinuxRenderer renderer;
@@ -625,7 +626,7 @@ TEST_CASE("LinuxExternalTexturePublicationSchedulesDamageThroughItsBoundRuntime"
   const auto texture = std::make_shared<linux::PixelTexture>(Size{2.0F, 2.0F});
   scheduled_texture = texture;
   TestPlatform platform;
-  Runtime runtime{LinuxExternalTextureApp, platform};
+  UiWindow runtime{LinuxExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
   static_cast<void>(runtime.BuildRenderFrame());
 
@@ -645,7 +646,7 @@ TEST_CASE("LinuxGdkTexturePublicationSchedulesDamageThroughItsBoundRuntime") {
   const auto texture = std::make_shared<linux::GdkTexture>(Size{2.0F, 2.0F});
   scheduled_texture = texture;
   TestPlatform platform;
-  Runtime runtime{LinuxExternalTextureApp, platform};
+  UiWindow runtime{LinuxExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
   static_cast<void>(runtime.BuildRenderFrame());
 

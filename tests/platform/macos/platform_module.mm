@@ -49,6 +49,7 @@ TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
   @autoreleasepool {
     REQUIRE(NSThread.isMainThread);
     TestPlatform platform(DispatchToMainQueue);
+    UiWindow runtime(+[]() -> View { return {}; }, platform);
     NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 320.0, 200.0)
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
@@ -122,6 +123,7 @@ TEST_CASE("MacPlatformModuleCancelsAndDisposesFoundationTimer") {
     std::weak_ptr<example::TimerService> service_lifetime;
     {
       TestPlatform platform(DispatchToMainQueue);
+      UiWindow runtime(+[]() -> View { return {}; }, platform);
       NSWindow* window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0.0, 0.0, 320.0, 200.0)
                                                      styleMask:NSWindowStyleMaskBorderless
                                                        backing:NSBackingStoreBuffered

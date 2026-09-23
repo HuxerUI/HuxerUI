@@ -10,7 +10,7 @@ constexpr char platform_text_field_class[] = "org.huxerui.examples.platformview.
 
 namespace huxerui::example {
 
-void InstallPlatformTextField(RootContext& root) {
+void InstallPlatformTextField(ApplicationContext& root) {
   root.RegisterPlatformView<PlatformTextFieldProperties>(platform_text_field::type,
                                                          android::JavaPlatformViewFactory<PlatformTextFieldProperties>{
                                                              .class_name = platform_text_field_class,

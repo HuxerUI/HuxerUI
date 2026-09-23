@@ -121,7 +121,7 @@ std::vector<TextOffset> CollectGraphemeBoundaries(detail::TextLayout& layout, st
 }
 
 PreparedTextLayout PrepareTextFieldLayout(
-    PlatformAdapter& platform,
+    UiWindow& ui_window,
     std::string_view text,
     const TextStyle& style,
     float max_width,
@@ -130,12 +130,12 @@ PreparedTextLayout PrepareTextFieldLayout(
 ) {
   if (!secure) {
     return {
-        platform.CreateTextLayout(text, style, max_width, options),
+        ui_window.CreateTextLayout(text, style, max_width, options),
         std::string(text),
     };
   }
 
-  std::unique_ptr<detail::TextLayout> source = platform.CreateTextLayout(text, style, max_width, options);
+  std::unique_ptr<detail::TextLayout> source = ui_window.CreateTextLayout(text, style, max_width, options);
   if (!source) {
     return {};
   }
@@ -147,7 +147,7 @@ PreparedTextLayout PrepareTextFieldLayout(
   for (std::size_t index = 1; index < boundaries.size(); ++index) {
     display_text.append(bullet);
   }
-  std::unique_ptr<detail::TextLayout> visual = platform.CreateTextLayout(display_text, style, max_width, options);
+  std::unique_ptr<detail::TextLayout> visual = ui_window.CreateTextLayout(display_text, style, max_width, options);
   if (!visual) {
     return {};
   }
@@ -617,10 +617,10 @@ public:
     UpdateLabelTarget(node.interaction.focused);
   }
 
-  Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
+  Size Measure(detail::MountedNode& node, UiWindow& ui_window, Constraints constraints) {
     Attach(node);
-    platform_ = &platform;
-    const float next_layout_width = ResolveLayoutWidth(platform, constraints);
+    ui_window_ = &ui_window;
+    const float next_layout_width = ResolveLayoutWidth(ui_window, constraints);
     if (next_layout_width != text_layout_width_) {
       text_layout_width_ = next_layout_width;
       text_layout_.reset();
@@ -635,7 +635,7 @@ public:
       validation_text_layout_width_ = next_validation_width;
       validation_layout_.reset();
     }
-    EnsureLayouts(platform);
+    EnsureLayouts(ui_window);
     const Size text_size = text_layout_->Measure();
     const Size label_size = label_layout_ ? label_layout_->Measure() : Size{};
     const Size floating_label_size = floating_label_layout_ ? floating_label_layout_->Measure() : Size{};
@@ -1425,10 +1425,10 @@ private:
     });
   }
 
-  void EnsureLayouts(PlatformAdapter& platform) {
+  void EnsureLayouts(UiWindow& ui_window) {
     if (!text_layout_) {
       PreparedTextLayout prepared = PrepareTextFieldLayout(
-          platform,
+          ui_window,
           editing_.value.text,
           style_.text_style,
           text_layout_width_,
@@ -1450,9 +1450,9 @@ private:
           .shaping = text_layout_options_.shaping,
           .wrap = TextWrap::NoWrap,
       };
-      label_layout_ = platform.CreateTextLayout(label_, style_.label_style, text_layout_width_, label_options);
+      label_layout_ = ui_window.CreateTextLayout(label_, style_.label_style, text_layout_width_, label_options);
       floating_label_layout_ =
-          platform.CreateTextLayout(label_, style_.floating_label_style, text_layout_width_, label_options);
+          ui_window.CreateTextLayout(label_, style_.floating_label_style, text_layout_width_, label_options);
       laid_out_label_ = label_;
       if (!label_layout_ || !floating_label_layout_) {
         throw std::logic_error("HuxerUI platform does not provide TextField label layout");
@@ -1463,7 +1463,7 @@ private:
       laid_out_placeholder_.clear();
     } else if (!placeholder_layout_ || laid_out_placeholder_ != placeholder_) {
       placeholder_layout_ =
-          platform.CreateTextLayout(placeholder_, style_.placeholder_style, text_layout_width_, text_layout_options_);
+          ui_window.CreateTextLayout(placeholder_, style_.placeholder_style, text_layout_width_, text_layout_options_);
       laid_out_placeholder_ = placeholder_;
       if (!placeholder_layout_) {
         throw std::logic_error("HuxerUI platform does not provide editable text layout");
@@ -1473,7 +1473,7 @@ private:
       validation_layout_.reset();
       laid_out_validation_message_.clear();
     } else if (!validation_layout_ || laid_out_validation_message_ != validation_.message) {
-      validation_layout_ = platform.CreateTextLayout(
+      validation_layout_ = ui_window.CreateTextLayout(
           validation_.message,
           style_.validation_text_style,
           validation_text_layout_width_,
@@ -1691,7 +1691,7 @@ private:
 
   void RecordHistory(TextEditingValue before, TextEditingValue after, HistoryMergeKind merge_kind) {
     redo_history_.clear();
-    const double timestamp = platform_ ? platform_->Now() : 0.0;
+    const double timestamp = ui_window_ ? ui_window_->Now() : 0.0;
     if (history_merge_allowed_ && merge_kind != HistoryMergeKind::None && !undo_history_.empty()) {
       HistoryEntry& previous = undo_history_.back();
       const double elapsed = timestamp - previous.timestamp;
@@ -1747,8 +1747,8 @@ private:
     last_emitted_ = editing_.value;
     if (text_changed) {
       text_layout_.reset();
-      if (platform_) {
-        EnsureLayouts(*platform_);
+      if (ui_window_) {
+        EnsureLayouts(*ui_window_);
       }
     }
     UpdateLabelTarget(node_ && node_->interaction.focused);
@@ -1791,10 +1791,10 @@ private:
   }
 
   std::vector<TextOffset> GraphemeBoundaries(std::string_view text) const {
-    if (!platform_) {
+    if (!ui_window_) {
       throw std::logic_error("HuxerUI TextField cannot resolve text boundaries before layout");
     }
-    std::unique_ptr<detail::TextLayout> layout = platform_->CreateTextLayout(
+    std::unique_ptr<detail::TextLayout> layout = ui_window_->CreateTextLayout(
         text,
         style_.text_style,
         std::numeric_limits<float>::infinity(),
@@ -1959,8 +1959,8 @@ private:
     last_emitted_ = editing_.value;
     if (text_changed) {
       text_layout_.reset();
-      if (platform_) {
-        EnsureLayouts(*platform_);
+      if (ui_window_) {
+        EnsureLayouts(*ui_window_);
       }
     }
     UpdateLabelTarget(node_ && node_->interaction.focused);
@@ -2277,7 +2277,7 @@ private:
     }
   }
 
-  float ResolveLayoutWidth(PlatformAdapter& platform, Constraints constraints) const {
+  float ResolveLayoutWidth(UiWindow& ui_window, Constraints constraints) const {
     if (constraints.HasBoundedWidth()) {
       return std::max(1.0F, constraints.max_width - IconContentWidth());
     }
@@ -2294,7 +2294,7 @@ private:
             end == std::string_view::npos ? text.substr(start) : text.substr(start, end - start);
         width = std::max(
             width,
-            platform
+            ui_window
                 .MeasureText(
                     line,
                     style,
@@ -2352,7 +2352,7 @@ private:
   }
 
   detail::MountedNode* node_ = nullptr;
-  PlatformAdapter* platform_ = nullptr;
+  UiWindow* ui_window_ = nullptr;
   detail::EventBindings event_bindings_;
   TextInputConfiguration configuration_;
   std::size_t min_lines_ = 1;
@@ -2538,8 +2538,8 @@ public:
                    trailing_icon_pressed_ && mounted.interaction.pressed);
   }
 
-  Size Measure(detail::MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
-    return client_->Measure(node, platform, constraints);
+  Size Measure(detail::MountedNode& node, UiWindow& ui_window, Constraints constraints) {
+    return client_->Measure(node, ui_window, constraints);
   }
 
 private:
@@ -2709,8 +2709,8 @@ const ModifierDescriptor& TextFieldModifier::Descriptor() {
   return descriptor;
 }
 
-Size MeasureTextField(MountedNode& node, PlatformAdapter& platform, Constraints constraints) {
-  return FindTextFieldExtension(node).Measure(node, platform, constraints);
+Size MeasureTextField(MountedNode& node, UiWindow& ui_window, Constraints constraints) {
+  return FindTextFieldExtension(node).Measure(node, ui_window, constraints);
 }
 
 } // namespace detail

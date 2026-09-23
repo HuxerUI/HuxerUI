@@ -175,14 +175,14 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
     [self dropInteraction:interaction sessionDidExit:_hover];
   }
   HuxerUIView* view = _view;
-  if (view == nil || view->huxeruiRuntime == nullptr) {
+  if (view == nil || view->huxeruiWindow == nullptr) {
     return;
   }
   _hover = session;
   ++_session;
   const CGPoint point = [session locationInView:view];
   try {
-    static_cast<void>(view->huxeruiRuntime->HandleFileDragEntered(
+    static_cast<void>(view->huxeruiWindow->HandleFileDragEntered(
         _session, huxerui::detail::IosDropOffer(session), {static_cast<float>(point.x), static_cast<float>(point.y)}
     ));
   } catch (...) {
@@ -193,10 +193,10 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
 - (UIDropProposal*)dropInteraction:(UIDropInteraction*)interaction sessionDidUpdate:(id<UIDropSession>)session {
   HuxerUIView* view = _view;
   bool accepted = false;
-  if (view != nil && view->huxeruiRuntime != nullptr && _hover == session) {
+  if (view != nil && view->huxeruiWindow != nullptr && _hover == session) {
     const CGPoint point = [session locationInView:view];
     try {
-      accepted = view->huxeruiRuntime->HandleFileDragMoved(
+      accepted = view->huxeruiWindow->HandleFileDragMoved(
           _session, huxerui::detail::IosDropOffer(session), {static_cast<float>(point.x), static_cast<float>(point.y)}
       );
     } catch (...) {
@@ -213,9 +213,9 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
     return;
   }
   _hover = nil;
-  if (view != nil && view->huxeruiRuntime != nullptr) {
+  if (view != nil && view->huxeruiWindow != nullptr) {
     try {
-      view->huxeruiRuntime->HandleFileDragExited(_session);
+      view->huxeruiWindow->HandleFileDragExited(_session);
     } catch (...) {
     }
   }
@@ -223,10 +223,10 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
 
 - (void)dropInteraction:(UIDropInteraction*)interaction performDrop:(id<UIDropSession>)session {
   HuxerUIView* view = _view;
-  if (view != nil && view->huxeruiRuntime != nullptr && _hover == session) {
+  if (view != nil && view->huxeruiWindow != nullptr && _hover == session) {
     const CGPoint point = [session locationInView:view];
     try {
-      static_cast<void>(view->huxeruiRuntime->HandleFileDrop(
+      static_cast<void>(view->huxeruiWindow->HandleFileDrop(
           _session, huxerui::detail::IosDropOffer(session), {static_cast<float>(point.x), static_cast<float>(point.y)},
           huxerui::detail::CaptureIosFileDrop(session)
       ));

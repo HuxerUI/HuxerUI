@@ -10,7 +10,7 @@
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -19,7 +19,7 @@ class AppKitRenderer;
 
 class AppKitPlatformViews final {
 public:
-  AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, Runtime& runtime, NSWindow* host_window);
+  AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window, NSWindow* platform_window);
   ~AppKitPlatformViews();
 
   AppKitPlatformViews(const AppKitPlatformViews&) = delete;

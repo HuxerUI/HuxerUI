@@ -71,7 +71,7 @@
 
 namespace huxerui::example {
 
-void InstallPlatformTextField(RootContext& root) {
+void InstallPlatformTextField(ApplicationContext& root) {
   ios::ObjectiveCPlatformViewFactory<PlatformTextFieldProperties> factory{
       .factory = [HuxerUIExamplePlatformTextFieldFactory new],
   };

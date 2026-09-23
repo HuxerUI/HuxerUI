@@ -26,8 +26,8 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
 }
 
 struct WindowsColorStreamState : huxerui::example::ColorStreamService {
-  explicit WindowsColorStreamState(huxerui::PlatformAdapter& adapter_value)
-      : adapter(&adapter_value),
+  explicit WindowsColorStreamState(huxerui::UiWindow& window_value)
+      : ui_window(&window_value),
         texture(std::make_shared<huxerui::windows::PixelTexture>(huxerui::Size{320.0F, 180.0F})) {}
 
   ~WindowsColorStreamState() {
@@ -49,7 +49,7 @@ struct WindowsColorStreamState : huxerui::example::ColorStreamService {
       throw std::invalid_argument("HuxerUI example color stream completion must not be empty");
     }
     Start();
-    adapter->DispatchToUIThread([completion = std::move(completion), texture = texture]() mutable {
+    ui_window->DispatchToUiThread([completion = std::move(completion), texture = texture]() mutable {
       completion(std::move(texture));
     });
     return ++request_id;
@@ -105,7 +105,7 @@ struct WindowsColorStreamState : huxerui::example::ColorStreamService {
     ++phase;
   }
 
-  huxerui::PlatformAdapter* adapter;
+  huxerui::UiWindow* ui_window;
   std::shared_ptr<huxerui::windows::PixelTexture> texture;
   std::mutex mutex;
   std::condition_variable wake;
@@ -119,11 +119,10 @@ struct WindowsColorStreamState : huxerui::example::ColorStreamService {
 
 namespace huxerui::example {
 
-void InstallColorStream(RootContext& root) {
-  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](PlatformAdapter& adapter) {
-    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WindowsColorStreamState>(adapter));
+void InstallColorStream(ApplicationContext& root) {
+  root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](UiWindow& ui_window) {
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WindowsColorStreamState>(ui_window));
   });
-  root.Provide(root.OpenPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type));
 }
 
 } // namespace huxerui::example

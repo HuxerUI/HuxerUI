@@ -118,7 +118,7 @@ ApplicationHandle
 
 One Runtime owns one private `LocalNotificationService` through its existing `ApplicationService`.
 `ApplicationHandle::LocalNotifications()` captures a lightweight handle rather than installing another public Root Service or global registry.
-The service shares the existing `UIThreadDispatcher` and callback-to-Task machinery with other asynchronous platform capabilities, but it does not depend on `PermissionController` or share mutable authorization state with it.
+The service shares the existing `UiThreadDispatcher` and callback-to-Task machinery with other asynchronous platform capabilities, but it does not depend on `PermissionController` or share mutable authorization state with it.
 
 A captured handle may outlive its Runtime.
 After Runtime destruction, new operations complete with `Unavailable`, pending Task continuations remain detached, and late platform callbacks cannot resume retired application code.
@@ -241,9 +241,9 @@ Background actions that do not create or target a Runtime require a separate app
 `can_activate` is true only when the platform shell can route primary notification interaction into the application activation path.
 Presentation may still be useful when activation is unavailable, so this capability is independent of `can_show`.
 
-## Platform adapter boundary
+## Runtime transport boundary
 
-`PlatformAdapter` exposes one protected `CreateLocalNotificationTransport()` factory.
+The platform-derived `Runtime` overrides the protected `CreateLocalNotificationTransport()` factory when it supports local notifications.
 A missing transport creates an unavailable service so application code retains one API path on every host.
 
 The private transport owns authorization queries and requests, presentation, scheduling, and cancellation.

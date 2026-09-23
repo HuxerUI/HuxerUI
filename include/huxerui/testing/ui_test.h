@@ -77,11 +77,11 @@ struct UiNodeInfo {
   /// Full transformed window-local axis-aligned bounding box in logical units, before clipping or occlusion.
   Rect bounds;
   /// Conservative intersection with the viewport and rectangular ancestor clips; empty when not participating.
-  /// Rotation, path clips, opacity, and occlusion still require Runtime hit testing.
+  /// Rotation, path clips, opacity, and occlusion still require UiWindow hit testing.
   Rect visible_bounds;
   /// Effective inherited interaction availability.
   bool enabled = true;
-  /// Runtime input focus, not platform accessibility focus.
+  /// UiWindow input focus, not platform accessibility focus.
   bool focused = false;
   /// Whether this node and all its ancestors participate in layout.
   bool participates_in_layout = false;
@@ -141,7 +141,7 @@ public:
   /// Matches effective inherited enabled state.
   /// @param enabled Expected state.
   static UiSelector Enabled(bool enabled);
-  /// Matches Runtime input focus.
+  /// Matches UiWindow input focus.
   /// @param focused Expected state.
   static UiSelector Focused(bool focused);
   /// Matches every supplied expression. Empty conjunctions are invalid.
@@ -211,8 +211,8 @@ public:
   /// Matches effective enabled state in the semantic tree.
   /// @param enabled Expected effective availability.
   static UiSemanticSelector Enabled(bool enabled);
-  /// Matches Runtime input focus, not a screen reader's independent accessibility focus.
-  /// @param focused Expected Runtime input focus.
+  /// Matches UiWindow input focus, not a screen reader's independent accessibility focus.
+  /// @param focused Expected UiWindow input focus.
   static UiSemanticSelector Focused(bool focused);
   /// Matches an explicitly published selection state.
   /// @param selected Expected state; an absent state does not match false.
@@ -315,7 +315,7 @@ struct UiTestOptions {
   /// Optional owning payload provider; the resources field above determines test locale and density.
   /// The provider's Configuration() is not used. No provider means no packaged payloads, not a filesystem search.
   std::shared_ptr<PlatformResources> resource_provider;
-  /// Initial ordinary application activation delivered during Runtime construction.
+  /// Initial ordinary application activation delivered during UiWindow construction.
   ApplicationActivation activation = LaunchActivation{};
   /// Maximum callbacks admitted in one frame's entry batch; must be positive.
   /// Also bounds the final best-effort cleanup drain, including callbacks posted during teardown.
@@ -360,7 +360,7 @@ public:
   [[nodiscard]] std::vector<UiNodeInfo> All() const;
   /// Sends Down/Up at the transformed local center, or the visible-bounds center when the former is clipped.
   /// Pumps after each event; never retries or activates directly.
-  /// Runtime hit testing, clipping, and modal routing still decide the event recipient. A successful call does not
+  /// UiWindow hit testing, clipping, and modal routing still decide the event recipient. A successful call does not
   /// guarantee activation of the selected node. No scrolling or semantic-action fallback is performed.
   /// The original point and pointer identity are kept through recomposition; failure attempts best-effort Cancel.
   /// @param options Pointer device and identity, which must not collide with an active raw pointer.
@@ -368,7 +368,7 @@ public:
   void Tap(UiPointerOptions options = {}) const;
   /// Sends a wheel update at the selected visible region and pumps once without advancing time.
   /// @param delta Finite logical content-offset delta. Touch scrolling uses UiTest::Drag instead.
-  /// @return Delta consumed by normal Runtime routing, which may include nested scroll ancestors.
+  /// @return Delta consumed by normal UiWindow routing, which may include nested scroll ancestors.
   /// @throws UiTestFailure If the target is missing, ambiguous, disabled, or outside the viewport.
   Point ScrollBy(Point delta) const;
   /// Repeatedly sends real wheel input until a unique descendant has visible geometry.
@@ -461,11 +461,11 @@ public:
   /// Returns owning copies of all final matches in semantic tree preorder.
   /// @return Matching SemanticNode values, or an empty vector. IDs retain their original publication meaning.
   [[nodiscard]] std::vector<SemanticNode> All() const;
-  /// Uses Runtime's accessibility path, not physical input, then pumps once.
+  /// Uses UiWindow's accessibility path, not physical input, then pumps once.
   /// Resolves the target again before dispatch. Normal semantic action availability, payload validation, and
   /// controlled component behavior apply; it does not synthesize pointer or key events.
   /// @param action Action to submit to the unique current target; its payload must match SemanticActionKind.
-  /// @throws UiTestFailure If the target is not unique or Runtime rejects the action.
+  /// @throws UiTestFailure If the target is not unique or UiWindow rejects the action.
   void PerformSemanticAction(const SemanticAction& action) const;
 
 private:
@@ -490,7 +490,7 @@ private:
 /// @endcode
 class UiSnapshot {
 public:
-  /// Serializes the captured structure on demand. Does not access Runtime or advance time.
+  /// Serializes the captured structure on demand. Does not access UiWindow or advance time.
   /// This is a locale-independent structural format, not JSON or an image. Equal strings do not establish
   /// native rendering equality, especially for explicitly uncaptured external or native content.
   /// @return An owning versioned string, independent of the snapshot's lifetime. No text export is cached.
@@ -512,7 +512,7 @@ private:
   friend class UiTest;
 };
 
-/// Runs an Application through the real shared Runtime without creating a native window.
+/// Runs an Application through the real shared UiWindow without creating a native window.
 ///
 /// Link HuxerUI::testing and include this header explicitly; it is not included by the production umbrella header.
 /// The Application must outlive the fixture. Initialization executes ordinary root hooks and commits one frame at
@@ -524,9 +524,9 @@ private:
 /// Direct platform work performed by application hooks is not sandboxed. Supply packaged resources explicitly
 /// through UiTestOptions::resource_provider when required.
 ///
-/// Exceptions while Runtime processes a frame, input, or configuration update retain their original type and
+/// Exceptions while UiWindow processes a frame, input, or configuration update retain their original type and
 /// invalidate the session; subsequent operations fail with UiTestFailure. Query mismatches and bounded waits do not
-/// themselves invalidate it. Teardown destroys Runtime, then runs a bounded best-effort callback drain without
+/// themselves invalidate it. Teardown destroys UiWindow, then runs a bounded best-effort callback drain without
 /// committing frames or waiting for workers. Cleanup exceptions are contained and never replace an initialization error.
 /// Examples in this header assume huxerui and huxerui::testing names are in scope, an Application named application,
 /// and, where used, a fixture named ui with the illustrated application content.
@@ -605,7 +605,7 @@ public:
   [[nodiscard]] double Now() const;
   /// Updates metrics; observations remain unchanged until Pump.
   /// @param metrics Native-style logical metrics for this test surface.
-  /// @throws std::invalid_argument If ordinary Runtime window-metric validation rejects the values.
+  /// @throws std::invalid_argument If ordinary UiWindow window-metric validation rejects the values.
   /// @code
   /// ui.SetWindowMetrics({.viewport = {800.0F, 600.0F}});
   /// ui.Pump();
@@ -636,22 +636,22 @@ public:
   void SendPointer(const PointerEvent& event);
   /// Forwards scroll without pumping and returns the consumed delta.
   /// @param event Normalized scroll intent in logical coordinates.
-  /// @return Delta consumed by Runtime's normal nested-scroll routing, not the remaining delta.
+  /// @return Delta consumed by UiWindow's normal nested-scroll routing, not the remaining delta.
   /// @code
   /// Point consumed = ui.SendScroll({.position = {40.0F, 80.0F}, .delta_y = 120.0F});
   /// ui.Pump();
   /// @endcode
   Point SendScroll(const ScrollInputEvent& event);
-  /// Forwards a key without pumping and reports whether Runtime handled it.
+  /// Forwards a key without pumping and reports whether UiWindow handled it.
   /// @param event Normalized portable key event; this does not synthesize text.
-  /// @return True if Runtime handled the event; false if it remained unhandled.
+  /// @return True if UiWindow handled the event; false if it remained unhandled.
   /// @see PressKey
   bool SendKey(const KeyEvent& event);
   /// Forwards an editing-command batch without pumping or focusing an editor.
-  /// Session and command validation follow the ordinary Runtime protocol; a rejected result is returned, not
+  /// Session and command validation follow the ordinary UiWindow protocol; a rejected result is returned, not
   /// converted into UiTestFailure. Use query editing helpers when manual session management is unnecessary.
   /// @param batch Session-aware editing commands whose text is UTF-8 and whose ranges use UTF-16 code units.
-  /// @return The ordinary Runtime apply result, including rejection or stale-session information.
+  /// @return The ordinary UiWindow apply result, including rejection or stale-session information.
   /// In this example, batch is supplied by the test's text-input integration with its captured session ID.
   /// @code
   /// TextInputApplyResult result = ui.SendTextInput(batch);
@@ -679,7 +679,7 @@ public:
   /// @see UiDragOptions
   void Drag(Point start, Point end, UiDragOptions options = {});
   /// Sends one key Down/Up pair, pumping after each event without advancing virtual time.
-  /// Uses current Runtime focus and traversal; it neither focuses a selected query nor synthesizes text.
+  /// Uses current UiWindow focus and traversal; it neither focuses a selected query nor synthesizes text.
   /// Individual handled/unhandled results are ignored; use SendKey() to inspect them or control frame boundaries.
   /// @param key Portable key identity.
   /// @param modifiers Modifier state on Down and Up.

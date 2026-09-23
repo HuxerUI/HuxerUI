@@ -421,7 +421,7 @@ public:
     }
     // A focused editor stays mounted while scrolling, even outside the visual cache window.
     const auto& mounted = static_cast<const detail::MountedNode&>(node);
-    const auto focused = detail::InternalAccess::FocusedNodeIdentity(*mounted.runtime);
+    const auto focused = detail::InternalAccess::FocusedNodeIdentity(*mounted.ui_window);
     if (const auto owner = session->focus_owners.find(focused.value_or(0)); owner != session->focus_owners.end()) {
       if (const auto index = FindRow(*snapshot, owner->second); index && (*index < first || *index >= last)) {
         realized.push_back(*index);
@@ -486,7 +486,7 @@ public:
   FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     if (std::exchange(restore_focus_, false)) {
       auto& mounted = static_cast<detail::MountedNode&>(node);
-      detail::InternalAccess::FocusNode(*mounted.runtime, mounted.identity);
+      detail::InternalAccess::FocusNode(*mounted.ui_window, mounted.identity);
     }
     return {};
   }

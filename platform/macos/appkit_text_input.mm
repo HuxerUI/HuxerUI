@@ -336,7 +336,7 @@ KeyEvent MakeMacKeyEvent(NSEvent* event, KeyEventType type) {
 
 class MacTextInputState {
 public:
-  MacTextInputState(Runtime& runtime, NSView* view) : runtime_(&runtime), view_(view) {
+  MacTextInputState(UiWindow& ui_window, NSView* view) : ui_window_(&ui_window), view_(view) {
     client_ = [[HuxerUITextInputClient alloc] initWithState:this];
     input_context_ = [[NSTextInputContext alloc] initWithClient:client_];
   }
@@ -378,7 +378,7 @@ public:
     }
     KeyEvent key_event = MakeMacKeyEvent(event, KeyEventType::Down);
     key_event.text.clear();
-    if (runtime_->HandleKeyEvent(key_event)) {
+    if (ui_window_->HandleKeyEvent(key_event)) {
       return true;
     }
     if (composing) {
@@ -534,7 +534,7 @@ public:
       return nil;
     }
     const TextInputContext context =
-        runtime_->QueryTextInputContext(session_id_, requested->start, requested->Length());
+        ui_window_->QueryTextInputContext(session_id_, requested->start, requested->Length());
     if (context.result_code != TextInputResultCode::Ok || requested->start > context.total_length) {
       SetActualRange(actual_range, std::nullopt);
       return nil;
@@ -590,7 +590,7 @@ public:
       return NSZeroRect;
     }
 
-    const TextInputGeometry geometry = runtime_->QueryTextInputGeometry(session_id_, *requested);
+    const TextInputGeometry geometry = ui_window_->QueryTextInputGeometry(session_id_, *requested);
     NSView* view = view_;
     if (geometry.result_code != TextInputResultCode::Ok || view == nil || view.window == nil) {
       SetActualRange(actual_range, std::nullopt);
@@ -610,7 +610,7 @@ public:
     }
     const NSPoint window_point = [view.window convertPointFromScreen:screen_point];
     const NSPoint view_point = [view convertPoint:window_point fromView:nil];
-    const TextInputPositionResult position = runtime_->QueryTextInputPosition(
+    const TextInputPositionResult position = ui_window_->QueryTextInputPosition(
         session_id_,
         {
             static_cast<float>(view_point.x),
@@ -735,7 +735,7 @@ public:
     if (routed_event_.has_value() && routed_event_->key == key && routed_event_->modifiers == modifiers) {
       return;
     }
-    runtime_->HandleKeyEvent({
+    ui_window_->HandleKeyEvent({
         KeyEventType::Down,
         key,
         {},
@@ -761,11 +761,11 @@ private:
       result.result_code = TextInputResultCode::SessionMismatch;
       return result;
     }
-    return runtime_->QueryTextInputContext(session_id_, 0, 0);
+    return ui_window_->QueryTextInputContext(session_id_, 0, 0);
   }
 
   void Apply(TextInputCommand command) {
-    runtime_->HandleTextInputCommands({
+    ui_window_->HandleTextInputCommands({
         session_id_,
         {std::move(command)},
     });
@@ -777,7 +777,7 @@ private:
     }
   }
 
-  Runtime* runtime_ = nullptr;
+  UiWindow* ui_window_ = nullptr;
   __weak NSView* view_ = nil;
   __strong HuxerUITextInputClient* client_ = nil;
   __strong NSTextInputContext* input_context_ = nil;
@@ -789,7 +789,7 @@ private:
   bool secure_event_input_enabled_ = false;
 };
 
-MacTextInput::MacTextInput(Runtime& runtime, NSView* view) : state_(std::make_unique<MacTextInputState>(runtime, view)) {}
+MacTextInput::MacTextInput(UiWindow& ui_window, NSView* view) : state_(std::make_unique<MacTextInputState>(ui_window, view)) {}
 
 MacTextInput::~MacTextInput() = default;
 

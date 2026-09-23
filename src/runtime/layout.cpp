@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "internal_access.h"
 
 #include <algorithm>
@@ -69,8 +69,7 @@ std::optional<VirtualCollectionSemantics> InternalAccess::CollectionSemantics(co
 namespace {
 
 struct LayoutContextState {
-  PlatformAdapter* platform;
-  Runtime* runtime;
+  UiWindow* ui_window;
   EdgeInsets safe_area;
   const WindowTitleBarMetrics* title_bar_metrics;
 };
@@ -119,7 +118,7 @@ Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, Layout
   if (node.children.empty()) {
     return constraints.Constrain({});
   }
-  return MeasureNode(*node.children.front(), constraints, *state.platform, *state.runtime, state.safe_area,
+  return MeasureNode(*node.children.front(), constraints, *state.ui_window, state.safe_area,
                      state.title_bar_metrics);
 }
 
@@ -148,7 +147,7 @@ Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, Layou
                 constraints.min_height,
                 constraints.max_height,
             };
-  const Size child_size = MeasureNode(*node.children.front(), child_constraints, *state.platform, *state.runtime,
+  const Size child_size = MeasureNode(*node.children.front(), child_constraints, *state.ui_window,
                                       state.safe_area, state.title_bar_metrics);
   node.scroll_state->content_width = child_size.width;
   node.scroll_state->content_height = child_size.height;
@@ -266,7 +265,7 @@ namespace {
 
 Size MeasureLayoutChild(void* state, huxerui::ViewNode& child, Constraints constraints) {
   auto& layout_state = *static_cast<LayoutContextState*>(state);
-  return MeasureNode(static_cast<MountedNode&>(child), constraints, *layout_state.platform, *layout_state.runtime,
+  return MeasureNode(static_cast<MountedNode&>(child), constraints, *layout_state.ui_window,
                      layout_state.safe_area, layout_state.title_bar_metrics);
 }
 
@@ -284,11 +283,11 @@ huxerui::ViewNode& ObtainVirtualItem(void* state, std::size_t index) {
 
 Size MeasureVirtualItem(void* state, huxerui::ViewNode& item, Constraints constraints) {
   auto& layout_state = *static_cast<VirtualLayoutContextState*>(state)->layout_state;
-  return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.platform, *layout_state.runtime,
+  return MeasureNode(static_cast<MountedNode&>(item), constraints, *layout_state.ui_window,
                      layout_state.safe_area, layout_state.title_bar_metrics);
 }
 
-Size MeasureLabelContent(MountedNode& node, PlatformAdapter& platform, const Constraints& constraints) {
+Size MeasureLabelContent(MountedNode& node, UiWindow& ui_window, const Constraints& constraints) {
   const LabelContentMetrics metrics = node.LayoutValueOr<LabelContentMetrics>({});
   const Size icon_size{
       std::max(0.0F, metrics.icon_size.width),
@@ -301,7 +300,7 @@ Size MeasureLabelContent(MountedNode& node, PlatformAdapter& platform, const Con
                                        : std::numeric_limits<float>::infinity();
   TextLayoutMetrics text;
   if (show_label) {
-    text = platform.MeasureText(node.text, node.properties.text_style, maximum_text_width,
+    text = ui_window.MeasureText(node.text, node.properties.text_style, maximum_text_width,
                                 node.properties.text_layout_options);
   }
   node.layout_cache.insert_or_assign(typeid(LabelLayoutCache), LabelLayoutCache{text});
@@ -390,7 +389,7 @@ void LayoutPlacedChildren(MountedNode& node, Point content_origin) {
 
 } // namespace
 
-Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdapter& platform, Runtime& runtime,
+Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui_window,
                  EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics) {
   HUXERUI_PROFILE_SCOPE(profile_measure, Measure, node.identity);
   HUXERUI_PROFILE_COUNT(MeasureRequests);
@@ -435,7 +434,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
       node.properties.padding.bottom + consumed_safe_area.bottom,
       node.properties.padding.left + consumed_safe_area.left,
   };
-  LayoutContextState layout_state{&platform, &runtime, safe_area, title_bar_metrics};
+  LayoutContextState layout_state{&ui_window, safe_area, title_bar_metrics};
   if (node.kind == NodeKind::ScrollView) {
     node.scroll_state->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
   }
@@ -449,27 +448,27 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
   switch (node.kind) {
   case NodeKind::Text:
     if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
-      content_size = MeasureLabelContent(node, platform, content_constraints);
+      content_size = MeasureLabelContent(node, ui_window, content_constraints);
     } else {
       content_size =
-          platform.MeasureText(node.text, node.properties.text_style, content_constraints.max_width,
+          ui_window.MeasureText(node.text, node.properties.text_style, content_constraints.max_width,
                                node.properties.text_layout_options).size;
     }
     break;
   case NodeKind::Button:
     content_size =
-        platform.MeasureText(node.text, node.properties.text_style, std::numeric_limits<float>::infinity(),
+        ui_window.MeasureText(node.text, node.properties.text_style, std::numeric_limits<float>::infinity(),
                              node.properties.text_layout_options).size;
     break;
   case NodeKind::IconButton:
-    content_size = MeasureLabelContent(node, platform, content_constraints);
+    content_size = MeasureLabelContent(node, ui_window, content_constraints);
     break;
   case NodeKind::Chip:
     if (node.image_properties.HasValue()) {
-      content_size = MeasureLabelContent(node, platform, content_constraints);
+      content_size = MeasureLabelContent(node, ui_window, content_constraints);
     } else {
       content_size =
-          platform.MeasureText(node.text, node.properties.text_style, std::numeric_limits<float>::infinity(),
+          ui_window.MeasureText(node.text, node.properties.text_style, std::numeric_limits<float>::infinity(),
                                node.properties.text_layout_options).size;
     }
     break;
@@ -490,7 +489,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     break;
   }
   case NodeKind::TextField:
-    content_size = MeasureTextField(node, platform, content_constraints);
+    content_size = MeasureTextField(node, ui_window, content_constraints);
     break;
   case NodeKind::Checkbox:
   case NodeKind::RadioButton:
@@ -502,7 +501,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
                                             ? std::max(0.0F, content_constraints.max_width - label_leading)
                                             : std::numeric_limits<float>::infinity();
       const Size label_size =
-          platform.MeasureText(node.text, node.properties.text_style, maximum_label_width,
+          ui_window.MeasureText(node.text, node.properties.text_style, maximum_label_width,
                                node.properties.text_layout_options).size;
       content_size = {
           std::max(metrics.interactive_size.width, label_leading + label_size.width),
@@ -546,7 +545,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
     content_size = MeasureScopeChild(node, content_constraints, layout_state);
     break;
   case NodeKind::SelectionArea:
-    content_size = MeasureSelectionArea(node, platform, runtime, content_constraints, safe_area, title_bar_metrics);
+    content_size = MeasureSelectionArea(node, ui_window, content_constraints, safe_area, title_bar_metrics);
     break;
   case NodeKind::ScrollView:
     if (node.layout_descriptor) {
@@ -569,7 +568,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, PlatformAdap
         content_constraints.HasBoundedHeight() ? content_constraints.max_height
                                               : std::max(content_constraints.min_height, node.measured_size.height),
     };
-    VirtualMeasureSession session{runtime, node};
+    VirtualMeasureSession session{ui_window, node};
     VirtualLayoutContextState virtual_context_state{
         &session,
         &layout_state,

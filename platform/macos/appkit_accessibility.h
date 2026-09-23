@@ -9,7 +9,7 @@
 
 namespace huxerui {
 
-class Runtime;
+class UiWindow;
 
 namespace detail {
 
@@ -17,7 +17,7 @@ class AppKitPlatformViews;
 
 class MacAccessibility final {
 public:
-  MacAccessibility(Runtime& runtime, NSView* root_view, AppKitPlatformViews& platform_views) noexcept;
+  MacAccessibility(UiWindow& ui_window, NSView* root_view, AppKitPlatformViews& platform_views) noexcept;
   ~MacAccessibility();
 
   MacAccessibility(const MacAccessibility&) = delete;
@@ -33,7 +33,7 @@ public:
   bool PerformAction(SemanticNodeId id, SemanticAction action);
 
 private:
-  Runtime* runtime_;
+  UiWindow* ui_window_;
   __weak NSView* root_view_;
   AppKitPlatformViews* platform_views_;
   std::shared_ptr<const SemanticFrame> frame_;

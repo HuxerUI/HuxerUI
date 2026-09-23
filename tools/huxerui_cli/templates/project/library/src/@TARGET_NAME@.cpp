@@ -2,6 +2,6 @@
 
 namespace @LIBRARY_NAMESPACE@ {
 
-void Install(huxerui::RootContext&) {}
+void Install(huxerui::ApplicationContext&) {}
 
 } // namespace @LIBRARY_NAMESPACE@

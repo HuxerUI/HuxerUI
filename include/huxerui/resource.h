@@ -38,6 +38,7 @@ std::string UseString(StringVariant&& value);
 namespace detail {
 struct InternalAccess;
 class AppResources;
+struct ApplicationRuntimeState;
 bool IsEmptyStringVariantLiteral(const StringVariant& value) noexcept;
 } // namespace detail
 
@@ -174,13 +175,13 @@ private:
   std::string language_tag_;
 };
 
-/// Platform-supplied defaults used by the Runtime's resource service.
-/// The platform reports configuration changes to Runtime; local Locale overrides still apply within their subtree.
+/// Platform-supplied application defaults and per-UiWindow resource configuration.
+/// The platform reports changes to the corresponding Runtime or UiWindow; local Locale overrides apply per subtree.
 struct ResourceConfiguration {
   /// Default locale for resource resolution and inherited localization unless Environment overrides it.
   Locale locale = Locale::Default();
   /// Finite, positive pixels-per-logical-unit density used to choose image variants.
-  /// Runtime rejects zero, negative, or non-finite configuration values.
+  /// Runtime and UiWindow reject zero, negative, or non-finite configuration values.
   float display_scale = 1.0F;
 
   bool operator==(const ResourceConfiguration&) const = default;
@@ -363,14 +364,84 @@ private:
 /// ExternalTexture is separate because it represents a live shared texture rather than an immutable image value.
 using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 
+/// Resolves owned resource values on the original application thread without subscribing composition.
+/// Implicit configuration follows the calling window and local Locale; application-only tasks use application defaults.
+/// Methods reject a stopped or different application lifetime. Resolved values can be retained independently.
+/// @code{.cpp}
+/// auto resources = UseService<Resources>();
+/// const ResourceConfiguration configuration = resources->Configuration();
+/// const std::string title = resources->GetString(app::strings::title, configuration);
+/// @endcode
+/// The example assumes an installed generated resource key. Use the UseXxx resource hooks when composition must react
+/// to configuration changes; Get methods return an immediate value and do not establish that subscription.
+class Resources final {
+public:
+  /// Reads effective resource configuration without observing composition dependencies.
+  /// @return An owned snapshot including application defaults, original-window overrides, and local Locale.
+  /// @throws std::logic_error If the original application lifetime, thread, or context is invalid.
+  [[nodiscard]] ResourceConfiguration Configuration() const;
+  /// Resolves a raw-resource identity without reading its payload.
+  /// @param resource Installed package raw-resource key.
+  /// @return A lazy asset that can later open or read its own stream.
+  /// @throws std::logic_error If the key is absent or the application lifetime/thread is invalid.
+  [[nodiscard]] RawAsset GetRawResource(RawResource resource) const;
+  /// Resolves a packaged raster image with this call's effective resource configuration.
+  /// @param resource Installed image key whose selected payload is raster data.
+  /// @return A retained asset; first resolution may synchronously read and parse package data.
+  /// @throws std::invalid_argument If the selected payload is vector data or malformed.
+  /// Missing keys and invalid application lifetime/thread raise std::logic_error; native I/O errors may propagate.
+  [[nodiscard]] ImageAsset GetImage(ImageResource resource) const;
+  /// Resolves a packaged raster image using an explicit configuration snapshot.
+  /// @param resource Installed key selecting raster image data.
+  /// @param configuration Locale and finite positive display scale used for variant selection; not retained by
+  /// reference.
+  /// @return An owned raster asset without composition subscriptions.
+  /// Uses the same payload, missing-key, lifetime, and I/O error rules as the implicit-configuration overload.
+  [[nodiscard]] ImageAsset GetImage(ImageResource resource, const ResourceConfiguration& configuration) const;
+  /// Resolves a packaged vector image with this call's effective resource configuration.
+  /// @param resource Installed image key whose selected payload is vector data.
+  /// @return A retained asset; first resolution may synchronously read and parse package data.
+  /// @throws std::invalid_argument If the selected payload is raster data or malformed.
+  /// Missing keys and invalid application lifetime/thread raise std::logic_error; native I/O errors may propagate.
+  [[nodiscard]] VectorAsset GetVectorImage(ImageResource resource) const;
+  /// Resolves a packaged vector image using an explicit configuration snapshot.
+  /// @param resource Installed key selecting vector image data.
+  /// @param configuration Locale and finite positive display scale used for variant selection; not retained by
+  /// reference.
+  /// @return An owned vector asset without composition subscriptions.
+  /// Uses the same payload, missing-key, lifetime, and I/O error rules as the implicit-configuration overload.
+  [[nodiscard]] VectorAsset GetVectorImage(ImageResource resource, const ResourceConfiguration& configuration) const;
+  /// Resolves text immediately using this call's effective Locale.
+  /// @param value Literal text or an installed string key with owned formatting arguments.
+  /// @return Owned resolved text with no composition dependency.
+  /// @throws std::logic_error If a key is absent or the original application lifetime/thread is invalid.
+  /// @throws std::invalid_argument If formatting arguments do not satisfy the selected template.
+  [[nodiscard]] std::string GetString(const StringVariant& value) const;
+  /// Resolves text with an explicit configuration snapshot.
+  /// @param value Literal text or a packaged string with owned formatting arguments.
+  /// @param configuration Snapshot whose locale selects the string variant; unrelated display fields do not affect
+  /// text.
+  /// @return Owned resolved text; uses the same lifetime/key/format validation as the implicit-configuration overload.
+  [[nodiscard]] std::string GetString(const StringVariant& value, const ResourceConfiguration& configuration) const;
+
+private:
+  Resources(std::shared_ptr<detail::AppResources> resources, std::weak_ptr<detail::ApplicationRuntimeState> application)
+      : resources_(std::move(resources)), application_(std::move(application)) {}
+  /// Rejects access outside this resource service's original live application and its owning thread.
+  void RequireLifetime() const;
+  std::shared_ptr<detail::AppResources> resources_;
+  std::weak_ptr<detail::ApplicationRuntimeState> application_;
+  friend class Runtime;
+};
+
 /// Platform capability for installed-package access and current resource defaults.
-/// Platform adapters provide this service to Runtime; applications normally use generated keys and UseXxx() helpers.
+/// Platform Runtime subclasses provide this service; applications normally use Resources or generated UseXxx() helpers.
 /// Package streams must own their native lifetime independently so an opened stream survives capability destruction.
 class PlatformResources {
 public:
   virtual ~PlatformResources() = default;
 
-  /// Reports the platform's current locale and density defaults on the Runtime thread.
+  /// Reports the platform's current locale and density defaults on the application thread.
   /// @return A configuration whose display_scale is finite and positive.
   /// The platform remains responsible for notifying Runtime when these defaults change.
   [[nodiscard]] virtual ResourceConfiguration Configuration() const = 0;

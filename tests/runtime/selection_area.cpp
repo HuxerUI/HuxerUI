@@ -159,7 +159,7 @@ const RenderNode* FindSelectionPaintNode(const RenderNode* node) {
   return nullptr;
 }
 
-void Pointer(Runtime& runtime, PointerEventType type, float x, float y) {
+void Pointer(UiWindow& runtime, PointerEventType type, float x, float y) {
   runtime.HandlePointerEvent({
       type,
       810,
@@ -167,11 +167,11 @@ void Pointer(Runtime& runtime, PointerEventType type, float x, float y) {
   });
 }
 
-void Touch(Runtime& runtime, PointerEventType type, Point position) {
+void Touch(UiWindow& runtime, PointerEventType type, Point position) {
   runtime.HandlePointerEvent({type, 850, position, PointerDeviceKind::Touch});
 }
 
-void SelectByTouch(Runtime& runtime, TestPlatform& platform, Point position) {
+void SelectByTouch(UiWindow& runtime, TestPlatform& platform, Point position) {
   Touch(runtime, PointerEventType::Down, position);
   Touch(runtime, PointerEventType::Up, position);
   platform.AdvanceTime(0.1);
@@ -186,7 +186,7 @@ TEST_CASE("TestSelectionAreaSelectsAndCopiesAcrossTextNodes") {
   TestPlatform platform;
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{SelectionAreaApp, platform};
+  UiWindow runtime{SelectionAreaApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -210,7 +210,7 @@ TEST_CASE("TestSelectionAreaHandlesSelectAllShortcut") {
   TestPlatform platform;
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{SelectionAreaApp, platform};
+  UiWindow runtime{SelectionAreaApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -239,7 +239,7 @@ TEST_CASE("TestSelectionAreaDoubleClickSelectsWord") {
   TestPlatform platform;
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{SelectionAreaApp, platform};
+  UiWindow runtime{SelectionAreaApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -259,7 +259,7 @@ TEST_CASE("TestSelectionAreaUsesPresentedTextGeometryAndOpacity") {
   TestPlatform platform;
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{PresentedSelectionAreaApp, platform};
+  UiWindow runtime{PresentedSelectionAreaApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -291,7 +291,7 @@ TEST_CASE("TestSelectionAreaUsesPresentedTextGeometryAndOpacity") {
 
 TEST_CASE("TestSelectionAreaRetainsForegroundPaintAcrossCleanFrames") {
   TestPlatform platform;
-  Runtime runtime{SelectionAreaApp, platform};
+  UiWindow runtime{SelectionAreaApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -310,7 +310,7 @@ TEST_CASE("TestSelectionAreaRetainsForegroundPaintAcrossCleanFrames") {
 
 TEST_CASE("TestSelectionAreaPaintsTheThemeFocusRingForKeyboardFocus") {
   TestPlatform platform;
-  Runtime runtime{FocusedSelectionAreaApp, platform};
+  UiWindow runtime{FocusedSelectionAreaApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
 
@@ -325,7 +325,7 @@ TEST_CASE("TestSelectionAreaPaintsTheThemeFocusRingForKeyboardFocus") {
 TEST_CASE("TestTextSelectionCapabilityDoesNotDependOnBuiltInNodeKinds") {
   custom_selection_requested = false;
   TestPlatform platform;
-  Runtime runtime{CustomSelectionApp, platform};
+  UiWindow runtime{CustomSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -345,7 +345,7 @@ TEST_CASE("TestTextRemainsNonSelectableOutsideSelectionArea") {
   TestPlatform platform;
   SelectionClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{PlainTextApp, platform};
+  UiWindow runtime{PlainTextApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 40.0F}});
   runtime.BuildFrame();
 
@@ -372,7 +372,7 @@ TEST_CASE("TestSelectionAreaCopiesLogicalBlocksWithoutRealizingOffscreenViews") 
         }).ItemExtent(20.0F).CacheExtent(0.0F).Controller(scroll)
     ).Source(snapshot);
   };
-  Runtime runtime{DynamicSelectionApp, platform};
+  UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
   auto* client = SelectionClient(runtime.RootNode());
@@ -433,7 +433,7 @@ TEST_CASE("TestSelectionAreaRetainsLayoutsWhenOnlyTheTailOrPresentationChanges")
       Text(tail).With(Offset{Point{offset, 0.0F}}).Key(2),
     });
   };
-  Runtime runtime{DynamicSelectionApp, platform};
+  UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
   REQUIRE(platform.layouts == 2);
@@ -460,7 +460,7 @@ TEST_CASE("TestSelectionAreaRejectsMismatchedSourceBodiesAndDuplicateBindings") 
   const auto source = std::make_shared<const SelectionSource>(2);
   SECTION("Mismatched body") {
     selection_test_root = [&]() -> View { return SelectionArea(Text("wrong").SelectionBlock(100)).Source(source); };
-    Runtime runtime{DynamicSelectionApp, platform};
+    UiWindow runtime{DynamicSelectionApp, platform};
     runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   }
@@ -468,7 +468,7 @@ TEST_CASE("TestSelectionAreaRejectsMismatchedSourceBodiesAndDuplicateBindings") 
     selection_test_root = [&]() -> View {
       return SelectionArea(Column {Text("line").SelectionBlock(100), Text("line").SelectionBlock(100)}).Source(source);
     };
-    Runtime runtime{DynamicSelectionApp, platform};
+    UiWindow runtime{DynamicSelectionApp, platform};
     runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
     REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
   }
@@ -477,7 +477,7 @@ TEST_CASE("TestSelectionAreaRejectsMismatchedSourceBodiesAndDuplicateBindings") 
     selection_test_root = [&]() -> View {
       return SelectionArea(Column {Text("decoration"), Text("line").SelectionBlock(100)}).Source(source);
     };
-    Runtime runtime{DynamicSelectionApp, platform};
+    UiWindow runtime{DynamicSelectionApp, platform};
     runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
     runtime.BuildFrame();
     auto* client = SelectionClient(runtime.RootNode());
@@ -505,7 +505,7 @@ TEST_CASE("TestSelectionAreaEdgeDragAdvancesVirtualBlocksAndStopsWhenUnavailable
         }).ItemExtent(20.0F).CacheExtent(0.0F).Controller(scroll)
     ).Source(source).With(Enabled{enabled});
   };
-  Runtime runtime{DynamicSelectionApp, platform};
+  UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
   Pointer(runtime, PointerEventType::Down, 10.0F, 10.0F);
@@ -546,7 +546,7 @@ TEST_CASE("TestSelectionAreaRejectedSourceUpdateCanRecoverWithoutLosingOldSelect
       Text("line").SelectionBlock(101),
     }).Source(source);
   };
-  Runtime runtime{DynamicSelectionApp, platform};
+  UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
   auto* client = SelectionClient(runtime.RootNode());
@@ -576,7 +576,7 @@ TEST_CASE("TestSelectionAreaTouchTapClearsSelectionWithoutConsumingTarget") {
       Button("Outside").OnClick([&] { ++clicks; }).With(Frame{300.0F, 48.0F}),
     });
   };
-  Runtime runtime{DynamicSelectionApp, platform};
+  UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {300.0F, 240.0F}});
   runtime.BuildFrame();
   SelectByTouch(runtime, platform, {20.0F, 10.0F});
@@ -610,7 +610,7 @@ TEST_CASE("TestSelectionAreaTouchScrollRestoresMenuAndRetainsOffscreenSelection"
         }).ItemExtent(20.0F).CacheExtent(0.0F).Controller(scroll)
             .With(ScrollPhysics{.overscroll_enabled = false})).Source(source));
   };
-  Runtime runtime{DynamicSelectionApp, platform};
+  UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {300.0F, 160.0F}});
   runtime.BuildFrame();
   SelectByTouch(runtime, platform, {20.0F, 50.0F});

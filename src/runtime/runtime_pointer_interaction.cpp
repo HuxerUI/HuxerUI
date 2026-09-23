@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "internal_access.h"
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
@@ -750,7 +750,7 @@ void detail::PointerInteraction::AdvanceDragDropSession(std::int64_t pointer_id,
 }
 
 void detail::AutoScrollDropTarget(
-    Runtime& runtime, const std::unique_ptr<MountedNode>& root, std::uint64_t target_identity,
+    UiWindow& ui_window, const std::unique_ptr<MountedNode>& root, std::uint64_t target_identity,
     Point window_position, const FrameInfo& frame
 ) {
   constexpr float edge_extent = 32.0F;
@@ -791,13 +791,13 @@ void detail::AutoScrollDropTarget(
       continue;
     }
     if (frame.delta_time <= 0.0) {
-      InternalAccess::RequestFrame(runtime);
+      InternalAccess::RequestFrame(ui_window);
       break;
     }
     const float delta = intensity * maximum_speed * static_cast<float>(frame.delta_time);
     const float consumed = ScrollNodeBy(*node, delta, ScrollSource::DragDrop);
     if (consumed != 0.0F) {
-      InternalAccess::RequestFrame(runtime);
+      InternalAccess::RequestFrame(ui_window);
     }
     if (std::abs(consumed - delta) < 0.001F) {
       break;
@@ -878,7 +878,7 @@ void detail::PointerInteraction::CancelPointerRecognition(PointerRecognition& re
   }
   recognition.active = false;
   const PointerEvent cancellation = CancellationEvent(event);
-  const double timestamp = runtime_state_.platform_->Now();
+  const double timestamp = runtime_state_.owner_.Now();
   const auto cancel_gesture = [&](GestureRecognitionState& retained) {
     NodeExtension* extension = FindExtension(*runtime_state_.mounted_root_, retained.extension);
     detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, retained.extension.node_identity);
@@ -1010,7 +1010,7 @@ bool detail::PointerInteraction::AcceptSharedGestureRecognition(
     detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, gesture->extension.node_identity);
     if (extension && node) {
       gesture->recognizer->Accepted(*node, *extension,
-                                    GestureInput(*gesture, event, timestamp.value_or(runtime_state_.platform_->Now())));
+                                    GestureInput(*gesture, event, timestamp.value_or(runtime_state_.owner_.Now())));
     }
   } catch (...) {
     for (const SharedRecognition& participant : shared) {
@@ -1112,14 +1112,14 @@ bool detail::PointerInteraction::AcceptPointerRecognition(
     detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, gesture->extension.node_identity);
     if (extension && node && gesture->recognizer) {
       gesture->recognizer->Accepted(*node, *extension,
-                                    GestureInput(*gesture, event, timestamp.value_or(runtime_state_.platform_->Now())));
+                                    GestureInput(*gesture, event, timestamp.value_or(runtime_state_.owner_.Now())));
     }
   } else if (auto* source = std::get_if<DragSourceRecognitionState>(&session.recognitions[index].state)) {
     NodeExtension* extension = FindExtension(*runtime_state_.mounted_root_, source->extension);
     detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, source->extension.node_identity);
     if (extension && node && source->recognizer) {
       source->recognizer->Accepted(*node, *extension,
-                                   GestureInput(*source, event, timestamp.value_or(runtime_state_.platform_->Now())));
+                                   GestureInput(*source, event, timestamp.value_or(runtime_state_.owner_.Now())));
       BeginDragDrop(session, *source);
     }
   } else if (const auto* accepted = std::get_if<TextSelectionRecognitionState>(&session.recognitions[index].state)) {
@@ -1205,7 +1205,7 @@ GestureDecision detail::PointerInteraction::UpdatePointerRecognition(
       return GestureDecision::Reject;
     }
     recognition.active = true;
-    const GestureRecognizerInput input = GestureInput(retained, event, runtime_state_.platform_->Now());
+    const GestureRecognizerInput input = GestureInput(retained, event, runtime_state_.owner_.Now());
     if (RecognitionOwnerIndex(session) == std::optional{index}) {
       retained.recognizer->UpdateAccepted(*node, *extension, input);
       return event.type == PointerEventType::Up || event.type == PointerEventType::Cancel
@@ -1222,7 +1222,7 @@ GestureDecision detail::PointerInteraction::UpdatePointerRecognition(
       return GestureDecision::Reject;
     }
     recognition.active = true;
-    const GestureRecognizerInput input = GestureInput(retained, event, runtime_state_.platform_->Now());
+    const GestureRecognizerInput input = GestureInput(retained, event, runtime_state_.owner_.Now());
     if (RecognitionOwnerIndex(session) == std::optional{index}) {
       retained.recognizer->UpdateAccepted(*node, *extension, input);
       if (event.type == PointerEventType::Move) {
@@ -1287,7 +1287,7 @@ GestureDecision detail::PointerInteraction::UpdatePointerRecognition(
       if (!valid && extension && node && consumer.recognizer) {
         const PointerEvent cancellation = CancellationEvent(event);
         consumer.recognizer->Canceled(*node, *extension,
-                                      GestureInput(consumer, cancellation, runtime_state_.platform_->Now()));
+                                      GestureInput(consumer, cancellation, runtime_state_.owner_.Now()));
       }
       return !valid;
     });
@@ -1299,7 +1299,7 @@ GestureDecision detail::PointerInteraction::UpdatePointerRecognition(
 }
 
 void detail::PointerInteraction::PublishTap(TapRecognitionState& tap, const PointerEvent& event) {
-  const double timestamp = runtime_state_.platform_->Now();
+  const double timestamp = runtime_state_.owner_.Now();
   for (GestureRecognitionState& consumer : tap.consumers) {
     NodeExtension* extension = FindExtension(*runtime_state_.mounted_root_, consumer.extension);
     detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, consumer.extension.node_identity);
@@ -1369,7 +1369,7 @@ void detail::PointerInteraction::AdvancePointerRecognition(double timestamp) {
 
     if (!due.has_value()) {
       if (next_deadline.has_value()) {
-        runtime_state_.owner_.RequestFrameAfter(*next_deadline - runtime_state_.platform_->Now());
+        runtime_state_.owner_.RequestFrameAfter(*next_deadline - runtime_state_.owner_.Now());
       }
       return;
     }
@@ -1461,7 +1461,7 @@ void detail::PointerInteraction::UpdatePointerCursor(std::optional<Point> positi
     return;
   }
   pointer_cursor_kind_ = kind;
-  runtime_state_.platform_->SetPointerCursor(kind);
+  runtime_state_.owner_.SetPointerCursor(kind);
 }
 
 void detail::PointerInteraction::HandlePointerEvent(const PointerEvent& input_event) {
@@ -1643,7 +1643,7 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
   session.initiating_button = initiating_button;
   session.pressed_buttons = pressed_buttons;
   session.chorded = HasMultipleButtons(pressed_buttons);
-  const double timestamp = runtime_state_.platform_->Now();
+  const double timestamp = runtime_state_.owner_.Now();
   if (event.device_kind == PointerDeviceKind::Touch) {
     RecordScrollVelocitySample(session, event.position, timestamp);
   }
@@ -1850,7 +1850,7 @@ void detail::PointerInteraction::HandlePointerMove(const PointerEvent& event, bo
   }
 
   if (session.device_kind == PointerDeviceKind::Touch) {
-    RecordScrollVelocitySample(session, event.position, runtime_state_.platform_->Now());
+    RecordScrollVelocitySample(session, event.position, runtime_state_.owner_.Now());
     const float distance_x = event.position.x - session.down_position.x;
     const float distance_y = event.position.y - session.down_position.y;
     if (!session.owner.has_value() &&
@@ -1984,7 +1984,7 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
     if (auto* scroll = std::get_if<ScrollRecognitionState>(&recognition.state)) {
       scroll_axis = scroll->axis;
       if (session.device_kind == PointerDeviceKind::Touch) {
-        scroll_velocity = EstimateScrollVelocity(session, scroll->axis, runtime_state_.platform_->Now());
+        scroll_velocity = EstimateScrollVelocity(session, scroll->axis, runtime_state_.owner_.Now());
       }
       for (std::uint64_t identity : std::exchange(scroll->active_nodes, {})) {
         if (detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, identity)) {

@@ -63,25 +63,23 @@ public:
   ~SystemTrayService();
 
   [[nodiscard]] bool IsAvailable();
-  void Show(
-      std::uint64_t owner, ImageVariant icon, SystemTrayOptions options, std::shared_ptr<const Environment> environment
-  );
-  void Hide(std::uint64_t owner) noexcept;
-  [[nodiscard]] std::function<void()> ConnectActivate(std::function<void()> handler);
+  void Show(ImageVariant icon, SystemTrayOptions options);
+  void Hide();
+  /// Retains one application-lifetime handler after validating the original application thread and context.
+  /// @param handler Nonempty callback; duplicate registration is rejected without replacing the current handler.
+  void OnActivate(std::function<void()> handler);
   void Disconnect() noexcept;
+  void RefreshPresentation();
 
 private:
   struct DesiredPresentation {
-    std::uint64_t owner = 0;
     ImageVariant icon;
     SystemTrayOptions options;
-    std::shared_ptr<const Environment> environment;
   };
 
   SystemTrayService(std::shared_ptr<SystemTrayTransport> transport, std::shared_ptr<AppResources> resources);
   void EnsureInitialized();
   void HandleEvent(const SystemTrayEvent& event);
-  void RefreshPresentation();
   ResolvedSystemTrayPresentation ResolvePresentation(
       const DesiredPresentation& desired,
       std::uint64_t generation,
@@ -90,11 +88,10 @@ private:
   );
   std::vector<ResolvedSystemTrayMenuEntry> ResolveMenu(
       const std::vector<MenuEntry>& entries,
-      const Locale& locale,
+      const ResourceConfiguration& configuration,
       std::uint64_t& next_command,
       std::unordered_map<std::uint64_t, std::function<void()>>& callbacks
   );
-  void DisconnectActivate(std::uint64_t connection) noexcept;
 
   std::shared_ptr<SystemTrayTransport> transport_;
   std::shared_ptr<AppResources> resources_;
@@ -104,10 +101,9 @@ private:
   std::function<void()> activation_handler_;
   std::uint64_t generation_ = 0;
   std::uint64_t next_command_ = 1;
-  std::uint64_t activation_connection_ = 0;
-  std::uint64_t next_connection_ = 1;
   bool initialized_ = false;
   bool connected_ = true;
+  std::shared_ptr<ExecutionContext> execution_;
 };
 
 } // namespace huxerui::detail

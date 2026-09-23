@@ -2,17 +2,17 @@
 
 This document defines the implemented platform-neutral semantics foundation and records deferred component and platform coverage explicitly.
 
-Semantics is shared Runtime output.
-Components and applications declare meaning, Runtime resolves the committed semantic hierarchy, and supported platform bridges expose that hierarchy through accessibility APIs.
+Semantics is shared UiWindow output.
+Components and applications declare meaning, UiWindow resolves the committed semantic hierarchy, and supported platform bridges expose that hierarchy through accessibility APIs.
 Renderers do not infer semantics from pixels or PaintCommands.
 
 ## Goals
 
 - Give built-in and custom controls one shared model for roles, names, values, states, actions, focus, collections, and geometry.
-- Preserve the existing `View`, modifier, typed event, `NodeExtension`, Runtime, and PlatformAdapter boundaries.
+- Preserve the existing `View`, modifier, typed event, `NodeExtension`, Runtime, and UiWindow boundaries.
 - Publish immutable committed data that supported platform accessibility objects can retain safely after `BuildFrame()` returns.
 - Support self-drawn composite controls without creating fake MountedNodes or platform Views.
-- Keep Runtime input focus, text-input ownership, and platform accessibility focus distinct.
+- Keep UiWindow input focus, text-input ownership, and platform accessibility focus distinct.
 - Prevent TextField-owned secure content from entering committed semantics.
 - Keep the shared type and action surface closed, platform-neutral, and explicit about which coverage remains deferred.
 
@@ -31,7 +31,7 @@ A PlatformView supplies or bridges its platform accessibility subtree and suppre
 |---|---|
 | Components and application Views | Declare platform-neutral semantic properties |
 | NodeExtension | Contribute retained state, virtual semantic children, and semantic-only behavior |
-| Runtime-owned SemanticTree | Resolve the hierarchy, identity, hard state, geometry, secure-data policy, and actions |
+| UiWindow-owned SemanticTree | Resolve the hierarchy, identity, hard state, geometry, secure-data policy, and actions |
 | Supported platform accessibility adapter | Retain `SemanticFrame`, expose platform objects, translate platform actions, and issue platform notifications |
 | Renderer | Render `RenderScene`; it does not construct semantics |
 
@@ -41,20 +41,20 @@ The flow is:
 component defaults
     + NodeExtension contribution
     + application Semantics overrides
-    + Runtime focus, visibility, security, and geometry
+    + UiWindow focus, visibility, security, and geometry
         -> SemanticFrame
         -> supported platform accessibility hierarchy
         -> SemanticAction
-        -> Runtime
+        -> UiWindow
 ```
 
-There is no platform Runtime variant and no concrete-component switch in a platform adapter.
+Platform-derived UiWindow implementations do not switch on concrete component types.
 
-The private SemanticTree owns identity allocation, action routes, and the immutable frame. Runtime invokes it after interaction and geometry synchronization and publishes its output in FrameCommit. Focus remains Runtime-owned; editing actions cooperate with TextInteraction without reading its session state. MountedNode retains node-associated semantic identities across compatible reconciliation.
+The private SemanticTree owns identity allocation, action routes, and the immutable frame. UiWindow invokes it after interaction and geometry synchronization and publishes its output in FrameCommit. Focus remains UiWindow-owned; editing actions cooperate with TextInteraction without reading its session state. MountedNode retains node-associated semantic identities across compatible reconciliation.
 
-Runtime retains one internal semantic patch for component meaning and an optional patch for author declarations.
+UiWindow retains one internal semantic patch for component meaning and an optional patch for author declarations.
 The optional patch's presence preserves an explicit empty `Semantics{}` without a separate declaration flag or wrapper type.
-NodeExtension contributions are applied between those patches, and Runtime hard state remains authoritative.
+NodeExtension contributions are applied between those patches, and UiWindow hard state remains authoritative.
 
 ## Public declarations
 
@@ -218,19 +218,19 @@ There is no separate replace modifier, exclusion type, traversal-order type, or 
 `Preserve` is the default and retains ordinary semantic descendants.
 Automatic descendant merging is intentionally absent until HuxerUI has concrete conflict and action-routing rules; a component that represents one semantic unit declares its complete label and excludes decorative descendants explicitly.
 
-Runtime-derived enabled state, input focus, multiline editing, secure editing, actual editable selection, scroll metrics, clipping, and modal visibility are resolved from mounted behavior rather than application overrides.
+UiWindow-derived enabled state, input focus, multiline editing, secure editing, actual editable selection, scroll metrics, clipping, and modal visibility are resolved from mounted behavior rather than application overrides.
 
 ## Resolution
 
-Runtime resolves fields in this order:
+UiWindow resolves fields in this order:
 
 - Built-in component defaults.
 - Compatible NodeExtension contribution.
 - Explicit `Semantics` modifiers from left to right.
-- Runtime hard state, visibility, secure-data policy, actions, and final geometry.
+- UiWindow hard state, visibility, secure-data policy, actions, and final geometry.
 
-The Runtime pass is authoritative.
-An application cannot mark a disabled subtree enabled, publish input focus that Runtime does not own, or expose a secure TextField value through the `value` field.
+The UiWindow pass is authoritative.
+An application cannot mark a disabled subtree enabled, publish input focus that UiWindow does not own, or expose a secure TextField value through the `value` field.
 
 Role never creates behavior.
 A Button role without an activation binding is not actionable, while an explicit activation binding is advertised only on a semantic node that can still perform it.
@@ -244,10 +244,10 @@ The accessible name resolves from:
 - The content itself for a Text node.
 
 Value, placeholder, hint, state description, and error remain separate fields.
-Runtime does not concatenate them into the label because platform accessibility APIs announce and update them differently.
+UiWindow does not concatenate them into the label because platform accessibility APIs announce and update them differently.
 
 Whitespace-only names are absent after localization.
-Runtime does not substitute an identifier, resource name, file path, or component type as a user-facing name.
+UiWindow does not substitute an identifier, resource name, file path, or component type as a user-facing name.
 
 ## Tree construction
 
@@ -258,7 +258,7 @@ Row, Column, Stack, visual wrappers, padding, backgrounds, indications, and othe
 Purely decorative nodes are absent.
 
 A node is emitted when it has meaningful content, state, actions, collection structure, live-region behavior, or an explicit semantic declaration.
-Runtime derives ShowOnScreen only for descendants that already qualify for emission, so scroll ancestry never makes a layout-only node semantic.
+UiWindow derives ShowOnScreen only for descendants that already qualify for emission, so scroll ancestry never makes a layout-only node semantic.
 Semantic order follows committed child order.
 The public API does not provide arbitrary traversal ordering.
 
@@ -320,7 +320,7 @@ public:
 The builder is valid only for the duration of `BuildSemantics()` and cannot be copied, moved, or retained.
 SetOwner applies dynamic properties to the mounted owner's declaration.
 AddChild creates one virtual child with owner-local bounds, an optional already-declared virtual parent, and explicit component-owned availability.
-Runtime combines that availability with the mounted owner and virtual ancestors' enabled state; a virtual child cannot enable a disabled subtree.
+UiWindow combines that availability with the mounted owner and virtual ancestors' enabled state; a virtual child cannot enable a disabled subtree.
 SetActiveChild projects owner input focus onto one published, effectively enabled logical child without creating a second native focus owner.
 If that child or one of its virtual ancestors is hidden or disabled, the mounted owner retains focus.
 AdoptChild associates a direct mounted child's interactive content with a virtual semantic item; it omits the wrapper and decorative labels while preserving nested controls, input state, and actions.
@@ -332,11 +332,11 @@ Extensions use the same availability predicate for actual input and semantic dec
 The action operations require an existing owner or child local ID and do not accept callbacks.
 It cannot publish a frame, insert platform objects, or retain a MountedNode pointer.
 
-Runtime privately records the mounted owner, compatible extension handle, and local ID for each actionable semantic node.
-An action looks up that route again on the Runtime UI thread, so platforms and extensions never retain mounted pointers.
+UiWindow privately records the mounted owner, compatible extension handle, and local ID for each actionable semantic node.
+An action looks up that route again on the application thread, so platforms and extensions never retain mounted pointers.
 
 Built-in and third-party controls use the same NodeExtension capability.
-Runtime does not switch on concrete component types.
+UiWindow does not switch on concrete component types.
 
 ## Identity
 
@@ -344,7 +344,7 @@ Runtime does not switch on concrete component types.
 using SemanticNodeId = std::uint64_t;
 ```
 
-Runtime allocates nonzero IDs monotonically and never reuses an ID for another semantic entity during its lifetime.
+UiWindow allocates nonzero IDs monotonically and never reuses an ID for another semantic entity during its lifetime.
 The primary ID follows a compatible MountedNode.
 A virtual child identity combines the mounted owner with its stable local ID.
 
@@ -424,14 +424,14 @@ A platform adapter with accessibility support retains the shared pointer for as 
 ## PlatformView semantic bridge
 
 A PlatformView contributes one semantic anchor at its mounted position rather than converting its platform accessibility descendants into SemanticNodes.
-An optional Runtime-owned platform-view identity marks anchor nodes in `SemanticFrame`; applications cannot supply it through the `Semantics` modifier.
+An optional UiWindow-owned platform-view identity marks anchor nodes in `SemanticFrame`; applications cannot supply it through the `Semantics` modifier.
 The anchor carries the same stable PlatformView identity as `PlacePlatformViewCommand`, while its parent and sibling position come from ordinary semantic resolution.
 Visual `RenderComposition` order and accessibility traversal are derived from the same committed mounted tree but remain distinct outputs: paint-only decoration does not become accessible merely because it occupies a later render slice.
 
 On a supported backend, the platform accessibility adapter resolves the anchor identity against the PlatformView instance from the same committed frame and exposes that platform object's accessibility root at the anchor position.
 The anchor is a structural substitution point rather than an additional generic accessible object, so assistive technology encounters the platform root once.
 It suppresses semantic descendants that would duplicate the platform subtree, but HuxerUI semantic siblings before and after the anchor remain in their declared order.
-The bridge does not copy platform labels, actions, selection, or editable content into shared Runtime state.
+The bridge does not copy platform labels, actions, selection, or editable content into shared UiWindow state.
 Accessibility queries and actions inside the subtree remain owned by the platform object, while traversal into or out of the subtree returns through the HuxerUI anchor.
 PlatformPayload events notify typed application EventBindings and do not substitute for platform accessibility queries or actions.
 Conversely, an accessibility action inside the platform subtree is not mirrored as a PlatformModule event unless the platform component independently emits that documented application event.
@@ -443,9 +443,9 @@ A stale query fails safely against the newest committed identity instead of dere
 Android exposes the PlatformView as a real accessible child alongside provider-backed HuxerUI virtual nodes and preserves the anchor's sibling position.
 UIKit and AppKit insert the platform accessibility root into their retained container-child order at the anchor.
 Windows bridges a child HWND or provider fragment root at the matching UI Automation position.
-Web PlatformView elements retain their native DOM accessibility independently; the Runtime anchor is not projected into browser accessibility.
+Web PlatformView elements retain their native DOM accessibility independently; the UiWindow anchor is not projected into browser accessibility.
 
-Runtime increments the nonzero revision and creates a new `SemanticFrame` only when semantic content, structure, focus, or geometry changes.
+UiWindow increments the nonzero revision and creates a new `SemanticFrame` only when semantic content, structure, focus, or geometry changes.
 A color-only render frame reuses the previous semantic frame.
 
 The semantics contract does not publish a separate change-set type.
@@ -475,7 +475,7 @@ enum class SemanticActionKind {
 ```
 
 Checkbox, Switch, RadioButton, Tabs, segmented items, and navigation destinations use `Activate` rather than separate Toggle or Select actions.
-Their role and state let a platform adapter expose the appropriate native toggle or selection pattern, while the explicitly advertised Activate action proves that Runtime behavior exists.
+Their role and state let a native accessibility bridge expose the appropriate toggle or selection pattern, while the explicitly advertised Activate action proves that UiWindow behavior exists.
 
 `SemanticAction` uses one payload variant rather than one request class per action:
 
@@ -502,13 +502,13 @@ There is no separate action descriptor hierarchy.
 Copy, Cut, Paste, Select All, Undo, and Redo remain in the existing TextInput and `TextEditingAction` path.
 The semantics layer does not duplicate that protocol.
 
-The platform calls `Runtime::PerformSemanticAction(SemanticNodeId, SemanticAction)` on the Runtime UI thread.
-Runtime validates the ID, latest committed action availability, enabled state, payload, mounted owner, extension compatibility, and local route before dispatch.
+The platform calls `UiWindow::PerformSemanticAction(SemanticNodeId, SemanticAction)` on the application thread.
+UiWindow validates the ID, latest committed action availability, enabled state, payload, mounted owner, extension compatibility, and local route before dispatch.
 An action kind with the wrong payload alternative is invalid and returns false before routing.
 Stale or otherwise invalid actions also return false.
 
 Activate reuses the existing activation or typed Click path.
-Focus reuses Runtime input focus.
+Focus reuses UiWindow input focus.
 An extension may advertise any other standard or custom action only when its `OnSemanticAction` implementation can handle it.
 The current Slider extension implements SetValue, Increment, and Decrement through its existing controlled change event.
 TextField editing routes through its retained extension, while scrolling and ShowOnScreen use generic mounted scrolling capability.
@@ -520,11 +520,11 @@ Node geometry uses host-view logical coordinates after final layout offsets and 
 Non-axis-aligned geometry is represented by a conservative axis-aligned bounds rectangle.
 The frame publishes full node bounds and an `offscreen` result derived from the host viewport, ancestor scroll viewports, and rectangular `ClipChildren` intersections.
 Partially clipped nodes retain their full stable bounds; the public snapshot does not add a second `visible_bounds` rectangle without a demonstrated native requirement.
-ShowOnScreen uses retained Runtime geometry rather than reconstructing a target from the public snapshot.
+ShowOnScreen uses retained UiWindow geometry rather than reconstructing a target from the public snapshot.
 
 ## Focus
 
-Runtime input focus is committed as node state.
+UiWindow input focus is committed as node state.
 The Focus action follows the same focus path used by keyboard and pointer input and starts TextInput only when the target owns a TextInputClient.
 
 Platform accessibility focus remains platform state.
@@ -532,7 +532,7 @@ Moving VoiceOver, TalkBack, Narrator, or another screen reader to a semantic nod
 
 Semantic modal isolation derives from the same topmost retained Layer focus trap used by keyboard and pointer focus.
 Application content and lower layers outside that trap are excluded from accessible navigation, while higher notification and system layers may remain available for live announcements.
-There is no author-settable modal boolean that can contradict Runtime behavior.
+There is no author-settable modal boolean that can contradict UiWindow behavior.
 
 Presentation content declares semantics on its real visual root rather than the viewport-sized Layer entry.
 Dialog and BottomSheet surfaces therefore publish their own bounds, while the barrier remains a visual and pointer concern.
@@ -547,12 +547,12 @@ A role never implies this behavior: a presentation surface advertises Dismiss on
 An exiting Layer may remain in the render tree until its exit motion completes, but its content immediately stops receiving input, owning focus, and contributing semantics.
 A modal interaction barrier remains until removal so pointer and keyboard input cannot fall through the still-visible presentation, while semantic modal isolation advances to the next active region immediately.
 This keeps paint lifetime independent from content interaction and accessibility lifetime without exposing the application through a fading modal.
-Runtime resolves this policy from the Layer metadata committed on the mounted entry rather than re-reading newer LayerController state during semantic construction.
+UiWindow resolves this policy from the Layer metadata committed on the mounted entry rather than re-reading newer LayerController state during semantic construction.
 If exit completion mutates the controller while a frame is building, the retained node therefore keeps the semantics of the snapshot that produced it until the next LayerStack reconciliation.
 
 ## Text editing and secure values
 
-TextField contributes its role, label, nonsecure value, placeholder, validation state, read-only state, multiline state, secure state, Runtime input focus, and nonsecure UTF-16 selection.
+TextField contributes its role, label, nonsecure value, placeholder, validation state, read-only state, multiline state, secure state, UiWindow input focus, and nonsecure UTF-16 selection.
 An editable TextField advertises SetText, and a nonsecure TextField advertises SetSelection even when it is read-only.
 The retained TextField extension handles both actions through the existing reducer, validation, length limit, history, and controlled change event rather than adding another editing protocol.
 
@@ -560,14 +560,14 @@ SetText replaces the complete value atomically, clears composition, and leaves t
 SetSelection accepts a normalized TextRange and resolves it to a downstream TextSelection after validating text boundaries.
 An invalid UTF-8 value, out-of-range offset, surrogate split, disabled field, or unsupported secure operation returns false without partial mutation.
 
-Runtime observes TextInputClient state before and after a semantic edit and applies the same state validation, invalidation, and active-session synchronization rules used by native command batches.
+UiWindow observes TextInputClient state before and after a semantic edit and applies the same state validation, invalidation, and active-session synchronization rules used by native command batches.
 Content revisions invalidate layout, paint, semantics, and active native input state; selection-only revisions invalidate foreground paint, semantics, and active native input state without requiring a new input session.
 
 An ordinary TextField publishes its committed value and normalized selection for platform accessibility editing.
 Composition details remain in the existing bounded TextInputClient query path.
 
 A secure TextField frame never contains TextField-owned plaintext, selected text, surrounding text, composition text, clipboard content, or plaintext-derived state descriptions.
-Runtime commits protected state without a value, selection, or protected length.
+UiWindow commits protected state without a value, selection, or protected length.
 An editable secure field may accept SetText, but it does not advertise SetSelection.
 Copy and Cut remain unavailable through the existing editing policy.
 
@@ -616,8 +616,8 @@ Material, Flat, and third-party visual themes do not change component semantics.
 Popup keeps the semantics of its supplied content because the presentation mechanism does not imply a shared role.
 VirtualList and VirtualGrid publish only realized retained items and never materialize every View for accessibility; scrolling advances the realized semantic window.
 Cached items outside the viewport remain published with `offscreen = true` and reuse the existing ShowOnScreen action while they remain mounted.
-An item root that already owns a meaningful role such as Button or Checkbox keeps that role and receives collection-item metadata; Runtime supplies ListItem or GridCell only when the item root has no component role.
-Future component defaults use the same owner/real-child and retained action-routing contracts rather than adding component-specific Runtime branches.
+An item root that already owns a meaningful role such as Button or Checkbox keeps that role and receives collection-item metadata; UiWindow supplies ListItem or GridCell only when the item root has no component role.
+Future component defaults use the same owner/real-child and retained action-routing contracts rather than adding component-specific UiWindow branches.
 
 TreeView publishes its expanded logical hierarchy independently of row realization.
 Sibling keys are qualified by parent identity and produce stable extension-local IDs; scrolling does not retire the logical TreeItem or execute its row factory.
@@ -657,9 +657,9 @@ result.Place(
 ```
 
 The two-argument `Place(item, offset)` remains the ordinary non-collection or decorative-item path.
-A custom VirtualLayout can opt into the same collection contract without adding a component-specific Runtime branch.
+A custom VirtualLayout can opt into the same collection contract without adding a component-specific UiWindow branch.
 
-Runtime retains the collection declaration and realized item metadata with the committed virtual placements.
+UiWindow retains the collection declaration and realized item metadata with the committed virtual placements.
 During semantic construction it applies the collection role and item role as component defaults, attaches structural collection metadata to the corresponding direct item root, and then applies extension and author semantics with their ordinary precedence.
 This creates no wrapper View, fake MountedNode, accessibility-only item cache, or platform-specific collection model.
 
@@ -703,8 +703,8 @@ Editable ComboBox nodes retain Value, SetText, selection, and ExpandCollapse sup
 It publishes stable runtime IDs, hierarchy, screen geometry, names, identifiers, state, collection position, live regions, and committed property, focus, selection, layout, and structure changes.
 
 UI Automation may query off-thread.
-Providers answer read-only queries from a retained immutable `SemanticFrame` and marshal actions to the HWND thread before calling Runtime.
-Provider queries retain the owning frame while using a node pointer and never copy or retain mounted Runtime objects.
+Providers answer read-only queries from a retained immutable `SemanticFrame` and marshal actions to the HWND thread before calling UiWindow.
+Provider queries retain the owning frame while using a node pointer and never copy or retain mounted UiWindow objects.
 Secure fields advertise password state but reject Value reads instead of exposing either their contents or an ambiguous empty value.
 TextField currently exposes Value rather than TextPattern because the semantic frame does not yet publish the native text-range geometry required for a correct `ITextRangeProvider` implementation.
 
@@ -715,8 +715,8 @@ Tree maps to an outline and TreeItem to an outline row, including disclosure rel
 The AppKit host currently exposes retained `NSAccessibilityElement` children with mapped roles, labels, basic values, hints, enabled, selected, and focused state, hierarchy, screen geometry, and press or range actions from the semantic frame.
 It preserves mixed checked state and emits separate structure, title, value, and focus notifications by comparing retained frames.
 For a PlatformView anchor, it resolves the committed identity through the AppKit host and substitutes the unignored NSView accessibility root at the anchor's sibling position instead of creating a duplicate `NSAccessibilityElement`.
-The focused AppKit property represents keyboard focus and may route a Runtime Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as Runtime input focus.
-AppKit calls and Runtime actions remain on the main thread.
+The focused AppKit property represents keyboard focus and may route a UiWindow Focus action; the VoiceOver cursor remains AppKit-owned and is not committed as UiWindow input focus.
+AppKit calls and UiWindow actions remain on the main thread.
 `NSTextInputClient` continues to own IME communication.
 
 ### Linux
@@ -737,7 +737,7 @@ ACTION_SELECT and ACTION_CLEAR_SELECTION dispatch SetSelected, independently of 
 
 `HuxerUIView` exposes virtual descendants through `AccessibilityNodeProvider`.
 The shared semantic root maps to `AccessibilityNodeProvider.HOST_VIEW_ID`, while every non-root SemanticNodeId is converted exactly to a positive 32-bit virtual View ID.
-The Android encoder rejects an identity above `jint` maximum instead of truncating it, and Android actions convert the virtual View ID directly back to SemanticNodeId for validation against the newest Runtime frame.
+The Android encoder rejects an identity above `jint` maximum instead of truncating it, and Android actions convert the virtual View ID directly back to SemanticNodeId for validation against the newest UiWindow frame.
 This removes a second identity allocator, bidirectional maps, reuse policy, and retained mapping growth from the ordinary node path.
 Custom semantic action IDs remain a separate 64-bit namespace and receive stable provider-local Android action IDs for the host View lifetime.
 
@@ -754,8 +754,8 @@ Provider touch exploration yields to a frontmost PlatformView subtree, and mount
 Roles map to the closest Android widget class, while checked, selected, expanded, editable, secure, range, collection, heading, live-region, invalid, and scrolling state use the corresponding AccessibilityNodeInfo contracts available on the current API level.
 Collections containing RadioButton children or children with selected state map to Android single-selection collections without adding a platform role to the shared semantic model.
 Secure fields never publish text or selection.
-Activate, Focus, SetText, SetSelection, SetSelected, SetValue, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and Custom actions return through `Runtime::PerformSemanticAction()` on the Android UI thread.
-Accessibility focus and explore-by-touch hover stay provider-owned; Android input-focus requests call Runtime Focus and remain distinct from TalkBack focus.
+Activate, Focus, SetText, SetSelection, SetSelected, SetValue, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and Custom actions return through `UiWindow::PerformSemanticAction()` on the Android UI thread.
+Accessibility focus and explore-by-touch hover stay provider-owned; Android input-focus requests call UiWindow Focus and remain distinct from TalkBack focus.
 
 Committed-frame diffs emit subtree, focus, selection, text, text-selection, scroll, state, dialog, and live-region events.
 The provider retains the newest frame even while accessibility is disabled so enabling TalkBack does not require rebuilding shared semantics.
@@ -781,13 +781,13 @@ List and Navigation map to UIKit list and landmark container types, while Grid a
 Label, value, placeholder fallback, hint, error, identifier, range, and geometry come from the retained committed frame.
 Secure TextField content, selection, and protected length remain absent rather than being reconstructed as masking characters.
 
-Activate, Focus, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and labeled custom actions return to `Runtime::PerformSemanticAction()` on the main thread.
+Activate, Focus, Increment, Decrement, Scroll, ShowOnScreen, Expand, Collapse, Dismiss, and labeled custom actions return to `UiWindow::PerformSemanticAction()` on the main thread.
 The default VoiceOver activation prefers Activate, otherwise chooses the currently valid Expand or Collapse action, and finally uses Focus for focusable fields.
 Adjustable callbacks route Increment and Decrement, the two-finger escape gesture routes Dismiss, and scrolling uses the committed axis and viewport extent of the nearest direction-compatible semantic scroll ancestor.
-SetText and SetSelection are not duplicated as custom accessibility actions: activating a TextField establishes the existing Runtime focus and a private non-accessible `UITextInput` view remains the only UIKit editing service.
-On iOS 18.1 and later, only the Runtime-focused TextField or SearchField exposes that view through `accessibilityTextInputResponder`; earlier versions still activate the same Runtime session and private first responder without making the application accessibility container a text input.
+SetText and SetSelection are not duplicated as custom accessibility actions: activating a TextField establishes the existing UiWindow focus and a private non-accessible `UITextInput` view remains the only UIKit editing service.
+On iOS 18.1 and later, only the UiWindow-focused TextField or SearchField exposes that view through `accessibilityTextInputResponder`; earlier versions still activate the same UiWindow session and private first responder without making the application accessibility container a text input.
 
-VoiceOver focus stays UIKit-owned and never becomes Runtime input focus merely because an accessibility element became focused.
+VoiceOver focus stays UIKit-owned and never becomes UiWindow input focus merely because an accessibility element became focused.
 An offscreen focused element may request ShowOnScreen without changing input focus.
 The bridge preserves the current UIKit element when its SemanticNodeId survives and issues conservative layout notifications only when the accessible hierarchy, role, collection structure, or PlatformView subtree changes.
 If the focused element disappears, UIKit remains responsible for choosing the next target from the new committed order; the bridge does not impose a platform-independent fallback.
@@ -808,23 +808,23 @@ Recomposition marks semantics dirty when declarations, events, enabled state, ch
 Layout, scrolling, presentation transforms, focus, and text editing are reflected when the next semantic frame is built.
 
 `InvalidateSemantics()` requests a frame for retained semantic state without implying paint or layout invalidation.
-Runtime owns TextInputClient mutation finalization so semantic editing cannot bypass layout, foreground paint, active native input, or semantic invalidation.
+UiWindow owns TextInputClient mutation finalization so semantic editing cannot bypass layout, foreground paint, active native input, or semantic invalidation.
 Scroll offset changes update scroll metrics, offscreen state, and realized virtual items in the same committed frame.
 An extension changing unrelated paint and semantics requests both explicitly.
 
-Runtime builds semantics after final presentation geometry and text-input session refresh and before returning `FrameCommit`.
+UiWindow builds semantics after final presentation geometry and text-input session refresh and before returning `FrameCommit`.
 It does not call platform accessibility APIs while building.
 
-The initial Runtime always produces semantics.
+Each UiWindow produces semantics.
 There is no enablement API or assistive-technology detection race.
 Unchanged frames reuse the immutable shared object, and additional caching is added only after profiling demonstrates a need.
 
 ## Threading
 
-Runtime construction and action dispatch run on the Runtime UI thread.
+UiWindow construction and action dispatch run on the application thread.
 NodeExtension semantic callbacks do not run concurrently with reconciliation, frame construction, or unmount.
 
-Platform accessibility queries use a retained immutable frame and do not call Runtime for names, children, states, or geometry.
+Platform accessibility queries use a retained immutable frame and do not call UiWindow for names, children, states, or geometry.
 Platform actions arriving during frame construction are queued or marshaled and cannot re-enter `BuildFrame()`.
 
 ## Validation
@@ -852,7 +852,7 @@ Shared tests also cover:
 - VirtualList and VirtualGrid counts, realized item metadata, scrolling, cache eviction, and semantic identity.
 
 Focused Android codec coverage verifies deterministic snapshots, direct virtual IDs, UTF-8 content, and overflow rejection.
-Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, read-only ComboBox values, List selection containers, pattern selection, secure-value rejection, scroll boundaries, and Runtime action routing.
+Focused Windows provider fixtures cover properties, stable fragment identity, static COM interfaces, provider-shape replacement, navigation, hit testing, read-only ComboBox values, List selection containers, pattern selection, secure-value rejection, scroll boundaries, and UiWindow action routing.
 The iOS bridge compiles against the iOS 15 Simulator boundary.
 Physical-device VoiceOver validation covers primary ui_gallery traversal, shared controls, text input, and PlatformView substitution.
 Broader manual coverage for modal isolation, scrolling, live regions, and less common actions remains ongoing.
@@ -863,21 +863,21 @@ Unavailable platforms and tools remain explicitly unverified.
 Windows UI Automation, AppKit, Android AccessibilityNodeProvider, and UIKit consume the shared contract.
 Linux and Web do not provide platform accessibility mappings, and those bridges are not planned.
 
-Shared public API and Runtime changes require common tests and every affected platform build available locally.
+Shared public API and UiWindow changes require common tests and every affected platform build available locally.
 Each platform adapter is validated on its platform; unavailable platforms remain unverified.
 
 ## Invariants
 
-- Semantics is shared Runtime output, not renderer output or platform inference.
+- Semantics is shared UiWindow output, not renderer output or platform inference.
 - `SemanticFrame` is immutable, owning, pointer-free with respect to mounted state, and safe to retain.
-- Role does not create an action; every advertised action has a valid Runtime route.
-- Runtime hard state and secure-data policy override declarations.
+- Role does not create an action; every advertised action has a valid UiWindow route.
+- UiWindow hard state and secure-data policy override declarations.
 - Secure semantic frames never expose TextField-owned plaintext, selection, composition, or protected length.
 - Semantic text editing uses the existing retained client and controlled change path rather than a second editor state.
 - Scroll and ShowOnScreen use existing mounted scrolling capability rather than component branches.
 - Modal accessibility derives from retained Layer focus trapping, and virtual collection semantics never force eager View materialization.
 - One MountedNode may own a stable hierarchical virtual semantic subtree without fake Views.
-- Semantic identity is Runtime-local and never reused for unrelated content.
+- Semantic identity is UiWindow-local and never reused for unrelated content.
 - Input focus, text-input ownership, and platform accessibility focus remain distinct.
 - Platform objects retain SemanticFrame and SemanticNodeIds, never MountedNode or NodeExtension pointers.
 - Platform actions are validated against the latest committed frame.

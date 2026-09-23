@@ -10,7 +10,7 @@
 
 namespace huxerui {
 
-class Runtime;
+class UiWindow;
 
 namespace detail {
 
@@ -27,7 +27,9 @@ public:
   Win32Accessibility(const Win32Accessibility&) = delete;
   Win32Accessibility& operator=(const Win32Accessibility&) = delete;
 
-  void SetRuntime(Runtime* runtime) noexcept;
+  /// Binds native callbacks to their shared window state on the application thread.
+  /// @param ui_window Borrowed original window, or null to clear the binding before its destruction.
+  void SetUiWindow(UiWindow* ui_window) noexcept;
   void SetWindow(HWND window) noexcept;
   void SetDpiScale(float scale) noexcept;
   void Commit(std::shared_ptr<const SemanticFrame> frame, const Win32PlatformViews* platform_views);

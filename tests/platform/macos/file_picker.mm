@@ -116,7 +116,7 @@ TEST_CASE("MacFileReferenceReadsImportsAndReplacesCoordinatedFiles") {
     REQUIRE(reference.CanWrite());
 
     TestPlatform platform(DispatchToMainQueue);
-    Runtime runtime(MacFileReferenceApp, platform);
+    UiWindow runtime(MacFileReferenceApp, platform);
     runtime.BuildFrame();
     mac_file_reference_tasks.Launch([reference, imported, destination_directory, replacement]() -> Task<void> {
       mac_file_reference_text = co_await reference.ReadStringAsync();
@@ -159,7 +159,7 @@ TEST_CASE("MacFileReferenceMapsMissingFilesAndPickerCapabilities") {
     );
 
     TestPlatform platform(DispatchToMainQueue);
-    Runtime runtime(MacFileReferenceApp, platform);
+    UiWindow runtime(MacFileReferenceApp, platform);
     runtime.BuildFrame();
     mac_file_reference_tasks.Launch([reference]() -> Task<void> {
       IoResult<std::string> result = co_await reference.ReadStringAsync();
@@ -223,7 +223,7 @@ TEST_CASE("MacFileDropRetainsReadOnlyReferencesAfterPasteboardAndPreparationRele
     REQUIRE_FALSE(reference.CanWrite());
 
     TestPlatform platform(DispatchToMainQueue);
-    Runtime runtime(MacFileReferenceApp, platform);
+    UiWindow runtime(MacFileReferenceApp, platform);
     runtime.BuildFrame();
     mac_file_reference_tasks.Launch([reference]() -> Task<void> {
       mac_file_reference_text = co_await reference.ReadStringAsync();

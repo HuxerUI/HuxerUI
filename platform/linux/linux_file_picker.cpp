@@ -152,7 +152,7 @@ bool StartService(GDBusConnection* connection, std::string_view name) {
 
 // Owns the D-Bus context and request subscriptions, not file access after selection. Portal work runs
 // on this context, blocking metadata/copy work runs on file workers, and shared Task delivery returns
-// to the Runtime thread. Shutdown must account for outstanding method replies as well as signals.
+// to the UiWindow thread. Shutdown must account for outstanding method replies as well as signals.
 class PortalConnection final : public std::enable_shared_from_this<PortalConnection> {
 public:
   static std::shared_ptr<PortalConnection> Create(std::optional<std::string> bus_address) {

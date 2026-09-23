@@ -10,7 +10,7 @@
 #include <huxerui/render_scene.h>
 
 namespace huxerui {
-class Runtime;
+class UiWindow;
 }
 
 namespace huxerui::detail {
@@ -61,7 +61,7 @@ private:
   std::vector<SharedVisual> Collect(MountedNode& owner, MountedNode& root, bool capture, bool committed);
   void Match(MountedNode& owner);
   void Sample(MountedNode& owner);
-  Runtime* runtime_ = nullptr;
+  UiWindow* ui_window_ = nullptr;
   std::uint64_t owner_id_ = 0;
   std::uint64_t source_id_ = 0;
   std::uint64_t destination_id_ = 0;

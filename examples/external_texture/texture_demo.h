@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <huxerui/external_texture.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 namespace huxerui::example {
 
@@ -35,6 +35,9 @@ inline std::shared_ptr<TextureDemo> UseTextureDemo() {
   return UseService<TextureDemo>();
 }
 
-void InstallTextureDemo(RootContext& root);
+void InstallTextureDemo(WindowContext& root);
+#if defined(__ANDROID__)
+void RegisterTextureDemo(ApplicationContext& context);
+#endif
 
 } // namespace huxerui::example

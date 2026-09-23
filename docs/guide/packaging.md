@@ -243,7 +243,7 @@ View InstallerPage() {
 
 const Application application{
     InstallerPage,
-    {.root_hooks = {InstallInstallerSession}},
+    {.window_hooks = {InstallInstallerSession}},
 };
 ```
 

@@ -8,9 +8,10 @@
 #include <tuple>
 
 #include <huxerui/environment.h>
-#include <huxerui/root.h>
+#include <huxerui/app.h>
 
 #include "runtime/profiling_internal.h"
+#include "application/application_internal.h"
 
 namespace huxerui::detail {
 
@@ -148,9 +149,37 @@ void AppResources::UpdateConfiguration(ResourceConfiguration configuration) {
   CommitDependencyChange(configuration_dependency_);
 }
 
-ResourceConfiguration AppResources::Configuration() const {
-  ObserveDependency(configuration_dependency_);
+ResourceConfiguration AppResources::Configuration(bool observe) const {
+  if (observe) ObserveDependency(configuration_dependency_);
   return configuration_;
+}
+
+ResourceConfiguration AppResources::EffectiveConfiguration(bool observe) const {
+  ResourceConfiguration result = configuration_;
+  auto dependency = configuration_dependency_;
+  const auto source = CurrentExecutionContext();
+  if (source && source->requires_ui) {
+    const auto ui = source->ui.lock();
+    if (!ui || !ui->ui_window) {
+      throw std::logic_error("HuxerUI resource lookup originating UI is disconnected");
+    }
+    if (ui->configuration) {
+      result = *ui->configuration;
+      dependency = ui->configuration_dependency;
+    }
+  }
+  if (observe) {
+    ObserveDependency(dependency);
+  }
+  for (auto environment = CurrentEnvironment(); environment; environment = EnvironmentParent(*environment)) {
+    const std::any* value = observe ? FindLocalEnvironmentValue(*environment, typeid(Locale))
+                                    : PeekLocalEnvironmentValue(*environment, typeid(Locale));
+    if (value) {
+      result.locale = std::any_cast<const Locale&>(*value);
+      break;
+    }
+  }
+  return result;
 }
 
 RawAsset AppResources::Resolve(RawResource resource) {
@@ -192,13 +221,17 @@ RawAsset AppResources::ReadEntry(const ResourceIndexEntry& entry) {
   return RawAsset::FromBytes(ReadStreamBytes(OpenRead(entry.package_path)), entry.mime_type);
 }
 
-ResolvedImageAsset AppResources::ResolveImage(ImageResource resource, const Locale& locale) {
+ResolvedImageAsset AppResources::ResolveImage(ImageResource resource, const Locale& locale,
+                                              std::optional<float> display_scale) {
   HUXERUI_PROFILE_SCOPE(profile_resource, Resource, 0);
   HUXERUI_PROFILE_COUNT(Resources);
-  ObserveDependency(configuration_dependency_);
+  const float scale = display_scale ? *display_scale : EffectiveConfiguration(true).display_scale;
+  if (!std::isfinite(scale) || scale <= 0) {
+    throw std::invalid_argument("HuxerUI resource display scale must be finite and positive");
+  }
   const auto candidates = ResolveLocalized(resource, ResourceEntryKind::Image, locale);
   const auto selected =
-      std::ranges::lower_bound(candidates, configuration_.display_scale, {}, &ResourceIndexEntry::scale);
+      std::ranges::lower_bound(candidates, scale, {}, &ResourceIndexEntry::scale);
   const ResourceIndexEntry& entry = selected == candidates.end() ? candidates.back() : *selected;
   const std::string cache_key = entry.package_path + '@' + std::to_string(entry.content_hash);
   const auto cached = image_cache_.find(cache_key);
@@ -222,16 +255,16 @@ ResolvedImageAsset AppResources::ResolveImage(ImageResource resource, const Loca
   return asset;
 }
 
-ImageAsset AppResources::Resolve(ImageResource resource, const Locale& locale) {
-  ResolvedImageAsset asset = ResolveImage(std::move(resource), locale);
+ImageAsset AppResources::Resolve(ImageResource resource, const Locale& locale, std::optional<float> display_scale) {
+  ResolvedImageAsset asset = ResolveImage(std::move(resource), locale, display_scale);
   if (const auto* image = std::get_if<ImageAsset>(&asset)) {
     return *image;
   }
   throw std::invalid_argument("HuxerUI UseImage requires a raster image resource");
 }
 
-VectorAsset AppResources::ResolveVector(ImageResource resource, const Locale& locale) {
-  ResolvedImageAsset asset = ResolveImage(std::move(resource), locale);
+VectorAsset AppResources::ResolveVector(ImageResource resource, const Locale& locale, std::optional<float> display_scale) {
+  ResolvedImageAsset asset = ResolveImage(std::move(resource), locale, display_scale);
   if (const auto* image = std::get_if<VectorAsset>(&asset)) {
     return *image;
   }
@@ -243,15 +276,6 @@ ResolvedStringResource AppResources::Resolve(const StringResource& resource, con
   HUXERUI_PROFILE_COUNT(Resources);
   const ResourceIndexEntry& entry = ResolveLocalized(resource, ResourceEntryKind::String, locale).front();
   return {entry.value, entry.argument_count};
-}
-
-std::shared_ptr<AppResources> RequireAppResources(std::shared_ptr<const Environment> environment) {
-  const std::any* value = FindEnvironmentValue(std::move(environment), typeid(AppResources));
-  const auto* resources = value ? std::any_cast<std::shared_ptr<AppResources>>(value) : nullptr;
-  if (resources == nullptr || !*resources) {
-    throw std::logic_error("HuxerUI mounted resource service is not available");
-  }
-  return *resources;
 }
 
 Locale ResolveResourceLocale(std::shared_ptr<const Environment> environment, const AppResources& resources) {
@@ -379,13 +403,14 @@ std::string StringLiteral(StringVariant&& value) {
   throw std::logic_error("HuxerUI unresolved StringVariant reached mounted state");
 }
 
-ResolvedImageAsset ResolveImage(const ImageVariant& image, AppResources& resources, const Locale& locale) {
+ResolvedImageAsset ResolveImage(const ImageVariant& image, AppResources& resources, const Locale& locale,
+                                 std::optional<float> display_scale) {
   ValidateImageVariant(image);
   return std::visit(
-      [&resources, &locale](const auto& value) -> ResolvedImageAsset {
+      [&resources, &locale, display_scale](const auto& value) -> ResolvedImageAsset {
         using Image = std::decay_t<decltype(value)>;
         if constexpr (std::same_as<Image, ImageResource>) {
-          return resources.ResolveImage(value, locale);
+          return resources.ResolveImage(value, locale, display_scale);
         } else {
           return value;
         }
@@ -424,4 +449,54 @@ std::string UseString(StringVariant&& value) {
   return detail::ResolveString(std::move(value), *resources, UseEnvironment<Locale>());
 }
 
+void Resources::RequireLifetime() const {
+  const auto application = application_.lock();
+  if (!application) {
+    throw std::logic_error("HuxerUI resource service application lifetime has ended");
+  }
+  application->RequireThread();
+  if (application->phase == detail::ApplicationRuntimeState::Phase::Stopped) {
+    throw std::logic_error("HuxerUI resource service is disconnected");
+  }
+  if (const auto source = detail::CurrentExecutionContext(); source && source->application.lock() != application) {
+    throw std::logic_error("HuxerUI resource service belongs to another application lifetime");
+  }
+}
+
+ResourceConfiguration Resources::Configuration() const {
+  RequireLifetime();
+  return resources_->EffectiveConfiguration(false);
+}
+
+RawAsset Resources::GetRawResource(RawResource resource) const {
+  RequireLifetime();
+  return resources_->Resolve(std::move(resource));
+}
+
+ImageAsset Resources::GetImage(ImageResource resource) const {
+  return GetImage(std::move(resource), Configuration());
+}
+
+ImageAsset Resources::GetImage(ImageResource resource, const ResourceConfiguration& configuration) const {
+  RequireLifetime();
+  return resources_->Resolve(std::move(resource), configuration.locale, configuration.display_scale);
+}
+
+VectorAsset Resources::GetVectorImage(ImageResource resource) const {
+  return GetVectorImage(std::move(resource), Configuration());
+}
+
+VectorAsset Resources::GetVectorImage(ImageResource resource, const ResourceConfiguration& configuration) const {
+  RequireLifetime();
+  return resources_->ResolveVector(std::move(resource), configuration.locale, configuration.display_scale);
+}
+
+std::string Resources::GetString(const StringVariant& value) const {
+  return GetString(value, Configuration());
+}
+
+std::string Resources::GetString(const StringVariant& value, const ResourceConfiguration& configuration) const {
+  RequireLifetime();
+  return detail::ResolveString(value, *resources_, configuration.locale);
+}
 } // namespace huxerui

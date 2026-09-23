@@ -235,7 +235,7 @@ The content ViewSpec may already exist when the boundary is declared because its
 When Runtime reaches the boundary, it uses the boundary's mounted Environment for ViewSpec compilation and for the ordinary child subtree.
 
 An Environment used as a public value is a transient typed declaration bag with no parent or Runtime identity.
-Runtime mounts that declaration into a stable `std::shared_ptr<Environment>`, installs its inherited parent, and never replaces the mounted object during compatible reconciliation.
+UiWindow mounts that declaration into a stable `std::shared_ptr<Environment>`, installs its inherited parent, and never replaces the mounted object during compatible reconciliation.
 The private Environment entry for each type contains an optional local value, its equality operation, and a shared composition dependency.
 Copying an Environment copies only its declaration values and equality operations; it does not copy the mounted parent, dependency identities, or subscribers.
 

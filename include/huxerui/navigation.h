@@ -674,7 +674,7 @@ template <detail::NavigationRouteValue Route> RouteNavigationController<Route> U
 
 /// Updates the authoritative path of a compatible routed NavigationStack.
 ///
-/// Controllers do not retain the mounted stack. Use them on the Runtime UI thread; after disconnection, mutations
+/// Controllers do not retain the mounted stack. Use them on the UiWindow UI thread; after disconnection, mutations
 /// other than Pop() throw and read-only queries report an empty stack.
 /// @tparam Route Copyable, equality-comparable route type of the owning stack.
 /// @code
@@ -779,7 +779,7 @@ private:
 /// Controls a factory-based NavigationStack through Push, Pop, and Replace.
 ///
 /// Factories are retained and invoked within each page's composition scope. Controllers do not retain the mounted stack
-/// and must be used on the Runtime UI thread. Factory navigation does not provide serializable route data.
+/// and must be used on the UiWindow UI thread. Factory navigation does not provide serializable route data.
 /// @code
 /// auto navigation = UseNavigation();
 /// return Button("Details").OnClick([navigation] {

@@ -1,4 +1,4 @@
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
 
@@ -105,7 +105,7 @@ void detail::PointerInteraction::HandleTextSelectionPointerDown(const PointerEve
   }
   auto& selection = std::get<TextSelectionRecognitionState>(recognition->state);
   selection.recognizer = runtime_state_.text_->CreateSelectionRecognizer(
-      selection.node_identity, event, runtime_state_.platform_->Now(), runtime_state_.gesture_settings_
+      selection.node_identity, event, runtime_state_.owner_.Now(), runtime_state_.gesture_settings_
   );
   recognition->active = true;
   if (!TrackTextSelectionGesture(event)) {
@@ -124,7 +124,7 @@ bool detail::PointerInteraction::TrackTextSelectionGesture(const PointerEvent& e
   if (recognition == nullptr || !recognition->recognizer) {
     return false;
   }
-  const double timestamp = runtime_state_.platform_->Now();
+  const double timestamp = runtime_state_.owner_.Now();
   const GestureDecision decision = recognition->recognizer->Update({event, event.position, timestamp});
   if (const std::optional<double> deadline = recognition->recognizer->Deadline()) {
     runtime_state_.owner_.RequestFrameAfter(*deadline - timestamp);
@@ -176,7 +176,7 @@ void detail::PointerInteraction::RecordTextSelectionTap(
     return;
   }
 
-  runtime_state_.text_->RememberSelectionTap(event, focused->identity, runtime_state_.platform_->Now());
+  runtime_state_.text_->RememberSelectionTap(event, focused->identity, runtime_state_.owner_.Now());
 }
 
 void detail::PointerInteraction::AdvanceTextSelectionLongPress(double timestamp) {

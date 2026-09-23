@@ -39,7 +39,8 @@
 #include "application/window_internal.h"
 
 namespace huxerui::detail {
-class MacPlatformAdapter;
+class MacUiWindow;
+class MacRuntime;
 }
 
 namespace {
@@ -109,14 +110,13 @@ NSCursor* MacPointerCursor(huxerui::PointerCursorKind kind) {
 
 @interface HuxerUIWindow : NSWindow {
 @public
-  huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
+  huxerui::detail::MacUiWindow* huxeruiWindow;
 }
 @end
 
 @interface HuxerUIView : NSView {
 @public
-  huxerui::Runtime* huxeruiRuntime;
-  huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
+  huxerui::detail::MacUiWindow* huxeruiWindow;
   NSPoint huxeruiPointerPosition;
   NSTrackingArea* huxeruiTrackingArea;
   std::uint8_t huxeruiModifierKeys;
@@ -135,8 +135,10 @@ NSCursor* MacPointerCursor(huxerui::PointerCursorKind kind) {
 @interface HuxerUIApplicationDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate,
                                                   UNUserNotificationCenterDelegate> {
 @public
-  huxerui::detail::MacPlatformAdapter* huxeruiAdapter;
+  huxerui::detail::MacUiWindow* huxeruiWindow;
+  huxerui::detail::MacRuntime* huxeruiApplicationRuntime;
 }
+- (void)resourceConfigurationDidChange:(NSNotification*)notification;
 @end
 
 @interface HuxerUIFrameScheduler : NSObject
@@ -237,38 +239,255 @@ GestureSettings MacGestureDefaults() noexcept {
   return settings;
 }
 
-class MacPlatformAdapter final : public PlatformAdapter, public PlatformClipboard, public PlatformResources {
+/// Owns AppKit application services and delegate callbacks independently of individual NSWindows.
+/// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
+class MacRuntime final : public Runtime, public PlatformClipboard, public PlatformResources {
 public:
-  MacPlatformAdapter()
-      : PlatformAdapter([](std::function<void()> task) {
+  MacRuntime()
+      : Runtime([](std::function<void()> task) {
           dispatch_async(dispatch_get_main_queue(), ^{
             try {
               task();
             } catch (...) {
             }
           });
-        }) {}
+        }) {
+    NSApplication* application = NSApplication.sharedApplication;
+    [application setActivationPolicy:NSApplicationActivationPolicyRegular];
+    delegate_ = [[HuxerUIApplicationDelegate alloc] init];
+    delegate_->huxeruiApplicationRuntime = this;
+    application.delegate = delegate_;
+    UNUserNotificationCenter.currentNotificationCenter.delegate = delegate_;
+    [application finishLaunching];
+  }
 
-  int Run(const Application& application_definition, const WindowOptions& options) {
+  ~MacRuntime() override {
+    Retire();
+    if (UNUserNotificationCenter.currentNotificationCenter.delegate == delegate_) {
+      UNUserNotificationCenter.currentNotificationCenter.delegate = nil;
+    }
+    if (NSApplication.sharedApplication.delegate == delegate_)
+      NSApplication.sharedApplication.delegate = nil;
+    delegate_->huxeruiApplicationRuntime = nullptr;
+    [NSNotificationCenter.defaultCenter removeObserver:delegate_];
+  }
+
+  /// Borrows the delegate coordinating AppKit callbacks and the original Runtime.
+  /// @return Main-thread delegate retained by this Runtime; callers must not extend its native binding.
+  HuxerUIApplicationDelegate* Delegate() const {
+    return delegate_;
+  }
+
+  /// Removes the first pending non-notification activation for startup.
+  /// @return That activation, or LaunchActivation when absent; notifications remain queued for later delivery.
+  ApplicationActivation TakeStartupActivation() {
+    const auto startup = std::find_if(pending_activations_.begin(), pending_activations_.end(), [](const auto& item) {
+      return !std::holds_alternative<NotificationActivation>(item);
+    });
+    if (startup == pending_activations_.end())
+      return LaunchActivation{};
+    auto activation = std::move(*startup);
+    pending_activations_.erase(startup);
+    return activation;
+  }
+
+  /// Initializes application services, delivers queued native activations, and starts locale observation.
+  /// @param application Declaration that outlives this Runtime; called on the AppKit main thread.
+  void Start(const Application& application) {
+    InitializeApplication(application, TakeStartupActivation(), LifecycleState());
+    for (auto& activation : pending_activations_)
+      HandleApplicationActivation(std::move(activation));
+    pending_activations_.clear();
+    [NSNotificationCenter.defaultCenter addObserver:delegate_
+                                           selector:@selector(resourceConfigurationDidChange:)
+                                               name:NSCurrentLocaleDidChangeNotification
+                                             object:nil];
+  }
+
+  /// Reads AppKit process activity independently of HuxerUI window attachments.
+  /// @return Background when hidden, otherwise Active or Inactive according to NSApplication activity.
+  static ApplicationLifecycleState LifecycleState() {
+    NSApplication* application = NSApplication.sharedApplication;
+    if (application.hidden) return ApplicationLifecycleState::Background;
+    return application.active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive;
+  }
+
+  /// Publishes current AppKit activity while shared services are live, on the main thread.
+  void UpdateLifecycleState() {
+    if (IsInitialized() && !stopped_) Runtime::UpdateApplicationLifecycleState(LifecycleState());
+  }
+
+  /// Refreshes application resource configuration after native locale/display changes, on the main thread.
+  void UpdateResourceConfiguration() {
+    if (IsInitialized() && !stopped_) Runtime::UpdateResourceConfiguration(Configuration());
+  }
+
+  /// Coordinates AppKit termination with asynchronous shared Runtime shutdown.
+  /// @return NSTerminateLater while shutdown is pending, NSTerminateNow when stopped, or Cancel before startup.
+  NSApplicationTerminateReply ShouldTerminate() {
+    if (stopped_) return NSTerminateNow;
+    if (!IsInitialized()) return NSTerminateCancel;
+    termination_pending_ = true;
+    Runtime::RequestShutdown();
+    return NSTerminateLater;
+  }
+  void OpenURLs(NSArray* urls) noexcept {
+    try {
+      std::optional<std::vector<ApplicationActivation>> activations = DecodeMacApplicationActivations(urls);
+      if (!activations.has_value()) {
+        return;
+      }
+      for (ApplicationActivation& activation : *activations) {
+        if (!IsInitialized()) {
+          pending_activations_.push_back(std::move(activation));
+        } else {
+          Runtime::HandleApplicationActivation(std::move(activation));
+        }
+      }
+    } catch (...) {
+    }
+  }
+
+  void HandleNotificationActivation(NotificationActivation activation) noexcept {
+    try {
+      if (!IsInitialized()) {
+        pending_activations_.push_back(std::move(activation));
+      } else {
+        Runtime::HandleApplicationActivation(std::move(activation));
+      }
+    } catch (...) {
+    }
+  }
+
+  PlatformClipboard* Clipboard() noexcept override {
+    return this;
+  }
+
+  PlatformResources* Resources() noexcept override {
+    return this;
+  }
+
+  std::optional<AppDirectories> CreateAppDirectories() override {
+    return CreateMacAppDirectories();
+  }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
+    return CreateMacHttpTransport();
+  }
+
+  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override {
+    return CreateMacLocalNotificationTransport();
+  }
+
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
+    return CreateMacPermissionTransport();
+  }
+
+  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
+    return std::make_shared<AppKitSystemTrayTransport>();
+  }
+
+  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0) {
+      return std::nullopt;
+    }
+    mach_task_basic_info_data_t task_metrics{};
+    mach_msg_type_number_t task_metrics_count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(
+            mach_task_self(),
+            MACH_TASK_BASIC_INFO,
+            reinterpret_cast<task_info_t>(&task_metrics),
+            &task_metrics_count
+        ) != KERN_SUCCESS) {
+      return std::nullopt;
+    }
+    return ProcessMetrics{
+        .cpu_time_seconds = TimevalSeconds(usage.ru_utime) + TimevalSeconds(usage.ru_stime),
+        .memory_usage_bytes = static_cast<std::uint64_t>(task_metrics.resident_size),
+        .processor_count = static_cast<std::uint32_t>(
+            std::max<NSInteger>(1, [[NSProcessInfo processInfo] processorCount])
+        ),
+    };
+  }
+
+  ResourceConfiguration Configuration() const override {
+    @autoreleasepool {
+      NSString* language = NSLocale.preferredLanguages.firstObject;
+      const char* language_tag = language == nil ? nullptr : language.UTF8String;
+      Locale locale = language_tag == nullptr ? Locale::Default() : Locale::FromLanguageTag(language_tag);
+      NSScreen* screen = NSScreen.mainScreen;
+      const float scale = screen == nil ? 1.0F : static_cast<float>(screen.backingScaleFactor);
+      return {std::move(locale), scale};
+    }
+  }
+
+  std::optional<InputStream> OpenRead(std::string_view package_path) override {
+    if (!IsValidResourcePackagePath(package_path)) {
+      throw std::logic_error("HuxerUI macOS resource path is invalid");
+    }
+    @autoreleasepool {
+      NSString* relative = [[NSString alloc] initWithBytes:package_path.data()
+                                                    length:package_path.size()
+                                                  encoding:NSUTF8StringEncoding];
+      if (relative == nil) {
+        throw std::logic_error("HuxerUI macOS resource path is not valid UTF-8");
+      }
+      NSURL* root = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"HuxerUI" isDirectory:YES];
+      NSURL* url = [root URLByAppendingPathComponent:relative];
+      const char* path = url.fileSystemRepresentation;
+      if (path == nullptr) {
+        throw std::runtime_error("HuxerUI package resource path could not be resolved");
+      }
+      return OpenPackageFile(std::filesystem::path(path));
+    }
+  }
+
+  std::optional<std::string> ReadText() override {
+    NSString* text = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
+    if (text == nil) {
+      return std::nullopt;
+    }
+    const char* utf8 = text.UTF8String;
+    return utf8 == nullptr ? std::optional<std::string>{std::string{}} : std::optional<std::string>{utf8};
+  }
+
+  bool WriteText(std::string_view text) override {
+    NSString* value = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+    if (value == nil) {
+      return false;
+    }
+    NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
+    [pasteboard clearContents];
+    return [pasteboard setString:value forType:NSPasteboardTypeString] == YES;
+  }
+
+private:
+  void OnRuntimeStopped() override {
+    stopped_ = true;
+    if (termination_pending_) {
+      [NSApplication.sharedApplication replyToApplicationShouldTerminate:YES];
+    } else {
+      [NSApplication.sharedApplication terminate:nil];
+    }
+  }
+
+  __strong HuxerUIApplicationDelegate* delegate_ = nil;
+  std::vector<ApplicationActivation> pending_activations_;
+  bool stopped_ = false;
+  bool termination_pending_ = false;
+};
+
+/// Owns one AppKit window and its text/rendering state; shared UI state retires before native facilities.
+class MacUiWindow final : public UiWindow {
+public:
+  ~MacUiWindow() override { Shutdown(); }
+
+  int Run(MacRuntime& application_runtime, const WindowOptions& options) {
     @autoreleasepool {
       NSApplication* application = [NSApplication sharedApplication];
-      [application setActivationPolicy:NSApplicationActivationPolicyRegular];
-
-      delegate_ = [[HuxerUIApplicationDelegate alloc] init];
-      delegate_->huxeruiAdapter = this;
-      application.delegate = delegate_;
-      UNUserNotificationCenter.currentNotificationCenter.delegate = delegate_;
-
-      [application finishLaunching];
-      ApplicationActivation startup_activation = LaunchActivation{};
-      // Notification responses always enter OnActivation, even if they arrive before Runtime construction.
-      const auto startup = std::find_if(pending_activations_.begin(), pending_activations_.end(), [](const auto& item) {
-        return !std::holds_alternative<NotificationActivation>(item);
-      });
-      if (startup != pending_activations_.end()) {
-        startup_activation = std::move(*startup);
-        pending_activations_.erase(startup);
-      }
+      delegate_ = application_runtime.Delegate();
+      delegate_->huxeruiWindow = this;
       const Size initial_size = ResolveInitialWindowSize(options);
       const NSRect frame = NSMakeRect(0.0, 0.0, initial_size.width, initial_size.height);
       custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
@@ -282,7 +501,7 @@ public:
                                                  styleMask:style
                                                    backing:NSBackingStoreBuffered
                                                      defer:NO];
-      window_->huxeruiAdapter = this;
+      window_->huxeruiWindow = this;
       if (options.minimum_size.has_value()) {
         window_.contentMinSize = NSMakeSize(options.minimum_size->width, options.minimum_size->height);
       }
@@ -298,61 +517,60 @@ public:
         }
       }
 
-      Runtime runtime{application_definition, *this, std::move(startup_activation)};
-      runtime_ = &runtime;
-      for (ApplicationActivation& activation : pending_activations_) {
-        runtime.HandleApplicationActivation(std::move(activation));
-      }
-      pending_activations_.clear();
-
       view_ = [[HuxerUIView alloc] initWithFrame:frame];
-      view_->huxeruiRuntime = runtime_;
-      view_->huxeruiAdapter = this;
+      window_.contentView = view_;
+      auto configuration = application_runtime.Configuration();
+      if (window_.screen != nil) configuration.display_scale = static_cast<float>(window_.screen.backingScaleFactor);
+      InitializeWindow(application_runtime, configuration);
+      view_->huxeruiWindow = this;
       [view_ registerForDraggedTypes:@[NSPasteboardTypeFileURL]];
       [NSNotificationCenter.defaultCenter addObserver:view_
                                              selector:@selector(resourceConfigurationDidChange:)
                                                  name:NSCurrentLocaleDidChangeNotification
                                                object:nil];
-      text_input_ = std::make_unique<MacTextInput>(runtime, view_);
-      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, PlatformRegistry(), runtime, window_);
-      accessibility_ = std::make_unique<MacAccessibility>(runtime, view_, *platform_views_);
+      text_input_ = std::make_unique<MacTextInput>(*this, view_);
+      platform_views_ = std::make_unique<AppKitPlatformViews>(renderer_, PlatformRegistry(), *this, window_);
+      accessibility_ = std::make_unique<MacAccessibility>(*this, view_, *platform_views_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
-      window_.contentView = view_;
       [window_ center];
       [window_ makeKeyAndOrderFront:nil];
       [window_ makeFirstResponder:view_];
-      runtime_->UpdateResourceConfiguration(Configuration());
+      UiWindow::UpdateResourceConfiguration(Configuration());
 
       [application activateIgnoringOtherApps:YES];
+      UpdateWindowLifecycleState();
       UpdateWindowMetrics({
           static_cast<float>(view_.bounds.size.width),
           static_cast<float>(view_.bounds.size.height),
       });
       RequestFrameAt(Now());
       [application run];
-      [NSNotificationCenter.defaultCenter removeObserver:view_ name:NSCurrentLocaleDidChangeNotification object:nil];
-      [view_ unregisterDraggedTypes];
-      [view_ draggingExited:nil];
-      view_->huxeruiRuntime = nullptr;
-      view_->huxeruiAdapter = nullptr;
-      if (UNUserNotificationCenter.currentNotificationCenter.delegate == delegate_) {
-        UNUserNotificationCenter.currentNotificationCenter.delegate = nil;
-      }
-      delegate_->huxeruiAdapter = nullptr;
-      window_->huxeruiAdapter = nullptr;
-      [frame_scheduler_ shutdown];
-      frame_scheduler_ = nil;
-      scheduled_frame_deadline_.reset();
-      committed_frame_ = nullptr;
-      accessibility_.reset();
-      platform_views_->Shutdown();
-      platform_views_.reset();
-      runtime_ = nullptr;
+      Shutdown();
       if (failure_) {
         std::rethrow_exception(failure_);
       }
     }
     return 0;
+  }
+
+  void Shutdown() noexcept {
+    Retire();
+    [NSNotificationCenter.defaultCenter removeObserver:view_ name:NSCurrentLocaleDidChangeNotification object:nil];
+    [view_ unregisterDraggedTypes];
+    [view_ draggingExited:nil];
+    if (view_ != nil) {
+      view_->huxeruiWindow = nullptr;
+    }
+    if (delegate_ != nil) delegate_->huxeruiWindow = nullptr;
+    if (window_ != nil) window_->huxeruiWindow = nullptr;
+    [frame_scheduler_ shutdown];
+    frame_scheduler_ = nil;
+    scheduled_frame_deadline_.reset();
+    committed_frame_ = nullptr;
+    accessibility_.reset();
+    if (platform_views_) platform_views_->Shutdown();
+    platform_views_.reset();
+    text_input_.reset();
   }
 
   NSWindow* Window() const noexcept {
@@ -419,10 +637,7 @@ public:
       [[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
       break;
     }
-  }
-
-  void RequestApplicationQuit() override {
-    [[NSApplication sharedApplication] terminate:nil];
+    UpdateWindowLifecycleState();
   }
 
   bool AllowWindowRequest(WindowCommand command) {
@@ -430,12 +645,16 @@ public:
       performing_minimize_ = false;
       return true;
     }
-    if (command == WindowCommand::Close && performing_close_) {
-      performing_close_ = false;
-      return true;
-    }
     try {
-      return runtime_ == nullptr || !runtime_->HandleWindowRequest(command);
+      const bool handled = !(command == WindowCommand::Close && performing_close_) &&
+                           IsInitialized() && UiWindow::HandleWindowRequest(command);
+      performing_close_ = false;
+      if (handled) return false;
+      if (command == WindowCommand::Close) {
+        ApplicationRuntime().RequestShutdown();
+        return false;
+      }
+      return true;
     } catch (...) {
       if (!failure_) {
         failure_ = std::current_exception();
@@ -446,11 +665,11 @@ public:
   }
 
   bool BeginWindowDrag(NSEvent* event) {
-    if (!custom_chrome_ || runtime_ == nullptr || view_ == nil || window_ == nil || event == nil) {
+    if (!custom_chrome_ || !IsInitialized() || view_ == nil || window_ == nil || event == nil) {
       return false;
     }
     const NSPoint point = [view_ convertPoint:event.locationInWindow fromView:nil];
-    if (!runtime_->IsWindowDragRegion({static_cast<float>(point.x), static_cast<float>(point.y)})) {
+    if (!IsWindowDragRegion({static_cast<float>(point.x), static_cast<float>(point.y)})) {
       return false;
     }
     [window_ performWindowDragWithEvent:event];
@@ -458,12 +677,12 @@ public:
   }
 
   void UpdateWindowMetrics(Size viewport) {
-    if (runtime_ != nullptr) {
+    if (IsInitialized()) {
       const Size constrained_viewport{
           std::max(0.0F, viewport.width),
           std::max(0.0F, viewport.height),
       };
-      runtime_->SetWindowMetrics({
+      UiWindow::SetWindowMetrics({
           .viewport = constrained_viewport,
           .title_bar = UpdateTitleBarLayout(constrained_viewport),
       });
@@ -479,10 +698,10 @@ public:
 
   void CommitFrameAndInvalidate() {
     scheduled_frame_deadline_.reset();
-    if (runtime_ == nullptr || !frame_state_.BeginCommit()) {
+    if (!IsInitialized() || !frame_state_.BeginCommit()) {
       return;
     }
-    const FrameCommit& commit = runtime_->BuildFrame();
+    const FrameCommit& commit = UiWindow::BuildFrame();
     const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
     committed_frame_ = &commit.render_frame;
     accessibility_->Commit(commit.semantic_frame);
@@ -507,7 +726,7 @@ public:
   }
 
   NSView* HitTestPlatformView(Point point) const {
-    if (runtime_ == nullptr || platform_views_ == nullptr) {
+    if (!IsInitialized() || platform_views_ == nullptr) {
       return nil;
     }
     return platform_views_->HitTest(point);
@@ -550,8 +769,8 @@ public:
   }
 
   void UpdateResourceConfiguration() {
-    if (runtime_ != nullptr) {
-      runtime_->UpdateResourceConfiguration(Configuration());
+    if (IsInitialized()) {
+      UiWindow::UpdateResourceConfiguration(Configuration());
     }
   }
 
@@ -591,53 +810,20 @@ public:
   }
 
   void ApplicationActiveChanged(bool active) {
-    if (runtime_ != nullptr) {
-      runtime_->UpdateApplicationLifecycleState(
-          active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Inactive
-      );
-    }
+    UpdateWindowLifecycleState();
     if (text_input_) {
       text_input_->ApplicationActiveChanged(active);
     }
   }
 
-  void ApplicationHiddenChanged(bool hidden) {
-    if (runtime_ == nullptr) {
-      return;
-    }
-    runtime_->UpdateApplicationLifecycleState(
-        hidden ? ApplicationLifecycleState::Background
-               : [NSApplication.sharedApplication isActive] ? ApplicationLifecycleState::Active
-                                                            : ApplicationLifecycleState::Inactive
-    );
-  }
-
-  void OpenURLs(NSArray* urls) noexcept {
-    try {
-      std::optional<std::vector<ApplicationActivation>> activations = DecodeMacApplicationActivations(urls);
-      if (!activations.has_value()) {
-        return;
-      }
-      for (ApplicationActivation& activation : *activations) {
-        if (runtime_ == nullptr) {
-          pending_activations_.push_back(std::move(activation));
-        } else {
-          runtime_->HandleApplicationActivation(std::move(activation));
-        }
-      }
-    } catch (...) {
-    }
-  }
-
-  void HandleNotificationActivation(NotificationActivation activation) noexcept {
-    try {
-      if (runtime_ == nullptr) {
-        pending_activations_.push_back(std::move(activation));
-      } else {
-        runtime_->HandleApplicationActivation(std::move(activation));
-      }
-    } catch (...) {
-    }
+  /// Publishes this NSWindow attachment's visibility, minimization, and key-window state on the main thread.
+  void UpdateWindowLifecycleState() {
+    if (!IsInitialized()) return;
+    const auto state = window_ == nil || !window_.visible || window_.miniaturized || NSApplication.sharedApplication.hidden
+        ? WindowLifecycleState::Background
+        : window_.keyWindow && NSApplication.sharedApplication.active
+            ? WindowLifecycleState::Active : WindowLifecycleState::Inactive;
+    UiWindow::UpdateWindowLifecycleState(state);
   }
 
   void InvalidateTextInputGeometry() {
@@ -646,113 +832,15 @@ public:
     }
   }
 
-  PlatformClipboard* Clipboard() noexcept override {
-    return this;
-  }
-
-  PlatformResources* Resources() noexcept override {
-    return this;
-  }
-
-  std::optional<AppDirectories> CreateAppDirectories() override {
-    return CreateMacAppDirectories();
-  }
-
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
     return CreateMacFilePickerTransport([this] { return window_; });
   }
 
-  std::shared_ptr<HttpTransport> CreateHttpTransport() override {
-    return CreateMacHttpTransport();
+  ResourceConfiguration Configuration() const {
+    auto configuration = ApplicationRuntime().Resources()->Configuration();
+    if (window_.screen != nil) configuration.display_scale = static_cast<float>(window_.screen.backingScaleFactor);
+    return configuration;
   }
-
-  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override {
-    return CreateMacLocalNotificationTransport();
-  }
-
-  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
-    return CreateMacPermissionTransport();
-  }
-
-  std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
-    return std::make_shared<AppKitSystemTrayTransport>();
-  }
-
-  std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {
-    rusage usage{};
-    if (getrusage(RUSAGE_SELF, &usage) != 0) {
-      return std::nullopt;
-    }
-    mach_task_basic_info_data_t task_metrics{};
-    mach_msg_type_number_t task_metrics_count = MACH_TASK_BASIC_INFO_COUNT;
-    if (task_info(
-            mach_task_self(),
-            MACH_TASK_BASIC_INFO,
-            reinterpret_cast<task_info_t>(&task_metrics),
-            &task_metrics_count
-        ) != KERN_SUCCESS) {
-      return std::nullopt;
-    }
-    return ProcessMetrics{
-        .cpu_time_seconds = TimevalSeconds(usage.ru_utime) + TimevalSeconds(usage.ru_stime),
-        .memory_usage_bytes = static_cast<std::uint64_t>(task_metrics.resident_size),
-        .processor_count = static_cast<std::uint32_t>(
-            std::max<NSInteger>(1, [[NSProcessInfo processInfo] processorCount])
-        ),
-    };
-  }
-
-  ResourceConfiguration Configuration() const override {
-    @autoreleasepool {
-      NSString* language = NSLocale.preferredLanguages.firstObject;
-      const char* language_tag = language == nil ? nullptr : language.UTF8String;
-      Locale locale = language_tag == nullptr ? Locale::Default() : Locale::FromLanguageTag(language_tag);
-      NSScreen* screen = window_ != nil ? window_.screen : NSScreen.mainScreen;
-      const float scale = screen == nil ? 1.0F : static_cast<float>(screen.backingScaleFactor);
-      return {std::move(locale), scale};
-    }
-  }
-
-  std::optional<InputStream> OpenRead(std::string_view package_path) override {
-    if (!IsValidResourcePackagePath(package_path)) {
-      throw std::logic_error("HuxerUI macOS resource path is invalid");
-    }
-    @autoreleasepool {
-      NSString* relative = [[NSString alloc] initWithBytes:package_path.data()
-                                                    length:package_path.size()
-                                                  encoding:NSUTF8StringEncoding];
-      if (relative == nil) {
-        throw std::logic_error("HuxerUI macOS resource path is not valid UTF-8");
-      }
-      NSURL* root = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"HuxerUI" isDirectory:YES];
-      NSURL* url = [root URLByAppendingPathComponent:relative];
-      const char* path = url.fileSystemRepresentation;
-      if (path == nullptr) {
-        throw std::runtime_error("HuxerUI package resource path could not be resolved");
-      }
-      return OpenPackageFile(std::filesystem::path(path));
-    }
-  }
-
-  std::optional<std::string> ReadText() override {
-    NSString* text = [[NSPasteboard generalPasteboard] stringForType:NSPasteboardTypeString];
-    if (text == nil) {
-      return std::nullopt;
-    }
-    const char* utf8 = text.UTF8String;
-    return utf8 == nullptr ? std::optional<std::string>{std::string{}} : std::optional<std::string>{utf8};
-  }
-
-  bool WriteText(std::string_view text) override {
-    NSString* value = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
-    if (value == nil) {
-      return false;
-    }
-    NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
-    [pasteboard clearContents];
-    return [pasteboard setString:value forType:NSPasteboardTypeString] == YES;
-  }
-
   NSArray* AccessibilityRootChildren() {
     return accessibility_ ? accessibility_->RootChildren() : @[];
   }
@@ -898,7 +986,6 @@ private:
   }
 
   AppKitRenderer renderer_;
-  Runtime* runtime_ = nullptr;
   bool custom_chrome_ = false;
   float custom_title_bar_height_ = 0.0F;
   __strong HuxerUIWindow* window_ = nil;
@@ -910,7 +997,6 @@ private:
   std::unique_ptr<AppKitPlatformViews> platform_views_;
   PlatformFrameState frame_state_;
   std::optional<double> scheduled_frame_deadline_;
-  std::vector<ApplicationActivation> pending_activations_;
   const RenderFrame* committed_frame_ = nullptr;
   bool performing_minimize_ = false;
   bool performing_close_ = false;
@@ -918,21 +1004,24 @@ private:
 };
 
 int RunPlatformApplication(const Application& application) {
-  WindowOptions options = application.options.window;
-  MacPlatformAdapter platform;
-  return platform.Run(application, options);
+  @autoreleasepool {
+    MacRuntime runtime;
+    runtime.Start(application);
+    MacUiWindow window;
+    return window.Run(runtime, application.options.window);
+  }
 }
 
 } // namespace huxerui::detail
 
 namespace huxerui::macos::detail {
 
-NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
-  auto* mac_adapter = dynamic_cast<huxerui::detail::MacPlatformAdapter*>(&adapter);
-  if (mac_adapter == nullptr || mac_adapter->Window() == nil) {
+NSWindow* GetAppKitWindow(UiWindow& ui_window) {
+  auto* mac_window = dynamic_cast<huxerui::detail::MacUiWindow*>(&ui_window);
+  if (mac_window == nullptr || mac_window->Window() == nil) {
     throw std::logic_error("HuxerUI macOS platform module requires an owning NSWindow");
   }
-  return mac_adapter->Window();
+  return mac_window->Window();
 }
 
 } // namespace huxerui::macos::detail
@@ -940,14 +1029,14 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 @implementation HuxerUIWindow
 
 - (void)sendEvent:(NSEvent*)event {
-  if (huxeruiAdapter == nullptr || !huxeruiAdapter->BeginPlatformViewFocusTraversal(event)) {
+  if (huxeruiWindow == nullptr || !huxeruiWindow->BeginPlatformViewFocusTraversal(event)) {
     [super sendEvent:event];
     return;
   }
   @try {
     [super sendEvent:event];
   } @finally {
-    huxeruiAdapter->EndPlatformViewFocusTraversal();
+    huxeruiWindow->EndPlatformViewFocusTraversal();
   }
 }
 
@@ -957,14 +1046,14 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
   [self draggingExited:nil];
-  if (huxeruiRuntime == nullptr || !(sender.draggingSourceOperationMask & NSDragOperationCopy)) {
+  if (huxeruiWindow == nullptr || !(sender.draggingSourceOperationMask & NSDragOperationCopy)) {
     return NSDragOperationNone;
   }
   const NSPoint position = [self convertPoint:sender.draggingLocation fromView:nil];
   huxeruiFileDropHover = YES;
   ++huxeruiFileDropSession;
   try {
-    const bool accepted = huxeruiRuntime->HandleFileDragEntered(
+    const bool accepted = huxeruiWindow->HandleFileDragEntered(
         huxeruiFileDropSession, {}, {static_cast<float>(position.x), static_cast<float>(position.y)}
     );
     return accepted ? NSDragOperationCopy : NSDragOperationNone;
@@ -984,7 +1073,7 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
   }
   const NSPoint position = [self convertPoint:sender.draggingLocation fromView:nil];
   try {
-    return huxeruiRuntime != nullptr && huxeruiRuntime->HandleFileDragMoved(
+    return huxeruiWindow != nullptr && huxeruiWindow->HandleFileDragMoved(
         huxeruiFileDropSession, {}, {static_cast<float>(position.x), static_cast<float>(position.y)}
     ) ? NSDragOperationCopy : NSDragOperationNone;
   } catch (...) {
@@ -995,24 +1084,24 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 
 - (void)draggingExited:(id<NSDraggingInfo>)sender {
   static_cast<void>(sender);
-  if (huxeruiFileDropHover && huxeruiRuntime != nullptr) {
+  if (huxeruiFileDropHover && huxeruiWindow != nullptr) {
     huxeruiFileDropHover = NO;
     try {
-      huxeruiRuntime->HandleFileDragExited(huxeruiFileDropSession);
+      huxeruiWindow->HandleFileDragExited(huxeruiFileDropSession);
     } catch (...) {
     }
   }
 }
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
-  if (huxeruiRuntime == nullptr || !huxeruiFileDropHover ||
+  if (huxeruiWindow == nullptr || !huxeruiFileDropHover ||
       !(sender.draggingSourceOperationMask & NSDragOperationCopy)) {
     [self draggingExited:nil];
     return NO;
   }
   const NSPoint position = [self convertPoint:sender.draggingLocation fromView:nil];
   try {
-    const bool accepted = huxeruiRuntime->HandleFileDrop(
+    const bool accepted = huxeruiWindow->HandleFileDrop(
         huxeruiFileDropSession, {}, {static_cast<float>(position.x), static_cast<float>(position.y)},
         huxerui::detail::CaptureMacFileDrop(sender.draggingPasteboard)
     );
@@ -1037,8 +1126,8 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
   if (!NSPointInRect(local_point, self.bounds)) {
     return nil;
   }
-  if (huxeruiAdapter != nullptr) {
-    NSView* platform_view = huxeruiAdapter->HitTestPlatformView({
+  if (huxeruiWindow != nullptr) {
+    NSView* platform_view = huxeruiWindow->HitTestPlatformView({
         static_cast<float>(local_point.x),
         static_cast<float>(local_point.y),
     });
@@ -1055,8 +1144,8 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 
 - (BOOL)becomeFirstResponder {
   const BOOL became_first_responder = [super becomeFirstResponder];
-  if (became_first_responder && huxeruiAdapter != nullptr) {
-    huxeruiAdapter->SynchronizePlatformViewFocus(self);
+  if (became_first_responder && huxeruiWindow != nullptr) {
+    huxeruiWindow->SynchronizePlatformViewFocus(self);
   }
   return became_first_responder;
 }
@@ -1066,64 +1155,64 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (NSArray*)accessibilityChildren {
-  return huxeruiAdapter == nullptr ? @[] : huxeruiAdapter->AccessibilityRootChildren();
+  return huxeruiWindow == nullptr ? @[] : huxeruiWindow->AccessibilityRootChildren();
 }
 
 - (void)setFrameSize:(NSSize)newSize {
   [super setFrameSize:newSize];
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->WindowGeometryChanged();
-    huxeruiAdapter->CommitFrameAndInvalidate();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->WindowGeometryChanged();
+    huxeruiWindow->CommitFrameAndInvalidate();
   }
 }
 
 - (void)setFrameOrigin:(NSPoint)newOrigin {
   [super setFrameOrigin:newOrigin];
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->InvalidateTextInputGeometry();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->InvalidateTextInputGeometry();
   }
 }
 
 - (void)setBoundsOrigin:(NSPoint)newOrigin {
   [super setBoundsOrigin:newOrigin];
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->InvalidateTextInputGeometry();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->InvalidateTextInputGeometry();
   }
 }
 
 - (void)viewDidMoveToWindow {
   [super viewDidMoveToWindow];
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
 - (void)viewDidMoveToSuperview {
   [super viewDidMoveToSuperview];
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
 - (void)viewDidChangeBackingProperties {
   [super viewDidChangeBackingProperties];
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->UpdateResourceConfiguration();
-    huxeruiAdapter->InvalidateAppKitSurface();
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->UpdateResourceConfiguration();
+    huxeruiWindow->InvalidateAppKitSurface();
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
 - (void)resourceConfigurationDidChange:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->UpdateResourceConfiguration();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->UpdateResourceConfiguration();
   }
 }
 
 - (NSTextInputContext*)inputContext {
-  if (huxeruiAdapter != nullptr) {
-    NSTextInputContext* context = huxeruiAdapter->InputContext();
+  if (huxeruiWindow != nullptr) {
+    NSTextInputContext* context = huxeruiWindow->InputContext();
     if (context != nil) {
       return context;
     }
@@ -1159,29 +1248,29 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (void)commitHuxerUIFrame {
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->CommitFrameAndInvalidate();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->CommitFrameAndInvalidate();
   }
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
   [super drawRect:dirtyRect];
-  if (huxeruiAdapter == nullptr) {
+  if (huxeruiWindow == nullptr) {
     return;
   }
 
   CGContextRef context = NSGraphicsContext.currentContext.CGContext;
-  huxeruiAdapter->DrawCommittedFrame(context, dirtyRect);
+  huxeruiWindow->DrawCommittedFrame(context, dirtyRect);
 }
 
 - (void)sendPointerEvent:(NSEvent*)event type:(huxerui::PointerEventType)type {
-  if (huxeruiRuntime == nullptr) {
+  if (huxeruiWindow == nullptr) {
     return;
   }
 
   const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
   huxeruiPointerPosition = point;
-  huxeruiRuntime->HandlePointerEvent({
+  huxeruiWindow->HandlePointerEvent({
       type,
       0,
       {
@@ -1203,10 +1292,10 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (void)cancelPointer {
-  if (huxeruiRuntime == nullptr) {
+  if (huxeruiWindow == nullptr) {
     return;
   }
-  huxeruiRuntime->HandlePointerEvent({
+  huxeruiWindow->HandlePointerEvent({
       huxerui::PointerEventType::Cancel,
       0,
       {
@@ -1220,14 +1309,14 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (BOOL)sendKeyEvent:(NSEvent*)event type:(huxerui::KeyEventType)type {
-  if (huxeruiRuntime == nullptr) {
+  if (huxeruiWindow == nullptr) {
     return NO;
   }
-  return huxeruiRuntime->HandleKeyEvent(huxerui::detail::MakeMacKeyEvent(event, type));
+  return huxeruiWindow->HandleKeyEvent(huxerui::detail::MakeMacKeyEvent(event, type));
 }
 
 - (void)mouseDown:(NSEvent*)event {
-  if (huxeruiAdapter != nullptr && huxeruiAdapter->BeginWindowDrag(event)) {
+  if (huxeruiWindow != nullptr && huxeruiWindow->BeginWindowDrag(event)) {
     return;
   }
   [self.window makeFirstResponder:self];
@@ -1278,8 +1367,8 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (void)keyDown:(NSEvent*)event {
-  if (huxeruiAdapter != nullptr && huxeruiAdapter->IsTextInputActive()) {
-    if (!huxeruiAdapter->HandleTextInputEvent(event)) {
+  if (huxeruiWindow != nullptr && huxeruiWindow->IsTextInputActive()) {
+    if (!huxeruiWindow->HandleTextInputEvent(event)) {
       [super keyDown:event];
     }
     return;
@@ -1376,13 +1465,13 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 }
 
 - (void)scrollWheel:(NSEvent*)event {
-  if (huxeruiRuntime == nullptr) {
+  if (huxeruiWindow == nullptr) {
     return;
   }
 
   const NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
   const float scale = event.hasPreciseScrollingDeltas ? 1.0F : 12.0F;
-  const huxerui::Point consumed = huxeruiRuntime->HandleScrollInput({
+  const huxerui::Point consumed = huxeruiWindow->HandleScrollInput({
       {
           static_cast<float>(point.x),
           static_cast<float>(point.y),
@@ -1424,8 +1513,8 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
   }
 
   if ([NSThread isMainThread]) {
-    if (huxeruiAdapter != nullptr) {
-      huxeruiAdapter->HandleNotificationActivation(std::move(*activation));
+    if (huxeruiApplicationRuntime != nullptr) {
+      huxeruiApplicationRuntime->HandleNotificationActivation(std::move(*activation));
     }
     completionHandler();
     return;
@@ -1434,8 +1523,8 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
   // Retain the complete snapshot across the dispatch boundary, including application data.
   const huxerui::NotificationActivation notification_activation = std::move(*activation);
   dispatch_async(dispatch_get_main_queue(), ^{
-    if (huxeruiAdapter != nullptr) {
-      huxeruiAdapter->HandleNotificationActivation(notification_activation);
+    if (huxeruiApplicationRuntime != nullptr) {
+      huxeruiApplicationRuntime->HandleNotificationActivation(notification_activation);
     }
     completionHandler();
   });
@@ -1443,92 +1532,125 @@ NSWindow* GetAppKitWindow(PlatformAdapter& adapter) {
 
 - (BOOL)windowShouldClose:(NSWindow*)sender {
   static_cast<void>(sender);
-  return huxeruiAdapter == nullptr || huxeruiAdapter->AllowWindowRequest(huxerui::WindowCommand::Close);
+  return huxeruiWindow == nullptr || huxeruiWindow->AllowWindowRequest(huxerui::WindowCommand::Close);
 }
 
 - (BOOL)windowShouldMiniaturize:(NSWindow*)sender {
   static_cast<void>(sender);
-  return huxeruiAdapter == nullptr || huxeruiAdapter->AllowWindowRequest(huxerui::WindowCommand::Minimize);
+  return huxeruiWindow == nullptr || huxeruiWindow->AllowWindowRequest(huxerui::WindowCommand::Minimize);
 }
 
 - (void)application:(NSApplication*)application openURLs:(NSArray<NSURL*>*)urls {
   static_cast<void>(application);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->OpenURLs(urls);
+  if (huxeruiApplicationRuntime != nullptr) {
+    huxeruiApplicationRuntime->OpenURLs(urls);
   }
 }
 
 - (void)applicationDidBecomeActive:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->ApplicationActiveChanged(true);
+  if (huxeruiApplicationRuntime != nullptr) huxeruiApplicationRuntime->UpdateLifecycleState();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->ApplicationActiveChanged(true);
   }
 }
 
 - (void)applicationDidResignActive:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->ApplicationActiveChanged(false);
+  if (huxeruiApplicationRuntime != nullptr) huxeruiApplicationRuntime->UpdateLifecycleState();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->ApplicationActiveChanged(false);
   }
 }
 
 - (void)applicationDidHide:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->ApplicationHiddenChanged(true);
+  if (huxeruiApplicationRuntime != nullptr) huxeruiApplicationRuntime->UpdateLifecycleState();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->UpdateWindowLifecycleState();
   }
 }
 
 - (void)applicationDidUnhide:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->ApplicationHiddenChanged(false);
+  if (huxeruiApplicationRuntime != nullptr) huxeruiApplicationRuntime->UpdateLifecycleState();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->UpdateWindowLifecycleState();
   }
 }
 
 - (void)windowDidMove:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->InvalidateTextInputGeometry();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->InvalidateTextInputGeometry();
   }
 }
 
 - (void)windowDidUpdate:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->SynchronizePlatformViewFocus();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->SynchronizePlatformViewFocus();
   }
 }
 
 - (void)windowDidResize:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
 - (void)windowDidChangeScreen:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->UpdateResourceConfiguration();
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->UpdateResourceConfiguration();
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
 - (void)windowDidExitFullScreen:(NSNotification*)notification {
   static_cast<void>(notification);
-  if (huxeruiAdapter != nullptr) {
-    huxeruiAdapter->WindowGeometryChanged();
+  if (huxeruiWindow != nullptr) {
+    huxeruiWindow->WindowGeometryChanged();
   }
 }
 
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
+  static_cast<void>(sender);
+  return huxeruiApplicationRuntime == nullptr ? NSTerminateNow : huxeruiApplicationRuntime->ShouldTerminate();
+}
+
+- (void)resourceConfigurationDidChange:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiApplicationRuntime != nullptr) huxeruiApplicationRuntime->UpdateResourceConfiguration();
+}
+
+- (void)windowDidBecomeKey:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiWindow != nullptr) huxeruiWindow->UpdateWindowLifecycleState();
+}
+
+- (void)windowDidResignKey:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiWindow != nullptr) huxeruiWindow->UpdateWindowLifecycleState();
+}
+
+- (void)windowDidMiniaturize:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiWindow != nullptr) huxeruiWindow->UpdateWindowLifecycleState();
+}
+
+- (void)windowDidDeminiaturize:(NSNotification*)notification {
+  static_cast<void>(notification);
+  if (huxeruiWindow != nullptr) huxeruiWindow->UpdateWindowLifecycleState();
+}
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
   static_cast<void>(sender);
   return YES;

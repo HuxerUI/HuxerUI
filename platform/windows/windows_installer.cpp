@@ -211,7 +211,7 @@ public:
     return status_cell_->value;
   }
 
-  void Bind(HuxerUIBootstrapperApplication& application, UIThreadDispatcher dispatcher, HWND window) {
+  void Bind(HuxerUIBootstrapperApplication& application, UiThreadDispatcher dispatcher, HWND window) {
     if (!dispatcher || window == nullptr) {
       throw std::logic_error("HuxerUI Windows installer requires an attached UI dispatcher and window");
     }
@@ -429,12 +429,13 @@ private:
     const std::weak_ptr<WindowsInstallerSession> weak = weak_from_this();
     dispatcher_([weak] {
       if (const std::shared_ptr<WindowsInstallerSession> session = weak.lock()) {
-        session->PublishOnUIThread();
+        session->PublishOnUiThread();
       }
     });
   }
 
-  void PublishOnUIThread() {
+  /// Copies the latest locked installer status into observable State on the application thread.
+  void PublishOnUiThread() {
     windows::InstallerStatus status;
     {
       std::lock_guard lock(mutex_);
@@ -450,7 +451,7 @@ private:
   std::condition_variable prompt_condition_;
   windows::InstallerStatus status_;
   std::shared_ptr<StateCell<windows::InstallerStatus>> status_cell_;
-  UIThreadDispatcher dispatcher_;
+  UiThreadDispatcher dispatcher_;
   HuxerUIBootstrapperApplication* application_ = nullptr;
   HWND window_ = nullptr;
   std::optional<windows::InstallerPromptChoice> prompt_response_;
@@ -468,7 +469,7 @@ public:
       : session_(std::move(session)) {}
 
   STDMETHODIMP OnStartup() override {
-    ui_thread_ = CreateThread(nullptr, 0, RunUI, this, 0, nullptr);
+    ui_thread_ = CreateThread(nullptr, 0, RunUi, this, 0, nullptr);
     return ui_thread_ == nullptr ? HRESULT_FROM_WIN32(GetLastError()) : S_OK;
   }
 
@@ -628,12 +629,15 @@ public:
   }
 
 private:
-  static DWORD WINAPI RunUI(void* context) {
+  /// Runs the installer application's native UI loop on its dedicated application thread.
+  /// @param context Bootstrapper instance kept alive until the UI thread exits.
+  /// @return Native UI exit code, also reported to the installer session for shutdown coordination.
+  static DWORD WINAPI RunUi(void* context) {
     auto& application = *static_cast<HuxerUIBootstrapperApplication*>(context);
     DWORD exit_code = 1;
     try {
       exit_code = static_cast<DWORD>(RunWin32PlatformApplication(
-          CurrentApplication(), [&application](UIThreadDispatcher dispatcher, HWND window) {
+          CurrentApplication(), [&application](UiThreadDispatcher dispatcher, HWND window) {
             application.session_->Bind(application, std::move(dispatcher), window);
             std::filesystem::path default_destination = application.DefaultDestination();
             const bool default_create_desktop_shortcut = application.DefaultCreateDesktopShortcut();
@@ -854,7 +858,7 @@ InstallerHandle UseInstaller() {
   return InstallerHandle{UseService<detail::WindowsInstallerSession>()};
 }
 
-void InstallInstallerSession(RootContext& root) {
+void InstallInstallerSession(WindowContext& root) {
   std::shared_ptr<detail::WindowsInstallerSession> session;
   {
     std::lock_guard lock(detail::CurrentInstallerMutex());

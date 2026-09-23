@@ -20,12 +20,10 @@
 #include <huxerui/modifier.h>
 #include <huxerui/navigation.h>
 #include <huxerui/paint.h>
-#include <huxerui/platform_adapter.h>
 #include <huxerui/platform_registry.h>
 #include <huxerui/presentation.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/resource.h>
-#include <huxerui/root.h>
 #include <huxerui/scroll.h>
 #include <huxerui/semantics.h>
 #include <huxerui/state.h>

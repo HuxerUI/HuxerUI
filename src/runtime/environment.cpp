@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "runtime_internal.h"
+#include "ui_window_internal.h"
 
 namespace huxerui {
 
@@ -168,13 +168,22 @@ const std::any* FindLocalEnvironmentValue(const Environment& environment, std::t
   return entry.value.has_value() ? &entry.value : nullptr;
 }
 
+const std::any* PeekLocalEnvironmentValue(const Environment& environment, std::type_index key) {
+  const auto found = environment.entries_.find(key);
+  return found != environment.entries_.end() && found->second.value.has_value() ? &found->second.value : nullptr;
+}
+
 const std::shared_ptr<const Environment>& EnvironmentParent(const Environment& environment) noexcept {
   return environment.parent_;
 }
 
 std::shared_ptr<const Environment> CurrentEnvironment() {
   Composer* composer = Composer::Current();
-  return composer ? composer->CurrentEnvironment() : nullptr;
+  if (composer) {
+    return composer->CurrentEnvironment();
+  }
+  const auto source = CurrentExecutionContext();
+  return source ? source->environment : nullptr;
 }
 
 const std::any* FindEnvironmentValue(std::shared_ptr<const Environment> environment, std::type_index key) {

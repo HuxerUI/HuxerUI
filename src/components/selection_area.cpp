@@ -261,16 +261,16 @@ public:
   void Update(ViewNode&, const detail::SelectionAreaModifier& modifier) { pending_source_ = modifier.source; }
 
   PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& measurer) override {
-    auto* platform = dynamic_cast<PlatformAdapter*>(&measurer);
-    if (!platform) {
+    auto* ui_window = dynamic_cast<UiWindow*>(&measurer);
+    if (!ui_window) {
       throw std::logic_error("HuxerUI selection geometry requires a platform text layout service");
     }
     enabled_ = node.IsEnabled();
-    pointer_slop_ = platform->GestureDefaults().pointer_slop;
+    pointer_slop_ = ui_window->GestureDefaults().pointer_slop;
     if (!enabled_) {
       pointer_active_ = false;
     }
-    return ReconcileEntries(static_cast<detail::MountedNode&>(node), *platform) ? PaintInvalidation::Foreground
+    return ReconcileEntries(static_cast<detail::MountedNode&>(node), *ui_window) ? PaintInvalidation::Foreground
                                                                             : PaintInvalidation::None;
   }
 
@@ -501,7 +501,7 @@ private:
     }
   }
 
-  bool ReconcileEntries(detail::MountedNode& owner, PlatformAdapter& platform) {
+  bool ReconcileEntries(detail::MountedNode& owner, UiWindow& ui_window) {
     const auto inverse = detail::InverseTransform(owner.presentation.resolved_transform);
     std::vector<TextNode> nodes;
     CollectTextNodes(owner, owner, inverse.value_or(Transform2D{}), {}, nodes);
@@ -556,7 +556,7 @@ private:
         entry.style = node.properties.text_style;
         entry.options = node.properties.text_layout_options;
         entry.width = content.width;
-        entry.layout = detail::GetParagraphLayout(node, platform);
+        entry.layout = detail::GetParagraphLayout(node, ui_window);
         changed = true;
       }
       entry.node_identity = node.identity;
@@ -710,11 +710,11 @@ const ModifierDescriptor& SelectionAreaModifier::Descriptor() {
   return ModifierDescriptorFor<SelectionAreaModifier, SelectionAreaExtension>();
 }
 
-Size MeasureSelectionArea(MountedNode& node, PlatformAdapter& platform, Runtime& runtime,
+Size MeasureSelectionArea(MountedNode& node, UiWindow& ui_window,
     const Constraints& constraints, EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics) {
   const Size size = node.children.empty()
                         ? Size{}
-                        : MeasureNode(*node.children.front(), constraints, platform, runtime, safe_area, title_bar_metrics);
+                        : MeasureNode(*node.children.front(), constraints, ui_window, safe_area, title_bar_metrics);
   return constraints.Constrain(size);
 }
 

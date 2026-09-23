@@ -52,7 +52,7 @@ void ResetParagraph() {
   activated_link.reset();
 }
 
-void ParagraphPointer(Runtime& runtime, PointerEventType type, Point position, KeyModifiers modifiers = {}) {
+void ParagraphPointer(UiWindow& runtime, PointerEventType type, Point position, KeyModifiers modifiers = {}) {
   runtime.HandlePointerEvent({type, 41, position, PointerDeviceKind::Mouse,
       type == PointerEventType::Down || type == PointerEventType::Up ? PointerButton::Primary : PointerButton::None,
       type == PointerEventType::Up || type == PointerEventType::Cancel ? PointerButton::None : PointerButton::Primary,
@@ -64,7 +64,7 @@ void ParagraphPointer(Runtime& runtime, PointerEventType type, Point position, K
 TEST_CASE("AttributedParagraphLinksUseTypedPointerKeyboardAndSemanticActions") {
   ResetParagraph();
   ParagraphPlatform platform;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   REQUIRE(platform.layouts == 1);
@@ -108,7 +108,7 @@ TEST_CASE("AttributedParagraphDragSelectionDoesNotActivateLinks") {
   ParagraphPlatform platform;
   ParagraphClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   ParagraphPointer(runtime, PointerEventType::Down, {40.0F, 10.0F});
@@ -125,7 +125,7 @@ TEST_CASE("AttributedParagraphDragSelectionDoesNotActivateLinks") {
 TEST_CASE("AttributedParagraphRejectsCanceledDisabledAndReplacedLinkTargets") {
   ResetParagraph();
   ParagraphPlatform platform;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   ParagraphPointer(runtime, PointerEventType::Down, {40.0F, 10.0F});
@@ -155,7 +155,7 @@ TEST_CASE("AttributedParagraphRejectsCanceledDisabledAndReplacedLinkTargets") {
 TEST_CASE("AttributedParagraphPaintOnlyChangesKeepMeasuredAncestors") {
   ResetParagraph();
   ParagraphPlatform platform;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   const int original = platform.measurements;
@@ -174,7 +174,7 @@ TEST_CASE("AttributedParagraphShiftClickExtendsExistingSelection") {
   ParagraphPlatform platform;
   ParagraphClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   ParagraphPointer(runtime, PointerEventType::Down, {10.0F, 10.0F});
@@ -195,7 +195,7 @@ TEST_CASE("AttributedParagraphLongPressSelectsWithoutActivatingLink") {
   platform.platform_resources = BuiltinTestResources();
   ParagraphClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   runtime.HandlePointerEvent({PointerEventType::Down, 44, {40.0F, 10.0F}, PointerDeviceKind::Touch});
@@ -212,7 +212,7 @@ TEST_CASE("AttributedParagraphDoubleClickSelectsLinkWordWithoutSecondActivation"
   ParagraphPlatform platform;
   ParagraphClipboard clipboard;
   platform.platform_clipboard = &clipboard;
-  Runtime runtime{AttributedParagraphApp, platform};
+  UiWindow runtime{AttributedParagraphApp, platform};
   runtime.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
   runtime.BuildFrame();
   ParagraphPointer(runtime, PointerEventType::Down, {40.0F, 10.0F});

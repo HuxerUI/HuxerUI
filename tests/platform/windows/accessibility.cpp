@@ -109,13 +109,13 @@ LONG PropertyInt(IRawElementProviderSimple& provider, PROPERTYID property) {
 
 TEST_CASE("Windows accessibility maps semantic properties and stable fragments") {
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime(WindowsAccessibilityApp, platform);
+  UiWindow runtime(WindowsAccessibilityApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   REQUIRE(frame);
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.CoreRuntime());
+  accessibility.SetUiWindow(&runtime.CoreRuntime());
   accessibility.Commit(frame, nullptr);
 
   const SemanticNode& button_node = FindNode(*frame, SemanticRole::Button);
@@ -185,13 +185,13 @@ TEST_CASE("Windows accessibility maps semantic properties and stable fragments")
 TEST_CASE("Windows accessibility tracks virtual date availability through retained providers") {
   accessibility_date_changes = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime(WindowsAccessibleDatePickerApp, platform);
+  UiWindow runtime(WindowsAccessibleDatePickerApp, platform);
   runtime.SetWindowMetrics({.viewport = {420.0F, 420.0F}});
   const std::shared_ptr<const SemanticFrame> initial = runtime.BuildCommit().semantic_frame;
   const SemanticNodeId date_id = FindNode(*initial, SemanticRole::GridCell, "March 17, 2024").id;
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.CoreRuntime());
+  accessibility.SetUiWindow(&runtime.CoreRuntime());
   accessibility.Commit(initial, nullptr);
   Microsoft::WRL::ComPtr<IRawElementProviderSimple> date;
   REQUIRE(accessibility.ProviderForNode(date_id, &date) == S_OK);
@@ -269,16 +269,16 @@ TEST_CASE("Windows accessibility exposes semantic Lists with selected children a
   REQUIRE(container.Get() == list.Get());
 }
 
-TEST_CASE("Windows accessibility patterns route actions through Runtime") {
+TEST_CASE("Windows accessibility patterns route actions through UiWindow") {
   accessibility_clicks = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime(WindowsAccessibilityApp, platform);
+  UiWindow runtime(WindowsAccessibilityApp, platform);
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   const std::shared_ptr<const SemanticFrame> frame = runtime.BuildCommit().semantic_frame;
   REQUIRE(frame);
 
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.CoreRuntime());
+  accessibility.SetUiWindow(&runtime.CoreRuntime());
   accessibility.Commit(frame, nullptr);
 
   const SemanticNode& button_node = FindNode(*frame, SemanticRole::Button);
@@ -579,11 +579,11 @@ TEST_CASE("Windows accessibility maps optional tree selection and set metadata",
 TEST_CASE("Windows accessibility tree selection does not invoke item activation", "[tree]") {
   accessibility_tree_activations = 0;
   TestPlatform platform{BuiltinTestResources()};
-  Runtime runtime{WindowsAccessibilityTreeApp, platform};
+  UiWindow runtime{WindowsAccessibilityTreeApp, platform};
   runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
   auto frame = runtime.BuildCommit().semantic_frame;
   detail::Win32Accessibility accessibility;
-  accessibility.SetRuntime(&runtime.CoreRuntime());
+  accessibility.SetUiWindow(&runtime.CoreRuntime());
   accessibility.Commit(frame, nullptr);
   const auto tree_id = FindNode(*frame, SemanticRole::Tree).id;
   const auto file_id = FindNode(*frame, SemanticRole::TreeItem, "File").id;

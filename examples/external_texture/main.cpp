@@ -83,6 +83,9 @@ const Application application{
             .title = "HuxerUI ExternalTexture",
             .initial_size = {760.0F, 720.0F},
         },
-        .root_hooks = {example::InstallTextureDemo},
+#if defined(__ANDROID__)
+        .application_hooks = {example::RegisterTextureDemo},
+#endif
+        .window_hooks = {example::InstallTextureDemo},
     }
 };
