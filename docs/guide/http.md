@@ -71,6 +71,7 @@ Task<bool> DownloadArchive(const std::shared_ptr<HttpClient>& http, File destina
 Only one `ReadAsync()` or `CopyToAsync()` operation may be pending on an input stream, and only one write or close may be pending on an output stream.
 `ReadAsync(maximum_bytes)` returns between 1 and `maximum_bytes` owned bytes, with empty `Bytes` representing EOF.
 Chunks are arbitrary binary boundaries and do not preserve text, JSON, multipart, or application-record boundaries.
+Sequential reads preserve response byte order, including when the next read starts immediately after the preceding one completes.
 Reading after EOF remains an empty success; reusing a failed stream, overlapping operations, or accessing a moved-from stream throws `std::logic_error`.
 
 An error before final headers appears in `HttpResult<HttpResponseStream>`.

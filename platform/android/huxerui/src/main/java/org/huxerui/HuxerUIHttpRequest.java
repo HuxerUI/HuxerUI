@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
@@ -46,13 +47,14 @@ final class HuxerUIHttpRequest implements Runnable {
     private final byte[] body;
     private final long timeoutMillis;
     private final AtomicBoolean finished = new AtomicBoolean();
-    private final AtomicBoolean readPending = new AtomicBoolean();
+    private final Object workLock = new Object();
     private final Object callbackLock = new Object();
 
-    private volatile HttpURLConnection connection;
-    private volatile InputStream input;
-    private volatile Future<?> worker;
-    private volatile ScheduledFuture<?> timeout;
+    private boolean readRequested;
+    private HttpURLConnection connection;
+    private InputStream input;
+    private Future<?> worker;
+    private ScheduledFuture<?> timeout;
 
     HuxerUIHttpRequest(long nativeHandle, String url, String method, String[] headerNames, String[] headerValues,
             byte[] body, long timeoutMillis) {
@@ -67,14 +69,14 @@ final class HuxerUIHttpRequest implements Runnable {
 
     void start() {
         try {
-            worker = executor.submit(this);
-            if (timeoutMillis > 0L) {
-                ScheduledFuture<?> deadline =
-                        timeoutExecutor.schedule(this::finishTimeout, timeoutMillis, TimeUnit.MILLISECONDS);
-                timeout = deadline;
+            synchronized (workLock) {
                 if (finished.get()) {
-                    deadline.cancel(false);
+                    return;
                 }
+                if (timeoutMillis > 0L) {
+                    timeout = timeoutExecutor.schedule(this::finishTimeout, timeoutMillis, TimeUnit.MILLISECONDS);
+                }
+                submitWorkLocked(this);
             }
         } catch (RuntimeException exception) {
             finishStartError(exception);
@@ -83,9 +85,14 @@ final class HuxerUIHttpRequest implements Runnable {
 
     @Override
     public void run() {
+        HttpURLConnection activeConnection = null;
         try {
-            HttpURLConnection activeConnection = (HttpURLConnection) new URL(url).openConnection();
-            connection = activeConnection;
+            activeConnection = (HttpURLConnection) new URL(url).openConnection();
+            synchronized (workLock) {
+                if (!finished.get()) {
+                    connection = activeConnection;
+                }
+            }
             if (finished.get()) {
                 return;
             }
@@ -123,7 +130,19 @@ final class HuxerUIHttpRequest implements Runnable {
                 }
             }
 
-            input = statusCode >= 400 ? activeConnection.getErrorStream() : activeConnection.getInputStream();
+            InputStream activeInput =
+                    statusCode >= 400 ? activeConnection.getErrorStream() : activeConnection.getInputStream();
+            boolean accepted;
+            synchronized (workLock) {
+                accepted = !finished.get();
+                if (accepted) {
+                    input = activeInput;
+                }
+            }
+            if (!accepted) {
+                closeInput(activeInput);
+                return;
+            }
             long bodySize = reliableBodySize(activeConnection, statusCode);
             publishResponse(activeConnection.getURL().toString(), statusCode,
                     responseHeaderNames.toArray(new String[0]), responseHeaderValues.toArray(new String[0]), bodySize);
@@ -131,32 +150,77 @@ final class HuxerUIHttpRequest implements Runnable {
             finishTimeout();
         } catch (Exception exception) {
             finishTransportError(exception);
+        } finally {
+            if (finished.get() && activeConnection != null) {
+                activeConnection.disconnect();
+            }
         }
     }
 
     void read() {
-        if (finished.get() || !readPending.compareAndSet(false, true)) {
-            return;
-        }
         try {
-            worker = executor.submit(this::readChunk);
+            synchronized (workLock) {
+                if (finished.get()) {
+                    return;
+                }
+                readRequested = true;
+                if (worker == null) {
+                    readRequested = false;
+                    submitWorkLocked(this::readChunk);
+                }
+            }
         } catch (RuntimeException exception) {
-            readPending.set(false);
             finishStartError(exception);
         }
     }
 
     void cancel() {
-        if (!finished.compareAndSet(false, true)) {
-            return;
+        finish(RESULT_CANCELED, null, true);
+    }
+
+    private void submitWorkLocked(Runnable work) {
+        FutureTask<Void> task = new FutureTask<Void>(work, null) {
+            @Override
+            public void run() {
+                try {
+                    super.run();
+                } finally {
+                    workFinished(this);
+                }
+            }
+        };
+        // Register before execution: callbacks may request more work before execute() returns.
+        worker = task;
+        executor.execute(task);
+    }
+
+    private void workFinished(Future<?> completed) {
+        try {
+            synchronized (workLock) {
+                if (worker != completed) {
+                    return;
+                }
+                worker = null;
+                // Ownership includes callback publication, so the next read cannot overtake its predecessor.
+                if (!finished.get() && readRequested) {
+                    readRequested = false;
+                    submitWorkLocked(this::readChunk);
+                }
+            }
+        } catch (RuntimeException exception) {
+            finishStartError(exception);
         }
-        cancelPlatformWork();
-        publishTerminal(RESULT_CANCELED, null);
     }
 
     private void readChunk() {
         try {
-            InputStream source = input;
+            InputStream source;
+            synchronized (workLock) {
+                if (finished.get()) {
+                    return;
+                }
+                source = input;
+            }
             if (source == null) {
                 finishComplete();
                 return;
@@ -178,8 +242,6 @@ final class HuxerUIHttpRequest implements Runnable {
             finishTimeout();
         } catch (Exception exception) {
             finishTransportError(exception);
-        } finally {
-            readPending.set(false);
         }
     }
 
@@ -210,78 +272,68 @@ final class HuxerUIHttpRequest implements Runnable {
     }
 
     private void finishComplete() {
-        if (!finished.compareAndSet(false, true)) {
-            return;
-        }
-        closePlatformWork();
-        publishTerminal(RESULT_COMPLETE, null);
+        finish(RESULT_COMPLETE, null, false);
     }
 
     private void finishTransportError(Exception exception) {
-        if (!finished.compareAndSet(false, true)) {
-            return;
-        }
-        closePlatformWork();
-        String detail = exception.getLocalizedMessage();
-        String message = detail == null || detail.isEmpty() ? "HuxerUI HTTP request failed"
-                                                            : "HuxerUI HTTP request failed: " + detail;
-        publishTerminal(RESULT_TRANSPORT_ERROR, message);
+        finishError(exception, false);
     }
 
     private void finishStartError(Exception exception) {
-        if (!finished.compareAndSet(false, true)) {
-            return;
-        }
-        cancelPlatformWork();
+        finishError(exception, true);
+    }
+
+    private void finishError(Exception exception, boolean interrupt) {
         String detail = exception.getLocalizedMessage();
         String message = detail == null || detail.isEmpty() ? "HuxerUI HTTP request failed"
                                                             : "HuxerUI HTTP request failed: " + detail;
-        publishTerminal(RESULT_TRANSPORT_ERROR, message);
+        finish(RESULT_TRANSPORT_ERROR, message, interrupt);
     }
 
     private void finishTimeout() {
-        if (!finished.compareAndSet(false, true)) {
-            return;
-        }
-        cancelPlatformWork();
-        publishTerminal(RESULT_TIMEOUT, "HuxerUI HTTP request timed out");
+        finish(RESULT_TIMEOUT, "HuxerUI HTTP request timed out", true);
     }
 
-    private void publishTerminal(int result, String message) {
+    private void finish(int result, String message, boolean interrupt) {
+        Future<?> activeWorker;
+        ScheduledFuture<?> activeTimeout;
+        InputStream activeInput;
+        HttpURLConnection activeConnection;
+        synchronized (workLock) {
+            if (!finished.compareAndSet(false, true)) {
+                return;
+            }
+            readRequested = false;
+            activeWorker = worker;
+            worker = null;
+            activeTimeout = timeout;
+            timeout = null;
+            activeInput = input;
+            input = null;
+            activeConnection = connection;
+            connection = null;
+        }
+        if (interrupt && activeWorker != null) {
+            activeWorker.cancel(true);
+        }
+        if (activeTimeout != null) {
+            activeTimeout.cancel(false);
+        }
+        closeInput(activeInput);
+        if (activeConnection != null) {
+            activeConnection.disconnect();
+        }
         synchronized (callbackLock) {
             nativeTerminal(nativeHandle, result, message);
         }
     }
 
-    private void cancelPlatformWork() {
-        Future<?> activeWorker = worker;
-        if (activeWorker != null) {
-            activeWorker.cancel(true);
-        }
-        closePlatformWork();
-    }
-
-    private void closePlatformWork() {
-        cancelTimeout();
-        InputStream activeInput = input;
-        input = null;
+    private static void closeInput(InputStream activeInput) {
         if (activeInput != null) {
             try {
                 activeInput.close();
             } catch (IOException ignored) {
             }
-        }
-        HttpURLConnection activeConnection = connection;
-        connection = null;
-        if (activeConnection != null) {
-            activeConnection.disconnect();
-        }
-    }
-
-    private void cancelTimeout() {
-        ScheduledFuture<?> activeTimeout = timeout;
-        if (activeTimeout != null) {
-            activeTimeout.cancel(false);
         }
     }
 

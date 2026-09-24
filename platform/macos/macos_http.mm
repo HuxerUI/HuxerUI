@@ -178,6 +178,7 @@ public:
             session_ = session;
             task_ = task;
             timeout_ = timeout;
+            [task resume];
           }
         }
         if (cancel) {
@@ -187,7 +188,6 @@ public:
           [session invalidateAndCancel];
           return;
         }
-        [task resume];
       } catch (const std::exception& exception) {
         FinishError(HttpError{
             HttpErrorCode::Transport,
@@ -200,14 +200,12 @@ public:
   }
 
   void RequestRead() override {
-    __strong NSURLSessionDataTask* task = nil;
-    {
-      std::scoped_lock lock(mutex_);
-      if (!finished_ && response_published_) {
-        task = task_;
-      }
+    std::scoped_lock lock(mutex_);
+    if (finished_ || !response_published_ || !paused_for_read_) {
+      return;
     }
-    [task resume];
+    paused_for_read_ = false;
+    [task_ resume];
   }
 
   void Cancel() noexcept override {
@@ -220,6 +218,7 @@ public:
       }
       finished_ = true;
       callbacks_ = {};
+      paused_for_read_ = false;
       session = std::exchange(session_, nil);
       task_ = nil;
       delegate_ = nil;
@@ -237,7 +236,6 @@ public:
         FinishError(HttpError{HttpErrorCode::Transport, "HuxerUI HTTP response is invalid"}, true);
         return false;
       }
-      [task suspend];
       NSHTTPURLResponse* http_response = static_cast<NSHTTPURLResponse*>(response);
       HttpTransportResponse result{
           .url = MakeString(http_response.URL.absoluteString),
@@ -274,6 +272,7 @@ public:
           return false;
         }
         response_published_ = true;
+        PauseForReadLocked(task);
         callback = callbacks_.response;
       }
       if (callback) {
@@ -285,7 +284,6 @@ public:
 
   void ReceiveBody(NSURLSessionDataTask* task, NSData* data) noexcept {
     @autoreleasepool {
-      [task suspend];
       if (data == nil || data.length == 0) {
         FinishError(HttpError{HttpErrorCode::Transport, "HuxerUI macOS HTTP response body is invalid"}, true);
         return;
@@ -296,6 +294,7 @@ public:
         if (finished_) {
           return;
         }
+        PauseForReadLocked(task);
         callback = callbacks_.body;
       }
       if (callback) {
@@ -332,6 +331,14 @@ public:
   }
 
 private:
+  void PauseForReadLocked(NSURLSessionDataTask* task) {
+    // In-flight delegate calls can still arrive while suspended; they share one backpressure pause.
+    if (!paused_for_read_) {
+      paused_for_read_ = true;
+      [task suspend];
+    }
+  }
+
   void FinishComplete() noexcept {
     __strong NSURLSession* session = nil;
     __strong dispatch_source_t timeout = nil;
@@ -343,6 +350,7 @@ private:
       }
       finished_ = true;
       callbacks = std::move(callbacks_);
+      paused_for_read_ = false;
       session = std::exchange(session_, nil);
       task_ = nil;
       delegate_ = nil;
@@ -368,6 +376,7 @@ private:
       }
       finished_ = true;
       callbacks = std::move(callbacks_);
+      paused_for_read_ = false;
       session = std::exchange(session_, nil);
       task_ = nil;
       delegate_ = nil;
@@ -394,6 +403,7 @@ private:
   __strong NSURLSessionDataTask* task_ = nil;
   __strong dispatch_source_t timeout_ = nil;
   bool response_published_ = false;
+  bool paused_for_read_ = false;
   bool finished_ = false;
 };
 

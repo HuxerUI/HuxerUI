@@ -7,6 +7,7 @@ target_sources(huxerui_macos_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
         "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"
         local_notification.mm
+        http.mm
         application.mm
         platform_module.mm
         platform_bridge.mm

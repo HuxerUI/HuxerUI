@@ -90,9 +90,15 @@ The callback order is final-response oriented:
 
 - Zero or more upload observations may precede the final response.
 - Exactly one final response or pre-header error is published.
-- Body callbacks are demand-driven after `RequestRead()`.
+- Body callbacks are serialized in response byte order and paced by `RequestRead()`.
 - Exactly one completion or post-header error terminates body delivery.
 - Intermediate redirect responses and bodies are not published.
+
+`RequestRead()` asks the transport to supply more data; it does not prescribe an exact native read or callback count.
+Push transports may deliver already in-flight data after applying backpressure, including while the shared layer is between reads.
+A new demand can reenter a body callback or arrive on another thread before that callback returns; the transport must retain it and preserve byte order.
+Normal completion follows all body publications; cancellation, timeout, and errors may interrupt delivery.
+Terminal operations never start further reads or resume native transfer in response to late demand.
 
 The shared state is mutex-protected but never invokes a platform operation, application callback, or coroutine continuation while holding its lock.
 Transport callbacks retain only a weak state reference.
@@ -125,6 +131,8 @@ The distribution-provided libsoup and GLib dependencies remain system packages.
 
 Android uses `HttpURLConnection` on a bounded Java executor.
 Connection setup and each requested body read occupy workers only while work is active; an idle stream does not reserve a worker thread.
+Each request retains worker ownership through callback publication, then atomically hands off pending demand or becomes idle.
+Worker handles are registered before executor submission, and resource registration shares the terminal-state lock so cancellation also retires resources acquired late.
 The in-memory request body uses Java's buffered upload path so automatic redirects and authentication are not disabled by fixed-length streaming mode.
 JNI publishes headers, body chunks, progress, and one terminal event through the same native operation handle.
 
@@ -135,7 +143,9 @@ The internal buffered `SendAsync()` path may fall back to `Response.arrayBuffer(
 Browser CORS, forbidden-header, credential, redirect, and visible-response-header rules are preserved.
 
 iOS and macOS each own a Foundation transport in their platform directory.
-Each operation uses an ephemeral `NSURLSession` data delegate, suspends its data task after headers and after each delivered body chunk, and resumes it for one requested read.
+Each operation uses an ephemeral `NSURLSession` with a serial delegate queue and publishes body data directly in delegate order.
+It holds at most one backpressure suspension after headers or body delivery, and releases that suspension when more data is requested.
+Already in-flight callbacks remain deliverable without adding another suspension; native suspend and resume calls are ordered with their state changes under the operation mutex.
 A dispatch deadline remains active while the native task is suspended.
 The configuration disables persistent cookies and URL caching without weakening App Transport Security or sandbox policy.
 
@@ -167,4 +177,7 @@ Implicit file transfers, background transfer, retry policy, interceptors, WebSoc
 Shared Runtime tests verify synchronous validation, binary preservation, headers-first completion, caller-selected read bounds, pre- and post-header errors, logical progress, UI-thread callbacks, cancellation, late events, and unsupported adapters.
 Windows loopback tests verify WinHTTP request conversion, pull-based body reads, reliable length metadata, deadlines, cancellation, and invalid UTF-8 handling.
 Linux loopback tests verify binary bodies, repeated headers, redirects, HTTP statuses, transport failures, deadlines, cancellation races, and transport shutdown.
-Android and Web builds validate their language boundary and generated platform artifact; Apple behavior requires macOS or iOS validation because Objective-C++ and Foundation cannot be built on Windows.
+Android request tests run the production Java class with a controlled connection and JNI callback fixture to verify reentrant and cross-thread demand, byte order, cancellation, deadlines, late resource acquisition, and executor rejection.
+Host builds with a JDK and JNI headers register these checks as `HuxerUIAndroidHttpTests`.
+macOS loopback tests verify coalesced in-flight delivery, byte order, EOF, and cancellation or deadlines while idle and while awaiting data.
+Android and Web builds also validate their language boundary and generated platform artifact; Apple behavior requires macOS or iOS validation because Objective-C++ and Foundation cannot be built on Windows.
