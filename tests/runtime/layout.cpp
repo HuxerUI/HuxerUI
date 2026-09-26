@@ -12,6 +12,7 @@ namespace huxerui::test {
 State<bool> use_column_layout;
 State<bool> use_long_cached_text;
 State<bool> expand_cached_scope;
+State<bool> use_measurement_memo_height;
 State<bool> update_opaque_layout_value;
 State<std::size_t> indexed_page_selection;
 State<std::size_t> pager_selection;
@@ -36,6 +37,33 @@ public:
 
   std::size_t measure_text_calls = 0;
 };
+
+void SnapshotMeasureRevisions(
+    const detail::MountedNode& node, std::unordered_map<std::uint64_t, std::uint64_t>& into
+) {
+  into.insert_or_assign(node.identity, node.measure_revision);
+  for (const auto& child : node.children) {
+    if (child) {
+      SnapshotMeasureRevisions(*child, into);
+    }
+  }
+}
+
+std::size_t CountRemeasuredNodes(
+    const detail::MountedNode& node, const std::unordered_map<std::uint64_t, std::uint64_t>& before
+) {
+  std::size_t count = 0;
+  const auto found = before.find(node.identity);
+  if (found != before.end() && node.measure_revision > found->second) {
+    ++count;
+  }
+  for (const auto& child : node.children) {
+    if (child) {
+      count += CountRemeasuredNodes(*child, before);
+    }
+  }
+  return count;
+}
 
 View ImageLayoutApp() {
   return Column {
@@ -435,6 +463,15 @@ View ScopedCachedLayoutApp() {
   return Column {
     CachedScope(),
     Text("Stable"),
+  };
+}
+
+View MeasurementMemoApp() {
+  auto tall = UseState(false);
+  use_measurement_memo_height = tall;
+  return Column {
+    Text("Memo").With(Frame{.width = 80.0F, .height = tall.Get() ? 40.0F : 20.0F}),
+    Text("Stable").With(Frame{.width = 80.0F}),
   };
 }
 
@@ -1220,6 +1257,54 @@ TEST_CASE("TestScopedLayoutInvalidationPropagatesToAncestors") {
   REQUIRE(root->children[1]->measure_revision == stable_measure_revision);
   REQUIRE(root->children[1]->layout_revision > stable_layout_revision);
   REQUIRE(root->children[1]->layout_offset.y == 40.0F);
+}
+
+TEST_CASE("TextMeasurementMemoReusesUnchangedShapingInputs") {
+  CountingTextPlatform platform;
+  UiWindow runtime{MeasurementMemoApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const std::size_t measured_once = platform.measure_text_calls;
+  const auto* memo = FindMountedText(*runtime.RootNode(), "Memo");
+  REQUIRE(memo != nullptr);
+  REQUIRE(memo->bounds.height == 20.0F);
+  const std::uint64_t revision_once = memo->measure_revision;
+
+  use_measurement_memo_height = true;
+  runtime.BuildFrame();
+
+  memo = FindMountedText(*runtime.RootNode(), "Memo");
+  REQUIRE(memo != nullptr);
+  REQUIRE(memo->measure_revision > revision_once);
+  REQUIRE(memo->bounds.height == 40.0F);
+  REQUIRE(platform.measure_text_calls == measured_once);
+}
+
+TEST_CASE("VirtualListScrollRemeasuresOnlyNewlyRealizedItemText") {
+  CountingTextPlatform platform;
+  UiWindow runtime{BoundedContainerFrameApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const std::size_t measured_once = platform.measure_text_calls;
+  runtime.BuildFrame();
+  REQUIRE(platform.measure_text_calls == measured_once);
+
+  std::unordered_map<std::uint64_t, std::uint64_t> revisions;
+  SnapshotMeasureRevisions(*runtime.RootNode(), revisions);
+
+  runtime.HandleScrollInput(ScrollInputEvent{{60.0F, 80.0F}, 0.0F, 20.0F});
+  runtime.BuildFrame();
+
+  // Scrolling invalidates the viewport, so the runtime re-measures the ancestor path and realizes the new window.
+  // Already realized items keep their measurement, and only the newly realized item reaches platform measurement.
+  REQUIRE(platform.measure_text_calls == measured_once + 1);
+  REQUIRE(CountRemeasuredNodes(*runtime.RootNode(), revisions) <= 4);
+
+  const std::size_t after_scroll = platform.measure_text_calls;
+  runtime.BuildFrame();
+  REQUIRE(platform.measure_text_calls == after_scroll);
 }
 
 TEST_CASE("TestNonComparableLayoutValueInvalidatesConservatively") {
