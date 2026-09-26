@@ -17,6 +17,7 @@
 #include "components/text_field_internal.h"
 #include "components/selection_area_internal.h"
 #include "profiling_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 
@@ -310,6 +311,25 @@ Size MeasureLabelContent(MountedNode& node, UiWindow& ui_window, const Constrain
   };
 }
 
+Size MeasureTextContent(MountedNode& node, UiWindow& ui_window, const Constraints& content_constraints) {
+  const float max_width = content_constraints.max_width;
+  const auto& memo = node.text_measurement_memo;
+  if (memo.has_value() && memo->max_width == max_width && memo->options == node.properties.text_layout_options &&
+      TextLayoutInputsEqual(memo->text, memo->font, node.text, node.properties.text_style.font)) {
+    return memo->size;
+  }
+  const Size measured =
+      ui_window.MeasureText(node.text, node.properties.text_style, max_width, node.properties.text_layout_options).size;
+  node.text_measurement_memo = MountedNode::TextMeasurementMemo{
+      node.text,
+      node.properties.text_style.font,
+      node.properties.text_layout_options,
+      max_width,
+      measured,
+  };
+  return measured;
+}
+
 void ClampScrollOffsetAndCompleteController(MountedNode& node) {
   const bool vertical = ScrollAxis(node) == Axis::Vertical;
   const Rect viewport = ScrollViewport(node);
@@ -450,9 +470,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui
     if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
       content_size = MeasureLabelContent(node, ui_window, content_constraints);
     } else {
-      content_size =
-          ui_window.MeasureText(node.text, node.properties.text_style, content_constraints.max_width,
-                               node.properties.text_layout_options).size;
+      content_size = MeasureTextContent(node, ui_window, content_constraints);
     }
     break;
   case NodeKind::Button:

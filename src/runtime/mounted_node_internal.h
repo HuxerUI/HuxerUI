@@ -273,6 +273,18 @@ struct MountedNode final : public huxerui::ViewNode {
   // Measurement derives this from properties.padding plus the safe-area edges consumed by this node. Layout and paint
   // use the resolved value while the declarative properties remain stable across window-inset changes.
   EdgeInsets resolved_padding;
+  // Platform paragraph measurement builds a shaped paragraph on some hosts, and a text node re-enters measurement
+  // whenever an ancestor, a constraint, or a layout-affecting property changes even though its paragraph, font,
+  // options, and available width did not. These inputs are the shaping geometry compared by TextLayoutInputsEqual;
+  // foreground colors and link targets stay out of the key, so recoloring never re-measures.
+  struct TextMeasurementMemo {
+    AttributedText text;
+    Font font;
+    TextLayoutOptions options;
+    float max_width = 0.0F;
+    Size size;
+  };
+  std::optional<TextMeasurementMemo> text_measurement_memo;
   Size measured_size;
   // Bounds stay at the node-local origin; layout_offset places the node in its parent's local coordinates.
   Rect bounds;
