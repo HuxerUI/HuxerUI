@@ -41,11 +41,13 @@ constexpr std::string_view kLinuxPayloads[] = {
 // location, which is what makes a relocatable payload store work at all.
 std::string pkg_config_libdir() {
     std::string dirs;
-    std::size_t found = 0;
+    std::vector<std::string_view> missing;
     for (std::string_view name : kLinuxPayloads) {
         const std::string root = mcpp::xpkg_dir("xim", std::string(name).c_str());
-        if (root.empty()) continue;
-        ++found;
+        if (root.empty()) {
+            missing.push_back(name);
+            continue;
+        }
         // xorgproto and friends install their .pc under share/, not lib/.
         for (const char* sub : { "/lib/pkgconfig", "/share/pkgconfig", "/lib64/pkgconfig" }) {
             const std::string d = root + sub;
@@ -54,10 +56,12 @@ std::string pkg_config_libdir() {
             dirs += d;
         }
     }
-    if (found != std::size(kLinuxPayloads)) {
-        std::cerr << "huxerui: " << (std::size(kLinuxPayloads) - found)
+    if (!missing.empty()) {
+        std::cerr << "huxerui: " << missing.size()
                   << " of " << std::size(kLinuxPayloads)
-                  << " xlings payloads did not resolve; check "
+                  << " xlings payloads did not resolve:";
+        for (std::string_view name : missing) std::cerr << ' ' << name;
+        std::cerr << "; check "
                      "[target.'cfg(linux)'.xlings.workspace] in mcpp.toml\n";
     }
     return dirs;
