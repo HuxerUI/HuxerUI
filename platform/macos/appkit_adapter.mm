@@ -621,6 +621,16 @@ public:
     case WindowCommand::ToggleMaximize:
       [window_ zoom:nil];
       break;
+    case WindowCommand::EnterFullscreen:
+      if (([window_ styleMask] & NSWindowStyleMaskFullScreen) == 0) {
+        [window_ toggleFullScreen:nil];
+      }
+      break;
+    case WindowCommand::ExitFullscreen:
+      if (([window_ styleMask] & NSWindowStyleMaskFullScreen) != 0) {
+        [window_ toggleFullScreen:nil];
+      }
+      break;
     case WindowCommand::Close:
       performing_close_ = true;
       [window_ performClose:nil];
@@ -909,7 +919,7 @@ private:
   }
 
   std::optional<WindowTitleBarMetrics> UpdateTitleBarLayout(Size viewport) noexcept {
-    if (!custom_chrome_) {
+    if (!custom_chrome_ || ([window_ styleMask] & NSWindowStyleMaskFullScreen) != 0) {
       return std::nullopt;
     }
     const std::optional<Rect> system_controls = SystemTitleBarControlBounds();

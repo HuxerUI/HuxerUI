@@ -98,12 +98,15 @@ void ValidateHttpMethod(HttpMethod method) {
 
 void ValidateHttpRequest(const HttpRequest& request) {
   ValidateHttpMethod(request.method);
+  if (request.shared_body && !request.body.empty()) {
+    throw std::invalid_argument("HuxerUI HTTP request cannot have both owned and shared bodies");
+  }
   if ((!StartsWithAsciiCaseInsensitive(request.url, "http://") &&
        !StartsWithAsciiCaseInsensitive(request.url, "https://")) ||
       ContainsInvalidLineCharacter(request.url)) {
     throw std::invalid_argument("HuxerUI HTTP URL must be an absolute HTTP or HTTPS URL");
   }
-  if ((request.method == HttpMethod::Get || request.method == HttpMethod::Head) && !request.body.empty()) {
+  if ((request.method == HttpMethod::Get || request.method == HttpMethod::Head) && !request.BodyBytes().empty()) {
     throw std::invalid_argument("HuxerUI HTTP GET and HEAD requests must not contain a body");
   }
   if (request.timeout.has_value() && *request.timeout <= std::chrono::milliseconds::zero()) {
@@ -147,7 +150,7 @@ public:
                      std::function<void(HttpProgress)> progress)
       : application_(std::move(application)), transport_(std::move(transport)), request_(std::move(request)),
         require_incremental_response_(require_incremental_response), progress_(std::move(progress)),
-        upload_total_(static_cast<std::uint64_t>(request_.body.size())) {}
+        upload_total_(static_cast<std::uint64_t>(request_.BodyBytes().size())) {}
 
   ~HttpOperationState() override {
     Cancel();

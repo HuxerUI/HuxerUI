@@ -69,6 +69,8 @@ StringVariant WindowCommandLabel(const WindowCaptionLabels& labels, WindowComman
   case WindowCommand::Show:
   case WindowCommand::Hide:
   case WindowCommand::Activate:
+  case WindowCommand::EnterFullscreen:
+  case WindowCommand::ExitFullscreen:
     break;
   }
   return {};
@@ -122,6 +124,8 @@ View WindowControl(
     case WindowCommand::Show:
     case WindowCommand::Hide:
     case WindowCommand::Activate:
+    case WindowCommand::EnterFullscreen:
+    case WindowCommand::ExitFullscreen:
       break;
     }
     context.StrokePath(std::move(path), window->caption_foreground, StrokeStyle{.width = 1.0F});
@@ -427,6 +431,10 @@ void WindowHandle::Restore() const {
 
 void WindowHandle::ToggleMaximize() const {
   service_->Request(WindowCommand::ToggleMaximize);
+}
+
+void WindowHandle::SetFullscreen(bool fullscreen) const {
+  service_->Request(fullscreen ? WindowCommand::EnterFullscreen : WindowCommand::ExitFullscreen);
 }
 
 void WindowHandle::Close() const {

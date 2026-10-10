@@ -194,7 +194,26 @@ View Resources() {
   };
 }
 
+View WindowLifecycleContent() {
+  const auto state = UseWindow().LifecycleState();
+  return Text(state == WindowLifecycleState::Active ? "active window" : "inactive window");
+}
+
 } // namespace
+
+TEST_CASE("Windowless lifecycle updates publish to window observers after pumping", "[ui-testing]") {
+  Application application(WindowLifecycleContent, {.show_debug_overlay = false});
+  UiTest ui(application);
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+  ui.Pump();
+  REQUIRE(ui.Find(UiSelector::Text("active window")).Exists());
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
+  ui.Pump();
+  REQUIRE(ui.Find(UiSelector::Text("inactive window")).Exists());
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+  ui.Pump();
+  REQUIRE(ui.Find(UiSelector::Text("active window")).Exists());
+}
 
 TEST_CASE("Windowless queries use mounted content independently of semantics", "[ui-testing]") {
   Application application(Counter, {.show_debug_overlay = false});

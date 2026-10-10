@@ -23,6 +23,7 @@
 #include <huxerui/semantics.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
+#include <huxerui/window.h>
 
 namespace huxerui::detail {
 class UiTestSession;
@@ -619,6 +620,8 @@ public:
   /// ui.Pump();
   /// @endcode
   void UpdateResourceConfiguration(ResourceConfiguration configuration);
+  /// Publishes a native window lifecycle transition; Pump commits its observers and resulting UI.
+  void UpdateWindowLifecycleState(WindowLifecycleState state);
   /// Forwards a raw pointer event without pumping, preserving normal hit testing, capture, and cancellation.
   /// Use complete pointer sequences with stable identities; no missing Down, Up, or Cancel is synthesized.
   /// @param event Normalized event with finite window-local logical coordinates and the intended button state.

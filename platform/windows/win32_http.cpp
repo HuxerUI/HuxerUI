@@ -209,7 +209,7 @@ public:
         });
         return;
       }
-      if (request_.body.size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())) {
+      if (request_.BodyBytes().size() > static_cast<std::size_t>(std::numeric_limits<DWORD>::max())) {
         FinishUnattached(HttpError{
             HttpErrorCode::Transport,
             "HuxerUI Windows HTTP request body exceeds the WinHTTP size range",
@@ -300,9 +300,9 @@ public:
       }
 
       const DWORD send_error = WithRequestHandle([this](HINTERNET request_handle) {
-        const DWORD body_size = static_cast<DWORD>(request_.body.size());
+        const DWORD body_size = static_cast<DWORD>(request_.BodyBytes().size());
         // WinHTTP may resend after authentication or redirects, so request_ owns the body through HANDLE_CLOSING.
-        void* body = request_.body.empty() ? WINHTTP_NO_REQUEST_DATA : request_.body.data();
+        void* body = request_.BodyBytes().empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<std::byte*>(request_.BodyBytes().data());
         const BOOL started = WinHttpSendRequest(
             request_handle,
             WINHTTP_NO_ADDITIONAL_HEADERS,
@@ -513,11 +513,11 @@ private:
     std::uint64_t body_size = 0;
     {
       std::scoped_lock lock(mutex_);
-      if (finished_ || request_.body.empty()) {
+      if (finished_ || request_.BodyBytes().empty()) {
         return;
       }
       callback = callbacks_.upload_progress;
-      body_size = static_cast<std::uint64_t>(request_.body.size());
+      body_size = static_cast<std::uint64_t>(request_.BodyBytes().size());
     }
     if (callback) {
       callback(body_size);

@@ -202,6 +202,8 @@ window.Minimize();
 window.Maximize();
 window.Restore();
 window.ToggleMaximize();
+window.SetFullscreen(true);
+window.SetFullscreen(false);
 window.Close();
 ```
 
@@ -209,7 +211,12 @@ Commands request system window operations rather than mutating shared Runtime st
 `Close()` follows the same native close-request path as a standard caption control.
 
 Framework caption controls use this same command boundary and do not call platform implementation helpers directly.
-Observable placement, full-screen control, and capability queries are not part of the current window command API.
+`SetFullscreen(true)` requests borderless native fullscreen on the monitor currently containing the window.
+`SetFullscreen(false)` restores its preceding native placement, including maximized state.
+Desktop adapters suppress custom caption metrics, drag operations, and resize edges while fullscreen; applications also hide their own title-bar content and provide an exit action.
+Linux delegates placement restoration to GTK and the window manager, macOS uses AppKit native fullscreen, and Windows retains its style and WINDOWPLACEMENT.
+Requests are asynchronous where the native host requires it; host-owned mobile and Web surfaces ignore these commands.
+Observable placement and capability queries are not part of the current window command API.
 
 ## Drag regions
 

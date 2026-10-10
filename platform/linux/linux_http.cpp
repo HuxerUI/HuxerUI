@@ -244,7 +244,7 @@ public:
       for (const HttpHeader& header : request_.headers) {
         soup_message_headers_append(request_headers, header.name.c_str(), header.value.c_str());
       }
-      if (!request_.body.empty()) {
+      if (!request_.BodyBytes().empty()) {
         g_signal_connect(
             message_,
             "restarted",
@@ -280,8 +280,8 @@ public:
           upload_progress = callbacks_.upload_progress;
         }
       }
-      if (!request_.body.empty() && upload_progress) {
-        upload_progress(static_cast<std::uint64_t>(request_.body.size()));
+      if (!request_.BodyBytes().empty() && upload_progress) {
+        upload_progress(static_cast<std::uint64_t>(request_.BodyBytes().size()));
       }
       native_pending_ = true;
       auto* callback_request = new std::shared_ptr<LinuxHttpRequest>(shared_from_this());
@@ -352,7 +352,7 @@ private:
     if (g_strcmp0(soup_message_get_method(message), HttpMethodName(request_.method)) != 0) {
       return;
     }
-    GBytes* body = g_bytes_new_static(request_.body.data(), request_.body.size());
+    GBytes* body = g_bytes_new_static(request_.BodyBytes().data(), request_.BodyBytes().size());
     soup_message_set_request_body_from_bytes(message, nullptr, body);
     g_bytes_unref(body);
   }

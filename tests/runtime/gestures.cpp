@@ -1416,6 +1416,25 @@ TEST_CASE("Drag preview converts a transformed source grab point into window spa
   REQUIRE(preview->x == Catch::Approx(20.0F));
 }
 
+TEST_CASE("Drag preview follows the grab point beyond the viewport edges") {
+  ResetGestureEvents();
+  TestPlatform platform;
+  UiWindow runtime{TransformedDragPreviewApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  Pointer(runtime, PointerEventType::Down, 39, {20.0F, 30.0F});
+  for (const Point position : {Point{40.0F, 30.0F}, Point{110.0F, 85.0F}, Point{-10.0F, -5.0F}}) {
+    Pointer(runtime, PointerEventType::Move, 39, position);
+    const auto preview = FindPresentedTextRect(runtime.BuildFrame(), "transformed preview");
+    REQUIRE(preview.has_value());
+    REQUIRE(preview->x == Catch::Approx(position.x - 20.0F));
+    REQUIRE(preview->y == Catch::Approx(position.y - 30.0F));
+  }
+  Pointer(runtime, PointerEventType::Cancel, 39, {-10.0F, -5.0F});
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "transformed preview"));
+}
+
 TEST_CASE("Removing an active DragSource closes its target and preview without calling an unmounted handler") {
   ResetGestureEvents();
   TestPlatform platform;

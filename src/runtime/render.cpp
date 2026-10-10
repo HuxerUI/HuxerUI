@@ -201,7 +201,9 @@ void PaintImage(const ImageProperties& properties, PaintContext& context, Rect c
   }
   if (properties.fit == ImageFit::Cover) {
     const float scale = std::max(content.width / intrinsic.width, content.height / intrinsic.height);
-    const Size source_size{content.width / scale, content.height / scale};
+    // Reversing a rounded scale can exceed an intrinsic extent by one ULP.
+    const Size source_size{std::min(intrinsic.width, content.width / scale),
+                           std::min(intrinsic.height, content.height / scale)};
     const Rect source{
         AlignOffset(intrinsic.width, source_size.width, properties.horizontal_alignment),
         AlignOffset(intrinsic.height, source_size.height, properties.vertical_alignment),

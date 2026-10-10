@@ -579,12 +579,20 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constrain
   const bool tight_cross = stretch && std::isfinite(maximum_cross) && minimum_cross == maximum_cross;
   const Constraints initial = tight_cross ? TightCross(loose, vertical, maximum_cross) : loose;
   float total_grow = 0.0F;
+  const bool main_bounded = std::isfinite(MaximumMain(constraints, vertical));
 
   for (ViewNode& child : node.Children()) {
+    total_grow += child.GrowFactor();
+    // A grow child under a bounded main axis is measured below with its final main size. A non-stretching layout
+    // recomputes its cross extent from that result; a tight cross axis already fixes the stretching cross extent.
+    // In either case, a speculative loose measurement contributes no sizing information and recursively doubles
+    // the work of deeply nested layouts.
+    if (main_bounded && child.GrowFactor() > 0.0F && (!stretch || tight_cross)) {
+      continue;
+    }
     // A tight cross axis already determines the stretch result. Measuring loose first would recursively double the
     // work of every nested stretching linear layout without contributing another layout decision.
     static_cast<void>(context.Measure(child, initial));
-    total_grow += child.GrowFactor();
   }
 
   float target_cross = std::clamp(MaxCrossSize(node, vertical), minimum_cross, maximum_cross);

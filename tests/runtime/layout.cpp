@@ -12,6 +12,7 @@ namespace huxerui::test {
 State<bool> use_column_layout;
 State<bool> use_long_cached_text;
 State<bool> expand_cached_scope;
+State<bool> use_measurement_memo_height;
 State<bool> update_opaque_layout_value;
 State<std::size_t> indexed_page_selection;
 State<std::size_t> pager_selection;
@@ -36,6 +37,33 @@ public:
 
   std::size_t measure_text_calls = 0;
 };
+
+void SnapshotMeasureRevisions(
+    const detail::MountedNode& node, std::unordered_map<std::uint64_t, std::uint64_t>& into
+) {
+  into.insert_or_assign(node.identity, node.measure_revision);
+  for (const auto& child : node.children) {
+    if (child) {
+      SnapshotMeasureRevisions(*child, into);
+    }
+  }
+}
+
+std::size_t CountRemeasuredNodes(
+    const detail::MountedNode& node, const std::unordered_map<std::uint64_t, std::uint64_t>& before
+) {
+  std::size_t count = 0;
+  const auto found = before.find(node.identity);
+  if (found != before.end() && node.measure_revision > found->second) {
+    ++count;
+  }
+  for (const auto& child : node.children) {
+    if (child) {
+      count += CountRemeasuredNodes(*child, before);
+    }
+  }
+  return count;
+}
 
 View ImageLayoutApp() {
   return Column {
@@ -438,6 +466,15 @@ View ScopedCachedLayoutApp() {
   };
 }
 
+View MeasurementMemoApp() {
+  auto tall = UseState(false);
+  use_measurement_memo_height = tall;
+  return Column {
+    Text("Memo").With(Frame{.width = 80.0F, .height = tall.Get() ? 40.0F : 20.0F}),
+    Text("Stable").With(Frame{.width = 80.0F}),
+  };
+}
+
 View IndexedCounterPage(std::string label) {
   HUXERUI_SCOPE({
     auto count = UseState(0);
@@ -636,6 +673,43 @@ TEST_CASE("Pager validates and retains its controlled page set") {
   REQUIRE(fourth_semantics->selected == std::optional{false});
 }
 
+TEST_CASE("Pager retains the departing page when a non-adjacent jump returns to its anchor") {
+  TestPlatform platform;
+  UiWindow runtime{PagerLayoutApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  pager_selection = 3;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  const auto* root = runtime.RootNode();
+  const float source_x = root->children[1]->PresentationBounds().x;
+  const float peer_x = root->children[3]->PresentationBounds().x;
+  REQUIRE(source_x < 0.0F);
+
+  pager_selection = 1;
+  REQUIRE_NOTHROW(runtime.BuildFrame());
+  root = runtime.RootNode();
+  REQUIRE(root->children[3]->participates_in_layout);
+  REQUIRE(root->children[1]->PresentationBounds().x == Catch::Approx(source_x));
+  REQUIRE(root->children[3]->PresentationBounds().x == Catch::Approx(peer_x));
+  for (int frame = 0; frame < 4; ++frame) {
+    platform.AdvanceTime(0.25);
+    runtime.BuildFrame();
+  }
+  REQUIRE(root->children[1]->PresentationBounds().x == Catch::Approx(0.0F));
+  REQUIRE_FALSE(root->children[3]->participates_in_layout);
+
+  pager_selection = 0;
+  REQUIRE_NOTHROW(runtime.BuildFrame());
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  pager_selection = 1;
+  REQUIRE_NOTHROW(runtime.BuildFrame());
+  REQUIRE_FALSE(root->children[3]->participates_in_layout);
+}
+
 TEST_CASE("Pager resolves programmatic selection immediately under reduced motion") {
   reduced_motion_pager_settlements.clear();
   TestPlatform platform;
@@ -769,6 +843,34 @@ TEST_CASE("TestImageFitAndAlignmentResolveSourceAndDestinationGeometry") {
   const DrawImageCommand constrained_scale_down =
       render(ImageFit::ScaleDown, HorizontalAlignment::Center, VerticalAlignment::Center);
   REQUIRE(constrained_scale_down.destination == Rect{0.0F, 2.5F, 10.0F, 5.0F});
+}
+
+TEST_CASE("TestImageCoverFractionalFramesKeepSourceInsideIntrinsicBounds") {
+  // Reversing the rounded scale can exceed the intrinsic extent by one ULP.
+  for (const auto frame : {48.023F, 117.809525F, 118.095238F}) {
+    for (const auto horizontal : {HorizontalAlignment::Start, HorizontalAlignment::Center, HorizontalAlignment::End}) {
+      for (const auto vertical : {VerticalAlignment::Start, VerticalAlignment::Center, VerticalAlignment::End}) {
+        layout_test_image = ImageAsset::FromEncoded(MakeTestPng(321, 704));
+        layout_test_image_fit = ImageFit::Cover;
+        layout_test_image_frame = {frame, frame};
+        layout_test_image_horizontal_alignment = horizontal;
+        layout_test_image_vertical_alignment = vertical;
+        TestPlatform platform;
+        UiWindow runtime{ImageLayoutApp, platform};
+        runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+        const FlattenedScene& scene = runtime.BuildFrame();
+        const auto command = std::ranges::find_if(scene.Commands(), [](const PaintCommand& value) {
+          return std::holds_alternative<DrawImageCommand>(value);
+        });
+        REQUIRE(command != scene.Commands().end());
+        const auto& source = std::get<DrawImageCommand>(*command).source;
+        REQUIRE(source.x >= 0.0F);
+        REQUIRE(source.y >= 0.0F);
+        REQUIRE(source.x + source.width <= 321.0F);
+        REQUIRE(source.y + source.height <= 704.0F);
+      }
+    }
+  }
 }
 
 TEST_CASE("TestImagePaintOnlyChangesReuseMeasuredLayout") {
@@ -1220,6 +1322,54 @@ TEST_CASE("TestScopedLayoutInvalidationPropagatesToAncestors") {
   REQUIRE(root->children[1]->measure_revision == stable_measure_revision);
   REQUIRE(root->children[1]->layout_revision > stable_layout_revision);
   REQUIRE(root->children[1]->layout_offset.y == 40.0F);
+}
+
+TEST_CASE("TextMeasurementMemoReusesUnchangedShapingInputs") {
+  CountingTextPlatform platform;
+  UiWindow runtime{MeasurementMemoApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  const std::size_t measured_once = platform.measure_text_calls;
+  const auto* memo = FindMountedText(*runtime.RootNode(), "Memo");
+  REQUIRE(memo != nullptr);
+  REQUIRE(memo->bounds.height == 20.0F);
+  const std::uint64_t revision_once = memo->measure_revision;
+
+  use_measurement_memo_height = true;
+  runtime.BuildFrame();
+
+  memo = FindMountedText(*runtime.RootNode(), "Memo");
+  REQUIRE(memo != nullptr);
+  REQUIRE(memo->measure_revision > revision_once);
+  REQUIRE(memo->bounds.height == 40.0F);
+  REQUIRE(platform.measure_text_calls == measured_once);
+}
+
+TEST_CASE("VirtualListScrollRemeasuresOnlyNewlyRealizedItemText") {
+  CountingTextPlatform platform;
+  UiWindow runtime{BoundedContainerFrameApp, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const std::size_t measured_once = platform.measure_text_calls;
+  runtime.BuildFrame();
+  REQUIRE(platform.measure_text_calls == measured_once);
+
+  std::unordered_map<std::uint64_t, std::uint64_t> revisions;
+  SnapshotMeasureRevisions(*runtime.RootNode(), revisions);
+
+  runtime.HandleScrollInput(ScrollInputEvent{{60.0F, 80.0F}, 0.0F, 20.0F});
+  runtime.BuildFrame();
+
+  // Scrolling invalidates the viewport, so the runtime re-measures the ancestor path and realizes the new window.
+  // Already realized items keep their measurement, and only the newly realized item reaches platform measurement.
+  REQUIRE(platform.measure_text_calls == measured_once + 1);
+  REQUIRE(CountRemeasuredNodes(*runtime.RootNode(), revisions) <= 4);
+
+  const std::size_t after_scroll = platform.measure_text_calls;
+  runtime.BuildFrame();
+  REQUIRE(platform.measure_text_calls == after_scroll);
 }
 
 TEST_CASE("TestNonComparableLayoutValueInvalidatesConservatively") {

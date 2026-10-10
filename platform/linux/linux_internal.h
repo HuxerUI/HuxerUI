@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <unordered_set>
 
 #include <huxerui/app.h>
@@ -12,6 +13,48 @@ namespace huxerui::detail {
 
 inline constexpr float kLinuxCaptionButtonWidth = 46.0F;
 inline constexpr float kLinuxMinTitleBarHeight = 32.0F;
+// Keep the visible border unchanged while making custom-chrome resize
+// targets practical to acquire.
+inline constexpr float kLinuxResizeBorderDips = 10.0F;
+inline constexpr float kLinuxResizeCornerDips = 14.0F;
+
+enum class LinuxResizeEdge {
+  NorthWest,
+  North,
+  NorthEast,
+  East,
+  SouthEast,
+  South,
+  SouthWest,
+  West,
+};
+
+inline std::optional<LinuxResizeEdge>
+ResolveLinuxResizeEdge(Point point, Size viewport, bool disabled) noexcept {
+  if (disabled || !std::isfinite(point.x) || !std::isfinite(point.y) ||
+      !std::isfinite(viewport.width) || !std::isfinite(viewport.height) ||
+      viewport.width <= 0.0F || viewport.height <= 0.0F || point.x < 0.0F || point.y < 0.0F ||
+      point.x > viewport.width || point.y > viewport.height) {
+    return std::nullopt;
+  }
+  const bool left = point.x <= kLinuxResizeBorderDips;
+  const bool right = point.x >= viewport.width - kLinuxResizeBorderDips;
+  const bool top = point.y <= kLinuxResizeBorderDips;
+  const bool bottom = point.y >= viewport.height - kLinuxResizeBorderDips;
+  const bool left_corner = point.x <= kLinuxResizeCornerDips;
+  const bool right_corner = point.x >= viewport.width - kLinuxResizeCornerDips;
+  const bool top_corner = point.y <= kLinuxResizeCornerDips;
+  const bool bottom_corner = point.y >= viewport.height - kLinuxResizeCornerDips;
+  if (top_corner && left_corner) return LinuxResizeEdge::NorthWest;
+  if (top_corner && right_corner) return LinuxResizeEdge::NorthEast;
+  if (bottom_corner && left_corner) return LinuxResizeEdge::SouthWest;
+  if (bottom_corner && right_corner) return LinuxResizeEdge::SouthEast;
+  if (left) return LinuxResizeEdge::West;
+  if (right) return LinuxResizeEdge::East;
+  if (top) return LinuxResizeEdge::North;
+  if (bottom) return LinuxResizeEdge::South;
+  return std::nullopt;
+}
 
 inline WindowTitleBarMetrics ResolveLinuxTitleBarMetrics(
     float preferred_height, Size viewport, bool maximized

@@ -322,6 +322,8 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
   window_handle->Maximize();
   window_handle->Restore();
   window_handle->ToggleMaximize();
+  window_handle->SetFullscreen(true);
+  window_handle->SetFullscreen(false);
   window_handle->Close();
 
   const std::vector expected{
@@ -332,6 +334,8 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
       WindowCommand::Maximize,
       WindowCommand::Restore,
       WindowCommand::ToggleMaximize,
+      WindowCommand::EnterFullscreen,
+      WindowCommand::ExitFullscreen,
       WindowCommand::Close,
   };
   REQUIRE(platform.window_commands == expected);

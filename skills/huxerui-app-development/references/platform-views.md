@@ -62,7 +62,9 @@ Use the active platform's public `platform_registry.h` factory contract:
 - iOS returns a detached stable `UIView*` from Objective-C++ or an actual Objective-C/Swift factory object.
 - macOS returns a detached stable `NSView*` from Objective-C++ or an actual Objective-C/Swift factory object.
 - Web returns a detached DOM element through a direct Emscripten C++ factory or `web::JavaScriptPlatformViewFactory`.
-- Linux does not currently implement PlatformView; do not present it as available or add a parallel embedding path.
+- Linux hosts PlatformViews as clipped GTK4 child widgets and interleaves GTK snapshots with HuxerUI render slices.
+  Its factory contract is in `huxerui/linux/platform_registry.h`; a factory returns the GTK child it added to the
+  supplied `GtkFixed` parent. Pointer hit testing and focus are routed between HuxerUI and the native child.
 
 `PlatformValue` is the public low-level in-process carrier used by RenderScene and platform factory adaptation to retain exact C++ Properties, Controller, and event value types.
 It never crosses a platform-language boundary, and ordinary components and direct factories use their concrete types rather than constructing it themselves.

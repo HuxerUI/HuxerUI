@@ -1273,7 +1273,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | --- | --- |
 | Windows | One transparent DirectComposition surface replays every HuxerUI slice, while child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
 | macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
-| Linux | PlatformView hosting is not implemented. |
+| Linux | The GTK4 adapter hosts each PlatformView in a clipped child container and interleaves native child snapshots with HuxerUI render slices in composition order. Pointer hit testing and focus route to the native child while it owns interaction. |
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The Web host coordinates DOM event targeting with UiWindow hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |

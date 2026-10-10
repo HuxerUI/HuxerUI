@@ -72,7 +72,10 @@ It still publishes enough private content extent for the existing scroll recogni
 
 After direct movement selects a direction, Pager measures and places the committed page and that adjacent page.
 Programmatic transitions measure and place only their source and target pages, including non-adjacent index changes without traversing intermediate pages.
+Retargeting back to the source preserves the previous target as the departing peer until the rebound ends.
+Completed transitions clear the retained drag target so later animations cannot reuse an unrelated page slot.
 Unplaced pages retain mounted state but remain excluded through the generic layout-participation contract.
+Pending virtual-viewport measurement remains dirty inside an unplaced page without propagating measurement invalidation into visible ancestors; showing that page resumes its pending work.
 
 Slots are local to the current transition rather than absolute page-index coordinates.
 When the slot set changes, Pager preserves displacement relative to the source page and remaps it into the new slots.

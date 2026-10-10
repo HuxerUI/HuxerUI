@@ -132,8 +132,8 @@ public:
           }
           [native_request addValue:value forHTTPHeaderField:name];
         }
-        if (!request_.body.empty()) {
-          native_request.HTTPBody = [NSData dataWithBytes:request_.body.data() length:request_.body.size()];
+        if (!request_.BodyBytes().empty()) {
+          native_request.HTTPBody = [NSData dataWithBytes:request_.BodyBytes().data() length:request_.BodyBytes().size()];
         }
 
         NSURLSessionConfiguration* configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];

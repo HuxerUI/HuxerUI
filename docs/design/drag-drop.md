@@ -237,6 +237,7 @@ DebugOverlay remains above it at System level.
 
 The initial source-local grab point is transformed into a window-space offset before anchoring preview placement, so transformed sources do not jump the preview origin.
 Later movement updates Layer placement without recomposing preview content.
+Preview placement follows that grab offset even outside the viewport, without popover side flipping or viewport clamping.
 Terminal state, source invalidation, pointer-session quarantine, and UiWindow retirement dismiss the preview exactly once.
 
 ## Nested auto-scroll

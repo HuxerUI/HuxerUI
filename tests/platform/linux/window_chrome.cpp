@@ -42,6 +42,34 @@ TEST_CASE("LinuxApplicationLifecycleIncludesMinimizedToplevelState") {
   );
 }
 
+TEST_CASE("LinuxCustomChromeResizeEdgesUseLargerCornerTargets") {
+  using detail::LinuxResizeEdge;
+  const Size viewport{800.0F, 600.0F};
+  REQUIRE(detail::ResolveLinuxResizeEdge({0.0F, 0.0F}, viewport, false) == LinuxResizeEdge::NorthWest);
+  REQUIRE(detail::ResolveLinuxResizeEdge({799.0F, 1.0F}, viewport, false) == LinuxResizeEdge::NorthEast);
+  REQUIRE(detail::ResolveLinuxResizeEdge({1.0F, 599.0F}, viewport, false) == LinuxResizeEdge::SouthWest);
+  REQUIRE(detail::ResolveLinuxResizeEdge({799.0F, 599.0F}, viewport, false) == LinuxResizeEdge::SouthEast);
+  REQUIRE(detail::ResolveLinuxResizeEdge({5.0F, 300.0F}, viewport, false) == LinuxResizeEdge::West);
+  REQUIRE(detail::ResolveLinuxResizeEdge({795.0F, 300.0F}, viewport, false) == LinuxResizeEdge::East);
+  REQUIRE(detail::ResolveLinuxResizeEdge({400.0F, 5.0F}, viewport, false) == LinuxResizeEdge::North);
+  REQUIRE(detail::ResolveLinuxResizeEdge({400.0F, 595.0F}, viewport, false) == LinuxResizeEdge::South);
+
+  // The corner target is intentionally deeper than the straight edge target.
+  REQUIRE(detail::ResolveLinuxResizeEdge({12.0F, 12.0F}, viewport, false) == LinuxResizeEdge::NorthWest);
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge({12.0F, 300.0F}, viewport, false).has_value());
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge({400.0F, 300.0F}, viewport, false).has_value());
+}
+
+TEST_CASE("LinuxCustomChromeResizeEdgesRejectDisabledAndInvalidGeometry") {
+  const Size viewport{800.0F, 600.0F};
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge({1.0F, 1.0F}, viewport, true).has_value());
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge({-1.0F, 10.0F}, viewport, false).has_value());
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge({801.0F, 10.0F}, viewport, false).has_value());
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge({1.0F, 1.0F}, {0.0F, 600.0F}, false).has_value());
+  REQUIRE_FALSE(detail::ResolveLinuxResizeEdge(
+      {std::numeric_limits<float>::quiet_NaN(), 1.0F}, viewport, false).has_value());
+}
+
 TEST_CASE("LinuxKeyTrackingBalancesInputMethodFilteringAndRepeat") {
   detail::LinuxKeyTracker keys;
   REQUIRE(keys.Press(38, false) == (detail::LinuxKeyPressResult{true, false}));

@@ -22,6 +22,7 @@ target_include_directories(huxerui_linux_tests PRIVATE
 )
 target_link_libraries(huxerui_linux_tests PRIVATE
         PkgConfig::HUXERUI_GTK4
+        PkgConfig::HUXERUI_EPOXY
         PkgConfig::HUXERUI_GIO
 )
 target_include_directories(huxerui_linux_tests PRIVATE "${HUXERUI_PROJECT_DIR}/platform/linux")

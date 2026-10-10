@@ -17,7 +17,9 @@ target_compile_options(huxerui_codegen PRIVATE
         "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>"
 )
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+option(HUXERUI_HOST_TOOLS_STATIC_RUNTIME "Link host tools against static libstdc++ and libgcc on Linux" ON)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND HUXERUI_HOST_TOOLS_STATIC_RUNTIME)
     target_link_options(huxerui_codegen PRIVATE -static-libstdc++ -static-libgcc)
 endif ()
 

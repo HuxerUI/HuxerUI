@@ -28,6 +28,9 @@ Status codes such as 404 and 500 are valid responses and remain available throug
 Timeouts, transport failures, and unsupported adapters produce `HttpError`.
 
 HTTP bodies use `Bytes` because their content is binary regardless of `Content-Type`.
+`HttpRequest::shared_body` optionally retains immutable bytes shared by repeated requests; leave `body` empty when using it.
+`BodyBytes()` selects the shared bytes or the ordinary owned body without copying them, and the request keeps the shared owner alive through completion or cancellation.
+GET and HEAD requests reject nonempty bodies through either representation.
 The HTTP layer preserves empty bodies, embedded null bytes, and byte sequences that are not valid UTF-8.
 It does not infer an encoding, parse JSON, or decode application response formats.
 

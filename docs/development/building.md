@@ -80,8 +80,9 @@ CI maintains all checked-in host packages through [Host-tool updates](sdk-packag
 When changing that workflow or its support script, run `python -B tests/scripts/host_tools_test.py`; it uses temporary Git repositories and requires only Python 3.12 or later and Git.
 
 Android Runtime tests run on a device or emulator with `./gradlew :HuxerUI:connectedDebugAndroidTest` from `platform/android` (`gradlew.bat` on Windows).
-The library's `androidTest` source set uses `tests/platform/android/instrumentation/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency or native HuxerUI library.
-It covers paragraph geometry and local-notification Intent identity and activation normalization, and installs only the separate test package rather than replacing an example application.
+The library's `androidTest` source set uses `tests/platform/android/instrumentation/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency.
+The actual host focus check loads native HuxerUI: build with `-PhuxeruiBuildNative=true`, or supply `-PhuxeruiRuntimeTestJniDirectory=/absolute/path/to/jni` containing matching ABI subdirectories with `libhuxerui.so` and its runtime dependencies, such as `libc++_shared.so`.
+It covers host focus highlighting, paragraph geometry, and local-notification Intent identity and activation normalization, and installs only the separate test package rather than replacing an example application.
 
 The separate windowless UI smoke runs with `./gradlew :ui_testing:connectedDebugAndroidTest` from the same directory.
 It builds source libraries by default; `-PhuxeruiTestingSdk=/absolute/path/to/sdk` selects installed headers, libraries, tools, and resources instead.

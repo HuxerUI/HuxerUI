@@ -685,6 +685,33 @@ TEST_CASE("HttpClientCancellationStopsTheSinglePlatformOperationAndDropsLateEven
   REQUIRE(http_completions == 0);
 }
 
+TEST_CASE("HTTP shared request bodies retain their owner without copying bytes") {
+  ResetHttpState();
+  HttpTestPlatform platform;
+  UiWindow runtime(HttpApp, platform);
+  runtime.BuildFrame();
+  auto body = std::make_shared<const Bytes>(BytesFromString("shared request"));
+  const auto* address = body->data();
+  std::weak_ptr<const Bytes> owner = body;
+  http_tasks.Launch(CaptureHttpResult(http_client, {
+      .url = "https://example.test/shared",
+      .method = HttpMethod::Post,
+      .shared_body = body,
+  }));
+  body.reset();
+  platform.RunPlatformModuleTasks();
+  REQUIRE_FALSE(owner.expired());
+  REQUIRE(platform.transport->CallCount() == 1);
+  const auto request = platform.transport->Request(0);
+  REQUIRE(request.body.empty());
+  REQUIRE(request.BodyBytes().data() == address);
+  REQUIRE(request.BodyBytes() == BytesFromString("shared request"));
+  platform.transport->Respond(0, {.url = request.url, .status_code = 204});
+  platform.transport->Complete(0);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(http_response.has_value());
+}
+
 TEST_CASE("HttpClientValidatesPortableRequestConfigurationBeforeLaunch") {
   ResetHttpState();
   HttpTestPlatform platform;
@@ -692,6 +719,14 @@ TEST_CASE("HttpClientValidatesPortableRequestConfigurationBeforeLaunch") {
   runtime.BuildFrame();
 
   REQUIRE_NOTHROW(static_cast<void>(http_client->SendAsync({.url = "HTTPS://example.test"})));
+  const auto shared_body = std::make_shared<const Bytes>(BytesFromString("shared request"));
+  REQUIRE_THROWS_AS(static_cast<void>(http_client->SendAsync({
+      .url = "https://example.test", .shared_body = shared_body,
+  })), std::invalid_argument);
+  REQUIRE_THROWS_AS(static_cast<void>(http_client->SendAsync({
+      .url = "https://example.test", .method = HttpMethod::Post,
+      .body = BytesFromString("owned request"), .shared_body = shared_body,
+  })), std::invalid_argument);
   REQUIRE_THROWS_AS(static_cast<void>(http_client->SendAsync({.url = "file:///tmp/value"})), std::invalid_argument);
   REQUIRE_THROWS_AS(
       static_cast<void>(http_client->SendAsync({.url = "https://example.test", .body = BytesFromString("body")})),

@@ -59,13 +59,13 @@ val MakeWebRequest(const HttpRequest& request) {
   }
   result.set("headers", headers);
 
-  val body = val::global("Uint8Array").new_(request.body.size());
-  if (!request.body.empty()) {
+  val body = val::global("Uint8Array").new_(request.BodyBytes().size());
+  if (!request.BodyBytes().empty()) {
     body.call<void>(
         "set",
         val(emscripten::typed_memory_view(
-            request.body.size(),
-            reinterpret_cast<const unsigned char*>(request.body.data())
+            request.BodyBytes().size(),
+            reinterpret_cast<const unsigned char*>(request.BodyBytes().data())
         ))
     );
   }

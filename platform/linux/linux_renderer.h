@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <string_view>
 
@@ -38,6 +39,8 @@ public:
       float max_width, const TextLayoutOptions& options);
 
   void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame);
+  void SnapshotSlice(GtkSnapshot* snapshot, const RenderFrame& frame, std::size_t first_command,
+                     std::size_t command_count);
 
 public:
   struct State;

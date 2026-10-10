@@ -14,6 +14,7 @@ def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
 def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
 def huxeruiStl = huxeruiProperty("huxeruiStl")
 def huxeruiBuildNative = huxeruiProperty("huxeruiBuildNative").toBoolean()
+def huxeruiRuntimeTestJniDirectory = providers.gradleProperty("huxeruiRuntimeTestJniDirectory").orNull
 
 android {
     namespace = "org.huxerui"
@@ -51,6 +52,9 @@ android {
 
     sourceSets {
         androidTest.java.srcDir "../../../tests/platform/android/instrumentation"
+        if (huxeruiRuntimeTestJniDirectory != null) {
+            androidTest.jniLibs.srcDir huxeruiRuntimeTestJniDirectory
+        }
     }
 
     compileOptions {

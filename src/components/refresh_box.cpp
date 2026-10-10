@@ -110,10 +110,12 @@ public:
     if (!drag_active_) {
       motion_result = displacement_.Advance(frame);
       const float displacement = std::max(0.0F, displacement_.Value());
-      mounted.presentation.children_transform = detail::ComposeTransform(
-          detail::TranslationTransform({0.0F, displacement}),
-          mounted.presentation.children_transform
-      );
+      if (behavior_.style.move_content) {
+        mounted.presentation.children_transform = detail::ComposeTransform(
+            detail::TranslationTransform({0.0F, displacement}),
+            mounted.presentation.children_transform
+        );
+      }
       if (motion_result.changed) {
         InvalidatePaint();
       }
@@ -121,6 +123,20 @@ public:
         mode_ = Mode::Idle;
         UpdateAllowedSources(mounted);
         InvalidateSemantics();
+      }
+    }
+    if (!behavior_.style.move_content) {
+      // The leading pull is stored as the node's own overscroll, and ResolveChildrenTransform adds that
+      // overscroll to the descendant translation, so a pull would still push the content down. Compose the
+      // equal and opposite translation to cancel it for the descendants only; the indicator keeps using the
+      // overscroll through LeadingDisplacement, and the offset itself must stay intact because the release
+      // threshold and the settle motion are computed from it.
+      const float overscroll = mounted.scroll_state->overscroll_offset;
+      if (overscroll != 0.0F) {
+        mounted.presentation.children_transform = detail::ComposeTransform(
+            detail::TranslationTransform({0.0F, overscroll}),
+            mounted.presentation.children_transform
+        );
       }
     }
 

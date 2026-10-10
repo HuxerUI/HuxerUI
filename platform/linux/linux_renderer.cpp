@@ -1576,7 +1576,9 @@ GskPath* CreateGskPath(const Path& path) {
 
 class SnapshotScenePainter final {
 public:
-  SnapshotScenePainter(LinuxRenderer::State& state, GtkSnapshot* snapshot) : state_(state), snapshot_(snapshot) {}
+  SnapshotScenePainter(LinuxRenderer::State& state, GtkSnapshot* snapshot,
+                       std::optional<std::pair<std::size_t, std::size_t>> command_range = std::nullopt)
+      : state_(state), snapshot_(snapshot), command_range_(command_range) {}
 
   void Draw(const RenderScene& scene) {
     if (scene.root != nullptr) {
@@ -1629,6 +1631,13 @@ private:
     CairoBatch batch;
     batch.commands.reserve(sequence.Commands().size());
     for (const PaintCommand& command : sequence.Commands()) {
+      if (!std::holds_alternative<PlacePlatformViewCommand>(command) && command_range_.has_value()) {
+        const std::size_t index = command_cursor_++;
+        const std::size_t end = command_range_->first + command_range_->second;
+        if (index < command_range_->first || index >= end) {
+          continue;
+        }
+      }
       std::visit([this, &batch, &command](const auto& value) { DrawCommand(batch, command, value); }, command);
     }
     Flush(batch);
@@ -1719,7 +1728,6 @@ private:
 
   void DrawCommand(CairoBatch& batch, const PaintCommand&, const PlacePlatformViewCommand&) {
     Flush(batch);
-    throw std::logic_error("HuxerUI Linux adapter does not support PlatformView composition yet");
   }
 
   void Flush(CairoBatch& batch) {
@@ -1770,6 +1778,8 @@ private:
 
   LinuxRenderer::State& state_;
   GtkSnapshot* snapshot_ = nullptr;
+  std::optional<std::pair<std::size_t, std::size_t>> command_range_;
+  std::size_t command_cursor_ = 0;
 };
 
 } // namespace
@@ -1869,6 +1879,17 @@ void LinuxRenderer::Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame) {
     throw std::invalid_argument("HuxerUI Linux renderer requires a GTK snapshot");
   }
   SnapshotScenePainter(*state_, snapshot).Draw(frame.scene);
+}
+
+void LinuxRenderer::SnapshotSlice(GtkSnapshot* snapshot, const RenderFrame& frame, std::size_t first_command,
+                                 std::size_t command_count) {
+  if (snapshot == nullptr) {
+    throw std::invalid_argument("HuxerUI Linux renderer requires a GTK snapshot");
+  }
+  if (command_count == 0) {
+    return;
+  }
+  SnapshotScenePainter(*state_, snapshot, std::pair{first_command, command_count}).Draw(frame.scene);
 }
 
 } // namespace huxerui::detail

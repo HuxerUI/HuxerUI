@@ -25,6 +25,9 @@ namespace {
 
 using detail::MakeContainerSpec;
 
+constexpr float kPagerSettleDistanceShare = 0.25F;
+constexpr float kPagerSettleVelocity = 450.0F;
+
 struct PagerPageState {
   static const detail::ModifierDescriptor& Descriptor();
 
@@ -91,6 +94,7 @@ public:
       initialized_ = true;
       displayed_index_ = behavior_.selected_index;
       mode_ = Mode::Stable;
+      drag_target_.reset();
       needs_rebase_ = true;
       layout_ready_ = false;
       ConfigureScrollState(mounted);
@@ -138,6 +142,7 @@ public:
     if (!result.needs_frame && !result.wake_after.has_value()) {
       displayed_index_ = behavior_.selected_index;
       mode_ = Mode::Stable;
+      drag_target_.reset();
       settlement_pending_ = true;
       needs_rebase_ = true;
       layout_ready_ = false;
@@ -234,9 +239,14 @@ public:
       relative.emplace_back(index, physical_direction);
     };
 
-    if (mode_ == Mode::Animating && animation_target_index_ != displayed_index_) {
+    if (mode_ == Mode::Animating) {
       add(displayed_index_, 0);
-      add(animation_target_index_, animation_target_index_ > displayed_index_ ? 1 : -1);
+      const auto peer = animation_target_index_ != displayed_index_
+                            ? std::optional<std::size_t>{animation_target_index_}
+                            : drag_target_;
+      if (peer.has_value() && *peer != displayed_index_) {
+        add(*peer, *peer > displayed_index_ ? 1 : -1);
+      }
     } else {
       add(displayed_index_, 0);
       if (displayed_index_ > 0) {
@@ -370,10 +380,13 @@ private:
 
   std::size_t ResolveReleaseProposal(const detail::MountedNode& node) const {
     const float displacement = Offset(node) - anchor_offset_;
-    const float decisive_velocity = std::abs(release_velocity_) >= 600.0F ? release_velocity_ : 0.0F;
+    const float decisive_velocity = std::abs(release_velocity_) >= kPagerSettleVelocity
+                                        ? release_velocity_
+                                        : 0.0F;
     const float direction_value = decisive_velocity != 0.0F ? decisive_velocity : displacement;
     if (direction_value == 0.0F ||
-        (decisive_velocity == 0.0F && std::abs(displacement) < extent_ * 0.35F)) {
+        (decisive_velocity == 0.0F &&
+         std::abs(displacement) < extent_ * kPagerSettleDistanceShare)) {
       return displayed_index_;
     }
     const int physical_direction = direction_value > 0.0F ? 1 : -1;
@@ -382,6 +395,13 @@ private:
   }
 
   void BeginAnimation(detail::MountedNode& node, std::size_t target) {
+    // Returning to the anchor during a non-adjacent jump still needs the old
+    // arriving page as its departing peer. Never reuse a completed drag target.
+    if (mode_ == Mode::Animating && animation_target_index_ != displayed_index_) {
+      drag_target_ = target == displayed_index_
+                         ? std::optional<std::size_t>{animation_target_index_}
+                         : std::nullopt;
+    }
     animation_initial_displacement_ = extent_ > 0.0F ? (Offset(node) - anchor_offset_) / extent_ : 0.0F;
     animation_target_index_ = target;
     mode_ = Mode::Animating;

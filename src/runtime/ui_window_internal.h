@@ -138,6 +138,7 @@ enum class LayerPlacementKind : std::uint8_t {
   BottomCenter,
   Fill,
   Anchored,
+  FollowPointer,
 };
 
 enum class LayerAnchorSide : std::uint8_t {

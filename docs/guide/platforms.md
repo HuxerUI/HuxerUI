@@ -21,6 +21,12 @@ The shared local-notification API is available on every listed platform.
 Registered Windows applications, configured Android hosts, and the iOS and macOS adapters install native transports; Linux and Web currently report unavailable capabilities and operations.
 See [Local Notifications](../design/local-notifications.md) for authorization, activation, and platform mapping details.
 
+## Android host focus
+
+The native HuxerUI host remains focusable for keyboard and IME input.
+On Android API 26 and later it disables the system's default View focus highlight because that drawable would tint the entire application surface when its window receives focus, including in split-screen mode.
+HuxerUI components keep their own focus indication; embedded native controls keep their native focus behavior.
+
 ## Shared CPU buffer references
 
 Include `<huxerui/data.h>` for `BufferReference`: a retained, read-only view of address-stable CPU memory.

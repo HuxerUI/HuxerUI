@@ -66,6 +66,14 @@ struct HttpRequest {
   /// The deadline for the complete operation, including redirects and streamed body reads. std::nullopt disables the
   /// HuxerUI deadline but cannot disable platform- or network-imposed failures.
   std::optional<std::chrono::milliseconds> timeout = std::chrono::milliseconds{30000};
+
+  /// Optional immutable body shared by several operations (for example a challenged request replay).
+  /// When set, body must be empty. The operation retains this owner until transport completion/cancellation.
+  std::shared_ptr<const Bytes> shared_body{};
+
+  [[nodiscard]] const Bytes& BodyBytes() const noexcept {
+    return shared_body ? *shared_body : body;
+  }
 };
 
 /// A fully buffered final HTTP response returned by HttpClient::SendAsync().

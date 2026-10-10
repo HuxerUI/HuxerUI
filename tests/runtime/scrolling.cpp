@@ -38,6 +38,7 @@ std::vector<std::string> scroll_hook_calls;
 std::vector<ScrollActivity> scroll_activities;
 int refresh_requests = 0;
 bool accept_refresh_requests = true;
+float refresh_indicator_radius = 20.0F;
 
 struct ScrollHook {
   class Extension;
@@ -416,6 +417,20 @@ View NestedRefreshBoxApp() {
              false
   )
       .OnRefresh([] { ++refresh_requests; });
+}
+
+/// Style that keeps the pulled content exactly where it is: only the indicator follows the finger.
+View StationaryContentRefreshBoxApp() {
+  ThemeDefinition definition = FlatThemeDefinition();
+  huxerui::RefreshBoxStyle style = ThemeDefinitionValue<huxerui::RefreshBoxStyle>(definition);
+  style.move_content = false;
+  refresh_indicator_radius = style.container_size * 0.5F;
+  definition.Set(style);
+  return Theme {
+    std::move(definition),
+    RefreshBox(Spacer().With(huxerui::Frame{100.0F, 100.0F}), false)
+        .OnRefresh([] { ++refresh_requests; }),
+  };
 }
 
 TEST_CASE("TestScrollViewLayoutClipAndHitTest") {
@@ -992,6 +1007,23 @@ TEST_CASE("Pager uses direct drag without mapping wheel input and honors DragEna
   REQUIRE(pager_proposals == std::vector<std::size_t>{2});
 }
 
+TEST_CASE("Pager changes page after dragging one quarter of its width") {
+  pager_proposals.clear();
+  accept_pager_proposals = true;
+  TestPlatform platform;
+  UiWindow runtime{InteractivePagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 308, {80.0F, 40.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 308, {55.0F, 40.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 308, {55.0F, 40.0F}, PointerDeviceKind::Touch});
+  runtime.BuildFrame();
+
+  REQUIRE(pager_proposals == std::vector<std::size_t>{2});
+  REQUIRE(interactive_pager_page.Get() == 2);
+}
+
 TEST_CASE("Pager returns to controlled selection when a proposal is rejected") {
   pager_settlements.clear();
   pager_proposals.clear();
@@ -1295,6 +1327,70 @@ TEST_CASE("RefreshBox receives only the pull remaining after nested content reac
 
   REQUIRE(refresh_content_scroll.Offset() == 0.0F);
   REQUIRE(refresh_requests == 1);
+}
+
+/// Reports the refresh indicator container: the only plain circle RefreshBox draws above its content.
+/// Its radius comes from the style, so the test reads it back from the same definition the app uses.
+std::optional<float> RefreshIndicatorCenterY(const FlattenedScene& scene) {
+  std::optional<float> center_y;
+  for (const PaintCommand& command : scene.Commands()) {
+    const auto* circle = std::get_if<DrawCircleCommand>(&command);
+    if (circle != nullptr && std::abs(circle->radius - refresh_indicator_radius) < 0.01F) {
+      center_y = circle->center.y;
+    }
+  }
+  return center_y;
+}
+
+/// The Theme that carries the style is an ancestor of the RefreshBox, so the refresh node is the first
+/// scroll container below the root rather than the root itself.
+const detail::MountedNode* FindScrollNode(const detail::MountedNode& node) {
+  if (node.scroll_state) {
+    return &node;
+  }
+  for (const std::unique_ptr<detail::MountedNode>& child : node.children) {
+    if (child) {
+      if (const detail::MountedNode* found = FindScrollNode(*child)) {
+        return found;
+      }
+    }
+  }
+  return nullptr;
+}
+
+TEST_CASE("RefreshBox keeps content stationary while the indicator follows the pull") {
+  refresh_requests = 0;
+  TestPlatform platform;
+  platform.platform_resources = BuiltinTestResources();
+  UiWindow runtime{StationaryContentRefreshBoxApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  const auto content_y = [&runtime] {
+    const detail::MountedNode* refresh = FindScrollNode(*runtime.RootNode());
+    REQUIRE(refresh != nullptr);
+    REQUIRE(refresh->children.size() == 1);
+    return refresh->children.front()->PresentationBounds().y;
+  };
+  REQUIRE_FALSE(RefreshIndicatorCenterY(runtime.BuildFrame()).has_value());
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 501, {50.0F, 20.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 501, {50.0F, 80.0F}, PointerDeviceKind::Touch});
+  REQUIRE(FindScrollNode(*runtime.RootNode())->scroll_state->overscroll_offset < 0.0F);
+  const std::optional<float> short_indicator = RefreshIndicatorCenterY(runtime.BuildFrame());
+  REQUIRE(short_indicator.has_value());
+  // The pull is stored as overscroll, and the descendant translation must not follow it.
+  REQUIRE(content_y() == Catch::Approx(0.0F));
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 501, {50.0F, 240.0F}, PointerDeviceKind::Touch});
+  const std::optional<float> long_indicator = RefreshIndicatorCenterY(runtime.BuildFrame());
+  REQUIRE(long_indicator.has_value());
+  REQUIRE(*long_indicator > *short_indicator);
+  REQUIRE(content_y() == Catch::Approx(0.0F));
+
+  runtime.HandlePointerEvent({PointerEventType::Up, 501, {50.0F, 240.0F}, PointerDeviceKind::Touch});
+  REQUIRE(refresh_requests == 1);
+  // While refreshing the content is still in place and the indicator stays visible.
+  REQUIRE(content_y() == Catch::Approx(0.0F));
+  REQUIRE(RefreshIndicatorCenterY(runtime.BuildFrame()).has_value());
 }
 
 TEST_CASE("RefreshBox validates its required content") {

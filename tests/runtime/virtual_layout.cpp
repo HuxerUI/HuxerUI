@@ -14,6 +14,7 @@ State<bool> variable_grid_height_expanded;
 State<int> virtual_list_declaration_revision;
 State<int> virtual_grid_declaration_revision;
 State<bool> horizontal_virtual_list;
+State<std::size_t> hidden_virtual_page;
 ScrollController custom_virtual_scroll;
 
 class TestVirtualStrip final : public VirtualLayout<TestVirtualStrip> {
@@ -1018,6 +1019,39 @@ TEST_CASE("TestCustomVirtualLayoutProtocol") {
   REQUIRE(centered != root->virtual_state->realized_indices.end());
   const std::size_t centered_position = static_cast<std::size_t>(centered - root->virtual_state->realized_indices.begin());
   REQUIRE(root->children[centered_position]->layout_offset.y == 37.5F);
+}
+
+TEST_CASE("Hidden virtual pages retain pending measurement without invalidating visible layout") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    auto selected = UseState<std::size_t>(0);
+    hidden_virtual_page = selected;
+    return IndexedPages(
+        {Text("visible"), TestVirtualStrip(100, [](std::size_t index) { return Text(std::to_string(index)); })},
+        selected
+    );
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+  const auto* root = runtime.RootNode();
+  const auto* hidden = root->children[1].get();
+  REQUIRE(hidden->virtual_state != nullptr);
+  REQUIRE(hidden->virtual_state->viewport_dirty);
+  REQUIRE_FALSE(hidden->participates_in_layout);
+  const auto visible_revision = root->children[0]->measure_revision;
+  const auto root_revision = root->measure_revision;
+  for (int frame = 0; frame < 4; ++frame) {
+    runtime.BuildFrame();
+    REQUIRE(root->measure_revision == root_revision);
+    REQUIRE(root->children[0]->measure_revision == visible_revision);
+    REQUIRE(hidden->virtual_state->viewport_dirty);
+  }
+  hidden_virtual_page = 1;
+  const auto& selected_scene = runtime.BuildFrame();
+  REQUIRE(hidden->participates_in_layout);
+  REQUIRE_FALSE(hidden->virtual_state->viewport_dirty);
+  REQUIRE_FALSE(hidden->children.empty());
+  REQUIRE(ContainsText(selected_scene, "0"));
 }
 
 TEST_CASE("TestVirtualLayoutSkipsCleanPolicyAndStableItemMeasurement") {

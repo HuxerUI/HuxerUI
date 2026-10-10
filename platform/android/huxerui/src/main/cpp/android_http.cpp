@@ -449,7 +449,7 @@ public:
       android::LocalRef<jobjectArray> header_values =
           MakeStringArray(environment, string_class.Get(), request.headers, false);
       android::LocalRef<jbyteArray> java_body =
-          android::BytesToJavaByteArray(environment, std::span<const std::byte>(request.body));
+          android::BytesToJavaByteArray(environment, std::span<const std::byte>(request.BodyBytes()));
       if (!url || !method || !java_body) {
         throw std::runtime_error("HuxerUI Android HTTP request values could not be allocated");
       }
