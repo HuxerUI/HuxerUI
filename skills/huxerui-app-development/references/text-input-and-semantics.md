@@ -10,6 +10,14 @@ Build `AttributedText` from `TextSpan` fragments, or supply validated style and 
 
 The source keeps offscreen text available for Copy without mounting Views. Its lookups must not fetch data, parse content, or depend on mounted nodes. Share unchanged blocks and indexes when publishing a replacement snapshot instead of rebuilding the whole document for each appended chunk. Keep accumulated streaming content in the owning model and batch State updates on the application thread; virtual rows only render the published snapshot. Removing a selected endpoint block clears selection, and appending content does not automatically extend it.
 
+### Custom fonts and sizing
+
+Load a single font with `Font::FromResource(RawResource)`, `FromFile(File)`, or `FromBytes(Bytes)`. For several weights or slants of one family, reuse `FontFamily::FromResources`, `FromFiles`, or `FromBytes`, then create requests with `Font::FromFamily(family, size)`. Set `TypographyScheme::family` through `ThemeSpec::typography` for theme-wide reuse; explicit Font overrides remain authoritative. Custom input is static, single-face TTF/OTF data; a named-family request does not load these files.
+
+Keep bundled fonts under `resources/raw` and pass their generated RawResource identifiers. Resource loading is synchronous and requires the application thread and Runtime, but no window or composition. File and byte factories need no Runtime and may run on a worker; use asynchronous file reading followed by `FromBytes` when blocking is inappropriate. Retain the immutable family instead of rereading fonts during composition; later source-file edits do not mutate it. Web may initially use fallback metrics while a custom font decodes; HuxerUI refreshes text geometry when it becomes available.
+
+`Font::Size()` is the application's baseline logical size. On Linux, GTK's effective text DPI resolves it as `size * DPI / 96`; device scaling is separate, and `ResourceConfiguration::display_scale` selects image density. Do not multiply application font sizes by that display scale or reapply GTK text scaling. Use `UseTextMeasurer()` for custom composition geometry rather than deriving it from the requested size; HuxerUI refreshes measurements when platform text metrics change. Fixed frames and padding do not acquire a text scale, so allow room for scaled text.
+
 ## Controlled editing
 
 Store the complete `TextEditingValue`, not only `text`. It carries `TextSelection` and optional composition. Text offsets and platform input units are not interchangeable; let HuxerUI's text-input contract translate UTF-8, UTF-16, scalar, and grapheme boundaries.

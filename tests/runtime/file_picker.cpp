@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -297,6 +298,42 @@ TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
   REQUIRE(picker_task_completed);
   REQUIRE_FALSE(replaced_reference);
   REQUIRE_FALSE(state->replaced_with.has_value());
+}
+
+TEST_CASE("FileReferenceCallbackBridgePreservesStartupErrorsAndCancellation") {
+  ResetFilePickerState();
+  TestPlatform platform;
+  UiWindow runtime(FilePickerApp, platform);
+  runtime.BuildFrame();
+  std::optional<IoResult<Bytes>> result;
+  file_picker_tasks.Launch([&]() -> Task<void> {
+    result = co_await detail::RunFileReferenceBytesOperation([](auto) -> std::function<void()> {
+      throw std::runtime_error("provider startup failed");
+    });
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(result.has_value());
+  REQUIRE_FALSE(result->Succeeded());
+  REQUIRE(result->Error().code == IoErrorCode::Io);
+
+  result.reset();
+  detail::FileReferenceBytesCompletion completion;
+  int cancellations = 0;
+  auto handle = file_picker_tasks.Launch([&]() -> Task<void> {
+    result = co_await detail::RunFileReferenceBytesOperation([&](auto callback) {
+      completion = std::move(callback);
+      return [&] {
+        ++cancellations;
+        throw std::runtime_error("provider cancellation failed");
+      };
+    });
+  });
+  platform.RunPlatformModuleTasks();
+  handle.Cancel();
+  completion(IoResult<Bytes>(BytesFromString("late")));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(cancellations == 1);
+  REQUIRE_FALSE(result.has_value());
 }
 
 TEST_CASE("RuntimeInstallsAnUnsupportedFilePickerService") {

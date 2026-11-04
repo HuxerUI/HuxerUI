@@ -126,137 +126,22 @@ void ValidateSaveOptions(const SaveFileOptions& options) {
   ValidateFilter(options.filter);
 }
 
-// Bridges provider callbacks to the owning TaskExecution without involving the picker queue. The
-// awaiter owns this state; weak callbacks cannot resurrect a canceled or destroyed coroutine.
-template <class Result>
-class CallbackOperationState final : public std::enable_shared_from_this<CallbackOperationState<Result>> {
-public:
-  using Completion = std::function<void(Result)>;
-  using Starter = std::function<std::function<void()>(Completion)>;
-
-  CallbackOperationState(Starter starter, Result failure)
-      : starter_(std::move(starter)), failure_(std::move(failure)) {}
-
-  void Suspend(
-      std::weak_ptr<TaskExecution> execution, std::coroutine_handle<typename Task<Result>::promise_type> continuation
-  ) {
-    {
-      std::scoped_lock lock(mutex_);
-      execution_ = std::move(execution);
-      continuation_ = continuation;
-    }
-
-    std::weak_ptr<CallbackOperationState> weak = this->shared_from_this();
-    std::function<void()> cancellation;
-    try {
-      cancellation = starter_([weak](Result result) {
-        if (auto state = weak.lock()) {
-          state->Complete(std::move(result));
+// File providers report startup failures as domain results and keep their existing non-throwing cancellation boundary.
+template <class Result, class Starter> Task<Result> RunCallbackOperation(Starter starter, Result failure) {
+  return AwaitCallback<Result>(
+      [starter = std::move(starter), failure = std::move(failure)](CallbackCompletion<Result> completion) mutable
+          -> std::function<void()> {
+        try {
+          auto cancellation = starter([completion](Result result) { completion.Complete(std::move(result)); });
+          if (cancellation) {
+            return [cancellation = std::move(cancellation)]() mutable { InvokeCancellation(std::move(cancellation)); };
+          }
+        } catch (...) {
+          completion.Complete(std::move(failure));
         }
-      });
-    } catch (...) {
-      Complete(std::move(failure_));
-      return;
-    }
-
-    // A starter can complete inline or race cancellation before returning its cancellation function.
-    // Publish that function only while pending, or cancel the newly started operation outside the lock.
-    bool cancel_started_operation = false;
-    {
-      std::scoped_lock lock(mutex_);
-      if (canceled_) {
-        cancel_started_operation = true;
-      } else if (!result_.has_value()) {
-        cancellation_ = std::move(cancellation);
+        return {};
       }
-    }
-    if (cancel_started_operation) {
-      InvokeCancellation(std::move(cancellation));
-    }
-  }
-
-  Result TakeResult() {
-    std::scoped_lock lock(mutex_);
-    if (!result_.has_value()) {
-      throw std::logic_error("HuxerUI file reference operation resumed without a result");
-    }
-    return std::move(*result_);
-  }
-
-  void Cancel() noexcept {
-    std::function<void()> cancellation;
-    {
-      std::scoped_lock lock(mutex_);
-      if (canceled_ || result_.has_value()) {
-        return;
-      }
-      canceled_ = true;
-      execution_.reset();
-      continuation_ = {};
-      cancellation = std::move(cancellation_);
-    }
-    InvokeCancellation(std::move(cancellation));
-  }
-
-private:
-  void Complete(Result result) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
-    {
-      std::scoped_lock lock(mutex_);
-      if (canceled_ || result_.has_value()) {
-        return;
-      }
-      result_.emplace(std::move(result));
-      cancellation_ = {};
-      execution = execution_;
-      continuation = std::exchange(continuation_, {});
-    }
-    ResumeTask(execution, continuation);
-  }
-
-  std::mutex mutex_;
-  Starter starter_;
-  Result failure_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
-  std::function<void()> cancellation_;
-  std::optional<Result> result_;
-  bool canceled_ = false;
-};
-
-template <class Result> class CallbackOperationAwaiter final {
-public:
-  using State = CallbackOperationState<Result>;
-
-  CallbackOperationAwaiter(typename State::Starter starter, Result failure)
-      : state_(std::make_shared<State>(std::move(starter), std::move(failure))) {}
-
-  ~CallbackOperationAwaiter() {
-    if (state_) {
-      state_->Cancel();
-    }
-  }
-
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
-  }
-
-  void await_suspend(std::coroutine_handle<typename Task<Result>::promise_type> continuation) {
-    state_->Suspend(TaskExecutionFor(continuation), continuation);
-  }
-
-  Result await_resume() {
-    return state_->TakeResult();
-  }
-
-private:
-  std::shared_ptr<State> state_;
-};
-
-template <class Result>
-Task<Result> RunCallbackOperation(typename CallbackOperationState<Result>::Starter starter, Result failure) {
-  co_return co_await CallbackOperationAwaiter<Result>(std::move(starter), std::move(failure));
+  );
 }
 
 Task<IoResult<Bytes>> ReadReferenceBytes(std::shared_ptr<FileReferenceState> state, FileType type) {

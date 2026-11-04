@@ -167,6 +167,14 @@ For a package-based mcpp project, use `mcpp build` and `mcpp run` with its exist
 - On Termux, Android and Web use the current device directly: do not pass `--device` or add ADB. Web uses the CLI-planned Python loopback server and opens its URL through `termux-open`.
 - A Termux Android run opens the APK in the system installer; complete installation and choose Open there.
 
+## UI testing
+
+Use the optional `HuxerUI::testing` library for deterministic tests of shared UI behavior without a native window. An installed SDK must contain the matching testing artifact: request `find_package(HuxerUI CONFIG REQUIRED COMPONENTS testing)` and link the test target to `HuxerUI::testing`, which supplies its core dependency. Include `<huxerui/testing/ui_test.h>` explicitly; the umbrella header does not include it. Apply codegen when test sources contain composable definitions.
+
+`huxerui::testing::UiTest` borrows an Application that must outlive it. Query through UiSelector and drive changes with `Pump()` or bounded `PumpUntil`; use virtual time for animation and timers instead of sleeping. This tests shared composition, input, layout, and render intent, not native rendering, font shaping, IME, or operating-system integration.
+
+The test window initially has `WindowLifecycleState::Background`. Use `ui.UpdateWindowLifecycleState(WindowLifecycleState::Active)` when activity matters, then `ui.Pump()` to update query observations. Injection does not pump, change application lifecycle, or perform native activation. It cannot establish mobile background execution or process-suspension behavior.
+
 ## Package applications
 
 Use `huxerui package <platform-list>` for user-requested distribution output and inspect `dist/<platform>` only after the command succeeds.

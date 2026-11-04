@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stop_token>
 #include <stdexcept>
 #include <thread>
@@ -26,6 +27,10 @@ static_assert(!std::copy_constructible<Task<int>>);
 static_assert(std::copy_constructible<TaskScope>);
 static_assert(std::copy_constructible<TaskHandle>);
 static_assert(std::copy_constructible<WorkerSequence>);
+static_assert(std::copy_constructible<CallbackCompletion<int>>);
+static_assert(std::copy_constructible<CallbackCompletion<void>>);
+static_assert(!std::default_initializable<CallbackCompletion<int>>);
+static_assert(!std::default_initializable<CallbackCompletion<void>>);
 static_assert(std::same_as<decltype(RunWorker([] { return 1; })), Task<int>>);
 static_assert(std::same_as<decltype(WorkerSequence{}.Run([](std::stop_token) { return 1; })), Task<int>>);
 
@@ -269,6 +274,10 @@ View TaskScopeApp() {
   task_value = UseState(0);
   task_recompose_trigger = UseState(0);
   return Text::Format("{}:{}", task_value, task_recompose_trigger);
+}
+
+View CallbackEnvironmentApp() {
+  return ProvideEnvironment(Locale::FromLanguageTag("fr-FR"), Scope(TaskScopeApp));
 }
 
 View TaskChild() {
@@ -1097,5 +1106,346 @@ TEST_CASE("TaskScopeReportsInvalidUsage") {
   post_platform.RunPlatformModuleTasks();
   REQUIRE(composition_post_runs == 0);
 }
+
+TEST_CASE("AwaitCallbackOwnsLazyMoveOnlyInputsAndDefersInlineCompletion") {
+  TestPlatform platform;
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  auto owner = std::make_shared<int>(42);
+  std::weak_ptr<int> weak_owner = owner;
+  int starts = 0;
+  int result = 0;
+  int cancellations = 0;
+  bool returned = false;
+  auto task = AwaitCallback<std::unique_ptr<int>>(
+      [owner = std::move(owner), value = std::make_unique<int>(7), &starts, &returned,
+       &cancellations, &platform](CallbackCompletion<std::unique_ptr<int>> completion) mutable {
+        ++starts;
+        *value += *owner;
+        completion.Complete(std::move(value));
+        platform.RunPlatformModuleTasks();
+        returned = true;
+        return [&cancellations] { ++cancellations; };
+      }
+  );
+  REQUIRE(starts == 0);
+  REQUIRE_FALSE(weak_owner.expired());
+  captured_task_scope.Launch([task = std::move(task), &result, &returned]() mutable -> Task<void> {
+    auto value = co_await std::move(task);
+    REQUIRE(returned);
+    result = *value;
+  });
+  REQUIRE(starts == 0);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(starts == 1);
+  REQUIRE(result == 49);
+  REQUIRE(cancellations == 0);
+  REQUIRE(weak_owner.expired());
+
+  auto unused_owner = std::make_shared<int>();
+  std::weak_ptr<int> weak_unused = unused_owner;
+  {
+    auto unused = AwaitCallback<void>([owner = std::move(unused_owner), &starts](auto) {
+      ++starts;
+      return std::function<void()>{};
+    });
+    REQUIRE_FALSE(weak_unused.expired());
+  }
+  REQUIRE(weak_unused.expired());
+  REQUIRE(starts == 1);
+}
+
+TEST_CASE("AwaitCallbackPropagatesFailuresAndAcceptsOnlyTheFirstSubmission") {
+  TestPlatform platform;
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  int caught = 0;
+  int result = 0;
+  bool completed = false;
+  captured_task_scope.Launch([&]() -> Task<void> {
+    try {
+      co_await AwaitCallback<void>([](auto) -> std::function<void()> {
+        throw std::runtime_error("startup failed");
+      });
+    } catch (const std::runtime_error&) {
+      ++caught;
+    }
+    try {
+      co_await AwaitCallback<void>([](auto completion) {
+        completion.Fail(std::make_exception_ptr(std::runtime_error("callback failed")));
+        completion.Complete();
+        return std::function<void()>{};
+      });
+    } catch (const std::runtime_error&) {
+      ++caught;
+    }
+    result = co_await AwaitCallback<int>([](auto completion) -> std::function<void()> {
+      completion.Complete(17);
+      completion.Complete(99);
+      completion.Fail(std::make_exception_ptr(std::runtime_error("late failure")));
+      throw std::runtime_error("startup threw after completion");
+    });
+    co_await AwaitCallback<void>([](auto completion) {
+      REQUIRE_THROWS_AS(completion.Fail({}), std::invalid_argument);
+      completion.Complete();
+      completion.Complete();
+      return std::function<void()>{};
+    });
+    completed = true;
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(caught == 2);
+  REQUIRE(result == 17);
+  REQUIRE(completed);
+}
+
+TEST_CASE("AwaitCallbackDeliversResultStorageExceptionsThroughTheTask") {
+  struct ThrowingValue {
+    ThrowingValue() = default;
+    ThrowingValue(ThrowingValue&&) { throw std::runtime_error("result move failed"); }
+  };
+  TestPlatform platform;
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  bool caught = false;
+  captured_task_scope.Launch([&]() -> Task<void> {
+    try {
+      static_cast<void>(co_await AwaitCallback<ThrowingValue>([](auto completion) {
+        REQUIRE_NOTHROW(completion.Complete(ThrowingValue{}));
+        return std::function<void()>{};
+      }));
+    } catch (const std::runtime_error&) {
+      caught = true;
+    }
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(caught);
+}
+
+TEST_CASE("AwaitCallbackCancelsBeforeStartAndBeforeCancellationRegistration") {
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const auto ui_thread = std::this_thread::get_id();
+  SECTION("Cancellation on the owning thread") {}
+#if !defined(__EMSCRIPTEN__)
+  bool external_cancel = false;
+  SECTION("Cancellation from another thread") { external_cancel = true; }
+#endif
+  int starts = 0;
+  int cancellations = 0;
+  auto skipped = captured_task_scope.Launch(AwaitCallback<void>([&](auto) {
+    ++starts;
+    return [&] { ++cancellations; };
+  }));
+  skipped.Cancel();
+  queue.Drain();
+  REQUIRE(starts == 0);
+  REQUIRE(cancellations == 0);
+
+  TaskHandle running;
+  bool resumed = false;
+  std::optional<CallbackCompletion<void>> retained;
+  running = captured_task_scope.Launch([&]() -> Task<void> {
+    co_await AwaitCallback<void>([&](auto completion) {
+      ++starts;
+      retained = completion;
+#if !defined(__EMSCRIPTEN__)
+      if (external_cancel) {
+        std::thread cancel([running] { running.Cancel(); });
+        cancel.join();
+      } else
+#endif
+      {
+        running.Cancel();
+      }
+      return [&, completion] {
+        REQUIRE(std::this_thread::get_id() == ui_thread);
+        ++cancellations;
+        completion.Complete();
+      };
+    });
+    resumed = true;
+  });
+  queue.Drain();
+  running.Cancel();
+  retained->Complete();
+  retained->Fail(std::make_exception_ptr(std::runtime_error("late failure")));
+  REQUIRE_THROWS_AS(retained->Fail({}), std::invalid_argument);
+  queue.Drain();
+  REQUIRE(starts == 1);
+  REQUIRE(cancellations == 1);
+  REQUIRE_FALSE(resumed);
+}
+
+TEST_CASE("AwaitCallbackCancellationReleasesInputsAndIgnoresLateCallbacks") {
+  TestPlatform platform;
+  auto runtime = std::make_unique<UiWindow>(TaskScopeApp, platform);
+  runtime->BuildFrame();
+  auto owner = std::make_shared<int>(3);
+  std::weak_ptr<int> weak_owner = owner;
+  std::optional<CallbackCompletion<int>> retained;
+  int cancellations = 0;
+  int resumed = 0;
+  auto pending = AwaitCallback<int>([owner = std::move(owner), &retained, &cancellations](auto completion) {
+    retained = completion;
+    return [owner, completion, &cancellations] {
+      ++cancellations;
+      completion.Complete(*owner);
+    };
+  });
+  TaskHandle handle = captured_task_scope.Launch([task = std::move(pending), &resumed]() mutable -> Task<void> {
+    resumed = co_await std::move(task);
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE_FALSE(weak_owner.expired());
+  SECTION("Explicit cancellation") { handle.Cancel(); }
+  SECTION("Window and runtime retirement") { runtime.reset(); }
+  REQUIRE(cancellations == 1);
+  REQUIRE(weak_owner.expired());
+  retained->Complete(42);
+  retained->Fail(std::make_exception_ptr(std::runtime_error("late failure")));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(resumed == 0);
+}
+
+TEST_CASE("AwaitCallbackDoesNotCancelACompletedOperationWhenItsContinuationIsCanceled") {
+  TestPlatform platform;
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  std::optional<CallbackCompletion<void>> completion;
+  int cancellations = 0;
+  bool resumed = false;
+  auto handle = captured_task_scope.Launch([&]() -> Task<void> {
+    co_await AwaitCallback<void>([&](auto value) {
+      completion = value;
+      return [&] { ++cancellations; };
+    });
+    resumed = true;
+  });
+  platform.RunPlatformModuleTasks();
+  completion->Complete();
+  handle.Cancel();
+  platform.RunPlatformModuleTasks();
+  REQUIRE(cancellations == 0);
+  REQUIRE_FALSE(resumed);
+}
+
+TEST_CASE("AwaitCallbackSettlesHostFailureWithoutAWindowAndCancelsOnRuntimeShutdown") {
+  TestPlatform platform;
+  Application application(TaskScopeApp, {.show_debug_overlay = false});
+  auto runtime = std::make_unique<RuntimeLifetime>(application, platform, std::nullopt);
+  auto tasks = UseApplicationTaskScope();
+  std::optional<CallbackCompletion<void>> completion;
+  bool failed = false;
+  int cancellations = 0;
+  tasks.Launch([&]() -> Task<void> {
+    try {
+      co_await AwaitCallback<void>([&](auto value) {
+        completion = value;
+        return [&] { ++cancellations; };
+      });
+    } catch (const std::runtime_error&) {
+      failed = true;
+    }
+  });
+  platform.RunPlatformModuleTasks();
+  completion->Fail(std::make_exception_ptr(std::runtime_error("host closed")));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(failed);
+  REQUIRE(cancellations == 0);
+  tasks.Launch(AwaitCallback<void>([&](auto value) {
+    completion = value;
+    return [&] { ++cancellations; };
+  }));
+  platform.RunPlatformModuleTasks();
+  runtime.reset();
+  REQUIRE(cancellations == 1);
+  completion->Complete();
+  platform.RunPlatformModuleTasks();
+}
+
+#if !defined(__EMSCRIPTEN__)
+
+TEST_CASE("AwaitCallbackRestoresTheOwningThreadAndEnvironmentFromExternalCompletion") {
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  UiWindow runtime(CallbackEnvironmentApp, platform);
+  runtime.BuildFrame();
+  const auto ui_thread = std::this_thread::get_id();
+  std::optional<CallbackCompletion<int>> completion;
+  int resumes = 0;
+  captured_task_scope.Launch([&]() -> Task<void> {
+    int value = co_await AwaitCallback<int>([&](auto endpoint) {
+      REQUIRE(std::this_thread::get_id() == ui_thread);
+      completion = endpoint;
+      return std::function<void()>{};
+    });
+    REQUIRE(std::this_thread::get_id() == ui_thread);
+    REQUIRE(UseService<Resources>()->Configuration().locale.LanguageTag() == "fr-FR");
+    task_value = value;
+    ++resumes;
+  });
+  queue.Drain();
+  std::thread worker([&] { completion->Complete(42); });
+  worker.join();
+  REQUIRE(resumes == 0);
+  queue.Drain();
+  REQUIRE(resumes == 1);
+  REQUIRE(task_value.Get() == 42);
+}
+
+TEST_CASE("AwaitCallbackSerializesConcurrentSubmissionsAndExternalCancellation") {
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  std::optional<CallbackCompletion<int>> completion;
+  int results = 0;
+  int failures = 0;
+  int cancellations = 0;
+  auto launch = [&] {
+    return captured_task_scope.Launch([&]() -> Task<void> {
+      try {
+        static_cast<void>(co_await AwaitCallback<int>([&](auto endpoint) {
+          completion = endpoint;
+          return [&] { ++cancellations; };
+        }));
+        ++results;
+      } catch (const std::runtime_error&) {
+        ++failures;
+      }
+    });
+  };
+  launch();
+  queue.Drain();
+  std::atomic<bool> ready = false;
+  std::thread value([&] {
+    while (!ready.load()) std::this_thread::yield();
+    completion->Complete(42);
+  });
+  std::thread failure([&] {
+    ready = true;
+    completion->Fail(std::make_exception_ptr(std::runtime_error("failed")));
+  });
+  value.join();
+  failure.join();
+  queue.Drain();
+  REQUIRE(results + failures == 1);
+  REQUIRE(cancellations == 0);
+
+  auto handle = launch();
+  queue.Drain();
+  std::thread cancel([&] { handle.Cancel(); });
+  std::thread complete([&] { completion->Complete(99); });
+  cancel.join();
+  complete.join();
+  queue.Drain();
+  REQUIRE(results + failures == 1);
+  REQUIRE(cancellations <= 1);
+}
+
+#endif
 
 } // namespace huxerui::test

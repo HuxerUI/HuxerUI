@@ -137,6 +137,16 @@ Treat `PermissionStatus::Unavailable` as a normal platform-capability result rat
 
 `ApplicationHandle::LocalNotifications()` provides local operating-system notifications. For authorization, native templates, scheduling, and activation data, read [local-notifications.md](local-notifications.md).
 
+## Callback integration
+
+Use `AwaitCallback<T>(start)` for one awaited result from an existing callback API; use `TaskScope::Post()` for external notifications that only update UI state, and `RunWorker()` for synchronous blocking work. The bridge immediately owns its starter and runs it once when the lazy Task starts. Capture owned inputs rather than a temporary facade or borrowed native reference.
+
+The starter receives a copyable `CallbackCompletion<T>` and returns a `std::function<void()>` cancellation action, empty when unavailable. Call `Complete(value)` (`Complete()` for void) or `Fail(non_null_exception_ptr)` from any thread; only the first valid submission wins. Startup exceptions and submitted failures propagate at `co_await`, which resumes through the owning Task's thread and captured context. Do not manually post that continuation.
+
+Cancel through the existing TaskHandle or scope. Pending cancellation invokes the action at most once on the owning thread, including when requested before registration; the action must not throw. Late callbacks are ignored, and Task cancellation never resumes business code with a cancellation result. Once a result is submitted, canceling before queued resumption still suppresses the continuation but does not invoke the action. Keep any longer-lived native resource or presentation cleanup with its owner; the action is not unconditional cleanup.
+
+An adapter must complete or fail a still-live Task when its host closes; simply dropping the callback leaves it suspended. Streams, progress subscriptions, buffering, and presentation queues remain domain-owned. For channel-specific closure behavior, see [platform modules](platform-modules.md).
+
 ## Reconciliation
 
 `View` is a transient declaration. Retained mutable behavior belongs in state, controllers, or mounted extensions. Unkeyed siblings reconcile by position. Component functions should not retain raw node, child, or platform pointers across reconciliation.

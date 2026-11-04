@@ -175,6 +175,13 @@ Its tasks are canceled when that scope is replaced or unmounted, and continuatio
 `RunWorker()` owns a synchronous callable and its arguments, executes them on HuxerUI's bounded native worker pool, and resumes the awaiting Task on that Runtime thread.
 Worker code must not access State, composition, Views, or UI-affine platform objects.
 `WorkerSequence::Run()` uses the same pool but starts only one operation for that sequence at a time; copied sequence handles share ordering, and each callable receives a `std::stop_token` for cooperative cancellation.
+`AwaitCallback<T>(start)` adapts one callback operation to a lazy `Task<T>` without using a worker thread.
+It immediately owns the starter, which receives a copyable `CallbackCompletion<T>` and returns a `std::function<void()>` cancellation action (empty if unavailable).
+The starter runs once on the owning Task's thread; `Complete(value)` and `Fail(exception_ptr)` may be called from any thread, and only the first submission takes effect.
+Use `Complete()` for `void`; failures and startup exceptions propagate at `co_await`.
+Canceling the Task requests cancellation of pending work on its owning thread and suppresses late callbacks without delivering a cancellation result.
+The cancellation action must not throw, and adapters must complete or fail a still-live Task when their host closes.
+See [Callback integration](../design/tasks.md#callback-integration) for ownership, cancellation races, and an adapter example.
 `TaskScope::Post()` is the lifecycle-bound handoff for an external thread or callback to enqueue a `void` update on the same Runtime thread; pending updates are discarded when the scope closes.
 None of these APIs requests or guarantees platform background execution.
 

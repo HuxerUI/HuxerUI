@@ -329,6 +329,268 @@ private:
 };
 
 namespace detail {
+template <class T> class CallbackOperationState;
+template <class T, class Start> class CallbackAwaiter;
+} // namespace detail
+
+/// A copyable completion endpoint supplied by AwaitCallback; it does not keep the waiting Task alive.
+/// Complete and Fail may be called from any thread. Only the first valid submission takes effect; submissions after
+/// cancellation are ignored. Values follow Task's move-constructible, non-cv object requirements.
+template <class T> class CallbackCompletion final {
+public:
+  /// Submits a value. Exceptions while storing it are delivered to the awaiting Task; constructing the argument
+  /// before this call retains ordinary C++ exception behavior. Discarded values may be destroyed on the callback
+  /// thread.
+  void Complete(T value) const;
+
+  /// Submits an exception for rethrow at co_await. A null exception throws std::invalid_argument even after completion
+  /// or cancellation.
+  void Fail(std::exception_ptr error) const;
+
+private:
+  explicit CallbackCompletion(std::weak_ptr<detail::CallbackOperationState<T>> state) : state_(std::move(state)) {}
+
+  std::weak_ptr<detail::CallbackOperationState<T>> state_;
+
+  template <class, class> friend class detail::CallbackAwaiter;
+};
+
+/// Completes an AwaitCallback<void> operation without a result value, with the same lifetime and threading rules.
+template <> class CallbackCompletion<void> final {
+public:
+  /// Submits successful completion without a value.
+  void Complete() const;
+
+  /// Submits an exception for rethrow at co_await. A null exception throws std::invalid_argument even after completion
+  /// or cancellation.
+  void Fail(std::exception_ptr error) const;
+
+private:
+  explicit CallbackCompletion(std::weak_ptr<detail::CallbackOperationState<void>> state) : state_(std::move(state)) {}
+
+  std::weak_ptr<detail::CallbackOperationState<void>> state_;
+
+  template <class, class> friend class detail::CallbackAwaiter;
+};
+
+namespace detail {
+
+template <class T> class CallbackOperationState final {
+  using StoredResult = std::conditional_t<std::is_void_v<T>, bool, T>;
+  enum class Phase { Pending, Completed, Canceled };
+
+public:
+  void Bind(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
+    // Bind before publishing the completion endpoint; no callback can access these fields yet.
+    execution_ = std::move(execution);
+    continuation_ = continuation;
+  }
+
+  void Complete(StoredResult&& value) noexcept {
+    Finish([&] { result_.emplace(std::move(value)); });
+  }
+
+  void Fail(std::exception_ptr error) noexcept {
+    Finish([&] { exception_ = std::move(error); });
+  }
+
+  void SetCancellation(std::function<void()> cancellation) noexcept {
+    std::weak_ptr<TaskExecution> execution;
+    std::coroutine_handle<> continuation;
+    bool cancel = false;
+    {
+      std::scoped_lock lock(mutex_);
+      starting_ = false;
+      if (phase_ == Phase::Pending) {
+        cancellation_ = std::move(cancellation);
+      } else if (phase_ == Phase::Canceled) {
+        cancel = true;
+      } else {
+        execution = execution_;
+        continuation = std::exchange(continuation_, {});
+      }
+    }
+    if (cancel && cancellation) {
+      cancellation();
+    }
+    if (continuation) {
+      ResumeTask(execution, continuation);
+    }
+  }
+
+  void Cancel() noexcept {
+    std::function<void()> cancellation;
+    bool cancel = false;
+    {
+      std::scoped_lock lock(mutex_);
+      cancel = phase_ == Phase::Pending;
+      phase_ = Phase::Canceled;
+      execution_.reset();
+      continuation_ = {};
+      cancellation = std::move(cancellation_);
+    }
+    // Release captures on the owning thread and outside the lock, including after successful completion.
+    if (cancel && cancellation) {
+      cancellation();
+    }
+  }
+
+  T TakeResult() {
+    // Resumption synchronizes with publication of the winning outcome; later submissions cannot modify it.
+    if (exception_) {
+      std::rethrow_exception(exception_);
+    }
+    if (!result_) {
+      throw std::logic_error("HuxerUI callback operation resumed without a result");
+    }
+    if constexpr (!std::is_void_v<T>) {
+      return std::move(*result_);
+    }
+  }
+
+private:
+  template <class Store> void Finish(Store store) noexcept {
+    std::weak_ptr<TaskExecution> execution;
+    std::coroutine_handle<> continuation;
+    {
+      std::scoped_lock lock(mutex_);
+      if (phase_ != Phase::Pending) {
+        return;
+      }
+      try {
+        store();
+      } catch (...) {
+        exception_ = std::current_exception();
+      }
+      phase_ = Phase::Completed;
+      // Even a nested platform event loop must not resume the coroutine while its starter is still executing.
+      if (!starting_) {
+        execution = execution_;
+        continuation = std::exchange(continuation_, {});
+      }
+    }
+    if (continuation) {
+      ResumeTask(execution, continuation);
+    }
+  }
+
+  std::mutex mutex_;
+  std::weak_ptr<TaskExecution> execution_;
+  std::coroutine_handle<> continuation_;
+  std::function<void()> cancellation_;
+  std::optional<StoredResult> result_;
+  std::exception_ptr exception_;
+  Phase phase_ = Phase::Pending;
+  bool starting_ = true;
+};
+
+template <class T, class Start> class CallbackAwaiter final {
+public:
+  explicit CallbackAwaiter(Start& start) : start_(start), state_(std::make_shared<CallbackOperationState<T>>()) {}
+
+  CallbackAwaiter(const CallbackAwaiter&) = delete;
+  CallbackAwaiter& operator=(const CallbackAwaiter&) = delete;
+
+  ~CallbackAwaiter() {
+    state_->Cancel();
+  }
+
+  [[nodiscard]] bool await_ready() const noexcept {
+    return false;
+  }
+
+  template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
+    const auto execution = continuation.promise().Execution();
+    if (execution.expired()) {
+      throw std::logic_error("HuxerUI AwaitCallback() requires a running Task execution");
+    }
+    state_->Bind(execution, continuation);
+    std::function<void()> cancellation;
+    try {
+      cancellation = std::invoke(std::move(start_), CallbackCompletion<T>(state_));
+    } catch (...) {
+      state_->Fail(std::current_exception());
+    }
+    state_->SetCancellation(std::move(cancellation));
+  }
+
+  T await_resume() {
+    return state_->TakeResult();
+  }
+
+private:
+  // The enclosing RunCallbackTask frame owns the starter until this awaiter is destroyed.
+  Start& start_;
+  std::shared_ptr<CallbackOperationState<T>> state_;
+};
+
+template <class T, class Start> Task<T> RunCallbackTask(Start start) {
+  if constexpr (std::is_void_v<T>) {
+    co_await CallbackAwaiter<T, Start>(start);
+  } else {
+    co_return co_await CallbackAwaiter<T, Start>(start);
+  }
+}
+
+} // namespace detail
+
+template <class T> void CallbackCompletion<T>::Complete(T value) const {
+  if (auto state = state_.lock()) {
+    state->Complete(std::move(value));
+  }
+}
+
+template <class T> void CallbackCompletion<T>::Fail(std::exception_ptr error) const {
+  if (!error) {
+    throw std::invalid_argument("HuxerUI CallbackCompletion::Fail() requires a non-null exception");
+  }
+  if (auto state = state_.lock()) {
+    state->Fail(std::move(error));
+  }
+}
+
+inline void CallbackCompletion<void>::Complete() const {
+  if (auto state = state_.lock()) {
+    state->Complete(true);
+  }
+}
+
+inline void CallbackCompletion<void>::Fail(std::exception_ptr error) const {
+  if (!error) {
+    throw std::invalid_argument("HuxerUI CallbackCompletion::Fail() requires a non-null exception");
+  }
+  if (auto state = state_.lock()) {
+    state->Fail(std::move(error));
+  }
+}
+
+/// Adapts one callback operation to a lazy Task, immediately retaining its starter, including move-only captures.
+/// The starter receives CallbackCompletion<T> and returns a std::function<void()> cancellation action (empty when
+/// unavailable). It runs once on the owning Task's UI thread. Results and exceptions resume through that Task's
+/// dispatcher and captured execution context, never inline before the starter returns. The starter must not block.
+///
+/// Startup exceptions and Fail() propagate at co_await; the first completion or failure wins. Canceling a pending Task
+/// retires its continuation and invokes the cancellation action at most once on the owning thread, even if canceled
+/// before registration. The action must not throw; an escaping exception terminates. Cancellation after a submission
+/// but before queued resumption still suppresses application code without invoking the action. The action is not an
+/// unconditional cleanup hook and does not guarantee that native work has stopped when it returns. Late callbacks are
+/// ignored, and Task cancellation never delivers a cancellation value or exception.
+///
+/// Capture owned inputs: retaining a starter does not extend the lifetime of objects captured by reference. A starter
+/// that throws after partially starting work must clean up that work itself. Adapters must settle a still-live Task
+/// with Complete or Fail when their host closes; native dismissal and operation-specific results remain adapter-owned.
+/// Native work that survives Task cancellation must retain its own resources independently of the starter.
+template <class T, class Start>
+  requires std::constructible_from<std::decay_t<Start>, Start&&> &&
+           std::move_constructible<std::decay_t<Start>> &&
+           std::invocable<std::decay_t<Start>, CallbackCompletion<T>> &&
+           std::convertible_to<
+               std::invoke_result_t<std::decay_t<Start>, CallbackCompletion<T>>, std::function<void()>>
+[[nodiscard]] Task<T> AwaitCallback(Start&& start) {
+  return detail::RunCallbackTask<T>(std::decay_t<Start>(std::forward<Start>(start)));
+}
+
+namespace detail {
 
 template <class Value> struct IsTask : std::false_type {};
 

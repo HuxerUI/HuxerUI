@@ -40,6 +40,7 @@ export namespace huxerui {
     using huxerui::AsyncInputStream;
     using huxerui::AsyncOutputStream;
     using huxerui::AttributedText;
+    using huxerui::AwaitCallback;
     using huxerui::Axis;
     using huxerui::BackEvent;
     using huxerui::BackPhase;
@@ -55,6 +56,7 @@ export namespace huxerui {
     using huxerui::Button;
     using huxerui::ButtonStyle;
     using huxerui::Bytes;
+    using huxerui::CallbackCompletion;
     using huxerui::Canvas;
     using huxerui::CanvasPainter;
     using huxerui::Checkbox;

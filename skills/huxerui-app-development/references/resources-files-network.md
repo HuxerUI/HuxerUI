@@ -82,7 +82,13 @@ Use `File::OpenRead()` / `OpenWrite()` for synchronous streams or their `Async` 
 
 The returned `File` does not retain the reference's grant or temporary-file owner, enforce `CanWrite()`, or inherit document coordination. Keep a reference alive throughout path-based use when access depends on those resources; use reference I/O when its grant restrictions or coordination matter. On Windows, ordinary local-path use may outlive the reference, but `AsFile()` does not release native handles: all sharing references and pending operations must release them before their rename restrictions end.
 
-`Type()`, `Size()`, `ContentType()`, and `CanWrite()` are captured metadata, not refreshed storage state. `ListChildrenAsync()` lists direct directory children, whose retained access survives destruction of the parent value without upgrading its grant. Directory references cannot use single-file read, import, or replacement operations.
+`Name()`, `Type()`, `Size()`, `ContentType()`, and `CanWrite()` are captured metadata, not refreshed storage state. An unknown name is empty; unknown size and content type are `std::nullopt`. Treat a known name as untrusted input, not a valid child path. `ListChildrenAsync()` lists direct directory children, whose retained access survives destruction of the parent value without upgrading its grant. Directory references cannot use single-file read, import, or replacement operations.
+
+### Native file references
+
+Android libraries can create a read-only capability with `HuxerUIFileReference.fromUri(context, uri)` for an already readable `content://` file. The SDK native library must be loaded; no window is required. The factory queries metadata and checks access synchronously, so use a worker when the provider may block. It neither takes nor releases persistent URI grants: the application owns that policy, and retained references do not prevent later revocation. Return the capability through `PlatformPayload.fileReference(reference)` and close each Java wrapper when its owner is done.
+
+iOS libraries use `+[HUXFileReference copyFromFileURL:error:]` (Swift: `try FileReference.copy(from: url)`). Finish this synchronous copy while the provider's source URL is valid; background queues are supported. The result is a read-only, payload-compatible reference to an SDK-owned temporary copy, not ownership of the source file. References, streams, and pending operations retain the copy until their last owner releases it; retaining only `fileURL` or `AsFile()` does not. Failure returns `nil` with an error and removes partial temporary contents. The SDK balances only security-scoped access acquired for its copy.
 
 ## File picker
 
@@ -120,6 +126,6 @@ Call File asynchronous methods, `HttpClient::SendAsync()`, `HttpClient::SendStre
 
 After `co_await` on these operations, the continuation is already back on the application thread and may update captured `State` directly while the task scope remains alive. Composition-bound hooks remain unavailable inside task continuations. Do not use `TaskScope::Post()` for that continuation; `Post()` is only for an external thread or callback outside a running HuxerUI Task.
 
-Use `RunWorker()` only for application-owned synchronous CPU-bound or blocking work. Use the appropriately owned `TaskScope::Post()` to deliver an external callback. Application tasks do not grant mobile background execution time; platform suspension can pause work even while its application lifetime remains valid.
+Use `RunWorker()` only for application-owned synchronous CPU-bound or blocking work. For an external callback, choose [AwaitCallback or scoped posting](fundamentals.md#callback-integration) according to whether the caller awaits one result or receives notifications. Application tasks do not grant mobile background execution time; platform suspension can pause work even while its application lifetime remains valid.
 
 The active SDK's services are installed by the application runtime. If a service is unavailable on a platform, report that public capability limit rather than reaching into a private adapter.

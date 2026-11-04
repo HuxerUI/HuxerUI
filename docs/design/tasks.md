@@ -12,6 +12,7 @@ The public model consists of:
 - `UseTaskScope()`, a composition function that returns the TaskScope owned by the current `RecomposeScope`.
 - `Delay()`, a lazy UI-affine minimum-duration suspension.
 - `RunWorker()`, a lazy Task that executes owned synchronous work on the shared worker pool.
+- `AwaitCallback<T>()` and `CallbackCompletion<T>`, a callback bridge into the same Task lifecycle.
 - `WorkerSequence`, a copyable ordering identity for cooperative, strictly serialized worker operations.
 - `TaskScope::Post()`, a lifecycle-bound handoff from an external thread to the scope's UI thread.
 
@@ -25,6 +26,23 @@ The public declarations live in `<huxerui/task.h>` and are re-exported from `<hu
 ```cpp
 template <class T>
 class [[nodiscard]] Task;
+
+template <class T>
+class CallbackCompletion {
+public:
+  void Complete(T value) const;
+  void Fail(std::exception_ptr error) const;
+};
+
+template <>
+class CallbackCompletion<void> {
+public:
+  void Complete() const;
+  void Fail(std::exception_ptr error) const;
+};
+
+template <class T, class Start>
+[[nodiscard]] Task<T> AwaitCallback(Start&& start);
 
 class WorkerSequence {
 public:
@@ -147,6 +165,62 @@ It is not an executor, a worker-thread affinity mechanism, a general actor, or a
 
 Non-Web local File asynchronous operations reuse this worker executor without calling the public RunWorker API or changing File result and persistence semantics.
 Ordinary platform-native asynchronous HTTP, file-picker, and external-file transports keep their existing cancellation and scheduling owners.
+
+## Callback integration
+
+`AwaitCallback<T>(start)` returns an ordinary lazy `Task<T>` and captures the decayed starter at the call site, including move-only captures.
+Its non-coroutine public wrapper transfers that owned callable into a coroutine frame before returning; it never stores a forwarding reference to a temporary starter.
+Capturing a borrowed pointer or reference still requires the adapter to guarantee that object's lifetime.
+The starter runs once on the owning Task's application/UI thread and returns a `std::function<void()>` cancellation action, or an empty function when cancellation is unavailable.
+The starter must return promptly rather than block waiting for its callback.
+
+The copyable `CallbackCompletion<T>` is supplied by the bridge and cannot be constructed independently.
+`Complete(value)` delivers a result, `Complete()` completes `void`, and `Fail(error)` delivers a non-null `std::exception_ptr` for rethrow at `co_await`.
+A null exception is a caller error and throws `std::invalid_argument`, even for a retired completion handle.
+Startup exceptions follow the same failure path; the first completion or failure wins, including completion followed by a startup exception.
+Exceptions while storing a submitted value are captured as Task failures; constructing the argument before calling `Complete` retains ordinary C++ exception behavior.
+A starter that throws after partially starting a platform operation must release that partially started work itself.
+
+For example, an extension can wrap its existing callback reader without introducing a platform channel:
+
+```cpp
+Task<Bytes> ReadAsync(std::shared_ptr<CallbackReader> reader) {
+  return AwaitCallback<Bytes>(
+      [reader = std::move(reader)](CallbackCompletion<Bytes> completion) -> std::function<void()> {
+        auto request = reader->Read(
+            [completion](Bytes bytes) { completion.Complete(std::move(bytes)); },
+            [completion](std::exception_ptr error) { completion.Fail(error); }
+        );
+        return [request] { request->Cancel(); };
+      }
+  );
+}
+```
+
+`CallbackReader` and its request are extension-owned types in this example.
+The bridge owns the starter until completion or cancellation; the native operation must independently own anything it still needs after Task cancellation.
+Completion handles hold weak operation state, so retaining a late callback does not retain the starter or resurrect its coroutine.
+Submitted values discarded on a callback thread may also be destroyed on that thread.
+
+Completion can arrive on any thread, including inline inside the starter.
+The bridge records at most one outcome and resumes through the existing `TaskExecution` dispatcher and captured execution context.
+It does not queue a resume until the starter has returned, so nested platform event loops cannot reenter that coroutine during startup.
+No new executor, Task scope, cancellation token, result envelope, or platform-specific Task type is introduced.
+
+Cancellation before Task execution skips the starter entirely.
+Canceling a pending operation first suppresses its continuation and invokes the returned cancellation action at most once on the owning thread, including cancellation requested before that action is registered.
+A cancellation action may synchronously invoke the native callback; the retired bridge ignores it.
+The action must not throw; an escaping exception terminates at the non-throwing teardown boundary.
+An operation that already completed is not canceled, but Task cancellation before queued resumption still suppresses application code.
+A cancellation action is not an unconditional cleanup callback and does not prove that native work has stopped or a presented picker has finished dismissing.
+
+Host closure and Task cancellation are separate events.
+An adapter whose host closes must complete or fail a still-live application Task rather than silently drop its callback.
+When the Task's own scope closes, ordinary cancellation applies instead.
+Picker dismissal results, HTTP streaming state, and presentation exclusion remain owned by their domain adapters.
+`PlatformChannel::Invoke()` retains its existing callback contract; this bridge does not add an `InvokeAsync()` overload or change channel closure.
+
+The file-reference callback adapter uses this shared bridge while preserving its domain error results and existing cancellation exception boundary.
 
 ## Scoped UI posting
 
@@ -317,5 +391,6 @@ They do not change TaskScope ownership, State semantics, Lifecycle, or EventBind
 ## Validation
 
 Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, invalid handles, deterministic deadlines, zero-duration deferral, Delay cancellation, worker callable forms and result types, worker concurrency bounds, worker cancellation races, Post ordering, move-only callbacks, external-thread delivery, and closed-scope suppression.
+Callback bridge tests cover lazy capture ownership, inline and concurrent completion, exception delivery, cancellation registration, late callbacks, host failure, runtime retirement, and execution-context restoration.
 Web coverage verifies that RunWorker fails explicitly without worker support and that Post still uses the browser UI dispatcher.
 The independent `example_task` demonstrates scope-owned launch, cancellable Delay, worker execution, scoped UI posting, explicit Lifecycle cancellation, and direct UI-thread State updates through public API.

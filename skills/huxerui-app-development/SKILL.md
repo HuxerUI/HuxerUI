@@ -51,15 +51,16 @@ Prefer the selected version's public headers, module interface, package configur
 Read only the references needed for the request:
 
 - Creating, opening, configuring, building, running, or diagnosing a project: [project-workflow.md](references/project-workflow.md)
+- Windowless UI tests and lifecycle injection: [project-workflow.md](references/project-workflow.md#ui-testing)
 - Writing or editing any UI declaration or snippet: [dsl-style.md](references/dsl-style.md)
 - Selecting and configuring built-in controls, TreeView, date/time pickers, or their controlled values: [components.md](references/components.md)
 - Arranging UI, scrolling, virtualization, responsiveness, app shells, mounted coordinate conversion, or any proposed custom layout: [layout-and-ui.md](references/layout-and-ui.md)
-- Composition, state, keyboard routing and shortcuts, events, environment, lifecycle, and tasks: [fundamentals.md](references/fundamentals.md)
+- Composition, state, keyboard routing and shortcuts, events, environment, lifecycle, tasks, and callback integration: [fundamentals.md](references/fundamentals.md)
 - `.With(...)`, events, keys, and modifier ownership: [modifiers.md](references/modifiers.md)
 - Pointer buttons, hover, pointer cursors, context-menu requests, raw pointer input, pointer interception, repeated tap, long press, drag, multi-pointer transform, typed in-process drag-and-drop, and external file reception: [gestures-and-drag-drop.md](references/gestures-and-drag-drop.md)
 - Custom retained behavior, after confirming that events, gestures, animation, lifecycle, or other built-ins do not fit: [node-extensions.md](references/node-extensions.md)
 - Built-in themes, system appearance, token or component-style customization, indication, animation, layers, and scene transitions: [theme-animation-presentation.md](references/theme-animation-presentation.md)
-- Attributed text, links, selection, text input, validation, virtual semantics, and accessibility: [text-input-and-semantics.md](references/text-input-and-semantics.md)
+- Fonts, text scaling, attributed text, links, selection, text input, validation, virtual semantics, and accessibility: [text-input-and-semantics.md](references/text-input-and-semantics.md)
 - In-UI image and SVG resources, localization and shaping, clipboard access, file/directory references, path access, pickers, copying, HTTP, and async work: [resources-files-network.md](references/resources-files-network.md)
 - Navigation, browser routes, application activation, multiple windows, safe areas, window chrome, and system tray behavior: [navigation-and-window.md](references/navigation-and-window.md)
 - Local operating-system notifications, authorization, native templates, scheduling, cancellation, and activation data: [local-notifications.md](references/local-notifications.md)

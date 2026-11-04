@@ -65,6 +65,7 @@ Keep them behind the library's typed Module facade.
 A structured boundary type owns its static `Encode(const T&)` or `Decode(const PlatformPayload&)` operation; direct C++ implementations do not call those operations.
 `PlatformPayload` directly supports retained `FileReference` values when a native Module needs an Android `Uri`, Apple `NSURL`, or browser `File` while preserving the original grant lifetime.
 Use that capability instead of embedding a provider URI string, copying the complete file into `Bytes`, or adding a second file-access Module.
+For references created from platform-library results, use the [native file-reference factories](resources-files-network.md#native-file-references).
 
 Android currently provides `android::JavaPlatformModuleFactory<Module, Options>` for Java or Kotlin implementations.
 Set `.class_name` to the Java factory class and use `.create` to wrap one framework-owned `PlatformChannel` in the library's exact Module type.
@@ -108,6 +109,7 @@ Results and events return asynchronously through that dispatcher.
 PlatformChannel event subscriptions remain void notifications even though the generic `Event` type supports synchronous result signatures for local code and PlatformView delegate decisions.
 Keep Module request results on `Invoke`; do not model RPC as a result-returning event.
 `Cancel` and `Close` invalidate C++ delivery immediately; queued invocations are skipped, in-flight cancellation runs before disposal, and late results or events are ignored.
+When adapting Invoke to a Task with [AwaitCallback](fundamentals.md#callback-integration), provide a separate completion or failure path for facade/channel closure while the Task remains alive. Close drops pending callbacks rather than delivering a result; wrapping Invoke alone can leave the Task suspended. The SDK has no `PlatformChannel::InvokeAsync()` convenience.
 The channel is a reusable transport convenience, not a PlatformModule base class or the Module API exposed to application UI.
 Apple factory creation, invocation, cancellation, and disposal run on the UIKit or AppKit main thread; results and events may originate on any queue and resume through the owning surface dispatcher.
 
