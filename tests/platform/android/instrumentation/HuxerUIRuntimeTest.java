@@ -3,6 +3,7 @@ package org.huxerui;
 import android.app.Activity;
 import android.app.Instrumentation;
 import android.os.Bundle;
+import android.os.Build;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.text.Layout;
@@ -10,7 +11,7 @@ import android.text.TextPaint;
 
 import java.lang.reflect.Method;
 
-/** Android-runtime regression checks; no native HuxerUI library is required. */
+/** Android-runtime regression checks; host checks require the matching native HuxerUI library. */
 public final class HuxerUIRuntimeTest extends Instrumentation {
     @Override
     public void onCreate(Bundle arguments) {
@@ -20,6 +21,7 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
 
     @Override
     public void onStart() {
+        assertions = 0;
         Bundle status = new Bundle();
         status.putString("class", getClass().getName());
         status.putString("test", "androidRuntime");
@@ -28,6 +30,7 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
         sendStatus(1, status);
         Bundle result = new Bundle();
         try {
+            verifyHostFocusHighlight();
             verifyGeometry();
             int notificationAssertions = HuxerUILocalNotificationTest.verify(getTargetContext());
             sendStatus(0, status);
@@ -43,6 +46,27 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
     }
 
     private static int assertions;
+
+    private void verifyHostFocusHighlight() {
+        final Throwable[] failure = new Throwable[1];
+        runOnMainSync(() -> {
+            try {
+                HuxerUIView host = new HuxerUIView(getTargetContext());
+                check(host.isFocusable(), "The host must remain focusable for keyboard input");
+                check(host.isFocusableInTouchMode(), "The host must remain focusable in touch mode for IME input");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    check(!host.getDefaultFocusHighlightEnabled(),
+                            "Android default focus highlighting must not cover the HuxerUI host");
+                }
+            } catch (Throwable error) {
+                // Report main-thread setup and assertion failures through the instrumentation result.
+                failure[0] = error;
+            }
+        });
+        if (failure[0] != null) {
+            throw new AssertionError("HuxerUI host focus regression failed", failure[0]);
+        }
+    }
 
     private static void check(boolean value, String message) {
         ++assertions;
@@ -79,7 +103,6 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
     }
 
     private static void verifyGeometry() throws Exception {
-        assertions = 0;
         for (int direction : new int[] {1, 2}) {
             String text = direction == 1 ? "abcdefghijklm" : "אבגדהוזחטיכלמ";
             for (Layout.Alignment alignment :

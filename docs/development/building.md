@@ -82,9 +82,10 @@ Code-generation changes also require the codegen tests and updated required host
 CI maintains all checked-in host packages through [Host-tool updates](sdk-packaging.md#host-tool-updates).
 When changing that workflow or its support script, run `python -B tests/scripts/host_tools_test.py`; it uses temporary Git repositories and requires only Python 3.12 or later and Git.
 
-Android Runtime tests run on a device or emulator with `./gradlew :HuxerUI:connectedDebugAndroidTest` from `platform/android` (`gradlew.bat` on Windows).
-The library's `androidTest` source set uses `tests/platform/android/instrumentation/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency or native HuxerUI library.
-It covers paragraph geometry and local-notification Intent identity and activation normalization, and installs only the separate test package rather than replacing an example application.
+Android Runtime tests run on a device or emulator with `./gradlew :HuxerUI:connectedDebugAndroidTest -PhuxeruiBuildNative=true` from `platform/android` (`gradlew.bat` on Windows).
+The library's `androidTest` source set uses `tests/platform/android/instrumentation/HuxerUIRuntimeTest.java` as its platform Instrumentation runner and needs no AndroidX/JUnit dependency.
+The host focus checks construct a real `HuxerUIView`, so the test package must include the matching native HuxerUI library and its runtime dependencies; `huxeruiBuildNative=true` builds and packages them for the configured ABIs.
+It covers host focus highlighting, paragraph geometry, and local-notification Intent identity and activation normalization, and installs only the separate test package rather than replacing an example application.
 
 The separate windowless UI smoke runs with `./gradlew :ui_testing:connectedDebugAndroidTest` from the same directory.
 It builds source libraries by default; `-PhuxeruiTestingSdk=/absolute/path/to/sdk` selects installed headers, libraries, tools, and resources instead.

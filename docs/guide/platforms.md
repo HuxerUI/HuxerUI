@@ -219,6 +219,7 @@ HuxerUI-rendered content does not have a semantic DOM accessibility bridge; DOM 
 
 The Android backend requires API 23 or later and uses an Android View host, Canvas, StaticLayout, InputConnection, JNI, and platform accessibility APIs.
 The generated Gradle project links the SDK-provided Android shared library and application C++ library for each configured ABI.
+On API 26 or later, `HuxerUIView` disables Android's default whole-host focus highlight because HuxerUI draws component focus indication; keyboard and IME focus remain enabled, and embedded native controls retain their own focus appearance.
 
 Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, and a compatible emulator or device.
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, FileReference payloads, and ExternalTexture are translated at the Android host boundary.

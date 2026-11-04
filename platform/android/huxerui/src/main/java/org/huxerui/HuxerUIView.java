@@ -262,6 +262,10 @@ public final class HuxerUIView extends ViewGroup {
         density = getResources().getDisplayMetrics().density;
         setFocusable(true);
         setFocusableInTouchMode(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // HuxerUI paints component focus indication within this host.
+            setDefaultFocusHighlightEnabled(false);
+        }
         setClickable(true);
         setWillNotDraw(false);
         if (Build.VERSION.SDK_INT >= 29) {
