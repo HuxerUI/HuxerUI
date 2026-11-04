@@ -253,6 +253,33 @@ TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
   REQUIRE(retained_state->replaced_with == File("/tmp/replacement.txt"));
 }
 
+TEST_CASE("FileReferencesWithUnknownMetadataRemainReadableAndImportable") {
+  ResetFilePickerState();
+  TestPlatform platform;
+  UiWindow runtime(FilePickerApp, platform);
+  runtime.BuildFrame();
+  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("content"));
+  const FileReference reference = detail::MakeFileReference({}, state);
+  REQUIRE(reference.Name().empty());
+  REQUIRE_FALSE(reference.Size().has_value());
+  REQUIRE_FALSE(reference.ContentType().has_value());
+  REQUIRE_FALSE(reference.CanWrite());
+  const auto payload = PlatformPayload::Decode(PlatformPayload(reference).Encode());
+  const auto retained = payload.AsFileReference();
+  file_picker_tasks.Launch([retained]() -> Task<void> {
+    reference_text = co_await retained.ReadStringAsync();
+    imported_reference = co_await retained.ImportToAsync(File("/tmp/explicit-name.txt"));
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(reference_text.has_value());
+  REQUIRE(reference_text->Succeeded());
+  REQUIRE(reference_text->Value() == "content");
+  REQUIRE(imported_reference);
+  REQUIRE(state->imported_to == File("/tmp/explicit-name.txt"));
+  REQUIRE_THROWS_AS(detail::MakeFileReference({.name = std::string("bad\0name", 8)}, state), std::logic_error);
+  REQUIRE_THROWS_AS(detail::MakeFileReference({.name = std::string(1, '\xFF')}, state), std::logic_error);
+}
+
 TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
   ResetFilePickerState();
   TestPlatform platform;

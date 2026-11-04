@@ -339,7 +339,8 @@ public:
   ~FileReference();
 
   /// @brief Returns the captured display name without contacting the provider.
-  /// @return A UTF-8 name, not a path. Treat it as untrusted input rather than assuming File::Child() will accept it.
+  /// @return A UTF-8 name, or an empty string when unknown; this is not a path. Treat a known name as untrusted input
+  /// rather than assuming File::Child() will accept it.
   [[nodiscard]] std::string Name() const;
   /// @brief Returns the captured file length without contacting the provider.
   /// @return The size in bytes when known for a file, or std::nullopt for unknown sizes and non-file entries.

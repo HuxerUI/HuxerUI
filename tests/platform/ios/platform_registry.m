@@ -71,7 +71,10 @@
 
 static void HuxerUITestFileReferenceDeclarations(HUXFileReference* reference) {
   NSURL* url = reference.fileURL;
+  NSError* error = nil;
+  HUXFileReference* copied = [HUXFileReference copyFromFileURL:url error:&error];
   HUXFileReference* round_trip = [HUXPlatformPayload fileReferenceValue:reference].fileReferenceValue;
+  (void)copied;
   (void)url;
   (void)round_trip;
 }

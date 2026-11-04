@@ -6,6 +6,10 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+dependencies {
+    androidTestImplementation project(":HuxerUI")
+}
+
 abstract class StageUiTestingAssets extends DefaultTask {
     @InputFiles
     @PathSensitive(PathSensitivity.RELATIVE)

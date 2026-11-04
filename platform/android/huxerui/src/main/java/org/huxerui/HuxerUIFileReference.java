@@ -33,7 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * A retained Android document capability received through {@link PlatformPayload}.
+ * A retained Android document capability created from a URI or received through {@link PlatformPayload}.
  *
  * <p>{@link #uri()} exposes the provider URI for APIs that accept Android document resources. The C++
  * {@code FileReference} remains retained until this object is closed; repeated calls to {@link #close()} are safe.</p>
@@ -72,6 +72,53 @@ public final class HuxerUIFileReference implements AutoCloseable {
     private final Uri uri;
     private final long capabilityKey;
     private long nativeHandle;
+
+    /**
+     * Creates a read-only file capability using the caller's existing access to a content URI.
+     *
+     * <p>This synchronous operation queries metadata and opens a read descriptor to check access; call it off the UI
+     * thread when the provider may block. Unknown metadata remains unknown. The SDK must already be loaded, but no
+     * window is required. Copies and pending operations retain their own access state after this wrapper closes.</p>
+     *
+     * <p>This method neither takes nor releases persistent URI grants. The caller owns that policy, and Android may
+     * revoke access later. A retained reference does not promise access across application restarts.</p>
+     *
+     * @param context a Context whose application Context provides the ContentResolver
+     * @param uri the readable content URI; retaining its text alone does not retain an access grant
+     * @return a payload-compatible wrapper; close it when this Java owner no longer needs the capability
+     * @throws IllegalArgumentException if context or uri is null, or uri is not a content URI
+     * @throws SecurityException if the provider denies access
+     * @throws IOException if the URI is not a readable file or its capability cannot be created
+     */
+    public static HuxerUIFileReference fromUri(Context context, Uri uri) throws IOException {
+        if (context == null || uri == null || !"content".equals(uri.getScheme())) {
+            throw new IllegalArgumentException("HuxerUI file reference requires a Context and content URI");
+        }
+        Context applicationContext = context.getApplicationContext();
+        if (applicationContext == null) {
+            throw new IllegalArgumentException("HuxerUI file reference requires an application Context");
+        }
+        ContentResolver resolver = applicationContext.getContentResolver();
+        Metadata metadata = describe(resolver, uri, 0);
+        if (DocumentsContract.Document.MIME_TYPE_DIR.equals(metadata.contentType)) {
+            throw new IOException("HuxerUI file reference requires a file, not a directory");
+        }
+        try (ParcelFileDescriptor descriptor = resolver.openFileDescriptor(uri, "r")) {
+            if (descriptor == null) {
+                throw new IOException("HuxerUI external file descriptor is unavailable");
+            }
+            if (OsConstants.S_ISDIR(Os.fstat(descriptor.getFileDescriptor()).st_mode)) {
+                throw new IOException("HuxerUI file reference requires a file, not a directory");
+            }
+        } catch (ErrnoException exception) {
+            throw new IOException("HuxerUI external file descriptor could not be inspected", exception);
+        } catch (SecurityException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            throw new IOException("HuxerUI external file could not be opened", exception);
+        }
+        return create(applicationContext, uri.toString(), metadata.name, metadata.size, metadata.contentType);
+    }
 
     // Provider-backed instances service C++ file operations; payload wrappers instead retain a native capability.
     HuxerUIFileReference(Context context, String uri, boolean writeAllowed) {
@@ -141,6 +188,9 @@ public final class HuxerUIFileReference implements AutoCloseable {
 
     private static native long retain(long handle);
 
+    private static native HuxerUIFileReference create(
+            Context context, String uri, String name, long size, String contentType) throws IOException;
+
     String entryKey() {
         try { return uri.getAuthority() + ":" + DocumentsContract.getDocumentId(uri); }
         catch (IllegalArgumentException exception) { return uri.toString(); }
@@ -198,12 +248,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
             }
         } catch (RuntimeException ignored) {
         }
-        if (name == null || name.isEmpty()) {
-            name = uri.getLastPathSegment();
-        }
-        if (name == null || name.isEmpty()) {
-            name = "document";
-        }
+        if (name == null) { name = ""; }
         String contentType = null;
         try {
             contentType = resolver.getType(uri);

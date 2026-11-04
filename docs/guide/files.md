@@ -145,6 +145,8 @@ It may represent a path, security-scoped Apple URL, Android document URI, or bro
 
 External references can be read, imported into application storage, or used for a supported replacement operation.
 Their lifetime and persistence follow platform capability rules.
+`Name()` returns an empty string when the provider supplies no name; `Size()` and `ContentType()` return `std::nullopt` when unknown.
+An unknown name does not prevent reading or importing to an explicitly named destination, but recursive directory copying rejects children without valid names rather than inventing destination entries.
 
 `OpenReadAsync()` and `OpenWriteAsync()` expose provider-backed `AsyncInputStream` and `AsyncOutputStream` values without importing the file or buffering it in full.
 The output form replaces the selected file and must be finalized with `CloseAsync()`.
@@ -182,6 +184,24 @@ The Apple wrapper releases through ARC.
 The projection preserves the original C++ capability and its access lifetime; it does not create persistent permission, start another Apple security scope, narrow read/write access, or add a platform `canWrite` property.
 Shared C++ code continues to inspect the captured `CanWrite()` metadata and perform writes through the existing `FileReference` operations.
 Do not serialize the HUXP bytes, cache a native URI or URL past the wrapper lifetime, or treat a browser `File` as permission to reopen the same external item later.
+
+### Creating a reference in a platform library
+
+Android libraries can create a read-only capability with `HuxerUIFileReference.fromUri(context, uri)` and return it through `PlatformPayload.fileReference(reference)`.
+The URI must be a readable `content://` file, not a directory; the SDK native library must already be loaded, but no window is required.
+The synchronous factory queries metadata and checks read access, so run it off the UI thread when a provider may block.
+Invalid arguments throw `IllegalArgumentException`, denied access throws `SecurityException`, and other access or construction failures throw `IOException`.
+The factory uses existing access only: it neither takes persistent URI permissions nor releases or revokes grants when a wrapper closes.
+Applications own persistent-grant policy, and later revocation still causes ordinary I/O failures.
+An absent display name remains unknown; URI identifiers are not used as filenames.
+
+iOS libraries can call `+[HUXFileReference copyFromFileURL:error:]`, imported into Swift as `try FileReference.copy(from: url)`, and return the result through the existing payload bridge.
+The method synchronously copies a readable ordinary file into SDK-owned temporary storage, supports background queues, and must finish before a provider callback's temporary URL expires.
+It returns a read-only capability, or `nil` and an `NSError` on failure, and removes partial temporary contents.
+The copy uses bounded memory, preserves available source metadata, and balances only security-scoped access acquired by this call.
+The original file remains caller-owned; the returned `fileURL` identifies the independent copy.
+Shared references, open streams, and pending operations retain that copy after the creating module is disposed; the last owner triggers temporary-file cleanup.
+Retaining `fileURL` or `AsFile()` alone does not retain the copy.
 
 ### Direct local-path access
 

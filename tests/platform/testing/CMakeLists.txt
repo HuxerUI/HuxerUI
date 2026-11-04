@@ -1,8 +1,9 @@
 if (ANDROID)
-    add_library(huxerui_ui_testing_smoke SHARED android.cpp smoke.cpp)
+    add_library(huxerui_ui_testing_smoke SHARED android.cpp smoke.cpp ../android/ui_testing/file_reference.cpp)
 elseif (IOS)
     find_package(XCTest REQUIRED)
-    xctest_add_bundle(huxerui_ui_testing_smoke huxerui_static ios.mm smoke.cpp)
+    xctest_add_bundle(huxerui_ui_testing_smoke huxerui_static ios.mm smoke.cpp ../ios/file_reference.mm)
+    set_source_files_properties(../ios/file_reference.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     set_target_properties(huxerui_ui_testing_smoke PROPERTIES
             XCODE_GENERATE_SCHEME TRUE
             MACOSX_BUNDLE_GUI_IDENTIFIER org.huxerui.testing.smoke

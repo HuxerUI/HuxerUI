@@ -546,6 +546,29 @@ TEST_CASE("DirectoryCopiesIndexListingBasedDestinationsOnlyWithinOneCopy") {
   REQUIRE(output->find_count == (output->listing_lookup ? 0 : 2001));
 }
 
+TEST_CASE("DirectoryCopiesRejectUnknownNamesWithoutInventingDestinationEntries") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Directories());
+  UiWindow runtime(FileApp, platform);
+  runtime.BuildFrame();
+  const File destination = file_application->Directories().temporary_directory.Child("destination");
+  REQUIRE(destination.CreateDirectory());
+  auto child = std::make_shared<ProviderReferenceState>("provider:unnamed");
+  auto directory = std::make_shared<ProviderReferenceState>("provider:root");
+  directory->children.push_back(detail::MakeFileReference({}, child));
+  auto reference = detail::MakeFileReference({.name = "root", .type = FileType::Directory}, directory);
+  std::optional<IoResult<DirectoryCopySummary>> result;
+  file_tasks.Launch([&]() -> Task<void> {
+    result = co_await reference.CopyDirectoryContentsToAsync(destination);
+  });
+  platform.RunUntil([&] { return result.has_value(); });
+  REQUIRE_FALSE(result->Succeeded());
+  REQUIRE(result->Error().code == IoErrorCode::Unsupported);
+  REQUIRE_FALSE(child->imported_to.has_value());
+  REQUIRE(fs::is_empty(destination.Path()));
+}
+
 TEST_CASE("DirectoryReferencesRejectReadonlyConflictsOverlapAndInvalidNames") {
   ResetFileState();
   TemporaryDirectory temporary;

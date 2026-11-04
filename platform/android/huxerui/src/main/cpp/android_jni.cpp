@@ -13,6 +13,7 @@
 
 #include "application/platform_registry_internal.h"
 #include "android_file_internal.h"
+#include "io/file_internal.h"
 
 namespace huxerui::android {
 
@@ -435,6 +436,45 @@ extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIExternalTexture_retai
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIFileReference_release(JNIEnv*, jclass, jlong handle) {
   delete reinterpret_cast<huxerui::FileReference*>(static_cast<std::uintptr_t>(handle));
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_org_huxerui_HuxerUIFileReference_create(
+    JNIEnv* environment, jclass reference_class, jobject context, jstring uri, jstring name, jlong size,
+    jstring content_type) {
+  using namespace huxerui;
+  try {
+    JavaVM* virtual_machine = nullptr;
+    if (environment->GetJavaVM(&virtual_machine) != JNI_OK) {
+      throw std::runtime_error("HuxerUI Android file reference requires a Java VM");
+    }
+    const std::string uri_value = android::JavaStringToUtf8(environment, uri);
+    detail::FileReferenceMetadata metadata{
+        .name = android::JavaStringToUtf8(environment, name),
+        .size = size >= 0 ? std::optional<std::uint64_t>(size) : std::nullopt,
+        .content_type = content_type ? std::optional(android::JavaStringToUtf8(environment, content_type))
+                                     : std::nullopt};
+    if (environment->ExceptionCheck()) { return nullptr; }
+    auto reference = std::make_unique<FileReference>(detail::CreateAndroidFileReference(
+        virtual_machine, environment, context, std::move(metadata), uri_value));
+    const auto projection = detail::ProjectAndroidFileReference(*reference);
+    const jmethodID constructor =
+        environment->GetMethodID(reference_class, "<init>", "(JJLjava/lang/String;)V");
+    if (constructor == nullptr || environment->ExceptionCheck()) { return nullptr; }
+    jobject result = environment->NewObject(reference_class, constructor,
+        static_cast<jlong>(reinterpret_cast<std::uintptr_t>(reference.get())),
+        static_cast<jlong>(projection.capability_key), uri);
+    if (result == nullptr || environment->ExceptionCheck()) { return nullptr; }
+    reference.release();
+    return result;
+  } catch (const std::exception&) {
+    if (!environment->ExceptionCheck()) {
+      android::LocalRef<jclass> error_class(environment, environment->FindClass("java/io/IOException"));
+      if (error_class) {
+        environment->ThrowNew(error_class.Get(), "HuxerUI could not create the Android file reference");
+      }
+    }
+    return nullptr;
+  }
 }
 
 extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIFileReference_retain(JNIEnv*, jclass, jlong handle) {

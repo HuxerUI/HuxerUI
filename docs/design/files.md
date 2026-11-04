@@ -420,7 +420,8 @@ public:
 
 There is no default constructor, empty state, `HasValue()`, unconditional path accessor, or implicit conversion to `File`.
 Code uses `std::optional<FileReference>` when absence is meaningful.
-`Name()` is a UTF-8 display filename and not a trustworthy local path segment without the same validation used by `File::Child()`.
+`Name()` is a UTF-8 display filename, or an empty string when unknown, and not a trustworthy local path segment without the same validation used by `File::Child()`.
+Platforms preserve missing metadata rather than synthesizing display names from opaque identifiers; recursive copies reject unknown child names through their existing name validation.
 `Size()` and `ContentType()` are optional metadata hints obtained without reading the entire file.
 `ContentType()` returns a MIME string when the platform can supply or map one and does not expose a platform-specific type identifier.
 
@@ -676,6 +677,9 @@ iOS independently maps durable data to Application Support, cache data to Caches
 Its executable directory is read-only and is never used as a replacement for packaged HuxerUI resources.
 Its picker transport presents `UIDocumentPickerViewController`, maps union filters through `UTType`, and retains security-scoped URLs inside `FileReference`.
 Application document activations use the same retained capability for open-in-place URLs. When UIKit marks a delivery as copy-before-use, the application adapter copies it into a private read-only temporary snapshot before returning from the native callback, and the shared `FileReference` state removes that snapshot after its last owner releases it.
+`+[HUXFileReference copyFromFileURL:error:]` exposes that same synchronous copy ownership to platform libraries, including provider callbacks on background queues.
+It preserves available source metadata, returns the underlying access or copy error, and removes partial copies on failure.
+Its read-only reference survives the source callback and creating module; shared references, streams, and pending operations retain the temporary copy independently of native wrappers.
 Directory selection requests `UTTypeFolder` in open-in-place mode rather than importing a temporary directory snapshot.
 External reads, imports, replacements, and directory operations use coordinated file access off the main thread; a copy coordinates its read and write locations together.
 Saving exports a copy of the local source, stages a temporary copy only when the suggested filename differs, and removes that staging directory after completion or cancellation.
@@ -696,6 +700,10 @@ Different authorities or unavailable containment checks return `Unsupported`; th
 Copying a selected tree into a local `File` is supported when the destination is inside application-private data and the provider belongs to a different UID; other local destinations remain unsupported when their independence cannot be established.
 Incomplete provider listings and virtual documents without an ordinary byte stream are unsupported rather than silently omitted or converted.
 The initial adapter retains process-scoped URI access only and does not call `takePersistableUriPermission()`.
+`HuxerUIFileReference.fromUri(context, uri)` creates a read-only capability from an already readable ordinary `content://` file and queries its metadata synchronously, without requiring a window.
+The Java factory checks read access before JNI constructs the existing provider state and a payload wrapper with a valid owning handle and capability key.
+The state retains the application Context independently of the originating module; wrapper closure never revokes URI access or releases application-owned persistent grants.
+The caller owns permission policy, and successful creation is not a guarantee against later revocation.
 
 `HuxerUIActivity` installs the SAF launcher and forwards Activity results automatically.
 An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its owner installs `HuxerUIView.FilePickerLauncher` and forwards matching results through `dispatchFilePickerResult()`.

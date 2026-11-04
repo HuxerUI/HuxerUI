@@ -46,5 +46,9 @@ func useFileReference(_ reference: FileReference) {
   _ = PlatformPayload.fileReference(reference).fileReference()
 }
 
+func copyFileReference(_ url: URL) throws -> FileReference {
+  try FileReference.copy(from: url)
+}
+
 let texture = PixelBufferTexture(intrinsicSize: CGSize(width: 16, height: 9))
 texture.finish()

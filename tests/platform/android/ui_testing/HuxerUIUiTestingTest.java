@@ -34,6 +34,7 @@ public final class HuxerUIUiTestingTest extends Instrumentation {
             }
             copyAssets(getContext().getAssets(), "package", packageRoot);
             System.loadLibrary("huxerui_ui_testing_smoke");
+            HuxerUIFileReferenceTest.verify(this);
             String packagePath = packageRoot.getAbsolutePath();
             runOnMainSync(() -> result.putString("error", runNative(packagePath)));
             String error = result.getString("error");

@@ -5,6 +5,7 @@
 
 #ifdef __OBJC__
 @class NSURL;
+@class NSError;
 @class UIViewController;
 @class HuxerUIView;
 #endif
@@ -25,7 +26,7 @@ class FilePickerTransport;
 CreateIosFilePickerTransport(std::function<UIViewController*()> presenter_provider);
 void InstallIosFileDrop(HuxerUIView* view);
 [[nodiscard]] FileReference MakeIosFileReference(NSURL* url, bool writable = true);
-[[nodiscard]] FileReference MakeCopiedIosFileReference(NSURL* url);
+[[nodiscard]] FileReference MakeCopiedIosFileReference(NSURL* url, NSError** error = nullptr);
 #endif
 
 } // namespace huxerui::detail

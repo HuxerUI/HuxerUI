@@ -90,63 +90,31 @@ NSURL* FileURL(const File& file) {
   return path == nil ? nil : [NSURL fileURLWithPath:path isDirectory:NO];
 }
 
-bool SameFileURL(NSURL* first, NSURL* second) {
-  return first != nil && second != nil && [first.URLByStandardizingPath isEqual:second.URLByStandardizingPath];
-}
-
-bool CopyFile(NSURL* source, NSURL* destination, bool overwrite) {
-  if (source == nil || destination == nil) {
-    return false;
-  }
-  NSFileManager* manager = NSFileManager.defaultManager;
-  BOOL source_is_directory = NO;
-  if (![manager fileExistsAtPath:source.path isDirectory:&source_is_directory] || source_is_directory) {
-    return false;
-  }
-  BOOL destination_is_directory = NO;
-  const bool destination_exists = [manager fileExistsAtPath:destination.path isDirectory:&destination_is_directory];
-  if (destination_is_directory) {
-    return false;
-  }
-  if (SameFileURL(source, destination)) {
-    return true;
-  }
-  if (!destination_exists) {
-    return [manager copyItemAtURL:source toURL:destination error:nil];
-  }
-  if (!overwrite) {
-    return false;
-  }
-
-  NSURL* temporary = [destination.URLByDeletingLastPathComponent
-      URLByAppendingPathComponent:[@".huxerui-" stringByAppendingString:NSUUID.UUID.UUIDString]];
-  if (![manager copyItemAtURL:source toURL:temporary error:nil]) {
-    return false;
-  }
-  NSURL* resulting_url = nil;
-  const bool replaced = [manager replaceItemAtURL:destination
-                                    withItemAtURL:temporary
-                                   backupItemName:nil
-                                          options:0
-                                 resultingItemURL:&resulting_url
-                                            error:nil];
-  if (!replaced) {
-    [manager removeItemAtURL:temporary error:nil];
-  }
-  return replaced;
-}
-
-bool CopyCoordinatedFile(NSURL* source, NSURL* destination, bool overwrite) {
+bool CopyCoordinatedFile(NSURL* source, NSURL* destination, NSError** error) {
   __block bool succeeded = false;
+  __block NSError* copy_error = nil;
   NSFileCoordinator* coordinator = [[NSFileCoordinator alloc] initWithFilePresenter:nil];
-  NSError* error = nil;
+  NSError* coordination_error = nil;
   [coordinator coordinateReadingItemAtURL:source
                                   options:0
-                                    error:&error
+                                    error:&coordination_error
                                byAccessor:^(NSURL* coordinated_url) {
-                                 succeeded = CopyFile(coordinated_url, destination, overwrite);
+                                 NSNumber* regular = nil;
+                                 if (![coordinated_url getResourceValue:&regular forKey:NSURLIsRegularFileKey
+                                                                 error:&copy_error]) {
+                                   return;
+                                 }
+                                 if (!regular.boolValue) {
+                                   copy_error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadUnknownError
+                                       userInfo:@{NSLocalizedDescriptionKey:
+                                           @"HuxerUI copied file reference requires an ordinary file"}];
+                                   return;
+                                 }
+                                 succeeded = [NSFileManager.defaultManager copyItemAtURL:coordinated_url
+                                                                                 toURL:destination error:&copy_error];
                                }];
-  return error == nil && succeeded;
+  if (error != nullptr) { *error = coordination_error != nil ? coordination_error : copy_error; }
+  return coordination_error == nil && succeeded;
 }
 
 void AppendType(NSMutableArray<UTType*>* types, UTType* type) API_AVAILABLE(ios(14.0)) {
@@ -703,29 +671,35 @@ FileReference MakeIosFileReference(NSURL* url, bool writable) {
   return MakeIosReference(url, writable, std::make_shared<IosFileAccess>(url));
 }
 
-FileReference MakeCopiedIosFileReference(NSURL* url) {
+FileReference MakeCopiedIosFileReference(NSURL* url, NSError** error) {
+  if (error != nullptr) { *error = nil; }
   if (url == nil || !url.isFileURL) {
-    throw std::logic_error("HuxerUI copied iOS file reference requires a file URL");
+    throw std::invalid_argument("HuxerUI copied iOS file reference requires a file URL");
   }
 
   IosFileAccess access(url);
   __strong NSURL* directory = nil;
   try {
+    // Capture source metadata before copying; the private storage name is not display metadata.
+    NSString* name = url.lastPathComponent;
+    const auto content_type = ReferenceContentType(url);
     NSURL* temporary_root = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     NSString* directory_name = [@"huxerui-activation-" stringByAppendingString:NSUUID.UUID.UUIDString];
     directory = [temporary_root URLByAppendingPathComponent:directory_name isDirectory:YES];
-    NSError* error = nil;
     const bool directory_created =
         [NSFileManager.defaultManager createDirectoryAtURL:directory
                                withIntermediateDirectories:NO
                                                 attributes:nil
-                                                     error:&error];
-    NSURL* copied_url = [directory URLByAppendingPathComponent:url.lastPathComponent isDirectory:NO];
-    if (!directory_created || !CopyCoordinatedFile(url, copied_url, false)) {
-      throw std::runtime_error("HuxerUI could not copy the temporary iOS document activation");
+                                                     error:error];
+    NSURL* copied_url = [directory URLByAppendingPathComponent:name.length == 0 ? @"content" : name isDirectory:NO];
+    if (!directory_created || !CopyCoordinatedFile(url, copied_url, error)) {
+      throw std::runtime_error("HuxerUI could not copy the iOS file reference");
     }
 
-    return MakeIosReference(copied_url, false, std::make_shared<IosFileAccess>(copied_url, directory));
+    auto reference = MakeIosReference(copied_url, false, std::make_shared<IosFileAccess>(copied_url, directory));
+    return MakeFileReference(
+        {.name = MakeString(name), .size = reference.Size(), .content_type = content_type},
+        FileReferenceState::Of(reference));
   } catch (...) {
     if (directory != nil) {
       [NSFileManager.defaultManager removeItemAtURL:directory error:nil];

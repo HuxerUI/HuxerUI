@@ -15,6 +15,7 @@
 
 #include "ios_external_texture_internal.h"
 #include "ios_application_internal.h"
+#include "ios_file_internal.h"
 #include "application/platform_registry_internal.h"
 
 using huxerui::BufferReference;
@@ -371,6 +372,21 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
 }
 
 @implementation HUXFileReference
+
++ (instancetype)copyFromFileURL:(NSURL*)url error:(NSError**)error {
+  if (error != nullptr) { *error = nil; }
+  try {
+    return WrapFileReference(huxerui::detail::MakeCopiedIosFileReference(url, error));
+  } catch (const std::exception& exception) {
+    if (error != nullptr && *error == nil) {
+      NSString* message = [NSString stringWithUTF8String:exception.what()];
+      *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileReadUnknownError
+                              userInfo:@{NSLocalizedDescriptionKey:
+                                  message != nil ? message : @"HuxerUI could not copy the iOS file reference"}];
+    }
+    return nil;
+  }
+}
 
 - (instancetype)initForHuxerUIWithReference:(FileReference)reference fileURL:(NSURL*)file_url {
   self = [super init];

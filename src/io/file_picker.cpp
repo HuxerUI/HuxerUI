@@ -943,8 +943,8 @@ FileReference MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<
   if (!state) {
     throw std::logic_error("HuxerUI platform file reference state must not be empty");
   }
-  if (metadata.name.empty() || !IsValidFileUtf8(metadata.name) || metadata.name.find('\0') != std::string::npos) {
-    throw std::logic_error("HuxerUI platform file reference name must contain non-empty valid UTF-8");
+  if (!IsValidFileUtf8(metadata.name) || metadata.name.find('\0') != std::string::npos) {
+    throw std::logic_error("HuxerUI platform file reference name must contain valid UTF-8 without NUL");
   }
   if (metadata.type != FileType::File) {
     metadata.size.reset();

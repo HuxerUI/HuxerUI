@@ -15,6 +15,16 @@ NS_SWIFT_NAME(FileReference)
 
 @property(nonatomic, readonly) NSURL* fileURL;
 
+/// Copies a readable ordinary file into SDK-owned temporary storage and returns a read-only capability.
+/// The copy finishes before returning, including when url is valid only inside a provider callback. May block;
+/// background queues are supported. The SDK balances only security-scoped access it acquires for this copy.
+/// The last reference, stream, or pending operation releases the copy; retaining fileURL alone does not retain it.
+/// @param url A file URL whose contents remain readable throughout this call.
+/// @param error Receives the access or copy error on failure; partial temporary contents are removed.
+/// @return A retained payload-compatible reference, or nil on failure. Does not modify or take ownership of url.
++ (nullable instancetype)copyFromFileURL:(NSURL*)url error:(NSError* _Nullable* _Nullable)error
+    NS_SWIFT_NAME(copy(from:));
+
 - (instancetype)init NS_UNAVAILABLE;
 + (instancetype)new NS_UNAVAILABLE;
 

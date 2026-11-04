@@ -348,7 +348,6 @@ public:
     android::LocalRef<jclass> uri_class(environment, environment->FindClass("android/net/Uri"));
     if (context_ == nullptr || !reference_class || !operation_class || !metadata_class || !uri_class ||
         environment->ExceptionCheck()) {
-      ClearJavaException(environment);
       if (context_ != nullptr) {
         environment->DeleteGlobalRef(context_);
         context_ = nullptr;
@@ -360,7 +359,6 @@ public:
     metadata_class_ = static_cast<jclass>(environment->NewGlobalRef(metadata_class.Get()));
     if (reference_class_ == nullptr || operation_class_ == nullptr || metadata_class_ == nullptr ||
         environment->ExceptionCheck()) {
-      ClearJavaException(environment);
       Release(environment);
       throw std::runtime_error("HuxerUI Android file reference Java classes could not be retained");
     }
@@ -398,7 +396,6 @@ public:
         prepare_read_ == nullptr || prepare_import_ == nullptr || prepare_replace_ == nullptr ||
         prepare_open_read_ == nullptr || prepare_open_write_ == nullptr || start_ == nullptr || cancel_ == nullptr ||
         environment->ExceptionCheck()) {
-      ClearJavaException(environment);
       Release(environment);
       throw std::runtime_error("HuxerUI Android file reference Java methods do not match the platform backend");
     }
@@ -421,12 +418,10 @@ public:
                                          environment->NewObject(reference_class_, constructor_, context_,
                                                                 java_uri.Get(), write_allowed ? JNI_TRUE : JNI_FALSE));
     if (!reference || environment->ExceptionCheck()) {
-      ClearJavaException(environment);
       throw std::runtime_error("HuxerUI Android file reference could not be created");
     }
     jobject retained = environment->NewGlobalRef(reference.Get());
     if (retained == nullptr) {
-      ClearJavaException(environment);
       throw std::runtime_error("HuxerUI Android file reference could not be retained");
     }
     return retained;
@@ -641,10 +636,14 @@ public:
         environment, static_cast<jstring>(environment->CallObjectMethod(reference_, bridge_->EntryKey())));
     if (!entry_key || environment->ExceptionCheck()) {
       environment->DeleteGlobalRef(reference_);
-      ClearJavaException(environment);
       throw std::runtime_error("HuxerUI Android document entry key is unavailable");
     }
-    entry_key_ = android::JavaStringToUtf8(environment, entry_key.Get());
+    try {
+      entry_key_ = android::JavaStringToUtf8(environment, entry_key.Get());
+    } catch (...) {
+      environment->DeleteGlobalRef(reference_);
+      throw;
+    }
   }
 
   ~AndroidFileReferenceState() override {

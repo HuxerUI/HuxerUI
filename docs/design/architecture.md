@@ -965,6 +965,9 @@ The Apple adapters retain the C++ value in a lightweight `HUXFileReference` wrap
 Web exposes a retained `FileReference` wrapper whose asynchronous `getFile()` resolves the current browser handle or captured `File`, and whose `close()` releases its C++ share.
 These projections do not start a new security scope, duplicate `CanWrite()`, attenuate the original grant, or make the capability persistent.
 
+`HuxerUIFileReference.fromUri()` constructs a read-only payload-compatible capability from existing URI access without acquiring or releasing persistent grants.
+On iOS, `+[HUXFileReference copyFromFileURL:error:]` creates a read-only SDK-owned copy before returning from a provider callback; the existing shared file state retains its temporary-file owner through reference I/O.
+
 BufferReference lives in `data.h` and owns one shared backing state containing a fixed byte span and a retained owner; slices add only an offset and length.
 Construction rejects nonempty storage without an owner, and slicing validates bounds using subtraction to avoid overflow.
 Equality and table deduplication use backing-state identity plus range, not contents or the raw address alone; independently wrapping the same address creates a distinct capability.
