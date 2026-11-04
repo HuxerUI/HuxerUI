@@ -198,6 +198,20 @@ Use `PumpUntil` for a particular business condition or `Pump(duration)` for an a
 Settle failures report elapsed time, frame count, queued callback count, and the next deadline; the fixture remains available for queries and captures.
 This observes shared Runtime scheduling only and does not establish idleness of workers or native services.
 
+`UpdateWindowLifecycleState()` injects a native-style transition into the test window without pumping or changing application lifecycle.
+The window initially has `WindowLifecycleState::Background`; inject `Active` when a test requires an active window.
+`UseWindow().LifecycleState()` exposes the latest injected state, while queries reflect it after `Pump()` recomposes the UI.
+Mounted `UseWindow().OnLifecycleChanged()` observers receive distinct queued transitions when Pump drains the application queue; repeated identical states produce no additional notification, and several transitions before a Pump retain their order.
+
+```cpp
+ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+ui.Pump();
+ui.UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
+ui.Pump();
+```
+
+This exercises the shared lifecycle observation path, not operating-system window activation, background execution, or suspension.
+
 ## Resources and reference text
 
 Supply an owning `PlatformResources` through `UiTestOptions::resource_provider` when content needs images, raw assets, localized catalogs, or built-in icons.

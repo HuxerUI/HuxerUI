@@ -376,7 +376,78 @@ TEST_CASE("Windowless resources use generated packages and explicit configuratio
   REQUIRE(ui.Find(UiSelector::Key("locale")).One().text == "de");
 }
 
-TEST_CASE("Windowless queries enforce creating-thread access", "[ui-testing]") {
+TEST_CASE("Windowless lifecycle injection publishes observations and distinct transitions on Pump",
+          "[ui-testing][window-lifecycle]") {
+  static std::vector<WindowLifecycleState> transitions;
+  transitions.clear();
+  Application application([]() -> View {
+    const auto window = UseWindow();
+    window.OnLifecycleChanged([](WindowLifecycleState state) { transitions.push_back(state); });
+    const auto state = window.LifecycleState();
+    return Column {
+      Text(state == WindowLifecycleState::Active ? "active" :
+           state == WindowLifecycleState::Inactive ? "inactive" : "background").Key("window"),
+      Text(UseApplication().LifecycleState() == ApplicationLifecycleState::Active ? "active" : "inactive")
+          .Key("application"),
+    };
+  }, {.show_debug_overlay = false});
+  UiTest ui(application);
+  auto window = ui.Find(UiSelector::Key("window"));
+  REQUIRE(window.One().text == "background");
+  REQUIRE(transitions.empty());
+
+  std::vector<WindowLifecycleState> expected;
+  for (const auto& [state, text] : {
+           std::pair{WindowLifecycleState::Active, "active"},
+           std::pair{WindowLifecycleState::Inactive, "inactive"},
+           std::pair{WindowLifecycleState::Background, "background"},
+           std::pair{WindowLifecycleState::Active, "active"},
+       }) {
+    const auto previous = window.One().text;
+    ui.UpdateWindowLifecycleState(state);
+    ui.UpdateWindowLifecycleState(state);
+    REQUIRE(window.One().text == previous);
+    REQUIRE(transitions == expected);
+    ui.Pump();
+    expected.push_back(state);
+    REQUIRE(window.One().text == text);
+    REQUIRE(transitions == expected);
+    REQUIRE(ui.Find(UiSelector::Key("application")).One().text == "active");
+  }
+
+  transitions.clear();
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Inactive);
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Background);
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Background);
+  ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+  REQUIRE(transitions.empty());
+  ui.Pump();
+  REQUIRE(transitions == std::vector{WindowLifecycleState::Inactive, WindowLifecycleState::Background,
+                                    WindowLifecycleState::Active});
+  REQUIRE(window.One().text == "active");
+  REQUIRE(ui.Find(UiSelector::Key("application")).One().text == "active");
+  REQUIRE(ui.Now() == 0.0);
+}
+
+TEST_CASE("Windowless lifecycle injection follows session mutation guards", "[ui-testing][window-lifecycle]") {
+  Application application(Empty, {.show_debug_overlay = false});
+  UiTest ui(application);
+  SECTION("Invalid states preserve the exception category and fail the session") {
+    REQUIRE_THROWS_AS(ui.UpdateWindowLifecycleState(static_cast<WindowLifecycleState>(-1)), std::invalid_argument);
+    REQUIRE_THROWS_AS(ui.UpdateWindowLifecycleState(WindowLifecycleState::Active), UiTestFailure);
+  }
+  SECTION("Wait predicates cannot mutate lifecycle") {
+    REQUIRE_THROWS_AS(ui.PumpUntil([&] {
+      ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+      return true;
+    }), std::logic_error);
+    REQUIRE_NOTHROW(ui.UpdateWindowLifecycleState(WindowLifecycleState::Active));
+    REQUIRE_NOTHROW(ui.Pump());
+  }
+}
+
+TEST_CASE("Windowless queries and lifecycle injection enforce creating-thread access",
+          "[ui-testing][window-lifecycle]") {
 #if defined(__EMSCRIPTEN__)
   SKIP("HuxerUI Web has no worker-thread execution capability");
 #endif
@@ -384,11 +455,20 @@ TEST_CASE("Windowless queries enforce creating-thread access", "[ui-testing]") {
   UiTest ui(application);
   auto query = ui.Find(UiSelector::Text("0"));
   bool rejected = false;
+  bool lifecycle_rejected = false;
   std::thread worker([&] {
     try { static_cast<void>(query.Count()); } catch (const std::logic_error&) { rejected = true; }
+    try {
+      ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
+    } catch (const std::logic_error&) {
+      lifecycle_rejected = true;
+    }
   });
   worker.join();
   REQUIRE(rejected);
+  REQUIRE(lifecycle_rejected);
+  REQUIRE_NOTHROW(ui.UpdateWindowLifecycleState(WindowLifecycleState::Active));
+  REQUIRE_NOTHROW(ui.Pump());
 }
 
 TEST_CASE("Windowless empty roots have valid captures and no fabricated text", "[ui-testing]") {
