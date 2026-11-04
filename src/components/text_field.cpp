@@ -1,6 +1,6 @@
 #include "runtime/mounted_node_internal.h"
 #include "runtime/gesture_internal.h"
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
 #include "internal_access.h"
 #endif
 #include "graphics/geometry_internal.h"
@@ -1429,7 +1429,7 @@ private:
   }
 
   void EnsureLayouts(UiWindow& ui_window) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
     const auto revision = detail::InternalAccess::TextMetricsRevision(ui_window);
     if (text_metrics_revision_ != revision) {
       text_metrics_revision_ = revision;
@@ -2409,7 +2409,7 @@ private:
   TextInputSessionId session_id_ = 0;
   std::uint64_t revision_ = 0;
   std::uint64_t content_revision_ = 0;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   std::uint64_t text_metrics_revision_ = 0;
 #endif
   TextLayoutOptions text_layout_options_;

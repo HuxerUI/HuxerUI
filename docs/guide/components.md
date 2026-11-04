@@ -49,6 +49,8 @@ Attributed text contains resolved direct text; translating sentence fragments in
 
 `FontFamily` is a reusable immutable family; `Font` adds size, weight, and slant.
 Existing system, monospace, and installed-name factories remain available.
+`Font::Size()` is the application's baseline logical size, independent of device pixels; platform text scaling can change measured geometry without changing the Font value.
+On Linux, every family (including custom fonts and attributed runs) follows GTK's effective text DPI; see [Linux](platforms.md#linux).
 Supply application fonts as ordinary raw resources, local files, or owned bytes:
 
 ```cpp
@@ -80,7 +82,7 @@ Native decoding can still reject a structurally accepted font; that emits a diag
 
 Web displays system fallback while the browser decodes the bytes, then updates text measurement, line wrapping, paint, selection, and TextField geometry automatically.
 Controlled text, selection, and focus survive that update.
-On Web, `UseTextMeasurer()` subscribes composition to font readiness changes; remeasure during recomposition to update geometry derived from its results.
+On Web and Linux, `UseTextMeasurer()` subscribes composition to font readiness and text DPI changes respectively; remeasure during recomposition to update geometry derived from its results.
 Previously returned measurements remain snapshots and do not update themselves.
 
 ### Selection and virtualized text

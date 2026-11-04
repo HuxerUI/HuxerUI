@@ -294,7 +294,7 @@ void MarkContentPaintDirtyTree(MountedNode& node) {
   }
 }
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
 void MarkTextMetricsDirtyTree(MountedNode& node) {
   node.measure_dirty = true;
   node.layout_dirty = true;
@@ -1077,7 +1077,7 @@ const MountedNode* InternalAccess::MountedRoot(const UiWindow& ui_window) noexce
   return ui_window.state_->mounted_root_.get();
 }
 
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
 std::uint64_t InternalAccess::TextMetricsRevision(const UiWindow& ui_window) noexcept {
   return ui_window.state_ ? ui_window.state_->text_metrics_revision_ : 0;
 }
@@ -1088,7 +1088,7 @@ void InternalAccess::InvalidateTextMetrics(UiWindow& ui_window) {
     throw std::logic_error("HuxerUI text metrics invalidation requires an initialized window");
   }
   ExecutionGuard execution_guard(state->execution_);
-  // Browser font readiness changes geometry without changing Font values, including composition-time measurements.
+  // Platform font metrics can change without changing Font values, including composition-time measurements.
   BeginDependencyChange(state->text_metrics_dependency_);
   ++state->text_metrics_revision_;
   CommitDependencyChange(state->text_metrics_dependency_);
@@ -1305,7 +1305,7 @@ void UiWindow::InitializeWindow(Runtime& application_runtime, ViewFactory conten
 #endif
     auto text_measurer = std::make_shared<TextMeasurerService>();
     text_measurer->measurer = this;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
     text_measurer->dependency = state_->text_metrics_dependency_;
 #endif
     root.Provide(std::move(text_measurer));

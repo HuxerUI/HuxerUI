@@ -146,6 +146,12 @@ Metal publication performs a GPU snapshot and is not a zero-copy handoff; render
 The Linux backend requires GTK 4.14 or later and uses GTK for the window, event loop, GSK presentation, `GtkIMContext`, and backend selection.
 Libepoxy provides OpenGL dispatch, Pango provides text layout, Cairo records ordinary drawing nodes, GIO provides platform services, and libsoup 3 provides HTTP.
 
+Text follows the drawing widget's effective GTK text DPI: its logical size is `Font::Size() * DPI / 96`, with unavailable or invalid DPI treated as 96.
+For example, a requested size of 16 becomes 24 logical units at 144 DPI; GTK applies the window's device scale afterward without applying text DPI again.
+Text DPI may also reduce the size below its baseline and is independent of `ResourceConfiguration::display_scale`, which selects image density.
+Changing desktop font settings refreshes measurement, wrapping, drawing, selection, and TextField/IME geometry in each affected window while preserving controlled text and its input session.
+Padding, fixed frames, icons, and pointer coordinates do not acquire a separate text scale.
+
 Install the corresponding development packages before configuring CMake.
 The SDK archive does not bundle distribution-owned GTK, libepoxy, Pango, Cairo, GIO, or libsoup libraries.
 Official Linux SDK binaries require glibc 2.38 or later.

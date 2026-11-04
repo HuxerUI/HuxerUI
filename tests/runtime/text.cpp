@@ -271,15 +271,20 @@ TEST_CASE("AttributedParagraphDoubleClickSelectsLinkWordWithoutSecondActivation"
 TEST_CASE("TextFontChangesRefreshObservationSelectionAndTextFieldWithoutResettingState") {
   class Input final : public PlatformTextInput {
   public:
-    void Start(TextInputSessionId, const TextInputConfiguration&, const TextInputState&,
-        const TextInputGeometry& value) override { geometry = value; ++starts; }
-    void Update(TextInputSessionId, const TextInputState&, const TextInputGeometry& value) override { geometry = value; }
+    void Start(TextInputSessionId id, const TextInputConfiguration&, const TextInputState&,
+        const TextInputGeometry& value) override { session = id; geometry = value; ++starts; }
+    void Update(TextInputSessionId id, const TextInputState&, const TextInputGeometry& value) override {
+      REQUIRE(id == session);
+      geometry = value;
+    }
     void Restart(TextInputSessionId, const TextInputConfiguration&, const TextInputState&,
         const TextInputGeometry&) override { ++restarts; }
-    void Stop(TextInputSessionId) override {}
+    void Stop(TextInputSessionId) override { ++stops; }
+    TextInputSessionId session = 0;
     TextInputGeometry geometry;
     int starts = 0;
     int restarts = 0;
+    int stops = 0;
   } input;
   ChangingTextPlatform platform;
   platform.platform_text_input = &input;
@@ -310,31 +315,106 @@ TEST_CASE("TextFontChangesRefreshObservationSelectionAndTextFieldWithoutResettin
   const auto width = FindText(before, "paragraph")->rect.width;
   const auto field = FindText(before, "edit")->rect;
   const auto observed = observed_width;
+  ClickAt(window, {field.x + 10.0F, field.y + 10.0F});
+  TextInputCommand begin;
+  begin.kind = TextInputCommandKind::BeginComposition;
+  begin.target = TextRange{1, 3};
+  TextInputCommand update;
+  update.kind = TextInputCommandKind::UpdateComposition;
+  update.text = "di";
+  update.selection_after = TextSelection{2, 2};
+  REQUIRE(window.HandleTextInputCommands({input.session, {begin, update}}).result_code == TextInputResultCode::Ok);
+  const auto editing = value.Get();
+  REQUIRE(editing.composition == TextRange{1, 3});
+  window.BuildFrame();
   const auto count = platform.layouts;
   const auto old_compositions = compositions;
-  ClickAt(window, {field.x + 10.0F, field.y + 10.0F});
-  const auto editing = value.Get();
   const auto before_caret = input.geometry.caret;
+  float scale = 2.0F;
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
+  bool platform_metrics_changed = false;
+#endif
   SECTION("Font value changes") {
     font = font.Get().WithSize(40.0F);
   }
-#if defined(__EMSCRIPTEN__)
-  SECTION("Web font availability changes") {
-    platform.scale = 2.0F;
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
+  SECTION("Platform text metrics change") {
+    platform_metrics_changed = true;
+    SECTION("Larger system fonts") { scale = 1.5F; }
+    SECTION("Smaller system fonts") { scale = 0.75F; }
+    platform.scale = scale;
     detail::InternalAccess::InvalidateTextMetrics(platform);
   }
 #endif
   const auto& after = window.BuildFrame();
-  REQUIRE(observed_width == Catch::Approx(observed * 2.0F));
-  REQUIRE(FindText(after, "paragraph")->rect.width == Catch::Approx(width * 2.0F));
+  REQUIRE(observed_width == Catch::Approx(observed * scale));
+  REQUIRE(FindText(after, "paragraph")->rect.width == Catch::Approx(width * scale));
   REQUIRE(platform.layouts > count);
   REQUIRE(compositions == old_compositions + 1);
   REQUIRE(value.Get() == editing);
   REQUIRE(input.starts == 1);
   REQUIRE(input.restarts == 0);
-  REQUIRE(input.geometry.caret.x - field.x == Catch::Approx((before_caret.x - field.x) * 2.0F));
+  REQUIRE(input.stops == 0);
+  REQUIRE(input.geometry.caret.x - field.x == Catch::Approx((before_caret.x - field.x) * scale));
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
+  if (platform_metrics_changed) {
+    REQUIRE(font.Get().Size() == 20.0F);
+    platform.scale = 1.0F;
+    detail::InternalAccess::InvalidateTextMetrics(platform);
+    const auto& restored = window.BuildFrame();
+    REQUIRE(observed_width == Catch::Approx(observed));
+    REQUIRE(FindText(restored, "paragraph")->rect.width == Catch::Approx(width));
+    REQUIRE(input.geometry.caret == before_caret);
+    REQUIRE(value.Get() == editing);
+    REQUIRE(input.starts == 1);
+    REQUIRE(input.restarts == 0);
+    REQUIRE(input.stops == 0);
+  }
+#endif
   REQUIRE(window.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::ArrowRight}));
   REQUIRE(value.Get().selection.active == editing.selection.active + 1);
 }
+
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
+TEST_CASE("PlatformTextMetricsChangesRemainLocalToOneWindow") {
+  TestPlatform application_platform;
+  ChangingTextPlatform first_platform;
+  ChangingTextPlatform second_platform;
+  float observed[2]{};
+  int compositions[2]{};
+  int slot = 0;
+  metric_root = [&]() -> View {
+    ++compositions[slot];
+    const TextStyle style{Font::System(20.0F), Color::Black()};
+    observed[slot] = UseTextMeasurer().MeasureText("measure", style).size.width;
+    return Column {
+      SelectionArea(Text("paragraph").Style(style)),
+    };
+  };
+  Application application(MetricApp, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, application_platform);
+  UiWindow first(runtime, first_platform);
+  UiWindow second(runtime, second_platform, ResourceConfiguration{.display_scale = 2.0F});
+  first.SetWindowMetrics({.viewport = {300.0F, 160.0F}});
+  second.SetWindowMetrics({.viewport = {300.0F, 160.0F}});
+  const auto initial_width = FindText(first.BuildFrame(), "paragraph")->rect.width;
+  slot = 1;
+  REQUIRE(FindText(second.BuildFrame(), "paragraph")->rect.width == initial_width);
+  const auto initial_observed = observed[0];
+  const auto second_layouts = second_platform.layouts;
+
+  first_platform.scale = 1.5F;
+  detail::InternalAccess::InvalidateTextMetrics(first_platform);
+  slot = 0;
+  REQUIRE(FindText(first.BuildFrame(), "paragraph")->rect.width == Catch::Approx(initial_width * 1.5F));
+  slot = 1;
+  REQUIRE(FindText(second.BuildFrame(), "paragraph")->rect.width == initial_width);
+  REQUIRE(observed[0] == Catch::Approx(initial_observed * 1.5F));
+  REQUIRE(observed[1] == initial_observed);
+  REQUIRE(compositions[0] == 2);
+  REQUIRE(compositions[1] == 1);
+  REQUIRE(second_platform.layouts == second_layouts);
+}
+#endif
 
 } // namespace huxerui::test

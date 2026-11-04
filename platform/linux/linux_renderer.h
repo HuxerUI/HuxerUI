@@ -25,6 +25,10 @@ public:
   void Initialize();
   void Discard() noexcept;
 
+  // Updates logical text scaling and clears shaped paragraphs only when the effective DPI changes.
+  // Invalid or unspecified DPI falls back to 96; retained TextLayouts keep their original geometry.
+  [[nodiscard]] bool UpdateTextDpi(double dpi);
+
   [[nodiscard]] FontMetrics Metrics(const Font& font);
   [[nodiscard]] TextRunMetrics
   MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options);

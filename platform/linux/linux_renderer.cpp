@@ -194,9 +194,10 @@ PangoFontDescription* CreateFontDescription(const Font& font, PangoContext* cont
     pango_font_description_set_family(description, std::string(font.FamilyName()).c_str());
     break;
   }
+  // Absolute Pango sizes bypass context DPI; apply text scaling once, independently of GTK's device scale.
   pango_font_description_set_absolute_size(
       description,
-      std::max(0.0F, font.Size()) * static_cast<float>(PANGO_SCALE)
+      std::max(0.0F, font.Size()) * (pango_cairo_context_get_resolution(context) / 96.0) * PANGO_SCALE
   );
   pango_font_description_set_weight(description, static_cast<PangoWeight>(face ? face->weight : static_cast<unsigned>(font.Weight())));
   pango_font_description_set_style(
@@ -781,12 +782,18 @@ struct LinuxRenderer::State {
     for (PathShadowMaskEntry& shadow : path_shadow_masks) {
       cairo_surface_destroy(shadow.surface);
     }
+    ClearTextLayouts();
+    g_object_unref(context);
+  }
+
+  void ClearTextLayouts() {
     for (TextLayoutCacheEntry& entry : text_layouts) {
       if (entry.layout != nullptr) {
         g_object_unref(entry.layout);
       }
     }
-    g_object_unref(context);
+    text_layouts.clear();
+    text_layout_bytes = 0;
   }
 
   GdkPixbuf* ImageFor(const ImageAsset& image) {
@@ -1917,6 +1924,14 @@ void LinuxRenderer::Initialize() {
 
 void LinuxRenderer::Discard() noexcept {
   state_.reset();
+}
+
+bool LinuxRenderer::UpdateTextDpi(double dpi) {
+  if (!std::isfinite(dpi) || dpi <= 0.0) dpi = 96.0;
+  if (pango_cairo_context_get_resolution(state_->context) == dpi) return false;
+  pango_cairo_context_set_resolution(state_->context, dpi);
+  state_->ClearTextLayouts();
+  return true;
 }
 
 FontMetrics LinuxRenderer::Metrics(const Font& font) {

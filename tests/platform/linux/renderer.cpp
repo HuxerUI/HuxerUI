@@ -819,6 +819,95 @@ TEST_CASE("LinuxOversizedTextSkipsTheLayoutCacheWithoutEvictingCachedEntries") {
   renderer.Discard();
 }
 
+TEST_CASE("LinuxTextDpiScalesEveryFontKindAndRefreshesCachedParagraphs") {
+  for (const Font& font : {Font::System(20.0F), Font::Monospace(20.0F), Font::Named("DejaVu Sans", 20.0F),
+           Font::FromFamily(TestFontFamily(), 20.0F)}) {
+    detail::LinuxRenderer renderer;
+    detail::LinuxRenderer reference;
+    const TextStyle style{font, Color::Black()};
+    const TextLayoutOptions options{.wrap = TextWrap::NoWrap};
+    const auto initial = renderer.MeasureText("AA", style, 200.0F, options);
+    const auto retained = renderer.CreateTextLayout("AA", style, 200.0F, options);
+    const auto original_caret = retained->CaretRect(2, TextAffinity::Upstream);
+
+    for (const double dpi : {144.0, 96.0, 72.0}) {
+      CAPTURE(dpi, font.FamilyKind());
+      REQUIRE(renderer.UpdateTextDpi(dpi));
+      REQUIRE_FALSE(renderer.UpdateTextDpi(dpi));
+      const TextStyle expected{font.WithSize(static_cast<float>(20.0 * dpi / 96.0)), Color::Black()};
+      REQUIRE(renderer.MeasureText("AA", style, 200.0F, options).size ==
+          reference.MeasureText("AA", expected, 200.0F, options).size);
+      REQUIRE(renderer.MeasureRun("AA", style, {}).advance ==
+          Catch::Approx(reference.MeasureRun("AA", expected, {}).advance));
+      REQUIRE(renderer.Metrics(font).ascent == Catch::Approx(reference.Metrics(expected.font).ascent));
+      const auto layout = renderer.CreateTextLayout("AA", style, 200.0F, options);
+      const auto expected_layout = reference.CreateTextLayout("AA", expected, 200.0F, options);
+      REQUIRE(layout->Measure() == expected_layout->Measure());
+      REQUIRE(layout->CaretRect(2, TextAffinity::Upstream) ==
+          expected_layout->CaretRect(2, TextAffinity::Upstream));
+      REQUIRE(retained->Measure() == initial.size);
+      REQUIRE(retained->CaretRect(2, TextAffinity::Upstream) == original_caret);
+      REQUIRE(reference.MeasureText("AA", style, 200.0F, options).size == initial.size);
+      REQUIRE(font.Size() == 20.0F);
+    }
+    for (const double dpi : {-1.0, 0.0, std::numeric_limits<double>::quiet_NaN(),
+             std::numeric_limits<double>::infinity()}) {
+      REQUIRE(renderer.UpdateTextDpi(144.0));
+      REQUIRE(renderer.UpdateTextDpi(dpi));
+      REQUIRE_FALSE(renderer.UpdateTextDpi(96.0));
+      REQUIRE(renderer.MeasureText("AA", style, 200.0F, options).size == initial.size);
+    }
+  }
+}
+
+TEST_CASE("LinuxTextDpiKeepsAttributedMeasurementCaretAndPaintAlignedAtDeviceScales") {
+  detail::LinuxRenderer renderer;
+  detail::LinuxRenderer reference;
+  const auto font = Font::FromFamily(TestFontFamily(), 20.0F);
+  const TextStyle style{font, Color::Black()};
+  const TextStyle expected_style{font.WithSize(30.0F), Color::Black()};
+  const auto rich = AttributedText::FromRanges("AA", {{{1, 2}, {.font_size = 30.0F, .font_weight = FontWeight::Bold}}});
+  const auto expected =
+      AttributedText::FromRanges("AA", {{{1, 2}, {.font_size = 45.0F, .font_weight = FontWeight::Bold}}});
+  const TextLayoutOptions options{.wrap = TextWrap::NoWrap};
+  const auto retained = renderer.CreateTextLayout(rich, style, 160.0F, options);
+  const auto original_size = retained->Measure();
+  REQUIRE(renderer.UpdateTextDpi(144.0));
+  const auto layout = renderer.CreateTextLayout(rich, style, 160.0F, options);
+  const auto expected_layout = reference.CreateTextLayout(expected, expected_style, 160.0F, options);
+  REQUIRE(renderer.MeasureText(rich, style, 160.0F, options).size == expected_layout->Measure());
+  REQUIRE(layout->Measure() == expected_layout->Measure());
+  REQUIRE(layout->CaretRect(2, TextAffinity::Upstream).x == Catch::Approx(51.0F));
+  REQUIRE(layout->RangeRects({0, 2}) == expected_layout->RangeRects({0, 2}));
+  REQUIRE(layout->HitTest({40.0F, 10.0F}).offset == expected_layout->HitTest({40.0F, 10.0F}).offset);
+  REQUIRE(retained->Measure() == original_size);
+
+  auto render = [&](detail::LinuxRenderer& target, const AttributedText& text, const TextStyle& text_style,
+                    int device_scale) {
+    RenderNode root;
+    PaintContext paint(root.content, {0.0F, 0.0F, 160.0F, 60.0F});
+    paint.DrawText({0.0F, 0.0F, 160.0F, 60.0F}, text, text_style, options);
+    paint.Finish();
+    RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 160 * device_scale, 60 * device_scale);
+    REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+    cairo_surface_set_device_scale(surface, device_scale, device_scale);
+    RenderSnapshot(target, frame, surface);
+    const auto* data = cairo_image_surface_get_data(surface);
+    std::vector<unsigned char> pixels(data, data + cairo_image_surface_get_stride(surface) * 60 * device_scale);
+    cairo_surface_destroy(surface);
+    return pixels;
+  };
+  for (const int device_scale : {1, 2}) {
+    CAPTURE(device_scale);
+    const auto pixels = render(renderer, rich, style, device_scale);
+    REQUIRE(pixels == render(reference, expected, expected_style, device_scale));
+    bool has_ink = false;
+    for (const auto pixel : pixels) has_ink = has_ink || pixel != 0;
+    REQUIRE(has_ink);
+  }
+}
+
 TEST_CASE("LinuxCustomFontsKeepExactFaceAndPrivateMapAcrossRendererDiscard") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();

@@ -176,6 +176,8 @@ enum class FontSlant {
 ///
 /// WithSize(), WithWeight(), and WithSlant() return modified values without changing the original.
 /// A missing family or face may fall back on the platform; this does not change the requested Font value.
+/// Size is the application's baseline in logical units. Platform text scaling may change measured geometry
+/// without changing this value; device pixel scaling remains a separate host operation.
 /// @code
 /// const Font title = Font::Named("Inter", 28.0F).WithWeight(FontWeight::Bold);
 /// const Font code = Font::Monospace(14.0F).WithSlant(FontSlant::Italic);
@@ -252,7 +254,7 @@ public:
     return family_.Name();
   }
 
-  /// @return The requested font size in logical units.
+  /// @return The requested baseline font size in logical units, before platform text scaling.
   [[nodiscard]] float Size() const noexcept {
     return size_;
   }

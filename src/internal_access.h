@@ -84,9 +84,9 @@ struct InternalAccess {
   static const MountedNode* RootNode(const UiWindow& ui_window) noexcept;
   // Returns the complete mounted tree, including runtime-owned containers.
   static const MountedNode* MountedRoot(const UiWindow& ui_window) noexcept;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   static std::uint64_t TextMetricsRevision(const UiWindow& ui_window) noexcept;
-  // Web clears its renderer caches before invalidating shared text geometry on the application thread.
+  // Platform backends clear renderer caches before invalidating shared text geometry on the application thread.
   static void InvalidateTextMetrics(UiWindow& ui_window);
 #endif
   static const ScrollPhysics& DefaultScrollPhysics(const UiWindow& ui_window) noexcept;

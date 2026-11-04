@@ -41,7 +41,7 @@ struct ViewSpec;
 
 struct TextMeasurerService {
   TextMeasurer* measurer = nullptr;
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   std::shared_ptr<CompositionDependency> dependency;
 #endif
 };

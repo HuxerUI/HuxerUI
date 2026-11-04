@@ -26,6 +26,7 @@ Font title = Font::Named("Inter", 28.0F)
 
 The family is system, monospace, or explicitly named.
 Size belongs to Font because platform font metrics and shaped glyph advances depend on it.
+It is the application's baseline logical size; platform text scaling may change resolved geometry without changing `Font::Size()`.
 Weight and slant also belong to Font because they select the platform face.
 The platform may fall back when a requested named family or exact face is unavailable, but the declarative Font value remains unchanged.
 
@@ -181,13 +182,15 @@ Caches retain bounded reusable entries rather than unbounded histories and use v
 Changing a Font, TextStyle, text string, shaping option, or layout width naturally misses the old entry.
 Device-dependent resources are cleared when the platform drawing device is recreated.
 Host destruction releases all remaining entries.
-When Web finishes decoding a custom font, its backend first clears the renderer's paragraph cache and calls internal `InternalAccess::InvalidateTextMetrics()` on the application thread.
-This Web-only path advances an internal per-window text metrics revision, invalidates measured nodes and paragraph geometry, refreshes paint and selection overlays, and schedules a frame.
-On Web, `UseTextMeasurer()` observes this dependency, so composition-derived geometry updates as well.
+When platform text metrics change without a Font value change, the host first clears the affected renderer caches and calls internal `InternalAccess::InvalidateTextMetrics()` on the application thread.
+Web uses this path for decoded custom fonts; Linux uses it for changes to the drawing widget's effective text DPI.
+This path is shared by Linux and Web and advances an internal per-window text metrics revision, invalidates measured nodes and paragraph geometry, refreshes paint and selection overlays, and schedules a frame.
+`UseTextMeasurer()` observes this window's dependency, so composition-derived geometry updates as well.
 TextField compares the revision when ensuring layouts and rebuilds editable, label, placeholder, and validation layouts while retaining controlled text, selection, focus, and IME state.
-The extra revision fields, dependency allocation and observation, cache checks, and internal invalidation operations compile only with `__EMSCRIPTEN__`; UiWindow and TextMeasurer expose no font-availability notification or revision API.
-Other backends load custom fonts synchronously and retain ordinary input-based cache invalidation without this additional state.
-Retained layout and measurement snapshots are not mutated; Web composition code must remeasure when its `UseTextMeasurer()` dependency changes.
+The revision fields, dependency allocation and observation, cache checks, and internal invalidation operations compile only on Web and desktop Linux, explicitly excluding Android.
+Other backends retain ordinary input-based cache invalidation without this additional state.
+UiWindow and TextMeasurer expose no font-availability notification or revision API; ordinary Font changes still use input-based invalidation.
+Retained layout and measurement snapshots are not mutated; composition code must remeasure when its `UseTextMeasurer()` dependency changes.
 
 Cache hits are an optimization only.
 They cannot change measurement, line breaking, baseline placement, selection geometry, or damage bounds.

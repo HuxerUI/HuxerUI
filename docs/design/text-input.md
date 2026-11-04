@@ -764,6 +764,8 @@ Secure TextField creates grapheme boundaries from the platform text layout, then
 Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and platform text layouts.
 
 The TextField caches layout by text, font, available width, multiline configuration, resolved shaping options, and relevant style values.
+On Linux and Web, the internal per-window [text-metrics revision](text.md#platform-caches) also invalidates these layouts when platform text metrics change without a Font value change.
+TextField retains its controlled value, selection, composition, focus, and input-session identity while refreshing caret and IME geometry.
 An empty shaping locale resolves from the mounted TextField's effective inherited Locale, while `TextField::Shaping()` preserves a non-empty explicit locale.
 The resolved shaping value is shared by the controlled value, label, placeholder, validation message, grapheme boundaries, selection and caret geometry, measurement, and every DrawText command so platform layout and renderer replay cannot diverge.
 
@@ -1013,6 +1015,16 @@ The first Windows implementation uses IMM32:
 TSF can replace or augment the native input bridge later without changing shared UiWindow logic, TextInputClient, TextField, or SweetEditor integration.
 
 ## Linux adapter
+
+Font sizes are application-owned logical baselines; the renderer resolves every font description to `Font::Size() * effective_text_DPI / 96` logical units, including attributed runs and custom font families.
+The host reads effective DPI from the drawing widget's GTK PangoContext, after GTK resolves settings and CSS, and falls back to 96 for an invalid or unspecified value.
+It borrows only DPI: HuxerUI retains its private Pango font map and context for custom font registration.
+GTK applies device scaling separately; surface scale is neither multiplied into nor divided out of the text DPI.
+
+Initial DPI is synchronized before shared window initialization.
+The canvas chains GTK's `css_changed` handler before requesting a frame; the next frame commit refreshes DPI and invalidates shared text metrics before building geometry.
+Snapshot replay never changes DPI while painting a previously committed frame.
+A repeated effective DPI is a no-op; a changed value clears only cached shaped paragraphs, preserving image caches, font registration, and independently retained text layouts.
 
 The GTK host owns one `GtkIMMulticontext` for its drawing area and lets GTK select the active desktop input-method module.
 Key events enter the input context before the shared direct-key path; accepted events produce preedit or commit callbacks, while declined events continue through UiWindow key handling in order.

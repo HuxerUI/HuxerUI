@@ -225,7 +225,7 @@ TextMeasurer& UseTextMeasurer() {
   if (service->measurer == nullptr) {
     throw std::logic_error("HuxerUI text measurer service is disconnected");
   }
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   if (service->dependency) detail::ObserveDependency(service->dependency);
 #endif
   return *service->measurer;
@@ -498,7 +498,7 @@ bool TextPaintInputsEqual(const AttributedText& left, const TextStyle& left_base
 }
 
 std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_window) {
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   const auto revision = InternalAccess::TextMetricsRevision(ui_window);
 #endif
   const float width = node.ContentBounds().width;
@@ -506,14 +506,14 @@ std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_w
   const auto& options = node.properties.text_layout_options;
   const auto& previous = node.paragraph_layout;
   if (previous && previous->width == width && previous->options == options &&
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
       previous->revision == revision &&
 #endif
       TextLayoutInputsEqual(previous->text, previous->font, node.text, style.font)) {
     return previous->layout;
   }
   auto next = std::make_shared<ParagraphLayout>();
-#if defined(__EMSCRIPTEN__)
+#if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   next->revision = revision;
 #endif
   next->text = node.text;
