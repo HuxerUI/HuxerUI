@@ -852,6 +852,83 @@ TEST_CASE("TestImageFitAndAlignmentResolveSourceAndDestinationGeometry") {
   REQUIRE(constrained_scale_down.destination == Rect{0.0F, 2.5F, 10.0F, 5.0F});
 }
 
+TEST_CASE("Image cover keeps fractional source rectangles inside intrinsic bounds", "[image-cover]") {
+  for (const auto pixels : {Size{321.0F, 704.0F}, Size{704.0F, 321.0F}}) {
+    const auto encoded =
+        MakeTestPng(static_cast<std::uint32_t>(pixels.width), static_cast<std::uint32_t>(pixels.height));
+    for (const float density : {1.0F, 1.25F, 2.0F}) {
+      layout_test_image = ImageAsset::FromEncoded(encoded, density);
+      layout_test_image_fit = ImageFit::Cover;
+      layout_test_image_sampling = ImageSampling::Linear;
+      const Size intrinsic = layout_test_image.IntrinsicSize();
+      for (const auto frame : {Size{48.023F, 48.023F}, Size{117.809525F, 117.809525F},
+                               Size{118.095238F, 118.095238F}, Size{117.809525F, 78.0625F},
+                               Size{86.0F, 17.0F}, Size{17.0F, 86.0F}}) {
+        for (const auto horizontal :
+             {HorizontalAlignment::Start, HorizontalAlignment::Center, HorizontalAlignment::End}) {
+          for (const auto vertical : {VerticalAlignment::Start, VerticalAlignment::Center, VerticalAlignment::End}) {
+            CAPTURE(intrinsic.width, intrinsic.height, density, frame.width, frame.height, horizontal, vertical);
+            layout_test_image_frame = frame;
+            layout_test_image_horizontal_alignment = horizontal;
+            layout_test_image_vertical_alignment = vertical;
+            TestPlatform platform;
+            UiWindow runtime{ImageLayoutApp, platform};
+            runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+            const FlattenedScene& scene = runtime.BuildFrame();
+            const auto command = std::ranges::find_if(scene.Commands(), [](const PaintCommand& value) {
+              return std::holds_alternative<DrawImageCommand>(value);
+            });
+            REQUIRE(command != scene.Commands().end());
+            const auto& image = std::get<DrawImageCommand>(*command);
+            REQUIRE(image.source.x >= 0.0F);
+            REQUIRE(image.source.y >= 0.0F);
+            REQUIRE(image.source.width > 0.0F);
+            REQUIRE(image.source.height > 0.0F);
+            REQUIRE(image.source.x + image.source.width <= intrinsic.width);
+            REQUIRE(image.source.y + image.source.height <= intrinsic.height);
+            REQUIRE(image.destination == Rect{0.0F, 0.0F, frame.width, frame.height});
+            REQUIRE(image.source.width / image.source.height == Catch::Approx(frame.width / frame.height));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("Image cover handles fractional frames for vectors and external textures", "[image-cover]") {
+  layout_test_vector = VectorAsset::Create({321.0F, 704.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(
+        Path{}.MoveTo({0.0F, 0.0F}).LineTo({321.0F, 0.0F}).LineTo({321.0F, 704.0F}).Close(), Color::Black()
+    );
+  });
+  layout_test_external_texture = MakeTestExternalTexture({704.0F, 321.0F});
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return Row {
+      Image(layout_test_vector)
+          .Fit(ImageFit::Cover)
+          .With(Frame{48.023F, 48.023F}),
+      Image(layout_test_external_texture)
+          .Fit(ImageFit::Cover)
+          .With(Frame{48.023F, 48.023F}),
+    };
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  const FlattenedScene& scene = runtime.BuildFrame();
+  REQUIRE(std::ranges::any_of(scene.Commands(), [](const PaintCommand& value) {
+    return std::holds_alternative<FillPathCommand>(value);
+  }));
+  const auto command = std::ranges::find_if(scene.Commands(), [](const PaintCommand& value) {
+    return std::holds_alternative<DrawExternalTextureCommand>(value);
+  });
+  REQUIRE(command != scene.Commands().end());
+  const auto& source = std::get<DrawExternalTextureCommand>(*command).source;
+  REQUIRE(source.x >= 0.0F);
+  REQUIRE(source.y >= 0.0F);
+  REQUIRE(source.x + source.width <= 704.0F);
+  REQUIRE(source.y + source.height <= 321.0F);
+}
+
 TEST_CASE("TestImagePaintOnlyChangesReuseMeasuredLayout") {
   layout_test_image = ImageAsset::FromEncoded(MakeTestPng(40, 20), 2.0F);
   layout_test_image_fit = ImageFit::Contain;
