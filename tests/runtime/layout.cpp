@@ -717,6 +717,91 @@ TEST_CASE("Pager validates and retains its controlled page set") {
   REQUIRE(fourth_semantics->selected == std::optional{false});
 }
 
+TEST_CASE("Pager retains the departing page when a non-adjacent jump returns to its source", "[pager-retarget]") {
+  static Axis axis;
+  axis = GENERATE(Axis::Horizontal, Axis::Vertical);
+  static bool reverse;
+  reverse = GENERATE(false, true);
+  static std::size_t initial_index;
+  initial_index = GENERATE(std::size_t{1}, std::size_t{3});
+  const bool reset_geometry = GENERATE(false, true);
+  static std::vector<std::size_t> settlements;
+  settlements.clear();
+  CAPTURE(axis, reverse, initial_index, reset_geometry);
+
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    auto selected = UseState(initial_index);
+    pager_selection = selected;
+    return Pager({Text("First"), Text("Second"), Text("Third"), Text("Fourth")}, selected)
+        .ScrollAxis(axis)
+        .Reverse(reverse)
+        .OnChanged([](std::size_t) { FAIL("Programmatic paging must not emit Changed"); })
+        .OnSettled([](std::size_t index) { settlements.push_back(index); });
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  runtime.BuildFrame();
+  const auto* root = runtime.RootNode();
+  const std::size_t peer_index = initial_index == 1 ? 3 : 1;
+  const std::uint64_t source_identity = root->children[initial_index]->identity;
+  const std::uint64_t peer_identity = root->children[peer_index]->identity;
+  const auto position = [](const detail::MountedNode& page) {
+    const Rect bounds = page.PresentationBounds();
+    return axis == Axis::Vertical ? bounds.y : bounds.x;
+  };
+
+  pager_selection = peer_index;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  const float source_position = position(*root->children[initial_index]);
+  const float peer_position = position(*root->children[peer_index]);
+  REQUIRE(source_position != 0.0F);
+  REQUIRE(settlements.empty());
+
+  pager_selection = initial_index;
+  runtime.BuildFrame();
+  REQUIRE(root->children[initial_index]->participates_in_layout);
+  REQUIRE(root->children[peer_index]->participates_in_layout);
+  REQUIRE(position(*root->children[initial_index]) == Catch::Approx(source_position));
+  REQUIRE(position(*root->children[peer_index]) == Catch::Approx(peer_position));
+  REQUIRE(root->children[initial_index]->interaction.enabled);
+  REQUIRE_FALSE(root->children[peer_index]->interaction.enabled);
+  REQUIRE(settlements.empty());
+
+  runtime.SetWindowMetrics({.viewport = {360.0F, 180.0F}});
+  runtime.BuildFrame();
+  REQUIRE(position(*root->children[initial_index]) == Catch::Approx(source_position * 1.5F));
+  REQUIRE(position(*root->children[peer_index]) == Catch::Approx(peer_position * 1.5F));
+  if (reset_geometry) {
+    reverse = !reverse;
+    runtime.InvalidateRoot();
+    runtime.BuildFrame();
+  }
+  SettlePresentation(platform, runtime);
+  REQUIRE(position(*root->children[initial_index]) == Catch::Approx(0.0F));
+  REQUIRE_FALSE(root->children[peer_index]->participates_in_layout);
+  REQUIRE(root->children[initial_index]->identity == source_identity);
+  REQUIRE(root->children[peer_index]->identity == peer_identity);
+  REQUIRE(settlements == std::vector<std::size_t>{initial_index});
+
+  const std::size_t next_peer = initial_index == 1 ? 0 : 2;
+  pager_selection = next_peer;
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  pager_selection = initial_index;
+  runtime.BuildFrame();
+  REQUIRE(root->children[next_peer]->participates_in_layout);
+  REQUIRE_FALSE(root->children[peer_index]->participates_in_layout);
+  SettlePresentation(platform, runtime);
+  REQUIRE(position(*root->children[initial_index]) == Catch::Approx(0.0F));
+  REQUIRE(std::ranges::count_if(root->children, [](const auto& page) {
+    return page->participates_in_layout;
+  }) == 1);
+  REQUIRE(settlements == std::vector<std::size_t>{initial_index, initial_index});
+}
+
 TEST_CASE("Pager resolves programmatic selection immediately under reduced motion") {
   reduced_motion_pager_settlements.clear();
   TestPlatform platform;
