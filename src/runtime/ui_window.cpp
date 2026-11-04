@@ -511,6 +511,16 @@ public:
           viewport_height - vertical_margin - child_size.height,
       };
       break;
+    case LayerPlacementKind::Positioned: {
+      child_size = context.Measure(child, loose);
+      // LayoutNode adds the safe-area padding back after placing the child.
+      const EdgeInsets layer_padding = static_cast<detail::MountedNode&>(node).resolved_padding;
+      child_offset = {
+          placement.anchor.x - layer_padding.left + placement.offset.x,
+          placement.anchor.y - layer_padding.top + placement.offset.y,
+      };
+      break;
+    }
     case LayerPlacementKind::Anchored: {
       // Layer anchors are captured in host-view coordinates. Safe-area padding establishes this layout's local
       // coordinate space, so subtract only the padding that LayoutNode adds back after placement.

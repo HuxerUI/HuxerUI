@@ -145,6 +145,8 @@ enum class LayerPlacementKind : std::uint8_t {
   BottomCenter,
   Fill,
   Anchored,
+  // Uses the window-space anchor origin plus offset without side selection or position clamping.
+  Positioned,
 };
 
 enum class LayerAnchorSide : std::uint8_t {

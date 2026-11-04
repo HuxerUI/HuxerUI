@@ -235,7 +235,8 @@ The preview uses Notification level, PassThrough pointer policy, no focus trap, 
 The existing PassThrough Layer contract excludes its complete subtree from target hit testing without a drag-specific route.
 DebugOverlay remains above it at System level.
 
-The initial source-local grab point is transformed into a window-space offset before anchoring preview placement, so transformed sources do not jump the preview origin.
+The initial source-local grab point is transformed into a window-space offset before positioning the preview, so transformed sources do not jump the preview origin.
+Preview placement uses the internal Positioned layer policy: the host-window point plus offset is converted into layer-local coordinates without side selection or viewport clamping.
 Later movement updates Layer placement without recomposing preview content.
 Terminal state, source invalidation, pointer-session quarantine, and UiWindow retirement dismiss the preview exactly once.
 

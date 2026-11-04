@@ -1416,6 +1416,46 @@ TEST_CASE("Drag preview converts a transformed source grab point into window spa
   REQUIRE(preview->x == Catch::Approx(20.0F));
 }
 
+TEST_CASE("Drag preview preserves the grab offset near and beyond window edges", "[drag-preview-placement]") {
+  const auto content_mode = GENERATE(WindowContentMode::SafeArea, WindowContentMode::EdgeToEdge);
+  const bool has_safe_area = GENERATE(false, true);
+  const auto device = GENERATE(PointerDeviceKind::Mouse, PointerDeviceKind::Touch);
+  const auto terminal = GENERATE(PointerEventType::Up, PointerEventType::Cancel);
+  CAPTURE(content_mode, has_safe_area, device, terminal);
+  ResetGestureEvents();
+  AppOptions options{.show_debug_overlay = false};
+  options.window.content_mode = content_mode;
+  TestPlatform platform;
+  UiWindow runtime{TransformedDragPreviewApp, platform, std::move(options)};
+  runtime.SetWindowMetrics({
+      .viewport = {100.0F, 80.0F},
+      .safe_area = has_safe_area ? EdgeInsets{.top = 11.0F, .right = 5.0F, .bottom = 7.0F, .left = 13.0F}
+                                : EdgeInsets{},
+  });
+  runtime.BuildFrame();
+  const Point origin = runtime.RootNode()->LocalToWindow({10.0F, 15.0F});
+  Pointer(runtime, PointerEventType::Down, 139, origin, device);
+
+  for (const Point position : {
+           Point{origin.x + 20.0F, origin.y},
+           Point{1.0F, 40.0F}, Point{99.0F, 40.0F}, Point{50.0F, 1.0F}, Point{50.0F, 79.0F},
+           Point{-10.0F, 40.0F}, Point{110.0F, 40.0F}, Point{50.0F, -5.0F}, Point{50.0F, 85.0F},
+           Point{110.0F, 85.0F}, Point{-10.0F, -5.0F},
+       }) {
+    CAPTURE(position.x, position.y);
+    Pointer(runtime, PointerEventType::Move, 139, position, device);
+    const auto preview = FindPresentedTextRect(runtime.BuildFrame(), "transformed preview");
+    REQUIRE(preview.has_value());
+    REQUIRE(preview->x == Catch::Approx(position.x - 20.0F));
+    REQUIRE(preview->y == Catch::Approx(position.y - 30.0F));
+  }
+
+  Pointer(runtime, terminal, 139, {-10.0F, -5.0F}, device);
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "transformed preview"));
+  Pointer(runtime, PointerEventType::Move, 139, {50.0F, 40.0F}, device);
+  REQUIRE_FALSE(ContainsText(runtime.BuildFrame(), "transformed preview"));
+}
+
 TEST_CASE("Removing an active DragSource closes its target and preview without calling an unmounted handler") {
   ResetGestureEvents();
   TestPlatform platform;

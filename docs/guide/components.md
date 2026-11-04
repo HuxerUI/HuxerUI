@@ -624,6 +624,7 @@ Platforms without a traditional pointer cursor may ignore the declaration.
 `DragSource` transfers an immutable application value to one exact typed `DropTarget` while preserving the ordinary DragGesture recognition rules.
 The application handles `DropEvents<T>::Dropped` to perform the authoritative data mutation.
 An optional preview is ordinary View content presented in a non-interactive Layer.
+The preview follows the pointer while preserving its original grab offset, including near and beyond window edges.
 
 ```cpp
 return CardView(card)
