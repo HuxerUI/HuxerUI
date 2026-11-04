@@ -3,15 +3,70 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <optional>
 #include <unordered_set>
 
 #include <huxerui/app.h>
+#include <huxerui/event.h>
 #include <huxerui/window.h>
 
 namespace huxerui::detail {
 
 inline constexpr float kLinuxCaptionButtonWidth = 46.0F;
 inline constexpr float kLinuxMinTitleBarHeight = 32.0F;
+
+enum class LinuxResizeEdge {
+  NorthWest,
+  North,
+  NorthEast,
+  East,
+  SouthEast,
+  South,
+  SouthWest,
+  West,
+};
+
+inline std::optional<LinuxResizeEdge>
+ResolveLinuxResizeEdge(Point point, Size viewport, bool disabled) noexcept {
+  if (disabled || !std::isfinite(point.x) || !std::isfinite(point.y) ||
+      !std::isfinite(viewport.width) || !std::isfinite(viewport.height) ||
+      viewport.width <= 0.0F || viewport.height <= 0.0F || point.x < 0.0F || point.y < 0.0F ||
+      point.x > viewport.width || point.y > viewport.height) {
+    return std::nullopt;
+  }
+  constexpr float border = 10.0F;
+  constexpr float corner = 14.0F;
+  // Overlapping zones in small windows select the nearer edge; midpoint ties select left or top.
+  const bool left_half = point.x <= viewport.width * 0.5F;
+  const bool top_half = point.y <= viewport.height * 0.5F;
+  const float horizontal_distance = left_half ? point.x : viewport.width - point.x;
+  const float vertical_distance = top_half ? point.y : viewport.height - point.y;
+  if (horizontal_distance <= corner && vertical_distance <= corner) {
+    if (top_half) return left_half ? LinuxResizeEdge::NorthWest : LinuxResizeEdge::NorthEast;
+    return left_half ? LinuxResizeEdge::SouthWest : LinuxResizeEdge::SouthEast;
+  }
+  if (horizontal_distance <= border) return left_half ? LinuxResizeEdge::West : LinuxResizeEdge::East;
+  if (vertical_distance <= border) return top_half ? LinuxResizeEdge::North : LinuxResizeEdge::South;
+  return std::nullopt;
+}
+
+inline PointerCursorKind LinuxResizePointerCursor(LinuxResizeEdge edge) noexcept {
+  switch (edge) {
+  case LinuxResizeEdge::North:
+  case LinuxResizeEdge::South:
+    return PointerCursorKind::ResizeVertical;
+  case LinuxResizeEdge::East:
+  case LinuxResizeEdge::West:
+    return PointerCursorKind::ResizeHorizontal;
+  case LinuxResizeEdge::NorthEast:
+  case LinuxResizeEdge::SouthWest:
+    return PointerCursorKind::ResizeNorthEastSouthWest;
+  case LinuxResizeEdge::NorthWest:
+  case LinuxResizeEdge::SouthEast:
+    return PointerCursorKind::ResizeNorthWestSouthEast;
+  }
+  return PointerCursorKind::Default;
+}
 
 inline WindowTitleBarMetrics ResolveLinuxTitleBarMetrics(
     float preferred_height, Size viewport, bool maximized

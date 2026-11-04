@@ -324,7 +324,11 @@ Linux metric resolution prefers `AppOptions::window.title_bar_height`, enforces 
 Native drag and edge or corner resize use `gdk_toplevel_begin_move()` and `gdk_toplevel_begin_resize()` with the device, button, local coordinates, and timestamp from the initiating GTK gesture.
 Hit testing resolves resize edges before `UiWindow::IsWindowDragRegion()`, while shared caption controls consume their own pointer input before a drag can begin.
 
-The custom client area uses a fixed 6-DIP resize border and skips resize edges while maximized.
+The custom client area uses a 10-DIP resize border and 14-DIP square corner targets without changing visible geometry or layout.
+Overlapping targets in very small windows select the nearer edge on each axis, with midpoint ties selecting left or top; non-finite geometry and points outside the client area never select an edge.
+Resize hit testing is disabled for unmapped, minimized, maximized, fullscreen, or non-resizable windows.
+Hover and press use the same edge classification, with resize cursors temporarily overriding the component-requested cursor while no content pointer button is held.
+Leaving the resize zone restores the latest component request; leaving the client area, canceling input, or hiding the window clears resize feedback, and geometry or resize-state changes reevaluate it only while the pointer remains inside.
 
 Minimize, maximize, restore, toggle, and close use the corresponding `GtkWindow` operations.
 The GTK maximized property drives the caption glyph swap through the shared `maximize_state_changed` path.
@@ -388,5 +392,5 @@ High DPI, `Alt+Space`, system-menu behavior, and Windows 11 Snap Layout still re
 
 macOS tests isolate preferred and native title-bar height, traffic-light vertical centering, left-side control reservation, narrow-viewport normalization, and zoomed-state propagation.
 Manual macOS validation remains required for system window composition, traffic-light accessibility, dragging, full-screen transitions, and cross-screen behavior before release.
-Linux tests isolate metric resolution, preferred-height flooring, viewport clamping, caption-control reservation, and maximized-state propagation.
-Manual Linux validation covers GTK decoration removal, drag and edge or corner resize, caption-control interaction, and the maximized glyph swap on each supported GDK backend.
+Linux tests isolate metric resolution, preferred-height flooring, viewport clamping, caption-control reservation, maximized-state propagation, and resize hit testing across all eight directions, zone boundaries, overlapping small-window targets, disabled states, and invalid geometry.
+Manual Linux validation covers GTK decoration removal, drag and edge or corner resize, cursor restoration after leave or cancellation, resize-state changes, caption-control interaction, and the maximized glyph swap on each supported GDK backend.

@@ -55,7 +55,6 @@ namespace huxerui::detail {
 namespace {
 
 constexpr float kDipsPerScrollStep = 40.0F;
-constexpr float kResizeBorderDips = 6.0F;
 
 // D-Bus completions retain only this cancellable subscription, never a native window.
 class LinuxSystemTheme final : public std::enable_shared_from_this<LinuxSystemTheme> {
@@ -403,39 +402,26 @@ std::string KeyText(guint key_value, GdkModifierType state) {
   return std::string(buffer, static_cast<std::size_t>(length));
 }
 
-std::optional<GdkSurfaceEdge> ResizeEdge(Point point, Size viewport, bool maximized) noexcept {
-  if (maximized || viewport.width <= 0.0F || viewport.height <= 0.0F) {
-    return std::nullopt;
-  }
-  const bool left = point.x <= kResizeBorderDips;
-  const bool right = point.x >= viewport.width - kResizeBorderDips;
-  const bool top = point.y <= kResizeBorderDips;
-  const bool bottom = point.y >= viewport.height - kResizeBorderDips;
-  if (top && left) {
+GdkSurfaceEdge GdkResizeEdge(LinuxResizeEdge edge) noexcept {
+  switch (edge) {
+  case LinuxResizeEdge::NorthWest:
     return GDK_SURFACE_EDGE_NORTH_WEST;
-  }
-  if (top && right) {
+  case LinuxResizeEdge::North:
+    return GDK_SURFACE_EDGE_NORTH;
+  case LinuxResizeEdge::NorthEast:
     return GDK_SURFACE_EDGE_NORTH_EAST;
-  }
-  if (bottom && left) {
-    return GDK_SURFACE_EDGE_SOUTH_WEST;
-  }
-  if (bottom && right) {
+  case LinuxResizeEdge::East:
+    return GDK_SURFACE_EDGE_EAST;
+  case LinuxResizeEdge::SouthEast:
     return GDK_SURFACE_EDGE_SOUTH_EAST;
-  }
-  if (left) {
+  case LinuxResizeEdge::South:
+    return GDK_SURFACE_EDGE_SOUTH;
+  case LinuxResizeEdge::SouthWest:
+    return GDK_SURFACE_EDGE_SOUTH_WEST;
+  case LinuxResizeEdge::West:
     return GDK_SURFACE_EDGE_WEST;
   }
-  if (right) {
-    return GDK_SURFACE_EDGE_EAST;
-  }
-  if (top) {
-    return GDK_SURFACE_EDGE_NORTH;
-  }
-  if (bottom) {
-    return GDK_SURFACE_EDGE_SOUTH;
-  }
-  return std::nullopt;
+  return GDK_SURFACE_EDGE_NORTH;
 }
 
 std::shared_ptr<LinuxUiThreadDispatcher> InitializeGtk() {
@@ -810,9 +796,8 @@ public:
   }
 
   void SetPointerCursor(PointerCursorKind kind) override {
-    if (drawing_area_ != nullptr) {
-      gtk_widget_set_cursor_from_name(GTK_WIDGET(drawing_area_), LinuxPointerCursorName(kind));
-    }
+    requested_pointer_cursor_ = kind;
+    ApplyPointerCursor();
   }
 
   FontMetrics Metrics(const Font& font) override {
@@ -919,7 +904,9 @@ private:
     g_signal_connect(window_, "map", G_CALLBACK(WindowMapped), this);
     g_signal_connect(window_, "unmap", G_CALLBACK(WindowUnmapped), this);
     g_signal_connect(window_, "notify::is-active", G_CALLBACK(WindowActiveChanged), this);
-    g_signal_connect(window_, "notify::maximized", G_CALLBACK(WindowMaximizedChanged), this);
+    g_signal_connect(window_, "notify::maximized", G_CALLBACK(WindowResizeStateChanged), this);
+    g_signal_connect(window_, "notify::fullscreened", G_CALLBACK(WindowResizeStateChanged), this);
+    g_signal_connect(window_, "notify::resizable", G_CALLBACK(WindowResizeStateChanged), this);
     g_signal_connect(drawing_area_, "notify::scale-factor", G_CALLBACK(ScaleChanged), this);
 
     GtkEventController* pointer = gtk_event_controller_legacy_new();
@@ -1019,6 +1006,7 @@ private:
       );
     }
     UiWindow::SetWindowMetrics(metrics);
+    ApplyPointerCursor();
   }
 
   void UpdateRuntimeViewport() {
@@ -1072,6 +1060,32 @@ private:
     static_cast<LinuxRuntime&>(ApplicationRuntime()).UpdateLifecycleState();
   }
 
+  std::optional<LinuxResizeEdge> HitTestResizeEdge(Point point) const noexcept {
+    if (!custom_chrome_ || window_ == nullptr || drawing_area_ == nullptr || !IsInitialized()) {
+      return std::nullopt;
+    }
+    return ResolveLinuxResizeEdge(
+        point,
+        {static_cast<float>(gtk_widget_get_width(drawing_area_)),
+         static_cast<float>(gtk_widget_get_height(drawing_area_))},
+        !gtk_widget_get_mapped(drawing_area_) || minimized_ || gtk_window_is_maximized(window_) ||
+            gtk_window_is_fullscreen(window_) || !gtk_window_get_resizable(window_)
+    );
+  }
+
+  void ApplyPointerCursor() noexcept {
+    if (drawing_area_ == nullptr) return;
+    PointerCursorKind kind = requested_pointer_cursor_;
+    if (pointer_inside_ && pressed_buttons_ == PointerButton::None) {
+      if (const auto edge = HitTestResizeEdge(last_pointer_position_)) kind = LinuxResizePointerCursor(*edge);
+    }
+    const char* name = LinuxPointerCursorName(kind);
+    GdkCursor* cursor = gtk_widget_get_cursor(drawing_area_);
+    if (cursor == nullptr || g_strcmp0(gdk_cursor_get_name(cursor), name) != 0) {
+      gtk_widget_set_cursor_from_name(drawing_area_, name);
+    }
+  }
+
   bool BeginWindowOperation(GdkEvent* event, guint button, Point point) {
     if (!custom_chrome_ || window_ == nullptr || !IsInitialized() || event == nullptr) {
       return false;
@@ -1085,13 +1099,10 @@ private:
       return false;
     }
     const guint32 time = gdk_event_get_time(event);
-    const Size viewport{
-        static_cast<float>(gtk_widget_get_width(GTK_WIDGET(drawing_area_))),
-        static_cast<float>(gtk_widget_get_height(GTK_WIDGET(drawing_area_))),
-    };
-    if (const std::optional<GdkSurfaceEdge> edge =
-            ResizeEdge(point, viewport, gtk_window_is_maximized(window_) != FALSE)) {
-      gdk_toplevel_begin_resize(GDK_TOPLEVEL(surface), *edge, device, static_cast<int>(button), point.x, point.y, time);
+    if (const auto edge = HitTestResizeEdge(point)) {
+      gdk_toplevel_begin_resize(
+          GDK_TOPLEVEL(surface), GdkResizeEdge(*edge), device, static_cast<int>(button), point.x, point.y, time
+      );
       return true;
     }
     if (UiWindow::IsWindowDragRegion(point)) {
@@ -1116,15 +1127,17 @@ private:
         pressed_buttons,
         modifiers,
     });
+    ApplyPointerCursor();
   }
 
   void CancelPointer() {
+    pointer_inside_ = false;
     suppress_pointer_release_ = false;
-    if (pressed_buttons_ == PointerButton::None) {
-      return;
+    if (pressed_buttons_ != PointerButton::None) {
+      pressed_buttons_ = PointerButton::None;
+      SendPointer(PointerEventType::Cancel, last_pointer_position_);
     }
-    pressed_buttons_ = PointerButton::None;
-    SendPointer(PointerEventType::Cancel, last_pointer_position_);
+    ApplyPointerCursor();
   }
 
   bool SendKey(KeyEventType type, guint key_value, GdkModifierType state, GdkEvent* event, bool repeat = false) {
@@ -1252,12 +1265,15 @@ private:
       }
     }
     self.minimized_ = minimized;
+    if (minimized) self.pointer_inside_ = false;
     self.UpdateLifecycleState();
     self.UpdateRuntimeViewport();
   }
 
-  static void WindowMaximizedChanged(GObject*, GParamSpec*, gpointer data) {
-    static_cast<LinuxUiWindow*>(data)->UpdateRuntimeViewport();
+  static void WindowResizeStateChanged(GObject*, GParamSpec*, gpointer data) {
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    self.UpdateRuntimeViewport();
   }
 
   static void ScaleChanged(GObject*, GParamSpec*, gpointer data) {
@@ -1351,12 +1367,15 @@ private:
   }
 
   static void PointerCanceled(GtkGesture*, GdkEventSequence*, gpointer data) {
-    static_cast<LinuxUiWindow*>(data)->CancelPointer();
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    self.CancelPointer();
   }
 
   static void PointerEntered(GtkEventControllerMotion* controller, double x, double y, gpointer data) {
     auto& self = *static_cast<LinuxUiWindow*>(data);
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    self.pointer_inside_ = true;
     self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
         self.pressed_buttons_,
         TranslateModifiers(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller))));
@@ -1365,6 +1384,7 @@ private:
   static void PointerMoved(GtkEventControllerMotion* controller, double x, double y, gpointer data) {
     auto& self = *static_cast<LinuxUiWindow*>(data);
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    self.pointer_inside_ = true;
     self.SendPointer(PointerEventType::Move, {static_cast<float>(x), static_cast<float>(y)}, PointerButton::None,
         self.pressed_buttons_,
         TranslateModifiers(gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(controller))));
@@ -1373,9 +1393,11 @@ private:
   static void PointerLeft(GtkEventControllerMotion*, gpointer data) {
     auto& self = *static_cast<LinuxUiWindow*>(data);
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    self.pointer_inside_ = false;
     if (self.pressed_buttons_ == PointerButton::None) {
       self.SendPointer(PointerEventType::Cancel, self.last_pointer_position_);
     }
+    self.ApplyPointerCursor();
   }
 
   static gboolean Scrolled(GtkEventControllerScroll* controller, double dx, double dy, gpointer data) {
@@ -1453,6 +1475,9 @@ private:
   PointerButton pressed_buttons_ = PointerButton::None;
   bool suppress_pointer_release_ = false;
   Point last_pointer_position_;
+  // Shared pointer routing only republishes changed requests, so retain the cursor hidden by resize feedback.
+  PointerCursorKind requested_pointer_cursor_ = PointerCursorKind::Default;
+  bool pointer_inside_ = false;
   LinuxKeyTracker key_tracker_;
 };
 
