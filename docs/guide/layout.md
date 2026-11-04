@@ -34,6 +34,9 @@ return Column {
 
 `Grow()` is parent-child layout metadata.
 It affects participation in a compatible parent layout and propagates across transparent composition boundaries such as scopes and Environment providers.
+`Row` and `Column` allocate finite remaining main-axis space by grow factor; an unbounded main axis preserves natural sizes instead.
+Growing children avoid speculative measurement when the cross axis does not stretch or its stretched size is already fixed by tight constraints.
+Stretching under loose cross-axis constraints still measures intrinsic cross sizes before allocating space.
 
 ## Mounted coordinate spaces
 
