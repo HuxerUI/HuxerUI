@@ -439,6 +439,8 @@ The runtime commits its result in three stages:
 
 Clean virtual nodes reuse the committed policy result, realization, and placements.
 Scrolling marks only the virtual viewport input dirty and reruns the policy and realization session without invalidating measurements of stable realized items.
+Pending virtual viewport invalidation marks the measurement path inside an unplaced subtree but does not propagate beyond its layout-participation boundary.
+The subtree retains that pending work until it participates in layout again.
 New items enter with layout and paint dirty.
 Retired items contribute their previous bounds to damage and preserve saveable state according to the existing virtual-state rules.
 

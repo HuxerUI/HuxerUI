@@ -75,6 +75,7 @@ Programmatic transitions measure and place only their source and target pages, i
 Retargeting back to the source preserves the previous target as the departing peer until the rebound ends.
 Completing a transition or resetting incompatible geometry clears the retained peer so later animations cannot reuse it.
 Unplaced pages retain mounted state but remain excluded through the generic layout-participation contract.
+Pending virtual measurement stays within an unplaced page without repeatedly invalidating visible ancestors and is processed when the page participates in layout again.
 
 Slots are local to the current transition rather than absolute page-index coordinates.
 When the slot set changes, Pager preserves displacement relative to the source page and remaps it into the new slots.

@@ -768,7 +768,8 @@ bool PropagateVirtualLayoutInvalidation(MountedNode& node) {
   if (subtree_dirty) {
     node.measure_dirty = true;
   }
-  return subtree_dirty;
+  // Retain pending work inside unplaced subtrees until they participate in layout again.
+  return subtree_dirty && node.participates_in_layout;
 }
 
 struct ModifierChanges {

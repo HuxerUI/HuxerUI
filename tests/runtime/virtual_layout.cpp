@@ -1020,6 +1020,126 @@ TEST_CASE("TestCustomVirtualLayoutProtocol") {
   REQUIRE(root->children[centered_position]->layout_offset.y == 37.5F);
 }
 
+TEST_CASE("Hidden virtual pages retain pending measurement without invalidating visible layout", "[hidden-virtual]") {
+  static bool nested;
+  nested = GENERATE(false, true);
+  static bool use_pager;
+  use_pager = GENERATE(false, true);
+  static State<std::size_t> selected_page;
+  CAPTURE(nested, use_pager);
+  virtual_strip_measure_calls = 0;
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    auto selected = UseState<std::size_t>(0);
+    selected_page = selected;
+    View hidden = TestVirtualStrip(100, [](std::size_t index) { return Text(std::to_string(index)); });
+    if (nested) {
+      hidden = Stack {std::move(hidden)};
+    }
+    if (use_pager) {
+      return Pager({Text("visible"), std::move(hidden)}, selected);
+    }
+    return IndexedPages({Text("visible"), std::move(hidden)}, selected);
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  runtime.BuildFrame();
+  const auto* root = runtime.RootNode();
+  const auto* page = root->children[1].get();
+  const auto* hidden = nested ? page->children.front().get() : page;
+  REQUIRE(hidden->virtual_state != nullptr);
+  REQUIRE(hidden->virtual_state->viewport_dirty);
+  REQUIRE_FALSE(page->participates_in_layout);
+  REQUIRE(virtual_strip_measure_calls == 0);
+  const auto root_revision = root->measure_revision;
+  const auto visible_revision = root->children[0]->measure_revision;
+  const auto hidden_identity = hidden->identity;
+  for (int frame = 0; frame < 4; ++frame) {
+    runtime.BuildFrame();
+    REQUIRE(root->measure_revision == root_revision);
+    REQUIRE(root->children[0]->measure_revision == visible_revision);
+    REQUIRE(hidden->virtual_state->viewport_dirty);
+    REQUIRE(page->measure_dirty);
+    REQUIRE(virtual_strip_measure_calls == 0);
+  }
+
+  selected_page = 1;
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(page->participates_in_layout);
+  REQUIRE_FALSE(hidden->virtual_state->viewport_dirty);
+  REQUIRE(hidden->identity == hidden_identity);
+  REQUIRE_FALSE(hidden->children.empty());
+  REQUIRE(ContainsText(runtime.BuildFrame(), "0"));
+}
+
+TEST_CASE("Hidden virtual pages resume pending scroll with updated content and viewport", "[hidden-virtual]") {
+  static bool nested;
+  nested = GENERATE(false, true);
+  static State<std::size_t> selected_page;
+  static State<int> content_revision;
+  static ScrollController scroll;
+  CAPTURE(nested);
+  virtual_strip_measure_calls = 0;
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    auto selected = UseState<std::size_t>(1);
+    auto revision = UseState(0);
+    selected_page = selected;
+    content_revision = revision;
+    scroll = UseScrollController();
+    View hidden = TestVirtualStrip(100, [value = revision.Get()](std::size_t index) {
+      return Text(std::to_string(value) + ":" + std::to_string(index)).Key(index);
+    }).Controller(scroll);
+    if (nested) {
+      hidden = Stack {std::move(hidden)};
+    }
+    return IndexedPages({Text("visible"), std::move(hidden)}, selected);
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
+  REQUIRE(ContainsText(runtime.BuildFrame(), "0:0"));
+  const auto* root = runtime.RootNode();
+  const auto* page = root->children[1].get();
+  const auto* hidden = nested ? page->children.front().get() : page;
+  const auto hidden_identity = hidden->identity;
+  REQUIRE(scroll.ScrollTo(250.0F));
+  REQUIRE(hidden->virtual_state->viewport_dirty);
+  selected_page = 0;
+  runtime.BuildFrame();
+  REQUIRE_FALSE(page->participates_in_layout);
+  const int measure_calls = virtual_strip_measure_calls;
+
+  content_revision = 1;
+  runtime.SetWindowMetrics({.viewport = {120.0F, 150.0F}});
+  runtime.BuildFrame();
+  const auto root_revision = root->measure_revision;
+  const auto visible_revision = root->children[0]->measure_revision;
+  for (int frame = 0; frame < 4; ++frame) {
+    runtime.BuildFrame();
+    REQUIRE(root->measure_revision == root_revision);
+    REQUIRE(root->children[0]->measure_revision == visible_revision);
+    REQUIRE(hidden->virtual_state->viewport_dirty);
+    REQUIRE(page->measure_dirty);
+    REQUIRE(virtual_strip_measure_calls == measure_calls);
+  }
+
+  selected_page = 1;
+  const auto& restored = runtime.BuildFrame();
+  REQUIRE(page->participates_in_layout);
+  REQUIRE_FALSE(hidden->virtual_state->viewport_dirty);
+  REQUIRE(hidden->identity == hidden_identity);
+  REQUIRE(hidden->virtual_state->realized_indices.front() == 10);
+  REQUIRE(hidden->children.size() == 7);
+  REQUIRE(ContainsText(restored, "1:10"));
+  REQUIRE(scroll.Offset() == Catch::Approx(250.0F));
+  REQUIRE(scroll.ViewportExtent() == Catch::Approx(150.0F));
+
+  const auto restored_revision = root->measure_revision;
+  REQUIRE(scroll.ScrollTo(300.0F));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "1:12"));
+  REQUIRE(root->measure_revision > restored_revision);
+  REQUIRE_FALSE(hidden->virtual_state->viewport_dirty);
+}
+
 TEST_CASE("TestVirtualLayoutSkipsCleanPolicyAndStableItemMeasurement") {
   virtual_strip_measure_calls = 0;
 
