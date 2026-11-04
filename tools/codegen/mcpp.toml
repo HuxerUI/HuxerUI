@@ -14,7 +14,7 @@
 [package]
 name        = "huxerui-codegen"
 namespace   = "huxerui"
-version     = "0.3.0"
+version     = "0.4.0"
 standard    = "c++20"
 description = "hcg -- the HuxerUI composable source transform"
 license     = "Apache-2.0"

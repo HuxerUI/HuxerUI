@@ -24,6 +24,7 @@ TEST_CASE("HuxerUICliCreatesAndroidPlatformShell") {
   const std::string android_app = Read(project / "platform/android/app/build.gradle");
   const std::string android_manifest = Read(project / "platform/android/app/src/main/AndroidManifest.xml");
   const std::string android_properties = Read(project / "platform/android/gradle.properties");
+  REQUIRE(android_app.find("versionName = \"0.1.0\"") != std::string::npos);
   REQUIRE(android_settings.find("project(\":HuxerUI\").projectDir") != std::string::npos);
   REQUIRE(android_settings.find("share/huxerui/platform/android/HuxerUI.aar") != std::string::npos);
   REQUIRE(android_settings.find("huxeruiUsesSource") != std::string::npos);

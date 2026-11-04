@@ -102,6 +102,9 @@ hello_huxer/
 
 The common files and platform shells are application source and belong in version control.
 The CLI never overwrites an existing shell during `platform add` or an ordinary build.
+Generated application, library, and Preview roots select the native macOS deployment default before the first `project()` call; explicit cache or environment settings and toolchain files retain precedence.
+The macOS shell uses CMake's executable-name substitution and target bundle-version properties, so renaming the executable does not leave a stale bundle entry point.
+The Web shell synchronizes its configured HTML and icons through a dependency of the application target, independently of linking, and restores missing output assets on the next build.
 
 The root `.gitignore` owns only repository-wide generated state:
 

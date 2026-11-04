@@ -26,7 +26,9 @@ function(huxerui_configure_web_app target_name)
             "${HUXERUI_WEB_GENERATED_DIRECTORY}/${HUXERUI_WEB_APPLE_TOUCH_ICON_FILE}"
             COPYONLY
     )
-    add_custom_command(TARGET ${target_name} POST_BUILD
+    # Shell-only edits and deleted output files must not require relinking the application.
+    add_custom_target(${target_name}_web_assets
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target_name}>"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                     "${HUXERUI_WEB_GENERATED_DIRECTORY}/${target_name}.html"
                     "${HUXERUI_WEB_GENERATED_DIRECTORY}/${HUXERUI_WEB_FAVICON_FILE}"
@@ -34,4 +36,5 @@ function(huxerui_configure_web_app target_name)
                     "$<TARGET_FILE_DIR:${target_name}>"
             VERBATIM
     )
+    add_dependencies(${target_name} ${target_name}_web_assets)
 endfunction()

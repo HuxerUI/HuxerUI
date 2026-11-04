@@ -168,7 +168,7 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
   REQUIRE(project_cmake.find("NO_CMAKE_FIND_ROOT_PATH") != std::string::npos);
   REQUIRE(project_cmake.find("\"id\": \"dev.example.sampleapp\"") != std::string::npos);
   REQUIRE(project_cmake.find("HUXERUI_LIBRARY_GRAPH_OUTPUT") == std::string::npos);
-  REQUIRE(project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   REQUIRE(project_cmake.find("if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)\n    enable_language(CXX)") !=
           std::string::npos);
   REQUIRE(project_cmake.find("enable_language(RC)") != std::string::npos);
@@ -236,7 +236,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(library_cmake.find("platform/macos/src/*.mm") != std::string::npos);
   REQUIRE(library_cmake.find("platform/web/src/*.cpp") != std::string::npos);
   REQUIRE(library_cmake.find("platform/windows/src/*.cpp") != std::string::npos);
-  REQUIRE(library_project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(library_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   REQUIRE(library_project_cmake.find("enable_language(OBJCXX)") != std::string::npos);
   REQUIRE(library_project_cmake.find("\"publicTarget\": \"HuxerUICameraKit::HuxerUICameraKit\"") !=
           std::string::npos);
@@ -246,7 +246,7 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(preview_cmake.find("huxerui_add_app(example_huxer_ui_camera_kit") != std::string::npos);
   REQUIRE(preview_cmake.find("TARGET HuxerUICameraKit::HuxerUICameraKit") != std::string::npos);
   REQUIRE(preview_cmake.find("PATH \"${CMAKE_CURRENT_SOURCE_DIR}/../..\"") != std::string::npos);
-  REQUIRE(preview_project_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
+  REQUIRE(preview_cmake.find("CMAKE_OSX_DEPLOYMENT_TARGET \"12.0\"") != std::string::npos);
   REQUIRE(preview_project_cmake.find("\"kind\": \"app\"") != std::string::npos);
   const std::string preview_application = Read(preview / "src/app.cpp");
   REQUIRE(preview_application.find("#include <huxeruicamerakit/huxeruicamerakit.h>") != std::string::npos);

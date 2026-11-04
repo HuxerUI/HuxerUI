@@ -4,7 +4,7 @@
 [package]
 name        = "huxerui-resource-compiler"
 namespace   = "huxerui"
-version     = "0.3.0"
+version     = "0.4.0"
 standard    = "c++20"
 description = "hrc -- the HuxerUI resource compiler"
 license     = "Apache-2.0"

@@ -16,7 +16,7 @@ members = ["mcpp/huxerui-source-select", "mcpp/huxerui-tests", "mcpp/huxerui-too
 [package]
 name        = "huxerui"
 namespace   = "huxerui"
-version     = "0.3.0"
+version     = "0.4.0"
 # The SDK ABI baseline. Do not raise it: mcpp applies the root standard to the
 # whole module graph, so this is imposed on every consumer too.
 standard    = "c++20"

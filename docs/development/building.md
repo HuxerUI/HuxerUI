@@ -11,6 +11,7 @@ Application developers using a released SDK should follow [Getting Started](../g
 - The required platform SDK and dependencies
 
 Apple builds require Xcode 26 or later for the standard library's `std::stop_token` and `std::stop_source` support without experimental-library flags. Release CI selects Xcode 26.2 explicitly through `DEVELOPER_DIR` for iOS artifacts and both macOS architectures, including their host-tool builds. For a local build, select a supported Xcode before configuring a fresh build directory. The build-machine requirement is separate from the deployment targets, which remain iOS 15.0 and macOS 12.0.
+The root CMake project selects the native macOS 12.0 default before the first `project()` call, including when invoked by the SDK packaging script. Explicit deployment settings and `MACOSX_DEPLOYMENT_TARGET` retain precedence; when a toolchain file is supplied, that toolchain owns the deployment setting. Existing build caches retain their configured values.
 
 Linux additionally requires GTK 4.14 or later, libepoxy, Pango (including pangoft2), Fontconfig, Cairo, GIO, and libsoup 3 development packages discoverable through pkg-config.
 Linux release CI uses GCC 14. Select it explicitly with `CC=gcc-14 CXX=g++-14` when configuring a fresh build directory; GCC 13 can encounter an internal compiler error in the coroutine-based local-notification example.

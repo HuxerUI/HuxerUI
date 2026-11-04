@@ -89,6 +89,20 @@ if (MSVC AND CMAKE_GENERATOR MATCHES "^Ninja")
 endif ()
 
 if (TARGET huxerui_cli_core)
+    add_test(NAME HuxerUIProjectTemplateTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DCLI_EXECUTABLE=$<TARGET_FILE:huxerui_cli>"
+                    "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                    "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                    "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                    "-DHOST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/project_templates.cmake"
+    )
+    if (MSVC AND CMAKE_GENERATOR MATCHES "^Ninja")
+        set_tests_properties(HuxerUIProjectTemplateTests PROPERTIES
+                ENVIRONMENT "${HUXERUI_SOURCE_SUBDIRECTORY_ENVIRONMENT}"
+        )
+    endif ()
     if (WIN32)
         set(HUXERUI_GENERATED_LIBRARY_PLATFORM windows)
     elseif (APPLE)

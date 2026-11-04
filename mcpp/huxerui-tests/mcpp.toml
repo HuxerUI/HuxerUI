@@ -15,7 +15,7 @@
 [package]
 name        = "huxerui-tests"
 namespace   = "huxerui"
-version     = "0.3.0"
+version     = "0.4.0"
 standard    = "c++20"
 description = "The HuxerUI test suite, compiled against the mcpp-built framework"
 license     = "Apache-2.0"

@@ -193,6 +193,10 @@ Android builds accept `--java-home <path>` to use that JDK for the current CLI i
 Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`; set it to a positive job count to limit concurrent compilation, including builds using `--source`. When unset, the selected build tool uses its default concurrency.
 The generated `CMakeLists.txt` keeps source discovery, target creation, resources, and library dependencies explicit.
 Its sibling `HuxerUIProject.cmake` contains the generated project plan, SDK discovery, and platform-shell connection details.
+New applications start at version `0.1.0`, independently of the HuxerUI SDK version; Android and iOS retain their own platform version settings.
+Native macOS projects default to macOS 12 before CMake initializes the toolchain, while an explicit deployment target, `MACOSX_DEPLOYMENT_TARGET`, or a supplied toolchain takes precedence.
+The macOS bundle records the actual executable name and the CMake project version.
+Web builds synchronize the HTML shell and icons even when no C++ source needs rebuilding.
 
 On Android, the application library defaults to `lib<cmake-target>.so` and links the shared `libhuxerui.so` framework.
 The generated Gradle shell resolves the final CMake artifact name into `BuildConfig.HUXERUI_APP_LIBRARY`, which MainActivity passes to `System.loadLibrary`; changing `OUTPUT_NAME` or a configuration postfix does not require a second library-name setting in Gradle.

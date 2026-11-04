@@ -8,7 +8,7 @@
 [package]
 name        = "huxerui-build-rules"
 namespace   = "huxerui"
-version     = "0.3.0"
+version     = "0.4.0"
 description = "mcpp build rules for HuxerUI: composable codegen and resource compilation"
 license     = "Apache-2.0"
 

@@ -97,6 +97,11 @@ foreach (GRAPH_HOME IN ITEMS "${SOURCE_DIRECTORY}" "${GRAPH_SDK}")
 endforeach ()
 file(TIMESTAMP "${LIBRARY_GRAPH}" GRAPH_TIMESTAMP_BEFORE_BUILD "%s.%f")
 
+if (PLATFORM_ID STREQUAL "macos")
+    file(APPEND "${PREVIEW_SOURCE}/CMakeLists.txt"
+            "\nset_target_properties(example_camera_kit PROPERTIES OUTPUT_NAME renamed_preview)\n")
+endif ()
+
 set(CONFIGURE_COMMAND
         "${CMAKE_COMMAND}" -S "${PREVIEW_SOURCE}" -B "${PREVIEW_BUILD}"
         -G "${HOST_GENERATOR}"
@@ -113,6 +118,10 @@ if (HOST_GENERATOR_TOOLSET)
 endif ()
 if (BUILD_CONFIG AND NOT HOST_GENERATOR MATCHES "^(Visual Studio|Xcode|Ninja Multi-Config)")
     list(APPEND CONFIGURE_COMMAND "-DCMAKE_BUILD_TYPE=${BUILD_CONFIG}")
+endif ()
+
+if (PLATFORM_ID STREQUAL "macos")
+    list(PREPEND CONFIGURE_COMMAND "${CMAKE_COMMAND}" -E env --unset=MACOSX_DEPLOYMENT_TARGET)
 endif ()
 
 execute_process(
@@ -146,6 +155,35 @@ endif ()
 file(TIMESTAMP "${LIBRARY_GRAPH}" GRAPH_TIMESTAMP_AFTER_BUILD "%s.%f")
 if (NOT GRAPH_TIMESTAMP_AFTER_BUILD STREQUAL GRAPH_TIMESTAMP_BEFORE_BUILD)
     message(FATAL_ERROR "Native build overwrote the platform library graph")
+endif ()
+
+if (PLATFORM_ID STREQUAL "macos")
+    file(GLOB_RECURSE bundle_plists "${PREVIEW_BUILD}/renamed_preview.app/Contents/Info.plist"
+            "${PREVIEW_BUILD}/*/renamed_preview.app/Contents/Info.plist")
+    list(LENGTH bundle_plists bundle_count)
+    if (NOT bundle_count EQUAL 1)
+        message(FATAL_ERROR "Expected one generated macOS application bundle, found ${bundle_count}")
+    endif ()
+    list(GET bundle_plists 0 bundle_plist)
+    foreach (key IN ITEMS CFBundleExecutable CFBundleShortVersionString CFBundleVersion)
+        if (key STREQUAL "CFBundleExecutable")
+            set(expected renamed_preview)
+        else ()
+            set(expected 0.1.0)
+        endif ()
+        execute_process(COMMAND /usr/libexec/PlistBuddy -c "Print :${key}" "${bundle_plist}"
+                RESULT_VARIABLE result OUTPUT_VARIABLE value ERROR_VARIABLE error OUTPUT_STRIP_TRAILING_WHITESPACE)
+        if (NOT result EQUAL 0 OR NOT value STREQUAL expected)
+            message(FATAL_ERROR "Generated bundle ${key}: ${value}; expected ${expected}\n${error}")
+        endif ()
+    endforeach ()
+    get_filename_component(bundle_contents "${bundle_plist}" DIRECTORY)
+    execute_process(COMMAND sh "${SOURCE_DIRECTORY}/.github/workflows/scripts/check_apple_deployment_target.sh"
+                    12.0 "${bundle_contents}/MacOS/renamed_preview"
+            RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+    if (NOT result EQUAL 0)
+        message(FATAL_ERROR "Generated bundle deployment target is incorrect:\n${output}${error}")
+    endif ()
 endif ()
 
 file(REMOVE_RECURSE "${TEST_ROOT}")
