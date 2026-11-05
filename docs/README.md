@@ -31,7 +31,7 @@ User guides describe the current public SDK, development guides cover this repos
 [External File Drop](design/file-drop.md) defines host file reception, hover lifecycle, and asynchronous reference delivery.
 [Date and Time Pickers](design/date-time-pickers.md) defines localized chrono-based calendar and clock controls.
 [Local Notifications](design/local-notifications.md) defines the shared authorization, scheduling, cancellation, and activation contract plus the Android, iOS, and macOS transports and remaining native boundaries.
-[Split and Docking Layouts](design/split-and-docking.md) records implemented controlled pane resizing and the approved future design for retained single-window workspaces.
+[Split and Docking Layouts](design/split-and-docking.md) defines controlled pane resizing and retained single-window docking workspaces.
 Design documents are implementation references, not a public API stability guarantee.
 
 ## Scope

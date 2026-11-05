@@ -1,8 +1,6 @@
 # Split and Docking Layouts
 
-Status: SplitLayout is implemented. DockLayout, DockTree, DockItem, and DockEvents remain approved future API and are not available in the current SDK.
-
-This design adds controlled pane resizing and single-window workspace rearrangement while preserving the existing View, modifier, event, and mounted-node contracts. The existing foundations are [Layout and Scrolling](../guide/layout.md), [Indexed Pages](indexed-pages.md), [Typed Drag-and-Drop](drag-drop.md), and [Semantics and Accessibility](semantics.md).
+SplitLayout and DockLayout provide controlled pane resizing and single-window workspace rearrangement through the existing View, modifier, event, and mounted-node contracts. The foundations are [Layout and Scrolling](../guide/layout.md), [Indexed Pages](indexed-pages.md), [Typed Drag-and-Drop](drag-drop.md), and [Semantics and Accessibility](semantics.md).
 
 ## Scope and ownership
 
@@ -78,11 +76,10 @@ return SplitLayout {
 
 ## Docking API
 
-This section describes future API.
-
 ```cpp
 enum class DockPlacement {
-  Tab,
+  TabBefore,
+  TabAfter,
   Left,
   Right,
   Top,
@@ -91,10 +88,7 @@ enum class DockPlacement {
 
 class DockTree final {
 public:
-  Frame frame{};
-  Grow grow{0.0F};
-
-  DockTree();
+  DockTree() = default;
 
   static DockTree Tabs(
       std::vector<std::string> panels,
@@ -109,13 +103,14 @@ public:
     )
   DockTree With(Modifiers&&... modifiers) &&;
 
+  const Frame& GetFrame() const noexcept;
+  Grow GetGrow() const noexcept;
   bool Empty() const noexcept;
   bool Contains(std::string_view panel) const;
 
   std::span<const std::string> Panels() const noexcept;
   std::string_view Selected() const noexcept;
   std::optional<Axis> SplitAxis() const noexcept;
-  std::span<DockTree> Children() noexcept;
   std::span<const DockTree> Children() const noexcept;
 
   DockTree Select(std::string_view panel) const;
@@ -143,24 +138,23 @@ struct DockEvents {
 class DockLayout final : public detail::TypedView<DockLayout> {
 public:
   DockLayout(std::vector<DockItem> items, DockTree tree);
-  DockLayout(std::vector<DockItem> items, const State<DockTree>& tree);
 
   template <class Function>
   DockLayout OnChanged(Function&& function) &&;
 };
 ```
 
-DockTree is a copyable, equality-comparable value containing no View, native handle, or mutable interaction state. Editing a copy must not change the original tree. Select, Remove, and Dock return new values, and OnChanged delegates to DockEvents::Changed. The public fields and mutable Children span support ordinary State::Update edits without introducing setters or a controller. Spans and string views are borrowed from their tree and must not survive a mutation or replacement that invalidates their storage.
+DockTree is a copyable, equality-comparable value containing no View, platform handle, or mutable interaction state. Select, Remove, and Dock return new values. Sizing and subtree queries are read-only and borrow from the tree. State<DockTree> passes through its ordinary conversion, and OnChanged delegates to DockEvents::Changed.
 
 A default tree is empty. Tabs requires at least one nonempty, unique panel ID; an omitted selected value chooses the first panel, and an explicit selection must belong to that group. Split requires at least two nonempty subtrees, with panel IDs unique across the complete tree. Panels and Selected return empty results outside a tab group; Children returns an empty span outside a split, and SplitAxis returns nullopt outside a split.
 
-DockItem IDs are unique within one DockLayout, independent of labels and declaration positions. Every tree reference must resolve to a declared item, while a declared item may be absent from the tree. DockItem requires nonempty content; Closable defaults to true and only controls user-facing close operations, not application edits to the tree. An empty tree and an empty item list are supported.
+DockItem IDs are unique within one DockLayout, independent of labels and declaration positions. Every tree reference must resolve to a declared item, while a declared item may be absent from the tree. DockItem requires a nonempty title and content. Closable defaults to true and controls the close affordance and menu command. Application edits can remove any panel. An empty tree and an empty item list are supported.
 
-Factories validate their inputs, and DockLayout validates the complete tree and item set before mounting or accepting a replacement declaration, including values edited through public fields. Invalid caller configuration uses std::invalid_argument with an English HuxerUI diagnostic; internal invariant failures use std::logic_error.
+Factories validate their inputs, and DockLayout validates item IDs and tree references before mounting or accepting a replacement declaration. Invalid caller configuration uses std::invalid_argument.
 
 ## Declarative construction
 
-DockTree::With is restricted to the existing Frame and Grow types at compile time. It applies values from left to right, updates only populated Frame fields, and uses the last Grow value. It shares the existing Frame/Grow merge and validation logic, including finite nonnegative dimensions and factors and valid minimum/maximum pairs. An empty Frame does not clear earlier fields; direct value editing can reset an optional field explicitly.
+DockTree::With is restricted to the existing Frame and Grow types at compile time. It applies values from left to right, updates only populated Frame fields, and uses the last Grow value. It shares the existing Frame/Grow merge and validation logic, including finite nonnegative dimensions and factors and valid minimum/maximum pairs. An empty Frame leaves the current fields in place.
 
 This is a layout-data construction operation, not View inheritance or a general modifier pipeline. It installs no ModifierDescriptor, NodeExtension, event binding, or mounted state, and it does not write State automatically. The supported modifier set differs from View::With even though Frame/Grow retain the same meanings.
 
@@ -204,7 +198,7 @@ return DockLayout(
 
 A logical region can contain a tab group or another split. Its Frame describes the whole region, including the tab bar for a group. Selecting another tab does not replace the group's allocation policy with the selected content's Frame/Grow. Content constraints remain subject to the parent constraints supplied by the region. SplitLayout reads its immediate pane configuration through existing declaration rules rather than searching arbitrary content descendants for a sizing policy.
 
-SplitLayout uses a private allocation algorithm that DockLayout will reuse:
+SplitLayout and DockLayout share a private allocation algorithm:
 
 - Deduct separator space before distributing the main-axis extent.
 - A zero Grow factor uses the preferred main-axis Frame dimension, or natural size when that dimension is absent.
@@ -227,21 +221,21 @@ When positive growth cannot reproduce an adjustment, such as collapsing to zero 
 
 Pointer movement uses stable split-container coordinates derived from window coordinates, not accumulated local deltas on a moving separator. Ordinary acceptance of the preceding proposal preserves the drag session. A cross-axis extent or translation change does not invalidate a drag when the mapping from window coordinates to the main axis is unchanged. Child topology or orientation changes, disablement, removal, window retirement, or invalidation of the drag's geometry/configuration baseline cancel the operation before a stale proposal can be delivered. Cancel and Escape stop future updates without rolling back changes already accepted by the application.
 
-Keyboard and accessibility adjustments use the same proposal path. The design adds SemanticRole::Separator and reuses existing range and adjustment actions; each supported accessibility bridge must map the new role. Panel moving and grouping must also have keyboard-accessible commands rather than requiring physical dragging.
+Keyboard and accessibility adjustments use the same proposal path. Separators expose SemanticRole::Separator with the existing range and adjustment actions.
 
 ## Docking edits
 
 ```cpp
 tree = tree->Dock("terminal", "editor", DockPlacement::Bottom);
-tree = tree->Dock("terminal", "editor", DockPlacement::Tab);
+tree = tree->Dock("terminal", "editor", DockPlacement::TabAfter);
 tree = tree->Remove("inspector");
 ```
 
-Dock can move an existing panel or insert an item that is currently absent from the tree. Its target must identify a panel already in the tree, and the final item references are validated by DockLayout. Tab inserts after the target within its group and selects the inserted panel. Left, Right, Top, and Bottom split beside the target's whole tab group, preserving the original region's external Frame/Grow and starting the inner regions with equal Grow weights, subject to their bounds. A single moved tab does not carry its former group's allocation policy into the destination.
+Dock can move an existing panel or insert an item that is currently absent from the tree. Its target must identify a panel already in the tree, and the final item references are validated by DockLayout. TabBefore and TabAfter insert on the specified side of the target tab and select the inserted panel. Left, Right, Top, and Bottom split beside the target's whole tab group, preserving the original region's external Frame/Grow and starting the inner regions with equal Grow weights. A moved tab does not carry its former group's allocation policy into the destination.
 
 Select activates an existing panel in its current group. Remove does nothing for an absent panel; removing the selected tab chooses its successor, or its predecessor when no successor exists. Empty groups are removed, single-child splits are collapsed, and the surviving region keeps the collapsed position's external Frame/Grow. The workspace may become empty; create its first group with Tabs. Reopening uses an explicit Dock destination rather than hidden previous-position history.
 
-Tab dragging changes only the preview until a successful drop proposes one complete tree edit. Cancellation leaves the tree unchanged, and incompatible topology changes invalidate the drag target. Closing, tab selection, resizing, grouping, and dropping all use DockEvents::Changed, with the application free to reject a proposal.
+Drag onto either half of a tab to insert before or after it. The empty part of a tab strip appends to that group. A drop near the edge of a panel splits its group, and a drop in the center inserts after its selected tab. Dragging changes only the preview until a successful drop proposes one complete tree edit. Cancellation leaves the tree unchanged, and topology changes invalidate the transfer. Tab context menus expose the same edits through pointer or keyboard commands.
 
 ## Panel identity and retention
 
@@ -259,19 +253,8 @@ Only selected, present panel content is measured and placed for the current work
 
 All declared panel content is mounted; this is retention rather than lazy creation or eviction. Compatible content retains local State, scroll offsets, and PlatformView identity, subject to ordinary geometry clamping and platform creation rules. Inactive content can still recompose from State updates, and its TaskScope remains alive. Focus, IME, pointer interaction, and scroll momentum follow the existing IndexedPages cleanup rules; active input sessions and automatic focus restoration are not promised across hiding. Application-owned Layers are not implicitly dismissed when a panel becomes inactive. Retained state does not survive removing the item declaration, moving to another DockLayout or UiWindow, or process recreation.
 
-## Implementation boundaries and validation
+## Implementation boundaries
 
-SplitLayout lives in `src/components/split_layout.cpp`, using a private layout and NodeExtension behavior. Its scope retains the geometry and event destination; keyed pane slots and private unkeyed separator layouts remain under one mounted parent. Each slot clips its content independently of content presentation transforms, forwarding the declaration key so compatible content retains its mounted identity when panes move. Sizing reads the slot's immediate content configuration and measures through the slot; the slot introduces no alternative Frame/Grow policy. Layout measurement and geometry preparation publish data without emitting resize events. DockLayout will reuse allocation and separator behavior; typed drag-and-drop provides recognition, transfer, preview, and cancellation. Docking supplies HuxerUI-owned drop regions without making a PlatformView itself a DropTarget. Existing Tabs cannot supply per-tab drag sources through its current public API; reuse appropriate private tab behavior and Theme values without adding a general tab factory or a parallel tab-selection engine. The flattened mounted structure must still expose logical group semantics and a coherent focus order through existing semantics facilities.
+SplitLayout and DockLayout share the split measurement, clipped pane slot, and separator extension. A layout records the separator geometry; its owner publishes it after presentation transforms resolve. SplitLayout reads its pane declarations directly. DockLayout measures logical regions recursively and places tabs, separators, and selected panel slots in tree order under one mounted parent. Its separator callbacks apply sizing changes to the corresponding branch of the latest committed tree.
 
-Before implementation is considered complete, validate:
-
-- Declarative Frame/Grow merging and validation, including compile-time rejection of unsupported DockTree modifiers and independent tree copies.
-- Empty, single-pane, dynamic, nested, horizontal, and vertical splits; duplicate or unresolved panel IDs and invalid tree edits.
-- Mixed preferred/natural sizes and multiple Grow items, minimum/maximum saturation, insufficient space, and unbounded constraints.
-- Replay of an accepted resize proposal reproducing its target geometry, including coordinated weight updates, without rewriting configuration merely because the window resized.
-- Rejected proposals, normal controlled writeback, keyboard and semantic adjustment, Escape, pointer Cancel, disablement, topology changes, and retirement.
-- Stable mounted identities, local State, scroll offsets, and PlatformViews across grouping, splitting, hiding, reopening, and keyed declaration reordering.
-- Absence of inactive paint, input, focus, semantics, and visual frame work; continued Task completion and deterministic cleanup on actual unmount.
-- Drop preview isolation, explicit clipping, focus/semantic order, and cancellation over ordinary content and PlatformViews.
-
-Future DockLayout implementation must also update public header checks, umbrella exports, owning SDK guides, affected examples, build/packaging metadata, generated module exports, and available platform accessibility mappings through the existing repository workflows. The user guides describe implemented SplitLayout behavior; the docking contracts above remain future design.
+DockLayout decorates the existing Tabs labels privately, retaining Tabs layout, selection, scrolling, and keyboard navigation. Typed drag-and-drop owns pointer recognition and the preview layer. Each transfer belongs to one workspace and topology. Drop targets live on the tab strip, tab items, and clipped pane slots; panel content uses its ordinary input contract.

@@ -16,7 +16,6 @@ Current behavior is documented in the user guides, while detailed constraints li
 
 ## Interaction and animation
 
-- Extend [SplitLayout sizing to single-window docking](design/split-and-docking.md), with controlled workspace rearrangement and stable panel content.
 - Add ordinary View lifecycle transitions without introducing per-component Runtime branches.
 - Expand paint primitives only when a production component or application requires them.
 

@@ -18,6 +18,8 @@
 
 namespace huxerui {
 
+class DockTree;
+
 /// Stores the complete controlled text value emitted by TextFieldEvents::Changed.
 struct TextEditingValue;
 
@@ -574,6 +576,12 @@ struct SliderEvents {
 struct SplitEvents {
   /// Requests one synchronous batch of pane configurations in current nonempty declaration order.
   struct Changed : Event<void(std::vector<SplitChange>)> {};
+};
+
+/// Event keys emitted by DockLayout.
+struct DockEvents {
+  /// Proposes a complete replacement tree for one user edit. Supply it to DockLayout to accept the edit.
+  struct Changed : Event<void(DockTree)> {};
 };
 
 /// Event keys emitted by SegmentedButton.

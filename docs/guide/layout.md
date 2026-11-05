@@ -10,6 +10,7 @@ Application code normally expresses intent with built-in containers and modifier
 
 - `Row` and `Column` arrange children along one axis.
 - `SplitLayout` arranges controlled, resizable panes using their Frame and Grow modifiers.
+- `DockLayout` arranges retained, movable panels in controlled tab groups and splits.
 - `Stack` overlays children.
 - `Flow` wraps children across lines.
 - `Spacer` consumes remaining main-axis space in a `Row` or `Column`.
@@ -68,9 +69,34 @@ Separators reserve 8 DIPs before allocation. A zero Grow factor uses the preferr
 
 Dragging, focused arrow keys, Home/End, and accessibility adjustment emit one synchronous `SplitEvents::Changed` batch. Each `SplitChange` contains the complete proposed Frame/Grow and the pane's current flattened nonempty index. Apply all entries to controlled state; do not retain index batches across reordering. Rejecting a proposal leaves allocation unchanged. A proposal can coordinate other panes' weights or convert a growing pane to fixed sizing when needed to reproduce the requested geometry; write back both Frame and Grow. Window resizing and programmatic updates never emit Changed or overwrite the declared sizing preferences.
 
-Cancel and Escape stop dragging without undoing accepted updates. Incompatible topology, orientation, enabled state, or geometry/configuration changes cancel the active drag. Panes are clipped to their allocations. SplitLayout uses existing layout and input machinery; [the design contract](../design/split-and-docking.md) separately describes future docking behavior.
+Cancel and Escape stop dragging without undoing accepted updates. Incompatible topology, orientation, enabled state, or geometry/configuration changes cancel the active drag. Panes are clipped to their allocations.
 
 The [SplitLayout example](../../examples/split_layout/main.cpp) demonstrates three controlled panes, optional inspector content, stable editor state, and vertical arrangement on compact windows. Build the `example_split_layout` target to run it.
+
+## Docking workspaces
+
+Declare each panel once with a stable ID, title, and View. `DockTree` describes which IDs appear, how they are grouped, and which panel is selected in each group. Apply the same Frame and Grow sizing rules as SplitLayout to the tree's branches. A group's size includes its tab bar and is independent of the selected item's own Frame.
+
+```cpp
+const auto tree = UseState(DockTree::Split(Axis::Horizontal, {
+    DockTree::Tabs({"files", "search"}).With(Frame{.width = 240.0F, .min_width = 160.0F}),
+    DockTree::Tabs({"editor"}).With(Grow()),
+}));
+return DockLayout(
+    {
+        DockItem("files", "Files", FilesPanel()),
+        DockItem("search", "Search", SearchPanel()),
+        DockItem("editor", "Editor", EditorPanel()).Closable(false),
+    },
+    tree
+).OnChanged([tree](DockTree next) { tree = std::move(next); });
+```
+
+Tabs can be dropped before or after another tab, or on a panel edge to create a split. The tab context menu offers the same edits through right click, the Context Menu key, or Shift+F10. Selection, closing, docking, and resizing each propose a complete tree through `DockEvents::Changed`. Write it back to accept the edit.
+
+For application commands, use `Select`, `Remove`, or `Dock` on the current tree. For example, `tree = tree->Dock("search", "editor", DockPlacement::TabAfter)` reopens or moves Search beside Editor. Removing Search from the tree hides it. Keeping its DockItem declaration preserves its mounted content and local State; removing the declaration unmounts it. If the tree is empty, start it again with `DockTree::Tabs`.
+
+The [DockLayout example](../../examples/dock_layout/main.cpp) is a project workspace with a file tree, an editor, an inspector, and an activity log. Move or resize panels, then close and reopen a pinned Inspector from the Panels menu to see its local state retained. Build `example_dock_layout` to run it. See the [design contract](../design/split-and-docking.md) for sizing and retention details.
 
 ## Mounted coordinate spaces
 

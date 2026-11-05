@@ -345,6 +345,14 @@ struct ViewSpec {
 };
 
 std::shared_ptr<ViewSpec> MakeScopeSpec(std::function<View()> factory);
+
+// Validate the merged Frame so bounds supplied by separate modifiers are checked together.
+Frame MergeFrame(Frame frame, const Frame& modifier);
+void ValidateGrow(Grow grow);
+
+// Resolve a validated Frame within the incoming limits. Conflicting bounds collapse to the nearest incoming limit.
+Constraints ResolveFrameConstraints(const Frame& frame, const Constraints& constraints);
+
 ViewSpec CompileViewSpec(const ViewSpec& declaration, const std::shared_ptr<const Environment>& environment,
                          AppResources& resources);
 VisualFill ResolveVisualFill(const VisualFill& fill, AppResources& resources, const Locale& locale);

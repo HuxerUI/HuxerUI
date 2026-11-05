@@ -12,6 +12,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -59,6 +60,7 @@ struct ViewSpec;
 struct PlatformEventDescriptor;
 std::shared_ptr<ViewSpec> MakePlatformViewSpec(std::string name, PlatformValue properties);
 struct InternalAccess;
+struct DockConfiguration;
 class VirtualMeasureSession;
 } // namespace detail
 
@@ -851,6 +853,11 @@ public:
   template <class Function> Tabs OnChanged(Function&& function) && {
     return std::move(*this).On<TabsEvents::Changed>(std::forward<Function>(function));
   }
+
+private:
+  // The decorator receives the configured tab label and its item index. Keep the label to preserve tab behavior.
+  Tabs(std::vector<TabItem> items, std::size_t selected_index, std::function<View(View, std::size_t)> decorate);
+  friend struct detail::DockConfiguration;
 };
 
 /// Presents a controlled, non-editable finite-choice field and anchored popup.
@@ -1500,6 +1507,140 @@ public:
 
 private:
   std::vector<View> children_;
+};
+
+/// Tab placements insert within the target's group. Edge placements put the panel in a new pane beside that group.
+enum class DockPlacement {
+  TabBefore,
+  TabAfter,
+  Left,
+  Right,
+  Top,
+  Bottom,
+};
+
+/// Describes the ordered splits, tab groups, and sizing of a DockLayout.
+///
+/// Panel IDs are nonempty and unique throughout the tree. Select(), Remove(), and Dock() return new values.
+/// Spans, string views, and references borrow from the source tree and are valid while it stays alive and unchanged.
+class DockTree final {
+public:
+  /// Creates a tree with no panels.
+  DockTree() = default;
+
+  /// Creates a nonempty tab group. An empty selected ID selects the first panel.
+  /// @throws std::invalid_argument If the group is empty, IDs are empty or repeated, or a specified selection
+  /// is absent.
+  static DockTree Tabs(std::vector<std::string> panels, std::string selected = {});
+  /// Creates a split from children in layout order.
+  /// @throws std::invalid_argument If the axis is invalid, there are fewer than two children, any child is empty,
+  /// or a panel ID appears in multiple children.
+  static DockTree Split(Axis axis, std::vector<DockTree> children);
+
+  /// Applies Frame and Grow from left to right. Each Frame replaces only populated fields.
+  /// The last Grow sets the weight.
+  /// @throws std::invalid_argument If a merged Frame or Grow factor is invalid under the View sizing rules.
+  template <class... Modifiers>
+    requires((std::same_as<std::remove_cvref_t<Modifiers>, Frame> ||
+              std::same_as<std::remove_cvref_t<Modifiers>, Grow>) && ...)
+  DockTree With(Modifiers&&... modifiers) && {
+    (ApplySizing(modifiers), ...);
+    return std::move(*this);
+  }
+
+  /// Returns the size preferences and bounds for the whole region, including the tab strip for a tab group.
+  [[nodiscard]] const Frame& GetFrame() const noexcept { return frame_; }
+  /// Returns the region's weight in its parent layout.
+  [[nodiscard]] Grow GetGrow() const noexcept { return grow_; }
+  [[nodiscard]] bool Empty() const noexcept;
+  /// Searches all tab groups in this subtree for the panel ID.
+  [[nodiscard]] bool Contains(std::string_view panel) const;
+
+  /// Returns the ordered panel IDs of a tab group, or an empty span for other nodes.
+  [[nodiscard]] std::span<const std::string> Panels() const noexcept;
+  /// Returns the active panel ID of a tab group, or an empty string for other nodes.
+  [[nodiscard]] std::string_view Selected() const noexcept;
+  /// Returns the split axis, or nullopt for an empty tree or tab group.
+  [[nodiscard]] std::optional<Axis> SplitAxis() const noexcept;
+  /// Returns the ordered regions of a split, or an empty span for other nodes.
+  [[nodiscard]] std::span<const DockTree> Children() const noexcept;
+
+  /// Selects an existing panel in its group.
+  /// @throws std::invalid_argument If the panel ID is absent.
+  [[nodiscard]] DockTree Select(std::string_view panel) const;
+  /// Removes a panel. An absent ID returns the same tree value.
+  ///
+  /// If other tabs remain, removing the selected tab selects the next tab or the previous one at the end.
+  /// Empty groups disappear. A split with one remaining child passes its Frame and Grow to that child.
+  [[nodiscard]] DockTree Remove(std::string_view panel) const;
+  /// Moves or inserts a panel relative to an existing target ID and selects it in the destination group.
+  ///
+  /// An edge placement gives the new split the target region's Frame and Grow and starts its children
+  /// with equal Grow weights. Docking a panel before or after itself returns the same tree value, as does
+  /// docking it beside its own single-panel group.
+  /// @throws std::invalid_argument If the panel ID is empty, the target is absent, or the placement is invalid.
+  [[nodiscard]] DockTree Dock(std::string panel, std::string_view target, DockPlacement placement) const;
+
+  bool operator==(const DockTree&) const = default;
+
+private:
+  struct TabGroup {
+    std::vector<std::string> panels;
+    std::size_t selected = 0;
+    bool operator==(const TabGroup&) const = default;
+  };
+  struct SplitGroup {
+    Axis axis;
+    std::vector<DockTree> children;
+    bool operator==(const SplitGroup&) const = default;
+  };
+
+  void ApplySizing(const Frame& frame);
+  void ApplySizing(Grow grow);
+  template <class Tree> static Tree* FindGroup(Tree& tree, std::string_view panel);
+  bool RemovePanel(std::string_view panel);
+
+  Frame frame_{};
+  Grow grow_{0.0F};
+  std::variant<std::monostate, TabGroup, SplitGroup> content_;
+
+  friend struct detail::DockConfiguration;
+};
+
+/// Declares the title and retained content associated with a stable dock panel ID.
+class DockItem final {
+public:
+  /// Associates a title and View with the ID used by DockTree.
+  /// @throws std::invalid_argument If the ID or content is empty, or the title is a blank literal.
+  DockItem(std::string id, StringVariant title, View content);
+
+  /// Controls the tab's close button and menu command. Defaults to true.
+  /// Use DockTree::Remove() for programmatic removal regardless of this setting.
+  DockItem Closable(bool closable) &&;
+
+private:
+  std::string id_;
+  StringVariant title_;
+  View content_;
+  bool closable_ = true;
+
+  friend struct detail::DockConfiguration;
+};
+
+/// Presents a controlled docking workspace with retained, keyed panel content.
+///
+/// Each tab group lays out its selected panel. Keeping a DockItem declaration retains compatible mounted content
+/// across tab changes, moves, and removal from the tree. Removing the declaration unmounts its content.
+class DockLayout final : public detail::TypedView<DockLayout> {
+public:
+  /// Creates a workspace and applies the tree root's Frame and Grow as View modifiers.
+  /// @throws std::invalid_argument If an item is invalid, item IDs repeat, or a tree ID has no declaration.
+  DockLayout(std::vector<DockItem> items, DockTree tree);
+
+  /// Handles DockEvents::Changed proposals from tab selection, closing, resizing, and completed docking moves.
+  template <class Function> DockLayout OnChanged(Function&& function) && {
+    return std::move(*this).On<DockEvents::Changed>(std::forward<Function>(function));
+  }
 };
 
 /// Places children in wrapping lines according to the configured Flow modifiers.

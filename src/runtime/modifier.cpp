@@ -502,27 +502,7 @@ void ValidateFrameConstraints(const Frame& frame) {
 }
 
 void ApplyFrame(detail::ViewSpec& spec, const Frame& modifier) {
-  Frame frame = spec.properties.frame;
-  if (modifier.width.has_value()) {
-    frame.width = modifier.width;
-  }
-  if (modifier.height.has_value()) {
-    frame.height = modifier.height;
-  }
-  if (modifier.min_width.has_value()) {
-    frame.min_width = modifier.min_width;
-  }
-  if (modifier.max_width.has_value()) {
-    frame.max_width = modifier.max_width;
-  }
-  if (modifier.min_height.has_value()) {
-    frame.min_height = modifier.min_height;
-  }
-  if (modifier.max_height.has_value()) {
-    frame.max_height = modifier.max_height;
-  }
-  ValidateFrameConstraints(frame);
-  spec.properties.frame = std::move(frame);
+  spec.properties.frame = detail::MergeFrame(spec.properties.frame, modifier);
 }
 
 void ApplyCornerRadius(detail::ViewSpec& spec, const CornerRadius& modifier) {
@@ -551,9 +531,7 @@ void ApplyAlign(detail::ViewSpec& spec, const Align& modifier) {
 }
 
 void ApplyGrow(detail::ViewSpec& spec, const Grow& modifier) {
-  if (!std::isfinite(modifier.factor) || modifier.factor < 0.0F) {
-    throw std::invalid_argument("HuxerUI grow factor must be finite and non-negative");
-  }
+  detail::ValidateGrow(modifier);
   spec.layout_values.insert_or_assign(
       typeid(detail::GrowFactorBinding), detail::MakeErasedLayoutValue(modifier.factor)
   );
@@ -572,6 +550,35 @@ void ApplyPointerCursor(detail::ViewSpec& spec, const PointerCursor& modifier) {
 }
 
 } // namespace
+
+Frame detail::MergeFrame(Frame frame, const Frame& modifier) {
+  if (modifier.width.has_value()) {
+    frame.width = modifier.width;
+  }
+  if (modifier.height.has_value()) {
+    frame.height = modifier.height;
+  }
+  if (modifier.min_width.has_value()) {
+    frame.min_width = modifier.min_width;
+  }
+  if (modifier.max_width.has_value()) {
+    frame.max_width = modifier.max_width;
+  }
+  if (modifier.min_height.has_value()) {
+    frame.min_height = modifier.min_height;
+  }
+  if (modifier.max_height.has_value()) {
+    frame.max_height = modifier.max_height;
+  }
+  ValidateFrameConstraints(frame);
+  return frame;
+}
+
+void detail::ValidateGrow(Grow grow) {
+  if (!std::isfinite(grow.factor) || grow.factor < 0.0F) {
+    throw std::invalid_argument("HuxerUI grow factor must be finite and non-negative");
+  }
+}
 
 const detail::ModifierDescriptor& Padding::Descriptor() {
   return ApplyOnlyModifierDescriptor<Padding, ApplyPadding>();

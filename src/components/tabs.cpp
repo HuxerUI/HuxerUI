@@ -425,7 +425,9 @@ private:
   }
 };
 
-std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::size_t selected_index) {
+std::shared_ptr<detail::ViewSpec> MakeTabsSpec(
+    std::vector<TabItem> items, std::size_t selected_index, std::function<View(View, std::size_t)> decorate = {}
+) {
   if (items.empty()) {
     throw std::invalid_argument("HuxerUI Tabs requires at least one item");
   }
@@ -443,7 +445,7 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
     detail::InternalAccess::ValidateIcon(item);
   }
 
-  return detail::MakeScopeSpec([items = std::move(items), selected_index]() -> View {
+  return detail::MakeScopeSpec([items = std::move(items), selected_index, decorate = std::move(decorate)]() -> View {
     std::vector<ResolvedTabItem> resolved_items;
     resolved_items.reserve(items.size());
     for (TabItem item : items) {
@@ -461,7 +463,10 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
 
     const std::shared_ptr<const Environment> environment = detail::CurrentEnvironment();
     const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
-    const TabsStyle style = ResolveStyleOverride<TabsStyle>(environment).value_or(detail::DefaultTabsStyle(theme));
+    TabsStyle style = ResolveStyleOverride<TabsStyle>(environment).value_or(detail::DefaultTabsStyle(theme));
+    if (decorate) {
+      style.indicator_sizing = TabIndicatorSizing::Item;
+    }
     const ScrollController scroll_controller = UseScrollController();
     const EventEmitter events = UseEvents();
 
@@ -472,16 +477,15 @@ std::shared_ptr<detail::ViewSpec> MakeTabsSpec(std::vector<TabItem> items, std::
     for (std::size_t index = 0; index < resolved_items.size(); ++index) {
       const bool enabled = resolved_items[index].enabled;
       enabled_items.push_back(enabled);
-      labels.push_back(
-          std::move(TabLabel(resolved_items[index], style, index == selected_index, index))
-              .OnClick([events, index, selected_index] {
-                if (index != selected_index) {
-                  events.Emit<TabsEvents::Changed>(index);
-                }
-              })
-              .With(huxerui::Enabled(enabled))
-              .Key(index)
-      );
+      View label = TabLabel(resolved_items[index], style, index == selected_index, index)
+          .OnClick([events, index, selected_index] {
+            if (index != selected_index) {
+              events.Emit<TabsEvents::Changed>(index);
+            }
+          })
+          .With(huxerui::Enabled(enabled))
+          .Key(index);
+      labels.push_back(decorate ? decorate(std::move(label), index) : std::move(label));
     }
 
     return ScrollView(TabsLayoutView(
@@ -531,5 +535,8 @@ Tabs::Tabs(std::vector<StringVariant> labels, std::size_t selected_index)
 
 Tabs::Tabs(std::vector<TabItem> items, std::size_t selected_index)
     : detail::TypedView<Tabs>(MakeTabsSpec(std::move(items), selected_index)) {}
+
+Tabs::Tabs(std::vector<TabItem> items, std::size_t selected_index, std::function<View(View, std::size_t)> decorate)
+    : detail::TypedView<Tabs>(MakeTabsSpec(std::move(items), selected_index, std::move(decorate))) {}
 
 } // namespace huxerui

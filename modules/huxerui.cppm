@@ -94,6 +94,11 @@ export namespace huxerui {
     using huxerui::DirectoryCopySummary;
     using huxerui::Divider;
     using huxerui::DividerStyle;
+    using huxerui::DockEvents;
+    using huxerui::DockItem;
+    using huxerui::DockLayout;
+    using huxerui::DockPlacement;
+    using huxerui::DockTree;
     using huxerui::DragDropResult;
     using huxerui::DragEvent;
     using huxerui::DragEvents;

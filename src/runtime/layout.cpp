@@ -99,21 +99,6 @@ std::pair<float, float> ResolveAxisConstraints(float parent_min, float parent_ma
   return {resolved_min, resolved_max};
 }
 
-Constraints ResolveConstraints(const ViewProperties& properties, const Constraints& constraints) {
-  const auto [min_width, max_width] =
-      ResolveAxisConstraints(constraints.min_width, constraints.max_width, properties.frame.width,
-                             properties.frame.min_width, properties.frame.max_width);
-  const auto [min_height, max_height] =
-      ResolveAxisConstraints(constraints.min_height, constraints.max_height, properties.frame.height,
-                             properties.frame.min_height, properties.frame.max_height);
-  return {
-      min_width,
-      max_width,
-      min_height,
-      max_height,
-  };
-}
-
 Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, LayoutContextState& state) {
   if (node.children.empty()) {
     return constraints.Constrain({});
@@ -389,6 +374,21 @@ void LayoutPlacedChildren(MountedNode& node, Point content_origin) {
 
 } // namespace
 
+Constraints ResolveFrameConstraints(const Frame& frame, const Constraints& constraints) {
+  const auto [min_width, max_width] =
+      ResolveAxisConstraints(constraints.min_width, constraints.max_width, frame.width,
+                             frame.min_width, frame.max_width);
+  const auto [min_height, max_height] =
+      ResolveAxisConstraints(constraints.min_height, constraints.max_height, frame.height,
+                             frame.min_height, frame.max_height);
+  return {
+      min_width,
+      max_width,
+      min_height,
+      max_height,
+  };
+}
+
 Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui_window,
                  EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics) {
   HUXERUI_PROFILE_SCOPE(profile_measure, Measure, node.identity);
@@ -441,7 +441,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui
   if (IsScrollContainer(node)) {
     PrepareScrollController(node);
   }
-  const Constraints resolved_constraints = ResolveConstraints(node.properties, constraints);
+  const Constraints resolved_constraints = ResolveFrameConstraints(node.properties.frame, constraints);
   const Constraints content_constraints = resolved_constraints.Deflate(node.resolved_padding);
   Size content_size;
 

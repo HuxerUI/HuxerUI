@@ -14,11 +14,17 @@
 #include <huxerui/semantics.h>
 #include <huxerui/theme.h>
 
+#include "split_layout_internal.h"
+
 #include "internal_access.h"
 #include "runtime/mounted_node_internal.h"
 
 namespace huxerui {
 namespace {
+
+using Pane = detail::SplitPaneMetrics;
+using detail::SplitGeometry;
+using detail::SplitSession;
 
 constexpr float separator_extent = 8.0F;
 constexpr float adjustment_step = 10.0F;
@@ -33,14 +39,6 @@ float Main(Point point, Axis axis) {
 Size Oriented(float main, float cross, Axis axis) {
   return axis == Axis::Horizontal ? Size{main, cross} : Size{cross, main};
 }
-
-struct Pane {
-  Frame frame;
-  Grow grow{0.0F};
-  std::uint64_t identity = 0;
-  float natural = 0.0F;
-  float extent = 0.0F;
-};
 
 float Minimum(const Pane& pane, Axis axis) {
   return (axis == Axis::Horizontal ? pane.frame.min_width : pane.frame.min_height).value_or(0.0F);
@@ -127,16 +125,6 @@ std::vector<float> Allocate(const std::vector<Pane>& panes, Axis axis, float ava
   }
   return result;
 }
-
-struct SplitGeometry {
-  Axis axis = Axis::Horizontal;
-  bool bounded = false;
-  bool enabled = false;
-  float available = 0.0F;
-  Size size;
-  Transform2D transform;
-  std::vector<Pane> panes;
-};
 
 bool SameMainCoordinates(const SplitGeometry& previous, const SplitGeometry& current) {
   if (!current.transform.Inverse({})) {
@@ -271,10 +259,6 @@ std::vector<Pane> Resize(const SplitGeometry& geometry, std::size_t index, float
   return next;
 }
 
-struct SplitSession {
-  SplitGeometry geometry;
-  EventEmitter events;
-};
 struct SplitBinding {
   struct Value {
     std::size_t count;
@@ -306,73 +290,31 @@ public:
   using Layout::Layout;
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     const auto& binding = *node.LayoutValue<SplitBinding>();
-    auto& geometry = node.Cache<SplitGeometry>();
-    geometry = {};
-    geometry.axis = binding.axis;
-    const Axis axis = geometry.axis;
-    const float main_limit = axis == Axis::Horizontal ? constraints.max_width : constraints.max_height;
-    const float cross_limit = axis == Axis::Horizontal ? constraints.max_height : constraints.max_width;
-    geometry.bounded = std::isfinite(main_limit);
-    const float gaps = binding.count > 1 ? static_cast<float>(binding.count - 1) : 0.0F;
-    const float separator =
-        geometry.bounded && gaps > 0.0F ? std::min(separator_extent, main_limit / gaps) : separator_extent;
-    geometry.available = geometry.bounded ? std::max(0.0F, main_limit - separator * gaps) : 0.0F;
-    float cross = std::isfinite(cross_limit) ? cross_limit : 0.0F;
+    std::vector<Pane> panes;
+    panes.reserve(binding.count);
     for (std::size_t index = 0; index < binding.count; ++index) {
-      ViewNode& slot = node.ChildAt(index);
-      const auto& content = static_cast<const detail::MountedNode&>(slot.ChildAt(0));
-      Pane pane{content.properties.frame, Grow(content.GrowFactor()), content.identity};
-      if (!geometry.bounded || (pane.grow.factor == 0.0F && !Preferred(pane, axis).has_value())) {
-        Constraints natural = constraints.Loose();
-        if (axis == Axis::Horizontal) {
-          natural.max_width = std::numeric_limits<float>::infinity();
-        } else {
-          natural.max_height = std::numeric_limits<float>::infinity();
-        }
-        const Size measured = context.Measure(slot, natural);
-        pane.natural = Main(measured, axis);
-      }
-      geometry.panes.push_back(pane);
+      const auto& content = static_cast<const detail::MountedNode&>(node.ChildAt(index).ChildAt(0));
+      panes.push_back({content.properties.frame, Grow(content.GrowFactor()), content.identity});
     }
-    std::vector<float> extents;
-    if (geometry.bounded) {
-      extents = Allocate(geometry.panes, axis, geometry.available);
-    } else {
-      for (const Pane& pane : geometry.panes) {
-        extents.push_back(std::clamp(Preferred(pane, axis), Minimum(pane, axis), Maximum(pane, axis)));
-      }
-    }
-    if (!std::isfinite(cross_limit)) {
-      // Wrapping and aspect ratios depend on the allocated main extent, not the initial natural measurement.
-      cross = axis == Axis::Horizontal ? constraints.min_height : constraints.min_width;
-      for (std::size_t index = 0; index < binding.count; ++index) {
-        Constraints allocated = constraints.Loose();
-        if (axis == Axis::Horizontal) {
-          allocated.min_width = allocated.max_width = extents[index];
-        } else {
-          allocated.min_height = allocated.max_height = extents[index];
-        }
-        const Size measured = context.Measure(node.ChildAt(index), allocated);
-        cross = std::max(cross, Main(measured, axis == Axis::Horizontal ? Axis::Vertical : Axis::Horizontal));
-      }
-    }
+    auto geometry = detail::MeasureSplit(binding.axis, constraints, std::move(panes),
+        [&](std::size_t index, Constraints limits) { return context.Measure(node.ChildAt(index), limits); });
     LayoutResult result;
     float offset = 0.0F;
     const auto place = [&](ViewNode& child, float extent) {
-      const Size size = Oriented(extent, cross, axis);
-      static_cast<void>(context.Measure(child, {size.width, size.width, size.height, size.height}));
-      result.Place(child, axis == Axis::Horizontal ? Point{offset, 0.0F} : Point{0.0F, offset});
+      const Rect bounds = geometry.Region(offset, extent);
+      static_cast<void>(context.Measure(child, {bounds.width, bounds.width, bounds.height, bounds.height}));
+      result.Place(child, {bounds.x, bounds.y});
       offset += extent;
     };
     for (std::size_t index = 0; index < binding.count; ++index) {
-      geometry.panes[index].extent = extents[index];
-      place(node.ChildAt(index), extents[index]);
+      place(node.ChildAt(index), geometry.panes[index].extent);
       if (index + 1 < binding.count) {
-        place(node.ChildAt(binding.count + index), separator);
+        place(node.ChildAt(binding.count + index), geometry.separator);
       }
     }
-    geometry.size = constraints.Constrain(Oriented(geometry.bounded ? main_limit : offset, cross, axis));
-    return result.SetSize(geometry.size);
+    result.SetSize(geometry.size);
+    node.Cache<SplitGeometry>() = std::move(geometry);
+    return result;
   }
 };
 
@@ -389,13 +331,7 @@ public:
     session_->geometry.enabled = false;
   }
   PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
-    auto geometry = node.Cache<SplitGeometry>();
-    geometry.enabled = node.IsEnabled();
-    const Point origin = node.LocalToWindow({});
-    const Point x = node.LocalToWindow({1.0F, 0.0F});
-    const Point y = node.LocalToWindow({0.0F, 1.0F});
-    geometry.transform = {x.x - origin.x, x.y - origin.y, y.x - origin.x, y.y - origin.y, origin.x, origin.y};
-    session_->geometry = std::move(geometry);
+    detail::CommitSplitGeometry(*session_, node.Cache<SplitGeometry>(), node);
     return PaintInvalidation::None;
   }
 
@@ -626,7 +562,10 @@ private:
       drag_.reset();
     }
     if (!changes.empty()) {
-      behavior_.session->events.Emit<SplitEvents::Changed>(std::move(changes));
+      const auto propose = behavior_.session->propose;
+      if (propose) {
+        propose(std::move(changes));
+      }
     }
   }
   SeparatorBehavior behavior_;
@@ -655,15 +594,17 @@ struct SplitConfiguration {
 };
 
 View ComposeSplit(const SplitConfiguration& configuration) {
-  const auto session = UseState(std::make_shared<SplitSession>()).Get();
-  session->events = UseEvents();
+  const std::shared_ptr<SplitSession> session = UseState(std::make_shared<SplitSession>());
+  session->propose = [events = UseEvents()](std::vector<SplitChange> changes) {
+    events.Emit<SplitEvents::Changed>(std::move(changes));
+  };
   const auto& theme = detail::ResolveThemeSpec(detail::CurrentEnvironment());
   std::vector<View> children;
   for (View child : configuration.children) {
     if (child) {
       const auto key = detail::InternalAccess::ViewDeclarationKey(child);
       // Keep the allocation clip outside content presentation transforms, and move the slot with its keyed content.
-      View slot = SplitPane{std::move(child)}.With(ClipChildren{});
+      View slot = detail::MakeClippedPane(std::move(child));
       if (key) {
         std::visit([&slot](const auto& value) { slot = std::move(slot).Key(value); }, *key);
       }
@@ -673,12 +614,7 @@ View ComposeSplit(const SplitConfiguration& configuration) {
   const std::size_t count = children.size();
   for (std::size_t index = 0; index + 1 < count; ++index) {
     // Unkeyed private layout nodes cannot collide with application pane keys or pane layout types.
-    children.push_back(SeparatorLayout{}.With(
-        Focusable{},
-        PointerCursor(configuration.axis == Axis::Horizontal
-            ? PointerCursorKind::ResizeHorizontal : PointerCursorKind::ResizeVertical),
-        SeparatorBehavior{session, index, theme.colors.outline}
-    ));
+    children.push_back(detail::MakeSplitSeparator(session, index, configuration.axis, theme.colors.outline));
   }
   return SplitArrangement(std::move(children))
       .LayoutValue<SplitBinding>({count, configuration.axis})
@@ -697,6 +633,98 @@ const detail::ModifierDescriptor& SplitConfiguration::Descriptor() {
 }
 
 } // namespace
+
+Rect detail::SplitGeometry::Region(float offset, float extent) const {
+  return axis == Axis::Horizontal ? Rect{offset, 0.0F, extent, size.height} : Rect{0.0F, offset, size.width, extent};
+}
+
+SplitGeometry detail::MeasureSplit(Axis axis, Constraints constraints, std::vector<SplitPaneMetrics> panes,
+                                   const std::function<Size(std::size_t, Constraints)>& measure_pane) {
+  SplitGeometry geometry;
+  geometry.axis = axis;
+  geometry.panes = std::move(panes);
+  const float main_limit = axis == Axis::Horizontal ? constraints.max_width : constraints.max_height;
+  const float cross_limit = axis == Axis::Horizontal ? constraints.max_height : constraints.max_width;
+  geometry.bounded = std::isfinite(main_limit);
+  const auto count = geometry.panes.size();
+  const float gaps = count > 1 ? static_cast<float>(count - 1) : 0.0F;
+  geometry.separator =
+      geometry.bounded && gaps > 0.0F ? std::min(separator_extent, main_limit / gaps) : separator_extent;
+  geometry.available = geometry.bounded ? std::max(0.0F, main_limit - geometry.separator * gaps) : 0.0F;
+  Constraints natural = constraints.Loose();
+  if (axis == Axis::Horizontal) {
+    natural.max_width = std::numeric_limits<float>::infinity();
+  } else {
+    natural.max_height = std::numeric_limits<float>::infinity();
+  }
+  for (std::size_t index = 0; index < count; ++index) {
+    Pane& pane = geometry.panes[index];
+    if (!geometry.bounded || (pane.grow.factor == 0.0F && !Preferred(pane, axis).has_value())) {
+      pane.natural = Main(measure_pane(index, natural), axis);
+    }
+  }
+
+  if (geometry.bounded) {
+    const auto extents = Allocate(geometry.panes, axis, geometry.available);
+    for (std::size_t index = 0; index < count; ++index) {
+      geometry.panes[index].extent = extents[index];
+    }
+  } else {
+    for (Pane& pane : geometry.panes) {
+      pane.extent = std::clamp(Preferred(std::as_const(pane), axis), Minimum(pane, axis), Maximum(pane, axis));
+    }
+  }
+  float cross = cross_limit;
+  if (!std::isfinite(cross_limit)) {
+    // Wrapping and aspect ratios depend on the allocated main extent, not the initial natural measurement.
+    cross = axis == Axis::Horizontal ? constraints.min_height : constraints.min_width;
+    for (std::size_t index = 0; index < count; ++index) {
+      const float extent = geometry.panes[index].extent;
+      Constraints allocated = constraints.Loose();
+      if (axis == Axis::Horizontal) {
+        allocated.min_width = allocated.max_width = extent;
+      } else {
+        allocated.min_height = allocated.max_height = extent;
+      }
+      const Size measured = measure_pane(index, allocated);
+      cross = std::max(cross, axis == Axis::Horizontal ? measured.height : measured.width);
+    }
+  }
+  float main = main_limit;
+  if (!geometry.bounded) {
+    main = 0.0F;
+    for (std::size_t index = 0; index < count; ++index) {
+      main += geometry.panes[index].extent;
+      if (index + 1 < count) {
+        main += geometry.separator;
+      }
+    }
+  }
+  geometry.size = constraints.Constrain(Oriented(main, cross, axis));
+  return geometry;
+}
+
+void detail::CommitSplitGeometry(SplitSession& session, SplitGeometry geometry, const ViewNode& owner, Point origin) {
+  geometry.enabled = owner.IsEnabled();
+  const Point window_origin = owner.LocalToWindow(origin);
+  const Point x = owner.LocalToWindow(origin + Point{1.0F, 0.0F});
+  const Point y = owner.LocalToWindow(origin + Point{0.0F, 1.0F});
+  geometry.transform = {x.x - window_origin.x, x.y - window_origin.y, y.x - window_origin.x, y.y - window_origin.y,
+                        window_origin.x, window_origin.y};
+  session.geometry = std::move(geometry);
+}
+
+View detail::MakeClippedPane(View content) {
+  return SplitPane{std::move(content)}.With(ClipChildren{});
+}
+
+View detail::MakeSplitSeparator(std::shared_ptr<SplitSession> session, std::size_t index, Axis axis, Color color) {
+  return SeparatorLayout{}.With(
+      Focusable{},
+      PointerCursor(axis == Axis::Horizontal ? PointerCursorKind::ResizeHorizontal : PointerCursorKind::ResizeVertical),
+      SeparatorBehavior{std::move(session), index, color}
+  );
+}
 
 SplitLayout::SplitLayout(std::vector<View> children)
     : detail::TypedView<SplitLayout>(std::make_shared<detail::ViewSpec>(detail::NodeKind::Scope)),
