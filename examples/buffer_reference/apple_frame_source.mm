@@ -62,7 +62,7 @@ namespace demo = huxerui::example::buffer_reference;
 @end
 
 #if TARGET_OS_IOS
-@interface HuxerUIExampleFrameSourceFactory : NSObject <HUXUIKitPlatformModuleFactory>
+@interface HuxerUIExampleFrameSourceFactory : NSObject <HUXPlatformModuleFactory>
 #else
 @interface HuxerUIExampleFrameSourceFactory : NSObject <HUXAppKitPlatformModuleFactory>
 #endif
@@ -71,8 +71,8 @@ namespace demo = huxerui::example::buffer_reference;
 @implementation HuxerUIExampleFrameSourceFactory
 
 #if TARGET_OS_IOS
-- (id<HUXPlatformModule>)createWithViewController:(UIViewController*)controller options:(HUXPlatformPayload*)options
-                                         events:(id<HUXPlatformEventEmitter>)events {
+- (id<HUXPlatformModule>)createWithOptions:(HUXPlatformPayload*)options
+                                   events:(id<HUXPlatformEventEmitter>)events {
 #else
 - (id<HUXPlatformModule>)createWithWindow:(NSWindow*)window options:(HUXPlatformPayload*)options
                                  events:(id<HUXPlatformEventEmitter>)events {

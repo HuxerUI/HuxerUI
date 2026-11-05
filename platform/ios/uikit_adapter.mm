@@ -25,6 +25,7 @@
 #include "ios_application_internal.h"
 #include "ios_file_internal.h"
 #include "ios_http_internal.h"
+#include "ios_presentation_internal.h"
 #include "uikit_accessibility.h"
 #include "uikit_platform_view.h"
 #include "uikit_renderer.h"
@@ -544,6 +545,7 @@ public:
     try {
       window_ = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
       view_controller_ = [[HuxerUIIOSViewController alloc] init];
+      presentation_ = [[HUXPresentationCoordinator alloc] initWithOwner:view_controller_];
       view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
 
       view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
@@ -606,6 +608,7 @@ public:
   }
 
   void Shutdown() {
+    [presentation_ close];
     Retire();
     [NSNotificationCenter.defaultCenter removeObserver:view_];
     [frame_scheduler_ shutdown];
@@ -626,6 +629,7 @@ public:
     scheduled_frame_deadline_.reset();
     view_ = nil;
     view_controller_ = nil;
+    presentation_ = nil;
     window_ = nil;
   }
 
@@ -725,6 +729,7 @@ public:
       state = application_state == ApplicationLifecycleState::Active && window_.keyWindow
           ? WindowLifecycleState::Active : WindowLifecycleState::Inactive;
     }
+    [presentation_ setActive:state == WindowLifecycleState::Active];
     UiWindow::UpdateWindowLifecycleState(state);
   }
   UIView* HitTestPlatformView(Point point, UIEvent* event) const {
@@ -768,7 +773,7 @@ public:
   }
 
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
-    return CreateIosFilePickerTransport([this] { return view_controller_; });
+    return CreateIosFilePickerTransport(presentation_);
   }
 
   ResourceConfiguration Configuration() const {
@@ -861,6 +866,7 @@ private:
   UIKitRenderer renderer_;
   __strong UIWindow* window_ = nil;
   __strong HuxerUIIOSViewController* view_controller_ = nil;
+  __strong HUXPresentationCoordinator* presentation_ = nil;
   __strong HuxerUIView* view_ = nil;
   __strong HuxerUIIOSFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<UIKitTextInput> text_input_;

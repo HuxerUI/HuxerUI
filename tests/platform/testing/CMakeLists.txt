@@ -3,11 +3,23 @@ if (ANDROID)
             ../android/ui_testing/file_reference.cpp ../android/ui_testing/activity_result.cpp)
 elseif (IOS)
     find_package(XCTest REQUIRED)
-    xctest_add_bundle(huxerui_ui_testing_smoke huxerui_static ios.mm smoke.cpp ../ios/file_reference.mm)
-    set_source_files_properties(../ios/file_reference.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    add_executable(huxerui_ui_testing_host MACOSX_BUNDLE ../ios/host.m)
+    target_link_libraries(huxerui_ui_testing_host PRIVATE "-framework UIKit")
+    set_target_properties(huxerui_ui_testing_host PROPERTIES
+            XCODE_GENERATE_SCHEME TRUE
+            MACOSX_BUNDLE_GUI_IDENTIFIER org.huxerui.testing.host
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.huxerui.testing.host
+            XCODE_ATTRIBUTE_INFOPLIST_KEY_UILaunchScreen_Generation YES
+    )
+    xctest_add_bundle(huxerui_ui_testing_smoke huxerui_ui_testing_host ios.mm smoke.cpp
+            ../ios/file_reference.mm ../ios/presentation.mm)
+    set_source_files_properties(../ios/file_reference.mm ../ios/presentation.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+    # Xcode embeds the test bundle itself; making PlugIns a build directory duplicates its mkdir output.
     set_target_properties(huxerui_ui_testing_smoke PROPERTIES
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/$<CONFIG>"
             XCODE_GENERATE_SCHEME TRUE
             MACOSX_BUNDLE_GUI_IDENTIFIER org.huxerui.testing.smoke
+            XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER org.huxerui.testing.smoke
     )
 elseif (EMSCRIPTEN)
     add_executable(huxerui_ui_testing_smoke web.cpp smoke.cpp)
@@ -34,10 +46,16 @@ _huxerui_append_resource_package_input(huxerui_ui_testing_smoke "${HUXERUI_BUILT
 get_target_property(_HUXERUI_SMOKE_PACKAGE huxerui_ui_testing_smoke HUXERUI_RESOURCE_PACKAGE)
 target_compile_definitions(huxerui_ui_testing_smoke PRIVATE "HUXERUI_SMOKE_PACKAGE=\"${_HUXERUI_SMOKE_PACKAGE}\"")
 if (IOS)
+    set(_HUXERUI_SMOKE_BUNDLE "$<TARGET_BUNDLE_CONTENT_DIR:huxerui_ui_testing_smoke>")
+    if (XCODE)
+        set(_HUXERUI_SMOKE_BUNDLE
+                "$<TARGET_BUNDLE_DIR:huxerui_ui_testing_host>/PlugIns/huxerui_ui_testing_smoke.xctest")
+    endif ()
     add_custom_command(TARGET huxerui_ui_testing_smoke POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_directory "${_HUXERUI_SMOKE_PACKAGE}"
-                    "$<TARGET_BUNDLE_CONTENT_DIR:huxerui_ui_testing_smoke>/package"
+                    "${_HUXERUI_SMOKE_BUNDLE}/package"
     )
+    unset(_HUXERUI_SMOKE_BUNDLE)
 elseif (EMSCRIPTEN)
     target_link_options(huxerui_ui_testing_smoke PRIVATE "SHELL:--preload-file \"${_HUXERUI_SMOKE_PACKAGE}@/package\"")
     add_custom_command(TARGET huxerui_ui_testing_smoke POST_BUILD

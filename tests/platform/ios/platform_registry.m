@@ -20,7 +20,7 @@
 
 @end
 
-@interface HuxerUITestPlatformModuleFactory : NSObject <HUXUIKitPlatformModuleFactory>
+@interface HuxerUITestPlatformModuleFactory : NSObject <HUXUIKitWindowPlatformModuleFactory>
 @end
 
 @implementation HuxerUITestPlatformModuleFactory
@@ -77,4 +77,23 @@ static void HuxerUITestFileReferenceDeclarations(HUXFileReference* reference) {
   (void)copied;
   (void)url;
   (void)round_trip;
+}
+
+@interface HuxerUITestApplicationModuleFactory : NSObject <HUXPlatformModuleFactory>
+@end
+@implementation HuxerUITestApplicationModuleFactory
+- (id<HUXPlatformModule>)createWithOptions:(HUXPlatformPayload*)options
+                                   events:(id<HUXPlatformEventEmitter>)events {
+  [events emit:@"created" payload:options];
+  return [HuxerUITestPlatformModule new];
+}
+@end
+
+static id<HUXPlatformCancellation> HuxerUITestPresentation(UIViewController* owner) {
+  return [HUXGetPresentationCoordinator(owner) enqueueWithStart:
+      ^id<HUXPlatformCancellation>(UIViewController* presenter, void (^finished)(void)) {
+    (void)presenter;
+    finished();
+    return nil;
+  } failure:^(NSError* error) { (void)error; }];
 }

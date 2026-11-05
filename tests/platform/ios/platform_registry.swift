@@ -13,7 +13,7 @@ final class TestPlatformModule: NSObject, PlatformModule {
   func dispose() {}
 }
 
-final class TestPlatformModuleFactory: NSObject, UIKitPlatformModuleFactory {
+final class TestPlatformModuleFactory: NSObject, UIKitWindowPlatformModuleFactory {
   func create(with viewController: UIViewController, options: PlatformPayload,
               events: PlatformEventEmitter) -> PlatformModule {
     _ = events.emit("created", payload: options)
@@ -52,3 +52,21 @@ func copyFileReference(_ url: URL) throws -> FileReference {
 
 let texture = PixelBufferTexture(intrinsicSize: CGSize(width: 16, height: 9))
 texture.finish()
+
+final class TestApplicationModuleFactory: NSObject, PlatformModuleFactory {
+  func create(options: PlatformPayload, events: PlatformEventEmitter) -> PlatformModule {
+    _ = events.emit("created", payload: options)
+    return TestPlatformModule()
+  }
+}
+
+@MainActor
+func usePresentation(_ owner: UIViewController) -> PlatformCancellation {
+  presentationCoordinator(for: owner).enqueue(start: { presenter, finished in
+    _ = presenter
+    finished()
+    return nil
+  }, failure: { error in
+    _ = error.localizedDescription
+  })
+}

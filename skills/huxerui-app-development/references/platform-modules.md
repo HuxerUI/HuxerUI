@@ -80,7 +80,8 @@ For a FileReference payload, `requireFileReference()` returns a retained `HuxerU
 The Web JavaScript `PlatformPayload` bridge does not transport `ExternalTexture`; use the direct Emscripten C++ texture path when Web must provide frames rather than adding another bridge channel.
 
 iOS and macOS expose their Objective-C/Swift contracts through the pure Objective-C Clang module `HuxerUIPlatform`.
-An Objective-C or Swift implementation conforms to `UIKitPlatformModuleFactory` or `AppKitPlatformModuleFactory` and returns a `PlatformModule` instance.
+On iOS, implement `PlatformModuleFactory` for application work or `UIKitWindowPlatformModuleFactory` for work tied to the supplied original UIViewController; macOS uses `AppKitPlatformModuleFactory`.
+Each opening returns a new `PlatformModule` instance, not a singleton.
 Its payload `fileReference()` accessor returns an ARC-retained `FileReference` whose `fileURL` preserves the underlying C++ access lifetime.
 When an Apple Module starts asynchronous reading, playback, or writing, retain that `FileReference` alongside the player, asset, document, or provider operation until the native consumer has stopped using the resource.
 Retaining only `fileURL` does not keep a security-scoped selection open after the wrapper is released.
@@ -101,7 +102,12 @@ context.RegisterPlatformModule<std::shared_ptr<AudioPlayer>, AudioPlayerOptions>
 
 Use `macos::ObjectiveCPlatformModuleFactory` for AppKit.
 The framework does not look up a class name, generate a registrant, or require the application delegate to register the factory again.
-Direct Objective-C++ implementations remain strongly typed through `ios::PlatformModuleFactory` or `macos::PlatformModuleFactory` and do not use payloads.
+For an iOS window service, use `ios::ObjectiveCWindowPlatformModuleFactory`; application services use `ios::ObjectiveCPlatformModuleFactory` as above and do not require UI.
+Direct Objective-C++ window implementations use `ios::WindowPlatformModuleFactory` or `macos::PlatformModuleFactory`; direct iOS application factories accept `Runtime&` and do not use payloads.
+iOS window modules retain `presentationCoordinator(for: viewController)` and use `enqueue(start:failure:)` to share FilePicker's FIFO presentation queue.
+All calls and callbacks run on the main thread. Active cancellation keeps the slot until actual dismiss completion calls `finished`; a queued cancellation prevents start, and a closed coordinator never rebinds.
+Return native cancellation from start, or nil only after synchronous `finished`. Keep provider work cancellation separate from presentation completion.
+Use a UI Task scope for picker work; acquired FileReferences can then move to application work. See [iOS native presentation](../../../docs/guide/extending.md#ios-native-presentation).
 
 `PlatformChannel::Invoke` returns a request identity before scheduling the platform invocation on the owning UI thread.
 Use `Invoke<Result>(method, completion)` when both the argument and result are Null; the typed C++ completion receives `PlatformResult<std::monostate>`.

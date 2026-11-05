@@ -146,9 +146,39 @@ Android receives a retained `HuxerUIFileReference` with `uri()`, Apple receives 
 The platform wrappers preserve the C++ access lifetime but do not expose a second `CanWrite()` contract; shared code continues to own capability metadata and file operations.
 
 iOS and macOS libraries may implement the platform side in Objective-C or Swift through the `HuxerUIPlatform` Clang module.
-Their Objective-C++ `ApplicationHook` passes the actual factory object to `ios::ObjectiveCPlatformModuleFactory` or `macos::ObjectiveCPlatformModuleFactory`, then wraps the resulting `PlatformChannel` in the library's typed service.
+Their Objective-C++ `ApplicationHook` registers the actual factory object and wraps the resulting `PlatformChannel` in the library's typed service.
+iOS uses `ios::ObjectiveCPlatformModuleFactory` with `HUXPlatformModuleFactory` for application services, and `ios::ObjectiveCWindowPlatformModuleFactory` with `HUXUIKitWindowPlatformModuleFactory` for window services.
+The application factory receives options and events without requiring UI; the window factory also receives its original `UIViewController`.
+Each opening creates an instance; application binding does not make it a singleton.
+macOS continues to use `macos::ObjectiveCPlatformModuleFactory` with its owning `NSWindow`.
 The adapter's `create` callback performs that strongly typed wrapping; PlatformView reserves `connect` and `disconnect` for Controller attachment.
+Direct iOS Objective-C++ window factories use `ios::WindowPlatformModuleFactory`; application factories use an ordinary callable accepting `Runtime&`.
 The same platform headers retain the direct Objective-C++ factory path; factory class-name lookup and application-host registration are not used.
+
+### iOS native presentation
+
+A window module obtains `HUXGetPresentationCoordinator(viewController)` (`presentationCoordinator(for:)` in Swift) once from the exact controller supplied by its factory and retains it for delayed work.
+`enqueueWithStart:failure:` (`enqueue(start:failure:)`) returns an `HUXPlatformCancellation` before starting native work asynchronously on the main thread.
+FilePicker and extension libraries share this FIFO queue per original window; another window has an independent queue.
+Inactive windows pause admission, a closed/unavailable window fails, and an unmanaged modal controller fails as busy instead of being covered.
+FilePicker save preparation runs before entering this native queue; requests still waiting in FilePicker's own C++ queue have not entered it.
+
+The starter receives the presenter and a `finished` closure, installs native UI synchronously, and returns its native cancellation object.
+It may return nil only after calling `finished` synchronously because no presentation remains.
+The library owns the picker, delegate, dismissal, and data processing.
+Call `finished` after programmatic dismiss completion or `presentationControllerDidDismiss` for interactive dismissal; UIKit does not call the latter for programmatic dismissal.
+Failed startup without installed UI also calls `finished`.
+This releases presentation ownership, independently of subsequent provider loading or file copying.
+
+Canceling a queued request prevents its starter from running; canceling an active one invokes native cancellation once and holds the slot until `finished`.
+The library's cancellation must wait through presentation/dismissal transitions and call `finished` only when UI is actually absent.
+Duplicate and late completions cannot release another request.
+Window teardown permanently closes the coordinator, fails uncanceled requests, and requests active cleanup; it never rebinds to a replacement window.
+All coordinator entry points and callbacks, including cancellation and `finished`, require the main thread.
+
+Use a UI Task scope for a window picker and hand acquired FileReferences to application work afterward.
+Coordinator cancellation covers presentation only; a media operation also owns cancellation of its provider loading/copying work.
+The existing PlatformChannel close contract still discards pending callbacks; an application Task that outlives a window-bound channel needs its own facade closure/failure path when using `AwaitCallback`.
 
 Use PlatformView only when a real platform visual control must participate in HuxerUI layout and ordering.
 Use ExternalTexture when a producer supplies image frames rather than an interactive platform view.

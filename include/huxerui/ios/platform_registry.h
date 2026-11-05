@@ -134,12 +134,45 @@ NS_SWIFT_NAME(PlatformModule)
 - (void)dispose;
 @end
 
-NS_SWIFT_NAME(UIKitPlatformModuleFactory)
-@protocol HUXUIKitPlatformModuleFactory <NSObject>
+/// Creates one application-bound instance per OpenPlatformModule call, without requiring a window.
+NS_SWIFT_NAME(PlatformModuleFactory)
+@protocol HUXPlatformModuleFactory <NSObject>
+- (id<HUXPlatformModule>)createWithOptions:(HUXPlatformPayload*)options
+                                   events:(id<HUXPlatformEventEmitter>)events
+    NS_SWIFT_NAME(create(options:events:));
+@end
+
+/// Creates an instance bound to the supplied original HuxerUI window.
+NS_SWIFT_NAME(UIKitWindowPlatformModuleFactory)
+@protocol HUXUIKitWindowPlatformModuleFactory <NSObject>
 - (id<HUXPlatformModule>)createWithViewController:(UIViewController*)viewController
                                           options:(HUXPlatformPayload*)options
                                            events:(id<HUXPlatformEventEmitter>)events;
 @end
+
+/// Serializes native presentations for one original HuxerUI window. All operations run on the main thread.
+/// Pauses admission while the window is inactive. Unmanaged modal UI fails admission instead of being covered.
+NS_SWIFT_NAME(PresentationCoordinator)
+@interface HUXPresentationCoordinator : NSObject
+- (instancetype)init NS_UNAVAILABLE;
++ (instancetype)new NS_UNAVAILABLE;
+
+/// Enqueues a presentation and returns its cancellation handle before start can run.
+/// start installs UI synchronously and returns native cancellation. It may return nil only after calling finished.
+/// Call finished exactly when UI is absent: after dismiss completion, interactive dismissal, or failed startup.
+/// Canceling a queued request prevents start; canceling active UI invokes native cancellation once and keeps its slot
+/// until finished. Duplicate or late finished calls are harmless. Media processing may continue after releasing UI.
+/// failure reports host closure, unavailable/busy presentation, or invalid startup, but not explicit cancellation.
+/// Window closure fails pending requests and requests active cleanup; retained coordinators never bind to another host.
+- (id<HUXPlatformCancellation>)enqueueWithStart:
+    (id<HUXPlatformCancellation> _Nullable (^)(UIViewController* presenter, void (^finished)(void)))start
+    failure:(void (^)(NSError* error))failure NS_SWIFT_NAME(enqueue(start:failure:));
+@end
+
+/// Returns the coordinator for the exact HuxerUI controller supplied to a window factory, on the main thread.
+/// Raises NSInvalidArgumentException for a controller not owned by HuxerUI. Retain the result for delayed work.
+FOUNDATION_EXPORT HUXPresentationCoordinator* HUXGetPresentationCoordinator(UIViewController* owner)
+    NS_SWIFT_NAME(presentationCoordinator(for:));
 
 NS_SWIFT_NAME(UIKitPlatformView)
 @protocol HUXUIKitPlatformView <NSObject>
@@ -214,10 +247,11 @@ namespace huxerui::ios {
 /// @tparam Instance Retained C++ or Objective-C++ state whose shared lifetime covers the mounted UIView.
 /// @tparam Controller Optional strongly typed command endpoint connected for the mounted View.
 template <class Properties, class Instance, class Controller = void> struct PlatformViewFactory;
-template <class Module, class Options = void> struct PlatformModuleFactory;
+template <class Module, class Options = void> struct WindowPlatformModuleFactory;
 
 #if defined(__OBJC__)
 template <class Module, class Options = void> struct ObjectiveCPlatformModuleFactory;
+template <class Module, class Options = void> struct ObjectiveCWindowPlatformModuleFactory;
 template <class Properties, class Controller = void> struct ObjectiveCPlatformViewFactory;
 #endif
 
@@ -238,9 +272,11 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window);
 #if defined(__OBJC__)
 class ObjectiveCPlatformViewInstance;
 
-PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, UIViewController* owner,
-                                               id<HUXUIKitPlatformModuleFactory> factory,
+PlatformChannel CreateObjectiveCPlatformModule(Runtime& runtime, id<HUXPlatformModuleFactory> factory,
                                                PlatformPayload options);
+PlatformChannel CreateObjectiveCWindowPlatformModule(UiWindow& ui_window, UIViewController* owner,
+                                                     id<HUXUIKitWindowPlatformModuleFactory> factory,
+                                                     PlatformPayload options);
 std::shared_ptr<ObjectiveCPlatformViewInstance>
 CreateObjectiveCPlatformView(UiWindow& ui_window, UIViewController* owner,
                              id<HUXUIKitPlatformViewFactory> factory, PlatformPayload properties,
@@ -355,7 +391,7 @@ ErasePlatformViewFactory(ios::PlatformViewFactory<Properties, Instance, Controll
 } // namespace detail
 
 /// Adapts a direct Objective-C++ PlatformModule factory to the platform-neutral registry callable contract.
-template <class Module> struct PlatformModuleFactory<Module, void> {
+template <class Module> struct WindowPlatformModuleFactory<Module, void> {
   std::function<Module(UiWindow&, UIViewController*)> create;
 
   Module operator()(UiWindow& ui_window) {
@@ -366,7 +402,7 @@ template <class Module> struct PlatformModuleFactory<Module, void> {
   }
 };
 
-template <class Module, class Options> struct PlatformModuleFactory {
+template <class Module, class Options> struct WindowPlatformModuleFactory {
   std::function<Module(UiWindow&, UIViewController*, const Options&)> create;
 
   Module operator()(UiWindow& ui_window, const Options& options) {
@@ -378,18 +414,18 @@ template <class Module, class Options> struct PlatformModuleFactory {
 };
 
 #if defined(__OBJC__)
-/// Adapts an actual Objective-C or Swift PlatformModule factory object to a strongly typed C++ Module facade.
+/// Creates an application-bound Objective-C or Swift instance without requiring a UiWindow.
 /// The factory object creates the platform instance; create wraps its framework-owned PlatformChannel in Module.
 template <class Module> struct ObjectiveCPlatformModuleFactory<Module, void> {
-  __strong id<HUXUIKitPlatformModuleFactory> factory = nil;
+  __strong id<HUXPlatformModuleFactory> factory = nil;
   std::function<Module(PlatformChannel)> create;
 
-  Module operator()(UiWindow& ui_window) {
+  Module operator()(Runtime& runtime) {
     if (factory == nil || !create) {
       throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory is incomplete");
     }
     PlatformChannel channel =
-        detail::CreateObjectiveCPlatformModule(ui_window, detail::GetUIKitViewController(ui_window), factory, {});
+        detail::CreateObjectiveCPlatformModule(runtime, factory, {});
     try {
       return create(channel);
     } catch (...) {
@@ -402,14 +438,56 @@ template <class Module> struct ObjectiveCPlatformModuleFactory<Module, void> {
 template <class Module, class Options> struct ObjectiveCPlatformModuleFactory {
   static_assert(huxerui::detail::PlatformPayloadEncodable<Options>);
 
-  __strong id<HUXUIKitPlatformModuleFactory> factory = nil;
+  __strong id<HUXPlatformModuleFactory> factory = nil;
+  std::function<Module(PlatformChannel)> create;
+
+  Module operator()(Runtime& runtime, const Options& options) {
+    if (factory == nil || !create) {
+      throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory is incomplete");
+    }
+    PlatformChannel channel = detail::CreateObjectiveCPlatformModule(
+        runtime, factory, huxerui::detail::EncodePlatformValue(options));
+    try {
+      return create(channel);
+    } catch (...) {
+      channel.Close();
+      throw;
+    }
+  }
+};
+
+/// Creates a window-bound Objective-C or Swift instance and wraps its channel in a strongly typed Module.
+/// The factory object creates the platform instance; create wraps its framework-owned PlatformChannel in Module.
+template <class Module> struct ObjectiveCWindowPlatformModuleFactory<Module, void> {
+  __strong id<HUXUIKitWindowPlatformModuleFactory> factory = nil;
+  std::function<Module(PlatformChannel)> create;
+
+  Module operator()(UiWindow& ui_window) {
+    if (factory == nil || !create) {
+      throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory is incomplete");
+    }
+    PlatformChannel channel =
+        detail::CreateObjectiveCWindowPlatformModule(ui_window, detail::GetUIKitViewController(ui_window), factory, {});
+    try {
+      return create(channel);
+    } catch (...) {
+      channel.Close();
+      throw;
+    }
+  }
+};
+
+template <class Module, class Options> struct ObjectiveCWindowPlatformModuleFactory {
+  static_assert(huxerui::detail::PlatformPayloadEncodable<Options>);
+
+  __strong id<HUXUIKitWindowPlatformModuleFactory> factory = nil;
   std::function<Module(PlatformChannel)> create;
 
   Module operator()(UiWindow& ui_window, const Options& options) {
     if (factory == nil || !create) {
       throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory is incomplete");
     }
-    PlatformChannel channel = detail::CreateObjectiveCPlatformModule(
+    PlatformChannel channel = detail::CreateObjectiveCWindowPlatformModule(
         ui_window, detail::GetUIKitViewController(ui_window), factory, huxerui::detail::EncodePlatformValue(options));
     try {
       return create(channel);

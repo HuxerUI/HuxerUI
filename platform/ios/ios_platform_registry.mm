@@ -765,22 +765,12 @@ public:
   bool channel_connected = false;
 };
 
-PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, UIViewController* owner,
-                                               id<HUXUIKitPlatformModuleFactory> factory,
-                                               PlatformPayload options) {
-  if (owner == nil) {
-    throw std::logic_error("HuxerUI iOS Objective-C PlatformModule requires an owning UIViewController");
-  }
-  if (factory == nil || ![factory respondsToSelector:@selector(createWithViewController:options:events:)]) {
-    throw std::invalid_argument("HuxerUI iOS Objective-C PlatformModule factory must provide create");
-  }
-  const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
+static PlatformChannel CreateModule(const huxerui::detail::PlatformChannelEndpoint& endpoint,
+                                    const std::function<id<HUXPlatformModule>(id<HUXPlatformEventEmitter>)>& create) {
   HUXIOSPlatformEventEmitter* events = [[HUXIOSPlatformEventEmitter alloc] initWithEvents:endpoint.Events()];
   __strong id<HUXPlatformModule> instance = nil;
   @try {
-    instance = [factory createWithViewController:owner
-                                         options:EncodePayload(std::move(options))
-                                          events:events];
+    instance = create(events);
   } @catch (NSException* exception) {
     [events close];
     throw std::logic_error("HuxerUI iOS Objective-C PlatformModule factory raised an exception");
@@ -793,6 +783,32 @@ PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, UIViewContro
   auto state = std::make_shared<ObjectiveCInstanceState>(instance, events);
   ConnectInstance(endpoint, state);
   return endpoint.Channel();
+}
+
+PlatformChannel CreateObjectiveCPlatformModule(Runtime& runtime, id<HUXPlatformModuleFactory> factory,
+                                               PlatformPayload options) {
+  if (factory == nil || ![factory respondsToSelector:@selector(createWithOptions:events:)]) {
+    throw std::invalid_argument("HuxerUI iOS Objective-C PlatformModule factory must provide create");
+  }
+  return CreateModule(huxerui::detail::MakePlatformChannelEndpoint(runtime),
+      [factory, options = std::move(options)](id<HUXPlatformEventEmitter> events) {
+        return [factory createWithOptions:EncodePayload(options) events:events];
+      });
+}
+
+PlatformChannel CreateObjectiveCWindowPlatformModule(UiWindow& ui_window, UIViewController* owner,
+                                                     id<HUXUIKitWindowPlatformModuleFactory> factory,
+                                                     PlatformPayload options) {
+  if (owner == nil) {
+    throw std::logic_error("HuxerUI iOS Objective-C PlatformModule requires an owning UIViewController");
+  }
+  if (factory == nil || ![factory respondsToSelector:@selector(createWithViewController:options:events:)]) {
+    throw std::invalid_argument("HuxerUI iOS Objective-C PlatformModule factory must provide create");
+  }
+  return CreateModule(huxerui::detail::MakePlatformChannelEndpoint(ui_window),
+      [owner, factory, options = std::move(options)](id<HUXPlatformEventEmitter> events) {
+        return [factory createWithViewController:owner options:EncodePayload(options) events:events];
+      });
 }
 
 std::shared_ptr<ObjectiveCPlatformViewInstance>

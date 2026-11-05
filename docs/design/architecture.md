@@ -1130,9 +1130,21 @@ A PlatformView without a Controller uses the default unsupported `invoke` implem
 
 The iOS and macOS adapters independently expose equivalent Objective-C protocols so Objective-C and Swift share one language contract without a common Apple host abstraction.
 The iOS PlatformView protocol exposes a non-null `UIView*`, the macOS protocol exposes a non-null `NSView*`, and their factories receive the owning `UIViewController*` or `NSWindow*` plus Properties and the framework emitter.
-Both View protocols expose optional `update` and `invoke` operations plus required `dispose`; Module protocols expose `invoke` and `dispose` and receive the platform-specific owning host at creation.
-An Objective-C++ installer registers the actual Objective-C or Swift factory object through `ios::ObjectiveCPlatformModuleFactory`, `ios::ObjectiveCPlatformViewFactory`, or the corresponding `macos` adapter.
+Both View protocols expose optional `update` and `invoke` operations plus required `dispose`; Module protocols expose `invoke` and `dispose`.
+iOS `HUXPlatformModuleFactory` creates application-bound instances without UI; `HUXUIKitWindowPlatformModuleFactory` receives the original window controller.
+Their Objective-C++ descriptors are `ios::ObjectiveCPlatformModuleFactory` and `ios::ObjectiveCWindowPlatformModuleFactory`; the direct window descriptor is `ios::WindowPlatformModuleFactory`, while direct application factories accept `Runtime&`.
+macOS module factories continue to receive their owning `NSWindow`.
+An Objective-C++ installer registers the actual Objective-C or Swift factory object through the applicable iOS module descriptor, `ios::ObjectiveCPlatformViewFactory`, or the corresponding `macos` adapter.
 The framework retains that object in the surface registry and never performs class-name lookup or asks the application host to register it again.
+
+Each iOS native window creates its presentation coordinator before shared window initialization and closes it before releasing native facilities.
+The native controller retains its coordinator; the coordinator weakly references that controller and exposes no raw UiWindow pointer to delayed operations.
+FilePicker transports and library modules retain the original coordinator, which never binds to another window.
+Native admission is FIFO on the main thread and pauses while the window is inactive; unmanaged modal UI is rejected as busy.
+A canceled active request retains its slot until the library reports actual dismissal through its identity-bound `finished` closure.
+Native cancellation returned after reentrant cancellation/closure is invoked once; a synchronous finish prevents later cancellation of completed work.
+Closing invalidates pending admission and requests active cleanup, which may outlive shared window state.
+Coordinator completion releases only native presentation ownership, not domain-specific media processing or a still-live Task awaiting a closed PlatformChannel.
 
 ```objc
 @protocol HUXPlatformEventEmitter <NSObject>

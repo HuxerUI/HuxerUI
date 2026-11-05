@@ -15,7 +15,7 @@ namespace huxerui::example {
 std::shared_ptr<TimerService> CreateAppleTimerService(PlatformChannel channel);
 
 #if TARGET_OS_IOS
-id<HUXUIKitPlatformModuleFactory> CreateAppleTimerFactory();
+id<HUXPlatformModuleFactory> CreateAppleTimerFactory();
 #else
 id<HUXAppKitPlatformModuleFactory> CreateAppleTimerFactory();
 #endif

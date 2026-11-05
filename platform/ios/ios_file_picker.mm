@@ -11,7 +11,6 @@
 #include <exception>
 #include <system_error>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,18 +18,22 @@
 #include <utility>
 #include <vector>
 
+#include <huxerui/ios/platform_registry.h>
+
 #include "io/file_internal.h"
 #include "ios_file_internal.h"
 
-@interface HuxerUIIOSDocumentPickerDelegate : NSObject <UIDocumentPickerDelegate>
+@interface HuxerUIIOSDocumentPickerDelegate : NSObject <UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate>
 @property(nonatomic, copy) void (^selection)(NSArray<NSURL*>* urls);
 @property(nonatomic, copy) void (^cancellation)(void);
+@property(nonatomic) BOOL selected;
 @end
 
 @implementation HuxerUIIOSDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController*)controller didPickDocumentsAtURLs:(NSArray<NSURL*>*)urls {
   static_cast<void>(controller);
+  self.selected = YES;
   if (self.selection != nil) {
     self.selection(urls);
   }
@@ -43,6 +46,23 @@
   }
 }
 
+- (void)presentationControllerDidDismiss:(UIPresentationController*)presentationController {
+  static_cast<void>(presentationController);
+  if (!self.selected && self.cancellation != nil) self.cancellation();
+}
+
+@end
+
+@interface HuxerUIIOSPickerCancellation : NSObject <HUXPlatformCancellation>
+@property(nonatomic, copy) void (^action)(void);
+@end
+
+@implementation HuxerUIIOSPickerCancellation
+- (void)cancel {
+  auto action = self.action;
+  self.action = nil;
+  if (action != nil) action();
+}
 @end
 
 @interface HuxerUIIOSExportPreparation : NSObject
@@ -251,14 +271,6 @@ std::optional<std::string> ReferenceContentType(NSURL* url) {
   return std::nullopt;
 }
 
-UIViewController* VisiblePresenter(UIViewController* owner) {
-  UIViewController* presenter = owner;
-  while (presenter.presentedViewController != nil && !presenter.presentedViewController.isBeingDismissed) {
-    presenter = presenter.presentedViewController;
-  }
-  return presenter.viewIfLoaded.window == nil ? nil : presenter;
-}
-
 HuxerUIIOSExportPreparation* PrepareExport(const File& source, std::string_view suggested_name) {
   // The export picker copies an existing URL and uses its filename. Stage only when the requested
   // name differs, so changing the export name neither renames the source nor stages every file read.
@@ -306,20 +318,6 @@ void CleanupExport(HuxerUIIOSExportPreparation* preparation) {
       [NSFileManager.defaultManager removeItemAtURL:directory error:nil];
     }
   });
-}
-
-template <class Completion> void DismissPicker(UIDocumentPickerViewController* picker, Completion completion) {
-  // The shared controller may present its next request as soon as completion runs. Wait for UIKit's
-  // dismissal completion so the old document picker no longer occupies the presentation hierarchy.
-  if (picker == nil || picker.presentingViewController == nil) {
-    completion();
-    return;
-  }
-  auto retained_completion = std::make_shared<Completion>(std::move(completion));
-  [picker dismissViewControllerAnimated:YES
-                             completion:^{
-                               (*retained_completion)();
-                             }];
 }
 
 // Shared local-reference coordination retains this owner beyond the picker and parent reference.
@@ -412,19 +410,32 @@ FileReference MakeIosReference(NSURL* url, bool writable, std::shared_ptr<IosFil
       });
 }
 
+// Picker state stays on the main queue; worker preparation returns there before touching the operation.
 class IosOpenPickerOperation final : public std::enable_shared_from_this<IosOpenPickerOperation> {
 public:
   explicit IosOpenPickerOperation(FilePickerOpenCompletion completion) : completion_(std::move(completion)) {}
 
-  void Start(FilePickerFilter filter, bool multiple, UIViewController* owner, bool directory = false,
+  void Start(FilePickerFilter filter, bool multiple, HUXPresentationCoordinator* coordinator, bool directory = false,
              bool writable = true) {
     writable_ = writable;
-    UIViewController* presenter = VisiblePresenter(owner);
-    if (presenter == nil) {
-      Complete({});
-      return;
-    }
+    auto self = shared_from_this();
+    presentation_ = [coordinator enqueueWithStart:^id<HUXPlatformCancellation>(UIViewController* presenter,
+                                                                             void (^finished)(void)) {
+      self->presentation_finished_ = finished;
+      self->Present(filter, multiple, presenter, directory);
+      if (self->finished_) return nil;
+      HuxerUIIOSPickerCancellation* cancellation = [HuxerUIIOSPickerCancellation new];
+      cancellation.action = ^{ self->Complete({}); };
+      return cancellation;
+    } failure:^(NSError*) { self->Complete({}); }];
+  }
 
+  void Cancel() noexcept {
+    Complete({});
+  }
+
+private:
+  void Present(const FilePickerFilter& filter, bool multiple, UIViewController* presenter, bool directory) {
     UIDocumentPickerViewController* picker =
         directory ? [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[ UTTypeFolder ] asCopy:NO]
                   : OpenPicker(filter, multiple);
@@ -451,13 +462,9 @@ public:
     picker_ = picker;
     delegate_ = delegate;
     [presenter presentViewController:picker animated:YES completion:nil];
+    picker.presentationController.delegate = delegate;
   }
 
-  void Cancel() noexcept {
-    Complete({});
-  }
-
-private:
   void Selected(NSArray<NSURL*>* urls) noexcept {
     // NSURL retention crosses the worker hop. Metadata and anchor creation can block, whereas picker
     // dismissal and completion must return to the main queue even if cancellation races this work.
@@ -485,27 +492,26 @@ private:
   }
 
   void Complete(std::vector<FileReference> references) noexcept {
-    FilePickerOpenCompletion completion;
-    __strong UIDocumentPickerViewController* picker = nil;
-    {
-      std::scoped_lock lock(mutex_);
-      if (finished_) {
-        return;
-      }
-      finished_ = true;
-      picker = picker_;
-      picker_ = nil;
-      delegate_ = nil;
-      completion = std::move(completion_);
-    }
-    DismissPicker(picker, [completion = std::move(completion), references = std::move(references)]() mutable {
-      if (completion) {
-        completion(std::move(references));
-      }
+    if (finished_) return;
+    finished_ = true;
+    [presentation_ cancel];
+    presentation_ = nil;
+    auto finished = presentation_finished_;
+    presentation_finished_ = nil;
+    auto delegate = delegate_;
+    auto picker = picker_;
+    picker_ = nil;
+    delegate_ = nil;
+    DismissIosFilePicker(picker, [completion = std::move(completion_), references = std::move(references),
+                           finished, delegate]() mutable {
+      static_cast<void>(delegate);
+      if (finished != nil) finished();
+      if (completion) completion(std::move(references));
     });
   }
 
-  std::mutex mutex_;
+  __strong id<HUXPlatformCancellation> presentation_ = nil;
+  void (^presentation_finished_)(void) = nil;
   __strong UIDocumentPickerViewController* picker_ = nil;
   __strong HuxerUIIOSDocumentPickerDelegate* delegate_ = nil;
   FilePickerOpenCompletion completion_;
@@ -517,19 +523,18 @@ class IosSavePickerOperation final : public std::enable_shared_from_this<IosSave
 public:
   explicit IosSavePickerOperation(FilePickerSaveCompletion completion) : completion_(std::move(completion)) {}
 
-  void Start(File source, SaveFileOptions options, UIViewController* owner) {
-    if (owner == nil) {
+  void Start(File source, SaveFileOptions options, HUXPresentationCoordinator* coordinator) {
+    if (coordinator == nil) {
       Complete(false);
       return;
     }
-    __weak UIViewController* weak_owner = owner;
     std::weak_ptr<IosSavePickerOperation> weak = shared_from_this();
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
       @autoreleasepool {
         HuxerUIIOSExportPreparation* preparation = PrepareExport(source, options.suggested_name);
         dispatch_async(dispatch_get_main_queue(), ^{
           if (auto operation = weak.lock()) {
-            operation->Present(preparation, weak_owner);
+            operation->Enqueue(preparation, coordinator);
           } else {
             CleanupExport(preparation);
           }
@@ -543,23 +548,27 @@ public:
   }
 
 private:
-  void Present(HuxerUIIOSExportPreparation* preparation, UIViewController* owner) {
-    UIViewController* presenter = VisiblePresenter(owner);
-    if (preparation == nil || presenter == nil) {
+  void Enqueue(HuxerUIIOSExportPreparation* preparation, HUXPresentationCoordinator* coordinator) {
+    if (finished_ || preparation == nil) {
       CleanupExport(preparation);
       Complete(false);
       return;
     }
-    {
-      std::scoped_lock lock(mutex_);
-      if (finished_) {
-        CleanupExport(preparation);
-        return;
-      }
-      preparation_ = preparation;
-    }
+    preparation_ = preparation;
+    auto self = shared_from_this();
+    presentation_ = [coordinator enqueueWithStart:^id<HUXPlatformCancellation>(UIViewController* presenter,
+                                                                             void (^finished)(void)) {
+      self->presentation_finished_ = finished;
+      self->Present(presenter);
+      if (self->finished_) return nil;
+      HuxerUIIOSPickerCancellation* cancellation = [HuxerUIIOSPickerCancellation new];
+      cancellation.action = ^{ self->Complete(false); };
+      return cancellation;
+    } failure:^(NSError*) { self->Complete(false); }];
+  }
 
-    UIDocumentPickerViewController* picker = ExportPicker(preparation.URL);
+  void Present(UIViewController* presenter) {
+    UIDocumentPickerViewController* picker = ExportPicker(preparation_.URL);
     if (picker == nil) {
       Complete(false);
       return;
@@ -577,44 +586,35 @@ private:
       }
     };
     picker.delegate = delegate;
-    {
-      std::scoped_lock lock(mutex_);
-      if (finished_) {
-        CleanupExport(preparation);
-        return;
-      }
-      picker_ = picker;
-      delegate_ = delegate;
-    }
+    picker_ = picker;
+    delegate_ = delegate;
     [presenter presentViewController:picker animated:YES completion:nil];
+    picker.presentationController.delegate = delegate;
   }
 
   void Complete(bool succeeded) noexcept {
-    FilePickerSaveCompletion completion;
-    __strong UIDocumentPickerViewController* picker = nil;
-    __strong HuxerUIIOSExportPreparation* preparation = nil;
-    {
-      std::scoped_lock lock(mutex_);
-      if (finished_) {
-        return;
-      }
-      finished_ = true;
-      picker = picker_;
-      preparation = preparation_;
-      picker_ = nil;
-      delegate_ = nil;
-      preparation_ = nil;
-      completion = std::move(completion_);
-    }
-    DismissPicker(picker, [completion = std::move(completion), preparation, succeeded]() mutable {
+    if (finished_) return;
+    finished_ = true;
+    [presentation_ cancel];
+    presentation_ = nil;
+    auto finished = presentation_finished_;
+    presentation_finished_ = nil;
+    auto delegate = delegate_;
+    auto picker = picker_;
+    auto preparation = preparation_;
+    picker_ = nil;
+    delegate_ = nil;
+    preparation_ = nil;
+    DismissIosFilePicker(picker, [completion = std::move(completion_), preparation, succeeded, finished, delegate]() mutable {
+      static_cast<void>(delegate);
+      if (finished != nil) finished();
       CleanupExport(preparation);
-      if (completion) {
-        completion(succeeded);
-      }
+      if (completion) completion(succeeded);
     });
   }
 
-  std::mutex mutex_;
+  __strong id<HUXPlatformCancellation> presentation_ = nil;
+  void (^presentation_finished_)(void) = nil;
   __strong UIDocumentPickerViewController* picker_ = nil;
   __strong HuxerUIIOSDocumentPickerDelegate* delegate_ = nil;
   __strong HuxerUIIOSExportPreparation* preparation_ = nil;
@@ -624,8 +624,7 @@ private:
 
 class IosFilePickerTransport final : public FilePickerTransport {
 public:
-  explicit IosFilePickerTransport(std::function<UIViewController*()> presenter_provider)
-      : presenter_provider_(std::move(presenter_provider)) {}
+  explicit IosFilePickerTransport(HUXPresentationCoordinator* coordinator) : coordinator_(coordinator) {}
 
   [[nodiscard]] bool CanOpenFiles() const noexcept override {
     return true;
@@ -641,25 +640,25 @@ public:
 
   std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) override {
     auto operation = std::make_shared<IosOpenPickerOperation>(std::move(completion));
-    operation->Start({}, false, presenter_provider_ ? presenter_provider_() : nil, true, writable);
+    operation->Start({}, false, coordinator_, true, writable);
     return [operation] { operation->Cancel(); };
   }
 
   std::function<void()>
   OpenFiles(FilePickerFilter filter, bool multiple, FilePickerOpenCompletion completion) override {
     auto operation = std::make_shared<IosOpenPickerOperation>(std::move(completion));
-    operation->Start(std::move(filter), multiple, presenter_provider_ ? presenter_provider_() : nil);
+    operation->Start(std::move(filter), multiple, coordinator_);
     return [operation] { operation->Cancel(); };
   }
 
   std::function<void()> SaveFile(File source, SaveFileOptions options, FilePickerSaveCompletion completion) override {
     auto operation = std::make_shared<IosSavePickerOperation>(std::move(completion));
-    operation->Start(std::move(source), std::move(options), presenter_provider_ ? presenter_provider_() : nil);
+    operation->Start(std::move(source), std::move(options), coordinator_);
     return [operation] { operation->Cancel(); };
   }
 
 private:
-  std::function<UIViewController*()> presenter_provider_;
+  __strong HUXPresentationCoordinator* coordinator_;
 };
 
 } // namespace
@@ -708,9 +707,32 @@ FileReference MakeCopiedIosFileReference(NSURL* url, NSError** error) {
   }
 }
 
-std::shared_ptr<FilePickerTransport> CreateIosFilePickerTransport(std::function<UIViewController*()> presenter_provider
-) {
-  return std::make_shared<IosFilePickerTransport>(std::move(presenter_provider));
+void DismissIosFilePicker(UIDocumentPickerViewController* picker, std::function<void()> completion) {
+  // Each phase consumes its continuation before advancing, so duplicate or late UIKit callbacks cannot
+  // start another dismissal or release the presentation slot more than once.
+  auto continuation = std::make_shared<std::function<void()>>(std::move(completion));
+  id<UIViewControllerTransitionCoordinator> transition = picker.transitionCoordinator;
+  if ((picker.isBeingPresented || picker.isBeingDismissed) && transition != nil) {
+    // The return value describes animation admission; even NO can still deliver this completion.
+    [transition animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext>) {
+      if (auto next = std::exchange(*continuation, {})) {
+        DismissIosFilePicker(picker, std::move(next));
+      }
+    }];
+    return;
+  }
+  auto finished = ^{
+    if (auto complete = std::exchange(*continuation, {})) complete();
+  };
+  if (picker == nil || picker.presentingViewController == nil) {
+    finished();
+    return;
+  }
+  [picker dismissViewControllerAnimated:YES completion:finished];
+}
+
+std::shared_ptr<FilePickerTransport> CreateIosFilePickerTransport(HUXPresentationCoordinator* coordinator) {
+  return std::make_shared<IosFilePickerTransport>(coordinator);
 }
 
 } // namespace huxerui::detail

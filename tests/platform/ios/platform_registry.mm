@@ -19,10 +19,12 @@ struct DirectViewInstance {
 };
 
 void RegisterDirectFactories(huxerui::ApplicationContext& root) {
-  huxerui::ios::PlatformModuleFactory<int> module_factory{
+  huxerui::ios::WindowPlatformModuleFactory<int> module_factory{
       .create = [](huxerui::UiWindow&, UIViewController*) { return 1; },
   };
   root.RegisterPlatformModule<int>("test/DirectModule", std::move(module_factory));
+
+  root.RegisterPlatformModule<int>("test/ApplicationModule", [](huxerui::Runtime&) { return 2; });
 
   huxerui::ios::PlatformViewFactory<DirectViewProperties, DirectViewInstance> view_factory{
       .create = [](UIViewController*, const DirectViewProperties&, huxerui::PlatformEventEmitter) {
@@ -39,4 +41,22 @@ void RegisterDirectFactories(huxerui::ApplicationContext& root) {
 
 void HuxerUITestIOSDirectPlatformFactories(huxerui::ApplicationContext& root) {
   RegisterDirectFactories(root);
+}
+
+void HuxerUITestIOSObjectiveCModuleFactories(huxerui::ApplicationContext& root,
+                                            id<HUXPlatformModuleFactory> application_factory,
+                                            id<HUXUIKitWindowPlatformModuleFactory> window_factory) {
+  using namespace huxerui;
+  root.RegisterPlatformModule<PlatformChannel>("test/ApplicationChannel",
+      ios::ObjectiveCPlatformModuleFactory<PlatformChannel>{
+          .factory = application_factory, .create = [](PlatformChannel channel) { return channel; }});
+  root.RegisterPlatformModule<PlatformChannel, PlatformPayload>("test/ApplicationOptions",
+      ios::ObjectiveCPlatformModuleFactory<PlatformChannel, PlatformPayload>{
+          .factory = application_factory, .create = [](PlatformChannel channel) { return channel; }});
+  root.RegisterPlatformModule<PlatformChannel>("test/WindowChannel",
+      ios::ObjectiveCWindowPlatformModuleFactory<PlatformChannel>{
+          .factory = window_factory, .create = [](PlatformChannel channel) { return channel; }});
+  root.RegisterPlatformModule<PlatformChannel, PlatformPayload>("test/WindowOptions",
+      ios::ObjectiveCWindowPlatformModuleFactory<PlatformChannel, PlatformPayload>{
+          .factory = window_factory, .create = [](PlatformChannel channel) { return channel; }});
 }

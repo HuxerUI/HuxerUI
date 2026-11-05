@@ -6,6 +6,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_file_drop.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_http.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/ios_platform_registry.mm"
+        "${HUXERUI_PROJECT_DIR}/platform/ios/ios_presentation.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_accessibility.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_adapter.mm"
         "${HUXERUI_PROJECT_DIR}/platform/ios/uikit_platform_view.mm"

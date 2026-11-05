@@ -206,15 +206,13 @@ private:
 @end
 
 #if TARGET_OS_IOS
-@interface HuxerUIExampleTimerFactory : NSObject <HUXUIKitPlatformModuleFactory>
+@interface HuxerUIExampleTimerFactory : NSObject <HUXPlatformModuleFactory>
 @end
 
 @implementation HuxerUIExampleTimerFactory
 
-- (id<HUXPlatformModule>)createWithViewController:(UIViewController*)view_controller
-                                           options:(HUXPlatformPayload*)options
-                                            events:(id<HUXPlatformEventEmitter>)events {
-  static_cast<void>(view_controller);
+- (id<HUXPlatformModule>)createWithOptions:(HUXPlatformPayload*)options
+                                   events:(id<HUXPlatformEventEmitter>)events {
   static_cast<void>(options);
   return [[HuxerUIExampleTimerModule alloc] initWithEvents:events];
 }
@@ -244,7 +242,7 @@ std::shared_ptr<TimerService> CreateAppleTimerService(PlatformChannel channel) {
 }
 
 #if TARGET_OS_IOS
-id<HUXUIKitPlatformModuleFactory> CreateAppleTimerFactory() {
+id<HUXPlatformModuleFactory> CreateAppleTimerFactory() {
 #else
 id<HUXAppKitPlatformModuleFactory> CreateAppleTimerFactory() {
 #endif
