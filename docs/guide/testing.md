@@ -35,8 +35,8 @@ using namespace huxerui::testing;
 View Counter() {
   auto count = UseState(0);
   return Column {
-    Text(std::to_string(count.Get())).Key("count"),
-    Button("Increment").OnClick([count]() mutable { count = count.Get() + 1; }),
+    Text(std::to_string(count)).Key("count"),
+    Button("Increment").OnClick([count] { ++count; }),
   };
 }
 

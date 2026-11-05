@@ -156,7 +156,7 @@ View TaskContent(std::shared_ptr<UserService> service, WorkerSequence worker_seq
           });
         }),
         Button("Cancel active").OnClick([=] {
-          if (const auto active = active_sequence_task.Get()) {
+          if (const std::shared_ptr<TaskHandle> active = active_sequence_task) {
             active->Cancel();
             active_sequence_task = {};
             sequence_status = "Cancellation requested; queued work will continue.";

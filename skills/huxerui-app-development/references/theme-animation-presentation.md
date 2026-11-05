@@ -30,8 +30,8 @@ Keep follow-system versus explicit light/dark selection in application state. Fo
 
 ```cpp
 auto theme_override = UseState(std::optional<ThemeBrightness>{});
-const ThemeBrightness brightness = theme_override.Get()
-    ? *theme_override.Get() : UseSystemThemeBrightness();
+const std::optional<ThemeBrightness>& selected = theme_override;
+const ThemeBrightness brightness = selected ? *selected : UseSystemThemeBrightness();
 ThemeSpec theme = brightness == ThemeBrightness::Dark
     ? MaterialDarkThemeSpec() : MaterialLightThemeSpec();
 return MaterialTheme {

@@ -469,11 +469,11 @@ auto transition = UseSharedTransition();
 auto expanded = UseState(false);
 return Column {
   Button("Toggle").OnClick([transition, expanded] {
-    transition.Run(TweenSpec{0.45, Easing::EaseInOut}, [expanded] { expanded = !expanded.Get(); });
+    transition.Run(TweenSpec{0.45, Easing::EaseInOut}, [expanded] { expanded = !expanded; });
   }),
   Stack {
     Image(product.image).With(
-        Frame{expanded.Get() ? 200.0F : 96.0F, expanded.Get() ? 200.0F : 96.0F},
+        Frame{expanded ? 200.0F : 96.0F, expanded ? 200.0F : 96.0F},
         SharedElement(product.id)
     ),
   }.With(Frame{.height = 240.0F}, transition.Scope()),

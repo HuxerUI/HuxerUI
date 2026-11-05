@@ -52,7 +52,7 @@ View DiscoverPage() {
       "Retained page state",
       "Increment the counter, visit another page, and return. The mounted page keeps its local State.",
       Row {
-        Text::Format(TextRole::Title, "{} saved", saved.Get()),
+        Text::Format(TextRole::Title, "{} saved", saved),
         Spacer(),
         Button("Save one").OnClick([saved] { saved += 1; }),
       }.With(CrossAlign(CrossAxisAlignment::Center)),
@@ -73,7 +73,7 @@ View TunePage() {
         Row {
           Text("Intensity"),
           Spacer(),
-          Text::Format("{}%", static_cast<int>(intensity.Get() * 100.0F)),
+          Text::Format("{}%", static_cast<int>(intensity * 100.0F)),
         }.With(CrossAlign(CrossAxisAlignment::Center)),
         Slider(intensity).OnChanged([intensity](float value) { intensity = value; }),
       }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch)),
@@ -148,35 +148,35 @@ View PagerDemo() {
             },
             selected
         )
-            .ScrollAxis(axis.Get() == 0 ? Axis::Horizontal : Axis::Vertical)
-            .Reverse(reverse.Get())
-            .DragEnabled(direct_drag.Get())
+            .ScrollAxis(axis == 0 ? Axis::Horizontal : Axis::Vertical)
+            .Reverse(reverse)
+            .DragEnabled(direct_drag)
             .OnChanged([=](std::size_t index) {
               status = "Direct interaction requested page " + std::to_string(index + 1);
-              if (accept_requests.Get()) {
+              if (accept_requests) {
                 selected = index;
               }
             })
             .With(Frame{.height = compact ? 360.0F : 320.0F}),
         Row {
           Row {
-            PageDot(selected.Get() == 0, theme),
-            PageDot(selected.Get() == 1, theme),
-            PageDot(selected.Get() == 2, theme),
+            PageDot(selected == 0, theme),
+            PageDot(selected == 1, theme),
+            PageDot(selected == 2, theme),
           }.With(Spacing(theme.spacing.extra_small), CrossAlign(CrossAxisAlignment::Center)),
           Spacer(),
-          Text::Format(TextRole::Label, "Page {} of 3", selected.Get() + 1),
+          Text::Format(TextRole::Label, "Page {} of 3", selected + 1),
         }.With(CrossAlign(CrossAxisAlignment::Center)),
         Flow {
           Button("Previous")
-              .OnClick([=] { select_programmatically(selected.Get() - 1); })
-              .With(Enabled(selected.Get() > 0)),
+              .OnClick([=] { select_programmatically(selected - 1); })
+              .With(Enabled(selected > 0)),
           Button("Next")
-              .OnClick([=] { select_programmatically(selected.Get() + 1); })
-              .With(Enabled(selected.Get() < 2)),
+              .OnClick([=] { select_programmatically(selected + 1); })
+              .With(Enabled(selected < 2)),
           Button("Jump to first").OnClick([=] { select_programmatically(0); }),
         }.With(Spacing(theme.spacing.small)),
-        Text(status.Get()).With(Foreground(theme.colors.on_surface_variant)),
+        Text(status).With(Foreground(theme.colors.on_surface_variant)),
       }.With(
           Padding(compact ? theme.spacing.medium : theme.spacing.extra_large),
           Spacing(theme.spacing.large),

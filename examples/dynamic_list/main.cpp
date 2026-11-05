@@ -53,7 +53,7 @@ View DynamicList() {
             .With(FontSize(14.0F), Foreground(secondary_text_color)),
         Row {
             Button("Add").OnClick([items, next_id] {
-              const auto id = next_id.Get();
+              const std::uint64_t id = next_id;
               next_id += 1;
               items.PushBack({
                   id,

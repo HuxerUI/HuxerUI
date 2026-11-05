@@ -537,7 +537,7 @@ struct ScrollBarStyle {
 /// Enables or disables interaction for a View subtree.
 ///
 /// @code
-/// Button("Save").With(Enabled(can_save.Get()));
+/// Button("Save").With(Enabled(can_save));
 /// @endcode
 struct Enabled {
   /// Returns the modifier descriptor used by View::With().

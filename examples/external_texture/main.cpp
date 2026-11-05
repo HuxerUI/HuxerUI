@@ -57,8 +57,8 @@ View ExternalTextureDemo() {
           "The same Image and RenderScene path displays each platform producer. The overlay, border, and clipping "
           "remain ordinary HuxerUI drawing."
       ).With(Foreground(theme.colors.on_surface_variant)),
-      Button(running.Get() ? "Pause producers" : "Resume producers").OnClick([demo, running] {
-        const bool next = !running.Get();
+      Button(running ? "Pause producers" : "Resume producers").OnClick([demo, running] {
+        const bool next = !running;
         demo->SetRunning(next);
         running = next;
       }),

@@ -36,7 +36,7 @@ Prefer the selected version's public headers, module interface, package configur
 - `View` is a lightweight copy-on-write declaration value. Pass and return it by value; do not add `std::move` to temporary chains, container children, or return statements as a routine optimization.
 - Mark a reusable function `[[huxerui::composable]]` when it directly calls a composition-bound `UseXxx()` API or needs its own recomposition lifetime. Do not annotate the application root.
 - One application Runtime owns services and application tasks; each UiWindow owns an independent UI. Choose state and task lifetimes deliberately, and use public application/window handles for ordinary app work.
-- Keep controlled values authoritative in app state and write emitted changes back for the next composition.
+- Keep controlled values authoritative in app state and write emitted changes back for the next composition. Read `State<T>` through implicit conversion by default and use `state->member` for member access.
 - Use stable semantic keys for dynamic stateful siblings that insert, remove, or reorder.
 - Preserve complete `TextEditingValue` state for `TextField`.
 - Use only public headers, public CMake targets, generated project conventions, and platform-specific public headers.

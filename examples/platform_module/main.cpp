@@ -32,9 +32,9 @@ View PlatformSpecificDemo() {
   auto color_stream = example::UseColorStream();
   auto stream_texture = UseState<std::shared_ptr<ExternalTexture>>({});
   auto stream_status = UseState<std::string>("The platform stream has not been requested");
-  View stream_preview = Text(stream_status.Get()).With(Frame{.height = 180.0F});
-  if (stream_texture.Get()) {
-    stream_preview = Image(stream_texture.Get()).Fit(ImageFit::Cover).With(Frame{.height = 180.0F});
+  View stream_preview = Text(stream_status).With(Frame{.height = 180.0F});
+  if (const std::shared_ptr<ExternalTexture>& texture = stream_texture) {
+    stream_preview = Image(texture).Fit(ImageFit::Cover).With(Frame{.height = 180.0F});
   }
   const ThemeSpec& theme = UseTheme();
 
@@ -77,11 +77,11 @@ View PlatformModuleDemo() {
   return Column {
     Text("PlatformModule", TextRole::Title),
     Text("A platform timer sends typed results and events through a nonvisual root service."),
-    Text("Tick: " + std::to_string(tick.Get()), TextRole::Title),
-    Text(status.Get(), TextRole::Label),
+    Text("Tick: " + std::to_string(tick), TextRole::Title),
+    Text(status, TextRole::Label),
     Row {
       Button("Start").OnClick([timer, tick, pending_start, status] {
-        const PlatformRequestId previous = pending_start.Get();
+        const PlatformRequestId previous = pending_start;
         if (previous != 0) {
           static_cast<void>(timer->Cancel(previous));
         }
@@ -96,7 +96,7 @@ View PlatformModuleDemo() {
         );
       }),
       Button("Cancel start").OnClick([timer, pending_start, status] {
-        const PlatformRequestId request = pending_start.Get();
+        const PlatformRequestId request = pending_start;
         status = request != 0 && timer->Cancel(request) ? "Start cancelled" : "No pending start";
         pending_start = 0;
       }),

@@ -1726,11 +1726,12 @@ void ValidateTreeExtent(float value, bool positive);
 /// return TreeView<Node>(roots, [](const Node& node) {
 ///   return FileRow(node).Key(node->id);
 /// }, [selected](const Node& node) {
+///   const Node& current = selected;
 ///   return TreeItemInfo{
 ///       .label = node->name,
 ///       .expandable = node->is_directory,
 ///       .expanded = node->expanded,
-///       .selected = selected.Get() == node,
+///       .selected = current == node,
 ///   };
 /// }).Children([](const Node& node) {
 ///   return node->children;

@@ -127,9 +127,9 @@ View QuickGestureLab(float width, bool stacked, State<std::uint32_t> clicks, Sta
                      State<bool> long_press_active, State<std::string> long_press_status,
                      const ThemeSpec& theme) {
   View tap_surface = Column {
-    Text(std::to_string(multi_taps.Get()), TextRole::Title).With(Foreground(theme.colors.on_secondary_container)),
+    Text(std::to_string(multi_taps), TextRole::Title).With(Foreground(theme.colors.on_secondary_container)),
     Text("MULTI-TAP", TextRole::Label).With(Foreground(theme.colors.on_secondary_container)),
-    Text(std::to_string(clicks.Get()) + " clicks").With(Foreground(theme.colors.on_surface_variant)),
+    Text(std::to_string(clicks) + " clicks").With(Foreground(theme.colors.on_surface_variant)),
   }.With(
       Grow(),
       Frame{.height = 144.0F},
@@ -146,20 +146,20 @@ View QuickGestureLab(float width, bool stacked, State<std::uint32_t> clicks, Sta
       });
 
   View hold_surface = Column {
-    Text(long_press_active.Get() ? "LIVE" : "HOLD", TextRole::Title)
-        .With(Foreground(long_press_active.Get() ? theme.colors.on_primary : theme.colors.on_surface)),
+    Text(long_press_active ? "LIVE" : "HOLD", TextRole::Title)
+        .With(Foreground(long_press_active ? theme.colors.on_primary : theme.colors.on_surface)),
     Text("LONG PRESS", TextRole::Label)
-        .With(Foreground(long_press_active.Get() ? theme.colors.on_primary : theme.colors.on_surface)),
-    Text(long_press_status.Get()).With(Foreground(
-        long_press_active.Get() ? theme.colors.on_primary : theme.colors.on_surface_variant
+        .With(Foreground(long_press_active ? theme.colors.on_primary : theme.colors.on_surface)),
+    Text(long_press_status).With(Foreground(
+        long_press_active ? theme.colors.on_primary : theme.colors.on_surface_variant
     )),
   }.With(
       Grow(),
       Frame{.height = 144.0F},
       Padding(theme.spacing.medium),
       Spacing(theme.spacing.extra_small),
-      Background(long_press_active.Get() ? theme.colors.primary : theme.colors.surface_container_highest),
-      Foreground(long_press_active.Get() ? theme.colors.on_primary : theme.colors.on_surface),
+      Background(long_press_active ? theme.colors.primary : theme.colors.surface_container_highest),
+      Foreground(long_press_active ? theme.colors.on_primary : theme.colors.on_surface),
       CornerRadius(theme.shapes.large),
       LongPressGesture{}
   )
@@ -229,12 +229,15 @@ View DragLab(float width, bool compact, State<Point> offset, State<Point> origin
           .blur_radius = 16.0F,
           .spread = -4.0F,
       },
-      Offset(offset.Get()),
+      Offset(offset),
       DragGesture{}
   )
-      .On<DragEvents::Started>([=](const DragEvent&) { origin = offset.Get(); })
+      .On<DragEvents::Started>([=](const DragEvent&) {
+        const Point start = offset;
+        origin = start;
+      })
       .On<DragEvents::Changed>([=](const DragEvent& event) {
-        const Point start = origin.Get();
+        const Point start = origin;
         offset = {
             std::clamp(start.x + event.translation.x, 12.0F, std::max(12.0F, stage_width - 144.0F)),
             std::clamp(start.y + event.translation.y, 12.0F, 140.0F),
@@ -246,9 +249,9 @@ View DragLab(float width, bool compact, State<Point> offset, State<Point> origin
   if (compact) {
     footer = Column {
       Row {
-        Metric("X position", Rounded(offset.Get().x), theme),
-        Metric("Y position", Rounded(offset.Get().y), theme),
-        Metric("Velocity", Rounded(std::hypot(velocity.Get().x, velocity.Get().y), " px/s"), theme),
+        Metric("X position", Rounded(offset->x), theme),
+        Metric("Y position", Rounded(offset->y), theme),
+        Metric("Velocity", Rounded(std::hypot(velocity->x, velocity->y), " px/s"), theme),
       }.With(
           Spacing(theme.spacing.medium),
           CrossAlign(CrossAxisAlignment::Center)
@@ -260,9 +263,9 @@ View DragLab(float width, bool compact, State<Point> offset, State<Point> origin
     );
   } else {
     footer = Row {
-      Metric("X position", Rounded(offset.Get().x), theme),
-      Metric("Y position", Rounded(offset.Get().y), theme),
-      Metric("Velocity", Rounded(std::hypot(velocity.Get().x, velocity.Get().y), " px/s"), theme),
+      Metric("X position", Rounded(offset->x), theme),
+      Metric("Y position", Rounded(offset->y), theme),
+      Metric("Velocity", Rounded(std::hypot(velocity->x, velocity->y), " px/s"), theme),
       Spacer(),
       Button("Reset").OnClick(reset),
     }.With(
@@ -302,8 +305,8 @@ View TransformLab(float width, bool compact, State<float> scale, State<float> ro
     rotation = 0.0F;
   };
   const auto apply_transform = [=](const TransformEvent& event) {
-    scale = scale.Get() * event.scale;
-    rotation = rotation.Get() + event.rotation * 180.0F / std::numbers::pi_v<float>;
+    scale = scale * event.scale;
+    rotation = rotation + event.rotation * 180.0F / std::numbers::pi_v<float>;
     pointers = event.pointer_count;
   };
 
@@ -330,8 +333,8 @@ View TransformLab(float width, bool compact, State<float> scale, State<float> ro
           .blur_radius = 18.0F,
           .spread = -4.0F,
       },
-      Scale(scale.Get()),
-      Rotation(rotation.Get()),
+      Scale(scale),
+      Rotation(rotation),
       TransformGesture{}
   )
       .On<TransformEvents::Started>([=](const TransformEvent& event) { pointers = event.pointer_count; })
@@ -347,9 +350,9 @@ View TransformLab(float width, bool compact, State<float> scale, State<float> ro
   if (compact) {
     footer = Column {
       Row {
-        Metric("Scale", Rounded(scale.Get() * 100.0F, "%"), theme),
-        Metric("Rotation", Rounded(rotation.Get(), "°"), theme),
-        Metric("Pointers", std::to_string(pointers.Get()), theme),
+        Metric("Scale", Rounded(scale * 100.0F, "%"), theme),
+        Metric("Rotation", Rounded(rotation, "°"), theme),
+        Metric("Pointers", std::to_string(pointers), theme),
       }.With(
           Spacing(theme.spacing.medium),
           CrossAlign(CrossAxisAlignment::Center)
@@ -361,9 +364,9 @@ View TransformLab(float width, bool compact, State<float> scale, State<float> ro
     );
   } else {
     footer = Row {
-      Metric("Scale", Rounded(scale.Get() * 100.0F, "%"), theme),
-      Metric("Rotation", Rounded(rotation.Get(), "°"), theme),
-      Metric("Pointers", std::to_string(pointers.Get()), theme),
+      Metric("Scale", Rounded(scale * 100.0F, "%"), theme),
+      Metric("Rotation", Rounded(rotation, "°"), theme),
+      Metric("Pointers", std::to_string(pointers), theme),
       Spacer(),
       Button("Reset").OnClick(reset),
     }.With(
@@ -508,7 +511,7 @@ View ReleaseColumn(StateList<StudioAsset> inbox, StateList<StudioAsset> delivere
       Text("Release queue", TextRole::Title),
       Spacer(),
       Text("READY ONLY", TextRole::Label)
-          .With(Foreground(target_active.Get() ? theme.colors.primary : theme.colors.on_surface_variant)),
+          .With(Foreground(target_active ? theme.colors.primary : theme.colors.on_surface_variant)),
     }.With(CrossAlign(CrossAxisAlignment::Center)),
     Text("The typed predicate rejects drafts before target events are emitted.")
         .With(Foreground(theme.colors.on_surface_variant)),
@@ -517,10 +520,10 @@ View ReleaseColumn(StateList<StudioAsset> inbox, StateList<StudioAsset> delivere
       Grow(),
       Padding(theme.spacing.medium),
       Spacing(theme.spacing.small),
-      Background(target_active.Get() ? WithAlpha(theme.colors.primary, 0.10F)
+      Background(target_active ? WithAlpha(theme.colors.primary, 0.10F)
                                      : theme.colors.surface_container_low),
-      Border{target_active.Get() ? theme.colors.primary : WithAlpha(theme.colors.outline, 0.18F),
-             target_active.Get() ? 2.0F : 1.0F},
+      Border{target_active ? theme.colors.primary : WithAlpha(theme.colors.outline, 0.18F),
+             target_active ? 2.0F : 1.0F},
       CornerRadius(theme.shapes.large),
       DropTarget::Accepts<AssetTransfer>([](const AssetTransfer& transfer) { return transfer.ready; }),
       CrossAlign(CrossAxisAlignment::Stretch)
@@ -564,18 +567,18 @@ View TransferLab(float width, bool stacked, StateList<StudioAsset> inbox, StateL
   View status;
   if (stacked) {
     status = Column {
-      StatusLabel(target_active.Get() ? "TARGET ACTIVE" : "WAITING",
-                  target_active.Get() ? theme.colors.primary : theme.colors.on_surface_variant, theme),
-      Text(drop_status.Get()).With(Foreground(theme.colors.on_surface_variant)),
+      StatusLabel(target_active ? "TARGET ACTIVE" : "WAITING",
+                  target_active ? theme.colors.primary : theme.colors.on_surface_variant, theme),
+      Text(drop_status).With(Foreground(theme.colors.on_surface_variant)),
     }.With(
         Spacing(theme.spacing.extra_small),
         CrossAlign(CrossAxisAlignment::Start)
     );
   } else {
     status = Row {
-      StatusLabel(target_active.Get() ? "TARGET ACTIVE" : "WAITING",
-                  target_active.Get() ? theme.colors.primary : theme.colors.on_surface_variant, theme),
-      Text(drop_status.Get()).With(Foreground(theme.colors.on_surface_variant)),
+      StatusLabel(target_active ? "TARGET ACTIVE" : "WAITING",
+                  target_active ? theme.colors.primary : theme.colors.on_surface_variant, theme),
+      Text(drop_status).With(Foreground(theme.colors.on_surface_variant)),
     }.With(
         Spacing(theme.spacing.small),
         CrossAlign(CrossAxisAlignment::Center)

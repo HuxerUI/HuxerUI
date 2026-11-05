@@ -102,7 +102,7 @@ View PagerPreviewPage(std::string eyebrow, std::string title, Color accent) {
     Text(std::move(title), TextRole::Title),
     Spacer(),
     Row {
-      Text::Format("Local state: {}", activity.Get()).With(Foreground(theme.colors.on_surface_variant)),
+      Text::Format("Local state: {}", activity).With(Foreground(theme.colors.on_surface_variant)),
       Spacer(),
       Button("Increment").OnClick([activity] { activity += 1; }),
     }.With(CrossAlign(CrossAxisAlignment::Center)),
@@ -284,7 +284,7 @@ View OrbitCanvasPreview() {
   auto started = UseState(false);
   Lifecycle([started] { started = true; });
   const ColorScheme colors = theme.colors;
-  const bool animated = started.Get() && !theme.motion.reduced_motion;
+  const bool animated = started && !theme.motion.reduced_motion;
   return Canvas([colors](PaintContext& paint, Size size) { PaintOrbit(paint, size, colors); })
       .With(
           Grow(),
@@ -305,7 +305,7 @@ View DataCanvasPreview() {
   const ThemeSpec& theme = UseTheme();
   auto progress = UseState(0.68F);
   const ColorScheme colors = theme.colors;
-  const float value = progress.Get();
+  const float value = progress;
   return Column {
     Canvas([colors, value](PaintContext& paint, Size size) { PaintDataGraphic(paint, size, colors, value); })
         .With(Grow()),
@@ -562,12 +562,12 @@ View TextInputDemo() {
   auto password_visible = UseState(false);
   auto message = UseState(TextEditingValue::FromText(""));
   auto city_query = UseState(TextEditingValue::FromText(""));
-  const bool password_is_visible = password_visible.Get();
+  const bool password_is_visible = password_visible;
   const auto password_visibility_icon =
       password_is_visible ? ui_gallery::images::visibility_off : ui_gallery::images::visibility;
   const char* password_visibility_label = password_is_visible ? "Hide password" : "Show password";
   const std::vector<std::string> cities{"Amsterdam", "Berlin", "London", "Paris", "Tokyo"};
-  const std::string& query = city_query.Get().text;
+  const std::string& query = city_query->text;
   std::vector<std::string> matching_cities;
   std::ranges::copy_if(cities, std::back_inserter(matching_cities), [&query](const std::string& city) {
     return city.find(query) != std::string::npos;
@@ -598,8 +598,8 @@ View TextInputDemo() {
               .LeadingIcon(ui_gallery::images::lock)
               .TrailingIcon(password_visibility_icon, password_visibility_label)
               .Variant(TextFieldVariant::Outlined)
-              .Validation(Validate(password.Get().text, Required("Password is required")))
-              .OnTrailingIconClick([password_visible] { password_visible = !password_visible.Get(); })
+              .Validation(Validate(password->text, Required("Password is required")))
+              .OnTrailingIconClick([password_visible] { password_visible = !password_visible; })
               .OnChanged([password](const TextEditingValue& value) { password = value; }),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
@@ -813,7 +813,7 @@ View NavigationDemo() {
               },
               destination
           ).OnChanged([destination](std::size_t index) { destination = index; }),
-          Text::Format("Selected destination: {}", destination.Get() + 1),
+          Text::Format("Selected destination: {}", destination + 1),
         }.With(Spacing(theme.spacing.small), CrossAlign(CrossAxisAlignment::Stretch))
     ),
     GallerySection(
@@ -968,7 +968,7 @@ View LayoutDemo() {
         "Swipe directly or use the buttons; each mounted page keeps its own local state.",
         Column {
           Row {
-            Text::Format(TextRole::Label, "Page {} of 3", preview_page.Get() + 1),
+            Text::Format(TextRole::Label, "Page {} of 3", preview_page + 1),
             Spacer(),
             Text("Drag horizontally").With(Foreground(theme.colors.on_surface_variant)),
           }.With(CrossAlign(CrossAxisAlignment::Center)),
@@ -985,10 +985,10 @@ View LayoutDemo() {
           Flow {
             Button("Previous")
                 .OnClick([preview_page] { preview_page -= 1; })
-                .With(Enabled(preview_page.Get() > 0)),
+                .With(Enabled(preview_page > 0)),
             Button("Next")
                 .OnClick([preview_page] { preview_page += 1; })
-                .With(Enabled(preview_page.Get() < 2)),
+                .With(Enabled(preview_page < 2)),
           }.With(Spacing(theme.spacing.small)),
         }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch))
     ),
@@ -1114,6 +1114,7 @@ View GalleryToolsContent(
   const ThemeSpec& theme = UseTheme();
   auto family_transition = UseSceneTransition();
   auto brightness_transition = UseSceneTransition();
+  const std::optional<ThemeBrightness>& selected_brightness = theme_override;
   return Column {
     Text("Tools", TextRole::Title),
     Text("Appearance", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
@@ -1126,7 +1127,7 @@ View GalleryToolsContent(
         }),
     SegmentedButton(
         {"System", "Light", "Dark"},
-        theme_override.Get() ? (*theme_override.Get() == ThemeBrightness::Dark ? 2U : 1U) : 0U
+        selected_brightness ? (*selected_brightness == ThemeBrightness::Dark ? 2U : 1U) : 0U
     ).OnChanged([brightness_transition, theme_override](std::size_t index) {
       brightness_transition.RunFromCurrentInteraction(
           TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}},
@@ -1138,7 +1139,7 @@ View GalleryToolsContent(
     }),
     Divider(),
     Text("Context", TextRole::Label).With(Foreground(theme.colors.on_surface_variant)),
-    ToolValue("Page", PageName(selected_page.Get())),
+    ToolValue("Page", PageName(selected_page)),
     ToolValue("Viewport", ViewportName(UseViewportClass())),
   }.With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch));
 }
@@ -1265,7 +1266,7 @@ View GalleryMain(
   }
 
   return Column {
-    TopAppBar(PageName(selected_page.Get()), std::move(leading), std::move(actions)),
+    TopAppBar(PageName(selected_page), std::move(leading), std::move(actions)),
     IndexedPages(
         {
             GalleryPage(
@@ -1351,7 +1352,7 @@ View App() {
   auto selected_page = UseState<std::size_t>(0);
   auto theme_family = UseState<std::size_t>(0);
   auto theme_override = UseState(std::optional<ThemeBrightness>{});
-  const auto selected = theme_override.Get();
+  const std::optional<ThemeBrightness> selected = theme_override;
   const auto brightness = selected ? *selected : UseSystemThemeBrightness();
   auto start_open = UseState(false);
   auto end_open = UseState(false);

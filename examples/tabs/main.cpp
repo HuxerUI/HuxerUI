@@ -34,7 +34,7 @@ View TabsDemo() {
         },
         selected
     ).OnChanged([selected](std::size_t index) { selected = index; }),
-    Text::Format("Selected page: {}", pages[selected.Get()]),
+    Text::Format("Selected page: {}", pages[selected]),
     FlatTheme {
       Scope([=] {
         return Column {

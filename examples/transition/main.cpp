@@ -109,7 +109,7 @@ View Catalog(State<Effect> selected, State<bool> slow, State<bool> daylight) {
   const bool compact = UseViewportClass() == ViewportClass::Compact;
   const auto navigation = UseNavigation();
   const auto scene = UseSceneTransition();
-  const Effect effect = selected.Get();
+  const Effect effect = selected;
   const auto& info = Describe(effect);
 
   Views choices;
@@ -131,18 +131,19 @@ View Catalog(State<Effect> selected, State<bool> slow, State<bool> daylight) {
     Text(std::string(info.description)).Style({Font::System(14.0F), theme.colors.on_surface_variant}),
     Switch("Slow motion", slow).OnChanged([slow](bool next) { slow = next; }).Key("slow-motion"),
     Button("Enter next page").OnClick([navigation, selected, slow, daylight] {
-      navigation.Push(DetailPage, selected.Get(), slow, daylight, 2);
+      const Effect choice = selected;
+      navigation.Push(DetailPage, choice, slow, daylight, 2);
     }).Key("enter-page"),
     Button("Transform scene").OnClick([scene, selected, slow, daylight] {
-      scene.RunFromCurrentInteraction(MakeTransition(selected.Get(), slow.Get()), [daylight] {
-        daylight = !daylight.Get();
+      scene.RunFromCurrentInteraction(MakeTransition(selected, slow), [daylight] {
+        daylight = !daylight;
       });
     }).Key("transform-scene"),
     Text("Enter a page, reverse back, or transform this whole scene. Try the circular reveal from a different touch point.")
         .Style({Font::System(12.0F), theme.colors.on_surface_variant}),
   }.With(Spacing(18.0F), CrossAlign(CrossAxisAlignment::Stretch)), theme);
 
-  View preview = Poster(daylight.Get(), false, compact);
+  View preview = Poster(daylight, false, compact);
   View stage;
   if (compact) {
     stage = Column {
@@ -183,7 +184,7 @@ View DetailPage(Effect effect, State<bool> slow, State<bool> daylight, int editi
   const auto navigation = UseNavigation();
   const auto scene = UseSceneTransition();
   const auto& info = Describe(effect);
-  const auto spec = MakeTransition(effect, slow.Get());
+  const auto spec = MakeTransition(effect, slow);
   const Effect next = effects[(static_cast<std::size_t>(effect) + 1) % effects.size()].effect;
 
   return ScrollView {
@@ -199,17 +200,17 @@ View DetailPage(Effect effect, State<bool> slow, State<bool> daylight, int editi
           navigation.Replace(DetailPage, next, slow, daylight, edition + 1);
         }).Key("replace-page"),
         Button("Transform scene").OnClick([scene, effect, slow, daylight] {
-          scene.RunFromCurrentInteraction(MakeTransition(effect, slow.Get()), [daylight] {
-            daylight = !daylight.Get();
+          scene.RunFromCurrentInteraction(MakeTransition(effect, slow), [daylight] {
+            daylight = !daylight;
           });
         }).Key("transform-scene"),
       }.With(Spacing(10.0F)),
-      Poster(daylight.Get(), true, compact),
+      Poster(daylight, true, compact),
       Row {
         Text(std::string(info.category))
             .Style({Font::System(11.0F).WithWeight(FontWeight::Bold), theme.colors.primary}),
         Spacer(),
-        Text(slow.Get() ? "SLOW MOTION" : "FULL SPEED")
+        Text(slow ? "SLOW MOTION" : "FULL SPEED")
             .Style({Font::System(11.0F), theme.colors.on_surface_variant}),
       }.With(CrossAlign(CrossAxisAlignment::Center)),
       Text("Back plays this effect in reverse. Try next effect replaces the page without growing the navigation stack.")
@@ -231,7 +232,7 @@ View App() {
   const auto selected = UseState(Effect::Tear);
   const auto slow = UseState(false);
   const auto daylight = UseState(false);
-  return Theme(StudioTheme(daylight.Get()), NavigationStack([selected, slow, daylight] {
+  return Theme(StudioTheme(daylight), NavigationStack([selected, slow, daylight] {
     return Catalog(selected, slow, daylight);
   }));
 }

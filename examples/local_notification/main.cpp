@@ -128,7 +128,7 @@ View LocalNotificationCard(const ApplicationHandle& application, TaskScope tasks
     Text("Configured Windows, Android, iOS, and macOS hosts provide native delivery. The download below uses an "
          "application-owned native template on supported hosts."),
     Text("The default reminder and download use separate identifiers, so they do not replace each other."),
-    Text("Last result: " + result.Get()),
+    Text::Format("Last result: {}", result),
     Button("Check authorization").OnClick([=] {
       tasks.Launch([=]() -> Task<void> {
         result = DescribePermissionStatus(co_await notifications.CheckAuthorizationAsync());
@@ -197,7 +197,7 @@ Task<LocalNotificationOperationStatus> PublishDownload(LocalNotificationHandle n
 
 Task<void> FinishDownload(LocalNotificationHandle notifications, State<DownloadState> state,
                           std::string status, std::string detail) {
-  auto snapshot = state.Get();
+  DownloadState snapshot = state;
   snapshot.status = std::move(status);
   snapshot.detail = std::move(detail);
   snapshot.busy = false;
@@ -213,7 +213,7 @@ Task<void> FinishDownload(LocalNotificationHandle notifications, State<DownloadS
 
 Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHandle notifications,
                            File directory, State<DownloadState> state) {
-  const auto initial = co_await PublishDownload(notifications, state.Get());
+  const auto initial = co_await PublishDownload(notifications, state);
   state.Update([initial](DownloadState& value) {
     value.notification_result = DescribeLocalNotificationOperationStatus(initial);
   });
@@ -280,7 +280,7 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
     state.Update([count](DownloadState& value) { value.downloaded_bytes += count; });
     if (std::chrono::steady_clock::now() - last_notification >= std::chrono::seconds(1)) {
       // Await each replacement instead of launching a notification Task for every network progress callback.
-      const auto result = co_await PublishDownload(notifications, state.Get());
+      const auto result = co_await PublishDownload(notifications, state);
       state.Update([result](DownloadState& value) {
         value.notification_result = DescribeLocalNotificationOperationStatus(result);
       });
@@ -314,7 +314,7 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
   const auto notifications = application.LocalNotifications();
   const auto capabilities = notifications.Capabilities();
   const auto& theme = UseTheme();
-  const auto& download = state.Get();
+  const DownloadState& download = state;
   const float fraction = download.status == "Complete" ? 1.0F : download.total_bytes && *download.total_bytes > 0
       ? static_cast<float>(std::clamp(static_cast<double>(download.downloaded_bytes) / *download.total_bytes, 0.0, 1.0))
       : 0.0F;
@@ -326,14 +326,14 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
     Text("Windows progress bars require Windows 10 version 1703 or later. Updates replace the notification and may "
          "show another popup; native in-place progress updates are not demonstrated."),
     Text("Downloads require this app to keep running; no background service or process-restart recovery is provided."),
-    Button(expanded.Get() ? "Detailed template layout: on" : "Detailed template layout: off")
+    Button(expanded ? "Detailed template layout: on" : "Detailed template layout: off")
         .With(Enabled(!download.busy))
-        .OnClick([=] { expanded = !expanded.Get(); }),
+        .OnClick([=] { expanded = !expanded; }),
     Button(download.busy ? "Downloading..." : "Download HuxerUI (54.8 MB)")
         .With(Enabled(!download.busy && capabilities.can_show && capabilities.can_use_templates))
         .OnClick([=] {
           if (state->busy) { return; }
-          state = DownloadState{.busy = true, .expanded = expanded.Get(), .status = "Downloading",
+          state = DownloadState{.busy = true, .expanded = expanded, .status = "Downloading",
                                 .detail = "Waiting for notification authorization and response headers..."};
           // Each attempt has its own cache directory: a canceled worker cannot overwrite a later attempt.
           const auto attempt = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -345,7 +345,7 @@ Task<void> DownloadRelease(std::shared_ptr<HttpClient> http, LocalNotificationHa
         .With(Enabled(download.busy && download.status == "Downloading"))
         .OnClick([=] {
           if (!state->busy || state->status != "Downloading") { return; }
-          if (auto task = active.Get()) { task->Cancel(); }
+          if (const std::shared_ptr<TaskHandle> task = active) { task->Cancel(); }
           active = {};
           state.Update([](DownloadState& value) { value.status = "Cancelling"; });
           tasks.Launch(FinishDownload(notifications, state, "Cancelled",
@@ -400,7 +400,7 @@ void InstallNotifications(ApplicationContext& context) {
       Column {
         Text("Notification activation data", TextRole::Title),
         Text("Startup and subsequent activations are shown here. Data is the submitted snapshot, not live app state."),
-        ForEach(activations.Get(), [](const std::string& activation) { return Text(activation); }),
+        ForEach(activations, [](const std::string& activation) { return Text(activation); }),
       }.With(
           Padding(theme.spacing.large),
           Spacing(theme.spacing.small),

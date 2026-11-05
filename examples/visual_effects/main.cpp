@@ -143,14 +143,14 @@ View SpotlightPreview(State<bool> active, State<int> activation_count, SceneTran
       EffectBadge(visual_effects::strings::badge_reveal, Color::Rgb(255, 190, 104)),
     }.With(Spacing(8.0F)),
     SpotlightButton(
-        active.Get() ? StringVariant(visual_effects::strings::button_active)
+        active ? StringVariant(visual_effects::strings::button_active)
                      : StringVariant(visual_effects::strings::button_idle)
     )
         .OnClick([scene, active, activation_count] {
           scene.RunFromCurrentInteraction(
               TransitionSpec{CircularRevealTransition{}, TweenSpec{0.46, Easing::EaseInOut}},
               [active, activation_count] {
-                active = !active.Get();
+                active = !active;
                 activation_count += 1;
               }
           );
@@ -158,20 +158,20 @@ View SpotlightPreview(State<bool> active, State<int> activation_count, SceneTran
         .With(Frame{.min_width = 240.0F}),
     Row {
       Stack {}.With(
-          Background(active.Get() ? Color::Rgb(255, 190, 104) : Color::Rgb(151, 117, 255)),
+          Background(active ? Color::Rgb(255, 190, 104) : Color::Rgb(151, 117, 255)),
           CornerRadius(5.0F),
           Frame{.width = 10.0F, .height = 10.0F},
           Shadow{
-              .color = active.Get() ? Color::Rgb(255, 190, 104, 0.5F) : Color::Rgb(151, 117, 255, 0.45F),
+              .color = active ? Color::Rgb(255, 190, 104, 0.5F) : Color::Rgb(151, 117, 255, 0.45F),
               .blur_radius = 12.0F,
           }
       ),
       Text(
-          active.Get() ? StringVariant(visual_effects::strings::status_active)
+          active ? StringVariant(visual_effects::strings::status_active)
                        : StringVariant(visual_effects::strings::status_idle)
       ).Style({Font::System(13.0F).WithWeight(FontWeight::Medium), Color::Rgb(173, 177, 197)}),
       Spacer(),
-      Text::Format(visual_effects::strings::activation_count, activation_count.Get())
+      Text::Format(visual_effects::strings::activation_count, activation_count)
           .Style({Font::System(12.0F), Color::Rgb(137, 142, 164)}),
     }.With(Spacing(10.0F), CrossAlign(CrossAxisAlignment::Center)),
   }.With(Spacing(16.0F), CrossAlign(CrossAxisAlignment::Stretch));
@@ -305,7 +305,7 @@ View EffectsStage(State<bool> active, State<int> activation_count) {
 
   View spotlight = EffectCard(
       visual_effects::strings::study_spotlight,
-      active.Get() ? StringVariant(visual_effects::strings::spotlight_title_active)
+      active ? StringVariant(visual_effects::strings::spotlight_title_active)
                    : StringVariant(visual_effects::strings::spotlight_title_idle),
       visual_effects::strings::spotlight_description,
       Color::Rgb(196, 172, 255),
@@ -389,13 +389,13 @@ View EffectsStage(State<bool> active, State<int> activation_count) {
       Spacing(compact ? 24.0F : 34.0F),
       Frame{.max_width = 1100.0F},
       CrossAlign(CrossAxisAlignment::Stretch),
-      Transition{AnimateTo(entered.Get() ? 1.0F : 0.0F, TweenSpec{0.5, Easing::EaseOut})}
+      Transition{AnimateTo(entered ? 1.0F : 0.0F, TweenSpec{0.5, Easing::EaseOut})}
           .Opacity(0.0F, 1.0F)
           .Offset({0.0F, 18.0F}, {})
   );
 
   return Stack {
-    AmbientCanvas(active.Get()),
+    AmbientCanvas(active),
     ScrollView {
       Stack {std::move(content)}.With(
           Padding(EdgeInsets::All(page_padding)),

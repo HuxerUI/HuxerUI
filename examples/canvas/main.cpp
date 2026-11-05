@@ -207,7 +207,7 @@ View TaijiEffect() {
   const ThemeSpec& theme = UseTheme();
   auto started = UseState(false);
   Lifecycle([started] { started = true; });
-  const bool animated = started.Get() && !theme.motion.reduced_motion;
+  const bool animated = started && !theme.motion.reduced_motion;
   const ColorScheme colors = theme.colors;
   const Animated<float> rotation = animated
                                         ? AnimateTo(
@@ -229,7 +229,7 @@ View OrbitEffect() {
   const ThemeSpec& theme = UseTheme();
   auto started = UseState(false);
   Lifecycle([started] { started = true; });
-  const bool animated = started.Get() && !theme.motion.reduced_motion;
+  const bool animated = started && !theme.motion.reduced_motion;
   const ColorScheme colors = theme.colors;
   const AnimationPlayback loop{.iterations = std::nullopt};
   const AnimationPlayback pulse{.iterations = std::nullopt, .repeat_mode = RepeatMode::Reverse};
@@ -273,7 +273,7 @@ View SelectedEffect(std::size_t selected) {
 View CanvasDemo() {
   const ThemeSpec& theme = UseTheme();
   auto selected = UseState<std::size_t>(0);
-  const std::size_t selected_index = selected.Get();
+  const std::size_t selected_index = selected;
 
   return Column {
     Text("Canvas Effects", TextRole::Title),

@@ -635,9 +635,9 @@ Password visibility stays controlled application state on the same component:
 auto visible = UseState(false);
 
 return TextField(password)
-    .Secure(!visible.Get())
-    .TrailingIcon(visibility_icon, visible.Get() ? "Hide password" : "Show password")
-    .OnTrailingIconClick([visible]() mutable { visible = !visible.Get(); })
+    .Secure(!visible)
+    .TrailingIcon(visibility_icon, visible ? "Hide password" : "Show password")
+    .OnTrailingIconClick([visible] { visible = !visible; })
     .OnChanged([password](const TextEditingValue& value) mutable { password = value; });
 ```
 

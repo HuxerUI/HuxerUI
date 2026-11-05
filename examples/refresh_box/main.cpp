@@ -29,12 +29,12 @@ View RefreshBoxDemo() {
           Column {
             Row {
               Column {
-                Text(status.Get()),
-                Text::Format("Completed refreshes: {}", refresh_count.Get())
+                Text(status),
+                Text::Format("Completed refreshes: {}", refresh_count)
                     .With(Foreground(theme.colors.on_surface_variant)),
               }.With(Spacing(theme.spacing.extra_small)),
               Spacer(),
-              Text(refreshing.Get() ? "UPDATING" : "READY", TextRole::Label)
+              Text(refreshing ? "UPDATING" : "READY", TextRole::Label)
                   .With(Foreground(theme.colors.primary)),
             }.With(
                 Padding(compact ? theme.spacing.medium : theme.spacing.large),

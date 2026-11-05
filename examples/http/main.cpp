@@ -185,8 +185,8 @@ View HttpContent() {
       Button(download->downloading ? "Downloading..." : "Download")
           .With(Enabled(!download->downloading))
           .OnClick([=] { tasks.Launch(DownloadFile(http, download_file, download)); }),
-      DownloadProgressBar(download.Get()),
-      Text(DownloadProgressText(download.Get()), TextRole::Label),
+      DownloadProgressBar(download),
+      Text(DownloadProgressText(download), TextRole::Label),
       Text(download->status, TextRole::Label),
       SelectionArea {
         Text(download->detail),

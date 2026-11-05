@@ -33,7 +33,7 @@ View LocalizedContent(State<std::size_t> selected_locale) {
   const std::string canvas_text = UseString(i18n::strings::canvas_text);
   const TextStyle canvas_style{Font::System(theme.typography.body_large), theme.colors.on_surface};
   const float canvas_padding = theme.spacing.large;
-  const std::size_t selected_index = selected_locale.Get();
+  const std::size_t selected_index = selected_locale;
 
   return ScrollView {
     Column {
@@ -107,7 +107,7 @@ View LocalizedContent(State<std::size_t> selected_locale) {
 [[huxerui::composable]]
 View I18nExample() {
   auto selected_locale = UseState<std::size_t>(0);
-  const std::size_t selected_index = selected_locale.Get();
+  const std::size_t selected_index = selected_locale;
   return ProvideEnvironment(
       Locale::FromLanguageTag(locale_tags[selected_index]),
       Scope([selected_locale] { return LocalizedContent(selected_locale); })

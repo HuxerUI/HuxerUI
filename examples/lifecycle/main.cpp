@@ -34,8 +34,8 @@ View LifecycleContent() {
   const ThemeSpec& theme = UseTheme();
 
   View connection;
-  if (mounted.Get()) {
-    connection = ChannelConnection(channel.Get(), events);
+  if (mounted) {
+    connection = ChannelConnection(channel, events);
   } else {
     connection = Text("The connection component is unmounted.").With(
         Padding(theme.spacing.large),
@@ -55,7 +55,7 @@ View LifecycleContent() {
       Row {
         Button("Design").OnClick([channel] { channel = "Design"; }),
         Button("Runtime").OnClick([channel] { channel = "Runtime"; }),
-        Button(mounted.Get() ? "Unmount" : "Mount").OnClick([mounted] { mounted = !mounted.Get(); }),
+        Button(mounted ? "Unmount" : "Mount").OnClick([mounted] { mounted = !mounted; }),
       }.With(
           Spacing(theme.spacing.medium),
           CrossAlign(CrossAxisAlignment::Center)

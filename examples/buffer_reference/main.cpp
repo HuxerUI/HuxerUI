@@ -34,7 +34,7 @@ View BufferReferenceDemo() {
   auto status = UseState(std::string("Ready. Request two frames to verify storage reuse."));
 
   std::vector<View> bars;
-  const auto& counts = analysis.Get().histogram;
+  const auto& counts = analysis->histogram;
   const auto maximum = std::max<std::size_t>(1, *std::max_element(counts.begin(), counts.end()));
   for (std::size_t index = 0; index < counts.size(); ++index) {
     bars.push_back(Column {
@@ -49,9 +49,9 @@ View BufferReferenceDemo() {
       Text("BufferReference", TextRole::Title),
       Text("One native allocation. A new grayscale frame on each request. No image conversion or byte snapshot."),
       Text("320 x 180 pixels, 336-byte row stride, 60,480 bytes of fixed storage."),
-      Button(busy.Get() ? "Reading..." : "Analyze next frame").OnClick(
+      Button(busy ? "Reading..." : "Analyze next frame").OnClick(
           [source, busy, sequence, analysis, previous, status] {
-            if (busy.Get()) {
+            if (busy) {
               return;
             }
             busy = true;
@@ -63,8 +63,8 @@ View BufferReferenceDemo() {
                 const auto& frame = std::get<demo::GrayFrame>(result);
                 try {
                   analysis = demo::Analyze(frame);
-                  const bool first = sequence.Get() == 0;
-                  const bool same = previous.Get() == frame.pixels;
+                  const bool first = sequence == 0;
+                  const bool same = frame.pixels == previous;
                   previous = frame.pixels;
                   sequence = frame.sequence;
                   if (first) {
@@ -82,10 +82,10 @@ View BufferReferenceDemo() {
               busy = false;
             });
           }
-      ).With(Enabled(!busy.Get())),
-      Text(status.Get()),
-      Text("Frame: " + std::to_string(sequence.Get()), TextRole::Title),
-      Text("Mean grayscale value: " + std::to_string(analysis.Get().mean)),
+      ).With(Enabled(!busy)),
+      Text(status),
+      Text("Frame: " + std::to_string(sequence), TextRole::Title),
+      Text("Mean grayscale value: " + std::to_string(analysis->mean)),
       Text("Histogram (bars scaled to the largest bucket)", TextRole::Label),
       Column(std::move(bars)).With(Spacing(theme.spacing.medium), CrossAlign(CrossAxisAlignment::Stretch)),
       Text("Retaining memory is not a read lock. An asynchronous reader must finish before requesting another frame."),

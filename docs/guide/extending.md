@@ -13,7 +13,7 @@ Mark it `[[huxerui::composable]]` only when it directly calls a composition-boun
 View FavoriteButton() {
   auto selected = UseState(false);
   return IconButton(star_icon, "Favorite").OnClick([selected] {
-    selected = !selected.Get();
+    selected = !selected;
   });
 }
 ```
@@ -100,7 +100,7 @@ public:
 
 View App() {
   auto submitted = UseState(false);
-  return Text(submitted.Get() ? "Submitted" : "Press Enter")
+  return Text(submitted ? "Submitted" : "Press Enter")
       .With(Focusable{}, SubmitOnEnter{})
       .On<Submitted>([submitted] { submitted = true; });
 }

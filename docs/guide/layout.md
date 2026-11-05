@@ -50,11 +50,11 @@ auto frames = UseState(std::vector<Frame>{
 });
 auto grows = UseState(std::vector<Grow>{Grow(0.0F), Grow()});
 return SplitLayout {
-  Text("Sidebar").With(frames.Get()[0], grows.Get()[0]).Key("sidebar"),
-  Text("Content").With(frames.Get()[1], grows.Get()[1]).Key("content"),
+  Text("Sidebar").With(frames->at(0), grows->at(0)).Key("sidebar"),
+  Text("Content").With(frames->at(1), grows->at(1)).Key("content"),
 }.OnChanged([=](const std::vector<SplitChange>& changes) {
-  auto next_frames = frames.Get();
-  auto next_grows = grows.Get();
+  std::vector<Frame> next_frames = frames;
+  std::vector<Grow> next_grows = grows;
   for (const auto& change : changes) {
     next_frames[change.index] = change.frame;
     next_grows[change.index] = change.grow;

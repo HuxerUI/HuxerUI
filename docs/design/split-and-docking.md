@@ -62,11 +62,11 @@ auto frames = UseState(std::vector<Frame>{
 });
 auto grows = UseState(std::vector<Grow>{Grow(0.0F), Grow()});
 return SplitLayout {
-  Text("Sidebar").With(frames.Get()[0], grows.Get()[0]).Key("sidebar"),
-  Text("Content").With(frames.Get()[1], grows.Get()[1]).Key("content"),
+  Text("Sidebar").With(frames->at(0), grows->at(0)).Key("sidebar"),
+  Text("Content").With(frames->at(1), grows->at(1)).Key("content"),
 }.OnChanged([=](const std::vector<SplitChange>& changes) {
-  auto next_frames = frames.Get();
-  auto next_grows = grows.Get();
+  std::vector<Frame> next_frames = frames;
+  std::vector<Grow> next_grows = grows;
   for (const auto& change : changes) {
     next_frames[change.index] = change.frame;
     next_grows[change.index] = change.grow;
@@ -232,9 +232,9 @@ Keyboard and accessibility adjustments use the same proposal path. The design ad
 ## Docking edits
 
 ```cpp
-tree = tree.Get().Dock("terminal", "editor", DockPlacement::Bottom);
-tree = tree.Get().Dock("terminal", "editor", DockPlacement::Tab);
-tree = tree.Get().Remove("inspector");
+tree = tree->Dock("terminal", "editor", DockPlacement::Bottom);
+tree = tree->Dock("terminal", "editor", DockPlacement::Tab);
+tree = tree->Remove("inspector");
 ```
 
 Dock can move an existing panel or insert an item that is currently absent from the tree. Its target must identify a panel already in the tree, and the final item references are validated by DockLayout. Tab inserts after the target within its group and selects the inserted panel. Left, Right, Top, and Bottom split beside the target's whole tab group, preserving the original region's external Frame/Grow and starting the inner regions with equal Grow weights, subject to their bounds. A single moved tab does not carry its former group's allocation policy into the destination.

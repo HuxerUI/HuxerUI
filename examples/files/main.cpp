@@ -68,7 +68,7 @@ View DirectoryPath(std::string label, const File& directory) {
       Column {
         Text("Receive external files", TextRole::Title),
         Column {
-          Text(hovering.Get() ? "Release to receive files" : "Drop text files here", TextRole::Title),
+          Text(hovering ? "Release to receive files" : "Drop text files here", TextRole::Title),
           Text("TXT, Markdown, JSON and other text files"),
           Text("References only. No automatic reading or import.", TextRole::Label),
         }.With(
@@ -77,9 +77,9 @@ View DirectoryPath(std::string label, const File& directory) {
             Spacing(theme.spacing.small),
             MainAlign(MainAxisAlignment::Center),
             CrossAlign(CrossAxisAlignment::Center),
-            Background(hovering.Get() ? theme.colors.primary : theme.colors.primary_container),
-            Foreground(hovering.Get() ? theme.colors.on_primary : theme.colors.on_primary_container),
-            Border{theme.colors.primary, hovering.Get() ? 3.0F : 1.0F},
+            Background(hovering ? theme.colors.primary : theme.colors.primary_container),
+            Foreground(hovering ? theme.colors.on_primary : theme.colors.on_primary_container),
+            Border{theme.colors.primary, hovering ? 3.0F : 1.0F},
             CornerRadius(theme.shapes.medium),
             FileDropTarget::Accepts({
                 .extensions = text_filter.extensions,

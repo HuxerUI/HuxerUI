@@ -121,8 +121,9 @@ UseStateCell(std::type_index type, const std::source_location& location, std::sh
 
 /// A shared observable cell bound to the original application's lifetime and thread.
 /// @tparam T Stored value type. Copies of State share the same cell rather than duplicating the value.
-/// Get/conversion reads subscribe an active composition; writes invalidate its observers. Ordinary application-thread
-/// reads do not require composition. Retaining a cell does not keep its Runtime alive or let it bind to a new Runtime.
+/// Prefer implicit conversion to `const T&` for value reads and `state->member` for member access. Reads subscribe an
+/// active composition, and writes invalidate its observers. Ordinary application-thread reads do not require composition.
+/// Retaining a cell does not keep its Runtime alive or let it bind to a new Runtime.
 ///
 /// Construct State values in application models during application_hooks or later application work. An empty State
 /// needs no Runtime; directly creating a value creates a fresh cell each time, while UseState remembers composition

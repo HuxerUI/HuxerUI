@@ -109,7 +109,7 @@ void UpdateTextFilePreview(
     State<TextFilePreview> preview,
     State<std::uint64_t> generation
 ) {
-  const std::uint64_t current_generation = generation.Get() + 1;
+  const std::uint64_t current_generation = generation + 1;
   generation = current_generation;
 
   std::optional<FileReference> file = ActivatedFile(activation);
@@ -122,7 +122,7 @@ void UpdateTextFilePreview(
   preview = {file_name, "Reading text content..."};
   tasks.Launch([file = std::move(*file), file_name, preview, generation, current_generation]() -> Task<void> {
     IoResult<std::string> result = co_await file.ReadStringAsync();
-    if (generation.Get() != current_generation) {
+    if (generation != current_generation) {
       co_return;
     }
     if (!result.Succeeded()) {
@@ -158,7 +158,7 @@ View PermissionCard(const ApplicationHandle& application, TaskScope tasks) {
   const ThemeSpec& theme = UseTheme();
   return Column {
     Text("Camera permission", TextRole::Title),
-    Text("Camera: " + status.Get(), TextRole::Label).With(Foreground(theme.colors.primary)),
+    Text::Format(TextRole::Label, "Camera: {}", status).With(Foreground(theme.colors.primary)),
     Text("The native application shell owns privacy declarations and final permission policy."),
     Button("Check camera").OnClick([=] {
       tasks.Launch([=]() -> Task<void> {
@@ -240,14 +240,14 @@ void InstallApplication(ApplicationContext& context) {
       Text(PlatformActivationSummary()),
       Text(PlatformActivationHint()),
       Column {
-        ForEach(model->activations.Get(), [](const std::string& activation) { return Text(activation); }),
+        ForEach(model->activations, [](const std::string& activation) { return Text(activation); }),
       }.With(
           Padding(theme.spacing.large),
           Spacing(theme.spacing.small),
           Background(theme.colors.surface_container_low),
           CornerRadius(theme.shapes.medium)
       ),
-      TextFilePreviewCard(model->preview.Get()),
+      TextFilePreviewCard(model->preview),
       PermissionCard(application, tasks),
     }.With(
         Padding(theme.spacing.extra_large),

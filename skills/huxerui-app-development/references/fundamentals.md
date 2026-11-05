@@ -34,9 +34,10 @@ Prefer constructing that chain directly when practical. Do not move temporary Vi
 ## State
 
 - `UseState(initial)` returns copyable `State<T>`.
-- Ordinary reads can use the implicit `const T&` conversion or `state->member`; call `Get()` only when an explicit reference helps overload resolution or clarity.
+- Pass `State<T>` directly to APIs that accept the handle or a known `T` or `const T&`. For example, literal `Text::Format("Count: {}", count)` accepts `State` directly. Use `state->member` for read-only field and method access.
+- When an API deduces its argument type and needs the stored value, initialize a typed value or reference first, such as `const int value = count;` before `std::clamp(value, 0, 100)`. A declaration such as `auto copy = count;` copies the handle and shares its cell.
 - Ordinary writes use `state = value`; `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, or `>>=` when supported by `T`; and prefix/postfix increment or decrement. There is no required setter call.
-- Use `state.Update([](T& value) { ... })` when one custom mutation must change fields or behavior that the operators cannot express. Do not attempt to mutate through the const reference returned by `Get()`.
+- Use `state.Update([](T& value) { ... })` for custom mutations. To write the value of one State into another, read it into a typed value before assigning it to the destination.
 - Reads subscribe the current composition scope; writes invalidate subscribers.
 - State identity depends on scope, source location, and occurrence at that location.
 - `StateList<T>` provides observable list operations such as `PushBack`, `Insert`, `Set`, `Erase`, `Move`, `PopBack`, and `Clear`.

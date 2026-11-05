@@ -208,7 +208,7 @@ struct InternalAccess;
 ///
 /// View App() {
 ///   const auto model = UseService<DemoViewModel>();
-///   return Text(std::to_string(model->activation_count.Get()));
+///   return Text(model->activation_count);
 /// }
 ///
 /// const Application application{App, {.application_hooks = {InstallApplication}}};

@@ -61,7 +61,7 @@ Choose an explicit palette to follow the host, optionally keeping a user overrid
 ```cpp
 View App() {
   auto theme_override = UseState(std::optional<ThemeBrightness>{});
-  const auto selected = theme_override.Get();
+  const std::optional<ThemeBrightness>& selected = theme_override;
   const auto brightness = selected ? *selected : UseSystemThemeBrightness();
   auto theme = brightness == ThemeBrightness::Dark
       ? MaterialDarkThemeSpec() : MaterialLightThemeSpec();
@@ -268,11 +268,11 @@ auto expanded = UseState(false);
 auto shared = UseSharedTransition();
 return Column {
   Button("Expand").OnClick([shared, expanded] {
-    shared.Run(TweenSpec{0.5, Easing::EaseInOut}, [expanded] { expanded = !expanded.Get(); });
+    shared.Run(TweenSpec{0.5, Easing::EaseInOut}, [expanded] { expanded = !expanded; });
   }),
   Stack {
     Image(product.image).With(
-        Frame{expanded.Get() ? 200.0F : 96.0F, expanded.Get() ? 200.0F : 96.0F},
+        Frame{expanded ? 200.0F : 96.0F, expanded ? 200.0F : 96.0F},
         SharedElement(product.id)
     ),
   }.With(Frame{.height = 240.0F}, shared.Scope()),

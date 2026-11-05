@@ -63,7 +63,7 @@ View WindowChromeDemo() {
         if (!tray_available) {
           return false;
         }
-        if (exit_dialog_open.Get()) {
+        if (exit_dialog_open) {
           return true;
         }
         exit_dialog_open = true;

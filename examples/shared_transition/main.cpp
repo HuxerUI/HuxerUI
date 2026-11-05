@@ -116,7 +116,7 @@ View StoryPage(int index, State<bool> slow) {
   const auto navigation = UseNavigation();
   const ThemeSpec& theme = UseTheme();
   const Story& story = stories[static_cast<std::size_t>(index)];
-  const TransitionSpec fade{FadeTransition{}, Timing(slow.Get())};
+  const TransitionSpec fade{FadeTransition{}, Timing(slow)};
   return Column {
     Row {
       Button("Back").OnClick([navigation] { navigation.Pop(); }).Key("back"),
@@ -141,7 +141,7 @@ View LocalCard(State<bool> slow) {
   const ThemeSpec& theme = UseTheme();
   const auto expanded = UseState(false);
   const auto transition = UseSharedTransition();
-  const bool open = expanded.Get();
+  const bool open = expanded;
   const Story& story = stories.front();
   return Column {
     Text("STAY ON THIS PAGE").Style({Font::System(11.0F).WithWeight(FontWeight::Bold), theme.colors.primary}),
@@ -149,7 +149,7 @@ View LocalCard(State<bool> slow) {
         .Style({Font::System(14.0F), theme.colors.on_surface_variant}),
     // The control stays outside Scope so an in-flight operation can be interrupted.
     Button(open ? "Make compact" : "Expand card").OnClick([transition, expanded, slow] {
-      transition.Run(Timing(slow.Get()), [expanded] { expanded = !expanded.Get(); });
+      transition.Run(Timing(slow), [expanded] { expanded = !expanded; });
     }).Key("expand-card"),
     Stack {
       Cover(story, open ? 112.0F : 64.0F).With(
@@ -178,7 +178,7 @@ View Studio() {
   const ThemeSpec& theme = UseTheme();
   const auto local = UseState(false);
   const auto slow = UseState(false);
-  View content = local.Get() ? LocalCard(slow).Key("local") : NavigationStack([slow] {
+  View content = local ? LocalCard(slow).Key("local") : NavigationStack([slow] {
     return Library(slow);
   }).Key("pages");
   return Column {
@@ -187,8 +187,8 @@ View Studio() {
       Spacer(),
     },
     Flow {
-      Chip("Between pages", !local.Get()).OnChanged([local](bool selected) { if (selected) { local = false; } }),
-      Chip("On this page", local.Get()).OnChanged([local](bool selected) { if (selected) { local = true; } }),
+      Chip("Between pages", !local).OnChanged([local](bool selected) { if (selected) { local = false; } }),
+      Chip("On this page", local).OnChanged([local](bool selected) { if (selected) { local = true; } }),
       Switch("Slow motion", slow).OnChanged([slow](bool value) { slow = value; }),
     }.With(Spacing(8.0F)),
     Divider(),

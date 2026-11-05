@@ -20,9 +20,9 @@ View PlatformViewDemo() {
   const ThemeSpec& theme = UseTheme();
 
   View platform_content;
-  if (visible.Get()) {
+  if (visible) {
     platform_content = Stack {
-      example::PlatformTextField(value.Get())
+      example::PlatformTextField(value)
           .On<example::PlatformTextFieldEvents::Changed>([value](std::string next) { value = std::move(next); })
           .With(Frame{.height = platform_text_field_height}),
       Stack {
@@ -49,11 +49,11 @@ View PlatformViewDemo() {
     Text("PlatformView", TextRole::Title),
     Text("The PlatformTextField participates in HuxerUI layout, rendering order, state, and events."),
     std::move(platform_content),
-    Text("Controlled value: " + value.Get(), TextRole::Label),
+    Text::Format(TextRole::Label, "Controlled value: {}", value),
     Column {
       Button("Set from HuxerUI").OnClick([value] { value = "Updated by HuxerUI"; }),
-      Button(visible.Get() ? "Unmount PlatformView" : "Mount PlatformView").OnClick([visible] {
-        visible = !visible.Get();
+      Button(visible ? "Unmount PlatformView" : "Mount PlatformView").OnClick([visible] {
+        visible = !visible;
       }),
     }.With(
         Spacing(theme.spacing.medium),

@@ -43,7 +43,7 @@ View EditorPane() {
       "Editor",
       Column {
         Text("Drag either divider to resize the workspace. Text wraps as the available width changes."),
-        Text::Format("Edits recorded: {}", edits.Get()),
+        Text::Format("Edits recorded: {}", edits),
         Button("Record edit").OnClick([edits] { edits += 1; }),
         Text("Hide and show the inspector: this pane keeps its local counter and scroll position.")
             .With(Foreground(theme.colors.on_surface_variant)),
@@ -61,12 +61,12 @@ View SplitDemo() {
   auto show_inspector = UseState(true);
 
   View inspector;
-  if (show_inspector.Get()) {
+  if (show_inspector) {
     inspector = PaneSurface(
         "Inspector",
         Text("Pane sizes belong to the application. Reset sizes to restore the initial allocation."),
         theme
-    ).With(frames.Get()[2], grows.Get()[2]).Key("inspector");
+    ).With(frames->at(2), grows->at(2)).Key("inspector");
   }
 
   return Column {
@@ -74,8 +74,8 @@ View SplitDemo() {
     Text("Drag a divider, or Tab to it and use arrow keys. Escape cancels the current drag.")
         .With(Foreground(theme.colors.on_surface_variant)),
     Flow {
-      Button(show_inspector.Get() ? "Hide inspector" : "Show inspector")
-          .OnClick([show_inspector] { show_inspector = !show_inspector.Get(); }),
+      Button(show_inspector ? "Hide inspector" : "Show inspector")
+          .OnClick([show_inspector] { show_inspector = !show_inspector; }),
       Button("Reset sizes").OnClick([=] {
         frames = InitialFrames();
         grows = InitialGrows();
@@ -91,13 +91,13 @@ View SplitDemo() {
             Text("resources/"),
           }.With(Spacing(theme.spacing.small)),
           theme
-      ).With(frames.Get()[0], grows.Get()[0]).Key("project"),
-      EditorPane().With(frames.Get()[1], grows.Get()[1]).Key("editor"),
+      ).With(frames->at(0), grows->at(0)).Key("project"),
+      EditorPane().With(frames->at(1), grows->at(1)).Key("editor"),
       std::move(inspector),
     }.Orientation(compact ? Axis::Vertical : Axis::Horizontal)
         .OnChanged([=](const std::vector<SplitChange>& changes) {
-          auto next_frames = frames.Get();
-          auto next_grows = grows.Get();
+          std::array<Frame, 3> next_frames = frames;
+          std::array<Grow, 3> next_grows = grows;
           // The optional inspector is last, so visible pane indices keep the same array entries.
           for (const auto& change : changes) {
             next_frames[change.index] = change.frame;

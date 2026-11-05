@@ -235,12 +235,13 @@ struct StreamModel {
   bool follow_new_block = false;
 
   void PublishSource() {
-    source = std::make_shared<const Transcript>(index, active_id, live.Get());
+    source = std::make_shared<const Transcript>(index, active_id, live);
   }
 
   void RebuildIndex() {
     auto updated = std::make_shared<TranscriptIndex>();
-    for (const auto& row : *messages.Get()) {
+    const std::shared_ptr<const Messages>& current = messages;
+    for (const auto& row : *current) {
       if (row->kind == BlockKind::Reasoning && !row->expanded) {
         continue;
       }
@@ -263,8 +264,9 @@ struct StreamModel {
   }
 
   void Latest() const {
-    if (!messages.Get()->empty()) {
-      static_cast<void>(scroll.ScrollToItem(messages.Get()->size() - 1, ScrollAlignment::End));
+    const std::shared_ptr<const Messages>& current = messages;
+    if (!current->empty()) {
+      static_cast<void>(scroll.ScrollToItem(current->size() - 1, ScrollAlignment::End));
     }
   }
 
@@ -272,10 +274,11 @@ struct StreamModel {
     if (active_id == 0) {
       return;
     }
-    auto updated = std::make_shared<Messages>(*messages.Get());
+    const std::shared_ptr<const Messages>& current = messages;
+    auto updated = std::make_shared<Messages>(*current);
     auto last = std::make_shared<MessageBlock>(*updated->back());
-    last->text.at(active_id - last->id).text = last->kind == BlockKind::Code
-        ? Highlight(live.Get(), code_color) : live.Get();
+    const AttributedText& text = live;
+    last->text.at(active_id - last->id).text = last->kind == BlockKind::Code ? Highlight(text, code_color) : text;
     if (last->kind == BlockKind::Tool && stop) {
       last->exit_code.reset();
     }
@@ -289,11 +292,12 @@ struct StreamModel {
   void Append(MessageBlock block, bool streaming = false) {
     const bool following = Following();
     Seal();
-    auto updated = std::make_shared<Messages>(*messages.Get());
+    const std::shared_ptr<const Messages>& current = messages;
+    auto updated = std::make_shared<Messages>(*current);
     block.id = next_id;
     next_id += block.text.size();
     if (block.kind == BlockKind::Question) {
-      auto values = answers.Get();
+      Answers values = answers;
       values.emplace(block.id, Answer{});
       answers = std::move(values);
     }
@@ -329,14 +333,15 @@ struct StreamModel {
     if (id != active_id || source_version != version) {
       return false;
     }
-    if (value != live.Get()) {
+    if (value != live) {
       Publish(std::move(value));
     }
     return true;
   }
 
   void ToggleDetails(TextBlockId id) {
-    auto updated = std::make_shared<Messages>(*messages.Get());
+    const std::shared_ptr<const Messages>& current = messages;
+    auto updated = std::make_shared<Messages>(*current);
     for (auto& row : *updated) {
       if (row->id == id) {
         auto replacement = std::make_shared<MessageBlock>(*row);
@@ -350,16 +355,16 @@ struct StreamModel {
   }
 
   template <class Edit> void EditAnswer(TextBlockId id, Edit edit) {
-    auto updated = answers.Get();
-    if (!running.Get() && !updated.at(id).submitted) {
+    Answers updated = answers;
+    if (!running && !updated.at(id).submitted) {
       edit(updated.at(id));
       answers = std::move(updated);
     }
   }
 
   bool CanSubmit(TextBlockId id) const {
-    const auto& value = answers.Get().at(id);
-    return !running.Get() && !value.submitted && (value.windows || value.web) && HasText(value.project.text);
+    const auto& value = answers->at(id);
+    return !running && !value.submitted && (value.windows || value.web) && HasText(value.project.text);
   }
 };
 
@@ -526,10 +531,13 @@ std::vector<MessageBlock> ResponseContent(const ColorScheme& colors, const std::
 }
 
 Task<void> HighlightLatest(std::shared_ptr<StreamModel> model) {
-  while (model->active_id != 0 && model->messages.Get()->back()->kind == BlockKind::Code) {
+  while (model->active_id != 0) {
+    if (const std::shared_ptr<const Messages>& messages = model->messages; messages->back()->kind != BlockKind::Code) {
+      break;
+    }
     const auto id = model->active_id;
     const auto version = model->version;
-    const auto text = model->live.Get();
+    const AttributedText text = model->live;
     const Color color = model->code_color;
     AttributedText highlighted;
     try {
@@ -553,10 +561,10 @@ Task<void> StreamBlock(std::shared_ptr<StreamModel> model, TaskScope tasks, Mess
   std::size_t byte = 0;
   unsigned chunks = 0;
   auto flush = [&] {
-    if (received == model->live.Get().Length()) {
+    if (received == model->live->Length()) {
       return;
     }
-    model->Publish(AppendResponse(model->live.Get(), response, received));
+    model->Publish(AppendResponse(model->live, response, received));
     if (kind == BlockKind::Code && !model->highlighting) {
       model->highlighting = true;
       tasks.Launch(HighlightLatest(model));
@@ -614,10 +622,11 @@ Task<void> GenerateResponse(std::shared_ptr<StreamModel> model, TaskScope tasks,
 }
 
 void Send(std::shared_ptr<StreamModel> model, TaskScope tasks, ColorScheme colors, std::string prompt) {
-  if (model->running.Get() || !HasText(prompt)) {
+  if (model->running || !HasText(prompt)) {
     return;
   }
-  const bool follow_up = !model->messages.Get()->empty();
+  const std::shared_ptr<const Messages>& messages = model->messages;
+  const bool follow_up = !messages->empty();
   model->running = true;
   model->stop = false;
   model->follow_new_block = true;
@@ -626,10 +635,10 @@ void Send(std::shared_ptr<StreamModel> model, TaskScope tasks, ColorScheme color
 }
 
 void SendDraft(std::shared_ptr<StreamModel> model, TaskScope tasks, ColorScheme colors) {
-  if (model->running.Get() || !HasText(model->draft.Get().text) || model->draft.Get().composition) {
+  if (model->running || !HasText(model->draft->text) || model->draft->composition) {
     return;
   }
-  const auto prompt = model->draft.Get().text;
+  const auto prompt = model->draft->text;
   model->draft = TextEditingValue::FromText("");
   Send(model, tasks, colors, prompt);
 }
@@ -638,7 +647,7 @@ void SubmitAnswer(std::shared_ptr<StreamModel> model, TaskScope tasks, ColorSche
   if (!model->CanSubmit(id)) {
     return;
   }
-  auto values = model->answers.Get();
+  Answers values = model->answers;
   auto& value = values.at(id);
   value.submitted = true;
   std::string targets = value.windows ? "Windows" : "";
@@ -825,7 +834,7 @@ View ChangePreview(DialogContext dialog, std::optional<std::size_t> selected) {
 [[huxerui::composable]]
 View DocumentText(std::shared_ptr<StreamModel> model, std::shared_ptr<const MessageBlock> row, std::size_t part = 0) {
   const auto id = row->id + part;
-  const auto text = id == model->active_id ? model->live.Get() : row->text.at(part).text;
+  const AttributedText text = id == model->active_id ? model->live : row->text.at(part).text;
   return Text(text).SelectionBlock(id).With(FontSize(16.0F))
       .On<TextEvents::LinkActivated>([status = model->status](const TextLinkActivation& link) {
         status = "Link requested: " + link.target.ToString();
@@ -842,9 +851,9 @@ View MessageAction(std::string label, Color foreground) {
 [[huxerui::composable]]
 View QuestionForm(std::shared_ptr<StreamModel> model, TaskScope tasks, std::shared_ptr<const MessageBlock> row) {
   const auto colors = UseTheme().colors;
-  const auto& answer = model->answers.Get().at(row->id);
+  const auto& answer = model->answers->at(row->id);
   const auto id = row->id;
-  const bool enabled = !answer.submitted && !model->running.Get();
+  const bool enabled = !answer.submitted && !model->running;
   return Column {
     DocumentText(model, row),
     Flow {
@@ -1030,7 +1039,7 @@ View MessageRow(std::shared_ptr<StreamModel> model, TaskScope tasks, std::shared
         MessageAction("Review proposal", colors.on_surface_variant).OnClick([dialog] {
           dialog.Show(ChangePreview, std::optional<std::size_t>{});
         }),
-        MessageAction("Request revision", colors.on_surface_variant).With(Enabled{!model->running.Get()})
+        MessageAction("Request revision", colors.on_surface_variant).With(Enabled{!model->running})
             .OnClick([=] { Send(model, tasks, colors, "Revise the proposed layout."); }),
       }.With(Spacing(8.0F)),
     }.With(Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch));
@@ -1052,7 +1061,7 @@ View MessageRow(std::shared_ptr<StreamModel> model, TaskScope tasks, std::shared
 
 [[huxerui::composable]]
 View TranscriptBlocks(std::shared_ptr<StreamModel> model, TaskScope tasks) {
-  const auto messages = model->messages.Get();
+  const std::shared_ptr<const Messages> messages = model->messages;
   Lifecycle([model] {
     if (std::exchange(model->follow_new_block, false)) {
       model->Latest();
@@ -1072,14 +1081,14 @@ View TranscriptBlocks(std::shared_ptr<StreamModel> model, TaskScope tasks) {
 
 [[huxerui::composable]]
 View SelectableTranscript(std::shared_ptr<StreamModel> model, TaskScope tasks) {
-  return SelectionArea(TranscriptBlocks(model, tasks)).Source(model->source.Get()).With(Grow());
+  return SelectionArea(TranscriptBlocks(model, tasks)).Source(model->source).With(Grow());
 }
 
 [[huxerui::composable]]
 View Composer(std::shared_ptr<StreamModel> model, TaskScope tasks) {
   const auto colors = UseTheme().colors;
-  const bool running = model->running.Get();
-  const bool can_send = HasText(model->draft.Get().text) && !model->draft.Get().composition;
+  const bool running = model->running;
+  const bool can_send = HasText(model->draft->text) && !model->draft->composition;
   return Column {
     TextField(model->draft).Variant(TextFieldVariant::Standard)
         .Label("Message").Placeholder("Ask the Agent...").MaxLength(2000)
@@ -1115,10 +1124,10 @@ View Conversation() {
   auto status = UseState(std::string{"Enter to send. Responses are scripted locally."});
   auto running = UseState(false);
   auto scroll = UseScrollController();
-  auto model = UseState(std::make_shared<StreamModel>(StreamModel{
+  const std::shared_ptr<StreamModel> model = UseState(std::make_shared<StreamModel>(StreamModel{
       .messages = messages, .live = live, .source = source, .answers = answers, .draft = draft,
       .status = status, .running = running, .scroll = scroll,
-  })).Get();
+  }));
   return Column {
     Text("Agent chat", TextRole::Title),
     Text("Local scripted demo / no model connection", TextRole::Label).With(Foreground(colors.on_surface_variant)),

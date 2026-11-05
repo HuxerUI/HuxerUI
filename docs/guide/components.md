@@ -246,17 +246,18 @@ It does not require a model base class, global ID map, or an eagerly initialized
 The required item-info provider supplies each item's accessible label, enabled state, expansion state, and optional selection.
 
 ```cpp
-return TreeView<Node>(roots.Get(), [](const Node& node) {
+return TreeView<Node>(roots, [](const Node& node) {
   return FileRow(node).Key(node->key);
 }, [selected](const Node& node) {
+  const Node& current = selected;
   return TreeItemInfo{
       .label = node->name,
       .expandable = node->is_directory,
-      .expanded = node->expanded.Get(),
-      .selected = selected.Get() == node,
+      .expanded = node->expanded,
+      .selected = current == node,
   };
-}).Children([](const Node& node) {
-  return node->children.Get();
+}).Children([](const Node& node) -> std::vector<Node> {
+  return node->children;
 }).OnExpandedChanged([tasks](const Node& node, bool expanded) {
   node->expanded = expanded;
   if (expanded) {
@@ -265,7 +266,7 @@ return TreeView<Node>(roots.Get(), [](const Node& node) {
 }).OnSelectionChanged([selected](const Node& node, bool value) {
   if (value) {
     selected = node;
-  } else if (selected.Get() == node) {
+  } else if (const Node& current = selected; current == node) {
     selected = Node{};
   }
 }).OnActivated([](const Node& node) {
@@ -688,9 +689,9 @@ View PasswordField(State<TextEditingValue> password, ImageVariant visibility_ico
 
   return TextField(password)
       .Label("Password")
-      .TrailingIcon(visibility_icon, visible.Get() ? "Hide password" : "Show password")
-      .Secure(!visible.Get())
-      .OnTrailingIconClick([visible]() mutable { visible = !visible.Get(); })
+      .TrailingIcon(visibility_icon, visible ? "Hide password" : "Show password")
+      .Secure(!visible)
+      .OnTrailingIconClick([visible] { visible = !visible; })
       .OnChanged([password](TextEditingValue next) mutable { password = std::move(next); });
 }
 ```
