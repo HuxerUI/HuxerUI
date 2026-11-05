@@ -1,5 +1,10 @@
 # Text Input and TextField Design
 
+`TextField::TextStyles` supplies visual `TextStyleRange` values over the current authoritative UTF-16 body.
+The nonsecure client creates and paints one attributed paragraph, keeping caret, range and IME geometry consistent with font changes.
+Attribute updates invalidate layout and advance the geometry revision without replacing the input session or editing history.
+Native proposals use base styling until matching controlled text and ranges are accepted; secure layout remains masked and ignores attributes.
+
 This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `UiWindow` focus ownership, its native text-input capability, retained `NodeExtension` state, typed events, and retained-scene rendering.
 
 The design also defines the extension boundary required by complex editable components. SweetEditor is the reference integration: it should reuse the HuxerUI focus and platform input path without replacing its document model with the built-in TextField state.
