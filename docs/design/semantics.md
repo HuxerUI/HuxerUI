@@ -107,11 +107,14 @@ enum class SemanticRole {
   ScrollView,
   Tree,
   TreeItem,
+  Separator,
 };
 ```
 
 A role expresses a shared distinction, not a native class name.
 An adapter maps an unsupported distinction to the closest native role while preserving name, state, actions, and hierarchy.
+
+SplitLayout separators expose the adjacent pane's extent and feasible range through Separator, SetValue, Increment, and Decrement. macOS maps them to its splitter role and Windows to its separator control type; Android uses the adjustable SeekBar class and iOS the adjustable trait. Unbounded or infeasible splits expose no resize actions. Linux and Web retain their existing deferred platform accessibility coverage.
 
 ### State and structure
 

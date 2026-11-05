@@ -9,6 +9,7 @@ Application code normally expresses intent with built-in containers and modifier
 ## Built-in layouts
 
 - `Row` and `Column` arrange children along one axis.
+- `SplitLayout` arranges controlled, resizable panes using their Frame and Grow modifiers.
 - `Stack` overlays children.
 - `Flow` wraps children across lines.
 - `Spacer` consumes remaining main-axis space in a `Row` or `Column`.
@@ -37,6 +38,39 @@ It affects participation in a compatible parent layout and propagates across tra
 `Row` and `Column` allocate finite remaining main-axis space by grow factor; an unbounded main axis preserves natural sizes instead.
 Growing children avoid speculative measurement when the cross axis does not stretch or its stretched size is already fixed by tight constraints.
 Stretching under loose cross-axis constraints still measures intrinsic cross sizes before allocating space.
+
+## Resizable panes
+
+SplitLayout accepts ordinary children and Views groups, ignoring empty Views. It defaults to Horizontal; `.Orientation(Axis::Vertical)` stacks panes vertically. Use stable keys when panes can be inserted, removed, or reordered.
+
+```cpp
+auto frames = UseState(std::vector<Frame>{
+    {.width = 240.0F, .min_width = 160.0F, .max_width = 480.0F},
+    {.min_width = 240.0F},
+});
+auto grows = UseState(std::vector<Grow>{Grow(0.0F), Grow()});
+return SplitLayout {
+  Text("Sidebar").With(frames.Get()[0], grows.Get()[0]).Key("sidebar"),
+  Text("Content").With(frames.Get()[1], grows.Get()[1]).Key("content"),
+}.OnChanged([=](const std::vector<SplitChange>& changes) {
+  auto next_frames = frames.Get();
+  auto next_grows = grows.Get();
+  for (const auto& change : changes) {
+    next_frames[change.index] = change.frame;
+    next_grows[change.index] = change.grow;
+  }
+  frames = std::move(next_frames);
+  grows = std::move(next_grows);
+});
+```
+
+Separators reserve 8 DIPs before allocation. A zero Grow factor uses the preferred main-axis Frame dimension or the pane's natural size; positive factors share the remaining finite space while honoring minimum and maximum bounds. A growing pane's preferred dimension is not an additional size base. Remaining space can stay unused when there are no growing panes or all of them reach their maximum. Parent constraints take precedence if the requested sizes cannot fit. Unbounded main-axis measurement preserves natural sizing and disables resizing.
+
+Dragging, focused arrow keys, Home/End, and accessibility adjustment emit one synchronous `SplitEvents::Changed` batch. Each `SplitChange` contains the complete proposed Frame/Grow and the pane's current flattened nonempty index. Apply all entries to controlled state; do not retain index batches across reordering. Rejecting a proposal leaves allocation unchanged. A proposal can coordinate other panes' weights or convert a growing pane to fixed sizing when needed to reproduce the requested geometry; write back both Frame and Grow. Window resizing and programmatic updates never emit Changed or overwrite the declared sizing preferences.
+
+Cancel and Escape stop dragging without undoing accepted updates. Incompatible topology, orientation, enabled state, or geometry/configuration changes cancel the active drag. Panes are clipped to their allocations. SplitLayout uses existing layout and input machinery; [the design contract](../design/split-and-docking.md) separately describes future docking behavior.
+
+The [SplitLayout example](../../examples/split_layout/main.cpp) demonstrates three controlled panes, optional inspector content, stable editor state, and vertical arrangement on compact windows. Build the `example_split_layout` target to run it.
 
 ## Mounted coordinate spaces
 

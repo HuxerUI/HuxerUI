@@ -440,6 +440,7 @@ It neither queues work nor creates an emitter that may outlive the extension.
 Popup, Dialog, and other window services remain explicit typed-handle dependencies.
 
 Component adjustment and presentation events remain local to existing retained behavior rather than introducing a generic transaction layer.
+SplitLayout owns its bounded Frame/Grow allocation, private separator layout, and retained resize behavior in `components/split_layout.cpp`. Its scope connects separator events through UseEvents; compatible controlled writeback preserves a drag, while incompatible topology or sizing baselines cancel it. SplitChange batches contain complete pane configurations without changing generic layout, child reconciliation, or application State transaction semantics. See [Split and Docking Layouts](split-and-docking.md).
 Slider retains the active pointer's last proposal across controlled writeback, ends ownership before Committed or Canceled dispatch, and defers cancellation caused by declarative configuration to mounted dispatch.
 Keyboard repeats and accessibility adjustments are independent atomic adjustments; cancellation never writes an application-owned rollback value.
 Select routes popup close paths through its existing session and reports ExpandedChanged(false) before a selection request, without emitting from destruction.

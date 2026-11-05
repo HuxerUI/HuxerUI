@@ -167,6 +167,7 @@ UIAccessibilityTraits Traits(const SemanticNode& node, bool container) {
       traits |= UIAccessibilityTraitButton;
       break;
     case SemanticRole::Slider:
+    case SemanticRole::Separator:
       traits |= UIAccessibilityTraitAdjustable;
       break;
     case SemanticRole::SearchField:

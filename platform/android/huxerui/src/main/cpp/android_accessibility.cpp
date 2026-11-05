@@ -138,6 +138,8 @@ std::int32_t AndroidRole(SemanticRole role) noexcept {
     return 25;
   case SemanticRole::TreeItem:
     return 26;
+  case SemanticRole::Separator:
+    return 27;
   }
   return 0;
 }

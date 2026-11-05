@@ -70,6 +70,15 @@ TEST_CASE("Android semantic frames encode the ComboBox role") {
   REQUIRE(ReadUint32(encoded, 33) == 24U);
 }
 
+TEST_CASE("Android semantic frames encode adjustable separators", "[split]") {
+  SemanticNode node;
+  node.role = SemanticRole::Separator;
+  node.range = SemanticRange{0.0, 300.0, 100.0, 10.0};
+  node.actions = SemanticActionMask(SemanticActionKind::SetValue) |
+      SemanticActionMask(SemanticActionKind::Increment) | SemanticActionMask(SemanticActionKind::Decrement);
+  REQUIRE(ReadUint32(EncodeAndroidSemanticFrame({1, 0, {node}}), 33) == 27U);
+}
+
 TEST_CASE("Android semantic frames encode tree roles and selection independently of activation", "[tree]") {
   SemanticNode node;
   node.role = SemanticRole::Tree;

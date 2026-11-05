@@ -88,6 +88,8 @@ enum class SemanticRole {
   Tree,
   /// One item in a Tree, optionally owning nested TreeItems.
   TreeItem,
+  /// An adjustable boundary between panes, described by SemanticRange.
+  Separator,
 };
 
 /// Describes the state of a checkable control, separately from selection within a collection.

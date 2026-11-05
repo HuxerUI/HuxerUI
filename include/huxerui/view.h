@@ -1463,6 +1463,45 @@ public:
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints);
 };
 
+/// Proposes the complete configuration of one pane after a separator adjustment.
+struct SplitChange {
+  /// Index in the current flattened nonempty child order, excluding separators.
+  std::size_t index = 0;
+  /// Proposed Frame; bounds and cross-axis fields retain their declared values.
+  Frame frame{};
+  /// Proposed growth weight, with zero selecting preferred or natural sizing.
+  Grow grow{0.0F};
+};
+
+/// Arranges controlled, resizable panes along one axis, using their Frame and Grow modifiers.
+///
+/// Separators emit proposals; only owner writeback changes pane sizes. Use stable keys for dynamic stateful panes.
+class SplitLayout final : public detail::TypedView<SplitLayout> {
+public:
+  /// Creates a horizontal split; empty Views are ignored and fewer than two panes have no separator.
+  explicit SplitLayout(std::vector<View> children);
+  SplitLayout(std::initializer_list<View> children) : SplitLayout(std::vector<View>(children)) {}
+
+  template <class... Children>
+    requires((detail::ViewChild<Children> && ...) &&
+             !(sizeof...(Children) == 1 && (std::same_as<std::remove_cvref_t<Children>, SplitLayout> && ...)))
+  explicit SplitLayout(Children&&... children)
+      : SplitLayout(detail::CollectChildren(std::forward<Children>(children)...)) {}
+
+  /// Selects the pane arrangement and resize axis. Defaults to Horizontal.
+  SplitLayout Orientation(Axis axis) &&;
+
+  /// Handles one resize proposal. Apply entries together; indices belong to this callback's child order.
+  /// Write back both Frame and Grow: a proposal may coordinate other panes or convert growth to fixed sizing.
+  /// Programmatic sizing and window resizing do not emit this event; ignored proposals leave sizes unchanged.
+  template <class Function> SplitLayout OnChanged(Function&& function) && {
+    return std::move(*this).On<SplitEvents::Changed>(std::forward<Function>(function));
+  }
+
+private:
+  std::vector<View> children_;
+};
+
 /// Places children in wrapping lines according to the configured Flow modifiers.
 class Flow final : public Layout<Flow> {
 public:

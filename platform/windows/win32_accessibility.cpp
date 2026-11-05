@@ -87,6 +87,8 @@ CONTROLTYPEID ControlType(SemanticRole role) noexcept {
     return UIA_RadioButtonControlTypeId;
   case SemanticRole::Slider:
     return UIA_SliderControlTypeId;
+  case SemanticRole::Separator:
+    return UIA_SeparatorControlTypeId;
   case SemanticRole::ProgressIndicator:
     return UIA_ProgressBarControlTypeId;
   case SemanticRole::ComboBox:

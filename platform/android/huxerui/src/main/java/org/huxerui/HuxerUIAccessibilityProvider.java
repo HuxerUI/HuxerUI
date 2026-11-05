@@ -61,6 +61,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     private static final int ROLE_COMBO_BOX = 24;
     private static final int ROLE_TREE = 25;
     private static final int ROLE_TREE_ITEM = 26;
+    private static final int ROLE_SEPARATOR = 27;
 
     private static final int SEMANTIC_ACTIVATE = 0;
     private static final int SEMANTIC_FOCUS = 1;
@@ -908,6 +909,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         case ROLE_SWITCH:
             return "android.widget.Switch";
         case ROLE_SLIDER:
+        case ROLE_SEPARATOR:
             return "android.widget.SeekBar";
         case ROLE_PROGRESS:
             return "android.widget.ProgressBar";

@@ -39,6 +39,8 @@ NSString* AccessibilityRole(const huxerui::SemanticNode& node) {
     return NSAccessibilityRadioButtonRole;
   case SemanticRole::Slider:
     return NSAccessibilitySliderRole;
+  case SemanticRole::Separator:
+    return NSAccessibilitySplitterRole;
   case SemanticRole::ProgressIndicator:
     return NSAccessibilityProgressIndicatorRole;
   case SemanticRole::ComboBox:

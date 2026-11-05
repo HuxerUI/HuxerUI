@@ -24,6 +24,7 @@ They explain the current implementation and deliberately unsupported behavior, w
 - [Navigation](navigation.md): stacks, typed routes, Back, URL history, activation integration, custom page transitions, and [shared-element transitions](navigation.md#shared-element-transitions).
 - [Indexed Pages](indexed-pages.md): retained peer pages and controlled selection.
 - [Pager](pager.md): controlled animated and directly draggable paging across retained peer pages.
+- [Split and Docking Layouts](split-and-docking.md): implemented SplitLayout sizing and controlled resizing, with future docking and panel retention contracts.
 - [Window Insets and System Bars](window-insets.md): safe area, edge-to-edge content, and system-bar appearance.
 - [Window Chrome](window-chrome.md): system and custom desktop chrome.
 - [System Tray and Window Visibility](system-tray.md): tray presentation, window request handling, visibility, and application termination.

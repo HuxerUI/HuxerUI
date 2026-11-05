@@ -406,6 +406,9 @@ export namespace huxerui {
     using huxerui::Spacer;
     using huxerui::Spacing;
     using huxerui::SpacingScheme;
+    using huxerui::SplitChange;
+    using huxerui::SplitEvents;
+    using huxerui::SplitLayout;
     using huxerui::SpringSpec;
     using huxerui::Stack;
     using huxerui::StartDrawer;
