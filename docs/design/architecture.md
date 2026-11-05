@@ -1025,12 +1025,19 @@ When a supported platform needs an owning host object, its protocol receives tha
 | macOS | Owning `NSWindow` | Owning `NSWindow` |
 | Linux | Adapter-owned parent `GtkWidget` | Owning `GtkWindow` |
 | Web | None; the factory returns a detached `HTMLElement` | None; browser globals are directly available |
-| Android | Owning `android.content.Context` | Owning `android.content.Context` |
+| Android | Owning `android.content.Context` | Application `Context` for `Factory`; originating `HuxerUIView` for `WindowFactory` |
 | iOS | Owning `UIViewController` | Owning `UIViewController` |
 
 These are explicit platform protocol parameters rather than fields of a universal Context object.
 The platform shell establishes application-level native facilities before Runtime executes application hooks and window-level facilities before UiWindow executes window hooks. A factory requiring a UiWindow cannot open without the original live window context.
 A future platform defines only the narrow host values required by its own factory contracts and does not widen the shared API.
+Android's `JavaWindowPlatformModuleFactory` is a UiWindow factory in the same frozen application catalog as `JavaPlatformModuleFactory`; it does not introduce another registry or channel protocol.
+Its Java factory and channel endpoint are prepared for each open against the original window, so a descriptor shared by several windows cannot cache the first window's host.
+Java modules capture the attachment-bound `HuxerUIActivityResultLauncher` during creation; reattaching the same View does not rebind a retained capability.
+The launcher serializes native Activity presentations with FilePicker, pauses admission while the host is not resumed, and retires on host replacement or window destruction.
+Cancel requests native dismissal without releasing an active slot until the native result or host closure; terminal cleanup still runs for the FilePicker transport after callback delivery is canceled.
+Request identities are never reused within a process, and the saved allocator cursor isolates results restored after Activity recreation without restoring library instances or C++ continuations.
+Existing PlatformChannel cancellation, event dispatch, and disposal remain unchanged, including discarded completion callbacks on Close; a library facade owns settlement of any surviving application-scoped Task waits.
 A PlatformView exposes its platform View, `update`, `invoke`, and `dispose`.
 A PlatformModule exposes `invoke` and `dispose`; `invoke` receives its method, arguments, and one `PlatformResult`, then returns an optional `PlatformCancellation`.
 `PlatformResult.complete` and `fail` are accepted at most once, `PlatformEventEmitter.emit` publishes an instance event and may return a PlatformView decision, and `PlatformCancellation.cancel` is idempotent.

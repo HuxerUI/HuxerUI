@@ -243,7 +243,8 @@ The default reference and its children are read-only through reference operation
 Passing `true` requests read/write access and never silently returns a read-only selection.
 `CanOpenDirectories(writable)` checks host support without opening UI or creating probe files; it does not guarantee approval for a particular location.
 `CanWrite()` on the returned directory advertises child creation, not permission to overwrite every existing child.
-Directory, file-open, and save requests share the same per-Runtime presentation queue.
+Directory, file-open, and save requests share the same per-window operation queue.
+On Android, each admitted picker shares its native presentation queue with window-owned Java modules; see [Android Activity results](platforms.md#window-owned-java-modules-and-activity-results).
 
 ## Receiving dropped files
 

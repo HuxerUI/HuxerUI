@@ -20,6 +20,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.os.SystemClock;
 import android.os.Build;
+import android.os.Bundle;
 import android.text.Layout;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -128,9 +129,15 @@ public final class HuxerUIView extends ViewGroup {
         void setContentBrightness(int statusBar, int navigationBar);
     }
 
-    public interface FilePickerLauncher {
+    /**
+     * Activity-owned presentation operations; request codes are allocated by HuxerUI and must be forwarded unchanged.
+     * The host reserves codes 0x40000000 through 0x7ffffffe for this route; other result handlers use a different range.
+     */
+    public interface ActivityResultHost {
+        /** Starts a result-producing Activity on the main thread; a launch failure may throw RuntimeException. */
         void launch(Intent intent, int requestCode);
 
+        /** Requests dismissal on the main thread; completion still requires the matching result or host closure. */
         void cancel(int requestCode);
     }
 
@@ -184,7 +191,7 @@ public final class HuxerUIView extends ViewGroup {
     private final float[] transformValues = new float[9];
     private final int[] screenLocation = new int[2];
     private final HuxerUIAccessibilityProvider accessibilityProvider;
-    private final HuxerUIFilePicker filePicker;
+    private HuxerUIFilePicker filePicker;
     private HuxerUIApplication application;
     private final LongSparseArray<PlatformViewContainer> platformViews = new LongSparseArray<>();
     private final LongSparseArray<HuxerUITextureLayer> textureLayers = new LongSparseArray<>();
@@ -222,7 +229,9 @@ public final class HuxerUIView extends ViewGroup {
     private int safeInsetRight;
     private int safeInsetBottom;
     private SystemBarsController systemBarsController;
-    private FilePickerLauncher filePickerLauncher;
+    private ActivityResultHost activityResultHost;
+    private HuxerUIActivityResultLauncher activityResults = new HuxerUIActivityResultLauncher(null);
+    private boolean activityResultResumed;
     private FileDropPermissionRequester fileDropPermissionRequester;
     private long fileDropSession;
     private boolean fileDropStarted;
@@ -258,7 +267,7 @@ public final class HuxerUIView extends ViewGroup {
     public HuxerUIView(Context context, AttributeSet attributes, int defaultStyleAttribute) {
         super(context, attributes, defaultStyleAttribute);
         accessibilityProvider = new HuxerUIAccessibilityProvider(this);
-        filePicker = new HuxerUIFilePicker(this);
+        filePicker = new HuxerUIFilePicker(this, activityResults);
         density = getResources().getDisplayMetrics().density;
         setFocusable(true);
         setFocusableInTouchMode(true);
@@ -369,16 +378,56 @@ public final class HuxerUIView extends ViewGroup {
         }
     }
 
-    public void setFilePickerLauncher(FilePickerLauncher launcher) {
-        if (filePickerLauncher == launcher) {
-            return;
-        }
+    /**
+     * Replaces this window's Activity endpoint on the main thread. Old launchers permanently lose presentation access.
+     * Pass null before destroying the host. Custom hosts forward lifecycle, saved state, and result callbacks below.
+     * Install before native attachment; changing the endpoint requires recreating its window modules and services.
+     * @param host Activity-owned operations, or null to disable result-producing presentation.
+     */
+    public void setActivityResultHost(ActivityResultHost host) {
+        HuxerUIActivityResultLauncher.requireThread();
+        if (activityResultHost == host) return;
         filePicker.cancelActive();
-        filePickerLauncher = launcher;
+        activityResults.close();
+        activityResultHost = host;
+        activityResults = new HuxerUIActivityResultLauncher(host);
+        filePicker = new HuxerUIFilePicker(this, activityResults);
+        activityResults.setResumed(activityResultResumed);
     }
 
-    public boolean dispatchFilePickerResult(int requestCode, int resultCode, Intent data) {
-        return filePicker.dispatchResult(requestCode, resultCode, data);
+    /**
+     * Returns this attachment's launcher on the main thread, including when presentation is unavailable.
+     * Capture it once during window-module creation, not on each invocation; unavailable launches report onFailure.
+     */
+    public HuxerUIActivityResultLauncher getActivityResultLauncher() {
+        HuxerUIActivityResultLauncher.requireThread();
+        return activityResults;
+    }
+
+    /** Forwards onActivityResult on the main thread; false leaves an unrelated result to the host's other handlers. */
+    public boolean dispatchActivityResult(int requestCode, int resultCode, Intent data) {
+        return activityResults.dispatchResult(requestCode, resultCode, data);
+    }
+
+    /**
+     * Forwards Activity onResume/onPause on the main thread, independently of View focus.
+     * Focus alone does not establish Activity readiness. False defers new launches without canceling active work.
+     */
+    public void setActivityResultResumed(boolean resumed) {
+        HuxerUIActivityResultLauncher.requireThread();
+        activityResultResumed = resumed;
+        activityResults.setResumed(resumed);
+    }
+
+    /** Pauses admission and saves request-code progress in onSaveInstanceState; pending operations are not restored. */
+    public void saveActivityResultState(Bundle state) {
+        setActivityResultResumed(false);
+        HuxerUIActivityResultLauncher.saveState(state);
+    }
+
+    /** Restores a nullable saved Bundle on the main thread in onCreate, before any result-producing activities start. */
+    public static void restoreActivityResultState(Bundle state) {
+        HuxerUIActivityResultLauncher.restoreState(state);
     }
 
     /**
@@ -481,10 +530,6 @@ public final class HuxerUIView extends ViewGroup {
         }
     }
 
-    FilePickerLauncher filePickerLauncher() {
-        return filePickerLauncher;
-    }
-
     /**
      * Borrows this View's explicit presentation endpoint on the main thread.
      * @return The configured launcher, or null; callers check native attachment and visibility separately.
@@ -499,27 +544,7 @@ public final class HuxerUIView extends ViewGroup {
      */
     long presentationIdentity() { return presentationIdentity; }
 
-    HuxerUIFilePicker.Operation prepareOpenDirectory(long nativeHandle, boolean writable) {
-        return filePicker.prepareDirectory(nativeHandle, writable);
-    }
-
-    boolean canOpenFiles() {
-        return filePickerLauncher != null;
-    }
-
-    boolean canSaveFiles() {
-        return filePickerLauncher != null;
-    }
-
-    HuxerUIFilePicker.Operation prepareOpenFiles(
-            long nativeHandle, String[] extensions, String[] contentTypes, boolean multiple) {
-        return filePicker.prepareOpen(nativeHandle, extensions, contentTypes, multiple);
-    }
-
-    HuxerUIFilePicker.Operation prepareSaveFile(
-            long nativeHandle, String sourcePath, String suggestedName, String[] extensions, String[] contentTypes) {
-        return filePicker.prepareSave(nativeHandle, sourcePath, suggestedName, extensions, contentTypes);
-    }
+    HuxerUIFilePicker filePicker() { return filePicker; }
 
     @Override
     protected void onAttachedToWindow() {
@@ -529,6 +554,11 @@ public final class HuxerUIView extends ViewGroup {
         observer.addOnGlobalFocusChangeListener(platformViewFocusListener);
         requestFocus();
         if (nativeHandle == 0L) {
+            if (activityResults.closed()) {
+                activityResults = new HuxerUIActivityResultLauncher(activityResultHost);
+                filePicker = new HuxerUIFilePicker(this, activityResults);
+                activityResults.setResumed(activityResultResumed);
+            }
             boolean applicationAlreadyRunning = HuxerUIApplication.current() != null;
             application = HuxerUIApplication.initialize(getContext(), startupApplicationActivation, true);
             application.attach(this);
@@ -2356,6 +2386,8 @@ public final class HuxerUIView extends ViewGroup {
      * Cancels scheduled frames and retires the original native UiWindow on the main thread.
      */
     void releaseWindow() {
+        filePicker.cancelActive();
+        activityResults.close();
         removeCallbacks(frameCallback);
         frameScheduled = false;
         if (nativeHandle != 0L) {

@@ -17,19 +17,14 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 
 final class HuxerUIFilePicker {
-    private static final int FIRST_REQUEST_CODE = 0x4800;
-    private static final int LAST_REQUEST_CODE = 0x7fff;
-    private static final AtomicInteger nextRequestCode = new AtomicInteger(FIRST_REQUEST_CODE);
-
-    private final HuxerUIView view;
+    private final HuxerUIActivityResultLauncher launcher;
     private final ContentResolver resolver;
     private volatile Operation active;
 
-    HuxerUIFilePicker(HuxerUIView view) {
-        this.view = view;
+    HuxerUIFilePicker(HuxerUIView view, HuxerUIActivityResultLauncher launcher) {
+        this.launcher = launcher;
         Context applicationContext = view.getContext().getApplicationContext();
         resolver = applicationContext.getContentResolver();
     }
@@ -50,10 +45,7 @@ final class HuxerUIFilePicker {
         return operation;
     }
 
-    boolean dispatchResult(int requestCode, int resultCode, Intent data) {
-        Operation operation = active;
-        return operation != null && operation.dispatchResult(requestCode, resultCode, data);
-    }
+    boolean available() { return launcher.available(); }
 
     void cancelActive() {
         Operation operation = active;
@@ -68,19 +60,9 @@ final class HuxerUIFilePicker {
         }
     }
 
-    private static int requestCode() {
-        while (true) {
-            int current = nextRequestCode.get();
-            int following = current == LAST_REQUEST_CODE ? FIRST_REQUEST_CODE : current + 1;
-            if (nextRequestCode.compareAndSet(current, following)) {
-                return current;
-            }
-        }
-    }
-
     final class Operation {
         // This request remains active through metadata loading or export, not just until Activity result.
-        // The terminal callback releases the native holder and the shared picker's presentation slot.
+        // The terminal callback releases the native holder and the shared picker's operation slot.
         private final long nativeHandle;
         private final String sourcePath;
         private final String suggestedName;
@@ -89,7 +71,8 @@ final class HuxerUIFilePicker {
         private final boolean multiple;
         private boolean directory;
         private boolean writable;
-        private final int requestCode = requestCode();
+        private HuxerUIPlatformChannel.Cancellation presentation;
+        private boolean canceled;
         private final AtomicBoolean finished = new AtomicBoolean();
         private final HuxerUIFileReference.CopyState copyState = new HuxerUIFileReference.CopyState();
         private volatile Future<?> worker;
@@ -105,52 +88,56 @@ final class HuxerUIFilePicker {
         }
 
         void start() {
-            HuxerUIView.FilePickerLauncher launcher = view.filePickerLauncher();
-            if (launcher == null || active != null) {
+            if (finished.get()) return;
+            if (!launcher.available() || active != null) {
                 complete(false, null);
                 return;
             }
             active = this;
             try {
-                launcher.launch(sourcePath == null ? openIntent() : saveIntent(), requestCode);
+                presentation = launcher.enqueue(sourcePath == null ? openIntent() : saveIntent(),
+                        new HuxerUIActivityResultLauncher.Callback() {
+                            @Override public void onResult(int code, Intent data) {
+                                presentation = null;
+                                acceptResult(code, data);
+                            }
+                            @Override public void onFailure(RuntimeException error) {
+                                presentation = null;
+                                complete(false, null);
+                            }
+                        }, () -> {
+                            presentation = null;
+                            complete(false, null);
+                        });
             } catch (RuntimeException exception) {
                 complete(false, null);
             }
         }
 
         void cancel() {
-            if (!finished.compareAndSet(false, true)) {
-                return;
-            }
-            clear(this);
+            if (finished.get() || canceled) return;
+            canceled = true;
             copyState.cancel();
             Future<?> activeWorker = worker;
-            if (activeWorker != null) {
-                activeWorker.cancel(true);
+            if (activeWorker != null) activeWorker.cancel(true);
+            if (presentation != null) {
+                presentation.cancel();
+            } else {
+                complete(false, null);
             }
-            HuxerUIView.FilePickerLauncher launcher = view.filePickerLauncher();
-            if (launcher != null) {
-                try {
-                    launcher.cancel(requestCode);
-                } catch (RuntimeException ignored) {
-                }
-            }
-            nativeComplete(nativeHandle, false, null);
         }
 
-        boolean dispatchResult(int resultRequestCode, int resultCode, Intent data) {
-            if (resultRequestCode != requestCode || finished.get()) {
-                return resultRequestCode == requestCode;
-            }
+        private void acceptResult(int resultCode, Intent data) {
+            if (finished.get()) return;
             if (resultCode != Activity.RESULT_OK || data == null) {
                 complete(false, null);
-                return true;
+                return;
             }
             if (sourcePath == null) {
                 List<Uri> uris = selectedUris(data, multiple);
                 if (uris.isEmpty()) {
                     complete(false, null);
-                    return true;
+                    return;
                 }
                 int grantFlags = data.getFlags();
                 // A read-only selection must not inherit broader OS write rights. Derived references
@@ -187,7 +174,7 @@ final class HuxerUIFilePicker {
                 // destination URI is not success; completion waits for streaming output to close.
                 if (destination == null) {
                     complete(false, null);
-                    return true;
+                    return;
                 }
                 try {
                     worker = HuxerUIFileReference.submit(() -> {
@@ -203,7 +190,6 @@ final class HuxerUIFilePicker {
                     complete(false, null);
                 }
             }
-            return true;
         }
 
         private Intent openIntent() {

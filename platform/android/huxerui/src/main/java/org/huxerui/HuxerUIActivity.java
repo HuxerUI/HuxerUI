@@ -24,6 +24,7 @@ public class HuxerUIActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        HuxerUIView.restoreActivityResultState(savedInstanceState);
         configureEdgeToEdgeWindow();
         HuxerUIApplication.PermissionLauncher permissionLauncher = new HuxerUIApplication.PermissionLauncher() {
             @Override
@@ -53,7 +54,7 @@ public class HuxerUIActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 24) {
             contentView.setFileDropPermissionRequester(event -> Api24.requestFileDropPermission(this, event));
         }
-        contentView.setFilePickerLauncher(new HuxerUIView.FilePickerLauncher() {
+        contentView.setActivityResultHost(new HuxerUIView.ActivityResultHost() {
             @SuppressWarnings("deprecation")
             @Override
             public void launch(Intent intent, int requestCode) {
@@ -89,12 +90,14 @@ public class HuxerUIActivity extends Activity {
         super.onResume();
         if (contentView != null) {
             contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.ACTIVE);
+            contentView.setActivityResultResumed(true);
         }
     }
 
     @Override
     protected void onPause() {
         if (contentView != null) {
+            contentView.setActivityResultResumed(false);
             contentView.setWindowLifecycleState(HuxerUIView.WindowLifecycleState.INACTIVE);
         }
         super.onPause();
@@ -133,7 +136,7 @@ public class HuxerUIActivity extends Activity {
     @SuppressWarnings("deprecation")
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (contentView != null && contentView.dispatchFilePickerResult(requestCode, resultCode, data)) {
+        if (contentView != null && contentView.dispatchActivityResult(requestCode, resultCode, data)) {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
@@ -148,6 +151,12 @@ public class HuxerUIActivity extends Activity {
     }
 
     @Override
+    protected void onSaveInstanceState(Bundle state) {
+        if (contentView != null) contentView.saveActivityResultState(state);
+        super.onSaveInstanceState(state);
+    }
+
+    @Override
     protected void onDestroy() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backCallback != null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -158,7 +167,7 @@ public class HuxerUIActivity extends Activity {
             backCallback = null;
         }
         if (contentView != null) {
-            contentView.setFilePickerLauncher(null);
+            contentView.setActivityResultHost(null);
             contentView.setFileDropPermissionRequester(null);
             contentView.setPermissionLauncher(null);
             contentView.setSystemBarsController(null);

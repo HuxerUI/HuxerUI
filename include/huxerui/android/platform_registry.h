@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -99,7 +100,9 @@ class JavaPlatformViewInstance;
 std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(Runtime& runtime,
                                                                                  std::string class_name);
 PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModuleFactoryState>& factory,
-                                         PlatformPayload options);
+                                         PlatformPayload options, jobject window = nullptr);
+/// Creates a fresh Java WindowFactory instance and binds its channel to this invocation's original UiWindow.
+PlatformChannel CreateJavaWindowPlatformModule(UiWindow& ui_window, std::string class_name, PlatformPayload options);
 
 /// Type-erased Android factory consumed by the Android PlatformView host.
 struct AndroidViewFactory {
@@ -355,6 +358,62 @@ template <class Module, class Options> struct JavaPlatformModuleFactory {
 
 private:
   std::shared_ptr<detail::JavaPlatformModuleFactoryState> state_;
+};
+
+/// Registers a Java HuxerUIPlatformModule.WindowFactory through the existing application factory catalog.
+/// Each OpenPlatformModule call requires a live window context and creates an independent Java instance and channel.
+/// The public Java factory has a public no-argument constructor and receives the originating HuxerUIView, Options,
+/// and Events. It should capture that attachment's capabilities at creation and never select a replacement window.
+/// The facade owns its channel as usual; Close drops pending callbacks, so a Task facade must separately settle any
+/// still-live waits during its own cleanup. Module creation, invocation, cancellation, and disposal use the UI thread.
+/// @tparam Module Exact C++ facade returned by create.
+/// @tparam Options Payload-encodable construction data, or void for Null.
+template <class Module, class Options = void> struct JavaWindowPlatformModuleFactory;
+
+/// Window-bound Java module factory without construction Options.
+template <class Module> struct JavaWindowPlatformModuleFactory<Module, void> {
+  std::string class_name;
+  std::function<Module(PlatformChannel)> create;
+
+  /// Creates a fresh window-bound module; an empty create or an invalid Java factory is a logic error.
+  /// @param ui_window Original live Android window supplied by the catalog, on its application thread.
+  /// @return The exact Module facade wrapping this instance's window-bound PlatformChannel.
+  /// Exceptions from the facade constructor propagate after closing the newly created channel.
+  Module operator()(UiWindow& ui_window) {
+    if (!create) throw std::logic_error("HuxerUI Android Java window module factory is incomplete");
+    PlatformChannel channel = detail::CreateJavaWindowPlatformModule(ui_window, class_name, {});
+    try {
+      return create(channel);
+    } catch (...) {
+      channel.Close();
+      throw;
+    }
+  }
+};
+
+/// Window-bound Java module factory with payload-encodable construction Options.
+template <class Module, class Options> struct JavaWindowPlatformModuleFactory {
+  static_assert(huxerui::detail::PlatformPayloadEncodable<Options>);
+  std::string class_name;
+  std::function<Module(PlatformChannel)> create;
+
+  /// Encodes options and creates a fresh module for this window, without caching an earlier window's endpoint.
+  /// @param ui_window Original live Android window supplied by the catalog, on its application thread.
+  /// @param options Construction data borrowed during this call and encoded into an owned payload.
+  /// @return The exact Module facade wrapping this instance's window-bound PlatformChannel.
+  /// @throws std::logic_error If create is empty or the original native host cannot be used.
+  /// Exceptions from the facade constructor propagate after closing the newly created channel.
+  Module operator()(UiWindow& ui_window, const Options& options) {
+    if (!create) throw std::logic_error("HuxerUI Android Java window module factory is incomplete");
+    PlatformChannel channel = detail::CreateJavaWindowPlatformModule(
+        ui_window, class_name, huxerui::detail::EncodePlatformValue(options));
+    try {
+      return create(channel);
+    } catch (...) {
+      channel.Close();
+      throw;
+    }
+  }
 };
 
 /// Java-backed PlatformView factory without a Controller.

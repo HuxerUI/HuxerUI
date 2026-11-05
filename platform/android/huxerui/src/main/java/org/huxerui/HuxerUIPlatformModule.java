@@ -33,6 +33,19 @@ public interface HuxerUIPlatformModule {
         HuxerUIPlatformModule create(Context context, PlatformPayload options, HuxerUIPlatformChannel.Events events);
     }
 
+    /** Creates a module bound to the original native attachment of one HuxerUIView. */
+    interface WindowFactory {
+        /**
+         * Creates the platform instance on the main thread.
+         * @param window the originating host; capture needed capabilities now instead of looking up a later attachment
+         * @param options immutable construction options, or Null for an optionless module
+         * @param events the existing framework event sink; stop retaining it during disposal
+         * @return a fresh module instance; the factory must not cache a window or a previously created instance
+         */
+        HuxerUIPlatformModule create(HuxerUIView window, PlatformPayload options,
+                HuxerUIPlatformChannel.Events events);
+    }
+
     /**
      * Handles one asynchronous method invocation.
      *

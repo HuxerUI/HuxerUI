@@ -1618,6 +1618,11 @@ private:
 };
 
 
+jobject AndroidWindowView(UiWindow& ui_window) {
+  static_cast<void>(android::GetPlatformEnv(ui_window));
+  return static_cast<AndroidUiWindow&>(ui_window).NativeView();
+}
+
 jobject CurrentAndroidPresentationView() {
   const auto source = CurrentExecutionContext();
   if (!source || !source->requires_ui) return nullptr;

@@ -6,6 +6,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -13,6 +14,7 @@
 
 #include "application/platform_registry_internal.h"
 #include "android_file_internal.h"
+#include "android_application_internal.h"
 #include "io/file_internal.h"
 
 namespace huxerui::android {
@@ -867,16 +869,21 @@ void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
 
 class JavaPlatformModuleFactoryState final {
 public:
-  JavaPlatformModuleFactoryState(Runtime& runtime, std::string class_name) {
-    const PlatformEnv env = GetPlatformEnv(runtime);
-    bridge = std::make_shared<JavaBridgeSupport>(runtime, env.jni, env.context);
+  template <class Host> JavaPlatformModuleFactoryState(Host& host, std::string class_name) {
+    constexpr bool window = std::is_same_v<Host, UiWindow>;
+    const PlatformEnv env = GetPlatformEnv(host);
+    bridge = std::make_shared<JavaBridgeSupport>(host, env.jni, env.context);
     LocalRef<jclass> implementation_class(env.jni, ResolveClass(env.jni, env.context, class_name));
     LocalRef<jobject> local_factory(
-        env.jni, ConstructFactory(env.jni, implementation_class.Get(), "org/huxerui/HuxerUIPlatformModule$Factory"));
+        env.jni, ConstructFactory(env.jni, implementation_class.Get(), window
+            ? "org/huxerui/HuxerUIPlatformModule$WindowFactory" : "org/huxerui/HuxerUIPlatformModule$Factory"));
     create = env.jni->GetMethodID(
         implementation_class.Get(), "create",
-        "(Landroid/content/Context;Lorg/huxerui/PlatformPayload;Lorg/huxerui/HuxerUIPlatformChannel$Events;)"
-        "Lorg/huxerui/HuxerUIPlatformModule;");
+        window
+            ? "(Lorg/huxerui/HuxerUIView;Lorg/huxerui/PlatformPayload;Lorg/huxerui/HuxerUIPlatformChannel$Events;)"
+              "Lorg/huxerui/HuxerUIPlatformModule;"
+            : "(Landroid/content/Context;Lorg/huxerui/PlatformPayload;Lorg/huxerui/HuxerUIPlatformChannel$Events;)"
+              "Lorg/huxerui/HuxerUIPlatformModule;");
     if (create == nullptr || env.jni->ExceptionCheck()) {
       ClearException(env.jni);
       throw std::logic_error("HuxerUI Android PlatformModule factory methods do not match the SDK");
@@ -957,7 +964,7 @@ std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory
 }
 
 PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModuleFactoryState>& factory,
-                                         PlatformPayload options) {
+                                         PlatformPayload options, jobject window) {
   if (!factory) {
     throw std::invalid_argument("HuxerUI Android Java PlatformModule factory must not be empty");
   }
@@ -972,8 +979,8 @@ PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModul
   LocalRef<jobject> emitter(environment, factory->bridge->NewEmitter(environment, endpoint.Events()));
   LocalRef<jobject> java_options = PlatformPayloadToJava(environment, options);
   LocalRef<jobject> instance(environment, environment->CallObjectMethod(factory->factory, factory->create,
-                                                                        factory->bridge->Context(), java_options.Get(),
-                                                                        emitter.Get()));
+                                                                        window ? window : factory->bridge->Context(),
+                                                                        java_options.Get(), emitter.Get()));
   if (!instance || environment->ExceptionCheck()) {
     ClearException(environment);
     factory->bridge->CloseEmitter(environment, emitter.Get());
@@ -995,6 +1002,11 @@ PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModul
   }
   ConnectInstance(endpoint, state);
   return endpoint.Channel();
+}
+
+PlatformChannel CreateJavaWindowPlatformModule(UiWindow& ui_window, std::string class_name, PlatformPayload options) {
+  auto factory = std::make_shared<JavaPlatformModuleFactoryState>(ui_window, std::move(class_name));
+  return CreateJavaPlatformModule(factory, std::move(options), huxerui::detail::AndroidWindowView(ui_window));
 }
 
 std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(UiWindow& ui_window,

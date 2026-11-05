@@ -1,5 +1,6 @@
 if (ANDROID)
-    add_library(huxerui_ui_testing_smoke SHARED android.cpp smoke.cpp ../android/ui_testing/file_reference.cpp)
+    add_library(huxerui_ui_testing_smoke SHARED android.cpp smoke.cpp
+            ../android/ui_testing/file_reference.cpp ../android/ui_testing/activity_result.cpp)
 elseif (IOS)
     find_package(XCTest REQUIRED)
     xctest_add_bundle(huxerui_ui_testing_smoke huxerui_static ios.mm smoke.cpp ../ios/file_reference.mm)

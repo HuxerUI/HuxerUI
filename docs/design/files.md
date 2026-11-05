@@ -591,13 +591,13 @@ An unsupported or failed platform operation produces the same empty or false out
 The platform interface owns overwrite confirmation, so the common operation does not add another overwrite argument.
 Saving bytes or strings directly is outside the public surface; code may write an application temporary file and save that file explicitly.
 
-Only one picker presentation may be active for a Runtime.
+Only one picker operation may be active for a UiWindow.
 Concurrent requests are serialized in call order.
 Directory requests use this same queue and select exactly one existing directory without file filters.
 `writable = false` restricts the returned reference and descendants to read access even if the platform account has broader rights.
 `writable = true` requests read/write access and returns no selection if that access cannot be obtained; it never silently downgrades the request.
 `CanOpenDirectories(writable)` checks host support without UI or probe-file creation and does not promise that the user or a selected provider will grant access.
-Task cancellation attempts to dismiss the platform picker when supported and otherwise detaches the continuation; Runtime destruction cancels queued requests and releases their retained state.
+Task cancellation attempts to dismiss the platform picker when supported and otherwise detaches the continuation; window destruction cancels queued requests and releases their retained state.
 
 ## Application activation boundary
 
@@ -705,8 +705,12 @@ The Java factory checks read access before JNI constructs the existing provider 
 The state retains the application Context independently of the originating module; wrapper closure never revokes URI access or releases application-owned persistent grants.
 The caller owns permission policy, and successful creation is not a guarantee against later revocation.
 
-`HuxerUIActivity` installs the SAF launcher and forwards Activity results automatically.
-An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its owner installs `HuxerUIView.FilePickerLauncher` and forwards matching results through `dispatchFilePickerResult()`.
+`HuxerUIActivity` installs the Activity result host and forwards results and presentation lifecycle automatically.
+An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its owner installs `HuxerUIView.ActivityResultHost` and forwards results through `dispatchActivityResult()` plus resume, pause, and saved state as described in the [Android platform guide](../guide/platforms.md#window-owned-java-modules-and-activity-results).
+FilePicker and Java extension modules use the same attachment-bound `HuxerUIActivityResultLauncher` and native presentation FIFO; the existing C++ picker queue retains file-operation ordering before requests reach that FIFO.
+Canceling an active request suppresses result delivery and requests native dismissal, but the slot and native completion holder survive until the Activity result or host closure.
+Metadata reads and save copies do not retain the native presentation slot after a result.
+The transport retains the original Java FilePicker, so host replacement or reattaching the same View cannot redirect an old C++ FilePicker to a new attachment.
 Without that host capability, `CanOpenFiles()` and `CanSaveFiles()` return `false` while local File operations and application directories remain available.
 
 Windows uses the application's Local App Data identity for durable data, application-specific cache and temporary children, and the directory containing the process executable.

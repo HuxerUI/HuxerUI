@@ -17,6 +17,9 @@ class PermissionTransport;
 /// An expired captured window is rejected instead of silently routing the request to another Activity.
 jobject CurrentAndroidPresentationView();
 
+/// Borrows the explicit original Android window's Java View for a synchronous factory call on its UI thread.
+jobject AndroidWindowView(UiWindow& ui_window);
+
 /// Borrowed JNI activation envelope decoded synchronously before the native call returns.
 /// kind selects the payload: absent (0), URI (1), file (2), or local notification (3).
 /// value carries the URI or notification identifier; data contains notification action data when present.

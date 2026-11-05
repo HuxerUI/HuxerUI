@@ -1041,32 +1041,21 @@ public:
   }
 
   void Cancel() noexcept {
-    jobject operation = nullptr;
-    FilePickerOpenCompletion open_completion;
-    FilePickerSaveCompletion save_completion;
+    JniEnvironment attached(virtual_machine_);
+    JNIEnv* environment = attached.Get();
+    if (!environment) return;
+    android::LocalRef<jobject> operation;
     {
       std::scoped_lock lock(mutex_);
-      if (finished_) {
-        return;
-      }
-      finished_ = true;
-      open_completion = std::move(open_completion_);
-      save_completion = std::move(save_completion_);
-      operation = std::exchange(operation_, nullptr);
+      if (finished_ || canceled_) return;
+      canceled_ = true;
+      if (operation_) operation = {environment, environment->NewLocalRef(operation_)};
     }
-    if (operation != nullptr) {
-      JniEnvironment attached(virtual_machine_);
-      if (JNIEnv* environment = attached.Get()) {
-        environment->CallVoidMethod(operation, cancel_);
-        ClearJavaException(environment);
-        environment->DeleteGlobalRef(operation);
-      }
+    if (operation) {
+      environment->CallVoidMethod(operation.Get(), cancel_);
+      ClearJavaException(environment);
     }
-    if (open_completion) {
-      open_completion({});
-    } else if (save_completion) {
-      save_completion(false);
-    }
+    // Java completes only after the presentation settles; that callback also releases the native holder.
   }
 
 private:
@@ -1093,6 +1082,7 @@ private:
   FilePickerOpenCompletion open_completion_;
   FilePickerSaveCompletion save_completion_;
   bool finished_ = false;
+  bool canceled_ = false;
 };
 
 using AndroidPickerControlHandle = std::shared_ptr<AndroidPickerOperationControl>;
@@ -1251,14 +1241,19 @@ public:
     if (virtual_machine_ == nullptr || environment == nullptr || view == nullptr) {
       throw std::invalid_argument("HuxerUI Android file picker requires a Java VM, JNI environment, and View");
     }
-    view_ = environment->NewGlobalRef(view);
     android::LocalRef<jclass> view_class(environment, environment->GetObjectClass(view));
+    const jmethodID get_picker = view_class
+        ? environment->GetMethodID(view_class.Get(), "filePicker", "()Lorg/huxerui/HuxerUIFilePicker;") : nullptr;
+    android::LocalRef<jobject> picker(environment,
+        get_picker ? environment->CallObjectMethod(view, get_picker) : nullptr);
+    picker_ = picker ? environment->NewGlobalRef(picker.Get()) : nullptr;
+    android::LocalRef<jclass> picker_class(environment, picker ? environment->GetObjectClass(picker.Get()) : nullptr);
     android::LocalRef<jclass> operation_class(
         environment,
         environment->FindClass("org/huxerui/HuxerUIFilePicker$Operation")
     );
     android::LocalRef<jclass> string_class(environment, environment->FindClass("java/lang/String"));
-    if (view_ == nullptr || !view_class || !operation_class || !string_class || environment->ExceptionCheck()) {
+    if (picker_ == nullptr || !picker_class || !operation_class || !string_class || environment->ExceptionCheck()) {
       ClearJavaException(environment);
       Release(environment);
       throw std::runtime_error("HuxerUI Android file picker Java implementation is unavailable");
@@ -1270,24 +1265,23 @@ public:
       Release(environment);
       throw std::runtime_error("HuxerUI Android file picker Java classes could not be retained");
     }
-    can_open_files_ = environment->GetMethodID(view_class.Get(), "canOpenFiles", "()Z");
-    can_save_files_ = environment->GetMethodID(view_class.Get(), "canSaveFiles", "()Z");
-    prepare_directory_ = environment->GetMethodID(view_class.Get(), "prepareOpenDirectory",
+    available_ = environment->GetMethodID(picker_class.Get(), "available", "()Z");
+    prepare_directory_ = environment->GetMethodID(picker_class.Get(), "prepareDirectory",
                                                   "(JZ)Lorg/huxerui/HuxerUIFilePicker$Operation;");
     prepare_open_files_ = environment->GetMethodID(
-        view_class.Get(),
-        "prepareOpenFiles",
+        picker_class.Get(),
+        "prepareOpen",
         "(J[Ljava/lang/String;[Ljava/lang/String;Z)Lorg/huxerui/HuxerUIFilePicker$Operation;"
     );
     prepare_save_file_ = environment->GetMethodID(
-        view_class.Get(),
-        "prepareSaveFile",
+        picker_class.Get(),
+        "prepareSave",
         "(JLjava/lang/String;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)"
         "Lorg/huxerui/HuxerUIFilePicker$Operation;"
     );
     start_ = environment->GetMethodID(operation_class_, "start", "()V");
     cancel_ = environment->GetMethodID(operation_class_, "cancel", "()V");
-    if (prepare_directory_ == nullptr || can_open_files_ == nullptr || can_save_files_ == nullptr ||
+    if (prepare_directory_ == nullptr || available_ == nullptr ||
         prepare_open_files_ == nullptr || prepare_save_file_ == nullptr || start_ == nullptr || cancel_ == nullptr ||
         environment->ExceptionCheck()) {
       ClearJavaException(environment);
@@ -1302,11 +1296,11 @@ public:
   }
 
   [[nodiscard]] bool CanOpenFiles() const noexcept override {
-    return Capability(can_open_files_);
+    return Capability(available_);
   }
 
   [[nodiscard]] bool CanSaveFiles() const noexcept override {
-    return Capability(can_save_files_);
+    return Capability(available_);
   }
 
   std::function<void()>
@@ -1326,7 +1320,7 @@ public:
       android::LocalRef<jobject> operation(
           environment,
           environment->CallObjectMethod(
-              view_,
+              picker_,
               prepare_open_files_,
               static_cast<jlong>(reinterpret_cast<std::uintptr_t>(native_handle.get())),
               extensions.Get(),
@@ -1369,7 +1363,7 @@ public:
     auto native_handle = std::make_unique<AndroidPickerControlHandle>(control);
     android::LocalRef<jobject> operation(
         environment,
-        environment->CallObjectMethod(view_, prepare_directory_,
+        environment->CallObjectMethod(picker_, prepare_directory_,
                                       static_cast<jlong>(reinterpret_cast<std::uintptr_t>(native_handle.get())),
                                       writable ? JNI_TRUE : JNI_FALSE));
     if (!operation || environment->ExceptionCheck() || !control->SetOperation(environment, operation.Get())) {
@@ -1409,7 +1403,7 @@ public:
       android::LocalRef<jobject> operation(
           environment,
           environment->CallObjectMethod(
-              view_,
+              picker_,
               prepare_save_file_,
               static_cast<jlong>(reinterpret_cast<std::uintptr_t>(native_handle.get())),
               source_path.Get(),
@@ -1441,10 +1435,10 @@ private:
   bool Capability(jmethodID method) const noexcept {
     JniEnvironment attached(virtual_machine_);
     JNIEnv* environment = attached.Get();
-    if (environment == nullptr || view_ == nullptr) {
+    if (environment == nullptr || picker_ == nullptr) {
       return false;
     }
-    const bool result = environment->CallBooleanMethod(view_, method) == JNI_TRUE;
+    const bool result = environment->CallBooleanMethod(picker_, method) == JNI_TRUE;
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);
       return false;
@@ -1464,19 +1458,18 @@ private:
       environment->DeleteGlobalRef(operation_class_);
       operation_class_ = nullptr;
     }
-    if (view_ != nullptr) {
-      environment->DeleteGlobalRef(view_);
-      view_ = nullptr;
+    if (picker_ != nullptr) {
+      environment->DeleteGlobalRef(picker_);
+      picker_ = nullptr;
     }
   }
 
   JavaVM* virtual_machine_ = nullptr;
-  jobject view_ = nullptr;
+  jobject picker_ = nullptr;
   jclass operation_class_ = nullptr;
   jclass string_class_ = nullptr;
   jmethodID prepare_directory_ = nullptr;
-  jmethodID can_open_files_ = nullptr;
-  jmethodID can_save_files_ = nullptr;
+  jmethodID available_ = nullptr;
   jmethodID prepare_open_files_ = nullptr;
   jmethodID prepare_save_file_ = nullptr;
   jmethodID start_ = nullptr;

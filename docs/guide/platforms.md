@@ -292,6 +292,58 @@ The SDK installer does not install Java, Gradle dependencies, `aapt2`, the Andro
 Termux diagnosis and setup do not require `sdkmanager`, platform-tools, or ADB because they are not part of the local-device path.
 `huxerui run android` opens the generated APK in the Android system installer through `termux-open`; complete the confirmation and choose Open in the installer to start the application.
 
+### Window-owned Java modules and Activity results
+
+Register a Java module that needs window presentation with `android::JavaWindowPlatformModuleFactory<Module, Options>` from `<huxerui/android/platform_registry.h>`.
+It uses the existing application factory catalog and `OpenPlatformModule` entry point, but requires a live window execution context; the application-scoped `JavaPlatformModuleFactory` continues to receive an application `Context` without requiring UI.
+The Java class implements `HuxerUIPlatformModule.WindowFactory`, is public, and has a public no-argument constructor.
+Each open creates a fresh instance for the originating `HuxerUIView`; optional construction values use the existing `PlatformPayload` encoding.
+
+```cpp
+context.RegisterPlatformModule<std::shared_ptr<MediaPicker>>("media/picker",
+    android::JavaWindowPlatformModuleFactory<std::shared_ptr<MediaPicker>>{
+        .class_name = "org.example.MediaPickerFactory",
+        .create = [](PlatformChannel channel) {
+          return std::make_shared<MediaPicker>(std::move(channel));
+        },
+    });
+```
+
+```java
+public final class MediaPickerFactory implements HuxerUIPlatformModule.WindowFactory {
+    @Override
+    public HuxerUIPlatformModule create(HuxerUIView window, PlatformPayload options,
+            HuxerUIPlatformChannel.Events events) {
+        return new MediaPickerInstance(window.getActivityResultLauncher(), events);
+    }
+}
+```
+
+The library's instance implements the existing `invoke` and `dispose` methods and retains the launcher obtained during creation.
+Its main-thread `launcher.launch(intent, callback)` returns the existing `HuxerUIPlatformChannel.Cancellation`; `Callback.onResult(int, Intent)` receives the unchanged result code and nullable data, while `Callback.onFailure(RuntimeException)` reports unavailable hosts and launch failures.
+Callbacks run asynchronously on the main thread at most once; `RESULT_CANCELED` is a normal platform result.
+Use Intents whose platform protocol returns an Activity result, finish configuring an Intent before submission, and do not mutate it while pending.
+Return a cancellation operation from `invoke` that both cancels the launch and closes any retained `Result`; forward successful/failing callbacks through that same result endpoint.
+Dispose releases retained event sinks and library resources through the existing channel lifecycle.
+Closing a channel discards pending callbacks; a C++ facade using `AwaitCallback` must separately settle any live application-owned waits during its own cleanup, rather than expecting `Close()` to resume them.
+
+FilePicker and module requests share one FIFO for native presentation per window attachment.
+FIFO order is admission into this queue: FilePicker retains its own operation queue, so API calls waiting there have not yet entered the native presentation queue.
+Paused hosts defer new launches, and independent windows have independent queues.
+Canceling queued work removes it; canceling active work suppresses its callback and requests native dismissal, but keeps the slot until the matching Activity result or host closure.
+Canceling after a result arrives but before callback dispatch also suppresses delivery.
+FilePicker metadata reads and save copies run after the native slot is released.
+A retained launcher or FilePicker never switches to a replacement attachment, and late or duplicate results cannot complete a newer request.
+
+`HuxerUIActivity` supplies the host integration automatically.
+A custom host installs `HuxerUIView.ActivityResultHost` with `setActivityResultHost`, implements `launch(Intent, int)` and `cancel(int)` using its Activity, and forwards `onActivityResult` through `dispatchActivityResult`; a `false` return leaves the result for other handlers.
+Reserve request codes `0x40000000` through `0x7ffffffe` for HuxerUI and forward them unchanged; unrelated host integrations use another range.
+Forward resume/pause through `setActivityResultResumed`, save through `saveActivityResultState`, and restore with `HuxerUIView.restoreActivityResultState` before installing the host or launching work.
+Saving suspends new launches until the next resume; saved state preserves request identity isolation, not pending requests or C++ continuations.
+Remove the host with `setActivityResultHost(null)` when its Activity is destroyed.
+Replacing or removing a host fails its pending requests and retires its launchers; establish the host before native window initialization, and recreate the window's modules and services when changing that endpoint.
+An Activity hosting several HuxerUI views forwards results until one consumes them and keeps presentation readiness consistent across those views.
+
 ## iOS
 
 The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
