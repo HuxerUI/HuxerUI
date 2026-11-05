@@ -1,5 +1,10 @@
 # Components and Input
 
+`TextField(value).TextStyles(ranges)` applies ordered, non-overlapping UTF-16 character styles to controlled text.
+Recompute ranges when accepting `OnChanged`; the same attributed paragraph owns drawing, hit testing, selection and IME geometry.
+Styles do not modify the value, insert markup or provide a rich document model; secure fields ignore the visual attributes.
+Until a native text proposal receives matching controlled attributes, the base style is used rather than applying stale ranges to new text.
+
 Components are controlled declarations that emit typed events.
 Use application state for authoritative values and let mounted behavior retain transient interaction state.
 

@@ -12,6 +12,8 @@ std::vector<TextEditingValue> text_field_changes;
 int text_field_submissions = 0;
 int text_field_trailing_icon_clicks = 0;
 State<bool> password_visible;
+State<bool> attributed_field_styled;
+State<TextEditingValue> attributed_field_value;
 State<TextEditingValue> multiline_text_field_value;
 State<TextEditingValue> nested_multiline_text_field_value;
 State<TextEditingValue> keyboard_text_field_value;
@@ -789,6 +791,16 @@ View DefaultAlignedTextFieldsApp() {
   };
 }
 
+View AttributedTextFieldApp() {
+  attributed_field_styled = UseState(true);
+  attributed_field_value = UseState(TextEditingValue::FromText("ab"));
+  std::vector<TextStyleRange> ranges;
+  if (attributed_field_styled.Get()) ranges.push_back({{0, 1}, {.font_size = 32.0F, .font_weight = FontWeight::Bold}});
+  return TextField(attributed_field_value).TextStyles(ranges)
+      .OnChanged([](const TextEditingValue& next) { attributed_field_value = next; })
+      .With(huxerui::Frame{200.0F, 70.0F});
+}
+
 View CenterAlignedTextFieldApp() {
   return TextField(TextEditingValue::FromText("Centered value that overflows the editor"))
       .Align(TextAlign::Center)
@@ -796,6 +808,27 @@ View CenterAlignedTextFieldApp() {
 }
 
 } // namespace
+
+TEST_CASE("TestTextFieldUsesAttributedContentForLayoutAndPaint") {
+  TestPlatform platform;
+  UiWindow runtime{AttributedTextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 100.0F}});
+  const auto* painted = FindText(runtime.BuildFrame(), "ab");
+  REQUIRE(painted != nullptr);
+  REQUIRE(painted->text.StyleRanges().size() == 1);
+  REQUIRE(painted->text.StyleRanges().front().style.font_size == 32.0F);
+  Pointer(runtime, PointerEventType::Down, 20.0F, 20.0F);
+  REQUIRE(runtime.QueryTextInputGeometry(1, {0, 1}).result_code == TextInputResultCode::Ok);
+  const auto edited = runtime.HandleTextInputCommands({1, {{.kind = TextInputCommandKind::CommitText, .target = TextRange{0, 1}, .text = "c"}}});
+  REQUIRE(edited.result_code == TextInputResultCode::Ok);
+  REQUIRE(FindText(runtime.BuildFrame(), "cb")->text.StyleRanges().front().style.font_size == 32.0F);
+  const auto selection = runtime.QueryTextInputContext(1, 0, 2).selection;
+  attributed_field_styled = false;
+  REQUIRE(FindText(runtime.BuildFrame(), "cb")->text.StyleRanges().empty());
+  REQUIRE(runtime.QueryTextInputContext(1, 0, 2).selection == selection);
+  REQUIRE_THROWS_AS(TextField(TextEditingValue::FromText("a")).TextStyles({{{0, 2}, {}}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(TextField(TextEditingValue::FromText("\xF0\x9F\x98\x80")).TextStyles({{{0, 1}, {}}}), std::invalid_argument);
+}
 
 TEST_CASE("TestTextFieldRendersPlaceholderAndThemeStyle") {
   ResetTextFieldState();

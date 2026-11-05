@@ -1109,6 +1109,12 @@ public:
   TextField LineLimits(TextFieldLineLimits value) &&;
   /// Configures text direction and an optional locale override for editable text and supporting labels.
   TextField Shaping(TextShapingOptions value) &&;
+  /// Applies ordered, non-overlapping UTF-16 visual ranges to the controlled text.
+  /// Uses the same attributed paragraph for paint, caret, selection and IME geometry.
+  /// Ranges must match the current value; recompute them when accepting text changes.
+  /// Pending native text without matching controlled attributes uses the base style.
+  /// Secure fields ignore these attributes. This does not insert formatting into text.
+  TextField TextStyles(std::vector<TextStyleRange> value) &&;
   /// Sets horizontal paragraph alignment inside the editor viewport.
   TextField Align(TextAlign value) &&;
   /// Sets vertical paragraph alignment inside the editor viewport.
@@ -1150,6 +1156,7 @@ private:
   TextInputConfiguration configuration_;
   TextFieldLineLimits line_limits_ = TextFieldLineLimits::SingleLine();
   TextShapingOptions text_shaping_;
+  std::vector<TextStyleRange> text_styles_;
   TextAlign text_align_ = TextAlign::Leading;
   std::optional<TextVerticalAlign> text_vertical_align_;
   std::optional<std::size_t> max_length_;
