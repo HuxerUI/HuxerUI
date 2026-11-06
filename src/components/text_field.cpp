@@ -773,12 +773,18 @@ public:
       }
     }
 
-    if (node.interaction.focused && editing_.value.selection.IsCollapsed() && caret_visible_) {
+    if (node.interaction.focused && editing_.value.selection.IsCollapsed() && caret_visible_ && content.width > 0.0F) {
       Rect caret = OffsetRect(
           text_layout_->CaretRect(editing_.value.selection.active, editing_.value.selection.affinity),
           origin
       );
       caret.width = std::max({1.0F, style_.caret_width, caret.width});
+      const float right = content.x + content.width;
+      if (caret.x >= content.x && caret.x <= right) {
+        // The insertion point can be on the clip edge, for example with trailing alignment.
+        caret.width = std::min(caret.width, content.width);
+        caret.x = std::max(content.x, std::min(caret.x, right - caret.width));
+      }
       context.DrawRect(caret, invalid ? style_.error_caret : style_.caret);
     }
     context.PopClip();

@@ -817,7 +817,7 @@ A multiline field uses the same retained scroll state on the vertical axis when 
 
 The field participates in the same retained scroll chain as other scrollable nodes. Wheel and touch movement scroll the field first and pass unconsumed movement to an enclosing scroll container. Mouse and pen dragging retain text selection semantics, and dragging a selection beyond the viewport advances the internal text offset. Manual scrolling temporarily suppresses automatic caret reveal until editing or navigation resumes.
 
-The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. The resolved `caret_width` controls only painted caret thickness; text hit testing, scrolling, and platform input geometry continue to use the logical caret boundary from TextLayout.
+The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. TextField uses `caret_width` for the painted stroke and fits it inside the clip at the trailing edge. Text hit testing, scrolling, and platform input geometry use the logical caret boundary from TextLayout.
 
 The first pointer behavior includes:
 
