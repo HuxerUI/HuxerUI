@@ -776,7 +776,7 @@ public:
     update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
     restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     stop_text_input_ = environment->GetMethodID(view_class, "stopTextInput", "(J)V");
-    request_show_text_input_ = environment->GetMethodID(view_class, "requestShowTextInput", "(J)V");
+    request_text_input_keyboard_ = environment->GetMethodID(view_class, "requestTextInputKeyboard", "(JZ)V");
     resource_locale_ = environment->GetMethodID(view_class, "resourceLocale", "()[B");
     resource_scale_ = environment->GetMethodID(view_class, "resourceScale", "()F");
     system_dark_theme_ = environment->GetMethodID(view_class, "systemDarkTheme", "()Z");
@@ -787,7 +787,7 @@ public:
     if (get_context == nullptr || schedule_frame_ == nullptr || invalidate_full_frame_ == nullptr ||
         font_metrics_ == nullptr || measure_text_ == nullptr || measure_text_run_ == nullptr ||
         create_text_layout_ == nullptr || start_text_input_ == nullptr || update_text_input_ == nullptr ||
-        restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_show_text_input_ == nullptr ||
+        restart_text_input_ == nullptr || stop_text_input_ == nullptr || request_text_input_keyboard_ == nullptr ||
         resource_locale_ == nullptr || resource_scale_ == nullptr || system_dark_theme_ == nullptr ||
         set_system_bars_content_brightness_ == nullptr || set_pointer_cursor_ == nullptr) {
       if (environment->ExceptionCheck()) {
@@ -1533,14 +1533,22 @@ public:
     }
   }
 
-  void RequestShow(TextInputSessionId session_id) override {
-    JNIEnv* environment = Environment();
-    if (environment != nullptr && view_ != nullptr) {
-      environment->CallVoidMethod(view_, request_show_text_input_, static_cast<jlong>(session_id));
-    }
+  void RequestShowKeyboard(TextInputSessionId session_id) override {
+    RequestKeyboard(session_id, JNI_TRUE);
+  }
+
+  void RequestHideKeyboard(TextInputSessionId session_id) override {
+    RequestKeyboard(session_id, JNI_FALSE);
   }
 
 private:
+  void RequestKeyboard(TextInputSessionId session_id, jboolean show) {
+    JNIEnv* environment = Environment();
+    if (environment != nullptr && view_ != nullptr) {
+      environment->CallVoidMethod(view_, request_text_input_keyboard_, static_cast<jlong>(session_id), show);
+    }
+  }
+
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override {
     return CreateAndroidFilePickerTransport(virtual_machine_, Environment(), view_, context_);
   }
@@ -1607,7 +1615,7 @@ private:
   jmethodID update_text_input_ = nullptr;
   jmethodID restart_text_input_ = nullptr;
   jmethodID stop_text_input_ = nullptr;
-  jmethodID request_show_text_input_ = nullptr;
+  jmethodID request_text_input_keyboard_ = nullptr;
   jmethodID resource_locale_ = nullptr;
   jmethodID resource_scale_ = nullptr;
   jmethodID system_dark_theme_ = nullptr;

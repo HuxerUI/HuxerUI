@@ -164,6 +164,14 @@ public:
     stopped_sessions.push_back(session_id);
   }
 
+  void RequestShowKeyboard(TextInputSessionId session_id) override {
+    keyboard_requests.emplace_back(session_id, true);
+  }
+
+  void RequestHideKeyboard(TextInputSessionId session_id) override {
+    keyboard_requests.emplace_back(session_id, false);
+  }
+
   std::vector<TextInputSessionId> started_sessions;
   std::vector<TextInputConfiguration> started_configurations;
   std::vector<TextInputState> started_states;
@@ -176,6 +184,7 @@ public:
   std::vector<TextInputState> restarted_states;
   std::vector<TextInputGeometry> restarted_geometry;
   std::vector<TextInputSessionId> stopped_sessions;
+  std::vector<std::pair<TextInputSessionId, bool>> keyboard_requests;
 };
 
 struct TextInputProbe;
@@ -190,6 +199,12 @@ public:
     return client_;
   }
 
+  void OnFocusChanged(ViewNode&, bool focused, bool) override {
+    if (focused && show_keyboard_on_focus_) {
+      ShowKeyboard();
+    }
+  }
+
   bool HitTest(ViewNode&, Point) const override {
     return handle_pointer_;
   }
@@ -199,6 +214,15 @@ public:
       return PointerResult::Ignored;
     }
     client_->SetSelection({pointer_selection_, pointer_selection_});
+    if (keyboard_on_press_) {
+      if (*keyboard_on_press_) {
+        HideKeyboard();
+        ShowKeyboard();
+      } else {
+        ShowKeyboard();
+        HideKeyboard();
+      }
+    }
     return PointerResult::Handled;
   }
 
@@ -206,6 +230,8 @@ private:
   std::shared_ptr<ProbeTextInputClient> client_;
   bool handle_pointer_ = false;
   TextOffset pointer_selection_ = 0;
+  std::optional<bool> keyboard_on_press_;
+  bool show_keyboard_on_focus_ = false;
 };
 
 struct TextInputProbe {
@@ -214,6 +240,8 @@ struct TextInputProbe {
   std::shared_ptr<ProbeTextInputClient> client;
   bool handle_pointer = false;
   TextOffset pointer_selection = 0;
+  std::optional<bool> keyboard_on_press = std::nullopt;
+  bool show_keyboard_on_focus = false;
 };
 
 TextInputProbeExtension::TextInputProbeExtension(ViewNode& node, const TextInputProbe& probe) {
@@ -224,11 +252,15 @@ void TextInputProbeExtension::Update(ViewNode&, const TextInputProbe& probe) {
   client_ = probe.client;
   handle_pointer_ = probe.handle_pointer;
   pointer_selection_ = probe.pointer_selection;
+  keyboard_on_press_ = probe.keyboard_on_press;
+  show_keyboard_on_focus_ = probe.show_keyboard_on_focus;
 }
 
 std::shared_ptr<ProbeTextInputClient> first_text_client;
 std::shared_ptr<ProbeTextInputClient> second_text_client;
 std::optional<DialogHandle> text_input_dialog;
+std::optional<WindowHandle> text_input_window;
+std::optional<bool> keyboard_on_press;
 State<bool> text_client_visible;
 State<bool> use_second_text_client;
 int text_key_events = 0;
@@ -242,14 +274,23 @@ View TwoTextClientsApp() {
 }
 
 View PointerTextClientApp() {
+  text_input_window = UseWindow();
   return Text("Pointer").With(
       Focusable{},
       TextInputProbe{
           first_text_client,
           true,
           2,
+          keyboard_on_press,
       }
   );
+}
+
+View KeyboardRequestBeforeFocusMoveApp() {
+  return TwoTextClientsApp().On<ViewEvents::KeyIntercept>([window = UseWindow()](const KeyEvent&) {
+    window.ShowKeyboard();
+    return false;
+  });
 }
 
 View ReplaceTextClientApp() {
@@ -298,6 +339,8 @@ void ResetTextInputProbes() {
   first_text_client = std::make_shared<ProbeTextInputClient>();
   second_text_client = std::make_shared<ProbeTextInputClient>();
   text_input_dialog.reset();
+  text_input_window.reset();
+  keyboard_on_press.reset();
   text_client_visible = State<bool>{};
   use_second_text_client = State<bool>{};
   text_key_events = 0;
@@ -539,6 +582,116 @@ TEST_CASE("TestPointerUpdatesSelectionBeforeStartingTextInput") {
   REQUIRE(text_input.started_states.size() == 1);
   REQUIRE(text_input.started_states.front().selection == TextSelection{2, 2});
   REQUIRE(text_input.started_geometry.front().caret.x == 20.0F);
+}
+
+TEST_CASE("Manual keyboard requests preserve focus, session, and selection") {
+  ResetTextInputProbes();
+  first_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{PointerTextClientApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  text_input_window->ShowKeyboard();
+  REQUIRE(text_input.keyboard_requests.empty());
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {10.0F, 10.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 1, {10.0F, 10.0F}, PointerDeviceKind::Touch});
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  platform.AdvanceTime(0.5);
+  runtime.HandlePointerEvent({PointerEventType::Down, 2, {10.0F, 10.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 2, {10.0F, 10.0F}, PointerDeviceKind::Touch});
+  REQUIRE(text_input.keyboard_requests.empty());
+
+  first_text_client->SetSelection({1, 4});
+  runtime.BuildFrame();
+  text_input_window->ShowKeyboard();
+  text_input_window->HideKeyboard();
+  REQUIRE(text_input.keyboard_requests == std::vector<std::pair<TextInputSessionId, bool>>{{1, true}, {1, false}});
+  REQUIRE(first_text_client->State().selection == TextSelection{1, 4});
+  REQUIRE(first_text_client->State().session_id == 1);
+  REQUIRE(text_input.stopped_sessions.empty());
+
+  first_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Automatic;
+  runtime.BuildFrame();
+  REQUIRE(text_input.restarted_sessions.empty());
+  REQUIRE(text_input.keyboard_requests.size() == 2);
+  text_input_window->ShowKeyboard();
+  REQUIRE(text_input.keyboard_requests.back() == std::pair<TextInputSessionId, bool>{1, true});
+}
+
+TEST_CASE("The last editor keyboard request takes priority on the event that starts input") {
+  ResetTextInputProbes();
+  const bool show = GENERATE(true, false);
+  keyboard_on_press = show;
+  first_text_client->configuration.keyboard_policy =
+      show ? SoftwareKeyboardPolicy::Manual : SoftwareKeyboardPolicy::Automatic;
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{PointerTextClientApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {10.0F, 10.0F}});
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE(text_input.keyboard_requests == std::vector<std::pair<TextInputSessionId, bool>>{{1, show}});
+}
+
+TEST_CASE("A keyboard request for the previous editor is discarded when focus moves during dispatch") {
+  ResetTextInputProbes();
+  first_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  second_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{KeyboardRequestBeforeFocusMoveApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  FocusNext(runtime);
+  FocusNext(runtime);
+  FocusNext(runtime);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1, 2, 3});
+  REQUIRE(text_input.stopped_sessions == std::vector<TextInputSessionId>{1, 2});
+  REQUIRE(text_input.keyboard_requests.empty());
+}
+
+TEST_CASE("An editor can request the keyboard when it receives accessibility focus") {
+  ResetTextInputProbes();
+  const bool replace_session = GENERATE(false, true);
+  first_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  second_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{[]() -> View {
+    return Column {
+      Text("First").With(Focusable{}, TextInputProbe{first_text_client}),
+      Text("Accessible editor").With(
+          Focusable{},
+          TextInputProbe{.client = second_text_client, .show_keyboard_on_focus = true},
+          Semantics{.role = SemanticRole::TextField, .label = "Accessible editor"}
+      ),
+    };
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 100.0F}});
+  if (replace_session) {
+    runtime.BuildFrame();
+    FocusNext(runtime);
+    REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+  }
+  const auto frame = runtime.BuildCommit().semantic_frame;
+  const auto editor = std::ranges::find(frame->nodes, "Accessible editor", &SemanticNode::label);
+  REQUIRE(editor != frame->nodes.end());
+
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(editor->id, {SemanticActionKind::Focus}));
+  const TextInputSessionId session = replace_session ? 2 : 1;
+  REQUIRE(second_text_client->State().session_id == session);
+  REQUIRE(text_input.keyboard_requests == std::vector<std::pair<TextInputSessionId, bool>>{{session, true}});
+  runtime.BuildFrame();
+  REQUIRE(text_input.keyboard_requests.size() == 1);
 }
 
 TEST_CASE("TestTextInputClientReplacementAndRemovalCloseSessions") {

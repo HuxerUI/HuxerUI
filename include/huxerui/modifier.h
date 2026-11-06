@@ -282,6 +282,20 @@ protected:
     }
   }
 
+  /// Requests the software keyboard for this node's editor when it receives or holds focus.
+  void ShowKeyboard() {
+    if (request_keyboard_) {
+      request_keyboard_(true);
+    }
+  }
+
+  /// Requests dismissal for this node's focused editor while preserving its HuxerUI focus and session.
+  void HideKeyboard() {
+    if (request_keyboard_) {
+      request_keyboard_(false);
+    }
+  }
+
 private:
   virtual std::shared_ptr<detail::GestureRecognizer> CreateGestureRecognizer(
       ViewNode& node, const PointerEvent& event, double timestamp, const GestureSettings& settings,
@@ -306,10 +320,15 @@ private:
     invalidate_semantics_ = std::move(callback);
   }
 
+  void BindKeyboardRequest(std::function<void(bool)> callback) {
+    request_keyboard_ = std::move(callback);
+  }
+
   // The owner outlives its extensions; reconciliation replaces the map's contents, not the map itself.
   const detail::EventBindings* event_bindings_ = nullptr;
   std::function<void(PaintInvalidation)> invalidate_paint_;
   std::function<void()> invalidate_semantics_;
+  std::function<void(bool)> request_keyboard_;
 
   friend class UiWindow;
   friend struct detail::InternalAccess;

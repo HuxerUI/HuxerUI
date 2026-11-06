@@ -67,7 +67,7 @@ public:
     stopped_sessions.push_back(session_id);
   }
 
-  void RequestShow(TextInputSessionId session_id) override {
+  void RequestShowKeyboard(TextInputSessionId session_id) override {
     show_requests.push_back(session_id);
   }
 
@@ -3805,7 +3805,7 @@ TEST_CASE("TestTouchTapStartsTextInputOnReleaseAndRetapRequestsKeyboard") {
   });
   REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
   REQUIRE(text_input.started_states.back().selection == TextSelection{1, 1});
-  REQUIRE(text_input.show_requests.empty());
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
 
   platform.AdvanceTime(0.5);
   runtime.HandlePointerEvent({
@@ -3814,7 +3814,7 @@ TEST_CASE("TestTouchTapStartsTextInputOnReleaseAndRetapRequestsKeyboard") {
       {30.0F, 20.0F},
       PointerDeviceKind::Touch,
   });
-  REQUIRE(text_input.show_requests.empty());
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
   runtime.HandlePointerEvent({
       PointerEventType::Up,
       722,
@@ -3823,7 +3823,7 @@ TEST_CASE("TestTouchTapStartsTextInputOnReleaseAndRetapRequestsKeyboard") {
   });
 
   REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
-  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1, 1});
   REQUIRE(text_field_value.Get().selection == TextSelection{2, 2});
 }
 
@@ -3870,9 +3870,46 @@ TEST_CASE("TestTouchDragOverFocusedTextFieldDoesNotRequestKeyboard") {
   });
   runtime.BuildFrame();
 
-  REQUIRE(text_input.show_requests.empty());
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
   REQUIRE(text_field_value.Get().selection == TextSelection{1, 1});
   REQUIRE(text_field_scroll.Metrics().offset > 0.0F);
+}
+
+TEST_CASE("A click on an already focused TextField requests the keyboard after release") {
+  class PointerPlatform final : public TestPlatform {
+  public:
+    GestureSettings GestureDefaults() const noexcept override {
+      return {.pointer_slop = pointer_slop};
+    }
+
+    float pointer_slop = 0.0F;
+  };
+
+  ResetTextFieldState();
+  TextFieldPlatformInput text_input;
+  PointerPlatform platform;
+  platform.pointer_slop = GENERATE(0.0F, GestureSettings{}.pointer_slop);
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{TextFieldApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {20.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 1, {20.0F, 20.0F}});
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
+
+  platform.AdvanceTime(0.5);
+  runtime.HandlePointerEvent({PointerEventType::Down, 2, {20.0F, 20.0F}});
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1});
+  runtime.HandlePointerEvent({PointerEventType::Move, 2, {20.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 2, {20.0F, 20.0F}});
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1, 1});
+
+  platform.AdvanceTime(0.5);
+  runtime.HandlePointerEvent({PointerEventType::Down, 3, {20.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Move, 3, {65.0F, 20.0F}});
+  runtime.HandlePointerEvent({PointerEventType::Up, 3, {20.0F, 20.0F}});
+  REQUIRE(text_input.show_requests == std::vector<TextInputSessionId>{1, 1});
 }
 
 TEST_CASE("TestTextFieldScrollsIntoReducedViewport") {

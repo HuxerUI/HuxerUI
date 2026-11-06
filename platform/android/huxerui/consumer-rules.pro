@@ -21,4 +21,5 @@
 -keep class * implements org.huxerui.HuxerUIPlatformModule$WindowFactory { public <init>(); *; }
 -keepclassmembers class org.huxerui.HuxerUIView {
     org.huxerui.HuxerUIFilePicker filePicker();
+    private void requestTextInputKeyboard(long, boolean);
 }

@@ -42,7 +42,8 @@ public:
       const TextInputGeometry& geometry
   ) override;
   void Stop(TextInputSessionId session_id) override;
-  void RequestShow(TextInputSessionId session_id) override;
+  void RequestShowKeyboard(TextInputSessionId session_id) override;
+  void RequestHideKeyboard(TextInputSessionId session_id) override;
 
 private:
   std::unique_ptr<UIKitTextInputState> state_;

@@ -123,7 +123,14 @@ bool IsKnown(TextInputSyncAction sync_action) noexcept {
 }
 
 bool IsValidConfiguration(const TextInputConfiguration& configuration) noexcept {
-  return IsKnown(configuration.type) && IsKnown(configuration.capitalization) && IsKnown(configuration.action);
+  return IsKnown(configuration.type) && IsKnown(configuration.capitalization) && IsKnown(configuration.action) &&
+         (configuration.keyboard_policy == SoftwareKeyboardPolicy::Automatic ||
+          configuration.keyboard_policy == SoftwareKeyboardPolicy::Manual);
+}
+
+bool PlatformConfigurationChanged(TextInputConfiguration current, const TextInputConfiguration& previous) noexcept {
+  current.keyboard_policy = previous.keyboard_policy;
+  return current != previous;
 }
 
 bool MatchesConfiguredAction(const TextInputConfiguration& configuration, TextInputAction requested) noexcept {
@@ -246,13 +253,127 @@ bool detail::TextInteraction::HasSession() const noexcept {
   return text_input_session_.has_value();
 }
 
-void detail::TextInteraction::RequestShowForNode(std::uint64_t node) {
-  if (runtime_state_.focused_node_identity_ != node || !text_input_session_ ||
-      text_input_session_->node_identity != node) {
+detail::TextInteraction::KeyboardDispatch::KeyboardDispatch(TextInteraction& text)
+    : text_(text), first_request_(text.keyboard_requests_.size()) {
+  ++text_.keyboard_dispatch_depth_;
+}
+
+detail::TextInteraction::KeyboardDispatch::~KeyboardDispatch() {
+  if (!finished_) {
+    text_.keyboard_requests_.resize(first_request_);
+    --text_.keyboard_dispatch_depth_;
+  }
+}
+
+void detail::TextInteraction::KeyboardDispatch::Finish() {
+  if (text_.keyboard_dispatch_depth_ == 1) {
+    text_.PrepareKeyboardRequestSession();
+  }
+  finished_ = true;
+  if (--text_.keyboard_dispatch_depth_ == 0) {
+    text_.FlushKeyboardRequests();
+  }
+}
+
+void detail::TextInteraction::RequestKeyboardForNode(std::uint64_t node, bool show) {
+  MountedNode* mounted = runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, node) : nullptr;
+  if (!mounted || !mounted->focusable || !mounted->interaction.enabled) {
     return;
   }
-  if (PlatformTextInput* text_input = runtime_state_.owner_.TextInput()) {
-    text_input->RequestShow(text_input_session_->session_id);
+  const std::shared_ptr<TextInputClient> client = FindTextInputClient(*mounted);
+  if (!client || client->Configuration().read_only) {
+    return;
+  }
+  const TextInputSessionId session =
+      text_input_session_ && text_input_session_->node_identity == node && text_input_session_->client == client
+          ? text_input_session_->session_id
+          : 0;
+  if (session != 0 || keyboard_dispatch_depth_ != 0) {
+    QueueKeyboardRequest({node, client, session, show, false});
+  }
+}
+
+void detail::TextInteraction::RequestAutomaticKeyboard(std::uint64_t node) {
+  if (text_input_session_ && text_input_session_->node_identity == node) {
+    QueueKeyboardRequest({node, text_input_session_->client, text_input_session_->session_id, true, true});
+  }
+}
+
+void detail::TextInteraction::QueueKeyboardRequest(KeyboardRequest request) {
+  keyboard_requests_.push_back(std::move(request));
+  if (keyboard_dispatch_depth_ == 0) {
+    FlushKeyboardRequests();
+  }
+}
+
+void detail::TextInteraction::PrepareKeyboardRequestSession() {
+  const auto focused = runtime_state_.focused_node_identity_;
+  if (!focused || !runtime_state_.mounted_root_) {
+    return;
+  }
+  const auto awaits_session = [focused](const KeyboardRequest& request) {
+    return request.node == *focused && request.session == 0;
+  };
+  if (std::ranges::none_of(keyboard_requests_, awaits_session)) {
+    return;
+  }
+
+  MountedNode* node = FindNode(*runtime_state_.mounted_root_, *focused);
+  if (!node || !node->focusable || !node->interaction.enabled) {
+    return;
+  }
+  const std::shared_ptr<TextInputClient> client = FindTextInputClient(*node);
+  if (!client || (text_input_session_ && text_input_session_->node_identity == *focused &&
+                  text_input_session_->client == client)) {
+    return;
+  }
+  if (std::ranges::any_of(keyboard_requests_, [&](const KeyboardRequest& request) {
+        return awaits_session(request) && request.client.lock() == client;
+      })) {
+    RefreshTextInputSession();
+  }
+}
+
+void detail::TextInteraction::FlushKeyboardRequests() {
+  if (keyboard_requests_.empty()) {
+    return;
+  }
+  const auto requests = std::exchange(keyboard_requests_, {});
+  if (!text_input_session_ || !runtime_state_.mounted_root_) {
+    return;
+  }
+  const ActiveTextInputSession& active = *text_input_session_;
+  if (runtime_state_.focused_node_identity_ != active.node_identity) {
+    return;
+  }
+  MountedNode* focused = FindNode(*runtime_state_.mounted_root_, active.node_identity);
+  if (!focused || !focused->focusable || !focused->interaction.enabled || FindTextInputClient(*focused) != active.client) {
+    return;
+  }
+  const TextInputConfiguration configuration = active.client->Configuration();
+  if (configuration.read_only) {
+    return;
+  }
+  const KeyboardRequest* chosen = nullptr;
+  for (auto request = requests.rbegin(); request != requests.rend(); ++request) {
+    if (request->node != active.node_identity || request->client.lock() != active.client ||
+        (request->session != 0 && request->session != active.session_id)) {
+      continue;
+    }
+    if (!request->automatic) {
+      chosen = &*request;
+      break;
+    }
+    if (!chosen && configuration.keyboard_policy == SoftwareKeyboardPolicy::Automatic) {
+      chosen = &*request;
+    }
+  }
+  if (PlatformTextInput* text_input = chosen ? runtime_state_.owner_.TextInput() : nullptr) {
+    if (chosen->show) {
+      text_input->RequestShowKeyboard(active.session_id);
+    } else {
+      text_input->RequestHideKeyboard(active.session_id);
+    }
   }
 }
 
@@ -437,7 +558,8 @@ void detail::TextInteraction::RefreshTextInputSession() {
                                          current.composition != active.state.composition ||
                                          current.content_revision != active.state.content_revision;
       const bool restart =
-          configuration != active.configuration || (active.state.composition.has_value() && editing_state_changed);
+          PlatformConfigurationChanged(configuration, active.configuration) ||
+          (active.state.composition.has_value() && editing_state_changed);
       const bool state_changed = current != active.state;
       const ResolvedGeometrySnapshot resolved = ResolveGeometrySnapshot(active, current, *focused, [&] {
         return QueryTextInputGeometry(active.session_id, current.selection.Range());
@@ -512,6 +634,9 @@ void detail::TextInteraction::RefreshTextInputSession() {
     client->EndTextInput(session_id, TextInputEndReason::ClientRemoved);
     throw;
   }
+  if (configuration.keyboard_policy == SoftwareKeyboardPolicy::Automatic) {
+    RequestAutomaticKeyboard(focused->identity);
+  }
 }
 
 TextInputApplyResult detail::TextInteraction::HandleTextInputCommands(const TextInputCommandBatch& batch) {
@@ -546,7 +671,8 @@ TextInputApplyResult detail::TextInteraction::HandleTextInputCommands(const Text
   }
 
   const bool state_changed = current.revision != previous.revision;
-  const bool restart = result.sync_action == TextInputSyncAction::Restart || configuration != active.configuration;
+  const bool restart = result.sync_action == TextInputSyncAction::Restart ||
+                       PlatformConfigurationChanged(configuration, active.configuration);
   const bool update = result.sync_action == TextInputSyncAction::Update || state_changed;
   detail::MountedNode* node =
       runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, active.node_identity) : nullptr;

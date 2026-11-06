@@ -49,7 +49,7 @@ std::int32_t WebOffset(TextOffset offset) noexcept {
 }
 
 // clang-format off
-EM_JS(bool, ActivateWebTextInput, (
+EM_JS(bool, PrepareWebTextInput, (
     std::uintptr_t web_session_id,
     std::uint32_t event_token,
     int input_type,
@@ -303,16 +303,6 @@ EM_JS(bool, ActivateWebTextInput, (
     session.textSynchronizing = true;
     element.setSelectionRange(start, end, anchor > active ? "backward" : "forward");
     session.textSynchronizing = false;
-    element.focus({preventScroll: true});
-    queueMicrotask(() => {
-      if (
-          Module.huxerUIWebSessions.get(web_session_id) === session
-          && session.activeTextInput === element
-          && session.textToken === event_token
-      ) {
-        element.focus({preventScroll: true});
-      }
-    });
     return true;
   } catch (error) {
     session.activeTextInput = null;
@@ -371,37 +361,45 @@ EM_JS(void, SynchronizeWebTextInput, (
   }
 });
 
-EM_JS(void, DeactivateWebTextInput, (std::uintptr_t web_session_id, std::uint32_t event_token), {
+EM_JS(bool, DeactivateWebTextInput, (std::uintptr_t web_session_id, std::uint32_t event_token), {
   const sessions = Module.huxerUIWebSessions;
   const session = sessions && sessions.get(web_session_id);
   if (!session || !session.activeTextInput || session.textToken !== event_token) {
-    return;
+    return false;
   }
   const element = session.activeTextInput;
+  const wasFocused = document.activeElement === element;
   session.activeTextInput = null;
   session.textToken = 0;
   session.textComposing = false;
   try {
     element.blur();
     element.style.display = "none";
-    queueMicrotask(() => {
-      if (Module.huxerUIWebSessions.get(web_session_id) === session && !session.activeTextInput) {
-        session.root.focus({preventScroll: true});
-      }
-    });
+    if (wasFocused) {
+      queueMicrotask(() => {
+        if (Module.huxerUIWebSessions.get(web_session_id) === session && document.activeElement === document.body) {
+          session.root.focus({preventScroll: true});
+        }
+      });
+    }
   } catch (error) {
     console.error("HuxerUI Web text input deactivation failed", error);
   }
+  return wasFocused;
 });
 
-EM_JS(void, FocusWebTextInput, (std::uintptr_t web_session_id, std::uint32_t event_token), {
+EM_JS(void, SetWebTextInputFocus, (std::uintptr_t web_session_id, std::uint32_t event_token, bool focused), {
   const sessions = Module.huxerUIWebSessions;
   const session = sessions && sessions.get(web_session_id);
   if (!session || !session.activeTextInput || session.textToken !== event_token) {
     return;
   }
   try {
-    session.activeTextInput.focus({preventScroll: true});
+    if (focused) {
+      session.activeTextInput.focus({preventScroll: true});
+    } else if (document.activeElement === session.activeTextInput) {
+      session.root.focus({preventScroll: true});
+    }
   } catch (error) {
     console.error("HuxerUI Web text input focus failed", error);
   }
@@ -444,7 +442,7 @@ void WebTextInput::Start(
   configuration_ = configuration;
   state_ = state;
   event_token_ = NextEventToken();
-  Activate(geometry);
+  Prepare(geometry);
 }
 
 void WebTextInput::Update(
@@ -466,13 +464,14 @@ void WebTextInput::Restart(
   if (session_id != session_id_) {
     return;
   }
-  if (event_token_ != 0) {
-    DeactivateWebTextInput(web_session_id_, event_token_);
-  }
+  const bool restore_focus = event_token_ != 0 && DeactivateWebTextInput(web_session_id_, event_token_);
   configuration_ = configuration;
   state_ = state;
   event_token_ = NextEventToken();
-  Activate(geometry);
+  Prepare(geometry);
+  if (restore_focus) {
+    SetWebTextInputFocus(web_session_id_, event_token_, true);
+  }
 }
 
 void WebTextInput::Stop(TextInputSessionId session_id) {
@@ -486,9 +485,15 @@ void WebTextInput::Stop(TextInputSessionId session_id) {
   state_ = {};
 }
 
-void WebTextInput::RequestShow(TextInputSessionId session_id) {
+void WebTextInput::RequestShowKeyboard(TextInputSessionId session_id) {
   if (session_id == session_id_ && event_token_ != 0) {
-    FocusWebTextInput(web_session_id_, event_token_);
+    SetWebTextInputFocus(web_session_id_, event_token_, true);
+  }
+}
+
+void WebTextInput::RequestHideKeyboard(TextInputSessionId session_id) {
+  if (session_id == session_id_ && event_token_ != 0) {
+    SetWebTextInputFocus(web_session_id_, event_token_, false);
   }
 }
 
@@ -504,7 +509,7 @@ std::uint32_t WebTextInput::NextEventToken() noexcept {
   return next_token++;
 }
 
-void WebTextInput::Activate(const TextInputGeometry& geometry) {
+void WebTextInput::Prepare(const TextInputGeometry& geometry) {
   if (ui_window_ == nullptr || geometry.result_code != TextInputResultCode::Ok) {
     return;
   }
@@ -512,7 +517,7 @@ void WebTextInput::Activate(const TextInputGeometry& geometry) {
   if (context.result_code != TextInputResultCode::Ok) {
     return;
   }
-  ActivateWebTextInput(
+  PrepareWebTextInput(
       web_session_id_,
       event_token_,
       static_cast<int>(configuration_.type),

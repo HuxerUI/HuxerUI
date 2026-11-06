@@ -223,6 +223,14 @@ enum class TextInputAction {
   Newline,
 };
 
+/// Controls when UiWindow requests the software keyboard for an editable client.
+enum class SoftwareKeyboardPolicy {
+  /// Requests the keyboard on session start and on a confirmed tap on the focused editor.
+  Automatic,
+  /// Leaves software-keyboard requests to the application or editor.
+  Manual,
+};
+
 /// Platform input configuration supplied by the client and synchronized by UiWindow.
 ///
 /// Keyboard hints do not replace application validation. Changing an active client's configuration can restart its
@@ -243,6 +251,8 @@ struct TextInputConfiguration {
   bool autocorrect = true;
   /// Disallows editing and prevents UiWindow from opening a text-input session; selection can remain available.
   bool read_only = false;
+  /// Controls automatic software-keyboard requests independently of the text-input session.
+  SoftwareKeyboardPolicy keyboard_policy = SoftwareKeyboardPolicy::Automatic;
 
   bool operator==(const TextInputConfiguration&) const = default;
 };
@@ -526,7 +536,7 @@ class PlatformTextInput {
 public:
   virtual ~PlatformTextInput() = default;
 
-  /// Starts platform input after the client has begun the session.
+  /// Prepares platform input after the client has begun the session, without requesting the software keyboard.
   /// @param session_id New active HuxerUI session ID.
   /// @param configuration Keyboard hints and input policy for this client.
   /// @param state Initial client state carrying session_id.
@@ -550,11 +560,11 @@ public:
   /// Releases the platform input connection for an ended session without affecting a newer one.
   /// @param session_id Session to stop; ignore stale IDs.
   virtual void Stop(TextInputSessionId session_id) = 0;
-  /// Requests software-keyboard visibility without changing focus or creating a new input session.
-  /// Only the active session may show the keyboard. Ignore stale session IDs.
-  /// UiWindow uses this for a confirmed tap on an already focused client. Hiding a keyboard does not end that
-  /// session; platforms without a software keyboard can retain the default no-op implementation.
-  virtual void RequestShow(TextInputSessionId) {}
+  /// Requests the software keyboard for the active session. Ignore stale session IDs.
+  virtual void RequestShowKeyboard(TextInputSessionId) {}
+  /// Requests dismissal of the software keyboard while keeping the active HuxerUI session and focus.
+  /// Ignore stale session IDs. Platforms may leave both keyboard requests as no-ops.
+  virtual void RequestHideKeyboard(TextInputSessionId) {}
 };
 
 } // namespace huxerui

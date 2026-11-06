@@ -222,6 +222,7 @@ public final class HuxerUIView extends ViewGroup {
     private boolean frameScheduled;
     private long frameTime;
     private HuxerUIInputConnection inputConnection;
+    private long keyboardRequestGeneration;
     private HuxerUIShadowRenderer shadowRenderer;
     private int imeInsetBottom;
     private int safeInsetLeft;
@@ -950,9 +951,7 @@ public final class HuxerUIView extends ViewGroup {
                 return;
             }
             requestFocus();
-            InputMethodManager manager = inputMethodManager();
-            manager.restartInput(this);
-            manager.showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+            inputMethodManager().restartInput(this);
         });
     }
 
@@ -997,16 +996,21 @@ public final class HuxerUIView extends ViewGroup {
         });
     }
 
-    private void requestShowTextInput(long sessionId) {
+    private void requestTextInputKeyboard(long sessionId, boolean show) {
         if (!hasTextInputSession(sessionId)) {
             return;
         }
+        final long generation = ++keyboardRequestGeneration;
         post(() -> {
-            if (!hasTextInputSession(sessionId)) {
+            if (generation != keyboardRequestGeneration || !hasTextInputSession(sessionId)) {
                 return;
             }
-            requestFocus();
-            inputMethodManager().showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+            if (show) {
+                requestFocus();
+                inputMethodManager().showSoftInput(this, InputMethodManager.SHOW_IMPLICIT);
+            } else if (isFocused() && getWindowToken() != null) {
+                hideInputMethod();
+            }
         });
     }
 
@@ -1235,13 +1239,17 @@ public final class HuxerUIView extends ViewGroup {
     private void hidePlatformViewInput() {
         post(() -> {
             if (inputConnection == null && platformViewIdentity(findFocus()) == 0L && getWindowToken() != null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && getWindowInsetsController() != null) {
-                    getWindowInsetsController().hide(WindowInsets.Type.ime());
-                } else {
-                    inputMethodManager().hideSoftInputFromWindow(getWindowToken(), 0);
-                }
+                hideInputMethod();
             }
         });
+    }
+
+    private void hideInputMethod() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && getWindowInsetsController() != null) {
+            getWindowInsetsController().hide(WindowInsets.Type.ime());
+        } else {
+            inputMethodManager().hideSoftInputFromWindow(getWindowToken(), 0);
+        }
     }
 
     private int validatePlatformView(Object candidate) {

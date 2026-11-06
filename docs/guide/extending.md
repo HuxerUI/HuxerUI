@@ -126,6 +126,8 @@ Keep local IDs stable and use the same availability predicate as actual input.
 Runtime combines each child's availability with the mounted owner's `Enabled` state: disabled children remain discoverable but have no executable standard or custom actions.
 Call `InvalidateSemantics()` when retained availability changes; this does not replace the control's pointer or keyboard checks.
 
+Custom editors expose their `TextInputClient` through `GetTextInputClient()` on a focusable node. Return `SoftwareKeyboardPolicy::Manual` in the client's `TextInputConfiguration::keyboard_policy` to control when the software keyboard opens. From mounted input or focus callbacks on the UI thread, use the protected `ShowKeyboard()` and `HideKeyboard()` methods to address that node's editor. A request in the same event that focuses the editor is resolved after the editing session is ready.
+
 ## Paint commands
 
 Use `Canvas` and existing `PaintCommand` variants for custom drawing.

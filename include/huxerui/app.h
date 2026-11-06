@@ -982,6 +982,8 @@ private:
                       std::uint64_t press_id, std::optional<Point> position = std::nullopt);
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
   void RefreshInteractionTree();
+  void RequestKeyboard(bool show);
+  bool DispatchKeyEvent(const KeyEvent& event);
   bool DispatchKeyboardContextMenu();
   detail::MountedNode* ActiveFocusTrapRoot();
   void SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible = std::nullopt,
@@ -1047,6 +1049,7 @@ private:
   friend class detail::SemanticTree;
   friend class detail::TextInteraction;
   friend class detail::VirtualMeasureSession;
+  friend class detail::WindowService;
   friend struct detail::InternalAccess;
   Runtime* application_runtime_ = nullptr;
   std::shared_ptr<detail::ExternalTextureFrameRequester> external_texture_frame_requester_;

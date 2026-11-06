@@ -408,6 +408,7 @@ export namespace huxerui {
     using huxerui::SnackBarOptions;
     using huxerui::SnackBarStyle;
     using huxerui::SnapSpec;
+    using huxerui::SoftwareKeyboardPolicy;
     using huxerui::Spacer;
     using huxerui::Spacing;
     using huxerui::SpacingScheme;

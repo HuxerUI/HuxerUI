@@ -57,8 +57,6 @@ public:
     stopped_sessions.push_back(session_id);
   }
 
-  void RequestShow(TextInputSessionId) override {}
-
   std::vector<TextInputSessionId> started_sessions;
   std::vector<TextInputSessionId> stopped_sessions;
 };

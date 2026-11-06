@@ -39,7 +39,8 @@ public:
       const TextInputGeometry& geometry
   ) override;
   void Stop(TextInputSessionId session_id) override;
-  void RequestShow(TextInputSessionId session_id) override;
+  void RequestShowKeyboard(TextInputSessionId session_id) override;
+  void RequestHideKeyboard(TextInputSessionId session_id) override;
 
   void CommitEdit(std::uint32_t event_token, TextRange target, std::string text, TextSelection selection);
   void SetSelection(std::uint32_t event_token, TextSelection selection);
@@ -51,7 +52,7 @@ public:
 private:
   [[nodiscard]] bool Accepts(std::uint32_t event_token) const noexcept;
   [[nodiscard]] std::uint32_t NextEventToken() noexcept;
-  void Activate(const TextInputGeometry& geometry);
+  void Prepare(const TextInputGeometry& geometry);
   void Synchronize(const TextInputGeometry& geometry);
   void Apply(std::vector<TextInputCommand> commands);
 

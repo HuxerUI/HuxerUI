@@ -400,6 +400,13 @@ public:
   /// Hides the native window without closing the application.
   void Hide() const;
 
+  /// Requests the software keyboard for this window's focused editor on the application thread.
+  /// The platform decides whether the keyboard can be shown.
+  void ShowKeyboard() const;
+
+  /// Requests software-keyboard dismissal on the application thread while preserving editor focus and session.
+  void HideKeyboard() const;
+
   /// Shows and brings the native window to the foreground when permitted by the platform.
   void Activate() const;
 

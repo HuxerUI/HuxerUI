@@ -371,7 +371,7 @@ EM_JS(
                           session.activePointers.set(event.pointerId, false);
                           return;
                         }
-                        if (!session.activeTextInput) {
+                        if (!session.activeTextInput || document.activeElement !== session.activeTextInput) {
                           root.focus({preventScroll : true});
                         }
                         if (event.pointerType === "mouse") {
@@ -431,11 +431,6 @@ EM_JS(
                           return;
                         }
                         sendPointer(event, 1);
-                        queueMicrotask(() => {
-                          if (Module.huxerUIWebSessions.get(session_id) === session && session.activeTextInput) {
-                            session.activeTextInput.focus({preventScroll : true});
-                          }
-                        });
                         event.preventDefault();
                         event.stopPropagation();
                       },

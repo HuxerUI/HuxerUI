@@ -341,6 +341,11 @@ enum class TextInputAction {
   Newline,
 };
 
+enum class SoftwareKeyboardPolicy {
+  Automatic,
+  Manual,
+};
+
 struct TextInputConfiguration {
   TextInputType type = TextInputType::Text;
   TextCapitalization capitalization = TextCapitalization::None;
@@ -349,6 +354,7 @@ struct TextInputConfiguration {
   bool secure = false;
   bool autocorrect = true;
   bool read_only = false;
+  SoftwareKeyboardPolicy keyboard_policy = SoftwareKeyboardPolicy::Automatic;
 };
 ```
 
@@ -457,7 +463,8 @@ public:
 
   virtual void Stop(TextInputSessionId session_id) = 0;
 
-  virtual void RequestShow(TextInputSessionId) {}
+  virtual void RequestShowKeyboard(TextInputSessionId) {}
+  virtual void RequestHideKeyboard(TextInputSessionId) {}
 };
 ```
 
@@ -471,7 +478,11 @@ virtual PlatformTextInput* TextInput() noexcept {
 
 A test host, headless host, or incomplete platform does not need an empty input implementation. Hardware navigation can continue to use ordinary key events when no platform text input capability exists.
 
-Focus, input-session ownership, and software-keyboard visibility remain separate. Hiding a software keyboard does not clear HuxerUI focus or end the active session. A confirmed tap on the same focused text client calls `RequestShow()` with the active session ID. Platforms without a software keyboard keep the default no-op implementation.
+Focus, input-session ownership, and software-keyboard visibility remain separate. `Start` prepares native input. With `Automatic`, UiWindow requests the software keyboard after starting a session and after a confirmed tap or click on the focused editor. `Manual` suppresses these automatic requests. Changing only the policy neither restarts native input nor changes keyboard visibility.
+
+`WindowHandle::ShowKeyboard()` and `HideKeyboard()` address the editor focused in that window at the time of the call. The protected `NodeExtension` methods address the extension's own node, including during the event that first focuses it. UiWindow resolves requests after dispatch and input-session synchronization. The last valid explicit request takes precedence over an automatic request. The mounted node, client, and session must still match. An explicit request made before session start can resolve only for that same editor during the current dispatch.
+
+`RequestShowKeyboard` and `RequestHideKeyboard` are best-effort platform operations for the active session. Hiding preserves HuxerUI focus, the session, and its selection. Native IME events, including a final composition update during dismissal, still use the ordinary command path. Platforms without a software keyboard can keep both hooks as no-ops. On Web, presentation depends on whether the browser allows the input proxy to focus and open the keyboard during the current user gesture.
 
 Start, Update, and Restart receive state and geometry from the same UiWindow snapshot.
 Platform-derived UiWindow implementations do not call back into shared UiWindow logic merely to recover the current caret during Start or Restart.
@@ -968,7 +979,7 @@ The Android adapter:
 - Uses `CursorAnchorInfo` for candidate and insertion marker geometry.
 - Uses the complete Android View-to-screen matrix, including ancestor transforms and scrolling, and re-publishes monitored cursor geometry when a pre-draw detects that matrix changed.
 - Rejects callbacks carrying a stale HuxerUI session.
-- Revalidates the active session before honoring `RequestShow()` and asking `InputMethodManager` to display a keyboard hidden without focus loss.
+- Checks the active session and request order before honoring a posted software-keyboard show or hide request. Dismissal keeps the input connection active.
 - Resizes the logical viewport for visible IME insets and asks ancestor scroll containers to reveal the active caret.
 - Forwards raw touch input while UiWindow owns long-press recognition, editing actions, and the HuxerUI-drawn selection overlay.
 - Uses password input type without suggestions and withholds surrounding, selected, and extracted text from secure input connections.
@@ -982,6 +993,8 @@ The adapter can retain a bounded surrounding-text mirror for Android query behav
 An AppKit-specific client owned by `MacTextInput` conforms to `NSTextInputClient` on macOS. The host view remains the first responder and exposes the client's explicit `NSTextInputContext`.
 
 On iOS, a private non-accessible view owned by the `UIKitTextInput` bridge conforms to `UITextInput`, while the HuxerUI drawing host remains a separate accessibility container. UIKit's UTF-16 positions, selection, marked text, keyboard traits, action keys, and geometry queries translate directly to the same UiWindow session and command protocol. The UIKit bridge keeps only session and UIKit text-service bookkeeping; the controlled `TextEditingValue` remains authoritative in the shared TextField client.
+
+The iOS proxy becomes first responder on a show request and resigns on a hide request. Both operations preserve the active HuxerUI session.
 
 The macOS adapter maps:
 

@@ -85,6 +85,28 @@ class TextInteraction final {
 public:
   explicit TextInteraction(UiWindow::State& runtime_state) : runtime_state_(runtime_state) {}
 
+  class KeyboardDispatch {
+  public:
+    explicit KeyboardDispatch(TextInteraction& text);
+    ~KeyboardDispatch();
+    KeyboardDispatch(const KeyboardDispatch&) = delete;
+    KeyboardDispatch& operator=(const KeyboardDispatch&) = delete;
+    void Finish();
+
+  private:
+    TextInteraction& text_;
+    std::size_t first_request_;
+    bool finished_ = false;
+  };
+
+  template <class Dispatch>
+  decltype(auto) DispatchWithKeyboardRequests(Dispatch dispatch) {
+    KeyboardDispatch keyboard_dispatch(*this);
+    decltype(auto) result = dispatch();
+    keyboard_dispatch.Finish();
+    return result;
+  }
+
   bool BringTextInputIntoView();
   void StopTextInputSession(TextInputEndReason reason);
   void RefreshTextInputSession();
@@ -107,7 +129,8 @@ public:
   void PaintTextSelectionOverlay();
 
   bool HasSession() const noexcept;
-  void RequestShowForNode(std::uint64_t node);
+  void RequestKeyboardForNode(std::uint64_t node, bool show);
+  void RequestAutomaticKeyboard(std::uint64_t node);
   bool SessionBelongsTo(const MountedNode& root) const;
   void NotifyScrollActivity(MountedNode& node, const ScrollActivity& activity);
   bool OverlayVisible() const noexcept;
@@ -119,6 +142,18 @@ public:
   void RememberSelectionTap(const PointerEvent& event, std::uint64_t node, double timestamp);
 
 private:
+  struct KeyboardRequest {
+    std::uint64_t node;
+    std::weak_ptr<TextInputClient> client;
+    // Zero allows this dispatch to start the session for the captured editor.
+    TextInputSessionId session;
+    bool show;
+    bool automatic;
+  };
+
+  void QueueKeyboardRequest(KeyboardRequest request);
+  void PrepareKeyboardRequestSession();
+  void FlushKeyboardRequests();
   void InvalidateTextInputStateChange(std::uint64_t node, const TextInputState& previous, const TextInputState& current);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);
   std::optional<TextSelectionGeometry> QueryFocusedTextSelectionGeometry() const;
@@ -126,6 +161,8 @@ private:
 
   UiWindow::State& runtime_state_;
   std::optional<ActiveTextInputSession> text_input_session_;
+  std::vector<KeyboardRequest> keyboard_requests_;
+  std::size_t keyboard_dispatch_depth_ = 0;
   TextSelectionGestureState text_selection_gesture_;
   // Re-hit the retained pointer position after the next layout has consumed an auto-scroll offset change.
   bool selection_scroll_pending_ = false;

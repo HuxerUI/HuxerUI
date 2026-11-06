@@ -675,6 +675,12 @@ Use `LeadingIcon`, `TrailingIcon`, `LineLimits`, `MaxLength`, `Secure`, `InputCo
 `OnChanged` reports the complete requested editing value.
 `OnSubmitted` reports the submitted text when the configured platform action is performed.
 
+### Software keyboard
+
+`TextField` and `ComboBox` request the software keyboard when an editable client starts a session and when the user taps the focused editor again. To choose when it appears, configure the editor with `.InputConfiguration({.keyboard_policy = SoftwareKeyboardPolicy::Manual})`. The editor still receives focus and can place the caret or select text on a tap.
+
+Get the window handle with `UseWindow()` and capture it in an event handler. Call `window.ShowKeyboard()` or `window.HideKeyboard()` on the application thread to request a change for that window's focused editor. Both methods work with either policy. Hiding preserves HuxerUI focus, the editing session, and the selection, subject to any final edits delivered by the input method. With no focused editable client the calls have no effect. Keyboard presentation is best effort, and Web browsers can require the show request to run during a user gesture.
+
 ## Validation and secure input
 
 Validation communicates application-owned domain state.

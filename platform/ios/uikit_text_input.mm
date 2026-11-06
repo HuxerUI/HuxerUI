@@ -279,11 +279,6 @@ public:
     session_id_ = session_id;
     configuration_ = configuration;
     input_state_ = state;
-    HuxerUITextInputView* view = input_view_;
-    if (view != nil) {
-      [view reloadInputViews];
-      [view becomeFirstResponder];
-    }
   }
 
   void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry&) {
@@ -326,7 +321,7 @@ public:
     configuration_ = configuration;
     Update(session_id, state, geometry);
     HuxerUITextInputView* view = input_view_;
-    if (view != nil) {
+    if (view.isFirstResponder) {
       [view reloadInputViews];
     }
   }
@@ -344,14 +339,21 @@ public:
     }
   }
 
-  void RequestShow(TextInputSessionId session_id) {
-    if (session_id != session_id_) {
+  void RequestShowKeyboard(TextInputSessionId session_id) {
+    if (session_id == 0 || session_id != session_id_) {
       return;
     }
     HuxerUITextInputView* view = input_view_;
     if (view != nil) {
       [view reloadInputViews];
       [view becomeFirstResponder];
+    }
+  }
+
+  void RequestHideKeyboard(TextInputSessionId session_id) {
+    HuxerUITextInputView* view = input_view_;
+    if (session_id != 0 && session_id == session_id_ && view.isFirstResponder) {
+      [view resignFirstResponder];
     }
   }
 
@@ -429,8 +431,12 @@ void UIKitTextInput::Stop(TextInputSessionId session_id) {
   state_->Stop(session_id);
 }
 
-void UIKitTextInput::RequestShow(TextInputSessionId session_id) {
-  state_->RequestShow(session_id);
+void UIKitTextInput::RequestShowKeyboard(TextInputSessionId session_id) {
+  state_->RequestShowKeyboard(session_id);
+}
+
+void UIKitTextInput::RequestHideKeyboard(TextInputSessionId session_id) {
+  state_->RequestHideKeyboard(session_id);
 }
 
 } // namespace huxerui::detail

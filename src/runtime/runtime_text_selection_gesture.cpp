@@ -226,7 +226,7 @@ void detail::PointerInteraction::AdvanceTextSelectionLongPress(double timestamp)
     return;
   }
   const PointerEvent event{PointerEventType::Move, *ready_pointer, ready_position, PointerDeviceKind::Touch};
-  if (!CommitPendingTouchFocus(session->second, event)) {
+  if (!CommitPendingPointerFocus(session->second, event)) {
     return;
   }
   runtime_state_.text_->RefreshTextInputSession();

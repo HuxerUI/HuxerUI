@@ -1411,12 +1411,14 @@ void UiWindow::Retire() noexcept {
 
 TextInputApplyResult UiWindow::HandleTextInputCommands(const TextInputCommandBatch& batch) {
   ExecutionGuard execution_guard(state_->execution_);
-  return state_->text_->HandleTextInputCommands(batch);
+  return state_->text_->DispatchWithKeyboardRequests([&] { return state_->text_->HandleTextInputCommands(batch); });
 }
 
 bool UiWindow::PerformTextInputAction(TextInputSessionId session_id, TextInputAction action) {
   ExecutionGuard execution_guard(state_->execution_);
-  return state_->text_->PerformTextInputAction(session_id, action);
+  return state_->text_->DispatchWithKeyboardRequests([&] {
+    return state_->text_->PerformTextInputAction(session_id, action);
+  });
 }
 
 TextInputContext
@@ -1438,7 +1440,7 @@ bool UiWindow::CanPerformTextEditingAction(TextEditingAction action) const {
 
 bool UiWindow::PerformTextEditingAction(TextEditingAction action) {
   ExecutionGuard execution_guard(state_->execution_);
-  return state_->text_->PerformTextEditingAction(action);
+  return state_->text_->DispatchWithKeyboardRequests([&] { return state_->text_->PerformTextEditingAction(action); });
 }
 
 std::uint64_t UiWindow::BeginInteraction(detail::MountedNode& node, InteractionEvent::Source source,
@@ -1464,7 +1466,15 @@ void UiWindow::EndInteraction(detail::MountedNode& node, InteractionEvent::Type 
 
 void UiWindow::HandlePointerEvent(const PointerEvent& event) {
   ExecutionGuard execution_guard(state_->execution_);
+  detail::TextInteraction::KeyboardDispatch keyboard_dispatch(*state_->text_);
   state_->pointer_->HandlePointerEvent(event);
+  keyboard_dispatch.Finish();
+}
+
+void UiWindow::RequestKeyboard(bool show) {
+  if (state_->focused_node_identity_) {
+    state_->text_->RequestKeyboardForNode(*state_->focused_node_identity_, show);
+  }
 }
 
 bool UiWindow::HasContextMenuHandler(Point position) const {
@@ -1499,7 +1509,9 @@ void UiWindow::BuildSemantics() {
 
 bool UiWindow::PerformSemanticAction(SemanticNodeId node_id, const SemanticAction& action) {
   ExecutionGuard execution_guard(state_->execution_);
-  return state_->semantics_->PerformSemanticAction(node_id, action);
+  return state_->text_->DispatchWithKeyboardRequests([&] {
+    return state_->semantics_->PerformSemanticAction(node_id, action);
+  });
 }
 
 void UiWindow::QueueLifecycleCommit(const std::shared_ptr<detail::RecomposeScope>& scope) {
@@ -1809,6 +1821,7 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     return state_->frame_commit_;
   }
   ExecutionGuard execution_guard(state_->execution_);
+  detail::TextInteraction::KeyboardDispatch keyboard_dispatch(*state_->text_);
   HUXERUI_PROFILE_FRAME(*state_->root_environment_);
   HUXERUI_PROFILE_STAGE(profile_stage, Compose);
   detail::DebugMetricsState* const debug_metrics = state_->debug_metrics_.get();
@@ -1871,6 +1884,7 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
         state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
     record_debug_commit();
     state_->building_frame_ = false;
+    keyboard_dispatch.Finish();
     return state_->frame_commit_;
   }
 
@@ -2013,6 +2027,7 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
       state_->frame_requested_ ? std::optional{state_->frame_request_deadline_} : std::nullopt;
   record_debug_commit();
   state_->building_frame_ = false;
+  keyboard_dispatch.Finish();
   return state_->frame_commit_;
 }
 
@@ -2459,6 +2474,9 @@ void UiWindow::BindExtensions(detail::MountedNode& node) {
         RequestFrame();
       }
     });
+    entry.extension->BindKeyboardRequest([this, identity = node.identity](bool show) {
+      state_->text_->RequestKeyboardForNode(identity, show);
+    });
   }
 }
 
@@ -2506,6 +2524,10 @@ Point UiWindow::HandleScrollInput(const ScrollInputEvent& event) {
 
 bool UiWindow::HandleKeyEvent(const KeyEvent& event) {
   ExecutionGuard execution_guard(state_->execution_);
+  return state_->text_->DispatchWithKeyboardRequests([&] { return DispatchKeyEvent(event); });
+}
+
+bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
   if (!state_->mounted_root_) {
     return false;
   }

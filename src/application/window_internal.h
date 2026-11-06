@@ -53,6 +53,7 @@ public:
   void BeginClose();
 
   void Request(WindowCommand command);
+  void RequestKeyboard(bool show);
   [[nodiscard]] bool HandleRequest(WindowCommand command);
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler);
