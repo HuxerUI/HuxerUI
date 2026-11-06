@@ -167,8 +167,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
+  NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
       if (phase_.Reset()) {
         InvalidatePaint();
@@ -220,8 +219,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
+  NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     if (progress_.has_value() || !std::isfinite(style_.animation_duration) || style_.animation_duration <= 0.0) {
       if (phase_.Reset()) {
         InvalidatePaint();

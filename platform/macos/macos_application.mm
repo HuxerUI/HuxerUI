@@ -101,8 +101,7 @@ public:
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
-    static_cast<void>(permission);
+  std::function<void()> OpenSettings(Permission, PermissionSettingsCompletion completion) override {
     completion(false);
     return {};
   }
@@ -267,8 +266,7 @@ public:
     @try {
       UNUserNotificationCenter* center = [UNUserNotificationCenter currentNotificationCenter];
       [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
-                            completionHandler:^(BOOL granted, NSError* error) {
-                              static_cast<void>(granted);
+                            completionHandler:^(BOOL, NSError* error) {
                               if (error != nil) {
                                 Complete(retained, PermissionStatus::Unavailable);
                                 return;

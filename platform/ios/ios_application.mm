@@ -90,8 +90,7 @@ public:
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
-    static_cast<void>(permission);
+  std::function<void()> OpenSettings(Permission, PermissionSettingsCompletion completion) override {
     NSURL* url = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
     if (url == nil) {
       completion(false);
@@ -305,8 +304,7 @@ public:
     UNUserNotificationCenter* center = center_;
     @try {
       [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
-                            completionHandler:^(BOOL granted, NSError* error) {
-                              static_cast<void>(granted);
+                            completionHandler:^(BOOL, NSError* error) {
                               if (error != nil) {
                                 Complete(retained, PermissionStatus::Unavailable);
                                 return;

@@ -63,7 +63,6 @@
 - (id<HUXUIKitPlatformView>)createWithViewController:(UIViewController*)viewController
                                           properties:(HUXPlatformPayload*)properties
                                               events:(id<HUXPlatformEventEmitter>)events {
-  static_cast<void>(viewController);
   return [[HuxerUIExamplePlatformTextFieldView alloc] initWithProperties:properties events:events];
 }
 

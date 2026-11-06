@@ -42,7 +42,7 @@ public:
 };
 
 template <class T, class Start>
-[[nodiscard]] Task<T> AwaitCallback(Start&& start);
+Task<T> AwaitCallback(Start&& start);
 
 class WorkerSequence {
 public:
@@ -50,7 +50,7 @@ public:
 
   template <class Function, class... Arguments>
     requires std::invocable<std::decay_t<Function>, std::stop_token, std::decay_t<Arguments>...>
-  [[nodiscard]] auto Run(Function&& function, Arguments&&... arguments) const;
+  auto Run(Function&& function, Arguments&&... arguments) const;
 };
 
 class TaskHandle {
@@ -81,7 +81,7 @@ public:
 
 TaskScope UseTaskScope();
 
-[[nodiscard]] Task<void> Delay(std::chrono::duration<double> duration);
+Task<void> Delay(std::chrono::duration<double> duration);
 
 template <class Function, class... Arguments>
   requires std::constructible_from<std::decay_t<Function>, Function&&> &&
@@ -89,7 +89,7 @@ template <class Function, class... Arguments>
            (std::constructible_from<std::decay_t<Arguments>, Arguments&&> && ...) &&
            (std::move_constructible<std::decay_t<Arguments>> && ...) &&
            std::invocable<std::decay_t<Function>, std::decay_t<Arguments>...>
-[[nodiscard]] auto RunWorker(Function&& function, Arguments&&... arguments);
+auto RunWorker(Function&& function, Arguments&&... arguments);
 ```
 
 `Task<T>` accepts non-cv, non-reference object value types and `void`.

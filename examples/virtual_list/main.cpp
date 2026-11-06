@@ -13,8 +13,8 @@ View VirtualListToolbar(ScrollController scroll) {
   const auto offset = static_cast<int>(scroll.Offset());
 
   return Row{
-      Button("Top").OnClick([scroll] { static_cast<void>(scroll.ScrollTo(0.0F)); }),
-      Button("Item 5000").OnClick([scroll] { static_cast<void>(scroll.ScrollToItem(4999, ScrollAlignment::Center)); }),
+      Button("Top").OnClick([scroll] { scroll.ScrollTo(0.0F); }),
+      Button("Item 5000").OnClick([scroll] { scroll.ScrollToItem(4999, ScrollAlignment::Center); }),
       Spacer(),
       Text::Format("Offset {}", offset).With(Foreground(secondary_text_color)),
   }

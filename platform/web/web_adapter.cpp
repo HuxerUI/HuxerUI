@@ -34,6 +34,7 @@
 #include "web_platform_view.h"
 #include "web_renderer.h"
 #include "web_text_input.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -85,7 +86,7 @@ void RunWebUiThreadTask(void* context) noexcept {
 void DispatchToWebUiThread(std::function<void()> task) {
   auto pending = std::make_unique<std::function<void()>>(std::move(task));
   emscripten_async_call(RunWebUiThreadTask, pending.get(), 0);
-  static_cast<void>(pending.release());
+  HUXERUI_DISCARD(pending.release());
 }
 
 // clang-format off

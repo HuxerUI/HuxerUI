@@ -706,7 +706,7 @@ std::vector<Entry> Discover(const CompileOptions& options) {
       std::string stem = Utf8PathString(relative.stem());
       if (extension == ".svg") {
         const std::string unscaled_stem = stem;
-        static_cast<void>(ImageScale(stem));
+        ImageScale(stem);
         if (stem != unscaled_stem) {
           throw std::runtime_error("SVG image resources do not support density suffixes: " + file.path().string());
         }
@@ -827,7 +827,7 @@ std::vector<Entry> Discover(const CompileOptions& options) {
         if (validated_key != "strings/" + key) {
           throw std::runtime_error("localized string key must be a normalized resource path: " + key);
         }
-        static_cast<void>(PlaceholderIndices(value));
+        PlaceholderIndices(value);
         entries.push_back({
             .kind = EntryKind::String,
             .key = "strings/" + key,
@@ -1071,7 +1071,6 @@ void Merge(const MergeOptions& options) {
   std::vector<Entry> entries;
   entries.reserve(merged.size());
   for (auto& [identity, entry] : merged) {
-    static_cast<void>(identity);
     entries.push_back(std::move(entry));
   }
   ValidateEntries(entries);

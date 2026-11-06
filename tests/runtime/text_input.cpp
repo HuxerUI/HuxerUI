@@ -46,10 +46,8 @@ public:
   }
 
   TextInputContext
-  QueryTextInputContext(TextInputSessionId session_id, TextOffset start, TextOffset length) const override {
+  QueryTextInputContext(TextInputSessionId session_id, TextOffset, TextOffset) const override {
     ++context_queries;
-    static_cast<void>(start);
-    static_cast<void>(length);
     return {
         TextInputResultCode::Ok,
         session_id,
@@ -192,14 +190,11 @@ public:
     return client_;
   }
 
-  bool HitTest(ViewNode& node, Point position) const override {
-    static_cast<void>(node);
-    static_cast<void>(position);
+  bool HitTest(ViewNode&, Point) const override {
     return handle_pointer_;
   }
 
-  PointerResult OnPointer(ViewNode& node, const PointerEvent& event) override {
-    static_cast<void>(node);
+  PointerResult OnPointer(ViewNode&, const PointerEvent& event) override {
     if (!handle_pointer_ || event.type != PointerEventType::Down) {
       return PointerResult::Ignored;
     }
@@ -225,8 +220,7 @@ TextInputProbeExtension::TextInputProbeExtension(ViewNode& node, const TextInput
   Update(node, probe);
 }
 
-void TextInputProbeExtension::Update(ViewNode& node, const TextInputProbe& probe) {
-  static_cast<void>(node);
+void TextInputProbeExtension::Update(ViewNode&, const TextInputProbe& probe) {
   client_ = probe.client;
   handle_pointer_ = probe.handle_pointer;
   pointer_selection_ = probe.pointer_selection;

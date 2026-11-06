@@ -11,6 +11,7 @@
 #include <huxerui/app.h>
 
 #include "uikit_platform_view.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 class UIKitAccessibility;
@@ -736,7 +737,7 @@ void UIKitAccessibility::AccessibilityFocusChanged(SemanticNodeId id) {
   }
   const SemanticNode* node = state_->Node(id);
   if (node != nullptr && node->offscreen && HasAction(*node, SemanticActionKind::ShowOnScreen)) {
-    static_cast<void>(Perform(id, SemanticActionKind::ShowOnScreen));
+    HUXERUI_DISCARD(Perform(id, SemanticActionKind::ShowOnScreen));
   }
 }
 
@@ -778,13 +779,13 @@ void UIKitAccessibility::AccessibilityFocusChanged(SemanticNodeId id) {
 
 - (void)accessibilityIncrement {
   if (huxeruiOwner != nullptr) {
-    static_cast<void>(huxeruiOwner->Perform(huxeruiNodeId, huxerui::SemanticActionKind::Increment));
+    HUXERUI_DISCARD(huxeruiOwner->Perform(huxeruiNodeId, huxerui::SemanticActionKind::Increment));
   }
 }
 
 - (void)accessibilityDecrement {
   if (huxeruiOwner != nullptr) {
-    static_cast<void>(huxeruiOwner->Perform(huxeruiNodeId, huxerui::SemanticActionKind::Decrement));
+    HUXERUI_DISCARD(huxeruiOwner->Perform(huxeruiNodeId, huxerui::SemanticActionKind::Decrement));
   }
 }
 

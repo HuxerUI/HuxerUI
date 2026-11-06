@@ -1641,10 +1641,10 @@ TEST_CASE("ViewNodeChildAccessChecksMutableAndConstBounds") {
       }
       REQUIRE(index == node.ChildCount());
       constexpr auto maximum_index = std::numeric_limits<std::size_t>::max();
-      REQUIRE_THROWS_AS(static_cast<void>(node.ChildAt(node.ChildCount())), std::out_of_range);
-      REQUIRE_THROWS_AS(static_cast<void>(read_only.ChildAt(read_only.ChildCount())), std::out_of_range);
-      REQUIRE_THROWS_AS(static_cast<void>(node.ChildAt(maximum_index)), std::out_of_range);
-      REQUIRE_THROWS_AS(static_cast<void>(read_only.ChildAt(maximum_index)), std::out_of_range);
+      REQUIRE_THROWS_AS(node.ChildAt(node.ChildCount()), std::out_of_range);
+      REQUIRE_THROWS_AS(read_only.ChildAt(read_only.ChildCount()), std::out_of_range);
+      REQUIRE_THROWS_AS(node.ChildAt(maximum_index), std::out_of_range);
+      REQUIRE_THROWS_AS(read_only.ChildAt(maximum_index), std::out_of_range);
       return Column::Measure(context, node, constraints);
     }
   };

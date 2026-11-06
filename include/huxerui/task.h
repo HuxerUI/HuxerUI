@@ -127,7 +127,7 @@ template <class T> class [[nodiscard]] Task {
 public:
   class promise_type final : public detail::TaskPromiseBase {
   public:
-    [[nodiscard]] Task get_return_object() noexcept {
+    Task get_return_object() noexcept {
       return Task(std::coroutine_handle<promise_type>::from_promise(*this));
     }
 
@@ -236,7 +236,7 @@ template <> class [[nodiscard]] Task<void> {
 public:
   class promise_type final : public detail::TaskPromiseBase {
   public:
-    [[nodiscard]] Task get_return_object() noexcept {
+    Task get_return_object() noexcept {
       return Task(std::coroutine_handle<promise_type>::from_promise(*this));
     }
 
@@ -586,7 +586,7 @@ template <class T, class Start>
            std::invocable<std::decay_t<Start>, CallbackCompletion<T>> &&
            std::convertible_to<
                std::invoke_result_t<std::decay_t<Start>, CallbackCompletion<T>>, std::function<void()>>
-[[nodiscard]] Task<T> AwaitCallback(Start&& start) {
+Task<T> AwaitCallback(Start&& start) {
   return detail::RunCallbackTask<T>(std::decay_t<Start>(std::forward<Start>(start)));
 }
 
@@ -939,7 +939,7 @@ public:
              (std::constructible_from<std::decay_t<Arguments>, Arguments&&> && ...) &&
              (std::move_constructible<std::decay_t<Arguments>> && ...) &&
              std::invocable<std::decay_t<Function>, std::stop_token, std::decay_t<Arguments>...>
-  [[nodiscard]] auto Run(Function&& function, Arguments&&... arguments) const {
+  auto Run(Function&& function, Arguments&&... arguments) const {
     using Operation = detail::WorkerSequenceInvocation<std::decay_t<Function>, std::decay_t<Arguments>...>;
     using Result = typename Operation::Result;
     static_assert(
@@ -1100,7 +1100,7 @@ TaskScope UseApplicationTaskScope();
 /// co_await Delay(300ms);
 /// visible = false;
 /// @endcode
-[[nodiscard]] Task<void> Delay(std::chrono::duration<double> duration);
+Task<void> Delay(std::chrono::duration<double> duration);
 
 /// Executes an owned synchronous callable on HuxerUI's bounded process-wide worker pool.
 ///
@@ -1124,7 +1124,7 @@ template <class Function, class... Arguments>
            (std::constructible_from<std::decay_t<Arguments>, Arguments&&> && ...) &&
            (std::move_constructible<std::decay_t<Arguments>> && ...) &&
            std::invocable<std::decay_t<Function>, std::decay_t<Arguments>...>
-[[nodiscard]] auto RunWorker(Function&& function, Arguments&&... arguments) {
+auto RunWorker(Function&& function, Arguments&&... arguments) {
   using Operation = detail::WorkerInvocation<std::decay_t<Function>, std::decay_t<Arguments>...>;
   using Result = typename Operation::Result;
   static_assert(

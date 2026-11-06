@@ -393,11 +393,9 @@ public:
   void Start(
       TextInputSessionId session_id,
       const TextInputConfiguration& configuration,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
+      const TextInputState&,
+      const TextInputGeometry&
   ) {
-    static_cast<void>(state);
-    static_cast<void>(geometry);
     session_id_ = session_id;
     configuration_ = configuration;
     UpdateSecureEventInput(configuration_.secure);
@@ -405,9 +403,7 @@ public:
     [input_context_ invalidateCharacterCoordinates];
   }
 
-  void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) {
-    static_cast<void>(state);
-    static_cast<void>(geometry);
+  void Update(TextInputSessionId session_id, const TextInputState&, const TextInputGeometry&) {
     if (session_id != session_id_) {
       return;
     }
@@ -417,11 +413,9 @@ public:
   void Restart(
       TextInputSessionId session_id,
       const TextInputConfiguration& configuration,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
+      const TextInputState&,
+      const TextInputGeometry&
   ) {
-    static_cast<void>(state);
-    static_cast<void>(geometry);
     if (session_id != session_id_) {
       return;
     }

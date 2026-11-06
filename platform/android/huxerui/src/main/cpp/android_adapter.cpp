@@ -42,6 +42,7 @@
 #include "io/stream_internal.h"
 #include "text/text_input_internal.h"
 #include "text/text_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -972,9 +973,8 @@ public:
       std::string text,
       TextOffset argument0,
       TextOffset argument1,
-      TextOffset argument2
+      TextOffset
   ) {
-    static_cast<void>(argument2);
     TextInputCommandBatch batch;
     batch.session_id = session_id;
 
@@ -1119,7 +1119,7 @@ public:
       throw std::logic_error("HuxerUI Android PlatformView host is not attached to UiWindow");
     }
     platform_views_->Commit(Environment(), commit.render_frame);
-    static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+    HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
     }
@@ -1619,7 +1619,7 @@ private:
 
 
 jobject AndroidWindowView(UiWindow& ui_window) {
-  static_cast<void>(android::GetPlatformEnv(ui_window));
+  HUXERUI_DISCARD(android::GetPlatformEnv(ui_window));
   return static_cast<AndroidUiWindow&>(ui_window).NativeView();
 }
 
@@ -1654,7 +1654,7 @@ PlatformEnv GetPlatformEnv(Runtime& runtime) {
 }
 
 PlatformEnv GetPlatformEnv(UiWindow& ui_window) {
-  static_cast<void>(huxerui::detail::CurrentApplicationRuntime());
+  HUXERUI_DISCARD(huxerui::detail::CurrentApplicationRuntime());
   auto* platform = dynamic_cast<huxerui::detail::AndroidUiWindow*>(&ui_window);
   if (platform == nullptr) {
     throw std::logic_error("HuxerUI Android platform factory requires an Android host");

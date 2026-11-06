@@ -35,7 +35,7 @@ template <class Predicate> bool RunMainLoopUntil(Predicate&& predicate, std::chr
 }
 
 void RunMainLoopFor(std::chrono::milliseconds duration) {
-  static_cast<void>(RunMainLoopUntil([] { return false; }, duration));
+  RunMainLoopUntil([] { return false; }, duration);
 }
 
 std::shared_ptr<example::TimerService> CreateTimer(TestPlatform& platform, NSWindow* window) {
@@ -66,7 +66,7 @@ TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
     bool completion_on_main = false;
     bool event_on_main = false;
     std::vector<std::string> delivery_order;
-    static_cast<void>(timer->Start(
+    timer->Start(
         10ms,
         [&](std::uint64_t tick) {
           ticked = tick == 1;
@@ -83,7 +83,7 @@ TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
           completion_on_main = NSThread.isMainThread;
           delivery_order.push_back("result");
         }
-    ));
+    );
     inside_call = false;
 
     REQUIRE_FALSE(completed);
@@ -100,13 +100,13 @@ TEST_CASE("MacPlatformModuleUsesMainQueueWithoutInlineReentry") {
     bool stopped = false;
     bool stop_has_value = false;
     bool stop_on_main = false;
-    static_cast<void>(timer->Stop([&](PlatformResult<std::monostate> result) {
+    timer->Stop([&](PlatformResult<std::monostate> result) {
       if (std::holds_alternative<std::monostate>(result)) {
         stop_has_value = true;
         stopped = true;
       }
       stop_on_main = NSThread.isMainThread;
-    }));
+    });
     REQUIRE_FALSE(stopped);
     REQUIRE(RunMainLoopUntil([&] { return stopped; }, 1s));
     REQUIRE(stop_has_value);
@@ -143,11 +143,11 @@ TEST_CASE("MacPlatformModuleCancelsAndDisposesFoundationTimer") {
       REQUIRE_FALSE(completed);
       REQUIRE_FALSE(ticked);
 
-      static_cast<void>(timer->Start(
+      timer->Start(
           50ms,
           [&](std::uint64_t) { ticked = true; },
           [&](PlatformResult<std::uint64_t>) { completed = true; }
-      ));
+      );
       timer.reset();
     }
 

@@ -22,6 +22,7 @@
 
 #include "io/file_internal.h"
 #include "ios_file_internal.h"
+#include "macros_internal.h"
 
 @interface HuxerUIIOSDocumentPickerDelegate : NSObject <UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate>
 @property(nonatomic, copy) void (^selection)(NSArray<NSURL*>* urls);
@@ -32,7 +33,6 @@
 @implementation HuxerUIIOSDocumentPickerDelegate
 
 - (void)documentPicker:(UIDocumentPickerViewController*)controller didPickDocumentsAtURLs:(NSArray<NSURL*>*)urls {
-  static_cast<void>(controller);
   self.selected = YES;
   if (self.selection != nil) {
     self.selection(urls);
@@ -40,14 +40,12 @@
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController*)controller {
-  static_cast<void>(controller);
   if (self.cancellation != nil) {
     self.cancellation();
   }
 }
 
 - (void)presentationControllerDidDismiss:(UIPresentationController*)presentationController {
-  static_cast<void>(presentationController);
   if (!self.selected && self.cancellation != nil) self.cancellation();
 }
 
@@ -352,7 +350,7 @@ FileReference MakeIosReference(NSURL* url, bool writable, std::shared_ptr<IosFil
   return MakeLocalFileReference(
       File(MakeString(url.path)), writable, ReferenceContentType(url),
       [access = std::move(access)](const File* reading, const File* writing, const std::function<void()>& operation) {
-        static_cast<void>(access);
+        HUXERUI_UNUSED(access);
         @autoreleasepool {
           // A coordinator belongs to this operation, while the grant owner is shared with descendants.
           // Coordinate both sides of a copy together without serializing unrelated operations here.
@@ -504,7 +502,7 @@ private:
     delegate_ = nil;
     DismissIosFilePicker(picker, [completion = std::move(completion_), references = std::move(references),
                            finished, delegate]() mutable {
-      static_cast<void>(delegate);
+      HUXERUI_UNUSED(delegate);
       if (finished != nil) finished();
       if (completion) completion(std::move(references));
     });
@@ -606,7 +604,7 @@ private:
     delegate_ = nil;
     preparation_ = nil;
     DismissIosFilePicker(picker, [completion = std::move(completion_), preparation, succeeded, finished, delegate]() mutable {
-      static_cast<void>(delegate);
+      HUXERUI_UNUSED(delegate);
       if (finished != nil) finished();
       CleanupExport(preparation);
       if (completion) completion(succeeded);

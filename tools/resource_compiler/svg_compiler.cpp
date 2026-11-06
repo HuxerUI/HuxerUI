@@ -1195,7 +1195,6 @@ void ValidateAttributes(std::string_view element, const std::map<std::string, st
     return false;
   };
   for (const auto& [name, unused] : attributes) {
-    static_cast<void>(unused);
     if (std::ranges::find(common, name) == common.end() && !allowed_for_element(name) && !name.starts_with("aria-") &&
         !name.starts_with("data-") && name != "role") {
       throw std::runtime_error("SVG " + std::string(element) + " contains an unsupported attribute: " + name);
@@ -2052,7 +2051,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
   for (std::size_t node_index = 0; node_index < document.nodes.size(); ++node_index) {
     SvgNode& node = document.nodes[node_index];
     const Style style = ResolveStyle(Style{}, node.attributes);
-    static_cast<void>(node_transform(node));
+    node_transform(node);
     if (IsShape(node.name)) {
       node.path = ShapePath(node.name, node.attributes);
     }
@@ -2079,7 +2078,7 @@ CompiledDocument EmitDocument(SvgDocument document) {
       }
     }
     if (node.name == "linearGradient" || node.name == "radialGradient") {
-      static_cast<void>(resolve_gradient_definition(node_index));
+      resolve_gradient_definition(node_index);
     }
     if (node.name == "stop") {
       if (!node.parent.has_value() || (document.nodes[*node.parent].name != "linearGradient" &&

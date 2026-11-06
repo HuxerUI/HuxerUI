@@ -62,7 +62,7 @@ struct AndroidColorStreamState : huxerui::example::ColorStreamService {
   void Dispose() noexcept {
     if (producer != nullptr) {
       environment->CallVoidMethod(producer, dispose_bridge);
-      static_cast<void>(ClearJavaException(environment));
+      ClearJavaException(environment);
       environment->DeleteGlobalRef(producer);
       producer = nullptr;
     }

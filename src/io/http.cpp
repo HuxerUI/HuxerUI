@@ -15,6 +15,7 @@
 #include "application/application_internal.h"
 #include "runtime/task_internal.h"
 #include "stream_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -256,7 +257,7 @@ public:
   }
 
   void RequireReadable() {
-    static_cast<void>(RequireHttpApplication(application_));
+    HUXERUI_DISCARD(RequireHttpApplication(application_));
     std::scoped_lock lock(mutex_);
     if (canceled_) {
       throw std::logic_error("HuxerUI HTTP response stream is canceled");
@@ -792,14 +793,14 @@ HttpClient::HttpClient(std::shared_ptr<detail::HttpTransport> transport)
 HttpClient::~HttpClient() = default;
 
 Task<HttpResult<HttpResponse>> HttpClient::SendAsync(HttpRequest request, std::function<void(HttpProgress)> progress) const {
-  static_cast<void>(detail::RequireHttpApplication(application_));
+  HUXERUI_DISCARD(detail::RequireHttpApplication(application_));
   detail::ValidateHttpRequest(request);
   return detail::SendHttpRequest(application_, transport_, std::move(request), std::move(progress));
 }
 
 Task<HttpResult<HttpResponseStream>>
 HttpClient::SendStreamAsync(HttpRequest request, std::function<void(HttpProgress)> progress) const {
-  static_cast<void>(detail::RequireHttpApplication(application_));
+  HUXERUI_DISCARD(detail::RequireHttpApplication(application_));
   detail::ValidateHttpRequest(request);
   return detail::OpenHttpStream(application_, transport_, std::move(request), true, std::move(progress));
 }

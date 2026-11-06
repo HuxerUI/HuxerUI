@@ -422,7 +422,6 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
 
   state_->frame = &frame;
   for (auto& [identity, hosted_view] : state_->hosted) {
-    static_cast<void>(identity);
     hosted_view->event_route->active = true;
   }
 

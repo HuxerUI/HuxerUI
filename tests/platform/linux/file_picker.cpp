@@ -29,6 +29,7 @@
 #include "io/file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "runtime_test_support.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -244,7 +245,7 @@ private:
     if (pid_ == 0) {
       return;
     }
-    static_cast<void>(kill(pid_, SIGTERM));
+    HUXERUI_DISCARD(kill(pid_, SIGTERM));
     int status = 0;
     while (waitpid(pid_, &status, 0) < 0 && errno == EINTR) {
     }
@@ -296,7 +297,7 @@ public:
     scenario_ = std::move(scenario);
   }
 
-  [[nodiscard]] PortalCall WaitForCall(std::size_t count) {
+  PortalCall WaitForCall(std::size_t count) {
     std::unique_lock lock(mutex_);
     if (!condition_.wait_for(lock, std::chrono::seconds(5), [this, count] { return calls_.size() >= count; })) {
       throw std::runtime_error("Timed out waiting for the fake portal call");
@@ -494,7 +495,7 @@ private:
       node_ = nullptr;
     }
     if (connection_ != nullptr) {
-      static_cast<void>(g_dbus_connection_close_sync(connection_, nullptr, nullptr));
+      HUXERUI_DISCARD(g_dbus_connection_close_sync(connection_, nullptr, nullptr));
       g_object_unref(connection_);
       connection_ = nullptr;
     }
@@ -669,7 +670,7 @@ private:
     g_variant_builder_init(&results, G_VARIANT_TYPE_VARDICT);
     g_variant_builder_add(&results, "{sv}", "uris", g_variant_builder_end(&uris));
     GError* error = nullptr;
-    static_cast<void>(g_dbus_connection_emit_signal(
+    HUXERUI_DISCARD(g_dbus_connection_emit_signal(
         connection_,
         nullptr,
         path.c_str(),
@@ -816,7 +817,7 @@ TEST_CASE("LinuxFilePickerDirectorySelectionChecksVersionAndUsesReadOnlyGrants")
     REQUIRE(transport->CanOpenDirectories(false) == (version >= 3));
     portal.SetScenario({.uris = {FileUri(selected)}});
     auto references = WaitFor<std::vector<FileReference>>([&](auto completion) {
-      static_cast<void>(transport->OpenDirectory(false, std::move(completion)));
+      transport->OpenDirectory(false, std::move(completion));
     });
     if (version < 3) {
       REQUIRE(references.empty());
@@ -851,7 +852,7 @@ TEST_CASE("LinuxFilePickerCompletesAnActiveRequestWhenThePortalDisappears") {
     }
     condition.notify_all();
   });
-  static_cast<void>(portal.WaitForCall(1));
+  portal.WaitForCall(1);
   portal.ReleaseName();
   {
     std::unique_lock lock(mutex);
@@ -860,7 +861,7 @@ TEST_CASE("LinuxFilePickerCompletesAnActiveRequestWhenThePortalDisappears") {
   REQUIRE_FALSE(transport->CanOpenFiles());
   REQUIRE_FALSE(transport->CanSaveFiles());
   REQUIRE(WaitFor<std::vector<FileReference>>([&](auto completion) {
-            static_cast<void>(transport->OpenFiles({}, false, std::move(completion)));
+            transport->OpenFiles({}, false, std::move(completion));
           }).empty());
   cancel();
 }
@@ -903,7 +904,7 @@ TEST_CASE("LinuxFilePickerHandlesEmptyFiltersPortalFailuresAndInvalidUris") {
 
   portal.SetScenario({.uris = {FileUri(selected)}});
   REQUIRE(WaitFor<std::vector<FileReference>>([&](auto completion) {
-            static_cast<void>(transport->OpenFiles({}, false, std::move(completion)));
+            transport->OpenFiles({}, false, std::move(completion));
           }).size() == 1);
   const PortalCall empty_filter_call = portal.WaitForCall(1);
   REQUIRE(empty_filter_call.parent_window.empty());
@@ -915,16 +916,16 @@ TEST_CASE("LinuxFilePickerHandlesEmptyFiltersPortalFailuresAndInvalidUris") {
 
   portal.SetScenario({.method_error = true, .request_exists_on_method_error = true});
   REQUIRE(WaitFor<std::vector<FileReference>>([&](auto completion) {
-            static_cast<void>(transport->OpenFiles({}, false, std::move(completion)));
+            transport->OpenFiles({}, false, std::move(completion));
           }).empty());
-  static_cast<void>(portal.WaitForCall(2));
+  portal.WaitForCall(2);
   portal.WaitForClose(1);
 
   portal.SetScenario({.response = 2});
   REQUIRE(WaitFor<std::vector<FileReference>>([&](auto completion) {
-            static_cast<void>(transport->OpenFiles({}, false, std::move(completion)));
+            transport->OpenFiles({}, false, std::move(completion));
           }).empty());
-  static_cast<void>(portal.WaitForCall(3));
+  portal.WaitForCall(3);
 
   const File read_only = temporary.Child("read-only.txt");
   REQUIRE(read_only.WriteString("read only"));
@@ -937,9 +938,9 @@ TEST_CASE("LinuxFilePickerHandlesEmptyFiltersPortalFailuresAndInvalidUris") {
       .uris = {"not a URI", "file://remote-host/tmp/document.txt", FileUri(read_only)},
   });
   const std::vector<FileReference> valid_references = WaitFor<std::vector<FileReference>>([&](auto completion) {
-    static_cast<void>(transport->OpenFiles({}, true, std::move(completion)));
+    transport->OpenFiles({}, true, std::move(completion));
   });
-  static_cast<void>(portal.WaitForCall(4));
+  portal.WaitForCall(4);
   REQUIRE(valid_references.size() == 1);
   REQUIRE(valid_references.front().Name() == "read-only.txt");
   REQUIRE(valid_references.front().CanWrite() == (access(read_only.Path().c_str(), W_OK) == 0));
@@ -961,11 +962,11 @@ TEST_CASE("DestroyingTheRuntimeClosesTheLinuxPortalRequestAndIgnoresALateRespons
     UiWindow runtime(LinuxFileReferenceApp, platform);
     runtime.BuildFrame();
     reference_tasks.Launch([picker = runtime_file_picker]() -> Task<void> {
-      static_cast<void>(co_await picker->OpenFileAsync());
+      HUXERUI_DISCARD(co_await picker->OpenFileAsync());
       runtime_picker_resumed = true;
     });
     platform.RunUiTasks();
-    static_cast<void>(portal.WaitForCall(1));
+    portal.WaitForCall(1);
     platform.ReleaseTransport();
     transport.reset();
     runtime_file_picker.reset();
@@ -997,7 +998,7 @@ TEST_CASE("LinuxFilePickerUsesThePortalForReferencesSavingAndCancellation") {
       .uris = {FileUri(first), "https://example.test/not-a-file", FileUri(second)},
   });
   const std::vector<FileReference> references = WaitFor<std::vector<FileReference>>([&](auto completion) {
-    static_cast<void>(transport->OpenFiles(
+    transport->OpenFiles(
         {
             .name = "Text",
             .extensions = {"txt"},
@@ -1005,7 +1006,7 @@ TEST_CASE("LinuxFilePickerUsesThePortalForReferencesSavingAndCancellation") {
         },
         true,
         std::move(completion)
-    ));
+    );
   });
   const PortalCall open_call = portal.WaitForCall(1);
   REQUIRE(open_call.method == "OpenFile");
@@ -1052,14 +1053,14 @@ TEST_CASE("LinuxFilePickerUsesThePortalForReferencesSavingAndCancellation") {
   const File saved = temporary.Child("saved.txt");
   portal.SetScenario({.response = 0, .uris = {FileUri(saved)}, .unexpected_handle = true});
   REQUIRE(WaitFor<bool>([&](auto completion) {
-    static_cast<void>(transport->SaveFile(
+    transport->SaveFile(
         first,
         {
             .suggested_name = "exported.txt",
             .filter = {.name = "Text", .extensions = {"txt"}, .content_types = {"text/plain"}},
         },
         std::move(completion)
-    ));
+    );
   }));
   const PortalCall save_call = portal.WaitForCall(2);
   REQUIRE(save_call.method == "SaveFile");
@@ -1078,7 +1079,7 @@ TEST_CASE("LinuxFilePickerUsesThePortalForReferencesSavingAndCancellation") {
     }
     cancel_condition.notify_all();
   });
-  static_cast<void>(portal.WaitForCall(3));
+  portal.WaitForCall(3);
   cancel();
   {
     std::unique_lock lock(cancel_mutex);
@@ -1088,9 +1089,9 @@ TEST_CASE("LinuxFilePickerUsesThePortalForReferencesSavingAndCancellation") {
 
   portal.SetScenario({.response = 1});
   REQUIRE(WaitFor<std::vector<FileReference>>([&](auto completion) {
-            static_cast<void>(transport->OpenFiles({}, false, std::move(completion)));
+            transport->OpenFiles({}, false, std::move(completion));
           }).empty());
-  static_cast<void>(portal.WaitForCall(4));
+  portal.WaitForCall(4);
   reference_tasks = {};
   runtime_file_picker.reset();
 }

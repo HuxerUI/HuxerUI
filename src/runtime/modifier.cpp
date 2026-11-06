@@ -52,8 +52,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const ScrollBar& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const ScrollBar& modifier) {
     if (!modifier.style.has_value()) {
       throw std::logic_error("HuxerUI compiled scroll bar style is missing");
     }
@@ -113,8 +112,7 @@ public:
     return finish({});
   }
 
-  void OnScrollActivity(ViewNode& node, const ScrollActivity& activity) override {
-    static_cast<void>(node);
+  void OnScrollActivity(ViewNode&, const ScrollActivity& activity) override {
     activity_pending_ = true;
     InvalidatePaint();
     if (activity.phase == ScrollPhase::Begin) {
@@ -134,8 +132,7 @@ public:
     return HitTest(node, position);
   }
 
-  void OnHover(ViewNode& node, const HoverEvent& event) override {
-    static_cast<void>(node);
+  void OnHover(ViewNode&, const HoverEvent& event) override {
     const bool hovered = event.type != HoverEventType::Leave;
     if (hovered_ == hovered) {
       return;

@@ -320,9 +320,7 @@ public:
       if (cancellation != nil) {
         @try {
           [cancellation cancel];
-        } @catch (NSException* exception) {
-          static_cast<void>(exception);
-        }
+        } @catch (NSException*) {}
       }
     };
   }
@@ -339,9 +337,7 @@ public:
     [events_ close];
     @try {
       [instance_ dispose];
-    } @catch (NSException* exception) {
-      static_cast<void>(exception);
-    }
+    } @catch (NSException*) {}
     instance_ = nil;
     events_ = nil;
   }
@@ -732,7 +728,6 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
     const PlatformPayload payload = DecodePayload(self);
     const auto& object = payload.AsObject();
     for (const auto& [name, value] : object) {
-      static_cast<void>(value);
       if (![fields containsObject:ToNSString(name)]) {
         throw std::invalid_argument("HuxerUI PlatformPayload contains unknown field " + name);
       }

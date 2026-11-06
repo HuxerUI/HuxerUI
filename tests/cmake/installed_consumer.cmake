@@ -254,7 +254,7 @@ string(REPLACE
 )
 string(REPLACE
         "View App() {\n"
-        "View App() {\n  static_cast<void>(AdditionalSource());\n"
+        "View App() {\n  AdditionalSource();\n"
         APP_SOURCE_CONTENT
         "${APP_SOURCE_CONTENT}"
 )

@@ -803,8 +803,7 @@ public:
     current_time += seconds;
   }
 
-  FontMetrics Metrics(const Font& font) override {
-    static_cast<void>(font);
+  FontMetrics Metrics(const Font&) override {
     return {
         .ascent = 15.0F,
         .descent = 5.0F,
@@ -815,8 +814,7 @@ public:
     };
   }
 
-  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) override {
-    static_cast<void>(options);
+  TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions&) override {
     const float width = static_cast<float>(text.size()) * 10.0F;
     const FontMetrics metrics = Metrics(style.font);
     const Rect bounds{0.0F, -metrics.ascent, width, metrics.LineHeight()};
@@ -826,10 +824,9 @@ public:
   using TextMeasurer::MeasureText;
   using UiWindow::CreateTextLayout;
 
-  TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const TextStyle& style, float max_width,
+  TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const TextStyle&, float max_width,
       const TextLayoutOptions& options) override {
     const auto& text = paragraph.PlainText();
-    static_cast<void>(style);
     if (max_width <= 0.0F) {
       return {};
     }
@@ -859,9 +856,8 @@ public:
   }
 
   std::unique_ptr<huxerui::detail::TextLayout> CreateTextLayout(const huxerui::AttributedText& paragraph,
-      const TextStyle& style, float max_width, const TextLayoutOptions& options) override {
+      const TextStyle&, float max_width, const TextLayoutOptions& options) override {
     const auto& text = paragraph.PlainText();
-    static_cast<void>(style);
     return std::make_unique<TextLayout>(
         text,
         options.wrap == TextWrap::NoWrap ? std::numeric_limits<float>::infinity() : max_width

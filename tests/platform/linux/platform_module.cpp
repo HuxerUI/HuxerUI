@@ -40,9 +40,8 @@ AppOptions LinuxPlatformModuleOptions() {
 
 template <class Predicate>
 bool RunDispatcherUntil(
-    detail::LinuxUiThreadDispatcher& dispatcher, Predicate&& predicate, std::chrono::milliseconds timeout
+    detail::LinuxUiThreadDispatcher&, Predicate&& predicate, std::chrono::milliseconds timeout
 ) {
-  static_cast<void>(dispatcher);
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!std::invoke(predicate) && std::chrono::steady_clock::now() < deadline) {
     while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
@@ -55,7 +54,7 @@ bool RunDispatcherUntil(
 }
 
 void RunDispatcherFor(detail::LinuxUiThreadDispatcher& dispatcher, std::chrono::milliseconds duration) {
-  static_cast<void>(RunDispatcherUntil(dispatcher, [] { return false; }, duration));
+  RunDispatcherUntil(dispatcher, [] { return false; }, duration);
 }
 
 TEST_CASE("LinuxUIThreadDispatcherWakesMainContextAndPreservesOrder") {
@@ -89,7 +88,7 @@ TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {
   TestPlatform platform(dispatcher.Bind());
   UiWindow runtime(LinuxPlatformModuleApp, platform, LinuxPlatformModuleOptions());
   runtime.SetWindowMetrics({{320.0F, 200.0F}});
-  static_cast<void>(runtime.BuildRenderFrame());
+  runtime.BuildRenderFrame();
   const std::shared_ptr<example::TimerService> timer = linux_timer_service.lock();
   REQUIRE(timer != nullptr);
 
@@ -103,7 +102,7 @@ TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {
   bool event_on_ui = false;
   std::uint64_t completed_tick = 0;
   std::vector<std::string> delivery_order;
-  static_cast<void>(timer->Start(
+  timer->Start(
       10ms,
       [&](std::uint64_t tick) {
         ticked = tick == 1;
@@ -120,7 +119,7 @@ TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {
         completion_on_ui = std::this_thread::get_id() == ui_thread;
         delivery_order.push_back("result");
       }
-  ));
+  );
   inside_call = false;
 
   REQUIRE_FALSE(completed);
@@ -135,9 +134,9 @@ TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {
 
   const std::size_t delivered_events = delivery_order.size();
   bool stopped = false;
-  static_cast<void>(timer->Stop([&](PlatformResult<std::monostate> result) {
+  timer->Stop([&](PlatformResult<std::monostate> result) {
     stopped = std::holds_alternative<std::monostate>(result);
-  }));
+  });
   REQUIRE_FALSE(stopped);
   REQUIRE(RunDispatcherUntil(dispatcher, [&] { return stopped; }, 1s));
   RunDispatcherFor(dispatcher, 30ms);
@@ -157,7 +156,7 @@ TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
   {
     UiWindow runtime(LinuxPlatformModuleApp, platform, LinuxPlatformModuleOptions());
     runtime.SetWindowMetrics({{320.0F, 200.0F}});
-    static_cast<void>(runtime.BuildRenderFrame());
+    runtime.BuildRenderFrame();
     std::shared_ptr<example::TimerService> timer = linux_timer_service.lock();
     REQUIRE(timer != nullptr);
     service_lifetime = timer;
@@ -171,22 +170,22 @@ TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
         std::invalid_argument
     );
 
-    static_cast<void>(timer->Start(
+    timer->Start(
         200ms,
         [&](std::uint64_t) {},
         [&](PlatformResult<std::uint64_t> result) {
           const auto* error = std::get_if<PlatformError>(&result);
           first_replaced = error != nullptr && error->code == "example/timer-replaced";
         }
-    ));
-    static_cast<void>(timer->Start(
+    );
+    timer->Start(
         10ms,
         [&](std::uint64_t) { ticked = true; },
         [&](PlatformResult<std::uint64_t> result) { second_completed = std::holds_alternative<std::uint64_t>(result); }
-    ));
+    );
     REQUIRE(RunDispatcherUntil(dispatcher, [&] { return first_replaced && second_completed && ticked; }, 1s));
 
-    static_cast<void>(timer->Stop([](PlatformResult<std::monostate>) {}));
+    timer->Stop([](PlatformResult<std::monostate>) {});
     while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
     }
     const PlatformRequestId cancelled = timer->Start(
@@ -200,11 +199,11 @@ TEST_CASE("LinuxPlatformModuleReplacesCancelsAndDisposesTimer") {
     REQUIRE_FALSE(cancelled_completed);
     REQUIRE_FALSE(cancelled_ticked);
 
-    static_cast<void>(timer->Start(
+    timer->Start(
         100ms,
         [&](std::uint64_t) { cancelled_ticked = true; },
         [&](PlatformResult<std::uint64_t>) { cancelled_completed = true; }
-    ));
+    );
     timer.reset();
   }
 

@@ -152,8 +152,8 @@ struct FileInfo {
   bool operator==(const FileInfo&) const = default;
 };
 
-[[nodiscard]] IoResult<FileInfo> Stat() const;
-[[nodiscard]] Task<IoResult<FileInfo>> StatAsync() const;
+IoResult<FileInfo> Stat() const;
+Task<IoResult<FileInfo>> StatAsync() const;
 ```
 
 `size` is the byte length of an ordinary file and is zero for other types.
@@ -217,11 +217,11 @@ HTTP body streams use IoError; HTTP request results retain HttpError. Task cance
 ## Reading
 
 ```cpp
-[[nodiscard]] IoResult<Bytes> ReadBytes() const;
-[[nodiscard]] Task<IoResult<Bytes>> ReadBytesAsync() const;
+IoResult<Bytes> ReadBytes() const;
+Task<IoResult<Bytes>> ReadBytesAsync() const;
 
-[[nodiscard]] IoResult<std::string> ReadString() const;
-[[nodiscard]] Task<IoResult<std::string>> ReadStringAsync() const;
+IoResult<std::string> ReadString() const;
+Task<IoResult<std::string>> ReadStringAsync() const;
 ```
 
 Read operations load the complete file into memory.
@@ -235,10 +235,10 @@ Additional encodings and line-oriented APIs are not part of the public surface.
 ## Streams
 
 ```cpp
-[[nodiscard]] IoResult<InputStream> OpenRead() const;
-[[nodiscard]] Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
-[[nodiscard]] IoResult<OutputStream> OpenWrite(FileWriteMode mode = FileWriteMode::Truncate) const;
-[[nodiscard]] Task<IoResult<AsyncOutputStream>> OpenWriteAsync(FileWriteMode mode = FileWriteMode::Truncate) const;
+IoResult<InputStream> OpenRead() const;
+Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
+IoResult<OutputStream> OpenWrite(FileWriteMode mode = FileWriteMode::Truncate) const;
+Task<IoResult<AsyncOutputStream>> OpenWriteAsync(FileWriteMode mode = FileWriteMode::Truncate) const;
 ```
 
 The four move-only stream handles separate synchronous and genuinely asynchronous execution explicitly.
@@ -262,16 +262,16 @@ Mutating operations report whether they reached their documented target state:
 
 ```cpp
 [[nodiscard]] bool WriteBytes(std::span<const std::byte> bytes) const;
-[[nodiscard]] Task<bool> WriteBytesAsync(Bytes bytes) const;
+Task<bool> WriteBytesAsync(Bytes bytes) const;
 
 [[nodiscard]] bool WriteString(std::string_view value) const;
-[[nodiscard]] Task<bool> WriteStringAsync(std::string value) const;
+Task<bool> WriteStringAsync(std::string value) const;
 
 [[nodiscard]] bool AppendBytes(std::span<const std::byte> bytes) const;
-[[nodiscard]] Task<bool> AppendBytesAsync(Bytes bytes) const;
+Task<bool> AppendBytesAsync(Bytes bytes) const;
 
 [[nodiscard]] bool AppendString(std::string_view value) const;
-[[nodiscard]] Task<bool> AppendStringAsync(std::string value) const;
+Task<bool> AppendStringAsync(std::string value) const;
 ```
 
 Asynchronous writes take ownership of bytes or text so no borrowed buffer survives suspension.
@@ -291,20 +291,20 @@ Atomic write is not supported; it would require a separate explicitly named oper
 ## Directories and deletion
 
 ```cpp
-[[nodiscard]] IoResult<std::vector<File>> ListChildren() const;
-[[nodiscard]] Task<IoResult<std::vector<File>>> ListChildrenAsync() const;
+IoResult<std::vector<File>> ListChildren() const;
+Task<IoResult<std::vector<File>>> ListChildrenAsync() const;
 
 [[nodiscard]] bool CreateDirectory() const;
-[[nodiscard]] Task<bool> CreateDirectoryAsync() const;
+Task<bool> CreateDirectoryAsync() const;
 
 [[nodiscard]] bool CreateDirectories() const;
-[[nodiscard]] Task<bool> CreateDirectoriesAsync() const;
+Task<bool> CreateDirectoriesAsync() const;
 
 [[nodiscard]] bool Delete() const;
-[[nodiscard]] Task<bool> DeleteAsync() const;
+Task<bool> DeleteAsync() const;
 
 [[nodiscard]] bool DeleteRecursively() const;
-[[nodiscard]] Task<bool> DeleteRecursivelyAsync() const;
+Task<bool> DeleteRecursivelyAsync() const;
 ```
 
 `ListChildren()` returns direct children, includes hidden entries, does not recurse, and does not impose a sort order.
@@ -325,10 +325,10 @@ The API does not provide a flag that disables this protection.
 
 ```cpp
 [[nodiscard]] bool CopyTo(const File& destination, bool overwrite = false) const;
-[[nodiscard]] Task<bool> CopyToAsync(File destination, bool overwrite = false) const;
+Task<bool> CopyToAsync(File destination, bool overwrite = false) const;
 
 [[nodiscard]] bool MoveTo(const File& destination, bool overwrite = false) const;
-[[nodiscard]] Task<bool> MoveToAsync(File destination, bool overwrite = false) const;
+Task<bool> MoveToAsync(File destination, bool overwrite = false) const;
 ```
 
 The single Boolean argument directly expresses whether an existing destination may be replaced.
@@ -402,19 +402,19 @@ public:
   [[nodiscard]] FileType Type() const noexcept;
   [[nodiscard]] std::optional<File> AsFile() const;
 
-  [[nodiscard]] Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
-  [[nodiscard]] Task<IoResult<AsyncOutputStream>> OpenWriteAsync() const;
-  [[nodiscard]] Task<IoResult<Bytes>> ReadBytesAsync() const;
-  [[nodiscard]] Task<IoResult<std::string>> ReadStringAsync() const;
-  [[nodiscard]] Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
-  [[nodiscard]] Task<bool> ReplaceWithAsync(File source) const;
+  Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
+  Task<IoResult<AsyncOutputStream>> OpenWriteAsync() const;
+  Task<IoResult<Bytes>> ReadBytesAsync() const;
+  Task<IoResult<std::string>> ReadStringAsync() const;
+  Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
+  Task<bool> ReplaceWithAsync(File source) const;
 
-  [[nodiscard]] Task<IoResult<std::vector<FileReference>>> ListChildrenAsync() const;
-  [[nodiscard]] Task<IoResult<FileReference>> CreateDirectoryAsync(std::string name) const;
-  [[nodiscard]] Task<IoResult<FileReference>> CopyFileFromAsync(File source, std::string name, bool overwrite = false) const;
-  [[nodiscard]] Task<IoResult<FileReference>> CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
-  [[nodiscard]] Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
-  [[nodiscard]] Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(FileReference destination, bool overwrite = false) const;
+  Task<IoResult<std::vector<FileReference>>> ListChildrenAsync() const;
+  Task<IoResult<FileReference>> CreateDirectoryAsync(std::string name) const;
+  Task<IoResult<FileReference>> CopyFileFromAsync(File source, std::string name, bool overwrite = false) const;
+  Task<IoResult<FileReference>> CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
+  Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
+  Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(FileReference destination, bool overwrite = false) const;
 };
 ```
 
@@ -567,10 +567,10 @@ public:
   [[nodiscard]] bool CanSaveFiles() const noexcept;
   [[nodiscard]] bool CanOpenDirectories(bool writable = false) const noexcept;
 
-  [[nodiscard]] Task<std::optional<FileReference>> OpenFileAsync(FilePickerFilter filter = {}) const;
-  [[nodiscard]] Task<std::vector<FileReference>> OpenFilesAsync(FilePickerFilter filter = {}) const;
-  [[nodiscard]] Task<bool> SaveFileAsync(File source, SaveFileOptions options = {}) const;
-  [[nodiscard]] Task<std::optional<FileReference>> OpenDirectoryAsync(bool writable = false) const;
+  Task<std::optional<FileReference>> OpenFileAsync(FilePickerFilter filter = {}) const;
+  Task<std::vector<FileReference>> OpenFilesAsync(FilePickerFilter filter = {}) const;
+  Task<bool> SaveFileAsync(File source, SaveFileOptions options = {}) const;
+  Task<std::optional<FileReference>> OpenDirectoryAsync(bool writable = false) const;
 };
 ```
 

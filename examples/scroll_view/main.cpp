@@ -13,9 +13,9 @@ View ScrollToolbar(ScrollController scroll) {
   const ScrollMetrics metrics = scroll.Metrics();
 
   return Row{
-      Button("Top").OnClick([scroll] { static_cast<void>(scroll.ScrollTo(0.0F)); }),
-      Button("+120").OnClick([scroll] { static_cast<void>(scroll.ScrollBy(120.0F)); }),
-      Button("Bottom").OnClick([scroll] { static_cast<void>(scroll.ScrollTo(scroll.MaxOffset())); }),
+      Button("Top").OnClick([scroll] { scroll.ScrollTo(0.0F); }),
+      Button("+120").OnClick([scroll] { scroll.ScrollBy(120.0F); }),
+      Button("Bottom").OnClick([scroll] { scroll.ScrollTo(scroll.MaxOffset()); }),
       Spacer(),
       Text::Format("Offset {} / {}", static_cast<int>(metrics.offset), static_cast<int>(metrics.maximum_offset))
           .With(Foreground(secondary_text_color)),

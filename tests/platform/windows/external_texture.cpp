@@ -231,7 +231,7 @@ TEST_CASE("WindowsExternalTexturePublicationSchedulesDamageThroughItsBoundRuntim
   TestPlatform platform;
   UiWindow runtime{WindowsExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
-  static_cast<void>(runtime.BuildRenderFrame());
+  runtime.BuildRenderFrame();
 
   const int requests_before_publish = platform.requested_frames;
   const std::array<std::byte, 16> pixels{};
@@ -314,7 +314,7 @@ TEST_CASE("WindowsD3D11TextureRetriesContentionAndRendersAcrossDevicesAfterReset
   TestPlatform platform;
   UiWindow runtime{WindowsExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
-  static_cast<void>(runtime.BuildRenderFrame());
+  runtime.BuildRenderFrame();
 
   const int requests_before_publish = platform.requested_frames;
   texture->Publish({source.Get(), windows::D3D11Texture::Alpha::Opaque});

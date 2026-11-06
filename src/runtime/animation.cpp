@@ -210,8 +210,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const Opacity& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const Opacity& modifier) {
     if (const auto* immediate = std::get_if<float>(&modifier.value)) {
       value_.Set(std::clamp(*immediate, 0.0F, 1.0F));
       initialized_ = true;
@@ -245,8 +244,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const Offset& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const Offset& modifier) {
     if (const auto* immediate = std::get_if<Point>(&modifier.value)) {
       x_.Set(immediate->x);
       y_.Set(immediate->y);
@@ -290,8 +288,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const Scale& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const Scale& modifier) {
     ValidateOrigin(modifier.origin);
     origin_ = modifier.origin;
     if (const auto* immediate = std::get_if<float>(&modifier.value)) {
@@ -344,8 +341,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const Rotation& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const Rotation& modifier) {
     ValidateOrigin(modifier.origin);
     origin_ = modifier.origin;
     if (const auto* immediate = std::get_if<float>(&modifier.degrees)) {
@@ -646,8 +642,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(huxerui::ViewNode& node, const Transition& modifier) {
-    static_cast<void>(node);
+  void Update(huxerui::ViewNode&, const Transition& modifier) {
     opacity_ = modifier.opacity_;
     offset_ = modifier.offset_;
     scale_ = modifier.scale_;

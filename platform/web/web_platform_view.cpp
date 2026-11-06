@@ -23,6 +23,7 @@
 
 #include "runtime/ui_window_internal.h"
 #include "web_renderer.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -324,7 +325,6 @@ struct WebPlatformViews::State {
     val canvas = val::global("document").call<val>("createElement", std::string("canvas"));
     ConfigureCanvas(canvas, viewport, display_scale);
     auto [inserted, was_inserted] = slices.emplace(key, CanvasSlice(std::move(canvas)));
-    static_cast<void>(was_inserted);
     inserted->second.range = range;
     composition_changed = true;
     return inserted->second;
@@ -362,7 +362,6 @@ void WebPlatformViews::SetViewport(Size viewport, float display_scale) {
   state_->viewport = viewport;
   state_->display_scale = std::max(1.0F, display_scale);
   for (auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     ConfigureCanvas(slice.canvas, state_->viewport, state_->display_scale);
   }
 }
@@ -408,7 +407,6 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     }
   } catch (...) {
     for (const auto& [identity, hosted] : pending) {
-      static_cast<void>(identity);
       state_->identities_by_token.erase(hosted->token);
     }
     throw;
@@ -480,7 +478,6 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
   }
   state_->order = std::move(next_order);
   for (auto& [identity, hosted] : state_->hosted) {
-    static_cast<void>(identity);
     hosted->event_route->active = true;
   }
 
@@ -517,7 +514,6 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     state_->renderer->DrawSlice(state_->base_canvas, frame, 0, 0, true, force_redraw);
   }
   for (const auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     state_->renderer
         ->DrawSlice(slice.canvas, frame, slice.range.first_command, slice.range.command_count, false, force_redraw);
   }
@@ -544,7 +540,7 @@ void WebPlatformViews::MoveFocus(std::uint32_t token, bool reverse) {
   }
   const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
   if (identity.has_value()) {
-    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *identity, reverse));
+    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *identity, reverse));
   }
 }
 
@@ -553,14 +549,12 @@ void WebPlatformViews::Shutdown() noexcept {
     return;
   }
   for (auto& [identity, hosted] : state_->hosted) {
-    static_cast<void>(identity);
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
   state_->hosted.clear();
   state_->identities_by_token.clear();
   for (auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     try {
       slice.canvas.call<void>("remove");
     } catch (...) {

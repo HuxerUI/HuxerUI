@@ -527,7 +527,6 @@ std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> ExternalT
     const RenderDamageSnapshot& scene) {
   std::unordered_map<ExternalTexture*, std::shared_ptr<ExternalTexture>> textures;
   for (const auto& [id, node] : scene) {
-    static_cast<void>(id);
     for (const ExternalTextureUseSnapshot& texture : node.external_textures) {
       textures.try_emplace(texture.texture.get(), texture.texture);
     }
@@ -1059,7 +1058,6 @@ void DeactivateExternalTextures(
     const std::shared_ptr<ExternalTextureFrameRequester>& texture_frame_requester
 ) {
   for (const auto& [identity, texture] : ExternalTextures(committed_scene)) {
-    static_cast<void>(identity);
     texture_frame_requester->SetActive(texture, false);
   }
   committed_scene.clear();

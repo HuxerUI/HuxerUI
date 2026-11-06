@@ -26,6 +26,7 @@
 #include "resources/resource_internal.h"
 #include "runtime/semantics_internal.h"
 #include "text/text_input_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui {
 
@@ -225,7 +226,7 @@ void DismissComboBox(const std::shared_ptr<ComboBoxSession>& session, bool suppr
   }
   const LayerId layer = *session->layer;
   if (session->popup.has_value()) {
-    static_cast<void>(session->popup->Dismiss(layer));
+    HUXERUI_DISCARD(session->popup->Dismiss(layer));
   }
   session->popup_state.reset();
   SetPopupLayer(session, std::nullopt);
@@ -411,9 +412,9 @@ public:
     const float bottom = top + active.LayoutSize().height;
     const ScrollMetrics metrics = scroll_controller_.Metrics();
     if (top < metrics.offset) {
-      static_cast<void>(scroll_controller_.ScrollTo(top));
+      HUXERUI_DISCARD(scroll_controller_.ScrollTo(top));
     } else if (bottom > metrics.offset + metrics.viewport_extent) {
-      static_cast<void>(scroll_controller_.ScrollTo(bottom - metrics.viewport_extent));
+      HUXERUI_DISCARD(scroll_controller_.ScrollTo(bottom - metrics.viewport_extent));
     }
     return PaintInvalidation::None;
   }
@@ -431,7 +432,7 @@ View ComboBoxPopupContent(detail::ComboBoxSuggestionSource source, ComboBoxStyle
                           const std::shared_ptr<ComboBoxPopupState>& state, float minimum_width) {
   ResizePopupState(state, source.size);
   state->recomposition_revision = UseState(std::uint64_t{0});
-  static_cast<void>(state->recomposition_revision.Get());
+  HUXERUI_DISCARD(state->recomposition_revision.Get());
 
   std::vector<View> items;
   items.reserve(source.size);

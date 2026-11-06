@@ -43,8 +43,7 @@ private:
 
 struct DummyPlatformViewFactory {
 private:
-  detail::PlatformViewFactoryRegistration Erase(huxerui::UiWindow& ui_window) && {
-    static_cast<void>(ui_window);
+  detail::PlatformViewFactoryRegistration Erase(huxerui::UiWindow&) && {
     return detail::MakePlatformViewFactoryRegistration(std::make_shared<int>(1));
   }
 
@@ -270,18 +269,18 @@ TEST_CASE("PlatformChannelMapsTypedNoValueCallsToNullPayloads") {
 
   PlatformChannel channel = endpoint.Channel();
   bool stopped = false;
-  static_cast<void>(channel.Invoke<std::monostate>("stop", [&](PlatformResult<std::monostate> result) {
+  channel.Invoke<std::monostate>("stop", [&](PlatformResult<std::monostate> result) {
     stopped = std::holds_alternative<std::monostate>(result);
-  }));
+  });
   platform.RunPlatformModuleTasks();
   REQUIRE(stopped);
 
   std::optional<PlatformError> error;
-  static_cast<void>(channel.Invoke<std::monostate>("invalid", [&](PlatformResult<std::monostate> result) {
+  channel.Invoke<std::monostate>("invalid", [&](PlatformResult<std::monostate> result) {
     if (const auto* failure = std::get_if<PlatformError>(&result)) {
       error = *failure;
     }
-  }));
+  });
   platform.RunPlatformModuleTasks();
   REQUIRE(error.has_value());
   REQUIRE(error->code == "huxerui/invalid-result");
@@ -327,8 +326,7 @@ TEST_CASE("PlatformChannelCancelsInFlightInvocationBeforeDisposal") {
       .dispose = [&] { operations.emplace_back("dispose"); },
   });
 
-  static_cast<void>(
-      channel.Invoke("read", PlatformPayload(), [&](PlatformResult<PlatformPayload>) { completed = true; }));
+  channel.Invoke("read", PlatformPayload(), [&](PlatformResult<PlatformPayload>) { completed = true; });
   REQUIRE(channel.IsOpen());
   platform.RunPlatformModuleTasks();
   REQUIRE_FALSE(channel.IsOpen());
@@ -394,9 +392,9 @@ TEST_CASE("PlatformChannel restores its declared host for invocations results an
     channel.On("changed", [&](const PlatformPayload&) {
       events.push_back(UseService<Resources>()->Configuration().display_scale);
     });
-    static_cast<void>(channel.Invoke("read", PlatformPayload{}, [&](auto) {
+    channel.Invoke("read", PlatformPayload{}, [&](auto) {
       results.push_back(UseService<Resources>()->Configuration().display_scale);
-    }));
+    });
     endpoint.Events().Emit("changed", PlatformPayload{});
     channels.push_back(std::move(channel));
   }
@@ -429,7 +427,7 @@ TEST_CASE("PlatformChannel rejects retired host delivery and still cancels and d
   });
   auto channel = endpoint.Channel();
   channel.On("changed", [&](const PlatformPayload&) { ++delivered; });
-  static_cast<void>(channel.Invoke("read", PlatformPayload{}, [&](auto) { ++delivered; }));
+  channel.Invoke("read", PlatformPayload{}, [&](auto) { ++delivered; });
   SECTION("Retirement before native invocation") {}
   SECTION("Retirement after native completion was queued") {
     platform.RunPlatformModuleTasks();

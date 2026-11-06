@@ -17,6 +17,7 @@
 
 #include "external_texture_test_support.h"
 #include "io/file_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -162,7 +163,7 @@ TEST_CASE("PlatformPayloadRetainsFileReferenceCapabilityAndMetadata") {
   REQUIRE(detail::FileReferenceState::Of(detail::EncodePlatformValue(reference).AsFileReference()) == state);
 
   FileReference moved = reference;
-  static_cast<void>(FileReference(std::move(moved)));
+  HUXERUI_DISCARD(FileReference(std::move(moved)));
   REQUIRE_THROWS_AS(PlatformPayload(std::move(moved)), std::invalid_argument);
 }
 

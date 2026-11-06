@@ -45,8 +45,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const VirtualSemantics& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const VirtualSemantics& modifier) {
     if (enabled_ != modifier.enabled) {
       enabled_ = modifier.enabled;
       InvalidateSemantics();

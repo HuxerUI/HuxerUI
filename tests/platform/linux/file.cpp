@@ -53,7 +53,7 @@ public:
     return Utf8Path(path_ / fs::path(relative));
   }
 
-  [[nodiscard]] std::string CreateDirectory(std::string_view relative, fs::perms permissions) const {
+  std::string CreateDirectory(std::string_view relative, fs::perms permissions) const {
     const fs::path directory = path_ / fs::path(relative);
     REQUIRE(fs::create_directories(directory));
     fs::permissions(directory, permissions, fs::perm_options::replace);
@@ -218,10 +218,10 @@ TEST_CASE("LinuxAppDirectoriesRejectAnInsecureTemporaryFallback") {
   const std::string executable = File(executable_directory).Child("sample").Path();
   detail::LinuxAppDirectoryEnvironment environment = Environment(temporary, {});
   environment.fallback_temporary_root = fallback;
-  static_cast<void>(temporary.CreateDirectory(
+  temporary.CreateDirectory(
       "fallback/huxerui-" + std::to_string(geteuid()),
       fs::perms::owner_all | fs::perms::group_read
-  ));
+  );
 
   REQUIRE_THROWS_AS(detail::CreateLinuxAppDirectories(executable, environment), std::runtime_error);
 }

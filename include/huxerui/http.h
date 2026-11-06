@@ -247,7 +247,7 @@ public:
   /// @return A lazy Task producing the response or an HttpError; launch or await it in a live TaskScope.
   /// @throws std::invalid_argument Synchronously if the request configuration is invalid.
   /// @throws std::logic_error If the originating application is no longer usable or the thread/context is wrong.
-  [[nodiscard]] Task<HttpResult<HttpResponse>> SendAsync(HttpRequest request, std::function<void(HttpProgress)> progress = {}) const;
+  Task<HttpResult<HttpResponse>> SendAsync(HttpRequest request, std::function<void(HttpProgress)> progress = {}) const;
 
   /// Sends request and returns after final response headers are available. progress is optional and observes upload and
   /// consumed download bytes on the owning application thread. Invalid request configuration throws
@@ -263,7 +263,8 @@ public:
   /// }
   /// co_await ConsumeResponse(std::move(opened).Value());
   /// @endcode
-  [[nodiscard]] Task<HttpResult<HttpResponseStream>> SendStreamAsync(HttpRequest request, std::function<void(HttpProgress)> progress = {}) const;
+  Task<HttpResult<HttpResponseStream>> SendStreamAsync(HttpRequest request,
+                                                       std::function<void(HttpProgress)> progress = {}) const;
 
 private:
   explicit HttpClient(std::shared_ptr<detail::HttpTransport> transport);

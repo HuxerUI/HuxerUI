@@ -391,13 +391,13 @@ TEST_CASE("PlatformViewDeclaresTypedEventsWithoutPuttingCallbacksInProperties") 
   REQUIRE(event->name == "changed");
   event->dispatch_direct(PlatformValue::Store(7), mounted->event_bindings);
   REQUIRE(received_platform_event == 7);
-  static_cast<void>(detail::InternalAccess::DispatchPlatformViewEvent(
-      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::Changed), PlatformValue::Store(8))
+  detail::InternalAccess::DispatchPlatformViewEvent(
+      runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::Changed), PlatformValue::Store(8)
   );
   REQUIRE(received_platform_event == 8);
-  static_cast<void>(detail::InternalAccess::DispatchPlatformViewEvent(
+  detail::InternalAccess::DispatchPlatformViewEvent(
       runtime.CoreRuntime(), placement.Identity(), "changed", PlatformPayload(std::int64_t{9})
-  ));
+  );
   REQUIRE(received_platform_event == 9);
   REQUIRE_FALSE(detail::InternalAccess::DispatchPlatformViewEvent(
       runtime.CoreRuntime(), placement.Identity(), "changed", PlatformPayload("invalid")
@@ -455,16 +455,16 @@ TEST_CASE("PlatformViewTransportsExternalTextureEventsBySharedIdentity") {
   runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand placement = FindPlatformView(runtime.BuildRenderFrame());
 
-  static_cast<void>(detail::InternalAccess::DispatchPlatformViewEvent(
+  detail::InternalAccess::DispatchPlatformViewEvent(
       runtime.CoreRuntime(), placement.Identity(), "textureChanged", PlatformPayload(texture)
-  ));
+  );
   REQUIRE(received_platform_texture == texture);
 
   received_platform_texture = {};
-  static_cast<void>(detail::InternalAccess::DispatchPlatformViewEvent(
+  detail::InternalAccess::DispatchPlatformViewEvent(
       runtime.CoreRuntime(), placement.Identity(), typeid(TestPlatformEvents::TextureChanged),
       PlatformValue::Store(texture)
-  ));
+  );
   REQUIRE(received_platform_texture == texture);
 
   received_platform_texture = {};
@@ -472,9 +472,9 @@ TEST_CASE("PlatformViewTransportsExternalTextureEventsBySharedIdentity") {
   UiWindow other_runtime(TextureEventPlatformViewApp, other_platform);
   other_runtime.SetWindowMetrics({{300.0F, 200.0F}});
   const PlacePlatformViewCommand other_placement = FindPlatformView(other_runtime.BuildRenderFrame());
-  static_cast<void>(detail::InternalAccess::DispatchPlatformViewEvent(
+  detail::InternalAccess::DispatchPlatformViewEvent(
       other_runtime.CoreRuntime(), other_placement.Identity(), "textureChanged", PlatformPayload(texture)
-  ));
+  );
   REQUIRE(received_platform_texture == texture);
 }
 

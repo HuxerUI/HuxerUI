@@ -130,14 +130,12 @@ public:
     return [check] { check->Cancel(); };
   }
 
-  std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) override {
-    static_cast<void>(permission);
+  std::function<void()> Request(Permission, PermissionStatusCompletion completion) override {
     completion(PermissionStatus::Unavailable);
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
-    static_cast<void>(permission);
+  std::function<void()> OpenSettings(Permission, PermissionSettingsCompletion completion) override {
     completion(false);
     return {};
   }

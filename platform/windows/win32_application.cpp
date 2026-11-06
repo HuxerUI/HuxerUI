@@ -26,6 +26,7 @@
 #include <huxerui/system.h>
 
 #include "application/application_internal.h"
+#include "macros_internal.h"
 #include "win32_file_internal.h"
 #include "win32_internal.h"
 
@@ -506,7 +507,7 @@ std::string EncodeNotificationActivation(const ResolvedLocalNotification& notifi
       notification.data.size() > max_local_notification_data_bytes) {
     throw std::invalid_argument("HuxerUI Windows notification has invalid activation data");
   }
-  static_cast<void>(DecodeLocalNotificationData(notification.data));
+  HUXERUI_DISCARD(DecodeLocalNotificationData(notification.data));
   const auto identifier = std::as_bytes(std::span(notification.identifier));
   return std::string(notification_envelope_prefix) + Base64(identifier) + "." + Base64(notification.data);
 }
@@ -992,7 +993,7 @@ public:
 
 std::wstring EncodeWin32NotificationActivation(const ResolvedLocalNotification& notification) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(notification);
+  HUXERUI_UNUSED(notification);
   return {};
 #else
   return Utf8ToWide(EncodeNotificationActivation(notification));
@@ -1001,7 +1002,7 @@ std::wstring EncodeWin32NotificationActivation(const ResolvedLocalNotification& 
 
 std::optional<NotificationActivation> DecodeWin32NotificationActivation(std::wstring_view arguments) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(arguments);
+  HUXERUI_UNUSED(arguments);
   return std::nullopt;
 #else
   try {
@@ -1029,8 +1030,8 @@ std::optional<NotificationActivation> DecodeWin32NotificationActivation(std::wst
 std::optional<std::wstring> BuildWin32NotificationXml(const ResolvedLocalNotification& notification,
     const windows::LocalNotificationTemplateProvider& template_provider) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(notification);
-  static_cast<void>(template_provider);
+  HUXERUI_UNUSED(notification);
+  HUXERUI_UNUSED(template_provider);
   return std::nullopt;
 #else
   if (const auto* presentation = std::get_if<TemplateNotificationPresentation>(&notification.presentation)) {
@@ -1087,7 +1088,7 @@ std::optional<std::wstring> BuildWin32NotificationXml(const ResolvedLocalNotific
 
 Win32LocalNotificationHost::Win32LocalNotificationHost(UiThreadDispatcher dispatcher) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(dispatcher);
+  HUXERUI_UNUSED(dispatcher);
 #else
   try {
     auto [configured, template_provider] = [] {
@@ -1354,10 +1355,10 @@ void RegisterLocalNotifications(
     std::string_view app_id, std::string_view display_name, std::string_view activator_clsid,
     LocalNotificationTemplateProvider template_provider) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(app_id);
-  static_cast<void>(display_name);
-  static_cast<void>(activator_clsid);
-  static_cast<void>(template_provider);
+  HUXERUI_UNUSED(app_id);
+  HUXERUI_UNUSED(display_name);
+  HUXERUI_UNUSED(activator_clsid);
+  HUXERUI_UNUSED(template_provider);
   throw std::runtime_error("HuxerUI local notifications are unavailable in the Windows 7 compatibility backend");
 #else
   auto identity = detail::ParseNotificationIdentity(app_id, activator_clsid);
@@ -1376,8 +1377,8 @@ void RegisterLocalNotifications(
 
 void UnregisterLocalNotifications(std::string_view app_id, std::string_view activator_clsid) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(app_id);
-  static_cast<void>(activator_clsid);
+  HUXERUI_UNUSED(app_id);
+  HUXERUI_UNUSED(activator_clsid);
   throw std::runtime_error("HuxerUI local notifications are unavailable in the Windows 7 compatibility backend");
 #else
   const auto identity = detail::ParseNotificationIdentity(app_id, activator_clsid);

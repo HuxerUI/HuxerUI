@@ -450,7 +450,6 @@ void detail::FileDropReceiver::DisconnectFileDrop() noexcept {
   drop->hover.reset();
   auto pending = std::move(drop->pending);
   for (const auto& [operation, item] : pending) {
-    static_cast<void>(operation);
     item->Cancel();
   }
 }

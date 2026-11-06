@@ -12,6 +12,7 @@
 #include <emscripten/val.h>
 
 #include "io/http_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -295,7 +296,7 @@ public:
 
     auto callback = std::make_unique<std::shared_ptr<WebHttpRequest>>(shared_from_this());
     const std::uintptr_t callback_handle = reinterpret_cast<std::uintptr_t>(callback.get());
-    static_cast<void>(callback.release());
+    HUXERUI_DISCARD(callback.release());
     StartWebHttpOperation(operation_.as_handle(), callback_handle);
   }
 

@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "stream_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -116,7 +117,7 @@ OutputOperation ReserveOutput(const std::shared_ptr<AsyncOutputStreamState>& sta
 
 Task<IoResult<Bytes>>
 ReadOperation(std::shared_ptr<AsyncInputStreamState> state, std::size_t maximum_bytes, InputOperation operation) {
-  static_cast<void>(operation);
+  HUXERUI_UNUSED(operation);
   try {
     auto result = co_await state->ReadAsync(maximum_bytes);
     if (!result.Succeeded()) {
@@ -142,7 +143,7 @@ Task<IoResult<Bytes>> CompleteRead() {
 }
 
 Task<IoResult<void>> WriteOperation(std::shared_ptr<AsyncOutputStreamState> state, Bytes data, OutputOperation operation) {
-  static_cast<void>(operation);
+  HUXERUI_UNUSED(operation);
   try {
     auto result = co_await state->WriteAsync(std::move(data));
     if (!result.Succeeded()) {
@@ -156,7 +157,7 @@ Task<IoResult<void>> WriteOperation(std::shared_ptr<AsyncOutputStreamState> stat
 }
 
 Task<IoResult<void>> CloseOperation(std::shared_ptr<AsyncOutputStreamState> state, OutputOperation operation) {
-  static_cast<void>(operation);
+  HUXERUI_UNUSED(operation);
   try {
     auto result = co_await state->CloseAsync();
     if (result.Succeeded()) {
@@ -179,7 +180,7 @@ Task<IoResult<std::uint64_t>> CopyOperation(std::shared_ptr<AsyncInputStreamStat
                                             std::shared_ptr<AsyncOutputStreamState> output,
                                             std::size_t maximum_read_size, InputOperation input_operation,
                                             OutputOperation output_operation) {
-  static_cast<void>(output_operation);
+  HUXERUI_UNUSED(output_operation);
   if (input->IsComplete()) {
     co_return IoResult<std::uint64_t>(0);
   }

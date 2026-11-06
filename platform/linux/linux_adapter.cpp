@@ -51,6 +51,7 @@
 #include "text/text_internal.h"
 #include "application/window_internal.h"
 #include "application/application_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -429,7 +430,7 @@ std::shared_ptr<LinuxUiThreadDispatcher> InitializeGtk() {
   if (g_getenv("GTK_A11Y") == nullptr) {
     // The Linux adapter does not yet publish UiWindow semantics through GTK. Avoid exposing a misleading host-only
     // accessibility tree, while preserving an explicit backend selected by the application or its environment.
-    static_cast<void>(g_setenv("GTK_A11Y", "none", FALSE));
+    HUXERUI_DISCARD(g_setenv("GTK_A11Y", "none", FALSE));
   }
   if (gtk_init_check() == FALSE) {
     throw std::runtime_error("HuxerUI Linux could not initialize GTK");
@@ -569,7 +570,6 @@ public:
     if (!(statm >> total_pages >> resident_pages)) {
       return std::nullopt;
     }
-    static_cast<void>(total_pages);
     const long page_size = sysconf(_SC_PAGESIZE);
     const long processor_count = sysconf(_SC_NPROCESSORS_ONLN);
     if (page_size <= 0) {
@@ -1469,7 +1469,7 @@ private:
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
     if (self.key_tracker_.Release(key_code, self.text_input_.FilterKeyEvent(event))) {
-      static_cast<void>(self.SendKey(KeyEventType::Up, key_value, state, event));
+      HUXERUI_DISCARD(self.SendKey(KeyEventType::Up, key_value, state, event));
     }
   }
 

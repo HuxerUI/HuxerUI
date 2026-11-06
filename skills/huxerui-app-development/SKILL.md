@@ -1,34 +1,20 @@
 ---
 name: huxerui-app-development
-description: "Develop HuxerUI applications and app-side components using public SDK APIs, CMake/CLI, or mcpp modules. Use for HuxerUI project setup, UI, integration, review, and troubleshooting; not framework internals or generic C++."
+description: "Develop, review, and troubleshoot HuxerUI applications and app-side libraries that use the public SDK or mcpp package. Covers consumer setup, UI, and integration."
 ---
 
 # HuxerUI App Development
 
 Use the project's selected HuxerUI SDK or package to create, modify, review, or troubleshoot applications and app-side reusable components. Framework internals, renderers, SDK packaging, and the framework's own build are outside this skill's scope.
 
-## Recognize the project
+## Identify the consumer and build
 
-Treat the task as HuxerUI SDK application work when the user names HuxerUI or its CLI, or when the project contains one of these signals:
+Confirm that the request concerns a HuxerUI consumer or the creation of one. Identify the build from the project's configuration:
 
-- `find_package(HuxerUI CONFIG REQUIRED)`
-- `HuxerUI::huxerui` or `HuxerUI::huxerui_static`
-- an include under `<huxerui/...>`
-- `import huxerui;` in a source or module interface unit
-- an `mcpp.toml` that depends on `huxerui.huxerui`, beside a `build.mcpp` that imports `huxerui.rules`
+- For CMake, look for `find_package(HuxerUI CONFIG REQUIRED)`, `huxerui_add_app`, or links to the public HuxerUI targets. Locate the [selected SDK](references/project-workflow.md#locate-the-tools-and-sdk).
+- For mcpp, read `mcpp.toml` and `build.mcpp` to identify the package dependency or manually linked SDK. An `import huxerui;` declaration alone does not identify the build setup.
 
-Inspect the manifest and build program to identify the build path; an import alone does not establish the project's complete build setup. Generated mcpp package projects use `mcpp build` and `mcpp run`, obtain HuxerUI through a dependency, and have no generated CMake platform shells. Read [cpp-modules-and-mcpp.md](references/cpp-modules-and-mcpp.md) for that path. Read [mcpp-build.md](references/mcpp-build.md) only for an existing mcpp project that manually consumes a prebuilt SDK.
-
-## Establish the SDK truth
-
-Before relying on an API, identify the SDK or dependency revision selected by the project. For an mcpp package project, inspect its dependency declaration and resolved package's public interface. For an installed CMake SDK:
-
-1. Read `HuxerUI_DIR` from the active build directory's `CMakeCache.txt`, then derive the SDK prefix from `lib/cmake/HuxerUI`.
-2. Otherwise use `HUXERUI_HOME` when it identifies an installed SDK.
-3. Otherwise locate `huxerui` on `PATH` and run `huxerui doctor`.
-4. If none is available, ask for the SDK location before relying on exact API or build behavior.
-
-Prefer the selected version's public headers, module interface, package configuration, and user documentation over this skill. If the project explicitly uses a source dependency, inspect that dependency's public contracts. Do not substitute an unrelated checkout or private implementation for the selected SDK, and do not invent compatibility aliases.
+Use the selected SDK or resolved package revision as the authority for APIs and build behavior. Check its public headers, module interface, package configuration, and documentation as applicable. For an explicit source dependency, use that checkout's public contracts.
 
 ## Work from public contracts
 
@@ -39,12 +25,12 @@ Prefer the selected version's public headers, module interface, package configur
 - Keep controlled values authoritative in app state and write emitted changes back for the next composition. Read `State<T>` through implicit conversion by default and use `state->member` for member access.
 - Use stable semantic keys for dynamic stateful siblings that insert, remove, or reorder.
 - Preserve complete `TextEditingValue` state for `TextField`.
-- Use only public headers, public CMake targets, generated project conventions, and platform-specific public headers.
+- Use the selected SDK's public headers and build targets, and follow the project's generated conventions.
+- Omit unused parameter names in callback definitions to avoid `static_cast<void>` for warning suppression.
 - Prefer generated `ImageResource` values for static artwork displayed by HuxerUI components. Keep scalable in-UI artwork as SVG under `resources/images`; use `VectorAsset::Create` or `Canvas` only for genuinely programmatic or dynamic drawing. Platform application and system-tray icons follow their separate packaging contracts.
 - Compose built-in layouts and their modifiers before deriving `Layout` or `VirtualLayout`. A custom layout is for a genuinely new measurement or placement algorithm, not ordinary alignment, spacing, growth, wrapping, overlay, paging, scrolling, or responsiveness.
 - Start application visuals from `FlatTheme`, `FlatDarkTheme`, `MaterialTheme`, or `MaterialDarkTheme`. Customize their tokens or typed styles instead of recreating a built-in theme with a bare `ThemeDefinition`.
 - Choose the narrowest extension mechanism after exhausting its built-in equivalent. Prefer an ordinary component, existing event or modifier, Environment/Theme value, presentation service, or root service. Use a custom `Layout`, retained modifier with `NodeExtension`, `PlatformModule`, `PlatformView`, or `ExternalTexture` only when its distinct geometry, mounted lifetime, or platform boundary is actually required.
-- Do not invent APIs, legacy names, private includes, or source-checkout paths.
 
 ## Route the task
 
@@ -83,5 +69,3 @@ After editing, check the items applicable to the current change:
 - platform-specific public contracts and unavailable-platform limits;
 - HuxerUI DSL formatting from `dsl-style.md`;
 - build and run results only for the current host and affected platforms that are actually available.
-
-When an API is uncertain, inspect the active SDK header, CMake package, or CLI help instead of guessing.

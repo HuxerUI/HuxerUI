@@ -93,8 +93,7 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
+  NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const float previous_progress = progress_.Value();
     if (kind_ == ToggleVisualKind::Checkbox) {
       progress_.Set(checked_ ? 1.0F : 0.0F);

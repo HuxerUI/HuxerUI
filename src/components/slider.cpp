@@ -129,7 +129,6 @@ public:
   }
 
   void OnHover(ViewNode& node, const HoverEvent& event) override {
-    static_cast<void>(node);
     const bool hovered = event.type != HoverEventType::Leave;
     if (hovered_ == hovered) {
       return;
@@ -139,7 +138,6 @@ public:
   }
 
   void OnFocusChanged(ViewNode& node, bool focused, bool) override {
-    static_cast<void>(node);
     if (focused_ == focused) {
       return;
     }

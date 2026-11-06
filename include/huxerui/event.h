@@ -826,7 +826,7 @@ public:
     using Result = detail::EventResult<Key>;
     if constexpr (std::is_void_v<Result>) {
       if (auto hub = hub_.lock()) {
-        static_cast<void>(hub->template Emit<Key>(std::forward<Arguments>(arguments)...));
+        hub->template Emit<Key>(std::forward<Arguments>(arguments)...);
       }
     } else {
       if (auto hub = hub_.lock()) {

@@ -18,6 +18,7 @@
 #include <huxerui/windows/platform_registry.h>
 
 #include "win32_accessibility.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -66,7 +67,6 @@ struct PlatformViewState {
 };
 
 LRESULT CALLBACK PlatformViewTestProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-  static_cast<void>(w_param);
   auto* state = reinterpret_cast<PlatformViewState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
   if (message == WM_NCCREATE) {
     const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
@@ -274,8 +274,7 @@ CreateWindowsPlatformView(HWND parent, const WindowsPlatformViewProperties& prop
   return state;
 }
 
-void UpdateWindowsPlatformView(PlatformViewState& state, const WindowsPlatformViewProperties& properties) {
-  static_cast<void>(state);
+void UpdateWindowsPlatformView(PlatformViewState&, const WindowsPlatformViewProperties& properties) {
   ++windows_platform_view_updates;
   const std::wstring text = std::to_wstring(properties.value);
   SetWindowTextW(windows_platform_view_edit, text.c_str());
@@ -396,16 +395,16 @@ TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   REQUIRE((windows_platform_view_controller_operations == std::vector<std::string>{"connect:1"}));
 
   windows_platform_view_controller = 2;
-  static_cast<void>(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
+  HUXERUI_DISCARD(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   REQUIRE((windows_platform_view_controller_operations ==
            std::vector<std::string>{"connect:1", "disconnect:1", "connect:2"}));
 
   windows_platform_view_controller_attached = false;
-  static_cast<void>(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
+  HUXERUI_DISCARD(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   REQUIRE((windows_platform_view_controller_operations ==
            std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2"}));
   windows_platform_view_controller_attached = true;
-  static_cast<void>(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
+  HUXERUI_DISCARD(platform_views.Commit(runtime.BuildRenderFrame(), 1.0F));
   REQUIRE((windows_platform_view_controller_operations ==
            std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2", "connect:2"}));
   windows_platform_view_events.Emit<WindowsPlatformViewEvents::Changed>(7);

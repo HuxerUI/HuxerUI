@@ -2,6 +2,7 @@
 #include "internal_access.h"
 #include "image_test_support.h"
 #include "graphics/path_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -222,7 +223,7 @@ View DefaultVariantTextFieldStyleApp() {
 View StableTextFieldApp() {
   auto trigger = UseState(0);
   text_field_recompose_trigger = trigger;
-  static_cast<void>(trigger.Get());
+  HUXERUI_DISCARD(trigger.Get());
   return TextField(TextEditingValue::FromText("stable")).With(huxerui::Frame{160.0F, 40.0F});
 }
 

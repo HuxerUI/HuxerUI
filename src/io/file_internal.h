@@ -44,8 +44,8 @@ using FileReferenceResultBoolCompletion = FileReferenceCompletion<bool>;
 using FileReferenceResultBoolOperation =
     std::function<std::function<void()>(FileReferenceResultBoolCompletion)>;
 
-[[nodiscard]] Task<IoResult<Bytes>> RunFileReferenceBytesOperation(FileReferenceBytesOperation operation);
-[[nodiscard]] Task<IoResult<bool>> RunFileReferenceBoolOperation(FileReferenceResultBoolOperation operation);
+Task<IoResult<Bytes>> RunFileReferenceBytesOperation(FileReferenceBytesOperation operation);
+Task<IoResult<bool>> RunFileReferenceBoolOperation(FileReferenceResultBoolOperation operation);
 
 // Retains access independently of the picker and public reference values. Operations deliver through
 // callbacks and return best-effort cancellation; the shared Task bridge suppresses late delivery.
@@ -113,14 +113,14 @@ void ProtectAppDirectories(const AppDirectories& directories);
 [[nodiscard]] std::string CurrentDirectoryPath();
 [[nodiscard]] FileReference
 MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
-[[nodiscard]] IoResult<std::string> DecodeFileUtf8(IoResult<Bytes> bytes);
+IoResult<std::string> DecodeFileUtf8(IoResult<Bytes> bytes);
 [[nodiscard]] bool IsValidFileUtf8(std::string_view text) noexcept;
 void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const std::vector<std::string>& content_types);
 [[nodiscard]] bool IsValidReferenceChildName(std::string_view name) noexcept;
 [[nodiscard]] FileReference MakeLocalFileReference(File file, bool writable,
                                                    std::optional<std::string> content_type = {},
                                                    FileReferenceCoordination coordination = {});
-[[nodiscard]] Task<IoResult<std::shared_ptr<FileReferenceState>>> MakeLocalDirectoryState(File directory);
+Task<IoResult<std::shared_ptr<FileReferenceState>>> MakeLocalDirectoryState(File directory);
 
 #if defined(__EMSCRIPTEN__)
 [[nodiscard]] bool IsWebPersistentFilePath(std::string_view path) noexcept;

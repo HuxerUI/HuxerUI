@@ -425,8 +425,7 @@ public:
     Update(node, value);
   }
 
-  void Update(ViewNode& node, const DatePickerBehavior& value) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const DatePickerBehavior& value) {
     const bool controlled_changed = !initialized_ || value_ != value.value;
     const bool range_changed = minimum_ != value.minimum || maximum_ != value.maximum;
     value_ = value.value;
@@ -513,8 +512,7 @@ public:
     return PointerResult::Capture;
   }
 
-  bool OnKey(ViewNode& node, const KeyEvent& event) override {
-    static_cast<void>(node);
+  bool OnKey(ViewNode&, const KeyEvent& event) override {
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
     }
@@ -721,8 +719,7 @@ public:
     return false;
   }
 
-  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer& text_measurer) override {
-    static_cast<void>(text_measurer);
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
     const Rect next = node.Bounds();
     if (next == bounds_) {
       return PaintInvalidation::None;
@@ -1148,8 +1145,7 @@ public:
     Update(node, value);
   }
 
-  void Update(ViewNode& node, const TimePickerBehavior& value) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const TimePickerBehavior& value) {
     const bool controlled_changed = !initialized_ || value_ != value.value;
     value_ = value.value;
     step_ = value.step;
@@ -1244,8 +1240,7 @@ public:
     return PointerResult::Capture;
   }
 
-  bool OnKey(ViewNode& node, const KeyEvent& event) override {
-    static_cast<void>(node);
+  bool OnKey(ViewNode&, const KeyEvent& event) override {
     if (event.type != KeyEventType::Down || event.modifiers.alt || event.modifiers.control || event.modifiers.meta) {
       return false;
     }

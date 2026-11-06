@@ -370,7 +370,7 @@ TEST_CASE("TaskScopeLaunchIsLazyAndComposesNestedTaskValuesAndExceptions") {
     ++factory_starts;
     state = co_await TaskValue(41);
     try {
-      static_cast<void>(co_await FailingTaskValue());
+      co_await FailingTaskValue();
     } catch (const std::runtime_error&) {
       state += 1;
     }
@@ -673,7 +673,7 @@ TEST_CASE("RunWorkerOwnsItsInvocationAndRestoresResultsAndExceptionsToTheUIThrea
     );
     co_await RunWorker([] {});
     try {
-      static_cast<void>(co_await RunWorker([]() -> int { throw std::runtime_error("worker failed"); }));
+      co_await RunWorker([]() -> int { throw std::runtime_error("worker failed"); });
     } catch (const std::runtime_error&) {
       caught = true;
     }
@@ -896,9 +896,9 @@ TEST_CASE("WorkerSequencePromotesTheNextOperationAfterAnException") {
 
   captured_task_scope.Launch([&]() -> Task<void> {
     try {
-      static_cast<void>(co_await sequence.Run([](std::stop_token) -> int {
+      co_await sequence.Run([](std::stop_token) -> int {
         throw std::runtime_error("sequenced worker failed");
-      }));
+      });
     } catch (const std::runtime_error&) {
       caught = true;
     }
@@ -977,7 +977,7 @@ TEST_CASE("RunWorkerReportsUnavailableWebWorkerExecution") {
 
   captured_task_scope.Launch([&]() -> Task<void> {
     try {
-      static_cast<void>(co_await RunWorker([] { return 1; }));
+      co_await RunWorker([] { return 1; });
     } catch (const std::runtime_error&) {
       unavailable = true;
     }
@@ -998,10 +998,10 @@ TEST_CASE("WorkerSequenceReportsUnavailableWebWorkerExecution") {
 
   captured_task_scope.Launch([&]() -> Task<void> {
     try {
-      static_cast<void>(co_await sequence.Run([&](std::stop_token) {
+      co_await sequence.Run([&](std::stop_token) {
         invoked = true;
         return 1;
-      }));
+      });
     } catch (const std::runtime_error&) {
       unavailable = true;
     }
@@ -1210,10 +1210,10 @@ TEST_CASE("AwaitCallbackDeliversResultStorageExceptionsThroughTheTask") {
   bool caught = false;
   captured_task_scope.Launch([&]() -> Task<void> {
     try {
-      static_cast<void>(co_await AwaitCallback<ThrowingValue>([](auto completion) {
+      co_await AwaitCallback<ThrowingValue>([](auto completion) {
         REQUIRE_NOTHROW(completion.Complete(ThrowingValue{}));
         return std::function<void()>{};
-      }));
+      });
     } catch (const std::runtime_error&) {
       caught = true;
     }
@@ -1408,10 +1408,10 @@ TEST_CASE("AwaitCallbackSerializesConcurrentSubmissionsAndExternalCancellation")
   auto launch = [&] {
     return captured_task_scope.Launch([&]() -> Task<void> {
       try {
-        static_cast<void>(co_await AwaitCallback<int>([&](auto endpoint) {
+        co_await AwaitCallback<int>([&](auto endpoint) {
           completion = endpoint;
           return [&] { ++cancellations; };
-        }));
+        });
         ++results;
       } catch (const std::runtime_error&) {
         ++failures;

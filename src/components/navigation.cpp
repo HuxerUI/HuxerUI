@@ -18,6 +18,7 @@
 #include "runtime/mounted_node_internal.h"
 #include "runtime/transition_internal.h"
 #include "internal_access.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -791,14 +792,12 @@ public:
     Update(node, modifier);
   }
 
-  void Update(huxerui::ViewNode& node, const NavigationPageModifier& modifier) {
-    static_cast<void>(node);
+  void Update(huxerui::ViewNode&, const NavigationPageModifier& modifier) {
     state_ = modifier.state;
     entry_id_ = modifier.entry_id;
   }
 
-  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(frame);
+  FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo&) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!state_) {
       mounted.presentation.local_opacity = 0.0F;
@@ -895,8 +894,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(huxerui::ViewNode& node, const NavigationContainerModifier& modifier) {
-    static_cast<void>(node);
+  void Update(huxerui::ViewNode&, const NavigationContainerModifier& modifier) {
     state_ = modifier.state;
     style_ = modifier.style;
     if (revision_ != modifier.revision) {
@@ -1006,8 +1004,7 @@ public:
     }
   }
 
-  bool OnBack(huxerui::ViewNode& node, const BackEvent& event) override {
-    static_cast<void>(node);
+  bool OnBack(huxerui::ViewNode&, const BackEvent& event) override {
     if (!state_) {
       return false;
     }
@@ -1078,7 +1075,7 @@ View BuildRoutedNavigationStack(
   auto state_holder = UseState(std::make_shared<NavigationState>(root, routes, binding));
   auto revision = UseState<std::uint64_t>(0);
   const std::shared_ptr<NavigationState> state = state_holder.Get();
-  static_cast<void>(revision.Get());
+  HUXERUI_DISCARD(revision.Get());
   state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
   state->UpdateRoot(std::move(root));
   state->UpdateRouteBinding(binding);
@@ -1182,7 +1179,7 @@ View NavigationStack(std::function<View()> root) {
     auto state_holder = UseState(std::make_shared<detail::NavigationState>(root));
     auto revision = UseState<std::uint64_t>(0);
     const std::shared_ptr<detail::NavigationState> state = state_holder.Get();
-    static_cast<void>(revision.Get());
+    HUXERUI_DISCARD(revision.Get());
     state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
     state->UpdateRoot(root);
     NavigationStyle style = UseEnvironment<NavigationStyle>();

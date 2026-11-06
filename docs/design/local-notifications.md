@@ -76,12 +76,12 @@ struct NotificationActivation {
 class LocalNotificationHandle final {
 public:
   [[nodiscard]] LocalNotificationCapabilities Capabilities() const;
-  [[nodiscard]] Task<PermissionStatus> CheckAuthorizationAsync() const;
-  [[nodiscard]] Task<PermissionStatus> RequestAuthorizationAsync() const;
-  [[nodiscard]] Task<LocalNotificationOperationStatus> ShowAsync(LocalNotification notification) const;
-  [[nodiscard]] Task<LocalNotificationOperationStatus>
+  Task<PermissionStatus> CheckAuthorizationAsync() const;
+  Task<PermissionStatus> RequestAuthorizationAsync() const;
+  Task<LocalNotificationOperationStatus> ShowAsync(LocalNotification notification) const;
+  Task<LocalNotificationOperationStatus>
   ScheduleAsync(LocalNotification notification, std::chrono::system_clock::time_point delivery_time) const;
-  [[nodiscard]] Task<LocalNotificationOperationStatus> CancelAsync(std::string_view identifier) const;
+  Task<LocalNotificationOperationStatus> CancelAsync(std::string_view identifier) const;
 };
 
 class ApplicationHandle final {

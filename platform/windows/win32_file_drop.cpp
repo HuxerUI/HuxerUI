@@ -15,6 +15,7 @@
 #include <huxerui/file_drop.h>
 
 #include "io/file_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -233,7 +234,7 @@ Win32FileDrop::Win32FileDrop(HWND platform_window, UiWindow& ui_window, std::fun
 
 Win32FileDrop::~Win32FileDrop() {
   target_->Detach();
-  static_cast<void>(RevokeDragDrop(platform_window_));
+  HUXERUI_DISCARD(RevokeDragDrop(platform_window_));
   target_->Release();
 }
 

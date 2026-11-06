@@ -36,6 +36,7 @@
 #include "graphics/shadow_internal.h"
 #include "text/text_internal.h"
 #include "text/font_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -1099,7 +1100,7 @@ private:
     cairo_matrix_t matrix{};
     cairo_matrix_init(&matrix, transform.m11, transform.m12, transform.m21, transform.m22, transform.translate_x,
                       transform.translate_y);
-    static_cast<void>(cairo_matrix_invert(&matrix));
+    HUXERUI_DISCARD(cairo_matrix_invert(&matrix));
     cairo_pattern_set_matrix(pattern, &matrix);
   }
 

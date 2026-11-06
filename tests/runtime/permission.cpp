@@ -27,11 +27,10 @@ void ResetPermissionState() {
   settings_results.clear();
 }
 
-void MountPermissionApp(TestPlatform& platform, UiWindow& runtime) {
+void MountPermissionApp(TestPlatform&, UiWindow& runtime) {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
   REQUIRE(permission_application.has_value());
-  static_cast<void>(platform);
 }
 
 TaskHandle CheckPermission(Permission permission) {

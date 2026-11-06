@@ -274,9 +274,8 @@ public:
       TextInputSessionId session_id,
       const TextInputConfiguration& configuration,
       const TextInputState& state,
-      const TextInputGeometry& geometry
+      const TextInputGeometry&
   ) {
-    static_cast<void>(geometry);
     session_id_ = session_id;
     configuration_ = configuration;
     input_state_ = state;
@@ -287,8 +286,7 @@ public:
     }
   }
 
-  void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) {
-    static_cast<void>(geometry);
+  void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry&) {
     if (session_id != session_id_) {
       return;
     }
@@ -738,15 +736,10 @@ void UIKitTextInput::RequestShow(TextInputSessionId session_id) {
 
 - (NSWritingDirection)baseWritingDirectionForPosition:(UITextPosition*)position
                                           inDirection:(UITextStorageDirection)direction {
-  static_cast<void>(position);
-  static_cast<void>(direction);
   return NSWritingDirectionNatural;
 }
 
-- (void)setBaseWritingDirection:(NSWritingDirection)writingDirection forRange:(UITextRange*)range {
-  static_cast<void>(writingDirection);
-  static_cast<void>(range);
-}
+- (void)setBaseWritingDirection:(NSWritingDirection)writingDirection forRange:(UITextRange*)range {}
 
 - (CGRect)firstRectForRange:(UITextRange*)range {
   if (huxeruiTextInput == nullptr) {
@@ -779,7 +772,6 @@ void UIKitTextInput::RequestShow(TextInputSessionId session_id) {
 }
 
 - (NSArray<UITextSelectionRect*>*)selectionRectsForRange:(UITextRange*)range {
-  static_cast<void>(range);
   return @[];
 }
 
@@ -863,36 +855,20 @@ void UIKitTextInput::RequestShow(TextInputSessionId session_id) {
   return huxeruiTextInput != nullptr && huxeruiTextInput->Configuration().secure;
 }
 
-- (void)setAutocapitalizationType:(UITextAutocapitalizationType)value {
-  static_cast<void>(value);
-}
+- (void)setAutocapitalizationType:(UITextAutocapitalizationType)value {}
 
-- (void)setAutocorrectionType:(UITextAutocorrectionType)value {
-  static_cast<void>(value);
-}
+- (void)setAutocorrectionType:(UITextAutocorrectionType)value {}
 
-- (void)setSpellCheckingType:(UITextSpellCheckingType)value {
-  static_cast<void>(value);
-}
+- (void)setSpellCheckingType:(UITextSpellCheckingType)value {}
 
-- (void)setKeyboardType:(UIKeyboardType)value {
-  static_cast<void>(value);
-}
+- (void)setKeyboardType:(UIKeyboardType)value {}
 
-- (void)setKeyboardAppearance:(UIKeyboardAppearance)value {
-  static_cast<void>(value);
-}
+- (void)setKeyboardAppearance:(UIKeyboardAppearance)value {}
 
-- (void)setReturnKeyType:(UIReturnKeyType)value {
-  static_cast<void>(value);
-}
+- (void)setReturnKeyType:(UIReturnKeyType)value {}
 
-- (void)setEnablesReturnKeyAutomatically:(BOOL)value {
-  static_cast<void>(value);
-}
+- (void)setEnablesReturnKeyAutomatically:(BOOL)value {}
 
-- (void)setSecureTextEntry:(BOOL)value {
-  static_cast<void>(value);
-}
+- (void)setSecureTextEntry:(BOOL)value {}
 
 @end

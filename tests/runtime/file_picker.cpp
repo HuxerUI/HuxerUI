@@ -376,10 +376,10 @@ TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
       file_picker->OpenFileAsync({.name = "Text", .content_types = {"te*xt/plain"}}),
       std::invalid_argument
   );
-  REQUIRE_NOTHROW(static_cast<void>(
+  REQUIRE_NOTHROW(
       file_picker->OpenFileAsync({.name = "Text", .content_types = {"application/x.test~json", "text/*"}})
-  ));
-  REQUIRE_NOTHROW(static_cast<void>(file_picker->OpenFileAsync({.name = "Any", .content_types = {"*/*"}})));
+  );
+  REQUIRE_NOTHROW(file_picker->OpenFileAsync({.name = "Any", .content_types = {"*/*"}}));
   REQUIRE_THROWS_AS(
       detail::MakeFileReference(
           {.name = "document.txt", .content_type = "text/*"},

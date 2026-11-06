@@ -23,7 +23,6 @@
 @implementation HuxerUISystemTrayTarget
 
 - (void)activate:(id)sender {
-  static_cast<void>(sender);
   if (!huxeruiActivation) {
     return;
   }

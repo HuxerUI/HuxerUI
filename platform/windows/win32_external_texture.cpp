@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "win32_external_texture_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -61,7 +62,7 @@ public:
 
   ~KeyedMutexLease() {
     if (mutex_) {
-      static_cast<void>(mutex_->ReleaseSync(release_key_));
+      HUXERUI_DISCARD(mutex_->ReleaseSync(release_key_));
     }
   }
 
@@ -103,7 +104,7 @@ void WaitForCopy(ID3D11Device& device, ID3D11DeviceContext& context) {
 
 std::shared_ptr<const Win32D3D11Frame> CopyD3D11Frame(const windows::D3D11Texture::Frame& frame) {
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
-  static_cast<void>(frame);
+  HUXERUI_UNUSED(frame);
   throw std::runtime_error("HuxerUI Windows D3D11 textures require Windows 10 or later");
 #else
   if (frame.texture == nullptr) {
@@ -184,7 +185,7 @@ std::shared_ptr<const Win32D3D11Frame> CopyD3D11Frame(const windows::D3D11Textur
       static_cast<int>(source_description.Width), static_cast<int>(source_description.Height), frame.alpha,
       shared_handle.Get(), std::move(snapshot)
   );
-  static_cast<void>(shared_handle.Release());
+  HUXERUI_DISCARD(shared_handle.Release());
   return copied;
 #endif
 }

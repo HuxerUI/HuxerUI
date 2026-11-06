@@ -3,6 +3,7 @@
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
 #include "application/window_internal.h"
+#include "macros_internal.h"
 
 #include <algorithm>
 #include <bit>
@@ -486,7 +487,7 @@ void detail::PointerInteraction::DispatchChordPointerEvent(PointerSession& sessi
   if (owner.has_value()) {
     if (*owner < session.recognitions.size() &&
         std::holds_alternative<PointerInterceptRecognitionState>(session.recognitions[*owner].state)) {
-      static_cast<void>(UpdatePointerRecognition(session, *owner, event));
+      HUXERUI_DISCARD(UpdatePointerRecognition(session, *owner, event));
     }
     return;
   }
@@ -915,7 +916,7 @@ void detail::PointerInteraction::CancelPointerRecognition(PointerRecognition& re
   } else if (auto* intercept_state = std::get_if<PointerInterceptRecognitionState>(&recognition.state)) {
     if (detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, intercept_state->node_identity);
         node && node->interaction.enabled && HasEventBinding<ViewEvents::PointerIntercept>(node->event_bindings)) {
-      static_cast<void>(EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, cancellation));
+      HUXERUI_DISCARD(EmitEvent<ViewEvents::PointerIntercept>(node->event_bindings, cancellation));
     }
   } else if (auto* selection = std::get_if<TextSelectionRecognitionState>(&recognition.state)) {
     selection->recognizer.reset();
@@ -1316,7 +1317,7 @@ void detail::PointerInteraction::PublishContextMenu(
 ) {
   if (detail::MountedNode* target = FindNode(*runtime_state_.mounted_root_, context_menu.node_identity);
       target && target->interaction.enabled) {
-    static_cast<void>(EmitEvent<ViewEvents::ContextMenuRequested>(target->event_bindings, event.position));
+    EmitEvent<ViewEvents::ContextMenuRequested>(target->event_bindings, event.position);
   }
 }
 
@@ -1421,7 +1422,7 @@ void detail::PointerInteraction::ApplyDragScroll(
       route.push_back(candidate);
     }
   }
-  static_cast<void>(ApplyScrollTransaction(route, scroll.axis, delta, ScrollSource::Drag, &scroll.active_nodes,
+  HUXERUI_DISCARD(ApplyScrollTransaction(route, scroll.axis, delta, ScrollSource::Drag, &scroll.active_nodes,
                                            session.device_kind == PointerDeviceKind::Touch));
 }
 
@@ -1762,7 +1763,6 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
   }
 
   auto [inserted, unused] = pointer_sessions_.insert_or_assign(event.pointer_id, std::move(session));
-  static_cast<void>(unused);
   if (primary) {
     HandleTextSelectionPointerDown(event);
   }
@@ -1865,7 +1865,7 @@ void detail::PointerInteraction::HandlePointerMove(const PointerEvent& event, bo
     if (auto* scroll = std::get_if<ScrollRecognitionState>(&recognition.state)) {
       apply_scroll(*scroll, PointerDelta(session.last_position, event.position, scroll->axis));
     } else {
-      static_cast<void>(UpdatePointerRecognition(session, *owner, event));
+      HUXERUI_DISCARD(UpdatePointerRecognition(session, *owner, event));
     }
     session.last_position = event.position;
     return;
@@ -1993,7 +1993,7 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
         }
       }
     } else {
-      static_cast<void>(UpdatePointerRecognition(session, *owner, event));
+      HUXERUI_DISCARD(UpdatePointerRecognition(session, *owner, event));
       if (std::holds_alternative<ExtensionRecognitionState>(recognition.state)) {
         CommitPendingTouchFocus(session, event);
         if (!continue_release()) {

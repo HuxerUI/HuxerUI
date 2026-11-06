@@ -63,7 +63,7 @@ public:
   }
 
   void Next(Completion completion) override {
-    static_cast<void>(channel_.Invoke<GrayFrame>("next", std::move(completion)));
+    channel_.Invoke<GrayFrame>("next", std::move(completion));
   }
 
 private:

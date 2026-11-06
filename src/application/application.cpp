@@ -14,6 +14,7 @@
 #include "runtime/ui_window_internal.h"
 #include "system_tray_internal.h"
 #include "runtime/task_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -26,7 +27,7 @@ void ValidateApplicationActivation(const ApplicationActivation& activation) {
   }
   const auto* notification = std::get_if<NotificationActivation>(&activation);
   if (notification != nullptr) {
-    static_cast<void>(EncodeLocalNotificationData(notification->data));
+    HUXERUI_DISCARD(EncodeLocalNotificationData(notification->data));
   }
   if (notification != nullptr &&
       (notification->identifier.empty() || notification->identifier.find('\0') != std::string::npos ||
@@ -568,7 +569,6 @@ void ApplicationService::UpdateLifecycleState(ApplicationLifecycleState lifecycl
   if (!lifecycle_handlers_.empty()) {
     LifecycleDelivery delivery{lifecycle_state, {}};
     for (const auto& [identity, handler] : lifecycle_handlers_) {
-      static_cast<void>(handler);
       delivery.recipients.push_back(identity);
     }
     pending_lifecycle_states_.push_back(std::move(delivery));

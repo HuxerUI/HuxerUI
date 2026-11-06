@@ -75,7 +75,7 @@ public:
       return;
     }
     environment->CallVoidMethod(producer_, set_running_, running ? JNI_TRUE : JNI_FALSE);
-    static_cast<void>(ClearJavaException(environment));
+    ClearJavaException(environment);
   }
 
   void PublishBitmap(JNIEnv* environment, jobject bitmap) {
@@ -119,7 +119,7 @@ private:
     JNIEnv* environment = Environment();
     if (environment != nullptr && producer_ != nullptr) {
       environment->CallVoidMethod(producer_, dispose_);
-      static_cast<void>(ClearJavaException(environment));
+      ClearJavaException(environment);
       environment->DeleteGlobalRef(producer_);
       producer_ = nullptr;
     }

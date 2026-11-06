@@ -150,8 +150,7 @@ public:
     return {result.needs_frame, result.wake_after};
   }
 
-  float OnPreFling(ViewNode& node, Axis axis, float available_velocity) override {
-    static_cast<void>(node);
+  float OnPreFling(ViewNode&, Axis axis, float available_velocity) override {
     if (axis != behavior_.axis || (mode_ != Mode::Dragging && mode_ != Mode::AwaitingCommit)) {
       return 0.0F;
     }

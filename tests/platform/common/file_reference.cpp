@@ -1,4 +1,5 @@
 #include "file_reference_test_support.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -9,7 +10,7 @@ int directory_compositions = 0;
 View DirectoryApp() {
   file_application = UseApplication();
   directory_revision = UseState(0);
-  static_cast<void>(directory_revision.Get());
+  HUXERUI_DISCARD(directory_revision.Get());
   ++directory_compositions;
   return {};
 }
@@ -408,7 +409,7 @@ TEST_CASE("CancelingAFileTaskDropsItsContinuation") {
 
   File file = file_application->Directories().temporary_directory.Child("canceled.txt");
   TaskHandle handle = file_tasks.Launch([file]() -> Task<void> {
-    static_cast<void>(co_await file.WriteStringAsync(std::string(1024 * 1024, 'x')));
+    HUXERUI_DISCARD(co_await file.WriteStringAsync(std::string(1024 * 1024, 'x')));
     canceled_file_task_continued = true;
   });
   platform.RunOne();

@@ -362,7 +362,7 @@ public:
   /// @param child A direct child obtained from the owning node's Children() or ChildAt().
   /// @param constraints Valid size limits in DIPs for the child's outer size, including its own Padding.
   /// @return The child's measured outer size under the supplied constraints and its declarative modifiers.
-  [[nodiscard]] Size Measure(ViewNode& child, Constraints constraints) const {
+  Size Measure(ViewNode& child, Constraints constraints) const {
     return measure_(state_, child, constraints);
   }
 

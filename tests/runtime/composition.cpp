@@ -1,4 +1,5 @@
 #include "runtime_test_support.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -262,7 +263,7 @@ View EnvironmentBoundaryContent() {
 View EnvironmentBoundaryApp() {
   environment_boundary_value = UseState(1);
   environment_boundary_trigger = UseState(0);
-  static_cast<void>(environment_boundary_trigger.Get());
+  HUXERUI_DISCARD(environment_boundary_trigger.Get());
   return ProvideEnvironment(
       ParameterizedEnvironmentValue{environment_boundary_value.Get()},
       EnvironmentBoundaryContent()
@@ -404,25 +405,18 @@ struct OpaqueProbeModifier {
   int value;
 };
 
-OpaqueProbeModifierExtension::OpaqueProbeModifierExtension(ViewNode& node, const OpaqueProbeModifier& modifier) {
-  static_cast<void>(node);
-  static_cast<void>(modifier);
-}
+OpaqueProbeModifierExtension::OpaqueProbeModifierExtension(ViewNode&, const OpaqueProbeModifier&) {}
 
-void OpaqueProbeModifierExtension::Update(ViewNode& node, const OpaqueProbeModifier& modifier) {
-  static_cast<void>(node);
-  static_cast<void>(modifier);
+void OpaqueProbeModifierExtension::Update(ViewNode&, const OpaqueProbeModifier&) {
   ++opaque_extension_updates;
 }
 
-ProbeModifierExtension::ProbeModifierExtension(ViewNode& node, const ProbeModifier& modifier)
+ProbeModifierExtension::ProbeModifierExtension(ViewNode&, const ProbeModifier& modifier)
     : value(modifier.value) {
-  static_cast<void>(node);
   ++extension_creations;
 }
 
-void ProbeModifierExtension::Update(ViewNode& node, const ProbeModifier& modifier) {
-  static_cast<void>(node);
+void ProbeModifierExtension::Update(ViewNode&, const ProbeModifier& modifier) {
   value = modifier.value;
   ++extension_updates;
 }
@@ -639,7 +633,6 @@ View DuplicateKeyApp() {
 View RepeatedUseStateApp() {
   std::vector<View> children;
   for (int index = 0; index < 3; ++index) {
-    static_cast<void>(index);
     auto value = UseState(0);
     children.emplace_back(Button(std::to_string(value.Get())).OnClick([value] { value += 1; }));
   }
@@ -737,16 +730,11 @@ struct ThrowingModifier {
   using Extension = ThrowingModifierExtension;
 };
 
-ThrowingModifierExtension::ThrowingModifierExtension(ViewNode& node, const ThrowingModifier& modifier) {
-  static_cast<void>(node);
-  static_cast<void>(modifier);
+ThrowingModifierExtension::ThrowingModifierExtension(ViewNode&, const ThrowingModifier&) {
   throw std::runtime_error("modifier creation failed");
 }
 
-void ThrowingModifierExtension::Update(ViewNode& node, const ThrowingModifier& modifier) {
-  static_cast<void>(node);
-  static_cast<void>(modifier);
-}
+void ThrowingModifierExtension::Update(ViewNode&, const ThrowingModifier&) {}
 
 State<bool> throwing_modifier_visible;
 
@@ -815,13 +803,13 @@ TEST_CASE("TestStateOperatorsUseTheEqualityAwareWritePath") {
   mutate_and_expect([] { operator_state ^= 3; }, 11);
   mutate_and_expect([] { operator_state <<= 1; }, 22);
   mutate_and_expect([] { operator_state >>= 2; }, 5);
-  mutate_and_expect([] { static_cast<void>(++operator_state); }, 6);
+  mutate_and_expect([] { ++operator_state; }, 6);
 
   int previous = 0;
   mutate_and_expect([&] { previous = operator_state++; }, 7);
   REQUIRE(previous == 6);
 
-  mutate_and_expect([] { static_cast<void>(--operator_state); }, 6);
+  mutate_and_expect([] { --operator_state; }, 6);
   mutate_and_expect([&] { previous = operator_state--; }, 5);
   REQUIRE(previous == 6);
 
@@ -1306,8 +1294,8 @@ TEST_CASE("TextStyleSetsTheCompleteStyleBeforeModifiers") {
 
 TEST_CASE("PropertyModifiersApplyOncePerMountedDeclarationResolution") {
   property_modifier_applications = 0;
-  static_cast<void>(Text("Declaration").With(PropertyProbe{true}));
-  static_cast<void>(Checkbox(false));
+  HUXERUI_DISCARD(Text("Declaration").With(PropertyProbe{true}));
+  HUXERUI_DISCARD(Checkbox(false));
   REQUIRE(property_modifier_applications == 0);
 
   TestPlatform platform;

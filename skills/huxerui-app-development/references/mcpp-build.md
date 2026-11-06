@@ -6,7 +6,7 @@ Use this reference only for an existing mcpp project that manually consumes a pr
 
 ## Resolve the selected SDK
 
-Use the project's configured SDK path first, then `HUXERUI_HOME` or the SDK surrounding the selected `huxerui` executable. Verify that it contains `include/huxerui/huxerui.h` and `lib/cmake/HuxerUI/HuxerUIConfig.cmake`. Inspect `huxerui mcpp --help` and the installed mcpp help before relying on flags.
+Use the project's configured SDK path first. If it does not specify one, follow [SDK discovery](project-workflow.md#locate-the-tools-and-sdk). Verify that the selected SDK contains `include/huxerui/huxerui.h` and locate its `HuxerUIConfig.cmake`. Inspect `huxerui mcpp --help` and the installed mcpp help before relying on flags.
 
 Read the installed exported targets and platform package fragments for include paths, library names, transitive libraries, link options, and runtime files. Use release metadata for that exact artifact to establish compiler, architecture, standard library, runtime linkage, and deployment baseline. An unrelated source checkout's current CI is not evidence of how an older SDK binary was built.
 

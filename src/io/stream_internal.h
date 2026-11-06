@@ -13,19 +13,19 @@
 namespace huxerui::detail {
 
 [[nodiscard]] IoErrorCode IoErrorCategory(const std::error_code& error) noexcept;
-[[nodiscard]] Task<AsyncInputStream> OpenWorkerInput(std::function<InputStream()> open);
+Task<AsyncInputStream> OpenWorkerInput(std::function<InputStream()> open);
 [[nodiscard]] AsyncInputStream MakeWorkerAsyncInput(InputStream input);
 [[nodiscard]] AsyncInputStream MakeMemoryAsyncInput(InputStream input);
 #if defined(__EMSCRIPTEN__)
-[[nodiscard]] Task<InputStream> RunQueuedInputOpen(std::function<InputStream()> open);
-[[nodiscard]] Task<IoResult<Bytes>> RunQueuedInputRead(std::function<IoResult<Bytes>()> read);
+Task<InputStream> RunQueuedInputOpen(std::function<InputStream()> open);
+Task<IoResult<Bytes>> RunQueuedInputRead(std::function<IoResult<Bytes>()> read);
 #endif
 
 class InputStreamState {
 public:
   virtual ~InputStreamState() = default;
 
-  [[nodiscard]] virtual IoResult<std::size_t> Read(std::span<std::byte> buffer) = 0;
+  virtual IoResult<std::size_t> Read(std::span<std::byte> buffer) = 0;
   virtual void Release() noexcept = 0;
 };
 
@@ -33,8 +33,8 @@ class OutputStreamState {
 public:
   virtual ~OutputStreamState() = default;
 
-  [[nodiscard]] virtual IoResult<void> Write(std::span<const std::byte> data) = 0;
-  [[nodiscard]] virtual IoResult<void> Close() = 0;
+  virtual IoResult<void> Write(std::span<const std::byte> data) = 0;
+  virtual IoResult<void> Close() = 0;
   virtual void Abort() noexcept = 0;
 };
 
@@ -42,7 +42,7 @@ class AsyncInputStreamState {
 public:
   virtual ~AsyncInputStreamState() = default;
 
-  [[nodiscard]] virtual Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) = 0;
+  virtual Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) = 0;
   virtual void Cancel() noexcept = 0;
 
   void Reserve(const char* operation);
@@ -64,8 +64,8 @@ class AsyncOutputStreamState {
 public:
   virtual ~AsyncOutputStreamState() = default;
 
-  [[nodiscard]] virtual Task<IoResult<void>> WriteAsync(Bytes data) = 0;
-  [[nodiscard]] virtual Task<IoResult<void>> CloseAsync() = 0;
+  virtual Task<IoResult<void>> WriteAsync(Bytes data) = 0;
+  virtual Task<IoResult<void>> CloseAsync() = 0;
   virtual void Abort() noexcept = 0;
 
   void Reserve(const char* operation);

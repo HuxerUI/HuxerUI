@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "linux_external_texture_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -333,7 +334,7 @@ CopyGlFrame(const linux::GlTexture::Frame& frame, std::shared_ptr<LinuxGlRelease
   if (texture == nullptr) {
     throw std::runtime_error("HuxerUI could not build the Linux GL texture snapshot");
   }
-  static_cast<void>(resources.release());
+  HUXERUI_DISCARD(resources.release());
   objects.texture = 0;
   objects.sync = nullptr;
   auto result = std::make_shared<const LinuxGdkTextureFrame>(texture, frame.origin);

@@ -116,8 +116,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const HoverProbe& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const HoverProbe& modifier) {
     hovered_ = modifier.hovered;
   }
 
@@ -125,8 +124,7 @@ public:
     return node.Bounds().Contains(position);
   }
 
-  void OnHover(ViewNode& node, const HoverEvent& event) override {
-    static_cast<void>(node);
+  void OnHover(ViewNode&, const HoverEvent& event) override {
     if (hovered_) {
       *hovered_ = event.type != HoverEventType::Leave;
     }

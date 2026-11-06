@@ -26,7 +26,7 @@ public:
     if (metrics == nullptr || metrics->right_inset <= 0.0F || metrics->height <= 0.0F) {
       LayoutResult result;
       for (huxerui::ViewNode& child : node.Children()) {
-        static_cast<void>(context.Measure(child, {0.0F, 0.0F, 0.0F, 0.0F}));
+        context.Measure(child, {0.0F, 0.0F, 0.0F, 0.0F});
         result.Place(child, {});
       }
       return result.SetSize(constraints.Constrain({constraints.max_width, constraints.max_height}));
@@ -42,7 +42,7 @@ public:
     LayoutResult result;
     for (std::size_t index = 0; index < node.ChildCount(); ++index) {
       huxerui::ViewNode& child = node.ChildAt(index);
-      static_cast<void>(context.Measure(child, {button_width, button_width, height, height}));
+      context.Measure(child, {button_width, button_width, height, height});
       result.Place(child, {left + button_width * static_cast<float>(index), 0.0F});
     }
     return result.SetSize(constraints.Constrain({constraints.max_width, constraints.max_height}));
@@ -233,7 +233,6 @@ void WindowService::UpdateLifecycleState(WindowLifecycleState state) {
   if (lifecycle_handlers_.empty()) return;
   std::vector<std::uint64_t> recipients;
   for (const auto& [identity, handler] : lifecycle_handlers_) {
-    static_cast<void>(handler);
     recipients.push_back(identity);
   }
   const std::weak_ptr<WindowService> weak = weak_from_this();

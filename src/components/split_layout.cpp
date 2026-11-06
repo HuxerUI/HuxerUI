@@ -302,7 +302,7 @@ public:
     float offset = 0.0F;
     const auto place = [&](ViewNode& child, float extent) {
       const Rect bounds = geometry.Region(offset, extent);
-      static_cast<void>(context.Measure(child, {bounds.width, bounds.width, bounds.height, bounds.height}));
+      context.Measure(child, {bounds.width, bounds.width, bounds.height, bounds.height});
       result.Place(child, {bounds.x, bounds.y});
       offset += extent;
     };

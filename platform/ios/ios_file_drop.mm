@@ -14,6 +14,7 @@
 #include <huxerui/file_drop.h>
 
 #include "uikit_view.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -158,7 +159,6 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
 }
 
 - (BOOL)dropInteraction:(UIDropInteraction*)interaction canHandleSession:(id<UIDropSession>)session {
-  static_cast<void>(interaction);
   if (session.items.count == 0) {
     return NO;
   }
@@ -182,7 +182,7 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
   ++_session;
   const CGPoint point = [session locationInView:view];
   try {
-    static_cast<void>(view->huxeruiWindow->HandleFileDragEntered(
+    HUXERUI_DISCARD(view->huxeruiWindow->HandleFileDragEntered(
         _session, huxerui::detail::IosDropOffer(session), {static_cast<float>(point.x), static_cast<float>(point.y)}
     ));
   } catch (...) {
@@ -207,7 +207,6 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
 }
 
 - (void)dropInteraction:(UIDropInteraction*)interaction sessionDidExit:(id<UIDropSession>)session {
-  static_cast<void>(interaction);
   HuxerUIView* view = _view;
   if (_hover != session) {
     return;
@@ -226,7 +225,7 @@ FileDropPreparation CaptureIosFileDrop(id<UIDropSession> session) {
   if (view != nil && view->huxeruiWindow != nullptr && _hover == session) {
     const CGPoint point = [session locationInView:view];
     try {
-      static_cast<void>(view->huxeruiWindow->HandleFileDrop(
+      HUXERUI_DISCARD(view->huxeruiWindow->HandleFileDrop(
           _session, huxerui::detail::IosDropOffer(session), {static_cast<float>(point.x), static_cast<float>(point.y)},
           huxerui::detail::CaptureIosFileDrop(session)
       ));

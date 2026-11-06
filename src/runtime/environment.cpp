@@ -79,7 +79,6 @@ EnvironmentTransaction::EnvironmentTransaction(
       parent_changed_ = true;
       mounted.parent_ = std::move(parent);
       for (auto& [key, entry] : mounted.entries_) {
-        static_cast<void>(key);
         if (!entry.value.has_value()) {
           begin_change(entry);
         }

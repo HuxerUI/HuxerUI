@@ -127,7 +127,6 @@ PlatformChannel GetJavaPlatformViewChannel(const std::shared_ptr<JavaPlatformVie
 
 template <class Properties> PlatformPayload EncodeJavaPlatformViewProperties(const PlatformValue& value) {
   if constexpr (std::same_as<Properties, void>) {
-    static_cast<void>(value);
     return {};
   } else {
     static_assert(huxerui::detail::PlatformPayloadEncodable<Properties>);
@@ -447,8 +446,7 @@ template <class Instance> struct PlatformViewFactory<void, Instance, void> {
   std::function<void(JNIEnv*, Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
-    static_cast<void>(ui_window);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow&) && {
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -463,8 +461,7 @@ template <class Instance, class Controller> struct PlatformViewFactory<void, Ins
   std::function<void(JNIEnv*, Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
-    static_cast<void>(ui_window);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow&) && {
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -478,8 +475,7 @@ template <class Properties, class Instance> struct PlatformViewFactory<Propertie
   std::function<void(JNIEnv*, Instance&)> dispose;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
-    static_cast<void>(ui_window);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow&) && {
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;
@@ -495,8 +491,7 @@ template <class Properties, class Instance, class Controller> struct PlatformVie
   std::function<void(JNIEnv*, Instance&, const Controller&)> disconnect;
 
 private:
-  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& ui_window) && {
-    static_cast<void>(ui_window);
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow&) && {
     return detail::ErasePlatformViewFactory(std::move(*this));
   }
   friend class huxerui::detail::PlatformRegistry;

@@ -152,7 +152,7 @@ struct LinuxTimerState : huxerui::example::TimerService {
         ++generation;
         pending_start.reset();
         tick_handler = {};
-        static_cast<void>(DisarmLocked());
+        DisarmLocked();
       }
     }
 
@@ -196,7 +196,7 @@ private:
   }
 
   bool ArmLocked(std::int64_t milliseconds) {
-    static_cast<void>(DisarmLocked());
+    DisarmLocked();
     itimerspec timer{};
     timer.it_value.tv_sec = static_cast<time_t>(milliseconds / 1000);
     timer.it_value.tv_nsec = static_cast<long>((milliseconds % 1000) * 1'000'000);

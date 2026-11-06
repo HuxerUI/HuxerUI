@@ -468,7 +468,7 @@ public:
   [[nodiscard]] Bytes ReadBytes(bool cache = false) const;
   [[nodiscard]] std::string ReadString(bool cache = false) const;
   [[nodiscard]] InputStream OpenRead() const;
-  [[nodiscard]] Task<AsyncInputStream> OpenReadAsync() const;
+  Task<AsyncInputStream> OpenReadAsync() const;
   [[nodiscard]] std::string_view MimeType() const noexcept;
   [[nodiscard]] bool HasValue() const noexcept;
 

@@ -159,7 +159,6 @@ public:
       open_ = false;
       cancellations.reserve(pending_.size());
       for (auto& [request, call] : pending_) {
-        static_cast<void>(request);
         if (call.cancel) {
           cancellations.push_back(std::move(call.cancel));
         }

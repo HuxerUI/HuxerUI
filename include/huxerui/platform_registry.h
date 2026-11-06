@@ -290,7 +290,6 @@ template <class Value> Value DecodePlatformPayload(const PlatformPayload& payloa
 
 template <class Value> PlatformPayload EncodePlatformValue(const Value& value) {
   if constexpr (std::same_as<Value, std::monostate>) {
-    static_cast<void>(value);
     return {};
   } else if constexpr (std::same_as<Value, PlatformPayload>) {
     return value;
@@ -371,7 +370,7 @@ template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescrip
           throw std::logic_error("HuxerUI fieldless platform event payload must be null");
         }
         if constexpr (std::is_void_v<Result>) {
-          static_cast<void>(EmitEvent<Key>(bindings));
+          EmitEvent<Key>(bindings);
           return std::nullopt;
         } else {
           std::optional<Result> result = EmitEvent<Key>(bindings);
@@ -388,7 +387,7 @@ template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescrip
             throw std::logic_error("HuxerUI fieldless platform event carried a value");
           }
           if constexpr (std::is_void_v<Result>) {
-            static_cast<void>(EmitEvent<Key>(bindings));
+            EmitEvent<Key>(bindings);
             return std::nullopt;
           } else {
             std::optional<Result> result = EmitEvent<Key>(bindings);
@@ -405,7 +404,7 @@ template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescrip
           [](const PlatformPayload& payload, const EventBindings& bindings) -> std::optional<PlatformPayload> {
         Value value = DecodePlatformPayload<Value>(payload);
         if constexpr (std::is_void_v<Result>) {
-          static_cast<void>(EmitEvent<Key>(bindings, value));
+          EmitEvent<Key>(bindings, value);
           return std::nullopt;
         } else {
           std::optional<Result> result = EmitEvent<Key>(bindings, value);
@@ -419,7 +418,7 @@ template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescrip
         typeid(Value),
         [](const PlatformValue& value, const EventBindings& bindings) -> std::optional<PlatformValue> {
           if constexpr (std::is_void_v<Result>) {
-            static_cast<void>(EmitEvent<Key>(bindings, value.Get<Value>()));
+            EmitEvent<Key>(bindings, value.Get<Value>());
             return std::nullopt;
           } else {
             std::optional<Result> result = EmitEvent<Key>(bindings, value.Get<Value>());
@@ -635,7 +634,6 @@ private:
     /// @return The movable factory result with its registered type preserved.
     template <class Host> ModuleInstance Invoke(Host& host, const PlatformValue* options) {
       if constexpr (std::same_as<Options, void>) {
-        static_cast<void>(options);
         static_assert(std::same_as<std::invoke_result_t<Factory&, Host&>, Module>,
                       "HuxerUI PlatformModule factory must return exactly Module");
         return ModuleInstance(std::invoke(factory_, host));
@@ -721,7 +719,7 @@ public:
   auto Emit() const {
     using Result = typename detail::PlatformEventSignature<typename Key::Signature>::ResultType;
     if constexpr (std::is_void_v<Result>) {
-      static_cast<void>(EmitValue(typeid(Key), {}));
+      EmitValue(typeid(Key), {});
     } else {
       const std::optional<PlatformValue> result = EmitValue(typeid(Key), {});
       return result.has_value() ? std::optional<Result>{result->Get<Result>()} : std::nullopt;
@@ -736,7 +734,7 @@ public:
   auto Emit(Value&& value) const {
     using Result = typename detail::PlatformEventSignature<typename Key::Signature>::ResultType;
     if constexpr (std::is_void_v<Result>) {
-      static_cast<void>(EmitValue(typeid(Key), PlatformValue::Store(std::forward<Value>(value))));
+      EmitValue(typeid(Key), PlatformValue::Store(std::forward<Value>(value)));
     } else {
       const std::optional<PlatformValue> result =
           EmitValue(typeid(Key), PlatformValue::Store(std::forward<Value>(value)));

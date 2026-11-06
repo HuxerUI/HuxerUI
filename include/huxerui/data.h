@@ -89,14 +89,14 @@ public:
   /// Selects success explicitly, including when T and ErrorT are identical.
   /// @param value Owned payload to store in the success alternative.
   /// @return A result with Succeeded() equal to true.
-  [[nodiscard]] static Result Success(T value) {
+  static Result Success(T value) {
     return Result(std::in_place_index<0>, std::move(value));
   }
 
   /// Selects failure explicitly.
   /// @param error Owned domain error to store, even if its own value is empty.
   /// @return A result with Succeeded() equal to false.
-  [[nodiscard]] static Result Failure(ErrorT error) {
+  static Result Failure(ErrorT error) {
     return Result(std::in_place_index<1>, std::move(error));
   }
 
@@ -201,14 +201,14 @@ public:
 
   /// Selects success without a payload.
   /// @return A result with Succeeded() equal to true.
-  [[nodiscard]] static Result Success() {
+  static Result Success() {
     return Result();
   }
 
   /// Selects failure explicitly.
   /// @param error Owned domain error to store, even if its own value is empty.
   /// @return A result with Succeeded() equal to false.
-  [[nodiscard]] static Result Failure(ErrorT error) {
+  static Result Failure(ErrorT error) {
     return Result(std::move(error));
   }
 

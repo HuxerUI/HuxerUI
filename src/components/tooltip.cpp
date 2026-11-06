@@ -50,8 +50,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(huxerui::ViewNode& node, const TooltipSurfaceHover& modifier) {
-    static_cast<void>(node);
+  void Update(huxerui::ViewNode&, const TooltipSurfaceHover& modifier) {
     target_ = modifier.target;
   }
 
@@ -65,8 +64,7 @@ public:
     return node.Bounds().Contains(position);
   }
 
-  void OnHover(huxerui::ViewNode& node, const HoverEvent& event) override {
-    static_cast<void>(node);
+  void OnHover(huxerui::ViewNode&, const HoverEvent& event) override {
     if (event.type == HoverEventType::Move) {
       return;
     }
@@ -528,8 +526,7 @@ public:
     return true;
   }
 
-  void OnHover(huxerui::ViewNode& node, const HoverEvent& event) override {
-    static_cast<void>(node);
+  void OnHover(huxerui::ViewNode&, const HoverEvent& event) override {
     if (event.type == HoverEventType::Move) {
       target_->anchor_hovered = true;
       hover_deadline_.reset();
@@ -548,8 +545,7 @@ public:
     }
   }
 
-  PointerResult OnPointer(huxerui::ViewNode& node, const PointerEvent& event) override {
-    static_cast<void>(node);
+  PointerResult OnPointer(huxerui::ViewNode&, const PointerEvent& event) override {
     if (event.type == PointerEventType::Down && event.device_kind != PointerDeviceKind::Touch) {
       Hide(true);
     }

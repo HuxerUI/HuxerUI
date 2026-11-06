@@ -21,7 +21,7 @@ public:
   using VirtualLayout::VirtualLayout;
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
+  Measure(VirtualLayoutContext& context, ViewNode&, huxerui::Constraints constraints) {
     ++virtual_strip_measure_calls;
     constexpr float item_extent = 25.0F;
     const auto viewport = context.Viewport();
@@ -38,22 +38,20 @@ public:
     VirtualLayoutResult result;
     for (std::size_t index = first; index < last; ++index) {
       ViewNode& item = context.Item(index);
-      static_cast<void>(context.Measure(item, constraints.LooseHeight().TightHeight(item_extent)));
+      context.Measure(item, constraints.LooseHeight().TightHeight(item_extent));
       result.Place(item, {0.0F, static_cast<float>(index) * item_extent});
     }
 
     const float content_height = static_cast<float>(count) * item_extent;
     const Size size = constraints.Constrain({constraints.max_width, content_height});
     result.SetAxis(Axis::Vertical).SetSize(size).SetContentSize({size.width, content_height});
-    static_cast<void>(node);
     return result;
   }
 
   static std::optional<float>
-  ScrollOffsetForItem(ViewNode& node, std::size_t index, ScrollAlignment alignment, float viewport_extent) {
+  ScrollOffsetForItem(ViewNode&, std::size_t index, ScrollAlignment alignment, float viewport_extent) {
     constexpr float item_extent = 25.0F;
     const float start = static_cast<float>(index) * item_extent;
-    static_cast<void>(node);
     switch (alignment) {
     case ScrollAlignment::Center:
       return start - (viewport_extent - item_extent) * 0.5F;
@@ -139,10 +137,10 @@ public:
       if (item.LayoutValueOr<TestGridSpan>(std::size_t{1}) != cell.span) {
         throw std::logic_error("HuxerUI test virtual grid item span does not match its plan");
       }
-      static_cast<void>(context.Measure(
+      context.Measure(
           item,
           constraints.Loose().TightWidth(cell_width * static_cast<float>(cell.span)).TightHeight(row_height)
-      ));
+      );
       result.Place(
           item,
           {
@@ -223,12 +221,11 @@ public:
   using VirtualLayout::VirtualLayout;
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
+  Measure(VirtualLayoutContext& context, ViewNode&, huxerui::Constraints constraints) {
     ViewNode& item = context.Item(0);
     const Size item_size = context.Measure(item, constraints.Loose());
     VirtualLayoutResult result;
     result.Place(item, {}, SemanticCollectionItem{.index = 0});
-    static_cast<void>(node);
     return result.SetSize(constraints.Constrain(item_size)).SetContentSize(item_size);
   }
 };
@@ -238,7 +235,7 @@ public:
   using VirtualLayout::VirtualLayout;
 
   static VirtualLayoutResult
-  Measure(VirtualLayoutContext& context, ViewNode& node, huxerui::Constraints constraints) {
+  Measure(VirtualLayoutContext& context, ViewNode&, huxerui::Constraints constraints) {
     ViewNode& item = context.Item(0);
     const Size item_size = context.Measure(item, constraints.Loose());
     VirtualLayoutResult result;
@@ -252,7 +249,6 @@ public:
         }
     );
     result.Place(item, {}, SemanticCollectionItem{.index = 1, .row_index = 0, .column_index = 0});
-    static_cast<void>(node);
     return result.SetSize(constraints.Constrain(item_size)).SetContentSize(item_size);
   }
 };
@@ -267,8 +263,8 @@ public:
       return result.SetSize(constraints.Constrain({}));
     }
     ViewNode& child = node.ChildAt(0);
-    static_cast<void>(context.Measure(child, Constraints{100.0F, 100.0F, 300.0F, 300.0F}));
-    static_cast<void>(context.Measure(child, Constraints{100.0F, 100.0F, 100.0F, 100.0F}));
+    context.Measure(child, Constraints{100.0F, 100.0F, 300.0F, 300.0F});
+    context.Measure(child, Constraints{100.0F, 100.0F, 100.0F, 100.0F});
     result.Place(child, {});
     return result.SetSize(constraints.Constrain({100.0F, 300.0F}));
   }
@@ -1419,7 +1415,7 @@ TEST_CASE("TestBuiltInVirtualGridLayoutStateAndResizeAnchor") {
 
   bool invalid_columns_rejected = false;
   try {
-    static_cast<void>(GridColumns::Fixed(0));
+    GridColumns::Fixed(0);
   } catch (const std::invalid_argument&) {
     invalid_columns_rejected = true;
   }

@@ -104,10 +104,10 @@ Use `macos::ObjectiveCPlatformModuleFactory` for AppKit.
 The framework does not look up a class name, generate a registrant, or require the application delegate to register the factory again.
 For an iOS window service, use `ios::ObjectiveCWindowPlatformModuleFactory`; application services use `ios::ObjectiveCPlatformModuleFactory` as above and do not require UI.
 Direct Objective-C++ window implementations use `ios::WindowPlatformModuleFactory` or `macos::PlatformModuleFactory`; direct iOS application factories accept `Runtime&` and do not use payloads.
-iOS window modules retain `presentationCoordinator(for: viewController)` and use `enqueue(start:failure:)` to share FilePicker's FIFO presentation queue.
-All calls and callbacks run on the main thread. Active cancellation keeps the slot until actual dismiss completion calls `finished`; a queued cancellation prevents start, and a closed coordinator never rebinds.
-Return native cancellation from start, or nil only after synchronous `finished`. Keep provider work cancellation separate from presentation completion.
-Use a UI Task scope for picker work; acquired FileReferences can then move to application work. See [iOS native presentation](../../../docs/guide/extending.md#ios-native-presentation).
+iOS window modules retain `presentationCoordinator(for: viewController)` from the original factory controller and use `enqueue(start:failure:)` to share FilePicker's FIFO presentation queue. Inactive windows pause admission. An unavailable window or unmanaged modal triggers the failure callback.
+Run coordinator calls and callbacks on the main thread. Install native UI synchronously in `start` and return its cancellation handle. If startup leaves no UI, call `finished` synchronously before returning `nil`.
+Canceling a queued request prevents it from starting. Active cancellation holds the slot until the UI is gone and `finished` runs. Call it from the programmatic dismissal completion or from `presentationControllerDidDismiss` for interactive dismissal. Window teardown closes the coordinator permanently.
+Keep provider work cancellation separate from presentation completion. Use a UI Task scope for picker work and hand acquired `FileReference` values to application work afterward. See [File picker](resources-files-network.md#file-picker) for the public picker contract.
 
 `PlatformChannel::Invoke` returns a request identity before scheduling the platform invocation on the owning UI thread.
 Use `Invoke<Result>(method, completion)` when both the argument and result are Null; the typed C++ completion receives `PlatformResult<std::monostate>`.

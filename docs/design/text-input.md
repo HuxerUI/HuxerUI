@@ -457,9 +457,7 @@ public:
 
   virtual void Stop(TextInputSessionId session_id) = 0;
 
-  virtual void RequestShow(TextInputSessionId session_id) {
-    static_cast<void>(session_id);
-  }
+  virtual void RequestShow(TextInputSessionId) {}
 };
 ```
 

@@ -43,7 +43,7 @@ View PlatformSpecificDemo() {
     Text("The module returns one capability; platform frames then bypass PlatformModule callbacks."),
     Button("Load platform color stream").OnClick([color_stream, stream_texture, stream_status] {
       stream_status = "Waiting for the platform texture";
-      static_cast<void>(color_stream->Texture(
+      color_stream->Texture(
           [stream_texture, stream_status](PlatformResult<std::shared_ptr<ExternalTexture>> result) {
             if (const auto* error = std::get_if<PlatformError>(&result)) {
               stream_status = error->message;
@@ -51,8 +51,7 @@ View PlatformSpecificDemo() {
             }
             stream_texture = std::get<std::shared_ptr<ExternalTexture>>(std::move(result));
             stream_status = "Streaming";
-          }
-      ));
+          });
     }),
     std::move(stream_preview),
   }.With(
@@ -83,7 +82,7 @@ View PlatformModuleDemo() {
       Button("Start").OnClick([timer, tick, pending_start, status] {
         const PlatformRequestId previous = pending_start;
         if (previous != 0) {
-          static_cast<void>(timer->Cancel(previous));
+          timer->Cancel(previous);
         }
         status = "Waiting for the first platform tick";
         pending_start = timer->Start(
@@ -101,10 +100,10 @@ View PlatformModuleDemo() {
         pending_start = 0;
       }),
       Button("Stop").OnClick([timer, pending_start, status] {
-        static_cast<void>(timer->Stop([pending_start, status](PlatformResult<std::monostate> result) {
+        timer->Stop([pending_start, status](PlatformResult<std::monostate> result) {
           pending_start = 0;
           status = ResultStatus(result, "Stopped");
-        }));
+        });
       }),
     }.With(Spacing(theme.spacing.medium)),
     PlatformSpecificDemo(),

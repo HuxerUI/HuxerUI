@@ -23,6 +23,7 @@
 
 #include "win32_internal.h"
 #include "win32_platform_view.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -581,7 +582,6 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
     {
       std::scoped_lock lock(mutex);
       for (const auto& [id, provider] : providers) {
-        static_cast<void>(id);
         retained.push_back(provider);
       }
       providers.clear();
@@ -1692,9 +1692,9 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
     return;
   }
   if (StructureChanged(previous.get(), frame.get())) {
-    static_cast<void>(UiaRaiseStructureChangedEvent(root, StructureChangeType_ChildrenInvalidated, nullptr, 0));
+    HUXERUI_DISCARD(UiaRaiseStructureChangedEvent(root, StructureChangeType_ChildrenInvalidated, nullptr, 0));
   } else if (LayoutChanged(previous.get(), frame.get())) {
-    static_cast<void>(UiaRaiseAutomationEvent(root, UIA_LayoutInvalidatedEventId));
+    HUXERUI_DISCARD(UiaRaiseAutomationEvent(root, UIA_LayoutInvalidatedEventId));
   }
   root->Release();
 
@@ -1718,7 +1718,7 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       VARIANT old_value{};
       VARIANT new_value{};
       if (SUCCEEDED(SetStringVariant(&old_value, before)) && SUCCEEDED(SetStringVariant(&new_value, after))) {
-        static_cast<void>(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
+        HUXERUI_DISCARD(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
       }
       VariantClear(&old_value);
       VariantClear(&new_value);
@@ -1731,7 +1731,7 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       VARIANT new_value{};
       SetBoolVariant(&old_value, before);
       SetBoolVariant(&new_value, after);
-      static_cast<void>(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
+      HUXERUI_DISCARD(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
     };
     const auto raise_int = [provider](PROPERTYID property, LONG before, LONG after) {
       if (before == after) {
@@ -1741,7 +1741,7 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       VARIANT new_value{};
       SetIntVariant(&old_value, before);
       SetIntVariant(&new_value, after);
-      static_cast<void>(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
+      HUXERUI_DISCARD(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
     };
     const auto raise_double = [provider](PROPERTYID property, double before, double after) {
       if (before == after) {
@@ -1751,7 +1751,7 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       VARIANT new_value{};
       SetDoubleVariant(&old_value, before);
       SetDoubleVariant(&new_value, after);
-      static_cast<void>(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
+      HUXERUI_DISCARD(UiaRaiseAutomationPropertyChangedEvent(provider, property, old_value, new_value));
     };
     raise_string(
         UIA_NamePropertyId,
@@ -1778,7 +1778,7 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
     if (old->selected && node.selected) {
       raise_bool(UIA_SelectionItemIsSelectedPropertyId, *old->selected, *node.selected);
       if (!*old->selected && *node.selected) {
-        static_cast<void>(UiaRaiseAutomationEvent(provider, UIA_SelectionItem_ElementSelectedEventId));
+        HUXERUI_DISCARD(UiaRaiseAutomationEvent(provider, UIA_SelectionItem_ElementSelectedEventId));
       }
     }
     if (old->expanded && node.expanded) {
@@ -1814,12 +1814,12 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       );
     }
     if (old->focused != node.focused && node.focused) {
-      static_cast<void>(UiaRaiseAutomationEvent(provider, UIA_AutomationFocusChangedEventId));
+      HUXERUI_DISCARD(UiaRaiseAutomationEvent(provider, UIA_AutomationFocusChangedEventId));
     }
     raise_int(UIA_LiveSettingPropertyId, LiveRegionSetting(old->live_region), LiveRegionSetting(node.live_region));
     if (node.live_region != SemanticLiveRegion::None &&
         (old->live_region != node.live_region || old->label != node.label)) {
-      static_cast<void>(UiaRaiseAutomationEvent(provider, UIA_LiveRegionChangedEventId));
+      HUXERUI_DISCARD(UiaRaiseAutomationEvent(provider, UIA_LiveRegionChangedEventId));
     }
     provider->Release();
   }
@@ -1838,7 +1838,7 @@ void Win32Accessibility::Reset() noexcept {
   }
   if (window != nullptr) {
     // UI Automation keeps a per-HWND provider map that must be disconnected before the HWND becomes invalid.
-    static_cast<void>(UiaReturnRawElementProvider(window, 0, 0, nullptr));
+    HUXERUI_DISCARD(UiaReturnRawElementProvider(window, 0, 0, nullptr));
   }
   state_->ReleaseProviders();
 }

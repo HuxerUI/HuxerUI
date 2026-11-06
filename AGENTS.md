@@ -62,6 +62,12 @@ Repository prose, documentation, diagnostics, identifiers, examples, and new com
 
 Comments explain non-obvious invariants, lifetimes, platform limitations, or algorithmic reasons. Do not restate code or add numbered procedural comments, `Step` comments, decorative separators such as `// ---` or `// ===`, or generated-sounding narration.
 
+Omit unused parameter names in function definitions and keep unused-parameter warnings enabled. Use the private `HUXERUI_UNUSED(name)` for a single identifier whose name must remain, for example when another platform branch uses it.
+
+Follow the called API's contract when deciding whether to ignore its result. Use the private `HUXERUI_DISCARD(expression)` when the discard needs to be explicit, such as for a `[[nodiscard]]` result.
+
+Keep one-off helper macros in the implementation file that uses them.
+
 Use `.clang-format` as the reference baseline for non-DSL code:
 
 - C++ and Objective-C++: two-space indentation, 120-column limit, no tabs.
@@ -271,35 +277,15 @@ Finish with `git diff --check` and `git status --short`. Report important files,
 
 ## C++20/23 modules and the mcpp build
 
-HuxerUI has a second build system. CMake is the full-platform one and the only
-path to Android, iOS and Web; mcpp builds the framework and applications on
-Linux, Windows and macOS. **Neither reads the other's files.** `mcpp.toml`,
-`build.mcpp`, `mcpp/`, `modules/` and `templates/` are the mcpp leg, and no
-change to them may alter what CMake compiles.
+CMake builds all supported platforms. mcpp builds the framework and applications on Linux, Windows, and macOS. The mcpp files `mcpp.toml`, `build.mcpp`, `mcpp/`, `modules/`, and `templates/` are independent of CMake's build configuration.
 
-- `modules/huxerui.cppm` is generated from the public headers by
-  `huxerui-module-gen`, not written. A public name added to a header and not to
-  the shell is a name `import huxerui;` cannot see; CI checks it.
-- `import huxerui;` and `#include <huxerui/huxerui.h>` name the same entities.
-  Do not introduce a module-only API or a header-only one.
-- Macros do not cross a module boundary. Generated code must therefore carry no
-  macro name: `hcg` injects the expansion of `HUXERUI_SCOPE`, which is also
-  what hand-written module code should spell.
-- An mcpp application contains no `#include`. `import std;` is what makes
-  `std::type_info` visible to a caller that instantiates `typeid`, and the
-  `standard = "c++23"` pin that goes with it is a workaround for
-  [mcpp#603](https://github.com/mcpp-community/mcpp/issues/603), not a language
-  requirement — one line per manifest changes back when that closes.
-- A change to the framework's sources, defines or platform link interface must
-  be made in `mcpp.toml` as well as in `cmake/`. `huxerui-build-check` compares
-  the two and names what is missing.
-- `mcpp test` runs the unit suite against the mcpp-built framework. It compiles
-  the same files `tests/unit/CMakeLists.txt` does; do not copy them.
+- Keep the public API available through both `import huxerui;` and `#include <huxerui/huxerui.h>`. Use `huxerui-module-gen` to update `modules/huxerui.cppm` when public exports change.
+- `hcg` expands `HUXERUI_SCOPE` so generated scope code works in module units. In handwritten module code, spell explicit scopes with the exported `Scope` and `View` APIs.
+- Use imports in generated mcpp applications and preserve the template's language mode. Use `import std;` in units that instantiate HuxerUI templates or use standard-library declarations.
+- For platforms built by both systems, keep framework source selection, defines, and link dependencies aligned. Update the build definitions where needed and verify them with `huxerui-build-check`.
+- `mcpp test` builds the same unit-test sources as `tests/unit/CMakeLists.txt` against the mcpp-built framework. Keep both suites on the shared sources.
 
-The design is [`docs/design/mcpp-build-system.md`](docs/design/mcpp-build-system.md).
-For writing an application rather than changing the framework, the reference is
-[`skills/huxerui-app-development/references/cpp-modules-and-mcpp.md`](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md),
-which links the upstream mcpp documentation.
+See the [mcpp build design](docs/design/mcpp-build-system.md) for framework integration and the language-mode rationale. For application work, see [C++ Modules and mcpp](skills/huxerui-app-development/references/cpp-modules-and-mcpp.md).
 
 ## Documentation
 

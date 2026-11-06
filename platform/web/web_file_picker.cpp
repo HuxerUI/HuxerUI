@@ -17,6 +17,7 @@
 #include "io/file_internal.h"
 #include "io/stream_internal.h"
 #include "web_file_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -1039,7 +1040,7 @@ private:
     operation_ = val::take_ownership(CreateWebPickerOperation(request.as_handle()));
     auto callback = std::make_unique<std::shared_ptr<WebPickerOperation>>(shared_from_this());
     const std::uintptr_t native_handle = reinterpret_cast<std::uintptr_t>(callback.get());
-    static_cast<void>(callback.release());
+    HUXERUI_DISCARD(callback.release());
     StartWebPickerOperation(operation_.as_handle(), native_handle, WebFileHelpers().as_handle());
   }
 

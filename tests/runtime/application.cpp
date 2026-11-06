@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "application/platform_registry_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -183,7 +184,7 @@ TEST_CASE("Application services may be acquired from a worker but State remains 
   bool rejected_write = false;
   std::thread worker([&] {
     acquired = UseService<DemoViewModel>();
-    try { static_cast<void>(acquired->value.Get()); } catch (const std::logic_error&) { rejected_read = true; }
+    try { HUXERUI_DISCARD(acquired->value.Get()); } catch (const std::logic_error&) { rejected_read = true; }
     try { acquired->value = 1; } catch (const std::logic_error&) { rejected_write = true; }
   });
   worker.join();

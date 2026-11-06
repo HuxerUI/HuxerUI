@@ -19,6 +19,7 @@
 
 #include "io/file_internal.h"
 #include "macos_file_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -231,7 +232,7 @@ FileReference MakeMacReference(NSURL* url, bool writable, std::shared_ptr<MacFil
   return MakeLocalFileReference(
       File(MakeString(url.path)), writable, ReferenceContentType(url),
       [access = std::move(access)](const File* reading, const File* writing, const std::function<void()>& operation) {
-        static_cast<void>(access);
+        HUXERUI_UNUSED(access);
         @autoreleasepool {
           // Share the access lifetime, not a coordinator instance or a global I/O lock. Each operation
           // coordinates its read/write pair independently before running the shared native file code.

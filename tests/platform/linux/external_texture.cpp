@@ -628,7 +628,7 @@ TEST_CASE("LinuxExternalTexturePublicationSchedulesDamageThroughItsBoundRuntime"
   TestPlatform platform;
   UiWindow runtime{LinuxExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
-  static_cast<void>(runtime.BuildRenderFrame());
+  runtime.BuildRenderFrame();
 
   const int requests_before_publish = platform.requested_frames;
   const std::array<std::byte, 16> pixels{};
@@ -648,7 +648,7 @@ TEST_CASE("LinuxGdkTexturePublicationSchedulesDamageThroughItsBoundRuntime") {
   TestPlatform platform;
   UiWindow runtime{LinuxExternalTextureApp, platform};
   runtime.SetWindowMetrics({.viewport = {2.0F, 2.0F}});
-  static_cast<void>(runtime.BuildRenderFrame());
+  runtime.BuildRenderFrame();
 
   const int requests_before_publish = platform.requested_frames;
   const std::array<std::byte, 16> pixels{};

@@ -48,7 +48,6 @@
 }
 
 - (void)controlTextDidChange:(NSNotification*)notification {
-  static_cast<void>(notification);
   [_events emit:@"changed" payload:[HUXPlatformPayload stringValue:_view.stringValue]];
 }
 
@@ -62,7 +61,6 @@
 - (id<HUXAppKitPlatformView>)createWithWindow:(NSWindow*)window
                                    properties:(HUXPlatformPayload*)properties
                                        events:(id<HUXPlatformEventEmitter>)events {
-  static_cast<void>(window);
   return [[HuxerUIExamplePlatformTextFieldView alloc] initWithProperties:properties events:events];
 }
 

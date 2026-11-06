@@ -213,7 +213,6 @@ private:
 
 - (id<HUXPlatformModule>)createWithOptions:(HUXPlatformPayload*)options
                                    events:(id<HUXPlatformEventEmitter>)events {
-  static_cast<void>(options);
   return [[HuxerUIExampleTimerModule alloc] initWithEvents:events];
 }
 
@@ -227,8 +226,6 @@ private:
 - (id<HUXPlatformModule>)createWithWindow:(NSWindow*)window
                                   options:(HUXPlatformPayload*)options
                                    events:(id<HUXPlatformEventEmitter>)events {
-  static_cast<void>(window);
-  static_cast<void>(options);
   return [[HuxerUIExampleTimerModule alloc] initWithEvents:events];
 }
 

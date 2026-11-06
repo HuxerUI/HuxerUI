@@ -13,6 +13,7 @@
 #include <emscripten/val.h>
 
 #include "io/file_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -69,7 +70,7 @@ void StartNextWebFileOperation() {
   queue.operations.pop_front();
   queue.active = true;
   emscripten_async_call(RunWebFileOperation, operation.get(), 0);
-  static_cast<void>(operation.release());
+  HUXERUI_DISCARD(operation.release());
 }
 
 // clang-format off

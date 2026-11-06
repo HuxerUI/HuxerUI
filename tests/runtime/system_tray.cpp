@@ -40,7 +40,7 @@ void InstallSystemTray(ApplicationContext&) {
   });
 }
 View ApplicationOnlyApp() {
-  static_cast<void>(UseApplication());
+  UseApplication();
   return {};
 }
 

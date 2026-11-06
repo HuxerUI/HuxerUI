@@ -15,6 +15,7 @@
 #include "internal_access.h"
 #include "application/window_internal.h"
 #include "graphics/geometry_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui {
 namespace {
@@ -324,7 +325,7 @@ void SceneTransitionService::Run(
     throw std::logic_error("HuxerUI scene transitions cannot start recursively from mutation or effect evaluation");
   }
   const Size viewport = runtime_state_->window_->metrics.viewport;
-  static_cast<void>(request.transition.Evaluate({0.0F, {0.0F, 0.0F, viewport.width, viewport.height}, request.origin}));
+  HUXERUI_DISCARD(request.transition.Evaluate({0.0F, {0.0F, 0.0F, viewport.width, viewport.height}, request.origin}));
   MotionController progress{0.0F};
   progress.AnimateTo(1.0F, request.transition.Animation(), AnimationPlayback{.delay = request.transition.Delay()});
   const RenderNode* const committed_root = runtime_state_->frame_commit_.render_frame.scene.root;
@@ -409,8 +410,7 @@ public:
     }
   }
 
-  void Update(huxerui::ViewNode& node, const SceneTransitionAnchor& modifier) {
-    static_cast<void>(node);
+  void Update(huxerui::ViewNode&, const SceneTransitionAnchor& modifier) {
     if (state_ == modifier.state_) {
       return;
     }

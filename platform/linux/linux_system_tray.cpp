@@ -667,7 +667,6 @@ struct LinuxSystemTrayTransport::State {
         GVariant* payload = nullptr;
         guint timestamp = 0;
         g_variant_get(parameters, "(i&svu)", &id, &event, &payload, &timestamp);
-        static_cast<void>(timestamp);
         if (std::string_view(event) == "clicked") {
           state.Invoke(id);
         }
@@ -683,8 +682,6 @@ struct LinuxSystemTrayTransport::State {
         GVariant* payload = nullptr;
         guint timestamp = 0;
         while (g_variant_iter_loop(events, "(i&svu)", &id, &event, &payload, &timestamp)) {
-          static_cast<void>(payload);
-          static_cast<void>(timestamp);
           if (std::string_view(event) == "clicked") {
             state.Invoke(id);
           }

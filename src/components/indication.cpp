@@ -394,8 +394,7 @@ public:
         detail::MergeInvalidation(previous_phases, indication_.ActivePaintPhases()), surface_invalidation));
   }
 
-  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
+  NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const PaintInvalidation previous_phases = indication_.ActivePaintPhases();
     const MotionAdvanceResult indication_result = indication_.Advance(frame);
     const MotionAdvanceResult surface_result = surface_progress_.Advance(frame);

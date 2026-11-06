@@ -22,6 +22,7 @@
 #include "ui_window_internal.h"
 #include "task_internal.h"
 #include "application/application_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -268,7 +269,6 @@ public:
     posts.clear();
     auto tasks = std::move(tasks_);
     for (auto& [identity, execution] : tasks) {
-      static_cast<void>(identity);
       execution->CloseOnUi();
     }
     // Active callbacks and Tasks retain their own context until they finish or reach deferred cancellation.
@@ -479,7 +479,7 @@ void EnqueueWorkerOperation(std::function<void()> operation, const char* api_nam
   throw std::runtime_error(std::string("HuxerUI ") + api_name +
                            " is unavailable because this Web build has no worker execution capability");
 #else
-  static_cast<void>(api_name);
+  HUXERUI_UNUSED(api_name);
   WorkerExecutor::Instance().Submit(std::move(operation));
 #endif
 }

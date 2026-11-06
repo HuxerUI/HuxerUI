@@ -16,6 +16,7 @@
 #include "text/text_input_internal.h"
 #include "internal_access.h"
 #include "text/text_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui {
 namespace detail {
@@ -84,7 +85,7 @@ void ValidatePosition(const TextSelectionSource& source, const LogicalTextPositi
     throw std::invalid_argument("HuxerUI selection position must identify an existing block");
   }
   const auto text = source.BlockAt(*index).text;
-  static_cast<void>(text.TextInRange({position.position.offset, position.position.offset}));
+  HUXERUI_DISCARD(text.TextInRange({position.position.offset, position.position.offset}));
 }
 
 } // namespace

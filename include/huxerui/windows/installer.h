@@ -170,7 +170,7 @@ public:
   /// @throws std::invalid_argument if `initial` is nonempty and not absolute.
   /// @throws std::logic_error if the installer is not ready or has no attached window.
   /// @throws std::runtime_error if the Windows folder picker fails.
-  [[nodiscard]] Task<std::optional<std::filesystem::path>>
+  Task<std::optional<std::filesystem::path>>
   ChooseDestinationAsync(const std::filesystem::path& initial = {}) const;
   /// Plans and applies installation with optional overrides for the authored choices.
   /// @throws std::invalid_argument if `options.destination` is nonempty and not absolute.

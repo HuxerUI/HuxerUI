@@ -36,6 +36,7 @@
 
 #include "android_external_texture_internal.h"
 #include "android_renderer.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -1093,8 +1094,8 @@ bool GpuContext::Render(
     }
     EGLint width = target.pixel_width;
     EGLint height = target.pixel_height;
-    static_cast<void>(eglQuerySurface(state_->display, target.surface, EGL_WIDTH, &width));
-    static_cast<void>(eglQuerySurface(state_->display, target.surface, EGL_HEIGHT, &height));
+    HUXERUI_DISCARD(eglQuerySurface(state_->display, target.surface, EGL_WIDTH, &width));
+    HUXERUI_DISCARD(eglQuerySurface(state_->display, target.surface, EGL_HEIGHT, &height));
     if (width <= 0 || height <= 0) {
       state_->MakeUtilityCurrent();
       return false;
@@ -1299,7 +1300,6 @@ void AndroidTextureLayers::Commit(JNIEnv* environment, const RenderFrame& frame)
   const std::uint64_t generation = state_->BeginCommit();
   for (const TextureLayerDescriptor& descriptor : descriptors) {
     auto [found, inserted] = state_->layers.try_emplace(descriptor.key);
-    static_cast<void>(inserted);
     State::LayerSlot& layer = found->second;
     layer.seen_generation = generation;
     if (!descriptor.drawable) {

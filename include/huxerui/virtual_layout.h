@@ -70,7 +70,8 @@ public:
     return item_(state_, index);
   }
 
-  [[nodiscard]] Size Measure(ViewNode& item, Constraints constraints) const {
+  /// Measures the item and updates its ViewNode::LayoutSize().
+  Size Measure(ViewNode& item, Constraints constraints) const {
     return measure_(state_, item, constraints);
   }
 

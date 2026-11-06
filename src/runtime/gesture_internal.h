@@ -75,8 +75,7 @@ public:
   // requested deadline, so implementations compare rather than require equality. Recognition therefore does not
   // depend on a synthetic pointer type or position; UiWindow supplies the last committed position only if acceptance
   // needs to be delivered afterward.
-  [[nodiscard]] virtual GestureDecision AdvanceDeadline(double timestamp) {
-    static_cast<void>(timestamp);
+  [[nodiscard]] virtual GestureDecision AdvanceDeadline(double) {
     return GestureDecision::Continue;
   }
 
@@ -86,39 +85,23 @@ public:
   // event that accepted the recognizer. For deadline acceptance, UiWindow synthesizes a Move carrying the session's
   // last committed position and device kind. Implementations must commit bookkeeping before invoking handlers because
   // a handler may recompose or unmount the owner.
-  virtual void Accepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
-    static_cast<void>(node);
-    static_cast<void>(extension);
-    static_cast<void>(input);
-  }
+  virtual void Accepted(MountedNode&, NodeExtension&, const GestureRecognizerInput&) {}
 
   // After acceptance, UiWindow bypasses recognition and sends subsequent Move and Up events here. Delivery remains
   // bound to the owner even outside the original node bounds. Up is the normal completion path; device or ownership
   // cancellation uses Canceled instead. Implementations normally publish Changed and Ended from this callback.
-  virtual void UpdateAccepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
-    static_cast<void>(node);
-    static_cast<void>(extension);
-    static_cast<void>(input);
-  }
+  virtual void UpdateAccepted(MountedNode&, NodeExtension&, const GestureRecognizerInput&) {}
 
   // UiWindow calls Canceled when another recognizer wins, the platform cancels the pointer, or UiWindow quarantines the
   // sequence after an exception. It may run before or after Accepted. A pending recognizer only discards tentative
   // state; a recognizer that published Started must publish at most one matching Canceled and clear ownership first.
   // If reconciliation removed the owning extension, its normal destruction is responsible for retained cleanup.
-  virtual void Canceled(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
-    static_cast<void>(node);
-    static_cast<void>(extension);
-    static_cast<void>(input);
-  }
+  virtual void Canceled(MountedNode&, NodeExtension&, const GestureRecognizerInput&) {}
 
   // UiWindow calls TapAccepted only when SharesTap returned true and the node's common Tap recognizer won on Up. A new
   // consumer recognizer is created for every pointer sequence, so accumulation across taps belongs to the compatible
   // NodeExtension rather than this per-sequence object.
-  virtual void TapAccepted(MountedNode& node, NodeExtension& extension, const GestureRecognizerInput& input) {
-    static_cast<void>(node);
-    static_cast<void>(extension);
-    static_cast<void>(input);
-  }
+  virtual void TapAccepted(MountedNode&, NodeExtension&, const GestureRecognizerInput&) {}
 };
 
 // DragSource recognizers expose their latest immutable event snapshot so UiWindow can order source and target output

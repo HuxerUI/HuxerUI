@@ -46,7 +46,7 @@ template <class Predicate> bool RunDispatcherUntil(Predicate&& predicate, std::c
 }
 
 void RunDispatcherFor(std::chrono::milliseconds duration) {
-  static_cast<void>(RunDispatcherUntil([] { return false; }, duration));
+  RunDispatcherUntil([] { return false; }, duration);
 }
 
 std::weak_ptr<example::TimerService> windows_timer_service;
@@ -159,7 +159,7 @@ TEST_CASE("WindowsPlatformModuleUsesUIThreadWithoutInlineReentry") {
   UiWindow runtime(WindowsPlatformModuleApp, platform, WindowsPlatformModuleOptions());
   dispatcher.Start();
   runtime.SetWindowMetrics({{320.0F, 200.0F}});
-  static_cast<void>(runtime.BuildRenderFrame());
+  runtime.BuildRenderFrame();
   const std::shared_ptr<example::TimerService> timer = windows_timer_service.lock();
   REQUIRE(timer != nullptr);
 
@@ -173,7 +173,7 @@ TEST_CASE("WindowsPlatformModuleUsesUIThreadWithoutInlineReentry") {
   bool event_on_ui = false;
   std::uint64_t completed_tick = 0;
   std::vector<std::string> delivery_order;
-  static_cast<void>(timer->Start(
+  timer->Start(
       10ms,
       [&](std::uint64_t tick) {
         ticked = tick == 1;
@@ -190,7 +190,7 @@ TEST_CASE("WindowsPlatformModuleUsesUIThreadWithoutInlineReentry") {
         completion_on_ui = std::this_thread::get_id() == ui_thread;
         delivery_order.push_back("result");
       }
-  ));
+  );
   inside_call = false;
 
   REQUIRE_FALSE(completed);
@@ -205,9 +205,9 @@ TEST_CASE("WindowsPlatformModuleUsesUIThreadWithoutInlineReentry") {
 
   const std::size_t delivered_events = delivery_order.size();
   bool stopped = false;
-  static_cast<void>(timer->Stop([&](PlatformResult<std::monostate> result) {
+  timer->Stop([&](PlatformResult<std::monostate> result) {
     stopped = std::holds_alternative<std::monostate>(result);
-  }));
+  });
   REQUIRE_FALSE(stopped);
   REQUIRE(RunDispatcherUntil([&] { return stopped; }, 1s));
   RunDispatcherFor(30ms);
@@ -229,30 +229,30 @@ TEST_CASE("WindowsPlatformModuleReplacesCancelsAndDisposesThreadPoolTimer") {
     UiWindow runtime(WindowsPlatformModuleApp, platform, WindowsPlatformModuleOptions());
     dispatcher.Start();
     runtime.SetWindowMetrics({{320.0F, 200.0F}});
-    static_cast<void>(runtime.BuildRenderFrame());
+    runtime.BuildRenderFrame();
     std::shared_ptr<example::TimerService> timer = windows_timer_service.lock();
     REQUIRE(timer != nullptr);
     service_lifetime = timer;
 
-    static_cast<void>(timer->Start(
+    timer->Start(
         200ms,
         [&](std::uint64_t) {},
         [&](PlatformResult<std::uint64_t> result) {
           const auto* error = std::get_if<PlatformError>(&result);
           first_replaced = error != nullptr && error->code == "example/timer-replaced";
         }
-    ));
-    static_cast<void>(timer->Start(
+    );
+    timer->Start(
         10ms,
         [&](std::uint64_t) { ticked = true; },
         [&](PlatformResult<std::uint64_t> result) { second_completed = std::holds_alternative<std::uint64_t>(result); }
-    ));
+    );
     REQUIRE(RunDispatcherUntil([&] { return first_replaced && second_completed && ticked; }, 1s));
 
     bool stopped = false;
-    static_cast<void>(timer->Stop([&](PlatformResult<std::monostate> result) {
+    timer->Stop([&](PlatformResult<std::monostate> result) {
       stopped = std::holds_alternative<std::monostate>(result);
-    }));
+    });
     REQUIRE(RunDispatcherUntil([&] { return stopped; }, 1s));
     const PlatformRequestId request = timer->Start(
         50ms,
@@ -265,11 +265,11 @@ TEST_CASE("WindowsPlatformModuleReplacesCancelsAndDisposesThreadPoolTimer") {
     REQUIRE_FALSE(cancelled_completed);
     REQUIRE_FALSE(cancelled_ticked);
 
-    static_cast<void>(timer->Start(
+    timer->Start(
         50ms,
         [&](std::uint64_t) { cancelled_ticked = true; },
         [&](PlatformResult<std::uint64_t>) { cancelled_completed = true; }
-    ));
+    );
     timer.reset();
   }
 

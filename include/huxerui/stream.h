@@ -91,7 +91,7 @@ public:
   /// @throws std::logic_error If this stream was moved from or previously returned an operational failure.
   /// Short reads are not EOF. After EOF, further reads return zero without contacting the source.
   /// On failure, do not treat any buffer contents as a successful read or retry this stream.
-  [[nodiscard]] IoResult<std::size_t> Read(std::span<std::byte> buffer);
+  IoResult<std::size_t> Read(std::span<std::byte> buffer);
 
   /// Copies from the current source position through EOF without closing either endpoint.
   /// @param destination Open, usable output stream to receive each complete chunk.
@@ -101,7 +101,7 @@ public:
   /// @throws std::logic_error If an endpoint is moved from or failed, or destination is already closed.
   /// Failure may leave written bytes and an advanced source cursor; no rollback or partial count is returned.
   /// The endpoint reporting an I/O failure cannot be reused. Explicitly Close() the output after a successful copy.
-  [[nodiscard]] IoResult<std::uint64_t> CopyTo(OutputStream& destination, std::span<std::byte> buffer);
+  IoResult<std::uint64_t> CopyTo(OutputStream& destination, std::span<std::byte> buffer);
 
 private:
   explicit InputStream(std::shared_ptr<detail::InputStreamState> state);
@@ -141,14 +141,14 @@ public:
   /// @return Success after all bytes have been accepted, or IoError if writing fails.
   /// @throws std::logic_error If the stream is moved from, closed, or previously failed.
   /// A failure may leave a written prefix and makes the stream unusable, including for Close().
-  [[nodiscard]] IoResult<void> Write(std::span<const std::byte> data);
+  IoResult<void> Write(std::span<const std::byte> data);
 
   /// Finalizes buffered or staged output according to the destination's contract.
   /// @return Success after finalization, or IoError. Repeated calls after success return success without more I/O.
   /// @throws std::logic_error If the stream is moved from or previously failed.
   /// A failed close is not successful finalization and cannot be retried on this stream.
   /// Closing does not add a cross-platform fsync, transaction, or power-loss durability guarantee.
-  [[nodiscard]] IoResult<void> Close();
+  IoResult<void> Close();
 
 private:
   explicit OutputStream(std::shared_ptr<detail::OutputStreamState> state);
@@ -203,7 +203,7 @@ public:
   /// Destroying an unstarted task releases that reservation without consuming input.
   /// After EOF, reads return an empty success without more source I/O.
   /// Cancellation is not returned as EOF or an error; its effect on ongoing native I/O depends on the source.
-  [[nodiscard]] Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes);
+  Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes);
 
   /// Copies from the current position through EOF using bounded owned intermediate chunks.
   /// @param destination Open async output stream to receive the bytes; keep its handle alive until completion.
@@ -214,7 +214,7 @@ public:
   /// Both operation slots are reserved before return. Neither stream is closed by copying.
   /// Failure or cancellation can leave written bytes and an advanced source; no rollback or partial count is reported.
   /// The endpoint reporting an I/O failure becomes unusable. Explicitly await CloseAsync() after successful copying.
-  [[nodiscard]] Task<IoResult<std::uint64_t>> CopyToAsync(AsyncOutputStream& destination, std::size_t maximum_read_size);
+  Task<IoResult<std::uint64_t>> CopyToAsync(AsyncOutputStream& destination, std::size_t maximum_read_size);
 
 private:
   explicit AsyncInputStream(std::shared_ptr<detail::AsyncInputStreamState> state);
@@ -259,7 +259,7 @@ public:
   /// The operation slot is reserved before return, including for empty data; an empty write transfers no bytes.
   /// Destroying an unstarted task releases its reservation. Keep the stream handle alive until completion.
   /// Failure may leave a written prefix; success still requires CloseAsync() to finalize output.
-  [[nodiscard]] Task<IoResult<void>> WriteAsync(Bytes data);
+  Task<IoResult<void>> WriteAsync(Bytes data);
 
   /// Finalizes buffered or staged output according to the destination's contract.
   /// @return A lazy task yielding success or IoError; repeated calls after success complete without more I/O.
@@ -267,7 +267,7 @@ public:
   /// Before closing, the task reserves the operation slot immediately. A failed close cannot be retried.
   /// Keep the stream handle alive until completion. Destruction is not a substitute for awaiting a successful close.
   /// Closing does not add a cross-platform transaction or power-loss durability guarantee.
-  [[nodiscard]] Task<IoResult<void>> CloseAsync();
+  Task<IoResult<void>> CloseAsync();
 
 private:
   explicit AsyncOutputStream(std::shared_ptr<detail::AsyncOutputStreamState> state);

@@ -18,6 +18,7 @@
 
 #include "io/http_internal.h"
 #include "io/stream_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -228,7 +229,7 @@ Task<void> CaptureHttpRead(std::size_t maximum_bytes = 16U * 1024U) {
 
 Task<void> CaptureHttpProgressException(std::shared_ptr<HttpClient> client) {
   try {
-    static_cast<void>(co_await client->SendAsync(
+    HUXERUI_DISCARD(co_await client->SendAsync(
         {.url = "https://example.test/progress-error", .method = HttpMethod::Post, .body = BytesFromString("body")},
         [](HttpProgress) { throw std::runtime_error("progress failed"); }));
   } catch (const std::runtime_error& error) {
@@ -249,7 +250,7 @@ Task<void> CaptureHttpDownloadProgressException(std::shared_ptr<HttpClient> clie
   }
   HttpResponseStream response = std::move(opened).Value();
   try {
-    static_cast<void>(co_await response.Body().ReadAsync(16));
+    HUXERUI_DISCARD(co_await response.Body().ReadAsync(16));
   } catch (const std::runtime_error& error) {
     http_progress_exception = std::string_view(error.what()) == "progress failed";
   }
@@ -468,7 +469,7 @@ TEST_CASE("HttpResponseStreamAllowsOnePendingReadTaskBeforeItStarts") {
 
   {
     Task<IoResult<Bytes>> read = http_stream->Body().ReadAsync(32);
-    REQUIRE_THROWS_AS(static_cast<void>(http_stream->Body().ReadAsync(32)), std::logic_error);
+    REQUIRE_THROWS_AS(http_stream->Body().ReadAsync(32), std::logic_error);
   }
   REQUIRE_FALSE(platform.transport->Canceled(0));
   REQUIRE(platform.transport->ReadRequests(0) == 0);
@@ -510,7 +511,7 @@ TEST_CASE("HttpCopyCancellationStopsTransportDuringEitherEndpointOperation") {
   auto output = detail::StreamAccess::MakeAsyncOutputStream(output_state);
   bool completed = false;
   const auto copy = http_tasks.Launch([&]() -> Task<void> {
-    static_cast<void>(co_await http_stream->Body().CopyToAsync(output, 1));
+    HUXERUI_DISCARD(co_await http_stream->Body().CopyToAsync(output, 1));
     completed = true;
   });
   platform.RunPlatformModuleTasks();
@@ -566,7 +567,7 @@ TEST_CASE("HttpResponseStreamCancelsOnDestructionAndRejectsMovedFromAccess") {
 
   {
     HttpResponseStream stream = std::move(*http_stream);
-    REQUIRE_THROWS_AS(static_cast<void>(http_stream->Url()), std::logic_error);
+    REQUIRE_THROWS_AS(http_stream->Url(), std::logic_error);
     REQUIRE_FALSE(platform.transport->Canceled(0));
   }
   REQUIRE(platform.transport->Canceled(0));
@@ -701,28 +702,28 @@ TEST_CASE("HttpClientValidatesPortableRequestConfigurationBeforeLaunch") {
   UiWindow runtime(HttpApp, platform);
   runtime.BuildFrame();
 
-  REQUIRE_NOTHROW(static_cast<void>(http_client->SendAsync({.url = "HTTPS://example.test"})));
-  REQUIRE_THROWS_AS(static_cast<void>(http_client->SendAsync({.url = "file:///tmp/value"})), std::invalid_argument);
+  REQUIRE_NOTHROW(http_client->SendAsync({.url = "HTTPS://example.test"}));
+  REQUIRE_THROWS_AS(http_client->SendAsync({.url = "file:///tmp/value"}), std::invalid_argument);
   REQUIRE_THROWS_AS(
-      static_cast<void>(http_client->SendAsync({.url = "https://example.test", .body = BytesFromString("body")})),
+      http_client->SendAsync({.url = "https://example.test", .body = BytesFromString("body")}),
       std::invalid_argument);
   REQUIRE_THROWS_AS(
-      static_cast<void>(http_client->SendAsync({
+      http_client->SendAsync({
           .url = "https://example.test",
           .timeout = std::chrono::milliseconds::zero(),
-      })),
+      }),
       std::invalid_argument);
   REQUIRE_THROWS_AS(
-      static_cast<void>(http_client->SendAsync({
+      http_client->SendAsync({
           .url = "https://example.test",
           .headers = {{"Invalid Header", "value"}},
-      })),
+      }),
       std::invalid_argument);
   REQUIRE_THROWS_AS(
-      static_cast<void>(http_client->SendStreamAsync({
+      http_client->SendStreamAsync({
           .url = "https://example.test",
           .headers = {{"X-Test", "first\r\nsecond"}},
-      })),
+      }),
       std::invalid_argument);
   REQUIRE(platform.transport->CallCount() == 0);
 }

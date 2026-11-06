@@ -34,6 +34,7 @@
 #include "application/platform_frame_internal.h"
 #include "resources/resource_internal.h"
 #include "text/text_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 class IosUiWindow;
@@ -100,7 +101,6 @@ class IosRuntime;
 }
 
 - (void)displayLinkDidFire:(CADisplayLink*)displayLink {
-  static_cast<void>(displayLink);
   _displayLink.paused = YES;
   HuxerUIView* view = _view;
   if (view != nil && view.window != nil) {
@@ -650,9 +650,8 @@ public:
   }
 
   void SetSystemBarsContentBrightness(
-      SystemBarContentBrightness status_bar, SystemBarContentBrightness navigation_bar
+      SystemBarContentBrightness status_bar, SystemBarContentBrightness
   ) override {
-    static_cast<void>(navigation_bar);
     if (view_controller_ == nil) {
       return;
     }
@@ -687,7 +686,7 @@ public:
       [view_ setNeedsDisplay];
       frame_state_.MarkPaintPending();
     } else {
-      static_cast<void>(InvalidateDamage(commit.render_frame.damage));
+      HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
     }
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
@@ -897,8 +896,7 @@ int IosRuntime::Run() {
   return result;
 }
 
-bool IosRuntime::FinishLaunching(NSDictionary* launch_options) noexcept {
-  static_cast<void>(launch_options);
+bool IosRuntime::FinishLaunching(NSDictionary*) noexcept {
   if (IsInitialized()) return false;
   try {
     const bool background = UIApplication.sharedApplication.applicationState == UIApplicationStateBackground;
@@ -1066,7 +1064,6 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 }
 
 - (void)huxeruiResourceConfigurationDidChange:(NSNotification*)notification {
-  static_cast<void>(notification);
   if (huxeruiPlatformWindow != nullptr) {
     huxeruiPlatformWindow->UpdateResourceConfiguration();
   }
@@ -1225,13 +1222,10 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 @implementation HuxerUIIOSApplicationDelegate
 
 - (void)resourceConfigurationDidChange:(NSNotification*)notification {
-  static_cast<void>(notification);
   if (huxeruiApplicationRuntime != nullptr) huxeruiApplicationRuntime->UpdateResourceConfiguration();
 }
 
 - (BOOL)application:(UIApplication*)application willFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
-  static_cast<void>(application);
-  static_cast<void>(launchOptions);
   huxeruiApplicationRuntime = huxerui::detail::IosRuntime::Active();
   if (huxeruiApplicationRuntime == nullptr) {
     return NO;
@@ -1241,21 +1235,18 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 }
 
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
-  static_cast<void>(application);
   return huxeruiApplicationRuntime != nullptr && huxeruiApplicationRuntime->FinishLaunching(launchOptions);
 }
 
 - (void)userNotificationCenter:(UNUserNotificationCenter*)center
        willPresentNotification:(UNNotification*)notification
          withCompletionHandler:(void (^)(UNNotificationPresentationOptions options))completionHandler {
-  static_cast<void>(center);
   completionHandler(huxerui::detail::IosLocalNotificationPresentationOptions(notification.request));
 }
 
 - (void)userNotificationCenter:(UNUserNotificationCenter*)center
     didReceiveNotificationResponse:(UNNotificationResponse*)response
              withCompletionHandler:(void (^)(void))completionHandler {
-  static_cast<void>(center);
   std::optional<huxerui::NotificationActivation> activation =
       huxerui::detail::DecodeIosLocalNotificationActivation(response.notification.request, response.actionIdentifier);
   if (!activation.has_value()) {
@@ -1284,12 +1275,10 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 - (BOOL)application:(UIApplication*)application
             openURL:(NSURL*)url
             options:(NSDictionary<UIApplicationOpenURLOptionsKey, id>*)options {
-  static_cast<void>(application);
   return huxeruiApplicationRuntime != nullptr && huxeruiApplicationRuntime->OpenURL(url, options);
 }
 
 - (void)applicationWillTerminate:(UIApplication*)application {
-  static_cast<void>(application);
   if (UNUserNotificationCenter.currentNotificationCenter.delegate == self) {
     UNUserNotificationCenter.currentNotificationCenter.delegate = nil;
   }
@@ -1300,7 +1289,6 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 }
 
 - (void)applicationWillResignActive:(UIApplication*)application {
-  static_cast<void>(application);
   if (huxeruiApplicationRuntime != nullptr) {
     huxeruiApplicationRuntime->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
     huxeruiApplicationRuntime->CancelActiveTouches();
@@ -1308,21 +1296,18 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 }
 
 - (void)applicationDidBecomeActive:(UIApplication*)application {
-  static_cast<void>(application);
   if (huxeruiApplicationRuntime != nullptr) {
     huxeruiApplicationRuntime->ApplicationDidBecomeActive();
   }
 }
 
 - (void)applicationDidEnterBackground:(UIApplication*)application {
-  static_cast<void>(application);
   if (huxeruiApplicationRuntime != nullptr) {
     huxeruiApplicationRuntime->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Background);
   }
 }
 
 - (void)applicationWillEnterForeground:(UIApplication*)application {
-  static_cast<void>(application);
   if (huxeruiApplicationRuntime != nullptr) {
     huxeruiApplicationRuntime->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
   }

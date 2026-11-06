@@ -50,6 +50,7 @@
 
 #include "data_internal.h"
 #include "file_internal.h"
+#include "macros_internal.h"
 #include "runtime/task_internal.h"
 #include "stream_internal.h"
 
@@ -260,7 +261,7 @@ bool CanMutate(std::string_view path) noexcept {
   // IDBFS synchronization. A successful synchronous write would otherwise promise persistence too early.
   return WebPersistentMutationAllowed() || !IsWebPersistentFilePath(path);
 #else
-  static_cast<void>(path);
+  HUXERUI_UNUSED(path);
   return true;
 #endif
 }
@@ -269,7 +270,7 @@ bool RequiresPersistence(std::string_view path) noexcept {
 #if defined(__EMSCRIPTEN__)
   return IsWebPersistentFilePath(path);
 #else
-  static_cast<void>(path);
+  HUXERUI_UNUSED(path);
   return false;
 #endif
 }
@@ -517,7 +518,7 @@ bool Delete(std::string_view path, bool recursive) {
   if (!recursive) {
     return fs::remove(platform_path, error) && !error;
   }
-  static_cast<void>(fs::remove_all(platform_path, error));
+  HUXERUI_DISCARD(fs::remove_all(platform_path, error));
   return !error && !fs::exists(platform_path, error);
 }
 
@@ -975,7 +976,7 @@ std::function<void()> RunLocalReference(Operation operation, FileReferenceComple
       return;
     }
 #else
-    static_cast<void>(persist);
+    HUXERUI_UNUSED(persist);
 #endif
     completion(std::move(result));
     done();
@@ -1345,7 +1346,8 @@ int ReferenceFileDescriptor(ReferenceHandle handle, bool writing) {
   const int descriptor =
       _open_osfhandle(reinterpret_cast<intptr_t>(handle.Get()), _O_BINARY | (writing ? _O_WRONLY : _O_RDONLY));
   CheckLocalIo(descriptor >= 0);
-  static_cast<void>(handle.Release());
+  // The CRT descriptor now owns the native handle.
+  HUXERUI_DISCARD(handle.Release());
   return descriptor;
 }
 
@@ -1624,7 +1626,7 @@ FileReferenceMetadata LocalFileReferenceState::Metadata(std::string* entry_key, 
     result.name = "/";
   }
 #if defined(_WIN32)
-  static_cast<void>(parent_descriptor);
+  HUXERUI_UNUSED(parent_descriptor);
   ReferenceHandle handle = OpenNative();
   const auto info = ReferenceInformation(handle.Get());
   if (!relative_.empty()) {
@@ -1958,7 +1960,7 @@ FileReferenceWriteResult LocalFileReferenceState::CopyFromLocal(LocalFileReferen
     } catch (...) {
       if (existed) {
         FILE_DISPOSITION_INFO discard{TRUE};
-        static_cast<void>(SetFileInformationByHandle(file.Get(), FileDispositionInfo, &discard, sizeof(discard)));
+        HUXERUI_DISCARD(SetFileInformationByHandle(file.Get(), FileDispositionInfo, &discard, sizeof(discard)));
       }
       throw;
     }
@@ -2009,7 +2011,7 @@ LocalFileReferenceState::CopyFileFrom(FileReferenceSource source, std::string na
 #if defined(_WIN32)
     // Windows references use native file objects. A path-only provider import cannot preserve this
     // destination's retained authority, so never fall back to handing it a reconstructed grant path.
-    static_cast<void>(existing);
+    HUXERUI_UNUSED(existing);
     completion(IoResult<FileReferenceWriteResult>(
         IoError{IoErrorCode::Unsupported, "HuxerUI file source cannot transfer to a native directory handle"}));
     return {};
@@ -2151,7 +2153,7 @@ std::function<void()> LocalFileReferenceState::ReplaceWith(File source, FileRefe
 #else
           CheckLocalIo(ftruncate(writer.Get(), 0) == 0);
 #endif
-          static_cast<void>(TransferReference(reader.Get(), writer.Get(), canceled));
+          HUXERUI_DISCARD(TransferReference(reader.Get(), writer.Get(), canceled));
           CheckLocalIo(writer.Close());
           CheckLocalIo(reader.Close());
         };

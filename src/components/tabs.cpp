@@ -18,6 +18,7 @@
 #include "internal_access.h"
 #include "runtime/mounted_node_internal.h"
 #include "resources/resource_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui {
 
@@ -107,7 +108,7 @@ struct TabsLayoutPolicy {
     float x = 0.0F;
     for (std::size_t index = 0; index < count; ++index) {
       ViewNode& child = node.ChildAt(index);
-      static_cast<void>(context.Measure(child, {widths[index], widths[index], height, height}));
+      context.Measure(child, {widths[index], widths[index], height, height});
       result.Place(child, {x, 0.0F});
       x += widths[index];
     }
@@ -198,8 +199,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
+  FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const float previous_x = indicator_x_.Value();
     const float previous_width = indicator_width_.Value();
     const MotionAdvanceResult x_result = indicator_x_.Advance(frame);
@@ -208,7 +208,7 @@ public:
       InvalidatePaint();
     }
     if (reveal_offset_.has_value()) {
-      static_cast<void>(scroll_controller_.ScrollTo(*reveal_offset_));
+      HUXERUI_DISCARD(scroll_controller_.ScrollTo(*reveal_offset_));
       reveal_offset_.reset();
     }
     return {

@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "io/file_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -356,8 +357,6 @@ private:
               const char* old_owner = nullptr;
               const char* new_owner = nullptr;
               g_variant_get(parameters, "(&s&s&s)", &name, &old_owner, &new_owner);
-              static_cast<void>(name);
-              static_cast<void>(old_owner);
               static_cast<PortalConnection*>(data)->PortalOwnerChanged(new_owner);
             },
             this,
@@ -408,8 +407,8 @@ private:
       }
       if (!g_dbus_connection_is_closed(connection_)) {
         // Request.Close replies are intentionally ignored, but their calls must reach the bus before the connection closes.
-        static_cast<void>(g_dbus_connection_flush_sync(connection_, nullptr, nullptr));
-        static_cast<void>(g_dbus_connection_close_sync(connection_, nullptr, nullptr));
+        HUXERUI_DISCARD(g_dbus_connection_flush_sync(connection_, nullptr, nullptr));
+        HUXERUI_DISCARD(g_dbus_connection_close_sync(connection_, nullptr, nullptr));
       }
       g_object_unref(connection_);
       connection_ = nullptr;
@@ -453,7 +452,6 @@ private:
     std::unordered_map<std::uint64_t, std::function<void()>> observers = std::move(unavailable_observers_);
     unavailable_observers_.clear();
     for (auto& [identifier, callback] : observers) {
-      static_cast<void>(identifier);
       try {
         callback();
       } catch (...) {
@@ -570,7 +568,6 @@ std::optional<File> FileFromPortalUri(std::string_view uri) {
 std::optional<std::string> ContentType(const File& file) {
   gboolean uncertain = false;
   char* guessed = g_content_type_guess(file.Path().c_str(), nullptr, 0, &uncertain);
-  static_cast<void>(uncertain);
   std::unique_ptr<char, decltype(&g_free)> owned_guessed(guessed, g_free);
   if (guessed == nullptr) {
     return std::nullopt;
@@ -659,7 +656,7 @@ public:
       save_completion = std::move(save_completion_);
     }
     const std::shared_ptr<PortalPickerOperation> self = shared_from_this();
-    static_cast<void>(portal_->Invoke([self, request_path = std::move(request_path)] {
+    HUXERUI_DISCARD(portal_->Invoke([self, request_path = std::move(request_path)] {
       self->CloseRequest(request_path);
       self->CleanupPortalSubscriptions();
     }));

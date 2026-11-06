@@ -28,6 +28,7 @@
 
 #include "io/http_internal.h"
 #include "linux_http_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -545,7 +546,7 @@ TEST_CASE("Destroying Linux HTTP transport cancels active requests and joins its
   release_response.set_value();
   REQUIRE(elapsed < 2s);
   REQUIRE(completions->load() == 0);
-  static_cast<void>(operation);
+  HUXERUI_UNUSED(operation);
 }
 
 } // namespace huxerui::test

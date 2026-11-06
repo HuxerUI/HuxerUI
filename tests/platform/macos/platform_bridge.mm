@@ -180,7 +180,7 @@ TEST_CASE("MacObjectiveCPlatformPayloadRejectsInvalidValuesAndTextures") {
   @autoreleasepool {
     bool invalid_double_rejected = false;
     @try {
-      static_cast<void>([HUXPlatformPayload doubleValue:std::numeric_limits<double>::infinity()]);
+      [HUXPlatformPayload doubleValue:std::numeric_limits<double>::infinity()];
     } @catch (NSException*) {
       invalid_double_rejected = true;
     }
@@ -189,7 +189,7 @@ TEST_CASE("MacObjectiveCPlatformPayloadRejectsInvalidValuesAndTextures") {
     HUXExternalTexture* forged = static_cast<HUXExternalTexture*>(class_createInstance(HUXExternalTexture.class, 0));
     bool forged_texture_rejected = false;
     @try {
-      static_cast<void>([HUXPlatformPayload externalTextureValue:forged]);
+      [HUXPlatformPayload externalTextureValue:forged];
     } @catch (NSException*) {
       forged_texture_rejected = true;
     }
@@ -252,9 +252,9 @@ TEST_CASE("MacObjectiveCBufferReferenceRoundTripPreservesBackingIdentity") {
     }];
     std::optional<BufferReference> returned;
     PlatformChannel channel = macos::detail::GetObjectiveCPlatformViewChannel(instance);
-    static_cast<void>(channel.Invoke("echo", PlatformPayload(reference), [&](PlatformResult<PlatformPayload> result) {
+    channel.Invoke("echo", PlatformPayload(reference), [&](PlatformResult<PlatformPayload> result) {
       returned = std::get<PlatformPayload>(result).AsBufferReference();
-    }));
+    });
     platform.RunPlatformModuleTasks();
     REQUIRE(returned.has_value());
     REQUIRE(*returned == reference);
@@ -292,10 +292,10 @@ TEST_CASE("MacObjectiveCPlatformPayloadRetainsFileReferenceAndExposesFileURL") {
 
     PlatformChannel channel = macos::detail::GetObjectiveCPlatformViewChannel(instance);
     std::shared_ptr<detail::FileReferenceState> returned_state;
-    static_cast<void>(channel.Invoke("echo", PlatformPayload(reference), [&](PlatformResult<PlatformPayload> result) {
+    channel.Invoke("echo", PlatformPayload(reference), [&](PlatformResult<PlatformPayload> result) {
       returned_state =
           detail::FileReferenceState::Of(std::get<PlatformPayload>(std::move(result)).AsFileReference());
-    }));
+    });
     platform.RunPlatformModuleTasks();
     REQUIRE(returned_state == state);
 
@@ -404,14 +404,14 @@ TEST_CASE("MacObjectiveCPlatformViewUsesOneEventAndChannelLifecycle") {
     PlatformChannel channel = macos::detail::GetObjectiveCPlatformViewChannel(instance);
     bool completed = false;
     std::string result_value;
-    static_cast<void>(channel.Invoke(
+    channel.Invoke(
         "echo",
         PlatformPayload("value"),
         [&](PlatformResult<PlatformPayload> result) {
           completed = true;
           result_value = std::get<PlatformPayload>(std::move(result)).AsString();
         }
-    ));
+    );
     REQUIRE_FALSE(completed);
     platform.RunPlatformModuleTasks();
     REQUIRE(completed);
@@ -424,7 +424,7 @@ TEST_CASE("MacObjectiveCPlatformViewUsesOneEventAndChannelLifecycle") {
     platform.RunPlatformModuleTasks();
     REQUIRE(factory.instance.cancelCount == 1);
 
-    static_cast<void>(channel.Invoke("pending", {}, [](PlatformResult<PlatformPayload>) {}));
+    channel.Invoke("pending", {}, [](PlatformResult<PlatformPayload>) {});
     platform.RunPlatformModuleTasks();
     macos::detail::DisposeObjectiveCPlatformView(instance);
     macos::detail::DisposeObjectiveCPlatformView(instance);

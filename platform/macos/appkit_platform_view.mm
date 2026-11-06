@@ -20,6 +20,7 @@
 
 #include "appkit_renderer.h"
 #include "runtime/ui_window_internal.h"
+#include "macros_internal.h"
 
 @interface HuxerUIPlatformSliceView : NSView {
 @public
@@ -41,7 +42,6 @@
 }
 
 - (NSView*)hitTest:(NSPoint)point {
-  static_cast<void>(point);
   return nil;
 }
 
@@ -126,9 +126,7 @@ struct HostedPlatformView {
           factory->disconnect(instance, controller);
         } catch (...) {
         }
-      } @catch (NSException* exception) {
-        static_cast<void>(exception);
-      }
+      } @catch (NSException*) {}
     }
     if (instance && factory && factory->dispose) {
       @try {
@@ -136,9 +134,7 @@ struct HostedPlatformView {
           factory->dispose(instance);
         } catch (...) {
         }
-      } @catch (NSException* exception) {
-        static_cast<void>(exception);
-      }
+      } @catch (NSException*) {}
     }
   }
 
@@ -149,8 +145,7 @@ struct HostedPlatformView {
       }
       @try {
         factory->update(instance, command.Properties());
-      } @catch (NSException* exception) {
-        static_cast<void>(exception);
+      } @catch (NSException*) {
         throw std::logic_error("HuxerUI macOS PlatformView factory raised an Objective-C exception while updating");
       }
       properties_revision = command.PropertiesRevision();
@@ -289,8 +284,7 @@ struct AppKitPlatformViews::State {
         throw std::logic_error("HuxerUI macOS PlatformView factory returned an empty instance");
       }
       hosted->view = hosted->factory->view(hosted->instance);
-    } @catch (NSException* exception) {
-      static_cast<void>(exception);
+    } @catch (NSException*) {
       throw std::logic_error("HuxerUI macOS PlatformView factory raised an Objective-C exception while creating");
     }
     if (hosted->view == nil) {
@@ -456,7 +450,6 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
   state_->root = root;
   state_->frame = &frame;
   for (auto& [identity, hosted] : state_->hosted) {
-    static_cast<void>(identity);
     hosted->event_route->active = true;
   }
   const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
@@ -487,7 +480,6 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
     state_->platform_view_focus_identity.reset();
   }
   for (const auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     if (composition_changed) {
       [slice setNeedsDisplay:YES];
     } else {
@@ -568,7 +560,7 @@ void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
   if (state_->pending_focus_traversal.has_value() && state_->pending_focus_traversal->first == *focused) {
     const bool reverse = state_->pending_focus_traversal->second;
     state_->pending_focus_traversal.reset();
-    static_cast<void>(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *focused, reverse));
+    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *focused, reverse));
     return;
   }
   InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
@@ -579,12 +571,10 @@ void AppKitPlatformViews::Shutdown() {
     return;
   }
   for (auto& [identity, hosted] : state_->hosted) {
-    static_cast<void>(identity);
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
   for (auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     slice->huxeruiRenderer = nullptr;
     slice->huxeruiFrame = nullptr;
     [slice removeFromSuperview];

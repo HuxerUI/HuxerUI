@@ -4,7 +4,9 @@ Use the selected CLI and generated project as the contract. This reference cover
 
 ## Locate the tools and SDK
 
-For an existing configured project, read `HuxerUI_DIR` in the active `CMakeCache.txt` and prefer that package over `HUXERUI_HOME` or another CLI installation.
+For an existing configured project, read `HuxerUI_DIR` in the active `CMakeCache.txt` and use its `HuxerUIConfig.cmake`. The package directory can be under `lib`, `lib64`, `share`, or an architecture-specific subdirectory of `lib`. Use the package and its exported targets to locate SDK headers and libraries.
+
+If the project has no configured package, use `HUXERUI_HOME` when it identifies an installed SDK. Otherwise, inspect the selected CLI's `huxerui doctor` output for its SDK location. If the location is still unknown and the task depends on exact SDK behavior, ask for the SDK path.
 
 When the task creates, configures, builds, runs, or diagnoses a project:
 

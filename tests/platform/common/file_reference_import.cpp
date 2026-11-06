@@ -1,4 +1,5 @@
 #include "file_reference_test_support.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -54,7 +55,7 @@ TEST_CASE("DirectoryReferencesFinalizeProviderImportsAndPreserveFailureAndCancel
   if (cancel) {
     bool drained = false;
     file_tasks.Launch([&]() -> Task<void> {
-      static_cast<void>(co_await destination.StatAsync());
+      HUXERUI_DISCARD(co_await destination.StatAsync());
       drained = true;
     });
     platform.RunUntil([&] { return drained; });

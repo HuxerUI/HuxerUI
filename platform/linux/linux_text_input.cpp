@@ -1,5 +1,6 @@
 #include "linux_text_input.h"
 #include "linux_text_input_internal.h"
+#include "macros_internal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -238,7 +239,7 @@ struct LinuxTextInput::State {
     }
     TextInputCommand finish;
     finish.kind = TextInputCommandKind::FinishComposition;
-    static_cast<void>(self.Apply({std::move(finish)}));
+    HUXERUI_DISCARD(self.Apply({std::move(finish)}));
     self.composing = false;
   }
 
@@ -250,7 +251,7 @@ struct LinuxTextInput::State {
     TextInputCommand commit;
     commit.kind = TextInputCommandKind::CommitText;
     commit.text = text;
-    static_cast<void>(self.Apply({std::move(commit)}));
+    HUXERUI_DISCARD(self.Apply({std::move(commit)}));
     self.composing = false;
   }
 

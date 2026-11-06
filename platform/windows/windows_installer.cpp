@@ -89,7 +89,7 @@ std::optional<std::filesystem::path> ChooseInstallerDestination(HWND owner, cons
   if (!initial.empty()) {
     ComPtr<IShellItem> initial_folder;
     if (SUCCEEDED(SHCreateItemFromParsingName(initial.c_str(), nullptr, IID_PPV_ARGS(&initial_folder)))) {
-      static_cast<void>(dialog->SetFolder(initial_folder.Get()));
+      dialog->SetFolder(initial_folder.Get());
     }
   }
   result = dialog->Show(owner);

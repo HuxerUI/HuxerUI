@@ -13,6 +13,7 @@
 #include "resources/resource_internal.h"
 #include "runtime_text_internal.h"
 #include "application/window_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -408,7 +409,7 @@ void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semant
     throw std::invalid_argument("HuxerUI virtual semantic child bounds must be finite and nonnegative");
   }
   if (parent_local_id != 0) {
-    static_cast<void>(detail::RequireItem(*state_, parent_local_id));
+    HUXERUI_DISCARD(detail::RequireItem(*state_, parent_local_id));
   }
   if (state_->item_indices.contains(local_id)) {
     throw std::logic_error("HuxerUI virtual semantic child local ids must be unique within an extension");
@@ -427,7 +428,7 @@ void SemanticBuilder::AddChild(std::uint64_t local_id, Rect local_bounds, Semant
 
 void SemanticBuilder::SetActiveChild(std::uint64_t local_id) {
   if (local_id != 0) {
-    static_cast<void>(detail::RequireItem(*state_, local_id));
+    HUXERUI_DISCARD(detail::RequireItem(*state_, local_id));
   }
   state_->active_child = local_id;
 }
@@ -436,7 +437,7 @@ void SemanticBuilder::AdoptChild(std::uint64_t local_id, std::size_t child_index
   if (local_id == 0) {
     throw std::invalid_argument("HuxerUI semantic adoption requires a virtual child");
   }
-  static_cast<void>(detail::RequireItem(*state_, local_id));
+  HUXERUI_DISCARD(detail::RequireItem(*state_, local_id));
   if (!state_->adopted_children.emplace(child_index, local_id).second) {
     throw std::logic_error("HuxerUI mounted semantic child may only be adopted once");
   }

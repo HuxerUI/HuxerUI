@@ -26,6 +26,7 @@
 #include "resources/resource_internal.h"
 #include "graphics/shadow_internal.h"
 #include "text/text_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -524,7 +525,7 @@ void AndroidRenderer::RenderCommand(
   }
   auto encoded = android::BytesToJavaByteArray(environment, command.image.EncodedBytes());
   if (encoded) {
-    static_cast<void>(draw(encoded.Get()));
+    HUXERUI_DISCARD(draw(encoded.Get()));
   }
 }
 
@@ -830,13 +831,8 @@ void AndroidRenderer::RenderCommand(JNIEnv* environment, jobject view, jobject c
 }
 
 void AndroidRenderer::RenderCommand(
-    JNIEnv* environment, jobject view, jobject canvas, const PlacePlatformViewCommand& command
-) {
-  static_cast<void>(environment);
-  static_cast<void>(view);
-  static_cast<void>(canvas);
-  static_cast<void>(command);
-}
+    JNIEnv*, jobject, jobject, const PlacePlatformViewCommand&
+) {}
 
 void AndroidRenderer::DrawSlice(
     JNIEnv* environment,
@@ -851,7 +847,7 @@ void AndroidRenderer::DrawSlice(
                                 ? std::numeric_limits<std::size_t>::max()
                                 : first_command + command_count;
     CommandRange range{first_command, end, 0};
-    static_cast<void>(RenderSceneNode(environment, view, canvas, *frame.scene.root, &range));
+    HUXERUI_DISCARD(RenderSceneNode(environment, view, canvas, *frame.scene.root, &range));
   }
 }
 

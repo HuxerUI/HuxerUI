@@ -69,25 +69,13 @@
   return self;
 }
 
-- (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(touches);
-  static_cast<void>(event);
-}
+- (void)touchesBegan:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {}
 
-- (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(touches);
-  static_cast<void>(event);
-}
+- (void)touchesMoved:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {}
 
-- (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(touches);
-  static_cast<void>(event);
-}
+- (void)touchesEnded:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {}
 
-- (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {
-  static_cast<void>(touches);
-  static_cast<void>(event);
-}
+- (void)touchesCancelled:(NSSet<UITouch*>*)touches withEvent:(UIEvent*)event {}
 
 @end
 
@@ -139,9 +127,7 @@ struct HostedPlatformView {
           factory->disconnect(instance, controller);
         } catch (...) {
         }
-      } @catch (NSException* exception) {
-        static_cast<void>(exception);
-      }
+      } @catch (NSException*) {}
     }
     if (instance && factory && factory->dispose) {
       @try {
@@ -149,9 +135,7 @@ struct HostedPlatformView {
           factory->dispose(instance);
         } catch (...) {
         }
-      } @catch (NSException* exception) {
-        static_cast<void>(exception);
-      }
+      } @catch (NSException*) {}
     }
   }
 
@@ -162,8 +146,7 @@ struct HostedPlatformView {
       }
       @try {
         factory->update(instance, command.Properties());
-      } @catch (NSException* exception) {
-        static_cast<void>(exception);
+      } @catch (NSException*) {
         throw std::logic_error("HuxerUI iOS PlatformView factory raised an Objective-C exception while updating");
       }
       properties_revision = command.PropertiesRevision();
@@ -298,8 +281,7 @@ struct UIKitPlatformViews::State {
         throw std::logic_error("HuxerUI iOS PlatformView factory returned an empty instance");
       }
       hosted->view = hosted->factory->view(hosted->instance);
-    } @catch (NSException* exception) {
-      static_cast<void>(exception);
+    } @catch (NSException*) {
       throw std::logic_error("HuxerUI iOS PlatformView factory raised an Objective-C exception while creating");
     }
     if (hosted->view == nil) {
@@ -462,7 +444,6 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
   state_->root = root;
   state_->frame = &frame;
   for (auto& [identity, hosted] : state_->hosted) {
-    static_cast<void>(identity);
     hosted->event_route->active = true;
   }
   const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
@@ -484,7 +465,6 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
     ResignFirstResponder(root);
   }
   for (const auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     if (composition_changed) {
       [slice setNeedsDisplay];
     } else {
@@ -551,12 +531,10 @@ void UIKitPlatformViews::Shutdown() {
     return;
   }
   for (auto& [identity, hosted] : state_->hosted) {
-    static_cast<void>(identity);
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
   for (auto& [key, slice] : state_->slices) {
-    static_cast<void>(key);
     slice->huxeruiRenderer = nullptr;
     slice->huxeruiFrame = nullptr;
     [slice removeFromSuperview];

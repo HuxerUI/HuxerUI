@@ -551,7 +551,7 @@ void MeasureFlowLine(LayoutContext& context, const ViewNode& node, FlowLine& lin
         continue;
       }
       const float share = remaining * child->GrowFactor() / line.total_grow;
-      static_cast<void>(context.Measure(*child, loose.TightWidth(share)));
+      context.Measure(*child, loose.TightWidth(share));
     }
   }
 
@@ -567,7 +567,7 @@ void MeasureFlowLine(LayoutContext& context, const ViewNode& node, FlowLine& lin
     if (child->GrowFactor() > 0.0F && line.total_grow > 0.0F && std::isfinite(width)) {
       child_constraints = child_constraints.TightWidth(child->LayoutSize().width);
     }
-    static_cast<void>(context.Measure(*child, child_constraints));
+    context.Measure(*child, child_constraints);
   }
 }
 
@@ -588,14 +588,14 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constrain
     if (child.GrowFactor() > 0.0F && std::isfinite(max_main) && (!stretch || tight_cross)) {
       continue;
     }
-    static_cast<void>(context.Measure(child, initial));
+    context.Measure(child, initial);
   }
 
   float target_cross = minimum_cross;
   if (stretch && !tight_cross) {
     target_cross = std::clamp(MaxCrossSize(node, vertical), minimum_cross, maximum_cross);
     for (ViewNode& child : node.Children()) {
-      static_cast<void>(context.Measure(child, TightCross(loose, vertical, target_cross)));
+      context.Measure(child, TightCross(loose, vertical, target_cross));
     }
   }
 
@@ -620,7 +620,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constrain
       if (stretch) {
         child_constraints = TightCross(child_constraints, vertical, target_cross);
       }
-      static_cast<void>(context.Measure(child, child_constraints));
+      context.Measure(child, child_constraints);
     }
   } else {
     target_main = SumMainSizes(node, vertical) + spacing;
@@ -1015,7 +1015,7 @@ LayoutResult Flow::Measure(LayoutContext& context, ViewNode& node, Constraints c
 LayoutResult Stack::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
   const Constraints loose = constraints.Loose();
   for (ViewNode& child : node.Children()) {
-    static_cast<void>(context.Measure(child, loose));
+    context.Measure(child, loose);
   }
 
   float width = 0.0F;
@@ -1031,7 +1031,7 @@ LayoutResult Stack::Measure(LayoutContext& context, ViewNode& node, Constraints 
   const bool stretch_height = node.VerticalAlignmentValue() == VerticalAlignment::Stretch;
   if (stretch_width) {
     for (ViewNode& child : node.Children()) {
-      static_cast<void>(context.Measure(child, loose.TightWidth(width)));
+      context.Measure(child, loose.TightWidth(width));
     }
     height = 0.0F;
     for (ViewNode& child : node.Children()) {
@@ -1045,7 +1045,7 @@ LayoutResult Stack::Measure(LayoutContext& context, ViewNode& node, Constraints 
       if (stretch_width) {
         child_constraints = child_constraints.TightWidth(width);
       }
-      static_cast<void>(context.Measure(child, child_constraints));
+      context.Measure(child, child_constraints);
     }
   }
 

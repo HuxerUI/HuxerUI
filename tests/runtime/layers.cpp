@@ -57,8 +57,7 @@ View ParameterizedLayerContent(std::string label, int value) {
   return Text(label + " " + std::to_string(value));
 }
 
-View ParameterizedDialogContent(DialogContext context, std::string label, int value) {
-  static_cast<void>(context);
+View ParameterizedDialogContent(DialogContext, std::string label, int value) {
   return ParameterizedLayerContent(std::move(label), value);
 }
 
@@ -1751,7 +1750,7 @@ TEST_CASE("TestDebugMetricsSamplesPaintedFramesAndProcessUsage") {
       .processor_count = 4,
   };
   detail::DebugMetricsState metrics{platform};
-  static_cast<void>(metrics.Sample(0.0));
+  metrics.Sample(0.0);
 
   metrics.RecordCommit(0.004, DamageRegion{.full = true}, {200.0F, 100.0F});
   metrics.RecordCommit(0.001, {}, {200.0F, 100.0F});

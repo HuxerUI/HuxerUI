@@ -266,7 +266,7 @@ struct StreamModel {
   void Latest() const {
     const std::shared_ptr<const Messages>& current = messages;
     if (!current->empty()) {
-      static_cast<void>(scroll.ScrollToItem(current->size() - 1, ScrollAlignment::End));
+      scroll.ScrollToItem(current->size() - 1, ScrollAlignment::End);
     }
   }
 

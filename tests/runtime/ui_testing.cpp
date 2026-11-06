@@ -13,6 +13,7 @@
 #include "application/platform_registry_internal.h"
 #include "external_texture_test_support.h"
 #include "image_test_support.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 namespace {
@@ -457,7 +458,7 @@ TEST_CASE("Windowless queries and lifecycle injection enforce creating-thread ac
   bool rejected = false;
   bool lifecycle_rejected = false;
   std::thread worker([&] {
-    try { static_cast<void>(query.Count()); } catch (const std::logic_error&) { rejected = true; }
+    try { HUXERUI_DISCARD(query.Count()); } catch (const std::logic_error&) { rejected = true; }
     try {
       ui.UpdateWindowLifecycleState(WindowLifecycleState::Active);
     } catch (const std::logic_error&) {
@@ -833,7 +834,7 @@ TEST_CASE("Windowless settle drains callback batches without inventing time", "[
       },
     },
     .window_hooks = {[](WindowContext& root) {
-      static_cast<void>(OpenPlatformModule<int>("testing/Dispatcher"));
+      OpenPlatformModule<int>("testing/Dispatcher");
     }},
   });
   int calls = 0;

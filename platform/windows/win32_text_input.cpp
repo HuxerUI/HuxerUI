@@ -21,11 +21,10 @@ namespace huxerui::detail {
 struct Win32TextInput::State {
   void Start(
       TextInputSessionId session_id,
-      const TextInputConfiguration& configuration,
+      const TextInputConfiguration&,
       const TextInputState& state,
       const TextInputGeometry& geometry
   ) {
-    static_cast<void>(configuration);
     text_input_session_id_ = session_id;
     text_input_state_ = state;
     ime_composing_ = state.composition.has_value();
@@ -45,11 +44,10 @@ struct Win32TextInput::State {
 
   void Restart(
       TextInputSessionId session_id,
-      const TextInputConfiguration& configuration,
+      const TextInputConfiguration&,
       const TextInputState& state,
       const TextInputGeometry& geometry
   ) {
-    static_cast<void>(configuration);
     CancelSystemComposition();
     text_input_session_id_ = session_id;
     text_input_state_ = state;

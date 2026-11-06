@@ -19,6 +19,7 @@
 
 #include "io/file_internal.h"
 #include "win32_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -236,7 +237,7 @@ public:
     }
     canceled_ = true;
     if (dialog_) {
-      static_cast<void>(dialog_->Close(kDialogCanceled));
+      HUXERUI_DISCARD(dialog_->Close(kDialogCanceled));
       return;
     }
     Finish({});
@@ -354,7 +355,7 @@ public:
       canceled_ = true;
     }
     if (dialog_) {
-      static_cast<void>(dialog_->Close(kDialogCanceled));
+      HUXERUI_DISCARD(dialog_->Close(kDialogCanceled));
       return;
     }
     Finish(false);

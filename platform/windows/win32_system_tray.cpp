@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "win32_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -154,7 +155,7 @@ struct Win32SystemTrayTransport::State {
     if (!added) {
       NOTIFYICONDATAW version = Data(window, icon, &*presentation);
       version.uVersion = NOTIFYICON_VERSION_4;
-      static_cast<void>(Shell_NotifyIconW(NIM_SETVERSION, &version));
+      HUXERUI_DISCARD(Shell_NotifyIconW(NIM_SETVERSION, &version));
       added = true;
     }
     if (previous != nullptr) {
@@ -165,7 +166,7 @@ struct Win32SystemTrayTransport::State {
   void Hide() noexcept {
     if (added && window != nullptr) {
       NOTIFYICONDATAW data = Data(window, icon, presentation ? &*presentation : nullptr);
-      static_cast<void>(Shell_NotifyIconW(NIM_DELETE, &data));
+      HUXERUI_DISCARD(Shell_NotifyIconW(NIM_DELETE, &data));
     }
     added = false;
     presentation.reset();
@@ -329,8 +330,7 @@ void Win32SystemTrayTransport::SetWindow(HWND window) noexcept {
   state_->window = window;
 }
 
-std::optional<LRESULT> Win32SystemTrayTransport::HandleMessage(UINT message, WPARAM w_param, LPARAM l_param) {
-  static_cast<void>(w_param);
+std::optional<LRESULT> Win32SystemTrayTransport::HandleMessage(UINT message, WPARAM, LPARAM l_param) {
   if (state_->taskbar_created != 0 && message == state_->taskbar_created) {
     state_->added = false;
     if (state_->presentation.has_value()) {
@@ -338,7 +338,7 @@ std::optional<LRESULT> Win32SystemTrayTransport::HandleMessage(UINT message, WPA
       if (target != nullptr && state_->Commit(target, NIM_ADD, state_->icon, &*state_->presentation)) {
         NOTIFYICONDATAW version = state_->Data(target, state_->icon, &*state_->presentation);
         version.uVersion = NOTIFYICON_VERSION_4;
-        static_cast<void>(Shell_NotifyIconW(NIM_SETVERSION, &version));
+        HUXERUI_DISCARD(Shell_NotifyIconW(NIM_SETVERSION, &version));
         state_->added = true;
       }
     }

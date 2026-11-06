@@ -47,6 +47,7 @@
 #include "win32_text_input.h"
 #include "win32_ui_dispatcher.h"
 #include "application/window_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -81,7 +82,7 @@ public:
     Microsoft::WRL::ComPtr<IInspectable> instance;
     const HRESULT result = activate(class_name, &instance);
     delete_string(class_name);
-    if (SUCCEEDED(result)) static_cast<void>(instance.As(&settings_));
+    if (SUCCEEDED(result)) HUXERUI_DISCARD(instance.As(&settings_));
   }
 
   ~Win32SystemTheme() {
@@ -118,7 +119,7 @@ public:
 
   void Stop() noexcept {
     if (observing_) {
-      static_cast<void>(settings_->remove_ColorValuesChanged(token_));
+      HUXERUI_DISCARD(settings_->remove_ColorValuesChanged(token_));
       observing_ = false;
     }
   }
@@ -201,12 +202,12 @@ public:
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
     if (set_process_dpi_awareness_context_ != nullptr) {
       constexpr std::intptr_t per_monitor_aware_v2 = -4;
-      static_cast<void>(set_process_dpi_awareness_context_(reinterpret_cast<HANDLE>(per_monitor_aware_v2)));
+      HUXERUI_DISCARD(set_process_dpi_awareness_context_(reinterpret_cast<HANDLE>(per_monitor_aware_v2)));
       return;
     }
-    static_cast<void>(SetProcessDPIAware());
+    HUXERUI_DISCARD(SetProcessDPIAware());
 #else
-    static_cast<void>(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
+    HUXERUI_DISCARD(SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
 #endif
   }
 
@@ -1012,7 +1013,7 @@ private:
       platform_views_.reset();
     }
     if (window_ != nullptr) {
-      static_cast<void>(DestroyWindow(window_));
+      HUXERUI_DISCARD(DestroyWindow(window_));
       window_ = nullptr;
     }
     renderer_.Discard();
@@ -1109,9 +1110,9 @@ private:
     const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
     accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
     if (composition_changed) {
-      static_cast<void>(InvalidateFullWindow());
+      HUXERUI_DISCARD(InvalidateFullWindow());
     }
-    static_cast<void>(InvalidateDamage(committed_frame_->damage));
+    HUXERUI_DISCARD(InvalidateDamage(committed_frame_->damage));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
     }
@@ -1246,7 +1247,7 @@ private:
           mouse_tracking_window_,
           HOVER_DEFAULT,
       };
-      static_cast<void>(TrackMouseEvent(&cancellation));
+      HUXERUI_DISCARD(TrackMouseEvent(&cancellation));
     }
     TRACKMOUSEEVENT tracking{
         sizeof(TRACKMOUSEEVENT),
@@ -1696,7 +1697,7 @@ private:
       return text_input_.EndComposition() ? 0 : DefWindowProcW(window, message, w_param, l_param);
     case WM_IME_CHAR:
       if (text_input_.Active()) {
-        static_cast<void>(text_input_.SuppressCharacter(static_cast<wchar_t>(w_param)));
+        HUXERUI_DISCARD(text_input_.SuppressCharacter(static_cast<wchar_t>(w_param)));
         return 0;
       }
       break;

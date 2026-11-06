@@ -15,6 +15,7 @@
 #include "runtime/mounted_node_internal.h"
 #include "internal_access.h"
 #include "resources/resource_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -343,8 +344,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const NavigationSelectionBehavior& modifier) {
-    static_cast<void>(node);
+  void Update(ViewNode&, const NavigationSelectionBehavior& modifier) {
     reveal_selection_ = reveal_selection_ || selected_index_ != modifier.selected_index;
     selected_index_ = modifier.selected_index;
     enabled_items_ = modifier.enabled_items;
@@ -364,9 +364,9 @@ public:
     const float bottom = top + selected.LayoutSize().height;
     const ScrollMetrics metrics = scroll_controller_.Metrics();
     if (top < metrics.offset) {
-      static_cast<void>(scroll_controller_.ScrollTo(top));
+      HUXERUI_DISCARD(scroll_controller_.ScrollTo(top));
     } else if (bottom > metrics.offset + metrics.viewport_extent) {
-      static_cast<void>(scroll_controller_.ScrollTo(bottom - metrics.viewport_extent));
+      HUXERUI_DISCARD(scroll_controller_.ScrollTo(bottom - metrics.viewport_extent));
     }
     return PaintInvalidation::None;
   }
@@ -784,8 +784,7 @@ public:
     }
   }
 
-  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(frame);
+  FrameResult OnFrame(ViewNode& node, const FrameInfo&) override {
     if (!state_) {
       return {};
     }
@@ -852,7 +851,7 @@ public:
     const bool inline_placement = configuration->presentation->placement == DrawerPlacement::Inline;
     LayoutResult result;
     const float scrim_width = inline_placement ? 0.0F : size.width;
-    static_cast<void>(context.Measure(node.ChildAt(0), {scrim_width, scrim_width, size.height, size.height}));
+    context.Measure(node.ChildAt(0), {scrim_width, scrim_width, size.height, size.height});
     result.Place(node.ChildAt(0), {});
 
     float panel_width = size.width;
@@ -876,8 +875,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(ViewNode& node, const DrawerOverlayConfiguration& modifier) {
-    static_cast<void>(modifier);
+  void Update(ViewNode& node, const DrawerOverlayConfiguration&) {
     const DrawerOverlayConfiguration* configuration = node.LayoutValue<DrawerOverlayValue>();
     if (configuration == nullptr) {
       throw std::logic_error("HuxerUI drawer overlay is missing its compiled configuration");
@@ -1071,7 +1069,7 @@ private:
       return;
     }
     const auto& panel = static_cast<const detail::MountedNode&>(node.ChildAt(1));
-    static_cast<void>(detail::EmitEvent<DrawerEvents::OpenChanged>(panel.event_bindings, open));
+    detail::EmitEvent<DrawerEvents::OpenChanged>(panel.event_bindings, open);
   }
 
   void ResetPointer() noexcept {
@@ -1691,7 +1689,7 @@ LayoutResult DrawerLayout::Measure(LayoutContext& context, ViewNode& node, Const
     slot->presentation->target_visible = inline_placement || slot->requested_open;
     const float drawer_width = inline_placement ? width : size.width;
     ViewNode& drawer = node.ChildAt(slot->child_index);
-    static_cast<void>(context.Measure(drawer, {drawer_width, drawer_width, size.height, size.height}));
+    context.Measure(drawer, {drawer_width, drawer_width, size.height, size.height});
     const float x = inline_placement && side == DrawerSide::End ? size.width - drawer_width : 0.0F;
     result.Place(drawer, {x, 0.0F});
   };

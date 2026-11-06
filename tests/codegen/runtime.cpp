@@ -34,8 +34,7 @@ public:
   ~TestPlatform() override { UiWindow::Retire(); Runtime::Retire(); }
   void OnRuntimeStopped() override {}
   std::vector<std::function<void()>> pending;
-  void RequestFrameAt(double deadline) override {
-    static_cast<void>(deadline);
+  void RequestFrameAt(double) override {
     ++requested_frames;
   }
 
@@ -43,24 +42,21 @@ public:
     return 0.0;
   }
 
-  huxerui::FontMetrics Metrics(const huxerui::Font& font) override {
-    static_cast<void>(font);
+  huxerui::FontMetrics Metrics(const huxerui::Font&) override {
     return {.ascent = 15.0F, .descent = 5.0F};
   }
 
   huxerui::TextRunMetrics MeasureRun(
-      std::string_view text, const huxerui::TextStyle& style, const huxerui::TextShapingOptions& options
+      std::string_view text, const huxerui::TextStyle& style, const huxerui::TextShapingOptions&
   ) override {
-    static_cast<void>(options);
     const float width = static_cast<float>(text.size()) * 10.0F;
     const huxerui::FontMetrics metrics = Metrics(style.font);
     return {width, {0.0F, -15.0F, width, 20.0F}, metrics};
   }
 
-  huxerui::TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const huxerui::TextStyle& style,
+  huxerui::TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const huxerui::TextStyle&,
       float max_width, const huxerui::TextLayoutOptions& options) override {
     const auto& text = paragraph.PlainText();
-    static_cast<void>(style);
     if (max_width <= 0.0F) {
       return {};
     }

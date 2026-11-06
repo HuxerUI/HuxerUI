@@ -135,7 +135,7 @@ struct SegmentedButtonLayoutPolicy {
     LayoutResult result;
     float x = 0.0F;
     for (ViewNode& child : node.Children()) {
-      static_cast<void>(context.Measure(child, {segment_width, segment_width, height, height}));
+      context.Measure(child, {segment_width, segment_width, height, height});
       result.Place(child, {x, 0.0F});
       x += segment_width - overlap;
     }

@@ -474,23 +474,17 @@ public:
   virtual ~TextSelectionClient() = default;
 
   /// Tests whether an action is currently available without changing the selection or clipboard.
-  /// @param action Requested shared editing action.
-  /// @param clipboard Borrowed clipboard service, or nullptr if unavailable; do not retain the pointer.
+  /// The clipboard service is borrowed and may be nullptr when unavailable. Do not retain the pointer.
   /// @return True if supported by the current selection and policy; the default returns false.
-  [[nodiscard]] virtual bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const {
-    static_cast<void>(action);
-    static_cast<void>(clipboard);
+  [[nodiscard]] virtual bool CanPerformTextEditingAction(TextEditingAction, PlatformClipboard*) const {
     return false;
   }
 
   /// Performs an available shared editing action, rechecking current selection and disclosure policy.
-  /// @param action Action to execute.
-  /// @param clipboard Borrowed clipboard service, or nullptr if unavailable; do not retain the pointer.
-  /// @return Whether the action succeeded; the default returns false.
+  /// The clipboard service is borrowed and may be nullptr when unavailable. Do not retain the pointer.
   /// Read-only clients can support Copy and Select All without implementing editing or IME behavior.
-  virtual bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) {
-    static_cast<void>(action);
-    static_cast<void>(clipboard);
+  /// @return Whether the action succeeded; the default returns false.
+  virtual bool PerformTextEditingAction(TextEditingAction, PlatformClipboard*) {
     return false;
   }
 
@@ -557,12 +551,10 @@ public:
   /// @param session_id Session to stop; ignore stale IDs.
   virtual void Stop(TextInputSessionId session_id) = 0;
   /// Requests software-keyboard visibility without changing focus or creating a new input session.
-  /// @param session_id Existing active session; ignore stale IDs.
+  /// Only the active session may show the keyboard. Ignore stale session IDs.
   /// UiWindow uses this for a confirmed tap on an already focused client. Hiding a keyboard does not end that
   /// session; platforms without a software keyboard can retain the default no-op implementation.
-  virtual void RequestShow(TextInputSessionId session_id) {
-    static_cast<void>(session_id);
-  }
+  virtual void RequestShow(TextInputSessionId) {}
 };
 
 } // namespace huxerui

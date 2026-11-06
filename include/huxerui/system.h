@@ -173,14 +173,14 @@ public:
   /// Native ephemeral authorization maps to `Granted` while effective, without exposing its expiration time.
   ///
   /// @return A Task resolving to the current notification authorization, or `Unavailable` when it cannot be queried.
-  [[nodiscard]] Task<PermissionStatus> CheckAuthorizationAsync() const;
+  Task<PermissionStatus> CheckAuthorizationAsync() const;
 
   /// Requests notification authorization when the host and native application configuration permit it.
   ///
   /// This operation may present native UI, but a host with no applicable prompt may only return its current state.
   ///
   /// @return A Task resolving to the notification authorization reported after the request.
-  [[nodiscard]] Task<PermissionStatus> RequestAuthorizationAsync() const;
+  Task<PermissionStatus> RequestAuthorizationAsync() const;
 
   /// Requests immediate operating-system presentation.
   ///
@@ -193,7 +193,7 @@ public:
   /// @return A Task resolving to the terminal submission result reported by the connected host.
   /// @throws std::invalid_argument if an identifier or resolved text is invalid, both resolved text fields are empty,
   /// a template identifier is invalid, or data contains retained capabilities or exceeds the encoded size limit.
-  [[nodiscard]] Task<LocalNotificationOperationStatus> ShowAsync(LocalNotification notification) const;
+  Task<LocalNotificationOperationStatus> ShowAsync(LocalNotification notification) const;
 
   /// Requests best-effort one-shot delivery at an absolute system-clock time.
   ///
@@ -208,7 +208,7 @@ public:
   /// @return A Task resolving to the terminal scheduling result reported by the connected host.
   /// @throws std::invalid_argument under the same content conditions as `ShowAsync()`, or when `delivery_time` is not
   /// later than the call.
-  [[nodiscard]] Task<LocalNotificationOperationStatus>
+  Task<LocalNotificationOperationStatus>
   ScheduleAsync(LocalNotification notification, std::chrono::system_clock::time_point delivery_time) const;
 
   /// Idempotently cancels a pending schedule and removes a delivered presentation for an identifier.
@@ -218,7 +218,7 @@ public:
   /// @param identifier Stable logical identifier previously supplied through `LocalNotification`.
   /// @return A Task resolving to the terminal cancellation result reported by the connected host.
   /// @throws std::invalid_argument if `identifier` is empty, malformed UTF-8, or contains a null character.
-  [[nodiscard]] Task<LocalNotificationOperationStatus> CancelAsync(std::string_view identifier) const;
+  Task<LocalNotificationOperationStatus> CancelAsync(std::string_view identifier) const;
 
 private:
   explicit LocalNotificationHandle(std::shared_ptr<detail::LocalNotificationService> service) : service_(std::move(service)) {}

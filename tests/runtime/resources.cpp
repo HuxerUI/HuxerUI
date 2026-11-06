@@ -29,6 +29,7 @@
 #include "resources/resource_internal.h"
 #include "components/text_field_internal.h"
 #include "io/stream_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -261,7 +262,7 @@ View ShapingUnrelatedContent() {
 
 View ExplicitTextMeasurerContent() {
   ++text_measurer_shaping_compositions;
-  static_cast<void>(UseTextMeasurer().MeasureText("explicit measurer", TextStyle::Default()));
+  HUXERUI_DISCARD(UseTextMeasurer().MeasureText("explicit measurer", TextStyle::Default()));
   return Spacer();
 }
 
@@ -1928,7 +1929,7 @@ TEST_CASE("RawResourceAsyncFailuresAndRetainedMemoryUseTheSameContract") {
     failure = true;
   }
   SECTION("Cached bytes remain readable after disconnect") {
-    static_cast<void>(asset.ReadBytes(true));
+    HUXERUI_DISCARD(asset.ReadBytes(true));
     service->Disconnect();
   }
   SECTION("Memory storage does not depend on a service") {
@@ -2134,7 +2135,7 @@ TEST_CASE("CustomFontResourcesLoadWithoutAWindowAndRetainSnapshotsAfterShutdown"
 #if !defined(__EMSCRIPTEN__)
     bool rejected = false;
     std::thread worker([&] {
-      try { static_cast<void>(FontFamily::FromResources({regular})); }
+      try { FontFamily::FromResources({regular}); }
       catch (const std::logic_error&) { rejected = true; }
     });
     worker.join();

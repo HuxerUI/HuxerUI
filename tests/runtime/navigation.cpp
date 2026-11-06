@@ -37,41 +37,27 @@ class NavigationPlatformInput final : public PlatformTextInput {
 public:
   void Start(
       TextInputSessionId session_id,
-      const TextInputConfiguration& configuration,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
+      const TextInputConfiguration&,
+      const TextInputState&,
+      const TextInputGeometry&
   ) override {
-    static_cast<void>(configuration);
-    static_cast<void>(state);
-    static_cast<void>(geometry);
     started_sessions.push_back(session_id);
   }
 
-  void Update(TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry) override {
-    static_cast<void>(session_id);
-    static_cast<void>(state);
-    static_cast<void>(geometry);
-  }
+  void Update(TextInputSessionId, const TextInputState&, const TextInputGeometry&) override {}
 
   void Restart(
-      TextInputSessionId session_id,
-      const TextInputConfiguration& configuration,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
-  ) override {
-    static_cast<void>(session_id);
-    static_cast<void>(configuration);
-    static_cast<void>(state);
-    static_cast<void>(geometry);
-  }
+      TextInputSessionId,
+      const TextInputConfiguration&,
+      const TextInputState&,
+      const TextInputGeometry&
+  ) override {}
 
   void Stop(TextInputSessionId session_id) override {
     stopped_sessions.push_back(session_id);
   }
 
-  void RequestShow(TextInputSessionId session_id) override {
-    static_cast<void>(session_id);
-  }
+  void RequestShow(TextInputSessionId) override {}
 
   std::vector<TextInputSessionId> started_sessions;
   std::vector<TextInputSessionId> stopped_sessions;
@@ -85,7 +71,7 @@ public:
     LayoutResult result;
     if (node.ChildCount() > 0) {
       ViewNode& child = node.ChildAt(0);
-      static_cast<void>(context.Measure(child, {0.0F, 180.0F, 0.0F, 120.0F}));
+      context.Measure(child, {0.0F, 180.0F, 0.0F, 120.0F});
       result.Place(child, {});
     }
     return result.SetSize(constraints.Constrain({180.0F, 120.0F}));
@@ -202,7 +188,7 @@ View BoundedNavigationApp() {
 }
 
 View MissingNavigationApp() {
-  static_cast<void>(UseNavigation());
+  UseNavigation();
   return Text("unreachable");
 }
 
@@ -296,7 +282,7 @@ View UpdatingRoutedResolverApp() {
 }
 
 View MissingRoutedNavigationApp() {
-  static_cast<void>(UseNavigation<TestRoute>());
+  UseNavigation<TestRoute>();
   return Text("unreachable");
 }
 

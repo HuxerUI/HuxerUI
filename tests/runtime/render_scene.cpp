@@ -69,9 +69,7 @@ public:
 
   void Update(ViewNode& node, const FramePaintInvalidation& modifier);
 
-  FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    static_cast<void>(node);
-    static_cast<void>(frame);
+  FrameResult OnFrame(ViewNode&, const FrameInfo&) override {
     InvalidatePaint();
     return {};
   }
@@ -115,16 +113,10 @@ struct GeometryMeasurement {
 };
 
 FramePaintInvalidationExtension::FramePaintInvalidationExtension(
-    ViewNode& node, const FramePaintInvalidation& modifier
-) {
-  static_cast<void>(node);
-  static_cast<void>(modifier);
-}
+    ViewNode&, const FramePaintInvalidation&
+) {}
 
-void FramePaintInvalidationExtension::Update(ViewNode& node, const FramePaintInvalidation& modifier) {
-  static_cast<void>(node);
-  static_cast<void>(modifier);
-}
+void FramePaintInvalidationExtension::Update(ViewNode&, const FramePaintInvalidation&) {}
 
 GeometryMeasurementExtension::GeometryMeasurementExtension(
     ViewNode& node, const GeometryMeasurement& modifier
@@ -132,8 +124,7 @@ GeometryMeasurementExtension::GeometryMeasurementExtension(
   Update(node, modifier);
 }
 
-void GeometryMeasurementExtension::Update(ViewNode& node, const GeometryMeasurement& modifier) {
-  static_cast<void>(node);
+void GeometryMeasurementExtension::Update(ViewNode&, const GeometryMeasurement& modifier) {
   text_ = modifier.text;
 }
 
@@ -154,23 +145,18 @@ GeometryMeasurementExtension::PrepareGeometry(ViewNode& node, TextMeasurer& text
   return PaintInvalidation::Foreground;
 }
 
-void GeometryMeasurementExtension::PaintAboveContent(const ViewNode& node, PaintContext& context) const {
-  static_cast<void>(node);
+void GeometryMeasurementExtension::PaintAboveContent(const ViewNode&, PaintContext& context) const {
   context.DrawRect({0.0F, 0.0F, measured_width_, 2.0F}, Color::Black());
 }
 
-OverflowPaintExtension::OverflowPaintExtension(ViewNode& node, const OverflowPaint& modifier)
-    : color_(modifier.color) {
-  static_cast<void>(node);
-}
+OverflowPaintExtension::OverflowPaintExtension(ViewNode&, const OverflowPaint& modifier)
+    : color_(modifier.color) {}
 
-void OverflowPaintExtension::Update(ViewNode& node, const OverflowPaint& modifier) {
-  static_cast<void>(node);
+void OverflowPaintExtension::Update(ViewNode&, const OverflowPaint& modifier) {
   color_ = modifier.color;
 }
 
-void OverflowPaintExtension::PaintAboveContent(const ViewNode& node, PaintContext& context) const {
-  static_cast<void>(node);
+void OverflowPaintExtension::PaintAboveContent(const ViewNode&, PaintContext& context) const {
   context.DrawRect({-200.0F, 0.0F, 80.0F, 20.0F}, color_);
 }
 

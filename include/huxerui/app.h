@@ -653,7 +653,7 @@ public:
   /// @param permission Permission capability to query; validation occurs before returning the lazy Task.
   /// @return A Task resolving to current authorization or Unavailable when unsupported/disconnected.
   /// Call and await on the original application's thread; no UiWindow is required.
-  [[nodiscard]] Task<PermissionStatus> CheckPermissionAsync(Permission permission) const;
+  Task<PermissionStatus> CheckPermissionAsync(Permission permission) const;
   /// Requests authorization using the native presentation endpoint captured when this method is called.
   /// @param permission Permission capability to request.
   /// @return A lazy Task resolving to the platform's authorization result, or Unavailable if the original endpoint
@@ -669,12 +669,12 @@ public:
   ///   HandleCameraPermission(status);
   /// });
   /// @endcode
-  [[nodiscard]] Task<PermissionStatus> RequestPermissionAsync(Permission permission) const;
+  Task<PermissionStatus> RequestPermissionAsync(Permission permission) const;
   /// Requests the native settings surface for a permission using the original presentation endpoint.
   /// @param permission Permission whose settings should be opened.
   /// @return A lazy Task resolving true if the platform accepted the opening request, not if permission was granted.
   /// False represents unsupported or expired presentation. Shares RequestPermissionAsync's thread and endpoint rules.
-  [[nodiscard]] Task<bool> OpenPermissionSettingsAsync(Permission permission) const;
+  Task<bool> OpenPermissionSettingsAsync(Permission permission) const;
   /// Requests orderly whole-application termination through Runtime.
   void Quit() const;
 

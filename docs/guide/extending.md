@@ -59,6 +59,7 @@ Use typed `LayoutValue<Key>` metadata for semantics owned by the parent layout.
 
 Derive from `VirtualLayout<Derived>` for a demand-driven logical item source.
 The layout chooses items to realize and returns their geometry.
+In both ordinary and virtual layouts, `Measure()` updates the node's `LayoutSize()` even when the layout ignores the returned size.
 
 UiWindow owns declaration reconciliation, keys, retained item state, clipping, hit testing, scrolling, semantics, and cleanup.
 The layout must not maintain a second mounted item tree.

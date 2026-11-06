@@ -297,8 +297,7 @@ public:
       if (cancellation != nil && ![cancellation respondsToSelector:@selector(cancel)]) {
         throw std::logic_error("HuxerUI macOS Objective-C invocation returned an invalid cancellation object");
       }
-    } @catch (NSException* exception) {
-      static_cast<void>(exception);
+    } @catch (NSException*) {
       [result close];
       throw std::logic_error("HuxerUI macOS Objective-C platform invocation raised an exception");
     }
@@ -307,9 +306,7 @@ public:
       if (cancellation != nil) {
         @try {
           [cancellation cancel];
-        } @catch (NSException* exception) {
-          static_cast<void>(exception);
-        }
+        } @catch (NSException*) {}
       }
     };
   }
@@ -326,9 +323,7 @@ public:
     [events_ close];
     @try {
       [instance_ dispose];
-    } @catch (NSException* exception) {
-      static_cast<void>(exception);
-    }
+    } @catch (NSException*) {}
     instance_ = nil;
     events_ = nil;
   }
@@ -704,7 +699,6 @@ static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endp
     const PlatformPayload payload = DecodePayload(self);
     const auto& object = payload.AsObject();
     for (const auto& [name, value] : object) {
-      static_cast<void>(value);
       if (![fields containsObject:ToNSString(name)]) {
         throw std::invalid_argument("HuxerUI PlatformPayload contains unknown field " + name);
       }
@@ -753,8 +747,7 @@ PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, NSWindow* ow
     instance = [factory createWithWindow:owner
                                  options:EncodePayload(std::move(options))
                                   events:events];
-  } @catch (NSException* exception) {
-    static_cast<void>(exception);
+  } @catch (NSException*) {
     [events close];
     throw std::logic_error("HuxerUI macOS Objective-C PlatformModule factory raised an exception");
   }
@@ -784,8 +777,7 @@ CreateObjectiveCPlatformView(UiWindow& ui_window, NSWindow* owner,
     instance = [factory createWithWindow:owner
                               properties:EncodePayload(std::move(properties))
                                   events:event_endpoint];
-  } @catch (NSException* exception) {
-    static_cast<void>(exception);
+  } @catch (NSException*) {
     [event_endpoint close];
     throw std::logic_error("HuxerUI macOS Objective-C PlatformView factory raised an exception");
   }
@@ -833,8 +825,7 @@ void UpdateObjectiveCPlatformView(const std::shared_ptr<ObjectiveCPlatformViewIn
     if (platform_view.view != instance->view) {
       throw std::logic_error("HuxerUI macOS Objective-C PlatformView changed its NSView identity");
     }
-  } @catch (NSException* exception) {
-    static_cast<void>(exception);
+  } @catch (NSException*) {
     throw std::logic_error("HuxerUI macOS Objective-C PlatformView update raised an exception");
   }
 }

@@ -17,6 +17,7 @@
 #include "graphics/geometry_internal.h"
 #include "internal_access.h"
 #include "mounted_node_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui::detail {
 
@@ -126,7 +127,7 @@ bool ScrollConnection::ScrollToOffset(float offset) {
   if (next == CurrentOffset()) {
     return true;
   }
-  static_cast<void>(ScrollNodeBy(*node_, next - CurrentOffset(), ScrollSource::Programmatic));
+  HUXERUI_DISCARD(ScrollNodeBy(*node_, next - CurrentOffset(), ScrollSource::Programmatic));
   return true;
 }
 
@@ -617,7 +618,7 @@ ScrollMotionFrameResult ScrollMotion::Advance(MountedNode& node, const FrameInfo
     return {};
   }
   if (std::abs(next_velocity) < stop_velocity) {
-    static_cast<void>(ApplyPostFling(node, velocity_, 0.0F));
+    HUXERUI_DISCARD(ApplyPostFling(node, velocity_, 0.0F));
     Reset();
     NotifyScrollNodeActivity(node, ScrollSource::Momentum, ScrollPhase::End, 0.0F);
     return {};

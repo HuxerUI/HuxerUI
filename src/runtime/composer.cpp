@@ -29,15 +29,12 @@ RecomposeScope::RecomposeScope(UiWindow& ui_window, std::uint64_t id, StateSlotS
 
 RecomposeScope::~RecomposeScope() {
   for (auto& [dependency_address, weak_dependency] : dependencies_) {
-    static_cast<void>(dependency_address);
     if (auto dependency = weak_dependency.lock()) {
       dependency->subscribers.erase(id_);
     }
   }
   for (auto& [owner_identity, dependencies] : retained_dependencies_) {
-    static_cast<void>(owner_identity);
     for (auto& [dependency_address, weak_dependency] : dependencies) {
-      static_cast<void>(dependency_address);
       if (auto dependency = weak_dependency.lock()) {
         dependency->subscribers.erase(id_);
       }
@@ -76,7 +73,6 @@ void RecomposeScope::EndComposition() {
 
   const auto self = shared_from_this();
   for (auto& [dependency_address, weak_dependency] : pending_dependencies_) {
-    static_cast<void>(dependency_address);
     if (auto dependency = weak_dependency.lock()) {
       dependency->subscribers[id_] = self;
     }
@@ -261,7 +257,6 @@ void RecomposeScope::CommitLifecycleSetups() {
       *cleanup = declaration.setup.Run();
       try {
         auto [slot, inserted] = lifecycle_slots_.try_emplace(declaration.key);
-        static_cast<void>(inserted);
         slot->second.dependencies = std::move(declaration.dependencies);
         slot->second.cleanup = LifecycleCleanup([execution, cleanup] {
           ExecutionGuard cleanup_guard(execution);

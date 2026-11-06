@@ -13,6 +13,7 @@
 #include "text/text_input_internal.h"
 #include "application/window_internal.h"
 #include "profiling_internal.h"
+#include "macros_internal.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -94,7 +95,7 @@ public:
   static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
     for (huxerui::ViewNode& child : node.Children()) {
-      static_cast<void>(context.Measure(child, constraints));
+      context.Measure(child, constraints);
       result.Place(child, {});
     }
     result.SetSize(constraints.Constrain({
@@ -115,7 +116,7 @@ public:
       throw std::logic_error("HuxerUI application content container must not contain multiple roots");
     }
     if (node.ChildCount() == 1) {
-      static_cast<void>(context.Measure(node.ChildAt(0), constraints));
+      context.Measure(node.ChildAt(0), constraints);
       result.Place(node.ChildAt(0), {});
     }
     return result.SetSize(constraints.Constrain({constraints.max_width, constraints.max_height}));
@@ -133,7 +134,7 @@ public:
   static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
     for (huxerui::ViewNode& child : node.Children()) {
-      static_cast<void>(context.Measure(child, constraints));
+      context.Measure(child, constraints);
       result.Place(child, {});
     }
     result.SetSize(constraints.Constrain({
@@ -156,8 +157,7 @@ public:
     Update(node, modifier);
   }
 
-  void Update(huxerui::ViewNode& node, const LayerTransition& modifier) {
-    static_cast<void>(node);
+  void Update(huxerui::ViewNode&, const LayerTransition& modifier) {
     if (state_ == modifier.state) {
       return;
     }
@@ -1197,7 +1197,7 @@ void UiWindow::UpdateSystemThemeBrightness(ThemeBrightness brightness) {
     throw std::invalid_argument("HuxerUI system theme brightness is invalid");
   }
   detail::ExecutionGuard execution_guard(state_->execution_);
-  static_cast<void>(state_->root_environment_->Update(detail::SystemThemeEnvironment{brightness}));
+  HUXERUI_DISCARD(state_->root_environment_->Update(detail::SystemThemeEnvironment{brightness}));
 }
 
 std::shared_ptr<detail::FilePickerTransport> UiWindow::CreateFilePickerTransport() {
@@ -1209,12 +1209,8 @@ std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(std::string_view 
   return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
 }
 
-std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(const AttributedText& text, const TextStyle& style,
-                                                               float max_width, const TextLayoutOptions& options) {
-  static_cast<void>(text);
-  static_cast<void>(style);
-  static_cast<void>(max_width);
-  static_cast<void>(options);
+std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(const AttributedText&, const TextStyle&,
+                                                               float, const TextLayoutOptions&) {
   return {};
 }
 
@@ -1630,7 +1626,7 @@ void UiWindow::SetWindowMetrics(WindowMetrics metrics) {
   const ViewportClass viewport_class = ResolveViewportClass(metrics.viewport.width, state_->viewport_breakpoints_);
   if (viewport_class != state_->viewport_class_) {
     state_->viewport_class_ = viewport_class;
-    static_cast<void>(state_->root_environment_->Update(detail::ViewportEnvironment{viewport_class}));
+    HUXERUI_DISCARD(state_->root_environment_->Update(detail::ViewportEnvironment{viewport_class}));
     return;
   }
   RequestFrame();
@@ -1803,7 +1799,7 @@ void UiWindow::UpdateResourceConfiguration(ResourceConfiguration configuration) 
   BeginDependencyChange(state_->ui_execution_->configuration_dependency);
   state_->ui_execution_->configuration = configuration;
   CommitDependencyChange(state_->ui_execution_->configuration_dependency);
-  static_cast<void>(state_->root_environment_->Update(configuration.locale));
+  HUXERUI_DISCARD(state_->root_environment_->Update(configuration.locale));
   ReconcileWindowControls();
   state_->text_->InvalidateOverlay();
 }
@@ -2178,7 +2174,7 @@ bool UiWindow::HandleBack(const BackEvent& incoming) {
       if (found->options.cancel_policy == LayerCancelPolicy::Consume) {
         return true;
       }
-      static_cast<void>(state_->layer_controller_.RequestDismiss(found->id).handled);
+      HUXERUI_DISCARD(state_->layer_controller_.RequestDismiss(found->id).handled);
       return true;
     }
     case detail::BackTargetKind::Event: {
@@ -2187,7 +2183,7 @@ bool UiWindow::HandleBack(const BackEvent& incoming) {
       }
       detail::MountedNode* node = FindNode(*state_->mounted_root_, target.node_identity);
       if (node != nullptr && node->interaction.enabled) {
-        static_cast<void>(EmitEvent<ViewEvents::BackRequested>(node->event_bindings));
+        EmitEvent<ViewEvents::BackRequested>(node->event_bindings);
       }
       return true;
     }
@@ -2198,7 +2194,7 @@ bool UiWindow::HandleBack(const BackEvent& incoming) {
       detail::MountedNode* node = FindNode(*state_->mounted_root_, target.extension.node_identity);
       NodeExtension* extension = FindExtension(*state_->mounted_root_, target.extension);
       if (node != nullptr && node->interaction.enabled && extension != nullptr) {
-        static_cast<void>(extension->OnBack(*node, event));
+        HUXERUI_DISCARD(extension->OnBack(*node, event));
       }
       // A target captured at Begin owns the whole transaction even when it disappears before Commit.
       return true;
@@ -2210,7 +2206,7 @@ bool UiWindow::HandleBack(const BackEvent& incoming) {
   if (event.phase == BackPhase::Begin && state_->back_target_.has_value()) {
     const BackEvent begin = event;
     event = {BackPhase::Cancel, 0.0F};
-    static_cast<void>(dispatch_captured(*state_->back_target_));
+    HUXERUI_DISCARD(dispatch_captured(*state_->back_target_));
     state_->back_target_.reset();
     event = begin;
   }
@@ -3019,7 +3015,7 @@ void UiWindow::ComposeLayers() {
                                                           dismiss = entry.options.dismiss_on_outside_press &&
                                                                     !exiting](const PointerEvent& event) {
           if (dismiss && event.type == PointerEventType::Down) {
-            static_cast<void>(controller.RequestDismiss(id).handled);
+            HUXERUI_DISCARD(controller.RequestDismiss(id).handled);
           }
         });
       } else if (entry.options.pointer_policy == LayerPointerPolicy::PassThrough) {
@@ -3201,10 +3197,10 @@ UiWindow::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr
   if (mounted->kind == NodeKind::ScrollView || mounted->kind == NodeKind::VirtualLayout) {
     mounted->scroll_state = std::make_unique<ScrollNodeState>();
   }
-  static_cast<void>(ReconcileNodeExtensions(*mounted, compiled.modifiers, false));
+  HUXERUI_DISCARD(ReconcileNodeExtensions(*mounted, compiled.modifiers, false));
   BindExtensions(*mounted);
   if (mounted->kind == NodeKind::Scope) {
-    static_cast<void>(ComposeScope(*mounted));
+    HUXERUI_DISCARD(ComposeScope(*mounted));
   } else if (IsVirtualLayoutNode(*mounted)) {
     mounted->virtual_state = std::make_unique<VirtualNodeState>();
     mounted->virtual_state->source = incoming->virtual_items;
@@ -3217,7 +3213,7 @@ UiWindow::Mount(const std::shared_ptr<ViewSpec>& incoming, const std::shared_ptr
     mounted->virtual_state->dependency_capture =
         std::make_unique<VirtualItemDependencyCapture>(std::move(dependency_scope), mounted->identity);
   } else {
-    static_cast<void>(ReconcileChildren(mounted->children, incoming->children, mounted->environment));
+    HUXERUI_DISCARD(ReconcileChildren(mounted->children, incoming->children, mounted->environment));
   }
   return mounted;
 }

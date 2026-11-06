@@ -251,7 +251,7 @@ public:
   /// Blocking package I/O uses workers or the Web file queue. Memory reads may complete immediately.
   /// Later stream operations return IoResult. Neither opening nor incremental reading fills the complete-content cache.
   /// Cancellation suppresses delivery; an active native operation may finish before its retained source is released.
-  [[nodiscard]] Task<AsyncInputStream> OpenReadAsync() const;
+  Task<AsyncInputStream> OpenReadAsync() const;
   /// Returns descriptive MIME metadata without opening or inspecting the payload.
   /// @return A view borrowing the shared asset storage; empty when absent or unspecified.
   [[nodiscard]] std::string_view MimeType() const noexcept;

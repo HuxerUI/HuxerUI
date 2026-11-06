@@ -341,7 +341,7 @@ private:
             const Rect bounds = geometry.Region(offset, geometry.separator);
             // Each separator immediately precedes the next region in flat child order.
             auto& separator = node.ChildAt(region.children[index + 1].first_view - 1);
-            static_cast<void>(context.Measure(separator, {bounds.width, bounds.width, bounds.height, bounds.height}));
+            context.Measure(separator, {bounds.width, bounds.width, bounds.height, bounds.height});
             result->Place(separator, origin + Point{bounds.x, bounds.y});
             offset += geometry.separator;
           }
@@ -362,11 +362,11 @@ private:
     const Size size = constraints.Constrain({std::max(bar.width, body.width), bar.height + body.height});
     if (result) {
       if (bar.width != size.width) {
-        static_cast<void>(context.Measure(tabs, {size.width, size.width, bar.height, bar.height}));
+        context.Measure(tabs, {size.width, size.width, bar.height, bar.height});
       }
       if (body.width != size.width || body.height != size.height - bar.height) {
         const float height = std::max(0.0F, size.height - bar.height);
-        static_cast<void>(context.Measure(pane, {size.width, size.width, height, height}));
+        context.Measure(pane, {size.width, size.width, height, height});
       }
       result->Place(tabs, origin).Place(pane, origin + Point{0.0F, bar.height});
     }

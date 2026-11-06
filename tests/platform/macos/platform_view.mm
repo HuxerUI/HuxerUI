@@ -15,6 +15,8 @@
 
 #include <huxerui/macos/platform_registry.h>
 
+#include "macros_internal.h"
+
 namespace {
 
 int mac_platform_view_frame_sets = 0;
@@ -299,16 +301,16 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     REQUIRE_FALSE(root.needsDisplay);
 
     mac_platform_view_controller = 2;
-    static_cast<void>(platform_views.Commit(root, runtime.BuildRenderFrame()));
+    HUXERUI_DISCARD(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE((mac_platform_view_controller_operations ==
              std::vector<std::string>{"connect:1", "disconnect:1", "connect:2"}));
 
     mac_platform_view_controller_attached = false;
-    static_cast<void>(platform_views.Commit(root, runtime.BuildRenderFrame()));
+    HUXERUI_DISCARD(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE((mac_platform_view_controller_operations ==
              std::vector<std::string>{"connect:1", "disconnect:1", "connect:2", "disconnect:2"}));
     mac_platform_view_controller_attached = true;
-    static_cast<void>(platform_views.Commit(root, runtime.BuildRenderFrame()));
+    HUXERUI_DISCARD(platform_views.Commit(root, runtime.BuildRenderFrame()));
     REQUIRE(mac_platform_view_controller_operations.back() == "connect:2");
     REQUIRE_FALSE(foreground_slice.needsDisplay);
 

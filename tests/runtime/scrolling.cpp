@@ -1,4 +1,5 @@
 #include "runtime_test_support.h"
+#include "macros_internal.h"
 
 namespace huxerui::test {
 
@@ -143,8 +144,8 @@ View ControlledVirtualListApp() {
 View ScrollControllerToolbar(ScrollController scroll) {
   HUXERUI_SCOPE({
     return Row{
-        Button("Top").OnClick([scroll] { static_cast<void>(scroll.ScrollTo(0.0F)); }),
-        Button("Item 500").OnClick([scroll] { static_cast<void>(scroll.ScrollToItem(499, ScrollAlignment::Center)); }),
+        Button("Top").OnClick([scroll] { scroll.ScrollTo(0.0F); }),
+        Button("Item 500").OnClick([scroll] { scroll.ScrollToItem(499, ScrollAlignment::Center); }),
         Spacer(),
         Text::Format("Offset {}", static_cast<int>(scroll.Offset())),
     }
@@ -1234,7 +1235,7 @@ TEST_CASE("RefreshBox ignores short, canceled, trailing, and non-drag input") {
   runtime.HandlePointerEvent({PointerEventType::Move, 404, {50.0F, 20.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Up, 404, {50.0F, 20.0F}, PointerDeviceKind::Touch});
   REQUIRE(refresh_requests == 0);
-  static_cast<void>(runtime.HandleScrollInput({{50.0F, 50.0F}, 0.0F, -200.0F}));
+  HUXERUI_DISCARD(runtime.HandleScrollInput({{50.0F, 50.0F}, 0.0F, -200.0F}));
   REQUIRE(refresh_requests == 0);
 }
 

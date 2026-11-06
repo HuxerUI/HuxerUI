@@ -198,9 +198,9 @@ public:
   PermissionController(PermissionController&&) = delete;
   PermissionController& operator=(PermissionController&&) = delete;
 
-  [[nodiscard]] Task<PermissionStatus> Check(Permission permission) const;
-  [[nodiscard]] Task<PermissionStatus> Request(Permission permission) const;
-  [[nodiscard]] Task<bool> OpenSettings(Permission permission) const;
+  Task<PermissionStatus> Check(Permission permission) const;
+  Task<PermissionStatus> Request(Permission permission) const;
+  Task<bool> OpenSettings(Permission permission) const;
   void Disconnect() noexcept;
 
 private:
@@ -257,12 +257,12 @@ public:
   ~LocalNotificationService();
 
   [[nodiscard]] LocalNotificationCapabilities Capabilities() const;
-  [[nodiscard]] Task<PermissionStatus> CheckAuthorization() const;
-  [[nodiscard]] Task<PermissionStatus> RequestAuthorization() const;
-  [[nodiscard]] Task<LocalNotificationOperationStatus> Show(LocalNotification notification) const;
-  [[nodiscard]] Task<LocalNotificationOperationStatus> Schedule(LocalNotification notification,
+  Task<PermissionStatus> CheckAuthorization() const;
+  Task<PermissionStatus> RequestAuthorization() const;
+  Task<LocalNotificationOperationStatus> Show(LocalNotification notification) const;
+  Task<LocalNotificationOperationStatus> Schedule(LocalNotification notification,
                                                                 std::chrono::system_clock::time_point delivery_time) const;
-  [[nodiscard]] Task<LocalNotificationOperationStatus> Cancel(std::string_view identifier) const;
+  Task<LocalNotificationOperationStatus> Cancel(std::string_view identifier) const;
   void Disconnect() noexcept;
 
 private:
@@ -290,9 +290,9 @@ public:
   /// @param handler Nonempty callback retained until disconnection or Runtime shutdown.
   /// @return An idempotent cleanup bound to this connection identity; multiple observers may coexist.
   [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(ApplicationLifecycleState)> handler);
-  [[nodiscard]] Task<PermissionStatus> CheckPermission(Permission permission) const;
-  [[nodiscard]] Task<PermissionStatus> RequestPermission(Permission permission) const;
-  [[nodiscard]] Task<bool> OpenPermissionSettings(Permission permission) const;
+  Task<PermissionStatus> CheckPermission(Permission permission) const;
+  Task<PermissionStatus> RequestPermission(Permission permission) const;
+  Task<bool> OpenPermissionSettings(Permission permission) const;
   [[nodiscard]] const std::shared_ptr<LocalNotificationService>& LocalNotifications() const noexcept;
   [[nodiscard]] const std::shared_ptr<SystemTrayService>& SystemTray() const noexcept;
   [[nodiscard]] const std::shared_ptr<huxerui::Clipboard>& Clipboard() const noexcept;
