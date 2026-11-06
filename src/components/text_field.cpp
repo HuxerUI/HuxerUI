@@ -486,7 +486,7 @@ public:
     if (!detail::IsValidTextEditingValue(modifier.value)) {
       throw std::invalid_argument("HuxerUI TextField value is invalid");
     }
-    (void)AttributedText::FromRanges(modifier.value.text, modifier.text_styles);
+    HUXERUI_DISCARD(AttributedText::FromRanges(modifier.value.text, modifier.text_styles));
     if (!detail::Utf16Length(label).has_value()) {
       throw std::invalid_argument("HuxerUI TextField label must contain valid UTF-8");
     }
@@ -2853,7 +2853,7 @@ TextField TextField::Shaping(TextShapingOptions value) && {
 }
 
 TextField TextField::TextStyles(std::vector<TextStyleRange> value) && {
-  (void)AttributedText::FromRanges(value_.text, value);
+  HUXERUI_DISCARD(AttributedText::FromRanges(value_.text, value));
   text_styles_ = std::move(value);
   UpdateModifier();
   return std::move(*this);
