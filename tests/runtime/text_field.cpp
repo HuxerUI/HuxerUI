@@ -977,6 +977,45 @@ TEST_CASE("TestTextFieldUsesThemeCaretWidth") {
   REQUIRE(FindTextFieldCaret(material.BuildFrame(), material_style.caret, material_style.caret_width) != nullptr);
 }
 
+TEST_CASE("TestTextFieldPaintsTheTrailingCaretInsideTheEditorClip") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    auto style = TextFieldStyle::Default();
+    style.padding = {};
+    ThemeDefinition theme;
+    theme.Set(style);
+    return Theme(
+        std::move(theme),
+        TextField(TextEditingValue::FromText("right aligned"))
+            .LineLimits(TextFieldLineLimits::MultiLine(1))
+            .Align(TextAlign::Trailing)
+    );
+  }, platform};
+  // The test layout uses ten units per character. Fill the clip exactly.
+  runtime.SetWindowMetrics({.viewport = {130.0F, 48.0F}});
+  runtime.BuildFrame();
+  Pointer(runtime, PointerEventType::Down, 40.0F, 20.0F);
+  runtime.HandleKeyEvent({KeyEventType::Down, Key::End});
+
+  const auto style = TextFieldStyle::Default();
+  const auto& frame = runtime.BuildFrame();
+  const auto* text = FindText(frame, "right aligned");
+  const auto* caret = FindTextFieldCaret(frame, style.caret, style.caret_width);
+  REQUIRE(text != nullptr);
+  REQUIRE(text->options.align == TextAlign::Trailing);
+  REQUIRE(caret != nullptr);
+  const float right = text->rect.x + text->rect.width;
+  const auto end = runtime.QueryTextInputGeometry(1, {13, 13});
+  REQUIRE(end.result_code == TextInputResultCode::Ok);
+  REQUIRE(end.caret.x == Catch::Approx(right));
+  REQUIRE(caret->rect.x + caret->rect.width == Catch::Approx(right));
+
+  runtime.HandleKeyEvent({KeyEventType::Down, Key::ArrowLeft});
+  const auto* inner_caret = FindTextFieldCaret(runtime.BuildFrame(), style.caret, style.caret_width);
+  REQUIRE(inner_caret != nullptr);
+  REQUIRE(inner_caret->rect.x == Catch::Approx(runtime.QueryTextInputGeometry(1, {12, 12}).caret.x));
+}
+
 TEST_CASE("TestTextFieldPreservesIndependentPlaceholderFont") {
   TestPlatform platform;
   UiWindow runtime{IndependentPlaceholderFontApp, platform};
