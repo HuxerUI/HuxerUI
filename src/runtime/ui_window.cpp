@@ -1204,6 +1204,22 @@ std::shared_ptr<detail::FilePickerTransport> UiWindow::CreateFilePickerTransport
   return {};
 }
 
+TextParagraphLayout UiWindow::LayoutText(const AttributedText& text, const TextStyle& style, float max_width,
+                                       const TextLayoutOptions& options) {
+  if (!IsInitialized()) {
+    throw std::logic_error("HuxerUI paragraph layout requires an initialized window");
+  }
+  state_->application_->RequireThread();
+  if (!(max_width >= 0.0F)) {
+    throw std::invalid_argument("HuxerUI paragraph layout width must be nonnegative");
+  }
+  auto layout = CreateTextLayout(text, style, max_width, options);
+  if (!layout) {
+    throw std::logic_error("HuxerUI native paragraph layout is unavailable");
+  }
+  return TextParagraphLayout(text, std::move(layout));
+}
+
 std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(std::string_view text, const TextStyle& style,
                                                                float max_width, const TextLayoutOptions& options) {
   return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);

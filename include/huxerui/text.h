@@ -24,6 +24,7 @@ class RawResource;
 namespace detail {
 struct InternalAccess;
 struct FontFamilyData;
+class TextLayout;
 }
 
 /// An offset measured in UTF-16 code units, not UTF-8 bytes or grapheme clusters.
@@ -462,6 +463,7 @@ public:
 
 private:
   friend struct detail::InternalAccess;
+  friend class TextParagraphLayout;
   struct Storage;
   explicit AttributedText(std::shared_ptr<const Storage> storage);
   std::shared_ptr<const Storage> storage_;
@@ -646,6 +648,33 @@ struct TextLayoutMetrics {
   bool operator==(const TextLayoutMetrics&) const = default;
 };
 
+/// An owned native paragraph layout created by TextMeasurer::LayoutText().
+///
+/// Copies share the layout. Query it on the originating UiWindow's thread while the window is active.
+/// Coordinates are paragraph-local logical units before external placement or clipping.
+/// Offsets are UTF-16 scalar boundaries. Invalid positions, ranges, or nonfinite points throw std::invalid_argument.
+class TextParagraphLayout final {
+public:
+  /// Returns the measured layout extent.
+  [[nodiscard]] Size Measure() const;
+  /// Maps a local point to an insertion position with visual affinity.
+  [[nodiscard]] TextPosition HitTest(Point point) const;
+  /// Returns the caret rectangle at the selected side of a logical boundary.
+  [[nodiscard]] Rect CaretRect(TextPosition position) const;
+  /// Returns the visual fragments of an ordered range, which may be disjoint at wraps or bidi boundaries.
+  [[nodiscard]] std::vector<Rect> RangeRects(TextRange range) const;
+  /// Moves to the preceding grapheme boundary in logical order, stopping at the paragraph start.
+  [[nodiscard]] TextOffset PreviousCaretOffset(TextOffset offset) const;
+  /// Moves to the following grapheme boundary in logical order, stopping at the paragraph end.
+  [[nodiscard]] TextOffset NextCaretOffset(TextOffset offset) const;
+
+private:
+  friend class UiWindow;
+  TextParagraphLayout(AttributedText text, std::shared_ptr<const detail::TextLayout> layout);
+  AttributedText text_;
+  std::shared_ptr<const detail::TextLayout> layout_;
+};
+
 /// Identifies a link requested by pointer, keyboard, or accessibility activation.
 /// Applications own URI scheme policy and navigation; HuxerUI does not open the target automatically.
 struct TextLinkActivation {
@@ -668,9 +697,9 @@ struct TextEvents {
   struct LinkActivated : Event<void(const TextLinkActivation&)> {};
 };
 
-/// Synchronous platform text measurement shared by components, layout, and custom drawing.
+/// Synchronous platform text measurement and paragraph layout shared by components and custom drawing.
 ///
-/// Calls run on the UiWindow's host thread. Retain returned value metrics, not the service reference, beyond the
+/// Calls run on the UiWindow's host thread. Retain returned values, not the service reference, beyond the
 /// current composition, layout, or geometry-preparation operation. Platform font engines may differ in metrics.
 /// Web's Canvas backend does not promise mixed bidirectional or cross-run shaping equivalent to non-Web backends.
 /// Measurement reads only the supplied shaping options, not the active Environment.
@@ -710,13 +739,21 @@ public:
       float max_width = std::numeric_limits<float>::infinity(), const TextLayoutOptions& options = {}) {
     return MeasureText(AttributedText(std::string(text)), style, max_width, options);
   }
+
+  /// Shapes a paragraph for hit testing, caret movement, and range geometry.
+  /// Use equivalent text, base style, width, and options when drawing. Apply vertical placement at the call site.
+  /// @param max_width Nonnegative width in logical units, or positive infinity for unconstrained layout.
+  /// @throws std::invalid_argument If the width is invalid.
+  /// @throws std::logic_error If native layout is unavailable.
+  [[nodiscard]] virtual TextParagraphLayout LayoutText(const AttributedText& text, const TextStyle& style,
+      float max_width = std::numeric_limits<float>::infinity(), const TextLayoutOptions& options = {});
 };
 
-/// Obtains the current UiWindow's text measurer during composition.
+/// Borrows the current UiWindow's text measurer for the active composition.
 ///
 /// Use this from an application root, composable component, or a custom hook called by one.
-/// Do not retain the returned reference in State or an asynchronous callback; keep the returned metrics instead.
-/// @return The active host's synchronous text-measurement service.
+/// Retain metrics or a layout snapshot for later queries on the host thread.
+/// @return The active host's synchronous text-measurement and layout service.
 /// @throws std::logic_error If no active service is available or the service is disconnected.
 /// @code
 /// TextLayoutMetrics UseLabelMetrics(std::string_view label) {

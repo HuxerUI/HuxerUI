@@ -117,7 +117,9 @@ Components can obtain it with `UseTextMeasurer()` without depending on native pl
 Built-in layout and editing code use the same service contract directly through the host boundary.
 `TextMeasurer` calls occur synchronously on the Runtime and platform host thread.
 `NodeExtension::PrepareGeometry()` receives the same active measurer after final presentation geometry is resolved.
-Callers may retain returned value metrics, but they must not retain the service reference beyond the active composition, layout, or geometry-preparation operation.
+Callers may retain returned metrics and paragraph layout snapshots. The service reference is borrowed for the active composition, layout, or geometry-preparation operation.
+
+`TextMeasurer::LayoutText()` uses the UiWindow's native paragraph factory and returns an owned `TextParagraphLayout` bound to the originating host thread and window lifetime. The snapshot retains the attributed text for UTF-16 range validation. Geometry precedes caller-owned placement and clipping, and the caller uses equivalent inputs when drawing.
 
 Measurement results are authoritative geometry.
 A caller that positions exact runs translates the returned run bounds to its chosen baseline and records both values.

@@ -268,6 +268,40 @@ TEST_CASE("AttributedParagraphDoubleClickSelectsLinkWordWithoutSecondActivation"
   REQUIRE(clipboard.text == "first");
 }
 
+TEST_CASE("TextMeasurerProvidesOwnedParagraphGeometry") {
+  ParagraphPlatform platform;
+  std::optional<TextParagraphLayout> layout;
+  metric_root = [&]() -> View {
+    const AttributedText text{
+      TextSpan("A"),
+      TextSpan("\U0001F600").Style({.font_weight = FontWeight::Bold}),
+      TextSpan("BC"),
+    };
+    layout = UseTextMeasurer().LayoutText(text, TextStyle::Default(), 25.0F);
+    return Spacer();
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
+  window.BuildFrame();
+  metric_root = {};
+  REQUIRE(layout.has_value());
+  REQUIRE(platform.layouts == 1);
+  REQUIRE(layout->Measure() == Size{20.0F, 60.0F});
+  REQUIRE(layout->NextCaretOffset(1) == 3);
+  REQUIRE(layout->PreviousCaretOffset(3) == 1);
+  const Rect start = layout->CaretRect({1, TextAffinity::Downstream});
+  REQUIRE(start.y == 20.0F);
+  REQUIRE(layout->CaretRect({1, TextAffinity::Upstream}).y == 0.0F);
+  REQUIRE(layout->HitTest({start.x, start.y + start.height / 2.0F}).offset == 1);
+  REQUIRE(layout->RangeRects({0, 5}).size() == 3);
+  REQUIRE(layout->RangeRects({1, 1}).empty());
+  REQUIRE_THROWS_AS(layout->CaretRect({2}), std::invalid_argument);
+  REQUIRE_THROWS_AS(layout->RangeRects({3, 1}), std::invalid_argument);
+  REQUIRE_THROWS_AS(layout->NextCaretOffset(6), std::invalid_argument);
+  REQUIRE_THROWS_AS(layout->HitTest({std::numeric_limits<float>::infinity(), 0.0F}), std::invalid_argument);
+  REQUIRE_THROWS_AS(platform.LayoutText(AttributedText("text"), TextStyle::Default(), -1.0F), std::invalid_argument);
+}
+
 TEST_CASE("TextFontChangesRefreshObservationSelectionAndTextFieldWithoutResettingState") {
   class Input final : public PlatformTextInput {
   public:

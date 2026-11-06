@@ -337,6 +337,46 @@ bool AttributedText::operator==(const AttributedText& other) const noexcept {
          storage_->styles == other.storage_->styles && storage_->links == other.storage_->links;
 }
 
+TextParagraphLayout::TextParagraphLayout(AttributedText text, std::shared_ptr<const detail::TextLayout> layout)
+    : text_(std::move(text)), layout_(std::move(layout)) {}
+
+Size TextParagraphLayout::Measure() const { return layout_->Measure(); }
+
+TextPosition TextParagraphLayout::HitTest(Point point) const {
+  if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+    throw std::invalid_argument("HuxerUI paragraph hit test requires a finite point");
+  }
+  return layout_->HitTest(point);
+}
+
+Rect TextParagraphLayout::CaretRect(TextPosition position) const {
+  text_.storage_->body->ByteOffset(position.offset);
+  if (position.affinity != TextAffinity::Upstream && position.affinity != TextAffinity::Downstream) {
+    throw std::invalid_argument("HuxerUI paragraph caret affinity is invalid");
+  }
+  return layout_->CaretRect(position.offset, position.affinity);
+}
+
+std::vector<Rect> TextParagraphLayout::RangeRects(TextRange range) const {
+  text_.storage_->body->ValidateRange(range);
+  return layout_->RangeRects(range);
+}
+
+TextOffset TextParagraphLayout::PreviousCaretOffset(TextOffset offset) const {
+  text_.storage_->body->ByteOffset(offset);
+  return layout_->PreviousCaretOffset(offset);
+}
+
+TextOffset TextParagraphLayout::NextCaretOffset(TextOffset offset) const {
+  text_.storage_->body->ByteOffset(offset);
+  return layout_->NextCaretOffset(offset);
+}
+
+TextParagraphLayout TextMeasurer::LayoutText(const AttributedText&, const TextStyle&, float,
+                                           const TextLayoutOptions&) {
+  throw std::logic_error("HuxerUI native paragraph layout is unavailable");
+}
+
 std::size_t detail::InternalAccess::BodyHash(const AttributedText& text) noexcept { return text.storage_->body->hash; }
 
 bool detail::InternalAccess::SameBody(const AttributedText& left, const AttributedText& right) noexcept {
