@@ -85,6 +85,12 @@ Controlled text, selection, and focus survive that update.
 On Web and Linux, `UseTextMeasurer()` subscribes composition to font readiness and text DPI changes respectively; remeasure during recomposition to update geometry derived from its results.
 Previously returned measurements remain snapshots and do not update themselves.
 
+### Native paragraph geometry
+
+Custom text components can call `UseTextMeasurer().LayoutText(paragraph, style, width, options)` to retain a `TextParagraphLayout` for hit testing, caret movement, and range rectangles. Query it on the originating window's thread while the window is active. Rebuild it when the paragraph, style, layout inputs, or observed text metrics change.
+
+Pass the same paragraph, base style, width, and options when drawing. Geometry uses paragraph-local logical units before vertical placement or clipping. Use `HitTest()` to get a UTF-16 position with affinity, `CaretRect()` for its caret, and `RangeRects()` for the visual fragments of a selection. Grapheme navigation is available through `PreviousCaretOffset()` and `NextCaretOffset()`.
+
 ### Selection and virtualized text
 
 Wrap ordinary content in `SelectionArea` to select across descendant Text nodes. Nested areas are independent; copied paragraphs are separated by newlines. Static content supports Copy and Select All but never starts an IME session. Mouse dragging, double-click, Shift-click, touch long press, and selection handles use retained geometry.

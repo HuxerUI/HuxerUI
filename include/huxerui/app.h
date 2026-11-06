@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -771,6 +772,9 @@ public:
   /// Requests the cursor represented by the PointerCursorKind argument on this native window.
   /// Called on the application thread; the default implementation ignores the request on hosts without pointer cursors.
   virtual void SetPointerCursor(PointerCursorKind) {}
+  /// Creates an owned paragraph geometry snapshot on the window thread.
+  [[nodiscard]] TextParagraphLayout LayoutText(const AttributedText& text, const TextStyle& style,
+      float max_width = std::numeric_limits<float>::infinity(), const TextLayoutOptions& options = {}) final;
   /// Creates native text measurement/layout state for attributed content on the application thread.
   /// @param text Attributed content to retain or copy into the layout.
   /// @param style Resolved default typography used where spans do not override it.

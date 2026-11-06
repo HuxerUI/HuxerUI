@@ -759,7 +759,7 @@ public:
 
 Secure TextField creates grapheme boundaries from the platform text layout, then lays out only its mask string. A small mapped layout translates between real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry, selection rectangles, and deletion. The PaintSequence never receives the real text.
 
-Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and platform text layouts.
+The native `detail::TextLayout` contract remains internal. `TextMeasurer::LayoutText()` provides an owned `TextParagraphLayout` for custom components, using the same native layout boundary as TextField. It validates paragraph-local UTF-16 inputs against its retained attributed text snapshot.
 
 The TextField caches layout by text, font, available width, multiline configuration, resolved shaping options, and relevant style values.
 On Linux and Web, the internal per-window [text-metrics revision](text.md#platform-caches) also invalidates these layouts when platform text metrics change without a Font value change.
@@ -767,7 +767,7 @@ TextField retains its controlled value, selection, composition, focus, and input
 An empty shaping locale resolves from the mounted TextField's effective inherited Locale, while `TextField::Shaping()` preserves a non-empty explicit locale.
 The resolved shaping value is shared by the controlled value, label, placeholder, validation message, grapheme boundaries, selection and caret geometry, measurement, and every DrawText command so platform layout and renderer replay cannot diverge.
 
-Editor components can use TextMeasurer for exact-run metrics while retaining their own line, selection, and document models. They do not reuse TextField's internal editable layout.
+Editor components can use paragraph layout geometry or exact-run metrics through TextMeasurer while retaining their own document, selection, and input state.
 
 Candidate geometry is reported in node-local logical coordinates. UiWindow applies layout and presentation transforms to obtain host-view coordinates. The native input boundary converts those coordinates to the coordinate space required by its API.
 
