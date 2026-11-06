@@ -197,7 +197,7 @@ jobs:
           path: |
             ~/.xlings
             ~/.mcpp
-          # The payload store holds the whole GTK closure (36 packages), so
+          # The payload store holds the whole GTK closure (37 packages), so
           # the key names the manifest that selects them.
           key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
