@@ -68,6 +68,7 @@ struct TextFieldModifier {
   std::optional<std::size_t> max_lines;
   std::optional<std::size_t> max_length;
   ValidationResult validation;
+  std::vector<TextStyleRange> text_styles;
 
   bool operator==(const TextFieldModifier&) const = default;
   static bool LayoutEquals(const TextFieldModifier& left, const TextFieldModifier& right);
