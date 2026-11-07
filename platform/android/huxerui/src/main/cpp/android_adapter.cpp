@@ -595,6 +595,14 @@ public:
   /// Returns the VM used to acquire thread-local JNI environments.
   /// @return Process VM pointer; no JNI attachment or reference ownership is transferred.
   JavaVM* VirtualMachine() const noexcept { return virtual_machine_; }
+
+  bool ReceiveSystemTaskEvent(const PlatformPayload& event) {
+    if (!system_task_event_)
+      return false;
+    system_task_event_(event);
+    return true;
+  }
+
   std::function<void()> on_stopped;
   std::uint64_t identity = 0;
   /// Initializes shared services after Java application facilities and dispatch are ready.
@@ -847,6 +855,9 @@ private:
     return CreateAndroidPermissionTransport(virtual_machine_, Environment(), host_);
   }
 
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
+    return CreateAndroidSystemTaskTransport(virtual_machine_, Environment(), host_, system_task_event_);
+  }
 
   /// Borrows JNI access from an already attached calling thread without attaching a worker.
   /// @return Thread-local JNI environment, or null when this thread cannot access the VM.
@@ -878,6 +889,7 @@ private:
   jobject context_ = nullptr;
   std::shared_ptr<AndroidAssetManager> asset_manager_;
   std::filesystem::path development_resource_root_;
+  std::function<void(const PlatformPayload&)> system_task_event_;
   jmethodID read_clipboard_text_ = nullptr;
   jmethodID write_clipboard_text_ = nullptr;
   jmethodID write_clipboard_item_ = nullptr;
@@ -1867,6 +1879,20 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeRequ
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());
   }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIApplication_nativeSystemTaskEvent(
+    JNIEnv* environment, jclass, jlong identity, jobject event) {
+  try {
+    if (auto application = huxerui::detail::ApplicationHost(identity)) {
+      return application->ReceiveSystemTaskEvent(huxerui::android::JavaPlatformPayloadToCpp(environment, event))
+                 ? JNI_TRUE
+                 : JNI_FALSE;
+    }
+  } catch (const std::exception& exception) {
+    huxerui::detail::ThrowJavaException(environment, exception.what());
+  }
+  return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIApplication_nativeDrainTasks(

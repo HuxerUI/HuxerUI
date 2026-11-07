@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <stop_token>
 
 #include <huxerui/app.h>
 #include <huxerui/task.h>
@@ -11,6 +12,26 @@ namespace huxerui {
 namespace detail {
 
 struct ExecutionContext;
+class SystemTaskGrant;
+
+/// Cooperative stop state for one admitted system execution, shared with its coroutine chain.
+struct SystemTaskStopState {
+  std::stop_source source;
+  std::weak_ptr<TaskExecution> execution;
+  /// Observes platform revocation before its queued Runtime event reaches the execution.
+  std::weak_ptr<SystemTaskGrant> grant;
+  bool cleaning_up = false;
+};
+
+/// Queues the current participating wait so it can observe a requested stop.
+void WakeStoppedTask(const SystemTaskStopState& stop) noexcept;
+/// Checks whether this exact system execution is running on the current thread.
+bool IsCurrentSystemTask(const SystemTaskStopState& stop) noexcept;
+/// Indicates that the current system task is executing its bounded cleanup.
+bool IsSystemTaskCleaningUp() noexcept;
+/// Launches admitted work under the application context with cooperative stop enabled.
+TaskHandle LaunchSystemTask(const std::shared_ptr<TaskScopeImpl>& scope, Task<void> task,
+                            std::shared_ptr<SystemTaskStopState> stop);
 
 [[nodiscard]] std::size_t WorkerConcurrency() noexcept;
 

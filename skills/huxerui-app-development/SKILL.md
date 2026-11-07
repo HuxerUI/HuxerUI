@@ -30,6 +30,6 @@ Keep the project's build system and compatible toolchain. Report build and run r
 - For component and state work, read [composition, state, and tasks](references/fundamentals.md), [built-in controls](references/components.md), or [layout and virtualization](references/layout-and-ui.md).
 - For interaction, read [modifiers and mounted View targets](references/modifiers.md), [gestures and drag-and-drop](references/gestures-and-drag-drop.md), or [retained node extensions](references/node-extensions.md).
 - For appearance and rendering, read [theme, animation, and presentation](references/theme-animation-presentation.md), [text editing and accessibility](references/text-input-and-semantics.md), or [Canvas and external textures](references/canvas-paint-and-images.md).
-- For app services, read [navigation and windows](references/navigation-and-window.md), [resources, files, and network](references/resources-files-network.md), or [local notifications](references/local-notifications.md).
+- For app services, read [navigation and windows](references/navigation-and-window.md), [resources, files, and network](references/resources-files-network.md), [local notifications](references/local-notifications.md), or [system tasks](references/fundamentals.md#system-tasks).
 - For platform integration, read [platform modules](references/platform-modules.md) for services and [platform views](references/platform-views.md) for embedded controls.
 - Use the [public API index](references/api-index.md) to find headers and focused references.

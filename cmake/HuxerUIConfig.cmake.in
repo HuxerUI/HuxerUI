@@ -58,6 +58,7 @@ if (IOS)
         )
         set(_HUXERUI_IOS_LINK_LIBRARIES
                 "-framework AVFoundation"
+                "-framework BackgroundTasks"
                 "-framework Contacts"
                 "-framework CoreBluetooth"
                 "-framework CoreFoundation"

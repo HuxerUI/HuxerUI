@@ -33,6 +33,7 @@
 #include <huxerui/scroll.h>
 #include <huxerui/semantics.h>
 #include <huxerui/system.h>
+#include <huxerui/system_task.h>
 #include <huxerui/task.h>
 #include <huxerui/text_input.h>
 #include <huxerui/view.h>
@@ -103,6 +104,7 @@ class PlatformChannelEndpoint;
 class PlatformRegistry;
 class PermissionTransport;
 class SystemTrayTransport;
+class SystemTaskTransport;
 class TextLayoutBackend;
 
 PlatformChannelEndpoint MakePlatformChannelEndpoint(UiWindow& ui_window);
@@ -385,6 +387,10 @@ struct AppOptions {
   std::vector<ApplicationHook> application_hooks{};
   /// Window service/layer installers, called in declaration order before each window first composes.
   std::vector<WindowHook> window_hooks{};
+  /// Immutable declarations installed before application hooks. Identifiers must be unique across the list.
+  std::vector<SystemTask> system_tasks{};
+  /// Maximum cooperative stop budget, shortened by any earlier platform deadline. Must be positive and finite.
+  std::chrono::duration<double> system_task_stop_timeout = std::chrono::seconds(5);
 
   /// Whether the built-in composition error page shows the failing operation and exception message.
   /// Applies to windows presented by the HuxerUI platform hosts and is independent of the debug overlay.
@@ -544,6 +550,8 @@ protected:
   /// Creates the application's native tray capability during initialization.
   /// @return An application-owned transport, or null if the platform has no tray support.
   virtual std::shared_ptr<detail::SystemTrayTransport> CreateSystemTrayTransport();
+  /// Supplies the host's system task mechanism during installation, or null when unsupported.
+  virtual std::shared_ptr<detail::SystemTaskTransport> CreateSystemTaskTransport();
   /// Notifies the native host after RequestShutdown has retired shared state.
   /// Runs on the application thread. The host may now stop its event loop and release native application facilities;
   /// the callback must not attempt to resume shared application or window work.
@@ -562,6 +570,8 @@ private:
   void RequestEventDispatch();
   /// Retires shared state and then invokes the native stop hook on the application thread.
   void FinishShutdown();
+  /// Closes attached windows and ordinary tasks before orderly or forced application retirement.
+  void RetireWindowsAndTasks() noexcept;
   /// Idempotently closes the ordinary timer queue before its dispatcher or native owner can disappear.
   void CloseTimers() noexcept;
   void ValidateWindowCreation(const ViewFactory& content, const WindowOptions& options);

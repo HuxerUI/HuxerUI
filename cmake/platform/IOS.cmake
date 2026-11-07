@@ -32,6 +32,7 @@ set(HUXERUI_PLATFORM_LINK_LIBRARIES
         "-framework MetalPerformanceShaders"
         "-framework MobileCoreServices"
         "-framework AVFoundation"
+        "-framework BackgroundTasks"
         "-framework Photos"
         "-framework QuartzCore"
         "-framework UIKit"

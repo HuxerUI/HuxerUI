@@ -195,6 +195,7 @@ struct ApplicationRuntimeState final : std::enable_shared_from_this<ApplicationR
   std::shared_ptr<HttpTransport> http_transport;
   std::vector<std::weak_ptr<HttpOperation>> http_operations;
   std::shared_ptr<TaskScopeImpl> tasks;
+  std::shared_ptr<SystemTasks> system_tasks;
   std::vector<std::weak_ptr<UiExecutionState>> uis;
   std::vector<std::function<void()>> handler_cleanups;
   bool event_dispatch_pending = false;

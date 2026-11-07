@@ -47,6 +47,7 @@ private:
 std::shared_ptr<TaskWaitState> BeginTaskWait(const std::weak_ptr<TaskExecution>& execution,
                                           std::coroutine_handle<> coroutine);
 void RetireTaskWait(const std::shared_ptr<TaskWaitState>& wait) noexcept;
+void ResumeTaskWait(const std::shared_ptr<TaskWaitState>& wait);
 
 template <class Operation> class TaskAwaiter final {
 public:
@@ -61,7 +62,7 @@ public:
   }
 
   decltype(auto) await_resume() {
-    RetireTaskWait(wait_);
+    ResumeTaskWait(wait_);
     return operation_.TakeResult();
   }
 
@@ -364,6 +365,7 @@ private:
   std::coroutine_handle<promise_type> coroutine_;
 
   friend class TaskScope;
+  friend class detail::TaskScopeImpl;
 };
 
 namespace detail {

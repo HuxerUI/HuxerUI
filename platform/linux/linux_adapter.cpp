@@ -54,6 +54,7 @@
 #include "application/window_internal.h"
 #include "application/application_internal.h"
 #include "macros_internal.h"
+#include "application/system_task_internal.h"
 
 namespace huxerui::detail {
 
@@ -906,6 +907,10 @@ public:
 
   std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
     return std::make_shared<LinuxSystemTrayTransport>();
+  }
+
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
+    return std::make_shared<ProcessLocalSystemTasks>();
   }
 
   std::optional<ProcessMetrics> QueryProcessMetrics() noexcept override {

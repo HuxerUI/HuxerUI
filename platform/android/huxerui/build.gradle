@@ -51,6 +51,11 @@ android {
 
     sourceSets {
         androidTest.java.srcDir "../../../tests/platform/android/instrumentation"
+        androidTest.manifest.srcFile "../../../tests/platform/android/instrumentation/AndroidManifest.xml"
+    }
+
+    testOptions {
+        targetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
     }
 
     compileOptions {

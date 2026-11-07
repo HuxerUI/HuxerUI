@@ -1,5 +1,6 @@
 -keep class org.huxerui.HuxerUIApplication { *; }
 -keep class org.huxerui.HuxerUIApplication$* { *; }
+-keep class org.huxerui.HuxerUISystemTasks { *; }
 -keep class org.huxerui.HuxerUIHttpRequest { *; }
 -keep class org.huxerui.HuxerUIFilePicker { *; }
 -keep class org.huxerui.HuxerUIFilePicker$* { *; }
