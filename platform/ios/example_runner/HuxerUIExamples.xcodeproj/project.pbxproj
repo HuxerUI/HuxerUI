@@ -364,7 +364,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 000000000000000000000205 /* Debug.xcconfig */;
 			buildSettings = {
-				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_FILE = "$(HUXERUI_APP_INFO_PLIST)";
 				PRODUCT_NAME = "$(inherited)";
 				SDKROOT = iphoneos;
 			};
@@ -374,7 +374,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 000000000000000000000206 /* Release.xcconfig */;
 			buildSettings = {
-				INFOPLIST_FILE = App/Info.plist;
+				INFOPLIST_FILE = "$(HUXERUI_APP_INFO_PLIST)";
 				PRODUCT_NAME = "$(inherited)";
 				SDKROOT = iphoneos;
 			};

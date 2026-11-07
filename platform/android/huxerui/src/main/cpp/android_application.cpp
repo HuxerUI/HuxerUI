@@ -3,6 +3,8 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -15,6 +17,7 @@
 #include <huxerui/android/jni.h>
 
 #include "application/application_internal.h"
+#include "application/system_task_internal.h"
 #include "android_file_internal.h"
 #include "io/file_internal.h"
 
@@ -601,3 +604,237 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUILocalNotification_nati
     (*owner)->Complete(status);
   }
 }
+
+namespace huxerui::detail {
+
+namespace {
+
+constexpr auto no_earliest_start = std::numeric_limits<std::int64_t>::min();
+
+PlatformPayload EncodeSystemTask(const SystemTaskRequest& request) {
+  return PlatformPayload::Object{
+      {"identifier", request.identifier}, {"instance", request.instance_id}, {"token", request.token},
+      {"kind", static_cast<int>(request.kind)},
+      {"earliest", request.schedule.earliest_start
+          ? std::chrono::ceil<std::chrono::milliseconds>(request.schedule.earliest_start->time_since_epoch()).count()
+          : no_earliest_start},
+      {"network", request.schedule.requires_network}, {"power", request.schedule.requires_external_power},
+      {"title", request.presentation ? request.presentation->title : std::string{}},
+      {"subtitle", request.presentation ? request.presentation->subtitle : std::string{}},
+  };
+}
+
+SystemTaskRequest DecodeSystemTask(const PlatformPayload& payload) {
+  const auto& value = payload.AsObject();
+  const auto kind = value.at("kind").AsInteger();
+  if (kind < 0 || kind > static_cast<int>(SystemTaskKind::Ongoing)) {
+    throw std::logic_error("HuxerUI Android task kind is invalid");
+  }
+  const auto earliest = value.at("earliest").AsInteger();
+  SystemTaskRequest request{.identifier = std::string(value.at("identifier").AsString()),
+                            .instance_id = std::string(value.at("instance").AsString()),
+                            .token = std::string(value.at("token").AsString()),
+                            .kind = static_cast<SystemTaskKind>(kind)};
+  using Clock = std::chrono::system_clock;
+  if (earliest != no_earliest_start) {
+    const auto when = std::chrono::milliseconds(earliest);
+    if (when > std::chrono::floor<std::chrono::milliseconds>(Clock::time_point::max().time_since_epoch()) ||
+        when < std::chrono::ceil<std::chrono::milliseconds>(Clock::time_point::min().time_since_epoch())) {
+      throw std::logic_error("HuxerUI Android task time is out of range");
+    }
+    request.schedule.earliest_start = Clock::time_point(std::chrono::duration_cast<Clock::duration>(when));
+  }
+  request.schedule.requires_network = value.at("network").AsBoolean();
+  request.schedule.requires_external_power = value.at("power").AsBoolean();
+  return request;
+}
+
+std::optional<SystemTaskError> DecodeSystemTaskError(const PlatformPayload::Object& payload) {
+  const auto found = payload.find("error");
+  if (found == payload.end()) return std::nullopt;
+  const auto code = found->second.AsInteger();
+  if (code < 0 || code > static_cast<int>(SystemTaskErrorCode::Handler)) {
+    throw std::logic_error("HuxerUI Android task error code is invalid");
+  }
+  return SystemTaskError{static_cast<SystemTaskErrorCode>(code), std::string(payload.at("message").AsString())};
+}
+
+class AndroidSystemTasks final : public SystemTaskTransport, public std::enable_shared_from_this<AndroidSystemTasks> {
+public:
+  AndroidSystemTasks(JavaVM* machine, JNIEnv* env, jobject host) : machine_(machine) {
+    const android::LocalRef<jclass> host_type(env, env->GetObjectClass(host));
+    const auto getter = env->GetMethodID(host_type.Get(), "systemTasks", "()Lorg/huxerui/HuxerUISystemTasks;");
+    Check(env);
+    const android::LocalRef<jobject> tasks(env, env->CallObjectMethod(host, getter));
+    Check(env);
+    const android::LocalRef<jclass> type(env, env->GetObjectClass(tasks.Get()));
+    recover_ = Method(env, type.Get(), "recover");
+    submit_ = Method(env, type.Get(), "submit");
+    withdraw_ = Method(env, type.Get(), "withdraw");
+    finish_ = Method(env, type.Get(), "finish");
+    update_ = Method(env, type.Get(), "update");
+    disconnect_ = env->GetMethodID(type.Get(), "disconnect", "()V");
+    Check(env);
+    tasks_ = env->NewGlobalRef(tasks.Get());
+    Check(env);
+  }
+
+  ~AndroidSystemTasks() override {
+    if (JniEnvironment access(machine_); auto* env = access.Get()) env->DeleteGlobalRef(tasks_);
+  }
+
+  SystemTaskCapabilities Capabilities(SystemTaskKind kind) const noexcept override {
+    return {.supported = true, .can_launch_process = kind == SystemTaskKind::Background};
+  }
+
+  void Install(std::span<const SystemTaskRegistration> registrations, EventHandler on_event) override {
+    on_event_ = std::move(on_event);
+    for (const auto& registration : registrations) {
+      if (registration.kind != SystemTaskKind::Background) continue;
+      SystemTaskEvent event{SystemTaskEvent::Kind::Reconciled, {.identifier = registration.identifier}};
+      const auto result = Call(recover_, registration.identifier);
+      if (auto error = DecodeSystemTaskError(result.AsObject())) event.error = std::move(error);
+      else if (const auto found = result.AsObject().find("request"); found != result.AsObject().end()) {
+        event.request = DecodeSystemTask(found->second);
+      }
+      on_event_(std::move(event));
+    }
+  }
+
+  SystemTaskResult<void> Submit(const SystemTaskRequest& request) override {
+    return Operation(submit_, EncodeSystemTask(request));
+  }
+
+  SystemTaskResult<void> Withdraw(const SystemTaskRequest& request) override {
+    return Operation(withdraw_, EncodeSystemTask(request));
+  }
+
+  void Disconnect() noexcept override {
+    on_event_ = {};
+    grants_.clear();
+    JniEnvironment access(machine_);
+    if (auto* env = access.Get()) {
+      env->CallVoidMethod(tasks_, disconnect_);
+      ClearJavaException(env);
+    }
+  }
+
+  void Receive(const PlatformPayload& payload) {
+    if (!on_event_) return;
+    const auto& value = payload.AsObject();
+    const auto event_name = value.at("event").AsString();
+    auto request = DecodeSystemTask(value.at("request"));
+    if (event_name == "rejected") {
+      on_event_({.kind = SystemTaskEvent::Kind::Rejected, .request = std::move(request),
+                 .error = DecodeSystemTaskError(value)});
+      return;
+    }
+    const auto allowance = value.at("allowance").AsInteger();
+    if (event_name == "granted") {
+      if (grants_.contains(allowance)) return;
+      const auto weak = weak_from_this();
+      auto grant = std::make_shared<SystemTaskGrant>([weak, allowance](SystemTaskOutcome outcome) {
+        if (auto owner = weak.lock()) {
+          owner->grants_.erase(allowance);
+          return owner->Operation(owner->finish_, PlatformPayload::Object{
+              {"allowance", allowance}, {"retry", outcome == SystemTaskOutcome::Retry}});
+        }
+        return SystemTaskResult<void>::Success();
+      });
+      if (request.kind != SystemTaskKind::Background) {
+        grant->update_presentation = [weak, allowance](const ResolvedTaskPresentation& presentation) {
+          if (auto owner = weak.lock()) {
+            return owner->Operation(owner->update_, PlatformPayload::Object{
+                {"allowance", allowance}, {"title", presentation.title}, {"subtitle", presentation.subtitle}});
+          }
+          return TaskFailure<void>(SystemTaskErrorCode::Unavailable, "HuxerUI Android task service has retired");
+        };
+        if (request.kind == SystemTaskKind::Continued) {
+          grant->update_progress = [weak, allowance](TaskProgress progress) {
+            if (auto owner = weak.lock()) {
+              return owner->Operation(owner->update_, PlatformPayload::Object{
+                  {"allowance", allowance}, {"completed", std::to_string(progress.completed)},
+                  {"total", progress.total ? std::to_string(*progress.total) : std::string{}}});
+            }
+            return TaskFailure<void>(SystemTaskErrorCode::Unavailable, "HuxerUI Android task service has retired");
+          };
+        }
+      }
+      grants_.emplace(allowance, grant);
+      on_event_({SystemTaskEvent::Kind::Granted, std::move(request), std::move(grant)});
+      return;
+    }
+    const auto found = grants_.find(allowance);
+    if (found == grants_.end()) return;
+    auto grant = found->second.lock();
+    if (!grant || !grant->IsLive()) return;
+    if (event_name == "revoked") {
+      grants_.erase(found);
+      grant->Revoke();
+      on_event_({SystemTaskEvent::Kind::Revoked, std::move(request), std::move(grant)});
+    } else if (event_name == "stop") {
+      on_event_({SystemTaskEvent::Kind::StopRequested, std::move(request), std::move(grant)});
+    }
+  }
+
+private:
+  static void Check(JNIEnv* env) {
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      throw std::runtime_error("HuxerUI Android system task JNI call failed");
+    }
+  }
+
+  static jmethodID Method(JNIEnv* env, jclass type, const char* name) {
+    auto method = env->GetMethodID(type, name, "(Lorg/huxerui/PlatformPayload;)Lorg/huxerui/PlatformPayload;");
+    Check(env);
+    return method;
+  }
+
+  PlatformPayload Call(jmethodID method, const PlatformPayload& value) {
+    JniEnvironment access(machine_);
+    auto* env = access.Get();
+    if (!env) throw std::runtime_error("HuxerUI Android system task JNI environment is unavailable");
+    const auto argument = android::PlatformPayloadToJava(env, value);
+    Check(env);
+    const android::LocalRef<jobject> result(env, env->CallObjectMethod(tasks_, method, argument.Get()));
+    Check(env);
+    return android::JavaPlatformPayloadToCpp(env, result.Get());
+  }
+
+  SystemTaskResult<void> Operation(jmethodID method, const PlatformPayload& value) {
+    try {
+      const auto result = Call(method, value);
+      if (auto error = DecodeSystemTaskError(result.AsObject())) {
+        return SystemTaskResult<void>::Failure(std::move(*error));
+      }
+      return SystemTaskResult<void>::Success();
+    } catch (const std::exception& exception) {
+      return TaskFailure<void>(SystemTaskErrorCode::Platform, exception.what());
+    }
+  }
+
+  JavaVM* machine_;
+  jobject tasks_ = nullptr;
+  jmethodID recover_ = nullptr;
+  jmethodID submit_ = nullptr;
+  jmethodID withdraw_ = nullptr;
+  jmethodID finish_ = nullptr;
+  jmethodID update_ = nullptr;
+  jmethodID disconnect_ = nullptr;
+  EventHandler on_event_;
+  std::map<std::int64_t, std::weak_ptr<SystemTaskGrant>> grants_;
+};
+
+} // namespace
+
+std::shared_ptr<SystemTaskTransport> CreateAndroidSystemTaskTransport(
+    JavaVM* machine, JNIEnv* environment, jobject host, std::function<void(const PlatformPayload&)>& receiver) {
+  auto tasks = std::make_shared<AndroidSystemTasks>(machine, environment, host);
+  receiver = [weak = std::weak_ptr(tasks)](const PlatformPayload& event) {
+    if (auto owner = weak.lock()) owner->Receive(event);
+  };
+  return tasks;
+}
+
+} // namespace huxerui::detail

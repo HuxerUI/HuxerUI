@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "application/application_internal.h"
+#include "application/system_task_internal.h"
 #include "macos_file_internal.h"
 
 namespace huxerui::detail {
@@ -471,6 +473,106 @@ std::optional<NotificationActivation> DecodeMacLocalNotificationActivation(UNNot
 
 std::shared_ptr<LocalNotificationTransport> CreateMacLocalNotificationTransport() {
   return std::make_shared<MacLocalNotificationTransport>();
+}
+
+namespace {
+
+class MacSystemTasks final : public ProcessLocalSystemTasks, public std::enable_shared_from_this<MacSystemTasks> {
+public:
+  SystemTaskCapabilities Capabilities(SystemTaskKind) const noexcept override {
+    return {.supported = true};
+  }
+
+  void Install(std::span<const SystemTaskRegistration> registrations, EventHandler on_event) override {
+    ProcessLocalSystemTasks::Install(registrations, std::move(on_event));
+    for (const auto& registration : registrations) {
+      if (registration.kind == SystemTaskKind::Background) {
+        on_event_({SystemTaskEvent::Kind::Reconciled, {.identifier = registration.identifier}});
+      }
+    }
+  }
+
+  SystemTaskResult<void> Submit(const SystemTaskRequest& request) override {
+    if (request.kind != SystemTaskKind::Background) return ProcessLocalSystemTasks::Submit(request);
+    if (request.schedule.requires_network || request.schedule.requires_external_power) {
+      return TaskFailure<void>(SystemTaskErrorCode::Unsupported,
+                               "HuxerUI macOS background activities cannot require network or power");
+    }
+    @try {
+      auto* activity = [[NSBackgroundActivityScheduler alloc] initWithIdentifier:MakeString(request.identifier)];
+      activity.interval = Interval(request);
+      activity.tolerance = 0;
+      activity.repeats = NO;
+      scheduled_.emplace(request.token, activity);
+      const auto weak = weak_from_this();
+      const auto pending_request = request;
+      [activity scheduleWithBlock:^(NSBackgroundActivityCompletionHandler completion) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          const auto owner = weak.lock();
+          if (!owner || !owner->scheduled_.contains(pending_request.token)) {
+            completion(NSBackgroundActivityResultFinished);
+            return;
+          }
+          auto* current = owner->scheduled_.at(pending_request.token);
+          if (pending_request.schedule.earliest_start &&
+              std::chrono::system_clock::now() < *pending_request.schedule.earliest_start) {
+            current.interval = Interval(pending_request);
+            completion(NSBackgroundActivityResultDeferred);
+            return;
+          }
+          auto grant = std::make_shared<SystemTaskGrant>([weak, token = pending_request.token, completion](
+              SystemTaskOutcome outcome) {
+            if (const auto tasks = weak.lock(); tasks && tasks->scheduled_.contains(token)) {
+              if (outcome == SystemTaskOutcome::Retry) {
+                tasks->scheduled_.at(token).interval = 30;
+                completion(NSBackgroundActivityResultDeferred);
+                return SystemTaskResult<void>::Success();
+              }
+              tasks->scheduled_.erase(token);
+            }
+            completion(NSBackgroundActivityResultFinished);
+            return SystemTaskResult<void>::Success();
+          });
+          owner->on_event_({SystemTaskEvent::Kind::Granted, pending_request, std::move(grant)});
+        });
+      }];
+      return SystemTaskResult<void>::Success();
+    } @catch (NSException* exception) {
+      scheduled_.erase(request.token);
+      return TaskFailure<void>(SystemTaskErrorCode::Platform,
+                               "HuxerUI macOS scheduling failed: " + Utf8String(exception.reason).value_or(""));
+    }
+  }
+
+  SystemTaskResult<void> Withdraw(const SystemTaskRequest& request) override {
+    if (const auto found = scheduled_.find(request.token); found != scheduled_.end()) {
+      [found->second invalidate];
+      scheduled_.erase(found);
+    }
+    return SystemTaskResult<void>::Success();
+  }
+
+  void Disconnect() noexcept override {
+    for (const auto& [token, activity] : scheduled_) [activity invalidate];
+    scheduled_.clear();
+    ProcessLocalSystemTasks::Disconnect();
+  }
+
+private:
+  static double Interval(const SystemTaskRequest& request) {
+    if (!request.schedule.earliest_start) return 1.0;
+    using Seconds = std::chrono::duration<double>;
+    return std::max(1.0, (Seconds(request.schedule.earliest_start->time_since_epoch()) -
+                          Seconds(std::chrono::system_clock::now().time_since_epoch())).count());
+  }
+
+  std::map<std::string, NSBackgroundActivityScheduler*> scheduled_;
+};
+
+} // namespace
+
+std::shared_ptr<SystemTaskTransport> CreateMacSystemTaskTransport() {
+  return std::make_shared<MacSystemTasks>();
 }
 
 } // namespace huxerui::detail

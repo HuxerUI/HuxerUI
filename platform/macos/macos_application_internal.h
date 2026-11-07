@@ -22,6 +22,7 @@ struct ResolvedLocalNotification;
 [[nodiscard]] GestureSettings MacGestureDefaults() noexcept;
 [[nodiscard]] std::shared_ptr<LocalNotificationTransport> CreateMacLocalNotificationTransport();
 [[nodiscard]] std::shared_ptr<PermissionTransport> CreateMacPermissionTransport();
+[[nodiscard]] std::shared_ptr<SystemTaskTransport> CreateMacSystemTaskTransport();
 
 #ifdef __OBJC__
 [[nodiscard]] std::optional<std::vector<ApplicationActivation>> DecodeMacApplicationActivations(NSArray* urls);

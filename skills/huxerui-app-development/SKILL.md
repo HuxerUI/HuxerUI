@@ -42,6 +42,7 @@ Read only the references needed for the request:
 - Selecting and configuring built-in controls, TreeView, date/time pickers, or their controlled values: [components.md](references/components.md)
 - Arranging UI, scrolling, virtualization, responsiveness, app shells, mounted coordinate conversion, or any proposed custom layout: [layout-and-ui.md](references/layout-and-ui.md)
 - Composition, state, keyboard routing and shortcuts, events, environment, lifecycle, tasks, and callback integration: [fundamentals.md](references/fundamentals.md)
+- Platform background scheduling, user-started continued work, and ongoing sessions: [fundamentals.md](references/fundamentals.md#system-tasks)
 - `.With(...)`, events, keys, and modifier ownership: [modifiers.md](references/modifiers.md)
 - Pointer buttons, hover, pointer cursors, context-menu requests, raw pointer input, pointer interception, repeated tap, long press, drag, multi-pointer transform, typed in-process drag-and-drop, and external file reception: [gestures-and-drag-drop.md](references/gestures-and-drag-drop.md)
 - Custom retained behavior, after confirming that events, gestures, animation, lifecycle, or other built-ins do not fit: [node-extensions.md](references/node-extensions.md)

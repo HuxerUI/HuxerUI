@@ -29,6 +29,7 @@
 #include <huxerui/state.h>
 #include <huxerui/stream.h>
 #include <huxerui/system.h>
+#include <huxerui/system_task.h>
 #include <huxerui/task.h>
 #include <huxerui/text.h>
 #include <huxerui/text_input.h>

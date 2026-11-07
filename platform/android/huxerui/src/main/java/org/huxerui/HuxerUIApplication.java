@@ -64,6 +64,7 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
     private final Map<HuxerUIView, Boolean> views = new WeakHashMap<>();
     private final HuxerUIPermission permission;
     private final HuxerUILocalNotification localNotification;
+    private HuxerUISystemTasks systemTasks;
     private WeakReference<Activity> presentationOwner = new WeakReference<>(null);
     private PermissionLauncher permissionLauncher;
     private long presentationIdentity = 1;
@@ -270,6 +271,19 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
      * @return The current host, or null before initialization and after retirement.
      */
     static HuxerUIApplication current() { return active; }
+
+    HuxerUISystemTasks systemTasks() {
+        requireMainThread();
+        if (systemTasks == null) systemTasks = new HuxerUISystemTasks(this, context);
+        return systemTasks;
+    }
+
+    boolean isForegroundForSystemTasks() { return lifecycleState() == 0; }
+
+    boolean dispatchSystemTaskEvent(PlatformPayload event) {
+        requireMainThread();
+        return nativeHandle != 0L && nativeSystemTaskEvent(nativeHandle, event);
+    }
 
     /**
      * Posts a native queue drain to the main Handler from any calling thread.
@@ -582,6 +596,7 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
      * @param handle Live native Runtime handle.
      */
     private static native void nativeRequestShutdown(long handle);
+    private static native boolean nativeSystemTaskEvent(long handle, PlatformPayload event);
     /**
      * Drains the native application dispatcher on the main thread.
      * @param handle Live native Runtime handle.

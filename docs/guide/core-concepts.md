@@ -185,6 +185,8 @@ See [Callback integration](../design/tasks.md#callback-integration) for ownershi
 `TaskScope::Post()` is the lifecycle-bound handoff for an external thread or callback to enqueue a `void` update on the same Runtime thread; pending updates are discarded when the scope closes.
 None of these APIs requests or guarantees platform background execution.
 
+Use a system task declaration when work requires system background scheduling or platform-supported continuation. Register the declarations in `AppOptions::system_tasks` and use the appropriate application-owned entry point. [System Tasks](system-tasks.md)
+
 ## Application state
 
 `Application` declares the process-level root and options.

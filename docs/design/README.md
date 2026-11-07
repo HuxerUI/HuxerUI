@@ -31,6 +31,7 @@ They explain the current implementation and deliberately unsupported behavior, w
 - [Application Permissions](permissions.md): typed authorization, Task delivery, native policy, and platform mapping.
 - [Local Notifications](local-notifications.md): shared authorization, presentation, scheduling, activation, and target platform boundaries.
 - [Task and Structured Concurrency](tasks.md): task ownership, cancellation, and UI-thread resumption.
+- [System Tasks](system-tasks.md) defines BackgroundTask, ContinuedTask, and OngoingTask ownership, platform execution, stopping, and observation.
 
 ## Content and services
 

@@ -25,6 +25,7 @@
 #include "macros_internal.h"
 #include "resources/resource_internal.h"
 #include "runtime/task_internal.h"
+#include "system_task_internal.h"
 #include "system_tray_internal.h"
 #include "internal_access.h"
 #include "runtime/ui_window_internal.h"
@@ -354,6 +355,10 @@ void Runtime::InitializeApplication(const Application& application,
         platform.CreateAppDirectories());
     state_->services->Provide(typeid(ApplicationService), state_->application_service);
     state_->services->Provide(typeid(HttpClient), std::shared_ptr<HttpClient>(new HttpClient(state_->http_transport)));
+    if (!application.options.system_tasks.empty()) {
+      state_->system_tasks = std::make_shared<SystemTasks>(state_, platform.CreateSystemTaskTransport());
+      state_->system_tasks->Install(application.options);
+    }
     ApplicationContext context(*state_);
     for (const ApplicationHook& hook : application.options.application_hooks) {
       if (!hook) {
@@ -507,6 +512,16 @@ void Runtime::RequestShutdown() {
   ScheduleWindowMaintenance();
 }
 
+void Runtime::RetireWindowsAndTasks() noexcept {
+  for (const auto& weak : state_->uis) {
+    if (const auto ui = weak.lock(); ui && ui->ui_window) {
+      ui->ui_window->Retire();
+    }
+  }
+  owned_windows_.clear();
+  CloseTaskScope(state_->tasks);
+}
+
 void Runtime::Retire() noexcept {
   if (!state_ || state_->phase == ApplicationRuntimeState::Phase::Stopped) {
     return;
@@ -518,13 +533,10 @@ void Runtime::Retire() noexcept {
   window_maintenance_needed_ = false;
   state_->phase = ApplicationRuntimeState::Phase::Stopping;
   state_->accepts_tasks = false;
-  for (const auto& weak : state_->uis) {
-    if (const auto ui = weak.lock(); ui && ui->ui_window) {
-      ui->ui_window->Retire();
-    }
+  RetireWindowsAndTasks();
+  if (auto tasks = std::exchange(state_->system_tasks, {})) {
+    tasks->Retire();
   }
-  owned_windows_.clear();
-  CloseTaskScope(state_->tasks);
   DisconnectHttpOperations(*state_);
   for (auto cleanup = state_->handler_cleanups.rbegin(); cleanup != state_->handler_cleanups.rend(); ++cleanup) {
     (*cleanup)();
@@ -551,6 +563,17 @@ void Runtime::Retire() noexcept {
 }
 
 void Runtime::FinishShutdown() {
+  if (state_->system_tasks) {
+    RetireWindowsAndTasks();
+    if (!state_->system_tasks->BeginShutdown([weak = std::weak_ptr(state_)] {
+          if (const auto state = weak.lock(); state && state->owner) {
+            state->owner->window_maintenance_needed_ = true;
+            state->owner->ScheduleWindowMaintenance();
+          }
+        })) {
+      return;
+    }
+  }
   Runtime* platform = state_->owner;
   Retire();
   platform->OnRuntimeStopped();
@@ -844,5 +867,6 @@ std::shared_ptr<detail::HttpTransport> Runtime::CreateHttpTransport() { return {
 std::shared_ptr<detail::LocalNotificationTransport> Runtime::CreateLocalNotificationTransport() { return {}; }
 std::shared_ptr<detail::PermissionTransport> Runtime::CreatePermissionTransport() { return {}; }
 std::shared_ptr<detail::SystemTrayTransport> Runtime::CreateSystemTrayTransport() { return {}; }
+std::shared_ptr<detail::SystemTaskTransport> Runtime::CreateSystemTaskTransport() { return {}; }
 
 } // namespace huxerui

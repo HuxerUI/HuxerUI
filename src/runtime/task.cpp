@@ -23,6 +23,7 @@
 #include "task_internal.h"
 #include "application/application_internal.h"
 #include "macros_internal.h"
+#include "application/system_task_internal.h"
 
 namespace huxerui::detail {
 
@@ -118,6 +119,16 @@ public:
   std::deque<std::weak_ptr<WorkerOperation>> queued;
 };
 
+struct TaskWaitState {
+  std::weak_ptr<TaskExecution> execution;
+  std::coroutine_handle<> coroutine;
+  bool active = true;
+};
+
+namespace {
+thread_local SystemTaskStopState* current_system_task = nullptr;
+}
+
 class TaskExecution final : public std::enable_shared_from_this<TaskExecution> {
 public:
   TaskExecution(
@@ -125,11 +136,11 @@ public:
       std::uint64_t identity,
       UiThreadDispatcher dispatcher,
       std::thread::id ui_thread, std::shared_ptr<ExecutionContext> context,
-      std::coroutine_handle<Task<void>::promise_type> coroutine
+      std::coroutine_handle<Task<void>::promise_type> coroutine, std::shared_ptr<SystemTaskStopState> stop
   )
       : scope_(std::move(scope)), identity_(identity), dispatcher_(std::move(dispatcher)),
         ui_thread_(ui_thread), context_(std::move(context)),
-        coroutine_(coroutine) {}
+        coroutine_(coroutine), stop_(std::move(stop)) {}
 
   ~TaskExecution() {
     if (coroutine_) {
@@ -142,8 +153,22 @@ public:
   /// Closes this execution during owner retirement on the application thread, deferring destruction while running.
   void CloseOnUi() noexcept;
   void QueueCompletion() noexcept;
-  void QueueResume(std::coroutine_handle<> coroutine) noexcept;
-  std::function<void()> ScheduleDelay(double duration_seconds, std::coroutine_handle<> coroutine);
+  void QueueResume(std::weak_ptr<TaskWaitState> wait) noexcept;
+  std::shared_ptr<TaskWaitState> BeginWait(std::coroutine_handle<> coroutine) {
+    auto wait = std::make_shared<TaskWaitState>(TaskWaitState{weak_from_this(), coroutine});
+    wait_ = wait;
+    return wait;
+  }
+  void CheckStop() const {
+    if (stop_ && !stop_->cleaning_up && stop_->source.stop_requested()) {
+      throw TaskStopped{};
+    }
+  }
+  void WakeStop() noexcept {
+    if (!stop_->cleaning_up && !wait_.expired()) {
+      QueueResume(wait_);
+    }
+  }
 
 private:
   /// Checks the application's owning thread, whether this scope is application-wide or composition-owned.
@@ -169,6 +194,8 @@ private:
   std::thread::id ui_thread_;
   std::shared_ptr<ExecutionContext> context_;
   std::coroutine_handle<Task<void>::promise_type> coroutine_;
+  std::shared_ptr<SystemTaskStopState> stop_;
+  std::weak_ptr<TaskWaitState> wait_;
   std::atomic<bool> cancellation_requested_ = false;
   bool running_ = false;
 };
@@ -183,7 +210,8 @@ public:
     }
   }
 
-  TaskHandle Launch(std::coroutine_handle<Task<void>::promise_type> coroutine) {
+  TaskHandle Launch(std::coroutine_handle<Task<void>::promise_type> coroutine,
+                    std::shared_ptr<SystemTaskStopState> stop = {}) {
     if (std::this_thread::get_id() != ui_thread_) {
       if (coroutine) {
         coroutine.destroy();
@@ -213,13 +241,16 @@ public:
           identity,
           dispatcher_,
           ui_thread_, context_,
-          coroutine
+          coroutine, stop
       );
     } catch (...) {
       coroutine.destroy();
       throw;
     }
     coroutine.promise().BindExecution(execution);
+    if (stop) {
+      stop->execution = execution;
+    }
     tasks_.emplace(identity, execution);
     try {
       execution->Start();
@@ -228,6 +259,10 @@ public:
       throw;
     }
     return TaskHandle(execution);
+  }
+
+  TaskHandle Launch(Task<void> task, std::shared_ptr<SystemTaskStopState> stop) {
+    return Launch(task.Release(), std::move(stop));
   }
 
   void Post(std::function<void()> callback) {
@@ -323,19 +358,14 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
+  void Suspend(TaskContinuation continuation) {
+    Runtime& runtime = *CurrentApplicationRuntime()->owner;
+    const auto deadline = runtime.TimerNow() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(duration_seconds_));
+    cancel_ = runtime.ScheduleTimerAt(deadline, [continuation] { continuation.Resume(); });
   }
 
-  template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    const std::shared_ptr<TaskExecution> execution = TaskExecutionFor(continuation).lock();
-    if (!execution) {
-      throw std::logic_error("HuxerUI Delay() requires a running Task execution");
-    }
-    cancel_ = execution->ScheduleDelay(duration_seconds_, continuation);
-  }
-
-  void await_resume() const noexcept {}
+  void TakeResult() const noexcept {}
 
 private:
   double duration_seconds_;
@@ -343,7 +373,7 @@ private:
 };
 
 Task<void> DelayTask(double duration_seconds) {
-  co_await DelayAwaiter(duration_seconds);
+  co_await TaskAwaiter<DelayAwaiter>(duration_seconds);
 }
 
 void TaskExecution::PostNoexcept(std::function<void()> callback) noexcept {
@@ -393,31 +423,28 @@ void TaskExecution::QueueCompletion() noexcept {
   });
 }
 
-void TaskExecution::QueueResume(std::coroutine_handle<> coroutine) noexcept {
+void TaskExecution::QueueResume(std::weak_ptr<TaskWaitState> wait) noexcept {
   std::weak_ptr<TaskExecution> weak = shared_from_this();
-  PostNoexcept([weak, coroutine] {
+  PostNoexcept([weak, wait = std::move(wait)] {
     if (auto execution = weak.lock()) {
-      execution->ResumeOnUi(coroutine);
+      if (auto pending = wait.lock(); pending && std::exchange(pending->active, false)) {
+        execution->ResumeOnUi(pending->coroutine);
+      }
     }
   });
-}
-
-std::function<void()> TaskExecution::ScheduleDelay(double duration_seconds, std::coroutine_handle<> coroutine) {
-  const auto application = context_->application.lock();
-  if (!application || !application->owner) {
-    throw std::logic_error("HuxerUI Delay() application Runtime is retired");
-  }
-  application->RequireThread();
-  Runtime& runtime = *application->owner;
-  const auto deadline = runtime.TimerNow() +
-      std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(duration_seconds));
-  return runtime.ScheduleTimerAt(deadline, [weak = weak_from_this(), coroutine] { ResumeTask(weak, coroutine); });
 }
 
 void TaskExecution::ResumeOnUi(std::coroutine_handle<> coroutine) noexcept {
   const auto self = shared_from_this();
   const auto application = context_->application.lock();
-  if (cancellation_requested_ || !application || !application->accepts_tasks) {
+  const auto grant = stop_ ? stop_->grant.lock() : nullptr;
+  if (grant && grant->WasRevoked()) {
+    ExecutionGuard guard(context_);
+    stop_->source.request_stop();
+    CancelOnUi();
+    return;
+  }
+  if (cancellation_requested_ || !application || (!application->accepts_tasks && !stop_)) {
     CancelOnUi();
     return;
   }
@@ -426,7 +453,9 @@ void TaskExecution::ResumeOnUi(std::coroutine_handle<> coroutine) noexcept {
   }
   ExecutionGuard guard(context_);
   running_ = true;
+  auto* previous = std::exchange(current_system_task, stop_.get());
   coroutine.resume();
+  current_system_task = previous;
   running_ = false;
   if (cancellation_requested_ && coroutine_) {
     CancelOnUi();
@@ -559,10 +588,53 @@ void NotifyTaskCompleted(const std::weak_ptr<TaskExecution>& execution) noexcept
   }
 }
 
-void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_handle<> coroutine) noexcept {
-  if (auto active = execution.lock()) {
-    active->QueueResume(coroutine);
+void TaskContinuation::Resume() const noexcept {
+  if (const auto wait = wait_.lock()) {
+    if (auto execution = wait->execution.lock()) {
+      execution->QueueResume(wait);
+    }
   }
+}
+
+std::shared_ptr<TaskWaitState> BeginTaskWait(const std::weak_ptr<TaskExecution>& execution,
+                                          std::coroutine_handle<> coroutine) {
+  if (auto active = execution.lock()) {
+    active->CheckStop();
+    return active->BeginWait(coroutine);
+  }
+  throw std::logic_error("HuxerUI asynchronous operation requires a running Task execution");
+}
+
+void RetireTaskWait(const std::shared_ptr<TaskWaitState>& wait) noexcept {
+  if (wait) {
+    wait->active = false;
+  }
+}
+
+void ResumeTaskWait(const std::shared_ptr<TaskWaitState>& wait) {
+  RetireTaskWait(wait);
+  if (auto active = wait->execution.lock()) {
+    active->CheckStop();
+  }
+}
+
+void WakeStoppedTask(const SystemTaskStopState& stop) noexcept {
+  if (auto execution = stop.execution.lock()) {
+    execution->WakeStop();
+  }
+}
+
+bool IsCurrentSystemTask(const SystemTaskStopState& stop) noexcept {
+  return current_system_task == &stop;
+}
+
+bool IsSystemTaskCleaningUp() noexcept {
+  return current_system_task && current_system_task->cleaning_up;
+}
+
+TaskHandle LaunchSystemTask(const std::shared_ptr<TaskScopeState>& scope, Task<void> task,
+                            std::shared_ptr<SystemTaskStopState> stop) {
+  return scope->Launch(std::move(task), std::move(stop));
 }
 
 } // namespace huxerui::detail
@@ -578,6 +650,9 @@ void TaskHandle::Cancel() const noexcept {
 }
 
 TaskHandle TaskScope::Launch(Task<void>&& task) const {
+  if (detail::IsSystemTaskCleaningUp()) {
+    throw std::logic_error("HuxerUI TaskScope::Launch() cannot run during system task cleanup");
+  }
   if (detail::Composer::Current() != nullptr) {
     throw std::logic_error("HuxerUI TaskScope::Launch() cannot run during view composition");
   }
@@ -588,6 +663,9 @@ TaskHandle TaskScope::Launch(Task<void>&& task) const {
 }
 
 void TaskScope::PostErased(std::function<void()> callback) const {
+  if (detail::IsSystemTaskCleaningUp()) {
+    throw std::logic_error("HuxerUI TaskScope::Post() cannot run during system task cleanup");
+  }
   if (detail::Composer::Current() != nullptr) {
     throw std::logic_error("HuxerUI TaskScope::Post() cannot run during view composition");
   }

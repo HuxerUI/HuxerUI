@@ -1,6 +1,7 @@
 #include <huxerui/app.h>
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -39,6 +40,10 @@ Application::Application(RootFactory root_factory, AppOptions options)
     : root_factory(root_factory), options(std::move(options)) {
   if (root_factory == nullptr) {
     throw std::invalid_argument("HuxerUI application requires a root factory");
+  }
+  const double stop_timeout = this->options.system_task_stop_timeout.count();
+  if (!std::isfinite(stop_timeout) || stop_timeout <= 0.0) {
+    throw std::invalid_argument("HuxerUI system task stop timeout must be positive and finite");
   }
 #if defined(__EMSCRIPTEN__)
   detail::EnsureWebPlatformLinked();

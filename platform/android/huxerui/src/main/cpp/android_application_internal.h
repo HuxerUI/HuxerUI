@@ -2,6 +2,7 @@
 
 #include <jni.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 
@@ -61,5 +62,9 @@ CreateAndroidPermissionTransport(JavaVM* virtual_machine, JNIEnv* environment, j
 /// @return A transport retaining a global host reference until it is released.
 [[nodiscard]] std::shared_ptr<LocalNotificationTransport>
 CreateAndroidLocalNotificationTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view);
+
+/// Creates the task transport and binds its event receiver to this exact Android Runtime.
+std::shared_ptr<SystemTaskTransport> CreateAndroidSystemTaskTransport(
+    JavaVM* machine, JNIEnv* environment, jobject host, std::function<void(const PlatformPayload&)>& receiver);
 
 } // namespace huxerui::detail

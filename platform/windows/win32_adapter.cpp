@@ -37,6 +37,7 @@
 #include "win32_accessibility.h"
 #include "win32_application_internal.h"
 #include "application/application_internal.h"
+#include "application/system_task_internal.h"
 #include "win32_application_runner.h"
 #include "win32_file_internal.h"
 #include "win32_http_internal.h"
@@ -583,6 +584,10 @@ public:
   }
 
   std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override { return notifications_; }
+
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
+    return std::make_shared<ProcessLocalSystemTasks>();
+  }
 
   std::shared_ptr<SystemTrayTransport> CreateSystemTrayTransport() override {
     if (!system_tray_) {

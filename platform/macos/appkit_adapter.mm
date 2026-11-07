@@ -393,6 +393,10 @@ public:
     return CreateMacLocalNotificationTransport();
   }
 
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
+    return CreateMacSystemTaskTransport();
+  }
+
   std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
     return CreateMacPermissionTransport();
   }

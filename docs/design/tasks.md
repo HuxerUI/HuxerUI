@@ -388,6 +388,10 @@ Platform background services, scheduled jobs, foreground services, and backgroun
 Future HuxerUI asynchronous APIs may return Task values or provide HuxerUI awaitables that resume through the bound execution.
 They do not change TaskScope ownership, State semantics, Lifecycle, or EventBindings.
 
+## System tasks
+
+BackgroundTask, ContinuedTask, and OngoingTask use ordinary Task values under application ownership. Each participating framework wait has its own continuation identity, so cooperative stop can retire that wait before cleanup starts another one. The system root translates TaskStopped and handler failures into execution snapshots and platform completion. [System Tasks](system-tasks.md)
+
 ## Validation
 
 Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, invalid handles, deterministic deadlines, zero-duration deferral, Delay cancellation, worker callable forms and result types, worker concurrency bounds, worker cancellation races, Post ordering, move-only callbacks, external-thread delivery, and closed-scope suppression.

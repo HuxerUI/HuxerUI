@@ -1,4 +1,5 @@
 #import <AVFoundation/AVFoundation.h>
+#import <BackgroundTasks/BackgroundTasks.h>
 #import <UIKit/UIKit.h>
 #import <UserNotifications/UserNotifications.h>
 
@@ -6,7 +7,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -16,6 +20,7 @@
 #include <utility>
 
 #include "application/application_internal.h"
+#include "application/system_task_internal.h"
 #include "ios_file_internal.h"
 
 namespace huxerui::detail {
@@ -517,6 +522,310 @@ std::optional<NotificationActivation> DecodeIosLocalNotificationActivation(UNNot
 
 std::shared_ptr<LocalNotificationTransport> CreateIosLocalNotificationTransport() {
   return std::make_shared<IosLocalNotificationTransport>();
+}
+
+namespace {
+
+using WallClock = std::chrono::system_clock;
+using Seconds = std::chrono::duration<double>;
+
+std::optional<WallClock::time_point> TaskDate(NSDate* date) {
+  if (![date isKindOfClass:NSDate.class]) return {};
+  const auto seconds = Seconds(date.timeIntervalSince1970);
+  if (!std::isfinite(seconds.count()) || seconds < Seconds(WallClock::time_point::min().time_since_epoch()) ||
+      seconds >= Seconds(WallClock::time_point::max().time_since_epoch())) return {};
+  return WallClock::time_point(std::chrono::duration_cast<WallClock::duration>(seconds));
+}
+
+NSString* TaskDefaultsKey(std::string_view identifier) {
+  return [@"org.huxerui.system_task." stringByAppendingString:MakeString(identifier)];
+}
+
+class IosSystemTasks final : public SystemTaskTransport, public std::enable_shared_from_this<IosSystemTasks> {
+public:
+  SystemTaskCapabilities Capabilities(SystemTaskKind kind) const noexcept override {
+    if (kind == SystemTaskKind::Background) return {true, true};
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
+    if (kind == SystemTaskKind::Continued) {
+      if (@available(iOS 26.0, *)) return {true, false};
+    }
+#endif
+    return {};
+  }
+
+  void Install(std::span<const SystemTaskRegistration> registrations, EventHandler on_event) override {
+    on_event_ = std::move(on_event);
+    NSArray* modes = [NSBundle.mainBundle objectForInfoDictionaryKey:@"UIBackgroundModes"];
+    for (const auto& registration : registrations) {
+      if (registration.kind != SystemTaskKind::Background) continue;
+      const auto& identifier = registration.identifier;
+      if ([modes isKindOfClass:NSArray.class] && [modes containsObject:@"processing"] &&
+          Permits(MakeString(identifier)) && Register(identifier, SystemTaskKind::Background)) {
+        background_.insert(identifier);
+      } else {
+        on_event_({.kind = SystemTaskEvent::Kind::Reconciled, .request = {.identifier = identifier},
+                   .error = SystemTaskError{SystemTaskErrorCode::Configuration,
+                       "HuxerUI iOS background task requires its permitted identifier and processing mode"}});
+      }
+    }
+    if (background_.empty()) return;
+    const auto weak = weak_from_this();
+    [BGTaskScheduler.sharedScheduler getPendingTaskRequestsWithCompletionHandler:^(NSArray<BGTaskRequest*>* pending) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (auto owner = weak.lock(); owner && owner->on_event_) owner->Reconcile(pending);
+      });
+    }];
+  }
+
+  SystemTaskResult<void> Submit(const SystemTaskRequest& request) override {
+    if (request.kind == SystemTaskKind::Background) return SubmitBackground(request);
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
+    if (request.kind == SystemTaskKind::Continued) {
+      if (@available(iOS 26.0, *)) {
+        if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+          return TaskFailure<void>(SystemTaskErrorCode::NotForeground,
+                                   "HuxerUI iOS continued task requires an active application");
+        }
+        NSString* prefix = MakeString(request.identifier);
+        NSString* bundle = NSBundle.mainBundle.bundleIdentifier;
+        if (!bundle || ![prefix hasPrefix:[bundle stringByAppendingString:@"."]] ||
+            !Permits([prefix stringByAppendingString:@".*"])) {
+          return TaskFailure<void>(SystemTaskErrorCode::Configuration,
+                                   "HuxerUI iOS continued task needs a bundle-prefixed permitted wildcard");
+        }
+        const auto identifier = SystemIdentifier(request);
+        if (!Register(identifier, request.kind)) {
+          return TaskFailure<void>(SystemTaskErrorCode::Configuration,
+                                   "HuxerUI iOS could not register the continued task identifier");
+        }
+        const auto& presentation = *request.presentation;
+        auto* system_request = [[BGContinuedProcessingTaskRequest alloc] initWithIdentifier:MakeString(identifier)
+            title:MakeString(presentation.title) subtitle:MakeString(presentation.subtitle)];
+        system_request.strategy = request.policy == ContinuedTask::SubmissionPolicy::RequireImmediate
+            ? BGContinuedProcessingTaskRequestSubmissionStrategyFail : BGContinuedProcessingTaskRequestSubmissionStrategyQueue;
+        return SubmitToSystem(identifier, request, system_request);
+      }
+    }
+#endif
+    return TaskFailure<void>(SystemTaskErrorCode::Unsupported, "HuxerUI iOS system task mode is unsupported");
+  }
+
+  SystemTaskResult<void> Withdraw(const SystemTaskRequest& request) override {
+    const auto identifier = SystemIdentifier(request);
+    if (const auto found = requests_.find(identifier);
+        found != requests_.end() && found->second.token != request.token) {
+      return TaskFailure<void>(SystemTaskErrorCode::Unavailable, "HuxerUI iOS system task request has changed");
+    }
+    [BGTaskScheduler.sharedScheduler cancelTaskRequestWithIdentifier:MakeString(identifier)];
+    requests_.erase(identifier);
+    if (request.kind == SystemTaskKind::Background) {
+      [NSUserDefaults.standardUserDefaults removeObjectForKey:TaskDefaultsKey(identifier)];
+      withdrawn_.insert(identifier);
+    }
+    return SystemTaskResult<void>::Success();
+  }
+
+  void Disconnect() noexcept override {
+    on_event_ = {};
+    for (const auto& [identifier, request] : requests_) {
+      if (request.kind == SystemTaskKind::Continued) {
+        [BGTaskScheduler.sharedScheduler cancelTaskRequestWithIdentifier:MakeString(identifier)];
+      }
+    }
+    requests_.clear();
+  }
+
+private:
+  static bool Permits(NSString* identifier) {
+    NSArray* permitted = [NSBundle.mainBundle objectForInfoDictionaryKey:@"BGTaskSchedulerPermittedIdentifiers"];
+    return [permitted isKindOfClass:NSArray.class] && [permitted containsObject:identifier];
+  }
+
+  static std::string SystemIdentifier(const SystemTaskRequest& request) {
+    return request.kind == SystemTaskKind::Background ? request.identifier : request.identifier + "." + request.token;
+  }
+
+  bool Register(const std::string& identifier, SystemTaskKind kind) {
+    const auto weak = weak_from_this();
+    const auto system_identifier = identifier;
+    @try {
+      return [BGTaskScheduler.sharedScheduler registerForTaskWithIdentifier:MakeString(identifier)
+          usingQueue:dispatch_get_main_queue() launchHandler:^(BGTask* task) {
+        if (auto owner = weak.lock(); owner && owner->on_event_) owner->Deliver(task, system_identifier, kind);
+        else [task setTaskCompletedWithSuccess:NO];
+      }];
+    } @catch (NSException*) {
+      return false;
+    }
+  }
+
+  static SystemTaskRequest ReadBackground(const std::string& identifier) {
+    SystemTaskRequest request{.identifier = identifier, .token = "ios-" + identifier, .schedule_known = false};
+    NSDictionary* saved = [NSUserDefaults.standardUserDefaults dictionaryForKey:TaskDefaultsKey(identifier)];
+    NSString* token = saved[@"token"];
+    if ([token isKindOfClass:NSString.class] && token.length) {
+      request.token = token.UTF8String;
+      request.schedule = {.earliest_start = TaskDate(saved[@"earliest"]),
+                          .requires_network = [saved[@"network"] boolValue],
+                          .requires_external_power = [saved[@"power"] boolValue]};
+      request.schedule_known = true;
+    }
+    return request;
+  }
+
+  void Reconcile(NSArray<BGTaskRequest*>* pending) {
+    for (const auto& identifier : background_) {
+      SystemTaskRequest request{.identifier = identifier};
+      for (BGTaskRequest* system_request in pending) {
+        if ([system_request isKindOfClass:BGProcessingTaskRequest.class] &&
+            [system_request.identifier isEqualToString:MakeString(identifier)]) {
+          request = ReadBackground(identifier);
+          if (!request.schedule_known) {
+            auto* processing = static_cast<BGProcessingTaskRequest*>(system_request);
+            request.schedule = {.earliest_start = TaskDate(processing.earliestBeginDate),
+                                .requires_network = static_cast<bool>(processing.requiresNetworkConnectivity),
+                                .requires_external_power = static_cast<bool>(processing.requiresExternalPower)};
+            request.schedule_known = true;
+          }
+          requests_.try_emplace(identifier, request);
+          break;
+        }
+      }
+      on_event_({SystemTaskEvent::Kind::Reconciled, std::move(request)});
+    }
+  }
+
+  SystemTaskResult<void> SubmitBackground(const SystemTaskRequest& request, bool retry = false) {
+    if (!background_.contains(request.identifier)) {
+      return TaskFailure<void>(SystemTaskErrorCode::Configuration, "HuxerUI iOS background task is not registered");
+    }
+    if (!request.schedule_known) {
+      return TaskFailure<void>(SystemTaskErrorCode::Unavailable,
+                               "HuxerUI iOS cannot recover the original background schedule for retry");
+    }
+    auto* system_request = [[BGProcessingTaskRequest alloc] initWithIdentifier:MakeString(request.identifier)];
+    system_request.requiresNetworkConnectivity = request.schedule.requires_network;
+    system_request.requiresExternalPower = request.schedule.requires_external_power;
+    auto earliest = request.schedule.earliest_start;
+    if (retry) {
+      const auto backoff = WallClock::now() + std::chrono::seconds(30);
+      if (!earliest || *earliest < backoff) earliest = backoff;
+    }
+    if (earliest) {
+      system_request.earliestBeginDate =
+          [NSDate dateWithTimeIntervalSince1970:Seconds(earliest->time_since_epoch()).count()];
+    }
+    auto result = SubmitToSystem(request.identifier, request, system_request);
+    if (result.Succeeded()) {
+      NSMutableDictionary* saved = [@{@"token": MakeString(request.token),
+                                      @"network": @(request.schedule.requires_network),
+                                      @"power": @(request.schedule.requires_external_power)} mutableCopy];
+      if (request.schedule.earliest_start) {
+        saved[@"earliest"] = [NSDate dateWithTimeIntervalSince1970:
+            Seconds(request.schedule.earliest_start->time_since_epoch()).count()];
+      }
+      [NSUserDefaults.standardUserDefaults setObject:saved forKey:TaskDefaultsKey(request.identifier)];
+      withdrawn_.erase(request.identifier);
+    }
+    return result;
+  }
+
+  SystemTaskResult<void> SubmitToSystem(const std::string& identifier, const SystemTaskRequest& request,
+                                        BGTaskRequest* system_request) {
+    NSError* error = nil;
+    if ([BGTaskScheduler.sharedScheduler submitTaskRequest:system_request error:&error]) {
+      requests_.insert_or_assign(identifier, request);
+      return SystemTaskResult<void>::Success();
+    }
+    SystemTaskErrorCode code = SystemTaskErrorCode::Rejected;
+    if ([error.domain isEqualToString:BGTaskSchedulerErrorDomain]) {
+      switch (error.code) {
+        case BGTaskSchedulerErrorCodeUnavailable: code = SystemTaskErrorCode::Unavailable; break;
+        case BGTaskSchedulerErrorCodeNotPermitted: code = SystemTaskErrorCode::NotPermitted; break;
+        case BGTaskSchedulerErrorCodeTooManyPendingTaskRequests: code = SystemTaskErrorCode::Busy; break;
+        default: break;
+      }
+    }
+    const char* message = error.localizedDescription.UTF8String;
+    return TaskFailure<void>(code, std::string("HuxerUI iOS system task submission failed: ") +
+                                  (message ? message : "system scheduler rejected the request"));
+  }
+
+  void Deliver(BGTask* task, const std::string& identifier, SystemTaskKind kind) {
+    const auto found = requests_.find(identifier);
+    if (found == requests_.end() && (kind != SystemTaskKind::Background || withdrawn_.contains(identifier))) {
+      [task setTaskCompletedWithSuccess:NO];
+      return;
+    }
+    auto request = found == requests_.end() ? ReadBackground(identifier) : found->second;
+    requests_.try_emplace(identifier, request);
+    const auto weak = weak_from_this();
+    auto grant = std::make_shared<SystemTaskGrant>([weak, task, identifier, request](SystemTaskOutcome outcome) {
+      task.expirationHandler = nil;
+      auto result = SystemTaskResult<void>::Success();
+      if (const auto owner = weak.lock()) {
+        const auto current = owner->requests_.find(identifier);
+        if (current != owner->requests_.end() && current->second.token == request.token) {
+          if (outcome == SystemTaskOutcome::Retry) {
+            result = owner->SubmitBackground(request, true);
+          }
+          if (outcome != SystemTaskOutcome::Retry || !result.Succeeded()) {
+            owner->requests_.erase(current);
+            if (request.kind == SystemTaskKind::Background) {
+              [NSUserDefaults.standardUserDefaults removeObjectForKey:TaskDefaultsKey(identifier)];
+            }
+          }
+        } else if (outcome == SystemTaskOutcome::Retry) {
+          result = TaskFailure<void>(SystemTaskErrorCode::Unavailable, "HuxerUI iOS system task request has changed");
+        }
+      }
+      [task setTaskCompletedWithSuccess:outcome == SystemTaskOutcome::Completed ||
+          (outcome == SystemTaskOutcome::Retry && result.Succeeded())];
+      return result;
+    });
+#if __IPHONE_OS_VERSION_MAX_ALLOWED >= 260000
+    if (@available(iOS 26.0, *)) {
+      if ([task isKindOfClass:BGContinuedProcessingTask.class]) {
+        auto* continued = static_cast<BGContinuedProcessingTask*>(task);
+        grant->update_progress = [continued](TaskProgress progress) {
+          constexpr auto maximum = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+          if (progress.completed > maximum || (progress.total && *progress.total > maximum)) {
+            return TaskFailure<void>(SystemTaskErrorCode::Unsupported, "HuxerUI iOS progress exceeds NSProgress range");
+          }
+          continued.progress.totalUnitCount = progress.total ? static_cast<std::int64_t>(*progress.total) : -1;
+          continued.progress.completedUnitCount = static_cast<std::int64_t>(progress.completed);
+          return SystemTaskResult<void>::Success();
+        };
+        grant->update_presentation = [continued](const ResolvedTaskPresentation& presentation) {
+          [continued updateTitle:MakeString(presentation.title) subtitle:MakeString(presentation.subtitle)];
+          return SystemTaskResult<void>::Success();
+        };
+      }
+    }
+#endif
+    const std::weak_ptr<SystemTaskGrant> weak_grant = grant;
+    task.expirationHandler = ^{
+      dispatch_async(dispatch_get_main_queue(), ^{
+        const auto owner = weak.lock();
+        if (auto allowance = weak_grant.lock(); owner && owner->on_event_ && allowance && allowance->IsLive()) {
+          owner->on_event_({SystemTaskEvent::Kind::StopRequested, request, std::move(allowance),
+                           std::chrono::steady_clock::now() + std::chrono::seconds(1)});
+        }
+      });
+    };
+    on_event_({SystemTaskEvent::Kind::Granted, std::move(request), std::move(grant)});
+  }
+
+  EventHandler on_event_;
+  std::set<std::string, std::less<>> background_;
+  std::set<std::string, std::less<>> withdrawn_;
+  std::map<std::string, SystemTaskRequest, std::less<>> requests_;
+};
+
+} // namespace
+
+std::shared_ptr<SystemTaskTransport> CreateIosSystemTaskTransport() {
+  return std::make_shared<IosSystemTasks>();
 }
 
 } // namespace huxerui::detail

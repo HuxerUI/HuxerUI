@@ -1,7 +1,6 @@
 #include <huxerui/app.h>
 
 #include <algorithm>
-#include <coroutine>
 #include <exception>
 #include <mutex>
 #include <optional>
@@ -13,7 +12,6 @@
 #include "platform_registry_internal.h"
 #include "runtime/ui_window_internal.h"
 #include "system_tray_internal.h"
-#include "runtime/task_internal.h"
 #include "macros_internal.h"
 
 namespace huxerui::detail {
@@ -189,10 +187,9 @@ public:
 
   PermissionOperation(Starter starter, Result failure) : starter_(std::move(starter)), failure_(std::move(failure)) {}
 
-  void Suspend(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
+  void Suspend(TaskContinuation continuation) {
     std::scoped_lock lock(mutex_);
-    execution_ = std::move(execution);
-    continuation_ = continuation;
+    continuation_ = std::move(continuation);
   }
 
   void Start(const std::shared_ptr<PermissionTransport>& transport,
@@ -241,7 +238,6 @@ public:
   std::function<void()> Detach() noexcept override {
     std::scoped_lock lock(mutex_);
     canceled_ = true;
-    execution_.reset();
     continuation_ = {};
     return std::move(cancellation_);
   }
@@ -264,8 +260,7 @@ public:
 
 private:
   void Complete(Result result) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     {
       std::scoped_lock lock(mutex_);
       if (canceled_ || result_.has_value()) {
@@ -273,18 +268,16 @@ private:
       }
       result_.emplace(std::move(result));
       cancellation_ = {};
-      execution = execution_;
       continuation = std::exchange(continuation_, {});
     }
-    ResumeTask(execution, continuation);
+    continuation.Resume();
   }
 
   std::mutex mutex_;
   Starter starter_;
   Result failure_;
   std::weak_ptr<PermissionController::State> controller_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  TaskContinuation continuation_;
   std::function<void()> cancellation_;
   std::optional<Result> result_;
   bool canceled_ = false;
@@ -306,16 +299,12 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
-  }
-
-  void await_suspend(std::coroutine_handle<typename Task<Result>::promise_type> continuation) {
-    operation_->Suspend(TaskExecutionFor(continuation), continuation);
+  void Suspend(TaskContinuation continuation) {
+    operation_->Suspend(std::move(continuation));
     controller_->Submit(operation_, interactive_);
   }
 
-  Result await_resume() {
+  Result TakeResult() {
     Result result = operation_->TakeResult();
     operation_.reset();
     return result;
@@ -331,7 +320,7 @@ template <class Result>
 Task<Result> RunPermissionOperation(std::shared_ptr<PermissionController::State> controller,
     typename PermissionOperation<Result>::Starter starter, Result failure, bool interactive) {
   ValidateApplicationCall(controller->application_source);
-  co_return co_await PermissionAwaiter<Result>(std::move(controller), std::move(starter), std::move(failure), interactive);
+  co_return co_await TaskAwaiter<PermissionAwaiter<Result>>(std::move(controller), std::move(starter), std::move(failure), interactive);
 }
 
 Task<PermissionStatus> CheckPermission(std::shared_ptr<PermissionController::State> state, Permission permission) {

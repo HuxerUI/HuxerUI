@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <coroutine>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -18,7 +17,6 @@
 #include <vector>
 
 #include "file_internal.h"
-#include "runtime/task_internal.h"
 #include "stream_internal.h"
 
 namespace huxerui::detail {
@@ -594,12 +592,9 @@ public:
 
   explicit PickerRequest(Starter starter) : starter_(std::move(starter)) {}
 
-  void Suspend(
-      std::weak_ptr<TaskExecution> execution, std::coroutine_handle<typename Task<Result>::promise_type> continuation
-  ) {
+  void Suspend(TaskContinuation continuation) {
     std::scoped_lock lock(mutex_);
-    execution_ = std::move(execution);
-    continuation_ = continuation;
+    continuation_ = std::move(continuation);
   }
 
   void BindController(std::weak_ptr<FilePickerController> controller) override {
@@ -651,7 +646,6 @@ public:
   void Detach() noexcept override {
     std::scoped_lock lock(mutex_);
     canceled_ = true;
-    execution_.reset();
     continuation_ = {};
   }
 
@@ -678,8 +672,7 @@ public:
 
 private:
   void Complete(Result result) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     {
       std::scoped_lock lock(mutex_);
       if (canceled_ || result_.has_value()) {
@@ -687,17 +680,15 @@ private:
       }
       result_.emplace(std::move(result));
       cancellation_ = {};
-      execution = execution_;
       continuation = std::exchange(continuation_, {});
     }
-    ResumeTask(execution, continuation);
+    continuation.Resume();
   }
 
   std::mutex mutex_;
   Starter starter_;
   std::weak_ptr<FilePickerController> controller_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  TaskContinuation continuation_;
   std::function<void()> cancellation_;
   std::optional<Result> result_;
   bool canceled_ = false;
@@ -716,16 +707,12 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
-  }
-
-  void await_suspend(std::coroutine_handle<typename Task<Result>::promise_type> continuation) {
-    request_->Suspend(TaskExecutionFor(continuation), continuation);
+  void Suspend(TaskContinuation continuation) {
+    request_->Suspend(std::move(continuation));
     controller_->Submit(request_);
   }
 
-  Result await_resume() {
+  Result TakeResult() {
     return request_->TakeResult();
   }
 
@@ -737,7 +724,7 @@ private:
 template <class Result>
 Task<Result>
 RunPickerRequest(std::shared_ptr<FilePickerController> controller, typename PickerRequest<Result>::Starter starter) {
-  co_return co_await PickerRequestAwaiter<Result>(std::move(controller), std::move(starter));
+  co_return co_await TaskAwaiter<PickerRequestAwaiter<Result>>(std::move(controller), std::move(starter));
 }
 
 using SingleFileCompletion = std::function<void(std::optional<FileReference>)>;

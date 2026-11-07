@@ -18,6 +18,7 @@ class PermissionTransport;
 
 [[nodiscard]] std::shared_ptr<LocalNotificationTransport> CreateIosLocalNotificationTransport();
 [[nodiscard]] std::shared_ptr<PermissionTransport> CreateIosPermissionTransport();
+[[nodiscard]] std::shared_ptr<SystemTaskTransport> CreateIosSystemTaskTransport();
 
 #ifdef __OBJC__
 [[nodiscard]] PlatformPayload DecodeIosLocalNotificationData(UNNotificationContent* content);

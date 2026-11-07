@@ -105,7 +105,7 @@ Choose the scope by the intended cancellation lifetime:
 - `UseTaskScope()` is composition-bound; unmount, replacement, virtual-item eviction, or window teardown cancels its children.
 - `UseApplicationTaskScope()` is available on the application thread, including during application hooks and outside composition. Its children survive window closure and are canceled at Runtime shutdown. It carries application context, not the calling window's Environment or presentation services.
 
-Launch from event handlers, committed `Lifecycle` setup, or application installation/work, never while composing. Prefer `Launch(factory)` for coroutine lambdas so captures remain owned. The returned `TaskHandle` cancels one child; discarding it leaves the task owned by its scope. Neither scope grants operating-system background execution rights.
+Launch from event handlers, committed `Lifecycle` setup, or application installation/work, never while composing. Prefer `Launch(factory)` for coroutine lambdas so captures remain owned. The returned `TaskHandle` cancels one child; discarding it leaves the task owned by its scope. Neither scope grants operating-system background execution rights; see [system tasks](#system-tasks) for platform admission.
 
 Use `RunWorker()` for owned synchronous CPU-bound or blocking work that must not run on the UI thread. Do not access State, composition, Views, or UI-affine platform objects from its callable. After `co_await RunWorker(...)`, the continuation is already back on the owning UI thread and may update State directly; do not call `TaskScope::Post()` for that continuation. Cancellation discards queued work or the result of work already running.
 
@@ -137,6 +137,24 @@ Native manifests, Apple usage descriptions, entitlements, request rationale, and
 Treat `PermissionStatus::Unavailable` as a normal platform-capability result rather than inventing a fallback permission path.
 
 `ApplicationHandle::LocalNotifications()` provides local operating-system notifications. For authorization, native templates, scheduling, and activation data, read [local-notifications.md](local-notifications.md).
+
+## System tasks
+
+Install stable declarations together in `AppOptions::system_tasks`, with unique identifiers matching platform configuration. Choose by the work:
+
+| Work | Declaration | Entry |
+| --- | --- | --- |
+| Maintenance at a system-selected opportunity | `BackgroundTask` | Await `ScheduleAsync()` from a running Task |
+| Finite user-started work, such as an export or one Agent turn | `ContinuedTask` | `Start(instance_id, presentation)` |
+| An eligible user-started ongoing session | `OngoingTask` | `Start(presentation)` |
+
+Call `Start()` directly from the eligible user action so platform submission occurs before that action returns. Check `GetCapabilities()` and the submission result; an accepted request may remain Pending until the platform grants execution. Keep submission, stopping, and record removal outside composition.
+
+Handlers are application-owned Tasks using Runtime services on the application thread. Update application-owned `State` directly and let UI read it or `GetState()` during composition. Worker code uses copied stop tokens and returns ordinary data to the handler.
+
+Use `RequestStop()` to withdraw or cooperatively stop work. `WaitAsync()` selects the current request when called; later starts do not retarget it, and canceling the observer leaves the work running. When asynchronous release is needed, catch `TaskStopped` in the handler and await one `context.Cleanup(...)` after the catch block, within the remaining execution budget. Persist business inputs and checkpoints needed after process death; State and services belong to one process.
+
+For platform setup, use the selected SDK's documentation. In a source checkout, see the [system task guide](../../../docs/guide/system-tasks.md) and runnable [system task example](../../../examples/system_tasks/README.md).
 
 ## Callback integration
 

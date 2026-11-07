@@ -3,7 +3,6 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
-#include <coroutine>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -168,57 +167,32 @@ private:
 };
 
 struct ManualSuspensionState {
-  void Suspend(std::weak_ptr<detail::TaskExecution> execution, std::coroutine_handle<> continuation) {
-    std::scoped_lock lock(mutex);
-    execution_ = std::move(execution);
-    continuation_ = continuation;
+  static Task<void> Wait(std::shared_ptr<ManualSuspensionState> state) {
+    return AwaitCallback<void>([state = std::move(state)](CallbackCompletion<void> completion) {
+      {
+        std::scoped_lock lock(state->mutex);
+        state->completion = std::move(completion);
+      }
+      return [state] {
+        std::scoped_lock lock(state->mutex);
+        state->completion.reset();
+        state->canceled = true;
+      };
+    });
   }
 
   void Resume() {
-    std::weak_ptr<detail::TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    std::optional<CallbackCompletion<void>> pending;
     {
       std::scoped_lock lock(mutex);
-      execution = execution_;
-      continuation = std::exchange(continuation_, {});
+      pending = std::exchange(completion, std::nullopt);
     }
-    detail::ResumeTask(execution, continuation);
-  }
-
-  void Cancel() noexcept {
-    std::scoped_lock lock(mutex);
-    if (continuation_) {
-      continuation_ = {};
-      canceled = true;
-    }
+    if (pending) pending->Complete();
   }
 
   std::mutex mutex;
-  std::weak_ptr<detail::TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  std::optional<CallbackCompletion<void>> completion;
   bool canceled = false;
-};
-
-class ManualAwaiter {
-public:
-  explicit ManualAwaiter(std::shared_ptr<ManualSuspensionState> state) : state_(std::move(state)) {}
-
-  ~ManualAwaiter() {
-    state_->Cancel();
-  }
-
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
-  }
-
-  template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    state_->Suspend(detail::TaskExecutionFor(continuation), continuation);
-  }
-
-  void await_resume() const noexcept {}
-
-private:
-  std::shared_ptr<ManualSuspensionState> state_;
 };
 
 TaskScope captured_task_scope;
@@ -263,7 +237,7 @@ Task<void> DelayedStateTask(State<int> state, std::thread::id* resumed_thread) {
 }
 
 Task<void> SuspendedTask(std::shared_ptr<ManualSuspensionState> suspension, int* completions = nullptr) {
-  co_await ManualAwaiter(std::move(suspension));
+  co_await ManualSuspensionState::Wait(std::move(suspension));
   if (completions != nullptr) {
     ++*completions;
   }
@@ -631,7 +605,7 @@ TEST_CASE("HuxerUIAwaitableRestoresTaskExecutionToTheOwningUIThread") {
   auto suspension = std::make_shared<ManualSuspensionState>();
   std::thread::id resumed_thread;
   captured_task_scope.Launch([state = task_value, suspension, &resumed_thread]() -> Task<void> {
-    co_await ManualAwaiter(suspension);
+    co_await ManualSuspensionState::Wait(suspension);
     resumed_thread = std::this_thread::get_id();
     state = 7;
   });

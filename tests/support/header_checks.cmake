@@ -30,6 +30,7 @@ set(HUXERUI_PUBLIC_HEADERS
         state.h
         stream.h
         system.h
+        system_task.h
         task.h
         text.h
         text_input.h

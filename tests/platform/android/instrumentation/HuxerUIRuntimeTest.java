@@ -33,9 +33,11 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
             verifyHostFocusHighlight();
             verifyGeometry();
             int notificationAssertions = HuxerUILocalNotificationTest.verify(getTargetContext());
+            int systemTaskAssertions = HuxerUISystemTasksTest.verify(this);
             sendStatus(0, status);
             result.putString("stream",
-                    "HuxerUI Android runtime: " + (assertions + notificationAssertions) + " assertions passed\n");
+                    "HuxerUI Android runtime: " + (assertions + notificationAssertions + systemTaskAssertions)
+                            + " assertions passed\n");
         } catch (Throwable error) {
             String stack = android.util.Log.getStackTraceString(error);
             status.putString("stack", stack);

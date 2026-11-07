@@ -169,6 +169,8 @@ cmake --build build --target example_ui_gallery
 
 [`example_multi_window`](../../examples/multi_window/main.cpp) opens independent desktop windows sharing an application counter, with local counters and observable close/reopen behavior. Build with `cmake --build build --target example_multi_window`; unsupported hosts disable the open-window command.
 
+[`example_system_tasks`](../../examples/system_tasks/README.md) demonstrates continued file export, system-scheduled export validation, and an ongoing HTTP receive session. It includes Android cold-start loading and foreground service configuration, plus an iOS Info.plist selected through `HUXERUI_APP_INFO_PLIST`. Its README covers platform support, storage, build commands, and device checks.
+
 Desktop binaries or application bundles are emitted under the configured build output.
 Android examples use `platform/android/example_runner`, and iOS examples use the repository platform runner.
 The Android runner resolves the selected example's final CMake shared-library name into `BuildConfig.HUXERUI_APP_LIBRARY`; MainActivity loads it before creating the hosted Runtime, without a fixed application `.so` name.

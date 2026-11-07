@@ -5,7 +5,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <coroutine>
 #include <cstddef>
 #include <cstring>
 #include <cwchar>
@@ -51,7 +50,6 @@
 #include "data_internal.h"
 #include "file_internal.h"
 #include "macros_internal.h"
-#include "runtime/task_internal.h"
 #include "stream_internal.h"
 
 namespace huxerui::detail {
@@ -558,11 +556,10 @@ public:
   FileOperationState(std::function<Result()> operation, bool persist)
       : operation_(std::move(operation)), persist_(persist) {}
 
-  void Suspend(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
+  void Suspend(TaskContinuation continuation) {
     {
       std::scoped_lock lock(mutex_);
-      execution_ = std::move(execution);
-      continuation_ = continuation;
+      continuation_ = std::move(continuation);
     }
     const std::shared_ptr<FileOperationState> self = this->shared_from_this();
 #if defined(__EMSCRIPTEN__)
@@ -588,7 +585,6 @@ public:
     // cannot be interrupted here; callers must not interpret Task cancellation as undoing a mutation.
     std::scoped_lock lock(mutex_);
     canceled_ = true;
-    execution_.reset();
     continuation_ = {};
   }
 
@@ -649,8 +645,7 @@ private:
   }
 
   void Finish(std::optional<Result> result, std::exception_ptr exception) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     {
       std::scoped_lock lock(mutex_);
       if (canceled_) {
@@ -660,16 +655,14 @@ private:
         result_.emplace(std::move(*result));
       }
       exception_ = exception;
-      execution = execution_;
       continuation = std::exchange(continuation_, {});
     }
-    ResumeTask(execution, continuation);
+    continuation.Resume();
   }
 
   std::mutex mutex_;
   std::function<Result()> operation_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  TaskContinuation continuation_;
   std::optional<Result> result_;
   std::exception_ptr exception_;
   bool canceled_ = false;
@@ -692,15 +685,11 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
+  void Suspend(TaskContinuation continuation) {
+    state_->Suspend(std::move(continuation));
   }
 
-  void await_suspend(std::coroutine_handle<typename Task<Result>::promise_type> continuation) {
-    state_->Suspend(TaskExecutionFor(continuation), continuation);
-  }
-
-  Result await_resume() {
+  Result TakeResult() {
     return state_->TakeResult();
   }
 
@@ -709,7 +698,7 @@ private:
 };
 
 template <class Result> Task<Result> RunFileOperation(std::function<Result()> operation, bool persist = false) {
-  co_return co_await FileOperationAwaiter<Result>(std::move(operation), persist);
+  co_return co_await TaskAwaiter<FileOperationAwaiter<Result>>(std::move(operation), persist);
 }
 
 class FileInputStreamState final : public InputStreamState {

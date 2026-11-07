@@ -14,6 +14,10 @@ xcrun simctl openurl booted "huxerui-example://documents/42"
 
 The runner also declares text documents, so the Files share sheet can open a UTF-8 text file with the application example. URL schemes and document types are native application metadata; generated applications declare their own values in `App/Info.plist`.
 
+## System tasks example
+
+Set `HUXERUI_APP_TARGET=example_system_tasks` and `HUXERUI_APP_INFO_PLIST=../../../examples/system_tasks/ios/Info.plist` in `Config/Local.xcconfig`. The selected Info.plist supplies the `processing` background mode and permitted task identifiers. The declaration identifiers use the default bundle prefix `com.huxerui.examples`; update the declarations and permitted identifiers together if changing the signing bundle identifier. See the [example instructions](../../../examples/system_tasks/README.md) for SDK requirements, expected support, and physical-device checks.
+
 ## Download notification example
 
 Select the shared **HuxerUINotifications** scheme to build the dedicated notification application and its embedded **DownloadNotification** Content Extension. Setting only `HUXERUI_APP_TARGET=example_local_notification` on the generic HuxerUIExamples scheme does not embed the extension and therefore does not enable the example's template. The generic target has no dependency on the extension and keeps its existing behavior.

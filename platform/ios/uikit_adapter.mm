@@ -445,6 +445,10 @@ public:
     return CreateIosLocalNotificationTransport();
   }
 
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
+    return CreateIosSystemTaskTransport();
+  }
+
   std::shared_ptr<PermissionTransport> CreatePermissionTransport() override {
     return CreateIosPermissionTransport();
   }

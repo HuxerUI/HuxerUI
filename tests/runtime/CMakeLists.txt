@@ -36,6 +36,7 @@ huxerui_add_test_suite(huxerui_runtime_tests HuxerUIRuntimeTests
             select.cpp
             tree.cpp
             system_tray.cpp
+            system_task.cpp
             selection_area.cpp
             task.cpp
             text.cpp
