@@ -26,6 +26,9 @@ Use the selected SDK or resolved package revision as the authority for APIs and 
 - Use stable semantic keys for dynamic stateful siblings that insert, remove, or reorder.
 - Preserve complete `TextEditingValue` state for `TextField`.
 - Use the selected SDK's public headers and build targets, and follow the project's generated conventions.
+- Use `platform` for platform implementations, windows, objects, capabilities, and bridges; use `system` for operating-system scheduling, tasks, requests, and system-assigned identifiers. Omit redundant qualifiers when context is clear. Apply these meanings to names, comments, diagnostics, and documentation.
+- Preserve precise `native` terminology for JNI/NDK, Java `native`, handles to C++ objects, and C/C++ libraries. Preserve external API names, third-party symbols, fixed build terminology, and JNI binding names rather than mechanically replacing them.
+- List proposed public renames for confirmation before changing them, then update declarations, implementations, callers, tests, examples, documentation, and affected bindings or exports together. Preserve threading, ownership, and lifecycle semantics; do not add compatibility aliases, forwarding layers, or wrappers solely for naming consistency.
 - Omit unused parameter names in callback definitions to avoid `static_cast<void>` for warning suppression.
 - Prefer generated `ImageResource` values for static artwork displayed by HuxerUI components. Keep scalable in-UI artwork as SVG under `resources/images`; use `VectorAsset::Create` or `Canvas` only for genuinely programmatic or dynamic drawing. Platform application and system-tray icons follow their separate packaging contracts.
 - Compose built-in layouts and their modifiers before deriving `Layout` or `VirtualLayout`. A custom layout is for a genuinely new measurement or placement algorithm, not ordinary alignment, spacing, growth, wrapping, overlay, paging, scrolling, or responsiveness.

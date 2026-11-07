@@ -34,8 +34,8 @@ Prefer constructing that chain directly when practical. Do not move temporary Vi
 ## State
 
 - `UseState(initial)` returns copyable `State<T>`.
-- Pass `State<T>` directly to APIs that accept the handle or a known `T` or `const T&`. For example, literal `Text::Format("Count: {}", count)` accepts `State` directly. Use `state->member` for read-only field and method access.
-- When an API deduces its argument type and needs the stored value, initialize a typed value or reference first, such as `const int value = count;` before `std::clamp(value, 0, 100)`. A declaration such as `auto copy = count;` copies the handle and shares its cell.
+- Pass `State<T>` directly to APIs that accept the handle or a known `T` or `const T&`. For example, literal `Text::Format("Count: {}", count)` accepts `State` directly. Use `state->member` or `state->Method()` for read-only field and method access.
+- When template deduction or overload selection needs the stored `T`, prefer an explicitly typed local value or reference, such as `const int value = count;` before `std::clamp(value, 0, 100)`. Keep `.Get()` when necessary; do not complicate code solely to remove it or change unrelated types' `Get()` methods. A declaration such as `auto copy = count;` copies the handle and shares its cell.
 - Ordinary writes use `state = value`; `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, or `>>=` when supported by `T`; and prefix/postfix increment or decrement. There is no required setter call.
 - Use `state.Update([](T& value) { ... })` for custom mutations. To write the value of one State into another, read it into a typed value before assigning it to the destination.
 - Reads subscribe the current composition scope; writes invalidate subscribers.
