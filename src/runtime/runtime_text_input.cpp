@@ -267,7 +267,7 @@ detail::TextInteraction::KeyboardDispatch::~KeyboardDispatch() {
 
 void detail::TextInteraction::KeyboardDispatch::Finish() {
   if (text_.keyboard_dispatch_depth_ == 1) {
-    text_.PrepareKeyboardRequestSession();
+    text_.RefreshTextInputSession();
   }
   finished_ = true;
   if (--text_.keyboard_dispatch_depth_ == 0) {
@@ -303,34 +303,6 @@ void detail::TextInteraction::QueueKeyboardRequest(KeyboardRequest request) {
   keyboard_requests_.push_back(std::move(request));
   if (keyboard_dispatch_depth_ == 0) {
     FlushKeyboardRequests();
-  }
-}
-
-void detail::TextInteraction::PrepareKeyboardRequestSession() {
-  const auto focused = runtime_state_.focused_node_identity_;
-  if (!focused || !runtime_state_.mounted_root_) {
-    return;
-  }
-  const auto awaits_session = [focused](const KeyboardRequest& request) {
-    return request.node == *focused && request.session == 0;
-  };
-  if (std::ranges::none_of(keyboard_requests_, awaits_session)) {
-    return;
-  }
-
-  MountedNode* node = FindNode(*runtime_state_.mounted_root_, *focused);
-  if (!node || !node->focusable || !node->interaction.enabled) {
-    return;
-  }
-  const std::shared_ptr<TextInputClient> client = FindTextInputClient(*node);
-  if (!client || (text_input_session_ && text_input_session_->node_identity == *focused &&
-                  text_input_session_->client == client)) {
-    return;
-  }
-  if (std::ranges::any_of(keyboard_requests_, [&](const KeyboardRequest& request) {
-        return awaits_session(request) && request.client.lock() == client;
-      })) {
-    RefreshTextInputSession();
   }
 }
 

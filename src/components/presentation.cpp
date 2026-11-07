@@ -2686,6 +2686,7 @@ LayerId detail::DialogService::Show(
   ValidateDialogStyle(style);
   const std::shared_ptr<detail::LayerTransitionState> transition = PresentationTransition(style.motion);
   auto id = std::make_shared<LayerId>(0);
+  auto initial_focus = std::move(options.initial_focus);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
   const LayerId attached = InternalAccess::AttachCaptured(
@@ -2718,7 +2719,10 @@ LayerId detail::DialogService::Show(
       ),
       std::move(environment),
       DialogLayerPlacement(style),
-      transition
+      transition,
+      {},
+      std::nullopt,
+      std::move(initial_focus)
   );
   *id = attached;
   return attached;
@@ -2734,6 +2738,7 @@ LayerId detail::DialogService::Show(
   ValidateDialogStyle(style);
   const std::shared_ptr<detail::LayerTransitionState> transition = PresentationTransition(style.motion);
   auto id = std::make_shared<LayerId>(0);
+  auto initial_focus = std::move(options.initial_focus);
   LayerOptions layer_options = DialogLayerOptions(std::move(options), style.scrim);
   const bool dismissible = layer_options.cancel_policy == LayerCancelPolicy::Dismiss;
   const LayerId attached = InternalAccess::AttachCaptured(
@@ -2742,7 +2747,10 @@ LayerId detail::DialogService::Show(
       PresentedContent(std::move(content), transition, id, dismissible),
       std::move(environment),
       DialogLayerPlacement(style),
-      transition
+      transition,
+      {},
+      std::nullopt,
+      std::move(initial_focus)
   );
   *id = attached;
   return attached;

@@ -419,6 +419,9 @@ struct DialogOptions {
   bool dismiss_on_cancel = true;
   /// Optional owner callback that receives dismissal requests instead of automatic removal.
   std::function<void()> on_dismiss_request{};
+  /// Optional target captured by Show() and tried once when this Dialog first acquires focus.
+  /// Invalid targets fall back to the first eligible control; content updates do not reapply the initial target.
+  std::optional<FocusRequester> initial_focus{};
 };
 
 /// Gives custom Dialog content access to the identifier and dismissal operation of its owning request.

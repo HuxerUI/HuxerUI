@@ -1,7 +1,15 @@
 #include "runtime_test_support.h"
 
+#include <algorithm>
+#include <array>
 #include <limits>
+#include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace huxerui::test {
 
@@ -2510,6 +2518,199 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
       .key = Key::Enter,
   });
   REQUIRE(background_dialog_clicks == 1);
+}
+
+namespace {
+
+std::array<std::optional<FocusRequester>, 3> programmatic_focus;
+State<bool> programmatic_first_enabled;
+State<bool> programmatic_first_visible;
+State<bool> programmatic_first_is_text;
+State<bool> programmatic_reverse;
+std::vector<std::pair<std::string, bool>> programmatic_focus_events;
+std::vector<bool> programmatic_redirect_results;
+bool programmatic_redirect = false;
+
+View ProgrammaticFocusApp() {
+  programmatic_first_enabled = UseState(true);
+  programmatic_first_visible = UseState(true);
+  programmatic_first_is_text = UseState(false);
+  const auto first = UseFocusRequester();
+  const auto second = UseFocusRequester();
+  const auto plain = UseFocusRequester();
+  programmatic_focus = {first, second, plain};
+  View first_control = programmatic_first_is_text
+      ? View(Text("request first").With(Focusable{})) : View(Button("request first"));
+  first_control = std::move(first_control)
+      .With(Enabled{programmatic_first_enabled}, FocusTarget{first})
+      .On<ViewEvents::FocusChanged>([](bool focused) {
+        programmatic_focus_events.emplace_back("first", focused);
+        if (programmatic_redirect) programmatic_redirect_results.push_back(programmatic_focus[1]->RequestFocus());
+      });
+  return Column {
+    programmatic_first_visible ? std::move(first_control) : View(Spacer()),
+    Button("request second").With(FocusTarget{second}).On<ViewEvents::FocusChanged>([](bool focused) {
+      programmatic_focus_events.emplace_back("second", focused);
+    }),
+    Text("not focusable").With(FocusTarget{plain}),
+  };
+}
+
+View KeyedProgrammaticFocusApp() {
+  programmatic_reverse = UseState(false);
+  std::vector<View> rows;
+  const auto order = programmatic_reverse ? std::array{1, 0} : std::array{0, 1};
+  for (const int id : order) {
+    rows.push_back(Scope([id] {
+      const auto requester = UseFocusRequester();
+      programmatic_focus[id] = requester;
+      return Button(id == 0 ? "keyed first" : "keyed second").With(FocusTarget{requester});
+    }).Key(id));
+  }
+  return Column(std::move(rows));
+}
+
+bool ProgrammaticNodeFocused(UiWindow& runtime, std::string_view label) {
+  const auto frame = runtime.BuildCommit().semantic_frame;
+  const auto found = std::ranges::find(frame->nodes, label, &SemanticNode::label);
+  return found != frame->nodes.end() && found->focused;
+}
+
+} // namespace
+
+TEST_CASE("Focus requests preserve existing focus on rejection and notify only actual changes") {
+  programmatic_focus_events.clear();
+  programmatic_redirect = false;
+  TestPlatform platform;
+  UiWindow runtime{ProgrammaticFocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  const auto first = *programmatic_focus[0];
+  REQUIRE(first.RequestFocus());
+  REQUIRE(first.RequestFocus());
+  REQUIRE(programmatic_focus_events == std::vector<std::pair<std::string, bool>>{{"first", true}});
+  REQUIRE_FALSE(programmatic_focus[2]->RequestFocus());
+  REQUIRE(ProgrammaticNodeFocused(runtime, "request first"));
+  REQUIRE(programmatic_focus[1]->RequestFocus());
+  programmatic_first_enabled = false;
+  runtime.BuildFrame();
+  REQUIRE_FALSE(first.RequestFocus());
+  REQUIRE(ProgrammaticNodeFocused(runtime, "request second"));
+
+  programmatic_first_visible = false;
+  runtime.BuildFrame();
+  REQUIRE_FALSE(first.RequestFocus());
+  programmatic_first_enabled = true;
+  programmatic_first_visible = true;
+  runtime.BuildFrame();
+  REQUIRE(ProgrammaticNodeFocused(runtime, "request second"));
+  REQUIRE(first == *programmatic_focus[0]);
+  REQUIRE(first.RequestFocus());
+  programmatic_first_is_text = true;
+  runtime.BuildFrame();
+  REQUIRE(first.RequestFocus());
+  REQUIRE(ProgrammaticNodeFocused(runtime, "request first"));
+}
+
+TEST_CASE("Keyed movement preserves requester identity and its logical target") {
+  TestPlatform platform;
+  UiWindow runtime{KeyedProgrammaticFocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  const auto first = *programmatic_focus[0];
+  const auto second = *programmatic_focus[1];
+  REQUIRE(first.RequestFocus());
+  programmatic_reverse = true;
+  runtime.BuildFrame();
+  REQUIRE(first == *programmatic_focus[0]);
+  REQUIRE(second == *programmatic_focus[1]);
+  REQUIRE(ProgrammaticNodeFocused(runtime, "keyed first"));
+  REQUIRE(second.RequestFocus());
+  REQUIRE(ProgrammaticNodeFocused(runtime, "keyed second"));
+}
+
+TEST_CASE("Focus-change notifications cannot redirect a programmatic request") {
+  programmatic_redirect_results.clear();
+  programmatic_redirect = true;
+  TestPlatform platform;
+  UiWindow runtime{ProgrammaticFocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(programmatic_focus[0]->RequestFocus());
+  REQUIRE(ProgrammaticNodeFocused(runtime, "request first"));
+  REQUIRE(programmatic_focus[1]->RequestFocus());
+  REQUIRE(ProgrammaticNodeFocused(runtime, "request second"));
+  REQUIRE(programmatic_redirect_results == std::vector<bool>{false, false});
+  programmatic_redirect = false;
+}
+
+TEST_CASE("Focus requester lifetime and calling-context errors are explicit") {
+  programmatic_redirect = false;
+  REQUIRE_THROWS_AS(UseFocusRequester(), std::logic_error);
+  TestPlatform platform;
+  std::optional<FocusRequester> retired;
+  {
+    UiWindow runtime{ProgrammaticFocusApp, platform};
+    runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+    runtime.BuildFrame();
+    retired = programmatic_focus[0];
+    bool rejected_thread = false;
+    std::thread worker([&] {
+      try {
+        retired->RequestFocus();
+      } catch (const std::logic_error&) {
+        rejected_thread = true;
+      }
+    });
+    worker.join();
+    REQUIRE(rejected_thread);
+  }
+  REQUIRE_FALSE(retired->RequestFocus());
+  TestPlatform replacement_platform;
+  UiWindow replacement{ProgrammaticFocusApp, replacement_platform};
+  replacement.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  replacement.BuildFrame();
+  REQUIRE_FALSE(retired->RequestFocus());
+  REQUIRE_FALSE(ProgrammaticNodeFocused(replacement, "request first"));
+}
+
+TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are rejected") {
+  SECTION("Focus requests cannot mutate composition") {
+    TestPlatform platform;
+    UiWindow runtime{[]() -> View {
+      auto requester = UseFocusRequester();
+      requester.RequestFocus();
+      return Button("invalid focus");
+    }, platform};
+    runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::logic_error);
+  }
+  SECTION("One requester cannot bind two controls") {
+    TestPlatform platform;
+    UiWindow runtime{[]() -> View {
+      auto requester = UseFocusRequester();
+      return Column {
+        Button("first binding").With(FocusTarget{requester}),
+        Button("second binding").With(FocusTarget{requester}),
+      };
+    }, platform};
+    runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+    REQUIRE_THROWS_AS(runtime.BuildFrame(), std::logic_error);
+  }
+  SECTION("A target cannot migrate to another window") {
+    programmatic_redirect = false;
+    TestPlatform platform;
+    UiWindow original{ProgrammaticFocusApp, platform};
+    original.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+    original.BuildFrame();
+    TestPlatform other_platform;
+    UiWindow other{[] {
+      return Button("foreign target").With(FocusTarget{*programmatic_focus[0]});
+    }, other_platform};
+    other.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+    REQUIRE_THROWS_AS(other.BuildFrame(), std::logic_error);
+    REQUIRE(programmatic_focus[0]->RequestFocus());
+  }
 }
 
 } // namespace huxerui::test

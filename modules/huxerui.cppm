@@ -156,7 +156,9 @@ export namespace huxerui {
     using huxerui::FlatTheme;
     using huxerui::FlatThemeDefinition;
     using huxerui::Flow;
+    using huxerui::FocusRequester;
     using huxerui::FocusRing;
+    using huxerui::FocusTarget;
     using huxerui::Focusable;
     using huxerui::Font;
     using huxerui::FontFamily;
@@ -545,6 +547,7 @@ export namespace huxerui {
     using huxerui::UseDialog;
     using huxerui::UseEnvironment;
     using huxerui::UseEvents;
+    using huxerui::UseFocusRequester;
     using huxerui::UseImage;
     using huxerui::UseMenu;
     using huxerui::UseNavigation;

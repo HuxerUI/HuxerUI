@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <huxerui/color.h>
+#include <huxerui/modifier.h>
 #include <huxerui/view.h>
 
 namespace huxerui {
@@ -159,7 +160,8 @@ private:
       detail::LayerPlacement placement,
       std::shared_ptr<detail::LayerTransitionState> transition = {},
       std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {},
-      std::optional<std::uint64_t> retained_focus_identity = std::nullopt
+      std::optional<std::uint64_t> retained_focus_identity = std::nullopt,
+      std::optional<FocusRequester> initial_focus = std::nullopt
   ) const;
   bool UpdateCaptured(
       LayerId id,
@@ -177,7 +179,8 @@ private:
       detail::LayerPlacement placement,
       std::shared_ptr<detail::LayerTransitionState> transition,
       std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {},
-      std::optional<std::uint64_t> retained_focus_identity = std::nullopt
+      std::optional<std::uint64_t> retained_focus_identity = std::nullopt,
+      std::optional<FocusRequester> initial_focus = std::nullopt
   ) const;
   bool UpdateEntry(
       LayerId id,

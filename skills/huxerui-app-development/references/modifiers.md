@@ -14,6 +14,7 @@ Modifiers apply from left to right. Property modifiers alter declaration data wi
 | Modifier | Main effect |
 | --- | --- |
 | `Enabled`, `Focusable` | Input/focus eligibility and semantics |
+| `FocusTarget` | Binds a remembered requester to one mounted View without changing focusability |
 | `Padding`, `Frame` | Measurement and layout constraints |
 | `Spacing`, `MainAlign`, `CrossAlign` | Linear and Flow container layout policy |
 | `Align` | `Stack` child-placement policy; unrelated to the component-specific `Text::Align` and `TextField::Align` methods |
@@ -32,6 +33,24 @@ Modifiers apply from left to right. Property modifiers alter declaration data wi
 | `Tooltip`, declarative `Dialog`, `LayerAnchor`, `SceneTransitionAnchor` | Presentation integration |
 
 Verify exact fields in the active SDK header. Do not infer a generic modifier from a component-specific style field.
+
+## Programmatic focus
+
+Create `UseFocusRequester()` during composition and bind its result with `.With(FocusTarget{requester})`. Built-in control defaults or `Focusable{}` still determine whether the View can receive focus.
+
+```cpp
+auto focus = UseFocusRequester();
+return Column {
+  TextField(value).With(FocusTarget{focus}),
+  Button("Edit").OnClick([focus] { focus.RequestFocus(); }),
+};
+```
+
+Capture the requester in handlers or resumed Tasks and call `RequestFocus()` on the application thread, outside composition. It synchronously accepts logical focus, including an already-focused target, makes focus visible, and uses the existing `ViewEvents::FocusChanged` event for actual changes.
+
+Copies share one binding in their original window. Compatible recomposition and keyed movement preserve it; unmounting disconnects it. An unmounted, disabled, non-focusable, or modal-excluded target returns `false` without changing current focus. Requests during focus-change notifications also return `false`. Requests do not queue for a future mount or realize virtual items; duplicate and cross-window bindings are errors.
+
+Logical focus is separate from window activation, accessibility focus, and software-keyboard visibility. With `SoftwareKeyboardPolicy::Manual`, capture `UseWindow()` and call `window.ShowKeyboard()` after a successful request when presentation is needed; this also works within one event handler. Keyboard presentation remains subject to platform policy. See [Dialog initial focus](theme-animation-presentation.md#presentation-services) for modal content.
 
 ## Corner radii
 

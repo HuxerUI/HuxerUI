@@ -225,6 +225,7 @@ struct LayerEntrySnapshot {
   bool exiting = false;
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
   std::optional<std::uint64_t> retained_focus_identity;
+  std::optional<FocusRequester> initial_focus;
 
   bool operator==(const LayerEntrySnapshot&) const = default;
 };
@@ -244,6 +245,7 @@ struct LayerEntry {
   // Active menu layers share this token so one logical menu chain remains one semantic modal region.
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
   std::optional<std::uint64_t> retained_focus_identity;
+  std::optional<FocusRequester> initial_focus;
   // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
   std::shared_ptr<LayerPlacement> placement;
   std::shared_ptr<LayerTransitionState> transition;
@@ -562,6 +564,7 @@ struct UiWindow::State {
   std::unique_ptr<detail::FileDropReceiver> file_drop_;
   std::optional<std::uint64_t> focused_node_identity_;
   bool focus_visible_ = false;
+  bool focus_change_in_progress_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;
   std::optional<std::uint64_t> keyboard_press_id_;
   std::vector<detail::FocusTrapFrame> focus_trap_stack_;

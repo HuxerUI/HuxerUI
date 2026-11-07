@@ -152,7 +152,6 @@ private:
   };
 
   void QueueKeyboardRequest(KeyboardRequest request);
-  void PrepareKeyboardRequestSession();
   void FlushKeyboardRequests();
   void InvalidateTextInputStateChange(std::uint64_t node, const TextInputState& previous, const TextInputState& current);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);

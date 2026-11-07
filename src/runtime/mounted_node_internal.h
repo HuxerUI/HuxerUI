@@ -13,6 +13,7 @@
 #include <string>
 #include <typeindex>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -37,6 +38,15 @@ class AppResources;
 class RecomposeScope;
 struct ParagraphLayout;
 class ScrollConnection;
+struct ExecutionContext;
+
+/// Keeps a focus target attached to its original window without retaining that window or its Environment.
+struct FocusRequesterState {
+  explicit FocusRequesterState(std::shared_ptr<ExecutionContext> source) : source(std::move(source)) {}
+
+  std::shared_ptr<ExecutionContext> source;
+  std::uint64_t node_identity = 0;
+};
 
 inline std::optional<double> EarliestWakeAfter(std::optional<double> first, std::optional<double> second) noexcept {
   if (!first.has_value()) {
@@ -243,6 +253,8 @@ struct NodePresentation {
 // MountedNode is the retained counterpart of ViewSpec. UiWindow reads copied component payloads only from matching
 // NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
 struct MountedNode final : public huxerui::ViewNode {
+  ~MountedNode() override;
+
   UiWindow* ui_window = nullptr;
   NodeKind kind = NodeKind::Layout;
   std::uint64_t identity = 0;
@@ -316,6 +328,8 @@ struct MountedNode final : public huxerui::ViewNode {
   // Re-resolved during geometry preparation from static indication geometry or a component's dynamic control bounds.
   std::optional<Rect> indication_bounds_override;
   bool focusable = false;
+  std::shared_ptr<FocusRequesterState> focus_target;
+  bool initial_focus_consumed = false;
   bool trap_focus = false;
   bool subtree_has_extensions = true;
   std::vector<std::unique_ptr<MountedNode>> children;

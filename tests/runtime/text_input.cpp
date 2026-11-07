@@ -1,7 +1,11 @@
 #include "runtime_test_support.h"
 
 #include <memory>
+#include <array>
+#include <functional>
+#include <algorithm>
 #include <optional>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -787,6 +791,171 @@ TEST_CASE("TestFocusableNodeRejectsMultipleTextInputClients") {
   runtime.BuildFrame();
 
   REQUIRE_THROWS_AS(FocusNext(runtime), std::logic_error);
+}
+
+namespace {
+
+std::array<std::optional<FocusRequester>, 3> input_focus;
+TaskScope input_focus_tasks;
+bool input_focus_accepted = false;
+
+View ProgrammaticTextInputApp() {
+  const auto first = UseFocusRequester();
+  const auto second = UseFocusRequester();
+  input_focus = {first, second, std::nullopt};
+  input_focus_tasks = UseTaskScope();
+  const auto window = UseWindow();
+  text_input_window = window;
+  return Column {
+    Text("first requested editor").With(Focusable{}, FocusTarget{first}, TextInputProbe{first_text_client}),
+    Text("second requested editor").With(Focusable{}, FocusTarget{second}, TextInputProbe{second_text_client}),
+    Button("edit second").OnClick([second, window] {
+      input_focus_accepted = second.RequestFocus();
+      if (input_focus_accepted) window.ShowKeyboard();
+    }),
+  };
+}
+
+View InitialDialogFocusApp() {
+  for (auto& requester : input_focus) requester = UseFocusRequester();
+  text_input_dialog = UseDialog();
+  return Button("dialog opener").With(FocusTarget{*input_focus[0]});
+}
+
+View InitialDialogFocusContent() {
+  return Column {
+    Text("default dialog editor").With(Focusable{}, TextInputProbe{first_text_client}),
+    Text("requested dialog editor")
+        .With(Focusable{}, FocusTarget{*input_focus[1]}, TextInputProbe{second_text_client}),
+    Button("other dialog control").With(FocusTarget{*input_focus[2]}),
+  };
+}
+
+bool RequestedSemanticFocus(UiWindow& runtime, std::string_view label) {
+  const auto frame = runtime.BuildCommit().semantic_frame;
+  const auto found = std::ranges::find(frame->nodes, label, &SemanticNode::label);
+  return found != frame->nodes.end() && found->focused;
+}
+
+} // namespace
+
+TEST_CASE("Programmatic focus and keyboard presentation work outside input dispatch and after a Task resumes") {
+  const bool task_callback = GENERATE(false, true);
+  ResetTextInputProbes();
+  first_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  second_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{ProgrammaticTextInputApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(input_focus[0]->RequestFocus());
+  const auto focus_and_show = [&] {
+    REQUIRE(input_focus[1]->RequestFocus());
+    text_input_window->ShowKeyboard();
+  };
+  if (task_callback) {
+    std::optional<CallbackCompletion<void>> resume;
+    input_focus_tasks.Launch([&]() -> Task<void> {
+      co_await AwaitCallback<void>([&](auto completion) {
+        resume = std::move(completion);
+        return std::function<void()>{};
+      });
+      focus_and_show();
+    });
+    platform.RunPlatformModuleTasks();
+    REQUIRE(resume);
+    resume->Complete();
+    platform.RunPlatformModuleTasks();
+  } else {
+    focus_and_show();
+  }
+  REQUIRE(first_text_client->begin_count == 1);
+  REQUIRE(second_text_client->begin_count == 1);
+  REQUIRE(text_input.keyboard_requests == std::vector<std::pair<TextInputSessionId, bool>>{{2, true}});
+  REQUIRE(RequestedSemanticFocus(runtime, "second requested editor"));
+}
+
+TEST_CASE("One input event can request focus and show the new editor keyboard") {
+  ResetTextInputProbes();
+  first_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  second_text_client->configuration.keyboard_policy = SoftwareKeyboardPolicy::Manual;
+  input_focus_accepted = false;
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{ProgrammaticTextInputApp, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+  REQUIRE(input_focus[0]->RequestFocus());
+  const auto button = FindPresentedTextRect(runtime.BuildFrame(), "edit second");
+  REQUIRE(button);
+  ClickAt(runtime, {button->x + button->width * 0.5F, button->y + button->height * 0.5F});
+  REQUIRE(input_focus_accepted);
+  REQUIRE(second_text_client->begin_count == 1);
+  REQUIRE(text_input.keyboard_requests == std::vector<std::pair<TextInputSessionId, bool>>{{2, true}});
+}
+
+TEST_CASE("Dialog initial focus skips the default editor and nested dialogs restore the current target") {
+  ResetTextInputProbes();
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{InitialDialogFocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {480.0F, 480.0F}});
+  runtime.BuildFrame();
+  REQUIRE(input_focus[0]->RequestFocus());
+  const auto dialog = text_input_dialog->Show(InitialDialogFocusContent, {.initial_focus = input_focus[1]});
+  runtime.BuildFrame();
+  REQUIRE(first_text_client->begin_count == 0);
+  REQUIRE(second_text_client->begin_count == 1);
+  REQUIRE(RequestedSemanticFocus(runtime, "requested dialog editor"));
+  REQUIRE_FALSE(input_focus[0]->RequestFocus());
+  REQUIRE(input_focus[2]->RequestFocus());
+  const auto nested = text_input_dialog->Show([] { return Button("nested control"); });
+  runtime.BuildFrame();
+  REQUIRE(RequestedSemanticFocus(runtime, "nested control"));
+  REQUIRE(text_input_dialog->Dismiss(nested));
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(RequestedSemanticFocus(runtime, "other dialog control"));
+  REQUIRE(text_input_dialog->Update(dialog, InitialDialogFocusContent));
+  runtime.BuildFrame();
+  REQUIRE(RequestedSemanticFocus(runtime, "other dialog control"));
+  REQUIRE(second_text_client->begin_count == 1);
+  REQUIRE(text_input_dialog->Dismiss(dialog));
+  runtime.BuildFrame();
+  SettlePresentation(platform, runtime);
+  REQUIRE(RequestedSemanticFocus(runtime, "dialog opener"));
+}
+
+TEST_CASE("An unavailable Dialog initial target falls back once without focusing a later mount") {
+  ResetTextInputProbes();
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow runtime{InitialDialogFocusApp, platform};
+  runtime.SetWindowMetrics({.viewport = {480.0F, 480.0F}});
+  runtime.BuildFrame();
+  text_input_dialog->Show([] {
+    text_client_visible = UseState(false);
+    return Column {
+      Text("fallback editor").With(Focusable{}, TextInputProbe{first_text_client}),
+      text_client_visible
+          ? Text("late editor").With(Focusable{}, FocusTarget{*input_focus[1]}, TextInputProbe{second_text_client})
+          : Text("not mounted"),
+    };
+  }, {.initial_focus = input_focus[1]});
+  runtime.BuildFrame();
+  REQUIRE(first_text_client->begin_count == 1);
+  REQUIRE(second_text_client->begin_count == 0);
+  text_client_visible = true;
+  runtime.BuildFrame();
+  REQUIRE(first_text_client->begin_count == 1);
+  REQUIRE(second_text_client->begin_count == 0);
+  REQUIRE(input_focus[1]->RequestFocus());
+  REQUIRE(second_text_client->begin_count == 1);
 }
 
 } // namespace huxerui::test

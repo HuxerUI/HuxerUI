@@ -982,6 +982,10 @@ private:
                       std::uint64_t press_id, std::optional<Point> position = std::nullopt);
   [[nodiscard]] std::optional<std::uint64_t> ResolvePointerFocusTarget(const std::vector<detail::MountedNode*>& route);
   void RefreshInteractionTree();
+  /// Requests focus only for an eligible mounted target in this window's current modal scope.
+  /// @param identity Mounted node to focus without retaining a pending request.
+  /// @return Whether the target owns focus after notification and text-input synchronization.
+  bool RequestFocus(std::uint64_t identity);
   void RequestKeyboard(bool show);
   bool DispatchKeyEvent(const KeyEvent& event);
   bool DispatchKeyboardContextMenu();
@@ -1041,6 +1045,7 @@ private:
 
   friend class Runtime;
   friend class LayerController;
+  friend class FocusRequester;
   friend class detail::ApplicationService;
   friend class detail::FileDropReceiver;
   friend class detail::PointerInteraction;

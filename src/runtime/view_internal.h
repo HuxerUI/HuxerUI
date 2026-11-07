@@ -37,6 +37,7 @@ struct ProgressCircleStyle;
 namespace huxerui::detail {
 
 class AppResources;
+struct FocusRequesterState;
 struct ViewSpec;
 
 struct TextMeasurerService {
@@ -340,6 +341,7 @@ struct ViewSpec {
   bool pointer_events_enabled = true;
   bool local_enabled = true;
   bool focusable = false;
+  std::shared_ptr<FocusRequesterState> focus_target;
   // The highest painted enabled trap confines keyboard and pointer focus to its subtree.
   bool trap_focus = false;
 };

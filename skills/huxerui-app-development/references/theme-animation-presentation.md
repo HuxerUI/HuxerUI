@@ -178,6 +178,8 @@ Local scope input is blocked during playback; keep retarget controls outside it.
 - `UseMenu()` anchors menu entries with enabled, checked, nested, icon, and icon-tint state.
 - `Tooltip` is a modifier for hover/long-press help.
 
+Set `DialogOptions::initial_focus` to a [FocusRequester](modifiers.md#programmatic-focus) bound inside the Dialog. `Show()` captures it for one attempt before ordinary first-eligible focus; unavailable targets fall back without later retries. Content updates do not reapply it, and closing a nested Dialog restores the current prior focus through the existing modal behavior.
+
 Layer content is outside the ordinary application subtree but retains its captured live Environment. Open layers follow theme changes without replacing their identifiers, content state, focus, or timeout progress; after a provider unmounts, retained layers keep its last values. Keep modal dismissal and owner state explicit, and do not retain a presentation context after dismissal. Presentation handles belong to their window and cannot present from an application task with no live window context.
 Set `PopupOptions::retain_anchor_focus` only when pointer interaction with non-focusable popup content must keep an editor or other keyboard session on its mounted anchor; focusable popup descendants still receive focus.
 

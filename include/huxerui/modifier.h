@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <source_location>
 #include <type_traits>
 #include <utility>
 
@@ -32,6 +33,7 @@ namespace detail {
 struct DragSourceCapability;
 struct DropTargetCapability;
 struct FileDropTargetCapability;
+struct FocusRequesterState;
 class GestureRecognizer;
 struct InternalAccess;
 }
@@ -523,6 +525,58 @@ struct Focusable {
   bool value = true;
 
   bool operator==(const Focusable&) const = default;
+};
+
+/// A copyable focus target belonging to the window where UseFocusRequester() created it.
+///
+/// Copies share one target. Compatible recomposition and keyed movement preserve its mounted identity; unmounting
+/// disconnects the target. A requester never activates a window or changes platform screen-reader focus.
+class FocusRequester final {
+public:
+  /// Requests visible logical focus for the currently bound control on the original application's thread.
+  ///
+  /// Returns true when that control owns focus after the request, including an already-focused control. Returns
+  /// false without changing focus when the target is unmounted, unavailable, disabled, excluded from input, outside
+  /// the active modal scope, or a focus-change notification is running. Requests are not retained for future mounts.
+  /// Text input and keyboard presentation use the existing window dispatch boundary; logical success does not
+  /// guarantee that the operating system displays a software keyboard.
+  /// @throws std::logic_error If called during composition, from another thread, or in another application's context.
+  bool RequestFocus() const;
+
+  bool operator==(const FocusRequester&) const = default;
+
+private:
+  explicit FocusRequester(std::shared_ptr<detail::FocusRequesterState> state) : state_(std::move(state)) {}
+
+  std::shared_ptr<detail::FocusRequesterState> state_;
+
+  friend FocusRequester UseFocusRequester(const std::source_location&);
+  friend class UiWindow;
+  friend struct FocusTarget;
+};
+
+/// Retains one requester at this composition location and occurrence.
+/// @param location Hook identity within the current RecomposeScope; normally supplied automatically.
+/// @return A requester bound to the composing window's lifetime.
+/// @throws std::logic_error If there is no active window composition.
+/// @code
+/// auto email_focus = UseFocusRequester();
+/// return TextField(email).With(FocusTarget{email_focus});
+/// @endcode
+FocusRequester UseFocusRequester(const std::source_location& location = std::source_location::current());
+
+/// Binds a requester to this mounted View without making it focusable.
+///
+/// Component defaults and Focusable still determine eligibility. One requester can name only one mounted control
+/// in its original window; duplicate or cross-window bindings throw std::logic_error during mounting.
+struct FocusTarget {
+  /// Returns the property modifier descriptor used by View::With().
+  static const detail::ModifierDescriptor& Descriptor();
+
+  /// Stable requester to bind; copying this modifier preserves the same requester identity.
+  FocusRequester requester;
+
+  bool operator==(const FocusTarget&) const = default;
 };
 
 /// Selects the pointer cursor while a mouse or pen points at a View.
