@@ -54,7 +54,7 @@ public:
     if (!result)
       return E_POINTER;
     *result = nullptr;
-    if (id != __uuidof(IUnknown) && id != __uuidof(Interface))
+    if (!IsEqualIID(id, __uuidof(IUnknown)) && !IsEqualIID(id, __uuidof(Interface)))
       return E_NOINTERFACE;
     *result = static_cast<Interface*>(this);
     AddRef();
