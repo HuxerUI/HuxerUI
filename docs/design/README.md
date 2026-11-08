@@ -2,6 +2,7 @@
 
 These documents define internal ownership, invariants, platform boundaries, and extension contracts.
 They explain the current implementation and deliberately unsupported behavior, with approved but unimplemented extensions explicitly marked in their owning sections; they are not tutorials or a release roadmap.
+Proposals remain explicitly marked as drafts until accepted.
 
 ## Runtime and composition
 
@@ -49,6 +50,7 @@ They explain the current implementation and deliberately unsupported behavior, w
 ## SDK and platforms
 
 - [SDK, CLI, Platform Shell, and Library](sdk-cli.md): installed SDK structure, project tooling, libraries, and platform integration.
+- [Build System Integration (Draft)](build-system-integration.md): proposed common CLI intent, build options, generated results, and acceptance requirements for build-system integrations.
 - [Web Platform](web.md): browser lifecycle, rendering, input, resources, services, and integration limits.
 
 Deferred behavior remains in the owning design document only when its boundary affects current architecture.
