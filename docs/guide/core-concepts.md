@@ -42,6 +42,8 @@ View Counter() {
 `UseState` returns a copyable `State<T>` handle.
 Reads subscribe the current scope; writes update the authoritative value and invalidate subscribed scopes.
 
+UI event callbacks may update State directly for synchronous navigation and other immediate UI changes. Recomposition and any resulting node unmount happen on a later frame; wrapping a plain assignment in `TaskScope::Launch()`, `TaskScope::Post()`, or `Delay(0)` adds an unnecessary dispatcher hop. Native services retain their own reentrancy and teardown contracts.
+
 State identity is determined by the current scope, source location, and occurrence at that location.
 Dynamic stateful content therefore needs stable scopes or keys when it can be inserted, removed, or reordered.
 
@@ -172,6 +174,7 @@ View UserSession(UserId user_id) {
 `Task<T>` represents asynchronous work.
 `UseTaskScope()` owns launched work for the current composition scope.
 Its tasks are canceled when that scope is replaced or unmounted, and continuations resume on the Runtime thread.
+Keeping an inactive page mounted also keeps its composition scope and tasks alive; pause nonessential polling using application-owned visibility state or refresh on demand.
 `RunWorker()` owns a synchronous callable and its arguments, executes them on HuxerUI's bounded native worker pool, and resumes the awaiting Task on that Runtime thread.
 Worker code must not access State, composition, Views, or UI-affine platform objects.
 `WorkerSequence::Run()` uses the same pool but starts only one operation for that sequence at a time; copied sequence handles share ordering, and each callable receives a `std::stop_token` for cooperative cancellation.

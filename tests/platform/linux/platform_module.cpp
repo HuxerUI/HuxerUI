@@ -38,17 +38,24 @@ AppOptions LinuxPlatformModuleOptions() {
   return options;
 }
 
+struct MainContextSourceDeleter {
+  void operator()(GSource* source) const {
+    g_source_destroy(source);
+    g_source_unref(source);
+  }
+};
+
+using MainContextSource = std::unique_ptr<GSource, MainContextSourceDeleter>;
+
 template <class Predicate>
 bool RunDispatcherUntil(
     detail::LinuxUiThreadDispatcher&, Predicate&& predicate, std::chrono::milliseconds timeout
 ) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!std::invoke(predicate) && std::chrono::steady_clock::now() < deadline) {
-    while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
+    if (g_main_context_iteration(nullptr, FALSE) == FALSE) {
+      std::this_thread::sleep_for(1ms);
     }
-    std::this_thread::sleep_for(1ms);
-  }
-  while (g_main_context_iteration(nullptr, FALSE) != FALSE) {
   }
   return std::invoke(predicate);
 }
@@ -80,6 +87,81 @@ TEST_CASE("LinuxUIThreadDispatcherWakesMainContextAndPreservesOrder") {
   REQUIRE(RunDispatcherUntil(dispatcher, [&] { return order.size() == 2; }, 1s));
   REQUIRE_FALSE(ran_inline);
   REQUIRE(order == std::vector<int>{1, 2});
+}
+
+TEST_CASE("LinuxUIThreadDispatcherProgressesUnderInputAndFrameCompetition") {
+  int frame_calls = 0;
+  int input_calls = 0;
+  std::vector<int> order;
+  detail::LinuxUiThreadDispatcher dispatcher;
+  UiThreadDispatcher post = dispatcher.Bind();
+  const std::thread::id ui_thread = std::this_thread::get_id();
+
+  MainContextSource frame_source(g_idle_source_new());
+  g_source_set_priority(frame_source.get(), G_PRIORITY_HIGH_IDLE);
+  g_source_set_callback(
+      frame_source.get(),
+      [](gpointer data) -> gboolean {
+        ++*static_cast<int*>(data);
+        return G_SOURCE_CONTINUE;
+      },
+      &frame_calls, nullptr
+  );
+  g_source_attach(frame_source.get(), nullptr);
+  REQUIRE(RunDispatcherUntil(dispatcher, [&] { return frame_calls > 0; }, 1s));
+  const int initial_frame_calls = frame_calls;
+
+  MainContextSource input_source(g_idle_source_new());
+  g_source_set_priority(input_source.get(), G_PRIORITY_DEFAULT);
+  g_source_set_callback(
+      input_source.get(),
+      [](gpointer data) -> gboolean {
+        return ++*static_cast<int*>(data) < 8 ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+      },
+      &input_calls, nullptr
+  );
+  g_source_attach(input_source.get(), nullptr);
+
+  for (int index = 0; index < 32; ++index) {
+    post([&, index] {
+      REQUIRE(std::this_thread::get_id() == ui_thread);
+      order.push_back(index);
+    });
+  }
+  REQUIRE(order.empty());
+  const bool completed = RunDispatcherUntil(
+      dispatcher,
+      [&] { return order.size() == 32 && input_calls == 8 && frame_calls > initial_frame_calls; },
+      1s
+  );
+  CAPTURE(input_calls, frame_calls, order.size());
+  REQUIRE(completed);
+  for (int index = 0; index < 32; ++index) {
+    REQUIRE(order[static_cast<std::size_t>(index)] == index);
+  }
+}
+
+TEST_CASE("LinuxUIThreadDispatcherDiscardsPendingAndFutureWorkAfterShutdown") {
+  int calls = 0;
+  int control_calls = 0;
+  detail::LinuxUiThreadDispatcher dispatcher;
+  UiThreadDispatcher post = dispatcher.Bind();
+  post([&] { ++calls; });
+  dispatcher.Shutdown();
+  post([&] { ++calls; });
+
+  MainContextSource control_source(g_idle_source_new());
+  g_source_set_callback(
+      control_source.get(),
+      [](gpointer data) -> gboolean {
+        ++*static_cast<int*>(data);
+        return G_SOURCE_REMOVE;
+      },
+      &control_calls, nullptr
+  );
+  g_source_attach(control_source.get(), nullptr);
+  REQUIRE(RunDispatcherUntil(dispatcher, [&] { return control_calls != 0; }, 1s));
+  REQUIRE(calls == 0);
 }
 
 TEST_CASE("LinuxPlatformModuleUsesUIThreadWithoutInlineReentry") {

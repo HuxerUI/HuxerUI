@@ -1,3 +1,5 @@
+#include "linux_internal.h"
+
 #include "linux_ui_dispatcher.h"
 
 #include <glib.h>
@@ -33,6 +35,8 @@ struct LinuxUiThreadDispatcher::State {
       }
     }
     GSource* source = g_idle_source_new();
+    // UI continuations must remain runnable while idle-priority redraw sources are ready.
+    g_source_set_priority(source, G_PRIORITY_DEFAULT);
     auto* pending = new PendingTask{self, std::move(task)};
     g_source_set_callback(
         source,

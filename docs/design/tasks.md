@@ -374,6 +374,7 @@ The platform-derived Runtime supplies an application dispatcher; each platform-d
 No new platform callback, event protocol, or platform-specific Task implementation is introduced.
 
 Windows continues to use its private window message, Apple platforms use the main dispatch queue, Linux uses its event-loop dispatcher, Web uses the browser event loop, and Android uses its owning HuxerUIView dispatcher.
+Linux attaches dispatcher sources at `G_PRIORITY_DEFAULT`, allowing ordinary UI continuations to run while idle-priority frame sources remain ready. Delivery remains queued on the owning thread and checks the original dispatcher's shutdown gate.
 Delay uses `Runtime::TimerNow()` and `Runtime::ScheduleTimerAt()`; frame scheduling remains a separate UiWindow operation.
 
 Native desktop and mobile builds use the shared C++ worker executor.
@@ -392,5 +393,6 @@ They do not change TaskScope ownership, State semantics, Lifecycle, or EventBind
 
 Focused tests cover lazy start, direct Task and factory launch, nested values and exceptions, ignored TaskHandles, individual and scope cancellation, late completion, UI-thread restoration, State writes, compatible recomposition, keyed movement, virtual eviction, unmount, Runtime teardown, invalid handles, deterministic deadlines, zero-duration deferral, Delay cancellation, worker callable forms and result types, worker concurrency bounds, worker cancellation races, Post ordering, move-only callbacks, external-thread delivery, and closed-scope suppression.
 Callback bridge tests cover lazy capture ownership, inline and concurrent completion, exception delivery, cancellation registration, late callbacks, host failure, runtime retirement, and execution-context restoration.
+Linux dispatcher tests use the real GLib main context to verify queued delivery, ordering, progress, and shutdown suppression while a frame source stays ready and finite input and task bursts compete. Windowless UI tests alone do not exercise native source-priority competition or establish presentation latency.
 Web coverage verifies that RunWorker fails explicitly without worker support and that Post still uses the browser UI dispatcher.
 The independent `example_task` demonstrates scope-owned launch, cancellable Delay, worker execution, scoped UI posting, explicit Lifecycle cancellation, and direct UI-thread State updates through public API.

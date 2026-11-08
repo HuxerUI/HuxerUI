@@ -39,6 +39,7 @@ Prefer constructing that chain directly when practical. Do not move temporary Vi
 - Ordinary writes use `state = value`; `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, or `>>=` when supported by `T`; and prefix/postfix increment or decrement. There is no required setter call.
 - Use `state.Update([](T& value) { ... })` for custom mutations. To write the value of one State into another, read it into a typed value before assigning it to the destination.
 - Reads subscribe the current composition scope; writes invalidate subscribers.
+- In UI event callbacks, update State directly for synchronous navigation and other local UI changes. Recomposition and node unmount happen on a later frame; wrapping a plain assignment in `Launch`, `Post`, or `Delay(0)` only to leave the callback adds a queue hop. Native service calls retain their own reentrancy contracts.
 - State identity depends on scope, source location, and occurrence at that location.
 - `StateList<T>` provides observable list operations such as `PushBack`, `Insert`, `Set`, `Erase`, `Move`, `PopBack`, and `Clear`.
 - Use stable `View::Key(...)` values when dynamic stateful siblings can be inserted, removed, or reordered.
@@ -99,6 +100,8 @@ Install shared models and services with `ApplicationContext::Provide()` in `AppO
 ## Lifecycle and tasks
 
 `Lifecycle(setup, dependencies...)` runs setup while the declaring composition lifetime is mounted and runs its cleanup on dependency change or unmount. Dependencies can be values, `State`, or `StateList`.
+
+An inactive page that remains mounted keeps its TaskScope alive. Pause nonessential polling using application-owned visibility state or refresh on demand.
 
 Choose the scope by the intended cancellation lifetime:
 
