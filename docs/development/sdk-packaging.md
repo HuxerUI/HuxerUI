@@ -3,7 +3,7 @@
 SDK libraries are built with `HUXERUI_ENABLE_PROFILING=OFF`, independently of their Debug or Release configuration.
 The packaging scripts and release workflow explicitly disable the option, and library installation rejects a profiling-enabled build.
 Published SDK archives use `HUXERUI_OPTIMIZATION=default` and `HUXERUI_ENABLE_LTO=OFF`; applications select further optimization for source targets as described in [Packaging Applications](../guide/packaging.md#size-optimization).
-Source builds include the private diagnostics described in [Runtime profiling](building.md#runtime-profiling) and record in `detailed` mode by default; application macros cannot enable diagnostics in a released SDK.
+Source builds can explicitly enable the private diagnostics described in [Runtime profiling](building.md#runtime-profiling), which then record in `detailed` mode by default; application macros cannot enable diagnostics in a released SDK.
 
 Repository packaging scripts build a complete SDK for the current desktop host and include the Android and Web target artifacts consumed by generated projects.
 Release CI additionally cross-builds the Android arm64-v8a host SDK for Termux with the Android NDK.

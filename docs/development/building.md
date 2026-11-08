@@ -50,7 +50,7 @@ Useful project options:
 | `HUXERUI_BUILD_TESTS` | `ON` | Build repository tests |
 | `HUXERUI_BUILD_EXAMPLES` | `ON` | Build examples |
 | `HUXERUI_BUILD_CLI` | `ON` | Build the `huxerui` CLI |
-| `HUXERUI_ENABLE_PROFILING` | `ON` | Compile private Runtime diagnostics for source builds; excluded from SDKs |
+| `HUXERUI_ENABLE_PROFILING` | `OFF` | Compile private Runtime diagnostics for source builds; excluded from SDKs |
 | `HUXERUI_OPTIMIZATION` | `default` | Release optimization level: `default`, `size`, or `minsize` |
 | `HUXERUI_ENABLE_LTO` | `OFF` | Enable LTO for source targets in release configurations |
 | `HUXERUI_WINDOWS_7_COMPAT` | `OFF` | Build the documented Windows 7 compatibility variant |
@@ -115,9 +115,9 @@ xcodebuild -project build/ios-testing/huxerui.xcodeproj \
 
 ## Runtime profiling
 
-Source builds default to `HUXERUI_ENABLE_PROFILING=ON`, making private Runtime diagnostics available to source applications and repository examples.
+Source builds default to `HUXERUI_ENABLE_PROFILING=OFF`; explicitly enable the option to compile private Runtime diagnostics for source applications and repository examples.
 The option is independent of Debug and Release; use an optimized build for performance measurements.
-Existing build directories retain their cached value; pass `-DHUXERUI_ENABLE_PROFILING=ON` explicitly to enable diagnostics in a directory previously configured with the option off.
+Existing build directories retain their cached value; pass `-DHUXERUI_ENABLE_PROFILING=OFF` explicitly to disable diagnostics in a directory previously configured with the option on.
 Defining a macro only on an application cannot add instrumentation to a precompiled SDK.
 With the option off, the recorder source is excluded and instrumentation macros do not evaluate their arguments; there is no added capture buffer, timer, environment lookup, or per-node profiling branch.
 Existing DebugOverlay metrics are separate and retain their current behavior.

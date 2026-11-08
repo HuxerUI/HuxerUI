@@ -2020,7 +2020,7 @@ Hooks run in declaration order within their own lists. Runtime owns application 
 
 HuxerUI installs its built-in Toast, SnackBar, Tooltip, Dialog, BottomSheet, Popup, and Menu services for each UiWindow. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; window hooks remain the extension mechanism for third-party per-window services and global components. When `AppOptions::show_debug_overlay` is enabled, UiWindow installs the built-in DebugOverlay after window hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
 
-Detailed performance diagnostics are a private source-build capability controlled by `HUXERUI_ENABLE_PROFILING`, which defaults to on for source builds and is explicitly disabled for SDK packaging.
+Detailed performance diagnostics are a private source-build capability controlled by `HUXERUI_ENABLE_PROFILING`, which defaults to off for source builds and must remain disabled for SDK packaging.
 When compiled in, detailed capture is enabled by default, and a window-owned recorder captures its frames; a library-owned thread-local pointer routes nested instrumentation during that frame and restores the previous recorder across nested calls.
 The optional `HUXERUI_PROFILE` selects `overview`, `detailed`, or `off`; an unset or empty value uses `detailed`.
 The optional `HUXERUI_PROFILE_DIRECTORY` overrides the default working-directory `traces/` location resolved at Runtime creation without changing the recording mode.

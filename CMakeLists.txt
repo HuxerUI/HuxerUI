@@ -57,7 +57,7 @@ option(HUXERUI_BUILD_TESTING_LIBRARY "Build the public windowless UI testing lib
 option(HUXERUI_BUILD_TESTING_SMOKE_TESTS "Build windowless UI testing smoke tests for the current platform" OFF)
 option(HUXERUI_BUILD_EXAMPLES "Build HuxerUI examples" ${HUXERUI_DEFAULT_BUILD_EXAMPLES})
 option(HUXERUI_BUILD_CLI "Build the HuxerUI command-line tool" ${HUXERUI_DEFAULT_BUILD_CLI})
-option(HUXERUI_ENABLE_PROFILING "Compile internal runtime performance diagnostics" ON)
+option(HUXERUI_ENABLE_PROFILING "Compile internal runtime performance diagnostics" OFF)
 if (WIN32)
     option(HUXERUI_WINDOWS_7_COMPAT "Build the Windows backend for Windows 7 SP1 with Platform Update" OFF)
 endif ()
