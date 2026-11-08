@@ -330,12 +330,28 @@ TEST_CASE("HuxerUICliRendersAndroidTemplatePathsAndContents") {
 
   REQUIRE(activity != files.end());
   REQUIRE(activity->content.find("package dev.example.sample;") != std::string::npos);
-  REQUIRE(activity->content.find("System.loadLibrary(BuildConfig.HUXERUI_APP_LIBRARY)") != std::string::npos);
   REQUIRE(activity->content.find("@PROJECT_") == std::string::npos);
+  const auto application = std::find_if(files.begin(), files.end(), [](const huxerui::cli::GeneratedFile& file) {
+    return file.path == "app/src/main/java/dev/example/sample/MainApplication.java";
+  });
+  REQUIRE(application != files.end());
+  REQUIRE(application->content.find("extends Application") != std::string::npos);
+  REQUIRE(application->content.find("System.loadLibrary(BuildConfig.HUXERUI_APP_LIBRARY)") != std::string::npos);
   const std::vector<huxerui::cli::GeneratedFile> wrapper = huxerui::cli::CopyTemplateTree("platform/android/wrapper");
   const auto wrapper_jar = std::find_if(wrapper.begin(), wrapper.end(), [](const huxerui::cli::GeneratedFile& file) {
     return file.path == "gradle/wrapper/gradle-wrapper.jar";
   });
   REQUIRE(wrapper_jar != wrapper.end());
   REQUIRE(wrapper_jar->content.starts_with("PK"));
+}
+
+TEST_CASE("HuxerUICliPassesAndroidOptimizationOverridesToGradle") {
+  huxerui::cli::PlatformCommandContext context;
+  context.profile = "release";
+  context.optimization = "size";
+  context.lto = false;
+  const auto commands = huxerui::cli::detail::AndroidBuildCommands(context, "windows", {});
+  const auto& arguments = commands.front().arguments;
+  REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiOptimization=size") != arguments.end());
+  REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiLto=OFF") != arguments.end());
 }

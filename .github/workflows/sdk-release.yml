@@ -119,12 +119,13 @@ jobs:
               "-DCMAKE_TOOLCHAIN_FILE=$ndk/build/cmake/android.toolchain.cmake" \
               -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_LIBDIR=. \
               "-DANDROID_ABI=$abi" "-DANDROID_PLATFORM=android-$min_sdk" "-DANDROID_STL=$stl" \
-              -DHUXERUI_BUILD_SHARED=ON -DHUXERUI_BUILD_STATIC=OFF -DHUXERUI_ENABLE_PROFILING=OFF \
+              -DHUXERUI_BUILD_SHARED=OFF -DHUXERUI_BUILD_STATIC=ON -DHUXERUI_ENABLE_PROFILING=OFF \
+              -DHUXERUI_OPTIMIZATION=default -DHUXERUI_ENABLE_LTO=OFF \
               -DHUXERUI_BUILD_CLI=OFF -DHUXERUI_BUILD_EXAMPLES=OFF -DHUXERUI_BUILD_TESTS=OFF \
               -DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_BUILD_TESTING_SMOKE_TESTS=OFF
-            cmake --build "$abi_build" --target huxerui huxerui_testing --parallel 4
+            cmake --build "$abi_build" --target huxerui_static huxerui_testing --parallel 4
             cmake --install "$abi_build" --config Release --component HuxerUILibraries \
-              --prefix "$artifacts/$abi" --strip
+              --prefix "$artifacts/$abi"
           done
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
@@ -158,6 +159,7 @@ jobs:
             -DHUXERUI_BUILD_SHARED=OFF \
             -DHUXERUI_BUILD_STATIC=ON \
             -DHUXERUI_ENABLE_PROFILING=OFF \
+            -DHUXERUI_OPTIMIZATION=default -DHUXERUI_ENABLE_LTO=OFF \
             -DHUXERUI_BUILD_CLI=OFF \
             -DHUXERUI_BUILD_EXAMPLES=OFF \
             -DHUXERUI_BUILD_TESTING_LIBRARY=ON \
@@ -297,6 +299,8 @@ jobs:
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${{ github.workspace }}/platform-artifacts
           -DHUXERUI_INTERNAL_PACKAGE_WINDOWS_DEBUG=ON
           -DHUXERUI_ENABLE_PROFILING=OFF
+          -DHUXERUI_OPTIMIZATION=default
+          -DHUXERUI_ENABLE_LTO=OFF
       - name: Build Windows Debug libraries
         run: >-
           cmake
@@ -423,6 +427,8 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
           -DHUXERUI_ENABLE_PROFILING=OFF
+          -DHUXERUI_OPTIMIZATION=default
+          -DHUXERUI_ENABLE_LTO=OFF
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=ON
@@ -533,6 +539,8 @@ jobs:
           -DHUXERUI_BUILD_TESTS=ON
           -DHUXERUI_INTERNAL_SDK_ARTIFACT_ROOT=${GITHUB_WORKSPACE}/platform-artifacts
           -DHUXERUI_ENABLE_PROFILING=OFF
+          -DHUXERUI_OPTIMIZATION=default
+          -DHUXERUI_ENABLE_LTO=OFF
       - name: Build
         id: test-build
         run: cmake --build build --parallel "${{ matrix.parallel_jobs }}"
@@ -630,6 +638,8 @@ jobs:
           -DHUXERUI_BUILD_SHARED=ON
           -DHUXERUI_BUILD_STATIC=OFF
           -DHUXERUI_ENABLE_PROFILING=OFF
+          -DHUXERUI_OPTIMIZATION=default
+          -DHUXERUI_ENABLE_LTO=OFF
           -DHUXERUI_BUILD_CLI=ON
           -DHUXERUI_BUILD_EXAMPLES=OFF
           -DHUXERUI_BUILD_TESTS=OFF

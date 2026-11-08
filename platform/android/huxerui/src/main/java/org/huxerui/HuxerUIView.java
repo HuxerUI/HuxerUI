@@ -60,10 +60,6 @@ import java.util.Locale;
 import java.util.Objects;
 
 public final class HuxerUIView extends ViewGroup {
-    static {
-        System.loadLibrary("huxerui");
-    }
-
     private static final int POINTER_DOWN = 0;
     private static final int POINTER_UP = 1;
     private static final int POINTER_MOVE = 2;

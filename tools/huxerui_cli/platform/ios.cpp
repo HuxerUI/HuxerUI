@@ -458,6 +458,12 @@ public:
     if (IsIosPhysicalDevice(context)) {
       build_arguments.push_back("-allowProvisioningUpdates");
     }
+    if (context.optimization) {
+      build_arguments.push_back("HUXERUI_OPTIMIZATION=" + *context.optimization);
+    }
+    if (context.lto) {
+      build_arguments.push_back(std::string("HUXERUI_ENABLE_LTO=") + (*context.lto ? "ON" : "OFF"));
+    }
     build_arguments.push_back("build");
     return {{"xcodebuild", std::move(build_arguments), context.project_root}};
   }

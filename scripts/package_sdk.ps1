@@ -189,16 +189,17 @@ foreach ($abi in $androidProperties.huxeruiAbis.Split(',')) {
         "-DCMAKE_BUILD_TYPE=$Configuration", "-DCMAKE_INSTALL_LIBDIR=.",
         "-DANDROID_ABI=$abi", "-DANDROID_PLATFORM=android-$($androidProperties.huxeruiMinSdk)",
         "-DANDROID_STL=$($androidProperties.huxeruiStl)",
-        "-DHUXERUI_BUILD_SHARED=ON", "-DHUXERUI_BUILD_STATIC=OFF", "-DHUXERUI_ENABLE_PROFILING=OFF",
+        "-DHUXERUI_BUILD_SHARED=OFF", "-DHUXERUI_BUILD_STATIC=ON", "-DHUXERUI_ENABLE_PROFILING=OFF",
+        "-DHUXERUI_OPTIMIZATION=default", "-DHUXERUI_ENABLE_LTO=OFF",
         "-DHUXERUI_BUILD_CLI=OFF", "-DHUXERUI_BUILD_EXAMPLES=OFF", "-DHUXERUI_BUILD_TESTS=OFF",
         "-DHUXERUI_BUILD_TESTING_LIBRARY=ON", "-DHUXERUI_BUILD_TESTING_SMOKE_TESTS=OFF"
     ) $sourceDirectory
     Invoke-Checked $cmake @(
-        "--build", $abiBuild, "--target", "huxerui", "huxerui_testing", "--parallel", $Jobs
+        "--build", $abiBuild, "--target", "huxerui_static", "huxerui_testing", "--parallel", $Jobs
     ) $sourceDirectory
     Invoke-Checked $cmake @(
         "--install", $abiBuild, "--config", $Configuration, "--component", "HuxerUILibraries",
-        "--prefix", (Join-Path $androidArtifactDirectory $abi), "--strip"
+        "--prefix", (Join-Path $androidArtifactDirectory $abi)
     ) $sourceDirectory
 }
 
@@ -210,6 +211,7 @@ Invoke-Checked $emcmake @(
     "-DHUXERUI_BUILD_SHARED=OFF",
     "-DHUXERUI_BUILD_STATIC=ON",
     "-DHUXERUI_ENABLE_PROFILING=OFF",
+    "-DHUXERUI_OPTIMIZATION=default", "-DHUXERUI_ENABLE_LTO=OFF",
     "-DHUXERUI_BUILD_CLI=OFF",
     "-DHUXERUI_BUILD_EXAMPLES=OFF",
     "-DHUXERUI_BUILD_TESTING_LIBRARY=ON",
@@ -234,6 +236,7 @@ $hostConfigureArguments = @(
     "-S", $sourceDirectory,
     "-B", $hostBuildDirectory,
     "-DHUXERUI_ENABLE_PROFILING=OFF",
+    "-DHUXERUI_OPTIMIZATION=default", "-DHUXERUI_ENABLE_LTO=OFF",
     "-DHUXERUI_BUILD_CLI=ON",
     "-DHUXERUI_BUILD_EXAMPLES=OFF",
     "-DHUXERUI_BUILD_TESTS=OFF",

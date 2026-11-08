@@ -177,6 +177,12 @@ public:
         "-DHUXERUI_HOME=" + context.huxerui_home.string(),
     };
     const std::string generator = ResolveCMakeGenerator(context);
+    if (context.optimization) {
+      configure_arguments.push_back("-DHUXERUI_OPTIMIZATION=" + *context.optimization);
+    }
+    if (context.lto) {
+      configure_arguments.push_back(std::string("-DHUXERUI_ENABLE_LTO=") + (*context.lto ? "ON" : "OFF"));
+    }
     if (!generator.empty()) {
       configure_arguments.insert(configure_arguments.begin() + 1, {"-G", generator});
     }

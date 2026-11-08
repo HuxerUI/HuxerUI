@@ -155,16 +155,18 @@ for abi in $android_abis; do
     "-DCMAKE_TOOLCHAIN_FILE=$android_ndk/build/cmake/android.toolchain.cmake" \
     "-DCMAKE_BUILD_TYPE=$configuration" -DCMAKE_INSTALL_LIBDIR=. \
     "-DANDROID_ABI=$abi" "-DANDROID_PLATFORM=android-$android_min_sdk" "-DANDROID_STL=$android_stl" \
-    -DHUXERUI_BUILD_SHARED=ON -DHUXERUI_BUILD_STATIC=OFF -DHUXERUI_ENABLE_PROFILING=OFF \
+    -DHUXERUI_BUILD_SHARED=OFF -DHUXERUI_BUILD_STATIC=ON -DHUXERUI_ENABLE_PROFILING=OFF \
+    -DHUXERUI_OPTIMIZATION=default -DHUXERUI_ENABLE_LTO=OFF \
     -DHUXERUI_BUILD_CLI=OFF -DHUXERUI_BUILD_EXAMPLES=OFF -DHUXERUI_BUILD_TESTS=OFF \
     -DHUXERUI_BUILD_TESTING_LIBRARY=ON -DHUXERUI_BUILD_TESTING_SMOKE_TESTS=OFF
-  run cmake --build "$abi_build" --target huxerui huxerui_testing --parallel "$jobs"
+  run cmake --build "$abi_build" --target huxerui_static huxerui_testing --parallel "$jobs"
   run cmake --install "$abi_build" --config "$configuration" --component HuxerUILibraries \
-    --prefix "$android_artifact_directory/$abi" --strip
+    --prefix "$android_artifact_directory/$abi"
 done
 
 run emcmake cmake -S "$source_directory" -B "$web_build_directory" \
   -DHUXERUI_ENABLE_PROFILING=OFF \
+  -DHUXERUI_OPTIMIZATION=default -DHUXERUI_ENABLE_LTO=OFF \
   "-DCMAKE_BUILD_TYPE=$configuration" \
   -DHUXERUI_BUILD_SHARED=OFF \
   -DHUXERUI_BUILD_STATIC=ON \
@@ -191,6 +193,7 @@ fi
 
 run cmake -S "$source_directory" -B "$host_build_directory" \
   -DHUXERUI_ENABLE_PROFILING=OFF \
+  -DHUXERUI_OPTIMIZATION=default -DHUXERUI_ENABLE_LTO=OFF \
   "-DCMAKE_BUILD_TYPE=$configuration" \
   -DHUXERUI_BUILD_CLI=ON \
   -DHUXERUI_BUILD_EXAMPLES=OFF \

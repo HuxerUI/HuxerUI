@@ -51,7 +51,12 @@ Useful project options:
 | `HUXERUI_BUILD_EXAMPLES` | `ON` | Build examples |
 | `HUXERUI_BUILD_CLI` | `ON` | Build the `huxerui` CLI |
 | `HUXERUI_ENABLE_PROFILING` | `ON` | Compile private Runtime diagnostics for source builds; excluded from SDKs |
+| `HUXERUI_OPTIMIZATION` | `default` | Release optimization level: `default`, `size`, or `minsize` |
+| `HUXERUI_ENABLE_LTO` | `OFF` | Enable LTO for source targets in release configurations |
 | `HUXERUI_WINDOWS_7_COMPAT` | `OFF` | Build the documented Windows 7 compatibility variant |
+
+Android, iOS, and Web builds default to static framework targets.
+See [Size optimization](../guide/packaging.md#size-optimization) for supported optimization settings and CLI options.
 
 ## Test
 

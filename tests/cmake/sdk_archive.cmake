@@ -65,6 +65,8 @@ foreach (required_path IN ITEMS
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIApp.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUICodegen.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUILibraries.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIOptimization.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIAndroid.exports"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIResourceBuild.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIResources.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIWebFileSystem.js"
@@ -90,8 +92,8 @@ if (EXISTS "${SDK_ROOT}/${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUITestingTargets.cm
     endif ()
     if (PLATFORM_ARTIFACTS_INCLUDED)
         list(APPEND TESTING_REQUIRED_PATHS
-                "share/huxerui/platform/android/arm64-v8a/libhuxerui_testing.so"
-                "share/huxerui/platform/android/x86_64/libhuxerui_testing.so"
+                "share/huxerui/platform/android/arm64-v8a/libhuxerui_testing.a"
+                "share/huxerui/platform/android/x86_64/libhuxerui_testing.a"
                 "share/huxerui/platform/web/emscripten-4.0.19/libhuxerui_testing.a")
         if (HOST_PLATFORM STREQUAL "macos")
             list(APPEND TESTING_REQUIRED_PATHS
@@ -150,8 +152,8 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
     endif ()
     foreach (required_path IN ITEMS
             "share/huxerui/platform/android/HuxerUI.aar"
-            "share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
-            "share/huxerui/platform/android/x86_64/libhuxerui.so"
+            "share/huxerui/platform/android/arm64-v8a/libhuxerui_static.a"
+            "share/huxerui/platform/android/x86_64/libhuxerui_static.a"
             "share/huxerui/platform/web/emscripten-4.0.19/libhuxerui.a"
     )
         if (NOT EXISTS "${SDK_ROOT}/${required_path}")
@@ -160,11 +162,11 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
     endforeach ()
 
     foreach (unexpected_path IN ITEMS
-            "share/huxerui/platform/android/arm64-v8a/libhuxerui_static.a"
-            "share/huxerui/platform/android/x86_64/libhuxerui_static.a"
+            "share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
+            "share/huxerui/platform/android/x86_64/libhuxerui.so"
     )
         if (EXISTS "${SDK_ROOT}/${unexpected_path}")
-            message(FATAL_ERROR "SDK archive contains unsupported Android static library: ${unexpected_path}")
+            message(FATAL_ERROR "SDK archive contains an unexpected Android shared framework: ${unexpected_path}")
         endif ()
     endforeach ()
 
@@ -195,10 +197,10 @@ if (PLATFORM_ARTIFACTS_INCLUDED)
         if (platform STREQUAL "android")
             set(PLATFORM_CONFIGURATION "set(ANDROID TRUE)\nset(ANDROID_ABI arm64-v8a)")
             set(PLATFORM_ASSERTION
-                    "if (TARGET HuxerUI::huxerui_static)\n  message(FATAL_ERROR \"Android SDK unexpectedly exposes HuxerUI::huxerui_static\")\nendif ()"
+                    "if (NOT TARGET HuxerUI::huxerui_static)\n  message(FATAL_ERROR \"Android SDK is missing HuxerUI::huxerui_static\")\nendif ()"
             )
             set(EXPECTED_LIBRARY
-                    "${SDK_ROOT}/share/huxerui/platform/android/arm64-v8a/libhuxerui.so"
+                    "${SDK_ROOT}/share/huxerui/platform/android/arm64-v8a/libhuxerui_static.a"
             )
         elseif (platform STREQUAL "web")
             set(PLATFORM_CONFIGURATION "set(EMSCRIPTEN TRUE)\nset(CMAKE_SIZEOF_VOID_P 4)")

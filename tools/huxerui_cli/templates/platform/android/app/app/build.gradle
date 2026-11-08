@@ -61,7 +61,9 @@ android {
         externalNativeBuild {
             cmake {
                 arguments "-DANDROID_STL=${huxeruiStl}",
-                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}"
+                        "-DHUXERUI_HOME=${huxeruiHome.absolutePath}",
+                        "-DHUXERUI_OPTIMIZATION=${providers.gradleProperty('huxeruiOptimization').orElse('default').get()}",
+                        "-DHUXERUI_ENABLE_LTO=${providers.gradleProperty('huxeruiLto').orElse('OFF').get()}"
             }
         }
 
@@ -72,6 +74,8 @@ android {
 
     buildTypes {
         release {
+            // Replace the local development signing configuration before publishing.
+            signingConfig = signingConfigs.debug
             minifyEnabled = false
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }

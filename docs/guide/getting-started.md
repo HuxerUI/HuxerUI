@@ -198,11 +198,11 @@ Native macOS projects default to macOS 12 before CMake initializes the toolchain
 The macOS bundle records the actual executable name and the CMake project version.
 Web builds synchronize the HTML shell and icons even when no C++ source needs rebuilding.
 
-On Android, the application library defaults to `lib<cmake-target>.so` and links the shared `libhuxerui.so` framework.
-The generated Gradle shell resolves the final CMake artifact name into `BuildConfig.HUXERUI_APP_LIBRARY`, which MainActivity passes to `System.loadLibrary`; changing `OUTPUT_NAME` or a configuration postfix does not require a second library-name setting in Gradle.
+On Android, the application library defaults to `lib<cmake-target>.so` and statically links HuxerUI.
+The generated Gradle shell resolves the final CMake artifact name into `BuildConfig.HUXERUI_APP_LIBRARY`, which MainApplication passes to `System.loadLibrary`; changing `OUTPUT_NAME` or a configuration postfix does not require a second library-name setting in Gradle.
 All packaged ABIs must use the same application library name, and that name must not be `huxerui`.
-Custom Android hosts must load their application library before creating a HuxerUI Runtime; HuxerUIActivity does not load application code on their behalf.
-Existing source-controlled shells are not rewritten by SDK updates: migrate their Gradle integration and MainActivity loading code together when adopting this contract.
+Custom Android hosts must load their application library before using HuxerUI Java services or creating a Runtime; HuxerUIActivity does not load application code on their behalf.
+Existing source-controlled shells are not rewritten by SDK updates: update their framework selection, STL, Gradle integration, and Application loading code together when adopting this contract.
 
 Library names remain repository and display identities.
 `--namespace` selects the exact generated C++ namespace, while `--target` selects an unqualified or single-package-qualified public CMake target.

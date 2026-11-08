@@ -98,6 +98,8 @@ install(FILES
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUICodegen.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILibraries.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIOptimization.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIAndroid.exports"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResourceBuild.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIResources.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIRuntimeDependencies.cmake"
@@ -139,8 +141,8 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
     )
     foreach (HUXERUI_REQUIRED_PLATFORM_ARTIFACT IN ITEMS
             "${HUXERUI_ANDROID_ARTIFACT_ROOT}/HuxerUI.aar"
-            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/arm64-v8a/libhuxerui.so"
-            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/x86_64/libhuxerui.so"
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/arm64-v8a/libhuxerui_static.a"
+            "${HUXERUI_ANDROID_ARTIFACT_ROOT}/x86_64/libhuxerui_static.a"
             "${HUXERUI_WEB_ARTIFACT_ROOT}/libhuxerui.a"
     )
         if (NOT EXISTS "${HUXERUI_REQUIRED_PLATFORM_ARTIFACT}")

@@ -2,6 +2,7 @@
 
 SDK libraries are built with `HUXERUI_ENABLE_PROFILING=OFF`, independently of their Debug or Release configuration.
 The packaging scripts and release workflow explicitly disable the option, and library installation rejects a profiling-enabled build.
+Published SDK archives use `HUXERUI_OPTIMIZATION=default` and `HUXERUI_ENABLE_LTO=OFF`; applications select further optimization for source targets as described in [Packaging Applications](../guide/packaging.md#size-optimization).
 Source builds include the private diagnostics described in [Runtime profiling](building.md#runtime-profiling) and record in `detailed` mode by default; application macros cannot enable diagnostics in a released SDK.
 
 Repository packaging scripts build a complete SDK for the current desktop host and include the Android and Web target artifacts consumed by generated projects.
@@ -11,8 +12,8 @@ They are release and integration tools, not prerequisites for ordinary source bu
 
 The existing packaging scripts and release CI directly build the Android artifacts, without a separate Android build entry point.
 They build the production AAR through `:HuxerUI:assembleRelease -PhuxeruiBuildNative=false` (or the corresponding Debug task), verify that it is Java-only, and copy it unchanged.
-For each ABI they configure and build the root CMake project with core and testing enabled and repository tests and smoke tests disabled, then call `cmake --install --component HuxerUILibraries --strip` into the SDK's ABI directory.
-The packaging entry points select the ABI and installation prefix, while the source CMake install rules own library selection, locations, and stripping through the configured toolchain; the native build directories retain their original libraries.
+For each ABI they configure and build the root CMake project with static core and testing enabled and repository tests and smoke tests disabled, then call `cmake --install --component HuxerUILibraries` into the SDK's ABI directory.
+The packaging entry points select the ABI and installation prefix, while the source CMake install rules own library selection and locations; static archives retain the symbol and relocation information required by the final application link.
 The `:ui_testing` module is exclusively a test consumer; SDK production neither invokes its tasks nor depends on its runner or smoke resources.
 The Android NDK version, minimum API, STL, and ABIs come from `platform/android/gradle.properties`; set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to the SDK containing that NDK.
 

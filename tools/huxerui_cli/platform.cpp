@@ -131,6 +131,12 @@ std::vector<ProcessCommand> DesktopBuildCommands(const PlatformCommandContext& c
   if (!context.cmake_generator.empty()) {
     configure_arguments.insert(configure_arguments.begin(), {"-G", context.cmake_generator});
   }
+  if (context.optimization) {
+    configure_arguments.push_back("-DHUXERUI_OPTIMIZATION=" + *context.optimization);
+  }
+  if (context.lto) {
+    configure_arguments.push_back(std::string("-DHUXERUI_ENABLE_LTO=") + (*context.lto ? "ON" : "OFF"));
+  }
   return {
       {"cmake", std::move(configure_arguments), context.project_root},
       {"cmake",

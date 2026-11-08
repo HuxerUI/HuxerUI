@@ -89,6 +89,15 @@ TEST_CASE("HuxerUICliDoctorReportsIncompleteAndUnknownPlatforms") {
   REQUIRE(invocation.output.find("Platform android") == std::string::npos);
 }
 
+TEST_CASE("HuxerUICliRejectsInvalidOptimizationOverrides") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--optimization"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--optimization", "fast"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto", "auto"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto", "off", "--lto", "on"}).result == 2);
+}
+
 TEST_CASE("HuxerUICliRejectsUnknownPlatformsAsUsageErrors") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "plan9"});

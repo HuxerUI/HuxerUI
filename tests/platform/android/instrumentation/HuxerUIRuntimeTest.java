@@ -13,6 +13,10 @@ import java.lang.reflect.Method;
 
 /** Android-runtime regression checks; host checks require the matching native HuxerUI library. */
 public final class HuxerUIRuntimeTest extends Instrumentation {
+    static {
+        System.loadLibrary("huxerui");
+    }
+
     @Override
     public void onCreate(Bundle arguments) {
         super.onCreate(arguments);

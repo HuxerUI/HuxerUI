@@ -26,6 +26,7 @@ function(huxerui_configure_compile_target target_name)
     if (HUXERUI_ENABLE_PROFILING)
         target_compile_definitions(${target_name} PRIVATE HUXERUI_ENABLE_PROFILING=1)
     endif ()
+    _huxerui_configure_optimization(${target_name})
 endfunction()
 
 function(huxerui_configure_public_target target_name resource_package)
@@ -40,6 +41,10 @@ function(huxerui_configure_public_target target_name resource_package)
     target_compile_options(${target_name} INTERFACE ${HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS})
     target_link_libraries(${target_name} PRIVATE ${HUXERUI_PLATFORM_LINK_LIBRARIES})
     target_link_options(${target_name} INTERFACE ${HUXERUI_PLATFORM_LINK_OPTIONS})
+    get_target_property(HUXERUI_TARGET_TYPE ${target_name} TYPE)
+    if (ANDROID AND HUXERUI_TARGET_TYPE STREQUAL "STATIC_LIBRARY")
+        _huxerui_configure_android_static_target(${target_name})
+    endif ()
     if (EMSCRIPTEN)
         set_property(TARGET ${target_name} APPEND PROPERTY
                 INTERFACE_LINK_DEPENDS
@@ -131,6 +136,7 @@ function(huxerui_configure_targets)
                 ${HUXERUI_SHARED_LIB_NAME}
                 "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
         )
+        _huxerui_configure_optimization(${HUXERUI_SHARED_LIB_NAME})
         add_library(HuxerUI::huxerui ALIAS ${HUXERUI_SHARED_LIB_NAME})
     endif ()
 
@@ -153,6 +159,9 @@ function(huxerui_configure_targets)
                 ${HUXERUI_STATIC_LIB_NAME}
                 "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}"
         )
+        if (NOT IOS)
+            _huxerui_configure_optimization(${HUXERUI_STATIC_LIB_NAME})
+        endif ()
         add_library(HuxerUI::huxerui_static ALIAS ${HUXERUI_STATIC_LIB_NAME})
         if (NOT TARGET HuxerUI::huxerui)
             add_library(HuxerUI::huxerui ALIAS ${HUXERUI_STATIC_LIB_NAME})

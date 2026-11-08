@@ -270,7 +270,7 @@ To run the same smoke against an installed SDK instead of compiling framework so
 ./gradlew :ui_testing:connectedDebugAndroidTest -PhuxeruiTestingSdk=/absolute/path/to/sdk
 ```
 
-The SDK must contain matching headers, host tools, resources, and `libhuxerui_testing.so` plus `libhuxerui.so` for the selected ABIs.
+The SDK must contain matching headers, host tools, resources, and `libhuxerui_testing.a` plus `libhuxerui_static.a` for the selected ABIs.
 The published `HuxerUI.aar` is Java-only; native libraries are selected through CMake dependencies, not copied wholesale from the SDK.
 No public testing AAR or production application dependency is added.
 The test APK owns its assets; no `adb push` or `packagePath` argument is needed.

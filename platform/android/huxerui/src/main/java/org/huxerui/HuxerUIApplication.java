@@ -36,8 +36,6 @@ import java.util.WeakHashMap;
  * }</pre>
  */
 public final class HuxerUIApplication implements Application.ActivityLifecycleCallbacks, ComponentCallbacks2 {
-    static { System.loadLibrary("huxerui"); }
-
     /**
      * Activity-owned presentation operations used by permissions and notification authorization on the main thread.
      * Implementations forward Android permission results to dispatchPermissionResult. Removal invalidates pending

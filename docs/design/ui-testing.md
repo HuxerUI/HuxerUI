@@ -63,8 +63,8 @@ No parser, file I/O, baseline policy, public diff model, or production cache is 
 Desktop SDKs export `HuxerUI::testing` with an ordinary shared/static core dependency selected by the requested available component.
 The imported testing target binds to that core on first lookup; later incompatible requests are rejected rather than changing existing consumers.
 Windows testing archives use the same `_debug` naming policy as core libraries so both configurations can coexist.
-Android uses a separate `libhuxerui_testing.so` alongside `libhuxerui.so` for each ABI.
-The published Android AAR remains Java-only; CMake shared-library dependencies supply native APK contents.
+Android provides `libhuxerui_testing.a` and `libhuxerui_static.a` for each ABI, linked into the test consumer's shared library.
+The published Android AAR remains Java-only; the test APK packages that consumer library.
 The production Gradle module never builds testing or selects its runner.
 The independent `:ui_testing` module owns only the windowless test APK; SDK packaging does not build or consume this module.
 The Android SDK build compiles core and testing together in one source CMake tree per ABI, with smoke tests disabled; Gradle builds only the Java-only production AAR.

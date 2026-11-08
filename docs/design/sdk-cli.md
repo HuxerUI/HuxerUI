@@ -164,7 +164,7 @@ The SDK owns the public `HuxerUIConfig.cmake`, application, library, code-genera
 Source-build target and platform configuration remains private to the repository and is not installed into the consumer package.
 `HuxerUIConfig.cmake` is the only public CMake package and exposes only canonical HuxerUI framework targets.
 Desktop packages import both targets by default, and `huxerui_add_app` selects the static target.
-Android imports only the shared `HuxerUI::huxerui` target because its Java host loads `libhuxerui.so`; Web and iOS use static framework artifacts.
+Android, Web, and iOS import static framework artifacts through the canonical targets; Android applications link the framework into their own shared library.
 Consumers may request only `COMPONENTS shared` or `COMPONENTS static`; requesting the Linux shared component does not resolve static-only dependencies, while the static component resolves the distribution-owned GTK 4, libepoxy, GIO, libsoup 3, pangoft2, and Fontconfig libraries through pkg-config.
 Platform package managers may carry platform libraries and integration code, but they do not introduce a second public HuxerUI package or a forwarding target hierarchy.
 The CLI or source-controlled platform shell supplies the resolved SDK location to CMake; application source does not encode an SDK archive layout.
@@ -367,7 +367,11 @@ The shell supplies `HUXERUI_ANDROID_APP_INTEGRATION_ROOT` with a variant-specifi
 AGP's public `MERGED_NATIVE_LIBS` artifact supplies the native build dependency and the ABI directories participating in this build, including Android Studio device-only builds; unused ABI plans from earlier builds do not participate in resolution.
 A Gradle resolver reads the corresponding application plans, validates the common target and loadable `lib<name>.so` filename and its presence in each ABI directory, and supplies the name through a task-backed Provider to `BuildConfig.HUXERUI_APP_LIBRARY`.
 The application library name must be distinct from the framework library, and missing plans or artifacts fail the build instead of falling back to a guessed name.
-The application MainActivity loads that constant before creating the hosted Runtime; HuxerUIActivity does not load application code, while HuxerUIView continues to load the shared framework `huxerui`.
+The application MainApplication loads that constant before any HuxerUI Java services or hosted Runtime are used; framework Java classes do not load a fixed library name.
+The static framework target retains named JNI entry points with the NDK linker's `--undefined-glob` options and exports `Java_*`, `JNI_OnLoad`, and `JNI_OnUnload` through a version script while hiding other symbols in the final application shared library.
+This covers JNI entry points in linked static libraries without a user-maintained export list or whole-archive linking; applications that require other dynamic exports own their separate library boundary.
+Library-specific initialization remains owned by that library; linking archives does not combine multiple `JNI_OnLoad` implementations.
+The generated shell defaults to `c++_static`; hosts with several interacting C++ shared libraries must select a consistent `c++_shared` runtime through `huxeruiStl`.
 The graph-only library plan does not describe native artifacts, and no Gradle property, source parser, private AGP cache inspection, or directory scan duplicates CMake's library naming decision.
 Each ABI writes its merged HuxerUI package to an explicit variant-owned resource directory. Gradle selects a package from the participating ABI directories and performs one sync into generated assets without inspecting private `.cxx` directories or comparing timestamps.
 The staging task owns an output DirectoryProperty registered through `variant.sources.assets.addGeneratedSourceDirectory`, so resource merging and lint both inherit its native build and staging dependencies; source sets do not independently list the generated directory.
@@ -502,7 +506,8 @@ HUXERUI_HOME/
     platform/
       android/
         HuxerUI.aar
-        <abi>/libhuxerui.so
+        <abi>/libhuxerui_static.a
+        <abi>/libhuxerui_testing.a
       ios/HuxerUI.xcframework/             # macOS SDK only
         ios-arm64/
         ios-arm64_x86_64-simulator/
@@ -540,7 +545,7 @@ No `sdk.json` is required: standard CMake and platform-package metadata describe
 
 Platform build systems consume platform artifacts through their normal mechanisms:
 
-- Android uses a Java-only AAR plus ABI-specific shared libraries imported by the installed CMake package.
+- Android uses a Java-only AAR plus ABI-specific static archives imported by the installed CMake package.
 - Android arm64-v8a also has a host SDK for Termux containing Bionic CLI and host-tool executables.
 - macOS uses its host libraries and installed `HuxerUIPlatform` Clang module, while the macOS SDK carries a static iOS XCFramework with its UIKit `HuxerUIPlatform` module for device and Simulator application-core builds.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.

@@ -106,6 +106,10 @@ struct PlatformCommandContext {
   std::optional<PlatformDevice> device;
   /// Whether command planning is producing a distributable package instead of an ordinary incremental build.
   bool package = false;
+  /// Explicit release optimization override; an absent value preserves project settings.
+  std::optional<std::string> optimization;
+  /// Explicit release LTO override; an absent value preserves project settings.
+  std::optional<bool> lto;
 };
 
 /// One file or directory published by the `package` command.

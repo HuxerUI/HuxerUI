@@ -41,6 +41,18 @@ if (NOT CMAKE_CONFIGURATION_TYPES)
     )
 endif ()
 
+find_program(HUXERUI_TEST_NINJA NAMES ninja)
+if (HUXERUI_TEST_NINJA)
+    add_test(NAME HuxerUIAndroidStaticLinkTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                    "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                    "-DHOST_NINJA=${HUXERUI_TEST_NINJA}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/android_static.cmake")
+    set_tests_properties(HuxerUIAndroidStaticLinkTests PROPERTIES
+            LABELS "build;android" SKIP_REGULAR_EXPRESSION "HuxerUI Android NDK is unavailable")
+endif ()
+
 if (WIN32)
     set(HUXERUI_SOURCE_SUBDIRECTORY_WORK_DIRECTORY "$ENV{TEMP}")
 else ()

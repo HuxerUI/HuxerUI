@@ -68,6 +68,7 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui open ios [--source <path>]\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n"
+         << "Build, run, and package accept --optimization default|size|minsize and --lto on|off.\n"
          << "Without --platform, an app and a common library's Preview enable all platforms.\n"
          << "An agent list is comma-separated and supports ";
   for (std::size_t index = 0; index < agent_skill_mappings.size(); ++index) {
@@ -692,6 +693,8 @@ struct BuildOptions {
   std::optional<PlatformDevice> selected_device;
   bool profile_explicit = false;
   bool package = false;
+  std::optional<std::string> optimization;
+  std::optional<bool> lto;
 };
 
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
@@ -706,6 +709,28 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
       if (options.profile != "debug" && options.profile != "release") {
         throw UsageError("profile must be debug or release");
       }
+    } else if (arguments[index] == "--optimization") {
+      if (options.optimization) {
+        throw UsageError("--optimization may be specified only once");
+      }
+      if (++index >= arguments.size()) {
+        throw UsageError("--optimization requires a value");
+      }
+      if (arguments[index] != "default" && arguments[index] != "size" && arguments[index] != "minsize") {
+        throw UsageError("optimization must be default, size, or minsize");
+      }
+      options.optimization = arguments[index];
+    } else if (arguments[index] == "--lto") {
+      if (options.lto) {
+        throw UsageError("--lto may be specified only once");
+      }
+      if (++index >= arguments.size()) {
+        throw UsageError("--lto requires a value");
+      }
+      if (arguments[index] != "on" && arguments[index] != "off") {
+        throw UsageError("lto must be on or off");
+      }
+      options.lto = arguments[index] == "on";
     } else if (arguments[index] == "--device") {
       if (++index >= arguments.size()) {
         throw UsageError("--device requires a value");
@@ -837,8 +862,15 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
     build_variant +=
         options.selected_device && options.selected_device->kind == DeviceKind::Physical ? "-device" : "-simulator";
   }
+  std::string build_profile = options.profile;
+  if (options.optimization) {
+    build_profile += "-" + *options.optimization;
+  }
+  if (options.lto) {
+    build_profile += *options.lto ? "-lto" : "-no-lto";
+  }
   const std::filesystem::path build_directory =
-      project.root / ".huxerui/build" / BuildHomeKey(huxerui_home) / build_variant / options.profile;
+      project.root / ".huxerui/build" / BuildHomeKey(huxerui_home) / build_variant / build_profile;
   std::string cmake_generator = options.cmake_generator;
   if (platform.Id() == "windows") {
     if (!cmake_generator.empty()) {
@@ -862,6 +894,8 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
       options.profile,
       options.selected_device,
       options.package,
+      options.optimization,
+      options.lto,
   };
 }
 
@@ -1098,7 +1132,8 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
   if (!options.platforms || *options.platforms != "ios") {
     throw UsageError("open usage: huxerui open ios [--source <path>]");
   }
-  if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty() || options.java_home) {
+  if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty() || options.java_home ||
+      options.optimization || options.lto) {
     throw UsageError("open accepts only --source <path>");
   }
   const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);

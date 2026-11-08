@@ -24,6 +24,38 @@ Windows setup generation currently supports x64 applications.
 Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
 Linux requires `appimagetool`, `patchelf`, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
+## Android signing
+
+Generated Android applications and the repository example runner use the local debug signing configuration for Release APKs by default, so optimized builds can be installed directly for development and testing.
+This signing choice preserves the Release build configuration and its optimization settings.
+Before publishing an application, replace `signingConfig = signingConfigs.debug` with your own release signing configuration in `platform/android/app/build.gradle`; app stores such as Google Play do not accept debug certificates for publication.
+
+## Size optimization
+
+Applications link the static framework by default, including Android, where the shell loads the application's single shared library using its actual CMake artifact name.
+Third-party libraries that are distributed only as shared libraries remain separate APK dependencies.
+Release configurations enable supported section removal, safe identical-code folding, and Android API 23+ packed relocations automatically.
+
+| Setting | Default | Effect |
+| --- | --- | --- |
+| `HUXERUI_OPTIMIZATION` | `default` | Retain the toolchain's optimization level; `size` selects `-Os` or MSVC `/O1`, and `minsize` requires `-Oz`. |
+| `HUXERUI_ENABLE_LTO` | `OFF` | Enable link-time optimization for source targets; Android uses ThinLTO and other toolchains use CMake IPO. |
+
+These settings apply to Release, RelWithDebInfo, and MinSizeRel configurations of the framework, applications, and libraries created through HuxerUI helpers.
+They do not change Debug optimization, exceptions, RTTI, or application semantics.
+Unsupported explicit settings fail configuration with a diagnostic.
+The CLI forwards the same choices for `build`, `run`, and `package`:
+
+```bash
+huxerui package android --optimization size --lto on
+huxerui build web --profile release --optimization minsize --lto on
+```
+
+Direct CMake builds use `-DHUXERUI_OPTIMIZATION=size -DHUXERUI_ENABLE_LTO=ON`.
+Android Studio builds use Gradle properties `huxeruiOptimization` and `huxeruiLto`; iOS shells use the corresponding `HUXERUI_OPTIMIZATION` and `HUXERUI_ENABLE_LTO` build settings.
+Prebuilt SDK archives retain their published optimization level; use `--source` to rebuild HuxerUI itself with different settings.
+Measure the final APK or platform package with the same ABIs and resources when choosing an optimization level.
+
 ## Windows URL scheme registration
 
 For a custom scheme owned by your Win32 application, call `windows::RegisterUrlScheme(scheme, display_name)` from `<huxerui/system.h>` explicitly in entry code before `RunApplication()`. It registers the current executable for the current user without administrator privileges, an installer, or CMake registration metadata. This also works in the Windows 7 compatibility backend.

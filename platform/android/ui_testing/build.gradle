@@ -102,10 +102,12 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
                         def abis = libraries.collect { it.tokenize("/")[1] }.toSet()
                         if (abis.empty) throw new GradleException("HuxerUI UI testing APK has no native libraries")
                         abis.each { abi ->
-                            ["huxerui", "huxerui_testing", "huxerui_ui_testing_smoke", "c++_shared"].each { name ->
-                                if (!entries.contains("lib/${abi}/lib${name}.so".toString())) {
-                                    throw new GradleException("HuxerUI UI testing APK is missing ${abi}/lib${name}.so")
-                                }
+                            if (!entries.contains("lib/${abi}/libhuxerui_ui_testing_smoke.so".toString())) {
+                                throw new GradleException("HuxerUI UI testing APK is missing ${abi}/libhuxerui_ui_testing_smoke.so")
+                            }
+                            if (entries.contains("lib/${abi}/libhuxerui.so".toString()) ||
+                                    entries.contains("lib/${abi}/libhuxerui_testing.so".toString())) {
+                                throw new GradleException("HuxerUI UI testing APK must statically link the framework")
                             }
                         }
                         if (!entries.contains("assets/package/huxerui/resources.bin")) {

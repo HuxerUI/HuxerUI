@@ -380,6 +380,12 @@ AndroidBuildCommands(const PlatformCommandContext& context, std::string_view hos
     };
   }
   arguments.push_back(":app:assemble" + configuration);
+  if (context.optimization) {
+    arguments.push_back("-PhuxeruiOptimization=" + *context.optimization);
+  }
+  if (context.lto) {
+    arguments.push_back(std::string("-PhuxeruiLto=") + (*context.lto ? "ON" : "OFF"));
+  }
   return {{wrapper.string(), std::move(arguments), shell}};
 }
 

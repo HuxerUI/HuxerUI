@@ -173,8 +173,8 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
           std::string::npos);
   REQUIRE(project_cmake.find("enable_language(RC)") != std::string::npos);
   REQUIRE(project_cmake.find("\"${HUXERUI_WINDOWS_RESOURCE}\"") != std::string::npos);
-  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_SHARED ON") != std::string::npos);
-  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_STATIC OFF") != std::string::npos);
+  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_SHARED OFF") != std::string::npos);
+  REQUIRE(project_cmake.find("set(HUXERUI_BUILD_STATIC ON") != std::string::npos);
   REQUIRE(project_cmake.find("RESOURCE_OUTPUT_DIRECTORY") != std::string::npos);
   REQUIRE(project_cmake.find("function(huxerui_configure_project_app target_name)") != std::string::npos);
   const std::string application = Read(project / "src/app.cpp");
