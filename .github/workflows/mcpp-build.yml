@@ -1,6 +1,6 @@
 name: mcpp Build
 
-# Developing HuxerUI and its applications with mcpp.
+# Manually validate HuxerUI and its application templates with mcpp.
 #
 # CMake remains the full-platform path and the only path for Android, iOS and
 # Web; this workflow covers what mcpp builds today. The design is
@@ -11,89 +11,6 @@ name: mcpp Build
 # and not the other -- is reported before anyone waits on a compile.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      # WHAT THIS BUILD ACTUALLY READS, and nothing else. Every entry below is
-      # an input to `mcpp build`, `mcpp test` or the parity check; a change
-      # anywhere else cannot alter the result, and running an hour of five
-      # platforms to prove that is waste.
-      #
-      # The `!` line is last on purpose: in a paths filter a later pattern
-      # overrides an earlier one, so it subtracts documentation from every
-      # directory named above. README.md under mcpp/, include/ or
-      # mcpp/examples/ is not a build input.
-      - 'mcpp.toml'
-      - 'build.mcpp'
-      - 'mcpp/**'
-      # The library itself, its public headers and the resources hrc compiles.
-      - 'src/**'
-      - 'include/**'
-      - 'modules/**'
-      - 'platform/linux/**'
-      - 'platform/windows/**'
-      - 'platform/macos/**'
-      - 'resources/**'
-      # Read by huxerui-build-check, which compares the two build systems.
-      - 'cmake/platform/**'
-      - 'cmake/HuxerUIBuild.cmake'
-      - 'tools/codegen/**'
-      - 'tools/resource_compiler/**'
-      # Compiled by mcpp/huxerui-tests: the suite, what it links beside it, and
-      # the vendored Catch2. Without these a change to a unit test would not run
-      # the suite that compiles it.
-      - 'tests/unit/**'
-      - 'tests/support/**'
-      - 'examples/buffer_reference/**'
-      - '3dparty/catch2/**'
-      # The generated-app job builds the CLI and instantiates every template,
-      # so those trees are inputs to this workflow as much as the framework is.
-      - 'templates/**'
-      - 'tools/huxerui_cli/**'
-      - 'tests/cli/**'
-      - '.github/workflows/mcpp-build.yml'
-      - '!**.[mM][dD]'
-  pull_request:
-    paths:
-      # WHAT THIS BUILD ACTUALLY READS, and nothing else. Every entry below is
-      # an input to `mcpp build`, `mcpp test` or the parity check; a change
-      # anywhere else cannot alter the result, and running an hour of five
-      # platforms to prove that is waste.
-      #
-      # The `!` line is last on purpose: in a paths filter a later pattern
-      # overrides an earlier one, so it subtracts documentation from every
-      # directory named above. README.md under mcpp/, include/ or
-      # mcpp/examples/ is not a build input.
-      - 'mcpp.toml'
-      - 'build.mcpp'
-      - 'mcpp/**'
-      # The library itself, its public headers and the resources hrc compiles.
-      - 'src/**'
-      - 'include/**'
-      - 'modules/**'
-      - 'platform/linux/**'
-      - 'platform/windows/**'
-      - 'platform/macos/**'
-      - 'resources/**'
-      # Read by huxerui-build-check, which compares the two build systems.
-      - 'cmake/platform/**'
-      - 'cmake/HuxerUIBuild.cmake'
-      - 'tools/codegen/**'
-      - 'tools/resource_compiler/**'
-      # Compiled by mcpp/huxerui-tests: the suite, what it links beside it, and
-      # the vendored Catch2. Without these a change to a unit test would not run
-      # the suite that compiles it.
-      - 'tests/unit/**'
-      - 'tests/support/**'
-      - 'examples/buffer_reference/**'
-      - '3dparty/catch2/**'
-      # The generated-app job builds the CLI and instantiates every template,
-      # so those trees are inputs to this workflow as much as the framework is.
-      - 'templates/**'
-      - 'tools/huxerui_cli/**'
-      - 'tests/cli/**'
-      - '.github/workflows/mcpp-build.yml'
-      - '!**.[mM][dD]'
   workflow_dispatch:
 
 concurrency:
@@ -104,13 +21,8 @@ permissions:
   contents: read
 
 env:
-  # Pinned rather than latest: an mcpp release changes build behaviour, and a
-  # green PR should stay green until someone chooses to move this line.
-  MCPP_VERSION: '2026.9.10.2'
-  # The Linux clang leg. Pinned for the same reason mcpp is: a toolchain
-  # release changes what compiles, and a green PR should stay green until
-  # someone moves this line. Windows and macOS already build with clang --
-  # this axis is the one GCC otherwise hides.
+  # Pin mcpp and the Linux Clang toolchain for reproducible validation.
+  MCPP_VERSION: '2026.9.18.3'
   MCPP_LLVM: 'llvm@22.1.8'
   XLINGS_NON_INTERACTIVE: '1'
 

@@ -41,7 +41,7 @@ kind = "lib"
 # asserts the two agree. modules/huxerui.cppm re-exports the public headers'
 # names, so `import huxerui;` and `#include <huxerui/huxerui.h>` name the same
 # entities -- compiling it here is what makes the module importable.
-sources                 = ["src/*/*.cpp", "modules/huxerui.cppm"]
+sources                 = ["src/*/*.cpp", "!src/runtime/profiling.cpp", "modules/huxerui.cppm"]
 include_dirs            = ["include", "src"]
 # `src` is implementation-only, as CMake's PRIVATE vs PUBLIC says.
 private_include_dirs    = ["src"]
