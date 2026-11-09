@@ -1,3 +1,7 @@
+// mcpp compiles src/*/*.cpp even when HUXERUI_ENABLE_PROFILING is off. Keep this translation unit empty in that
+// configuration so it does not reference the declarations hidden by profiling_internal.h.
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+
 #include "profiling_internal.h"
 
 #include <any>
@@ -262,3 +266,5 @@ std::shared_ptr<ProfileRecorder> CreateRuntimeProfiler() {
 #endif
 
 } // namespace huxerui::detail
+
+#endif
