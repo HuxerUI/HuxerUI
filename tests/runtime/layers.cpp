@@ -22,6 +22,7 @@ std::optional<DialogHandle> retained_environment_dialog;
 std::optional<LayerController> raw_layers;
 State<float> layer_anchor_offset;
 State<bool> layer_anchor_visible;
+State<bool> replace_anchor_with_text;
 State<bool> local_anchor_transform_changed;
 State<int> layer_environment_value;
 State<bool> layer_environment_provider_visible;
@@ -244,6 +245,19 @@ View RemovableAnchorApp() {
     return Text("anchor removed");
   }
   return Button("removable popup anchor").With(huxerui::Frame{60.0F, 30.0F}, popup.Anchor());
+}
+
+/// Keeps one popup anchor binding while replacing the anchored node between
+/// different node kinds. This is the structural swap a responsive breakpoint or
+/// conditional layout performs during reconciliation.
+View ReplaceableAnchorApp() {
+  auto popup = UsePopup();
+  layer_popup = popup;
+  replace_anchor_with_text = UseState(false);
+  if (replace_anchor_with_text.Get()) {
+    return Text("replaceable popup anchor").With(huxerui::Frame{60.0F, 30.0F}, popup.Anchor());
+  }
+  return Button("replaceable popup anchor").With(huxerui::Frame{60.0F, 30.0F}, popup.Anchor());
 }
 
 View FocusTrapApp() {
@@ -1364,6 +1378,25 @@ TEST_CASE("TestAnchoredPresentationDismissesWhenAnchorUnmounts") {
   layer_anchor_visible = false;
   REQUIRE(!ContainsText(runtime.BuildFrame(), "attached popup"));
   REQUIRE(!layer_popup->Dismiss(popup));
+}
+
+TEST_CASE("TestAnchoredPresentationTransfersAcrossAnchorNodeReplacement") {
+  layer_popup.reset();
+
+  TestPlatform platform;
+  UiWindow runtime{ReplaceableAnchorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  const LayerId popup = layer_popup->Show([] { return Text("attached popup"); });
+  REQUIRE(ContainsText(runtime.BuildFrame(), "attached popup"));
+
+  // Reconciliation builds the replacement node before releasing the previous
+  // one, so both LayerAnchorExtension instances briefly own the same binding.
+  replace_anchor_with_text = true;
+  REQUIRE_NOTHROW(runtime.BuildFrame());
+  REQUIRE(ContainsText(runtime.BuildFrame(), "attached popup"));
+  REQUIRE(layer_popup->Dismiss(popup));
 }
 
 TEST_CASE("TestLocalAnchoredPresentationDismissesWhenAnchorUnmounts") {

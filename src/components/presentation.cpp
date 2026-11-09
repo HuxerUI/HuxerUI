@@ -1514,14 +1514,23 @@ struct LayerAnchorBinding : std::enable_shared_from_this<LayerAnchorBinding> {
   explicit LayerAnchorBinding(LayerController controller) : layers(std::move(controller)) {}
 
   void Mount(std::uint64_t identity) {
-    if (mounted) {
-      throw std::logic_error("HuxerUI presentation anchor must be mounted on only one View");
-    }
+    // Reconciliation builds a replacement node before releasing the previous
+    // one, so an anchor can transfer between node identities within one frame.
+    // Runtime does not expose a "replacing" signal. Detaching the old
+    // extension before mounting the replacement would preserve this
+    // single-owner assertion, but it would couple shared reconciliation
+    // ordering to a presentation concern. This local handoff leaves
+    // LayerController and Runtime lifecycle unchanged; applying one binding to
+    // two genuinely live Views remains unsupported and resolves to the most
+    // recent geometry update.
     mounted_identity = identity;
     mounted = true;
   }
 
-  void Unmount() {
+  void UnmountNode(std::uint64_t identity) {
+    // A stale extension can outlive the transfer; only the current owner may
+    // clear the anchor state or dismiss its layer.
+    if (!mounted || mounted_identity != identity) return;
     mounted = false;
     mounted_identity.reset();
     node_bounds.reset();
@@ -2201,24 +2210,27 @@ public:
   }
 
   ~LayerAnchorExtension() override {
-    if (binding_) {
+    if (binding_ && node_identity.has_value()) {
       try {
-        binding_->Unmount();
+        binding_->UnmountNode(*node_identity);
       } catch (...) {
       }
     }
   }
 
   void Update(huxerui::ViewNode& node, const LayerAnchor& modifier) {
+    const auto identity = static_cast<const detail::MountedNode&>(node).identity;
     if (binding_ == modifier.binding_) {
+      node_identity = identity;
       return;
     }
-    if (binding_) {
-      binding_->Unmount();
+    if (binding_ && node_identity.has_value()) {
+      binding_->UnmountNode(*node_identity);
     }
     binding_ = modifier.binding_;
+    node_identity = identity;
     if (binding_) {
-      binding_->Mount(static_cast<const detail::MountedNode&>(node).identity);
+      binding_->Mount(identity);
     }
   }
 
@@ -2232,6 +2244,7 @@ public:
 
 private:
   std::shared_ptr<LayerAnchorBinding> binding_;
+  std::optional<std::uint64_t> node_identity;
 };
 
 class DebugOverlayInstaller {
