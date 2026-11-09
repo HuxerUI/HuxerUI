@@ -84,6 +84,7 @@ private:
 };
 
 struct StreamAccess {
+  [[nodiscard]] static RandomAccessStream MakeRandomAccessStream(std::shared_ptr<RandomAccessStreamState> state);
   [[nodiscard]] static InputStream MakeInputStream(std::shared_ptr<InputStreamState> state);
   [[nodiscard]] static OutputStream MakeOutputStream(std::shared_ptr<OutputStreamState> state);
   [[nodiscard]] static AsyncInputStream MakeAsyncInputStream(std::shared_ptr<AsyncInputStreamState> state);

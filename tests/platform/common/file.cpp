@@ -7,6 +7,7 @@
 #include <concepts>
 #include <cstddef>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -161,6 +162,86 @@ TEST_CASE("FileStreamsReadWriteAppendAndCopyWithCallerOwnedBuffers") {
   REQUIRE_FALSE(root.OpenWrite().Succeeded());
   REQUIRE(root.OpenWrite().Error().code == IoErrorCode::IsDirectory);
 }
+
+TEST_CASE("Random-access file opening preserves contents unless creation or truncation is explicit") {
+  TemporaryDirectory temporary;
+  const File root(temporary.Path());
+  const File file = root.Child("media.bin");
+  using Access = FileAccessMode;
+  using Mode = FileOpenMode;
+
+  REQUIRE(file.OpenRandomAccess().Error().code == IoErrorCode::NotFound);
+  REQUIRE(file.OpenRandomAccess(Access::WriteOnly, Mode::TruncateExisting).Error().code == IoErrorCode::NotFound);
+  REQUIRE_THROWS_AS(file.OpenRandomAccess(Access::ReadOnly, Mode::CreateNew), std::invalid_argument);
+  REQUIRE(root.OpenRandomAccess().Error().code == IoErrorCode::IsDirectory);
+
+  auto created = file.OpenRandomAccess(Access::WriteOnly, Mode::CreateNew);
+  REQUIRE(created.Succeeded());
+  REQUIRE(created.Value().Size().Value() == 0);
+  REQUIRE(created.Value().WriteAt(0, Bytes{std::byte{1}, std::byte{2}, std::byte{3}}).Succeeded());
+  Bytes buffer(4);
+  REQUIRE_THROWS_AS(created.Value().ReadAt(0, buffer), std::logic_error);
+  REQUIRE(created.Value().Close().Succeeded());
+  REQUIRE(created.Value().Close().Succeeded());
+  REQUIRE_THROWS_AS(created.Value().Size(), std::logic_error);
+  REQUIRE(file.OpenRandomAccess(Access::WriteOnly, Mode::CreateNew).Error().code == IoErrorCode::AlreadyExists);
+
+  auto opened = file.OpenRandomAccess(Access::ReadWrite);
+  REQUIRE(opened.Succeeded());
+  auto stream = std::move(opened).Value();
+  REQUIRE_THROWS_AS(opened.Value().Size(), std::logic_error);
+  REQUIRE(stream.Size().Value() == 3);
+  REQUIRE(stream.ReadAt(2, buffer).Value() == 1);
+  REQUIRE(buffer.front() == std::byte{3});
+  REQUIRE(stream.ReadAt(3, buffer).Value() == 0);
+  REQUIRE(stream.ReadAt(0, buffer).Value() == 3);
+  REQUIRE_THROWS_AS(stream.ReadAt(0, {}), std::invalid_argument);
+  constexpr auto overflow = std::numeric_limits<std::uint64_t>::max();
+  REQUIRE(stream.ReadAt(overflow, buffer).Error().code == IoErrorCode::TooLarge);
+  REQUIRE(stream.WriteAt(overflow, Bytes{std::byte{7}}).Error().code == IoErrorCode::TooLarge);
+  REQUIRE(stream.WriteAt(overflow, {}).Succeeded());
+  REQUIRE(stream.WriteAt(0, Bytes{std::byte{7}}).Succeeded());
+  REQUIRE(stream.Close().Succeeded());
+  REQUIRE(file.ReadBytes().Value() == Bytes{std::byte{7}, std::byte{2}, std::byte{3}});
+
+  auto truncated = file.OpenRandomAccess(Access::ReadWrite, Mode::TruncateExisting);
+  REQUIRE(truncated.Succeeded());
+  REQUIRE(truncated.Value().Size().Value() == 0);
+  REQUIRE(truncated.Value().Close().Succeeded());
+}
+
+TEST_CASE("Random-access file I/O remains bound to the opened file after its path is replaced") {
+  TemporaryDirectory temporary;
+  const File root(temporary.Path());
+  const File file = root.Child("media.bin");
+  const File moved = root.Child("renamed.bin");
+  REQUIRE(file.WriteBytes(Bytes{std::byte{1}, std::byte{2}}));
+  auto opened = file.OpenRandomAccess(FileAccessMode::ReadWrite);
+  REQUIRE(opened.Succeeded());
+  REQUIRE(file.MoveTo(moved));
+  REQUIRE(file.WriteBytes(Bytes{std::byte{3}}));
+  REQUIRE(opened.Value().Size().Value() == 2);
+  REQUIRE(opened.Value().WriteAt(1, Bytes{std::byte{4}}).Succeeded());
+  REQUIRE(opened.Value().Close().Succeeded());
+  REQUIRE(moved.ReadBytes().Value() == Bytes{std::byte{1}, std::byte{4}});
+  REQUIRE(file.ReadBytes().Value() == Bytes{std::byte{3}});
+}
+
+#if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+TEST_CASE("Random-access file offsets and lengths exceed 32 bits without a whole-file allocation") {
+  TemporaryDirectory temporary;
+  const File file = File(temporary.Path()).Child("sparse.bin");
+  auto opened = file.OpenRandomAccess(FileAccessMode::ReadWrite, FileOpenMode::CreateNew);
+  REQUIRE(opened.Succeeded());
+  constexpr std::uint64_t offset = (std::uint64_t{1} << 32) + 3;
+  REQUIRE(opened.Value().WriteAt(offset, Bytes{std::byte{5}}).Succeeded());
+  REQUIRE(opened.Value().Size().Value() == offset + 1);
+  Bytes buffer(2);
+  REQUIRE(opened.Value().ReadAt(offset - 1, buffer).Value() == 2);
+  REQUIRE(buffer == Bytes{std::byte{0}, std::byte{5}});
+  REQUIRE(opened.Value().Close().Succeeded());
+}
+#endif
 
 TEST_CASE("AppDirectoriesAreCreatedAndProtected") {
   TemporaryDirectory temporary;

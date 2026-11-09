@@ -62,6 +62,26 @@ enum class FileWriteMode {
   Append,
 };
 
+/// Controls which byte operations a RandomAccessStream permits after opening.
+enum class FileAccessMode {
+  /// Permits reading existing bytes.
+  ReadOnly,
+  /// Permits writing bytes at explicit offsets.
+  WriteOnly,
+  /// Permits both reading and writing.
+  ReadWrite,
+};
+
+/// Controls file creation and truncation when opening a RandomAccessStream.
+enum class FileOpenMode {
+  /// Requires an existing file and preserves its contents.
+  OpenExisting,
+  /// Exclusively creates a new empty local file or returns AlreadyExists.
+  CreateNew,
+  /// Requires an existing file and truncates it to zero bytes.
+  TruncateExisting,
+};
+
 /// @brief A normalized absolute UTF-8 path in the application's local file system.
 /// A File is a path value, not an open handle or an access grant. Relative input is resolved against the
 /// current directory when the value is created. Normalization is lexical: it does not require the entry
@@ -169,6 +189,17 @@ public:
   /// @return A task yielding a uniquely owned async stream or an IoError. CloseAsync() includes required Web
   /// persistence.
   Task<IoResult<AsyncOutputStream>> OpenWriteAsync(FileWriteMode mode = FileWriteMode::Truncate) const;
+
+  /// @brief Opens an ordinary local file for random access on the calling thread.
+  /// @param access Permitted byte operations. Creation and truncation require write access.
+  /// @param mode Whether to preserve an existing file, exclusively create a new file, or truncate an existing file.
+  /// @return A uniquely owned stream or an IoError. Opening a directory reports IsDirectory.
+  /// @throws std::invalid_argument If either mode is invalid or read-only access is combined with creation
+  /// or truncation.
+  /// Writable random access to Web paths that require asynchronous persistence reports Unsupported.
+  IoResult<RandomAccessStream> OpenRandomAccess(
+      FileAccessMode access = FileAccessMode::ReadOnly, FileOpenMode mode = FileOpenMode::OpenExisting
+  ) const;
 
   /// @brief Reads an entire ordinary file into owned memory.
   /// @return Bytes, including an empty buffer for an empty file, or an IoError such as NotFound, IsDirectory,
@@ -387,6 +418,19 @@ public:
   /// @return A task yielding a uniquely owned truncating stream or an IoError. Call CloseAsync() to finalize output.
   /// Provider failures after opening also use IoResult.
   Task<IoResult<AsyncOutputStream>> OpenWriteAsync() const;
+
+  /// @brief Acquires random access to this ordinary referenced file through its provider.
+  /// @param access Permitted byte operations. Write access requires a writable reference.
+  /// @param mode Whether to preserve or truncate the referenced file. Truncation requires write access.
+  /// @return A lazy task yielding a uniquely owned stream or an IoError. A provider without the requested
+  /// capability reports Unsupported, and a directory reports IsDirectory.
+  /// @throws std::invalid_argument Before returning a task for invalid modes, CreateNew, or read-only truncation.
+  /// @throws std::logic_error If this reference was moved from.
+  /// The task retains the reference while opening. The stream retains the grant independently and runs byte
+  /// operations synchronously on the calling thread. Task cancellation suppresses delivery without undoing truncation.
+  Task<IoResult<RandomAccessStream>> OpenRandomAccessAsync(
+      FileAccessMode access = FileAccessMode::ReadOnly, FileOpenMode mode = FileOpenMode::OpenExisting
+  ) const;
 
   /// @brief Reads the complete contents of an ordinary referenced file into owned memory.
   /// @return A task yielding Bytes or an IoError; directories report IsDirectory and unsupported kinds report

@@ -42,10 +42,12 @@ final class HuxerUIFileReferenceTest {
                 @Override public Context getApplicationContext() { return this; }
                 @Override public ContentResolver getContentResolver() { return resolver; }
             };
-            for (int scenario = 0; scenario < 3; ++scenario) {
+            for (int scenario = 0; scenario < 4; ++scenario) {
                 provider.unknown = scenario == 1;
                 provider.revoked = false;
+                provider.sequential = false;
                 final boolean revoke = scenario == 2;
+                final boolean sequential = scenario == 3;
                 try (HuxerUIFileReference first = HuxerUIFileReference.fromUri(context, URI);
                         HuxerUIFileReference second = HuxerUIFileReference.fromUri(context, URI)) {
                     PlatformPayload payload = PlatformPayload.fileReference(first);
@@ -59,10 +61,12 @@ final class HuxerUIFileReferenceTest {
                         check(second.uri().equals(URI), "Closing one wrapper must preserve another selection");
                         second.close();
                         provider.revoked = revoke;
-                    }, destination.getPath(), provider.unknown, revoke));
+                        provider.sequential = sequential;
+                    }, destination.getPath(), provider.unknown, revoke, sequential));
                     check("".equals(error[0]), "Native reference regression: " + error[0]);
                 }
             }
+            provider.sequential = false;
             provider.revoked = true;
             try {
                 HuxerUIFileReference.fromUri(context, URI).close();
@@ -98,6 +102,7 @@ final class HuxerUIFileReferenceTest {
         final File source;
         volatile boolean unknown;
         volatile boolean revoked;
+        volatile boolean sequential;
         boolean directory;
 
         Provider(File source) { this.source = source; }
@@ -113,6 +118,23 @@ final class HuxerUIFileReferenceTest {
         @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
             if (revoked) { throw new SecurityException("Test provider access revoked"); }
             check("r".equals(mode), "A read-only factory must not request write access");
+            if (sequential) {
+                try {
+                    ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+                    try (ParcelFileDescriptor.AutoCloseOutputStream output =
+                            new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                        output.write("content".getBytes(StandardCharsets.UTF_8));
+                        return pipe[0];
+                    } catch (IOException exception) {
+                        pipe[0].close();
+                        throw exception;
+                    }
+                } catch (IOException exception) {
+                    FileNotFoundException failure = new FileNotFoundException("Test provider pipe unavailable");
+                    failure.initCause(exception);
+                    throw failure;
+                }
+            }
             return ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY);
         }
         @Override public Uri insert(Uri uri, ContentValues values) { throw new UnsupportedOperationException(); }
@@ -125,5 +147,5 @@ final class HuxerUIFileReferenceTest {
     }
 
     private static native String verifyNative(PlatformPayload payload, Runnable afterCapture,
-            String destination, boolean unknown, boolean revoked);
+            String destination, boolean unknown, boolean revoked, boolean sequential);
 }

@@ -18,7 +18,7 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 
 ## Non-goals
 
-The file API does not provide a public filesystem subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, random-access handles, or a document-provider abstraction.
+The file API does not provide a public filesystem subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, or a document-provider abstraction.
 Directory copying does not add multi-directory selection, mixed file/directory selection, recursive deletion of grants, mirroring, moves, metadata preservation, transactions, rollback, resumability, or a progress-controller API.
 
 It also does not persist picker grants across process launches or add clipboard, recent-file, or share-sheet APIs.
@@ -224,7 +224,7 @@ IoResult<std::string> ReadString() const;
 Task<IoResult<std::string>> ReadStringAsync() const;
 ```
 
-Read operations load the complete file into memory.
+`ReadBytes()` and `ReadString()` load the complete file into memory.
 An empty `Bytes` or string value is a successful empty file, which is why reads retain `IoResult<T>`.
 The implementation reports a file that cannot fit in the owned result as `TooLarge` before allocating an invalid buffer.
 
@@ -241,7 +241,7 @@ IoResult<OutputStream> OpenWrite(FileWriteMode mode = FileWriteMode::Truncate) c
 Task<IoResult<AsyncOutputStream>> OpenWriteAsync(FileWriteMode mode = FileWriteMode::Truncate) const;
 ```
 
-The four move-only stream handles separate synchronous and genuinely asynchronous execution explicitly.
+The sequential stream handles separate synchronous and genuinely asynchronous execution explicitly.
 Synchronous `Read()` borrows a caller-owned span and returns zero for EOF; asynchronous `ReadAsync(maximum_bytes)` returns owned bytes and uses an empty value for EOF.
 The caller chooses every read maximum or synchronous copy buffer instead of inheriting a framework-wide chunk size.
 `InputStream::CopyTo()` and `AsyncInputStream::CopyToAsync()` are non-virtual member algorithms and leave both endpoints open.
@@ -255,6 +255,14 @@ Only one operation may be outstanding per asynchronous endpoint; an input and ou
 Native local async streams use `WorkerSequence` so one open descriptor is never accessed concurrently and blocking calls stay off the Runtime thread.
 File inputs and packaged-resource inputs share one adapter over a synchronous InputStream; the underlying file state only owns synchronous reading and handle release.
 This worker adaptation is specific to inherently blocking sources; HTTP, browser, and other natively asynchronous transports do not route through `RunWorker()`.
+
+## Random-access streams
+
+`File::OpenRandomAccess()` opens a local descriptor synchronously without requiring Runtime. `FileReference::OpenRandomAccessAsync()` uses the provider's existing acquisition and cancellation path. Each successful open returns the same move-only `RandomAccessStream` interface with synchronous absolute-offset reads and writes, handle-relative size, and explicit close.
+
+Access mode governs operations after opening. Open mode governs creation and truncation. Local creation is exclusive. Truncation checks type, access, and seekability before changing the same opened descriptor. Path-backed references keep their existing grant-relative opening and coordination for the descriptor's lifetime. Android opens the provider descriptor without truncation and verifies it before accepting or truncating it. It rejects descriptors whose providers require reliable Java close signaling. The Web picker backend keeps its asynchronous browser streams and reports unsupported random-access opening.
+
+The stream owns its descriptor and any retained reference or coordination. Operation spans are borrowed only until return. Native offsets and counts are checked before transfer. Reads and size queries can fail without ending the session. Failed writes and failed closes prevent further operations, and descriptor cleanup does not imply rollback or durable storage.
 
 ## Writing and appending
 
@@ -432,9 +440,9 @@ The returned `File` does not retain the grant or temporary-file owner; applicati
 Path-based operations use ordinary system permissions and do not inherit `CanWrite()` restrictions, coordinated access, or handle-relative identity and containment guarantees; the original reference and its I/O contract remain unchanged.
 `AsFile()` is an explicit path interoperability operation, not an existence/access check or a persistent grant; use reference I/O when its authorization or coordination behavior is required.
 
-External references expose asynchronous I/O only because their platform transport may involve a provider process, coordinated access, security-scope activation, or a browser permission check.
+External references acquire resources asynchronously because their platform transport may involve a provider process, coordinated access, security-scope activation, or a browser permission check.
 Their input and output streams retain the reference capability independently, read caller-bounded chunks, and require explicit output close.
-The write stream truncates or replaces the selected file; append and random access are not part of the reference-stream contract.
+The sequential write stream truncates or replaces the selected file. A provider with a compatible descriptor can also acquire a synchronous random-access stream.
 `ReadStringAsync()` follows the same UTF-8, byte-order-mark, and line-ending contract as `File::ReadStringAsync()`.
 An expired or revoked grant reports `NotFound` or `PermissionDenied` through the existing `IoResult` error model rather than adding a second result type.
 

@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -38,6 +39,7 @@ struct FileReferenceWriteResult {
 template <class T> using FileReferenceCompletion = std::function<void(IoResult<T>)>;
 using FileReferenceInputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncInputStreamState>>;
 using FileReferenceOutputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncOutputStreamState>>;
+using FileReferenceRandomAccessCompletion = FileReferenceCompletion<std::shared_ptr<RandomAccessStreamState>>;
 using FileReferenceBytesOperation =
     std::function<std::function<void()>(FileReferenceBytesCompletion)>;
 using FileReferenceResultBoolCompletion = FileReferenceCompletion<bool>;
@@ -56,6 +58,8 @@ public:
 
   virtual std::function<void()> OpenRead(FileReferenceInputStreamCompletion completion);
   virtual std::function<void()> OpenWrite(FileReferenceOutputStreamCompletion completion);
+  virtual std::function<void()> OpenRandomAccess(FileAccessMode access, FileOpenMode mode,
+                                                 FileReferenceRandomAccessCompletion completion);
   virtual std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) = 0;
   virtual std::function<void()> ImportTo(File destination, bool overwrite,
                                          FileReferenceCompletion<std::uint64_t> completion) = 0;
@@ -89,6 +93,56 @@ public:
 // Optional synchronous read/write coordination for path-backed grants. Null pointers omit that side
 // of the operation; the callback retains the grant owner, but must not retain these borrowed pointers.
 using FileReferenceCoordination = std::function<void(const File*, const File*, const std::function<void()>&)>;
+
+// Errors from acquiring or operating on a native descriptor use the shared I/O categories.
+class ReferenceFailure final {
+public:
+  explicit ReferenceFailure(IoErrorCode value) : code(value) {}
+  IoErrorCode code;
+};
+
+void CheckReference(bool condition, IoErrorCode code);
+void CheckLocalIo(bool succeeded);
+IoError OperationError(std::string_view operation, const std::error_code& error);
+
+class ReferenceDescriptor final {
+public:
+  explicit ReferenceDescriptor(int value = -1);
+  ~ReferenceDescriptor();
+
+  ReferenceDescriptor(const ReferenceDescriptor&) = delete;
+  ReferenceDescriptor& operator=(const ReferenceDescriptor&) = delete;
+  ReferenceDescriptor(ReferenceDescriptor&& other) noexcept;
+  ReferenceDescriptor& operator=(ReferenceDescriptor&& other) noexcept;
+
+  [[nodiscard]] int Get() const;
+  [[nodiscard]] int Release();
+  bool Close();
+
+private:
+  int value_;
+};
+
+[[nodiscard]] ReferenceDescriptor OpenRandomAccessFileDescriptor(
+    std::string_view path, FileAccessMode access, FileOpenMode mode
+);
+void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode);
+[[nodiscard]] std::uint64_t DescriptorSize(int descriptor);
+
+using ReferenceStreamCoordination = std::function<void(const std::function<void()>&)>;
+
+std::shared_ptr<RandomAccessStreamState> MakeRandomAccessState(
+    ReferenceDescriptor descriptor, FileAccessMode access, FileOpenMode mode,
+    ReferenceStreamCoordination coordinate = {}, std::shared_ptr<FileReferenceState> owner = {}
+);
+
+void ValidateRandomAccessOpen(FileAccessMode access, FileOpenMode mode);
+#if defined(__ANDROID__)
+// Takes ownership of the detached descriptor even when validation or truncation fails.
+[[nodiscard]] IoResult<std::shared_ptr<RandomAccessStreamState>> OpenRandomAccessDescriptor(
+    int descriptor, FileAccessMode access, FileOpenMode mode, std::shared_ptr<FileReferenceState> owner
+);
+#endif
 
 using FilePickerOpenCompletion = std::function<void(std::vector<FileReference>)>;
 using FilePickerSaveCompletion = std::function<void(bool)>;

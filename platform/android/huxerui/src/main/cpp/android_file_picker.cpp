@@ -381,6 +381,8 @@ public:
                                                   "(J)Lorg/huxerui/HuxerUIFileReference$Operation;");
     prepare_open_write_ = environment->GetMethodID(reference_class_, "prepareOpenWrite",
                                                    "(J)Lorg/huxerui/HuxerUIFileReference$Operation;");
+    prepare_open_random_access_ = environment->GetMethodID(reference_class_, "prepareOpenRandomAccess",
+                                                           "(JZ)Lorg/huxerui/HuxerUIFileReference$Operation;");
     start_ = environment->GetMethodID(operation_class_, "start", "()V");
     cancel_ = environment->GetMethodID(operation_class_, "cancel", "()V");
     metadata_uri_ = environment->GetFieldID(metadata_class_, "uri", "Landroid/net/Uri;");
@@ -394,7 +396,8 @@ public:
         !metadata_write_allowed_ ||
         !uri_string_ || entry_key_ == nullptr || prepare_directory_ == nullptr || constructor_ == nullptr ||
         prepare_read_ == nullptr || prepare_import_ == nullptr || prepare_replace_ == nullptr ||
-        prepare_open_read_ == nullptr || prepare_open_write_ == nullptr || start_ == nullptr || cancel_ == nullptr ||
+        prepare_open_read_ == nullptr || prepare_open_write_ == nullptr || prepare_open_random_access_ == nullptr ||
+        start_ == nullptr || cancel_ == nullptr ||
         environment->ExceptionCheck()) {
       Release(environment);
       throw std::runtime_error("HuxerUI Android file reference Java methods do not match the platform backend");
@@ -458,6 +461,10 @@ public:
     return prepare_open_write_;
   }
 
+  [[nodiscard]] jmethodID PrepareOpenRandomAccess() const noexcept {
+    return prepare_open_random_access_;
+  }
+
   [[nodiscard]] jmethodID Start() const noexcept {
     return start_;
   }
@@ -510,6 +517,7 @@ private:
   jmethodID prepare_replace_ = nullptr;
   jmethodID prepare_open_read_ = nullptr;
   jmethodID prepare_open_write_ = nullptr;
+  jmethodID prepare_open_random_access_ = nullptr;
   jmethodID start_ = nullptr;
   jmethodID cancel_ = nullptr;
 };
@@ -627,7 +635,8 @@ private:
   WorkerSequence operations_;
 };
 
-class AndroidFileReferenceState final : public FileReferenceState {
+class AndroidFileReferenceState final : public FileReferenceState,
+                                        public std::enable_shared_from_this<AndroidFileReferenceState> {
 public:
   AndroidFileReferenceState(std::shared_ptr<AndroidFileReferenceBridge> bridge, JNIEnv* environment,
                             std::string_view uri, bool write_allowed)
@@ -665,6 +674,34 @@ public:
   std::function<void()> OpenWrite(FileReferenceOutputStreamCompletion completion) override {
     return OpenStream<AsyncOutputStreamState, AndroidOutputStreamState>(bridge_->PrepareOpenWrite(),
                                                                         std::move(completion));
+  }
+
+  std::function<void()> OpenRandomAccess(FileAccessMode access, FileOpenMode mode,
+                                         FileReferenceRandomAccessCompletion completion) override {
+    AndroidStreamCompletion opened =
+        [self = shared_from_this(), completion = std::move(completion), access, mode](
+            jint result, jint error, jlong descriptor, std::string message
+        ) {
+          using StateResult = IoResult<std::shared_ptr<RandomAccessStreamState>>;
+          if (static_cast<AndroidReferenceResult>(result) != AndroidReferenceResult::True ||
+              descriptor < 0 || descriptor > std::numeric_limits<int>::max()) {
+            completion(StateResult(IoError{ToFileErrorCode(error), std::move(message)}));
+            return;
+          }
+          auto state = [&] {
+            try {
+              return OpenRandomAccessDescriptor(static_cast<int>(descriptor), access, mode, self);
+            } catch (...) {
+              return StateResult(IoError{IoErrorCode::Io, "HuxerUI Android random-access stream could not be opened"});
+            }
+          }();
+          completion(std::move(state));
+        };
+    return Start(std::move(opened), [&](JNIEnv* environment, jlong handle) {
+      const jboolean writing = access == FileAccessMode::ReadOnly ? JNI_FALSE : JNI_TRUE;
+      return android::LocalRef<jobject>(
+          environment, environment->CallObjectMethod(reference_, bridge_->PrepareOpenRandomAccess(), handle, writing));
+    });
   }
 
   std::function<void()> ImportTo(File destination, bool overwrite,

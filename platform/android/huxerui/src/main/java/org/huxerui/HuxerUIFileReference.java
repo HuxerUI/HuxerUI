@@ -225,6 +225,11 @@ public final class HuxerUIFileReference implements AutoCloseable {
         return new Operation(nativeHandle, Operation.OPEN_WRITE, null, false);
     }
 
+    Operation prepareOpenRandomAccess(long nativeHandle, boolean writing) {
+        int kind = writing ? Operation.OPEN_RANDOM_WRITE : Operation.OPEN_RANDOM_READ;
+        return new Operation(nativeHandle, kind, null, false);
+    }
+
     static Future<?> submit(Runnable operation) {
         return executor.submit(operation);
     }
@@ -408,6 +413,8 @@ public final class HuxerUIFileReference implements AutoCloseable {
         static final int CHECK_DESTINATION = 7;
         static final int OPEN_READ = 8;
         static final int OPEN_WRITE = 9;
+        static final int OPEN_RANDOM_READ = 10;
+        static final int OPEN_RANDOM_WRITE = 11;
 
         private final long nativeHandle;
         private final int kind;
@@ -460,11 +467,12 @@ public final class HuxerUIFileReference implements AutoCloseable {
                 } else if (kind == REPLACE) {
                     if (!writeAllowed) { throw new SecurityException(); }
                     finishBoolean(copyFileToUri(resolver, new File(path), uri, copyState));
-                } else if (kind == OPEN_READ) {
-                    finishDescriptor(openDescriptor(false));
-                } else if (kind == OPEN_WRITE) {
-                    if (!writeAllowed) { throw new SecurityException(); }
-                    finishDescriptor(openDescriptor(true));
+                } else if (kind == OPEN_READ || kind == OPEN_WRITE ||
+                        kind == OPEN_RANDOM_READ || kind == OPEN_RANDOM_WRITE) {
+                    boolean writing = kind == OPEN_WRITE || kind == OPEN_RANDOM_WRITE;
+                    boolean randomAccess = kind == OPEN_RANDOM_READ || kind == OPEN_RANDOM_WRITE;
+                    if (writing && !writeAllowed) { throw new SecurityException(); }
+                    finishDescriptor(openDescriptor(writing, randomAccess));
                 } else {
                     directoryOperation();
                 }
@@ -658,10 +666,13 @@ public final class HuxerUIFileReference implements AutoCloseable {
             }
         }
 
-        private int openDescriptor(boolean writing) throws IOException {
+        private int openDescriptor(boolean writing, boolean randomAccess) throws IOException {
             ParcelFileDescriptor descriptor = null;
             try {
-                if (writing) {
+                if (writing && randomAccess) {
+                    // Native code validates seekability and access before applying any requested truncation.
+                    descriptor = resolver.openFileDescriptor(uri, "rw");
+                } else if (writing) {
                     try {
                         descriptor = resolver.openFileDescriptor(uri, "rwt");
                     } catch (FileNotFoundException ignored) {
@@ -672,6 +683,10 @@ public final class HuxerUIFileReference implements AutoCloseable {
                 }
                 if (descriptor == null) {
                     throw new FileNotFoundException("HuxerUI external file descriptor is unavailable");
+                }
+                // Detaching a reliable descriptor breaks the Java close/error channel used by its provider.
+                if (randomAccess && descriptor.canDetectErrors()) {
+                    throw new UnsupportedOperationException();
                 }
                 return descriptor.detachFd();
             } finally {

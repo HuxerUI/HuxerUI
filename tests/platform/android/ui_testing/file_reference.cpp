@@ -17,7 +17,7 @@ void Require(bool condition, const char* message) {
 
 extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_verifyNative(
     JNIEnv* environment, jclass, jobject payload, jobject after_capture, jstring destination,
-    jboolean unknown, jboolean revoked) {
+    jboolean unknown, jboolean revoked, jboolean sequential) {
   using namespace huxerui;
   try {
     TaskScope tasks;
@@ -26,6 +26,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_v
     });
     testing::UiTest ui(application);
     Task<IoResult<AsyncInputStream>> open;
+    Task<IoResult<RandomAccessStream>> open_random_access;
     Task<bool> import;
     const File target(android::JavaStringToUtf8(environment, destination));
     {
@@ -41,6 +42,7 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_v
                 "The factory must preserve provider metadata");
       }
       open = reference.OpenReadAsync();
+      open_random_access = reference.OpenRandomAccessAsync();
       import = reference.ImportToAsync(target, true);
     }
     android::LocalRef<jclass> runnable(environment, environment->GetObjectClass(after_capture));
@@ -52,9 +54,12 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_v
     tasks.Launch([&]() -> Task<void> {
       try {
         auto opened = co_await std::move(open);
+        auto random = co_await std::move(open_random_access);
         if (revoked) {
           Require(!opened.Succeeded() && opened.Error().code == IoErrorCode::PermissionDenied,
                   "Revoked access must report PermissionDenied");
+          Require(!random.Succeeded() && random.Error().code == IoErrorCode::PermissionDenied,
+                  "Revoked random access must report PermissionDenied");
         } else {
           Require(opened.Succeeded(), "A pending open must survive wrapper closure");
           auto first = co_await opened.Value().ReadAsync(3);
@@ -65,6 +70,17 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_v
           Require(co_await std::move(import), "A pending import must survive wrapper closure");
           auto contents = target.ReadString();
           Require(contents.Succeeded() && contents.Value() == "content", "Import must preserve file contents");
+          if (sequential) {
+            Require(!random.Succeeded() && random.Error().code == IoErrorCode::Unsupported,
+                    "A sequential document must not open for random access");
+          } else {
+            Require(random.Succeeded(), "A seekable document must open for random access");
+            Bytes buffer(3);
+            Require(random.Value().Size().Value() == 7 && random.Value().ReadAt(4, buffer).Value() == 3 &&
+                        buffer == Bytes{std::byte{'e'}, std::byte{'n'}, std::byte{'t'}},
+                    "The random-access stream must query current length and read at the requested offset");
+            Require(random.Value().Close().Succeeded(), "The random-access document must close successfully");
+          }
         }
       } catch (...) { failure = std::current_exception(); }
       finished = true;

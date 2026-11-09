@@ -138,6 +138,20 @@ Copy errors preserve the source or destination error; a written prefix may remai
 A failed stream cannot be reused. Task cancellation suppresses result delivery instead of returning an error or EOF.
 Native `File` asynchronous streams serialize their blocking operations through a worker sequence, while provider and browser streams retain their native asynchronous resource.
 
+## Random-access streams
+
+`File::OpenRandomAccess()` opens a local file on the calling thread. `FileReference::OpenRandomAccessAsync()` acquires an external file on the existing provider path. Both return a move-only `RandomAccessStream` whose byte operations run synchronously on the calling thread.
+
+Both entry points default to `FileAccessMode::ReadOnly` and `FileOpenMode::OpenExisting`. Choose `WriteOnly` or `ReadWrite` to write. `OpenExisting` preserves contents, `CreateNew` creates an empty local file and fails if the name exists, and `TruncateExisting` empties an existing file. Creation and truncation require write access. A `FileReference` accepts the two existing-file modes.
+
+`ReadAt(offset, buffer)` reads into a caller-owned nonempty span and returns the byte count. A successful zero means EOF at that offset, and a subsequent read can start anywhere. `WriteAt(offset, data)` writes the complete span on success. A nonempty write beyond EOF extends the file, with zero bytes in the gap. Offsets and file sizes use 64-bit values. An offset or range outside the backend's representable offset limits reports `TooLarge` before transferring bytes.
+
+`Size()` queries the same opened resource and reports its current length. Zero is a known empty file, a successful `std::nullopt` means unknown length, and an error reports a failed query. `FileReference::Size()` is captured metadata.
+
+Keep operations on one stream serial, including close. The opened stream retains any required reference grant. A read or size error permits another operation. A backend write failure may leave a written prefix and makes the stream unusable. Call `Close()` to check finalization after successful operations. Destruction releases the resource, and closing provides no rollback or power-loss durability guarantee.
+
+Provider support is checked at open. Android document references require a seekable descriptor with a compatible access mode and close contract. Browser selections return `Unsupported`. Local Web paths with asynchronous persistence reject writable random-access opening.
+
 ## External files and directories
 
 `FileReference` is a capability for one file or directory selected or opened outside application-owned storage.

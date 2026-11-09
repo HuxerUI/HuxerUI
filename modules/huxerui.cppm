@@ -136,6 +136,7 @@ export namespace huxerui {
     using huxerui::ExternalTexture;
     using huxerui::FadeTransition;
     using huxerui::File;
+    using huxerui::FileAccessMode;
     using huxerui::FileActivation;
     using huxerui::FileDropEvent;
     using huxerui::FileDropEvents;
@@ -143,6 +144,7 @@ export namespace huxerui {
     using huxerui::FileDropOptions;
     using huxerui::FileDropTarget;
     using huxerui::FileInfo;
+    using huxerui::FileOpenMode;
     using huxerui::FilePicker;
     using huxerui::FilePickerFilter;
     using huxerui::FileReference;
@@ -330,6 +332,7 @@ export namespace huxerui {
     using huxerui::RadialGradient;
     using huxerui::RadioButton;
     using huxerui::RadioButtonStyle;
+    using huxerui::RandomAccessStream;
     using huxerui::RawAsset;
     using huxerui::RawResource;
     using huxerui::Rect;

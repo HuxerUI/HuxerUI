@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -56,6 +57,7 @@ class AsyncInputStreamState;
 class AsyncOutputStreamState;
 class InputStreamState;
 class OutputStreamState;
+class RandomAccessStreamState;
 struct StreamAccess;
 } // namespace detail
 
@@ -161,6 +163,61 @@ private:
   bool failed_ = false;
 
   friend class InputStream;
+  friend struct detail::StreamAccess;
+};
+
+/// A move-only stream for reading and writing at absolute byte offsets.
+///
+/// Obtain it from File::OpenRandomAccess() or FileReference::OpenRandomAccessAsync(). It stays bound to the
+/// opened resource and retains any required provider grant. Operations are synchronous on the calling thread.
+/// Serialize access to each stream, including closing it or moving it to another thread.
+class RandomAccessStream final {
+public:
+  RandomAccessStream(const RandomAccessStream&) = delete;
+  RandomAccessStream& operator=(const RandomAccessStream&) = delete;
+  RandomAccessStream(RandomAccessStream&&) noexcept;
+  RandomAccessStream& operator=(RandomAccessStream&&) noexcept;
+  ~RandomAccessStream();
+
+  /// Reads at an absolute offset without requiring the source to fill the supplied buffer.
+  /// @param offset Byte offset from the beginning of the opened file.
+  /// @param buffer Nonempty writable range borrowed until return.
+  /// @return The number of valid bytes in the buffer's prefix, or an IoError. A successful zero means EOF at
+  /// this offset. A range outside the backend's offset limits reports TooLarge.
+  /// @throws std::invalid_argument If buffer is empty.
+  /// @throws std::logic_error If the stream is moved from, closed, failed, or write-only.
+  /// Short reads are allowed. Later reads may use any valid offset. A read error leaves the stream usable.
+  IoResult<std::size_t> ReadAt(std::uint64_t offset, std::span<std::byte> buffer);
+
+  /// Writes the complete supplied range at an absolute offset.
+  /// @param offset Byte offset from the beginning of the opened file.
+  /// @param data Bytes borrowed until return. An empty range succeeds without accessing the file.
+  /// @return Success after all bytes have been written, or an IoError. A range outside the backend's offset
+  /// limits reports TooLarge before writing any bytes and leaves the stream usable.
+  /// @throws std::logic_error If the stream is moved from, closed, failed, or read-only.
+  /// A nonempty write beyond EOF extends the file. Reads from the gap return zeros. A backend write failure
+  /// may leave a written prefix and makes the stream unusable, including for Close().
+  IoResult<void> WriteAt(std::uint64_t offset, std::span<const std::byte> data);
+
+  /// Queries the current size of the opened resource, including on a write-only stream.
+  /// @return The size in bytes, std::nullopt if the size is unknown, or an IoError. Zero is a known empty size.
+  /// @throws std::logic_error If the stream is moved from, closed, or failed.
+  /// A size query error leaves the stream usable.
+  IoResult<std::optional<std::uint64_t>> Size() const;
+
+  /// Closes the opened resource and releases its grant on success.
+  /// @return Success or an IoError. Repeated calls after success return success without additional I/O.
+  /// @throws std::logic_error If the stream is moved from or previously failed.
+  /// A failed close cannot be retried. Destruction releases resources without reporting close errors.
+  /// Close() provides no rollback or power-loss durability guarantee.
+  IoResult<void> Close();
+
+private:
+  explicit RandomAccessStream(std::shared_ptr<detail::RandomAccessStreamState> state);
+  detail::RandomAccessStreamState& State() const;
+
+  std::shared_ptr<detail::RandomAccessStreamState> state_;
+
   friend struct detail::StreamAccess;
 };
 

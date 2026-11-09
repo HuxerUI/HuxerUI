@@ -400,6 +400,87 @@ TEST_CASE("LocalFileReferencesProvideIncrementalAsyncStreams") {
   REQUIRE(read_back.Value() == expected);
 }
 
+TEST_CASE("Random-access streams retain reference access and query the opened resource's current size") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Directories());
+  UiWindow runtime(FileApp, platform);
+  runtime.BuildFrame();
+  const File file = file_application->Directories().temporary_directory.Child("random-reference.bin");
+  REQUIRE(file.WriteBytes(Bytes{std::byte{1}, std::byte{2}}));
+
+  Task<IoResult<RandomAccessStream>> pending;
+  std::weak_ptr<int> weak_access;
+  {
+    auto access = std::make_shared<int>();
+    weak_access = access;
+    const auto reference = detail::MakeLocalFileReference(file, true, {},
+        [access](const File*, const File*, const std::function<void()>& operation) {
+          ++*access;
+          operation();
+        });
+    REQUIRE_THROWS_AS(reference.OpenRandomAccessAsync(FileAccessMode::ReadWrite, FileOpenMode::CreateNew),
+                      std::invalid_argument);
+    pending = reference.OpenRandomAccessAsync(FileAccessMode::ReadWrite);
+  }
+
+  file_tasks.Launch([&]() -> Task<void> {
+    auto opened = co_await std::move(pending);
+    REQUIRE(opened.Succeeded());
+    auto stream = std::move(opened).Value();
+    REQUIRE_FALSE(weak_access.expired());
+    REQUIRE(stream.Size().Value() == 2);
+    REQUIRE(stream.WriteAt(2, Bytes{std::byte{3}}).Succeeded());
+    REQUIRE(stream.Size().Value() == 3);
+    REQUIRE(stream.Close().Succeeded());
+    const auto readonly = detail::MakeLocalFileReference(file, false);
+    auto denied = co_await readonly.OpenRandomAccessAsync(FileAccessMode::WriteOnly, FileOpenMode::TruncateExisting);
+    REQUIRE(denied.Error().code == IoErrorCode::PermissionDenied);
+    file_task_complete = true;
+  });
+  platform.RunUntil([] { return file_task_complete; });
+  REQUIRE(file.ReadBytes().Value() == Bytes{std::byte{1}, std::byte{2}, std::byte{3}});
+}
+
+TEST_CASE("A failed coordinated read can be retried but a failed write invalidates the random-access stream") {
+  ResetFileState();
+  TemporaryDirectory temporary;
+  FileTestPlatform platform(temporary.Directories());
+  UiWindow runtime(FileApp, platform);
+  runtime.BuildFrame();
+  const File file = file_application->Directories().temporary_directory.Child("random-reference-error.bin");
+  REQUIRE(file.WriteBytes(Bytes{std::byte{1}, std::byte{2}}));
+  std::atomic<bool> fail_before = false;
+  std::atomic<bool> fail_after = false;
+  const auto reference = detail::MakeLocalFileReference(file, true, {},
+      [&](const File*, const File*, const std::function<void()>& operation) {
+        if (fail_before) {
+          throw std::system_error(std::make_error_code(std::errc::permission_denied));
+        }
+        operation();
+        if (fail_after) {
+          throw std::system_error(std::make_error_code(std::errc::no_space_on_device));
+        }
+      });
+  file_tasks.Launch([&]() -> Task<void> {
+    auto opened = co_await reference.OpenRandomAccessAsync(FileAccessMode::ReadWrite);
+    REQUIRE(opened.Succeeded());
+    auto stream = std::move(opened).Value();
+    Bytes buffer(2);
+    fail_before = true;
+    REQUIRE(stream.ReadAt(0, buffer).Error().code == IoErrorCode::PermissionDenied);
+    fail_before = false;
+    REQUIRE(stream.ReadAt(0, buffer).Value() == 2);
+    fail_after = true;
+    REQUIRE(stream.WriteAt(0, Bytes{std::byte{3}}).Error().code == IoErrorCode::NoSpace);
+    REQUIRE_THROWS_AS(stream.Size(), std::logic_error);
+    REQUIRE_THROWS_AS(stream.Close(), std::logic_error);
+    file_task_complete = true;
+  });
+  platform.RunUntil([] { return file_task_complete; });
+  REQUIRE(file.ReadBytes().Value() == Bytes{std::byte{3}, std::byte{2}});
+}
+
 TEST_CASE("CancelingAFileTaskDropsItsContinuation") {
   ResetFileState();
   TemporaryDirectory temporary;

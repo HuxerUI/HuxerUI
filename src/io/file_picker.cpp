@@ -203,6 +203,25 @@ Task<IoResult<AsyncOutputStream>> OpenReferenceOutputStream(std::shared_ptr<File
   co_return IoResult<AsyncOutputStream>(StreamAccess::MakeAsyncOutputStream(std::move(opened).Value()));
 }
 
+Task<IoResult<RandomAccessStream>> OpenReferenceRandomAccess(std::shared_ptr<FileReferenceState> state, FileType type,
+                                                             bool can_write, FileAccessMode access, FileOpenMode mode) {
+  if (type != FileType::File || (access != FileAccessMode::ReadOnly && !can_write)) {
+    const auto code = type == FileType::Directory ? IoErrorCode::IsDirectory
+                      : type == FileType::File ? IoErrorCode::PermissionDenied : IoErrorCode::Unsupported;
+    co_return IoResult<RandomAccessStream>(IoError{code, "HuxerUI external file cannot be opened for random access"});
+  }
+  using StateResult = IoResult<std::shared_ptr<RandomAccessStreamState>>;
+  auto opened = co_await RunCallbackOperation<StateResult>(
+      [state = std::move(state), access, mode](FileReferenceRandomAccessCompletion completion) {
+        return state->OpenRandomAccess(access, mode, std::move(completion));
+      },
+      StateResult(IoError{IoErrorCode::Io, "HuxerUI external file could not be opened for random access"}));
+  if (!opened.Succeeded()) {
+    co_return IoResult<RandomAccessStream>(std::move(opened).Error());
+  }
+  co_return IoResult<RandomAccessStream>(StreamAccess::MakeRandomAccessStream(std::move(opened).Value()));
+}
+
 Task<IoResult<std::string>> ReadReferenceString(std::shared_ptr<FileReferenceState> state, FileType type) {
   // This is a whole-file read. Decoding runs after resumption on the owning UiWindow thread, unlike
   // File::ReadStringAsync(), which decodes inside its scheduled file operation.
@@ -866,6 +885,15 @@ std::function<void()> FileReferenceState::OpenWrite(FileReferenceOutputStreamCom
       IoResult<std::shared_ptr<AsyncOutputStreamState>>(ReferenceError(IoErrorCode::Unsupported, "file stream open")));
   return {};
 }
+
+std::function<void()> FileReferenceState::OpenRandomAccess(
+    FileAccessMode, FileOpenMode, FileReferenceRandomAccessCompletion completion
+) {
+  completion(IoResult<std::shared_ptr<RandomAccessStreamState>>(
+      ReferenceError(IoErrorCode::Unsupported, "random-access file open")));
+  return {};
+}
+
 std::optional<File> FileReferenceState::AsFile() const {
   return std::nullopt;
 }
@@ -954,6 +982,19 @@ Task<IoResult<AsyncInputStream>> FileReference::OpenReadAsync() const {
 
 Task<IoResult<AsyncOutputStream>> FileReference::OpenWriteAsync() const {
   return detail::OpenReferenceOutputStream(state_, can_write_, type_);
+}
+
+Task<IoResult<RandomAccessStream>> FileReference::OpenRandomAccessAsync(
+    FileAccessMode access, FileOpenMode mode
+) const {
+  detail::ValidateRandomAccessOpen(access, mode);
+  if (mode == FileOpenMode::CreateNew) {
+    throw std::invalid_argument("HuxerUI cannot create a file through an existing file reference");
+  }
+  if (!state_) {
+    throw std::logic_error("HuxerUI cannot open a moved-from file reference");
+  }
+  return detail::OpenReferenceRandomAccess(state_, type_, can_write_, access, mode);
 }
 
 Task<IoResult<Bytes>> FileReference::ReadBytesAsync() const {
