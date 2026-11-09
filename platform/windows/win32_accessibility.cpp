@@ -348,9 +348,9 @@ class Win32SemanticProvider final : public IRawElementProviderSimple,
                                     public IScrollProvider {
 public:
   Win32SemanticProvider(
-      std::weak_ptr<Win32Accessibility::State> state, SemanticNodeId id, std::uint16_t interfaces
+      std::weak_ptr<Win32Accessibility::Impl> accessibility, SemanticNodeId id, std::uint16_t interfaces
   ) noexcept
-      : state_(std::move(state)), id_(id), interfaces_(interfaces) {}
+      : accessibility_(std::move(accessibility)), id_(id), interfaces_(interfaces) {}
 
   [[nodiscard]] std::uint16_t Interfaces() const noexcept {
     return interfaces_;
@@ -418,20 +418,20 @@ public:
   HRESULT STDMETHODCALLTYPE get_VerticallyScrollable(BOOL* scrollable) override;
 
 private:
-  std::shared_ptr<Win32Accessibility::State> LockState() const noexcept;
+  std::shared_ptr<Win32Accessibility::Impl> LockAccessibility() const noexcept;
   SemanticNodeSnapshot Node() const;
   HRESULT Perform(SemanticAction action) const;
   HRESULT Provider(SemanticNodeId id, IRawElementProviderFragment** provider) const;
 
   std::atomic<ULONG> reference_count_{1};
-  std::weak_ptr<Win32Accessibility::State> state_;
+  std::weak_ptr<Win32Accessibility::Impl> accessibility_;
   SemanticNodeId id_ = 0;
   // COM requires QueryInterface to expose a static interface set for the lifetime of an object.
   std::uint16_t interfaces_ = 0;
 };
 
-struct Win32Accessibility::State final : public std::enable_shared_from_this<Win32Accessibility::State> {
-  ~State() {
+struct Win32Accessibility::Impl final : public std::enable_shared_from_this<Win32Accessibility::Impl> {
+  ~Impl() {
     ReleaseProviders();
   }
 
@@ -634,13 +634,13 @@ struct Win32Accessibility::State final : public std::enable_shared_from_this<Win
   std::unordered_map<SemanticNodeId, Win32SemanticProvider*> providers;
 };
 
-std::shared_ptr<Win32Accessibility::State> Win32SemanticProvider::LockState() const noexcept {
-  return state_.lock();
+std::shared_ptr<Win32Accessibility::Impl> Win32SemanticProvider::LockAccessibility() const noexcept {
+  return accessibility_.lock();
 }
 
 SemanticNodeSnapshot Win32SemanticProvider::Node() const {
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  SemanticNodeSnapshot node = state ? state->Node(id_) : SemanticNodeSnapshot{};
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  SemanticNodeSnapshot node = accessibility ? accessibility->Node(id_) : SemanticNodeSnapshot{};
   if (node && ProviderInterfaces(*node.frame, *node.index, *node) != interfaces_) {
     return {};
   }
@@ -655,8 +655,8 @@ HRESULT Win32SemanticProvider::Perform(SemanticAction action) const {
   if (!node->enabled) {
     return UIA_E_ELEMENTNOTENABLED;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  return state && state->Perform(id_, std::move(action)) ? S_OK : UIA_E_INVALIDOPERATION;
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  return accessibility && accessibility->Perform(id_, std::move(action)) ? S_OK : UIA_E_INVALIDOPERATION;
 }
 
 HRESULT Win32SemanticProvider::Provider(SemanticNodeId id, IRawElementProviderFragment** provider) const {
@@ -664,12 +664,12 @@ HRESULT Win32SemanticProvider::Provider(SemanticNodeId id, IRawElementProviderFr
     return E_INVALIDARG;
   }
   *provider = nullptr;
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   IRawElementProviderSimple* simple = nullptr;
-  const HRESULT result = state->Provider(id, &simple);
+  const HRESULT result = accessibility->Provider(id, &simple);
   if (FAILED(result)) {
     return result;
   }
@@ -857,14 +857,14 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_HostRawElementProvider(IRaw
   }
   *provider = nullptr;
   const SemanticNodeSnapshot node = Node();
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!node || !state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!node || !accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   HWND window = nullptr;
   {
-    std::scoped_lock lock(state->mutex);
-    window = state->window;
+    std::scoped_lock lock(accessibility->mutex);
+    window = accessibility->window;
   }
   if (window != nullptr && HasInterface(interfaces_, kFragmentRootInterface)) {
     return UiaHostProviderFromHwnd(window, provider);
@@ -882,8 +882,8 @@ Win32SemanticProvider::Navigate(NavigateDirection direction, IRawElementProvider
   if (!node) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   std::optional<SemanticNodeId> destination;
@@ -947,16 +947,16 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_BoundingRectangle(UiaRect* 
   }
   *rectangle = {};
   const SemanticNodeSnapshot node = Node();
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!node || !state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!node || !accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   HWND window = nullptr;
   float scale = kDefaultDpiScale;
   {
-    std::scoped_lock lock(state->mutex);
-    window = state->window;
-    scale = state->dpi_scale;
+    std::scoped_lock lock(accessibility->mutex);
+    window = accessibility->window;
+    scale = accessibility->dpi_scale;
   }
   if (window == nullptr) {
     return S_OK;
@@ -982,12 +982,12 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetEmbeddedFragmentRoots(SAFEAR
   if (!node->platform_view_identity.has_value()) {
     return S_OK;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   IRawElementProviderSimple* embedded = nullptr;
-  const HRESULT provider_result = state->QueryPlatformViewProvider(
+  const HRESULT provider_result = accessibility->QueryPlatformViewProvider(
       *node->platform_view_identity,
       __uuidof(IRawElementProviderSimple),
       reinterpret_cast<void**>(&embedded)
@@ -1035,12 +1035,12 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_FragmentRoot(IRawElementPro
   if (!node) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   IRawElementProviderSimple* simple = nullptr;
-  const HRESULT result = state->Provider(node.frame->root, &simple);
+  const HRESULT result = accessibility->Provider(node.frame->root, &simple);
   if (FAILED(result)) {
     return result;
   }
@@ -1059,17 +1059,17 @@ Win32SemanticProvider::ElementProviderFromPoint(double x, double y, IRawElementP
   if (!root || !HasInterface(interfaces_, kFragmentRootInterface)) {
     return root ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   const std::shared_ptr<const SemanticFrame>& frame = root.frame;
   HWND window = nullptr;
   float scale = kDefaultDpiScale;
   {
-    std::scoped_lock lock(state->mutex);
-    window = state->window;
-    scale = state->dpi_scale;
+    std::scoped_lock lock(accessibility->mutex);
+    window = accessibility->window;
+    scale = accessibility->dpi_scale;
   }
   POINT point{static_cast<LONG>(std::lround(x)), static_cast<LONG>(std::lround(y))};
   if (window != nullptr) {
@@ -1103,7 +1103,8 @@ Win32SemanticProvider::ElementProviderFromPoint(double x, double y, IRawElementP
   }
   const SemanticNode* found_node = FindNode(index, *found);
   if (found_node != nullptr && found_node->platform_view_identity.has_value()) {
-    const HRESULT result = state->PlatformViewElementFromPoint(*found_node->platform_view_identity, x, y, provider);
+    const HRESULT result =
+        accessibility->PlatformViewElementFromPoint(*found_node->platform_view_identity, x, y, provider);
     if (SUCCEEDED(result)) {
       return result;
     }
@@ -1120,8 +1121,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetFocus(IRawElementProviderFra
   if (!root || !HasInterface(interfaces_, kFragmentRootInterface)) {
     return root ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   const std::shared_ptr<const SemanticFrame>& frame = root.frame;
@@ -1130,7 +1131,7 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetFocus(IRawElementProviderFra
     return S_OK;
   }
   if (focused->platform_view_identity.has_value()) {
-    const HRESULT result = state->FocusedPlatformViewElement(*focused->platform_view_identity, provider);
+    const HRESULT result = accessibility->FocusedPlatformViewElement(*focused->platform_view_identity, provider);
     if (SUCCEEDED(result)) {
       return result;
     }
@@ -1373,8 +1374,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_SelectionContainer(IRawElem
   if (!node || !node->selected.has_value()) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   std::optional<SemanticNodeId> parent = node->parent;
@@ -1384,7 +1385,7 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_SelectionContainer(IRawElem
       break;
     }
     if (SupportsSelection(*node.index, *candidate)) {
-      return state->Provider(candidate->id, provider);
+      return accessibility->Provider(candidate->id, provider);
     }
     parent = candidate->parent;
   }
@@ -1400,8 +1401,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetSelection(SAFEARRAY** select
   if (!node) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
-  const std::shared_ptr<Win32Accessibility::State> state = LockState();
-  if (!state) {
+  const std::shared_ptr<Win32Accessibility::Impl> accessibility = LockAccessibility();
+  if (!accessibility) {
     return UIA_E_ELEMENTNOTAVAILABLE;
   }
   if (!SupportsSelection(*node.index, *node)) {
@@ -1413,7 +1414,7 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetSelection(SAFEARRAY** select
       continue;
     }
     IRawElementProviderSimple* provider = nullptr;
-    if (SUCCEEDED(state->Provider(item->id, &provider))) {
+    if (SUCCEEDED(accessibility->Provider(item->id, &provider))) {
       selected.push_back(provider);
     }
   }
@@ -1629,27 +1630,27 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_VerticallyScrollable(BOOL* 
   return S_OK;
 }
 
-Win32Accessibility::Win32Accessibility() : state_(std::make_shared<State>()) {}
+Win32Accessibility::Win32Accessibility() : impl_(std::make_shared<Impl>()) {}
 
 Win32Accessibility::~Win32Accessibility() {
   Reset();
 }
 
 void Win32Accessibility::SetUiWindow(UiWindow* ui_window) noexcept {
-  std::scoped_lock lock(state_->mutex);
-  state_->ui_window = ui_window;
-  state_->ui_thread = GetCurrentThreadId();
+  std::scoped_lock lock(impl_->mutex);
+  impl_->ui_window = ui_window;
+  impl_->ui_thread = GetCurrentThreadId();
 }
 
 void Win32Accessibility::SetWindow(HWND window) noexcept {
-  std::scoped_lock lock(state_->mutex);
-  state_->window = window;
-  state_->ui_thread = GetCurrentThreadId();
+  std::scoped_lock lock(impl_->mutex);
+  impl_->window = window;
+  impl_->ui_thread = GetCurrentThreadId();
 }
 
 void Win32Accessibility::SetDpiScale(float scale) noexcept {
-  std::scoped_lock lock(state_->mutex);
-  state_->dpi_scale = std::isfinite(scale) && scale > 0.0F ? scale : kDefaultDpiScale;
+  std::scoped_lock lock(impl_->mutex);
+  impl_->dpi_scale = std::isfinite(scale) && scale > 0.0F ? scale : kDefaultDpiScale;
 }
 
 void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, const Win32PlatformViews* platform_views) {
@@ -1672,23 +1673,23 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
   std::shared_ptr<const SemanticFrame> previous;
   HWND window = nullptr;
   {
-    std::scoped_lock lock(state_->mutex);
-    if (state_->frame == frame && state_->platform_view_handles == platform_view_handles) {
+    std::scoped_lock lock(impl_->mutex);
+    if (impl_->frame == frame && impl_->platform_view_handles == platform_view_handles) {
       return;
     }
-    previous = state_->frame;
-    state_->frame = frame;
-    state_->node_index = std::move(node_index);
-    state_->platform_view_handles = std::move(platform_view_handles);
-    window = state_->window;
+    previous = impl_->frame;
+    impl_->frame = frame;
+    impl_->node_index = std::move(node_index);
+    impl_->platform_view_handles = std::move(platform_view_handles);
+    window = impl_->window;
   }
-  state_->RetainProviders(frame.get());
+  impl_->RetainProviders(frame.get());
   if (!UiaClientsAreListening() || window == nullptr || !frame) {
     return;
   }
 
   IRawElementProviderSimple* root = nullptr;
-  if (FAILED(state_->Provider(frame->root, &root))) {
+  if (FAILED(impl_->Provider(frame->root, &root))) {
     return;
   }
   if (StructureChanged(previous.get(), frame.get())) {
@@ -1708,7 +1709,7 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       continue;
     }
     IRawElementProviderSimple* provider = nullptr;
-    if (FAILED(state_->Provider(node.id, &provider))) {
+    if (FAILED(impl_->Provider(node.id, &provider))) {
       continue;
     }
     const auto raise_string = [provider](PROPERTYID property, const std::string& before, const std::string& after) {
@@ -1828,28 +1829,28 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
 void Win32Accessibility::Reset() noexcept {
   HWND window = nullptr;
   {
-    std::scoped_lock lock(state_->mutex);
-    window = state_->window;
-    state_->ui_window = nullptr;
-    state_->window = nullptr;
-    state_->frame.reset();
-    state_->node_index.reset();
-    state_->platform_view_handles.clear();
+    std::scoped_lock lock(impl_->mutex);
+    window = impl_->window;
+    impl_->ui_window = nullptr;
+    impl_->window = nullptr;
+    impl_->frame.reset();
+    impl_->node_index.reset();
+    impl_->platform_view_handles.clear();
   }
   if (window != nullptr) {
     // UI Automation keeps a per-HWND provider map that must be disconnected before the HWND becomes invalid.
     HUXERUI_DISCARD(UiaReturnRawElementProvider(window, 0, 0, nullptr));
   }
-  state_->ReleaseProviders();
+  impl_->ReleaseProviders();
 }
 
 LRESULT Win32Accessibility::HandleGetObject(WPARAM w_param, LPARAM l_param) {
   std::shared_ptr<const SemanticFrame> frame;
   HWND window = nullptr;
   {
-    std::scoped_lock lock(state_->mutex);
-    frame = state_->frame;
-    window = state_->window;
+    std::scoped_lock lock(impl_->mutex);
+    frame = impl_->frame;
+    window = impl_->window;
   }
   if (!frame || window == nullptr) {
     return 0;
@@ -1870,15 +1871,15 @@ LRESULT Win32Accessibility::HandleActionMessage(LPARAM l_param) {
   }
   UiWindow* ui_window = nullptr;
   {
-    std::scoped_lock lock(state_->mutex);
-    ui_window = state_->ui_window;
+    std::scoped_lock lock(impl_->mutex);
+    ui_window = impl_->ui_window;
   }
   request->result = ui_window != nullptr && ui_window->PerformSemanticAction(request->id, request->action);
   return request->result ? TRUE : FALSE;
 }
 
 HRESULT Win32Accessibility::ProviderForNode(SemanticNodeId id, IRawElementProviderSimple** provider) {
-  return state_->Provider(id, provider);
+  return impl_->Provider(id, provider);
 }
 
 } // namespace huxerui::detail

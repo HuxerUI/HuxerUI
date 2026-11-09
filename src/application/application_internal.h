@@ -29,7 +29,7 @@ namespace huxerui::detail {
 
 class AppResources;
 class HttpTransport;
-class HttpOperationState;
+class HttpOperation;
 
 /// Window identity and observable resource overrides retained independently of the native window.
 /// Callbacks capture this state weakly. Retirement clears ui_window before native facilities disappear, so keeping
@@ -147,8 +147,8 @@ struct ApplicationRuntimeState final : std::enable_shared_from_this<ApplicationR
   std::shared_ptr<AppResources> resources;
   std::shared_ptr<ApplicationService> application_service;
   std::shared_ptr<HttpTransport> http_transport;
-  std::vector<std::weak_ptr<HttpOperationState>> http_operations;
-  std::shared_ptr<TaskScopeState> tasks;
+  std::vector<std::weak_ptr<HttpOperation>> http_operations;
+  std::shared_ptr<TaskScopeImpl> tasks;
   std::vector<std::weak_ptr<UiExecutionState>> uis;
   std::vector<std::function<void()>> handler_cleanups;
   bool event_dispatch_pending = false;
@@ -188,7 +188,7 @@ public:
 
 class PermissionController final {
 public:
-  struct State;
+  struct Impl;
 
   PermissionController(std::shared_ptr<PermissionTransport> transport, UiThreadDispatcher dispatch_to_ui_thread);
   ~PermissionController();
@@ -204,7 +204,7 @@ public:
   void Disconnect() noexcept;
 
 private:
-  std::shared_ptr<State> state_;
+  std::shared_ptr<Impl> impl_;
 };
 
 struct ResolvedLocalNotification {
@@ -249,7 +249,7 @@ public:
 
 class LocalNotificationService final {
 public:
-  struct State;
+  struct Impl;
 
   static std::shared_ptr<LocalNotificationService> Create(std::shared_ptr<LocalNotificationTransport> transport,
                                                           UiThreadDispatcher dispatch_to_ui_thread,
@@ -271,7 +271,7 @@ private:
 
   [[nodiscard]] ResolvedLocalNotification Resolve(LocalNotification notification) const;
 
-  std::shared_ptr<State> state_;
+  std::shared_ptr<Impl> impl_;
   std::shared_ptr<AppResources> resources_;
 };
 

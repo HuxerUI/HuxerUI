@@ -150,14 +150,14 @@ GVariant* PixmapVariant(const std::optional<IconPixmap>& pixmap) {
 
 } // namespace
 
-struct LinuxSystemTrayTransport::State {
+struct LinuxSystemTrayTransport::Impl {
   struct MenuNode {
     int id = 0;
     ResolvedSystemTrayMenuEntry entry;
     std::vector<MenuNode> children;
   };
 
-  State() {
+  Impl() {
     GError* error = nullptr;
     item_node = g_dbus_node_info_new_for_xml(item_xml, &error);
     if (item_node == nullptr) {
@@ -174,7 +174,7 @@ struct LinuxSystemTrayTransport::State {
     }
   }
 
-  ~State() {
+  ~Impl() {
     StopWatching();
     g_dbus_node_info_unref(menu_node);
     g_dbus_node_info_unref(item_node);
@@ -213,19 +213,19 @@ struct LinuxSystemTrayTransport::State {
   }
 
   static void WatcherAppeared(GDBusConnection* connection, const gchar*, const gchar*, gpointer data) {
-    static_cast<State*>(data)->Connect(connection);
+    static_cast<Impl*>(data)->Connect(connection);
   }
 
   static void WatcherVanished(GDBusConnection*, const gchar*, gpointer data) {
-    State* state = static_cast<State*>(data);
-    state->Unexport();
-    state->SetAvailable(false);
+    Impl* impl = static_cast<Impl*>(data);
+    impl->Unexport();
+    impl->SetAvailable(false);
   }
 
   static void WatcherPropertiesChanged(
       GDBusConnection* connection, const gchar*, const gchar*, const gchar*, const gchar*, GVariant*, gpointer data
   ) {
-    static_cast<State*>(data)->Connect(connection);
+    static_cast<Impl*>(data)->Connect(connection);
   }
 
   void Connect(GDBusConnection* value) noexcept {
@@ -521,10 +521,10 @@ struct LinuxSystemTrayTransport::State {
       GDBusMethodInvocation* invocation,
       gpointer data
   ) {
-    auto& state = *static_cast<State*>(data);
+    auto& impl = *static_cast<Impl*>(data);
     try {
-      if (std::string_view(method) == "Activate" && state.event_handler) {
-        state.event_handler({.type = SystemTrayEventType::Activate});
+      if (std::string_view(method) == "Activate" && impl.event_handler) {
+        impl.event_handler({.type = SystemTrayEventType::Activate});
       }
       g_dbus_method_invocation_return_value(invocation, nullptr);
     } catch (const std::exception& exception) {
@@ -537,10 +537,10 @@ struct LinuxSystemTrayTransport::State {
   static GVariant* ReadItemProperty(
       GDBusConnection*, const gchar*, const gchar*, const gchar*, const gchar* property, GError**, gpointer data
   ) {
-    const auto& state = *static_cast<State*>(data);
+    const auto& impl = *static_cast<Impl*>(data);
     const std::string_view name = property;
-    const bool active = state.presentation.has_value();
-    const std::string& tooltip = active ? state.presentation->tooltip : empty_string;
+    const bool active = impl.presentation.has_value();
+    const std::string& tooltip = active ? impl.presentation->tooltip : empty_string;
     if (name == "Category") {
       return g_variant_new_string("ApplicationStatus");
     }
@@ -561,13 +561,13 @@ struct LinuxSystemTrayTransport::State {
       return g_variant_new_string("");
     }
     if (name == "IconPixmap") {
-      return PixmapVariant(state.icon);
+      return PixmapVariant(impl.icon);
     }
     if (name == "OverlayIconPixmap" || name == "AttentionIconPixmap") {
       return EmptyPixmap();
     }
     if (name == "ToolTip") {
-      return g_variant_new("(s@a(iiay)ss)", "", PixmapVariant(state.icon), tooltip.c_str(), "");
+      return g_variant_new("(s@a(iiay)ss)", "", PixmapVariant(impl.icon), tooltip.c_str(), "");
     }
     if (name == "ItemIsMenu") {
       return g_variant_new_boolean(FALSE);
@@ -588,7 +588,7 @@ struct LinuxSystemTrayTransport::State {
       GDBusMethodInvocation* invocation,
       gpointer data
   ) {
-    auto& state = *static_cast<State*>(data);
+    auto& impl = *static_cast<Impl*>(data);
     try {
       const std::string_view name = method;
       if (name == "GetLayout") {
@@ -597,7 +597,7 @@ struct LinuxSystemTrayTransport::State {
         GVariant* properties = nullptr;
         g_variant_get(parameters, "(ii@as)", &parent, &depth, &properties);
         g_variant_unref(properties);
-        const MenuNode* node = parent == 0 ? nullptr : state.FindMenuNode(parent, state.menu);
+        const MenuNode* node = parent == 0 ? nullptr : impl.FindMenuNode(parent, impl.menu);
         if (parent != 0 && node == nullptr) {
           g_dbus_method_invocation_return_dbus_error(
               invocation,
@@ -608,7 +608,7 @@ struct LinuxSystemTrayTransport::State {
         }
         g_dbus_method_invocation_return_value(
             invocation,
-            g_variant_new("(u@(ia{sv}av))", state.menu_revision, state.MenuLayout(node, depth))
+            g_variant_new("(u@(ia{sv}av))", impl.menu_revision, impl.MenuLayout(node, depth))
         );
         return;
       }
@@ -621,9 +621,9 @@ struct LinuxSystemTrayTransport::State {
         g_variant_builder_init(&result, G_VARIANT_TYPE("a(ia{sv})"));
         gint id = 0;
         while (g_variant_iter_loop(ids, "i", &id)) {
-          const MenuNode* node = id == 0 ? nullptr : state.FindMenuNode(id, state.menu);
+          const MenuNode* node = id == 0 ? nullptr : impl.FindMenuNode(id, impl.menu);
           if (id == 0 || node != nullptr) {
-            g_variant_builder_add(&result, "(i@a{sv})", id, state.MenuProperties(node));
+            g_variant_builder_add(&result, "(i@a{sv})", id, impl.MenuProperties(node));
           }
         }
         g_variant_iter_free(ids);
@@ -637,7 +637,7 @@ struct LinuxSystemTrayTransport::State {
         gint id = 0;
         const gchar* property = nullptr;
         g_variant_get(parameters, "(i&s)", &id, &property);
-        const MenuNode* node = id == 0 ? nullptr : state.FindMenuNode(id, state.menu);
+        const MenuNode* node = id == 0 ? nullptr : impl.FindMenuNode(id, impl.menu);
         if (id != 0 && node == nullptr) {
           g_dbus_method_invocation_return_dbus_error(
               invocation,
@@ -646,7 +646,7 @@ struct LinuxSystemTrayTransport::State {
           );
           return;
         }
-        GVariant* all_properties = state.MenuProperties(node);
+        GVariant* all_properties = impl.MenuProperties(node);
         GVariant* value = g_variant_lookup_value(all_properties, property, nullptr);
         g_variant_unref(all_properties);
         if (value == nullptr) {
@@ -668,7 +668,7 @@ struct LinuxSystemTrayTransport::State {
         guint timestamp = 0;
         g_variant_get(parameters, "(i&svu)", &id, &event, &payload, &timestamp);
         if (std::string_view(event) == "clicked") {
-          state.Invoke(id);
+          impl.Invoke(id);
         }
         g_variant_unref(payload);
         g_dbus_method_invocation_return_value(invocation, nullptr);
@@ -683,7 +683,7 @@ struct LinuxSystemTrayTransport::State {
         guint timestamp = 0;
         while (g_variant_iter_loop(events, "(i&svu)", &id, &event, &payload, &timestamp)) {
           if (std::string_view(event) == "clicked") {
-            state.Invoke(id);
+            impl.Invoke(id);
           }
         }
         g_variant_iter_free(events);
@@ -767,29 +767,29 @@ struct LinuxSystemTrayTransport::State {
   bool available = false;
 };
 
-LinuxSystemTrayTransport::LinuxSystemTrayTransport() : state_(std::make_unique<State>()) {}
+LinuxSystemTrayTransport::LinuxSystemTrayTransport() : impl_(std::make_unique<Impl>()) {}
 
 LinuxSystemTrayTransport::~LinuxSystemTrayTransport() = default;
 
 bool LinuxSystemTrayTransport::IsAvailable() const noexcept {
-  return state_->available;
+  return impl_->available;
 }
 
 void LinuxSystemTrayTransport::SetEventHandler(std::function<void(SystemTrayEvent)> handler) {
-  state_->event_handler = std::move(handler);
-  if (state_->event_handler) {
-    state_->StartWatching();
+  impl_->event_handler = std::move(handler);
+  if (impl_->event_handler) {
+    impl_->StartWatching();
   } else {
-    state_->StopWatching();
+    impl_->StopWatching();
   }
 }
 
 void LinuxSystemTrayTransport::Show(const ResolvedSystemTrayPresentation& presentation) {
-  state_->Show(presentation);
+  impl_->Show(presentation);
 }
 
 void LinuxSystemTrayTransport::Hide() noexcept {
-  state_->Hide();
+  impl_->Hide();
 }
 
 } // namespace huxerui::detail

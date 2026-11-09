@@ -43,7 +43,7 @@ public:
   );
 
 private:
-  struct State;
+  struct Impl;
   struct CommandRange;
 
   void RenderSequence(const PaintSequence& sequence, CGContextRef context, CommandRange* range);
@@ -68,7 +68,7 @@ private:
   void RenderCommand(CGContextRef context, const PopTransformCommand& command);
   void RenderCommand(CGContextRef context, const PlacePlatformViewCommand& command);
 
-  std::unique_ptr<State> state_;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

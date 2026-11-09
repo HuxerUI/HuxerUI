@@ -31,7 +31,7 @@ Bytes WireBytes(std::initializer_list<std::uint8_t> values) {
   return bytes;
 }
 
-class PayloadFileReferenceState final : public detail::FileReferenceState {
+class PayloadFileReferenceBackend final : public detail::FileReferenceBackend {
 public:
   std::function<void()> ReadBytes(detail::FileReferenceBytesCompletion completion) override {
     completion(IoResult<Bytes>(Bytes{}));
@@ -49,10 +49,10 @@ public:
   }
 };
 
-FileReference MakePayloadFileReference(const std::shared_ptr<PayloadFileReferenceState>& state,
+FileReference MakePayloadFileReference(const std::shared_ptr<PayloadFileReferenceBackend>& backend,
                                        std::string name = "sample.mp4") {
   return detail::MakeFileReference(
-      {.name = std::move(name), .size = 42, .content_type = "video/mp4", .can_write = true}, state);
+      {.name = std::move(name), .size = 42, .content_type = "video/mp4", .can_write = true}, backend);
 }
 
 TEST_CASE("PlatformPayloadTransportsBufferReferencesWithoutInlineBytes") {
@@ -146,10 +146,10 @@ TEST_CASE("PlatformPayloadRetainsExternalTextureIdentity") {
 }
 
 TEST_CASE("PlatformPayloadRetainsFileReferenceCapabilityAndMetadata") {
-  auto state = std::make_shared<PayloadFileReferenceState>();
-  const FileReference reference = MakePayloadFileReference(state);
-  const FileReference alias = MakePayloadFileReference(state, "alias.mp4");
-  const FileReference other = MakePayloadFileReference(std::make_shared<PayloadFileReferenceState>());
+  auto backend = std::make_shared<PayloadFileReferenceBackend>();
+  const FileReference reference = MakePayloadFileReference(backend);
+  const FileReference alias = MakePayloadFileReference(backend, "alias.mp4");
+  const FileReference other = MakePayloadFileReference(std::make_shared<PayloadFileReferenceBackend>());
   const PlatformPayload payload(reference);
 
   REQUIRE(payload.Kind() == PlatformPayloadKind::FileReference);
@@ -159,8 +159,8 @@ TEST_CASE("PlatformPayloadRetainsFileReferenceCapabilityAndMetadata") {
   REQUIRE(payload.AsFileReference().CanWrite());
   REQUIRE(PlatformPayload(reference) == PlatformPayload(alias));
   REQUIRE(PlatformPayload(reference) != PlatformPayload(other));
-  REQUIRE(detail::FileReferenceState::Of(detail::DecodePlatformPayload<FileReference>(payload)) == state);
-  REQUIRE(detail::FileReferenceState::Of(detail::EncodePlatformValue(reference).AsFileReference()) == state);
+  REQUIRE(detail::FileReferenceBackend::Of(detail::DecodePlatformPayload<FileReference>(payload)) == backend);
+  REQUIRE(detail::FileReferenceBackend::Of(detail::EncodePlatformValue(reference).AsFileReference()) == backend);
 
   FileReference moved = reference;
   HUXERUI_DISCARD(FileReference(std::move(moved)));
@@ -197,7 +197,7 @@ TEST_CASE("PlatformPayloadAccessorsRequireTheDeclaredKind") {
 
 TEST_CASE("PlatformPayloadEnvelopeRoundTripsEveryValueKind") {
   const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
-  const FileReference reference = MakePayloadFileReference(std::make_shared<PayloadFileReferenceState>());
+  const FileReference reference = MakePayloadFileReference(std::make_shared<PayloadFileReferenceBackend>());
   const PlatformPayload payload = PlatformPayload::Object{
       {"boolean", true},
       {"integer", std::numeric_limits<std::int64_t>::min()},
@@ -213,14 +213,14 @@ TEST_CASE("PlatformPayloadEnvelopeRoundTripsEveryValueKind") {
 
   REQUIRE(envelope.external_textures == std::vector<std::shared_ptr<ExternalTexture>>{texture});
   REQUIRE(envelope.file_references.size() == 1);
-  REQUIRE(detail::FileReferenceState::Of(envelope.file_references.front()) ==
-          detail::FileReferenceState::Of(reference));
+  REQUIRE(detail::FileReferenceBackend::Of(envelope.file_references.front()) ==
+          detail::FileReferenceBackend::Of(reference));
   REQUIRE(PlatformPayload::Decode(envelope) == payload);
 }
 
 TEST_CASE("PlatformPayloadEnvelopeHasStableWireValues") {
   const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
-  const FileReference reference = MakePayloadFileReference(std::make_shared<PayloadFileReferenceState>());
+  const FileReference reference = MakePayloadFileReference(std::make_shared<PayloadFileReferenceBackend>());
   const PlatformPayload payload = PlatformPayload::List{
       nullptr,
       true,
@@ -278,7 +278,7 @@ TEST_CASE("PlatformPayloadEnvelopeRejectsMalformedInput") {
 
 TEST_CASE("PlatformPayloadEnvelopeRequiresExactCapabilityTables") {
   const std::shared_ptr<ExternalTexture> texture = MakeTestExternalTexture({320.0F, 180.0F});
-  const FileReference reference = MakePayloadFileReference(std::make_shared<PayloadFileReferenceState>());
+  const FileReference reference = MakePayloadFileReference(std::make_shared<PayloadFileReferenceBackend>());
   const PlatformPayload::Envelope texture_envelope = PlatformPayload(texture).Encode();
   const PlatformPayload::Envelope reference_envelope = PlatformPayload(reference).Encode();
   const PlatformPayload::Envelope empty_envelope = PlatformPayload(nullptr).Encode();

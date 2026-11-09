@@ -127,15 +127,15 @@ HICON DecodeTrayIcon(const ImageAsset& image) {
 
 } // namespace
 
-struct Win32SystemTrayTransport::State {
+struct Win32SystemTrayTransport::Impl {
   struct Command {
     UINT menu_id = 0;
     std::uint64_t command = 0;
   };
 
-  State() : taskbar_created(RegisterWindowMessageW(L"TaskbarCreated")) {}
+  Impl() : taskbar_created(RegisterWindowMessageW(L"TaskbarCreated")) {}
 
-  ~State() {
+  ~Impl() {
     Hide();
   }
 
@@ -302,7 +302,7 @@ struct Win32SystemTrayTransport::State {
   bool added = false;
 };
 
-Win32SystemTrayTransport::Win32SystemTrayTransport() : state_(std::make_unique<State>()) {}
+Win32SystemTrayTransport::Win32SystemTrayTransport() : impl_(std::make_unique<Impl>()) {}
 
 Win32SystemTrayTransport::~Win32SystemTrayTransport() = default;
 
@@ -311,51 +311,51 @@ bool Win32SystemTrayTransport::IsAvailable() const noexcept {
 }
 
 void Win32SystemTrayTransport::SetEventHandler(std::function<void(SystemTrayEvent)> handler) {
-  state_->event_handler = std::move(handler);
+  impl_->event_handler = std::move(handler);
 }
 
 void Win32SystemTrayTransport::Show(const ResolvedSystemTrayPresentation& presentation) {
-  state_->Show(presentation);
+  impl_->Show(presentation);
 }
 
 void Win32SystemTrayTransport::Hide() noexcept {
-  state_->Hide();
+  impl_->Hide();
 }
 
 void Win32SystemTrayTransport::SetWindow(HWND window) noexcept {
-  if (state_->window == window) {
+  if (impl_->window == window) {
     return;
   }
-  state_->Hide();
-  state_->window = window;
+  impl_->Hide();
+  impl_->window = window;
 }
 
 std::optional<LRESULT> Win32SystemTrayTransport::HandleMessage(UINT message, WPARAM, LPARAM l_param) {
-  if (state_->taskbar_created != 0 && message == state_->taskbar_created) {
-    state_->added = false;
-    if (state_->presentation.has_value()) {
-      HWND target = state_->window;
-      if (target != nullptr && state_->Commit(target, NIM_ADD, state_->icon, &*state_->presentation)) {
-        NOTIFYICONDATAW version = state_->Data(target, state_->icon, &*state_->presentation);
+  if (impl_->taskbar_created != 0 && message == impl_->taskbar_created) {
+    impl_->added = false;
+    if (impl_->presentation.has_value()) {
+      HWND target = impl_->window;
+      if (target != nullptr && impl_->Commit(target, NIM_ADD, impl_->icon, &*impl_->presentation)) {
+        NOTIFYICONDATAW version = impl_->Data(target, impl_->icon, &*impl_->presentation);
         version.uVersion = NOTIFYICON_VERSION_4;
         HUXERUI_DISCARD(Shell_NotifyIconW(NIM_SETVERSION, &version));
-        state_->added = true;
+        impl_->added = true;
       }
     }
     return 0;
   }
-  if (message != tray_callback_message || !state_->presentation.has_value()) {
+  if (message != tray_callback_message || !impl_->presentation.has_value()) {
     return std::nullopt;
   }
   const UINT event = LOWORD(l_param);
   if (event == WM_CONTEXTMENU || event == WM_RBUTTONUP) {
-    if (HWND target = state_->window) {
-      state_->ShowMenu(target);
+    if (HWND target = impl_->window) {
+      impl_->ShowMenu(target);
     }
     return 0;
   }
-  if ((event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_LBUTTONUP) && state_->event_handler) {
-    state_->event_handler({.type = SystemTrayEventType::Activate});
+  if ((event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_LBUTTONUP) && impl_->event_handler) {
+    impl_->event_handler({.type = SystemTrayEventType::Activate});
     return 0;
   }
   return 0;

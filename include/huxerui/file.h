@@ -25,10 +25,10 @@ class UiWindow;
 namespace detail {
 class FilePickerController;
 class FilePickerTransport;
-class FileReferenceState;
+class FileReferenceBackend;
 struct FileReferenceMetadata;
 [[nodiscard]] FileReference
-MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
+MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceBackend> backend);
 } // namespace detail
 
 /// @brief The kind of entry reported by a file system or document provider.
@@ -582,18 +582,18 @@ public:
   ) const;
 
 private:
-  FileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceState> state);
+  FileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceBackend> backend);
 
   std::string name_;
   std::optional<std::uint64_t> size_;
   std::optional<std::string> content_type_;
   bool can_write_ = false;
   FileType type_ = FileType::File;
-  std::shared_ptr<detail::FileReferenceState> state_;
+  std::shared_ptr<detail::FileReferenceBackend> backend_;
 
-  friend class detail::FileReferenceState;
-  friend FileReference
-  detail::MakeFileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceState> state);
+  friend class detail::FileReferenceBackend;
+  friend FileReference detail::MakeFileReference(detail::FileReferenceMetadata metadata,
+                                                 std::shared_ptr<detail::FileReferenceBackend> backend);
 };
 
 /// @brief Portable picker hints expressed as filename extensions and MIME types.

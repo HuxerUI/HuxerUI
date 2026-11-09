@@ -36,7 +36,7 @@ class SystemTrayService;
 class PopupService;
 class SnackBarService;
 class ToastService;
-struct LayerAnchorState;
+struct LayerAnchorBinding;
 
 template <class Context, class Factory, class... Arguments>
 concept PresentationFactoryFor =
@@ -740,9 +740,9 @@ public:
   static const detail::ModifierDescriptor& Descriptor();
 
 private:
-  explicit LayerAnchor(std::shared_ptr<detail::LayerAnchorState> state) : state_(std::move(state)) {}
+  explicit LayerAnchor(std::shared_ptr<detail::LayerAnchorBinding> binding) : binding_(std::move(binding)) {}
 
-  std::shared_ptr<detail::LayerAnchorState> state_;
+  std::shared_ptr<detail::LayerAnchorBinding> binding_;
 
   friend class PopupHandle;
   friend class MenuHandle;
@@ -761,9 +761,9 @@ public:
   bool Dismiss() const;
 
 private:
-  PopupContext(std::shared_ptr<detail::LayerAnchorState> anchor, LayerId id) : anchor_(std::move(anchor)), id_(id) {}
+  PopupContext(std::shared_ptr<detail::LayerAnchorBinding> anchor, LayerId id) : anchor_(std::move(anchor)), id_(id) {}
 
-  std::shared_ptr<detail::LayerAnchorState> anchor_;
+  std::shared_ptr<detail::LayerAnchorBinding> anchor_;
   LayerId id_;
 
   friend class detail::PopupService;
@@ -859,13 +859,13 @@ private:
   PopupHandle(
       std::shared_ptr<detail::PopupService> service,
       std::shared_ptr<const Environment> environment,
-      std::shared_ptr<detail::LayerAnchorState> anchor
+      std::shared_ptr<detail::LayerAnchorBinding> anchor
   )
       : service_(std::move(service)), environment_(std::move(environment)), anchor_(std::move(anchor)) {}
 
   std::shared_ptr<detail::PopupService> service_;
   std::shared_ptr<const Environment> environment_;
-  std::shared_ptr<detail::LayerAnchorState> anchor_;
+  std::shared_ptr<detail::LayerAnchorBinding> anchor_;
 
   friend PopupHandle UsePopup();
 };
@@ -957,13 +957,13 @@ private:
   MenuHandle(
       std::shared_ptr<detail::MenuService> service,
       std::shared_ptr<const Environment> environment,
-      std::shared_ptr<detail::LayerAnchorState> anchor
+      std::shared_ptr<detail::LayerAnchorBinding> anchor
   )
       : service_(std::move(service)), environment_(std::move(environment)), anchor_(std::move(anchor)) {}
 
   std::shared_ptr<detail::MenuService> service_;
   std::shared_ptr<const Environment> environment_;
-  std::shared_ptr<detail::LayerAnchorState> anchor_;
+  std::shared_ptr<detail::LayerAnchorBinding> anchor_;
 
   friend MenuHandle UseMenu();
   friend class detail::MenuService;

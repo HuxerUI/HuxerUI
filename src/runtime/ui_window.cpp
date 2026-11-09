@@ -1363,7 +1363,7 @@ void UiWindow::InitializeWindow(Runtime& application_runtime, ViewFactory conten
       hook(root);
     }
     if (application.options.show_debug_overlay) {
-      state_->debug_metrics_ = std::make_shared<DebugMetricsState>(*application_state->owner);
+      state_->debug_metrics_ = std::make_shared<DebugMetricsSampler>(*application_state->owner);
       InstallDebugOverlay(root, state_->debug_metrics_);
     }
     std::erase_if(application_state->uis, [](const auto& weak) {
@@ -1616,7 +1616,7 @@ void UiWindow::DiscardLifecycleCommits() noexcept {
   state_->lifecycle_commits_.clear();
 }
 
-std::shared_ptr<detail::TaskScopeState> UiWindow::CreateTaskScope() {
+std::shared_ptr<detail::TaskScopeImpl> UiWindow::CreateTaskScope() {
   return detail::MakeTaskScopeState(state_->application_->Dispatcher(), detail::CurrentExecutionContext());
 }
 
@@ -1634,7 +1634,7 @@ detail::PlatformChannelEndpoint detail::MakePlatformChannelEndpoint(UiWindow& ui
                                       std::make_shared<ExecutionContext>(*source));
 }
 
-void UiWindow::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) noexcept {
+void UiWindow::RetireTaskScope(std::shared_ptr<detail::TaskScopeImpl> scope) noexcept {
   if (!scope) {
     return;
   }
@@ -1646,7 +1646,7 @@ void UiWindow::RetireTaskScope(std::shared_ptr<detail::TaskScopeState> scope) no
 }
 
 void UiWindow::CommitTaskScopes() noexcept {
-  for (const std::shared_ptr<detail::TaskScopeState>& scope : state_->retired_task_scopes_) {
+  for (const std::shared_ptr<detail::TaskScopeImpl>& scope : state_->retired_task_scopes_) {
     detail::CloseTaskScope(scope);
   }
   state_->retired_task_scopes_.clear();
@@ -1865,7 +1865,7 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
   detail::TextInteraction::KeyboardDispatch keyboard_dispatch(*state_->text_);
   HUXERUI_PROFILE_FRAME(*state_->root_environment_);
   HUXERUI_PROFILE_STAGE(profile_stage, Compose);
-  detail::DebugMetricsState* const debug_metrics = state_->debug_metrics_.get();
+  detail::DebugMetricsSampler* const debug_metrics = state_->debug_metrics_.get();
   const double build_started_at = debug_metrics != nullptr ? state_->owner_.Now() : 0.0;
   const auto record_debug_commit = [&] {
     if (debug_metrics == nullptr) {

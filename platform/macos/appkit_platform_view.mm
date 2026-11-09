@@ -227,8 +227,8 @@ bool IsDescendant(NSView* view, NSView* ancestor) {
 
 } // namespace
 
-struct AppKitPlatformViews::State {
-  State(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value,
+struct AppKitPlatformViews::Impl {
+  Impl(AppKitRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value,
         NSWindow* platform_window_value)
       : renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value), platform_window(platform_window_value) {
     if (platform_window == nil) {
@@ -354,7 +354,7 @@ struct AppKitPlatformViews::State {
 
 AppKitPlatformViews::AppKitPlatformViews(AppKitRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window,
                                          NSWindow* platform_window)
-    : state_(std::make_unique<State>(renderer, registry, ui_window, platform_window)) {}
+    : impl_(std::make_unique<Impl>(renderer, registry, ui_window, platform_window)) {}
 
 AppKitPlatformViews::~AppKitPlatformViews() {
   Shutdown();
@@ -362,7 +362,7 @@ AppKitPlatformViews::~AppKitPlatformViews() {
 
 bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
   NSArray<NSView*>* previous_subviews = [root.subviews copy];
-  const std::optional<std::uint64_t> responder_identity = state_->IdentityForResponder(root.window.firstResponder);
+  const std::optional<std::uint64_t> responder_identity = impl_->IdentityForResponder(root.window.firstResponder);
   RenderComposition composition = BuildRenderComposition(frame.scene);
   std::unordered_set<std::uint64_t> retained_identities;
   std::vector<std::pair<std::uint64_t, std::unique_ptr<HostedPlatformView>>> pending;
@@ -374,9 +374,9 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
     }
     const PlacePlatformViewCommand& command = *placement->command;
     retained_identities.insert(command.Identity());
-    const auto found = state_->hosted.find(command.Identity());
-    if (found == state_->hosted.end() || found->second->type != command.Type()) {
-      pending.emplace_back(command.Identity(), state_->Create(*placement));
+    const auto found = impl_->hosted.find(command.Identity());
+    if (found == impl_->hosted.end() || found->second->type != command.Type()) {
+      pending.emplace_back(command.Identity(), impl_->Create(*placement));
       continue;
     }
     found->second->Update(command);
@@ -389,35 +389,35 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
                                          }));
   if (focused_instance_removed) {
     [root.window makeFirstResponder:root];
-    state_->platform_view_focus_identity.reset();
+    impl_->platform_view_focus_identity.reset();
   }
   for (auto& [identity, hosted] : pending) {
-    state_->hosted.erase(identity);
-    state_->hosted.emplace(identity, std::move(hosted));
+    impl_->hosted.erase(identity);
+    impl_->hosted.emplace(identity, std::move(hosted));
   }
-  std::erase_if(state_->hosted, [&retained_identities](const auto& entry) {
+  std::erase_if(impl_->hosted, [&retained_identities](const auto& entry) {
     return !retained_identities.contains(entry.first);
   });
 
   NSMutableArray<NSView*>* ordered_subviews = [NSMutableArray array];
   std::unordered_set<SliceKey, SliceKeyHash> retained_slices;
-  state_->base_slice.reset();
+  impl_->base_slice.reset();
   bool passed_platform_view = false;
   for (const RenderCompositionLayer& layer : composition.layers) {
     if (const auto* slice = std::get_if<RenderSlice>(&layer)) {
-      if (!passed_platform_view && !state_->base_slice.has_value()) {
-        state_->base_slice = *slice;
+      if (!passed_platform_view && !impl_->base_slice.has_value()) {
+        impl_->base_slice = *slice;
         continue;
       }
       const SliceKey key{slice->preceding_platform_view, slice->following_platform_view};
       retained_slices.insert(key);
-      HuxerUIPlatformSliceView* slice_view = state_->slices[key];
+      HuxerUIPlatformSliceView* slice_view = impl_->slices[key];
       if (slice_view == nil) {
         slice_view = [[HuxerUIPlatformSliceView alloc] initWithFrame:root.bounds];
         slice_view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-        state_->slices[key] = slice_view;
+        impl_->slices[key] = slice_view;
       }
-      slice_view->huxeruiRenderer = state_->renderer;
+      slice_view->huxeruiRenderer = impl_->renderer;
       slice_view->huxeruiFrame = &frame;
       slice_view->huxeruiFirstCommand = slice->first_command;
       slice_view->huxeruiCommandCount = slice->command_count;
@@ -430,12 +430,12 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
 
     const auto& placement = std::get<PlatformViewPlacement>(layer);
     passed_platform_view = true;
-    HostedPlatformView& hosted = *state_->hosted.at(placement.command->Identity());
-    state_->Place(hosted, placement);
+    HostedPlatformView& hosted = *impl_->hosted.at(placement.command->Identity());
+    impl_->Place(hosted, placement);
     [ordered_subviews addObject:hosted.container];
   }
 
-  std::erase_if(state_->slices, [&retained_slices](const auto& entry) {
+  std::erase_if(impl_->slices, [&retained_slices](const auto& entry) {
     if (retained_slices.contains(entry.first)) {
       return false;
     }
@@ -447,39 +447,39 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
   if (composition_changed) {
     [root setSubviews:ordered_subviews];
   }
-  state_->root = root;
-  state_->frame = &frame;
-  for (auto& [identity, hosted] : state_->hosted) {
+  impl_->root = root;
+  impl_->frame = &frame;
+  for (auto& [identity, hosted] : impl_->hosted) {
     hosted->event_route->active = true;
   }
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*impl_->ui_window);
   const std::optional<std::uint64_t> current_responder_identity =
-      state_->IdentityForResponder(root.window.firstResponder);
+      impl_->IdentityForResponder(root.window.firstResponder);
   if (focused_identity.has_value()) {
-    const auto focused = state_->hosted.find(*focused_identity);
-    if (focused == state_->hosted.end() || focused->second->container.hidden) {
+    const auto focused = impl_->hosted.find(*focused_identity);
+    if (focused == impl_->hosted.end() || focused->second->container.hidden) {
       if (current_responder_identity == focused_identity) {
         [root.window makeFirstResponder:root];
       }
-      state_->platform_view_focus_identity.reset();
-      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+      impl_->platform_view_focus_identity.reset();
+      InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
       if ([root.window makeFirstResponder:focused->second->view]) {
-        state_->platform_view_focus_identity = focused_identity;
+        impl_->platform_view_focus_identity = focused_identity;
       } else {
-        state_->platform_view_focus_identity.reset();
-        InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+        impl_->platform_view_focus_identity.reset();
+        InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
       }
     } else {
-      state_->platform_view_focus_identity = focused_identity;
+      impl_->platform_view_focus_identity = focused_identity;
     }
   } else if (current_responder_identity.has_value()) {
     [root.window makeFirstResponder:root];
-    state_->platform_view_focus_identity.reset();
+    impl_->platform_view_focus_identity.reset();
   } else {
-    state_->platform_view_focus_identity.reset();
+    impl_->platform_view_focus_identity.reset();
   }
-  for (const auto& [key, slice] : state_->slices) {
+  for (const auto& [key, slice] : impl_->slices) {
     if (composition_changed) {
       [slice setNeedsDisplay:YES];
     } else {
@@ -490,103 +490,103 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
 }
 
 void AppKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect) {
-  if (state_->base_slice.has_value()) {
-    const RenderSlice& slice = *state_->base_slice;
-    state_->renderer->DrawSlice(context, dirty_rect, state_->frame, slice.first_command, slice.command_count, true);
+  if (impl_->base_slice.has_value()) {
+    const RenderSlice& slice = *impl_->base_slice;
+    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, slice.first_command, slice.command_count, true);
     return;
   }
-  state_->renderer->DrawSlice(context, dirty_rect, state_->frame, 0, 0, true);
+  impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, 0, 0, true);
 }
 
 NSView* AppKitPlatformViews::HitTest(Point point) const {
-  if (state_->ui_window == nullptr) {
+  if (impl_->ui_window == nullptr) {
     return nil;
   }
-  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*state_->ui_window, point);
+  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*impl_->ui_window, point);
   if (!identity.has_value()) {
     return nil;
   }
-  const auto found = state_->hosted.find(*identity);
-  if (found == state_->hosted.end() || found->second->container.hidden || state_->root == nil) {
+  const auto found = impl_->hosted.find(*identity);
+  if (found == impl_->hosted.end() || found->second->container.hidden || impl_->root == nil) {
     return nil;
   }
   return [found->second->container hitTest:NSMakePoint(point.x, point.y)];
 }
 
 NSView* AppKitPlatformViews::AccessibilityView(std::uint64_t identity) const {
-  const auto found = state_->hosted.find(identity);
-  return found == state_->hosted.end() || found->second->container.hidden ? nil : found->second->view;
+  const auto found = impl_->hosted.find(identity);
+  return found == impl_->hosted.end() || found->second->container.hidden ? nil : found->second->view;
 }
 
 bool AppKitPlatformViews::BeginFocusTraversal(NSResponder* responder, bool reverse) {
-  state_->pending_focus_traversal.reset();
-  if (state_->ui_window == nullptr) {
+  impl_->pending_focus_traversal.reset();
+  if (impl_->ui_window == nullptr) {
     return false;
   }
-  const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
+  const std::optional<std::uint64_t> identity = impl_->IdentityForResponder(responder);
   if (!identity.has_value()) {
     return false;
   }
-  state_->pending_focus_traversal = std::pair{*identity, reverse};
+  impl_->pending_focus_traversal = std::pair{*identity, reverse};
   return true;
 }
 
 void AppKitPlatformViews::EndFocusTraversal() {
-  state_->pending_focus_traversal.reset();
+  impl_->pending_focus_traversal.reset();
 }
 
 void AppKitPlatformViews::SynchronizeFocus(NSResponder* responder) {
-  if (state_->ui_window == nullptr) {
+  if (impl_->ui_window == nullptr) {
     return;
   }
-  const std::optional<std::uint64_t> identity = state_->IdentityForResponder(responder);
+  const std::optional<std::uint64_t> identity = impl_->IdentityForResponder(responder);
   if (identity.has_value()) {
-    state_->platform_view_focus_identity = identity;
-    if (InternalAccess::FocusedPlatformView(*state_->ui_window) != identity) {
-      const bool focus_visible = state_->pending_focus_traversal.has_value();
-      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, identity, focus_visible);
+    impl_->platform_view_focus_identity = identity;
+    if (InternalAccess::FocusedPlatformView(*impl_->ui_window) != identity) {
+      const bool focus_visible = impl_->pending_focus_traversal.has_value();
+      InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, identity, focus_visible);
     }
     return;
   }
-  const std::optional<std::uint64_t> previous_platform_view_focus = state_->platform_view_focus_identity;
-  state_->platform_view_focus_identity.reset();
+  const std::optional<std::uint64_t> previous_platform_view_focus = impl_->platform_view_focus_identity;
+  impl_->platform_view_focus_identity.reset();
   if (!previous_platform_view_focus.has_value()) {
     return;
   }
-  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*state_->ui_window);
+  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*impl_->ui_window);
   if (focused != previous_platform_view_focus) {
     return;
   }
-  if (state_->pending_focus_traversal.has_value() && state_->pending_focus_traversal->first == *focused) {
-    const bool reverse = state_->pending_focus_traversal->second;
-    state_->pending_focus_traversal.reset();
-    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *focused, reverse));
+  if (impl_->pending_focus_traversal.has_value() && impl_->pending_focus_traversal->first == *focused) {
+    const bool reverse = impl_->pending_focus_traversal->second;
+    impl_->pending_focus_traversal.reset();
+    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*impl_->ui_window, *focused, reverse));
     return;
   }
-  InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+  InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
 }
 
 void AppKitPlatformViews::Shutdown() {
-  if (!state_) {
+  if (!impl_) {
     return;
   }
-  for (auto& [identity, hosted] : state_->hosted) {
+  for (auto& [identity, hosted] : impl_->hosted) {
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
-  for (auto& [key, slice] : state_->slices) {
+  for (auto& [key, slice] : impl_->slices) {
     slice->huxeruiRenderer = nullptr;
     slice->huxeruiFrame = nullptr;
     [slice removeFromSuperview];
   }
-  state_->slices.clear();
-  state_->hosted.clear();
-  state_->base_slice.reset();
-  state_->platform_view_focus_identity.reset();
-  state_->pending_focus_traversal.reset();
-  state_->frame = nullptr;
-  state_->root = nil;
-  state_->ui_window = nullptr;
+  impl_->slices.clear();
+  impl_->hosted.clear();
+  impl_->base_slice.reset();
+  impl_->platform_view_focus_identity.reset();
+  impl_->pending_focus_traversal.reset();
+  impl_->frame = nullptr;
+  impl_->root = nil;
+  impl_->ui_window = nullptr;
 }
 
 } // namespace huxerui::detail

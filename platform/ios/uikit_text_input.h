@@ -9,7 +9,7 @@
 
 namespace huxerui::detail {
 
-class UIKitTextInputState;
+class UIKitTextInputBridge;
 
 class UIKitTextInput final : public PlatformTextInput {
 public:
@@ -46,7 +46,7 @@ public:
   void RequestHideKeyboard(TextInputSessionId session_id) override;
 
 private:
-  std::unique_ptr<UIKitTextInputState> state_;
+  std::unique_ptr<UIKitTextInputBridge> bridge_;
 };
 
 } // namespace huxerui::detail

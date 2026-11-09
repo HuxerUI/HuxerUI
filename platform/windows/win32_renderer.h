@@ -46,8 +46,8 @@ public:
   [[nodiscard]] Win32RenderResult Render(HWND window, float dpi, const RenderFrame& frame, const RECT& paint_rect);
 
 private:
-  struct State;
-  std::unique_ptr<State> state_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

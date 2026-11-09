@@ -36,21 +36,21 @@ struct PendingStart {
   std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion;
 };
 
-struct WindowsTimerState : huxerui::example::TimerService, std::enable_shared_from_this<WindowsTimerState> {
-  static std::shared_ptr<WindowsTimerState> Create(huxerui::UiWindow& ui_window) {
-    auto state = std::shared_ptr<WindowsTimerState>(new WindowsTimerState(ui_window));
-    state->timer = CreateThreadpoolTimer(TimerCallback, state.get(), nullptr);
-    if (state->timer == nullptr) {
+struct WindowsTimerService : huxerui::example::TimerService, std::enable_shared_from_this<WindowsTimerService> {
+  static std::shared_ptr<WindowsTimerService> Create(huxerui::UiWindow& ui_window) {
+    auto service = std::shared_ptr<WindowsTimerService>(new WindowsTimerService(ui_window));
+    service->timer = CreateThreadpoolTimer(TimerCallback, service.get(), nullptr);
+    if (service->timer == nullptr) {
       throw std::system_error(
           static_cast<int>(GetLastError()),
           std::system_category(),
           "HuxerUI example could not create the Windows timer"
       );
     }
-    return state;
+    return service;
   }
 
-  ~WindowsTimerState() {
+  ~WindowsTimerService() {
     Dispose();
   }
 
@@ -164,7 +164,7 @@ struct WindowsTimerState : huxerui::example::TimerService, std::enable_shared_fr
   }
 
 private:
-  explicit WindowsTimerState(huxerui::UiWindow& window_value) : ui_window(&window_value) {}
+  explicit WindowsTimerService(huxerui::UiWindow& window_value) : ui_window(&window_value) {}
 
   template <class Result, class Value>
   void Complete(std::function<void(huxerui::PlatformResult<Result>)> completion, Value&& value) {
@@ -174,7 +174,7 @@ private:
   }
 
   static void CALLBACK TimerCallback(PTP_CALLBACK_INSTANCE, void* context, PTP_TIMER) noexcept {
-    static_cast<WindowsTimerState*>(context)->Tick();
+    static_cast<WindowsTimerService*>(context)->Tick();
   }
 
   static FILETIME RelativeDueTime(std::int64_t milliseconds) noexcept {
@@ -266,7 +266,7 @@ namespace huxerui::example {
 
 void InstallTimer(ApplicationContext& root) {
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](UiWindow& ui_window) {
-    return std::static_pointer_cast<TimerService>(WindowsTimerState::Create(ui_window));
+    return std::static_pointer_cast<TimerService>(WindowsTimerService::Create(ui_window));
   });
 }
 

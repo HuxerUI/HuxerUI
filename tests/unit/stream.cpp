@@ -19,9 +19,9 @@ namespace huxerui::test {
 
 namespace {
 
-class MemoryInputState final : public detail::InputStreamState {
+class MemoryInputBackend final : public detail::InputStreamBackend {
 public:
-  explicit MemoryInputState(Bytes bytes) : bytes_(std::move(bytes)) {}
+  explicit MemoryInputBackend(Bytes bytes) : bytes_(std::move(bytes)) {}
 
   IoResult<std::size_t> Read(std::span<std::byte> buffer) override {
     read_sizes.push_back(buffer.size());
@@ -47,7 +47,7 @@ private:
   std::size_t offset_ = 0;
 };
 
-class MemoryOutputState final : public detail::OutputStreamState {
+class MemoryOutputBackend final : public detail::OutputStreamBackend {
 public:
   IoResult<void> Write(std::span<const std::byte> data) override {
     write_sizes.push_back(data.size());
@@ -90,86 +90,86 @@ static_assert(std::move_constructible<AsyncOutputStream>);
 static_assert(!std::copy_constructible<AsyncOutputStream>);
 
 TEST_CASE("InputStreamUsesCallerProvidedReadCapacityAndCachesEof") {
-  auto state =
-      std::make_shared<MemoryInputState>(Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
-  InputStream stream = detail::StreamAccess::MakeInputStream(state);
+  auto backend =
+      std::make_shared<MemoryInputBackend>(Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
+  InputStream stream = detail::StreamAccess::MakeInputStream(backend);
   Bytes buffer(3);
 
   REQUIRE(stream.Read(buffer).Value() == 3);
   REQUIRE(stream.Read(buffer).Value() == 2);
   REQUIRE(stream.Read(buffer).Value() == 0);
   REQUIRE(stream.Read(buffer).Value() == 0);
-  REQUIRE(state->read_sizes == std::vector<std::size_t>{3, 3, 3});
+  REQUIRE(backend->read_sizes == std::vector<std::size_t>{3, 3, 3});
   REQUIRE_THROWS_AS(stream.Read({}), std::invalid_argument);
 }
 
 TEST_CASE("InputStreamCopyToUsesCallerBufferAndLeavesOutputOpen") {
-  auto input_state =
-      std::make_shared<MemoryInputState>(Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
-  auto output_state = std::make_shared<MemoryOutputState>();
-  InputStream input = detail::StreamAccess::MakeInputStream(input_state);
-  OutputStream output = detail::StreamAccess::MakeOutputStream(output_state);
+  auto input_backend =
+      std::make_shared<MemoryInputBackend>(Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
+  auto output_backend = std::make_shared<MemoryOutputBackend>();
+  InputStream input = detail::StreamAccess::MakeInputStream(input_backend);
+  OutputStream output = detail::StreamAccess::MakeOutputStream(output_backend);
   Bytes buffer(2);
 
   REQUIRE(input.CopyTo(output, buffer).Value() == 5);
-  REQUIRE(output_state->bytes == Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
-  REQUIRE(output_state->write_sizes == std::vector<std::size_t>{2, 2, 1});
-  REQUIRE(output_state->close_count == 0);
-  REQUIRE_FALSE(output_state->aborted);
+  REQUIRE(output_backend->bytes == Bytes{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}, std::byte{5}});
+  REQUIRE(output_backend->write_sizes == std::vector<std::size_t>{2, 2, 1});
+  REQUIRE(output_backend->close_count == 0);
+  REQUIRE_FALSE(output_backend->aborted);
 
   REQUIRE(output.Close().Succeeded());
   REQUIRE(output.Close().Succeeded());
-  REQUIRE(output_state->close_count == 1);
+  REQUIRE(output_backend->close_count == 1);
   REQUIRE_THROWS_AS(output.Write({}), std::logic_error);
 }
 
 TEST_CASE("OutputStreamAbortsOnlyWhenDestroyedBeforeClose") {
-  auto abandoned_state = std::make_shared<MemoryOutputState>();
+  auto abandoned_backend = std::make_shared<MemoryOutputBackend>();
   {
-    OutputStream output = detail::StreamAccess::MakeOutputStream(abandoned_state);
+    OutputStream output = detail::StreamAccess::MakeOutputStream(abandoned_backend);
     REQUIRE(output.Write({}).Succeeded());
   }
-  REQUIRE(abandoned_state->aborted);
+  REQUIRE(abandoned_backend->aborted);
 
-  auto closed_state = std::make_shared<MemoryOutputState>();
+  auto closed_backend = std::make_shared<MemoryOutputBackend>();
   {
-    OutputStream output = detail::StreamAccess::MakeOutputStream(closed_state);
+    OutputStream output = detail::StreamAccess::MakeOutputStream(closed_backend);
     REQUIRE(output.Close().Succeeded());
   }
-  REQUIRE_FALSE(closed_state->aborted);
+  REQUIRE_FALSE(closed_backend->aborted);
 }
 
 TEST_CASE("MovingStreamsTransfersReleaseOwnership") {
-  auto input_state = std::make_shared<MemoryInputState>(Bytes{std::byte{1}});
-  InputStream input = detail::StreamAccess::MakeInputStream(input_state);
+  auto input_backend = std::make_shared<MemoryInputBackend>(Bytes{std::byte{1}});
+  InputStream input = detail::StreamAccess::MakeInputStream(input_backend);
   InputStream moved_input = std::move(input);
   Bytes buffer(1);
   REQUIRE_THROWS_AS(input.Read(buffer), std::logic_error);
-  REQUIRE_FALSE(input_state->released);
+  REQUIRE_FALSE(input_backend->released);
   REQUIRE(moved_input.Read(buffer).Value() == 1);
 
-  auto output_state = std::make_shared<MemoryOutputState>();
-  OutputStream output = detail::StreamAccess::MakeOutputStream(output_state);
+  auto output_backend = std::make_shared<MemoryOutputBackend>();
+  OutputStream output = detail::StreamAccess::MakeOutputStream(output_backend);
   OutputStream moved_output = std::move(output);
   REQUIRE_THROWS_AS(output.Write({}), std::logic_error);
-  REQUIRE_FALSE(output_state->aborted);
+  REQUIRE_FALSE(output_backend->aborted);
   REQUIRE(moved_output.Close().Succeeded());
 }
 
 TEST_CASE("StreamCopyPreservesOperationalErrorsAndWrittenPrefixes") {
-  auto input_state = std::make_shared<MemoryInputState>(Bytes{std::byte{1}, std::byte{2}});
-  auto output_state = std::make_shared<MemoryOutputState>();
-  InputStream input = detail::StreamAccess::MakeInputStream(input_state);
-  OutputStream output = detail::StreamAccess::MakeOutputStream(output_state);
+  auto input_backend = std::make_shared<MemoryInputBackend>(Bytes{std::byte{1}, std::byte{2}});
+  auto output_backend = std::make_shared<MemoryOutputBackend>();
+  InputStream input = detail::StreamAccess::MakeInputStream(input_backend);
+  OutputStream output = detail::StreamAccess::MakeOutputStream(output_backend);
   Bytes buffer(1);
   const IoError error{IoErrorCode::PermissionDenied, "HuxerUI source access revoked"};
-  input_state->error = error;
+  input_backend->error = error;
 
   const auto copied = input.CopyTo(output, buffer);
   REQUIRE_FALSE(copied.Succeeded());
   REQUIRE(copied.Error() == error);
-  REQUIRE(output_state->bytes == Bytes{std::byte{1}, std::byte{2}});
-  REQUIRE(output_state->close_count == 0);
+  REQUIRE(output_backend->bytes == Bytes{std::byte{1}, std::byte{2}});
+  REQUIRE(output_backend->close_count == 0);
   REQUIRE_THROWS_AS(input.Read(buffer), std::logic_error);
   REQUIRE(output.Close().Succeeded());
 }
@@ -177,17 +177,17 @@ TEST_CASE("StreamCopyPreservesOperationalErrorsAndWrittenPrefixes") {
 TEST_CASE("StreamOutputFailuresAreResultsAndDoNotFinalizeOutput") {
   const bool fail_close = GENERATE(false, true);
   const IoError error{IoErrorCode::NoSpace, "HuxerUI destination is full"};
-  auto state = std::make_shared<MemoryOutputState>();
+  auto backend = std::make_shared<MemoryOutputBackend>();
   {
-    OutputStream output = detail::StreamAccess::MakeOutputStream(state);
+    OutputStream output = detail::StreamAccess::MakeOutputStream(backend);
     if (fail_close) {
-      state->close_error = error;
+      backend->close_error = error;
       const auto result = output.Close();
       REQUIRE_FALSE(result.Succeeded());
       REQUIRE(result.Error() == error);
     } else {
-      state->write_error = error;
-      auto source = std::make_shared<MemoryInputState>(Bytes{std::byte{1}});
+      backend->write_error = error;
+      auto source = std::make_shared<MemoryInputBackend>(Bytes{std::byte{1}});
       InputStream input = detail::StreamAccess::MakeInputStream(source);
       Bytes buffer(1);
       const auto result = input.CopyTo(output, buffer);
@@ -197,8 +197,8 @@ TEST_CASE("StreamOutputFailuresAreResultsAndDoNotFinalizeOutput") {
     REQUIRE_THROWS_AS(output.Write({}), std::logic_error);
     REQUIRE_THROWS_AS(output.Close(), std::logic_error);
   }
-  REQUIRE(state->aborted);
-  REQUIRE(state->close_count == (fail_close ? 1 : 0));
+  REQUIRE(backend->aborted);
+  REQUIRE(backend->close_count == (fail_close ? 1 : 0));
 }
 
 TEST_CASE("IoErrorCategoriesPreservePortableSystemFailures") {

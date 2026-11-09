@@ -10,14 +10,14 @@
 #include "text/text_input_internal.h"
 
 namespace huxerui::detail {
-class MacTextInputState;
+class MacTextInputBridge;
 }
 
 @interface HuxerUITextInputClient : NSObject <NSTextInputClient> {
 @public
-  huxerui::detail::MacTextInputState* huxeruiState;
+  huxerui::detail::MacTextInputBridge* huxeruiBridge;
 }
-- (instancetype)initWithState:(huxerui::detail::MacTextInputState*)state;
+- (instancetype)initWithBridge:(huxerui::detail::MacTextInputBridge*)bridge;
 @end
 
 namespace huxerui::detail {
@@ -334,16 +334,16 @@ KeyEvent MakeMacKeyEvent(NSEvent* event, KeyEventType type) {
   };
 }
 
-class MacTextInputState {
+class MacTextInputBridge {
 public:
-  MacTextInputState(UiWindow& ui_window, NSView* view) : ui_window_(&ui_window), view_(view) {
-    client_ = [[HuxerUITextInputClient alloc] initWithState:this];
+  MacTextInputBridge(UiWindow& ui_window, NSView* view) : ui_window_(&ui_window), view_(view) {
+    client_ = [[HuxerUITextInputClient alloc] initWithBridge:this];
     input_context_ = [[NSTextInputContext alloc] initWithClient:client_];
   }
 
-  ~MacTextInputState() {
+  ~MacTextInputBridge() {
     UpdateSecureEventInput(false);
-    client_->huxeruiState = nullptr;
+    client_->huxeruiBridge = nullptr;
   }
 
   NSTextInputContext* InputContext() const noexcept {
@@ -783,28 +783,29 @@ private:
   bool secure_event_input_enabled_ = false;
 };
 
-MacTextInput::MacTextInput(UiWindow& ui_window, NSView* view) : state_(std::make_unique<MacTextInputState>(ui_window, view)) {}
+MacTextInput::MacTextInput(UiWindow& ui_window, NSView* view)
+    : bridge_(std::make_unique<MacTextInputBridge>(ui_window, view)) {}
 
 MacTextInput::~MacTextInput() = default;
 
 NSTextInputContext* MacTextInput::InputContext() const noexcept {
-  return state_->InputContext();
+  return bridge_->InputContext();
 }
 
 bool MacTextInput::HandleEvent(NSEvent* event) {
-  return state_->HandleEvent(event);
+  return bridge_->HandleEvent(event);
 }
 
 bool MacTextInput::IsActive() const noexcept {
-  return state_->IsActive();
+  return bridge_->IsActive();
 }
 
 void MacTextInput::InvalidateGeometry() {
-  state_->InvalidateGeometry();
+  bridge_->InvalidateGeometry();
 }
 
 void MacTextInput::ApplicationActiveChanged(bool active) {
-  state_->ApplicationActiveChanged(active);
+  bridge_->ApplicationActiveChanged(active);
 }
 
 void MacTextInput::Start(
@@ -813,13 +814,13 @@ void MacTextInput::Start(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->Start(session_id, configuration, state, geometry);
+  bridge_->Start(session_id, configuration, state, geometry);
 }
 
 void MacTextInput::Update(
     TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry
 ) {
-  state_->Update(session_id, state, geometry);
+  bridge_->Update(session_id, state, geometry);
 }
 
 void MacTextInput::Restart(
@@ -828,46 +829,46 @@ void MacTextInput::Restart(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->Restart(session_id, configuration, state, geometry);
+  bridge_->Restart(session_id, configuration, state, geometry);
 }
 
 void MacTextInput::Stop(TextInputSessionId session_id) {
-  state_->Stop(session_id);
+  bridge_->Stop(session_id);
 }
 
 } // namespace huxerui::detail
 
 @implementation HuxerUITextInputClient
 
-- (instancetype)initWithState:(huxerui::detail::MacTextInputState*)state {
+- (instancetype)initWithBridge:(huxerui::detail::MacTextInputBridge*)bridge {
   self = [super init];
   if (self != nil) {
-    huxeruiState = state;
+    huxeruiBridge = bridge;
   }
   return self;
 }
 
 - (BOOL)hasMarkedText {
-  return huxeruiState != nullptr && huxeruiState->HasMarkedText();
+  return huxeruiBridge != nullptr && huxeruiBridge->HasMarkedText();
 }
 
 - (NSRange)markedRange {
-  return huxeruiState == nullptr ? NSMakeRange(NSNotFound, 0) : huxeruiState->MarkedRange();
+  return huxeruiBridge == nullptr ? NSMakeRange(NSNotFound, 0) : huxeruiBridge->MarkedRange();
 }
 
 - (NSRange)selectedRange {
-  return huxeruiState == nullptr ? NSMakeRange(NSNotFound, 0) : huxeruiState->SelectedRange();
+  return huxeruiBridge == nullptr ? NSMakeRange(NSNotFound, 0) : huxeruiBridge->SelectedRange();
 }
 
 - (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
-  if (huxeruiState != nullptr) {
-    huxeruiState->SetMarkedText(string, selectedRange, replacementRange);
+  if (huxeruiBridge != nullptr) {
+    huxeruiBridge->SetMarkedText(string, selectedRange, replacementRange);
   }
 }
 
 - (void)unmarkText {
-  if (huxeruiState != nullptr) {
-    huxeruiState->UnmarkText();
+  if (huxeruiBridge != nullptr) {
+    huxeruiBridge->UnmarkText();
   }
 }
 
@@ -876,26 +877,26 @@ void MacTextInput::Stop(TextInputSessionId session_id) {
 }
 
 - (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
-  return huxeruiState == nullptr ? nil : huxeruiState->AttributedSubstring(range, actualRange);
+  return huxeruiBridge == nullptr ? nil : huxeruiBridge->AttributedSubstring(range, actualRange);
 }
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
-  if (huxeruiState != nullptr) {
-    huxeruiState->InsertText(string, replacementRange);
+  if (huxeruiBridge != nullptr) {
+    huxeruiBridge->InsertText(string, replacementRange);
   }
 }
 
 - (NSUInteger)characterIndexForPoint:(NSPoint)point {
-  return huxeruiState == nullptr ? NSNotFound : huxeruiState->CharacterIndex(point);
+  return huxeruiBridge == nullptr ? NSNotFound : huxeruiBridge->CharacterIndex(point);
 }
 
 - (NSRect)firstRectForCharacterRange:(NSRange)range actualRange:(NSRangePointer)actualRange {
-  return huxeruiState == nullptr ? NSZeroRect : huxeruiState->FirstRect(range, actualRange);
+  return huxeruiBridge == nullptr ? NSZeroRect : huxeruiBridge->FirstRect(range, actualRange);
 }
 
 - (void)doCommandBySelector:(SEL)selector {
-  if (huxeruiState != nullptr) {
-    huxeruiState->DoCommand(selector);
+  if (huxeruiBridge != nullptr) {
+    huxeruiBridge->DoCommand(selector);
   }
 }
 

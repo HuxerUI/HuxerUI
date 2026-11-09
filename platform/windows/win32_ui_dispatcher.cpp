@@ -14,7 +14,7 @@ namespace huxerui::detail {
 
 /// Shared dispatch gate and message-only HWND; no visible window owns this queue.
 /// The application thread initializes and destroys the HWND, while the mutex protects foreign-thread posting.
-struct Win32UiThreadDispatcher::State : std::enable_shared_from_this<State> {
+struct Win32UiThreadDispatcher::Impl : std::enable_shared_from_this<Impl> {
   static constexpr UINT task_message = WM_APP + 4;
 
   /// Creates the message-only HWND on its owning thread before callbacks may be dispatched.
@@ -142,14 +142,14 @@ struct Win32UiThreadDispatcher::State : std::enable_shared_from_this<State> {
   }
 
   static LRESULT CALLBACK WindowProcedure(HWND platform_window, UINT message, WPARAM w_param, LPARAM l_param) {
-    auto* state = reinterpret_cast<State*>(GetWindowLongPtrW(platform_window, GWLP_USERDATA));
+    auto* dispatcher = reinterpret_cast<Impl*>(GetWindowLongPtrW(platform_window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
       const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-      state = static_cast<State*>(create->lpCreateParams);
-      SetWindowLongPtrW(platform_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+      dispatcher = static_cast<Impl*>(create->lpCreateParams);
+      SetWindowLongPtrW(platform_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dispatcher));
     }
-    if (state != nullptr && message == task_message) {
-      const std::shared_ptr<State> retained = state->shared_from_this();
+    if (dispatcher != nullptr && message == task_message) {
+      const std::shared_ptr<Impl> retained = dispatcher->shared_from_this();
       retained->RunPending();
       return 0;
     }
@@ -167,8 +167,8 @@ struct Win32UiThreadDispatcher::State : std::enable_shared_from_this<State> {
   bool closed = false;
 };
 
-Win32UiThreadDispatcher::Win32UiThreadDispatcher() : state_(std::make_shared<State>()) {
-  state_->Initialize();
+Win32UiThreadDispatcher::Win32UiThreadDispatcher() : impl_(std::make_shared<Impl>()) {
+  impl_->Initialize();
 }
 
 Win32UiThreadDispatcher::~Win32UiThreadDispatcher() {
@@ -176,16 +176,16 @@ Win32UiThreadDispatcher::~Win32UiThreadDispatcher() {
 }
 
 UiThreadDispatcher Win32UiThreadDispatcher::Bind() const {
-  const std::shared_ptr<State> state = state_;
-  return [state](std::function<void()> task) { state->Post(std::move(task)); };
+  const std::shared_ptr<Impl> dispatcher = impl_;
+  return [dispatcher](std::function<void()> task) { dispatcher->Post(std::move(task)); };
 }
 
 void Win32UiThreadDispatcher::Start() {
-  state_->Start();
+  impl_->Start();
 }
 
 void Win32UiThreadDispatcher::Shutdown() noexcept {
-  state_->Shutdown();
+  impl_->Shutdown();
 }
 
 } // namespace huxerui::detail

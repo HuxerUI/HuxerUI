@@ -97,7 +97,7 @@ std::optional<IoError> ValidateDroppedFiles(const FileDropOptions& options, cons
   return std::nullopt;
 }
 
-struct FileDropTargetState {
+struct FileDropTargetMatch {
   NodeExtensionHandle extension;
   FileDropEvent event;
 };
@@ -106,11 +106,11 @@ struct FileDropHover {
   std::uint64_t session = 0;
   FileDropOffer offer;
   Point position;
-  std::optional<FileDropTargetState> target{};
+  std::optional<FileDropTargetMatch> target{};
 };
 
 struct PendingFileDrop {
-  FileDropTargetState target;
+  FileDropTargetMatch target;
   FileDropOptions options;
   std::atomic<bool> completed = false;
   std::atomic<bool> canceled = false;
@@ -247,7 +247,7 @@ void detail::FileDropReceiver::RefreshFileDropTarget(bool emit_moved) {
   const auto offer = drop->hover->offer;
   const auto position = drop->hover->position;
   const auto previous = drop->hover->target;
-  std::optional<FileDropTargetState> next;
+  std::optional<FileDropTargetMatch> next;
   std::vector<detail::MountedNode*> route;
   if (std::isfinite(position.x) && std::isfinite(position.y) && runtime_state_.mounted_root_ &&
       !runtime_state_.owner_.HitTestPlatformView(position) &&
@@ -264,7 +264,7 @@ void detail::FileDropReceiver::RefreshFileDropTarget(bool emit_moved) {
         const auto& entry = (*node)->extensions[index - 1];
         const auto* capability = entry.extension ? InternalAccess::GetFileDropTargetCapability(*entry.extension) : nullptr;
         if (capability && AcceptsFileDropOffer(capability->options, offer) && capability->predicate(offer)) {
-          next = FileDropTargetState{{(*node)->identity, index - 1, entry.descriptor}, {*local, position}};
+          next = FileDropTargetMatch{{(*node)->identity, index - 1, entry.descriptor}, {*local, position}};
           break;
         }
       }

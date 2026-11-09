@@ -1694,7 +1694,7 @@ struct ResourceProbe {
   std::function<void()> before_read;
 };
 
-class ProbedResourceInput final : public detail::InputStreamState {
+class ProbedResourceInput final : public detail::InputStreamBackend {
 public:
   explicit ProbedResourceInput(std::shared_ptr<ResourceProbe> probe) : probe_(std::move(probe)) {}
 

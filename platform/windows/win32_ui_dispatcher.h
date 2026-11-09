@@ -32,8 +32,8 @@ public:
   void Shutdown() noexcept;
 
 private:
-  struct State;
-  std::shared_ptr<State> state_;
+  struct Impl;
+  std::shared_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

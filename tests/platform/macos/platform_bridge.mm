@@ -275,7 +275,7 @@ TEST_CASE("MacObjectiveCPlatformPayloadRetainsFileReferenceAndExposesFileURL") {
     HuxerUITestMacPlatformViewFactory* factory = [HuxerUITestMacPlatformViewFactory new];
     const FileReference reference =
         detail::MakeLocalFileReference(File(std::string(NSTemporaryDirectory().UTF8String)), true);
-    const std::shared_ptr<detail::FileReferenceState> state = detail::FileReferenceState::Of(reference);
+    const std::shared_ptr<detail::FileReferenceBackend> backend = detail::FileReferenceBackend::Of(reference);
     PlatformEventEmitter emitter = detail::MakePlatformEventEmitter({}, [](std::string, PlatformPayload) {
       return std::optional<PlatformPayload>{};
     });
@@ -291,13 +291,13 @@ TEST_CASE("MacObjectiveCPlatformPayloadRetainsFileReferenceAndExposesFileURL") {
     REQUIRE([native_reference.fileURL.path isEqualToString:[NSString stringWithUTF8String:local_path.c_str()]]);
 
     PlatformChannel channel = macos::detail::GetObjectiveCPlatformViewChannel(instance);
-    std::shared_ptr<detail::FileReferenceState> returned_state;
+    std::shared_ptr<detail::FileReferenceBackend> returned_backend;
     channel.Invoke("echo", PlatformPayload(reference), [&](PlatformResult<PlatformPayload> result) {
-      returned_state =
-          detail::FileReferenceState::Of(std::get<PlatformPayload>(std::move(result)).AsFileReference());
+      returned_backend =
+          detail::FileReferenceBackend::Of(std::get<PlatformPayload>(std::move(result)).AsFileReference());
     });
     platform.RunPlatformModuleTasks();
-    REQUIRE(returned_state == state);
+    REQUIRE(returned_backend == backend);
 
     macos::detail::DisposeObjectiveCPlatformView(instance);
     platform.RunPlatformModuleTasks();

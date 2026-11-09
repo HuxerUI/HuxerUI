@@ -25,8 +25,8 @@ public:
   LinuxFileDrop& operator=(const LinuxFileDrop&) = delete;
 
 private:
-  struct State;
-  std::unique_ptr<State> state_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 struct LinuxAppDirectoryEnvironment {

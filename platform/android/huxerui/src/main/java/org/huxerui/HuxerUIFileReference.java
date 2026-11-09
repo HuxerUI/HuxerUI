@@ -295,18 +295,18 @@ public final class HuxerUIFileReference implements AutoCloseable {
         }
     }
 
-    static boolean copyFileToUri(ContentResolver resolver, File source, Uri destination, CopyState state)
-            throws IOException {
+    static boolean copyFileToUri(ContentResolver resolver, File source, Uri destination,
+            FileOperationCancellation cancellation) throws IOException {
         if (!source.isFile()) {
             return false;
         }
-        try (InputStream input = state.trackInput(new FileInputStream(source));
-                OutputStream output = state.trackOutput(openOutput(resolver, destination))) {
-            copy(input, output, state);
+        try (InputStream input = cancellation.trackInput(new FileInputStream(source));
+                OutputStream output = cancellation.trackOutput(openOutput(resolver, destination))) {
+            copy(input, output, cancellation);
             output.flush();
-            return !state.canceled.get();
+            return !cancellation.canceled.get();
         } finally {
-            state.clearStreams();
+            cancellation.clearStreams();
         }
     }
 
@@ -325,23 +325,24 @@ public final class HuxerUIFileReference implements AutoCloseable {
         return output;
     }
 
-    private static long copy(InputStream input, OutputStream output, CopyState state) throws IOException {
+    private static long copy(InputStream input, OutputStream output, FileOperationCancellation cancellation)
+            throws IOException {
         // Imports, write-back, and directory copies share this bounded Java-side transfer. Only the
         // final byte count crosses JNI; public ReadBytes instead materializes the entire payload.
         byte[] buffer = new byte[BUFFER_SIZE];
         long bytes = 0;
         int count;
-        while (!state.canceled.get() && (count = input.read(buffer)) != -1) {
+        while (!cancellation.canceled.get() && (count = input.read(buffer)) != -1) {
             output.write(buffer, 0, count);
             bytes += count;
         }
-        if (state.canceled.get()) {
+        if (cancellation.canceled.get()) {
             throw new IOException("HuxerUI file operation was canceled");
         }
         return bytes;
     }
 
-    static final class CopyState {
+    static final class FileOperationCancellation {
         // Closing tracked streams complements Future.cancel(): provider I/O may ignore thread
         // interruption. This is best effort and does not roll back bytes already accepted by a provider.
         final AtomicBoolean canceled = new AtomicBoolean();
@@ -428,7 +429,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
         // Cancellation and worker completion share this gate because nativeComplete consumes a native
         // callback holder exactly once. A late worker must not call it again after cancellation.
         private final AtomicBoolean finished = new AtomicBoolean();
-        private final CopyState copyState = new CopyState();
+        private final FileOperationCancellation cancellation = new FileOperationCancellation();
         private volatile Future<?> worker;
 
         Operation(long nativeHandle, int kind, String path, boolean overwrite) {
@@ -450,7 +451,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
             if (!finished.compareAndSet(false, true)) {
                 return;
             }
-            copyState.cancel();
+            cancellation.cancel();
             Future<?> activeWorker = worker;
             if (activeWorker != null) {
                 activeWorker.cancel(true);
@@ -468,7 +469,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
                     finishBoolean(importTo(new File(path), overwrite));
                 } else if (kind == REPLACE) {
                     if (!writeAllowed) { throw new SecurityException(); }
-                    finishBoolean(copyFileToUri(resolver, new File(path), uri, copyState));
+                    finishBoolean(copyFileToUri(resolver, new File(path), uri, cancellation));
                 } else if (kind == OPEN_READ || kind == OPEN_WRITE ||
                         kind == OPEN_RANDOM_READ || kind == OPEN_RANDOM_WRITE) {
                     boolean writing = kind == OPEN_WRITE || kind == OPEN_RANDOM_WRITE;
@@ -516,7 +517,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
                 if (cursor == null) { throw new IOException(); }
                 if (cursor.getExtras().getBoolean(DocumentsContract.EXTRA_LOADING, false)) { throw new OperationFailure(ERROR_UNSUPPORTED); }
                 while (cursor.moveToNext()) {
-                    if (copyState.canceled.get()) { throw new IOException(); }
+                    if (cancellation.canceled.get()) { throw new IOException(); }
                     String id = cursor.getString(0);
                     String childName = cursor.getString(1);
                     String type = cursor.getString(3);
@@ -605,7 +606,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
             if (existing != null && (isDirectory(existing) != creatingDirectory || (kind == COPY_FILE && !overwrite))) {
                 throw new OperationFailure(ERROR_ALREADY_EXISTS);
             }
-            if (copyState.canceled.get()) { throw new IOException(); }
+            if (cancellation.canceled.get()) { throw new IOException(); }
             String type = creatingDirectory ? DocumentsContract.Document.MIME_TYPE_DIR : "application/octet-stream";
             if (kind == COPY_FILE && sourceUri != null) {
                 String sourceType = resolver.getType(sourceUri);
@@ -631,13 +632,13 @@ public final class HuxerUIFileReference implements AutoCloseable {
             long bytes = 0;
             if (kind == COPY_FILE) {
                 if (!outputMetadata.writable) { throw new SecurityException(); }
-                try (InputStream input = copyState.trackInput(sourceUri == null
+                try (InputStream input = cancellation.trackInput(sourceUri == null
                              ? new FileInputStream(path) : resolver.openInputStream(sourceUri));
-                        OutputStream output = copyState.trackOutput(openOutput(resolver, outputUri))) {
+                        OutputStream output = cancellation.trackOutput(openOutput(resolver, outputUri))) {
                     if (input == null || output == null) { throw new FileNotFoundException(); }
-                    bytes = copy(input, output, copyState);
+                    bytes = copy(input, output, cancellation);
                     output.flush();
-                } finally { copyState.clearStreams(); }
+                } finally { cancellation.clearStreams(); }
                 outputMetadata = metadata(outputUri);
             }
             finishDirectory(new Metadata[] {outputMetadata}, bytes, existing == null);
@@ -650,7 +651,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
         }
 
         private byte[] readBytes() throws IOException {
-            try (InputStream input = copyState.trackInput(resolver.openInputStream(uri));
+            try (InputStream input = cancellation.trackInput(resolver.openInputStream(uri));
                     ByteArrayOutputStream output = new ByteArrayOutputStream()) {
                 if (input == null) {
                     throw new FileNotFoundException("HuxerUI external file input is unavailable");
@@ -658,19 +659,19 @@ public final class HuxerUIFileReference implements AutoCloseable {
                 byte[] buffer = new byte[BUFFER_SIZE];
                 int count;
                 int total = 0;
-                while (!copyState.canceled.get() && (count = input.read(buffer)) != -1) {
+                while (!cancellation.canceled.get() && (count = input.read(buffer)) != -1) {
                     if (count > MAX_BYTE_ARRAY_SIZE - total) {
                         throw new FileTooLargeException();
                     }
                     output.write(buffer, 0, count);
                     total += count;
                 }
-                if (copyState.canceled.get()) {
+                if (cancellation.canceled.get()) {
                     throw new IOException("HuxerUI file operation was canceled");
                 }
                 return output.toByteArray();
             } finally {
-                copyState.clearStreams();
+                cancellation.clearStreams();
             }
         }
 
@@ -730,15 +731,15 @@ public final class HuxerUIFileReference implements AutoCloseable {
             }
             File temporary = File.createTempFile(".huxerui-", ".tmp", parent);
             try {
-                try (InputStream input = copyState.trackInput(resolver.openInputStream(uri));
-                        OutputStream output = copyState.trackOutput(new FileOutputStream(temporary))) {
+                try (InputStream input = cancellation.trackInput(resolver.openInputStream(uri));
+                        OutputStream output = cancellation.trackOutput(new FileOutputStream(temporary))) {
                     if (input == null) {
                         throw new FileNotFoundException("HuxerUI external file input is unavailable");
                     }
-                    transferred = copy(input, output, copyState);
+                    transferred = copy(input, output, cancellation);
                     output.flush();
                 } finally {
-                    copyState.clearStreams();
+                    cancellation.clearStreams();
                 }
                 try {
                     Os.rename(temporary.getAbsolutePath(), destination.getAbsolutePath());

@@ -226,11 +226,12 @@ private:
   val cancellation_;
 };
 
-class JavaScriptInstanceState final {
+class JavaScriptPlatformInstanceBridge final {
 public:
-  JavaScriptInstanceState(val instance, val emitter) : instance_(std::move(instance)), emitter_(std::move(emitter)) {}
+  JavaScriptPlatformInstanceBridge(val instance, val emitter)
+      : instance_(std::move(instance)), emitter_(std::move(emitter)) {}
 
-  ~JavaScriptInstanceState() {
+  ~JavaScriptPlatformInstanceBridge() {
     Dispose();
   }
 
@@ -285,7 +286,7 @@ private:
 };
 
 void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
-                     const std::shared_ptr<JavaScriptInstanceState>& instance) {
+                     const std::shared_ptr<JavaScriptPlatformInstanceBridge>& instance) {
   endpoint.Connect({
       .invoke = [instance](std::string method, PlatformPayload arguments,
                            std::function<void(PlatformResult<PlatformPayload>)> completion) {
@@ -295,7 +296,7 @@ void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
   });
 }
 
-std::shared_ptr<JavaScriptInstanceState>
+std::shared_ptr<JavaScriptPlatformInstanceBridge>
 CreateInstance(const val& factory, PlatformPayload initial_value, PlatformEventEmitter events,
                bool invocation_required, std::string_view kind) {
   RequireFactory(factory, kind);
@@ -322,7 +323,7 @@ CreateInstance(const val& factory, PlatformPayload initial_value, PlatformEventE
     }
     throw;
   }
-  return std::make_shared<JavaScriptInstanceState>(std::move(instance), std::move(emitter));
+  return std::make_shared<JavaScriptPlatformInstanceBridge>(std::move(instance), std::move(emitter));
 }
 
 } // namespace
@@ -331,20 +332,21 @@ class JavaScriptPlatformViewInstance final {
 public:
   ~JavaScriptPlatformViewInstance() {
     channel.Close();
-    if (state) {
-      state->Dispose();
+    if (instance_bridge) {
+      instance_bridge->Dispose();
     }
   }
 
-  std::shared_ptr<JavaScriptInstanceState> state;
+  std::shared_ptr<JavaScriptPlatformInstanceBridge> instance_bridge;
   PlatformChannel channel;
   val element = val::undefined();
 };
 
 PlatformChannel CreateJavaScriptPlatformModule(UiWindow& ui_window, const val& factory, PlatformPayload options) {
   const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
-  std::shared_ptr state = CreateInstance(factory, std::move(options), endpoint.Events(), true, "PlatformModule");
-  ConnectInstance(endpoint, state);
+  std::shared_ptr instance_bridge =
+      CreateInstance(factory, std::move(options), endpoint.Events(), true, "PlatformModule");
+  ConnectInstance(endpoint, instance_bridge);
   return endpoint.Channel();
 }
 
@@ -352,17 +354,18 @@ std::shared_ptr<JavaScriptPlatformViewInstance>
 CreateJavaScriptPlatformView(UiWindow& ui_window, const val& factory, PlatformPayload properties,
                              PlatformEventEmitter events, bool update_required, bool channel_required) {
   auto result = std::make_shared<JavaScriptPlatformViewInstance>();
-  result->state = CreateInstance(factory, std::move(properties), std::move(events), channel_required, "PlatformView");
-  if (update_required && !HasFunction(result->state->Instance(), "update")) {
+  result->instance_bridge =
+      CreateInstance(factory, std::move(properties), std::move(events), channel_required, "PlatformView");
+  if (update_required && !HasFunction(result->instance_bridge->Instance(), "update")) {
     throw std::logic_error("HuxerUI Web JavaScript PlatformView instance must provide update");
   }
-  result->element = result->state->Instance()["element"];
+  result->element = result->instance_bridge->Instance()["element"];
   if (result->element.isUndefined() || result->element.isNull()) {
     throw std::logic_error("HuxerUI Web JavaScript PlatformView instance must provide element");
   }
   if (channel_required) {
     const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
-    ConnectInstance(endpoint, result->state);
+    ConnectInstance(endpoint, result->instance_bridge);
     result->channel = endpoint.Channel();
   }
   return result;
@@ -374,11 +377,11 @@ val GetJavaScriptPlatformView(const std::shared_ptr<JavaScriptPlatformViewInstan
 
 void UpdateJavaScriptPlatformView(const std::shared_ptr<JavaScriptPlatformViewInstance>& instance,
                                   PlatformPayload properties) {
-  if (!instance || !instance->state || instance->state->Disposed()) {
+  if (!instance || !instance->instance_bridge || instance->instance_bridge->Disposed()) {
     throw std::logic_error("HuxerUI Web JavaScript PlatformView instance is disposed");
   }
   try {
-    instance->state->Instance().call<void>("update", PlatformPayloadToJavaScript(properties));
+    instance->instance_bridge->Instance().call<void>("update", PlatformPayloadToJavaScript(properties));
   } catch (...) {
     throw std::logic_error("HuxerUI Web JavaScript PlatformView update failed");
   }
@@ -389,8 +392,8 @@ void DisposeJavaScriptPlatformView(const std::shared_ptr<JavaScriptPlatformViewI
     return;
   }
   instance->channel.Close();
-  if (instance->state) {
-    instance->state->Dispose();
+  if (instance->instance_bridge) {
+    instance->instance_bridge->Dispose();
   }
   instance->element = val::undefined();
 }

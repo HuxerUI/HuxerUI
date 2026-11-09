@@ -16,21 +16,21 @@ namespace huxerui {
 
 namespace detail {
 
-class PlatformChannelState final : public std::enable_shared_from_this<PlatformChannelState> {
+class PlatformChannelImpl final : public std::enable_shared_from_this<PlatformChannelImpl> {
 public:
   struct PendingCall {
     std::function<void(PlatformResult<PlatformPayload>)> completion;
     std::function<void()> cancel;
   };
 
-  PlatformChannelState(UiThreadDispatcher ui_thread_dispatcher, std::shared_ptr<ExecutionContext> source)
+  PlatformChannelImpl(UiThreadDispatcher ui_thread_dispatcher, std::shared_ptr<ExecutionContext> source)
       : dispatch_to_ui_thread_(std::move(ui_thread_dispatcher)), source_(std::move(source)) {
     if (!dispatch_to_ui_thread_) {
       throw std::invalid_argument("HuxerUI PlatformChannel UI thread dispatcher must not be empty");
     }
   }
 
-  ~PlatformChannelState() {
+  ~PlatformChannelImpl() {
     Close();
   }
 
@@ -84,11 +84,11 @@ public:
       dispatcher = dispatch_to_ui_thread_;
     }
 
-    const std::weak_ptr weak_state = weak_from_this();
+    const std::weak_ptr weak_channel = weak_from_this();
     try {
-      dispatcher([weak_state, request, method = std::move(method), arguments = std::move(arguments)]() mutable {
-        if (const std::shared_ptr state = weak_state.lock()) {
-          state->InvokeTransport(request, std::move(method), std::move(arguments));
+      dispatcher([weak_channel, request, method = std::move(method), arguments = std::move(arguments)]() mutable {
+        if (const std::shared_ptr channel = weak_channel.lock()) {
+          channel->InvokeTransport(request, std::move(method), std::move(arguments));
         }
       });
     } catch (...) {
@@ -211,11 +211,11 @@ public:
       event_delivery_scheduled_ = true;
       dispatcher = dispatch_to_ui_thread_;
     }
-    const std::weak_ptr weak_state = weak_from_this();
+    const std::weak_ptr weak_channel = weak_from_this();
     try {
-      dispatcher([weak_state] {
-        if (const std::shared_ptr state = weak_state.lock()) {
-          state->DrainEvents();
+      dispatcher([weak_channel] {
+        if (const std::shared_ptr channel = weak_channel.lock()) {
+          channel->DrainEvents();
         }
       });
     } catch (...) {
@@ -248,13 +248,13 @@ private:
       invoke = transport_.invoke;
     }
 
-    const std::weak_ptr weak_state = weak_from_this();
+    const std::weak_ptr weak_channel = weak_from_this();
     std::function<void()> cancel;
     try {
       cancel = invoke(std::move(method), std::move(arguments),
-                      [weak_state, request](PlatformResult<PlatformPayload> result) mutable {
-                        if (const std::shared_ptr state = weak_state.lock()) {
-                          state->PostResult(request, std::move(result));
+                      [weak_channel, request](PlatformResult<PlatformPayload> result) mutable {
+                        if (const std::shared_ptr channel = weak_channel.lock()) {
+                          channel->PostResult(request, std::move(result));
                         }
                       });
     } catch (...) {
@@ -293,11 +293,11 @@ private:
       }
       dispatcher = dispatch_to_ui_thread_;
     }
-    const std::weak_ptr weak_state = weak_from_this();
+    const std::weak_ptr weak_channel = weak_from_this();
     try {
-      dispatcher([weak_state, request, result = std::move(result)]() mutable {
-        if (const std::shared_ptr state = weak_state.lock()) {
-          state->DeliverResult(request, std::move(result));
+      dispatcher([weak_channel, request, result = std::move(result)]() mutable {
+        if (const std::shared_ptr channel = weak_channel.lock()) {
+          channel->DeliverResult(request, std::move(result));
         }
       });
     } catch (...) {
@@ -392,33 +392,33 @@ PlatformChannelEndpoint MakePlatformChannelEndpoint(UiThreadDispatcher dispatch_
     throw std::logic_error("HuxerUI PlatformChannel requires a live execution source");
   }
   return PlatformChannelEndpoint(
-      std::make_shared<PlatformChannelState>(std::move(dispatch_to_ui_thread), std::move(source)));
+      std::make_shared<PlatformChannelImpl>(std::move(dispatch_to_ui_thread), std::move(source)));
 }
 
 PlatformChannel PlatformChannelEndpoint::Channel() const {
-  return PlatformChannel(state_);
+  return PlatformChannel(impl_);
 }
 
 PlatformEventEmitter PlatformChannelEndpoint::Events() const {
-  const std::weak_ptr weak_state = state_;
-  return MakePlatformEventEmitter({}, [weak_state](std::string event, PlatformPayload payload) {
-    if (const std::shared_ptr state = weak_state.lock()) {
-      state->PostEvent(std::move(event), std::move(payload));
+  const std::weak_ptr weak_channel = impl_;
+  return MakePlatformEventEmitter({}, [weak_channel](std::string event, PlatformPayload payload) {
+    if (const std::shared_ptr channel = weak_channel.lock()) {
+      channel->PostEvent(std::move(event), std::move(payload));
     }
     return std::optional<PlatformPayload>{};
   });
 }
 
 void PlatformChannelEndpoint::Connect(PlatformChannelTransport transport) const {
-  if (!state_) {
+  if (!impl_) {
     throw std::logic_error("HuxerUI PlatformChannel endpoint is empty");
   }
-  state_->Connect(std::move(transport));
+  impl_->Connect(std::move(transport));
 }
 
 void PlatformChannelEndpoint::Close() const noexcept {
-  if (state_) {
-    state_->Close();
+  if (impl_) {
+    impl_->Close();
   }
 }
 
@@ -503,31 +503,31 @@ PlatformEventEmitter MakePlatformEventEmitter(
 } // namespace detail
 
 bool PlatformChannel::IsOpen() const noexcept {
-  return state_ && state_->IsOpen();
+  return impl_ && impl_->IsOpen();
 }
 
 PlatformRequestId PlatformChannel::Invoke(std::string method, PlatformPayload arguments,
                                           std::function<void(PlatformResult<PlatformPayload>)> completion) const {
-  if (!state_) {
+  if (!impl_) {
     throw std::logic_error("HuxerUI PlatformChannel is empty");
   }
-  return state_->Invoke(std::move(method), std::move(arguments), std::move(completion));
+  return impl_->Invoke(std::move(method), std::move(arguments), std::move(completion));
 }
 
 void PlatformChannel::On(std::string event, std::function<void(const PlatformPayload&)> handler) const {
-  if (!state_) {
+  if (!impl_) {
     throw std::logic_error("HuxerUI PlatformChannel is empty");
   }
-  state_->On(std::move(event), std::move(handler));
+  impl_->On(std::move(event), std::move(handler));
 }
 
 bool PlatformChannel::Cancel(PlatformRequestId request) const {
-  return state_ && state_->Cancel(request);
+  return impl_ && impl_->Cancel(request);
 }
 
 void PlatformChannel::Close() const noexcept {
-  if (state_) {
-    state_->Close();
+  if (impl_) {
+    impl_->Close();
   }
 }
 

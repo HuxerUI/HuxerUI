@@ -430,7 +430,7 @@ template <PlatformEventKey Key> PlatformEventDescriptor MakePlatformEventDescrip
   }
 }
 
-class PlatformChannelState;
+class PlatformChannelImpl;
 class PlatformChannelEndpoint;
 /// Creates an asynchronous channel endpoint bound to one window's execution lifetime.
 /// @param ui_window Live original window, accessed on the application thread.
@@ -855,13 +855,13 @@ public:
   ///
   /// Returns false when the request is unknown, already completed, or already cancelled.
   bool Cancel(PlatformRequestId request) const;
-  /// Closes the shared channel state. Copies of this PlatformChannel observe the same closure.
+  /// Closes this channel for all copies of this PlatformChannel.
   void Close() const noexcept;
 
 private:
-  explicit PlatformChannel(std::shared_ptr<detail::PlatformChannelState> state) : state_(std::move(state)) {}
+  explicit PlatformChannel(std::shared_ptr<detail::PlatformChannelImpl> impl) : impl_(std::move(impl)) {}
 
-  std::shared_ptr<detail::PlatformChannelState> state_;
+  std::shared_ptr<detail::PlatformChannelImpl> impl_;
 
   friend class detail::PlatformChannelEndpoint;
 };

@@ -19,8 +19,8 @@ public:
   void Hide() noexcept override;
 
 private:
-  struct State;
-  std::unique_ptr<State> state_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

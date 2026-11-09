@@ -35,15 +35,15 @@ struct PendingStart {
   std::function<void(huxerui::PlatformResult<std::uint64_t>)> completion;
 };
 
-struct LinuxTimerState : huxerui::example::TimerService {
-  static std::shared_ptr<LinuxTimerState> Create(huxerui::UiWindow& ui_window) {
-    auto state = std::shared_ptr<LinuxTimerState>(new LinuxTimerState(ui_window));
-    LinuxTimerState* state_pointer = state.get();
-    state->worker = std::thread([state_pointer] { state_pointer->Run(); });
-    return state;
+struct LinuxTimerService : huxerui::example::TimerService {
+  static std::shared_ptr<LinuxTimerService> Create(huxerui::UiWindow& ui_window) {
+    auto service = std::shared_ptr<LinuxTimerService>(new LinuxTimerService(ui_window));
+    LinuxTimerService* service_pointer = service.get();
+    service->worker = std::thread([service_pointer] { service_pointer->Run(); });
+    return service;
   }
 
-  ~LinuxTimerState() {
+  ~LinuxTimerService() {
     Dispose();
   }
 
@@ -175,7 +175,7 @@ struct LinuxTimerState : huxerui::example::TimerService {
   }
 
 private:
-  explicit LinuxTimerState(huxerui::UiWindow& window_value) : ui_window(&window_value) {
+  explicit LinuxTimerService(huxerui::UiWindow& window_value) : ui_window(&window_value) {
     timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
     if (timer_fd < 0) {
       throw std::runtime_error("HuxerUI example could not create the Linux platform timer");
@@ -351,7 +351,7 @@ namespace huxerui::example {
 
 void InstallTimer(ApplicationContext& root) {
   root.RegisterPlatformModule<std::shared_ptr<TimerService>>(timer::type, [](UiWindow& ui_window) {
-    return std::static_pointer_cast<TimerService>(LinuxTimerState::Create(ui_window));
+    return std::static_pointer_cast<TimerService>(LinuxTimerService::Create(ui_window));
   });
 }
 

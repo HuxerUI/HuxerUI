@@ -146,7 +146,7 @@ protected:
   }
 };
 
-class PausedHttpCopyOutput final : public detail::AsyncOutputStreamState {
+class PausedHttpCopyOutput final : public detail::AsyncOutputStreamBackend {
 public:
   Task<IoResult<void>> WriteAsync(Bytes) override {
     started = true;
@@ -507,8 +507,8 @@ TEST_CASE("HttpCopyCancellationStopsTransportDuringEitherEndpointOperation") {
   platform.RunPlatformModuleTasks();
   platform.transport->Respond(0, {.url = "https://example.test/canceled-copy", .status_code = 200});
   platform.RunPlatformModuleTasks();
-  auto output_state = std::make_shared<PausedHttpCopyOutput>();
-  auto output = detail::StreamAccess::MakeAsyncOutputStream(output_state);
+  auto output_backend = std::make_shared<PausedHttpCopyOutput>();
+  auto output = detail::StreamAccess::MakeAsyncOutputStream(output_backend);
   bool completed = false;
   const auto copy = http_tasks.Launch([&]() -> Task<void> {
     HUXERUI_DISCARD(co_await http_stream->Body().CopyToAsync(output, 1));
@@ -520,7 +520,7 @@ TEST_CASE("HttpCopyCancellationStopsTransportDuringEitherEndpointOperation") {
     platform.transport->Body(0, BytesFromString("a"));
     platform.RunPlatformModuleTasks();
   }
-  REQUIRE(output_state->started == waiting_for_output);
+  REQUIRE(output_backend->started == waiting_for_output);
   copy.Cancel();
   REQUIRE(platform.transport->Canceled(0));
   platform.transport->Body(0, BytesFromString("late"));
@@ -538,16 +538,16 @@ TEST_CASE("HttpUnstartedCopyReleasesBothEndpointsWithoutCancelingThem") {
   platform.RunPlatformModuleTasks();
   platform.transport->Respond(0, {.url = "https://example.test/unstarted-copy", .status_code = 200});
   platform.RunPlatformModuleTasks();
-  auto output_state = std::make_shared<PausedHttpCopyOutput>();
-  auto output = detail::StreamAccess::MakeAsyncOutputStream(output_state);
+  auto output_backend = std::make_shared<PausedHttpCopyOutput>();
+  auto output = detail::StreamAccess::MakeAsyncOutputStream(output_backend);
   {
     auto pending = http_stream->Body().CopyToAsync(output, 1);
     REQUIRE_THROWS_AS(http_stream->Body().ReadAsync(1), std::logic_error);
     REQUIRE_THROWS_AS(output.CloseAsync(), std::logic_error);
   }
   REQUIRE_FALSE(platform.transport->Canceled(0));
-  REQUIRE_FALSE(output_state->aborted);
-  REQUIRE_FALSE(output_state->started);
+  REQUIRE_FALSE(output_backend->aborted);
+  REQUIRE_FALSE(output_backend->started);
   REQUIRE(platform.transport->ReadRequests(0) == 0);
   REQUIRE_NOTHROW(http_stream->Body().ReadAsync(1));
   REQUIRE_NOTHROW(output.CloseAsync());

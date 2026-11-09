@@ -11,7 +11,7 @@
 
 namespace huxerui::detail {
 
-class IndicationState;
+class IndicationController;
 struct MountedNode;
 class GestureRecognizer;
 
@@ -72,7 +72,7 @@ struct TextSelectionOverlayState {
   std::vector<Rect> action_rects;
   std::vector<std::string> action_labels;
   std::vector<InteractionState> action_interactions;
-  std::vector<std::shared_ptr<IndicationState>> action_indications;
+  std::vector<std::shared_ptr<IndicationController>> action_indications;
 };
 
 struct TextSelectionOverlay {

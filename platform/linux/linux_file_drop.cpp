@@ -130,8 +130,8 @@ private:
 
 } // namespace
 
-struct LinuxFileDrop::State {
-  State(GtkWidget* target, UiWindow& owner, UiThreadDispatcher dispatch)
+struct LinuxFileDrop::Impl {
+  Impl(GtkWidget* target, UiWindow& owner, UiThreadDispatcher dispatch)
       : widget(GTK_WIDGET(g_object_ref(target))), ui_window(owner), dispatcher(std::move(dispatch)) {
     controller = gtk_drop_target_async_new(gdk_content_formats_new_for_gtype(GDK_TYPE_FILE_LIST), GDK_ACTION_COPY);
     g_signal_connect(controller, "drag-enter", G_CALLBACK(Entered), this);
@@ -141,7 +141,7 @@ struct LinuxFileDrop::State {
     gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(controller));
   }
 
-  ~State() {
+  ~Impl() {
     Leave();
     for (const auto& weak : pending) {
       if (auto operation = weak.lock()) {
@@ -165,7 +165,7 @@ struct LinuxFileDrop::State {
   }
 
   static GdkDragAction Entered(GtkDropTargetAsync*, GdkDrop* drop, double x, double y, gpointer data) {
-    auto& self = *static_cast<State*>(data);
+    auto& self = *static_cast<Impl*>(data);
     self.Leave();
     if (!(gdk_drop_get_actions(drop) & GDK_ACTION_COPY)) {
       return static_cast<GdkDragAction>(0);
@@ -182,7 +182,7 @@ struct LinuxFileDrop::State {
   }
 
   static GdkDragAction Moved(GtkDropTargetAsync*, GdkDrop* drop, double x, double y, gpointer data) {
-    auto& self = *static_cast<State*>(data);
+    auto& self = *static_cast<Impl*>(data);
     try {
       return self.current == drop && (gdk_drop_get_actions(drop) & GDK_ACTION_COPY) &&
                      self.ui_window.HandleFileDragMoved(self.session, {}, {static_cast<float>(x), static_cast<float>(y)})
@@ -194,14 +194,14 @@ struct LinuxFileDrop::State {
   }
 
   static void Left(GtkDropTargetAsync*, GdkDrop* drop, gpointer data) {
-    auto& self = *static_cast<State*>(data);
+    auto& self = *static_cast<Impl*>(data);
     if (self.current == drop) {
       self.Leave();
     }
   }
 
   static gboolean Dropped(GtkDropTargetAsync*, GdkDrop* drop, double x, double y, gpointer data) {
-    auto& self = *static_cast<State*>(data);
+    auto& self = *static_cast<Impl*>(data);
     if (self.current != drop || !(gdk_drop_get_actions(drop) & GDK_ACTION_COPY)) {
       self.Leave();
       return FALSE;
@@ -240,7 +240,7 @@ struct LinuxFileDrop::State {
 };
 
 LinuxFileDrop::LinuxFileDrop(GtkWidget* widget, UiWindow& ui_window, UiThreadDispatcher dispatcher)
-    : state_(std::make_unique<State>(widget, ui_window, std::move(dispatcher))) {}
+    : impl_(std::make_unique<Impl>(widget, ui_window, std::move(dispatcher))) {}
 
 LinuxFileDrop::~LinuxFileDrop() = default;
 

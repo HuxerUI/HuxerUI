@@ -140,7 +140,7 @@ The page-stack public API lives in `<huxerui/navigation.h>`:
 namespace huxerui {
 
 namespace detail {
-class NavigationState;
+class NavigationCoordinator;
 }
 
 class NavigationController {
@@ -162,9 +162,9 @@ public:
   [[nodiscard]] std::size_t Depth() const;
 
 private:
-  explicit NavigationController(std::weak_ptr<detail::NavigationState> state);
+  explicit NavigationController(std::weak_ptr<detail::NavigationCoordinator> coordinator);
 
-  std::weak_ptr<detail::NavigationState> state_;
+  std::weak_ptr<detail::NavigationCoordinator> coordinator_;
 
   friend View NavigationStack(std::function<View()> root);
   friend NavigationController UseNavigation();
@@ -283,8 +283,8 @@ NavigationStack therefore remains an explicit stateful container rather than syn
 
 ## Controller and Environment ownership
 
-Each NavigationStack owns one shared private navigation state.
-The stack scope holds the strong reference, while public NavigationController copies hold weak references so a page factory that captures its controller cannot form a cycle through the controller state.
+Each NavigationStack owns one private `NavigationCoordinator`.
+The stack scope holds the strong reference, while public NavigationController copies hold weak references so a page factory that captures its controller cannot form a cycle through the coordinator.
 Controller mutations invalidate only that NavigationStack scope through its retained invalidation binding; they do not retain UiWindow directly or recompose the application root.
 
 The controller is provided through a private typed Environment value while each page factory composes.
@@ -760,7 +760,7 @@ Missing domain content is ordinary destination state and may render an applicati
 
 The `State<NavigationPath<Route>>` supplied by the application is the only logical history for a routed stack.
 A routed controller mutates that State rather than a private logical stack.
-The private NavigationState retains non-authoritative requested and realized descriptor snapshots, resolved entries, internal identities, queued visual operations, and transition state needed to reconcile the controlled value without discarding exiting pages early.
+The private `NavigationCoordinator` retains non-authoritative requested and realized descriptor snapshots, resolved entries, internal identities, queued visual operations, and transition state needed to reconcile the controlled value without discarding exiting pages early.
 Controller `Depth()` is therefore the path size plus the fixed root entry, while `CanPop()` is true exactly when the path is non-empty.
 
 The routed controller surface is:
@@ -951,7 +951,7 @@ The public files are:
 - `include/huxerui/web/navigation.h` for the typed route-codec and Browser History adapter.
 - `include/huxerui/huxerui.h` for the public umbrella include.
 
-`src/components/navigation.cpp` owns controller state, navigation-source reconciliation, resolved entries, NavigationStack layout, retained page modifiers, and page motion.
+`src/components/navigation.cpp` owns the navigation coordinator, navigation-source reconciliation, resolved entries, NavigationStack layout, retained page modifiers, and page motion.
 `src/components/navigation_ui.cpp` owns TopAppBar layout, NavigationItem resolution, NavigationBar, NavigationPane, DrawerLayout, and retained drawer presentation.
 
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
@@ -1032,7 +1032,7 @@ Application activation integration requires platform tests for cold-start delive
 - TopAppBar actions remain ordinary Views and never imply navigation, menu, or automatic overflow policy.
 - A page is an ordinary View factory with an independent keyed RecomposeScope.
 - NavigationController resolves the nearest scoped stack and does not own Runtime or mounted nodes.
-- The stack scope is the only strong owner of controller state.
+- The stack scope is the only strong owner of the coordinator.
 - A routed stack has exactly one application-owned NavigationPath as its logical history.
 - Factory and routed entries never coexist in one NavigationStack.
 - Route values contain destination data, while private entry identifiers define mounted page identity.

@@ -127,7 +127,7 @@ void detail::TextInteraction::AdvanceTextSelectionOverlay(const FrameInfo& frame
   bool needs_frame = false;
   std::optional<double> wake_after;
   bool has_visuals = false;
-  for (const std::shared_ptr<detail::IndicationState>& indication : overlay.action_indications) {
+  for (const std::shared_ptr<detail::IndicationController>& indication : overlay.action_indications) {
     if (!indication) {
       continue;
     }
@@ -576,14 +576,14 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
     overlay.action_indications.clear();
     overlay.action_indications.reserve(overlay.actions.size());
     for (std::size_t index = 0; index < overlay.actions.size(); ++index) {
-      auto indication = std::make_shared<detail::IndicationState>();
+      auto indication = std::make_shared<detail::IndicationController>();
       indication->Update(menu_style.item_indication);
       overlay.action_indications.push_back(std::move(indication));
     }
     overlay.hovered_action.reset();
     overlay.pressed_action.reset();
   } else {
-    for (const std::shared_ptr<detail::IndicationState>& indication : overlay.action_indications) {
+    for (const std::shared_ptr<detail::IndicationController>& indication : overlay.action_indications) {
       if (indication) {
         indication->Update(menu_style.item_indication);
       }

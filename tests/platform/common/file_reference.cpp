@@ -457,7 +457,7 @@ TEST_CASE("Synchronous file reference operations retain access and work without 
 
 TEST_CASE("File references without synchronous provider operations report Unsupported") {
   const auto reference = detail::MakeFileReference({.name = "external", .can_write = true},
-                                                    std::make_shared<ProviderReferenceState>("external"));
+                                                    std::make_shared<ProviderReferenceBackend>("external"));
   REQUIRE(reference.OpenRead().Error().code == IoErrorCode::Unsupported);
   REQUIRE(reference.OpenWrite().Error().code == IoErrorCode::Unsupported);
   REQUIRE(reference.OpenRandomAccess().Error().code == IoErrorCode::Unsupported);
@@ -494,7 +494,7 @@ TEST_CASE("Synchronous directory references create and enumerate immediate child
   REQUIRE(file.CreateDirectory("child").Error().code == IoErrorCode::NotDirectory);
 
   const auto external = detail::MakeFileReference({.name = "external", .can_write = true, .type = FileType::Directory},
-                                                   std::make_shared<ProviderReferenceState>("external"));
+                                                   std::make_shared<ProviderReferenceBackend>("external"));
   REQUIRE(external.ListChildren().Error().code == IoErrorCode::Unsupported);
   REQUIRE(external.CreateDirectory("child").Error().code == IoErrorCode::Unsupported);
 }
@@ -641,13 +641,13 @@ TEST_CASE("DirectoryCopiesIndexListingBasedDestinationsOnlyWithinOneCopy") {
   FileTestPlatform platform(temporary.Directories());
   UiWindow runtime(FileApp, platform);
   runtime.BuildFrame();
-  auto input = std::make_shared<ProviderReferenceState>("provider:source");
-  auto output = std::make_shared<ProviderReferenceState>("provider:destination");
+  auto input = std::make_shared<ProviderReferenceBackend>("provider:source");
+  auto output = std::make_shared<ProviderReferenceBackend>("provider:destination");
   output->listing_lookup = true;
   for (std::size_t index = 0; index < 1000; ++index) {
     const std::string name = std::to_string(index) + ".txt";
     input->children.push_back(detail::MakeFileReference(
-        {.name = name}, std::make_shared<ProviderReferenceState>("provider:source/" + name)));
+        {.name = name}, std::make_shared<ProviderReferenceBackend>("provider:source/" + name)));
   }
   auto source = detail::MakeFileReference({.name = "source", .type = FileType::Directory}, input);
   auto destination = detail::MakeFileReference(
@@ -659,12 +659,12 @@ TEST_CASE("DirectoryCopiesIndexListingBasedDestinationsOnlyWithinOneCopy") {
   }
   SECTION("Unrelated duplicate names do not block the copy") {
     auto unrelated = detail::MakeFileReference(
-        {.name = "unrelated.txt"}, std::make_shared<ProviderReferenceState>("provider:unrelated"));
+        {.name = "unrelated.txt"}, std::make_shared<ProviderReferenceBackend>("provider:unrelated"));
     output->children = {unrelated, unrelated};
   }
   SECTION("An addressed duplicate is rejected before writing") {
     auto duplicate = detail::MakeFileReference(
-        {.name = "0.txt"}, std::make_shared<ProviderReferenceState>("provider:duplicate"));
+        {.name = "0.txt"}, std::make_shared<ProviderReferenceBackend>("provider:duplicate"));
     output->children = {duplicate, duplicate};
     expected_error = IoErrorCode::AlreadyExists;
   }
@@ -718,8 +718,8 @@ TEST_CASE("DirectoryCopiesRejectUnknownNamesWithoutInventingDestinationEntries")
   runtime.BuildFrame();
   const File destination = file_application->Directories().temporary_directory.Child("destination");
   REQUIRE(destination.CreateDirectory());
-  auto child = std::make_shared<ProviderReferenceState>("provider:unnamed");
-  auto directory = std::make_shared<ProviderReferenceState>("provider:root");
+  auto child = std::make_shared<ProviderReferenceBackend>("provider:unnamed");
+  auto directory = std::make_shared<ProviderReferenceBackend>("provider:root");
   directory->children.push_back(detail::MakeFileReference({}, child));
   auto reference = detail::MakeFileReference({.name = "root", .type = FileType::Directory}, directory);
   std::optional<IoResult<DirectoryCopySummary>> result;

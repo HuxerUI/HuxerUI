@@ -822,7 +822,7 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), window_ != nullptr)) {
+    if (const std::optional<double> scheduled = frame_coordinator_.Request(deadline, Now(), window_ != nullptr)) {
       ScheduleFrame(*scheduled);
     }
   }
@@ -1070,7 +1070,7 @@ private:
   }
 
   void FlushDeferredFrame() {
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(window_ != nullptr)) {
+    if (const std::optional<double> deadline = frame_coordinator_.TakeDeferred(window_ != nullptr)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -1078,7 +1078,7 @@ private:
   bool InvalidateFullWindow() {
     const bool invalidated = window_ != nullptr && InvalidateRect(window_, nullptr, FALSE) != FALSE;
     if (invalidated) {
-      frame_state_.MarkPaintPending();
+      frame_coordinator_.MarkPaintPending();
     }
     return invalidated;
   }
@@ -1095,13 +1095,13 @@ private:
       invalidated = InvalidateRect(window_, &rect, FALSE) != FALSE || invalidated;
     }
     if (invalidated) {
-      frame_state_.MarkPaintPending();
+      frame_coordinator_.MarkPaintPending();
     }
     return invalidated;
   }
 
   void CommitFrameAndInvalidate() {
-    if (!frame_state_.BeginCommit()) {
+    if (!frame_coordinator_.BeginCommit()) {
       return;
     }
     const FrameCommit& commit = UiWindow::BuildFrame();
@@ -1591,8 +1591,9 @@ private:
     case Win32Accessibility::action_message:
       return accessibility_.HandleActionMessage(l_param);
     case WM_PAINT: {
-      frame_state_.BeginPaint();
-      if (committed_frame_ == nullptr || (frame_state_.FrameBuildPending() && !frame_state_.PaintPending())) {
+      frame_coordinator_.BeginPaint();
+      if (committed_frame_ == nullptr ||
+          (frame_coordinator_.FrameBuildPending() && !frame_coordinator_.PaintPending())) {
         CommitFrameAndInvalidate();
       } else {
         UpdateRuntimeViewport();
@@ -1607,14 +1608,14 @@ private:
       if (render_result == Win32RenderResult::Presented && platform_views_) {
         platform_views_->DidPresent();
       }
-      if (const std::optional<double> deadline = frame_state_.EndPaint(window_ != nullptr)) {
+      if (const std::optional<double> deadline = frame_coordinator_.EndPaint(window_ != nullptr)) {
         ScheduleFrame(*deadline);
       }
       return 0;
     }
     case kRenderMessage:
       render_message_posted_ = false;
-      if (frame_state_.FrameBuildPending()) {
+      if (frame_coordinator_.FrameBuildPending()) {
         CommitFrameAndInvalidate();
       }
       return 0;
@@ -1626,7 +1627,7 @@ private:
         KillTimer(window, kFrameTimer);
         timer_armed_ = false;
         timer_deadline_.reset();
-        if (frame_state_.FrameBuildPending()) {
+        if (frame_coordinator_.FrameBuildPending()) {
           CommitFrameAndInvalidate();
         }
         return 0;
@@ -1748,7 +1749,7 @@ private:
   bool first_nc_calc_ = true;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;
-  PlatformFrameState frame_state_;
+  PlatformFrameCoordinator frame_coordinator_;
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   HWND mouse_tracking_window_ = nullptr;

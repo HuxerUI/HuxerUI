@@ -56,8 +56,8 @@ static NSString* ToNSString(std::string_view value) {
   return result;
 }
 
-// Keep the FileReference beside its NSURL: the URL identifies the resource, while the C++ state owns any coordinated
-// access that must survive asynchronous native media work.
+// The NSURL identifies the resource. Keep the FileReference beside it to retain coordinated access
+// during asynchronous native media work.
 @interface HUXFileReference () {
 @private
   std::optional<FileReference> reference_;
@@ -274,12 +274,12 @@ static HUXPlatformPayloadKind ToObjectiveCKind(PlatformPayloadKind kind) {
 
 @end
 
-class ObjectiveCInstanceState final {
+class ObjectiveCPlatformInstanceBridge final {
 public:
-  ObjectiveCInstanceState(id instance, HUXMacPlatformEventEmitter* events)
+  ObjectiveCPlatformInstanceBridge(id instance, HUXMacPlatformEventEmitter* events)
       : instance_(instance), events_(events) {}
 
-  ~ObjectiveCInstanceState() {
+  ~ObjectiveCPlatformInstanceBridge() {
     Dispose();
   }
 
@@ -343,7 +343,7 @@ private:
 };
 
 static void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
-                            const std::shared_ptr<ObjectiveCInstanceState>& instance) {
+                            const std::shared_ptr<ObjectiveCPlatformInstanceBridge>& instance) {
   endpoint.Connect({
       .invoke = [instance](std::string method, PlatformPayload arguments,
                            std::function<void(PlatformResult<PlatformPayload>)> completion) {
@@ -715,17 +715,17 @@ namespace huxerui::macos::detail {
 class ObjectiveCPlatformViewInstance final {
 public:
   ~ObjectiveCPlatformViewInstance() {
-    if (state) {
-      state->CloseEvents();
+    if (instance_bridge) {
+      instance_bridge->CloseEvents();
       if (channel_connected) {
         channel.Close();
       } else {
-        state->Dispose();
+        instance_bridge->Dispose();
       }
     }
   }
 
-  std::shared_ptr<ObjectiveCInstanceState> state;
+  std::shared_ptr<ObjectiveCPlatformInstanceBridge> instance_bridge;
   PlatformChannel channel;
   __strong NSView* view = nil;
   bool channel_connected = false;
@@ -756,8 +756,8 @@ PlatformChannel CreateObjectiveCPlatformModule(UiWindow& ui_window, NSWindow* ow
     [events close];
     throw std::logic_error("HuxerUI macOS Objective-C PlatformModule factory returned an invalid instance");
   }
-  auto state = std::make_shared<ObjectiveCInstanceState>(instance, events);
-  ConnectInstance(endpoint, state);
+  auto instance_bridge = std::make_shared<ObjectiveCPlatformInstanceBridge>(instance, events);
+  ConnectInstance(endpoint, instance_bridge);
   return endpoint.Channel();
 }
 
@@ -799,11 +799,11 @@ CreateObjectiveCPlatformView(UiWindow& ui_window, NSWindow* owner,
   }
 
   auto result = std::make_shared<ObjectiveCPlatformViewInstance>();
-  result->state = std::make_shared<ObjectiveCInstanceState>(instance, event_endpoint);
+  result->instance_bridge = std::make_shared<ObjectiveCPlatformInstanceBridge>(instance, event_endpoint);
   result->view = view;
   if (channel_required) {
     const huxerui::detail::PlatformChannelEndpoint endpoint = huxerui::detail::MakePlatformChannelEndpoint(ui_window);
-    ConnectInstance(endpoint, result->state);
+    ConnectInstance(endpoint, result->instance_bridge);
     result->channel = endpoint.Channel();
     result->channel_connected = true;
   }
@@ -816,10 +816,10 @@ NSView* GetObjectiveCPlatformView(const std::shared_ptr<ObjectiveCPlatformViewIn
 
 void UpdateObjectiveCPlatformView(const std::shared_ptr<ObjectiveCPlatformViewInstance>& instance,
                                   PlatformPayload properties) {
-  if (!instance || !instance->state || instance->state->Disposed()) {
+  if (!instance || !instance->instance_bridge || instance->instance_bridge->Disposed()) {
     throw std::logic_error("HuxerUI macOS Objective-C PlatformView instance is disposed");
   }
-  id<HUXAppKitPlatformView> platform_view = instance->state->Instance();
+  id<HUXAppKitPlatformView> platform_view = instance->instance_bridge->Instance();
   @try {
     [platform_view updateWithProperties:EncodePayload(std::move(properties))];
     if (platform_view.view != instance->view) {
@@ -834,12 +834,12 @@ void DisposeObjectiveCPlatformView(const std::shared_ptr<ObjectiveCPlatformViewI
   if (!instance) {
     return;
   }
-  if (instance->state) {
-    instance->state->CloseEvents();
+  if (instance->instance_bridge) {
+    instance->instance_bridge->CloseEvents();
     if (instance->channel_connected) {
       instance->channel.Close();
     } else {
-      instance->state->Dispose();
+      instance->instance_bridge->Dispose();
     }
   }
   instance->view = nil;

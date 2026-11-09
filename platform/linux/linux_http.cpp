@@ -109,15 +109,15 @@ std::optional<std::uint64_t> ParseContentLength(const std::vector<HttpHeader>& h
 
 class LinuxHttpRequest;
 
-class LinuxHttpTransportState final : public std::enable_shared_from_this<LinuxHttpTransportState> {
+class LinuxHttpWorker final : public std::enable_shared_from_this<LinuxHttpWorker> {
 public:
-  static std::shared_ptr<LinuxHttpTransportState> Create() {
-    auto state = std::shared_ptr<LinuxHttpTransportState>(new LinuxHttpTransportState());
-    state->StartThread();
-    return state;
+  static std::shared_ptr<LinuxHttpWorker> Create() {
+    auto worker = std::shared_ptr<LinuxHttpWorker>(new LinuxHttpWorker());
+    worker->StartThread();
+    return worker;
   }
 
-  ~LinuxHttpTransportState() {
+  ~LinuxHttpWorker() {
     if (loop_ != nullptr) {
       g_main_loop_unref(loop_);
     }
@@ -163,7 +163,7 @@ public:
         context_,
         G_PRIORITY_DEFAULT,
         [](gpointer data) -> gboolean {
-          static_cast<LinuxHttpTransportState*>(data)->StopOnNetworkThread();
+          static_cast<LinuxHttpWorker*>(data)->StopOnNetworkThread();
           return G_SOURCE_REMOVE;
         },
         this,
@@ -173,10 +173,10 @@ public:
   }
 
 private:
-  LinuxHttpTransportState() : context_(g_main_context_new()), loop_(g_main_loop_new(context_, false)) {}
+  LinuxHttpWorker() : context_(g_main_context_new()), loop_(g_main_loop_new(context_, false)) {}
 
   void StartThread() {
-    const std::shared_ptr<LinuxHttpTransportState> self = shared_from_this();
+    const std::shared_ptr<LinuxHttpWorker> self = shared_from_this();
     thread_ = std::thread([self] { self->Run(); });
     std::unique_lock lock(ready_mutex_);
     ready_condition_.wait(lock, [this] { return ready_; });
@@ -218,9 +218,9 @@ private:
 class LinuxHttpRequest final : public HttpTransportOperation, public std::enable_shared_from_this<LinuxHttpRequest> {
 public:
   LinuxHttpRequest(
-      std::weak_ptr<LinuxHttpTransportState> transport, HttpRequest request, HttpTransportCallbacks callbacks
+      std::weak_ptr<LinuxHttpWorker> worker, HttpRequest request, HttpTransportCallbacks callbacks
   )
-      : transport_(std::move(transport)), request_(std::move(request)), callbacks_(std::move(callbacks)),
+      : worker_(std::move(worker)), request_(std::move(request)), callbacks_(std::move(callbacks)),
         cancellable_(g_cancellable_new()) {}
 
   ~LinuxHttpRequest() override {
@@ -309,9 +309,9 @@ public:
   }
 
   void RequestRead() override {
-    if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
+    if (const std::shared_ptr<LinuxHttpWorker> worker = worker_.lock()) {
       const std::shared_ptr<LinuxHttpRequest> request = shared_from_this();
-      transport->Post([request] { request->ReadOnNetworkThread(); });
+      worker->Post([request] { request->ReadOnNetworkThread(); });
     }
   }
 
@@ -319,9 +319,9 @@ public:
     if (!SuppressCompletion()) {
       return;
     }
-    if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
+    if (const std::shared_ptr<LinuxHttpWorker> worker = worker_.lock()) {
       const std::shared_ptr<LinuxHttpRequest> request = shared_from_this();
-      transport->Post([request] { request->CancelOnNetworkThread(); });
+      worker->Post([request] { request->CancelOnNetworkThread(); });
     }
   }
 
@@ -561,8 +561,8 @@ private:
       return;
     }
     removed_ = true;
-    if (const std::shared_ptr<LinuxHttpTransportState> transport = transport_.lock()) {
-      transport->Remove(this);
+    if (const std::shared_ptr<LinuxHttpWorker> worker = worker_.lock()) {
+      worker->Remove(this);
     }
   }
 
@@ -576,7 +576,7 @@ private:
     g_clear_object(&message_);
   }
 
-  std::weak_ptr<LinuxHttpTransportState> transport_;
+  std::weak_ptr<LinuxHttpWorker> worker_;
   HttpRequest request_;
   mutable std::mutex mutex_;
   HttpTransportCallbacks callbacks_;
@@ -589,7 +589,7 @@ private:
   bool finished_ = false;
 };
 
-void LinuxHttpTransportState::Queue(std::shared_ptr<LinuxHttpRequest> request) {
+void LinuxHttpWorker::Queue(std::shared_ptr<LinuxHttpRequest> request) {
   requests_.push_back(request);
   if (stopping_ || request->Finished()) {
     request->CancelOnNetworkThread();
@@ -598,12 +598,12 @@ void LinuxHttpTransportState::Queue(std::shared_ptr<LinuxHttpRequest> request) {
   request->Start(session_);
 }
 
-void LinuxHttpTransportState::Remove(LinuxHttpRequest* request) noexcept {
+void LinuxHttpWorker::Remove(LinuxHttpRequest* request) noexcept {
   std::erase_if(requests_, [request](const std::shared_ptr<LinuxHttpRequest>& item) { return item.get() == request; });
   MaybeQuit();
 }
 
-void LinuxHttpTransportState::StopOnNetworkThread() noexcept {
+void LinuxHttpWorker::StopOnNetworkThread() noexcept {
   if (stopping_) {
     return;
   }
@@ -617,22 +617,22 @@ void LinuxHttpTransportState::StopOnNetworkThread() noexcept {
 
 class LinuxHttpTransport final : public HttpTransport {
 public:
-  LinuxHttpTransport() : state_(LinuxHttpTransportState::Create()) {}
+  LinuxHttpTransport() : worker_(LinuxHttpWorker::Create()) {}
 
   ~LinuxHttpTransport() override {
-    state_->Stop();
+    worker_->Stop();
   }
 
   std::shared_ptr<HttpTransportOperation>
   Start(HttpRequest request, bool, HttpTransportCallbacks callbacks) override {
-    auto operation = std::make_shared<LinuxHttpRequest>(state_, std::move(request), std::move(callbacks));
-    LinuxHttpTransportState* state = state_.get();
-    state->Post([state, operation] { state->Queue(operation); });
+    auto operation = std::make_shared<LinuxHttpRequest>(worker_, std::move(request), std::move(callbacks));
+    LinuxHttpWorker* worker = worker_.get();
+    worker->Post([worker, operation] { worker->Queue(operation); });
     return operation;
   }
 
 private:
-  std::shared_ptr<LinuxHttpTransportState> state_;
+  std::shared_ptr<LinuxHttpWorker> worker_;
 };
 
 } // namespace

@@ -122,9 +122,9 @@ private:
   AppDirectories directories_;
 };
 
-class ProviderReferenceState final : public detail::FileReferenceState {
+class ProviderReferenceBackend final : public detail::FileReferenceBackend {
 public:
-  explicit ProviderReferenceState(std::string entry_key) : entry_key_(std::move(entry_key)) {}
+  explicit ProviderReferenceBackend(std::string entry_key) : entry_key_(std::move(entry_key)) {}
 
   std::string EntryKey() const override { return entry_key_; }
 
@@ -189,8 +189,8 @@ public:
       CHECK(existing->Name() == name);
       completion(IoResult<detail::FileReferenceWriteResult>({*existing, 1, false}));
     } else {
-      auto state = std::make_shared<ProviderReferenceState>(entry_key_ + "/" + name);
-      children.push_back(detail::MakeFileReference({.name = name, .can_write = true}, std::move(state)));
+      auto backend = std::make_shared<ProviderReferenceBackend>(entry_key_ + "/" + name);
+      children.push_back(detail::MakeFileReference({.name = name, .can_write = true}, std::move(backend)));
       completion(IoResult<detail::FileReferenceWriteResult>({children.back(), 1, true}));
     }
     return {};

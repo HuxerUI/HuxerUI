@@ -53,11 +53,11 @@ class AsyncOutputStream;
 class OutputStream;
 
 namespace detail {
-class AsyncInputStreamState;
-class AsyncOutputStreamState;
-class InputStreamState;
-class OutputStreamState;
-class RandomAccessStreamState;
+class AsyncInputStreamBackend;
+class AsyncOutputStreamBackend;
+class InputStreamBackend;
+class OutputStreamBackend;
+class RandomAccessStreamImpl;
 struct StreamAccess;
 } // namespace detail
 
@@ -107,9 +107,9 @@ public:
   IoResult<std::uint64_t> CopyTo(OutputStream& destination, std::span<std::byte> buffer);
 
 private:
-  explicit InputStream(std::shared_ptr<detail::InputStreamState> state);
+  explicit InputStream(std::shared_ptr<detail::InputStreamBackend> backend);
 
-  std::shared_ptr<detail::InputStreamState> state_;
+  std::shared_ptr<detail::InputStreamBackend> backend_;
   bool complete_ = false;
   bool failed_ = false;
 
@@ -154,12 +154,12 @@ public:
   IoResult<void> Close();
 
 private:
-  explicit OutputStream(std::shared_ptr<detail::OutputStreamState> state);
+  explicit OutputStream(std::shared_ptr<detail::OutputStreamBackend> backend);
 
   void RequireWritable() const;
   void Release() noexcept;
 
-  std::shared_ptr<detail::OutputStreamState> state_;
+  std::shared_ptr<detail::OutputStreamBackend> backend_;
   bool closed_ = false;
   bool failed_ = false;
 
@@ -214,10 +214,10 @@ public:
   IoResult<void> Close();
 
 private:
-  explicit RandomAccessStream(std::shared_ptr<detail::RandomAccessStreamState> state);
-  detail::RandomAccessStreamState& State() const;
+  explicit RandomAccessStream(std::shared_ptr<detail::RandomAccessStreamImpl> impl);
+  detail::RandomAccessStreamImpl& RequireImpl() const;
 
-  std::shared_ptr<detail::RandomAccessStreamState> state_;
+  std::shared_ptr<detail::RandomAccessStreamImpl> impl_;
 
   friend struct detail::StreamAccess;
 };
@@ -275,11 +275,11 @@ public:
   Task<IoResult<std::uint64_t>> CopyToAsync(AsyncOutputStream& destination, std::size_t maximum_read_size);
 
 private:
-  explicit AsyncInputStream(std::shared_ptr<detail::AsyncInputStreamState> state);
+  explicit AsyncInputStream(std::shared_ptr<detail::AsyncInputStreamBackend> backend);
 
   void Release() noexcept;
 
-  std::shared_ptr<detail::AsyncInputStreamState> state_;
+  std::shared_ptr<detail::AsyncInputStreamBackend> backend_;
 
   friend struct detail::StreamAccess;
 };
@@ -328,11 +328,11 @@ public:
   Task<IoResult<void>> CloseAsync();
 
 private:
-  explicit AsyncOutputStream(std::shared_ptr<detail::AsyncOutputStreamState> state);
+  explicit AsyncOutputStream(std::shared_ptr<detail::AsyncOutputStreamBackend> backend);
 
   void Release() noexcept;
 
-  std::shared_ptr<detail::AsyncOutputStreamState> state_;
+  std::shared_ptr<detail::AsyncOutputStreamBackend> backend_;
 
   friend class AsyncInputStream;
   friend struct detail::StreamAccess;

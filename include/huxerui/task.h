@@ -28,7 +28,7 @@ namespace detail {
 
 class RecomposeScope;
 class TaskExecution;
-class TaskScopeState;
+class TaskScopeImpl;
 class WorkerOperation;
 class WorkerSequenceState;
 void NotifyTaskCompleted(const std::weak_ptr<TaskExecution>& execution) noexcept;
@@ -329,7 +329,7 @@ private:
 };
 
 namespace detail {
-template <class T> class CallbackOperationState;
+template <class T> class CallbackOperation;
 template <class T, class Start> class CallbackAwaiter;
 } // namespace detail
 
@@ -348,9 +348,10 @@ public:
   void Fail(std::exception_ptr error) const;
 
 private:
-  explicit CallbackCompletion(std::weak_ptr<detail::CallbackOperationState<T>> state) : state_(std::move(state)) {}
+  explicit CallbackCompletion(std::weak_ptr<detail::CallbackOperation<T>> operation)
+      : operation_(std::move(operation)) {}
 
-  std::weak_ptr<detail::CallbackOperationState<T>> state_;
+  std::weak_ptr<detail::CallbackOperation<T>> operation_;
 
   template <class, class> friend class detail::CallbackAwaiter;
 };
@@ -366,16 +367,17 @@ public:
   void Fail(std::exception_ptr error) const;
 
 private:
-  explicit CallbackCompletion(std::weak_ptr<detail::CallbackOperationState<void>> state) : state_(std::move(state)) {}
+  explicit CallbackCompletion(std::weak_ptr<detail::CallbackOperation<void>> operation)
+      : operation_(std::move(operation)) {}
 
-  std::weak_ptr<detail::CallbackOperationState<void>> state_;
+  std::weak_ptr<detail::CallbackOperation<void>> operation_;
 
   template <class, class> friend class detail::CallbackAwaiter;
 };
 
 namespace detail {
 
-template <class T> class CallbackOperationState final {
+template <class T> class CallbackOperation final {
   using StoredResult = std::conditional_t<std::is_void_v<T>, bool, T>;
   enum class Phase { Pending, Completed, Canceled };
 
@@ -486,13 +488,13 @@ private:
 
 template <class T, class Start> class CallbackAwaiter final {
 public:
-  explicit CallbackAwaiter(Start& start) : start_(start), state_(std::make_shared<CallbackOperationState<T>>()) {}
+  explicit CallbackAwaiter(Start& start) : start_(start), operation_(std::make_shared<CallbackOperation<T>>()) {}
 
   CallbackAwaiter(const CallbackAwaiter&) = delete;
   CallbackAwaiter& operator=(const CallbackAwaiter&) = delete;
 
   ~CallbackAwaiter() {
-    state_->Cancel();
+    operation_->Cancel();
   }
 
   [[nodiscard]] bool await_ready() const noexcept {
@@ -504,24 +506,24 @@ public:
     if (execution.expired()) {
       throw std::logic_error("HuxerUI AwaitCallback() requires a running Task execution");
     }
-    state_->Bind(execution, continuation);
+    operation_->Bind(execution, continuation);
     std::function<void()> cancellation;
     try {
-      cancellation = std::invoke(std::move(start_), CallbackCompletion<T>(state_));
+      cancellation = std::invoke(std::move(start_), CallbackCompletion<T>(operation_));
     } catch (...) {
-      state_->Fail(std::current_exception());
+      operation_->Fail(std::current_exception());
     }
-    state_->SetCancellation(std::move(cancellation));
+    operation_->SetCancellation(std::move(cancellation));
   }
 
   T await_resume() {
-    return state_->TakeResult();
+    return operation_->TakeResult();
   }
 
 private:
   // The enclosing RunCallbackTask frame owns the starter until this awaiter is destroyed.
   Start& start_;
-  std::shared_ptr<CallbackOperationState<T>> state_;
+  std::shared_ptr<CallbackOperation<T>> operation_;
 };
 
 template <class T, class Start> Task<T> RunCallbackTask(Start start) {
@@ -535,8 +537,8 @@ template <class T, class Start> Task<T> RunCallbackTask(Start start) {
 } // namespace detail
 
 template <class T> void CallbackCompletion<T>::Complete(T value) const {
-  if (auto state = state_.lock()) {
-    state->Complete(std::move(value));
+  if (auto operation = operation_.lock()) {
+    operation->Complete(std::move(value));
   }
 }
 
@@ -544,14 +546,14 @@ template <class T> void CallbackCompletion<T>::Fail(std::exception_ptr error) co
   if (!error) {
     throw std::invalid_argument("HuxerUI CallbackCompletion::Fail() requires a non-null exception");
   }
-  if (auto state = state_.lock()) {
-    state->Fail(std::move(error));
+  if (auto operation = operation_.lock()) {
+    operation->Fail(std::move(error));
   }
 }
 
 inline void CallbackCompletion<void>::Complete() const {
-  if (auto state = state_.lock()) {
-    state->Complete(true);
+  if (auto operation = operation_.lock()) {
+    operation->Complete(true);
   }
 }
 
@@ -559,8 +561,8 @@ inline void CallbackCompletion<void>::Fail(std::exception_ptr error) const {
   if (!error) {
     throw std::invalid_argument("HuxerUI CallbackCompletion::Fail() requires a non-null exception");
   }
-  if (auto state = state_.lock()) {
-    state->Fail(std::move(error));
+  if (auto operation = operation_.lock()) {
+    operation->Fail(std::move(error));
   }
 }
 
@@ -625,10 +627,10 @@ private:
 };
 
 template <class Operation, class Result>
-class WorkerOperationState final : public WorkerOperation,
-                                   public std::enable_shared_from_this<WorkerOperationState<Operation, Result>> {
+class WorkerJob final : public WorkerOperation,
+                                   public std::enable_shared_from_this<WorkerJob<Operation, Result>> {
 public:
-  WorkerOperationState(Operation operation, std::shared_ptr<WorkerSequenceState> sequence)
+  WorkerJob(Operation operation, std::shared_ptr<WorkerSequenceState> sequence)
       : operation_(std::move(operation)), sequence_(std::move(sequence)) {}
 
   void Suspend(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
@@ -704,7 +706,7 @@ private:
   using StoredResult = std::conditional_t<std::is_void_v<Result>, bool, Result>;
 
   void Schedule() {
-    std::shared_ptr<WorkerOperationState> self;
+    std::shared_ptr<WorkerJob> self;
     {
       std::scoped_lock lock(mutex_);
       if (phase_ != Phase::Queued) {
@@ -804,12 +806,10 @@ private:
 template <class Operation, class Result> class WorkerAwaiter final {
 public:
   explicit WorkerAwaiter(Operation operation)
-      : state_(std::make_shared<WorkerOperationState<Operation, Result>>(std::move(operation), nullptr)) {}
+      : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), nullptr)) {}
 
   WorkerAwaiter(std::shared_ptr<WorkerSequenceState> sequence, Operation operation)
-      : state_(std::make_shared<WorkerOperationState<Operation, Result>>(
-            std::move(operation), std::move(sequence)
-        )),
+      : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), std::move(sequence))),
         sequenced_(true) {}
 
   WorkerAwaiter(const WorkerAwaiter&) = delete;
@@ -818,8 +818,8 @@ public:
   WorkerAwaiter& operator=(WorkerAwaiter&&) noexcept = default;
 
   ~WorkerAwaiter() {
-    if (state_) {
-      state_->Cancel();
+    if (job_) {
+      job_->Cancel();
     }
   }
 
@@ -839,15 +839,15 @@ public:
       }
       throw std::logic_error("HuxerUI RunWorker() requires a running Task execution");
     }
-    state_->Suspend(execution, continuation);
+    job_->Suspend(execution, continuation);
   }
 
   Result await_resume() {
-    return state_->TakeResult();
+    return job_->TakeResult();
   }
 
 private:
-  std::shared_ptr<WorkerOperationState<Operation, Result>> state_;
+  std::shared_ptr<WorkerJob<Operation, Result>> job_;
   bool sequenced_ = false;
 };
 
@@ -985,7 +985,7 @@ private:
 
   std::weak_ptr<detail::TaskExecution> execution_;
 
-  friend class detail::TaskScopeState;
+  friend class detail::TaskScopeImpl;
 };
 
 namespace detail {
@@ -1059,11 +1059,11 @@ public:
   }
 
 private:
-  explicit TaskScope(std::shared_ptr<detail::TaskScopeState> state) noexcept : state_(std::move(state)) {}
+  explicit TaskScope(std::shared_ptr<detail::TaskScopeImpl> impl) noexcept : impl_(std::move(impl)) {}
 
   void PostErased(std::function<void()> callback) const;
 
-  std::shared_ptr<detail::TaskScopeState> state_;
+  std::shared_ptr<detail::TaskScopeImpl> impl_;
 
   friend class detail::RecomposeScope;
   friend TaskScope UseApplicationTaskScope();

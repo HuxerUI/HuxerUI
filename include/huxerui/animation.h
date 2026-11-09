@@ -29,7 +29,7 @@ class SceneTransitionAnchorExtension;
 class SceneTransitionService;
 struct SceneTransitionAnchorState;
 class TransitionExtension;
-class SharedTransitionState;
+class SharedTransitionCoordinator;
 
 struct SharedBoundsEvaluator {
   virtual ~SharedBoundsEvaluator() = default;
@@ -876,8 +876,9 @@ public:
   static const detail::ModifierDescriptor& Descriptor();
   bool operator==(const SharedTransitionScope&) const = default;
 private:
-  explicit SharedTransitionScope(std::shared_ptr<detail::SharedTransitionState> state) : state_(std::move(state)) {}
-  std::shared_ptr<detail::SharedTransitionState> state_;
+  explicit SharedTransitionScope(std::shared_ptr<detail::SharedTransitionCoordinator> coordinator)
+      : coordinator_(std::move(coordinator)) {}
+  std::shared_ptr<detail::SharedTransitionCoordinator> coordinator_;
   friend class SharedTransitionHandle;
   friend struct detail::InternalAccess;
 };
@@ -898,8 +899,9 @@ public:
   /// @note A new request starts from committed shared visuals; velocity continuity is not guaranteed.
   void Run(AnimationSpec animation, std::function<void()> mutation) const;
 private:
-  explicit SharedTransitionHandle(std::shared_ptr<detail::SharedTransitionState> state) : state_(std::move(state)) {}
-  std::shared_ptr<detail::SharedTransitionState> state_;
+  explicit SharedTransitionHandle(std::shared_ptr<detail::SharedTransitionCoordinator> coordinator)
+      : coordinator_(std::move(coordinator)) {}
+  std::shared_ptr<detail::SharedTransitionCoordinator> coordinator_;
   friend SharedTransitionHandle UseSharedTransition();
 };
 

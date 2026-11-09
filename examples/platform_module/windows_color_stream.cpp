@@ -25,12 +25,12 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
   };
 }
 
-struct WindowsColorStreamState : huxerui::example::ColorStreamService {
-  explicit WindowsColorStreamState(huxerui::UiWindow& window_value)
+struct WindowsColorStreamService : huxerui::example::ColorStreamService {
+  explicit WindowsColorStreamService(huxerui::UiWindow& window_value)
       : ui_window(&window_value),
         texture(std::make_shared<huxerui::windows::PixelTexture>(huxerui::Size{320.0F, 180.0F})) {}
 
-  ~WindowsColorStreamState() {
+  ~WindowsColorStreamService() {
     Dispose();
   }
 
@@ -121,7 +121,7 @@ namespace huxerui::example {
 
 void InstallColorStream(ApplicationContext& root) {
   root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](UiWindow& ui_window) {
-    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WindowsColorStreamState>(ui_window));
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WindowsColorStreamService>(ui_window));
   });
 }
 

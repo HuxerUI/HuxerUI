@@ -15,33 +15,33 @@ namespace huxerui::detail {
 [[nodiscard]] IoErrorCode IoErrorCategory(const std::error_code& error) noexcept;
 Task<AsyncInputStream> OpenWorkerInput(std::function<InputStream()> open);
 [[nodiscard]] AsyncInputStream MakeWorkerAsyncInput(InputStream input);
-[[nodiscard]] std::shared_ptr<AsyncInputStreamState> MakeWorkerAsyncInputState(InputStream input);
+[[nodiscard]] std::shared_ptr<AsyncInputStreamBackend> MakeWorkerAsyncInputBackend(InputStream input);
 [[nodiscard]] AsyncInputStream MakeMemoryAsyncInput(InputStream input);
 #if defined(__EMSCRIPTEN__)
 Task<InputStream> RunQueuedInputOpen(std::function<InputStream()> open);
 Task<IoResult<Bytes>> RunQueuedInputRead(std::function<IoResult<Bytes>()> read);
 #endif
 
-class InputStreamState {
+class InputStreamBackend {
 public:
-  virtual ~InputStreamState() = default;
+  virtual ~InputStreamBackend() = default;
 
   virtual IoResult<std::size_t> Read(std::span<std::byte> buffer) = 0;
   virtual void Release() noexcept = 0;
 };
 
-class OutputStreamState {
+class OutputStreamBackend {
 public:
-  virtual ~OutputStreamState() = default;
+  virtual ~OutputStreamBackend() = default;
 
   virtual IoResult<void> Write(std::span<const std::byte> data) = 0;
   virtual IoResult<void> Close() = 0;
   virtual void Abort() noexcept = 0;
 };
 
-class AsyncInputStreamState {
+class AsyncInputStreamBackend {
 public:
-  virtual ~AsyncInputStreamState() = default;
+  virtual ~AsyncInputStreamBackend() = default;
 
   virtual Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) = 0;
   virtual void Cancel() noexcept = 0;
@@ -61,9 +61,9 @@ private:
   bool owned_ = true;
 };
 
-class AsyncOutputStreamState {
+class AsyncOutputStreamBackend {
 public:
-  virtual ~AsyncOutputStreamState() = default;
+  virtual ~AsyncOutputStreamBackend() = default;
 
   virtual Task<IoResult<void>> WriteAsync(Bytes data) = 0;
   virtual Task<IoResult<void>> CloseAsync() = 0;
@@ -85,11 +85,11 @@ private:
 };
 
 struct StreamAccess {
-  [[nodiscard]] static RandomAccessStream MakeRandomAccessStream(std::shared_ptr<RandomAccessStreamState> state);
-  [[nodiscard]] static InputStream MakeInputStream(std::shared_ptr<InputStreamState> state);
-  [[nodiscard]] static OutputStream MakeOutputStream(std::shared_ptr<OutputStreamState> state);
-  [[nodiscard]] static AsyncInputStream MakeAsyncInputStream(std::shared_ptr<AsyncInputStreamState> state);
-  [[nodiscard]] static AsyncOutputStream MakeAsyncOutputStream(std::shared_ptr<AsyncOutputStreamState> state);
+  [[nodiscard]] static RandomAccessStream MakeRandomAccessStream(std::shared_ptr<RandomAccessStreamImpl> impl);
+  [[nodiscard]] static InputStream MakeInputStream(std::shared_ptr<InputStreamBackend> backend);
+  [[nodiscard]] static OutputStream MakeOutputStream(std::shared_ptr<OutputStreamBackend> backend);
+  [[nodiscard]] static AsyncInputStream MakeAsyncInputStream(std::shared_ptr<AsyncInputStreamBackend> backend);
+  [[nodiscard]] static AsyncOutputStream MakeAsyncOutputStream(std::shared_ptr<AsyncOutputStreamBackend> backend);
 };
 
 } // namespace huxerui::detail

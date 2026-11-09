@@ -38,7 +38,7 @@ namespace huxerui::detail {
 struct MountedNode;
 struct PathElement;
 struct SharedMarkerData;
-class SharedTransitionState;
+class SharedTransitionCoordinator;
 struct VirtualCollectionSemantics;
 
 // Public headers only declare this friend. Implementations stay with the subsystem owning each operation.
@@ -117,7 +117,7 @@ struct InternalAccess {
 
   static const SharedMarkerData& SharedMarker(const SharedElement& marker) noexcept;
   static const SharedMarkerData& SharedMarker(const SharedBounds& marker) noexcept;
-  static const std::shared_ptr<SharedTransitionState>& SharedScope(const SharedTransitionScope& scope) noexcept;
+  static const std::shared_ptr<SharedTransitionCoordinator>& SharedScope(const SharedTransitionScope& scope) noexcept;
 
 #pragma endregion
 

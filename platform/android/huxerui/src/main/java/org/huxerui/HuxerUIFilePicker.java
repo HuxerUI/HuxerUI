@@ -74,7 +74,8 @@ final class HuxerUIFilePicker {
         private HuxerUIPlatformChannel.Cancellation presentation;
         private boolean canceled;
         private final AtomicBoolean finished = new AtomicBoolean();
-        private final HuxerUIFileReference.CopyState copyState = new HuxerUIFileReference.CopyState();
+        private final HuxerUIFileReference.FileOperationCancellation cancellation =
+                new HuxerUIFileReference.FileOperationCancellation();
         private volatile Future<?> worker;
 
         Operation(long nativeHandle, String sourcePath, String suggestedName, String[] extensions,
@@ -117,7 +118,7 @@ final class HuxerUIFilePicker {
         void cancel() {
             if (finished.get() || canceled) return;
             canceled = true;
-            copyState.cancel();
+            cancellation.cancel();
             Future<?> activeWorker = worker;
             if (activeWorker != null) activeWorker.cancel(true);
             if (presentation != null) {
@@ -181,7 +182,7 @@ final class HuxerUIFilePicker {
                         boolean saved = false;
                         try {
                             saved = HuxerUIFileReference.copyFileToUri(
-                                    resolver, new File(sourcePath), destination, copyState);
+                                    resolver, new File(sourcePath), destination, cancellation);
                         } catch (Exception ignored) {
                         }
                         complete(saved, null);

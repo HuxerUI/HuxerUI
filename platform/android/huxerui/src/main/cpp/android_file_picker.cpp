@@ -654,9 +654,9 @@ private:
   std::unique_ptr<AndroidReliableDescriptor> reliable_;
 };
 
-class AndroidInputStreamState final : public InputStreamState {
+class AndroidInputStreamBackend final : public InputStreamBackend {
 public:
-  AndroidInputStreamState(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner)
+  AndroidInputStreamBackend(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceBackend> owner)
       : owner_(std::move(owner)), descriptor_(std::move(descriptor)) {}
 
   IoResult<std::size_t> Read(std::span<std::byte> buffer) override {
@@ -681,20 +681,20 @@ public:
   }
 
 private:
-  std::shared_ptr<FileReferenceState> owner_;
+  std::shared_ptr<FileReferenceBackend> owner_;
   AndroidStreamDescriptor descriptor_;
 };
 
-InputStream MakeAndroidInput(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
+InputStream MakeAndroidInput(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceBackend> owner) {
   return StreamAccess::MakeInputStream(
-      std::make_shared<AndroidInputStreamState>(std::move(descriptor), std::move(owner)));
+      std::make_shared<AndroidInputStreamBackend>(std::move(descriptor), std::move(owner)));
 }
 
-class AndroidOutputStreamState final : public OutputStreamState,
-                                       public AsyncOutputStreamState,
-                                       public std::enable_shared_from_this<AndroidOutputStreamState> {
+class AndroidOutputStreamBackend final : public OutputStreamBackend,
+                                         public AsyncOutputStreamBackend,
+                                         public std::enable_shared_from_this<AndroidOutputStreamBackend> {
 public:
-  AndroidOutputStreamState(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner)
+  AndroidOutputStreamBackend(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceBackend> owner)
       : owner_(std::move(owner)), descriptor_(std::move(descriptor)) {}
 
   IoResult<void> Write(std::span<const std::byte> data) override {
@@ -746,7 +746,7 @@ private:
     return IoResult<void>::Success();
   }
 
-  std::shared_ptr<FileReferenceState> owner_;
+  std::shared_ptr<FileReferenceBackend> owner_;
   AndroidStreamDescriptor descriptor_;
   WorkerSequence operations_;
 };
@@ -787,11 +787,11 @@ IoResult<T> RunAndroidReferenceSync(Start start) {
   return result;
 }
 
-class AndroidFileReferenceState final : public FileReferenceState,
-                                        public std::enable_shared_from_this<AndroidFileReferenceState> {
+class AndroidFileReferenceBackend final : public FileReferenceBackend,
+                                          public std::enable_shared_from_this<AndroidFileReferenceBackend> {
 public:
-  AndroidFileReferenceState(std::shared_ptr<AndroidFileReferenceBridge> bridge, JNIEnv* environment,
-                            std::string_view uri, bool write_allowed)
+  AndroidFileReferenceBackend(std::shared_ptr<AndroidFileReferenceBridge> bridge, JNIEnv* environment,
+                              std::string_view uri, bool write_allowed)
       : bridge_(std::move(bridge)), uri_(uri), reference_(bridge_->CreateReference(environment, uri, write_allowed)) {
     android::LocalRef<jstring> entry_key(
         environment, static_cast<jstring>(environment->CallObjectMethod(reference_, bridge_->EntryKey())));
@@ -807,7 +807,7 @@ public:
     }
   }
 
-  ~AndroidFileReferenceState() override {
+  ~AndroidFileReferenceBackend() override {
     JniEnvironment attached(bridge_->VirtualMachine());
     if (JNIEnv* environment = attached.Get(); environment != nullptr && reference_ != nullptr) {
       environment->DeleteGlobalRef(reference_);
@@ -823,9 +823,9 @@ public:
   IoResult<OutputStream> OpenWriteSync() override {
     return RunAndroidReferenceSync<OutputStream>([&](auto completion) {
       OpenStream(bridge_->PrepareOpenWrite(), std::move(completion),
-          [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
+          [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceBackend> owner) {
             return StreamAccess::MakeOutputStream(
-                std::make_shared<AndroidOutputStreamState>(std::move(descriptor), std::move(owner)));
+                std::make_shared<AndroidOutputStreamBackend>(std::move(descriptor), std::move(owner)));
           }, true);
     });
   }
@@ -848,11 +848,11 @@ public:
         return IoResult<RandomAccessStream>(
             IoError{IoErrorCode::Unsupported, "HuxerUI provider requires reliable stream close"});
       }
-      auto state = OpenRandomAccessDescriptor(fd, access, mode, std::move(owner));
-      if (!state.Succeeded()) {
-        return IoResult<RandomAccessStream>(std::move(state).Error());
+      auto result = OpenRandomAccessDescriptor(fd, access, mode, std::move(owner));
+      if (!result.Succeeded()) {
+        return IoResult<RandomAccessStream>(std::move(result).Error());
       }
-      return IoResult<RandomAccessStream>(StreamAccess::MakeRandomAccessStream(std::move(state).Value()));
+      return IoResult<RandomAccessStream>(StreamAccess::MakeRandomAccessStream(std::move(result).Value()));
     } catch (...) {
       return IoResult<RandomAccessStream>(
           IoError{IoErrorCode::Io, "HuxerUI Android random-access stream could not be opened"});
@@ -888,15 +888,15 @@ public:
 
   std::function<void()> OpenRead(FileReferenceInputStreamCompletion completion) override {
     return OpenStream(bridge_->PrepareOpenRead(), std::move(completion),
-        [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
-          return MakeWorkerAsyncInputState(MakeAndroidInput(std::move(descriptor), std::move(owner)));
+        [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceBackend> owner) {
+          return MakeWorkerAsyncInputBackend(MakeAndroidInput(std::move(descriptor), std::move(owner)));
         });
   }
 
   std::function<void()> OpenWrite(FileReferenceOutputStreamCompletion completion) override {
     return OpenStream(bridge_->PrepareOpenWrite(), std::move(completion),
-        [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
-          return std::make_shared<AndroidOutputStreamState>(std::move(descriptor), std::move(owner));
+        [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceBackend> owner) {
+          return std::make_shared<AndroidOutputStreamBackend>(std::move(descriptor), std::move(owner));
         });
   }
 
@@ -958,7 +958,7 @@ public:
       return Directory<FileReferenceWriteResult>(copy_file, file->Path(), {}, std::move(name), overwrite,
                                                  std::move(completion), DecodeWrite, std::move(existing));
     }
-    if (auto input = std::dynamic_pointer_cast<AndroidFileReferenceState>(std::get<1>(source))) {
+    if (auto input = std::dynamic_pointer_cast<AndroidFileReferenceBackend>(std::get<1>(source))) {
       return Directory<FileReferenceWriteResult>(copy_file, {}, input->uri_, std::move(name), overwrite,
                                                  std::move(completion), DecodeWrite, std::move(existing));
     }
@@ -973,7 +973,7 @@ public:
     std::string uri;
     if (const auto* file = std::get_if<File>(&destination)) {
       path = file->Path();
-    } else if (auto target = std::dynamic_pointer_cast<AndroidFileReferenceState>(std::get<1>(destination))) {
+    } else if (auto target = std::dynamic_pointer_cast<AndroidFileReferenceBackend>(std::get<1>(destination))) {
       uri = target->uri_;
     } else {
       completion(
@@ -1060,11 +1060,11 @@ private:
       auto java_name = android::Utf8ToJavaString(environment, name);
       android::LocalRef<jstring> java_existing;
       if (existing) {
-        auto state = std::dynamic_pointer_cast<AndroidFileReferenceState>(FileReferenceState::Of(*existing));
-        if (!state) {
+        auto backend = std::dynamic_pointer_cast<AndroidFileReferenceBackend>(FileReferenceBackend::Of(*existing));
+        if (!backend) {
           throw std::logic_error("HuxerUI directory child belongs to another backend");
         }
-        java_existing = android::Utf8ToJavaString(environment, state->uri_);
+        java_existing = android::Utf8ToJavaString(environment, backend->uri_);
       }
       if (environment->ExceptionCheck()) {
         throw std::runtime_error("HuxerUI Android directory arguments could not be allocated");
@@ -1180,8 +1180,8 @@ std::vector<FileReference> AndroidFileReferenceBridge::DecodeReferences(
     if (environment->ExceptionCheck()) {
       throw std::runtime_error("HuxerUI Android file metadata could not be decoded");
     }
-    auto state = std::make_shared<AndroidFileReferenceState>(bridge, environment, uri_value, write_allowed);
-    references.push_back(MakeFileReference(std::move(metadata), std::move(state)));
+    auto backend = std::make_shared<AndroidFileReferenceBackend>(bridge, environment, uri_value, write_allowed);
+    references.push_back(MakeFileReference(std::move(metadata), std::move(backend)));
   }
   return references;
 }
@@ -1741,17 +1741,17 @@ FileReference CreateAndroidFileReference(
     JavaVM* virtual_machine, JNIEnv* environment, jobject context, FileReferenceMetadata metadata, std::string_view uri
 ) {
   auto bridge = std::make_shared<AndroidFileReferenceBridge>(virtual_machine, environment, context);
-  auto state = std::make_shared<AndroidFileReferenceState>(bridge, environment, uri, metadata.can_write);
-  return MakeFileReference(std::move(metadata), std::move(state));
+  auto backend = std::make_shared<AndroidFileReferenceBackend>(bridge, environment, uri, metadata.can_write);
+  return MakeFileReference(std::move(metadata), std::move(backend));
 }
 
 AndroidFileReferenceProjection ProjectAndroidFileReference(const FileReference& reference) {
-  std::shared_ptr<FileReferenceState> state = FileReferenceState::Of(reference);
-  auto android_state = std::dynamic_pointer_cast<AndroidFileReferenceState>(state);
-  if (!android_state) {
+  std::shared_ptr<FileReferenceBackend> backend = FileReferenceBackend::Of(reference);
+  auto android_backend = std::dynamic_pointer_cast<AndroidFileReferenceBackend>(backend);
+  if (!android_backend) {
     throw std::invalid_argument("HuxerUI FileReference does not contain an Android document URI");
   }
-  return {android_state->Uri(), reinterpret_cast<std::uintptr_t>(state.get())};
+  return {android_backend->Uri(), reinterpret_cast<std::uintptr_t>(backend.get())};
 }
 
 FileDropPreparation CaptureAndroidFileDrop(JNIEnv* environment, jobject operation) {

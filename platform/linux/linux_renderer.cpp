@@ -692,7 +692,7 @@ struct CairoSurfaceHandle {
 
 } // namespace
 
-struct LinuxRenderer::State {
+struct LinuxRenderer::Impl {
   struct SnapshotTexture {
     ::GdkTexture* texture = nullptr;
     bool flip_y = false;
@@ -761,14 +761,14 @@ struct LinuxRenderer::State {
     std::uint64_t bytes = 0;
   };
 
-  State() {
+  Impl() {
     PangoFontMap* font_map = CreateLinuxFontMap();
     context = pango_font_map_create_context(font_map);
     g_object_unref(font_map);
     pango_cairo_context_set_resolution(context, 96.0);
   }
 
-  ~State() {
+  ~Impl() {
     for (CachedImage& image : images) {
       g_object_unref(image.pixbuf);
     }
@@ -1058,7 +1058,7 @@ concept CairoPaintCommand = std::same_as<Command, DrawRectCommand> || std::same_
 
 class CairoCommandPainter final {
 public:
-  CairoCommandPainter(LinuxRenderer::State& state, cairo_t* context) : state_(state), context_(context) {
+  CairoCommandPainter(LinuxRenderer::Impl& impl, cairo_t* context) : impl_(impl), context_(context) {
     double horizontal_x = 1.0;
     double horizontal_y = 0.0;
     double vertical_x = 0.0;
@@ -1142,7 +1142,7 @@ private:
     if (command.text.PlainText().empty() || command.rect.IsEmpty()) {
       return;
     }
-    auto shaped = state_.TextLayoutFor(command.text, command.style, command.rect.width, command.options);
+    auto shaped = impl_.TextLayoutFor(command.text, command.style, command.rect.width, command.options);
     PangoLayout* layout = shaped.layout();
     PangoRectangle logical{};
     pango_layout_get_extents(layout, nullptr, &logical);
@@ -1177,7 +1177,7 @@ private:
       if (run.text.empty() || run.bounds.IsEmpty() || run.style.foreground.alpha <= 0.0F) {
         continue;
       }
-      PangoLayout* layout = pango_layout_new(state_.context);
+      PangoLayout* layout = pango_layout_new(impl_.context);
       ConfigureLayout(
           layout,
           run.text,
@@ -1197,7 +1197,7 @@ private:
     if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
       return;
     }
-    GdkPixbuf* pixbuf = state_.ImageFor(command.image);
+    GdkPixbuf* pixbuf = impl_.ImageFor(command.image);
     if (pixbuf == nullptr) {
       return;
     }
@@ -1346,7 +1346,7 @@ private:
 
   cairo_surface_t*
   BlurredRectMaskFor(const ResolvedShadow& shadow, float blur_radius, int width, int height) {
-    const LinuxRenderer::State::ShadowMaskKey key{
+    const LinuxRenderer::Impl::ShadowMaskKey key{
         shadow.caster.width,
         shadow.caster.height,
         shadow.corner_radius,
@@ -1354,13 +1354,13 @@ private:
         device_scale_,
     };
     const auto cached = std::find_if(
-        state_.shadow_masks.begin(),
-        state_.shadow_masks.end(),
-        [&key](const LinuxRenderer::State::ShadowMaskEntry& entry) { return entry.key == key; }
+        impl_.shadow_masks.begin(),
+        impl_.shadow_masks.end(),
+        [&key](const LinuxRenderer::Impl::ShadowMaskEntry& entry) { return entry.key == key; }
     );
-    if (cached != state_.shadow_masks.end()) {
-      std::rotate(cached, cached + 1, state_.shadow_masks.end());
-      return state_.shadow_masks.back().surface;
+    if (cached != impl_.shadow_masks.end()) {
+      std::rotate(cached, cached + 1, impl_.shadow_masks.end());
+      return impl_.shadow_masks.back().surface;
     }
 
     CairoSurfaceHandle mask{cairo_image_surface_create(CAIRO_FORMAT_A8, width, height)};
@@ -1382,15 +1382,15 @@ private:
     }
     const std::uint64_t bytes =
         static_cast<std::uint64_t>(cairo_image_surface_get_stride(blurred)) * static_cast<std::uint64_t>(height);
-    while (!state_.shadow_masks.empty() &&
-           (state_.shadow_masks.size() >= LinuxRenderer::State::kMaxShadowMasks ||
-            state_.shadow_mask_bytes + bytes > LinuxRenderer::State::kShadowMaskBudget)) {
-      state_.shadow_mask_bytes -= state_.shadow_masks.front().bytes;
-      cairo_surface_destroy(state_.shadow_masks.front().surface);
-      state_.shadow_masks.erase(state_.shadow_masks.begin());
+    while (!impl_.shadow_masks.empty() &&
+           (impl_.shadow_masks.size() >= LinuxRenderer::Impl::kMaxShadowMasks ||
+            impl_.shadow_mask_bytes + bytes > LinuxRenderer::Impl::kShadowMaskBudget)) {
+      impl_.shadow_mask_bytes -= impl_.shadow_masks.front().bytes;
+      cairo_surface_destroy(impl_.shadow_masks.front().surface);
+      impl_.shadow_masks.erase(impl_.shadow_masks.begin());
     }
-    state_.shadow_masks.push_back({key, blurred, bytes});
-    state_.shadow_mask_bytes += bytes;
+    impl_.shadow_masks.push_back({key, blurred, bytes});
+    impl_.shadow_mask_bytes += bytes;
     return blurred;
   }
 
@@ -1400,7 +1400,7 @@ private:
     const int height = cairo_image_surface_get_height(mask);
     const unsigned char* source = cairo_image_surface_get_data(mask);
     const int source_stride = cairo_image_surface_get_stride(mask);
-    state_.blur_scratch.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
+    impl_.blur_scratch.resize(static_cast<std::size_t>(width) * static_cast<std::size_t>(height));
     const int window = radius * 2 + 1;
     for (int y = 0; y < height; ++y) {
       int sum = 0;
@@ -1408,7 +1408,7 @@ private:
         sum += source[y * source_stride + std::clamp(x, 0, width - 1)];
       }
       for (int x = 0; x < width; ++x) {
-        state_.blur_scratch[static_cast<std::size_t>(y) * width + x] = static_cast<unsigned char>(sum / window);
+        impl_.blur_scratch[static_cast<std::size_t>(y) * width + x] = static_cast<unsigned char>(sum / window);
         sum += source[y * source_stride + std::clamp(x + radius + 1, 0, width - 1)] -
                source[y * source_stride + std::clamp(x - radius, 0, width - 1)];
       }
@@ -1423,12 +1423,12 @@ private:
     for (int x = 0; x < width; ++x) {
       int sum = 0;
       for (int y = -radius; y <= radius; ++y) {
-        sum += state_.blur_scratch[static_cast<std::size_t>(std::clamp(y, 0, height - 1)) * width + x];
+        sum += impl_.blur_scratch[static_cast<std::size_t>(std::clamp(y, 0, height - 1)) * width + x];
       }
       for (int y = 0; y < height; ++y) {
         destination[y * destination_stride + x] = static_cast<unsigned char>(sum / window);
-        sum += state_.blur_scratch[static_cast<std::size_t>(std::clamp(y + radius + 1, 0, height - 1)) * width + x] -
-               state_.blur_scratch[static_cast<std::size_t>(std::clamp(y - radius, 0, height - 1)) * width + x];
+        sum += impl_.blur_scratch[static_cast<std::size_t>(std::clamp(y + radius + 1, 0, height - 1)) * width + x] -
+               impl_.blur_scratch[static_cast<std::size_t>(std::clamp(y - radius, 0, height - 1)) * width + x];
       }
     }
     cairo_surface_mark_dirty(result);
@@ -1515,20 +1515,20 @@ private:
 
   cairo_surface_t*
   BlurredPathMaskFor(const DrawPathShadowCommand& command, const Rect& bounds, int width, int height) {
-    const LinuxRenderer::State::PathShadowMaskKey key{
+    const LinuxRenderer::Impl::PathShadowMaskKey key{
         command.path,
         command.fill_rule,
         command.blur_radius,
         device_scale_,
     };
     const auto cached = std::find_if(
-        state_.path_shadow_masks.begin(),
-        state_.path_shadow_masks.end(),
-        [&key](const LinuxRenderer::State::PathShadowMaskEntry& entry) { return entry.key == key; }
+        impl_.path_shadow_masks.begin(),
+        impl_.path_shadow_masks.end(),
+        [&key](const LinuxRenderer::Impl::PathShadowMaskEntry& entry) { return entry.key == key; }
     );
-    if (cached != state_.path_shadow_masks.end()) {
-      std::rotate(cached, cached + 1, state_.path_shadow_masks.end());
-      return state_.path_shadow_masks.back().surface;
+    if (cached != impl_.path_shadow_masks.end()) {
+      std::rotate(cached, cached + 1, impl_.path_shadow_masks.end());
+      return impl_.path_shadow_masks.back().surface;
     }
 
     CairoSurfaceHandle mask{cairo_image_surface_create(CAIRO_FORMAT_A8, width, height)};
@@ -1555,19 +1555,19 @@ private:
     }
     const std::uint64_t bytes =
         static_cast<std::uint64_t>(cairo_image_surface_get_stride(blurred)) * static_cast<std::uint64_t>(height);
-    while (!state_.path_shadow_masks.empty() &&
-           (state_.path_shadow_masks.size() >= LinuxRenderer::State::kMaxPathShadowMasks ||
-            state_.path_shadow_mask_bytes + bytes > LinuxRenderer::State::kPathShadowMaskBudget)) {
-      state_.path_shadow_mask_bytes -= state_.path_shadow_masks.front().bytes;
-      cairo_surface_destroy(state_.path_shadow_masks.front().surface);
-      state_.path_shadow_masks.erase(state_.path_shadow_masks.begin());
+    while (!impl_.path_shadow_masks.empty() &&
+           (impl_.path_shadow_masks.size() >= LinuxRenderer::Impl::kMaxPathShadowMasks ||
+            impl_.path_shadow_mask_bytes + bytes > LinuxRenderer::Impl::kPathShadowMaskBudget)) {
+      impl_.path_shadow_mask_bytes -= impl_.path_shadow_masks.front().bytes;
+      cairo_surface_destroy(impl_.path_shadow_masks.front().surface);
+      impl_.path_shadow_masks.erase(impl_.path_shadow_masks.begin());
     }
-    state_.path_shadow_masks.push_back({key, blurred, bytes});
-    state_.path_shadow_mask_bytes += bytes;
+    impl_.path_shadow_masks.push_back({key, blurred, bytes});
+    impl_.path_shadow_mask_bytes += bytes;
     return blurred;
   }
 
-  LinuxRenderer::State& state_;
+  LinuxRenderer::Impl& impl_;
   cairo_t* context_;
   float device_scale_ = 1.0F;
 };
@@ -1715,7 +1715,7 @@ GskPath* CreateGskPath(const Path& path) {
 
 class SnapshotScenePainter final {
 public:
-  SnapshotScenePainter(LinuxRenderer::State& state, GtkSnapshot* snapshot) : state_(state), snapshot_(snapshot) {}
+  SnapshotScenePainter(LinuxRenderer::Impl& impl, GtkSnapshot* snapshot) : impl_(impl), snapshot_(snapshot) {}
 
   void Draw(const RenderScene& scene) {
     if (scene.root != nullptr) {
@@ -1788,7 +1788,7 @@ private:
     if (command.destination.IsEmpty() || command.source.IsEmpty() || command.opacity <= 0.0F) {
       return;
     }
-    LinuxRenderer::State::SnapshotTexture acquired = state_.AcquireSnapshotTexture(command.texture);
+    LinuxRenderer::Impl::SnapshotTexture acquired = impl_.AcquireSnapshotTexture(command.texture);
     if (acquired.texture == nullptr) {
       return;
     }
@@ -1867,7 +1867,7 @@ private:
     }
     const graphene_rect_t cairo_bounds = GrapheneRect(batch.bounds);
     cairo_t* context = gtk_snapshot_append_cairo(snapshot_, &cairo_bounds);
-    CairoCommandPainter painter(state_, context);
+    CairoCommandPainter painter(impl_, context);
     for (const PaintCommand* command : batch.commands) {
       std::visit(
           [&painter](const auto& value) {
@@ -1907,37 +1907,37 @@ private:
     gsk_path_unref(path);
   }
 
-  LinuxRenderer::State& state_;
+  LinuxRenderer::Impl& impl_;
   GtkSnapshot* snapshot_ = nullptr;
 };
 
 } // namespace
 
-LinuxRenderer::LinuxRenderer() : state_(std::make_unique<State>()) {}
+LinuxRenderer::LinuxRenderer() : impl_(std::make_unique<Impl>()) {}
 
 LinuxRenderer::~LinuxRenderer() = default;
 
 void LinuxRenderer::Initialize() {
-  if (!state_) {
-    state_ = std::make_unique<State>();
+  if (!impl_) {
+    impl_ = std::make_unique<Impl>();
   }
 }
 
 void LinuxRenderer::Discard() noexcept {
-  state_.reset();
+  impl_.reset();
 }
 
 bool LinuxRenderer::UpdateTextDpi(double dpi) {
   if (!std::isfinite(dpi) || dpi <= 0.0) dpi = 96.0;
-  if (pango_cairo_context_get_resolution(state_->context) == dpi) return false;
-  pango_cairo_context_set_resolution(state_->context, dpi);
-  state_->ClearTextLayouts();
+  if (pango_cairo_context_get_resolution(impl_->context) == dpi) return false;
+  pango_cairo_context_set_resolution(impl_->context, dpi);
+  impl_->ClearTextLayouts();
   return true;
 }
 
 FontMetrics LinuxRenderer::Metrics(const Font& font) {
-  PangoFontDescription* description = CreateFontDescription(font, state_->context);
-  PangoFontMetrics* metrics = pango_context_get_metrics(state_->context, description, nullptr);
+  PangoFontDescription* description = CreateFontDescription(font, impl_->context);
+  PangoFontMetrics* metrics = pango_context_get_metrics(impl_->context, description, nullptr);
   pango_font_description_free(description);
   const float ascent = PangoUnits(pango_font_metrics_get_ascent(metrics));
   const float descent = PangoUnits(pango_font_metrics_get_descent(metrics));
@@ -1962,7 +1962,7 @@ TextRunMetrics LinuxRenderer::MeasureRun(
   if (text.find_first_of("\r\n") != std::string_view::npos) {
     throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
   }
-  PangoLayout* layout = pango_layout_new(state_->context);
+  PangoLayout* layout = pango_layout_new(impl_->context);
   ConfigureLayout(
       layout,
       text,
@@ -1999,7 +1999,7 @@ TextLayoutMetrics LinuxRenderer::MeasureText(const AttributedText& text, const T
   if (std::isfinite(max_width) && max_width <= 0.0F) {
     return {};
   }
-  TextLayoutMetrics metrics = state_->TextLayoutFor(text, style, max_width, options).metrics();
+  TextLayoutMetrics metrics = impl_->TextLayoutFor(text, style, max_width, options).metrics();
   if (std::isfinite(max_width)) {
     metrics.size.width = std::min(metrics.size.width, max_width);
   }
@@ -2008,14 +2008,14 @@ TextLayoutMetrics LinuxRenderer::MeasureText(const AttributedText& text, const T
 
 std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
     float max_width, const TextLayoutOptions& options) {
-  return std::make_unique<PangoTextLayout>(state_->context, text, style, max_width, options);
+  return std::make_unique<PangoTextLayout>(impl_->context, text, style, max_width, options);
 }
 
 void LinuxRenderer::Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame) {
   if (snapshot == nullptr) {
     throw std::invalid_argument("HuxerUI Linux renderer requires a GTK snapshot");
   }
-  SnapshotScenePainter(*state_, snapshot).Draw(frame.scene);
+  SnapshotScenePainter(*impl_, snapshot).Draw(frame.scene);
 }
 
 } // namespace huxerui::detail

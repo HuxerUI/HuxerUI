@@ -72,8 +72,8 @@ TEST_CASE("WindowsDirectoryReferencesRejectPathOnlyProviderImports") {
   runtime.BuildFrame();
   const File destination = file_application->Directories().temporary_directory.Child("destination");
   REQUIRE(destination.CreateDirectory());
-  auto input = std::make_shared<ProviderReferenceState>("provider:file");
-  auto directory = std::make_shared<ProviderReferenceState>("provider:directory");
+  auto input = std::make_shared<ProviderReferenceBackend>("provider:file");
+  auto directory = std::make_shared<ProviderReferenceBackend>("provider:directory");
   directory->children.push_back(detail::MakeFileReference({.name = "value.bin", .size = 1000}, input));
   auto source = detail::MakeFileReference({.name = "source", .type = FileType::Directory}, directory);
   std::optional<IoResult<DirectoryCopySummary>> result;

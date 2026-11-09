@@ -233,8 +233,8 @@ bool IsDescendant(UIView* view, UIView* ancestor) {
 
 } // namespace
 
-struct UIKitPlatformViews::State {
-  State(UIKitRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value)
+struct UIKitPlatformViews::Impl {
+  Impl(UIKitRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value)
       : renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value) {}
 
   std::unique_ptr<HostedPlatformView> Create(UIView* root, const PlatformViewPlacement& placement) {
@@ -344,7 +344,7 @@ struct UIKitPlatformViews::State {
 };
 
 UIKitPlatformViews::UIKitPlatformViews(UIKitRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window)
-    : state_(std::make_unique<State>(renderer, registry, ui_window)) {}
+    : impl_(std::make_unique<Impl>(renderer, registry, ui_window)) {}
 
 UIKitPlatformViews::~UIKitPlatformViews() {
   Shutdown();
@@ -352,7 +352,7 @@ UIKitPlatformViews::~UIKitPlatformViews() {
 
 bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
   NSArray<UIView*>* previous_subviews = [root.subviews copy];
-  const std::optional<std::uint64_t> responder_identity = state_->IdentityForResponder(FindFirstResponder(root));
+  const std::optional<std::uint64_t> responder_identity = impl_->IdentityForResponder(FindFirstResponder(root));
   RenderComposition composition = BuildRenderComposition(frame.scene);
   std::unordered_set<std::uint64_t> retained_identities;
   std::vector<std::pair<std::uint64_t, std::unique_ptr<HostedPlatformView>>> pending;
@@ -364,9 +364,9 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
     }
     const PlacePlatformViewCommand& command = *placement->command;
     retained_identities.insert(command.Identity());
-    const auto found = state_->hosted.find(command.Identity());
-    if (found == state_->hosted.end() || found->second->type != command.Type()) {
-      pending.emplace_back(command.Identity(), state_->Create(root, *placement));
+    const auto found = impl_->hosted.find(command.Identity());
+    if (found == impl_->hosted.end() || found->second->type != command.Type()) {
+      pending.emplace_back(command.Identity(), impl_->Create(root, *placement));
       continue;
     }
     found->second->Update(command);
@@ -381,32 +381,32 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
     ResignFirstResponder(root);
   }
   for (auto& [identity, hosted] : pending) {
-    state_->hosted.erase(identity);
-    state_->hosted.emplace(identity, std::move(hosted));
+    impl_->hosted.erase(identity);
+    impl_->hosted.emplace(identity, std::move(hosted));
   }
-  std::erase_if(state_->hosted, [&retained_identities](const auto& entry) {
+  std::erase_if(impl_->hosted, [&retained_identities](const auto& entry) {
     return !retained_identities.contains(entry.first);
   });
 
   NSMutableArray<UIView*>* ordered_subviews = [NSMutableArray array];
   std::unordered_set<SliceKey, SliceKeyHash> retained_slices;
-  state_->base_slice.reset();
+  impl_->base_slice.reset();
   bool passed_platform_view = false;
   for (const RenderCompositionLayer& layer : composition.layers) {
     if (const auto* slice = std::get_if<RenderSlice>(&layer)) {
-      if (!passed_platform_view && !state_->base_slice.has_value()) {
-        state_->base_slice = *slice;
+      if (!passed_platform_view && !impl_->base_slice.has_value()) {
+        impl_->base_slice = *slice;
         continue;
       }
       const SliceKey key{slice->preceding_platform_view, slice->following_platform_view};
       retained_slices.insert(key);
-      HuxerUIPlatformSliceView* slice_view = state_->slices[key];
+      HuxerUIPlatformSliceView* slice_view = impl_->slices[key];
       if (slice_view == nil) {
         slice_view = [[HuxerUIPlatformSliceView alloc] initWithFrame:root.bounds];
         slice_view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        state_->slices[key] = slice_view;
+        impl_->slices[key] = slice_view;
       }
-      slice_view->huxeruiRenderer = state_->renderer;
+      slice_view->huxeruiRenderer = impl_->renderer;
       slice_view->huxeruiFrame = &frame;
       slice_view->huxeruiFirstCommand = slice->first_command;
       slice_view->huxeruiCommandCount = slice->command_count;
@@ -419,12 +419,12 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
 
     const auto& placement = std::get<PlatformViewPlacement>(layer);
     passed_platform_view = true;
-    HostedPlatformView& hosted = *state_->hosted.at(placement.command->Identity());
-    state_->Place(hosted, placement);
+    HostedPlatformView& hosted = *impl_->hosted.at(placement.command->Identity());
+    impl_->Place(hosted, placement);
     [ordered_subviews addObject:hosted.container];
   }
 
-  std::erase_if(state_->slices, [&retained_slices](const auto& entry) {
+  std::erase_if(impl_->slices, [&retained_slices](const auto& entry) {
     if (retained_slices.contains(entry.first)) {
       return false;
     }
@@ -441,30 +441,30 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
       }
     }
   }
-  state_->root = root;
-  state_->frame = &frame;
-  for (auto& [identity, hosted] : state_->hosted) {
+  impl_->root = root;
+  impl_->frame = &frame;
+  for (auto& [identity, hosted] : impl_->hosted) {
     hosted->event_route->active = true;
   }
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*impl_->ui_window);
   const std::optional<std::uint64_t> current_responder_identity =
-      state_->IdentityForResponder(FindFirstResponder(root));
+      impl_->IdentityForResponder(FindFirstResponder(root));
   if (focused_identity.has_value()) {
-    const auto focused = state_->hosted.find(*focused_identity);
-    if (focused == state_->hosted.end() || focused->second->container.hidden) {
+    const auto focused = impl_->hosted.find(*focused_identity);
+    if (focused == impl_->hosted.end() || focused->second->container.hidden) {
       if (current_responder_identity == focused_identity) {
         ResignFirstResponder(root);
       }
-      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
     } else if (current_responder_identity != focused_identity) {
       if (![focused->second->view becomeFirstResponder]) {
-        InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+        InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
       }
     }
   } else if (current_responder_identity.has_value()) {
     ResignFirstResponder(root);
   }
-  for (const auto& [key, slice] : state_->slices) {
+  for (const auto& [key, slice] : impl_->slices) {
     if (composition_changed) {
       [slice setNeedsDisplay];
     } else {
@@ -475,76 +475,76 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
 }
 
 void UIKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect) {
-  if (state_->base_slice.has_value()) {
-    const RenderSlice& slice = *state_->base_slice;
-    state_->renderer->DrawSlice(context, dirty_rect, state_->frame, slice.first_command, slice.command_count, true);
+  if (impl_->base_slice.has_value()) {
+    const RenderSlice& slice = *impl_->base_slice;
+    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, slice.first_command, slice.command_count, true);
     return;
   }
-  state_->renderer->DrawSlice(context, dirty_rect, state_->frame, 0, 0, true);
+  impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, 0, 0, true);
 }
 
 UIView* UIKitPlatformViews::HitTest(Point point, UIEvent* event) {
-  if (state_->ui_window == nullptr) {
+  if (impl_->ui_window == nullptr) {
     return nil;
   }
-  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*state_->ui_window, point);
+  const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(*impl_->ui_window, point);
   if (!identity.has_value()) {
     return nil;
   }
-  const auto found = state_->hosted.find(*identity);
-  if (found == state_->hosted.end() || found->second->container.hidden || state_->root == nil) {
+  const auto found = impl_->hosted.find(*identity);
+  if (found == impl_->hosted.end() || found->second->container.hidden || impl_->root == nil) {
     return nil;
   }
   const CGPoint root_point = CGPointMake(point.x, point.y);
-  const CGPoint container_point = [found->second->container convertPoint:root_point fromView:state_->root];
+  const CGPoint container_point = [found->second->container convertPoint:root_point fromView:impl_->root];
   UIView* target = [found->second->container hitTest:container_point withEvent:event];
   if (target != nil && event != nil && event.type == UIEventTypeTouches &&
-      InternalAccess::FocusedPlatformView(*state_->ui_window) != identity) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, identity, false);
+      InternalAccess::FocusedPlatformView(*impl_->ui_window) != identity) {
+    InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, identity, false);
   }
   return target;
 }
 
 UIView* UIKitPlatformViews::AccessibilityView(std::uint64_t identity) const noexcept {
-  if (!state_) {
+  if (!impl_) {
     return nil;
   }
-  const auto found = state_->hosted.find(identity);
-  return found == state_->hosted.end() ? nil : found->second->view;
+  const auto found = impl_->hosted.find(identity);
+  return found == impl_->hosted.end() ? nil : found->second->view;
 }
 
 void UIKitPlatformViews::ClearFocus() {
-  if (!state_ || state_->ui_window == nullptr) {
+  if (!impl_ || impl_->ui_window == nullptr) {
     return;
   }
-  UIView* responder = state_->root == nil ? nil : FindFirstResponder(state_->root);
-  if (state_->IdentityForResponder(responder).has_value()) {
+  UIView* responder = impl_->root == nil ? nil : FindFirstResponder(impl_->root);
+  if (impl_->IdentityForResponder(responder).has_value()) {
     [responder resignFirstResponder];
   }
-  if (InternalAccess::FocusedPlatformView(*state_->ui_window).has_value()) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+  if (InternalAccess::FocusedPlatformView(*impl_->ui_window).has_value()) {
+    InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
   }
 }
 
 void UIKitPlatformViews::Shutdown() {
-  if (!state_) {
+  if (!impl_) {
     return;
   }
-  for (auto& [identity, hosted] : state_->hosted) {
+  for (auto& [identity, hosted] : impl_->hosted) {
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
-  for (auto& [key, slice] : state_->slices) {
+  for (auto& [key, slice] : impl_->slices) {
     slice->huxeruiRenderer = nullptr;
     slice->huxeruiFrame = nullptr;
     [slice removeFromSuperview];
   }
-  state_->slices.clear();
-  state_->hosted.clear();
-  state_->base_slice.reset();
-  state_->frame = nullptr;
-  state_->root = nil;
-  state_->ui_window = nullptr;
+  impl_->slices.clear();
+  impl_->hosted.clear();
+  impl_->base_slice.reset();
+  impl_->frame = nullptr;
+  impl_->root = nil;
+  impl_->ui_window = nullptr;
 }
 
 } // namespace huxerui::detail

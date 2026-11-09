@@ -119,9 +119,9 @@ struct ObservePointer {
 
 struct StableExtension;
 
-class StableExtensionState final : public NodeExtension {
+class StableNodeExtension final : public NodeExtension {
 public:
-  StableExtensionState(ViewNode&, const StableExtension&) {}
+  StableNodeExtension(ViewNode&, const StableExtension&) {}
 
   void Update(ViewNode&, const StableExtension&) {
     ++stable_extension_updates;
@@ -129,7 +129,7 @@ public:
 };
 
 struct StableExtension {
-  using Extension = StableExtensionState;
+  using Extension = StableNodeExtension;
 
   bool operator==(const StableExtension&) const = default;
 };

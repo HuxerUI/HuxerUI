@@ -26,7 +26,7 @@ struct FileReferenceMetadata {
 
 using FileReferenceBytesCompletion = std::function<void(IoResult<Bytes>)>;
 using FileReferenceBoolCompletion = std::function<void(bool)>;
-using FileReferenceSource = std::variant<File, std::shared_ptr<FileReferenceState>>;
+using FileReferenceSource = std::variant<File, std::shared_ptr<FileReferenceBackend>>;
 
 // The destination returns finalized output together with transfer accounting. Directory traversal must
 // count actual bytes and newly created directories, not source metadata or merged destination entries.
@@ -37,8 +37,8 @@ struct FileReferenceWriteResult {
 };
 
 template <class T> using FileReferenceCompletion = std::function<void(IoResult<T>)>;
-using FileReferenceInputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncInputStreamState>>;
-using FileReferenceOutputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncOutputStreamState>>;
+using FileReferenceInputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncInputStreamBackend>>;
+using FileReferenceOutputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncOutputStreamBackend>>;
 using FileReferenceBytesOperation =
     std::function<std::function<void()>(FileReferenceBytesCompletion)>;
 using FileReferenceResultBoolCompletion = FileReferenceCompletion<bool>;
@@ -50,10 +50,10 @@ Task<IoResult<bool>> RunFileReferenceBoolOperation(FileReferenceResultBoolOperat
 
 // Retains access independently of the picker and public reference values. Operations deliver through
 // callbacks and return best-effort cancellation; the shared Task bridge suppresses late delivery.
-// Platforms keep provider-native whole-file transfers here; public incremental streams use the shared stream state.
-class FileReferenceState {
+// Platforms keep provider-native whole-file transfers here; public incremental streams use the shared stream backends.
+class FileReferenceBackend {
 public:
-  virtual ~FileReferenceState() = default;
+  virtual ~FileReferenceBackend() = default;
 
   virtual IoResult<InputStream> OpenReadSync();
   virtual IoResult<OutputStream> OpenWriteSync();
@@ -69,8 +69,8 @@ public:
                                          FileReferenceCompletion<std::uint64_t> completion) = 0;
   virtual std::function<void()> ReplaceWith(File source, FileReferenceBoolCompletion completion) = 0;
 
-  [[nodiscard]] static std::shared_ptr<FileReferenceState> Of(const FileReference& reference);
-  // Optional path projection only; the returned File never takes ownership of this state's grant.
+  [[nodiscard]] static std::shared_ptr<FileReferenceBackend> Of(const FileReference& reference);
+  // Optional path projection only; the returned File never takes ownership of this backend's grant.
   [[nodiscard]] virtual std::optional<File> AsFile() const;
   // Provider-local entry key used for ancestor-cycle and destination-alias checks, never as a public path or a
   // persistent token. An empty key means traversal cannot establish the required relationship safely.
@@ -136,17 +136,17 @@ void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOp
 
 using ReferenceStreamCoordination = std::function<void(const std::function<void()>&)>;
 
-std::shared_ptr<RandomAccessStreamState> MakeRandomAccessState(
-    ReferenceDescriptor descriptor, FileAccessMode access, FileOpenMode mode,
-    ReferenceStreamCoordination coordinate = {}, std::shared_ptr<FileReferenceState> owner = {}
-);
+std::shared_ptr<RandomAccessStreamImpl> MakeRandomAccessStreamImpl(ReferenceDescriptor descriptor,
+                                                                   FileAccessMode access, FileOpenMode mode,
+                                                                   ReferenceStreamCoordination coordinate = {},
+                                                                   std::shared_ptr<FileReferenceBackend> owner = {});
 
 void ValidateRandomAccessOpen(FileAccessMode access, FileOpenMode mode);
 #if defined(__ANDROID__)
 // Takes ownership of the detached descriptor even when validation or truncation fails.
-[[nodiscard]] IoResult<std::shared_ptr<RandomAccessStreamState>> OpenRandomAccessDescriptor(
-    int descriptor, FileAccessMode access, FileOpenMode mode, std::shared_ptr<FileReferenceState> owner
-);
+[[nodiscard]] IoResult<std::shared_ptr<RandomAccessStreamImpl>>
+OpenRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode,
+                           std::shared_ptr<FileReferenceBackend> owner);
 #endif
 
 using FilePickerOpenCompletion = std::function<void(std::vector<FileReference>)>;
@@ -171,7 +171,7 @@ public:
 void ProtectAppDirectories(const AppDirectories& directories);
 [[nodiscard]] std::string CurrentDirectoryPath();
 [[nodiscard]] FileReference
-MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceState> state);
+MakeFileReference(FileReferenceMetadata metadata, std::shared_ptr<FileReferenceBackend> backend);
 IoResult<std::string> DecodeFileUtf8(IoResult<Bytes> bytes);
 [[nodiscard]] bool IsValidFileUtf8(std::string_view text) noexcept;
 void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const std::vector<std::string>& content_types);
@@ -179,7 +179,7 @@ void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const st
 [[nodiscard]] FileReference MakeLocalFileReference(File file, bool writable,
                                                    std::optional<std::string> content_type = {},
                                                    FileReferenceCoordination coordination = {});
-Task<IoResult<std::shared_ptr<FileReferenceState>>> MakeLocalDirectoryState(File directory);
+Task<IoResult<std::shared_ptr<FileReferenceBackend>>> MakeLocalDirectoryBackend(File directory);
 
 #if defined(__EMSCRIPTEN__)
 [[nodiscard]] bool IsWebPersistentFilePath(std::string_view path) noexcept;

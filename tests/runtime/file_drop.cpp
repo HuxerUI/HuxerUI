@@ -29,7 +29,7 @@ bool file_drop_throw_exited = false;
 bool file_drop_nested = false;
 bool file_drop_child_accepts = true;
 
-class DroppedFileState final : public detail::FileReferenceState {
+class DroppedFileBackend final : public detail::FileReferenceBackend {
 public:
   std::function<void()> ReadBytes(detail::FileReferenceBytesCompletion completion) override {
     ++reads;
@@ -49,7 +49,7 @@ public:
 
 FileReference DroppedFile(std::string name = "photo.PNG", std::optional<std::string> content_type = "image/png",
                           FileType type = FileType::File,
-                          std::shared_ptr<DroppedFileState> access = std::make_shared<DroppedFileState>()) {
+                          std::shared_ptr<DroppedFileBackend> access = std::make_shared<DroppedFileBackend>()) {
   return detail::MakeFileReference({.name = std::move(name), .content_type = std::move(content_type), .type = type},
                                    std::move(access));
 }
@@ -245,7 +245,7 @@ TEST_CASE_METHOD(FileDropFixture, "File drop separates hover from deferred succe
   TestPlatform platform;
   UiWindow runtime{FileDropApp, platform};
   MountDropApp(runtime);
-  auto access = std::make_shared<DroppedFileState>();
+  auto access = std::make_shared<DroppedFileBackend>();
   REQUIRE(runtime.CoreRuntime().HandleFileDragEntered(1, {}, drop_point));
   const detail::FileDropPreparation source{[access](detail::FileDropCompletion completion) {
     completion(IoResult<std::vector<FileReference>>({DroppedFile("photo.png", "image/png", FileType::File, access)}));

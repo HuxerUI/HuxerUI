@@ -6,7 +6,7 @@
 
 namespace huxerui::detail {
 
-class PlatformFrameState {
+class PlatformFrameCoordinator {
 public:
   [[nodiscard]] std::optional<double> Request(double deadline, double now, bool platform_ready) noexcept {
     frame_build_pending_ = true;

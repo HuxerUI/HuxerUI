@@ -194,15 +194,15 @@ void ApplyCommittedText(
 
 } // namespace
 
-class UIKitTextInputState {
+class UIKitTextInputBridge {
 public:
-  UIKitTextInputState(UiWindow& ui_window, HuxerUIView* host_view, UIKitTextInput& text_input)
+  UIKitTextInputBridge(UiWindow& ui_window, HuxerUIView* host_view, UIKitTextInput& text_input)
       : ui_window_(&ui_window), input_view_([[HuxerUITextInputView alloc] initWithHostView:host_view]) {
     input_view_->huxeruiTextInput = &text_input;
     [host_view.superview addSubview:input_view_];
   }
 
-  ~UIKitTextInputState() {
+  ~UIKitTextInputBridge() {
     if (input_view_ != nil) {
       if (input_view_.isFirstResponder) {
         [input_view_ resignFirstResponder];
@@ -367,40 +367,40 @@ private:
 };
 
 UIKitTextInput::UIKitTextInput(UiWindow& ui_window, HuxerUIView* view)
-    : state_(std::make_unique<UIKitTextInputState>(ui_window, view, *this)) {}
+    : bridge_(std::make_unique<UIKitTextInputBridge>(ui_window, view, *this)) {}
 
 UIKitTextInput::~UIKitTextInput() = default;
 
 bool UIKitTextInput::IsActive() const noexcept {
-  return state_->IsActive();
+  return bridge_->IsActive();
 }
 
 const TextInputConfiguration& UIKitTextInput::Configuration() const noexcept {
-  return state_->Configuration();
+  return bridge_->Configuration();
 }
 
 TextInputContext UIKitTextInput::QueryContext(TextOffset start, TextOffset length) const {
-  return state_->QueryContext(start, length);
+  return bridge_->QueryContext(start, length);
 }
 
 TextInputGeometry UIKitTextInput::QueryGeometry(TextRange range) const {
-  return state_->QueryGeometry(range);
+  return bridge_->QueryGeometry(range);
 }
 
 TextInputPositionResult UIKitTextInput::QueryPosition(Point point) const {
-  return state_->QueryPosition(point);
+  return bridge_->QueryPosition(point);
 }
 
 id<UITextInput> UIKitTextInput::Responder() const noexcept {
-  return state_->Responder();
+  return bridge_->Responder();
 }
 
 TextInputApplyResult UIKitTextInput::Apply(TextInputCommand command) {
-  return state_->Apply(std::move(command));
+  return bridge_->Apply(std::move(command));
 }
 
 bool UIKitTextInput::PerformAction(TextInputAction action) {
-  return state_->PerformAction(action);
+  return bridge_->PerformAction(action);
 }
 
 void UIKitTextInput::Start(
@@ -409,13 +409,13 @@ void UIKitTextInput::Start(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->Start(session_id, configuration, state, geometry);
+  bridge_->Start(session_id, configuration, state, geometry);
 }
 
 void UIKitTextInput::Update(
     TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry
 ) {
-  state_->Update(session_id, state, geometry);
+  bridge_->Update(session_id, state, geometry);
 }
 
 void UIKitTextInput::Restart(
@@ -424,19 +424,19 @@ void UIKitTextInput::Restart(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->Restart(session_id, configuration, state, geometry);
+  bridge_->Restart(session_id, configuration, state, geometry);
 }
 
 void UIKitTextInput::Stop(TextInputSessionId session_id) {
-  state_->Stop(session_id);
+  bridge_->Stop(session_id);
 }
 
 void UIKitTextInput::RequestShowKeyboard(TextInputSessionId session_id) {
-  state_->RequestShowKeyboard(session_id);
+  bridge_->RequestShowKeyboard(session_id);
 }
 
 void UIKitTextInput::RequestHideKeyboard(TextInputSessionId session_id) {
-  state_->RequestHideKeyboard(session_id);
+  bridge_->RequestHideKeyboard(session_id);
 }
 
 } // namespace huxerui::detail

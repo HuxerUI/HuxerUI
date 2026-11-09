@@ -696,7 +696,7 @@ FileReference MakeCopiedIosFileReference(NSURL* url, NSError** error) {
     auto reference = MakeIosReference(copied_url, false, std::make_shared<IosFileAccess>(copied_url, directory));
     return MakeFileReference(
         {.name = MakeString(name), .size = reference.Size(), .content_type = content_type},
-        FileReferenceState::Of(reference));
+        FileReferenceBackend::Of(reference));
   } catch (...) {
     if (directory != nil) {
       [NSFileManager.defaultManager removeItemAtURL:directory error:nil];

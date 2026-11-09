@@ -24,8 +24,8 @@ public:
   [[nodiscard]] std::optional<LRESULT> HandleMessage(UINT message, WPARAM w_param, LPARAM l_param);
 
 private:
-  struct State;
-  std::unique_ptr<State> state_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

@@ -19,7 +19,7 @@ class FilePickerTransport;
 struct FileReferenceMetadata;
 
 // PlatformPayload wrappers expose Android metadata but retain the original FileReference for access and lifetime.
-// The capability key is a process-local comparison key derived from FileReferenceState, never an owning handle.
+// The capability key is a process-local comparison key derived from FileReferenceBackend, never an owning handle.
 struct AndroidFileReferenceProjection {
   std::string uri;
   std::uintptr_t capability_key = 0;

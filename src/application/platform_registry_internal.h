@@ -12,7 +12,7 @@
 
 namespace huxerui::detail {
 
-class PlatformChannelState;
+class PlatformChannelImpl;
 struct ExecutionContext;
 
 [[nodiscard]] bool IsValidUtf8(std::string_view text) noexcept;
@@ -34,14 +34,14 @@ public:
   void Close() const noexcept;
 
 private:
-  explicit PlatformChannelEndpoint(std::shared_ptr<PlatformChannelState> state) : state_(std::move(state)) {}
+  explicit PlatformChannelEndpoint(std::shared_ptr<PlatformChannelImpl> impl) : impl_(std::move(impl)) {}
 
-  std::shared_ptr<PlatformChannelState> state_;
+  std::shared_ptr<PlatformChannelImpl> impl_;
 
   friend PlatformChannelEndpoint MakePlatformChannelEndpoint(UiThreadDispatcher, std::shared_ptr<ExecutionContext>);
 };
 
-/// Creates shared channel state for a Runtime or UiWindow endpoint.
+/// Creates a shared channel implementation for a Runtime or UiWindow endpoint.
 /// @param dispatch_to_ui_thread Queued dispatcher for the original application's thread.
 /// @param source Original application or window execution context; never rebound to a replacement host.
 /// @return An unconnected endpoint retaining its dispatch context until close or destruction.

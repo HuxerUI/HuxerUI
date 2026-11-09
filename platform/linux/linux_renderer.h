@@ -44,10 +44,10 @@ public:
   void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame);
 
 public:
-  struct State;
+  struct Impl;
 
 private:
-  std::unique_ptr<State> state_;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

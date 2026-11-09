@@ -1042,7 +1042,7 @@ public:
 
   void Ready() {
     platform_ready_ = true;
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(true)) {
+    if (const std::optional<double> deadline = frame_coordinator_.TakeDeferred(true)) {
       Schedule(*deadline);
     } else {
       RequestFrameAt(Now());
@@ -1060,7 +1060,7 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), platform_ready_)) {
+    if (const std::optional<double> scheduled = frame_coordinator_.Request(deadline, Now(), platform_ready_)) {
       Schedule(*scheduled);
     }
   }
@@ -1121,14 +1121,14 @@ public:
   }
 
   void Frame() {
-    if (!IsInitialized() || !frame_state_.BeginCommit()) {
+    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
       return;
     }
     const FrameCommit& commit = UiWindow::BuildFrame();
-    frame_state_.BeginPaint();
+    frame_coordinator_.BeginPaint();
     renderer_.BeginFrame();
     platform_views_->Commit(commit.render_frame);
-    if (const std::optional<double> deadline = frame_state_.EndPaint(platform_ready_)) {
+    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(platform_ready_)) {
       Schedule(*deadline);
     }
     if (commit.next_frame_deadline.has_value()) {
@@ -1240,7 +1240,7 @@ private:
   val root_;
   val base_canvas_;
   std::unique_ptr<WebPlatformViews> platform_views_;
-  PlatformFrameState frame_state_;
+  PlatformFrameCoordinator frame_coordinator_;
   Size viewport_;
   bool platform_ready_ = false;
 };

@@ -113,7 +113,7 @@ private:
   friend class DialogExtension;
 };
 
-void DebugMetricsState::RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept {
+void DebugMetricsSampler::RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept {
   viewport_ = viewport;
   const bool damaged = damage.full || !damage.rects.empty();
   if (!damaged) {
@@ -139,7 +139,7 @@ void DebugMetricsState::RecordCommit(double commit_time_seconds, const DamageReg
   }
 }
 
-void DebugMetricsState::ResetSampling() noexcept {
+void DebugMetricsSampler::ResetSampling() noexcept {
   window_initialized_ = false;
   window_started_at_ = 0.0;
   painted_frame_count_ = 0;
@@ -150,7 +150,7 @@ void DebugMetricsState::ResetSampling() noexcept {
   previous_process_timestamp_ = 0.0;
 }
 
-DebugMetricsSnapshot DebugMetricsState::Sample(double timestamp) noexcept {
+DebugMetricsSnapshot DebugMetricsSampler::Sample(double timestamp) noexcept {
   DebugMetricsSnapshot snapshot;
   snapshot.viewport = viewport_;
 
@@ -1302,7 +1302,7 @@ constexpr Color debug_shadow_color = Color::Rgb(0, 0, 0, 0.42F);
 constexpr Color debug_live_color = Color::Rgb(67, 209, 125);
 
 struct DebugSampler {
-  std::shared_ptr<detail::DebugMetricsState> metrics;
+  std::shared_ptr<detail::DebugMetricsSampler> metrics;
   State<detail::DebugMetricsSnapshot> snapshot;
 
   static const detail::ModifierDescriptor& Descriptor();
@@ -1359,7 +1359,7 @@ public:
   }
 
 private:
-  std::shared_ptr<detail::DebugMetricsState> metrics_;
+  std::shared_ptr<detail::DebugMetricsSampler> metrics_;
   State<detail::DebugMetricsSnapshot> snapshot_;
   std::optional<double> next_sample_at_;
 };
@@ -1391,7 +1391,7 @@ View DebugMetricCard(std::string label, std::string value, std::string detail, C
 
 View DebugPanel(
     const detail::DebugMetricsSnapshot& snapshot,
-    const std::shared_ptr<detail::DebugMetricsState>& metrics,
+    const std::shared_ptr<detail::DebugMetricsSampler>& metrics,
     State<detail::DebugMetricsSnapshot> snapshot_state
 ) {
   const std::string fps =
@@ -1510,8 +1510,8 @@ void ValidateLayerAnchorTarget(const LayerAnchorTarget& target) {
   }
 }
 
-struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
-  explicit LayerAnchorState(LayerController controller) : layers(std::move(controller)) {}
+struct LayerAnchorBinding : std::enable_shared_from_this<LayerAnchorBinding> {
+  explicit LayerAnchorBinding(LayerController controller) : layers(std::move(controller)) {}
 
   void Mount(std::uint64_t identity) {
     if (mounted) {
@@ -1656,9 +1656,9 @@ struct LayerAnchorState : std::enable_shared_from_this<LayerAnchorState> {
   bool mounted = false;
 };
 
-struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
+struct MenuChainSession : std::enable_shared_from_this<MenuChainSession> {
   struct Level {
-    std::weak_ptr<LayerAnchorState> anchor;
+    std::weak_ptr<LayerAnchorBinding> anchor;
     LayerId id = 0;
   };
 
@@ -1675,7 +1675,7 @@ struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
     return dismissed;
   }
 
-  void Register(std::size_t depth, const std::shared_ptr<LayerAnchorState>& anchor, LayerId id) {
+  void Register(std::size_t depth, const std::shared_ptr<LayerAnchorBinding>& anchor, LayerId id) {
     if (depth != levels.size()) {
       throw std::logic_error("HuxerUI menu chain levels must be registered in order");
     }
@@ -1686,14 +1686,14 @@ struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
     });
   }
 
-  [[nodiscard]] bool IsExpanded(std::size_t depth, const std::shared_ptr<LayerAnchorState>& anchor) const {
+  [[nodiscard]] bool IsExpanded(std::size_t depth, const std::shared_ptr<LayerAnchorBinding>& anchor) const {
     if (levels.size() <= depth + 1) {
       return false;
     }
     return levels[depth + 1].anchor.lock() == anchor;
   }
 
-  // Layer semantics compare this token without depending on MenuChainState or its operational menu state.
+  // Layer semantics compare this token without depending on MenuChainSession or its operational menu state.
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group = std::make_shared<SemanticModalGroupToken>();
   // Levels contains operationally open menus only. DismissFrom removes them before their retained Layer entries finish
   // exit motion, which lets submenu ownership and expansion state settle immediately.
@@ -1701,8 +1701,8 @@ struct MenuChainState : std::enable_shared_from_this<MenuChainState> {
 };
 
 struct MenuExpansionAction {
-  std::weak_ptr<MenuChainState> chain;
-  std::weak_ptr<LayerAnchorState> submenu_anchor;
+  std::weak_ptr<MenuChainSession> chain;
+  std::weak_ptr<LayerAnchorBinding> submenu_anchor;
   std::size_t depth = 0;
   std::function<void()> expand;
 
@@ -1723,8 +1723,8 @@ public:
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {
-    const std::shared_ptr<MenuChainState> chain = chain_.lock();
-    const std::shared_ptr<LayerAnchorState> anchor = submenu_anchor_.lock();
+    const std::shared_ptr<MenuChainSession> chain = chain_.lock();
+    const std::shared_ptr<LayerAnchorBinding> anchor = submenu_anchor_.lock();
     const bool expanded = chain && anchor && chain->IsExpanded(depth_, anchor);
     Semantics semantics;
     semantics.expanded = expanded;
@@ -1736,8 +1736,8 @@ public:
     if (local_id != 0) {
       return false;
     }
-    const std::shared_ptr<MenuChainState> chain = chain_.lock();
-    const std::shared_ptr<LayerAnchorState> anchor = submenu_anchor_.lock();
+    const std::shared_ptr<MenuChainSession> chain = chain_.lock();
+    const std::shared_ptr<LayerAnchorBinding> anchor = submenu_anchor_.lock();
     if (!chain || !anchor) {
       return false;
     }
@@ -1753,8 +1753,8 @@ public:
   }
 
 private:
-  std::weak_ptr<MenuChainState> chain_;
-  std::weak_ptr<LayerAnchorState> submenu_anchor_;
+  std::weak_ptr<MenuChainSession> chain_;
+  std::weak_ptr<LayerAnchorBinding> submenu_anchor_;
   std::size_t depth_ = 0;
   std::function<void()> expand_;
 };
@@ -1779,27 +1779,27 @@ class PopupService {
 public:
   explicit PopupService(LayerController& layers) : layers_(layers) {}
 
-  [[nodiscard]] std::shared_ptr<LayerAnchorState> CreateAnchor() const {
-    return std::make_shared<LayerAnchorState>(layers_);
+  [[nodiscard]] std::shared_ptr<LayerAnchorBinding> CreateAnchor() const {
+    return std::make_shared<LayerAnchorBinding>(layers_);
   }
 
   LayerId Show(
-      const std::shared_ptr<LayerAnchorState>& anchor,
+      const std::shared_ptr<LayerAnchorBinding>& anchor,
       LayerAnchorTarget target,
       ViewFactory content,
       PopupOptions options,
       std::shared_ptr<const Environment> environment
   );
   LayerId Show(
-      const std::shared_ptr<LayerAnchorState>& anchor,
+      const std::shared_ptr<LayerAnchorBinding>& anchor,
       LayerAnchorTarget target,
       PopupFactory content,
       PopupOptions options,
       std::shared_ptr<const Environment> environment
   );
-  bool Update(const std::shared_ptr<LayerAnchorState>& anchor, LayerId id, ViewFactory content,
+  bool Update(const std::shared_ptr<LayerAnchorBinding>& anchor, LayerId id, ViewFactory content,
               std::shared_ptr<const Environment> environment);
-  bool Update(const std::shared_ptr<LayerAnchorState>& anchor, LayerId id, PopupFactory content,
+  bool Update(const std::shared_ptr<LayerAnchorBinding>& anchor, LayerId id, PopupFactory content,
               std::shared_ptr<const Environment> environment);
 
 private:
@@ -1810,12 +1810,12 @@ class MenuService {
 public:
   explicit MenuService(LayerController& layers) : layers_(layers) {}
 
-  [[nodiscard]] std::shared_ptr<LayerAnchorState> CreateAnchor() const {
-    return std::make_shared<LayerAnchorState>(layers_);
+  [[nodiscard]] std::shared_ptr<LayerAnchorBinding> CreateAnchor() const {
+    return std::make_shared<LayerAnchorBinding>(layers_);
   }
 
   LayerId Show(
-      const std::shared_ptr<LayerAnchorState>& anchor,
+      const std::shared_ptr<LayerAnchorBinding>& anchor,
       std::optional<Point> point,
       std::vector<MenuEntry> entries,
       MenuOptions options,
@@ -1824,12 +1824,12 @@ public:
 
 private:
   LayerId ShowLevel(
-      const std::shared_ptr<LayerAnchorState>& anchor,
+      const std::shared_ptr<LayerAnchorBinding>& anchor,
       std::optional<Point> point,
       std::vector<MenuEntry> entries,
       MenuOptions options,
       std::shared_ptr<const Environment> environment,
-      const std::shared_ptr<MenuChainState>& chain,
+      const std::shared_ptr<MenuChainSession>& chain,
       std::size_t depth,
       bool submenu
   );
@@ -1837,7 +1837,7 @@ private:
   static View ItemView(
       MenuItem item,
       const MenuStyle& style,
-      const std::shared_ptr<MenuChainState>& chain,
+      const std::shared_ptr<MenuChainSession>& chain,
       std::size_t depth,
       std::size_t index
   );
@@ -1846,7 +1846,7 @@ private:
       std::vector<MenuEntry> entries,
       MenuStyle style,
       std::optional<float> width,
-      const std::shared_ptr<MenuChainState>& chain,
+      const std::shared_ptr<MenuChainSession>& chain,
       std::size_t depth,
       std::function<bool()> request_dismiss
   );
@@ -1912,7 +1912,7 @@ void MenuService::ValidateEntries(const std::vector<MenuEntry>& entries) {
 View MenuService::ItemView(
     MenuItem item,
     const MenuStyle& style,
-    const std::shared_ptr<MenuChainState>& chain,
+    const std::shared_ptr<MenuChainSession>& chain,
     std::size_t depth,
     std::size_t index
 ) {
@@ -2031,7 +2031,7 @@ View MenuService::Surface(
     std::vector<MenuEntry> entries,
     MenuStyle style,
     std::optional<float> width,
-    const std::shared_ptr<MenuChainState>& chain,
+    const std::shared_ptr<MenuChainSession>& chain,
     std::size_t depth,
     std::function<bool()> request_dismiss
 ) {
@@ -2201,42 +2201,42 @@ public:
   }
 
   ~LayerAnchorExtension() override {
-    if (state_) {
+    if (binding_) {
       try {
-        state_->Unmount();
+        binding_->Unmount();
       } catch (...) {
       }
     }
   }
 
   void Update(huxerui::ViewNode& node, const LayerAnchor& modifier) {
-    if (state_ == modifier.state_) {
+    if (binding_ == modifier.binding_) {
       return;
     }
-    if (state_) {
-      state_->Unmount();
+    if (binding_) {
+      binding_->Unmount();
     }
-    state_ = modifier.state_;
-    if (state_) {
-      state_->Mount(static_cast<const detail::MountedNode&>(node).identity);
+    binding_ = modifier.binding_;
+    if (binding_) {
+      binding_->Mount(static_cast<const detail::MountedNode&>(node).identity);
     }
   }
 
   [[nodiscard]] PaintInvalidation PrepareGeometry(huxerui::ViewNode& node, huxerui::TextMeasurer&) override {
-    if (state_) {
+    if (binding_) {
       const auto& mounted = static_cast<const detail::MountedNode&>(node);
-      state_->UpdateGeometry(node.PresentationBounds(), mounted.presentation.resolved_transform);
+      binding_->UpdateGeometry(node.PresentationBounds(), mounted.presentation.resolved_transform);
     }
     return PaintInvalidation::None;
   }
 
 private:
-  std::shared_ptr<LayerAnchorState> state_;
+  std::shared_ptr<LayerAnchorBinding> binding_;
 };
 
 class DebugOverlayInstaller {
 public:
-  static void Install(WindowContext& root, std::shared_ptr<DebugMetricsState> metrics) {
+  static void Install(WindowContext& root, std::shared_ptr<DebugMetricsSampler> metrics) {
     LayerPlacement placement;
     placement.kind = LayerPlacementKind::Fill;
     placement.safe_area_policy = LayerSafeAreaPolicy::Ignore;
@@ -2334,7 +2334,7 @@ void InstallBuiltinPresentation(WindowContext& root) {
   InstallTooltip(root);
 }
 
-void InstallDebugOverlay(WindowContext& root, std::shared_ptr<DebugMetricsState> metrics) {
+void InstallDebugOverlay(WindowContext& root, std::shared_ptr<DebugMetricsSampler> metrics) {
   DebugOverlayInstaller::Install(root, std::move(metrics));
 }
 
@@ -2986,7 +2986,7 @@ bool PopupHandle::Dismiss(LayerId id) const {
 }
 
 LayerId detail::PopupService::Show(
-    const std::shared_ptr<detail::LayerAnchorState>& anchor,
+    const std::shared_ptr<detail::LayerAnchorBinding>& anchor,
     LayerAnchorTarget target,
     ViewFactory content,
     PopupOptions options,
@@ -3014,7 +3014,7 @@ LayerId detail::PopupService::Show(
 }
 
 LayerId detail::PopupService::Show(
-    const std::shared_ptr<detail::LayerAnchorState>& anchor,
+    const std::shared_ptr<detail::LayerAnchorBinding>& anchor,
     LayerAnchorTarget target,
     PopupFactory content,
     PopupOptions options,
@@ -3035,7 +3035,7 @@ LayerId detail::PopupService::Show(
   return attached;
 }
 
-bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id,
+bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorBinding>& anchor, LayerId id,
                                   ViewFactory content, std::shared_ptr<const Environment> environment) {
   if (!content) {
     throw std::invalid_argument("HuxerUI popup content factory must not be empty");
@@ -3046,7 +3046,7 @@ bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState
   return InternalAccess::UpdateEntry(layers_, id, std::nullopt, std::move(content), std::move(environment));
 }
 
-bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorState>& anchor, LayerId id,
+bool detail::PopupService::Update(const std::shared_ptr<detail::LayerAnchorBinding>& anchor, LayerId id,
                                   PopupFactory content, std::shared_ptr<const Environment> environment) {
   if (!content) {
     throw std::invalid_argument("HuxerUI popup content factory must not be empty");
@@ -3087,7 +3087,7 @@ bool MenuHandle::Dismiss(LayerId id) const {
 }
 
 LayerId detail::MenuService::Show(
-    const std::shared_ptr<detail::LayerAnchorState>& anchor,
+    const std::shared_ptr<detail::LayerAnchorBinding>& anchor,
     std::optional<Point> point,
     std::vector<MenuEntry> entries,
     MenuOptions options,
@@ -3099,19 +3099,19 @@ LayerId detail::MenuService::Show(
       std::move(entries),
       std::move(options),
       std::move(environment),
-      std::make_shared<MenuChainState>(),
+      std::make_shared<MenuChainSession>(),
       0,
       false
   );
 }
 
 LayerId detail::MenuService::ShowLevel(
-    const std::shared_ptr<detail::LayerAnchorState>& anchor,
+    const std::shared_ptr<detail::LayerAnchorBinding>& anchor,
     std::optional<Point> point,
     std::vector<MenuEntry> entries,
     MenuOptions options,
     std::shared_ptr<const Environment> environment,
-    const std::shared_ptr<MenuChainState>& chain,
+    const std::shared_ptr<MenuChainSession>& chain,
     std::size_t depth,
     bool submenu
 ) {
@@ -3147,14 +3147,14 @@ LayerId detail::MenuService::ShowLevel(
        preferred_placement,
        transition,
        dismissible,
-       anchor = std::weak_ptr<LayerAnchorState>(anchor)]() -> View {
+       anchor = std::weak_ptr<LayerAnchorBinding>(anchor)]() -> View {
         const auto style = ResolveMenuStyle(detail::CurrentEnvironment());
         ValidateMenuStyle(style);
         if (transition) UpdatePresentationTransition(transition, style.motion);
         std::function<bool()> request_dismiss;
         if (dismissible) {
           request_dismiss = [anchor] {
-            const std::shared_ptr<LayerAnchorState> locked = anchor.lock();
+            const std::shared_ptr<LayerAnchorBinding> locked = anchor.lock();
             return locked && locked->RequestDismissActive();
           };
         }

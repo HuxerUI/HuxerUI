@@ -141,16 +141,16 @@ struct HttpOpenEvent {
 
 } // namespace
 
-class HttpOperationState final : public AsyncInputStreamState, public std::enable_shared_from_this<HttpOperationState> {
+class HttpOperation final : public AsyncInputStreamBackend, public std::enable_shared_from_this<HttpOperation> {
 public:
-  HttpOperationState(std::weak_ptr<ApplicationRuntimeState> application, std::shared_ptr<HttpTransport> transport,
+  HttpOperation(std::weak_ptr<ApplicationRuntimeState> application, std::shared_ptr<HttpTransport> transport,
                      HttpRequest request, bool require_incremental_response,
                      std::function<void(HttpProgress)> progress)
       : application_(std::move(application)), transport_(std::move(transport)), request_(std::move(request)),
         require_incremental_response_(require_incremental_response), progress_(std::move(progress)),
         upload_total_(static_cast<std::uint64_t>(request_.body.size())) {}
 
-  ~HttpOperationState() override {
+  ~HttpOperation() override {
     Cancel();
   }
 
@@ -329,31 +329,31 @@ public:
 
 private:
   void StartTransport() {
-    std::weak_ptr<HttpOperationState> weak = shared_from_this();
+    std::weak_ptr<HttpOperation> weak = shared_from_this();
     HttpTransportCallbacks callbacks{
         .upload_progress = [weak](std::uint64_t transferred_bytes) {
-          if (auto state = weak.lock()) {
-            state->OnUploadProgress(transferred_bytes);
+          if (auto operation = weak.lock()) {
+            operation->OnUploadProgress(transferred_bytes);
           }
         },
         .response = [weak](HttpTransportResponse response) {
-          if (auto state = weak.lock()) {
-            state->OnResponse(std::move(response));
+          if (auto operation = weak.lock()) {
+            operation->OnResponse(std::move(response));
           }
         },
         .body = [weak](Bytes body) {
-          if (auto state = weak.lock()) {
-            state->OnBody(std::move(body));
+          if (auto operation = weak.lock()) {
+            operation->OnBody(std::move(body));
           }
         },
         .complete = [weak] {
-          if (auto state = weak.lock()) {
-            state->OnComplete();
+          if (auto operation = weak.lock()) {
+            operation->OnComplete();
           }
         },
         .error = [weak](HttpError error) {
-          if (auto state = weak.lock()) {
-            state->OnError(std::move(error));
+          if (auto operation = weak.lock()) {
+            operation->OnError(std::move(error));
           }
         },
     };
@@ -567,7 +567,7 @@ namespace {
 
 class HttpOpenAwaiter final {
 public:
-  explicit HttpOpenAwaiter(std::shared_ptr<HttpOperationState> state) : state_(std::move(state)) {}
+  explicit HttpOpenAwaiter(std::shared_ptr<HttpOperation> operation) : operation_(std::move(operation)) {}
 
   HttpOpenAwaiter(const HttpOpenAwaiter&) = delete;
   HttpOpenAwaiter& operator=(const HttpOpenAwaiter&) = delete;
@@ -575,8 +575,8 @@ public:
   HttpOpenAwaiter& operator=(HttpOpenAwaiter&&) noexcept = default;
 
   ~HttpOpenAwaiter() {
-    if (state_) {
-      state_->Cancel();
+    if (operation_) {
+      operation_->Cancel();
     }
   }
 
@@ -585,65 +585,65 @@ public:
   }
 
   template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    state_->SuspendOpen(TaskExecutionFor(continuation), continuation);
+    operation_->SuspendOpen(TaskExecutionFor(continuation), continuation);
   }
 
   HttpOpenEvent await_resume() {
-    return std::exchange(state_, {})->TakeOpenEvent();
+    return std::exchange(operation_, {})->TakeOpenEvent();
   }
 
 private:
-  std::shared_ptr<HttpOperationState> state_;
+  std::shared_ptr<HttpOperation> operation_;
 };
 
 class HttpReadAwaiter final {
 public:
-  HttpReadAwaiter(std::shared_ptr<HttpOperationState> state, std::size_t maximum_bytes)
-      : state_(std::move(state)), maximum_bytes_(maximum_bytes) {}
+  HttpReadAwaiter(std::shared_ptr<HttpOperation> operation, std::size_t maximum_bytes)
+      : operation_(std::move(operation)), maximum_bytes_(maximum_bytes) {}
 
   [[nodiscard]] bool await_ready() const noexcept {
     return false;
   }
 
   template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    state_->SuspendRead(TaskExecutionFor(continuation), continuation);
+    operation_->SuspendRead(TaskExecutionFor(continuation), continuation);
   }
 
   IoResult<Bytes> await_resume() {
-    return state_->TakeReadEvent(maximum_bytes_);
+    return operation_->TakeReadEvent(maximum_bytes_);
   }
 
 private:
-  std::shared_ptr<HttpOperationState> state_;
+  std::shared_ptr<HttpOperation> operation_;
   std::size_t maximum_bytes_ = 0;
 };
 
 class HttpReadCancellation final {
 public:
-  explicit HttpReadCancellation(std::shared_ptr<HttpOperationState> state) : state_(std::move(state)) {}
+  explicit HttpReadCancellation(std::shared_ptr<HttpOperation> operation) : operation_(std::move(operation)) {}
 
   HttpReadCancellation(const HttpReadCancellation&) = delete;
   HttpReadCancellation& operator=(const HttpReadCancellation&) = delete;
-  HttpReadCancellation(HttpReadCancellation&& other) noexcept : state_(std::exchange(other.state_, {})) {}
+  HttpReadCancellation(HttpReadCancellation&& other) noexcept : operation_(std::exchange(other.operation_, {})) {}
   HttpReadCancellation& operator=(HttpReadCancellation&&) = delete;
 
   ~HttpReadCancellation() {
-    if (state_) {
-      state_->Cancel();
+    if (operation_) {
+      operation_->Cancel();
     }
   }
 
-  [[nodiscard]] const std::shared_ptr<HttpOperationState>& State() const noexcept {
-    return state_;
+  [[nodiscard]] const std::shared_ptr<HttpOperation>& Operation() const noexcept {
+    return operation_;
   }
 
   void Finish(bool terminal) noexcept {
-    state_->FinishRead(terminal);
-    state_.reset();
+    operation_->FinishRead(terminal);
+    operation_.reset();
   }
 
 private:
-  std::shared_ptr<HttpOperationState> state_;
+  std::shared_ptr<HttpOperation> operation_;
 };
 
 Task<HttpResult<HttpResponseStream>> OpenHttpStream(std::weak_ptr<ApplicationRuntimeState> original,
@@ -658,34 +658,34 @@ Task<HttpResult<HttpResponseStream>> OpenHttpStream(std::weak_ptr<ApplicationRun
     });
   }
 
-  auto state = std::make_shared<HttpOperationState>(original, std::move(transport), std::move(request),
-                                                    require_incremental_response, std::move(progress));
-  std::erase_if(application->http_operations, [](const auto& operation) { return operation.expired(); });
-  application->http_operations.push_back(state);
+  auto operation = std::make_shared<HttpOperation>(original, std::move(transport), std::move(request),
+                                                   require_incremental_response, std::move(progress));
+  std::erase_if(application->http_operations, [](const auto& pending) { return pending.expired(); });
+  application->http_operations.push_back(operation);
   while (true) {
-    HttpOpenEvent event = co_await HttpOpenAwaiter(state);
+    HttpOpenEvent event = co_await HttpOpenAwaiter(operation);
     if (event.progress.has_value()) {
-      state->ReportProgress(std::move(*event.progress));
+      operation->ReportProgress(std::move(*event.progress));
       continue;
     }
     if (event.error.has_value()) {
       co_return HttpResult<HttpResponseStream>(std::move(*event.error));
     }
     if (event.response) {
-      co_return HttpResult<HttpResponseStream>(state->MakeResponseStream());
+      co_return HttpResult<HttpResponseStream>(operation->MakeResponseStream());
     }
   }
 }
 
 Task<IoResult<Bytes>> ReadHttpStream(HttpReadCancellation cancellation, std::size_t maximum_bytes) {
-  cancellation.State()->RequireReadable();
-  auto data = co_await HttpReadAwaiter(cancellation.State(), maximum_bytes);
+  cancellation.Operation()->RequireReadable();
+  auto data = co_await HttpReadAwaiter(cancellation.Operation(), maximum_bytes);
   if (!data.Succeeded() || data.Value().empty()) {
     cancellation.Finish(true);
     co_return data;
   }
-  auto progress = cancellation.State()->MakeDownloadProgress(data.Value().size());
-  cancellation.State()->ReportProgress(std::move(progress));
+  auto progress = cancellation.Operation()->MakeDownloadProgress(data.Value().size());
+  cancellation.Operation()->ReportProgress(std::move(progress));
   cancellation.Finish(false);
   co_return data;
 }
@@ -725,7 +725,7 @@ Task<HttpResult<HttpResponse>> SendHttpRequest(std::weak_ptr<ApplicationRuntimeS
 
 } // namespace
 
-Task<IoResult<Bytes>> HttpOperationState::ReadAsync(std::size_t maximum_bytes) {
+Task<IoResult<Bytes>> HttpOperation::ReadAsync(std::size_t maximum_bytes) {
   RequireReadable();
   return ReadHttpStream(HttpReadCancellation(shared_from_this()), maximum_bytes);
 }
@@ -741,15 +741,15 @@ void DisconnectHttpOperations(ApplicationRuntimeState& application) noexcept {
 
 namespace huxerui {
 
-HttpResponseStream::HttpResponseStream(std::shared_ptr<detail::HttpOperationState> state)
-    : state_(std::move(state)), body_(detail::StreamAccess::MakeAsyncInputStream(state_)) {}
+HttpResponseStream::HttpResponseStream(std::shared_ptr<detail::HttpOperation> operation)
+    : operation_(std::move(operation)), body_(detail::StreamAccess::MakeAsyncInputStream(operation_)) {}
 
 HttpResponseStream::HttpResponseStream(HttpResponseStream&& other) noexcept
-    : state_(std::move(other.state_)), body_(std::move(other.body_)) {}
+    : operation_(std::move(other.operation_)), body_(std::move(other.body_)) {}
 
 HttpResponseStream& HttpResponseStream::operator=(HttpResponseStream&& other) noexcept {
   if (this != &other) {
-    state_ = std::move(other.state_);
+    operation_ = std::move(other.operation_);
     body_ = std::move(other.body_);
   }
   return *this;
@@ -758,28 +758,28 @@ HttpResponseStream& HttpResponseStream::operator=(HttpResponseStream&& other) no
 HttpResponseStream::~HttpResponseStream() = default;
 
 const std::string& HttpResponseStream::Url() const {
-  if (!state_) {
+  if (!operation_) {
     throw std::logic_error("HuxerUI HTTP response stream has been moved from");
   }
-  return state_->Url();
+  return operation_->Url();
 }
 
 int HttpResponseStream::StatusCode() const {
-  if (!state_) {
+  if (!operation_) {
     throw std::logic_error("HuxerUI HTTP response stream has been moved from");
   }
-  return state_->StatusCode();
+  return operation_->StatusCode();
 }
 
 std::span<const HttpHeader> HttpResponseStream::Headers() const {
-  if (!state_) {
+  if (!operation_) {
     throw std::logic_error("HuxerUI HTTP response stream has been moved from");
   }
-  return state_->Headers();
+  return operation_->Headers();
 }
 
 AsyncInputStream& HttpResponseStream::Body() {
-  if (!state_) {
+  if (!operation_) {
     throw std::logic_error("HuxerUI HTTP response stream has been moved from");
   }
   return body_;

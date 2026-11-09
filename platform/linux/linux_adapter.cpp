@@ -798,7 +798,7 @@ public:
 
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled =
-            frame_state_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
+            frame_coordinator_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
       ScheduleFrame(*scheduled);
     }
   }
@@ -982,14 +982,14 @@ private:
   void CommitFrame() {
     ExecutionGuard guard(InternalAccess::WindowExecution(*this));
     frame_source_ = 0;
-    if (!IsInitialized() || !frame_state_.BeginCommit()) {
+    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
       return;
     }
     // Keep the previous frame's text scale until its snapshot has finished, then rebuild all text geometry together.
     RefreshTextDpi();
     const FrameCommit& commit = UiWindow::BuildFrame();
     committed_frame_ = &commit.render_frame;
-    frame_state_.MarkPaintPending();
+    frame_coordinator_.MarkPaintPending();
     gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
     if (commit.next_frame_deadline.has_value()) {
       RequestFrameAt(*commit.next_frame_deadline);
@@ -998,7 +998,7 @@ private:
   }
 
   void FlushDeferredFrame() {
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(drawing_area_ != nullptr && running_)) {
+    if (const std::optional<double> deadline = frame_coordinator_.TakeDeferred(drawing_area_ != nullptr && running_)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -1007,13 +1007,13 @@ private:
     if (!IsInitialized() || committed_frame_ == nullptr) {
       return;
     }
-    frame_state_.BeginPaint();
+    frame_coordinator_.BeginPaint();
     try {
       renderer_.Snapshot(snapshot, *committed_frame_);
     } catch (...) {
       static_cast<LinuxRuntime&>(ApplicationRuntime()).ReportFailure(std::current_exception());
     }
-    if (const std::optional<double> deadline = frame_state_.EndPaint(drawing_area_ != nullptr && running_)) {
+    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(drawing_area_ != nullptr && running_)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -1494,7 +1494,7 @@ private:
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   std::unique_ptr<LinuxFileDrop> file_drop_;
-  PlatformFrameState frame_state_;
+  PlatformFrameCoordinator frame_coordinator_;
   const RenderFrame* committed_frame_ = nullptr;
   guint frame_source_ = 0;
   bool running_ = false;

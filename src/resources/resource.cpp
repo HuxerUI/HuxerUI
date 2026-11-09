@@ -232,9 +232,9 @@ struct RawAsset::Data {
 
 namespace {
 
-class RawAssetInputStreamState final : public detail::InputStreamState {
+class RawAssetInputStreamBackend final : public detail::InputStreamBackend {
 public:
-  RawAssetInputStreamState(std::shared_ptr<const void> owner, std::span<const std::byte> bytes)
+  RawAssetInputStreamBackend(std::shared_ptr<const void> owner, std::span<const std::byte> bytes)
       : owner_(std::move(owner)), bytes_(bytes) {}
 
   IoResult<std::size_t> Read(std::span<std::byte> buffer) override {
@@ -382,10 +382,10 @@ InputStream RawAsset::OpenRead() const {
   }
   if (data_->package_path.empty()) {
     return detail::StreamAccess::MakeInputStream(
-        std::make_shared<RawAssetInputStreamState>(data_->owner, detail::InternalAccess::RawBytes(*this)));
+        std::make_shared<RawAssetInputStreamBackend>(data_->owner, detail::InternalAccess::RawBytes(*this)));
   }
   if (auto bytes = CachedBytes()) {
-    return detail::StreamAccess::MakeInputStream(std::make_shared<RawAssetInputStreamState>(bytes, *bytes));
+    return detail::StreamAccess::MakeInputStream(std::make_shared<RawAssetInputStreamBackend>(bytes, *bytes));
   }
   const auto resources = data_->resources.lock();
   if (!resources) {

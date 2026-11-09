@@ -1749,7 +1749,7 @@ TEST_CASE("TestDebugMetricsSamplesPaintedFramesAndProcessUsage") {
       .memory_usage_bytes = 48ULL * 1024ULL * 1024ULL,
       .processor_count = 4,
   };
-  detail::DebugMetricsState metrics{platform};
+  detail::DebugMetricsSampler metrics{platform};
   metrics.Sample(0.0);
 
   metrics.RecordCommit(0.004, DamageRegion{.full = true}, {200.0F, 100.0F});

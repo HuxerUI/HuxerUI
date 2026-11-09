@@ -105,10 +105,10 @@ void ValidateRandomAccessOpen(FileAccessMode access, FileOpenMode mode) {
   }
 }
 
-class RandomAccessStreamState final {
+class RandomAccessStreamImpl final {
 public:
-  RandomAccessStreamState(ReferenceDescriptor descriptor, FileAccessMode access, ReferenceStreamCoordination coordinate,
-                          std::shared_ptr<FileReferenceState> owner)
+  RandomAccessStreamImpl(ReferenceDescriptor descriptor, FileAccessMode access, ReferenceStreamCoordination coordinate,
+                         std::shared_ptr<FileReferenceBackend> owner)
       : coordinate_(std::move(coordinate)), owner_(std::move(owner)), descriptor_(std::move(descriptor)),
         access_(access) {}
 
@@ -211,70 +211,70 @@ private:
 
   // Member order keeps the grant alive until after the descriptor is closed during destruction.
   ReferenceStreamCoordination coordinate_;
-  std::shared_ptr<FileReferenceState> owner_;
+  std::shared_ptr<FileReferenceBackend> owner_;
   ReferenceDescriptor descriptor_;
   FileAccessMode access_;
   bool closed_ = false;
   bool failed_ = false;
 };
 
-std::shared_ptr<RandomAccessStreamState> MakeRandomAccessState(
-    ReferenceDescriptor descriptor, FileAccessMode access, FileOpenMode mode,
-    ReferenceStreamCoordination coordinate, std::shared_ptr<FileReferenceState> owner
-) {
+std::shared_ptr<RandomAccessStreamImpl> MakeRandomAccessStreamImpl(ReferenceDescriptor descriptor,
+                                                                   FileAccessMode access, FileOpenMode mode,
+                                                                   ReferenceStreamCoordination coordinate,
+                                                                   std::shared_ptr<FileReferenceBackend> owner) {
   PrepareRandomAccessDescriptor(descriptor.Get(), access, mode);
-  return std::make_shared<RandomAccessStreamState>(
-      std::move(descriptor), access, std::move(coordinate), std::move(owner));
+  return std::make_shared<RandomAccessStreamImpl>(std::move(descriptor), access, std::move(coordinate),
+                                                  std::move(owner));
 }
 
 #if defined(__ANDROID__)
-IoResult<std::shared_ptr<RandomAccessStreamState>> OpenRandomAccessDescriptor(
-    int descriptor, FileAccessMode access, FileOpenMode mode, std::shared_ptr<FileReferenceState> owner
-) {
+IoResult<std::shared_ptr<RandomAccessStreamImpl>>
+OpenRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode,
+                           std::shared_ptr<FileReferenceBackend> owner) {
   ReferenceDescriptor owned(descriptor);
   return RunRandomAccess("open", [&] {
-    return IoResult<std::shared_ptr<RandomAccessStreamState>>(
-        MakeRandomAccessState(std::move(owned), access, mode, {}, std::move(owner)));
+    return IoResult<std::shared_ptr<RandomAccessStreamImpl>>(
+        MakeRandomAccessStreamImpl(std::move(owned), access, mode, {}, std::move(owner)));
   });
 }
 #endif
 
-RandomAccessStream StreamAccess::MakeRandomAccessStream(std::shared_ptr<RandomAccessStreamState> state) {
-  return RandomAccessStream(std::move(state));
+RandomAccessStream StreamAccess::MakeRandomAccessStream(std::shared_ptr<RandomAccessStreamImpl> impl) {
+  return RandomAccessStream(std::move(impl));
 }
 
 } // namespace huxerui::detail
 
 namespace huxerui {
 
-RandomAccessStream::RandomAccessStream(std::shared_ptr<detail::RandomAccessStreamState> state)
-    : state_(std::move(state)) {}
+RandomAccessStream::RandomAccessStream(std::shared_ptr<detail::RandomAccessStreamImpl> impl)
+    : impl_(std::move(impl)) {}
 
 RandomAccessStream::RandomAccessStream(RandomAccessStream&&) noexcept = default;
 RandomAccessStream& RandomAccessStream::operator=(RandomAccessStream&&) noexcept = default;
 RandomAccessStream::~RandomAccessStream() = default;
 
-detail::RandomAccessStreamState& RandomAccessStream::State() const {
-  if (!state_) {
+detail::RandomAccessStreamImpl& RandomAccessStream::RequireImpl() const {
+  if (!impl_) {
     throw std::logic_error("HuxerUI cannot use a moved-from random-access stream");
   }
-  return *state_;
+  return *impl_;
 }
 
 IoResult<std::size_t> RandomAccessStream::ReadAt(std::uint64_t offset, std::span<std::byte> buffer) {
-  return State().ReadAt(offset, buffer);
+  return RequireImpl().ReadAt(offset, buffer);
 }
 
 IoResult<void> RandomAccessStream::WriteAt(std::uint64_t offset, std::span<const std::byte> data) {
-  return State().WriteAt(offset, data);
+  return RequireImpl().WriteAt(offset, data);
 }
 
 IoResult<std::optional<std::uint64_t>> RandomAccessStream::Size() const {
-  return State().Size();
+  return RequireImpl().Size();
 }
 
 IoResult<void> RandomAccessStream::Close() {
-  return State().Close();
+  return RequireImpl().Close();
 }
 
 IoResult<RandomAccessStream> File::OpenRandomAccess(FileAccessMode access, FileOpenMode mode) const {
@@ -288,7 +288,7 @@ IoResult<RandomAccessStream> File::OpenRandomAccess(FileAccessMode access, FileO
   return detail::RunRandomAccess("open", [&] {
     auto descriptor = detail::OpenRandomAccessFileDescriptor(path_, access, mode);
     return IoResult<RandomAccessStream>(detail::StreamAccess::MakeRandomAccessStream(
-        detail::MakeRandomAccessState(std::move(descriptor), access, mode)));
+        detail::MakeRandomAccessStreamImpl(std::move(descriptor), access, mode)));
   });
 }
 

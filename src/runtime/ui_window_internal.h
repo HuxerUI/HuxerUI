@@ -114,9 +114,9 @@ struct DebugMetricsSnapshot {
   bool operator==(const DebugMetricsSnapshot&) const = default;
 };
 
-class DebugMetricsState {
+class DebugMetricsSampler {
 public:
-  explicit DebugMetricsState(Runtime& runtime) : runtime_(&runtime) {}
+  explicit DebugMetricsSampler(Runtime& runtime) : runtime_(&runtime) {}
 
   void RecordCommit(double commit_time_seconds, const DamageRegion& damage, Size viewport) noexcept;
   void ResetSampling() noexcept;
@@ -136,7 +136,7 @@ private:
 };
 
 void InstallBuiltinPresentation(WindowContext& root);
-void InstallDebugOverlay(WindowContext& root, std::shared_ptr<DebugMetricsState> metrics);
+void InstallDebugOverlay(WindowContext& root, std::shared_ptr<DebugMetricsSampler> metrics);
 
 enum class LayerPlacementKind : std::uint8_t {
   Natural,
@@ -416,7 +416,7 @@ private:
   std::unordered_map<CompositionSlotKey, std::size_t, CompositionSlotKeyHash> pending_lifecycle_indices_;
   std::unordered_map<CompositionSlotKey, std::uint32_t, CompositionSlotKeyHash> lifecycle_occurrences_;
   bool lifecycle_commit_pending_ = false;
-  std::shared_ptr<TaskScopeState> task_scope_;
+  std::shared_ptr<TaskScopeImpl> task_scope_;
   std::unordered_map<CompositionDependency*, std::weak_ptr<CompositionDependency>> dependencies_;
   std::unordered_map<CompositionDependency*, std::weak_ptr<CompositionDependency>> pending_dependencies_;
   std::unordered_map<
@@ -529,7 +529,7 @@ struct UiWindow::State {
   std::unordered_set<std::type_index> root_service_types_;
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
-  std::shared_ptr<detail::DebugMetricsState> debug_metrics_;
+  std::shared_ptr<detail::DebugMetricsSampler> debug_metrics_;
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   std::uint64_t text_metrics_revision_ = 0;
   std::shared_ptr<detail::CompositionDependency> text_metrics_dependency_ =
@@ -545,7 +545,7 @@ struct UiWindow::State {
   std::unique_ptr<detail::MountedNode> mounted_root_;
   std::vector<std::weak_ptr<detail::RecomposeScope>> lifecycle_commits_;
   std::vector<detail::LifecycleCleanup> retired_lifecycle_cleanups_;
-  std::vector<std::shared_ptr<detail::TaskScopeState>> retired_task_scopes_;
+  std::vector<std::shared_ptr<detail::TaskScopeImpl>> retired_task_scopes_;
   FrameCommit frame_commit_;
   detail::RenderDamageSnapshot committed_scene_snapshot_;
   Size committed_viewport_;

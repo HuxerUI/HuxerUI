@@ -27,9 +27,9 @@ Bytes BytesFromString(std::string_view value) {
   return bytes;
 }
 
-class TestFileReferenceState final : public detail::FileReferenceState {
+class TestFileReferenceBackend final : public detail::FileReferenceBackend {
 public:
-  explicit TestFileReferenceState(Bytes bytes) : bytes(std::move(bytes)) {}
+  explicit TestFileReferenceBackend(Bytes bytes) : bytes(std::move(bytes)) {}
 
   std::function<void()> ReadBytes(detail::FileReferenceBytesCompletion completion) override {
     ++read_count;
@@ -64,9 +64,10 @@ public:
 FileReference MakeReference(
     std::string name = "document.txt",
     bool can_write = true,
-    std::shared_ptr<TestFileReferenceState> state = std::make_shared<TestFileReferenceState>(BytesFromString("content"))
+    std::shared_ptr<TestFileReferenceBackend> backend =
+        std::make_shared<TestFileReferenceBackend>(BytesFromString("content"))
 ) {
-  const std::size_t size = state->bytes.size();
+  const std::size_t size = backend->bytes.size();
   return detail::MakeFileReference(
       {
           .name = std::move(name),
@@ -74,7 +75,7 @@ FileReference MakeReference(
           .content_type = "text/plain",
           .can_write = can_write,
       },
-      std::move(state)
+      std::move(backend)
   );
 }
 
@@ -205,15 +206,15 @@ static_assert(!std::is_copy_constructible_v<FilePicker>);
 static_assert(std::is_same_v<decltype(std::declval<const FileReference&>().AsFile()), std::optional<File>>);
 
 TEST_CASE("FileReferencesWithoutLocalPathsDoNotInferOrImportOne") {
-  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("content"));
-  const FileReference file = MakeReference("/tmp/document.txt", true, state);
+  auto backend = std::make_shared<TestFileReferenceBackend>(BytesFromString("content"));
+  const FileReference file = MakeReference("/tmp/document.txt", true, backend);
   const FileReference directory = detail::MakeFileReference(
-      {.name = "/tmp/project", .can_write = true, .type = FileType::Directory}, state);
+      {.name = "/tmp/project", .can_write = true, .type = FileType::Directory}, backend);
   REQUIRE_FALSE(file.AsFile().has_value());
   REQUIRE_FALSE(directory.AsFile().has_value());
-  REQUIRE(state->read_count == 0);
-  REQUIRE_FALSE(state->imported_to.has_value());
-  REQUIRE_FALSE(state->replaced_with.has_value());
+  REQUIRE(backend->read_count == 0);
+  REQUIRE_FALSE(backend->imported_to.has_value());
+  REQUIRE_FALSE(backend->replaced_with.has_value());
 }
 
 TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
@@ -222,17 +223,17 @@ TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
   UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
-  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("\xEF\xBB\xBFhello"));
-  std::weak_ptr<TestFileReferenceState> weak_state = state;
-  FileReference reference = MakeReference("report.txt", true, state);
+  auto backend = std::make_shared<TestFileReferenceBackend>(BytesFromString("\xEF\xBB\xBFhello"));
+  std::weak_ptr<TestFileReferenceBackend> weak_backend = backend;
+  FileReference reference = MakeReference("report.txt", true, backend);
   FileReference copy = reference;
-  state.reset();
+  backend.reset();
 
   REQUIRE(reference.Name() == "report.txt");
   REQUIRE(reference.Size() == 8);
   REQUIRE(reference.ContentType() == "text/plain");
   REQUIRE(reference.CanWrite());
-  REQUIRE_FALSE(weak_state.expired());
+  REQUIRE_FALSE(weak_backend.expired());
 
   file_picker_tasks.Launch([reference, copy]() -> Task<void> {
     reference_text = co_await reference.ReadStringAsync();
@@ -246,12 +247,12 @@ TEST_CASE("FileReferenceRetainsItsGrantAndProvidesMetadataAndOperations") {
   REQUIRE(reference_text->Value() == "hello");
   REQUIRE(imported_reference);
   REQUIRE(replaced_reference);
-  const std::shared_ptr<TestFileReferenceState> retained_state = weak_state.lock();
-  REQUIRE(retained_state);
-  REQUIRE(retained_state->read_count == 1);
-  REQUIRE(retained_state->imported_to == File("/tmp/imported.txt"));
-  REQUIRE(retained_state->imported_with_overwrite);
-  REQUIRE(retained_state->replaced_with == File("/tmp/replacement.txt"));
+  const std::shared_ptr<TestFileReferenceBackend> retained_backend = weak_backend.lock();
+  REQUIRE(retained_backend);
+  REQUIRE(retained_backend->read_count == 1);
+  REQUIRE(retained_backend->imported_to == File("/tmp/imported.txt"));
+  REQUIRE(retained_backend->imported_with_overwrite);
+  REQUIRE(retained_backend->replaced_with == File("/tmp/replacement.txt"));
 }
 
 TEST_CASE("FileReferencesWithUnknownMetadataRemainReadableAndImportable") {
@@ -259,8 +260,8 @@ TEST_CASE("FileReferencesWithUnknownMetadataRemainReadableAndImportable") {
   TestPlatform platform;
   UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
-  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("content"));
-  const FileReference reference = detail::MakeFileReference({}, state);
+  auto backend = std::make_shared<TestFileReferenceBackend>(BytesFromString("content"));
+  const FileReference reference = detail::MakeFileReference({}, backend);
   REQUIRE(reference.Name().empty());
   REQUIRE_FALSE(reference.Size().has_value());
   REQUIRE_FALSE(reference.ContentType().has_value());
@@ -276,9 +277,9 @@ TEST_CASE("FileReferencesWithUnknownMetadataRemainReadableAndImportable") {
   REQUIRE(reference_text->Succeeded());
   REQUIRE(reference_text->Value() == "content");
   REQUIRE(imported_reference);
-  REQUIRE(state->imported_to == File("/tmp/explicit-name.txt"));
-  REQUIRE_THROWS_AS(detail::MakeFileReference({.name = std::string("bad\0name", 8)}, state), std::logic_error);
-  REQUIRE_THROWS_AS(detail::MakeFileReference({.name = std::string(1, '\xFF')}, state), std::logic_error);
+  REQUIRE(backend->imported_to == File("/tmp/explicit-name.txt"));
+  REQUIRE_THROWS_AS(detail::MakeFileReference({.name = std::string("bad\0name", 8)}, backend), std::logic_error);
+  REQUIRE_THROWS_AS(detail::MakeFileReference({.name = std::string(1, '\xFF')}, backend), std::logic_error);
 }
 
 TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
@@ -287,8 +288,8 @@ TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
   UiWindow runtime(FilePickerApp, platform);
   runtime.BuildFrame();
 
-  auto state = std::make_shared<TestFileReferenceState>(BytesFromString("read only"));
-  FileReference reference = MakeReference("readonly.txt", false, state);
+  auto backend = std::make_shared<TestFileReferenceBackend>(BytesFromString("read only"));
+  FileReference reference = MakeReference("readonly.txt", false, backend);
   file_picker_tasks.Launch([reference]() -> Task<void> {
     replaced_reference = co_await reference.ReplaceWithAsync(File("/tmp/replacement.txt"));
     picker_task_completed = true;
@@ -297,7 +298,7 @@ TEST_CASE("ReadOnlyFileReferenceRejectsReplacementWithoutCallingThePlatform") {
 
   REQUIRE(picker_task_completed);
   REQUIRE_FALSE(replaced_reference);
-  REQUIRE_FALSE(state->replaced_with.has_value());
+  REQUIRE_FALSE(backend->replaced_with.has_value());
 }
 
 TEST_CASE("FileReferenceCallbackBridgePreservesStartupErrorsAndCancellation") {
@@ -383,7 +384,7 @@ TEST_CASE("FilePickerValidatesPortableFiltersAndSuggestedNames") {
   REQUIRE_THROWS_AS(
       detail::MakeFileReference(
           {.name = "document.txt", .content_type = "text/*"},
-          std::make_shared<TestFileReferenceState>(BytesFromString("content"))
+          std::make_shared<TestFileReferenceBackend>(BytesFromString("content"))
       ),
       std::logic_error
   );
@@ -515,7 +516,7 @@ TEST_CASE("FilePickerDirectoriesShareThePresentationQueueAndRejectWrongResults")
   });
   platform.RunPlatformModuleTasks();
   auto readonly = detail::MakeFileReference({.name = "directory", .can_write = false, .type = FileType::Directory},
-      std::make_shared<TestFileReferenceState>(Bytes{}));
+      std::make_shared<TestFileReferenceBackend>(Bytes{}));
   platform.transport->CompleteOpen(2, {readonly});
   platform.RunPlatformModuleTasks();
   REQUIRE(completed);

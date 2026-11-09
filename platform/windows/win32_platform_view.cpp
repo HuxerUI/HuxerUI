@@ -64,7 +64,7 @@ LRESULT CALLBACK ContainerWindowProcedure(HWND window, UINT message, WPARAM w_pa
 
 } // namespace
 
-struct Win32PlatformViews::State {
+struct Win32PlatformViews::Impl {
   struct EventRoute {
     UiWindow* ui_window = nullptr;
     // Value-returning events are synchronous, so a route may enter UiWindow only from its owning UI thread.
@@ -111,7 +111,7 @@ struct Win32PlatformViews::State {
     }
   };
 
-  State(HINSTANCE instance_value, HWND platform_window_value, PlatformRegistry& registry_value,
+  Impl(HINSTANCE instance_value, HWND platform_window_value, PlatformRegistry& registry_value,
         UiWindow& ui_window_value, OverlayMessageHandler overlay_message_handler_value)
       : instance(instance_value), platform_window(platform_window_value), registry(&registry_value), ui_window(&ui_window_value),
         overlay_message_handler(std::move(overlay_message_handler_value)) {
@@ -379,31 +379,31 @@ struct Win32PlatformViews::State {
   }
 
   static LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
-    State* state = reinterpret_cast<State*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    Impl* impl = reinterpret_cast<Impl*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
       const auto* create = reinterpret_cast<const CREATESTRUCTW*>(l_param);
-      state = static_cast<State*>(create->lpCreateParams);
-      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+      impl = static_cast<Impl*>(create->lpCreateParams);
+      SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(impl));
     }
-    if (state == nullptr) {
+    if (impl == nullptr) {
       return DefWindowProcW(window, message, w_param, l_param);
     }
     if (message == WM_NCHITTEST) {
-      if (state->overlay_message_handler &&
-          state->overlay_message_handler(window, message, w_param, l_param) != HTCLIENT) {
+      if (impl->overlay_message_handler &&
+          impl->overlay_message_handler(window, message, w_param, l_param) != HTCLIENT) {
         // The root HWND must own resizing, dragging, and native caption behavior.
         return HTTRANSPARENT;
       }
       POINT point{GET_X_LPARAM(l_param), GET_Y_LPARAM(l_param)};
-      ScreenToClient(state->platform_window, &point);
-      const float scale = std::max(state->dpi_scale, 0.01F);
+      ScreenToClient(impl->platform_window, &point);
+      const float scale = std::max(impl->dpi_scale, 0.01F);
       const std::optional<std::uint64_t> identity = InternalAccess::HitTestPlatformView(
-          *state->ui_window,
+          *impl->ui_window,
           {static_cast<float>(point.x) / scale, static_cast<float>(point.y) / scale}
       );
       if (identity.has_value()) {
-        const auto found = state->hosted_views.find(*identity);
-        if (found != state->hosted_views.end() && found->second->visible) {
+        const auto found = impl->hosted_views.find(*identity);
+        if (found != impl->hosted_views.end() && found->second->visible) {
           return HTTRANSPARENT;
         }
       }
@@ -415,8 +415,8 @@ struct Win32PlatformViews::State {
     if (message == WM_GETOBJECT) {
       return 0;
     }
-    if (state->overlay_message_handler) {
-      return state->overlay_message_handler(window, message, w_param, l_param);
+    if (impl->overlay_message_handler) {
+      return impl->overlay_message_handler(window, message, w_param, l_param);
     }
     return DefWindowProcW(window, message, w_param, l_param);
   }
@@ -439,7 +439,8 @@ struct Win32PlatformViews::State {
 
 Win32PlatformViews::Win32PlatformViews(HINSTANCE instance, HWND platform_window, PlatformRegistry& registry,
                                        UiWindow& ui_window, OverlayMessageHandler overlay_message_handler)
-    : state_(std::make_unique<State>(instance, platform_window, registry, ui_window, std::move(overlay_message_handler))) {}
+    : impl_(std::make_unique<Impl>(instance, platform_window, registry, ui_window,
+                                  std::move(overlay_message_handler))) {}
 
 Win32PlatformViews::~Win32PlatformViews() {
   Shutdown();
@@ -448,26 +449,26 @@ Win32PlatformViews::~Win32PlatformViews() {
 bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
   // Windows currently uses one HuxerUI surface, but the shared slice sequence remains the ordering contract.
   const RenderComposition composition = BuildRenderComposition(frame.scene);
-  state_->dpi_scale = std::isfinite(dpi_scale) && dpi_scale > 0.0F ? dpi_scale : 1.0F;
+  impl_->dpi_scale = std::isfinite(dpi_scale) && dpi_scale > 0.0F ? dpi_scale : 1.0F;
 
   std::unordered_set<std::uint64_t> retained;
-  std::vector<std::pair<std::uint64_t, std::unique_ptr<State::HostedView>>> pending;
+  std::vector<std::pair<std::uint64_t, std::unique_ptr<Impl::HostedView>>> pending;
   std::vector<const PlatformViewPlacement*> placements;
   for (const RenderCompositionLayer& layer : composition.layers) {
     if (const auto* placement = std::get_if<PlatformViewPlacement>(&layer)) {
       const PlacePlatformViewCommand& command = *placement->command;
       retained.insert(command.Identity());
       placements.push_back(placement);
-      const auto found = state_->hosted_views.find(command.Identity());
-      if (found == state_->hosted_views.end() || found->second->type != command.Type()) {
-        pending.emplace_back(command.Identity(), state_->Create(*placement));
+      const auto found = impl_->hosted_views.find(command.Identity());
+      if (found == impl_->hosted_views.end() || found->second->type != command.Type()) {
+        pending.emplace_back(command.Identity(), impl_->Create(*placement));
       } else {
-        state_->Update(*found->second, command);
+        impl_->Update(*found->second, command);
       }
     }
   }
 
-  const std::optional<std::uint64_t> platform_view_focus = state_->IdentityForWindow(GetFocus());
+  const std::optional<std::uint64_t> platform_view_focus = impl_->IdentityForWindow(GetFocus());
   const bool focused_instance_removed =
       platform_view_focus.has_value() &&
       (!retained.contains(*platform_view_focus) ||
@@ -476,69 +477,69 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
            [platform_view_focus](const auto& entry) { return entry.first == *platform_view_focus; }
        ));
   if (focused_instance_removed) {
-    SetFocus(state_->platform_window);
-    state_->platform_view_focus_identity.reset();
+    SetFocus(impl_->platform_window);
+    impl_->platform_view_focus_identity.reset();
   }
   for (auto& [identity, hosted] : pending) {
-    const auto found = state_->hosted_views.find(identity);
-    if (found != state_->hosted_views.end()) {
-      state_->Retire(std::move(found->second));
-      state_->hosted_views.erase(found);
+    const auto found = impl_->hosted_views.find(identity);
+    if (found != impl_->hosted_views.end()) {
+      impl_->Retire(std::move(found->second));
+      impl_->hosted_views.erase(found);
     }
-    state_->hosted_views.emplace(identity, std::move(hosted));
+    impl_->hosted_views.emplace(identity, std::move(hosted));
   }
-  for (auto iterator = state_->hosted_views.begin(); iterator != state_->hosted_views.end();) {
+  for (auto iterator = impl_->hosted_views.begin(); iterator != impl_->hosted_views.end();) {
     if (retained.contains(iterator->first)) {
       ++iterator;
       continue;
     }
-    state_->Retire(std::move(iterator->second));
-    iterator = state_->hosted_views.erase(iterator);
+    impl_->Retire(std::move(iterator->second));
+    iterator = impl_->hosted_views.erase(iterator);
   }
   for (const PlatformViewPlacement* placement : placements) {
     const PlacePlatformViewCommand& command = *placement->command;
-    const auto found = state_->hosted_views.find(command.Identity());
-    state_->Place(*found->second, *placement, state_->dpi_scale);
+    const auto found = impl_->hosted_views.find(command.Identity());
+    impl_->Place(*found->second, *placement, impl_->dpi_scale);
   }
 
-  for (auto& [identity, hosted] : state_->hosted_views) {
+  for (auto& [identity, hosted] : impl_->hosted_views) {
     hosted->event_route->active = true;
   }
-  state_->ResizeOverlay();
+  impl_->ResizeOverlay();
 
-  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*state_->ui_window);
-  const std::optional<std::uint64_t> current = state_->IdentityForWindow(GetFocus());
+  const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*impl_->ui_window);
+  const std::optional<std::uint64_t> current = impl_->IdentityForWindow(GetFocus());
   if (focused.has_value()) {
-    const auto found = state_->hosted_views.find(*focused);
-    if (found == state_->hosted_views.end() || !found->second->visible) {
+    const auto found = impl_->hosted_views.find(*focused);
+    if (found == impl_->hosted_views.end() || !found->second->visible) {
       if (current == focused) {
-        SetFocus(state_->platform_window);
+        SetFocus(impl_->platform_window);
       }
-      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
     } else if (current != focused) {
-      SetFocus(state_->FocusTarget(*found->second));
-      if (state_->IdentityForWindow(GetFocus()) != focused) {
-        InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+      SetFocus(impl_->FocusTarget(*found->second));
+      if (impl_->IdentityForWindow(GetFocus()) != focused) {
+        InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
       }
     }
   } else if (current.has_value()) {
-    SetFocus(state_->platform_window);
+    SetFocus(impl_->platform_window);
   }
-  state_->platform_view_focus_identity = state_->IdentityForWindow(GetFocus());
-  return !state_->hosted_views.empty() || !state_->retired.empty();
+  impl_->platform_view_focus_identity = impl_->IdentityForWindow(GetFocus());
+  return !impl_->hosted_views.empty() || !impl_->retired.empty();
 }
 
 void Win32PlatformViews::DidPresent() {
-  if (!state_->retired.empty()) {
+  if (!impl_->retired.empty()) {
     // Present queues the composition buffer; wait until DWM has consumed it before exposing retired apertures.
     HUXERUI_DISCARD(DwmFlush());
   }
-  state_->retired.clear();
-  state_->ResizeOverlay();
+  impl_->retired.clear();
+  impl_->ResizeOverlay();
 }
 
 void Win32PlatformViews::Resize() {
-  state_->ResizeOverlay();
+  impl_->ResizeOverlay();
 }
 
 bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
@@ -546,12 +547,12 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
     return false;
   }
   const HWND focused = GetFocus();
-  const std::optional<std::uint64_t> identity = state_->IdentityForWindow(focused);
+  const std::optional<std::uint64_t> identity = impl_->IdentityForWindow(focused);
   if (!identity.has_value()) {
     return false;
   }
-  const auto found = state_->hosted_views.find(*identity);
-  if (found == state_->hosted_views.end()) {
+  const auto found = impl_->hosted_views.find(*identity);
+  if (found == impl_->hosted_views.end()) {
     return false;
   }
   std::vector<HWND> tab_order;
@@ -564,9 +565,9 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
   const bool reverse = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
   const bool leaves_view = current == tab_order.end() || (reverse && current == tab_order.begin()) ||
                            (!reverse && std::next(current) == tab_order.end());
-  state_->pending_focus_visible = true;
+  impl_->pending_focus_visible = true;
   if (leaves_view) {
-    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *identity, reverse));
+    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*impl_->ui_window, *identity, reverse));
     return true;
   }
   SetFocus(reverse ? *std::prev(current) : *std::next(current));
@@ -574,47 +575,47 @@ bool Win32PlatformViews::HandleFocusTraversal(const MSG& message) {
 }
 
 void Win32PlatformViews::SynchronizeFocus(HWND focused) {
-  const std::optional<std::uint64_t> identity = state_->IdentityForWindow(focused);
-  if (identity == state_->platform_view_focus_identity) {
+  const std::optional<std::uint64_t> identity = impl_->IdentityForWindow(focused);
+  if (identity == impl_->platform_view_focus_identity) {
     return;
   }
-  const std::optional<std::uint64_t> previous = state_->platform_view_focus_identity;
-  state_->platform_view_focus_identity = identity;
+  const std::optional<std::uint64_t> previous = impl_->platform_view_focus_identity;
+  impl_->platform_view_focus_identity = identity;
   if (identity.has_value()) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, identity, state_->pending_focus_visible);
-    state_->pending_focus_visible = false;
-  } else if (previous.has_value() && InternalAccess::FocusedPlatformView(*state_->ui_window) == previous) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+    InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, identity, impl_->pending_focus_visible);
+    impl_->pending_focus_visible = false;
+  } else if (previous.has_value() && InternalAccess::FocusedPlatformView(*impl_->ui_window) == previous) {
+    InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
   }
 }
 
 HWND Win32PlatformViews::AccessibilityView(std::uint64_t identity) const noexcept {
-  const auto found = state_->hosted_views.find(identity);
-  return found == state_->hosted_views.end() || !found->second->visible ? nullptr : found->second->view;
+  const auto found = impl_->hosted_views.find(identity);
+  return found == impl_->hosted_views.end() || !found->second->visible ? nullptr : found->second->view;
 }
 
 void Win32PlatformViews::Shutdown() noexcept {
-  if (!state_) {
+  if (!impl_) {
     return;
   }
-  for (auto& [identity, hosted] : state_->hosted_views) {
+  for (auto& [identity, hosted] : impl_->hosted_views) {
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
-  state_->hosted_views.clear();
-  state_->retired.clear();
-  if (state_->overlay != nullptr && IsWindow(state_->overlay)) {
-    DestroyWindow(state_->overlay);
+  impl_->hosted_views.clear();
+  impl_->retired.clear();
+  if (impl_->overlay != nullptr && IsWindow(impl_->overlay)) {
+    DestroyWindow(impl_->overlay);
   }
-  state_->overlay = nullptr;
-  state_->ui_window = nullptr;
-  if (state_->container_atom != 0) {
-    UnregisterClassW(kContainerClassName, state_->instance);
-    state_->container_atom = 0;
+  impl_->overlay = nullptr;
+  impl_->ui_window = nullptr;
+  if (impl_->container_atom != 0) {
+    UnregisterClassW(kContainerClassName, impl_->instance);
+    impl_->container_atom = 0;
   }
-  if (state_->overlay_atom != 0) {
-    UnregisterClassW(kOverlayClassName, state_->instance);
-    state_->overlay_atom = 0;
+  if (impl_->overlay_atom != 0) {
+    UnregisterClassW(kOverlayClassName, impl_->instance);
+    impl_->overlay_atom = 0;
   }
 }
 

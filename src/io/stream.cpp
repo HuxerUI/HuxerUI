@@ -14,10 +14,10 @@ namespace huxerui::detail {
 
 namespace {
 
-class WorkerInputStreamState final : public AsyncInputStreamState,
-                                     public std::enable_shared_from_this<WorkerInputStreamState> {
+class AsyncInputStreamAdapter final : public AsyncInputStreamBackend,
+                                      public std::enable_shared_from_this<AsyncInputStreamAdapter> {
 public:
-  WorkerInputStreamState(InputStream input, bool memory) : input_(std::move(input)), memory_(memory) {
+  AsyncInputStreamAdapter(InputStream input, bool memory) : input_(std::move(input)), memory_(memory) {
 #if !defined(__EMSCRIPTEN__)
     if (!memory_) {
       operations_.emplace();
@@ -63,18 +63,18 @@ private:
 
 class InputOperation final {
 public:
-  explicit InputOperation(std::shared_ptr<AsyncInputStreamState> state) : state_(std::move(state)) {}
+  explicit InputOperation(std::shared_ptr<AsyncInputStreamBackend> backend) : backend_(std::move(backend)) {}
   InputOperation(const InputOperation&) = delete;
   InputOperation& operator=(const InputOperation&) = delete;
   InputOperation(InputOperation&&) noexcept = default;
   InputOperation& operator=(InputOperation&&) = delete;
 
   ~InputOperation() {
-    if (state_) {
+    if (backend_) {
       if (cancel_on_release_) {
-        state_->Cancel();
+        backend_->Cancel();
       }
-      state_->FinishOperation();
+      backend_->FinishOperation();
     }
   }
 
@@ -83,45 +83,45 @@ public:
   }
 
 private:
-  std::shared_ptr<AsyncInputStreamState> state_;
+  std::shared_ptr<AsyncInputStreamBackend> backend_;
   bool cancel_on_release_ = false;
 };
 
 class OutputOperation final {
 public:
-  explicit OutputOperation(std::shared_ptr<AsyncOutputStreamState> state) : state_(std::move(state)) {}
+  explicit OutputOperation(std::shared_ptr<AsyncOutputStreamBackend> backend) : backend_(std::move(backend)) {}
   OutputOperation(const OutputOperation&) = delete;
   OutputOperation& operator=(const OutputOperation&) = delete;
   OutputOperation(OutputOperation&&) noexcept = default;
   OutputOperation& operator=(OutputOperation&&) = delete;
 
   ~OutputOperation() {
-    if (state_) {
-      state_->FinishOperation();
+    if (backend_) {
+      backend_->FinishOperation();
     }
   }
 
 private:
-  std::shared_ptr<AsyncOutputStreamState> state_;
+  std::shared_ptr<AsyncOutputStreamBackend> backend_;
 };
 
-InputOperation ReserveInput(const std::shared_ptr<AsyncInputStreamState>& state, const char* operation) {
-  state->Reserve(operation);
-  return InputOperation(state);
+InputOperation ReserveInput(const std::shared_ptr<AsyncInputStreamBackend>& backend, const char* operation) {
+  backend->Reserve(operation);
+  return InputOperation(backend);
 }
 
-OutputOperation ReserveOutput(const std::shared_ptr<AsyncOutputStreamState>& state, const char* operation) {
-  state->Reserve(operation);
-  return OutputOperation(state);
+OutputOperation ReserveOutput(const std::shared_ptr<AsyncOutputStreamBackend>& backend, const char* operation) {
+  backend->Reserve(operation);
+  return OutputOperation(backend);
 }
 
 Task<IoResult<Bytes>>
-ReadOperation(std::shared_ptr<AsyncInputStreamState> state, std::size_t maximum_bytes, InputOperation operation) {
+ReadOperation(std::shared_ptr<AsyncInputStreamBackend> backend, std::size_t maximum_bytes, InputOperation operation) {
   HUXERUI_UNUSED(operation);
   try {
-    auto result = co_await state->ReadAsync(maximum_bytes);
+    auto result = co_await backend->ReadAsync(maximum_bytes);
     if (!result.Succeeded()) {
-      state->MarkFailed();
+      backend->MarkFailed();
       co_return result;
     }
     const Bytes& data = result.Value();
@@ -129,11 +129,11 @@ ReadOperation(std::shared_ptr<AsyncInputStreamState> state, std::size_t maximum_
       throw std::logic_error("HuxerUI async input stream returned more bytes than requested");
     }
     if (data.empty()) {
-      state->MarkComplete();
+      backend->MarkComplete();
     }
     co_return result;
   } catch (...) {
-    state->MarkFailed();
+    backend->MarkFailed();
     throw;
   }
 }
@@ -142,32 +142,33 @@ Task<IoResult<Bytes>> CompleteRead() {
   co_return IoResult<Bytes>(Bytes{});
 }
 
-Task<IoResult<void>> WriteOperation(std::shared_ptr<AsyncOutputStreamState> state, Bytes data, OutputOperation operation) {
+Task<IoResult<void>> WriteOperation(std::shared_ptr<AsyncOutputStreamBackend> backend, Bytes data,
+                                    OutputOperation operation) {
   HUXERUI_UNUSED(operation);
   try {
-    auto result = co_await state->WriteAsync(std::move(data));
+    auto result = co_await backend->WriteAsync(std::move(data));
     if (!result.Succeeded()) {
-      state->MarkFailed();
+      backend->MarkFailed();
     }
     co_return result;
   } catch (...) {
-    state->MarkFailed();
+    backend->MarkFailed();
     throw;
   }
 }
 
-Task<IoResult<void>> CloseOperation(std::shared_ptr<AsyncOutputStreamState> state, OutputOperation operation) {
+Task<IoResult<void>> CloseOperation(std::shared_ptr<AsyncOutputStreamBackend> backend, OutputOperation operation) {
   HUXERUI_UNUSED(operation);
   try {
-    auto result = co_await state->CloseAsync();
+    auto result = co_await backend->CloseAsync();
     if (result.Succeeded()) {
-      state->MarkClosed();
+      backend->MarkClosed();
     } else {
-      state->MarkFailed();
+      backend->MarkFailed();
     }
     co_return result;
   } catch (...) {
-    state->MarkFailed();
+    backend->MarkFailed();
     throw;
   }
 }
@@ -176,10 +177,10 @@ Task<IoResult<void>> CompleteClose() {
   co_return IoResult<void>::Success();
 }
 
-Task<IoResult<std::uint64_t>> CopyOperation(std::shared_ptr<AsyncInputStreamState> input,
-                                            std::shared_ptr<AsyncOutputStreamState> output,
-                                            std::size_t maximum_read_size, InputOperation input_operation,
-                                            OutputOperation output_operation) {
+Task<IoResult<std::uint64_t>> CopyOperation(std::shared_ptr<AsyncInputStreamBackend> input,
+                                           std::shared_ptr<AsyncOutputStreamBackend> output,
+                                           std::size_t maximum_read_size, InputOperation input_operation,
+                                           OutputOperation output_operation) {
   HUXERUI_UNUSED(output_operation);
   if (input->IsComplete()) {
     co_return IoResult<std::uint64_t>(0);
@@ -270,18 +271,18 @@ Task<AsyncInputStream> OpenWorkerInput(std::function<InputStream()> open) {
 }
 
 AsyncInputStream MakeWorkerAsyncInput(InputStream input) {
-  return StreamAccess::MakeAsyncInputStream(MakeWorkerAsyncInputState(std::move(input)));
+  return StreamAccess::MakeAsyncInputStream(MakeWorkerAsyncInputBackend(std::move(input)));
 }
 
-std::shared_ptr<AsyncInputStreamState> MakeWorkerAsyncInputState(InputStream input) {
-  return std::make_shared<WorkerInputStreamState>(std::move(input), false);
+std::shared_ptr<AsyncInputStreamBackend> MakeWorkerAsyncInputBackend(InputStream input) {
+  return std::make_shared<AsyncInputStreamAdapter>(std::move(input), false);
 }
 
 AsyncInputStream MakeMemoryAsyncInput(InputStream input) {
-  return StreamAccess::MakeAsyncInputStream(std::make_shared<WorkerInputStreamState>(std::move(input), true));
+  return StreamAccess::MakeAsyncInputStream(std::make_shared<AsyncInputStreamAdapter>(std::move(input), true));
 }
 
-void AsyncInputStreamState::Reserve(const char* operation) {
+void AsyncInputStreamBackend::Reserve(const char* operation) {
   std::scoped_lock lock(mutex_);
   if (!owned_) {
     throw std::logic_error("HuxerUI cannot use a released async input stream");
@@ -295,33 +296,33 @@ void AsyncInputStreamState::Reserve(const char* operation) {
   active_ = true;
 }
 
-void AsyncInputStreamState::FinishOperation() noexcept {
+void AsyncInputStreamBackend::FinishOperation() noexcept {
   std::scoped_lock lock(mutex_);
   active_ = false;
 }
 
-void AsyncInputStreamState::MarkComplete() noexcept {
+void AsyncInputStreamBackend::MarkComplete() noexcept {
   std::scoped_lock lock(mutex_);
   complete_ = true;
 }
 
-void AsyncInputStreamState::MarkFailed() noexcept {
+void AsyncInputStreamBackend::MarkFailed() noexcept {
   std::scoped_lock lock(mutex_);
   failed_ = true;
 }
 
-bool AsyncInputStreamState::IsComplete() const noexcept {
+bool AsyncInputStreamBackend::IsComplete() const noexcept {
   std::scoped_lock lock(mutex_);
   return complete_;
 }
 
-bool AsyncInputStreamState::ReleaseOwner() noexcept {
+bool AsyncInputStreamBackend::ReleaseOwner() noexcept {
   std::scoped_lock lock(mutex_);
   owned_ = false;
   return !complete_;
 }
 
-void AsyncOutputStreamState::Reserve(const char* operation) {
+void AsyncOutputStreamBackend::Reserve(const char* operation) {
   std::scoped_lock lock(mutex_);
   if (!owned_) {
     throw std::logic_error("HuxerUI cannot use a released async output stream");
@@ -338,68 +339,68 @@ void AsyncOutputStreamState::Reserve(const char* operation) {
   active_ = true;
 }
 
-void AsyncOutputStreamState::FinishOperation() noexcept {
+void AsyncOutputStreamBackend::FinishOperation() noexcept {
   std::scoped_lock lock(mutex_);
   active_ = false;
 }
 
-void AsyncOutputStreamState::MarkClosed() noexcept {
+void AsyncOutputStreamBackend::MarkClosed() noexcept {
   std::scoped_lock lock(mutex_);
   closed_ = true;
 }
 
-void AsyncOutputStreamState::MarkFailed() noexcept {
+void AsyncOutputStreamBackend::MarkFailed() noexcept {
   std::scoped_lock lock(mutex_);
   failed_ = true;
 }
 
-bool AsyncOutputStreamState::IsClosed() const noexcept {
+bool AsyncOutputStreamBackend::IsClosed() const noexcept {
   std::scoped_lock lock(mutex_);
   return closed_;
 }
 
-bool AsyncOutputStreamState::ReleaseOwner() noexcept {
+bool AsyncOutputStreamBackend::ReleaseOwner() noexcept {
   std::scoped_lock lock(mutex_);
   owned_ = false;
   return !closed_;
 }
 
-InputStream StreamAccess::MakeInputStream(std::shared_ptr<InputStreamState> state) {
-  return InputStream(std::move(state));
+InputStream StreamAccess::MakeInputStream(std::shared_ptr<InputStreamBackend> backend) {
+  return InputStream(std::move(backend));
 }
 
-OutputStream StreamAccess::MakeOutputStream(std::shared_ptr<OutputStreamState> state) {
-  return OutputStream(std::move(state));
+OutputStream StreamAccess::MakeOutputStream(std::shared_ptr<OutputStreamBackend> backend) {
+  return OutputStream(std::move(backend));
 }
 
-AsyncInputStream StreamAccess::MakeAsyncInputStream(std::shared_ptr<AsyncInputStreamState> state) {
-  return AsyncInputStream(std::move(state));
+AsyncInputStream StreamAccess::MakeAsyncInputStream(std::shared_ptr<AsyncInputStreamBackend> backend) {
+  return AsyncInputStream(std::move(backend));
 }
 
-AsyncOutputStream StreamAccess::MakeAsyncOutputStream(std::shared_ptr<AsyncOutputStreamState> state) {
-  return AsyncOutputStream(std::move(state));
+AsyncOutputStream StreamAccess::MakeAsyncOutputStream(std::shared_ptr<AsyncOutputStreamBackend> backend) {
+  return AsyncOutputStream(std::move(backend));
 }
 
 } // namespace huxerui::detail
 
 namespace huxerui {
 
-InputStream::InputStream(std::shared_ptr<detail::InputStreamState> state) : state_(std::move(state)) {
-  if (!state_) {
-    throw std::invalid_argument("HuxerUI input stream state must not be null");
+InputStream::InputStream(std::shared_ptr<detail::InputStreamBackend> backend) : backend_(std::move(backend)) {
+  if (!backend_) {
+    throw std::invalid_argument("HuxerUI input stream backend must not be null");
   }
 }
 
 InputStream::InputStream(InputStream&& other) noexcept
-    : state_(std::exchange(other.state_, {})), complete_(std::exchange(other.complete_, false)),
+    : backend_(std::exchange(other.backend_, {})), complete_(std::exchange(other.complete_, false)),
       failed_(std::exchange(other.failed_, false)) {}
 
 InputStream& InputStream::operator=(InputStream&& other) noexcept {
   if (this != &other) {
-    if (state_) {
-      state_->Release();
+    if (backend_) {
+      backend_->Release();
     }
-    state_ = std::exchange(other.state_, {});
+    backend_ = std::exchange(other.backend_, {});
     complete_ = std::exchange(other.complete_, false);
     failed_ = std::exchange(other.failed_, false);
   }
@@ -407,13 +408,13 @@ InputStream& InputStream::operator=(InputStream&& other) noexcept {
 }
 
 InputStream::~InputStream() {
-  if (state_) {
-    state_->Release();
+  if (backend_) {
+    backend_->Release();
   }
 }
 
 IoResult<std::size_t> InputStream::Read(std::span<std::byte> buffer) {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot read from a moved-from input stream");
   }
   if (buffer.empty()) {
@@ -425,7 +426,7 @@ IoResult<std::size_t> InputStream::Read(std::span<std::byte> buffer) {
   if (complete_) {
     return IoResult<std::size_t>(0);
   }
-  auto result = state_->Read(buffer);
+  auto result = backend_->Read(buffer);
   if (!result.Succeeded()) {
     failed_ = true;
     return result;
@@ -464,20 +465,20 @@ IoResult<std::uint64_t> InputStream::CopyTo(OutputStream& destination, std::span
   }
 }
 
-OutputStream::OutputStream(std::shared_ptr<detail::OutputStreamState> state) : state_(std::move(state)) {
-  if (!state_) {
-    throw std::invalid_argument("HuxerUI output stream state must not be null");
+OutputStream::OutputStream(std::shared_ptr<detail::OutputStreamBackend> backend) : backend_(std::move(backend)) {
+  if (!backend_) {
+    throw std::invalid_argument("HuxerUI output stream backend must not be null");
   }
 }
 
 OutputStream::OutputStream(OutputStream&& other) noexcept
-    : state_(std::exchange(other.state_, {})), closed_(std::exchange(other.closed_, false)),
+    : backend_(std::exchange(other.backend_, {})), closed_(std::exchange(other.closed_, false)),
       failed_(std::exchange(other.failed_, false)) {}
 
 OutputStream& OutputStream::operator=(OutputStream&& other) noexcept {
   if (this != &other) {
     Release();
-    state_ = std::exchange(other.state_, {});
+    backend_ = std::exchange(other.backend_, {});
     closed_ = std::exchange(other.closed_, false);
     failed_ = std::exchange(other.failed_, false);
   }
@@ -490,27 +491,27 @@ OutputStream::~OutputStream() {
 
 IoResult<void> OutputStream::Write(std::span<const std::byte> data) {
   RequireWritable();
-  auto result = state_->Write(data);
+  auto result = backend_->Write(data);
   failed_ = !result.Succeeded();
   return result;
 }
 
 IoResult<void> OutputStream::Close() {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot close a moved-from output stream");
   }
   if (closed_) {
     return IoResult<void>::Success();
   }
   RequireWritable();
-  auto result = state_->Close();
+  auto result = backend_->Close();
   closed_ = result.Succeeded();
   failed_ = !closed_;
   return result;
 }
 
 void OutputStream::RequireWritable() const {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot write to a moved-from output stream");
   }
   if (closed_) {
@@ -522,24 +523,25 @@ void OutputStream::RequireWritable() const {
 }
 
 void OutputStream::Release() noexcept {
-  if (state_ && !closed_) {
-    state_->Abort();
+  if (backend_ && !closed_) {
+    backend_->Abort();
   }
-  state_.reset();
+  backend_.reset();
 }
 
-AsyncInputStream::AsyncInputStream(std::shared_ptr<detail::AsyncInputStreamState> state) : state_(std::move(state)) {
-  if (!state_) {
-    throw std::invalid_argument("HuxerUI async input stream state must not be null");
+AsyncInputStream::AsyncInputStream(std::shared_ptr<detail::AsyncInputStreamBackend> backend)
+    : backend_(std::move(backend)) {
+  if (!backend_) {
+    throw std::invalid_argument("HuxerUI async input stream backend must not be null");
   }
 }
 
-AsyncInputStream::AsyncInputStream(AsyncInputStream&& other) noexcept : state_(std::exchange(other.state_, {})) {}
+AsyncInputStream::AsyncInputStream(AsyncInputStream&& other) noexcept : backend_(std::exchange(other.backend_, {})) {}
 
 AsyncInputStream& AsyncInputStream::operator=(AsyncInputStream&& other) noexcept {
   if (this != &other) {
     Release();
-    state_ = std::exchange(other.state_, {});
+    backend_ = std::exchange(other.backend_, {});
   }
   return *this;
 }
@@ -549,57 +551,59 @@ AsyncInputStream::~AsyncInputStream() {
 }
 
 Task<IoResult<Bytes>> AsyncInputStream::ReadAsync(std::size_t maximum_bytes) {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot read from a moved-from async input stream");
   }
   if (maximum_bytes == 0) {
     throw std::invalid_argument("HuxerUI async input stream maximum read size must be positive");
   }
-  if (state_->IsComplete()) {
+  if (backend_->IsComplete()) {
     return detail::CompleteRead();
   }
-  detail::InputOperation operation = detail::ReserveInput(state_, "async input stream read");
-  return detail::ReadOperation(state_, maximum_bytes, std::move(operation));
+  detail::InputOperation operation = detail::ReserveInput(backend_, "async input stream read");
+  return detail::ReadOperation(backend_, maximum_bytes, std::move(operation));
 }
 
 Task<IoResult<std::uint64_t>> AsyncInputStream::CopyToAsync(AsyncOutputStream& destination, std::size_t maximum_read_size) {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot copy from a moved-from async input stream");
   }
-  if (!destination.state_) {
+  if (!destination.backend_) {
     throw std::logic_error("HuxerUI cannot copy to a moved-from async output stream");
   }
   if (maximum_read_size == 0) {
     throw std::invalid_argument("HuxerUI async stream copy maximum read size must be positive");
   }
-  detail::InputOperation input_operation = detail::ReserveInput(state_, "async stream copy");
-  detail::OutputOperation output_operation = detail::ReserveOutput(destination.state_, "async stream copy");
-  return detail::CopyOperation(state_, destination.state_, maximum_read_size, std::move(input_operation),
+  detail::InputOperation input_operation = detail::ReserveInput(backend_, "async stream copy");
+  detail::OutputOperation output_operation = detail::ReserveOutput(destination.backend_, "async stream copy");
+  return detail::CopyOperation(backend_, destination.backend_, maximum_read_size, std::move(input_operation),
                                std::move(output_operation));
 }
 
 void AsyncInputStream::Release() noexcept {
-  if (!state_) {
+  if (!backend_) {
     return;
   }
-  if (state_->ReleaseOwner()) {
-    state_->Cancel();
+  if (backend_->ReleaseOwner()) {
+    backend_->Cancel();
   }
-  state_.reset();
+  backend_.reset();
 }
 
-AsyncOutputStream::AsyncOutputStream(std::shared_ptr<detail::AsyncOutputStreamState> state) : state_(std::move(state)) {
-  if (!state_) {
-    throw std::invalid_argument("HuxerUI async output stream state must not be null");
+AsyncOutputStream::AsyncOutputStream(std::shared_ptr<detail::AsyncOutputStreamBackend> backend)
+    : backend_(std::move(backend)) {
+  if (!backend_) {
+    throw std::invalid_argument("HuxerUI async output stream backend must not be null");
   }
 }
 
-AsyncOutputStream::AsyncOutputStream(AsyncOutputStream&& other) noexcept : state_(std::exchange(other.state_, {})) {}
+AsyncOutputStream::AsyncOutputStream(AsyncOutputStream&& other) noexcept
+    : backend_(std::exchange(other.backend_, {})) {}
 
 AsyncOutputStream& AsyncOutputStream::operator=(AsyncOutputStream&& other) noexcept {
   if (this != &other) {
     Release();
-    state_ = std::exchange(other.state_, {});
+    backend_ = std::exchange(other.backend_, {});
   }
   return *this;
 }
@@ -609,32 +613,32 @@ AsyncOutputStream::~AsyncOutputStream() {
 }
 
 Task<IoResult<void>> AsyncOutputStream::WriteAsync(Bytes data) {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot write to a moved-from async output stream");
   }
-  detail::OutputOperation operation = detail::ReserveOutput(state_, "async output stream write");
-  return detail::WriteOperation(state_, std::move(data), std::move(operation));
+  detail::OutputOperation operation = detail::ReserveOutput(backend_, "async output stream write");
+  return detail::WriteOperation(backend_, std::move(data), std::move(operation));
 }
 
 Task<IoResult<void>> AsyncOutputStream::CloseAsync() {
-  if (!state_) {
+  if (!backend_) {
     throw std::logic_error("HuxerUI cannot close a moved-from async output stream");
   }
-  if (state_->IsClosed()) {
+  if (backend_->IsClosed()) {
     return detail::CompleteClose();
   }
-  detail::OutputOperation operation = detail::ReserveOutput(state_, "async output stream close");
-  return detail::CloseOperation(state_, std::move(operation));
+  detail::OutputOperation operation = detail::ReserveOutput(backend_, "async output stream close");
+  return detail::CloseOperation(backend_, std::move(operation));
 }
 
 void AsyncOutputStream::Release() noexcept {
-  if (!state_) {
+  if (!backend_) {
     return;
   }
-  if (state_->ReleaseOwner()) {
-    state_->Abort();
+  if (backend_->ReleaseOwner()) {
+    backend_->Abort();
   }
-  state_.reset();
+  backend_.reset();
 }
 
 } // namespace huxerui

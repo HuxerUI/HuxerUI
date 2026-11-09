@@ -61,8 +61,8 @@ void ClearJavaException(JNIEnv* environment) {
 
 } // namespace
 
-struct AndroidPlatformViews::State {
-  State(JNIEnv* environment, jobject root_value, jobject context_value, AndroidRenderer& renderer_value,
+struct AndroidPlatformViews::Impl {
+  Impl(JNIEnv* environment, jobject root_value, jobject context_value, AndroidRenderer& renderer_value,
         PlatformRegistry& registry_value, UiWindow& ui_window_value)
       : context(context_value), renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value) {
     if (environment->GetJavaVM(&virtual_machine) != JNI_OK) {
@@ -296,17 +296,17 @@ struct AndroidPlatformViews::State {
 
 AndroidPlatformViews::AndroidPlatformViews(JNIEnv* environment, jobject root, jobject context,
                                            AndroidRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window)
-    : state_(std::make_unique<State>(environment, root, context, renderer, registry, ui_window)) {}
+    : impl_(std::make_unique<Impl>(environment, root, context, renderer, registry, ui_window)) {}
 
 AndroidPlatformViews::~AndroidPlatformViews() {
-  if (state_) {
-    Shutdown(state_->Environment());
+  if (impl_) {
+    Shutdown(impl_->Environment());
   }
 }
 
 void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame) {
   RenderComposition composition = BuildRenderComposition(frame.scene);
-  state_->texture_layers->Commit(environment, frame);
+  impl_->texture_layers->Commit(environment, frame);
   std::unordered_set<std::uint64_t> retained_identities;
   std::vector<std::pair<std::uint64_t, std::unique_ptr<HostedPlatformView>>> pending;
   try {
@@ -317,51 +317,51 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
       }
       const PlacePlatformViewCommand& command = *placement->command;
       retained_identities.insert(command.Identity());
-      const auto found = state_->hosted.find(command.Identity());
-      if (found == state_->hosted.end() || found->second->type != command.Type()) {
-        pending.emplace_back(command.Identity(), state_->Create(environment, *placement));
+      const auto found = impl_->hosted.find(command.Identity());
+      if (found == impl_->hosted.end() || found->second->type != command.Type()) {
+        pending.emplace_back(command.Identity(), impl_->Create(environment, *placement));
         continue;
       }
-      state_->Update(environment, *found->second, command);
+      impl_->Update(environment, *found->second, command);
     }
   } catch (...) {
     for (auto& [identity, hosted_view] : pending) {
-      state_->Dispose(environment, identity, *hosted_view);
+      impl_->Dispose(environment, identity, *hosted_view);
     }
     throw;
   }
 
   for (auto& [identity, hosted_view] : pending) {
-    const auto existing = state_->hosted.find(identity);
-    if (existing != state_->hosted.end()) {
-      state_->Dispose(environment, identity, *existing->second);
-      state_->hosted.erase(existing);
+    const auto existing = impl_->hosted.find(identity);
+    if (existing != impl_->hosted.end()) {
+      impl_->Dispose(environment, identity, *existing->second);
+      impl_->hosted.erase(existing);
     }
     try {
-      state_->Mount(environment, identity, *hosted_view);
+      impl_->Mount(environment, identity, *hosted_view);
     } catch (...) {
-      state_->Dispose(environment, identity, *hosted_view);
+      impl_->Dispose(environment, identity, *hosted_view);
       throw;
     }
-    state_->hosted.emplace(identity, std::move(hosted_view));
+    impl_->hosted.emplace(identity, std::move(hosted_view));
   }
-  for (auto iterator = state_->hosted.begin(); iterator != state_->hosted.end();) {
+  for (auto iterator = impl_->hosted.begin(); iterator != impl_->hosted.end();) {
     if (retained_identities.contains(iterator->first)) {
       ++iterator;
       continue;
     }
-    state_->Dispose(environment, iterator->first, *iterator->second);
-    iterator = state_->hosted.erase(iterator);
+    impl_->Dispose(environment, iterator->first, *iterator->second);
+    iterator = impl_->hosted.erase(iterator);
   }
 
-  state_->base_slice.reset();
+  impl_->base_slice.reset();
   bool passed_platform_view = false;
   std::vector<jlong> encoded_layers;
   encoded_layers.reserve(composition.layers.size() * 3);
   for (const RenderCompositionLayer& layer : composition.layers) {
     if (const auto* slice = std::get_if<RenderSlice>(&layer)) {
-      if (!passed_platform_view && !state_->base_slice.has_value()) {
-        state_->base_slice = *slice;
+      if (!passed_platform_view && !impl_->base_slice.has_value()) {
+        impl_->base_slice = *slice;
         continue;
       }
       if (slice->first_command > static_cast<std::size_t>(std::numeric_limits<jlong>::max()) ||
@@ -380,8 +380,8 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
     const Rect visible_bounds = VisibleBounds(placement);
     const bool visible = placement.visible && !visible_bounds.IsEmpty();
     environment->CallVoidMethod(
-        state_->root,
-        state_->place_platform_view,
+        impl_->root,
+        impl_->place_platform_view,
         static_cast<jlong>(identity),
         placement.world_bounds.x,
         placement.world_bounds.y,
@@ -413,109 +413,109 @@ void AndroidPlatformViews::Commit(JNIEnv* environment, const RenderFrame& frame)
   if (!encoded_layers.empty()) {
     environment->SetLongArrayRegion(layers, 0, layer_count, encoded_layers.data());
   }
-  environment->CallVoidMethod(state_->root, state_->commit_composition, layers);
+  environment->CallVoidMethod(impl_->root, impl_->commit_composition, layers);
   environment->DeleteLocalRef(layers);
   if (environment->ExceptionCheck()) {
     ClearJavaException(environment);
     throw std::logic_error("HuxerUI Android PlatformView host failed to commit RenderComposition");
   }
 
-  state_->frame = &frame;
-  for (auto& [identity, hosted_view] : state_->hosted) {
+  impl_->frame = &frame;
+  for (auto& [identity, hosted_view] : impl_->hosted) {
     hosted_view->event_route->active = true;
   }
 
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*impl_->ui_window);
   if (focused_identity.has_value() &&
       *focused_identity > static_cast<std::uint64_t>(std::numeric_limits<jlong>::max())) {
     throw std::overflow_error("HuxerUI Android PlatformView focus identity exceeds the JNI range");
   }
   const jlong requested_focus = focused_identity.has_value() ? static_cast<jlong>(*focused_identity) : 0;
   const jboolean focus_applied =
-      environment->CallBooleanMethod(state_->root, state_->apply_platform_view_focus, requested_focus);
+      environment->CallBooleanMethod(impl_->root, impl_->apply_platform_view_focus, requested_focus);
   if (environment->ExceptionCheck()) {
     ClearJavaException(environment);
     throw std::logic_error("HuxerUI Android PlatformView host failed to synchronize focus");
   }
   if (focused_identity.has_value() && focus_applied != JNI_TRUE) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+    InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
   }
 }
 
 void AndroidPlatformViews::DrawBase(JNIEnv* environment, jobject canvas) {
-  if (state_->frame == nullptr) {
+  if (impl_->frame == nullptr) {
     return;
   }
-  if (state_->base_slice.has_value()) {
-    state_->renderer->DrawSlice(
+  if (impl_->base_slice.has_value()) {
+    impl_->renderer->DrawSlice(
         environment,
-        state_->root,
+        impl_->root,
         canvas,
-        *state_->frame,
-        state_->base_slice->first_command,
-        state_->base_slice->command_count
+        *impl_->frame,
+        impl_->base_slice->first_command,
+        impl_->base_slice->command_count
     );
     return;
   }
-  state_->renderer->DrawSlice(environment, state_->root, canvas, *state_->frame, 0, 0);
+  impl_->renderer->DrawSlice(environment, impl_->root, canvas, *impl_->frame, 0, 0);
 }
 
 void AndroidPlatformViews::DrawSlice(
     JNIEnv* environment, jobject canvas, std::size_t first_command, std::size_t command_count
 ) {
-  if (state_->frame != nullptr) {
-    state_->renderer->DrawSlice(environment, state_->root, canvas, *state_->frame, first_command, command_count);
+  if (impl_->frame != nullptr) {
+    impl_->renderer->DrawSlice(environment, impl_->root, canvas, *impl_->frame, first_command, command_count);
   }
 }
 
 void AndroidPlatformViews::SetTextureLayerSurface(
     JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height
 ) {
-  if (state_ && state_->texture_layers) {
-    state_->texture_layers->SetSurface(environment, identity, surface, pixel_width, pixel_height);
+  if (impl_ && impl_->texture_layers) {
+    impl_->texture_layers->SetSurface(environment, identity, surface, pixel_width, pixel_height);
   }
 }
 
 void AndroidPlatformViews::ClearTextureLayerSurface(std::uint64_t identity) noexcept {
-  if (state_ && state_->texture_layers) {
-    state_->texture_layers->ClearSurface(identity);
+  if (impl_ && impl_->texture_layers) {
+    impl_->texture_layers->ClearSurface(identity);
   }
 }
 
 std::optional<std::uint64_t> AndroidPlatformViews::HitTest(Point point) const {
-  return state_->ui_window == nullptr ? std::nullopt : InternalAccess::HitTestPlatformView(*state_->ui_window, point);
+  return impl_->ui_window == nullptr ? std::nullopt : InternalAccess::HitTestPlatformView(*impl_->ui_window, point);
 }
 
 void AndroidPlatformViews::SynchronizeFocus(std::optional<std::uint64_t> identity, bool focus_visible) {
-  if (state_->ui_window != nullptr) {
-    InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, identity, focus_visible);
+  if (impl_->ui_window != nullptr) {
+    InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, identity, focus_visible);
   }
 }
 
 bool AndroidPlatformViews::MoveFocus(std::uint64_t identity, bool reverse) {
-  if (state_->ui_window == nullptr || InternalAccess::FocusedPlatformView(*state_->ui_window) != identity) {
+  if (impl_->ui_window == nullptr || InternalAccess::FocusedPlatformView(*impl_->ui_window) != identity) {
     return false;
   }
-  return InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, identity, reverse);
+  return InternalAccess::MoveFocusFromPlatformView(*impl_->ui_window, identity, reverse);
 }
 
 void AndroidPlatformViews::Shutdown(JNIEnv* environment) {
-  if (!state_ || state_->root == nullptr || environment == nullptr) {
+  if (!impl_ || impl_->root == nullptr || environment == nullptr) {
     return;
   }
-  for (auto& [identity, hosted_view] : state_->hosted) {
+  for (auto& [identity, hosted_view] : impl_->hosted) {
     hosted_view->event_route->ui_window = nullptr;
-    state_->Dispose(environment, identity, *hosted_view);
+    impl_->Dispose(environment, identity, *hosted_view);
   }
-  state_->hosted.clear();
-  state_->texture_layers->Shutdown(environment);
-  state_->texture_layers.reset();
-  state_->frame = nullptr;
-  state_->base_slice.reset();
-  state_->ui_window = nullptr;
-  state_->context = nullptr;
-  environment->DeleteGlobalRef(state_->root);
-  state_->root = nullptr;
+  impl_->hosted.clear();
+  impl_->texture_layers->Shutdown(environment);
+  impl_->texture_layers.reset();
+  impl_->frame = nullptr;
+  impl_->base_slice.reset();
+  impl_->ui_window = nullptr;
+  impl_->context = nullptr;
+  environment->DeleteGlobalRef(impl_->root);
+  impl_->root = nullptr;
 }
 
 } // namespace huxerui::detail

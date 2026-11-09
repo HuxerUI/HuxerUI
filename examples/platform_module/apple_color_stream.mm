@@ -32,13 +32,13 @@ huxerui::PlatformError ColorStreamError(std::string code, std::string message) {
   };
 }
 
-struct AppleColorStreamState : huxerui::example::ColorStreamService,
-                               std::enable_shared_from_this<AppleColorStreamState> {
-  explicit AppleColorStreamState(huxerui::UiWindow& window_value)
+struct AppleColorStreamService : huxerui::example::ColorStreamService,
+                                 std::enable_shared_from_this<AppleColorStreamService> {
+  explicit AppleColorStreamService(huxerui::UiWindow& window_value)
       : ui_window(&window_value),
         texture(std::make_shared<huxerui_apple::PixelBufferTexture>(huxerui::Size{320.0F, 180.0F})) {}
 
-  ~AppleColorStreamState() override {
+  ~AppleColorStreamService() override {
     Stop();
   }
 
@@ -75,12 +75,12 @@ struct AppleColorStreamState : huxerui::example::ColorStreamService,
       return;
     }
     PublishFrame();
-    std::weak_ptr<AppleColorStreamState> weak = shared_from_this();
+    std::weak_ptr<AppleColorStreamService> weak = shared_from_this();
     timer = [NSTimer timerWithTimeInterval:1.0 / 30.0
                                    repeats:YES
                                      block:^(NSTimer*) {
-                                       if (const std::shared_ptr<AppleColorStreamState> state = weak.lock()) {
-                                         state->PublishFrame();
+                                       if (const std::shared_ptr<AppleColorStreamService> service = weak.lock()) {
+                                         service->PublishFrame();
                                        }
                                      }];
     [NSRunLoop.mainRunLoop addTimer:timer forMode:NSRunLoopCommonModes];
@@ -120,7 +120,7 @@ namespace huxerui::example {
 
 void InstallColorStream(ApplicationContext& root) {
   root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](UiWindow& ui_window) {
-    return std::static_pointer_cast<ColorStreamService>(std::make_shared<AppleColorStreamState>(ui_window));
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<AppleColorStreamService>(ui_window));
   });
 }
 

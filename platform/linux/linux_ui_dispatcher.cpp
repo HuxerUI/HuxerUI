@@ -11,23 +11,23 @@
 namespace huxerui::detail {
 
 /// Retains the GMainContext and a synchronized admission gate for outstanding dispatcher callbacks.
-struct LinuxUiThreadDispatcher::State {
-  State() : context(g_main_context_ref(g_main_context_default())) {}
+struct LinuxUiThreadDispatcher::Impl {
+  Impl() : context(g_main_context_ref(g_main_context_default())) {}
 
-  ~State() {
+  ~Impl() {
     g_main_context_unref(context);
   }
 
   /// GLib-source-owned callback with a weak gate, so queued work cannot revive a retired application.
   struct PendingTask {
-    std::weak_ptr<State> state;
+    std::weak_ptr<Impl> dispatcher;
     std::function<void()> task;
   };
 
   /// Schedules one idle source from any thread and wakes the application main context.
-  /// @param self Original dispatch state used weakly by the source's delivery callback.
+  /// @param self Original dispatcher implementation referenced weakly by the delivery callback.
   /// @param task Callback retained by the source until delivery or source destruction.
-  void Post(const std::shared_ptr<State>& self, std::function<void()> task) {
+  void Post(const std::shared_ptr<Impl>& self, std::function<void()> task) {
     {
       std::lock_guard lock(mutex);
       if (!active) {
@@ -42,13 +42,13 @@ struct LinuxUiThreadDispatcher::State {
         source,
         [](gpointer data) -> gboolean {
           auto& pending_task = *static_cast<PendingTask*>(data);
-          const std::shared_ptr<State> state = pending_task.state.lock();
-          if (!state) {
+          const std::shared_ptr<Impl> dispatcher = pending_task.dispatcher.lock();
+          if (!dispatcher) {
             return G_SOURCE_REMOVE;
           }
           {
-            std::lock_guard lock(state->mutex);
-            if (!state->active) {
+            std::lock_guard lock(dispatcher->mutex);
+            if (!dispatcher->active) {
               return G_SOURCE_REMOVE;
             }
           }
@@ -76,19 +76,19 @@ struct LinuxUiThreadDispatcher::State {
   bool active = true;
 };
 
-LinuxUiThreadDispatcher::LinuxUiThreadDispatcher() : state_(std::make_shared<State>()) {}
+LinuxUiThreadDispatcher::LinuxUiThreadDispatcher() : impl_(std::make_shared<Impl>()) {}
 
 LinuxUiThreadDispatcher::~LinuxUiThreadDispatcher() {
   Shutdown();
 }
 
 UiThreadDispatcher LinuxUiThreadDispatcher::Bind() const {
-  const std::shared_ptr<State> state = state_;
-  return [state](std::function<void()> task) { state->Post(state, std::move(task)); };
+  const std::shared_ptr<Impl> dispatcher = impl_;
+  return [dispatcher](std::function<void()> task) { dispatcher->Post(dispatcher, std::move(task)); };
 }
 
 void LinuxUiThreadDispatcher::Shutdown() noexcept {
-  state_->Shutdown();
+  impl_->Shutdown();
 }
 
 } // namespace huxerui::detail

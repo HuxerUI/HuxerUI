@@ -654,7 +654,7 @@ void ClipCurrentPath(CGContextRef context, PathFillRule fill_rule) {
 
 } // namespace
 
-struct UIKitRenderer::State {
+struct UIKitRenderer::Impl {
   struct CachedImage {
     std::uint64_t identity = 0;
     std::size_t byte_size = 0;
@@ -672,7 +672,7 @@ struct UIKitRenderer::State {
     __strong CIContext* context = nil;
   };
 
-  State() : external_texture_context([CIContext contextWithOptions:nil]) {}
+  Impl() : external_texture_context([CIContext contextWithOptions:nil]) {}
 
   struct FontHash {
     std::size_t operator()(const Font& font) const noexcept {
@@ -1402,12 +1402,12 @@ private:
   float horizontal_offset_ = 0.0F;
 };
 
-UIKitRenderer::UIKitRenderer() : state_(std::make_unique<State>()) {}
+UIKitRenderer::UIKitRenderer() : impl_(std::make_unique<Impl>()) {}
 
 UIKitRenderer::~UIKitRenderer() = default;
 
 FontMetrics UIKitRenderer::Metrics(const Font& font) {
-  return state_->FontFor(font).metrics;
+  return impl_->FontFor(font).metrics;
 }
 
 TextRunMetrics
@@ -1415,7 +1415,7 @@ UIKitRenderer::MeasureRun(std::string_view text, const TextStyle& style, const T
   if (text.find_first_of("\r\n") != std::string_view::npos) {
     throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
   }
-  return state_->RunFor(text, style, options).metrics;
+  return impl_->RunFor(text, style, options).metrics;
 }
 
 TextLayoutMetrics UIKitRenderer::MeasureText(std::string_view text, const TextStyle& style, float max_width,
@@ -1551,8 +1551,8 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& c
   if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
     return;
   }
-  const auto retained = state_->ParagraphFor(command);
-  const State::CachedParagraph& paragraph = *retained;
+  const auto retained = impl_->ParagraphFor(command);
+  const Impl::CachedParagraph& paragraph = *retained;
   const float remaining_height = std::max(0.0F, command.rect.height - paragraph.content_height);
   float vertical_offset = 0.0F;
   if (command.options.vertical_align == TextVerticalAlign::Center) {
@@ -1581,7 +1581,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextRunsComman
     if (run.text.empty() || run.style.foreground.alpha <= 0.0F) {
       continue;
     }
-    const State::CachedRun& cached = state_->RunFor(run.text, run.style, run.shaping);
+    const Impl::CachedRun& cached = impl_->RunFor(run.text, run.style, run.shaping);
     CGContextSaveGState(context);
     CGContextTranslateCTM(context, 0.0, run.baseline_origin.y);
     CGContextScaleCTM(context, 1.0, -1.0);
@@ -1596,7 +1596,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawTextRunsComman
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& command) {
   DrawCGImage(
       context,
-      state_->ImageFor(command.image),
+      impl_->ImageFor(command.image),
       command.image.IntrinsicSize(),
       command.source,
       command.destination,
@@ -1608,7 +1608,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& 
 void UIKitRenderer::RenderCommand(CGContextRef context, const DrawExternalTextureCommand& command) {
   DrawCGImage(
       context,
-      state_->ImageFor(command.texture),
+      impl_->ImageFor(command.texture),
       command.texture->IntrinsicSize(),
       command.source,
       command.destination,
@@ -1876,7 +1876,7 @@ void UIKitRenderer::DrawSlice(
     std::size_t command_count,
     bool draw_background
 ) {
-  state_->PruneExternalTextures();
+  impl_->PruneExternalTextures();
   CGContextSaveGState(context);
   CGContextClipToRect(context, dirty_rect);
   if (draw_background) {

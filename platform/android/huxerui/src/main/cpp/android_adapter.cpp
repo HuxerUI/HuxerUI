@@ -97,12 +97,12 @@ private:
   AAssetManager* native_ = nullptr;
 };
 
-class AndroidAssetInputStreamState final : public InputStreamState {
+class AndroidAssetInputStreamBackend final : public InputStreamBackend {
 public:
-  AndroidAssetInputStreamState(std::shared_ptr<AndroidAssetManager> owner, std::string_view path)
+  AndroidAssetInputStreamBackend(std::shared_ptr<AndroidAssetManager> owner, std::string_view path)
       : owner_(std::move(owner)),
         asset_(AAssetManager_open(owner_->Get(), std::string(path).c_str(), AASSET_MODE_STREAMING)) {}
-  ~AndroidAssetInputStreamState() override { Release(); }
+  ~AndroidAssetInputStreamBackend() override { Release(); }
 
   bool IsOpen() const noexcept { return asset_ != nullptr; }
 
@@ -365,9 +365,9 @@ void ThrowJavaException(JNIEnv* environment, const char* message) noexcept {
 /// Independently retained JNI dispatch queue shared by the Runtime and outstanding dispatch handles.
 /// Worker threads may enqueue work; main-thread Drain invokes callbacks after releasing the queue mutex.
 /// Shutdown closes the queue before releasing the Java application host, so stale dispatchers become inert.
-class AndroidUiThreadDispatcherState final {
+class AndroidUiThreadDispatcher final {
 public:
-  ~AndroidUiThreadDispatcherState() {
+  ~AndroidUiThreadDispatcher() {
     bool attached = false;
     JNIEnv* environment = Environment(attached);
     Shutdown(environment);
@@ -508,13 +508,13 @@ private:
 };
 
 /// Creates a dispatch handle that does not extend the Java host's execution lifetime.
-/// @param state Original queue retained by the Runtime.
+/// @param dispatcher Original queue retained by the Runtime.
 /// @return An any-thread enqueue callback using a weak reference; expired queues silently drop work.
-UiThreadDispatcher MakeUiThreadDispatcher(const std::shared_ptr<AndroidUiThreadDispatcherState>& state) {
-  const std::weak_ptr<AndroidUiThreadDispatcherState> weak_state = state;
-  return [weak_state](std::function<void()> task) mutable {
-    if (const std::shared_ptr locked_state = weak_state.lock()) {
-      locked_state->Dispatch(std::move(task));
+UiThreadDispatcher MakeUiThreadDispatcher(const std::shared_ptr<AndroidUiThreadDispatcher>& dispatcher) {
+  const std::weak_ptr<AndroidUiThreadDispatcher> weak_dispatcher = dispatcher;
+  return [weak_dispatcher](std::function<void()> task) mutable {
+    if (const std::shared_ptr locked_dispatcher = weak_dispatcher.lock()) {
+      locked_dispatcher->Dispatch(std::move(task));
     }
   };
 }
@@ -527,10 +527,9 @@ class AndroidRuntime final : public Runtime, public PlatformClipboard, public Pl
   friend android::PlatformEnv android::GetPlatformEnv(Runtime& runtime);
 
 public:
-  AndroidRuntime(JNIEnv* environment, jobject host,
-                 std::shared_ptr<AndroidUiThreadDispatcherState> dispatcher)
-      : Runtime(MakeUiThreadDispatcher(dispatcher)), dispatch_state_(std::move(dispatcher)) {
-    dispatch_state_->Initialize(environment, host);
+  AndroidRuntime(JNIEnv* environment, jobject host, std::shared_ptr<AndroidUiThreadDispatcher> dispatcher)
+      : Runtime(MakeUiThreadDispatcher(dispatcher)), dispatcher_(std::move(dispatcher)) {
+    dispatcher_->Initialize(environment, host);
     if (environment->GetJavaVM(&virtual_machine_) != JNI_OK) {
       throw std::runtime_error("HuxerUI could not access the Android Java VM");
     }
@@ -564,13 +563,13 @@ public:
 
   ~AndroidRuntime() override {
     Retire();
-    dispatch_state_->Shutdown(Environment());
+    dispatcher_->Shutdown(Environment());
     Release(Environment());
   }
 
   /// Borrows the queue shared by native attachments under this Runtime.
-  /// @return Retained dispatcher state whose gate is closed before native application references are released.
-  const std::shared_ptr<AndroidUiThreadDispatcherState>& Dispatcher() const { return dispatch_state_; }
+  /// @return Retained dispatcher whose gate is closed before native application references are released.
+  const std::shared_ptr<AndroidUiThreadDispatcher>& Dispatcher() const { return dispatcher_; }
   /// Borrows the process application Context on the application thread.
   /// @return JNI global reference owned by this Runtime; callers must not delete it.
   jobject Context() const noexcept { return context_; }
@@ -645,11 +644,11 @@ public:
     if (!IsValidResourcePackagePath(package_path)) {
       throw std::logic_error("HuxerUI Android resource path is invalid");
     }
-    auto state = std::make_shared<AndroidAssetInputStreamState>(asset_manager_, package_path);
-    if (!state->IsOpen()) {
+    auto backend = std::make_shared<AndroidAssetInputStreamBackend>(asset_manager_, package_path);
+    if (!backend->IsOpen()) {
       return std::nullopt;
     }
-    return StreamAccess::MakeInputStream(std::move(state));
+    return StreamAccess::MakeInputStream(std::move(backend));
   }
 
   std::optional<std::string> ReadText() override {
@@ -722,7 +721,7 @@ private:
     host_ = nullptr;
   }
 
-  std::shared_ptr<AndroidUiThreadDispatcherState> dispatch_state_;
+  std::shared_ptr<AndroidUiThreadDispatcher> dispatcher_;
   JavaVM* virtual_machine_ = nullptr;
   jobject host_ = nullptr;
   jobject context_ = nullptr;
@@ -1105,13 +1104,13 @@ public:
   jobject NativeView() const noexcept { return view_; }
 
   void RequestFrameAt(double deadline) override {
-    if (const std::optional<double> scheduled = frame_state_.Request(deadline, Now(), view_ != nullptr)) {
+    if (const std::optional<double> scheduled = frame_coordinator_.Request(deadline, Now(), view_ != nullptr)) {
       ScheduleFrame(*scheduled);
     }
   }
 
   bool BeginFrameCommit() {
-    return frame_state_.BeginCommit();
+    return frame_coordinator_.BeginCommit();
   }
 
   void CommitFrame(const FrameCommit& commit) {
@@ -1127,7 +1126,7 @@ public:
   }
 
   void BeginDraw() {
-    frame_state_.BeginPaint();
+    frame_coordinator_.BeginPaint();
     renderer_.BeginDraw();
   }
 
@@ -1158,7 +1157,7 @@ public:
   }
 
   void EndDraw() {
-    if (const std::optional<double> deadline = frame_state_.EndPaint(view_ != nullptr)) {
+    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(view_ != nullptr)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -1225,7 +1224,7 @@ private:
   }
 
   void FlushDeferredFrame() {
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(view_ != nullptr)) {
+    if (const std::optional<double> deadline = frame_coordinator_.TakeDeferred(view_ != nullptr)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -1238,7 +1237,7 @@ private:
     environment->CallVoidMethod(view_, invalidate_full_frame_);
     const bool invalidated = !environment->ExceptionCheck();
     if (invalidated) {
-      frame_state_.MarkPaintPending();
+      frame_coordinator_.MarkPaintPending();
     }
     return invalidated;
   }
@@ -1621,7 +1620,7 @@ private:
   jmethodID system_dark_theme_ = nullptr;
   jmethodID set_system_bars_content_brightness_ = nullptr;
   jmethodID set_pointer_cursor_ = nullptr;
-  PlatformFrameState frame_state_;
+  PlatformFrameCoordinator frame_coordinator_;
   std::optional<std::uint64_t> last_semantic_revision_;
 };
 
@@ -1687,7 +1686,7 @@ extern "C" JNIEXPORT jlong JNICALL Java_org_huxerui_HuxerUIApplication_nativeIni
         .content_type = content_type, .writable = writable, .data = data,
     };
     auto application = std::make_shared<huxerui::detail::AndroidRuntime>(
-        environment, host, std::make_shared<huxerui::detail::AndroidUiThreadDispatcherState>());
+        environment, host, std::make_shared<huxerui::detail::AndroidUiThreadDispatcher>());
     application->Start(environment, foreground == JNI_TRUE,
         static_cast<huxerui::ApplicationLifecycleState>(lifecycle), input);
     application->identity = huxerui::detail::next_application_identity++;

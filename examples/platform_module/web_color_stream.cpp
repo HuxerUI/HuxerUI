@@ -35,8 +35,8 @@ void CloseVideoFrame(val& frame) noexcept {
   frame = val::undefined();
 }
 
-struct WebColorStreamState : huxerui::example::ColorStreamService {
-  explicit WebColorStreamState(huxerui::UiWindow& window_value)
+struct WebColorStreamService : huxerui::example::ColorStreamService {
+  explicit WebColorStreamService(huxerui::UiWindow& window_value)
       : ui_window(&window_value),
         texture(std::make_shared<huxerui::web::VideoFrameTexture>(huxerui::Size{320.0F, 180.0F})),
         canvas(val::global("document").call<val>("createElement", std::string("canvas"))) {
@@ -48,7 +48,7 @@ struct WebColorStreamState : huxerui::example::ColorStreamService {
     }
   }
 
-  ~WebColorStreamState() {
+  ~WebColorStreamService() {
     Dispose();
   }
 
@@ -117,11 +117,11 @@ private:
   }
 
   static void TimerCallback(void* context) noexcept {
-    WebColorStreamState* state = static_cast<WebColorStreamState*>(context);
+    WebColorStreamService* service = static_cast<WebColorStreamService*>(context);
     try {
-      state->PublishFrame();
+      service->PublishFrame();
     } catch (...) {
-      state->StopTimer();
+      service->StopTimer();
     }
   }
 
@@ -140,7 +140,7 @@ namespace huxerui::example {
 
 void InstallColorStream(ApplicationContext& root) {
   root.RegisterPlatformModule<std::shared_ptr<ColorStreamService>>(color_stream::type, [](UiWindow& ui_window) {
-    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WebColorStreamState>(ui_window));
+    return std::static_pointer_cast<ColorStreamService>(std::make_shared<WebColorStreamService>(ui_window));
   });
 }
 

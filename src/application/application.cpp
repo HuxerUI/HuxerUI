@@ -68,24 +68,25 @@ void InvokeCancellation(std::function<void()> cancellation) noexcept {
 
 } // namespace
 
-struct PermissionController::State final : public std::enable_shared_from_this<State> {
+struct PermissionController::Impl final : public std::enable_shared_from_this<Impl> {
   class Operation {
   public:
     virtual ~Operation() = default;
 
-    virtual void Start(const std::shared_ptr<PermissionTransport>& transport, const std::weak_ptr<State>& controller) = 0;
+    virtual void Start(const std::shared_ptr<PermissionTransport>& transport,
+                       const std::weak_ptr<Impl>& controller) = 0;
     virtual void Fail() noexcept = 0;
     virtual std::function<void()> Detach() noexcept = 0;
   };
 
-  State(std::shared_ptr<PermissionTransport> transport, UiThreadDispatcher dispatch_to_ui_thread)
+  Impl(std::shared_ptr<PermissionTransport> transport, UiThreadDispatcher dispatch_to_ui_thread)
       : transport(std::move(transport)), dispatch_to_ui_thread(std::move(dispatch_to_ui_thread)) {
     if (this->transport && !this->dispatch_to_ui_thread) {
       throw std::logic_error("HuxerUI permission transport requires a UiThreadDispatcher");
     }
   }
 
-  ~State() {
+  ~Impl() {
     Disconnect();
   }
 
@@ -181,7 +182,7 @@ struct PermissionController::State final : public std::enable_shared_from_this<S
 namespace {
 
 template <class Result>
-class PermissionOperation final : public PermissionController::State::Operation,
+class PermissionOperation final : public PermissionController::Impl::Operation,
                                   public std::enable_shared_from_this<PermissionOperation<Result>> {
 public:
   using Completion = std::function<void(Result)>;
@@ -196,7 +197,7 @@ public:
   }
 
   void Start(const std::shared_ptr<PermissionTransport>& transport,
-      const std::weak_ptr<PermissionController::State>& controller) override {
+      const std::weak_ptr<PermissionController::Impl>& controller) override {
     if (!transport) {
       Fail();
       return;
@@ -204,10 +205,10 @@ public:
     controller_ = controller;
     std::weak_ptr<PermissionOperation> weak = this->shared_from_this();
     std::function<void()> cancellation = starter_(*transport, [weak, controller](Result result) mutable {
-      if (const std::shared_ptr<PermissionController::State> owner = controller.lock()) {
+      if (const std::shared_ptr<PermissionController::Impl> owner = controller.lock()) {
         owner->Post([weak, controller, result = std::move(result)]() mutable {
           const std::shared_ptr<PermissionOperation> operation = weak.lock();
-          const std::shared_ptr<PermissionController::State> active_controller = controller.lock();
+          const std::shared_ptr<PermissionController::Impl> active_controller = controller.lock();
           if (!operation || !active_controller) {
             return;
           }
@@ -228,7 +229,7 @@ public:
     }
     if (cancel_started_operation) {
       InvokeCancellation(std::move(cancellation));
-      if (const std::shared_ptr<PermissionController::State> owner = controller.lock()) {
+      if (const std::shared_ptr<PermissionController::Impl> owner = controller.lock()) {
         owner->Finish(this->shared_from_this());
       }
     }
@@ -247,7 +248,7 @@ public:
   }
 
   void Cancel() noexcept {
-    if (const std::shared_ptr<PermissionController::State> controller = controller_.lock()) {
+    if (const std::shared_ptr<PermissionController::Impl> controller = controller_.lock()) {
       controller->Cancel(this->shared_from_this());
     } else {
       Detach();
@@ -282,7 +283,7 @@ private:
   std::mutex mutex_;
   Starter starter_;
   Result failure_;
-  std::weak_ptr<PermissionController::State> controller_;
+  std::weak_ptr<PermissionController::Impl> controller_;
   std::weak_ptr<TaskExecution> execution_;
   std::coroutine_handle<> continuation_;
   std::function<void()> cancellation_;
@@ -295,7 +296,7 @@ class PermissionAwaiter final {
 public:
   using Operation = PermissionOperation<Result>;
 
-  PermissionAwaiter(std::shared_ptr<PermissionController::State> controller, typename Operation::Starter starter,
+  PermissionAwaiter(std::shared_ptr<PermissionController::Impl> controller, typename Operation::Starter starter,
     Result failure, bool interactive)
       : controller_(std::move(controller)), operation_(std::make_shared<Operation>(std::move(starter), failure)),
         interactive_(interactive) {}
@@ -322,22 +323,22 @@ public:
   }
 
 private:
-  std::shared_ptr<PermissionController::State> controller_;
+  std::shared_ptr<PermissionController::Impl> controller_;
   std::shared_ptr<Operation> operation_;
   bool interactive_ = false;
 };
 
 template <class Result>
-Task<Result> RunPermissionOperation(std::shared_ptr<PermissionController::State> controller,
+Task<Result> RunPermissionOperation(std::shared_ptr<PermissionController::Impl> controller,
     typename PermissionOperation<Result>::Starter starter, Result failure, bool interactive) {
   ValidateApplicationCall(controller->application_source);
   co_return co_await PermissionAwaiter<Result>(std::move(controller), std::move(starter), std::move(failure), interactive);
 }
 
-Task<PermissionStatus> CheckPermission(std::shared_ptr<PermissionController::State> state, Permission permission) {
-  ValidateApplicationCall(state->application_source);
+Task<PermissionStatus> CheckPermission(std::shared_ptr<PermissionController::Impl> controller, Permission permission) {
+  ValidateApplicationCall(controller->application_source);
   return RunPermissionOperation<PermissionStatus>(
-      std::move(state),
+      std::move(controller),
       [permission](PermissionTransport& transport, PermissionStatusCompletion completion) {
         return transport.Check(permission, std::move(completion));
       },
@@ -345,11 +346,12 @@ Task<PermissionStatus> CheckPermission(std::shared_ptr<PermissionController::Sta
       false);
 }
 
-Task<PermissionStatus> RequestPermission(std::shared_ptr<PermissionController::State> state, Permission permission) {
-  auto source = CapturePresentationContext(state->application_source);
-  const auto identity = state->transport ? state->transport->PresentationIdentity() : 0;
+Task<PermissionStatus> RequestPermission(std::shared_ptr<PermissionController::Impl> controller,
+                                         Permission permission) {
+  auto source = CapturePresentationContext(controller->application_source);
+  const auto identity = controller->transport ? controller->transport->PresentationIdentity() : 0;
   return RunPermissionOperation<PermissionStatus>(
-      std::move(state),
+      std::move(controller),
       [permission, identity, source = std::move(source)](PermissionTransport& transport, PermissionStatusCompletion completion) {
         if (!IsPresentationSourceAvailable(source)) {
           completion(PermissionStatus::Unavailable);
@@ -365,11 +367,11 @@ Task<PermissionStatus> RequestPermission(std::shared_ptr<PermissionController::S
       PermissionStatus::Unavailable, true);
 }
 
-Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::State> state, Permission permission) {
-  auto source = CapturePresentationContext(state->application_source);
-  const auto identity = state->transport ? state->transport->PresentationIdentity() : 0;
+Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::Impl> controller, Permission permission) {
+  auto source = CapturePresentationContext(controller->application_source);
+  const auto identity = controller->transport ? controller->transport->PresentationIdentity() : 0;
   return RunPermissionOperation<bool>(
-      std::move(state),
+      std::move(controller),
       [permission, identity, source = std::move(source)](PermissionTransport& transport, PermissionSettingsCompletion completion) {
         if (!IsPresentationSourceAvailable(source)) {
           completion(false);
@@ -389,7 +391,7 @@ Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::State> s
 
 PermissionController::PermissionController(std::shared_ptr<PermissionTransport> transport,
     UiThreadDispatcher dispatch_to_ui_thread)
-    : state_(std::make_shared<State>(std::move(transport), std::move(dispatch_to_ui_thread))) {}
+    : impl_(std::make_shared<Impl>(std::move(transport), std::move(dispatch_to_ui_thread))) {}
 
 PermissionController::~PermissionController() {
   Disconnect();
@@ -397,21 +399,21 @@ PermissionController::~PermissionController() {
 
 Task<PermissionStatus> PermissionController::Check(Permission permission) const {
   ValidatePermission(permission);
-  return CheckPermission(state_, permission);
+  return CheckPermission(impl_, permission);
 }
 
 Task<PermissionStatus> PermissionController::Request(Permission permission) const {
   ValidatePermission(permission);
-  return RequestPermission(state_, permission);
+  return RequestPermission(impl_, permission);
 }
 
 Task<bool> PermissionController::OpenSettings(Permission permission) const {
   ValidatePermission(permission);
-  return OpenPermissionSettings(state_, permission);
+  return OpenPermissionSettings(impl_, permission);
 }
 
 void PermissionController::Disconnect() noexcept {
-  state_->Disconnect();
+  impl_->Disconnect();
 }
 
 ApplicationService::ApplicationService(Runtime& runtime, std::optional<ApplicationActivation> startup_activation, ApplicationLifecycleState initial_lifecycle,

@@ -33,7 +33,7 @@ struct IndicationRippleState {
   bool released = false;
 };
 
-class IndicationState {
+class IndicationController {
 public:
   void Update(Indication spec);
   void Reset();

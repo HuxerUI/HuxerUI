@@ -37,7 +37,7 @@ struct SharedTransitionSession::Pair {
   RenderNode composite;
 };
 
-class SharedTransitionState {
+class SharedTransitionCoordinator {
 public:
   void Mount(MountedNode& owner);
   void Unmount() noexcept;
@@ -203,19 +203,19 @@ public:
 class SharedScopeExtension final : public NodeExtension {
 public:
   SharedScopeExtension(ViewNode& node, const SharedTransitionScope& scope) { Update(node, scope); }
-  ~SharedScopeExtension() override { if (state_) { state_->Unmount(); } }
+  ~SharedScopeExtension() override { if (coordinator_) { coordinator_->Unmount(); } }
   void Update(ViewNode& node, const SharedTransitionScope& scope) {
     const auto& next = InternalAccess::SharedScope(scope);
-    if (next == state_) { return; }
+    if (next == coordinator_) { return; }
     next->Mount(static_cast<MountedNode&>(node));
-    if (state_) { state_->Unmount(); }
-    state_ = next;
+    if (coordinator_) { coordinator_->Unmount(); }
+    coordinator_ = next;
   }
   FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    return state_->Advance(static_cast<MountedNode&>(node), frame);
+    return coordinator_->Advance(static_cast<MountedNode&>(node), frame);
   }
 private:
-  std::shared_ptr<SharedTransitionState> state_;
+  std::shared_ptr<SharedTransitionCoordinator> coordinator_;
 };
 
 } // namespace
@@ -535,20 +535,20 @@ void SharedTransitionSession::PrepareRender(MountedNode& owner) {
   }
 }
 
-void SharedTransitionState::Mount(MountedNode& owner) {
+void SharedTransitionCoordinator::Mount(MountedNode& owner) {
   if (mounted_) { throw std::logic_error("HuxerUI a shared transition scope can be mounted on only one View"); }
   session.Bind(owner);
   thread_ = std::this_thread::get_id();
   mounted_ = true;
 }
 
-void SharedTransitionState::Unmount() noexcept {
+void SharedTransitionCoordinator::Unmount() noexcept {
   session.Unbind();
   mounted_ = false;
   started_ = false;
 }
 
-void SharedTransitionState::Run(AnimationSpec animation, std::function<void()> mutation) {
+void SharedTransitionCoordinator::Run(AnimationSpec animation, std::function<void()> mutation) {
   if (!mounted_ || thread_ != std::this_thread::get_id()) {
     throw std::logic_error("HuxerUI shared transition requires a mounted scope on its UI thread");
   }
@@ -580,7 +580,7 @@ void SharedTransitionState::Run(AnimationSpec animation, std::function<void()> m
   InternalAccess::RequestFrame(*ui_window);
 }
 
-NodeExtension::FrameResult SharedTransitionState::Advance(MountedNode& owner, const FrameInfo& frame) {
+NodeExtension::FrameResult SharedTransitionCoordinator::Advance(MountedNode& owner, const FrameInfo& frame) {
   if (!session.Active()) { return {}; }
   if (frame.reduced_motion || session.Blocked()) { session.Clear(); return {}; }
   owner.exclude_input = true;
@@ -627,8 +627,9 @@ bool PrepareSharedTransitions(MountedNode& node, bool participating) {
 
 const SharedMarkerData& InternalAccess::SharedMarker(const SharedElement& marker) noexcept { return marker.data_; }
 const SharedMarkerData& InternalAccess::SharedMarker(const SharedBounds& marker) noexcept { return marker.data_; }
-const std::shared_ptr<SharedTransitionState>& InternalAccess::SharedScope(const SharedTransitionScope& scope) noexcept {
-  return scope.state_;
+const std::shared_ptr<SharedTransitionCoordinator>&
+InternalAccess::SharedScope(const SharedTransitionScope& scope) noexcept {
+  return scope.coordinator_;
 }
 
 } // namespace huxerui::detail
@@ -650,13 +651,13 @@ const detail::ModifierDescriptor& SharedBounds::Descriptor() {
 const detail::ModifierDescriptor& SharedTransitionScope::Descriptor() {
   return detail::ModifierDescriptorFor<SharedTransitionScope, detail::SharedScopeExtension>();
 }
-SharedTransitionScope SharedTransitionHandle::Scope() const { return SharedTransitionScope{state_}; }
+SharedTransitionScope SharedTransitionHandle::Scope() const { return SharedTransitionScope{coordinator_}; }
 void SharedTransitionHandle::Run(AnimationSpec animation, std::function<void()> mutation) const {
-  state_->Run(std::move(animation), std::move(mutation));
+  coordinator_->Run(std::move(animation), std::move(mutation));
 }
 SharedTransitionHandle UseSharedTransition() {
-  auto state = UseState(std::make_shared<detail::SharedTransitionState>());
-  return SharedTransitionHandle{state.Get()};
+  auto coordinator_state = UseState(std::make_shared<detail::SharedTransitionCoordinator>());
+  return SharedTransitionHandle{coordinator_state.Get()};
 }
 
 } // namespace huxerui

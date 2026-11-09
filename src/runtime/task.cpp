@@ -121,7 +121,7 @@ public:
 class TaskExecution final : public std::enable_shared_from_this<TaskExecution> {
 public:
   TaskExecution(
-      std::weak_ptr<TaskScopeState> scope,
+      std::weak_ptr<TaskScopeImpl> scope,
       std::uint64_t identity,
       UiThreadDispatcher dispatcher,
       std::thread::id ui_thread, std::shared_ptr<ExecutionContext> context,
@@ -163,7 +163,7 @@ private:
   void CompleteOnUi() noexcept;
   void DetachFromScope() noexcept;
 
-  std::weak_ptr<TaskScopeState> scope_;
+  std::weak_ptr<TaskScopeImpl> scope_;
   std::uint64_t identity_;
   UiThreadDispatcher dispatcher_;
   std::thread::id ui_thread_;
@@ -173,9 +173,9 @@ private:
   bool running_ = false;
 };
 
-class TaskScopeState final : public std::enable_shared_from_this<TaskScopeState> {
+class TaskScopeImpl final : public std::enable_shared_from_this<TaskScopeImpl> {
 public:
-  TaskScopeState(UiThreadDispatcher dispatcher, std::shared_ptr<ExecutionContext> context)
+  TaskScopeImpl(UiThreadDispatcher dispatcher, std::shared_ptr<ExecutionContext> context)
       : dispatcher_(std::move(dispatcher)),
         ui_thread_(std::this_thread::get_id()), context_(std::move(context)), application_(context_->application) {
     if (!dispatcher_) {
@@ -238,7 +238,7 @@ public:
     }
     const std::uint64_t identity = next_post_identity_++;
     posts_.emplace(identity, std::move(callback));
-    std::weak_ptr<TaskScopeState> weak = weak_from_this();
+    std::weak_ptr<TaskScopeImpl> weak = weak_from_this();
     try {
       dispatcher_([weak, identity] {
         if (auto scope = weak.lock()) {
@@ -542,12 +542,12 @@ std::size_t WorkerConcurrency() noexcept {
 #endif
 }
 
-std::shared_ptr<TaskScopeState>
+std::shared_ptr<TaskScopeImpl>
 MakeTaskScopeState(UiThreadDispatcher dispatcher, std::shared_ptr<ExecutionContext> context) {
-  return std::make_shared<TaskScopeState>(std::move(dispatcher), std::move(context));
+  return std::make_shared<TaskScopeImpl>(std::move(dispatcher), std::move(context));
 }
 
-void CloseTaskScope(const std::shared_ptr<TaskScopeState>& scope) noexcept {
+void CloseTaskScope(const std::shared_ptr<TaskScopeImpl>& scope) noexcept {
   if (scope) {
     scope->Close();
   }
@@ -581,20 +581,20 @@ TaskHandle TaskScope::Launch(Task<void>&& task) const {
   if (detail::Composer::Current() != nullptr) {
     throw std::logic_error("HuxerUI TaskScope::Launch() cannot run during view composition");
   }
-  if (!state_) {
+  if (!impl_) {
     throw std::logic_error("HuxerUI TaskScope is empty");
   }
-  return state_->Launch(task.Release());
+  return impl_->Launch(task.Release());
 }
 
 void TaskScope::PostErased(std::function<void()> callback) const {
   if (detail::Composer::Current() != nullptr) {
     throw std::logic_error("HuxerUI TaskScope::Post() cannot run during view composition");
   }
-  if (!state_) {
+  if (!impl_) {
     throw std::logic_error("HuxerUI TaskScope is empty");
   }
-  state_->Post(std::move(callback));
+  impl_->Post(std::move(callback));
 }
 
 TaskScope UseTaskScope() {

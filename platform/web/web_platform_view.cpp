@@ -197,8 +197,8 @@ struct HostedPlatformView {
 
 } // namespace
 
-struct WebPlatformViews::State {
-  State(WebRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value,
+struct WebPlatformViews::Impl {
+  Impl(WebRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value,
         val root_value, val base_canvas_value)
       : renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value),
         root(std::move(root_value)), base_canvas(std::move(base_canvas_value)) {}
@@ -352,17 +352,17 @@ struct WebPlatformViews::State {
 
 WebPlatformViews::WebPlatformViews(WebRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window,
                                    val root, val base_canvas)
-    : state_(std::make_unique<State>(renderer, registry, ui_window, std::move(root), std::move(base_canvas))) {}
+    : impl_(std::make_unique<Impl>(renderer, registry, ui_window, std::move(root), std::move(base_canvas))) {}
 
 WebPlatformViews::~WebPlatformViews() {
   Shutdown();
 }
 
 void WebPlatformViews::SetViewport(Size viewport, float display_scale) {
-  state_->viewport = viewport;
-  state_->display_scale = std::max(1.0F, display_scale);
-  for (auto& [key, slice] : state_->slices) {
-    ConfigureCanvas(slice.canvas, state_->viewport, state_->display_scale);
+  impl_->viewport = viewport;
+  impl_->display_scale = std::max(1.0F, display_scale);
+  for (auto& [key, slice] : impl_->slices) {
+    ConfigureCanvas(slice.canvas, impl_->viewport, impl_->display_scale);
   }
 }
 
@@ -372,17 +372,17 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     return std::holds_alternative<PlatformViewPlacement>(layer);
   });
   if (!has_platform_views) {
-    const bool composition_changed = !state_->hosted.empty() || !state_->slices.empty() || !state_->order.empty();
-    state_->hosted.clear();
-    state_->identities_by_token.clear();
-    state_->slices.clear();
-    state_->base_slice.reset();
-    state_->order.clear();
+    const bool composition_changed = !impl_->hosted.empty() || !impl_->slices.empty() || !impl_->order.empty();
+    impl_->hosted.clear();
+    impl_->identities_by_token.clear();
+    impl_->slices.clear();
+    impl_->base_slice.reset();
+    impl_->order.clear();
     if (composition_changed) {
-      state_->root.call<void>("replaceChildren", state_->base_canvas);
-      state_->renderer->Invalidate();
+      impl_->root.call<void>("replaceChildren", impl_->base_canvas);
+      impl_->renderer->Invalidate();
     }
-    state_->renderer->Draw(frame);
+    impl_->renderer->Draw(frame);
     return;
   }
 
@@ -397,9 +397,9 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
       }
       const PlacePlatformViewCommand& command = *placement->command;
       retained_identities.insert(command.Identity());
-      const auto found = state_->hosted.find(command.Identity());
-      if (found == state_->hosted.end() || found->second->type != command.Type()) {
-        pending.emplace_back(command.Identity(), state_->Create(*placement));
+      const auto found = impl_->hosted.find(command.Identity());
+      if (found == impl_->hosted.end() || found->second->type != command.Type()) {
+        pending.emplace_back(command.Identity(), impl_->Create(*placement));
         composition_changed = true;
         continue;
       }
@@ -407,24 +407,24 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     }
   } catch (...) {
     for (const auto& [identity, hosted] : pending) {
-      state_->identities_by_token.erase(hosted->token);
+      impl_->identities_by_token.erase(hosted->token);
     }
     throw;
   }
 
   for (auto& [identity, hosted] : pending) {
-    const auto existing = state_->hosted.find(identity);
-    if (existing != state_->hosted.end()) {
-      state_->identities_by_token.erase(existing->second->token);
-      state_->hosted.erase(existing);
+    const auto existing = impl_->hosted.find(identity);
+    if (existing != impl_->hosted.end()) {
+      impl_->identities_by_token.erase(existing->second->token);
+      impl_->hosted.erase(existing);
     }
-    state_->hosted.emplace(identity, std::move(hosted));
+    impl_->hosted.emplace(identity, std::move(hosted));
   }
-  std::erase_if(state_->hosted, [&](const auto& entry) {
+  std::erase_if(impl_->hosted, [&](const auto& entry) {
     if (retained_identities.contains(entry.first)) {
       return false;
     }
-    state_->identities_by_token.erase(entry.second->token);
+    impl_->identities_by_token.erase(entry.second->token);
     composition_changed = true;
     return true;
   });
@@ -432,17 +432,17 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
   std::unordered_set<SliceKey, SliceKeyHash> retained_slices;
   std::vector<LayerKey> next_order;
   std::vector<val> ordered_elements;
-  state_->base_slice.reset();
+  impl_->base_slice.reset();
   bool passed_platform_view = false;
   for (const RenderCompositionLayer& layer : composition.layers) {
     if (const auto* slice = std::get_if<RenderSlice>(&layer)) {
-      if (!passed_platform_view && !state_->base_slice.has_value()) {
-        state_->base_slice = *slice;
+      if (!passed_platform_view && !impl_->base_slice.has_value()) {
+        impl_->base_slice = *slice;
         continue;
       }
       const SliceKey key{slice->preceding_platform_view, slice->following_platform_view};
       retained_slices.insert(key);
-      CanvasSlice& retained = state_->EnsureSlice(key, *slice, composition_changed);
+      CanvasSlice& retained = impl_->EnsureSlice(key, *slice, composition_changed);
       next_order.emplace_back(key);
       ordered_elements.push_back(retained.canvas);
       continue;
@@ -450,13 +450,13 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
 
     const auto& placement = std::get<PlatformViewPlacement>(layer);
     passed_platform_view = true;
-    HostedPlatformView& hosted = *state_->hosted.at(placement.command->Identity());
-    state_->Place(hosted, placement);
+    HostedPlatformView& hosted = *impl_->hosted.at(placement.command->Identity());
+    impl_->Place(hosted, placement);
     next_order.emplace_back(placement.command->Identity());
     ordered_elements.push_back(hosted.container);
   }
 
-  std::erase_if(state_->slices, [&](const auto& entry) {
+  std::erase_if(impl_->slices, [&](const auto& entry) {
     if (retained_slices.contains(entry.first)) {
       return false;
     }
@@ -467,103 +467,103 @@ void WebPlatformViews::Commit(const RenderFrame& frame) {
     composition_changed = true;
     return true;
   });
-  if (state_->order != next_order) {
+  if (impl_->order != next_order) {
     composition_changed = true;
   }
   if (composition_changed) {
-    state_->root.call<void>("appendChild", state_->base_canvas);
+    impl_->root.call<void>("appendChild", impl_->base_canvas);
     for (const val& element : ordered_elements) {
-      state_->root.call<void>("appendChild", element);
+      impl_->root.call<void>("appendChild", element);
     }
   }
-  state_->order = std::move(next_order);
-  for (auto& [identity, hosted] : state_->hosted) {
+  impl_->order = std::move(next_order);
+  for (auto& [identity, hosted] : impl_->hosted) {
     hosted->event_route->active = true;
   }
 
-  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*state_->ui_window);
+  const std::optional<std::uint64_t> focused_identity = InternalAccess::FocusedPlatformView(*impl_->ui_window);
   if (focused_identity.has_value()) {
-    const auto focused = state_->hosted.find(*focused_identity);
-    if (focused == state_->hosted.end() || !focused->second->placement.has_value() ||
+    const auto focused = impl_->hosted.find(*focused_identity);
+    if (focused == impl_->hosted.end() || !focused->second->placement.has_value() ||
         focused->second->placement->hidden) {
-      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
     } else if (!WebPlatformElementContainsFocus(focused->second->element.as_handle()) &&
                !FocusWebPlatformElement(focused->second->element.as_handle())) {
-      InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, std::nullopt, false);
+      InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, std::nullopt, false);
     }
   } else {
-    const bool platform_view_focused = std::ranges::any_of(state_->hosted, [](const auto& entry) {
+    const bool platform_view_focused = std::ranges::any_of(impl_->hosted, [](const auto& entry) {
       return WebPlatformElementContainsFocus(entry.second->element.as_handle());
     });
     if (platform_view_focused) {
-      state_->root.call<void>("focus", val::object());
+      impl_->root.call<void>("focus", val::object());
     }
   }
 
-  const bool force_redraw = state_->renderer->TakeInvalidation() || composition_changed;
-  if (state_->base_slice.has_value()) {
-    state_->renderer->DrawSlice(
-        state_->base_canvas,
+  const bool force_redraw = impl_->renderer->TakeInvalidation() || composition_changed;
+  if (impl_->base_slice.has_value()) {
+    impl_->renderer->DrawSlice(
+        impl_->base_canvas,
         frame,
-        state_->base_slice->first_command,
-        state_->base_slice->command_count,
+        impl_->base_slice->first_command,
+        impl_->base_slice->command_count,
         true,
         force_redraw
     );
   } else {
-    state_->renderer->DrawSlice(state_->base_canvas, frame, 0, 0, true, force_redraw);
+    impl_->renderer->DrawSlice(impl_->base_canvas, frame, 0, 0, true, force_redraw);
   }
-  for (const auto& [key, slice] : state_->slices) {
-    state_->renderer
+  for (const auto& [key, slice] : impl_->slices) {
+    impl_->renderer
         ->DrawSlice(slice.canvas, frame, slice.range.first_command, slice.range.command_count, false, force_redraw);
   }
 }
 
 void WebPlatformViews::SynchronizeFocus(std::uint32_t token, bool focus_visible) {
-  if (!state_ || state_->ui_window == nullptr) {
+  if (!impl_ || impl_->ui_window == nullptr) {
     return;
   }
-  InternalAccess::SynchronizePlatformViewFocus(*state_->ui_window, state_->IdentityForToken(token), focus_visible);
+  InternalAccess::SynchronizePlatformViewFocus(*impl_->ui_window, impl_->IdentityForToken(token), focus_visible);
 }
 
 bool WebPlatformViews::HitTest(std::uint32_t token, Point point) const {
-  if (!state_ || state_->ui_window == nullptr) {
+  if (!impl_ || impl_->ui_window == nullptr) {
     return false;
   }
-  const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
-  return identity.has_value() && InternalAccess::HitTestPlatformView(*state_->ui_window, point) == identity;
+  const std::optional<std::uint64_t> identity = impl_->IdentityForToken(token);
+  return identity.has_value() && InternalAccess::HitTestPlatformView(*impl_->ui_window, point) == identity;
 }
 
 void WebPlatformViews::MoveFocus(std::uint32_t token, bool reverse) {
-  if (!state_ || state_->ui_window == nullptr) {
+  if (!impl_ || impl_->ui_window == nullptr) {
     return;
   }
-  const std::optional<std::uint64_t> identity = state_->IdentityForToken(token);
+  const std::optional<std::uint64_t> identity = impl_->IdentityForToken(token);
   if (identity.has_value()) {
-    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*state_->ui_window, *identity, reverse));
+    HUXERUI_DISCARD(InternalAccess::MoveFocusFromPlatformView(*impl_->ui_window, *identity, reverse));
   }
 }
 
 void WebPlatformViews::Shutdown() noexcept {
-  if (!state_) {
+  if (!impl_) {
     return;
   }
-  for (auto& [identity, hosted] : state_->hosted) {
+  for (auto& [identity, hosted] : impl_->hosted) {
     hosted->event_route->active = false;
     hosted->event_route->ui_window = nullptr;
   }
-  state_->hosted.clear();
-  state_->identities_by_token.clear();
-  for (auto& [key, slice] : state_->slices) {
+  impl_->hosted.clear();
+  impl_->identities_by_token.clear();
+  for (auto& [key, slice] : impl_->slices) {
     try {
       slice.canvas.call<void>("remove");
     } catch (...) {
     }
   }
-  state_->slices.clear();
-  state_->base_slice.reset();
-  state_->order.clear();
-  state_->ui_window = nullptr;
+  impl_->slices.clear();
+  impl_->base_slice.reset();
+  impl_->order.clear();
+  impl_->ui_window = nullptr;
 }
 
 } // namespace huxerui::detail

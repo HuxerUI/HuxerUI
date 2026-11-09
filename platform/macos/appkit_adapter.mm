@@ -604,7 +604,7 @@ public:
 
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled =
-            frame_state_.Request(deadline, Now(), frame_scheduler_ != nil && view_ != nil)) {
+            frame_coordinator_.Request(deadline, Now(), frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*scheduled);
     }
   }
@@ -725,7 +725,7 @@ public:
 
   void CommitFrameAndInvalidate() {
     scheduled_frame_deadline_.reset();
-    if (!IsInitialized() || !frame_state_.BeginCommit()) {
+    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
       return;
     }
     const FrameCommit& commit = UiWindow::BuildFrame();
@@ -734,7 +734,7 @@ public:
     accessibility_->Commit(commit.semantic_frame);
     if (composition_changed) {
       [view_ setNeedsDisplay:YES];
-      frame_state_.MarkPaintPending();
+      frame_coordinator_.MarkPaintPending();
     } else {
       HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
     }
@@ -746,9 +746,9 @@ public:
 
   void DrawCommittedFrame(CGContextRef context, NSRect dirty_rect) {
     if (!IsInitialized()) return;
-    frame_state_.BeginPaint();
+    frame_coordinator_.BeginPaint();
     platform_views_->DrawBase(context, NSRectToCGRect(dirty_rect));
-    if (const std::optional<double> deadline = frame_state_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
+    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -969,7 +969,8 @@ private:
   }
 
   void FlushDeferredFrame() {
-    if (const std::optional<double> deadline = frame_state_.TakeDeferred(frame_scheduler_ != nil && view_ != nil)) {
+    if (const std::optional<double> deadline =
+            frame_coordinator_.TakeDeferred(frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -980,7 +981,7 @@ private:
     }
     if (damage.full) {
       [view_ setNeedsDisplay:YES];
-      frame_state_.MarkPaintPending();
+      frame_coordinator_.MarkPaintPending();
       return true;
     }
 
@@ -989,7 +990,7 @@ private:
       if (!std::isfinite(rect.x) || !std::isfinite(rect.y) || !std::isfinite(rect.width) ||
           !std::isfinite(rect.height)) {
         [view_ setNeedsDisplay:YES];
-        frame_state_.MarkPaintPending();
+        frame_coordinator_.MarkPaintPending();
         return true;
       }
       if (rect.IsEmpty()) {
@@ -1009,7 +1010,7 @@ private:
       invalidated = true;
     }
     if (invalidated) {
-      frame_state_.MarkPaintPending();
+      frame_coordinator_.MarkPaintPending();
     }
     return invalidated;
   }
@@ -1024,7 +1025,7 @@ private:
   std::unique_ptr<MacTextInput> text_input_;
   std::unique_ptr<MacAccessibility> accessibility_;
   std::unique_ptr<AppKitPlatformViews> platform_views_;
-  PlatformFrameState frame_state_;
+  PlatformFrameCoordinator frame_coordinator_;
   std::optional<double> scheduled_frame_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
   bool performing_minimize_ = false;

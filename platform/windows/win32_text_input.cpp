@@ -18,7 +18,7 @@
 
 namespace huxerui::detail {
 
-struct Win32TextInput::State {
+struct Win32TextInput::Impl {
   void Start(
       TextInputSessionId session_id,
       const TextInputConfiguration&,
@@ -304,62 +304,62 @@ struct Win32TextInput::State {
   std::wstring pending_ime_result_;
 };
 
-Win32TextInput::Win32TextInput() : state_(std::make_unique<State>()) {}
+Win32TextInput::Win32TextInput() : impl_(std::make_unique<Impl>()) {}
 
 Win32TextInput::~Win32TextInput() = default;
 
 void Win32TextInput::SetUiWindow(UiWindow* ui_window) noexcept {
-  state_->ui_window_ = ui_window;
+  impl_->ui_window_ = ui_window;
 }
 
 void Win32TextInput::SetWindow(HWND window) noexcept {
-  state_->window_ = window;
+  impl_->window_ = window;
 }
 
 void Win32TextInput::SetDpiScale(float scale) noexcept {
-  state_->dpi_scale_ = std::max(scale, 0.0F);
+  impl_->dpi_scale_ = std::max(scale, 0.0F);
 }
 
 void Win32TextInput::Reset() noexcept {
-  state_->ui_window_ = nullptr;
-  state_->window_ = nullptr;
-  state_->text_input_session_id_ = 0;
-  state_->text_input_state_ = {};
-  state_->ime_composing_ = false;
-  state_->pending_high_surrogate_ = 0;
-  state_->pending_ime_result_.clear();
+  impl_->ui_window_ = nullptr;
+  impl_->window_ = nullptr;
+  impl_->text_input_session_id_ = 0;
+  impl_->text_input_state_ = {};
+  impl_->ime_composing_ = false;
+  impl_->pending_high_surrogate_ = 0;
+  impl_->pending_ime_result_.clear();
 }
 
 bool Win32TextInput::Active() const noexcept {
-  return state_->text_input_session_id_ != 0;
+  return impl_->text_input_session_id_ != 0;
 }
 
 bool Win32TextInput::Composing() const noexcept {
-  return state_->ime_composing_;
+  return impl_->ime_composing_;
 }
 
 void Win32TextInput::ClearPendingResult() noexcept {
-  state_->pending_ime_result_.clear();
+  impl_->pending_ime_result_.clear();
 }
 
 bool Win32TextInput::BeginComposition() {
-  return state_->BeginImeComposition();
+  return impl_->BeginImeComposition();
 }
 
 bool Win32TextInput::UpdateComposition(LPARAM flags) {
-  return state_->UpdateImeComposition(flags);
+  return impl_->UpdateImeComposition(flags);
 }
 
 bool Win32TextInput::EndComposition() {
-  return state_->EndImeComposition();
+  return impl_->EndImeComposition();
 }
 
 bool Win32TextInput::CommitCharacter(wchar_t character) {
-  return state_->CommitCharacter(character);
+  return impl_->CommitCharacter(character);
 }
 
 bool Win32TextInput::SuppressCharacter(wchar_t character) {
-  return state_->SuppressImeCharacter(character);
+  return impl_->SuppressImeCharacter(character);
 }
 
 void Win32TextInput::Start(
@@ -368,13 +368,13 @@ void Win32TextInput::Start(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->Start(session_id, configuration, state, geometry);
+  impl_->Start(session_id, configuration, state, geometry);
 }
 
 void Win32TextInput::Update(
     TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry
 ) {
-  state_->Update(session_id, state, geometry);
+  impl_->Update(session_id, state, geometry);
 }
 
 void Win32TextInput::Restart(
@@ -383,11 +383,11 @@ void Win32TextInput::Restart(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->Restart(session_id, configuration, state, geometry);
+  impl_->Restart(session_id, configuration, state, geometry);
 }
 
 void Win32TextInput::Stop(TextInputSessionId session_id) {
-  state_->Stop(session_id);
+  impl_->Stop(session_id);
 }
 
 } // namespace huxerui::detail

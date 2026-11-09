@@ -32,7 +32,7 @@
 namespace huxerui {
 
 namespace detail {
-class NavigationState;
+class NavigationCoordinator;
 struct InternalAccess;
 
 template <class Route>
@@ -44,7 +44,7 @@ struct NavigationRouteDescriptor {
   std::function<View()> factory;
 };
 
-// Logical history intent is independent from the retained page transitions resolved by NavigationState.
+// Logical history intent is independent from the retained page transitions resolved by NavigationCoordinator.
 enum class NavigationHistoryAction {
   Push,
   Pop,
@@ -59,7 +59,7 @@ struct NavigationRouteBinding {
 };
 
 struct NavigationAccess {
-  std::weak_ptr<NavigationState> state;
+  std::weak_ptr<NavigationCoordinator> coordinator;
   std::shared_ptr<void> path_state;
   std::shared_ptr<void> history_commit;
 };
@@ -68,7 +68,7 @@ View BuildRoutedNavigationStack(
     std::function<View()> root, std::vector<NavigationRouteDescriptor> routes, NavigationRouteBinding binding
 );
 NavigationAccess FindNavigationAccess(std::optional<std::type_index> route_type, bool outermost);
-bool CheckNavigationAccess(const std::weak_ptr<NavigationState>& state);
+bool CheckNavigationAccess(const std::weak_ptr<NavigationCoordinator>& weak_coordinator);
 } // namespace detail
 
 /// Selects all page transition operations through one root modifier.
@@ -698,7 +698,7 @@ public:
   /// Removes the last route when connected and above the fixed root.
   /// @return True when a path change was requested; false at the root or after disconnection.
   bool Pop() const {
-    if (!detail::CheckNavigationAccess(state_)) {
+    if (!detail::CheckNavigationAccess(coordinator_)) {
       return false;
     }
     if (path_.Get().routes_.empty()) {
@@ -737,22 +737,22 @@ public:
   /// Reports whether a route can be removed.
   /// @return True when connected and the authoritative path is non-empty.
   [[nodiscard]] bool CanPop() const {
-    return detail::CheckNavigationAccess(state_) && !path_.Get().Empty();
+    return detail::CheckNavigationAccess(coordinator_) && !path_.Get().Empty();
   }
 
   /// Reports logical depth, including the fixed root.
   /// @return Path size plus one while connected, or zero after disconnection.
   [[nodiscard]] std::size_t Depth() const {
-    return detail::CheckNavigationAccess(state_) ? path_.Get().Size() + 1 : 0;
+    return detail::CheckNavigationAccess(coordinator_) ? path_.Get().Size() + 1 : 0;
   }
 
 private:
   RouteNavigationController(
-      std::weak_ptr<detail::NavigationState> state,
+      std::weak_ptr<detail::NavigationCoordinator> coordinator,
       State<NavigationPath<Route>> path,
       std::shared_ptr<detail::NavigationHistoryCommit<Route>> history_commit
   )
-      : state_(std::move(state)), path_(std::move(path)), history_commit_(std::move(history_commit)) {}
+      : coordinator_(std::move(coordinator)), path_(std::move(path)), history_commit_(std::move(history_commit)) {}
 
   void Commit(detail::NavigationHistoryAction action, NavigationPath<Route> path) const {
     if (history_commit_ && *history_commit_) {
@@ -763,12 +763,12 @@ private:
   }
 
   void RequireConnected() const {
-    if (!detail::CheckNavigationAccess(state_)) {
+    if (!detail::CheckNavigationAccess(coordinator_)) {
       throw std::logic_error("HuxerUI routed navigation controller is disconnected");
     }
   }
 
-  std::weak_ptr<detail::NavigationState> state_;
+  std::weak_ptr<detail::NavigationCoordinator> coordinator_;
   State<NavigationPath<Route>> path_;
   std::shared_ptr<detail::NavigationHistoryCommit<Route>> history_commit_;
 
@@ -840,9 +840,10 @@ public:
   [[nodiscard]] std::size_t Depth() const;
 
 private:
-  explicit NavigationController(std::weak_ptr<detail::NavigationState> state) : state_(std::move(state)) {}
+  explicit NavigationController(std::weak_ptr<detail::NavigationCoordinator> coordinator)
+      : coordinator_(std::move(coordinator)) {}
 
-  std::weak_ptr<detail::NavigationState> state_;
+  std::weak_ptr<detail::NavigationCoordinator> coordinator_;
 
   friend View NavigationStack(std::function<View()> root);
   friend NavigationController UseNavigation();
@@ -918,11 +919,11 @@ NavigationController UseRootNavigation();
 
 template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseNavigation() {
   detail::NavigationAccess access = detail::FindNavigationAccess(typeid(Route), false);
-  if (access.state.expired() || !access.path_state) {
+  if (access.coordinator.expired() || !access.path_state) {
     throw std::logic_error("HuxerUI UseNavigation<Route>() requires an enclosing compatible routed NavigationStack");
   }
   return RouteNavigationController<Route>{
-      std::move(access.state),
+      std::move(access.coordinator),
       *std::static_pointer_cast<State<NavigationPath<Route>>>(std::move(access.path_state)),
       std::static_pointer_cast<detail::NavigationHistoryCommit<Route>>(std::move(access.history_commit)),
   };
@@ -930,13 +931,13 @@ template <detail::NavigationRouteValue Route> RouteNavigationController<Route> U
 
 template <detail::NavigationRouteValue Route> RouteNavigationController<Route> UseRootNavigation() {
   detail::NavigationAccess access = detail::FindNavigationAccess(typeid(Route), true);
-  if (access.state.expired() || !access.path_state) {
+  if (access.coordinator.expired() || !access.path_state) {
     throw std::logic_error(
         "HuxerUI UseRootNavigation<Route>() requires an enclosing compatible routed NavigationStack"
     );
   }
   return RouteNavigationController<Route>{
-      std::move(access.state),
+      std::move(access.coordinator),
       *std::static_pointer_cast<State<NavigationPath<Route>>>(std::move(access.path_state)),
       std::static_pointer_cast<detail::NavigationHistoryCommit<Route>>(std::move(access.history_commit)),
   };

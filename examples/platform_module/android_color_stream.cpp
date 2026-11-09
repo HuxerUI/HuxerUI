@@ -22,14 +22,14 @@ bool ClearJavaException(JNIEnv* environment) {
   return true;
 }
 
-struct AndroidColorStreamState : huxerui::example::ColorStreamService {
-  AndroidColorStreamState(huxerui::UiWindow& window_value, JNIEnv* environment_value)
+struct AndroidColorStreamService : huxerui::example::ColorStreamService {
+  AndroidColorStreamService(huxerui::UiWindow& window_value, JNIEnv* environment_value)
       : ui_window(&window_value), environment(environment_value),
         texture(std::make_shared<huxerui::android::BitmapTexture>(
             huxerui::Size{320.0F, 180.0F}
         )) {}
 
-  ~AndroidColorStreamState() override {
+  ~AndroidColorStreamService() override {
     Dispose();
   }
 
@@ -77,7 +77,7 @@ struct AndroidColorStreamState : huxerui::example::ColorStreamService {
   jobject producer = nullptr;
   jmethodID start = nullptr;
   jmethodID dispose_bridge = nullptr;
-  std::weak_ptr<AndroidColorStreamState>* bridge = nullptr;
+  std::weak_ptr<AndroidColorStreamService>* bridge = nullptr;
   huxerui::PlatformRequestId request_id = 0;
 };
 
@@ -97,8 +97,8 @@ std::shared_ptr<huxerui::example::ColorStreamService> CreateAndroidColorStream(h
     throw std::logic_error("HuxerUI example Android color stream methods do not match the platform bridge");
   }
 
-  auto state = std::make_shared<AndroidColorStreamState>(ui_window, environment);
-  auto bridge = std::make_unique<std::weak_ptr<AndroidColorStreamState>>(state);
+  auto service = std::make_shared<AndroidColorStreamService>(ui_window, environment);
+  auto bridge = std::make_unique<std::weak_ptr<AndroidColorStreamService>>(service);
   huxerui::android::LocalRef<jobject> local_producer(
       environment,
       environment->NewObject(
@@ -112,15 +112,15 @@ std::shared_ptr<huxerui::example::ColorStreamService> CreateAndroidColorStream(h
     ClearJavaException(environment);
     throw std::logic_error("HuxerUI example could not create the Android platform color stream");
   }
-  state->producer = environment->NewGlobalRef(local_producer.Get());
-  if (state->producer == nullptr) {
+  service->producer = environment->NewGlobalRef(local_producer.Get());
+  if (service->producer == nullptr) {
     ClearJavaException(environment);
     throw std::runtime_error("HuxerUI example could not retain the Android platform color stream");
   }
-  state->start = start;
-  state->dispose_bridge = dispose_bridge;
-  state->bridge = bridge.release();
-  return state;
+  service->start = start;
+  service->dispose_bridge = dispose_bridge;
+  service->bridge = bridge.release();
+  return service;
 }
 
 } // namespace
@@ -140,11 +140,11 @@ extern "C" JNIEXPORT void JNICALL
 Java_org_huxerui_examples_platformmodule_PlatformColorStream_nativePublish(
     JNIEnv* environment, jclass, jlong bridge, jobject bitmap
 ) {
-  auto* state = reinterpret_cast<std::weak_ptr<AndroidColorStreamState>*>(static_cast<std::uintptr_t>(bridge));
-  if (state != nullptr) {
+  auto* weak_service = reinterpret_cast<std::weak_ptr<AndroidColorStreamService>*>(static_cast<std::uintptr_t>(bridge));
+  if (weak_service != nullptr) {
     try {
-      if (const std::shared_ptr<AndroidColorStreamState> locked_state = state->lock()) {
-        locked_state->Publish(environment, bitmap);
+      if (const std::shared_ptr<AndroidColorStreamService> service = weak_service->lock()) {
+        service->Publish(environment, bitmap);
       }
     } catch (...) {
     }

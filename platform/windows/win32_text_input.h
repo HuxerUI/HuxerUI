@@ -52,8 +52,8 @@ public:
   void Stop(TextInputSessionId session_id) override;
 
 private:
-  struct State;
-  std::unique_ptr<State> state_;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 } // namespace huxerui::detail

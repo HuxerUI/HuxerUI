@@ -66,7 +66,7 @@ struct NavigationTransition {
 };
 
 struct NavigationEnvironmentEntry {
-  std::weak_ptr<NavigationState> state;
+  std::weak_ptr<NavigationCoordinator> coordinator;
   std::optional<std::type_index> route_type;
   std::shared_ptr<void> path_state;
   std::shared_ptr<void> history_commit;
@@ -87,8 +87,8 @@ struct NavigationEnvironment {
   bool operator==(const NavigationEnvironment&) const = default;
 };
 
-struct NavigationStateValue {
-  using Value = std::shared_ptr<NavigationState>;
+struct NavigationCoordinatorValue {
+  using Value = std::shared_ptr<NavigationCoordinator>;
 };
 
 struct NavigationEntryIdValue {
@@ -115,14 +115,13 @@ bool PageHasPlatformView(const MountedNode& node) {
 
 } // namespace
 
-class NavigationState {
+class NavigationCoordinator {
 public:
-  explicit NavigationState(std::function<View()> root)
+  explicit NavigationCoordinator(std::function<View()> root)
       : owner_thread_(std::this_thread::get_id()), entries_{{1, std::move(root)}} {}
 
-  NavigationState(
-      std::function<View()> root, std::vector<NavigationRouteDescriptor> routes, NavigationRouteBinding binding
-  )
+  NavigationCoordinator(std::function<View()> root, std::vector<NavigationRouteDescriptor> routes,
+                        NavigationRouteBinding binding)
       : owner_thread_(std::this_thread::get_id()), entries_{{1, std::move(root)}}, requested_routes_(std::move(routes)),
         request_route_pop_(std::move(binding.request_pop)), route_type_(binding.route_type) {
     ValidateRoutePath(requested_routes_);
@@ -718,14 +717,14 @@ public:
 
   static LayoutResult Measure(LayoutContext& context, huxerui::ViewNode& node, Constraints constraints) {
     LayoutResult result;
-    const auto* state = node.LayoutValue<NavigationStateValue>();
-    if (state == nullptr || !*state) {
+    const auto* coordinator = node.LayoutValue<NavigationCoordinatorValue>();
+    if (coordinator == nullptr || !*coordinator) {
       return result.SetSize(constraints.Constrain({}));
     }
 
     std::uint64_t source_id = 0;
-    std::uint64_t destination_id = (*state)->ActiveEntryId();
-    if (const auto& transition = (*state)->Transition()) {
+    std::uint64_t destination_id = (*coordinator)->ActiveEntryId();
+    if (const auto& transition = (*coordinator)->Transition()) {
       source_id = transition->source_id;
       destination_id = transition->destination_id;
     }
@@ -760,7 +759,7 @@ public:
 };
 
 struct NavigationPageModifier {
-  std::shared_ptr<NavigationState> state;
+  std::shared_ptr<NavigationCoordinator> coordinator;
   std::uint64_t entry_id = 0;
 
   static const ModifierDescriptor& Descriptor();
@@ -768,9 +767,10 @@ struct NavigationPageModifier {
   bool operator==(const NavigationPageModifier&) const = default;
 };
 
-void ApplyNavigationPagePresentation(MountedNode& page, const NavigationState& state, std::uint64_t entry_id) {
-  page.presentation.local_opacity = entry_id == state.ActiveEntryId() ? 1.0F : 0.0F;
-  const auto& transition = state.Transition();
+void ApplyNavigationPagePresentation(MountedNode& page, const NavigationCoordinator& coordinator,
+                                     std::uint64_t entry_id) {
+  page.presentation.local_opacity = entry_id == coordinator.ActiveEntryId() ? 1.0F : 0.0F;
+  const auto& transition = coordinator.Transition();
   if (transition && transition->spec) {
     if (entry_id != transition->source_id && entry_id != transition->destination_id) {
       page.presentation.local_opacity = 0.0F;
@@ -793,24 +793,24 @@ public:
   }
 
   void Update(huxerui::ViewNode&, const NavigationPageModifier& modifier) {
-    state_ = modifier.state;
+    coordinator_ = modifier.coordinator;
     entry_id_ = modifier.entry_id;
   }
 
   FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo&) override {
     auto& mounted = static_cast<detail::MountedNode&>(node);
-    if (!state_) {
+    if (!coordinator_) {
       mounted.presentation.local_opacity = 0.0F;
       return {};
     }
-    const auto& transition = state_->Transition();
-    mounted.local_enabled = !transition && entry_id_ == state_->ActiveEntryId();
-    ApplyNavigationPagePresentation(mounted, *state_, entry_id_);
+    const auto& transition = coordinator_->Transition();
+    mounted.local_enabled = !transition && entry_id_ == coordinator_->ActiveEntryId();
+    ApplyNavigationPagePresentation(mounted, *coordinator_, entry_id_);
     return {};
   }
 
 private:
-  std::shared_ptr<NavigationState> state_;
+  std::shared_ptr<NavigationCoordinator> coordinator_;
   std::uint64_t entry_id_ = 0;
 };
 
@@ -821,7 +821,7 @@ const ModifierDescriptor& NavigationPageModifier::Descriptor() {
          const std::shared_ptr<const Environment>&,
          AppResources&) {
         const auto& modifier = *static_cast<const NavigationPageModifier*>(compiled_modifier.value.get());
-        spec.local_enabled = modifier.state && modifier.state->ActiveEntryId() == modifier.entry_id;
+        spec.local_enabled = modifier.coordinator && modifier.coordinator->ActiveEntryId() == modifier.entry_id;
         // Page content cannot interact during motion; container-level Back and its cancellation remain available.
         spec.properties.disabled_opacity = 1.0F;
       },
@@ -842,7 +842,7 @@ const ModifierDescriptor& NavigationPageModifier::Descriptor() {
 }
 
 struct NavigationContainerModifier {
-  std::shared_ptr<NavigationState> state;
+  std::shared_ptr<NavigationCoordinator> coordinator;
   NavigationStyle style;
   std::uint64_t revision = 0;
 
@@ -895,7 +895,7 @@ public:
   }
 
   void Update(huxerui::ViewNode&, const NavigationContainerModifier& modifier) {
-    state_ = modifier.state;
+    coordinator_ = modifier.coordinator;
     style_ = modifier.style;
     if (revision_ != modifier.revision) {
       revision_ = modifier.revision;
@@ -904,11 +904,11 @@ public:
   }
 
   FrameResult OnFrame(huxerui::ViewNode& node, const FrameInfo& frame) override {
-    if (!state_) {
+    if (!coordinator_) {
       return {};
     }
     const PageTransition* selected = nullptr;
-    const auto& active = state_->Transition();
+    const auto& active = coordinator_->Transition();
     const std::uint64_t policy_id = active
         ? (active->kind == NavigationOperationKind::Pop ? active->source_id : active->destination_id) : 0;
     for (huxerui::ViewNode& child : node.Children()) {
@@ -925,7 +925,7 @@ public:
     }
     if (!active->spec) {
       const PageTransition policy = selected ? *selected : style_.motion.value_or(PageTransition{});
-      state_->SetTransitionSpec(active->kind == NavigationOperationKind::Pop ? policy.pop
+      coordinator_->SetTransitionSpec(active->kind == NavigationOperationKind::Pop ? policy.pop
           : active->kind == NavigationOperationKind::Push ? policy.push : policy.replace);
     }
     const NavigationTransition& transition = *active;
@@ -945,14 +945,14 @@ public:
     MotionAdvanceResult result;
     if (!transition.interactive) {
       result = progress_.Advance(frame);
-      state_->SetTransitionProgress(progress_.Value());
+      coordinator_->SetTransitionProgress(progress_.Value());
     }
     try {
-      state_->EvaluateTransition(node, transition.interactive &&
+      coordinator_->EvaluateTransition(node, transition.interactive &&
           (frame.reduced_motion || spec.IsImmediate()));
     } catch (...) {
       Clear();
-      state_->FinishTransition();
+      coordinator_->FinishTransition();
       animation_initialized_ = false;
       throw;
     }
@@ -973,7 +973,7 @@ public:
                transition.kind == NavigationOperationKind::Pop, !frame.reduced_motion && !spec.IsImmediate());
     if (!transition.interactive && !progress_.IsRunning()) {
       Clear();
-      state_->FinishTransition();
+      coordinator_->FinishTransition();
       animation_initialized_ = false;
       return {true, std::nullopt};
     }
@@ -984,48 +984,48 @@ public:
     try {
       SharedTransitionSession::PrepareRender(node);
     } catch (...) {
-      state_->FinishTransition();
+      coordinator_->FinishTransition();
       animation_initialized_ = false;
       throw;
     }
   }
 
   void PaintAboveContent(const huxerui::ViewNode& node, PaintContext& paint) const override {
-    if (!state_) { return; }
-    const auto& transition = state_->Transition();
+    if (!coordinator_) { return; }
+    const auto& transition = coordinator_->Transition();
     if (!painted_ || !transition || !transition->spec || transition->native_fallback) { return; }
     try {
       paint.PushClip(node.Bounds());
       transition->spec->Paint(paint, transition->context);
       paint.PopClip();
     } catch (...) {
-      state_->FinishTransition();
+      coordinator_->FinishTransition();
       throw;
     }
   }
 
   bool OnBack(huxerui::ViewNode&, const BackEvent& event) override {
-    if (!state_) {
+    if (!coordinator_) {
       return false;
     }
     switch (event.phase) {
     case BackPhase::Begin:
       animation_initialized_ = false;
-      return state_->BeginPredictivePop();
+      return coordinator_->BeginPredictivePop();
     case BackPhase::Update:
-      return state_->UpdatePredictivePop(event.progress);
+      return coordinator_->UpdatePredictivePop(event.progress);
     case BackPhase::Cancel:
       animation_initialized_ = false;
-      return state_->CancelPredictivePop();
+      return coordinator_->CancelPredictivePop();
     case BackPhase::Commit:
       animation_initialized_ = false;
-      return state_->CommitPredictivePop();
+      return coordinator_->CommitPredictivePop();
     }
     return false;
   }
 
 private:
-  std::shared_ptr<NavigationState> state_;
+  std::shared_ptr<NavigationCoordinator> coordinator_;
   NavigationStyle style_;
   MotionController progress_;
   std::uint64_t revision_ = 0;
@@ -1037,9 +1037,8 @@ const ModifierDescriptor& NavigationContainerModifier::Descriptor() {
   return ModifierDescriptorFor<NavigationContainerModifier, NavigationContainerExtension, true>();
 }
 
-View BuildNavigationView(
-    const std::shared_ptr<NavigationState>& state, NavigationStyle style, NavigationEnvironmentEntry environment_entry
-) {
+View BuildNavigationView(const std::shared_ptr<NavigationCoordinator>& coordinator, NavigationStyle style,
+                         NavigationEnvironmentEntry environment_entry) {
   NavigationEnvironment environment = UseEnvironment<NavigationEnvironment>();
   environment.current = std::make_shared<NavigationEnvironmentNode>(NavigationEnvironmentNode{
       .entry = std::move(environment_entry),
@@ -1047,21 +1046,21 @@ View BuildNavigationView(
   });
 
   std::vector<View> pages;
-  pages.reserve(state->Entries().size());
-  for (const NavigationEntry& entry : state->Entries()) {
+  pages.reserve(coordinator->Entries().size());
+  for (const NavigationEntry& entry : coordinator->Entries()) {
     View page = ProvideEnvironment(environment, Scope(entry.factory));
     pages.push_back(
         Stack{
             std::move(page),
         }
             .LayoutValue<NavigationEntryIdValue>(entry.id)
-            .With(NavigationPageModifier{state, entry.id})
+            .With(NavigationPageModifier{coordinator, entry.id})
             .Key(entry.id)
     );
   }
 
-  NavigationContainerModifier container{state, style, state->Revision()};
-  return NavigationStackLayout {std::move(pages)}.LayoutValue<NavigationStateValue>(state).With(
+  NavigationContainerModifier container{coordinator, style, coordinator->Revision()};
+  return NavigationStackLayout {std::move(pages)}.LayoutValue<NavigationCoordinatorValue>(coordinator).With(
       ClipChildren{},
       std::move(container)
   );
@@ -1072,21 +1071,21 @@ View BuildNavigationView(
 View BuildRoutedNavigationStack(
     std::function<View()> root, std::vector<NavigationRouteDescriptor> routes, NavigationRouteBinding binding
 ) {
-  auto state_holder = UseState(std::make_shared<NavigationState>(root, routes, binding));
+  auto coordinator_state = UseState(std::make_shared<NavigationCoordinator>(root, routes, binding));
   auto revision = UseState<std::uint64_t>(0);
-  const std::shared_ptr<NavigationState> state = state_holder.Get();
+  const std::shared_ptr<NavigationCoordinator> coordinator = coordinator_state.Get();
   HUXERUI_DISCARD(revision.Get());
-  state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
-  state->UpdateRoot(std::move(root));
-  state->UpdateRouteBinding(binding);
-  state->SynchronizeRoutePath(std::move(routes));
+  coordinator->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
+  coordinator->UpdateRoot(std::move(root));
+  coordinator->UpdateRouteBinding(binding);
+  coordinator->SynchronizeRoutePath(std::move(routes));
   NavigationStyle style = UseEnvironment<NavigationStyle>();
-  state->UpdateStyle(style);
+  coordinator->UpdateStyle(style);
   return BuildNavigationView(
-      state,
+      coordinator,
       std::move(style),
       NavigationEnvironmentEntry{
-          .state = state,
+          .coordinator = coordinator,
           .route_type = binding.route_type,
           .path_state = std::move(binding.path_state),
           .history_commit = std::move(binding.history_commit),
@@ -1097,13 +1096,13 @@ View BuildRoutedNavigationStack(
 NavigationAccess FindNavigationAccess(std::optional<std::type_index> route_type, bool outermost) {
   const NavigationEnvironment environment = UseEnvironment<NavigationEnvironment>();
   const auto matches = [route_type](const NavigationEnvironmentEntry& entry) {
-    return entry.route_type == route_type && !entry.state.expired();
+    return entry.route_type == route_type && !entry.coordinator.expired();
   };
 
   NavigationAccess found;
   for (auto node = environment.current; node; node = node->parent) {
     if (matches(node->entry)) {
-      found = {node->entry.state, node->entry.path_state, node->entry.history_commit};
+      found = {node->entry.coordinator, node->entry.path_state, node->entry.history_commit};
       if (!outermost) {
         break;
       }
@@ -1112,8 +1111,8 @@ NavigationAccess FindNavigationAccess(std::optional<std::type_index> route_type,
   return found;
 }
 
-bool CheckNavigationAccess(const std::weak_ptr<NavigationState>& state) {
-  const std::shared_ptr<NavigationState> shared = state.lock();
+bool CheckNavigationAccess(const std::weak_ptr<NavigationCoordinator>& weak_coordinator) {
+  const std::shared_ptr<NavigationCoordinator> shared = weak_coordinator.lock();
   if (!shared) {
     return false;
   }
@@ -1135,38 +1134,38 @@ NavigationStyle NavigationStyle::Default() {
 }
 
 void NavigationController::Push(std::function<View()> page) const {
-  if (auto state = state_.lock()) {
-    state->Push(std::move(page));
+  if (auto coordinator = coordinator_.lock()) {
+    coordinator->Push(std::move(page));
     return;
   }
   throw std::logic_error("HuxerUI navigation controller is disconnected");
 }
 
 bool NavigationController::Pop() const {
-  if (auto state = state_.lock()) {
-    return state->Pop();
+  if (auto coordinator = coordinator_.lock()) {
+    return coordinator->Pop();
   }
   return false;
 }
 
 void NavigationController::Replace(std::function<View()> page) const {
-  if (auto state = state_.lock()) {
-    state->Replace(std::move(page));
+  if (auto coordinator = coordinator_.lock()) {
+    coordinator->Replace(std::move(page));
     return;
   }
   throw std::logic_error("HuxerUI navigation controller is disconnected");
 }
 
 bool NavigationController::CanPop() const {
-  if (auto state = state_.lock()) {
-    return state->CanPop();
+  if (auto coordinator = coordinator_.lock()) {
+    return coordinator->CanPop();
   }
   return false;
 }
 
 std::size_t NavigationController::Depth() const {
-  if (auto state = state_.lock()) {
-    return state->Depth();
+  if (auto coordinator = coordinator_.lock()) {
+    return coordinator->Depth();
   }
   return 0;
 }
@@ -1176,19 +1175,19 @@ View NavigationStack(std::function<View()> root) {
     throw std::invalid_argument("HuxerUI navigation root factory must not be empty");
   }
   return Scope([root = std::move(root)]() mutable -> View {
-    auto state_holder = UseState(std::make_shared<detail::NavigationState>(root));
+    auto coordinator_state = UseState(std::make_shared<detail::NavigationCoordinator>(root));
     auto revision = UseState<std::uint64_t>(0);
-    const std::shared_ptr<detail::NavigationState> state = state_holder.Get();
+    const std::shared_ptr<detail::NavigationCoordinator> coordinator = coordinator_state.Get();
     HUXERUI_DISCARD(revision.Get());
-    state->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
-    state->UpdateRoot(root);
+    coordinator->Connect([revision] { revision.Update([](std::uint64_t& value) { ++value; }); });
+    coordinator->UpdateRoot(root);
     NavigationStyle style = UseEnvironment<NavigationStyle>();
-    state->UpdateStyle(style);
+    coordinator->UpdateStyle(style);
     return detail::BuildNavigationView(
-        state,
+        coordinator,
         std::move(style),
         detail::NavigationEnvironmentEntry{
-            .state = state,
+            .coordinator = coordinator,
             .route_type = std::nullopt,
             .path_state = nullptr,
             .history_commit = nullptr,
@@ -1199,18 +1198,18 @@ View NavigationStack(std::function<View()> root) {
 
 NavigationController UseNavigation() {
   detail::NavigationAccess access = detail::FindNavigationAccess(std::nullopt, false);
-  if (access.state.expired()) {
+  if (access.coordinator.expired()) {
     throw std::logic_error("HuxerUI UseNavigation() requires an enclosing NavigationStack");
   }
-  return NavigationController{std::move(access.state)};
+  return NavigationController{std::move(access.coordinator)};
 }
 
 NavigationController UseRootNavigation() {
   detail::NavigationAccess access = detail::FindNavigationAccess(std::nullopt, true);
-  if (access.state.expired()) {
+  if (access.coordinator.expired()) {
     throw std::logic_error("HuxerUI UseRootNavigation() requires an enclosing NavigationStack");
   }
-  return NavigationController{std::move(access.state)};
+  return NavigationController{std::move(access.coordinator)};
 }
 
 } // namespace huxerui

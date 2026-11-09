@@ -8,7 +8,7 @@
 
 namespace huxerui::detail {
 
-class MacTextInputState;
+class MacTextInputBridge;
 
 [[nodiscard]] KeyEvent MakeMacKeyEvent(NSEvent* event, KeyEventType type);
 
@@ -42,7 +42,7 @@ public:
   void Stop(TextInputSessionId session_id) override;
 
 private:
-  std::unique_ptr<MacTextInputState> state_;
+  std::unique_ptr<MacTextInputBridge> bridge_;
 };
 
 } // namespace huxerui::detail

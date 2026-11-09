@@ -138,7 +138,7 @@ void PaintLayer(PaintContext& context, Rect frame, CornerRadii corner_radii, con
 
 } // namespace
 
-void IndicationState::Update(Indication spec) {
+void IndicationController::Update(Indication spec) {
   spec_ = std::move(spec);
   if (IsEmpty(spec_)) {
     Reset();
@@ -147,7 +147,7 @@ void IndicationState::Update(Indication spec) {
   SetInteraction(interaction_, std::nullopt, {});
 }
 
-void IndicationState::Reset() {
+void IndicationController::Reset() {
   interaction_ = {};
   focus_opacity_.Set(0.0F);
   hover_opacity_.Set(0.0F);
@@ -155,7 +155,7 @@ void IndicationState::Reset() {
   ripples_.clear();
 }
 
-void IndicationState::RetargetLayer(MotionController& controller, bool visible,
+void IndicationController::RetargetLayer(MotionController& controller, bool visible,
                                     const std::optional<IndicationLayer>& layer) {
   if (!layer.has_value()) {
     controller.Set(0.0F);
@@ -168,7 +168,7 @@ void IndicationState::RetargetLayer(MotionController& controller, bool visible,
   controller.AnimateTo(target, visible ? layer->enter : layer->exit);
 }
 
-void IndicationState::SetInteraction(const InteractionState& state, const std::optional<InteractionEvent>& event,
+void IndicationController::SetInteraction(const InteractionState& state, const std::optional<InteractionEvent>& event,
                                      Rect frame) {
   const bool released_before_press_frame = interaction_.pressed && !state.pressed && event.has_value() &&
                                            event->type == InteractionEvent::Type::Release && spec_.press.has_value() &&
@@ -213,7 +213,7 @@ void IndicationState::SetInteraction(const InteractionState& state, const std::o
   }
 }
 
-MotionAdvanceResult IndicationState::Advance(const FrameInfo& frame) {
+MotionAdvanceResult IndicationController::Advance(const FrameInfo& frame) {
   MotionAdvanceResult result;
   const auto advance = [&](MotionController& controller) {
     const MotionAdvanceResult current = controller.Advance(frame);
@@ -242,7 +242,7 @@ MotionAdvanceResult IndicationState::Advance(const FrameInfo& frame) {
   return result;
 }
 
-void IndicationState::Paint(PaintContext& context, Rect frame, CornerRadii corner_radii,
+void IndicationController::Paint(PaintContext& context, Rect frame, CornerRadii corner_radii,
                             IndicationPlacement placement, float opacity) const {
   const auto paint_layer = [&](const std::optional<IndicationLayer>& layer, float layer_opacity) {
     if (layer.has_value() && layer->placement == placement) {
@@ -272,7 +272,7 @@ void IndicationState::Paint(PaintContext& context, Rect frame, CornerRadii corne
   context.PopClip();
 }
 
-NodeExtension::PaintInvalidation IndicationState::ActivePaintPhases() const noexcept {
+NodeExtension::PaintInvalidation IndicationController::ActivePaintPhases() const noexcept {
   NodeExtension::PaintInvalidation result = NodeExtension::PaintInvalidation::None;
   const auto merge_layer = [&](const std::optional<IndicationLayer>& layer, const MotionController& opacity) {
     if (layer.has_value() && (opacity.Value() > 0.0F || opacity.IsRunning())) {
@@ -288,7 +288,7 @@ NodeExtension::PaintInvalidation IndicationState::ActivePaintPhases() const noex
   return result;
 }
 
-bool IndicationState::HasVisuals() const noexcept {
+bool IndicationController::HasVisuals() const noexcept {
   return focus_opacity_.Value() > 0.0F || hover_opacity_.Value() > 0.0F || press_opacity_.Value() > 0.0F ||
          focus_opacity_.IsRunning() || hover_opacity_.IsRunning() || press_opacity_.IsRunning() || !ripples_.empty();
 }
@@ -556,7 +556,7 @@ private:
   }
 
   Indication spec_;
-  detail::IndicationState indication_;
+  detail::IndicationController indication_;
   SurfaceStyle surface_source_;
   SurfaceStyle surface_target_;
   MotionController surface_progress_{1.0F};

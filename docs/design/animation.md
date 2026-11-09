@@ -518,8 +518,8 @@ Pair draw order follows the destination's paint order for local, Push, and Repla
 
 ### Shared retention and fallback
 
-The private SharedTransitionSession owns pair metadata, immutable subtree captures, and synthetic render wrappers; Navigation or SharedTransitionState owns operation progress.
-transition_internal.h declares the session contract shared with Navigation; local state, visual metadata, and pair definitions remain in shared_transition.cpp.
+The private `SharedTransitionSession` owns pair metadata, immutable subtree captures, and synthetic render wrappers. Navigation or the local `SharedTransitionCoordinator` owns operation progress.
+`transition_internal.h` declares the session contract shared with Navigation. The coordinator, visual metadata, and pair definitions live in `shared_transition.cpp`.
 NodePresentation carries temporary render suppression and a borrowed overlay reference; input exclusion belongs to MountedNode's interaction state and preserves declarative enabled styling.
 UiWindow calls the internal PrepareSharedTransitions entry after layout and presentation geometry settle, before input/semantics publication and scene assembly.
 The shared-transition implementation prepares participating sessions directly and releases hidden sessions without adding a general extension lifecycle interface or cached capability pointer. Local sessions end when no valid pairs remain; input exclusion is resolved once per node from its active local sessions after preparation.

@@ -41,8 +41,8 @@ public:
   HRESULT ProviderForNode(SemanticNodeId id, IRawElementProviderSimple** provider);
 
 private:
-  struct State;
-  std::shared_ptr<State> state_;
+  struct Impl;
+  std::shared_ptr<Impl> impl_;
 
   friend class Win32SemanticProvider;
 };

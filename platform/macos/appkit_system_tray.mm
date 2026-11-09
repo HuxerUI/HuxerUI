@@ -69,8 +69,8 @@ NSImage* DecodeImage(const ImageAsset& image) {
 
 } // namespace
 
-struct AppKitSystemTrayTransport::State {
-  State() {
+struct AppKitSystemTrayTransport::Impl {
+  Impl() {
     target = [[HuxerUISystemTrayTarget alloc] init];
     target->huxeruiActivation = [this](BOOL context) {
       if (context) {
@@ -95,7 +95,7 @@ struct AppKitSystemTrayTransport::State {
     };
   }
 
-  ~State() {
+  ~Impl() {
     target->huxeruiActivation = {};
     target->huxeruiCommand = {};
     Hide();
@@ -172,7 +172,7 @@ struct AppKitSystemTrayTransport::State {
   __strong NSMenu* menu = nil;
 };
 
-AppKitSystemTrayTransport::AppKitSystemTrayTransport() : state_(std::make_unique<State>()) {}
+AppKitSystemTrayTransport::AppKitSystemTrayTransport() : impl_(std::make_unique<Impl>()) {}
 
 AppKitSystemTrayTransport::~AppKitSystemTrayTransport() = default;
 
@@ -181,15 +181,15 @@ bool AppKitSystemTrayTransport::IsAvailable() const noexcept {
 }
 
 void AppKitSystemTrayTransport::SetEventHandler(std::function<void(SystemTrayEvent)> handler) {
-  state_->event_handler = std::move(handler);
+  impl_->event_handler = std::move(handler);
 }
 
 void AppKitSystemTrayTransport::Show(const ResolvedSystemTrayPresentation& presentation) {
-  state_->Show(presentation);
+  impl_->Show(presentation);
 }
 
 void AppKitSystemTrayTransport::Hide() noexcept {
-  state_->Hide();
+  impl_->Hide();
 }
 
 } // namespace huxerui::detail

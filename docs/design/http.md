@@ -9,8 +9,8 @@ Runtime installs one `HttpClient` root service backed by the adapter's private `
 The shared layer owns request validation, result types, stream state, progress semantics, buffering for `SendAsync()`, Task resumption, and cancellation races.
 Platform transports own URL loading, TLS, proxies, redirects, native decoding, headers, body delivery, and native cancellation.
 
-There is one operation state for both public request forms.
-`SendStreamAsync()` exposes that state after final headers, while `SendAsync()` opens the same state and repeatedly reads it into `HttpResponse::body`.
+Both public request forms use `HttpOperation`.
+`SendStreamAsync()` returns the response stream after final headers, while `SendAsync()` reads that same stream into `HttpResponse::body`.
 There is no buffered transport completion path beside the streaming path and no second registry, callback model, or data channel.
 
 ## Public contract
@@ -100,15 +100,15 @@ A new demand can reenter a body callback or arrive on another thread before that
 Normal completion follows all body publications; cancellation, timeout, and errors may interrupt delivery.
 Terminal operations never start further reads or resume native transfer in response to late demand.
 
-The shared state is mutex-protected but never invokes a platform operation, application callback, or coroutine continuation while holding its lock.
-Transport callbacks retain only a weak state reference.
-The state keeps the transport and operation alive through EOF, timeout, error, or cancellation.
+`HttpOperation` protects its shared data with a mutex and invokes platform operations, application callbacks, and coroutine continuations after releasing it.
+Transport callbacks hold a weak reference to `HttpOperation`.
+`HttpOperation` keeps the transport and its native request alive through EOF, timeout, error, or cancellation.
 Body data or completion received before final response metadata terminates the operation with a transport error.
 Late and duplicate callbacks are ignored.
 
 Calling `ReadAsync()` reserves the single stream-operation slot synchronously before returning its lazy Task.
 Destroying an unstarted read Task releases that reservation without canceling the response; canceling a suspended body read cancels the complete HTTP operation.
-The shared stream state owns the single-operation reservation; the HTTP read guard only protects transport cancellation while a read is in flight.
+The asynchronous stream backend owns the single-operation reservation. The HTTP read guard handles transport cancellation while a read is in flight.
 During CopyToAsync(), the input reservation also requests source cancellation if the task is destroyed while waiting for output. Discarding an unstarted copy releases both reservations without canceling either endpoint.
 EOF is cached and subsequent reads return empty `Bytes`; a failed stream cannot be reused.
 Destroying an unfinished `HttpResponseStream` reaches the same idempotent platform cancellation path.
@@ -124,7 +124,7 @@ It publishes final metadata from `HEADERS_AVAILABLE`, performs one `WinHttpReadD
 Its thread-pool deadline covers the whole stream.
 WinHTTP handles redirects and optional gzip or deflate decoding, and download totals are omitted when decoding makes content length unreliable.
 
-Linux uses one libsoup 3 session on its private GLib network thread.
+`LinuxHttpWorker` owns one libsoup 3 session on its private GLib network thread.
 It opens responses with `soup_session_send_async` and performs one `GInputStream` read per demand.
 The GLib deadline and `GCancellable` remain active while a stream is idle.
 The distribution-provided libsoup and GLib dependencies remain system packages.

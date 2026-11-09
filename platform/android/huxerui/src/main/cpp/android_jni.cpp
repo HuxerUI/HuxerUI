@@ -792,7 +792,7 @@ private:
   jobject cancellation_ = nullptr;
 };
 
-struct JavaInstanceState {
+struct JavaPlatformInstanceBridge {
   std::shared_ptr<JavaBridgeSupport> bridge;
   jobject instance = nullptr;
   jobject emitter = nullptr;
@@ -800,7 +800,7 @@ struct JavaInstanceState {
   jmethodID dispose = nullptr;
   bool disposed = false;
 
-  ~JavaInstanceState() {
+  ~JavaPlatformInstanceBridge() {
     Dispose();
   }
 
@@ -854,7 +854,7 @@ struct JavaInstanceState {
 };
 
 void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
-                     const std::shared_ptr<JavaInstanceState>& instance) {
+                     const std::shared_ptr<JavaPlatformInstanceBridge>& instance) {
   endpoint.Connect({
       .invoke =
           [instance](std::string method, PlatformPayload arguments,
@@ -867,9 +867,9 @@ void ConnectInstance(const huxerui::detail::PlatformChannelEndpoint& endpoint,
 
 } // namespace
 
-class JavaPlatformModuleFactoryState final {
+class PreparedJavaPlatformModuleFactory final {
 public:
-  template <class Host> JavaPlatformModuleFactoryState(Host& host, std::string class_name) {
+  template <class Host> PreparedJavaPlatformModuleFactory(Host& host, std::string class_name) {
     constexpr bool window = std::is_same_v<Host, UiWindow>;
     const PlatformEnv env = GetPlatformEnv(host);
     bridge = std::make_shared<JavaBridgeSupport>(host, env.jni, env.context);
@@ -895,7 +895,7 @@ public:
     }
   }
 
-  ~JavaPlatformModuleFactoryState() {
+  ~PreparedJavaPlatformModuleFactory() {
     DeleteGlobalReference(bridge->VirtualMachine(), factory);
   }
 
@@ -904,9 +904,9 @@ public:
   jmethodID create = nullptr;
 };
 
-class JavaPlatformViewFactoryState final {
+class PreparedJavaPlatformViewFactory final {
 public:
-  JavaPlatformViewFactoryState(UiWindow& ui_window, std::string class_name) {
+  PreparedJavaPlatformViewFactory(UiWindow& ui_window, std::string class_name) {
     const PlatformEnv env = GetPlatformEnv(ui_window);
     bridge = std::make_shared<JavaBridgeSupport>(ui_window, env.jni, env.context);
     LocalRef<jclass> implementation_class(env.jni, ResolveClass(env.jni, env.context, class_name));
@@ -927,7 +927,7 @@ public:
     }
   }
 
-  ~JavaPlatformViewFactoryState() {
+  ~PreparedJavaPlatformViewFactory() {
     DeleteGlobalReference(bridge->VirtualMachine(), factory);
   }
 
@@ -939,31 +939,31 @@ public:
 class JavaPlatformViewInstance final {
 public:
   ~JavaPlatformViewInstance() {
-    if (!state) {
+    if (!instance_bridge) {
       return;
     }
-    JavaEnvironment attached(state->bridge->VirtualMachine());
+    JavaEnvironment attached(instance_bridge->bridge->VirtualMachine());
     if (JNIEnv* environment = attached.Get()) {
       channel.Close();
-      state->Dispose(environment);
+      instance_bridge->Dispose(environment);
       if (view != nullptr) {
         environment->DeleteGlobalRef(view);
       }
     }
   }
 
-  std::shared_ptr<JavaInstanceState> state;
+  std::shared_ptr<JavaPlatformInstanceBridge> instance_bridge;
   PlatformChannel channel;
   jobject view = nullptr;
   jmethodID update = nullptr;
 };
 
-std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(Runtime& runtime,
-                                                                                 std::string class_name) {
-  return std::make_shared<JavaPlatformModuleFactoryState>(runtime, std::move(class_name));
+std::shared_ptr<PreparedJavaPlatformModuleFactory>
+PrepareJavaPlatformModuleFactory(Runtime& runtime, std::string class_name) {
+  return std::make_shared<PreparedJavaPlatformModuleFactory>(runtime, std::move(class_name));
 }
 
-PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModuleFactoryState>& factory,
+PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<PreparedJavaPlatformModuleFactory>& factory,
                                          PlatformPayload options, jobject window) {
   if (!factory) {
     throw std::invalid_argument("HuxerUI Android Java PlatformModule factory must not be empty");
@@ -973,8 +973,8 @@ PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModul
   if (environment == nullptr) {
     throw std::runtime_error("HuxerUI could not access JNI while creating an Android PlatformModule");
   }
-  auto state = std::make_shared<JavaInstanceState>();
-  state->bridge = factory->bridge;
+  auto instance_bridge = std::make_shared<JavaPlatformInstanceBridge>();
+  instance_bridge->bridge = factory->bridge;
   const huxerui::detail::PlatformChannelEndpoint endpoint = factory->bridge->NewEndpoint();
   LocalRef<jobject> emitter(environment, factory->bridge->NewEmitter(environment, endpoint.Events()));
   LocalRef<jobject> java_options = PlatformPayloadToJava(environment, options);
@@ -987,35 +987,35 @@ PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModul
     throw std::logic_error("HuxerUI Android PlatformModule factory failed while creating");
   }
   LocalRef<jclass> instance_class(environment, environment->GetObjectClass(instance.Get()));
-  state->invoke = environment->GetMethodID(
+  instance_bridge->invoke = environment->GetMethodID(
       instance_class.Get(), "invoke",
       "(Ljava/lang/String;Lorg/huxerui/PlatformPayload;Lorg/huxerui/HuxerUIPlatformChannel$Result;)"
       "Lorg/huxerui/HuxerUIPlatformChannel$Cancellation;");
-  state->dispose = environment->GetMethodID(instance_class.Get(), "dispose", "()V");
-  state->instance = environment->NewGlobalRef(instance.Get());
-  state->emitter = environment->NewGlobalRef(emitter.Get());
-  if (state->invoke == nullptr || state->dispose == nullptr || state->instance == nullptr ||
-      state->emitter == nullptr || environment->ExceptionCheck()) {
+  instance_bridge->dispose = environment->GetMethodID(instance_class.Get(), "dispose", "()V");
+  instance_bridge->instance = environment->NewGlobalRef(instance.Get());
+  instance_bridge->emitter = environment->NewGlobalRef(emitter.Get());
+  if (instance_bridge->invoke == nullptr || instance_bridge->dispose == nullptr ||
+      instance_bridge->instance == nullptr || instance_bridge->emitter == nullptr || environment->ExceptionCheck()) {
     ClearException(environment);
     factory->bridge->CloseEmitter(environment, emitter.Get());
     throw std::logic_error("HuxerUI Android PlatformModule instance methods do not match the SDK");
   }
-  ConnectInstance(endpoint, state);
+  ConnectInstance(endpoint, instance_bridge);
   return endpoint.Channel();
 }
 
 PlatformChannel CreateJavaWindowPlatformModule(UiWindow& ui_window, std::string class_name, PlatformPayload options) {
-  auto factory = std::make_shared<JavaPlatformModuleFactoryState>(ui_window, std::move(class_name));
+  auto factory = std::make_shared<PreparedJavaPlatformModuleFactory>(ui_window, std::move(class_name));
   return CreateJavaPlatformModule(factory, std::move(options), huxerui::detail::AndroidWindowView(ui_window));
 }
 
-std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(UiWindow& ui_window,
-                                                                             std::string class_name) {
-  return std::make_shared<JavaPlatformViewFactoryState>(ui_window, std::move(class_name));
+std::shared_ptr<PreparedJavaPlatformViewFactory>
+PrepareJavaPlatformViewFactory(UiWindow& ui_window, std::string class_name) {
+  return std::make_shared<PreparedJavaPlatformViewFactory>(ui_window, std::move(class_name));
 }
 
 std::shared_ptr<JavaPlatformViewInstance>
-CreateJavaPlatformView(const std::shared_ptr<JavaPlatformViewFactoryState>& factory, PlatformPayload properties,
+CreateJavaPlatformView(const std::shared_ptr<PreparedJavaPlatformViewFactory>& factory, PlatformPayload properties,
                        PlatformEventEmitter events, bool channel_required) {
   if (!factory) {
     throw std::invalid_argument("HuxerUI Android Java PlatformView factory must not be empty");
@@ -1026,8 +1026,8 @@ CreateJavaPlatformView(const std::shared_ptr<JavaPlatformViewFactoryState>& fact
     throw std::runtime_error("HuxerUI could not access JNI while creating an Android PlatformView");
   }
   auto instance = std::make_shared<JavaPlatformViewInstance>();
-  instance->state = std::make_shared<JavaInstanceState>();
-  instance->state->bridge = factory->bridge;
+  instance->instance_bridge = std::make_shared<JavaPlatformInstanceBridge>();
+  instance->instance_bridge->bridge = factory->bridge;
   const huxerui::detail::PlatformChannelEndpoint endpoint =
       channel_required ? factory->bridge->NewEndpoint() : huxerui::detail::PlatformChannelEndpoint{};
   LocalRef<jobject> emitter(environment, factory->bridge->NewEmitter(environment, std::move(events)));
@@ -1044,30 +1044,31 @@ CreateJavaPlatformView(const std::shared_ptr<JavaPlatformViewFactoryState>& fact
   const jmethodID get_view = environment->GetMethodID(instance_class.Get(), "getView", "()Landroid/view/View;");
   instance->update = environment->GetMethodID(instance_class.Get(), "update", "(Lorg/huxerui/PlatformPayload;)V");
   if (channel_required) {
-    instance->state->invoke = environment->GetMethodID(
+    instance->instance_bridge->invoke = environment->GetMethodID(
         instance_class.Get(), "invoke",
         "(Ljava/lang/String;Lorg/huxerui/PlatformPayload;Lorg/huxerui/HuxerUIPlatformChannel$Result;)"
         "Lorg/huxerui/HuxerUIPlatformChannel$Cancellation;");
   }
-  instance->state->dispose = environment->GetMethodID(instance_class.Get(), "dispose", "()V");
-  if (get_view == nullptr || instance->update == nullptr || (channel_required && instance->state->invoke == nullptr) ||
-      instance->state->dispose == nullptr || environment->ExceptionCheck()) {
+  instance->instance_bridge->dispose = environment->GetMethodID(instance_class.Get(), "dispose", "()V");
+  if (get_view == nullptr || instance->update == nullptr ||
+      (channel_required && instance->instance_bridge->invoke == nullptr) ||
+      instance->instance_bridge->dispose == nullptr || environment->ExceptionCheck()) {
     ClearException(environment);
     factory->bridge->CloseEmitter(environment, emitter.Get());
     throw std::logic_error("HuxerUI Android PlatformView instance methods do not match the SDK");
   }
   LocalRef<jobject> view(environment, environment->CallObjectMethod(java_instance.Get(), get_view));
-  instance->state->instance = environment->NewGlobalRef(java_instance.Get());
-  instance->state->emitter = environment->NewGlobalRef(emitter.Get());
+  instance->instance_bridge->instance = environment->NewGlobalRef(java_instance.Get());
+  instance->instance_bridge->emitter = environment->NewGlobalRef(emitter.Get());
   instance->view = environment->NewGlobalRef(view.Get());
-  if (!view || instance->state->instance == nullptr || instance->state->emitter == nullptr ||
+  if (!view || instance->instance_bridge->instance == nullptr || instance->instance_bridge->emitter == nullptr ||
       instance->view == nullptr || environment->ExceptionCheck()) {
     ClearException(environment);
     factory->bridge->CloseEmitter(environment, emitter.Get());
     throw std::logic_error("HuxerUI Android PlatformView instance methods do not match the SDK");
   }
   if (channel_required) {
-    ConnectInstance(endpoint, instance->state);
+    ConnectInstance(endpoint, instance->instance_bridge);
     instance->channel = endpoint.Channel();
   }
   return instance;
@@ -1082,11 +1083,11 @@ jobject GetJavaPlatformView(JNIEnv* environment, const std::shared_ptr<JavaPlatf
 
 void UpdateJavaPlatformView(JNIEnv* environment, const std::shared_ptr<JavaPlatformViewInstance>& instance,
                             PlatformPayload properties) {
-  if (!instance || instance->state->disposed) {
+  if (!instance || instance->instance_bridge->disposed) {
     throw std::logic_error("HuxerUI Android PlatformView instance is disposed");
   }
   LocalRef<jobject> java_properties = PlatformPayloadToJava(environment, properties);
-  environment->CallVoidMethod(instance->state->instance, instance->update, java_properties.Get());
+  environment->CallVoidMethod(instance->instance_bridge->instance, instance->update, java_properties.Get());
   if (environment->ExceptionCheck()) {
     ClearException(environment);
     throw std::logic_error("HuxerUI Android PlatformView update raised a Java exception");
@@ -1098,7 +1099,7 @@ void DisposeJavaPlatformView(JNIEnv* environment, const std::shared_ptr<JavaPlat
     return;
   }
   instance->channel.Close();
-  instance->state->Dispose(environment);
+  instance->instance_bridge->Dispose(environment);
   if (instance->view != nullptr) {
     environment->DeleteGlobalRef(instance->view);
     instance->view = nullptr;
@@ -1106,7 +1107,7 @@ void DisposeJavaPlatformView(JNIEnv* environment, const std::shared_ptr<JavaPlat
 }
 
 PlatformChannel GetJavaPlatformViewChannel(const std::shared_ptr<JavaPlatformViewInstance>& instance) {
-  if (!instance || instance->state->disposed) {
+  if (!instance || instance->instance_bridge->disposed) {
     return {};
   }
   return instance->channel;

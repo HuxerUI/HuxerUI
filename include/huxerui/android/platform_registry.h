@@ -89,17 +89,17 @@ template <class Properties, class Controller = void> struct JavaPlatformViewFact
 
 namespace detail {
 
-class JavaPlatformModuleFactoryState;
-class JavaPlatformViewFactoryState;
+class PreparedJavaPlatformModuleFactory;
+class PreparedJavaPlatformViewFactory;
 class JavaPlatformViewInstance;
 
 /// Prepares a Java module factory against the application host without requiring a HuxerUIView.
 /// @param runtime Original Android Runtime, accessed on its application thread.
 /// @param class_name Fully qualified public Java factory class with a public no-argument constructor.
-/// @return Retained factory state bound to the original application's channel endpoint.
-std::shared_ptr<JavaPlatformModuleFactoryState> PrepareJavaPlatformModuleFactory(Runtime& runtime,
-                                                                                 std::string class_name);
-PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<JavaPlatformModuleFactoryState>& factory,
+/// @return Prepared factory bound to the original application's channel endpoint.
+std::shared_ptr<PreparedJavaPlatformModuleFactory>
+PrepareJavaPlatformModuleFactory(Runtime& runtime, std::string class_name);
+PlatformChannel CreateJavaPlatformModule(const std::shared_ptr<PreparedJavaPlatformModuleFactory>& factory,
                                          PlatformPayload options, jobject window = nullptr);
 /// Creates a fresh Java WindowFactory instance and binds its channel to this invocation's original UiWindow.
 PlatformChannel CreateJavaWindowPlatformModule(UiWindow& ui_window, std::string class_name, PlatformPayload options);
@@ -114,10 +114,10 @@ struct AndroidViewFactory {
   std::function<void(JNIEnv*, const std::shared_ptr<void>&, const PlatformValue&)> disconnect;
 };
 
-std::shared_ptr<JavaPlatformViewFactoryState> PrepareJavaPlatformViewFactory(UiWindow& ui_window,
-                                                                             std::string class_name);
+std::shared_ptr<PreparedJavaPlatformViewFactory>
+PrepareJavaPlatformViewFactory(UiWindow& ui_window, std::string class_name);
 std::shared_ptr<JavaPlatformViewInstance>
-CreateJavaPlatformView(const std::shared_ptr<JavaPlatformViewFactoryState>& factory, PlatformPayload properties,
+CreateJavaPlatformView(const std::shared_ptr<PreparedJavaPlatformViewFactory>& factory, PlatformPayload properties,
                        PlatformEventEmitter events, bool channel_required);
 jobject GetJavaPlatformView(JNIEnv* environment, const std::shared_ptr<JavaPlatformViewInstance>& instance);
 void UpdateJavaPlatformView(JNIEnv* environment, const std::shared_ptr<JavaPlatformViewInstance>& instance,
@@ -311,10 +311,10 @@ template <class Module> struct JavaPlatformModuleFactory<Module, void> {
     if (!create) {
       throw std::logic_error("HuxerUI Android Java PlatformModule factory is incomplete");
     }
-    if (!state_) {
-      state_ = detail::PrepareJavaPlatformModuleFactory(runtime, class_name);
+    if (!prepared_factory_) {
+      prepared_factory_ = detail::PrepareJavaPlatformModuleFactory(runtime, class_name);
     }
-    PlatformChannel channel = detail::CreateJavaPlatformModule(state_, {});
+    PlatformChannel channel = detail::CreateJavaPlatformModule(prepared_factory_, {});
     try {
       return create(channel);
     } catch (...) {
@@ -324,7 +324,7 @@ template <class Module> struct JavaPlatformModuleFactory<Module, void> {
   }
 
 private:
-  std::shared_ptr<detail::JavaPlatformModuleFactoryState> state_;
+  std::shared_ptr<detail::PreparedJavaPlatformModuleFactory> prepared_factory_;
 };
 
 /// Java-backed PlatformModule factory with payload-encodable construction Options.
@@ -343,10 +343,11 @@ template <class Module, class Options> struct JavaPlatformModuleFactory {
     if (!create) {
       throw std::logic_error("HuxerUI Android Java PlatformModule factory is incomplete");
     }
-    if (!state_) {
-      state_ = detail::PrepareJavaPlatformModuleFactory(runtime, class_name);
+    if (!prepared_factory_) {
+      prepared_factory_ = detail::PrepareJavaPlatformModuleFactory(runtime, class_name);
     }
-    PlatformChannel channel = detail::CreateJavaPlatformModule(state_, huxerui::detail::EncodePlatformValue(options));
+    PlatformChannel channel =
+        detail::CreateJavaPlatformModule(prepared_factory_, huxerui::detail::EncodePlatformValue(options));
     try {
       return create(channel);
     } catch (...) {
@@ -356,7 +357,7 @@ template <class Module, class Options> struct JavaPlatformModuleFactory {
   }
 
 private:
-  std::shared_ptr<detail::JavaPlatformModuleFactoryState> state_;
+  std::shared_ptr<detail::PreparedJavaPlatformModuleFactory> prepared_factory_;
 };
 
 /// Registers a Java HuxerUIPlatformModule.WindowFactory through the existing application factory catalog.

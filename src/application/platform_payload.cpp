@@ -259,17 +259,17 @@ private:
       WriteTag(PayloadTag::FileReference);
       WriteUnsigned(file_reference_capability);
       const FileReference& reference = payload.AsFileReference();
-      const std::shared_ptr<detail::FileReferenceState> state = detail::FileReferenceState::Of(reference);
-      const auto found = std::ranges::find(file_reference_states_, state);
-      const std::size_t slot = found == file_reference_states_.end()
-                                   ? file_reference_states_.size()
-                                   : static_cast<std::size_t>(found - file_reference_states_.begin());
-      if (found == file_reference_states_.end()) {
+      const std::shared_ptr<detail::FileReferenceBackend> backend = detail::FileReferenceBackend::Of(reference);
+      const auto found = std::ranges::find(file_reference_backends_, backend);
+      const std::size_t slot = found == file_reference_backends_.end()
+                                   ? file_reference_backends_.size()
+                                   : static_cast<std::size_t>(found - file_reference_backends_.begin());
+      if (found == file_reference_backends_.end()) {
         if (external_textures_.size() + buffer_references_.size() + slot >= max_capability_slots ||
             slot > std::numeric_limits<std::uint32_t>::max()) {
           throw std::invalid_argument("HuxerUI PlatformPayload contains too many retained capabilities");
         }
-        file_reference_states_.push_back(state);
+        file_reference_backends_.push_back(backend);
         file_references_.push_back(reference);
       }
       WriteUnsigned(static_cast<std::uint32_t>(slot));
@@ -304,7 +304,7 @@ private:
   std::vector<std::shared_ptr<ExternalTexture>> external_textures_;
   std::vector<FileReference> file_references_;
   std::vector<BufferReference> buffer_references_;
-  std::vector<std::shared_ptr<detail::FileReferenceState>> file_reference_states_;
+  std::vector<std::shared_ptr<detail::FileReferenceBackend>> file_reference_backends_;
 };
 
 class EnvelopeReader final {
@@ -331,14 +331,14 @@ public:
         throw std::invalid_argument("HuxerUI PlatformPayload envelope contains a duplicate external texture");
       }
     }
-    std::unordered_set<const detail::FileReferenceState*> references;
+    std::unordered_set<const detail::FileReferenceBackend*> references;
     references.reserve(file_references_.size());
     for (const FileReference& reference : file_references_) {
-      const std::shared_ptr<detail::FileReferenceState> state = detail::FileReferenceState::Of(reference);
-      if (!state) {
+      const std::shared_ptr<detail::FileReferenceBackend> backend = detail::FileReferenceBackend::Of(reference);
+      if (!backend) {
         throw std::invalid_argument("HuxerUI PlatformPayload envelope contains an empty file reference");
       }
-      if (!references.insert(state.get()).second) {
+      if (!references.insert(backend.get()).second) {
         throw std::invalid_argument("HuxerUI PlatformPayload envelope contains a duplicate file reference");
       }
     }
@@ -553,7 +553,7 @@ PlatformPayload::PlatformPayload(std::shared_ptr<ExternalTexture> value) {
 }
 
 PlatformPayload::PlatformPayload(FileReference value) {
-  if (!detail::FileReferenceState::Of(value)) {
+  if (!detail::FileReferenceBackend::Of(value)) {
     throw std::invalid_argument("HuxerUI PlatformPayload file reference must not be empty");
   }
   data_ = std::make_shared<Data>(std::move(value));
@@ -627,8 +627,8 @@ bool PlatformPayload::operator==(const PlatformPayload& other) const {
         using Value = std::remove_cvref_t<decltype(value)>;
         if constexpr (std::is_same_v<Value, FileReference>) {
           // Metadata is a snapshot and can differ between wrappers for the same retained capability.
-          return detail::FileReferenceState::Of(value) ==
-                 detail::FileReferenceState::Of(std::get<FileReference>(other.data_->value));
+          return detail::FileReferenceBackend::Of(value) ==
+                 detail::FileReferenceBackend::Of(std::get<FileReference>(other.data_->value));
         } else {
           return value == std::get<Value>(other.data_->value);
         }

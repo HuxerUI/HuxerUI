@@ -119,8 +119,8 @@ GtkInputHints InputHints(const TextInputConfiguration& configuration) noexcept {
 
 } // namespace
 
-struct LinuxTextInput::State {
-  State() : context(gtk_im_multicontext_new()) {
+struct LinuxTextInput::Impl {
+  Impl() : context(gtk_im_multicontext_new()) {
     g_signal_connect(context, "preedit-start", G_CALLBACK(PreeditStart), this);
     g_signal_connect(context, "preedit-changed", G_CALLBACK(PreeditChanged), this);
     g_signal_connect(context, "preedit-end", G_CALLBACK(PreeditEnd), this);
@@ -129,7 +129,7 @@ struct LinuxTextInput::State {
     g_signal_connect(context, "delete-surrounding", G_CALLBACK(DeleteSurrounding), this);
   }
 
-  ~State() {
+  ~Impl() {
     g_object_unref(context);
   }
 
@@ -190,7 +190,7 @@ struct LinuxTextInput::State {
   }
 
   static void PreeditStart(GtkIMContext*, gpointer user_data) {
-    auto& self = *static_cast<State*>(user_data);
+    auto& self = *static_cast<Impl*>(user_data);
     if (!self.IsActive() || self.composing || self.configuration.secure) {
       return;
     }
@@ -201,7 +201,7 @@ struct LinuxTextInput::State {
   }
 
   static void PreeditChanged(GtkIMContext* context, gpointer user_data) {
-    auto& self = *static_cast<State*>(user_data);
+    auto& self = *static_cast<Impl*>(user_data);
     if (!self.IsActive() || self.configuration.secure) {
       return;
     }
@@ -233,7 +233,7 @@ struct LinuxTextInput::State {
   }
 
   static void PreeditEnd(GtkIMContext*, gpointer user_data) {
-    auto& self = *static_cast<State*>(user_data);
+    auto& self = *static_cast<Impl*>(user_data);
     if (!self.IsActive() || !self.composing) {
       return;
     }
@@ -244,7 +244,7 @@ struct LinuxTextInput::State {
   }
 
   static void Commit(GtkIMContext*, const char* text, gpointer user_data) {
-    auto& self = *static_cast<State*>(user_data);
+    auto& self = *static_cast<Impl*>(user_data);
     if (!self.IsActive() || text == nullptr) {
       return;
     }
@@ -256,7 +256,7 @@ struct LinuxTextInput::State {
   }
 
   static gboolean RetrieveSurrounding(GtkIMContext*, gpointer user_data) {
-    auto& self = *static_cast<State*>(user_data);
+    auto& self = *static_cast<Impl*>(user_data);
     if (!self.IsActive() || self.configuration.secure) {
       return FALSE;
     }
@@ -265,7 +265,7 @@ struct LinuxTextInput::State {
   }
 
   static gboolean DeleteSurrounding(GtkIMContext*, int offset, int characters, gpointer user_data) {
-    auto& self = *static_cast<State*>(user_data);
+    auto& self = *static_cast<Impl*>(user_data);
     const std::optional<LinuxDeleteSurroundingPlan> plan = ResolveLinuxDeleteSurrounding(offset, characters);
     if (!self.IsActive() || !plan.has_value()) {
       return FALSE;
@@ -289,61 +289,61 @@ struct LinuxTextInput::State {
   bool composing = false;
 };
 
-LinuxTextInput::LinuxTextInput() : state_(std::make_unique<State>()) {}
+LinuxTextInput::LinuxTextInput() : impl_(std::make_unique<Impl>()) {}
 
 LinuxTextInput::~LinuxTextInput() = default;
 
 void LinuxTextInput::SetUiWindow(UiWindow* ui_window) noexcept {
-  state_->ui_window = ui_window;
+  impl_->ui_window = ui_window;
 }
 
 void LinuxTextInput::SetClientWidget(GtkWidget* widget) {
-  if (state_->widget == widget) {
+  if (impl_->widget == widget) {
     return;
   }
-  if (state_->widget != nullptr) {
-    gtk_im_context_focus_out(state_->context);
-    gtk_im_context_set_client_widget(state_->context, nullptr);
+  if (impl_->widget != nullptr) {
+    gtk_im_context_focus_out(impl_->context);
+    gtk_im_context_set_client_widget(impl_->context, nullptr);
   }
-  state_->widget = widget;
-  gtk_im_context_set_client_widget(state_->context, widget);
+  impl_->widget = widget;
+  gtk_im_context_set_client_widget(impl_->context, widget);
 }
 
 void LinuxTextInput::SetFocus(bool focused) {
-  if (state_->focused == focused) {
+  if (impl_->focused == focused) {
     return;
   }
-  state_->focused = focused;
-  if (focused && state_->IsActive()) {
-    gtk_im_context_focus_in(state_->context);
+  impl_->focused = focused;
+  if (focused && impl_->IsActive()) {
+    gtk_im_context_focus_in(impl_->context);
   } else {
-    gtk_im_context_focus_out(state_->context);
+    gtk_im_context_focus_out(impl_->context);
   }
 }
 
 void LinuxTextInput::Reset() noexcept {
-  if (state_->context != nullptr && state_->widget != nullptr) {
-    gtk_im_context_reset(state_->context);
-    gtk_im_context_focus_out(state_->context);
-    gtk_im_context_set_client_widget(state_->context, nullptr);
+  if (impl_->context != nullptr && impl_->widget != nullptr) {
+    gtk_im_context_reset(impl_->context);
+    gtk_im_context_focus_out(impl_->context);
+    gtk_im_context_set_client_widget(impl_->context, nullptr);
   }
-  state_->widget = nullptr;
-  state_->ui_window = nullptr;
-  state_->session_id = 0;
-  state_->focused = false;
-  state_->composing = false;
+  impl_->widget = nullptr;
+  impl_->ui_window = nullptr;
+  impl_->session_id = 0;
+  impl_->focused = false;
+  impl_->composing = false;
 }
 
 bool LinuxTextInput::Active() const noexcept {
-  return state_->IsActive();
+  return impl_->IsActive();
 }
 
 bool LinuxTextInput::Composing() const noexcept {
-  return state_->composing;
+  return impl_->composing;
 }
 
 bool LinuxTextInput::FilterKeyEvent(GdkEvent* event) {
-  return state_->IsActive() && event != nullptr && gtk_im_context_filter_keypress(state_->context, event) != FALSE;
+  return impl_->IsActive() && event != nullptr && gtk_im_context_filter_keypress(impl_->context, event) != FALSE;
 }
 
 void LinuxTextInput::Start(
@@ -352,27 +352,27 @@ void LinuxTextInput::Start(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  state_->session_id = session_id;
-  state_->configuration = configuration;
-  state_->state = state;
-  state_->geometry = geometry;
-  state_->composing = state.composition.has_value();
-  state_->UpdateContext();
-  if (state_->focused && state_->IsActive()) {
-    gtk_im_context_focus_in(state_->context);
+  impl_->session_id = session_id;
+  impl_->configuration = configuration;
+  impl_->state = state;
+  impl_->geometry = geometry;
+  impl_->composing = state.composition.has_value();
+  impl_->UpdateContext();
+  if (impl_->focused && impl_->IsActive()) {
+    gtk_im_context_focus_in(impl_->context);
   }
 }
 
 void LinuxTextInput::Update(
     TextInputSessionId session_id, const TextInputState& state, const TextInputGeometry& geometry
 ) {
-  if (session_id != state_->session_id) {
+  if (session_id != impl_->session_id) {
     return;
   }
-  state_->state = state;
-  state_->geometry = geometry;
-  state_->composing = state.composition.has_value();
-  state_->UpdateContext();
+  impl_->state = state;
+  impl_->geometry = geometry;
+  impl_->composing = state.composition.has_value();
+  impl_->UpdateContext();
 }
 
 void LinuxTextInput::Restart(
@@ -381,22 +381,22 @@ void LinuxTextInput::Restart(
     const TextInputState& state,
     const TextInputGeometry& geometry
 ) {
-  if (session_id != state_->session_id) {
+  if (session_id != impl_->session_id) {
     return;
   }
-  gtk_im_context_reset(state_->context);
+  gtk_im_context_reset(impl_->context);
   Start(session_id, configuration, state, geometry);
 }
 
 void LinuxTextInput::Stop(TextInputSessionId session_id) {
-  if (session_id != state_->session_id) {
+  if (session_id != impl_->session_id) {
     return;
   }
-  gtk_im_context_reset(state_->context);
-  gtk_im_context_focus_out(state_->context);
-  state_->session_id = 0;
-  state_->composing = false;
-  state_->configuration = {};
+  gtk_im_context_reset(impl_->context);
+  gtk_im_context_focus_out(impl_->context);
+  impl_->session_id = 0;
+  impl_->composing = false;
+  impl_->configuration = {};
 }
 
 } // namespace huxerui::detail

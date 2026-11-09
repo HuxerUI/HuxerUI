@@ -677,7 +677,7 @@ Dialog Dismiss follows `dismiss_on_cancel`; BottomSheet also exposes Dismiss whe
 Menu separators are decorative and do not count as collection items.
 Each real item node owns its label, zero-based collection index, enabled state, optional checked state, and optional submenu expansion state, and excludes its decorative icon, checkmark, label Text, and arrow descendants.
 Not calling `Checked()` means that checked state is unsupported, while `Checked(false)` and `Checked(true)` publish Unchecked and Checked respectively.
-Submenu items advertise Expand or Collapse through a retained action extension that uses the existing MenuChainState and anchored-layer path.
+Submenu items advertise Expand or Collapse through a retained action extension that uses the `MenuChainSession` and anchored-layer path.
 
 Toast applies `SemanticLiveRegion::Polite` directly to its message Text.
 It does not create a Toast role, focus target, action, or announcement service.

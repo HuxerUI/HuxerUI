@@ -684,9 +684,9 @@ val ReferenceRequest(std::string kind) {
 
 FileReference MakeWebFileReference(const val& reference);
 
-class WebInputStreamState final : public AsyncInputStreamState {
+class WebInputStreamBackend final : public AsyncInputStreamBackend {
 public:
-  explicit WebInputStreamState(val file) : file_(std::move(file)) {}
+  explicit WebInputStreamBackend(val file) : file_(std::move(file)) {}
 
   Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) override {
     constexpr double maximum_safe_integer = 9007199254740991.0;
@@ -720,10 +720,10 @@ private:
   double offset_ = 0;
 };
 
-class WebOutputStreamState final : public AsyncOutputStreamState {
+class WebOutputStreamBackend final : public AsyncOutputStreamBackend {
 public:
-  explicit WebOutputStreamState(val writable) : writable_(std::move(writable)) {}
-  ~WebOutputStreamState() override { Abort(); }
+  explicit WebOutputStreamBackend(val writable) : writable_(std::move(writable)) {}
+  ~WebOutputStreamBackend() override { Abort(); }
 
   Task<IoResult<void>> WriteAsync(Bytes data) override {
     auto request = ReferenceRequest("writeChunk");
@@ -777,9 +777,9 @@ private:
   val writable_;
 };
 
-class WebFileReferenceState final : public FileReferenceState {
+class WebFileReferenceBackend final : public FileReferenceBackend {
 public:
-  explicit WebFileReferenceState(val source) : source_(std::move(source)) {}
+  explicit WebFileReferenceBackend(val source) : source_(std::move(source)) {}
 
   std::string EntryKey() const override {
     return source_["entryKey"].as<std::string>();
@@ -804,16 +804,16 @@ public:
   }
 
   std::function<void()> OpenRead(FileReferenceInputStreamCompletion completion) override {
-    return RunWebReference<std::shared_ptr<AsyncInputStreamState>>(
+    return RunWebReference<std::shared_ptr<AsyncInputStreamBackend>>(
         source_, ReferenceRequest("openRead"), std::move(completion), [](const val& file) {
-          return std::make_shared<WebInputStreamState>(file);
+          return std::make_shared<WebInputStreamBackend>(file);
         });
   }
 
   std::function<void()> OpenWrite(FileReferenceOutputStreamCompletion completion) override {
-    return RunWebReference<std::shared_ptr<AsyncOutputStreamState>>(
+    return RunWebReference<std::shared_ptr<AsyncOutputStreamBackend>>(
         source_, ReferenceRequest("openWrite"), std::move(completion), [](const val& writable) {
-          return std::make_shared<WebOutputStreamState>(writable);
+          return std::make_shared<WebOutputStreamBackend>(writable);
         });
   }
 
@@ -908,7 +908,7 @@ private:
       value.set("path", file->Path());
       return value;
     }
-    if (auto reference = std::dynamic_pointer_cast<WebFileReferenceState>(std::get<1>(source))) {
+    if (auto reference = std::dynamic_pointer_cast<WebFileReferenceBackend>(std::get<1>(source))) {
       return reference->source_;
     }
     return val::undefined();
@@ -947,7 +947,7 @@ FileReference MakeWebFileReference(const val& reference) {
   if (source["entryKey"].as<std::string>().empty()) {
     source.set("entryKey", "web:" + std::to_string(++next_entry_key));
   }
-  return MakeFileReference(std::move(metadata), std::make_shared<WebFileReferenceState>(std::move(source)));
+  return MakeFileReference(std::move(metadata), std::make_shared<WebFileReferenceBackend>(std::move(source)));
 }
 
 FileReference MakeWebFileReferenceFromFile(const val& file) {
@@ -1098,12 +1098,13 @@ public:
 } // namespace
 
 WebFileReferenceProjection ProjectWebFileReference(const FileReference& reference) {
-  std::shared_ptr<FileReferenceState> state = FileReferenceState::Of(reference);
-  auto web_state = std::dynamic_pointer_cast<WebFileReferenceState>(state);
-  if (!web_state) {
+  std::shared_ptr<FileReferenceBackend> backend = FileReferenceBackend::Of(reference);
+  auto web_backend = std::dynamic_pointer_cast<WebFileReferenceBackend>(backend);
+  if (!web_backend) {
     throw std::invalid_argument("HuxerUI FileReference does not contain a Web file source");
   }
-  return {web_state->SourceValue(), reinterpret_cast<std::uintptr_t>(state.get()), reference.Type() == FileType::File};
+  return {web_backend->SourceValue(), reinterpret_cast<std::uintptr_t>(backend.get()),
+          reference.Type() == FileType::File};
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void

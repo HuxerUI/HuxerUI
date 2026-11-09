@@ -149,7 +149,7 @@ Platform thread initialization such as COM apartments, JNI attachment, or platfo
 
 Cancellation skips a queued callable and releases its owned inputs without searching or removing the small queue entry.
 A callable that already started may finish, but its value or exception is discarded and retired application code is not resumed.
-The queued or running operation state holds TaskExecution weakly and never retains Runtime, TaskScope, or mounted UI state.
+A queued or running `WorkerJob` holds TaskExecution weakly and never retains Runtime, TaskScope, or mounted UI state.
 
 WorkerSequence uses the same process-wide executor without reserving or pinning a worker thread.
 At most one callable belonging to a sequence is active; its completion or terminal cleanup promotes the next queued operation in submission order.
@@ -199,7 +199,7 @@ Task<Bytes> ReadAsync(std::shared_ptr<CallbackReader> reader) {
 
 `CallbackReader` and its request are extension-owned types in this example.
 The bridge owns the starter until completion or cancellation; the native operation must independently own anything it still needs after Task cancellation.
-Completion handles hold weak operation state, so retaining a late callback does not retain the starter or resurrect its coroutine.
+Completion handles hold a weak reference to `CallbackOperation`. The awaiting coroutine owns the operation through its awaiter.
 Submitted values discarded on a callback thread may also be destroyed on that thread.
 
 Completion can arrive on any thread, including inline inside the starter.
