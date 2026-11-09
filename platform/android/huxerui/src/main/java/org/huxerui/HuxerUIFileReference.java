@@ -225,9 +225,11 @@ public final class HuxerUIFileReference implements AutoCloseable {
         return new Operation(nativeHandle, Operation.OPEN_WRITE, null, false);
     }
 
-    Operation prepareOpenRandomAccess(long nativeHandle, boolean writing) {
+    Operation prepareOpenRandomAccess(long nativeHandle, boolean writing, boolean retainParcel) {
         int kind = writing ? Operation.OPEN_RANDOM_WRITE : Operation.OPEN_RANDOM_READ;
-        return new Operation(nativeHandle, kind, null, false);
+        Operation operation = new Operation(nativeHandle, kind, null, false);
+        operation.retainParcel = retainParcel;
+        return operation;
     }
 
     static Future<?> submit(Runnable operation) {
@@ -426,6 +428,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
         private Uri existingUri;
         private String name;
         private long transferred;
+        private boolean retainParcel;
         // Cancellation and worker completion share this gate because nativeComplete consumes a native
         // callback holder exactly once. A late worker must not call it again after cancellation.
         private final AtomicBoolean finished = new AtomicBoolean();
@@ -696,9 +699,9 @@ public final class HuxerUIFileReference implements AutoCloseable {
             boolean reliable = false;
             try {
                 reliable = descriptor.canDetectErrors();
-                if (reliable) {
-                    if (randomAccess) { throw new UnsupportedOperationException(); }
-                    // Keep the Java owner alive so the provider can exchange close and error status.
+                if (reliable && randomAccess) { throw new UnsupportedOperationException(); }
+                if (reliable || retainParcel) {
+                    // Retain the Java owner for close signaling or a borrowed fd's provider lifetime.
                     retained = finishDescriptor(descriptor.getFd(), descriptor);
                 } else {
                     int fd = descriptor.detachFd();

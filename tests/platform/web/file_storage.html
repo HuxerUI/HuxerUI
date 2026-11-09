@@ -1,0 +1,39 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>HuxerUI Web file storage regression</title>
+<div id="root" style="width: 320px; height: 200px"></div>
+<script type="module">
+  import createModule from "./huxerui_web_file_storage_test.js";
+
+  const key = "huxerui.file storage test";
+  const persistent = `/huxerui/${encodeURIComponent(key)}/data`;
+  const output = `${persistent}/output.bin`;
+  let phase = "module initialization";
+  try {
+    const module = await createModule({huxeruiStorageKey: key});
+    if (sessionStorage.getItem("wrote-output")) {
+      phase = "persistent read after reload";
+      if (!module.readPersistent(output)) throw new Error("async output bytes did not survive reload");
+      await fetch("/result", {method: "POST", body: "PASS"});
+    } else {
+      const checkRandomAccess = (stage) => {
+        phase = stage;
+        // The persistent-root prefix alone is insufficient. This sibling is on MEMFS.
+        const memory = `/huxerui/${encodeURIComponent(key)}-${stage}.bin`;
+        const error = module.checkRandomAccess(`${persistent}/${stage}.bin`, memory);
+        if (error) throw new Error(error);
+      };
+      checkRandomAccess("before-mount");
+      phase = "mount";
+      if (!module.mountHuxerUI("#root")) throw new Error("could not mount HuxerUI");
+      checkRandomAccess("after-mount");
+      phase = "async persistent write and close";
+      const error = await new Promise(resolve => module.writePersistent(output, resolve));
+      if (error) throw new Error(error);
+      sessionStorage.setItem("wrote-output", "yes");
+      location.reload();
+    }
+  } catch (error) {
+    await fetch("/result", {method: "POST", body: `${phase}: ${error}`});
+  }
+</script>

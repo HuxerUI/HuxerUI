@@ -2,6 +2,8 @@
 #include <huxerui/huxerui.h>
 #include <huxerui/testing/ui_test.h>
 
+#include <unistd.h>
+
 #include <chrono>
 #include <exception>
 #include <optional>
@@ -31,11 +33,13 @@ void VerifySynchronousReference(const huxerui::FileReference& reference, bool re
   using namespace huxerui;
   auto input = reference.OpenRead();
   auto random = reference.OpenRandomAccess();
+  auto descriptor = android::OpenSeekableFileDescriptor(reference);
   if (revoked) {
     auto content = reference.ReadString();
     Require(!input.Succeeded() && input.Error().code == IoErrorCode::PermissionDenied &&
                 !content.Succeeded() && content.Error().code == IoErrorCode::PermissionDenied &&
-                !random.Succeeded() && random.Error().code == IoErrorCode::PermissionDenied,
+                !random.Succeeded() && random.Error().code == IoErrorCode::PermissionDenied &&
+                !descriptor.Succeeded() && descriptor.Error().code == IoErrorCode::PermissionDenied,
             "Synchronous operations must observe revoked provider access");
     return;
   }
@@ -56,12 +60,25 @@ void VerifySynchronousReference(const huxerui::FileReference& reference, bool re
   if (sequential) {
     Require(!random.Succeeded() && random.Error().code == IoErrorCode::Unsupported,
             "Synchronous random access must reject a sequential document");
+    Require(!descriptor.Succeeded() && descriptor.Error().code == IoErrorCode::Unsupported,
+            "The descriptor bridge must reject a sequential or reliable document");
   } else {
+    const Bytes tail{std::byte{'e'}, std::byte{'n'}, std::byte{'t'}};
     buffer.resize(3);
     Require(random.Succeeded() && random.Value().Size().Value() == 7 &&
                 random.Value().ReadAt(4, buffer).Value() == 3 &&
-                buffer == Bytes{std::byte{'e'}, std::byte{'n'}, std::byte{'t'}} && random.Value().Close().Succeeded(),
+                buffer == tail && random.Value().Close().Succeeded(),
             "Synchronous random access must read at the requested offset and close a seekable document");
+    auto write = android::OpenSeekableFileDescriptor(reference, FileAccessMode::ReadWrite);
+    Require(!write.Succeeded() && write.Error().code == IoErrorCode::PermissionDenied,
+            "The descriptor bridge must respect a read-only capability");
+    buffer.assign(3, std::byte{});
+    Require(descriptor.Succeeded(), "The descriptor bridge must open an ordinary provider file");
+    auto owner = std::move(descriptor).Value();
+    Require(descriptor.Value().Get() == -1 && pread(owner.Get(), buffer.data(), buffer.size(), 4) == 3 && buffer == tail,
+            "The borrowed descriptor must read the granted file");
+    Require(owner.Close().Succeeded() && owner.Get() == -1 && owner.Close().Succeeded(),
+            "The descriptor owner must release the fd exactly once");
   }
 }
 } // namespace
@@ -140,6 +157,29 @@ extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_v
     return environment->NewStringUTF("");
   } catch (const std::exception& error) {
     return huxerui::android::Utf8ToJavaString(environment, error.what()).Release();
+  }
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_org_huxerui_HuxerUIFileReferenceTest_verifyDescriptorAccess(
+    JNIEnv* environment, jclass, jobject context, jstring uri) {
+  using namespace huxerui;
+  try {
+    JavaVM* vm = nullptr;
+    Require(environment->GetJavaVM(&vm) == JNI_OK, "Android VM must be available");
+    auto reference = detail::CreateAndroidFileReference(
+        vm, environment, context, {.name = "access-check.txt", .can_write = true},
+        android::JavaStringToUtf8(environment, uri));
+    auto read = android::OpenSeekableFileDescriptor(reference);
+    Require(!read.Succeeded() && read.Error().code == IoErrorCode::Unsupported,
+            "A read-only descriptor must not expose write access");
+    for (const auto mode : {FileOpenMode::OpenExisting, FileOpenMode::TruncateExisting}) {
+      auto write = android::OpenSeekableFileDescriptor(reference, FileAccessMode::ReadWrite, mode);
+      Require(!write.Succeeded() && write.Error().code == IoErrorCode::Unsupported,
+              "A read-write descriptor must support reading and writing");
+    }
+    return environment->NewStringUTF("");
+  } catch (const std::exception& error) {
+    return android::Utf8ToJavaString(environment, error.what()).Release();
   }
 }
 

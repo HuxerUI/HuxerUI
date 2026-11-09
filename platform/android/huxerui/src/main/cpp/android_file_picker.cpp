@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -392,7 +393,7 @@ public:
     prepare_open_write_ = environment->GetMethodID(reference_class_, "prepareOpenWrite",
                                                    "(J)Lorg/huxerui/HuxerUIFileReference$Operation;");
     prepare_open_random_access_ = environment->GetMethodID(reference_class_, "prepareOpenRandomAccess",
-                                                           "(JZ)Lorg/huxerui/HuxerUIFileReference$Operation;");
+                                                           "(JZZ)Lorg/huxerui/HuxerUIFileReference$Operation;");
     start_ = environment->GetMethodID(operation_class_, "start", "()V");
     run_ = environment->GetMethodID(operation_class_, "run", "()V");
     cancel_ = environment->GetMethodID(operation_class_, "cancel", "()V");
@@ -552,16 +553,16 @@ IoError AndroidStreamError(std::string_view operation) {
   };
 }
 
-// A reliable fd is borrowed from its Java owner. Only that owner can send the provider a close status.
-class AndroidReliableDescriptor final {
+// The Java descriptor owns the fd and any provider resources associated with the open.
+class AndroidParcelDescriptor final {
 public:
-  AndroidReliableDescriptor(const AndroidFileReferenceBridge& bridge, int fd, bool writing) noexcept
+  AndroidParcelDescriptor(const AndroidFileReferenceBridge& bridge, int fd, bool writing) noexcept
       : virtual_machine_(bridge.VirtualMachine()), methods_(bridge.ParcelMethods()), fd_(fd), writing_(writing) {}
 
-  AndroidReliableDescriptor(const AndroidReliableDescriptor&) = delete;
-  AndroidReliableDescriptor& operator=(const AndroidReliableDescriptor&) = delete;
+  AndroidParcelDescriptor(const AndroidParcelDescriptor&) = delete;
+  AndroidParcelDescriptor& operator=(const AndroidParcelDescriptor&) = delete;
 
-  ~AndroidReliableDescriptor() {
+  ~AndroidParcelDescriptor() {
     Close(writing_);
   }
 
@@ -573,7 +574,7 @@ public:
     return descriptor_ != nullptr;
   }
 
-  [[nodiscard]] int Get() const noexcept { return fd_; }
+  int Get() const noexcept { return fd_; }
 
   bool CheckReadStatus() const noexcept {
     JniEnvironment attached(virtual_machine_);
@@ -628,17 +629,17 @@ private:
 class AndroidStreamDescriptor final {
 public:
   explicit AndroidStreamDescriptor(int fd) : native_(fd) {}
-  explicit AndroidStreamDescriptor(std::unique_ptr<AndroidReliableDescriptor> reliable)
-      : reliable_(std::move(reliable)) {}
+  explicit AndroidStreamDescriptor(std::unique_ptr<AndroidParcelDescriptor> parcel)
+      : parcel_(std::move(parcel)) {}
 
-  [[nodiscard]] int Get() const { return reliable_ ? reliable_->Get() : native_.Get(); }
+  int Get() const noexcept { return parcel_ ? parcel_->Get() : native_.Get(); }
   [[nodiscard]] int ReleaseNative() { return native_.Release(); }
-  [[nodiscard]] bool CheckReadStatus() const noexcept { return !reliable_ || reliable_->CheckReadStatus(); }
+  [[nodiscard]] bool CheckReadStatus() const noexcept { return !parcel_ || parcel_->CheckReadStatus(); }
 
   bool Close() {
-    if (reliable_) {
-      const bool closed = reliable_->Close(false);
-      reliable_.reset();
+    if (parcel_) {
+      const bool closed = parcel_->Close(false);
+      parcel_.reset();
       if (!closed) {
         errno = EIO;
       }
@@ -647,11 +648,11 @@ public:
     return native_.Close();
   }
 
-  void FailWrite() noexcept { reliable_.reset(); }
+  void FailWrite() noexcept { parcel_.reset(); }
 
 private:
   ReferenceDescriptor native_;
-  std::unique_ptr<AndroidReliableDescriptor> reliable_;
+  std::unique_ptr<AndroidParcelDescriptor> parcel_;
 };
 
 class AndroidInputStreamBackend final : public InputStreamBackend {
@@ -767,14 +768,14 @@ AndroidStreamCompletion CompleteDescriptor(std::shared_ptr<AndroidFileReferenceB
       completion(IoResult<AndroidStreamDescriptor>(AndroidStreamDescriptor(fd)));
       return true;
     }
-    auto reliable = std::unique_ptr<AndroidReliableDescriptor>(new (std::nothrow)
-        AndroidReliableDescriptor(*bridge, fd, writing));
-    if (!reliable || !reliable->Retain(environment, parcel)) {
+    auto retained = std::unique_ptr<AndroidParcelDescriptor>(new (std::nothrow)
+        AndroidParcelDescriptor(*bridge, fd, writing));
+    if (!retained || !retained->Retain(environment, parcel)) {
       completion(IoResult<AndroidStreamDescriptor>(
           IoError{IoErrorCode::Io, "HuxerUI Android provider descriptor could not be retained"}));
       return false;
     }
-    completion(IoResult<AndroidStreamDescriptor>(AndroidStreamDescriptor(std::move(reliable))));
+    completion(IoResult<AndroidStreamDescriptor>(AndroidStreamDescriptor(std::move(retained))));
     return true;
   };
 }
@@ -831,13 +832,7 @@ public:
   }
 
   IoResult<RandomAccessStream> OpenRandomAccessSync(FileAccessMode access, FileOpenMode mode) override {
-    auto opened = RunAndroidReferenceSync<AndroidStreamDescriptor>([&](auto completion) {
-      Start(CompleteDescriptor(bridge_, std::move(completion)), [&](JNIEnv* environment, jlong handle) {
-        const jboolean writing = access == FileAccessMode::ReadOnly ? JNI_FALSE : JNI_TRUE;
-        return android::LocalRef<jobject>(environment, environment->CallObjectMethod(
-            reference_, bridge_->PrepareOpenRandomAccess(), handle, writing));
-      }, true);
-    });
+    auto opened = OpenRandomDescriptor(access, false);
     if (!opened.Succeeded()) {
       return IoResult<RandomAccessStream>(std::move(opened).Error());
     }
@@ -857,6 +852,16 @@ public:
       return IoResult<RandomAccessStream>(
           IoError{IoErrorCode::Io, "HuxerUI Android random-access stream could not be opened"});
     }
+  }
+
+  IoResult<AndroidStreamDescriptor> OpenRandomDescriptor(FileAccessMode access, bool retain_parcel) {
+    return RunAndroidReferenceSync<AndroidStreamDescriptor>([&](auto completion) {
+      Start(CompleteDescriptor(bridge_, std::move(completion)), [&](JNIEnv* environment, jlong handle) {
+        const jboolean writing = access == FileAccessMode::ReadOnly ? JNI_FALSE : JNI_TRUE;
+        return android::LocalRef<jobject>(environment, environment->CallObjectMethod(
+            reference_, bridge_->PrepareOpenRandomAccess(), handle, writing, static_cast<jboolean>(retain_parcel)));
+      }, true);
+    });
   }
 
   IoResult<Bytes> ReadBytesSync() override {
@@ -1765,6 +1770,69 @@ CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, j
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui::android {
+
+struct FileDescriptor::Impl {
+  std::shared_ptr<huxerui::detail::FileReferenceBackend> owner;
+  huxerui::detail::AndroidStreamDescriptor descriptor;
+};
+
+FileDescriptor::FileDescriptor(std::unique_ptr<Impl> impl) noexcept : impl_(std::move(impl)) {}
+FileDescriptor::FileDescriptor(FileDescriptor&&) noexcept = default;
+FileDescriptor& FileDescriptor::operator=(FileDescriptor&&) noexcept = default;
+FileDescriptor::~FileDescriptor() = default;
+
+int FileDescriptor::Get() const noexcept {
+  return impl_ ? impl_->descriptor.Get() : -1;
+}
+
+IoResult<void> FileDescriptor::Close() {
+  auto impl = std::move(impl_);
+  if (impl && !impl->descriptor.Close()) {
+    return IoResult<void>(huxerui::detail::AndroidStreamError("descriptor close"));
+  }
+  return IoResult<void>::Success();
+}
+
+IoResult<FileDescriptor> OpenSeekableFileDescriptor(const FileReference& reference,
+    FileAccessMode access, FileOpenMode mode) {
+  using namespace huxerui::detail;
+  ValidateRandomAccessOpen(access, mode);
+  if (mode == FileOpenMode::CreateNew) {
+    throw std::invalid_argument("HuxerUI cannot create a file through an existing file reference");
+  }
+  auto backend = FileReferenceBackend::Of(reference);
+  if (!backend) {
+    throw std::logic_error("HuxerUI cannot use a moved-from file reference");
+  }
+  if (reference.Type() == FileType::Directory) {
+    return IoResult<FileDescriptor>(IoError{IoErrorCode::IsDirectory, "HuxerUI Android reference is a directory"});
+  }
+  auto provider = std::dynamic_pointer_cast<AndroidFileReferenceBackend>(backend);
+  if (!provider || reference.Type() != FileType::File || access == FileAccessMode::WriteOnly) {
+    return IoResult<FileDescriptor>(
+        IoError{IoErrorCode::Unsupported, "HuxerUI Android descriptor requires a document file opened for reading"});
+  }
+  if (access == FileAccessMode::ReadWrite && !reference.CanWrite()) {
+    return IoResult<FileDescriptor>(IoError{IoErrorCode::PermissionDenied, "HuxerUI external file is not writable"});
+  }
+  auto opened = provider->OpenRandomDescriptor(access, true);
+  if (!opened.Succeeded()) {
+    return IoResult<FileDescriptor>(std::move(opened).Error());
+  }
+  auto impl = std::make_unique<FileDescriptor::Impl>(std::move(backend), std::move(opened).Value());
+  try {
+    PrepareRandomAccessDescriptor(impl->descriptor.Get(), access, mode, /*require_exact_access=*/true);
+  } catch (const ReferenceFailure& error) {
+    return IoResult<FileDescriptor>(IoError{error.code, "HuxerUI Android provider descriptor is incompatible"});
+  } catch (const std::system_error& error) {
+    return IoResult<FileDescriptor>(OperationError("Android descriptor open", error.code()));
+  }
+  return IoResult<FileDescriptor>(FileDescriptor(std::move(impl)));
+}
+
+} // namespace huxerui::android
 
 extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIFileReference_nativeComplete(
     JNIEnv* environment, jclass, jlong native_handle, jint result, jint error_code, jbyteArray bytes, jstring message,

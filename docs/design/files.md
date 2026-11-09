@@ -708,6 +708,7 @@ Extensions are mapped through `MimeTypeMap` when possible; an unrecognized exten
 The returned `content://` grant remains private to `FileReference`, while display name, size, MIME type, and provider write support populate its public metadata.
 Asynchronous Android reference opens use the bounded Java worker executor. The C++ stream owns an ordinary detached fd, or borrows the fd of a retained reliable `ParcelFileDescriptor` so the provider's close and error channel stays active.
 Reliable sequential reads check provider status at EOF. Explicit output close finalizes the Java descriptor, while a failed or abandoned write reports an error to the provider once the worker has finished using it.
+The Android JNI descriptor bridge shares the random-access open and validation path. It retains the provider's original `ParcelFileDescriptor` and the reference backend for the borrow's lifetime, with close routed through the Java owner. It verifies that the acquired fd grants only the requested access and rejects descriptors requiring reliable close signaling before truncation or handoff.
 Asynchronous incremental descriptor reads and writes use a per-stream worker sequence, while imports, replacements, and save copies retain their Java-side bounded transfer path.
 Cancellation closes active transfer streams where safe, and local imports atomically replace an existing destination within its parent directory.
 Directory selection uses `ACTION_OPEN_DOCUMENT_TREE`, retains the returned tree authority, and derives children through `DocumentsContract` rather than reconstructing local paths.
@@ -846,8 +847,9 @@ Synchronous mutation remains available for paths in MEMFS, including `temporary_
 
 A synchronous operation that would mutate the persistent data or cache subtree returns `false` without first changing the virtual filesystem.
 This applies to writing, appending, directory creation, deletion, copying into persistent storage, and moving when either the source or destination is persistent.
-The restriction is enforced in the shared local-operation path using the persistent root owned by the Web file implementation rather than repeated independently across Web adapter methods.
+The shared local-operation path checks the persistent root published by module initialization. The same policy applies before the first UI mounts and throughout the module's lifetime.
 It preserves the existing `bool` contract: success is never reported before IndexedDB persistence can complete.
+Opening a persistent file for writable random access returns `IoErrorCode::Unsupported` before creating or truncating it. Use `OpenWriteAsync()` and await `CloseAsync()` for incremental persistent output.
 
 ### Asynchronous execution and persistence
 

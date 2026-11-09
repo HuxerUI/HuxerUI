@@ -22,3 +22,19 @@ add_test(NAME HuxerUIWebTestFailureExitTests
 set_tests_properties(HuxerUIWebTestFailureExitTests PROPERTIES
         LABELS "build;platform;web"
 )
+
+find_program(HUXERUI_WEB_TEST_BROWSER
+        NAMES chromium chromium-browser google-chrome google-chrome-stable chrome "Google Chrome"
+        PATHS "/Applications/Google Chrome.app/Contents/MacOS"
+)
+if (HUXERUI_WEB_TEST_BROWSER AND HUXERUI_WEB_TEST_COMMAND)
+    huxerui_add_app(huxerui_web_file_storage_test SOURCES file_storage.cpp)
+    set_target_properties(huxerui_web_file_storage_test PROPERTIES SUFFIX ".js")
+    add_test(NAME HuxerUIWebFileStorageTests
+            COMMAND ${HUXERUI_WEB_TEST_COMMAND}
+                    "${CMAKE_CURRENT_LIST_DIR}/file_storage_test.mjs"
+                    "${HUXERUI_WEB_TEST_BROWSER}"
+                    "$<TARGET_FILE:huxerui_web_file_storage_test>"
+    )
+    set_tests_properties(HuxerUIWebFileStorageTests PROPERTIES LABELS "platform;web;native" TIMEOUT 45)
+endif ()

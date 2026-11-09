@@ -131,7 +131,8 @@ private:
 [[nodiscard]] ReferenceDescriptor OpenRandomAccessFileDescriptor(
     std::string_view path, FileAccessMode access, FileOpenMode mode
 );
-void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode);
+void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode,
+                                   bool require_exact_access = false);
 [[nodiscard]] std::uint64_t DescriptorSize(int descriptor);
 
 using ReferenceStreamCoordination = std::function<void(const std::function<void()>&)>;

@@ -1457,11 +1457,13 @@ ReferenceDescriptor OpenRandomAccessFileDescriptor(std::string_view path, FileAc
 #endif
 }
 
-void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode) {
+void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOpenMode mode,
+                                   bool require_exact_access) {
   // A provider may supply a sequential endpoint or weaker access than requested. Validate the
   // acquired descriptor before making any destructive change to it.
 #if defined(_WIN32)
   HUXERUI_UNUSED(access);
+  HUXERUI_UNUSED(require_exact_access);
   const auto handle = reinterpret_cast<HANDLE>(_get_osfhandle(descriptor));
   CheckReference(GetFileType(handle) == FILE_TYPE_DISK, IoErrorCode::Unsupported);
   CheckReference(!(ReferenceInformation(handle).dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY), IoErrorCode::IsDirectory);
@@ -1474,6 +1476,8 @@ void PrepareRandomAccessDescriptor(int descriptor, FileAccessMode access, FileOp
   const int actual_access = flags & O_ACCMODE;
   CheckReference(access == FileAccessMode::WriteOnly || actual_access != O_WRONLY, IoErrorCode::PermissionDenied);
   CheckReference(access == FileAccessMode::ReadOnly || actual_access != O_RDONLY, IoErrorCode::PermissionDenied);
+  // A borrowed fd exposes its native access directly, outside the stream's read and write checks.
+  CheckReference(!require_exact_access || actual_access == DescriptorAccess(access), IoErrorCode::Unsupported);
   // Some systems make pwrite append on an O_APPEND descriptor regardless of the requested offset.
   CheckReference(access == FileAccessMode::ReadOnly || !(flags & O_APPEND), IoErrorCode::Unsupported);
   // Providers can return a descriptor whose reported type does not establish seekability.

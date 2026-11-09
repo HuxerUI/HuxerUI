@@ -152,6 +152,8 @@ Keep operations on one stream serial, including close. The opened stream retains
 
 Provider support is checked at open. Android document references require a seekable descriptor with a compatible access mode and close contract. Browser selections return `Unsupported`. Local Web paths with asynchronous persistence reject writable random-access opening.
 
+Android C++ callers that need a native fd can include `<huxerui/android/jni.h>` and call `android::OpenSeekableFileDescriptor(reference, access, mode)`. It accepts `ReadOnly` and `ReadWrite` for existing whole-file content URI references. The move-only owner retains the provider access and the Java descriptor. Pass the borrowed `Get()` value to APIs that leave ownership with the caller, then call the owner's `Close()` after the native consumer finishes. Nonseekable descriptors and providers requiring reliable Java close signaling report `Unsupported`.
+
 ## External files and directories
 
 `FileReference` is a capability for one file or directory selected or opened outside application-owned storage.

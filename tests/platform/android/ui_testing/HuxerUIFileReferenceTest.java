@@ -16,17 +16,23 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
 
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 final class HuxerUIFileReferenceTest {
     private static final Uri URI = Uri.parse("content://org.huxerui.test/opaque-provider-id");
+    private static final Uri ACCESS_CHECK_URI = URI.buildUpon().appendPath("access-check").build();
 
     static void verify(Instrumentation instrumentation) throws Exception {
         if (Build.VERSION.SDK_INT < 29) {
@@ -76,6 +82,10 @@ final class HuxerUIFileReferenceTest {
                     check("".equals(error[0]), "Native reference regression: " + error[0]);
                 }
             }
+            String accessError = verifyDescriptorAccess(context, ACCESS_CHECK_URI.toString());
+            check("".equals(accessError), "Native descriptor access regression: " + accessError);
+            check("content".equals(new String(Files.readAllBytes(source.toPath()), StandardCharsets.UTF_8)),
+                    "Rejecting an incompatible descriptor must preserve the file contents");
             for (boolean asynchronous : new boolean[] {false, true}) {
                 verifyOutput(instrumentation, context, provider, asynchronous, true, false);
                 verifyOutput(instrumentation, context, provider, asynchronous, false, false);
@@ -165,6 +175,22 @@ final class HuxerUIFileReferenceTest {
         }
         @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
             if (revoked) { throw new SecurityException("Test provider access revoked"); }
+            if (ACCESS_CHECK_URI.equals(uri)) {
+                try {
+                    // Linux access mode 3 checks permissions but returns an fd that cannot read or write.
+                    int access = "r".equals(mode) ? OsConstants.O_RDWR : 3;
+                    FileDescriptor descriptor = Os.open(source.getPath(), access, 0);
+                    try {
+                        return ParcelFileDescriptor.dup(descriptor);
+                    } finally {
+                        Os.close(descriptor);
+                    }
+                } catch (ErrnoException | IOException exception) {
+                    FileNotFoundException failure = new FileNotFoundException("Test descriptor unavailable");
+                    failure.initCause(exception);
+                    throw failure;
+                }
+            }
             OutputObserver observer = output;
             if (observer != null && mode.contains("w")) {
                 try {
@@ -211,6 +237,7 @@ final class HuxerUIFileReferenceTest {
 
     private static native String verifyNative(PlatformPayload payload, Runnable afterCapture,
             String destination, boolean unknown, boolean revoked, boolean sequential, boolean readError);
+    private static native String verifyDescriptorAccess(Context context, String uri);
     private static native String verifyReliableOutput(Context context, String uri, boolean asynchronous,
             boolean finalize, boolean writeError);
 }

@@ -1,5 +1,6 @@
 #include "web_file.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <functional>
@@ -31,11 +32,6 @@ struct WebFileQueue {
 WebFileQueue& FileQueue() {
   static WebFileQueue queue;
   return queue;
-}
-
-std::string& PersistentRoot() {
-  static std::string root;
-  return root;
 }
 
 void StartNextWebFileOperation();
@@ -78,6 +74,15 @@ EM_JS(emscripten::EM_VAL, WebFileSystemState, (), {
   return Emval.toHandle(Module.huxerUIFileSystem || null);
 });
 
+EM_JS(bool, IsWebPersistentFilePathJs, (const char* path, std::size_t length), {
+  const root = Module.huxerUIFileSystem?.persistentRoot;
+  if (!root || length < root.length) {
+    return false;
+  }
+  const candidate = UTF8ToString(path, length);
+  return candidate === root || candidate.startsWith(root + "/");
+});
+
 EM_JS(void, PersistWebFileSystemJs, (std::uintptr_t context), {
   let completed = false;
   const complete = (succeeded) => {
@@ -116,8 +121,7 @@ AppDirectories CreateWebAppDirectories() {
     throw std::runtime_error(std::move(error));
   }
 
-  const std::string persistent_root = state["persistentRoot"].as<std::string>();
-  File persistent_directory(persistent_root);
+  File persistent_directory(state["persistentRoot"].as<std::string>());
   File data_directory(state["dataDirectory"].as<std::string>());
   File cache_directory(state["cacheDirectory"].as<std::string>());
   File temporary_directory(state["temporaryDirectory"].as<std::string>());
@@ -125,12 +129,6 @@ AppDirectories CreateWebAppDirectories() {
       !temporary_directory.IsDirectory()) {
     throw std::runtime_error("HuxerUI Web application file directories are unavailable");
   }
-
-  std::string& registered_root = PersistentRoot();
-  if (!registered_root.empty() && registered_root != persistent_root) {
-    throw std::logic_error("HuxerUI Web persistent file root is already initialized");
-  }
-  registered_root = persistent_root;
 
   return AppDirectories{
       .executable_directory = std::nullopt,
@@ -141,11 +139,8 @@ AppDirectories CreateWebAppDirectories() {
 }
 
 bool IsWebPersistentFilePath(std::string_view path) noexcept {
-  const std::string& root = PersistentRoot();
-  if (root.empty() || path.size() < root.size() || path.compare(0, root.size(), root) != 0) {
-    return false;
-  }
-  return path.size() == root.size() || path[root.size()] == '/';
+  // File operations can run as soon as the module initializes, before a Runtime publishes AppDirectories.
+  return IsWebPersistentFilePathJs(path.data(), path.size());
 }
 
 void EnqueueWebFileOperation(std::function<void(std::function<void()>)> operation) {
