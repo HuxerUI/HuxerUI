@@ -18,6 +18,12 @@ Keep bundled fonts under `resources/raw` and pass their generated RawResource id
 
 `Font::Size()` is the application's baseline logical size. On Linux, GTK's effective text DPI resolves it as `size * DPI / 96`; device scaling is separate, and `ResourceConfiguration::display_scale` selects image density. Do not multiply application font sizes by that display scale or reapply GTK text scaling. Use `UseTextMeasurer()` for custom composition geometry rather than deriving it from the requested size; HuxerUI refreshes measurements when platform text metrics change. Fixed frames and padding do not acquire a text scale, so allow room for scaled text.
 
+### Custom text layout
+
+Use `UseTextMeasurer().CreateTextLayout(text, style, width, options)` when a custom editor needs one paragraph layout for drawing, hit testing, and caret or selection geometry. Pass the effective shaping locale explicitly. Keep the immutable layout on its creating UI thread and recreate it when its inputs change.
+
+Use `PaintContext::DrawText(origin, layout)` and the same origin to translate pointer and selection geometry. `HitTest()`, `CaretRect()`, and `RangeRects()` use paragraph-relative logical coordinates and UTF-16 offsets.
+
 ## Controlled editing
 
 Store the complete `TextEditingValue`, not only `text`. It carries `TextSelection` and optional composition. Text offsets and platform input units are not interchangeable; let HuxerUI's text-input contract translate UTF-8, UTF-16, scalar, and grapheme boundaries.

@@ -529,6 +529,7 @@ struct SelectTriggerBehavior {
   SelectStyle style;
   EventEmitter events;
   PopupHandle popup;
+  ViewHandle popup_target;
   std::shared_ptr<SelectSession> session;
   std::string accessible_label;
   std::size_t selected_index = 0;
@@ -552,6 +553,7 @@ public:
     source_ = modifier.source;
     style_ = modifier.style;
     popup_ = modifier.popup;
+    popup_target_ = modifier.popup_target;
     session_ = modifier.session;
     session_->events = modifier.events;
     selected_index_ = modifier.selected_index;
@@ -724,7 +726,7 @@ private:
   }
 
   void Open() {
-    if (!session_ || !popup_.has_value() || session_->layer.has_value()) {
+    if (!session_ || !popup_ || !popup_target_ || session_->layer.has_value()) {
       return;
     }
     session_->popup_state = std::make_shared<SelectPopupState>();
@@ -741,7 +743,7 @@ private:
         DismissSelect(session, popup);
       }
     };
-    session_->layer = popup_->Show(PopupContentFactory(), std::move(options));
+    session_->layer = popup_->Show(*popup_target_, PopupContentFactory(), std::move(options));
     popup_missing_ = false;
     InvalidateSemantics();
     session_->events.Emit<SelectEvents::ExpandedChanged>(true);
@@ -759,6 +761,7 @@ private:
   detail::ViewItemSource source_;
   SelectStyle style_;
   std::optional<PopupHandle> popup_;
+  std::optional<ViewHandle> popup_target_;
   std::shared_ptr<SelectSession> session_;
   std::optional<std::string> label_;
   std::string accessible_label_;
@@ -780,6 +783,7 @@ std::function<View()> MakeSelectScopeFactory(SelectConfiguration configuration) 
     ValidateSelectStyle(style);
     const EventEmitter events = UseEvents();
     const PopupHandle popup = UsePopup();
+    const ViewHandle popup_target = UseViewHandle();
     auto session_state = UseState(std::make_shared<SelectSession>());
     const std::shared_ptr<SelectSession> session = session_state.Get();
     const std::string validation_message = UseString(configuration.validation.message);
@@ -823,12 +827,13 @@ std::function<View()> MakeSelectScopeFactory(SelectConfiguration configuration) 
     trigger = std::move(trigger).With(detail::DefaultIndication{style.indication});
     trigger = std::move(trigger).With(
         Focusable{},
-        popup.Anchor(),
+        popup_target,
         SelectTriggerBehavior{
             .source = configuration.source,
             .style = style,
             .events = events,
             .popup = popup,
+            .popup_target = popup_target,
             .session = session,
             .accessible_label = accessible_label,
             .selected_index = configuration.selected_index,

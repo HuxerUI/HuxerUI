@@ -160,8 +160,8 @@ private:
       detail::LayerPlacement placement,
       std::shared_ptr<detail::LayerTransitionState> transition = {},
       std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {},
-      std::optional<std::uint64_t> retained_focus_identity = std::nullopt,
-      std::optional<FocusRequester> initial_focus = std::nullopt
+      std::optional<ViewHandle> retained_focus_target = std::nullopt,
+      std::optional<ViewHandle> initial_focus = std::nullopt
   ) const;
   bool UpdateCaptured(
       LayerId id,
@@ -179,8 +179,8 @@ private:
       detail::LayerPlacement placement,
       std::shared_ptr<detail::LayerTransitionState> transition,
       std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group = {},
-      std::optional<std::uint64_t> retained_focus_identity = std::nullopt,
-      std::optional<FocusRequester> initial_focus = std::nullopt
+      std::optional<ViewHandle> retained_focus_target = std::nullopt,
+      std::optional<ViewHandle> initial_focus = std::nullopt
   ) const;
   bool UpdateEntry(
       LayerId id,
@@ -189,6 +189,7 @@ private:
       std::optional<std::shared_ptr<const Environment>> environment
   ) const;
   bool UpdatePlacement(LayerId id, detail::LayerPlacement placement) const;
+  bool RefreshAnchors(bool update_geometry) const;
   std::optional<LayerOptions> EntryOptions(LayerId id) const;
   std::shared_ptr<detail::LayerTransitionState> Transition(LayerId id) const;
   DismissRequestResult RequestDismiss(LayerId id) const;
@@ -200,6 +201,7 @@ private:
   std::shared_ptr<State> state_;
 
   friend class UiWindow;
+  friend struct detail::AnchoredPresentation;
   friend struct detail::InternalAccess;
 };
 

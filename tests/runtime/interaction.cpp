@@ -2522,7 +2522,7 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
 
 namespace {
 
-std::array<std::optional<FocusRequester>, 3> programmatic_focus;
+std::array<std::optional<ViewHandle>, 3> programmatic_focus;
 State<bool> programmatic_first_enabled;
 State<bool> programmatic_first_visible;
 State<bool> programmatic_first_is_text;
@@ -2535,24 +2535,24 @@ View ProgrammaticFocusApp() {
   programmatic_first_enabled = UseState(true);
   programmatic_first_visible = UseState(true);
   programmatic_first_is_text = UseState(false);
-  const auto first = UseFocusRequester();
-  const auto second = UseFocusRequester();
-  const auto plain = UseFocusRequester();
+  const auto first = UseViewHandle();
+  const auto second = UseViewHandle();
+  const auto plain = UseViewHandle();
   programmatic_focus = {first, second, plain};
   View first_control = programmatic_first_is_text
       ? View(Text("request first").With(Focusable{})) : View(Button("request first"));
   first_control = std::move(first_control)
-      .With(Enabled{programmatic_first_enabled}, FocusTarget{first})
+      .With(Enabled{programmatic_first_enabled}, first)
       .On<ViewEvents::FocusChanged>([](bool focused) {
         programmatic_focus_events.emplace_back("first", focused);
         if (programmatic_redirect) programmatic_redirect_results.push_back(programmatic_focus[1]->RequestFocus());
       });
   return Column {
     programmatic_first_visible ? std::move(first_control) : View(Spacer()),
-    Button("request second").With(FocusTarget{second}).On<ViewEvents::FocusChanged>([](bool focused) {
+    Button("request second").With(second).On<ViewEvents::FocusChanged>([](bool focused) {
       programmatic_focus_events.emplace_back("second", focused);
     }),
-    Text("not focusable").With(FocusTarget{plain}),
+    Text("not focusable").With(plain),
   };
 }
 
@@ -2562,9 +2562,9 @@ View KeyedProgrammaticFocusApp() {
   const auto order = programmatic_reverse ? std::array{1, 0} : std::array{0, 1};
   for (const int id : order) {
     rows.push_back(Scope([id] {
-      const auto requester = UseFocusRequester();
+      const auto requester = UseViewHandle();
       programmatic_focus[id] = requester;
-      return Button(id == 0 ? "keyed first" : "keyed second").With(FocusTarget{requester});
+      return Button(id == 0 ? "keyed first" : "keyed second").With(requester);
     }).Key(id));
   }
   return Column(std::move(rows));
@@ -2646,9 +2646,9 @@ TEST_CASE("Focus-change notifications cannot redirect a programmatic request") {
 
 TEST_CASE("Focus requester lifetime and calling-context errors are explicit") {
   programmatic_redirect = false;
-  REQUIRE_THROWS_AS(UseFocusRequester(), std::logic_error);
+  REQUIRE_THROWS_AS(UseViewHandle(), std::logic_error);
   TestPlatform platform;
-  std::optional<FocusRequester> retired;
+  std::optional<ViewHandle> retired;
   {
     UiWindow runtime{ProgrammaticFocusApp, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
@@ -2678,7 +2678,7 @@ TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are r
   SECTION("Focus requests cannot mutate composition") {
     TestPlatform platform;
     UiWindow runtime{[]() -> View {
-      auto requester = UseFocusRequester();
+      auto requester = UseViewHandle();
       requester.RequestFocus();
       return Button("invalid focus");
     }, platform};
@@ -2688,10 +2688,10 @@ TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are r
   SECTION("One requester cannot bind two controls") {
     TestPlatform platform;
     UiWindow runtime{[]() -> View {
-      auto requester = UseFocusRequester();
+      auto requester = UseViewHandle();
       return Column {
-        Button("first binding").With(FocusTarget{requester}),
-        Button("second binding").With(FocusTarget{requester}),
+        Button("first binding").With(requester),
+        Button("second binding").With(requester),
       };
     }, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
@@ -2705,7 +2705,7 @@ TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are r
     original.BuildFrame();
     TestPlatform other_platform;
     UiWindow other{[] {
-      return Button("foreign target").With(FocusTarget{*programmatic_focus[0]});
+      return Button("foreign target").With(*programmatic_focus[0]);
     }, other_platform};
     other.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     REQUIRE_THROWS_AS(other.BuildFrame(), std::logic_error);

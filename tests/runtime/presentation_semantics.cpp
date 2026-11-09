@@ -13,6 +13,7 @@ std::optional<BottomSheetHandle> semantic_bottom_sheet;
 std::optional<ToastHandle> semantic_toast;
 std::optional<SnackBarHandle> semantic_snack_bar;
 std::optional<MenuHandle> semantic_menu;
+std::optional<ViewHandle> semantic_menu_target;
 int semantic_dismiss_requests = 0;
 int semantic_snack_bar_actions = 0;
 
@@ -22,8 +23,9 @@ View PresentationSemanticsApp() {
   semantic_toast = UseToast();
   semantic_snack_bar = UseSnackBar();
   semantic_menu = UseMenu();
+  semantic_menu_target = UseViewHandle();
   return Column{
-      Button("menu anchor").With(huxerui::Frame{120.0F, 36.0F}, semantic_menu->Anchor()),
+      Button("menu anchor").With(huxerui::Frame{120.0F, 36.0F}, *semantic_menu_target),
       Text("application semantics"),
   };
 }
@@ -224,7 +226,7 @@ TEST_CASE("Menu semantics describe items and keep an expanded submenu in one mod
   runtime.SetWindowMetrics({.viewport = {480.0F, 320.0F}});
   runtime.BuildFrame();
 
-  semantic_menu->Show({
+  semantic_menu->Show(*semantic_menu_target, {
       MenuItem("Checked", [] {}).Checked(true),
       MenuItem("Unchecked", [] {}).Checked(false),
       MenuSection{},

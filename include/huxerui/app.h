@@ -1050,7 +1050,7 @@ private:
 
   friend class Runtime;
   friend class LayerController;
-  friend class FocusRequester;
+  friend class ViewHandle;
   friend class detail::ApplicationService;
   friend class detail::FileDropReceiver;
   friend class detail::PointerInteraction;

@@ -55,6 +55,8 @@ View App() {
   auto dialog = UseDialog();
   auto bottom_sheet = UseBottomSheet();
   auto popup = UsePopup();
+  auto popup_target = UseViewHandle();
+  auto menu_target = UseViewHandle();
   auto menu = UseMenu();
 
   return Column {
@@ -84,9 +86,11 @@ View App() {
         Text("Popup and Menu follow the final bounds of their anchor View.")
             .With(Foreground(secondary_text_color)),
         Flow {
-          Button("Show popup").With(popup.Anchor()).OnClick([popup] { popup.Show(PopupCard); }),
-          Button("Show menu").With(menu.Anchor()).OnClick([menu] {
-            menu.Show({
+          Button("Show popup").With(popup_target).OnClick([popup, popup_target] {
+            popup.Show(popup_target, PopupCard);
+          }),
+          Button("Show menu").With(menu_target).OnClick([menu, menu_target] {
+            menu.Show(menu_target, {
                 MenuItem("Rename", [] {}),
                 MenuItem("Duplicate", [] {}),
                 MenuItem(

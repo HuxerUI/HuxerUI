@@ -104,18 +104,17 @@ Scene transitions animate between two committed window composites. They are expl
 
 ```cpp
 auto scene_transition = UseSceneTransition();
+auto target = UseViewHandle();
 
-return Button("Dark theme")
-    .With(scene_transition.Anchor())
-    .OnClick([scene_transition, dark] {
-      scene_transition.Run(TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}}, [dark] {
-        dark = !dark;
-      });
-    });
+return Button("Dark theme").With(target).OnClick([scene_transition, target, dark] {
+  scene_transition.RunFromView(
+      target, TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}},
+      [dark] { dark = !dark; });
+});
 ```
 
 `RunAt()` accepts a window-local logical point for callers that already own pointer geometry.
-`Run()` with a circular reveal uses the final bounds of the retained anchor, while Fade does not require an anchor.
+`RunFromView()` captures the mounted target's presentation center before executing the mutation. Use `Run()` for effects such as Fade that need no origin.
 
 `RunFromCurrentInteraction()` resolves a circular reveal from the UiWindow's current synchronous interaction origin:
 
@@ -364,10 +363,16 @@ It is not repeated or reverse playback of retained obsolete content, and it does
 
 ### Extensible scene requests
 
-SceneTransitionHandle keeps its existing ownership and geometry-source model, with this request surface:
+SceneTransitionHandle owns the transition request and accepts an explicit origin when the effect needs one.
 
 ```cpp
 void Run(TransitionSpec transition, std::function<void()> mutation) const;
+
+void RunFromView(
+    const ViewHandle& target,
+    TransitionSpec transition,
+    std::function<void()> mutation
+) const;
 
 void RunAt(
     Point origin,

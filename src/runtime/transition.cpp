@@ -278,34 +278,18 @@ const RenderNode* SceneTransitionService::Compose(const RenderNode* live_root) {
   return &transition.composite;
 }
 
-void SceneTransitionAnchorState::Mount() {
-  if (mounted) {
-    throw std::logic_error("HuxerUI scene transition anchor must be mounted on only one View");
+Point SceneTransitionService::ViewOrigin(const ViewHandle& target) const {
+  const auto& binding = target.binding_;
+  if (binding) {
+    ValidateApplicationCall(binding->source);
   }
-  mounted = true;
-}
-
-void SceneTransitionAnchorState::Unmount() noexcept {
-  mounted = false;
-  bounds.reset();
-}
-
-void SceneTransitionAnchorState::UpdateBounds(Rect next_bounds) noexcept {
-  bounds = next_bounds;
-}
-
-std::optional<Point> SceneTransitionAnchorState::Center() const noexcept {
-  if (!mounted || !bounds.has_value()) {
-    return std::nullopt;
+  const auto window = binding ? binding->source->ui.lock() : nullptr;
+  if (!runtime_state_ || !window || window->ui_window != &runtime_state_->owner_ ||
+      binding->node_identity == 0 || !binding->geometry) {
+    throw std::logic_error("HuxerUI scene transition requires a mounted ViewHandle in its window");
   }
-  return Point{
-      bounds->x + bounds->width * 0.5F,
-      bounds->y + bounds->height * 0.5F,
-  };
-}
-
-std::shared_ptr<SceneTransitionAnchorState> SceneTransitionService::CreateAnchor() const {
-  return std::make_shared<SceneTransitionAnchorState>();
+  const Rect bounds = binding->geometry->bounds;
+  return {bounds.x + bounds.width / 2.0F, bounds.y + bounds.height / 2.0F};
 }
 
 std::optional<Point> SceneTransitionService::CurrentInteractionOrigin() const noexcept {
@@ -398,53 +382,18 @@ void SceneTransitionService::Disconnect() noexcept {
   runtime_state_ = nullptr;
 }
 
-class SceneTransitionAnchorExtension final : public NodeExtension {
-public:
-  SceneTransitionAnchorExtension(huxerui::ViewNode& node, const SceneTransitionAnchor& modifier) {
-    Update(node, modifier);
-  }
-
-  ~SceneTransitionAnchorExtension() override {
-    if (state_) {
-      state_->Unmount();
-    }
-  }
-
-  void Update(huxerui::ViewNode&, const SceneTransitionAnchor& modifier) {
-    if (state_ == modifier.state_) {
-      return;
-    }
-    if (state_) {
-      state_->Unmount();
-    }
-    state_ = modifier.state_;
-    if (state_) {
-      state_->Mount();
-    }
-  }
-
-  PaintInvalidation PrepareGeometry(huxerui::ViewNode& node, huxerui::TextMeasurer&) override {
-    if (state_) {
-      state_->UpdateBounds(node.PresentationBounds());
-    }
-    return PaintInvalidation::None;
-  }
-
-private:
-  std::shared_ptr<SceneTransitionAnchorState> state_;
-};
-
 } // namespace huxerui::detail
 
 namespace huxerui {
 
-SceneTransitionAnchor SceneTransitionHandle::Anchor() const {
-  return SceneTransitionAnchor{anchor_};
+void SceneTransitionHandle::Run(TransitionSpec transition, std::function<void()> mutation) const {
+  service_->Run({std::move(transition), std::nullopt}, std::move(mutation), reduced_motion_);
 }
 
-void SceneTransitionHandle::Run(TransitionSpec transition, std::function<void()> mutation) const {
-  const std::optional<Point> origin = anchor_ ? anchor_->Center() : std::nullopt;
-  service_->Run({std::move(transition), origin}, std::move(mutation), reduced_motion_);
+void SceneTransitionHandle::RunFromView(
+    const ViewHandle& target, TransitionSpec transition, std::function<void()> mutation
+) const {
+  RunAt(service_->ViewOrigin(target), std::move(transition), std::move(mutation));
 }
 
 void SceneTransitionHandle::RunAt(Point origin, TransitionSpec transition, std::function<void()> mutation) const {
@@ -466,12 +415,7 @@ void SceneTransitionHandle::RunFromCurrentInteraction(
 
 SceneTransitionHandle UseSceneTransition() {
   const std::shared_ptr<detail::SceneTransitionService> service = UseService<detail::SceneTransitionService>();
-  auto anchor = UseState(service->CreateAnchor());
-  return SceneTransitionHandle{service, anchor.Get(), UseTheme().motion.reduced_motion};
-}
-
-const detail::ModifierDescriptor& SceneTransitionAnchor::Descriptor() {
-  return detail::ModifierDescriptorFor<SceneTransitionAnchor, detail::SceneTransitionAnchorExtension>();
+  return SceneTransitionHandle{service, UseTheme().motion.reduced_motion};
 }
 
 } // namespace huxerui

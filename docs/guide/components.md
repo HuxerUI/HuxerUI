@@ -347,18 +347,18 @@ Do not recreate Button, Select, Menu, or text-editing key behavior in an applica
 
 ### Programmatic focus
 
-Create a stable `FocusRequester` with `UseFocusRequester()` during composition and bind it with `.With(FocusTarget{requester})`. `FocusTarget` does not make a View focusable; use a built-in focusable control or add `Focusable{}` to a custom View. Call `RequestFocus()` on the application thread from an event handler or a resumed Task. It synchronously returns `true` when the mounted target accepts logical focus, including when it already owns focus, and makes its focus ring visible. Actual focus changes emit the existing `ViewEvents::FocusChanged` event.
+Create a stable `ViewHandle` with `UseViewHandle()` during composition and bind it with `.With(target)`. Binding the handle preserves the View's existing focus eligibility; use a built-in focusable control or add `Focusable{}` to a custom View. Call `RequestFocus()` on the application thread from an event handler or a resumed Task. It synchronously returns `true` when the mounted target accepts logical focus, including when it already owns focus, and makes its focus ring visible. Actual focus changes emit the existing `ViewEvents::FocusChanged` event.
 
 ```cpp
 [[huxerui::composable]]
 View SearchForm(State<TextEditingValue> query) {
-  auto search = UseFocusRequester();
+  auto search = UseViewHandle();
   auto window = UseWindow();
   return Column {
     TextField(query)
         .Label("Search")
         .InputConfiguration({.keyboard_policy = SoftwareKeyboardPolicy::Manual})
-        .With(FocusTarget{search}),
+        .With(search),
     Button("Edit search").OnClick([search, window] {
       if (search.RequestFocus()) window.ShowKeyboard();
     }),
@@ -373,11 +373,11 @@ Set `DialogOptions::initial_focus` to choose a Dialog's first target:
 ```cpp
 [[huxerui::composable]]
 View EditName(State<TextEditingValue> name) {
-  auto field = UseFocusRequester();
+  auto field = UseViewHandle();
   auto dialogs = UseDialog();
   return Button("Edit name").OnClick([dialogs, field, name] {
     dialogs.Show([field, name] {
-      return TextField(name).Label("Name").With(FocusTarget{field});
+      return TextField(name).Label("Name").With(field);
     }, {.initial_focus = field});
   });
 }

@@ -795,20 +795,20 @@ TEST_CASE("TestFocusableNodeRejectsMultipleTextInputClients") {
 
 namespace {
 
-std::array<std::optional<FocusRequester>, 3> input_focus;
+std::array<std::optional<ViewHandle>, 3> input_focus;
 TaskScope input_focus_tasks;
 bool input_focus_accepted = false;
 
 View ProgrammaticTextInputApp() {
-  const auto first = UseFocusRequester();
-  const auto second = UseFocusRequester();
+  const auto first = UseViewHandle();
+  const auto second = UseViewHandle();
   input_focus = {first, second, std::nullopt};
   input_focus_tasks = UseTaskScope();
   const auto window = UseWindow();
   text_input_window = window;
   return Column {
-    Text("first requested editor").With(Focusable{}, FocusTarget{first}, TextInputProbe{first_text_client}),
-    Text("second requested editor").With(Focusable{}, FocusTarget{second}, TextInputProbe{second_text_client}),
+    Text("first requested editor").With(Focusable{}, first, TextInputProbe{first_text_client}),
+    Text("second requested editor").With(Focusable{}, second, TextInputProbe{second_text_client}),
     Button("edit second").OnClick([second, window] {
       input_focus_accepted = second.RequestFocus();
       if (input_focus_accepted) window.ShowKeyboard();
@@ -817,17 +817,17 @@ View ProgrammaticTextInputApp() {
 }
 
 View InitialDialogFocusApp() {
-  for (auto& requester : input_focus) requester = UseFocusRequester();
+  for (auto& requester : input_focus) requester = UseViewHandle();
   text_input_dialog = UseDialog();
-  return Button("dialog opener").With(FocusTarget{*input_focus[0]});
+  return Button("dialog opener").With(*input_focus[0]);
 }
 
 View InitialDialogFocusContent() {
   return Column {
     Text("default dialog editor").With(Focusable{}, TextInputProbe{first_text_client}),
     Text("requested dialog editor")
-        .With(Focusable{}, FocusTarget{*input_focus[1]}, TextInputProbe{second_text_client}),
-    Button("other dialog control").With(FocusTarget{*input_focus[2]}),
+        .With(Focusable{}, *input_focus[1], TextInputProbe{second_text_client}),
+    Button("other dialog control").With(*input_focus[2]),
   };
 }
 
@@ -943,7 +943,7 @@ TEST_CASE("An unavailable Dialog initial target falls back once without focusing
     return Column {
       Text("fallback editor").With(Focusable{}, TextInputProbe{first_text_client}),
       text_client_visible
-          ? Text("late editor").With(Focusable{}, FocusTarget{*input_focus[1]}, TextInputProbe{second_text_client})
+          ? Text("late editor").With(Focusable{}, *input_focus[1], TextInputProbe{second_text_client})
           : Text("not mounted"),
     };
   }, {.initial_focus = input_focus[1]});

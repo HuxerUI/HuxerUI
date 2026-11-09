@@ -8,34 +8,9 @@ For an existing configured project, read `HuxerUI_DIR` in the active `CMakeCache
 
 If the project has no configured package, use `HUXERUI_HOME` when it identifies an installed SDK. Otherwise, inspect the selected CLI's `huxerui doctor` output for its SDK location. If the location is still unknown and the task depends on exact SDK behavior, ask for the SDK path.
 
-When the task creates, configures, builds, runs, or diagnoses a project:
+Check the shell-selected executable with `huxerui --version` and `huxerui --help` before relying on flags. Try subcommand help where available and use `huxerui doctor` for setup or environment diagnosis. Use the selected CLI's help for available scaffold options and agent destinations.
 
-1. Identify the `huxerui` executable selected by the shell.
-2. Run `huxerui --version` and inspect `huxerui --help` before relying on its commands.
-3. Run `huxerui doctor` for setup or environment diagnosis, scoped to the affected platform when possible.
-4. Try the relevant subcommand help before use. If that CLI does not implement subcommand `--help`, rely on its top-level usage and an isolated generated project rather than guessing flags.
-
-The packaged CLI exposes these top-level forms at the time this Skill is distributed:
-
-```text
-huxerui create app <name> [--build cmake|mcpp] [--template <name>] [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui create library <name> [--build cmake|mcpp] [--template <name>] [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui platform add <platform-list>
-huxerui doctor [platform-list]
-huxerui setup <platform-list> [--yes]
-huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
-huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
-huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
-huxerui open ios [--source <path>]
-```
-
-Re-read current help before copying these commands. CMake is the default build system. `--template` requires `--build mcpp`, and mcpp creation rejects `--platform`; the CMake-specific layouts and packaging steps below do not apply to that path.
-
-The CLI copies this Skill into new projects by default.
-`--agent` accepts `codex`, `claude`, `antigravity`, `opencode`, `command-code`, `omp`, `dsh`, and `zcode`; `all` selects every distinct supported Skill directory, while `none` omits the Skill.
-An explicit list replaces the default `codex` selection.
+CMake is the default build system. For mcpp scaffolding and build commands, use the [mcpp package workflow](cpp-modules-and-mcpp.md).
 
 ## Create a minimal application
 
@@ -159,8 +134,6 @@ Do not add a second dependency manifest or invoke FetchContent separately for a 
 
 ## Build and run without changing toolchains
 
-For a package-based mcpp project, use `mcpp build` and `mcpp run` with its existing rules. The separate `huxerui mcpp build` frontend only delegates an already configured mcpp build; it does not convert an SDK/CMake project or supply missing integration. See [prebuilt SDK consumers](mcpp-build.md) when that is the actual project setup.
-
 - Reuse the project's compatible build directory and generator.
 - On Windows, keep the existing MSVC generator; do not switch to MinGW or pin a Visual Studio release without a project requirement.
 - Build only the current host and platforms affected by the task by default.
@@ -168,6 +141,17 @@ For a package-based mcpp project, use `mcpp build` and `mcpp run` with its exist
 - Use `huxerui devices` when a platform needs a device selection.
 - On Termux, Android and Web use the current device directly: do not pass `--device` or add ADB. Web uses the CLI-planned Python loopback server and opens its URL through `termux-open`.
 - A Termux Android run opens the APK in the system installer; complete installation and choose Open there.
+
+### Select target ABIs
+
+When supported by the selected CLI, use `--abi` with `build`, `run`, or `package` for one platform. Omit it to keep project defaults. Separate multiple ABIs with commas where the operation supports them. Aliases resolve to platform spellings, such as `arm64` to `arm64-v8a` on Android and `x64` to `x86_64`.
+
+```bash
+huxerui package android --abi arm64
+huxerui build android --abi arm64-v8a,x86_64
+```
+
+Use the selected SDK's packaging guide for allowed combinations and output layouts. Termux Android builds support only `arm64-v8a`.
 
 ## UI testing
 

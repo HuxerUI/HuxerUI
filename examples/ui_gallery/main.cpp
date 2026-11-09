@@ -681,6 +681,8 @@ View FeedbackDemo(MenuHandle menu) {
   auto dialog = UseDialog();
   auto bottom_sheet = UseBottomSheet();
   auto popup = UsePopup();
+  auto popup_target = UseViewHandle();
+  auto menu_target = UseViewHandle();
 
   return Column {
     Text(
@@ -733,9 +735,11 @@ View FeedbackDemo(MenuHandle menu) {
         "Anchored presentation",
         "Popup and Menu support stable anchor geometry or an explicit window-local interaction point.",
         Flow {
-          Button("Show popup").With(popup.Anchor()).OnClick([popup] { popup.Show(GalleryPopup); }),
-          Button("Show menu").With(menu.Anchor()).OnClick([menu] {
-            menu.Show({
+          Button("Show popup").With(popup_target).OnClick([popup, popup_target] {
+            popup.Show(popup_target, GalleryPopup);
+          }),
+          Button("Show menu").With(menu_target).OnClick([menu, menu_target] {
+            menu.Show(menu_target, {
                 MenuItem(ui_gallery::images::content, "Open", [] {}),
                 MenuItem("Duplicate", [] {}),
                 MenuItem(

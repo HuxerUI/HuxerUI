@@ -35,6 +35,7 @@
 
 namespace huxerui::detail {
 
+struct AnchoredPresentation;
 class AppResources;
 struct FrozenScene;
 struct WindowState;
@@ -224,8 +225,8 @@ struct LayerEntrySnapshot {
   std::uint64_t revision = 0;
   bool exiting = false;
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
-  std::optional<std::uint64_t> retained_focus_identity;
-  std::optional<FocusRequester> initial_focus;
+  std::optional<ViewHandle> retained_focus_target;
+  std::optional<ViewHandle> initial_focus;
 
   bool operator==(const LayerEntrySnapshot&) const = default;
 };
@@ -244,11 +245,12 @@ struct LayerEntry {
   std::shared_ptr<const Environment> environment;
   // Active menu layers share this token so one logical menu chain remains one semantic modal region.
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
-  std::optional<std::uint64_t> retained_focus_identity;
-  std::optional<FocusRequester> initial_focus;
+  std::optional<ViewHandle> retained_focus_target;
+  std::optional<ViewHandle> initial_focus;
   // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
   std::shared_ptr<LayerPlacement> placement;
   std::shared_ptr<LayerTransitionState> transition;
+  std::shared_ptr<AnchoredPresentation> anchored_presentation{};
 };
 
 struct SceneTransitionRequest {
@@ -277,16 +279,6 @@ private:
   std::optional<Point> previous_;
 };
 
-struct SceneTransitionAnchorState {
-  void Mount();
-  void Unmount() noexcept;
-  void UpdateBounds(Rect bounds) noexcept;
-  [[nodiscard]] std::optional<Point> Center() const noexcept;
-
-  std::optional<Rect> bounds;
-  bool mounted = false;
-};
-
 class SceneTransitionService {
 public:
   explicit SceneTransitionService(UiWindow::State& runtime_state) : runtime_state_(&runtime_state) {}
@@ -294,7 +286,7 @@ public:
   SceneTransitionService(const SceneTransitionService&) = delete;
   SceneTransitionService& operator=(const SceneTransitionService&) = delete;
 
-  [[nodiscard]] std::shared_ptr<SceneTransitionAnchorState> CreateAnchor() const;
+  Point ViewOrigin(const ViewHandle& target) const;
   [[nodiscard]] std::optional<Point> CurrentInteractionOrigin() const noexcept;
   void Run(SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion);
   [[nodiscard]] bool IsActive() const noexcept;

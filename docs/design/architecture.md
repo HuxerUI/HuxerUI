@@ -1588,9 +1588,9 @@ Each accepted Press receives a UiWindow-unique `press_id`. Release and Cancel re
 
 `Focusable` lets a custom View participate in the window focus order. Button is focusable by default. UiWindow owns one focused mounted-node identity, dispatches `FocusChanged`, and moves focus for Tab or Shift+Tab. Enter activates a focused Button on key down; Space publishes ordered keyboard Press and Release interactions and activates on key up. Meaningful keyboard input, including an unmapped key reported as `Key::Unknown`, makes focus visible; the explicit left and right Shift, Control, Alt, and Meta keys do not reveal a pointer-focused ring by themselves. Focus ring, disabled opacity, and indication motion resolve from Theme.
 
-`UseFocusRequester()` retains one requester in the current composition scope; `FocusTarget` binds it to a mounted node without changing focusability. The requester captures the original window execution context without retaining its Environment or keeping the window alive. Reconciliation publishes bindings after replacement and keyed movement have completed, and unmount disconnects only the binding owned by that node. A requester cannot bind multiple mounted nodes or migrate to another window. Its declarations belong in `modifier.h`, and its implementation uses the existing mounted-node and UiWindow focus path.
+`UseViewHandle()` retains a copyable handle in the current composition scope. Pass it to `.With(target)` to declare the target without changing focus eligibility. The handle captures the original window execution context without retaining its Environment or window. UiWindow publishes the association after reconciliation and rejects simultaneous bindings to distinct nodes or another window. Focus, anchored presentation, and scene transitions share the association.
 
-`FocusRequester::RequestFocus()` validates the application thread and rejects composition-time mutation with `std::logic_error`. It returns `false` without disturbing existing focus for a retired window, an unmounted, disabled, or non-focusable target, or a target outside the active focus trap. Unrealized virtual items are not targets, and a rejected request creates no pending intent. An accepted request makes focus visible and uses the same focus notifications and text-input session synchronization as user input. Requests during focus-change notifications return `false`, keeping that transition indivisible. Requesting an already focused target succeeds without repeating `FocusChanged`.
+`ViewHandle::RequestFocus()` validates the application thread and rejects composition-time mutation with `std::logic_error`. It returns `false` without disturbing existing focus for a retired window, an unmounted, disabled, or non-focusable target, or a target outside the active focus trap. Unrealized virtual items are not targets, and a rejected request creates no pending intent. An accepted request makes focus visible and uses the same focus notifications and text-input session synchronization as user input. Requests during focus-change notifications return `false`, keeping that transition indivisible. Requesting an already focused target succeeds without repeating `FocusChanged`.
 
 `Key` identifies portable keys independently of layout-resolved `KeyEvent::text`. Left and right modifiers, main-row and numeric-keypad keys, punctuation, international keys, and F1 through F24 remain distinct. Modifier booleans intentionally report their collapsed active state. Release events have empty text and are never repeats; unmapped keys still travel through the route as `Key::Unknown`.
 
@@ -1944,15 +1944,16 @@ These typed handles are the primary public interaction model for command-oriente
 
 Presentation `UseXxx()` captures the current Environment while composing and returns a lightweight handle that can be retained by an event callback. Showing content later uses that captured Theme, Locale, resources, and third-party values. Services installed through a window hook use that window's root Environment unless their typed handle captures a narrower one.
 
-Popup and Menu handles expose a retained anchor modifier and point-based presentation:
+Popup and Menu handles accept a bound ViewHandle or a window point.
 
 ```cpp
 auto menu = UseMenu();
+auto target = UseViewHandle();
 
 return Button("More")
-    .With(menu.Anchor())
-    .OnClick([menu] {
-      menu.Show({
+    .With(target)
+    .OnClick([menu, target] {
+      menu.Show(target, {
           MenuItem("Rename", [] {}),
           MenuSection{},
           MenuItem("Delete", [] {}),
@@ -1960,7 +1961,7 @@ return Button("More")
     });
 ```
 
-The anchor modifier records final presentation geometry without creating a layer. `Show()` attaches the entry and follows the complete node bounds, `ShowAtAnchor()` follows a validated node-local rectangle, and `ShowAt()` uses a fixed window point. The retained anchor stores only the local rectangle and latest resolved transform values; `PopupHandle::UpdateAnchor()` updates a LocalRect entry without changing its layer id or content instance and rejects stale identifiers or other anchor modes. `PopupHandle::Update()` replaces content and its captured Environment without changing the active layer id, anchor placement, or dismissal options. `retain_anchor_focus` snapshots the mounted anchor identity into the layer entry; pointer focus resolution keeps that anchor only when popup content has no focusable target and the anchor still owns focus. Each Popup or Menu handle retains at most one active entry; presenting through it again dismisses the previous entry before attaching the replacement. `PopupContext` dismisses arbitrary popup content directly, while Menu leaf actions dismiss the complete open menu chain automatically. Anchor movement invalidates only the corresponding layer entry placement, settles that layout path before the current frame commit, and damages the old and new bounds; anchor removal dismisses node-bound and local-rectangle entries while fixed-window entries remain independent. Placement combines a preferred side, cross-axis alignment, gap, offset, viewport margin, opposite-side fallback, and final clamping without introducing a general cross-tree layout dependency.
+UiWindow publishes target geometry after layout and presentation transforms. `Show(target, ...)` follows the target bounds, `ShowAtAnchor(target, rect, ...)` follows a local rectangle, and `ShowAt(point, ...)` uses a fixed window point. A replacement bound to the same handle in one reconciliation keeps the active layer. A handle without a mounted target after reconciliation dismisses node-bound layers. `PopupHandle::UpdateAnchor()` changes the local rectangle while preserving the layer ID and content. `PopupHandle::Update()` changes content and its captured Environment. For `retain_anchor_focus`, pointer focus resolution uses the current bound target and preserves focus only when that target already owns it and popup content has no focusable target. Popup and Menu handles each keep independent presentation state. Placement uses the existing layer layout and resolves nested anchors before the frame commits.
 
 Menu is structurally distinct from Popup. Its public input is a recursive sequence of `MenuEntry` values created implicitly from `MenuItem` and `MenuSection`. Menu items directly contain either an action or another entry sequence, while `MenuSection{}` is a non-interactive logical boundary whose visual treatment belongs to the theme. Items retain resource identifiers and image assets as semantic values; the presentation service resolves resources from the captured Environment and composes themed surfaces and interaction. The root menu owns the transparent outside-press barrier. Submenus are content-only anchored layers, so their parent menu remains interactive; Back closes the deepest open level, the default outside-press behavior closes the complete chain, and opening another submenu replaces only that level and its descendants. Arbitrary custom anchored content remains a Popup responsibility.
 

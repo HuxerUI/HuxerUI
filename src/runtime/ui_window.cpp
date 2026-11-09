@@ -743,11 +743,12 @@ void ApplyViewDeclaration(MountedNode& mounted, ViewSpec& compiled, std::shared_
   mounted.pointer_events_enabled = compiled.pointer_events_enabled;
   mounted.local_enabled = compiled.local_enabled;
   mounted.focusable = compiled.focusable;
-  if (mounted.focus_target != compiled.focus_target) {
-    if (mounted.focus_target && mounted.focus_target->node_identity == mounted.identity) {
-      mounted.focus_target->node_identity = 0;
+  if (mounted.view_handle != compiled.view_handle) {
+    if (mounted.view_handle && mounted.view_handle->node_identity == mounted.identity) {
+      mounted.view_handle->node_identity = 0;
+      mounted.view_handle->geometry.reset();
     }
-    mounted.focus_target = std::move(compiled.focus_target);
+    mounted.view_handle = std::move(compiled.view_handle);
   }
   mounted.trap_focus = compiled.trap_focus;
 }
@@ -948,16 +949,8 @@ void PrepareExtensionGeometry(MountedNode& node, TextMeasurer& text_measurer) {
 
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
   // Publish targets after reconciliation so replacement and keyed movement cannot overlap previous bindings.
-  if (node.focus_target) {
-    auto& target = *node.focus_target;
-    const auto window = target.source->ui.lock();
-    if (!window || window->ui_window != node.ui_window) {
-      throw std::logic_error("HuxerUI focus target belongs to another window");
-    }
-    if (target.node_identity != 0 && target.node_identity != node.identity) {
-      throw std::logic_error("HuxerUI focus requester is bound to multiple mounted controls");
-    }
-    target.node_identity = node.identity;
+  if (node.view_handle) {
+    node.PublishViewBinding();
   }
   const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled &&
       !node.exclude_input;
@@ -1176,27 +1169,26 @@ std::optional<PlatformValue> InternalAccess::DispatchPlatformViewEvent(
 
 namespace huxerui {
 
-bool FocusRequester::RequestFocus() const {
+bool ViewHandle::RequestFocus() const {
   if (detail::Composer::Current()) {
     throw std::logic_error("HuxerUI cannot request focus during composition");
   }
-  if (!state_ || !state_->source->application.lock()) return false;
-  detail::ValidateApplicationCall(state_->source);
-  const auto window = state_->source->ui.lock();
-  if (!window || !window->ui_window || state_->node_identity == 0) return false;
-  detail::ExecutionGuard guard(state_->source);
-  return window->ui_window->RequestFocus(state_->node_identity);
+  if (!binding_ || !binding_->source->application.lock()) return false;
+  detail::ValidateApplicationCall(binding_->source);
+  const auto window = binding_->source->ui.lock();
+  if (!window || !window->ui_window || binding_->node_identity == 0) return false;
+  detail::ExecutionGuard guard(binding_->source);
+  return window->ui_window->RequestFocus(binding_->node_identity);
 }
 
-FocusRequester UseFocusRequester(const std::source_location& location) {
+ViewHandle UseViewHandle(const std::source_location& location) {
   if (!detail::Composer::Current()) {
-    throw std::logic_error("HuxerUI UseFocusRequester() requires window composition");
+    throw std::logic_error("HuxerUI UseViewHandle() requires window composition");
   }
   auto* window = detail::CurrentUiWindow();
-  if (!window) throw std::logic_error("HuxerUI UseFocusRequester() requires window composition");
+  if (!window) throw std::logic_error("HuxerUI UseViewHandle() requires window composition");
   auto source = detail::CapturePresentationContext(detail::InternalAccess::WindowExecution(*window));
-  auto requester = FocusRequester(std::make_shared<detail::FocusRequesterState>(std::move(source)));
-  return UseState(std::move(requester), location);
+  return UseState(ViewHandle{std::make_shared<detail::ViewHandleBinding>(std::move(source))}, location);
 }
 
 Runtime& UiWindow::ApplicationRuntime() const {
@@ -1990,6 +1982,10 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     state_->pointer_->RefreshCursor();
     state_->pointer_->RefreshHover(false);
     RefreshInteractionTree();
+    if (state_->layer_controller_.RefreshAnchors(false)) {
+      ComposeLayers();
+      RefreshInteractionTree();
+    }
     state_->file_drop_->AdvanceFileDrop(frame);
     state_->text_->RefreshTextInputSession();
     HUXERUI_PROFILE_NEXT(profile_stage, Semantics);
@@ -2065,6 +2061,10 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
   // Extensions prepare node-local geometry after the final layout. Text input geometry is then converted to host-view
   // coordinates while the platform IME session is synchronized.
   PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
+  bool anchor_layers_dismissed = state_->layer_controller_.RefreshAnchors(true);
+  if (anchor_layers_dismissed) {
+    ComposeLayers();
+  }
   // Anchors can be nested inside other anchored layers. Settle the bounded dependency chain in this commit so a child
   // presentation does not retain geometry from its parent's previous placement.
   const detail::MountedNode* const committed_layer_stack = FindLayerStack(*state_->mounted_root_);
@@ -2082,8 +2082,15 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
         state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
     );
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
+    if (anchor_layers_dismissed) {
+      RefreshInteractionTree();
+    }
     ResolvePresentationTree(*state_->mounted_root_);
     PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
+    anchor_layers_dismissed = state_->layer_controller_.RefreshAnchors(true);
+    if (anchor_layers_dismissed) {
+      ComposeLayers();
+    }
   }
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();
@@ -2214,7 +2221,7 @@ void UiWindow::RefreshInteractionTree() {
         focus_root->initial_focus_consumed = true;
         const auto* snapshot = focus_root->LayoutValue<LayerEntrySnapshotValue>();
         if (snapshot && snapshot->initial_focus) {
-          const auto& target = snapshot->initial_focus->state_;
+          const auto& target = snapshot->initial_focus->binding_;
           const auto window = target ? target->source->ui.lock() : nullptr;
           const auto* candidate = window && window->ui_window == this
               ? FindNode(*focus_root, target->node_identity) : nullptr;
@@ -2274,7 +2281,8 @@ std::optional<std::uint64_t> UiWindow::ResolvePointerFocusTarget(const std::vect
     const bool retains_focus = std::ranges::any_of(route, [this, pointer_target](const detail::MountedNode* node) {
       const auto* snapshot = node->LayoutValue<detail::LayerEntrySnapshotValue>();
       return node != pointer_target && snapshot != nullptr &&
-             snapshot->retained_focus_identity == state_->focused_node_identity_;
+             snapshot->retained_focus_target && snapshot->retained_focus_target->binding_ &&
+             snapshot->retained_focus_target->binding_->node_identity == state_->focused_node_identity_;
     });
     if (retains_focus) {
       return state_->focused_node_identity_;
@@ -3181,7 +3189,7 @@ void UiWindow::ComposeLayers() {
           .revision = entry.revision,
           .exiting = exiting,
           .semantic_modal_group = entry.semantic_modal_group,
-          .retained_focus_identity = entry.retained_focus_identity,
+          .retained_focus_target = entry.retained_focus_target,
           .initial_focus = entry.initial_focus,
       });
       // An exiting modal keeps its focus barrier until removal so input cannot fall through while its content fades.
@@ -3549,7 +3557,21 @@ bool UiWindow::ReconcileLayerChildren(
 namespace huxerui::detail {
 
 MountedNode::~MountedNode() {
-  if (focus_target && focus_target->node_identity == identity) focus_target->node_identity = 0;
+  if (view_handle && view_handle->node_identity == identity) {
+    view_handle->node_identity = 0;
+    view_handle->geometry.reset();
+  }
+}
+
+void MountedNode::PublishViewBinding() {
+  const auto window = view_handle->source->ui.lock();
+  if (!window || window->ui_window != ui_window) {
+    throw std::logic_error("HuxerUI ViewHandle belongs to another window");
+  }
+  if (view_handle->node_identity != 0 && view_handle->node_identity != identity) {
+    throw std::logic_error("HuxerUI ViewHandle is bound to multiple mounted Views");
+  }
+  view_handle->node_identity = identity;
 }
 
 VirtualMeasureSession::VirtualMeasureSession(UiWindow& ui_window, MountedNode& owner)

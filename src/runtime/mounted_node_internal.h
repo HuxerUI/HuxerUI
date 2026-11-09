@@ -40,12 +40,18 @@ struct CachedParagraphLayout;
 class ScrollConnection;
 struct ExecutionContext;
 
-/// Keeps a focus target attached to its original window without retaining that window or its Environment.
-struct FocusRequesterState {
-  explicit FocusRequesterState(std::shared_ptr<ExecutionContext> source) : source(std::move(source)) {}
+struct ViewHandleGeometry {
+  Rect bounds;
+  Transform2D local_to_window;
+};
+
+/// Keeps a target attached to its original window without retaining that window or its Environment.
+struct ViewHandleBinding {
+  explicit ViewHandleBinding(std::shared_ptr<ExecutionContext> source) : source(std::move(source)) {}
 
   std::shared_ptr<ExecutionContext> source;
   std::uint64_t node_identity = 0;
+  std::optional<ViewHandleGeometry> geometry;
 };
 
 inline std::optional<double> EarliestWakeAfter(std::optional<double> first, std::optional<double> second) noexcept {
@@ -254,6 +260,7 @@ struct NodePresentation {
 // NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
 struct MountedNode final : public huxerui::ViewNode {
   ~MountedNode() override;
+  void PublishViewBinding();
 
   UiWindow* ui_window = nullptr;
   NodeKind kind = NodeKind::Layout;
@@ -328,7 +335,7 @@ struct MountedNode final : public huxerui::ViewNode {
   // Re-resolved during geometry preparation from static indication geometry or a component's dynamic control bounds.
   std::optional<Rect> indication_bounds_override;
   bool focusable = false;
-  std::shared_ptr<FocusRequesterState> focus_target;
+  std::shared_ptr<ViewHandleBinding> view_handle;
   bool initial_focus_consumed = false;
   bool trap_focus = false;
   bool subtree_has_extensions = true;

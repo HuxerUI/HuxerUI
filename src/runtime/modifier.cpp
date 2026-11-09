@@ -589,9 +589,9 @@ const detail::ModifierDescriptor& Focusable::Descriptor() {
   return ApplyOnlyModifierDescriptor<Focusable, ApplyFocusable>();
 }
 
-const detail::ModifierDescriptor& FocusTarget::Descriptor() {
-  return ApplyOnlyModifierDescriptor<FocusTarget, [](detail::ViewSpec& spec, const FocusTarget& modifier) {
-    spec.focus_target = modifier.requester.state_;
+const detail::ModifierDescriptor& ViewHandle::Descriptor() {
+  return ApplyOnlyModifierDescriptor<ViewHandle, [](detail::ViewSpec& spec, const ViewHandle& modifier) {
+    spec.view_handle = modifier.binding_;
   }>();
 }
 

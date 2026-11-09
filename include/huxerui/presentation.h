@@ -30,13 +30,12 @@ namespace detail {
 class BottomSheetService;
 class DialogExtension;
 class DialogService;
-class LayerAnchorExtension;
 class MenuService;
 class SystemTrayService;
 class PopupService;
 class SnackBarService;
 class ToastService;
-struct LayerAnchorBinding;
+struct AnchoredPresentation;
 
 template <class Context, class Factory, class... Arguments>
 concept PresentationFactoryFor =
@@ -421,7 +420,7 @@ struct DialogOptions {
   std::function<void()> on_dismiss_request{};
   /// Optional target captured by Show() and tried once when this Dialog first acquires focus.
   /// Invalid targets fall back to the first eligible control; content updates do not reapply the initial target.
-  std::optional<FocusRequester> initial_focus{};
+  std::optional<ViewHandle> initial_focus{};
 };
 
 /// Gives custom Dialog content access to the identifier and dismissal operation of its owning request.
@@ -731,24 +730,6 @@ struct MenuOptions {
   std::function<void()> on_dismiss_request;
 };
 
-/// Retained modifier that provides live anchor geometry to one PopupHandle or MenuHandle.
-///
-/// Obtain this modifier from the same handle that will show the presentation and apply it to the anchor View.
-class LayerAnchor {
-public:
-  /// Returns the retained modifier descriptor used by View::With().
-  static const detail::ModifierDescriptor& Descriptor();
-
-private:
-  explicit LayerAnchor(std::shared_ptr<detail::LayerAnchorBinding> binding) : binding_(std::move(binding)) {}
-
-  std::shared_ptr<detail::LayerAnchorBinding> binding_;
-
-  friend class PopupHandle;
-  friend class MenuHandle;
-  friend class detail::LayerAnchorExtension;
-};
-
 /// Gives custom Popup content access to the identifier and dismissal operation of its owning request.
 class PopupContext {
 public:
@@ -761,9 +742,10 @@ public:
   bool Dismiss() const;
 
 private:
-  PopupContext(std::shared_ptr<detail::LayerAnchorBinding> anchor, LayerId id) : anchor_(std::move(anchor)), id_(id) {}
+  PopupContext(std::shared_ptr<detail::AnchoredPresentation> presentation, LayerId id)
+      : presentation_(std::move(presentation)), id_(id) {}
 
-  std::shared_ptr<detail::LayerAnchorBinding> anchor_;
+  std::shared_ptr<detail::AnchoredPresentation> presentation_;
   LayerId id_;
 
   friend class detail::PopupService;
@@ -775,25 +757,28 @@ using PopupFactory = std::function<View(PopupContext)>;
 /// Presents arbitrary content relative to a retained anchor or a window point.
 /// @code
 /// auto popup = UsePopup();
-///
-/// return Button("Details")
-///     .With(popup.Anchor())
-///     .OnClick([popup] { popup.Show([](PopupContext context) { return DetailsCard(context); }); });
+/// auto target = UseViewHandle();
+/// return Button("Details").With(target).OnClick([popup, target] {
+///   popup.Show(target, [](PopupContext context) { return DetailsCard(context); });
+/// });
 /// @endcode
 class PopupHandle {
 public:
-  /// Returns the retained modifier that tracks this handle's anchor View.
-  [[nodiscard]] LayerAnchor Anchor() const;
-  /// Presents content relative to the tracked anchor and returns its LayerId.
-  LayerId Show(ViewFactory content, PopupOptions options = {}) const;
+  /// Presents content relative to a mounted target and returns its LayerId.
+  /// @throws std::logic_error If the target is unavailable or belongs to another window.
+  LayerId Show(const ViewHandle& target, ViewFactory content, PopupOptions options = {}) const;
   /// Presents context-aware content relative to the tracked anchor and returns its LayerId.
-  LayerId Show(PopupFactory content, PopupOptions options = {}) const;
+  LayerId Show(const ViewHandle& target, PopupFactory content, PopupOptions options = {}) const;
   /// Presents content relative to node-local bounds associated with the tracked anchor.
   /// The bounds may extend outside the anchor View.
-  LayerId ShowAtAnchor(Rect local_anchor, ViewFactory content, PopupOptions options = {}) const;
+  LayerId ShowAtAnchor(
+      const ViewHandle& target, Rect local_anchor, ViewFactory content, PopupOptions options = {}
+  ) const;
   /// Presents context-aware content relative to node-local bounds associated with the tracked anchor.
   /// The bounds may extend outside the anchor View.
-  LayerId ShowAtAnchor(Rect local_anchor, PopupFactory content, PopupOptions options = {}) const;
+  LayerId ShowAtAnchor(
+      const ViewHandle& target, Rect local_anchor, PopupFactory content, PopupOptions options = {}
+  ) const;
   /// Replaces anchored Popup content and returns false for a stale identifier.
   bool Update(LayerId id, ViewFactory content) const;
   /// Replaces context-aware anchored Popup content and returns false for a stale identifier.
@@ -804,8 +789,9 @@ public:
   /// Binds copyable factory arguments and presents content relative to the tracked anchor.
   template <class Factory, class... Arguments>
     requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
-  LayerId Show(Factory&& content, Arguments&&... arguments) const {
+  LayerId Show(const ViewHandle& target, Factory&& content, Arguments&&... arguments) const {
     return Show(
+        target,
         detail::BindPresentationFactory<PopupContext>(
             std::forward<Factory>(content),
             std::forward<Arguments>(arguments)...
@@ -816,8 +802,9 @@ public:
   /// Binds copyable factory arguments and presents content relative to node-local anchor bounds.
   template <class Factory, class... Arguments>
     requires detail::PresentationFactoryFor<PopupContext, Factory, Arguments...>
-  LayerId ShowAtAnchor(Rect local_anchor, Factory&& content, Arguments&&... arguments) const {
+  LayerId ShowAtAnchor(const ViewHandle& target, Rect local_anchor, Factory&& content, Arguments&&... arguments) const {
     return ShowAtAnchor(
+        target,
         local_anchor,
         detail::BindPresentationFactory<PopupContext>(
             std::forward<Factory>(content),
@@ -859,18 +846,18 @@ private:
   PopupHandle(
       std::shared_ptr<detail::PopupService> service,
       std::shared_ptr<const Environment> environment,
-      std::shared_ptr<detail::LayerAnchorBinding> anchor
+      std::shared_ptr<detail::AnchoredPresentation> presentation
   )
-      : service_(std::move(service)), environment_(std::move(environment)), anchor_(std::move(anchor)) {}
+      : service_(std::move(service)), environment_(std::move(environment)), presentation_(std::move(presentation)) {}
 
   std::shared_ptr<detail::PopupService> service_;
   std::shared_ptr<const Environment> environment_;
-  std::shared_ptr<detail::LayerAnchorBinding> anchor_;
+  std::shared_ptr<detail::AnchoredPresentation> presentation_;
 
   friend PopupHandle UsePopup();
 };
 
-/// Returns a Popup handle with a scope-stable anchor and captures the current Environment.
+/// Returns a Popup handle with scope-stable presentation state and captures the current Environment.
 ///
 /// Reusable functions that call this composition-bound facility should be marked composable.
 PopupHandle UsePopup();
@@ -935,19 +922,16 @@ private:
 /// Presents a semantic Menu relative to a retained anchor or a window point.
 /// @code
 /// auto menu = UseMenu();
-///
-/// return Button("More")
-///     .With(menu.Anchor())
-///     .OnClick([menu] {
-///       menu.Show({MenuItem("Rename", RenameItem), MenuItem("Delete", DeleteItem)});
-///     });
+/// auto target = UseViewHandle();
+/// return Button("More").With(target).OnClick([menu, target] {
+///   menu.Show(target, {MenuItem("Rename", RenameItem), MenuItem("Delete", DeleteItem)});
+/// });
 /// @endcode
 class MenuHandle {
 public:
-  /// Returns the retained modifier that tracks this handle's anchor View.
-  [[nodiscard]] LayerAnchor Anchor() const;
-  /// Presents entries relative to the tracked anchor and returns the root Menu LayerId.
-  LayerId Show(std::vector<MenuEntry> entries, MenuOptions options = {}) const;
+  /// Presents entries relative to a mounted target and returns the root Menu LayerId.
+  /// @throws std::logic_error If the target is unavailable or belongs to another window.
+  LayerId Show(const ViewHandle& target, std::vector<MenuEntry> entries, MenuOptions options = {}) const;
   /// Presents entries relative to a window point and returns the root Menu LayerId.
   LayerId ShowAt(Point point, std::vector<MenuEntry> entries, MenuOptions options = {}) const;
   /// Dismisses the whole matching Menu chain and returns false for a stale identifier.
@@ -957,19 +941,19 @@ private:
   MenuHandle(
       std::shared_ptr<detail::MenuService> service,
       std::shared_ptr<const Environment> environment,
-      std::shared_ptr<detail::LayerAnchorBinding> anchor
+      std::shared_ptr<detail::AnchoredPresentation> presentation
   )
-      : service_(std::move(service)), environment_(std::move(environment)), anchor_(std::move(anchor)) {}
+      : service_(std::move(service)), environment_(std::move(environment)), presentation_(std::move(presentation)) {}
 
   std::shared_ptr<detail::MenuService> service_;
   std::shared_ptr<const Environment> environment_;
-  std::shared_ptr<detail::LayerAnchorBinding> anchor_;
+  std::shared_ptr<detail::AnchoredPresentation> presentation_;
 
   friend MenuHandle UseMenu();
   friend class detail::MenuService;
 };
 
-/// Returns a Menu handle with a scope-stable anchor and captures the current Environment.
+/// Returns a Menu handle with scope-stable presentation state and captures the current Environment.
 ///
 /// Reusable functions that call this composition-bound facility should be marked composable.
 MenuHandle UseMenu();

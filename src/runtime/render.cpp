@@ -599,6 +599,11 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
     node.presentation.resolved_opacity = 0.0F;
     return;
   }
+  if (node.view_handle) {
+    // A geometry pass can realize additional virtual items after interaction was refreshed.
+    node.PublishViewBinding();
+    node.view_handle->geometry = ViewHandleGeometry{node.PresentationBounds(), node.presentation.resolved_transform};
+  }
   // render_opacity is emitted as this node's group opacity. resolved_opacity is the inherited product used for
   // visibility and descendant geometry without baking ancestor opacity into retained paint commands.
   float render_opacity = std::clamp(node.presentation.local_opacity, 0.0F, 1.0F);

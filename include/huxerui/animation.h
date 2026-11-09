@@ -25,9 +25,7 @@ class PaintContext;
 
 namespace detail {
 struct InternalAccess;
-class SceneTransitionAnchorExtension;
 class SceneTransitionService;
-struct SceneTransitionAnchorState;
 class TransitionExtension;
 class SharedTransitionCoordinator;
 
@@ -914,33 +912,7 @@ private:
 /// @endcode
 SharedTransitionHandle UseSharedTransition();
 
-/// Retained modifier that supplies stable presentation geometry to a circular scene transition.
-///
-/// One anchor returned by SceneTransitionHandle::Anchor() may be mounted on only one View at a time.
-/// @code
-/// return Button("Change theme")
-///     .With(scene_transition.Anchor())
-///     .OnClick([scene_transition, dark] {
-///       scene_transition.Run(TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36}}, [dark] { dark = !dark; });
-///     });
-/// @endcode
-class SceneTransitionAnchor {
-public:
-  /// Returns the retained-modifier descriptor used by View::With().
-  /// @return The framework modifier descriptor; attach the value through With().
-  static const detail::ModifierDescriptor& Descriptor();
-
-private:
-  explicit SceneTransitionAnchor(std::shared_ptr<detail::SceneTransitionAnchorState> state)
-      : state_(std::move(state)) {}
-
-  std::shared_ptr<detail::SceneTransitionAnchorState> state_;
-
-  friend class SceneTransitionHandle;
-  friend class detail::SceneTransitionAnchorExtension;
-};
-
-/// Starts window scene transitions and owns the optional geometry anchor associated with one composable call site.
+/// Starts window scene transitions across synchronous state changes.
 ///
 /// The mutation must synchronously update authoritative application state so UiWindow can capture the old scene and
 /// compose its replacement. When reduced motion is enabled, the mutation still runs but the visual transition is
@@ -953,12 +925,7 @@ private:
 /// @endcode
 class SceneTransitionHandle {
 public:
-  /// Returns the modifier that records one mounted View's current presentation bounds.
-  /// @return A retained modifier associated with this handle's stable anchor state.
-  /// @note Mount the returned anchor on at most one View at a time.
-  [[nodiscard]] SceneTransitionAnchor Anchor() const;
-
-  /// Runs a one-shot effect over a synchronous mutation, using Anchor() geometry when available.
+  /// Runs a one-shot effect over a synchronous mutation.
   /// Required-origin validation happens before mutation; an effect requiring a missing origin throws.
   /// @param transition One-shot visual effect and timing for this operation.
   /// @param mutation Non-empty synchronous application-state update, executed once after preflight validation.
@@ -967,11 +934,15 @@ public:
   /// @note Mutation exceptions propagate without rolling back state writes; active visual retention is released.
   void Run(TransitionSpec transition, std::function<void()> mutation) const;
 
+  /// Runs the effect from the mounted target's presentation center, captured before mutation.
+  /// @throws std::logic_error If the target is unavailable or belongs to another window.
+  void RunFromView(const ViewHandle& target, TransitionSpec transition, std::function<void()> mutation) const;
+
   /// Runs the effect with a finite window-local logical origin.
   ///
   /// RunAt() is appropriate when the caller already owns stable geometry or resumes asynchronous work after an input
   /// callback has returned.
-  /// @param origin Finite window-local logical point; it overrides the handle's anchor geometry.
+  /// @param origin Finite window-local logical point.
   /// @param transition One-shot visual effect and timing.
   /// @param mutation Non-empty synchronous application-state update.
   /// @throws std::invalid_argument If origin, mutation, or evaluated geometry is invalid.
@@ -999,12 +970,10 @@ public:
   void RunFromCurrentInteraction(TransitionSpec transition, std::function<void()> mutation) const;
 
 private:
-  SceneTransitionHandle(std::shared_ptr<detail::SceneTransitionService> service,
-                        std::shared_ptr<detail::SceneTransitionAnchorState> anchor, bool reduced_motion)
-      : service_(std::move(service)), anchor_(std::move(anchor)), reduced_motion_(reduced_motion) {}
+  SceneTransitionHandle(std::shared_ptr<detail::SceneTransitionService> service, bool reduced_motion)
+      : service_(std::move(service)), reduced_motion_(reduced_motion) {}
 
   std::shared_ptr<detail::SceneTransitionService> service_;
-  std::shared_ptr<detail::SceneTransitionAnchorState> anchor_;
   bool reduced_motion_ = false;
 
   friend SceneTransitionHandle UseSceneTransition();

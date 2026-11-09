@@ -15,13 +15,17 @@ std::optional<ToastHandle> layer_toast;
 std::optional<BottomSheetHandle> layer_bottom_sheet;
 std::optional<BottomSheetContext> layer_bottom_sheet_context;
 std::optional<PopupHandle> layer_popup;
+std::optional<ViewHandle> layer_popup_target;
 std::optional<PopupContext> layer_popup_context;
 std::optional<MenuHandle> layer_menu;
+std::optional<ViewHandle> layer_menu_target;
 std::optional<MenuHandle> nested_menu;
+std::optional<ViewHandle> nested_menu_target;
 std::optional<DialogHandle> retained_environment_dialog;
 std::optional<LayerController> raw_layers;
 State<float> layer_anchor_offset;
 State<bool> layer_anchor_visible;
+State<int> layer_anchor_variant;
 State<bool> local_anchor_transform_changed;
 State<int> layer_environment_value;
 State<bool> layer_environment_provider_visible;
@@ -80,13 +84,15 @@ View LayerApp() {
     auto popup = UsePopup();
     auto menu = UseMenu();
     layer_popup = popup;
+    layer_popup_target = UseViewHandle();
     layer_menu = menu;
+    layer_menu_target = UseViewHandle();
     layer_anchor_offset = UseState(20.0F);
     return Column {
         Button("popup anchor")
-            .With(huxerui::Frame{60.0F, 30.0F}, Offset{Point{layer_anchor_offset.Get(), 0.0F}}, popup.Anchor())
+            .With(huxerui::Frame{60.0F, 30.0F}, Offset{Point{layer_anchor_offset.Get(), 0.0F}}, *layer_popup_target)
             .OnClick([] { ++layer_background_clicks; }),
-        Button("menu anchor").With(huxerui::Frame{60.0F, 30.0F}, menu.Anchor()),
+        Button("menu anchor").With(huxerui::Frame{60.0F, 30.0F}, *layer_menu_target),
         Text("application content"),
     };
   });
@@ -99,6 +105,7 @@ View MaterialLayerApp() {
 View LocalAnchorTransformApp() {
   auto popup = UsePopup();
   layer_popup = popup;
+  layer_popup_target = UseViewHandle();
   local_anchor_transform_changed = UseState(false);
   const bool transformed = local_anchor_transform_changed.Get();
   return Spacer().With(
@@ -106,7 +113,7 @@ View LocalAnchorTransformApp() {
       Scale{transformed ? 2.0F : 1.0F, huxerui::TransformOrigin{0.0F, 0.0F}},
       Rotation{transformed ? 90.0F : 0.0F, huxerui::TransformOrigin{0.0F, 0.0F}},
       Offset{Point{100.0F, 20.0F}},
-      popup.Anchor()
+      *layer_popup_target
   );
 }
 
@@ -224,26 +231,44 @@ View NestedAnchorContent() {
   return Theme {std::move(definition), Scope([] {
     auto menu = UseMenu();
     nested_menu = menu;
-    return Button("nested menu anchor").With(huxerui::Frame{60.0F, 30.0F}, menu.Anchor());
+    nested_menu_target = UseViewHandle();
+    return Button("nested menu anchor").With(huxerui::Frame{60.0F, 30.0F}, *nested_menu_target);
   })};
 }
 
 View NestedAnchorApp() {
   auto popup = UsePopup();
   layer_popup = popup;
+  layer_popup_target = UseViewHandle();
   layer_anchor_offset = UseState(20.0F);
   return Button("outer popup anchor")
-      .With(huxerui::Frame{60.0F, 30.0F}, Offset{Point{layer_anchor_offset.Get(), 0.0F}}, popup.Anchor());
+      .With(huxerui::Frame{60.0F, 30.0F}, Offset{Point{layer_anchor_offset.Get(), 0.0F}}, *layer_popup_target);
 }
 
 View RemovableAnchorApp() {
   auto popup = UsePopup();
   layer_popup = popup;
+  layer_popup_target = UseViewHandle();
   layer_anchor_visible = UseState(true);
   if (!layer_anchor_visible.Get()) {
     return Text("anchor removed");
   }
-  return Button("removable popup anchor").With(huxerui::Frame{60.0F, 30.0F}, popup.Anchor());
+  return Button("removable popup anchor").With(huxerui::Frame{60.0F, 30.0F}, *layer_popup_target);
+}
+
+View ReplaceableAnchorApp() {
+  layer_popup = UsePopup();
+  layer_popup_target = UseViewHandle();
+  layer_anchor_variant = UseState(0);
+  const int variant = layer_anchor_variant;
+  if (variant == 2) {
+    return Text("replacement anchor").With(
+        huxerui::Frame{60.0F, 30.0F}, Offset{Point{40.0F, 0.0F}}, *layer_popup_target);
+  }
+  if (variant == 1) {
+    return Button("original anchor").With(huxerui::Frame{60.0F, 30.0F}, Tooltip("Hint"), *layer_popup_target);
+  }
+  return Button("original anchor").With(huxerui::Frame{60.0F, 30.0F}, *layer_popup_target);
 }
 
 View FocusTrapApp() {
@@ -464,11 +489,11 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
   const float infinity = std::numeric_limits<float>::infinity();
   REQUIRE_THROWS_AS(layer_popup->ShowAt({infinity, 0.0F}, [] { return Text("popup"); }), std::invalid_argument);
   REQUIRE_THROWS_AS(
-      layer_popup->ShowAtAnchor({infinity, 0.0F, 10.0F, 10.0F}, [] { return Text("popup"); }),
+      layer_popup->ShowAtAnchor(*layer_popup_target, {infinity, 0.0F, 10.0F, 10.0F}, [] { return Text("popup"); }),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(
-      layer_popup->ShowAtAnchor({0.0F, 0.0F, -1.0F, 10.0F}, [] { return Text("popup"); }),
+      layer_popup->ShowAtAnchor(*layer_popup_target, {0.0F, 0.0F, -1.0F, 10.0F}, [] { return Text("popup"); }),
       std::invalid_argument
   );
   REQUIRE_THROWS_AS(layer_menu->ShowAt({0.0F, infinity}, TestMenu("menu")), std::invalid_argument);
@@ -484,19 +509,23 @@ TEST_CASE("TestAnchoredPresentationRejectsInvalidGeometry") {
       layer_menu->ShowAt({0.0F, 0.0F}, TestMenu("menu"), MenuOptions{.viewport_margin = -1.0F}),
       std::invalid_argument
   );
-  REQUIRE_THROWS_AS(layer_menu->Show({}), std::invalid_argument);
+  REQUIRE_THROWS_AS(layer_menu->Show(*layer_menu_target, {}), std::invalid_argument);
   REQUIRE_THROWS_AS(
-      layer_menu->Show({
+      layer_menu->Show(*layer_menu_target, {
           MenuSection{},
           MenuItem("invalid", [] {}),
       }),
       std::invalid_argument
   );
-  REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::function<void()>{})}), std::invalid_argument);
-  REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("invalid", std::vector<MenuEntry>{})}), std::invalid_argument);
-  REQUIRE_THROWS_AS(layer_menu->Show({MenuItem(VectorAsset{}, "invalid", [] {})}), std::invalid_argument);
-  REQUIRE_THROWS_AS(layer_menu->Show({MenuItem("", [] {})}), std::invalid_argument);
-  REQUIRE_THROWS_AS(layer_menu->Show(TestMenu("menu"), MenuOptions{.width = 0.0F}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      layer_menu->Show(*layer_menu_target, {MenuItem("invalid", std::function<void()>{})}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      layer_menu->Show(*layer_menu_target, {MenuItem("invalid", std::vector<MenuEntry>{})}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      layer_menu->Show(*layer_menu_target, {MenuItem(VectorAsset{}, "invalid", [] {})}), std::invalid_argument);
+  REQUIRE_THROWS_AS(layer_menu->Show(*layer_menu_target, {MenuItem("", [] {})}), std::invalid_argument);
+  REQUIRE_THROWS_AS(
+      layer_menu->Show(*layer_menu_target, TestMenu("menu"), MenuOptions{.width = 0.0F}), std::invalid_argument);
 }
 
 TEST_CASE("TestPresentationStylesRejectInvalidShadowsBeforeAttachingLayers") {
@@ -506,7 +535,7 @@ TEST_CASE("TestPresentationStylesRejectInvalidShadowsBeforeAttachingLayers") {
     UiWindow runtime{InvalidMenuShadowApp, platform};
     runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
     runtime.BuildFrame();
-    REQUIRE_THROWS_AS(layer_menu->Show(TestMenu("menu")), std::invalid_argument);
+    REQUIRE_THROWS_AS(layer_menu->Show(*layer_menu_target, TestMenu("menu")), std::invalid_argument);
   }
 
   {
@@ -545,6 +574,7 @@ TEST_CASE("TestAnchoredPresentationAlignsAndOffsetsFromAnchor") {
 
   constexpr Color popup_color = Color::Rgb(190, 70, 40);
   const LayerId popup = layer_popup->Show(
+      *layer_popup_target,
       [popup_color] {
         return Spacer().With(huxerui::Frame{20.0F, 10.0F}, huxerui::Background{popup_color});
       },
@@ -576,6 +606,7 @@ TEST_CASE("TestAnchoredPresentationKeepsHostCoordinatesInsideSafeArea") {
 
   constexpr Color popup_color = Color::Rgb(180, 80, 30);
   layer_popup->Show(
+      *layer_popup_target,
       [popup_color] { return Spacer().With(huxerui::Frame{20.0F, 10.0F}, huxerui::Background{popup_color}); },
       PopupOptions{
           .placement = AnchorPlacement{.side = AnchorSide::Below, .alignment = AnchorAlignment::End},
@@ -597,7 +628,7 @@ TEST_CASE("TestMenuSectionsAndSubmenusUseSemanticEntries") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem("Rename", [] {}),
       MenuSection{},
       MenuItem(
@@ -656,7 +687,7 @@ TEST_CASE("TestSubmenuLeavesItsParentInteractiveAndOutsideDismissesTheCascade") 
   runtime.BuildFrame();
 
   const auto show_menu = [] {
-    layer_menu->Show({
+    layer_menu->Show(*layer_menu_target, {
         MenuItem("Close chain", [] { ++parent_menu_clicks; }),
         MenuItem(
             "More",
@@ -710,7 +741,7 @@ TEST_CASE("TestMenuCheckedAndDisabledItemsKeepTheirSemantics") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem("Checked", [] {}).Checked(true),
       MenuItem("Disabled", [] { ++parent_menu_clicks; }).Enabled(false),
   });
@@ -735,7 +766,7 @@ TEST_CASE("TestMenuSeparatorPolicyComesFromTheme") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem("First", [] {}),
       MenuItem("Second", [] {}),
       MenuSection{},
@@ -759,13 +790,13 @@ TEST_CASE("TestMenuSectionMarksThemedSeparatorBoundaries") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem("First", [] {}),
       MenuItem("Second", [] {}),
   });
   REQUIRE(FindRectWithColor(runtime.BuildFrame(), section_separator_color) == nullptr);
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem("First", [] {}),
       MenuSection{},
       MenuItem("Second", [] {}),
@@ -781,7 +812,7 @@ TEST_CASE("TestThemedMenuMotionRetainsTheLayerThroughExit") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  const LayerId menu = layer_menu->Show({MenuItem("Animated item", [] {})});
+  const LayerId menu = layer_menu->Show(*layer_menu_target, {MenuItem("Animated item", [] {})});
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
   REQUIRE(ContainsText(runtime.BuildFrame(), "Animated item"));
@@ -804,7 +835,7 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   runtime.BuildFrame();
 
   const ImageAsset icon = ImageAsset::FromEncoded(MakeTestPng(16, 16));
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem(icon, "With icon", [] {}),
       MenuItem("No icon", [] {}),
   });
@@ -829,13 +860,14 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
     return std::holds_alternative<huxerui::DrawImageCommand>(command);
   }));
 
-  layer_menu->Show(TestMenu("Fixed width"), MenuOptions{.width = 240.0F});
+  layer_menu->Show(*layer_menu_target, TestMenu("Fixed width"), MenuOptions{.width = 240.0F});
   const std::optional<Rect> fixed_surface =
       FindPresentedRectWithColor(runtime.BuildFrame(), MenuStyle::Default().background);
   REQUIRE(fixed_surface.has_value());
   REQUIRE(fixed_surface->width == Catch::Approx(240.0F));
 
   layer_menu->Show(
+      *layer_menu_target,
       {MenuItem("Fixed submenu", std::vector<MenuEntry>{MenuItem("Child", [] {})})},
       MenuOptions{.width = 240.0F}
   );
@@ -847,7 +879,7 @@ TEST_CASE("TestMenuUsesNaturalOrExplicitSurfaceWidthAndOptionalImages") {
   REQUIRE(submenu_arrow.has_value());
   REQUIRE(submenu_arrow->x > fixed_surface->x + fixed_surface->width * 0.75F);
 
-  layer_menu->Show({MenuItem("Natural submenu", std::vector<MenuEntry>{MenuItem("Child", [] {})})});
+  layer_menu->Show(*layer_menu_target, {MenuItem("Natural submenu", std::vector<MenuEntry>{MenuItem("Child", [] {})})});
   const FlattenedScene& natural_submenu = runtime.BuildFrame();
   const std::optional<Rect> natural_submenu_surface =
       FindPresentedRectWithColor(natural_submenu, MenuStyle::Default().background);
@@ -867,7 +899,7 @@ TEST_CASE("TestMenuVectorIconsUseThemedAndItemTint") {
   runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
   runtime.BuildFrame();
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem(MenuTestIcon(), "Themed icon", [] {}),
       MenuItem(MenuTestIcon(), "Override icon", [] {}).IconTint(menu_icon_override),
   });
@@ -876,7 +908,7 @@ TEST_CASE("TestMenuVectorIconsUseThemedAndItemTint") {
   REQUIRE(FindPresentedRectWithColor(shown, menu_icon_override).has_value());
 
   const ImageAsset raster = ImageAsset::FromEncoded(MakeTestPng(16, 16));
-  layer_menu->Show({MenuItem(raster, "Raster icon", [] {}).IconTint(menu_icon_override)});
+  layer_menu->Show(*layer_menu_target, {MenuItem(raster, "Raster icon", [] {}).IconTint(menu_icon_override)});
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
 }
 
@@ -1214,7 +1246,7 @@ TEST_CASE("TestPopupContextAndMenuActionDismissTheirOwnLayers") {
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
-  const LayerId popup = layer_popup->Show([](PopupContext context) {
+  const LayerId popup = layer_popup->Show(*layer_popup_target, [](PopupContext context) {
     layer_popup_context = context;
     return Text("context popup");
   });
@@ -1223,7 +1255,7 @@ TEST_CASE("TestPopupContextAndMenuActionDismissTheirOwnLayers") {
   REQUIRE(layer_popup_context->Dismiss());
   REQUIRE(!ContainsText(runtime.BuildFrame(), "context popup"));
 
-  const LayerId menu = layer_menu->Show(TestMenu("context menu", [] { ++popup_focus_clicks; }));
+  const LayerId menu = layer_menu->Show(*layer_menu_target, TestMenu("context menu", [] { ++popup_focus_clicks; }));
   REQUIRE(ContainsText(runtime.BuildFrame(), "context menu"));
   runtime.HandleKeyEvent({KeyEventType::Down, Key::Enter});
   REQUIRE(popup_focus_clicks == 1);
@@ -1242,7 +1274,7 @@ TEST_CASE("TestAnchoredPopupTracksPresentationBounds") {
   runtime.BuildFrame();
 
   constexpr Color popup_color = Color::Rgb(180, 60, 90);
-  layer_popup->Show([popup_color] {
+  layer_popup->Show(*layer_popup_target, [popup_color] {
     return Text("anchored popup").With(huxerui::Frame{50.0F, 20.0F}, huxerui::Background{popup_color});
   });
   const std::optional<Rect> initial_bounds = FindPresentedRectWithColor(runtime.BuildFrame(), popup_color);
@@ -1269,6 +1301,7 @@ TEST_CASE("TestPopupTracksAndUpdatesNodeLocalAnchorBoundsWithoutReplacingContent
 
   constexpr Color popup_color = Color::Rgb(80, 120, 210);
   const LayerId popup = layer_popup->ShowAtAnchor(
+      *layer_popup_target,
       {10.0F, 5.0F, 20.0F, 10.0F},
       [popup_color] {
         ++local_anchor_content_compositions;
@@ -1296,7 +1329,7 @@ TEST_CASE("TestPopupTracksAndUpdatesNodeLocalAnchorBoundsWithoutReplacingContent
   REQUIRE_FALSE(layer_popup->UpdateAnchor(popup + 1000, {0.0F, 0.0F, 1.0F, 1.0F}));
 
   REQUIRE(layer_popup->Dismiss(popup));
-  const LayerId full_anchor = layer_popup->Show([] { return Text("full anchor"); });
+  const LayerId full_anchor = layer_popup->Show(*layer_popup_target, [] { return Text("full anchor"); });
   REQUIRE_FALSE(layer_popup->UpdateAnchor(full_anchor, {0.0F, 0.0F, 1.0F, 1.0F}));
   REQUIRE(layer_popup->Dismiss(full_anchor));
   const LayerId fixed_anchor = layer_popup->ShowAt({40.0F, 20.0F}, [] { return Text("fixed anchor"); });
@@ -1304,6 +1337,7 @@ TEST_CASE("TestPopupTracksAndUpdatesNodeLocalAnchorBoundsWithoutReplacingContent
   REQUIRE(layer_popup->Dismiss(fixed_anchor));
 
   const LayerId bound_factory = layer_popup->ShowAtAnchor(
+      *layer_popup_target,
       {0.0F, 0.0F, 1.0F, 1.0F},
       ParameterizedPopupContent,
       std::string{"local popup"},
@@ -1324,6 +1358,7 @@ TEST_CASE("TestPopupLocalAnchorFollowsTheCurrentResolvedTransform") {
   constexpr Rect local_anchor{10.0F, 5.0F, 20.0F, 10.0F};
   constexpr Color popup_color = Color::Rgb(120, 80, 210);
   layer_popup->ShowAtAnchor(
+      *layer_popup_target,
       local_anchor,
       [popup_color] {
         return Spacer().With(huxerui::Frame{10.0F, 10.0F}, huxerui::Background{popup_color});
@@ -1358,7 +1393,7 @@ TEST_CASE("TestAnchoredPresentationDismissesWhenAnchorUnmounts") {
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
-  const LayerId popup = layer_popup->Show([] { return Text("attached popup"); });
+  const LayerId popup = layer_popup->Show(*layer_popup_target, [] { return Text("attached popup"); });
   REQUIRE(ContainsText(runtime.BuildFrame(), "attached popup"));
 
   layer_anchor_visible = false;
@@ -1374,13 +1409,34 @@ TEST_CASE("TestLocalAnchoredPresentationDismissesWhenAnchorUnmounts") {
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
-  const LayerId popup =
-      layer_popup->ShowAtAnchor({5.0F, 5.0F, 20.0F, 10.0F}, [] { return Text("local attached popup"); });
+  const LayerId popup = layer_popup->ShowAtAnchor(
+      *layer_popup_target, {5.0F, 5.0F, 20.0F, 10.0F}, [] { return Text("local attached popup"); });
   REQUIRE(ContainsText(runtime.BuildFrame(), "local attached popup"));
 
   layer_anchor_visible = false;
   REQUIRE(!ContainsText(runtime.BuildFrame(), "local attached popup"));
   REQUIRE(!layer_popup->Dismiss(popup));
+}
+
+TEST_CASE("TestAnchoredPresentationFollowsViewHandleAcrossReplacement") {
+  TestPlatform platform;
+  UiWindow runtime{ReplaceableAnchorApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 120.0F}});
+  runtime.BuildFrame();
+
+  const LayerId popup = layer_popup->Show(
+      *layer_popup_target, [] { return Text("attached popup"); }, PopupOptions{.viewport_margin = 0.0F});
+  const auto initial = FindPresentedTextRect(runtime.BuildFrame(), "attached popup");
+  REQUIRE(initial);
+
+  layer_anchor_variant = 1;
+  REQUIRE(FindPresentedTextRect(runtime.BuildFrame(), "attached popup") == initial);
+
+  layer_anchor_variant = 2;
+  const auto moved = FindPresentedTextRect(runtime.BuildFrame(), "attached popup");
+  REQUIRE(moved);
+  REQUIRE(moved->x == Catch::Approx(initial->x + 40.0F));
+  REQUIRE(layer_popup->Dismiss(popup));
 }
 
 TEST_CASE("TestNestedAnchorsSettleInOneFrame") {
@@ -1392,10 +1448,10 @@ TEST_CASE("TestNestedAnchorsSettleInOneFrame") {
   runtime.SetWindowMetrics({.viewport = {400.0F, 240.0F}});
   runtime.BuildFrame();
 
-  layer_popup->Show(NestedAnchorContent);
+  layer_popup->Show(*layer_popup_target, NestedAnchorContent);
   runtime.BuildFrame();
   REQUIRE(nested_menu.has_value());
-  nested_menu->Show(TestMenu("nested menu"));
+  nested_menu->Show(*nested_menu_target, TestMenu("nested menu"));
   const std::optional<Rect> initial_bounds = FindPresentedRectWithColor(runtime.BuildFrame(), nested_menu_color);
   REQUIRE(initial_bounds.has_value());
 
@@ -1403,6 +1459,24 @@ TEST_CASE("TestNestedAnchorsSettleInOneFrame") {
   const std::optional<Rect> moved_bounds = FindPresentedRectWithColor(runtime.BuildFrame(), nested_menu_color);
   REQUIRE(moved_bounds.has_value());
   REQUIRE(moved_bounds->x == initial_bounds->x + 30.0F);
+}
+
+TEST_CASE("TestPopupAndMenuShareAViewHandle") {
+  TestPlatform platform;
+  UiWindow runtime{LayerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {240.0F, 160.0F}});
+  runtime.BuildFrame();
+
+  const auto popup = layer_popup->Show(*layer_popup_target, [] { return Text("shared target popup"); });
+  const auto menu = layer_menu->Show(*layer_popup_target, TestMenu("shared target menu"));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "shared target popup"));
+  REQUIRE(ContainsText(runtime.BuildFrame(), "shared target menu"));
+
+  REQUIRE(layer_popup->Dismiss(popup));
+  const auto& frame = runtime.BuildFrame();
+  REQUIRE_FALSE(ContainsText(frame, "shared target popup"));
+  REQUIRE(ContainsText(frame, "shared target menu"));
+  REQUIRE(layer_menu->Dismiss(menu));
 }
 
 TEST_CASE("TestMenuTrapsFocusAndDismissesOnBack") {
@@ -1414,7 +1488,7 @@ TEST_CASE("TestMenuTrapsFocusAndDismissesOnBack") {
   runtime.SetWindowMetrics({.viewport = {200.0F, 120.0F}});
   runtime.BuildFrame();
 
-  layer_menu->Show({
+  layer_menu->Show(*layer_menu_target, {
       MenuItem("first menu item", [] { ++popup_focus_clicks; }),
       MenuItem("second menu item", [] {}),
   });
@@ -1445,6 +1519,7 @@ TEST_CASE("TestPopupRetainsAnchorFocusOnlyForNonFocusableContent") {
   REQUIRE(find_semantic(*runtime.BuildCommit().semantic_frame, "popup anchor").focused);
 
   const LayerId popup = layer_popup->Show(
+      *layer_popup_target,
       [] {
         return Text("retained popup")
             .With(huxerui::Frame{80.0F, 30.0F})
@@ -1514,7 +1589,7 @@ TEST_CASE("TestNestedLayerFocusRestoresAcrossRemovedLowerLayer") {
   const LayerId dialog = layer_dialogs->Show([] { return Button("dialog focus"); });
   runtime.BuildFrame();
   SettlePresentation(platform, runtime);
-  const LayerId menu = layer_menu->Show(TestMenu("menu focus"));
+  const LayerId menu = layer_menu->Show(*layer_menu_target, TestMenu("menu focus"));
   runtime.BuildFrame();
 
   REQUIRE(layer_dialogs->Dismiss(dialog));
