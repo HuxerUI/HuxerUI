@@ -66,7 +66,8 @@ struct StreamAccess;
 /// Read() consumes at most the caller-provided buffer size and returns zero at EOF. A zero-length buffer is rejected
 /// because it cannot distinguish a successful no-op from EOF. Operational failures return IoError; reusing a failed
 /// or moved-from stream throws std::logic_error. Destruction releases the source without additional reads.
-/// Obtain a stream from File::OpenRead() or RawAsset::OpenRead(). Operations run on the calling thread.
+/// Obtain a stream from File::OpenRead(), FileReference::OpenRead(), or RawAsset::OpenRead().
+/// Operations run on the calling thread.
 /// @code{.cpp}
 /// IoResult<Bytes> ReadFirstChunk(InputStream& input) {
 ///   Bytes buffer(4096);
@@ -120,7 +121,7 @@ private:
 /// Write() accepts the complete span on success or returns IoError. A failure may leave a written prefix and makes
 /// the stream unusable. Close() finalizes buffered output and is idempotent after success. Destroying
 /// a stream that was not closed releases or aborts the destination without promising that buffered bytes are durable.
-/// Obtain a stream from File::OpenWrite(); operations run on the calling thread.
+/// Obtain a stream from File::OpenWrite() or FileReference::OpenWrite(). Operations run on the calling thread.
 /// @code{.cpp}
 /// IoResult<void> WriteAndClose(OutputStream& output, std::span<const std::byte> data) {
 ///   auto written = output.Write(data);
@@ -168,8 +169,8 @@ private:
 
 /// A move-only stream for reading and writing at absolute byte offsets.
 ///
-/// Obtain it from File::OpenRandomAccess() or FileReference::OpenRandomAccessAsync(). It stays bound to the
-/// opened resource and retains any required provider grant. Operations are synchronous on the calling thread.
+/// Obtain it from File::OpenRandomAccess() or FileReference::OpenRandomAccess(). It stays bound to the opened
+/// resource and retains any required provider grant. Operations are synchronous on the calling thread.
 /// Serialize access to each stream, including closing it or moving it to another thread.
 class RandomAccessStream final {
 public:

@@ -258,7 +258,7 @@ This worker adaptation is specific to inherently blocking sources; HTTP, browser
 
 ## Random-access streams
 
-`File::OpenRandomAccess()` opens a local descriptor synchronously without requiring Runtime. `FileReference::OpenRandomAccessAsync()` uses the provider's existing acquisition and cancellation path. Each successful open returns the same move-only `RandomAccessStream` interface with synchronous absolute-offset reads and writes, handle-relative size, and explicit close.
+`File::OpenRandomAccess()` opens a local descriptor, and `FileReference::OpenRandomAccess()` acquires a compatible provider descriptor. Both open synchronously on the calling thread without requiring a TaskScope. Each successful open returns the same move-only `RandomAccessStream` interface with synchronous absolute-offset reads and writes, handle-relative size, and explicit close.
 
 Access mode governs operations after opening. Open mode governs creation and truncation. Local creation is exclusive. Truncation checks type, access, and seekability before changing the same opened descriptor. Path-backed references keep their existing grant-relative opening and coordination for the descriptor's lifetime. Android opens the provider descriptor without truncation and verifies it before accepting or truncating it. It rejects descriptors whose providers require reliable Java close signaling. The Web picker backend keeps its asynchronous browser streams and reports unsupported random-access opening.
 
@@ -410,15 +410,24 @@ public:
   [[nodiscard]] FileType Type() const noexcept;
   [[nodiscard]] std::optional<File> AsFile() const;
 
+  IoResult<InputStream> OpenRead() const;
+  IoResult<OutputStream> OpenWrite() const;
+  IoResult<RandomAccessStream> OpenRandomAccess(
+      FileAccessMode access = FileAccessMode::ReadOnly, FileOpenMode mode = FileOpenMode::OpenExisting
+  ) const;
+  IoResult<Bytes> ReadBytes() const;
+  IoResult<std::string> ReadString() const;
+  IoResult<std::vector<FileReference>> ListChildren() const;
+  IoResult<FileReference> CreateDirectory(std::string_view name) const;
+
   Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
   Task<IoResult<AsyncOutputStream>> OpenWriteAsync() const;
   Task<IoResult<Bytes>> ReadBytesAsync() const;
   Task<IoResult<std::string>> ReadStringAsync() const;
-  Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
-  Task<bool> ReplaceWithAsync(File source) const;
-
   Task<IoResult<std::vector<FileReference>>> ListChildrenAsync() const;
   Task<IoResult<FileReference>> CreateDirectoryAsync(std::string name) const;
+  Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
+  Task<bool> ReplaceWithAsync(File source) const;
   Task<IoResult<FileReference>> CopyFileFromAsync(File source, std::string name, bool overwrite = false) const;
   Task<IoResult<FileReference>> CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
   Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
@@ -440,10 +449,10 @@ The returned `File` does not retain the grant or temporary-file owner; applicati
 Path-based operations use ordinary system permissions and do not inherit `CanWrite()` restrictions, coordinated access, or handle-relative identity and containment guarantees; the original reference and its I/O contract remain unchanged.
 `AsFile()` is an explicit path interoperability operation, not an existence/access check or a persistent grant; use reference I/O when its authorization or coordination behavior is required.
 
-External references acquire resources asynchronously because their platform transport may involve a provider process, coordinated access, security-scope activation, or a browser permission check.
-Their input and output streams retain the reference capability independently, read caller-bounded chunks, and require explicit output close.
-The sequential write stream truncates or replaces the selected file. A provider with a compatible descriptor can also acquire a synchronous random-access stream.
-`ReadStringAsync()` follows the same UTF-8, byte-order-mark, and line-ending contract as `File::ReadStringAsync()`.
+Synchronous reference operations run on the calling thread and require a provider capable of completing the requested operation synchronously. Prefer asynchronous forms when available for the broadest Web compatibility. Browser-selected references report `Unsupported` before I/O and keep their asynchronous browser transport.
+Native synchronous and asynchronous entry points share their provider's acquisition and byte operations. The asynchronous paths retain their worker or provider scheduling and cooperative cancellation. Each stream retains the reference capability independently.
+Sequential input reads caller-bounded chunks. The sequential write stream replaces the selected file and requires explicit output close. Whole-file reads retain the provider's complete-read path so a path-backed reference can coordinate the read once.
+`ReadString()` and `ReadStringAsync()` share UTF-8 validation, byte-order-mark removal, and line-ending preservation with `File`.
 An expired or revoked grant reports `NotFound` or `PermissionDenied` through the existing `IoResult` error model rather than adding a second result type.
 
 `ImportToAsync()` streams the referenced content into a local `File` and requires the destination parent to exist.
@@ -490,15 +499,15 @@ Operations recheck current item state because deletion, replacement, and permiss
 Directory reads fail with `IsDirectory`, and existing Boolean import/replacement operations return `false` without traversing.
 Unsupported item kinds use `FileType::Other` and fail with `Unsupported` rather than being followed or silently skipped.
 
-`ListChildrenAsync()` returns all immediate children or an error, with no sorting, hidden-item filtering, or file reads.
+`ListChildren()` and `ListChildrenAsync()` return all immediate children or an error, with no sorting, hidden-item filtering, or file reads.
 Each child retains its own item identity and shares the selected root's grant owner; parent destruction does not invalidate retained children or active I/O.
 The effective write restriction cannot increase when a child is derived, and selecting the same location again does not upgrade an earlier read-only capability.
 `CanWrite()` on a directory advertises child creation, not blanket authority to replace its existing files.
 
-`CreateDirectoryAsync(name)` creates one direct child or returns the existing directory of that name; another item kind produces `AlreadyExists`.
+`CreateDirectory(name)` and `CreateDirectoryAsync(name)` create one direct child or return the existing directory of that name. Another item kind produces `AlreadyExists`.
 `CopyFileFromAsync(source, name, overwrite)` accepts an ordinary local file or file reference and returns the destination reference only after streamed output is finalized.
-Both require a writable directory receiver and never create intermediate directories implicitly.
-Caller names are valid UTF-8 single segments excluding empty names, `.`, `..`, NUL, and either slash; invalid names throw `std::invalid_argument` before the lazy Task is returned.
+Child creation and copying require a writable directory receiver. The receiver must already exist.
+Caller names are valid UTF-8 single segments excluding empty names, `.`, `..`, NUL, and either slash. Invalid names throw `std::invalid_argument` immediately, including when the operation would return a lazy Task.
 Unrepresentable provider names and destination restrictions are operational errors, not caller exceptions.
 Creation verifies the requested name rather than accepting provider-added extensions, normalization, or duplicate suffixes; cleanup is limited to an item known to have been newly created by that operation.
 
@@ -525,7 +534,7 @@ Descendant operations stay bound to their granted authority using native handles
 
 Shared code owns validation, traversal, collision policy, counters, diagnostics, and Task integration through the existing private `FileReferenceState` boundary.
 Platforms own enumeration, creation, native identities, authorization, and single-file transfer/finalization; a data block need not cross JNI or resume a shared coroutine merely to unify byte-copy loops.
-The shared write path passes the preceding child lookup to the destination operation; this operation-local result avoids a second provider directory scan, but does not replace final authorization, type, or native exclusive-create checks.
+Directory traversal and single-file copy pass the preceding child lookup to the destination operation. Android reuses that operation-local result to avoid a second provider scan, while standalone directory creation resolves the display name in the same provider operation. Path-backed and browser-backed standalone creation check collisions within their own create operation.
 Backends whose child lookup is an exact display-name listing scan opt into one destination-name index per active copy frame, avoiding repeated scans as output grows.
 The index preserves duplicate-name ambiguity, is updated after successful writes, and is discarded with the frame; later copies enumerate again, and native filename resolution remains authoritative for other backends.
 The destination state returns the written reference, actual byte count, and creation status directly.
@@ -697,8 +706,9 @@ These private locations require no broad storage permission.
 Its picker transport uses `ACTION_OPEN_DOCUMENT` for single and multiple selection and `ACTION_CREATE_DOCUMENT` for saving without requesting broad storage permission.
 Extensions are mapped through `MimeTypeMap` when possible; an unrecognized extension deliberately widens the advisory filter rather than hiding a valid document.
 The returned `content://` grant remains private to `FileReference`, while display name, size, MIME type, and provider write support populate its public metadata.
-Opening Android reference streams uses the bounded Java worker executor and detaches the provider-authorized descriptor into the C++ stream state.
-Incremental descriptor reads and writes use a per-stream worker sequence, while imports, replacements, and save copies retain their Java-side bounded transfer path.
+Asynchronous Android reference opens use the bounded Java worker executor. The C++ stream owns an ordinary detached fd, or borrows the fd of a retained reliable `ParcelFileDescriptor` so the provider's close and error channel stays active.
+Reliable sequential reads check provider status at EOF. Explicit output close finalizes the Java descriptor, while a failed or abandoned write reports an error to the provider once the worker has finished using it.
+Asynchronous incremental descriptor reads and writes use a per-stream worker sequence, while imports, replacements, and save copies retain their Java-side bounded transfer path.
 Cancellation closes active transfer streams where safe, and local imports atomically replace an existing destination within its parent directory.
 Directory selection uses `ACTION_OPEN_DOCUMENT_TREE`, retains the returned tree authority, and derives children through `DocumentsContract` rather than reconstructing local paths.
 Read-only selection masks write access for every derived reference; writable selection additionally requires `FLAG_DIR_SUPPORTS_CREATE`, while an existing file requires its own write support.

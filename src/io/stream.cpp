@@ -270,7 +270,11 @@ Task<AsyncInputStream> OpenWorkerInput(std::function<InputStream()> open) {
 }
 
 AsyncInputStream MakeWorkerAsyncInput(InputStream input) {
-  return StreamAccess::MakeAsyncInputStream(std::make_shared<WorkerInputStreamState>(std::move(input), false));
+  return StreamAccess::MakeAsyncInputStream(MakeWorkerAsyncInputState(std::move(input)));
+}
+
+std::shared_ptr<AsyncInputStreamState> MakeWorkerAsyncInputState(InputStream input) {
+  return std::make_shared<WorkerInputStreamState>(std::move(input), false);
 }
 
 AsyncInputStream MakeMemoryAsyncInput(InputStream input) {

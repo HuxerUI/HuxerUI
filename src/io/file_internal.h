@@ -39,7 +39,6 @@ struct FileReferenceWriteResult {
 template <class T> using FileReferenceCompletion = std::function<void(IoResult<T>)>;
 using FileReferenceInputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncInputStreamState>>;
 using FileReferenceOutputStreamCompletion = FileReferenceCompletion<std::shared_ptr<AsyncOutputStreamState>>;
-using FileReferenceRandomAccessCompletion = FileReferenceCompletion<std::shared_ptr<RandomAccessStreamState>>;
 using FileReferenceBytesOperation =
     std::function<std::function<void()>(FileReferenceBytesCompletion)>;
 using FileReferenceResultBoolCompletion = FileReferenceCompletion<bool>;
@@ -56,10 +55,15 @@ class FileReferenceState {
 public:
   virtual ~FileReferenceState() = default;
 
+  virtual IoResult<InputStream> OpenReadSync();
+  virtual IoResult<OutputStream> OpenWriteSync();
+  virtual IoResult<RandomAccessStream> OpenRandomAccessSync(FileAccessMode access, FileOpenMode mode);
+  virtual IoResult<Bytes> ReadBytesSync();
+  virtual IoResult<std::vector<FileReference>> ListChildrenSync();
+  virtual IoResult<FileReference> CreateDirectorySync(std::string_view name);
+
   virtual std::function<void()> OpenRead(FileReferenceInputStreamCompletion completion);
   virtual std::function<void()> OpenWrite(FileReferenceOutputStreamCompletion completion);
-  virtual std::function<void()> OpenRandomAccess(FileAccessMode access, FileOpenMode mode,
-                                                 FileReferenceRandomAccessCompletion completion);
   virtual std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) = 0;
   virtual std::function<void()> ImportTo(File destination, bool overwrite,
                                          FileReferenceCompletion<std::uint64_t> completion) = 0;
@@ -78,11 +82,12 @@ public:
   virtual std::function<void()> ListChildren(FileReferenceCompletion<std::vector<FileReference>> completion);
   virtual std::function<void()> FindChild(std::string name,
                                           FileReferenceCompletion<std::optional<FileReference>> completion);
-  // The preceding lookup is operation-local; writes still validate the current type and authorization.
-  // Providers may reuse its native child key instead of scanning again. It does not reserve the
-  // name, and a missing child can be created concurrently before the write reaches the platform.
-  virtual std::function<void()> CreateDirectory(std::string name, std::optional<FileReference> existing,
+  virtual std::function<void()> CreateDirectory(std::string name,
                                                 FileReferenceCompletion<FileReferenceWriteResult> completion);
+  // Directory traversal already checked this name. Providers can reuse the result to avoid scanning
+  // again. The lookup does not reserve the name or grant access.
+  virtual std::function<void()> CreateDirectoryFromLookup(std::string name, std::optional<FileReference> existing,
+                                                          FileReferenceCompletion<FileReferenceWriteResult> completion);
   virtual std::function<void()> CopyFileFrom(FileReferenceSource source, std::string name, bool overwrite,
                                              std::optional<FileReference> existing,
                                              FileReferenceCompletion<FileReferenceWriteResult> completion);

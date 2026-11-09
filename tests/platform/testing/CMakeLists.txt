@@ -1,6 +1,8 @@
 if (ANDROID)
     add_library(huxerui_ui_testing_smoke SHARED android.cpp smoke.cpp
             ../android/ui_testing/file_reference.cpp ../android/ui_testing/activity_result.cpp)
+    target_include_directories(huxerui_ui_testing_smoke PRIVATE
+            "${HUXERUI_PROJECT_DIR}/src" "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp")
 elseif (IOS)
     find_package(XCTest REQUIRED)
     add_executable(huxerui_ui_testing_host MACOSX_BUNDLE ../ios/host.m)

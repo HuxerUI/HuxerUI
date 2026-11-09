@@ -140,7 +140,7 @@ Native `File` asynchronous streams serialize their blocking operations through a
 
 ## Random-access streams
 
-`File::OpenRandomAccess()` opens a local file on the calling thread. `FileReference::OpenRandomAccessAsync()` acquires an external file on the existing provider path. Both return a move-only `RandomAccessStream` whose byte operations run synchronously on the calling thread.
+`File::OpenRandomAccess()` opens a local file, and `FileReference::OpenRandomAccess()` acquires a compatible provider descriptor. Both open on the calling thread and return a move-only `RandomAccessStream` with synchronous byte operations. On native platforms, use `RunWorker()` to move a blocking open and its reads or writes off the UI thread.
 
 Both entry points default to `FileAccessMode::ReadOnly` and `FileOpenMode::OpenExisting`. Choose `WriteOnly` or `ReadWrite` to write. `OpenExisting` preserves contents, `CreateNew` creates an empty local file and fails if the name exists, and `TruncateExisting` empties an existing file. Creation and truncation require write access. A `FileReference` accepts the two existing-file modes.
 
@@ -162,18 +162,20 @@ Their lifetime and persistence follow platform capability rules.
 `Name()` returns an empty string when the provider supplies no name; `Size()` and `ContentType()` return `std::nullopt` when unknown.
 An unknown name does not prevent reading or importing to an explicitly named destination, but recursive directory copying rejects children without valid names rather than inventing destination entries.
 
-`OpenReadAsync()` and `OpenWriteAsync()` expose provider-backed `AsyncInputStream` and `AsyncOutputStream` values without importing the file or buffering it in full.
-The output form replaces the selected file and must be finalized with `CloseAsync()`.
-`ReadBytesAsync()` remains the complete-memory convenience, while `ImportToAsync()` and `ReplaceWithAsync()` retain their provider-native transfer paths.
+`OpenRead()` and `OpenWrite()` open synchronous sequential streams on the calling thread. `ReadBytes()` and `ReadString()` read the whole file into owned memory. Synchronous calls can block and do not require a TaskScope. Prefer asynchronous reference operations when available for the broadest Web compatibility. Providers without synchronous access, including browser selections on Web, report `Unsupported` before I/O or mutation.
+
+`OpenReadAsync()` and `OpenWriteAsync()` expose provider-backed `AsyncInputStream` and `AsyncOutputStream` values without importing the file or buffering it in full. Both sequential output forms replace the selected file and require explicit finalization with `Close()` or `CloseAsync()`. `ReadBytesAsync()` and `ReadStringAsync()` read complete contents asynchronously. `ImportToAsync()` and `ReplaceWithAsync()` keep their provider-native transfer paths.
+
+On Android, sequential reads through a reliable provider descriptor can report an I/O error when checking the end of the stream. Reliable providers also receive a close status when a write is finalized, fails, or is abandoned.
 
 `Type()` reports the item kind recorded when the reference was obtained; operations still check current storage state.
 Directory references have no `Size()` or `ContentType()` value.
-Their `ListChildrenAsync()` returns direct children, including hidden entries, without sorting or reading file contents.
+`ListChildren()` and `ListChildrenAsync()` return direct children, including hidden entries, without sorting or reading file contents.
 Children retain the selection's grant independently of the parent value, and cannot acquire more permissions than that parent.
 The grant restriction is distinct from an item's `CanWrite()` snapshot: a directory that cannot create children may still contain independently writable files, but a read-only selection keeps all derived references read-only.
 External renaming or replacement can invalidate later operations; a retained directory grant does not authorize an unrelated directory subsequently occupying its old path.
 
-Directory stream opens, `ReadBytesAsync()`, and `ReadStringAsync()` fail with `IsDirectory`.
+Directory stream opens and whole-file reads fail with `IsDirectory`.
 Existing `ImportToAsync()` and `ReplaceWithAsync()` remain single-file operations and return `false` for directories.
 
 ### Passing a reference to a platform library
@@ -306,9 +308,9 @@ Provide a picker action for keyboard, touch, accessibility, and unsupported host
 
 ## Copying directory contents
 
-Use `CreateDirectoryAsync(name)` on a writable directory reference to create one child or obtain an existing child directory.
+`CreateDirectory(name)` and `CreateDirectoryAsync(name)` create one child or reuse an existing child directory under a writable directory reference.
 Use `CopyFileFromAsync(source, name, overwrite)` to stream one `File` or file `FileReference` into a named child.
-Names must be valid UTF-8 single segments, excluding empty names, `.`, `..`, NUL, `/`, and `\\`; invalid caller names throw before returning the lazy Task.
+Names must be valid UTF-8 single segments, excluding empty names, `.`, `..`, NUL, `/`, and `\\`. Invalid caller names throw immediately, including for asynchronous calls.
 Destination-specific restrictions are reported as file errors, not silently corrected names.
 
 `CopyDirectoryContentsToAsync(destination, overwrite = false)` recursively copies a selected source directory into an existing `File` directory or writable directory `FileReference`.

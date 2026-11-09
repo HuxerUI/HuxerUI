@@ -158,9 +158,11 @@ public:
   /// @brief Checks whether the path resolves to an existing entry, following symbolic links.
   /// @return False for a missing entry or a status-query failure. Use Stat() when the error category matters.
   [[nodiscard]] bool Exists() const;
+
   /// @brief Checks whether the path resolves to an ordinary file, following symbolic links.
   /// @return False for another entry kind, a missing entry, or a status-query failure.
   [[nodiscard]] bool IsFile() const;
+
   /// @brief Checks whether the path resolves to a directory, following symbolic links.
   /// @return False for another entry kind, a missing entry, or a status-query failure.
   [[nodiscard]] bool IsDirectory() const;
@@ -168,27 +170,16 @@ public:
   /// @brief Queries the entry kind, file size, and available modification time, following symbolic links.
   /// @return Best-effort metadata or an IoError. The fields are not an atomic snapshot against concurrent changes.
   IoResult<FileInfo> Stat() const;
-  /// @brief Performs Stat() asynchronously.
-  /// @return A task yielding the metadata or an IoError, with the same semantics as Stat().
-  Task<IoResult<FileInfo>> StatAsync() const;
 
   /// @brief Opens an ordinary file for synchronous incremental reads.
   /// @return A uniquely owned stream or an IoError. The stream returns zero at EOF.
   IoResult<InputStream> OpenRead() const;
-  /// @brief Opens an ordinary file for incremental reads performed on the file worker path.
-  /// @return A task yielding a uniquely owned async stream or an IoError.
-  Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
 
   /// @brief Opens a synchronous incremental writer, creating the file when it is missing.
   /// @param mode Whether to truncate existing contents or append after them.
   /// @return A uniquely owned stream or an IoError. Call Close() to finalize output.
   /// @warning Web persistent paths require OpenWriteAsync().
   IoResult<OutputStream> OpenWrite(FileWriteMode mode = FileWriteMode::Truncate) const;
-  /// @brief Opens an incremental writer whose blocking operations use the file worker path.
-  /// @param mode Whether to truncate existing contents or append after them.
-  /// @return A task yielding a uniquely owned async stream or an IoError. CloseAsync() includes required Web
-  /// persistence.
-  Task<IoResult<AsyncOutputStream>> OpenWriteAsync(FileWriteMode mode = FileWriteMode::Truncate) const;
 
   /// @brief Opens an ordinary local file for random access on the calling thread.
   /// @param access Permitted byte operations. Creation and truncation require write access.
@@ -205,109 +196,65 @@ public:
   /// @return Bytes, including an empty buffer for an empty file, or an IoError such as NotFound, IsDirectory,
   /// Unsupported for a non-ordinary entry, or TooLarge when the result cannot be represented.
   IoResult<Bytes> ReadBytes() const;
-  /// @brief Performs ReadBytes() asynchronously; this is not a streaming read.
-  /// @return A task yielding the complete byte buffer or an IoError.
-  Task<IoResult<Bytes>> ReadBytesAsync() const;
 
   /// @brief Reads the entire file as UTF-8 text, removing one leading UTF-8 byte-order mark if present.
   /// @return The decoded string without newline conversion, or an IoError, including InvalidEncoding for
   /// malformed UTF-8 contents. An empty file is a successful empty string.
   IoResult<std::string> ReadString() const;
-  /// @brief Performs ReadString() asynchronously, including its UTF-8 validation and byte-order-mark handling.
-  /// @return A task yielding the complete string or an IoError.
-  Task<IoResult<std::string>> ReadStringAsync() const;
 
   /// @brief Creates or truncates a file and writes the supplied bytes; its parent directory must already exist.
   /// @param bytes Data borrowed for the duration of this call. An empty span still creates or truncates the file.
   /// @return True on success; false on failure. Failure may leave a truncated or partially written destination.
   /// @warning This is not an atomic replacement. Web persistent paths require WriteBytesAsync().
   [[nodiscard]] bool WriteBytes(std::span<const std::byte> bytes) const;
-  /// @brief Performs WriteBytes() asynchronously with task-owned input and any required Web persistence.
-  /// @param bytes The complete data to write, retained by the returned task.
-  /// @return A task yielding true on success or false on failure; cancellation does not guarantee writes stop.
-  Task<bool> WriteBytesAsync(Bytes bytes) const;
 
   /// @brief Creates or truncates a file and writes UTF-8 text, without adding a byte-order mark or newline.
   /// @param value Valid UTF-8 text borrowed during the call; an empty string still creates or truncates the file.
   /// @return True on success; false on an I/O failure. Parent and partial-write rules are those of WriteBytes().
   /// @throws std::invalid_argument If value is not valid UTF-8; validation occurs before writing.
   [[nodiscard]] bool WriteString(std::string_view value) const;
-  /// @brief Performs WriteString() asynchronously with task-owned text and any required Web persistence.
-  /// @param value Valid UTF-8 text retained by the returned task, written without newline conversion.
-  /// @return A task yielding true on success or false on failure, with the same write semantics as WriteString().
-  /// @throws std::invalid_argument If value is not valid UTF-8, before the task is returned.
-  Task<bool> WriteStringAsync(std::string value) const;
 
   /// @brief Appends bytes, creating the file if needed; its parent directory must already exist.
   /// @param bytes Data borrowed during the call. Empty data still creates a missing file.
   /// @return True on success; false on failure, which may leave a partial append.
   /// No cross-writer transaction is provided. Web persistent paths require AppendBytesAsync().
   [[nodiscard]] bool AppendBytes(std::span<const std::byte> bytes) const;
-  /// @brief Performs AppendBytes() asynchronously with task-owned input and any required Web persistence.
-  /// @param bytes The data to append, retained by the returned task.
-  /// @return A task yielding true on success or false on failure, with the same append semantics as AppendBytes().
-  Task<bool> AppendBytesAsync(Bytes bytes) const;
 
   /// @brief Appends UTF-8 text without adding a byte-order mark or newline.
   /// @param value Valid UTF-8 text borrowed during the call; existing file contents are not decoded or validated.
   /// @return True on success; false on an I/O failure. Creation and partial-write rules are those of AppendBytes().
   /// @throws std::invalid_argument If value is not valid UTF-8; validation occurs before appending.
   [[nodiscard]] bool AppendString(std::string_view value) const;
-  /// @brief Performs AppendString() asynchronously with task-owned text and any required Web persistence.
-  /// @param value Valid UTF-8 text retained by the returned task.
-  /// @return A task yielding true on success or false on failure, with the same append semantics as AppendString().
-  /// @throws std::invalid_argument If value is not valid UTF-8, before the task is returned.
-  Task<bool> AppendStringAsync(std::string value) const;
 
   /// @brief Enumerates immediate children, including hidden entries, without reading their contents.
   /// @return Child paths in unspecified order, or an IoError. An empty directory yields a successful empty vector.
   /// Enumeration is not recursive and is not a snapshot against concurrent directory changes.
   IoResult<std::vector<File>> ListChildren() const;
-  /// @brief Performs ListChildren() asynchronously.
-  /// @return A task yielding the immediate child paths or an IoError.
-  Task<IoResult<std::vector<File>>> ListChildrenAsync() const;
 
   /// @brief Creates this directory only; its parent must already exist.
   /// @return True if created or already a directory; false on failure or a conflicting non-directory entry.
   [[nodiscard]] bool CreateDirectory() const;
-  /// @brief Performs CreateDirectory() asynchronously, including any required Web persistence.
-  /// @return A task yielding true if created or already a directory, or false on failure.
-  Task<bool> CreateDirectoryAsync() const;
 
   /// @brief Creates this directory and any missing ancestor directories.
   /// @return True if the directory exists after the operation; false on failure, possibly after creating some parents.
   [[nodiscard]] bool CreateDirectories() const;
-  /// @brief Performs CreateDirectories() asynchronously, including any required Web persistence.
-  /// @return A task yielding true on success or false on failure, with no rollback of created directories.
-  Task<bool> CreateDirectoriesAsync() const;
 
   /// @brief Removes a file, symbolic link, or empty directory without recursively removing children.
   /// @return True if removed or already absent; false on failure, a nonempty directory, or a protected path.
   /// File-system roots, application storage roots, and their ancestors are protected from deletion.
   [[nodiscard]] bool Delete() const;
-  /// @brief Performs Delete() asynchronously, including any required Web persistence.
-  /// @return A task yielding true if removed or already absent, or false on failure or a protected path.
-  Task<bool> DeleteAsync() const;
 
   /// @brief Removes an entry and, for a directory, all descendants; symbolic links are removed rather than traversed.
   /// @return True if removed or already absent; false on failure or a path protected by the same rules as Delete().
   /// @warning Deletion does not use a trash/recycle bin and has no rollback; failure may leave a partially deleted
   /// tree.
   [[nodiscard]] bool DeleteRecursively() const;
-  /// @brief Performs DeleteRecursively() asynchronously, including any required Web persistence.
-  /// @return A task yielding true on success or false on failure; cancellation cannot restore removed entries.
-  Task<bool> DeleteRecursivelyAsync() const;
 
   /// @brief Copies one ordinary file without creating parent directories or recursively copying a directory.
   /// @param destination The complete target file path, not a directory into which the source name is appended.
   /// @param overwrite Whether an existing destination file may be replaced; false rejects a conflicting entry.
   /// @return True on success; false on failure or conflict. A failed copy may leave partial destination contents.
   [[nodiscard]] bool CopyTo(const File& destination, bool overwrite = false) const;
-  /// @brief Performs CopyTo() asynchronously, including any required Web persistence.
-  /// @param destination The complete target file path, retained by the task; its parent must already exist.
-  /// @param overwrite Whether an existing destination file may be replaced.
-  /// @return A task yielding true on success or false on failure, with the same copy semantics as CopyTo().
-  Task<bool> CopyToAsync(File destination, bool overwrite = false) const;
 
   /// @brief Moves a file or directory using the local file system's rename operation.
   /// @param destination The complete target path, whose parent must already exist.
@@ -315,6 +262,77 @@ public:
   /// @return True on success; false on failure or conflict. There is no cross-file-system copy-and-delete fallback.
   /// This path value remains unchanged after the move. The overwrite check is not a cross-process transaction.
   [[nodiscard]] bool MoveTo(const File& destination, bool overwrite = false) const;
+
+  /// @brief Performs Stat() asynchronously.
+  /// @return A task yielding the metadata or an IoError, with the same semantics as Stat().
+  Task<IoResult<FileInfo>> StatAsync() const;
+
+  /// @brief Opens an ordinary file for incremental reads performed on the file worker path.
+  /// @return A task yielding a uniquely owned async stream or an IoError.
+  Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
+
+  /// @brief Opens an incremental writer whose blocking operations use the file worker path.
+  /// @param mode Whether to truncate existing contents or append after them.
+  /// @return A task yielding a uniquely owned async stream or an IoError. CloseAsync() includes required Web
+  /// persistence.
+  Task<IoResult<AsyncOutputStream>> OpenWriteAsync(FileWriteMode mode = FileWriteMode::Truncate) const;
+
+  /// @brief Performs ReadBytes() asynchronously; this is not a streaming read.
+  /// @return A task yielding the complete byte buffer or an IoError.
+  Task<IoResult<Bytes>> ReadBytesAsync() const;
+
+  /// @brief Performs ReadString() asynchronously, including its UTF-8 validation and byte-order-mark handling.
+  /// @return A task yielding the complete string or an IoError.
+  Task<IoResult<std::string>> ReadStringAsync() const;
+
+  /// @brief Performs WriteBytes() asynchronously with task-owned input and any required Web persistence.
+  /// @param bytes The complete data to write, retained by the returned task.
+  /// @return A task yielding true on success or false on failure; cancellation does not guarantee writes stop.
+  Task<bool> WriteBytesAsync(Bytes bytes) const;
+
+  /// @brief Performs WriteString() asynchronously with task-owned text and any required Web persistence.
+  /// @param value Valid UTF-8 text retained by the returned task, written without newline conversion.
+  /// @return A task yielding true on success or false on failure, with the same write semantics as WriteString().
+  /// @throws std::invalid_argument If value is not valid UTF-8, before the task is returned.
+  Task<bool> WriteStringAsync(std::string value) const;
+
+  /// @brief Performs AppendBytes() asynchronously with task-owned input and any required Web persistence.
+  /// @param bytes The data to append, retained by the returned task.
+  /// @return A task yielding true on success or false on failure, with the same append semantics as AppendBytes().
+  Task<bool> AppendBytesAsync(Bytes bytes) const;
+
+  /// @brief Performs AppendString() asynchronously with task-owned text and any required Web persistence.
+  /// @param value Valid UTF-8 text retained by the returned task.
+  /// @return A task yielding true on success or false on failure, with the same append semantics as AppendString().
+  /// @throws std::invalid_argument If value is not valid UTF-8, before the task is returned.
+  Task<bool> AppendStringAsync(std::string value) const;
+
+  /// @brief Performs ListChildren() asynchronously.
+  /// @return A task yielding the immediate child paths or an IoError.
+  Task<IoResult<std::vector<File>>> ListChildrenAsync() const;
+
+  /// @brief Performs CreateDirectory() asynchronously, including any required Web persistence.
+  /// @return A task yielding true if created or already a directory, or false on failure.
+  Task<bool> CreateDirectoryAsync() const;
+
+  /// @brief Performs CreateDirectories() asynchronously, including any required Web persistence.
+  /// @return A task yielding true on success or false on failure, with no rollback of created directories.
+  Task<bool> CreateDirectoriesAsync() const;
+
+  /// @brief Performs Delete() asynchronously, including any required Web persistence.
+  /// @return A task yielding true if removed or already absent, or false on failure or a protected path.
+  Task<bool> DeleteAsync() const;
+
+  /// @brief Performs DeleteRecursively() asynchronously, including any required Web persistence.
+  /// @return A task yielding true on success or false on failure; cancellation cannot restore removed entries.
+  Task<bool> DeleteRecursivelyAsync() const;
+
+  /// @brief Performs CopyTo() asynchronously, including any required Web persistence.
+  /// @param destination The complete target file path, retained by the task; its parent must already exist.
+  /// @param overwrite Whether an existing destination file may be replaced.
+  /// @return A task yielding true on success or false on failure, with the same copy semantics as CopyTo().
+  Task<bool> CopyToAsync(File destination, bool overwrite = false) const;
+
   /// @brief Performs MoveTo() asynchronously, including any required Web persistence.
   /// @param destination The complete target path, retained by the task; its parent must already exist.
   /// @param overwrite Whether replacement is allowed under the platform's rename rules.
@@ -347,9 +365,11 @@ struct DirectoryCopySummary {
 /// destroying the parent value does not invalidate them. Retention does not promise serializable or permanent
 /// access across application restarts, and a read-only grant is never upgraded implicitly.
 ///
-/// All I/O is asynchronous and returns lazy tasks to await within a TaskScope execution. Tasks retain the
-/// required capability and arguments. Cancellation suppresses delivery and requests cooperative cancellation
-/// where supported; already completed writes are not rolled back and an in-flight provider operation may finish.
+/// Prefer asynchronous operations when both forms are available for the broadest Web compatibility.
+/// Synchronous I/O blocks the calling thread and returns Unsupported when the provider requires asynchronous access.
+/// Async methods return lazy tasks to await within a TaskScope. Tasks retain the capability and arguments.
+/// Cancellation suppresses delivery and requests cooperative cancellation where supported. An in-flight provider
+/// operation may still finish, and completed writes remain in effect.
 /// @code{.cpp}
 /// Task<bool> AddReport(FileReference destination, File report) {
 ///   auto folder = co_await destination.CreateDirectoryAsync("reports");
@@ -383,6 +403,7 @@ public:
   /// @brief Reports whether the retained grant and captured capability permit writing.
   /// @return True for a replaceable file or a directory supporting child creation; false for a read-only grant.
   /// This is not a fresh permission check. Directory writability does not guarantee every child can be overwritten.
+  /// Writability does not imply synchronous access.
   [[nodiscard]] bool CanWrite() const noexcept;
   /// @brief Returns the entry kind captured when this reference was produced.
   /// @return File, Directory, or Other; no provider query is performed and later changes are not reflected.
@@ -411,54 +432,81 @@ public:
   /// @endcode
   [[nodiscard]] std::optional<File> AsFile() const;
 
+  /// @brief Opens this ordinary referenced file for incremental reads on the calling thread.
+  /// @return A uniquely owned stream or an IoError. The stream retains the grant independently.
+  /// @throws std::logic_error If this reference was moved from.
+  /// A provider without synchronous access reports Unsupported before opening the file.
+  IoResult<InputStream> OpenRead() const;
+
+  /// @brief Opens this writable ordinary referenced file for incremental replacement on the calling thread.
+  /// @return A uniquely owned stream or an IoError. Call Close() to finalize output.
+  /// @throws std::logic_error If this reference was moved from.
+  /// The stream retains the grant independently. Opening may truncate the file, and a failed write may
+  /// leave partial contents. A provider without synchronous access reports Unsupported before mutation.
+  IoResult<OutputStream> OpenWrite() const;
+
+  /// @brief Opens this ordinary referenced file for random access on the calling thread.
+  /// @param access Permitted byte operations. Write access requires a writable reference.
+  /// @param mode Whether to preserve or truncate the referenced file. Truncation requires write access.
+  /// @return A uniquely owned stream or an IoError. The stream retains the grant independently.
+  /// @throws std::invalid_argument For invalid modes, CreateNew, or read-only truncation.
+  /// @throws std::logic_error If this reference was moved from.
+  /// A provider without synchronous random access reports Unsupported before mutation.
+  IoResult<RandomAccessStream> OpenRandomAccess(
+      FileAccessMode access = FileAccessMode::ReadOnly, FileOpenMode mode = FileOpenMode::OpenExisting
+  ) const;
+
+  /// @brief Reads the complete referenced file into owned memory on the calling thread.
+  /// @return Bytes or an IoError. An empty file yields a successful empty buffer. A provider without
+  /// synchronous access reports Unsupported before reading.
+  /// @throws std::logic_error If this reference was moved from.
+  IoResult<Bytes> ReadBytes() const;
+
+  /// @brief Reads the complete referenced file as UTF-8 text on the calling thread.
+  /// @return Text with one leading UTF-8 byte-order mark removed and line endings preserved, or an IoError.
+  /// Malformed UTF-8 reports InvalidEncoding. Other errors follow ReadBytes().
+  /// @throws std::logic_error If this reference was moved from.
+  IoResult<std::string> ReadString() const;
+
+  /// @brief Enumerates the immediate children of this directory on the calling thread.
+  /// @return Child references in unspecified order, or an IoError. Each child retains the original grant.
+  /// @throws std::logic_error If this reference was moved from.
+  /// Empty directories yield an empty vector. Hidden entries are included. Enumeration is not a snapshot.
+  IoResult<std::vector<FileReference>> ListChildren() const;
+
+  /// @brief Creates or reuses one immediate child directory on the calling thread.
+  /// @param name A nonempty UTF-8 child name other than "." or "..", with no NUL, slash, or backslash.
+  /// @return The child reference or an IoError. A conflicting non-directory reports AlreadyExists.
+  /// @throws std::invalid_argument If name violates the portable single-segment rules.
+  /// @throws std::logic_error If this reference was moved from.
+  /// The parent must be writable. Unsupported synchronous creation fails before modifying the directory.
+  IoResult<FileReference> CreateDirectory(std::string_view name) const;
+
   /// @brief Opens this ordinary referenced file for incremental asynchronous reads.
   /// @return A task yielding a uniquely owned stream or an IoError. Provider failures after opening also use IoResult.
   Task<IoResult<AsyncInputStream>> OpenReadAsync() const;
+
   /// @brief Opens this writable ordinary referenced file for incremental asynchronous replacement.
   /// @return A task yielding a uniquely owned truncating stream or an IoError. Call CloseAsync() to finalize output.
   /// Provider failures after opening also use IoResult.
   Task<IoResult<AsyncOutputStream>> OpenWriteAsync() const;
 
-  /// @brief Acquires random access to this ordinary referenced file through its provider.
-  /// @param access Permitted byte operations. Write access requires a writable reference.
-  /// @param mode Whether to preserve or truncate the referenced file. Truncation requires write access.
-  /// @return A lazy task yielding a uniquely owned stream or an IoError. A provider without the requested
-  /// capability reports Unsupported, and a directory reports IsDirectory.
-  /// @throws std::invalid_argument Before returning a task for invalid modes, CreateNew, or read-only truncation.
-  /// @throws std::logic_error If this reference was moved from.
-  /// The task retains the reference while opening. The stream retains the grant independently and runs byte
-  /// operations synchronously on the calling thread. Task cancellation suppresses delivery without undoing truncation.
-  Task<IoResult<RandomAccessStream>> OpenRandomAccessAsync(
-      FileAccessMode access = FileAccessMode::ReadOnly, FileOpenMode mode = FileOpenMode::OpenExisting
-  ) const;
-
   /// @brief Reads the complete contents of an ordinary referenced file into owned memory.
   /// @return A task yielding Bytes or an IoError; directories report IsDirectory and unsupported kinds report
   /// Unsupported. An empty file yields a successful empty buffer; this method is not a streaming interface.
   Task<IoResult<Bytes>> ReadBytesAsync() const;
+
   /// @brief Reads the complete referenced file as UTF-8 text, stripping one leading UTF-8 byte-order mark.
   /// @return A task yielding text without newline conversion, or an IoError; malformed contents report
   /// InvalidEncoding. Entry-kind and provider errors follow ReadBytesAsync().
   Task<IoResult<std::string>> ReadStringAsync() const;
-  /// @brief Imports one referenced file into application-accessible local storage without presenting a picker.
-  /// @param destination The complete local target file path; its parent directory must already exist.
-  /// @param overwrite Whether an existing destination file may be replaced; false rejects a conflicting entry.
-  /// @return A task yielding true after a successful copy, including any required Web persistence, or false for
-  /// an entry-kind, permission, conflict, or I/O failure. A failed copy may leave partial output.
-  /// The source may be read-only. Directories are not imported recursively; use CopyDirectoryContentsToAsync().
-  Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
-  /// @brief Replaces the contents of this writable file from a local file without presenting a picker.
-  /// @param source An existing ordinary local file whose contents are to be copied into this reference.
-  /// @return A task yielding true on success, or false for a read-only grant, wrong entry kind, or I/O failure.
-  /// @warning Replacement is not guaranteed atomic; failure may leave truncated or partial contents.
-  /// The reference keeps its original metadata snapshot and does not acquire broader access.
-  Task<bool> ReplaceWithAsync(File source) const;
 
   /// @brief Enumerates the immediate children of this directory without reading file contents.
   /// @return A task yielding child references in unspecified order, or an IoError such as NotDirectory.
   /// Empty directories yield a successful empty vector. Hidden entries are included, and each child preserves
   /// the parent's grant limits while retaining access independently. Enumeration is not a concurrent snapshot.
   Task<IoResult<std::vector<FileReference>>> ListChildrenAsync() const;
+
   /// @brief Creates or reuses one immediate child directory under this writable directory.
   /// @param name The exact UTF-8 child name: nonempty, not "." or "..", and containing no NUL, slash, or backslash.
   /// @return A task yielding the new or existing directory reference, or an IoError. A conflicting non-directory
@@ -466,6 +514,22 @@ public:
   /// @throws std::invalid_argument If name violates the portable single-segment rules, before returning a task.
   /// Additional provider-specific name restrictions are reported through IoResult.
   Task<IoResult<FileReference>> CreateDirectoryAsync(std::string name) const;
+
+  /// @brief Imports one referenced file into application-accessible local storage without presenting a picker.
+  /// @param destination The complete local target file path; its parent directory must already exist.
+  /// @param overwrite Whether an existing destination file may be replaced; false rejects a conflicting entry.
+  /// @return A task yielding true after a successful copy, including any required Web persistence, or false for
+  /// an entry-kind, permission, conflict, or I/O failure. A failed copy may leave partial output.
+  /// The source may be read-only. Directories are not imported recursively; use CopyDirectoryContentsToAsync().
+  Task<bool> ImportToAsync(File destination, bool overwrite = false) const;
+
+  /// @brief Replaces the contents of this writable file from a local file without presenting a picker.
+  /// @param source An existing ordinary local file whose contents are to be copied into this reference.
+  /// @return A task yielding true on success, or false for a read-only grant, wrong entry kind, or I/O failure.
+  /// @warning Replacement is not guaranteed atomic; failure may leave truncated or partial contents.
+  /// The reference keeps its original metadata snapshot and does not acquire broader access.
+  Task<bool> ReplaceWithAsync(File source) const;
+
   /// @brief Copies one ordinary local file into this writable directory under an exact child name.
   /// @param source An existing ordinary local file; the source is retained as a path, not opened at the call site.
   /// @param name The exact target name, subject to the same portable name rules as CreateDirectoryAsync().
@@ -473,8 +537,8 @@ public:
   /// @return A task yielding the destination file reference after the copy is finalized, or an IoError.
   /// Existing files report AlreadyExists when overwrite is false. Failure can leave partial destination contents.
   /// @throws std::invalid_argument If name is not a valid portable child name, before returning a task.
-  Task<IoResult<FileReference>>
-  CopyFileFromAsync(File source, std::string name, bool overwrite = false) const;
+  Task<IoResult<FileReference>> CopyFileFromAsync(File source, std::string name, bool overwrite = false) const;
+
   /// @brief Copies one referenced file into this writable directory without staging it through an application file.
   /// @param source An ordinary file reference; read-only source access is sufficient.
   /// @param name The exact target name, subject to the same portable name rules as CreateDirectoryAsync().
@@ -482,8 +546,8 @@ public:
   /// @return A task yielding the finalized destination reference or an IoError, including Unsupported when the
   /// providers cannot support this transfer. Conflict and partial-write rules match the local-file overload.
   /// @throws std::invalid_argument If name is not a valid portable child name, before returning a task.
-  Task<IoResult<FileReference>>
-  CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
+  Task<IoResult<FileReference>> CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
+
   /// @brief Recursively copies this directory's contents into an existing local destination directory.
   /// @param destination The existing destination root; no extra directory named after the source is added.
   /// @param overwrite Whether conflicting files may be replaced. Existing directories are merged; conflicting
@@ -503,8 +567,8 @@ public:
   ///   co_return co_await source.CopyDirectoryContentsToAsync(destination);
   /// }
   /// @endcode
-  Task<IoResult<DirectoryCopySummary>>
-  CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
+  Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
+
   /// @brief Recursively copies this directory's contents into another existing writable directory reference.
   /// @param destination The independent writable destination root; it is retained for the operation's lifetime.
   /// @param overwrite Whether existing files may be replaced; directory merging and entry-kind conflict rules
@@ -513,8 +577,9 @@ public:
   /// provider capabilities cannot establish independent roots or perform the requested transfer.
   /// This has the same contents-only layout, partial-output, cancellation, and concurrency rules as the
   /// local-destination overload. Directory writability does not override a read-only existing child's permissions.
-  Task<IoResult<DirectoryCopySummary>>
-  CopyDirectoryContentsToAsync(FileReference destination, bool overwrite = false) const;
+  Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(
+      FileReference destination, bool overwrite = false
+  ) const;
 
 private:
   FileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceState> state);

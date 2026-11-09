@@ -863,7 +863,7 @@ public:
                                                          });
   }
 
-  std::function<void()> CreateDirectory(std::string name, std::optional<FileReference>,
+  std::function<void()> CreateDirectory(std::string name,
                                         FileReferenceCompletion<FileReferenceWriteResult> completion) override {
     auto request = ReferenceRequest("create");
     request.set("name", std::move(name));

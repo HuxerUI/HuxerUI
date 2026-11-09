@@ -11,6 +11,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -127,7 +128,7 @@ IoErrorCode ToFileErrorCode(jint error_code) noexcept {
 class AndroidFileReferenceBridge;
 
 using AndroidDirectoryCompletion = std::function<void(JNIEnv*, jint, jint, jobjectArray, jlong, bool)>;
-using AndroidStreamCompletion = std::function<void(jint, jint, jlong, std::string)>;
+using AndroidStreamCompletion = std::function<bool(JNIEnv*, jint, jint, jlong, jobject, std::string)>;
 
 // Owns one Java operation across the JNI call that starts it. Completion and cancellation can race;
 // detach callbacks under the mutex, then call Java outside it because cancel() can reenter nativeComplete.
@@ -169,7 +170,7 @@ public:
   }
 
   bool Complete(JNIEnv* environment, jint result, jint error_code, jbyteArray bytes, jstring message,
-                jobjectArray references, jlong transferred, bool created) noexcept {
+                jobjectArray references, jlong transferred, bool created, jobject descriptor) noexcept {
     jobject operation = nullptr;
     FileReferenceBytesCompletion bytes_completion;
     FileReferenceBoolCompletion bool_completion;
@@ -201,9 +202,9 @@ public:
       return true;
     }
     if (stream_completion) {
-      stream_completion(result, error_code, transferred,
-                        JavaStringOrFallback(environment, message, "HuxerUI external file stream could not be opened"));
-      return true;
+      return stream_completion(
+          environment, result, error_code, transferred, descriptor,
+          JavaStringOrFallback(environment, message, "HuxerUI external file stream could not be opened"));
     }
     if (directory_completion) {
       directory_completion(environment, result, error_code, references, transferred, created);
@@ -253,7 +254,8 @@ public:
       stream_completion = std::move(stream_completion_);
     }
     if (stream_completion) {
-      stream_completion(static_cast<jint>(AndroidReferenceResult::Error), static_cast<jint>(AndroidFileError::Io), -1,
+      stream_completion(nullptr, static_cast<jint>(AndroidReferenceResult::Error),
+                        static_cast<jint>(AndroidFileError::Io), -1, nullptr,
                         "HuxerUI Android external file stream could not be opened");
     } else if (import_completion) {
       import_completion(
@@ -326,6 +328,12 @@ private:
 
 using AndroidReferenceControlHandle = std::shared_ptr<AndroidReferenceOperationControl>;
 
+struct AndroidParcelDescriptorMethods {
+  jmethodID check_error = nullptr;
+  jmethodID close = nullptr;
+  jmethodID close_with_error = nullptr;
+};
+
 // Shared by references returned from selection and directory operations. Retained classes and cached
 // IDs let worker callbacks decode the same Metadata[] representation without repeated JNI lookup.
 // The Context and bridge outlive the picker whenever a reference or operation still holds them.
@@ -346,7 +354,9 @@ public:
     android::LocalRef<jclass> metadata_class(
         environment, environment->FindClass("org/huxerui/HuxerUIFileReference$Metadata"));
     android::LocalRef<jclass> uri_class(environment, environment->FindClass("android/net/Uri"));
+    android::LocalRef<jclass> descriptor_class(environment, environment->FindClass("android/os/ParcelFileDescriptor"));
     if (context_ == nullptr || !reference_class || !operation_class || !metadata_class || !uri_class ||
+        !descriptor_class ||
         environment->ExceptionCheck()) {
       if (context_ != nullptr) {
         environment->DeleteGlobalRef(context_);
@@ -384,6 +394,7 @@ public:
     prepare_open_random_access_ = environment->GetMethodID(reference_class_, "prepareOpenRandomAccess",
                                                            "(JZ)Lorg/huxerui/HuxerUIFileReference$Operation;");
     start_ = environment->GetMethodID(operation_class_, "start", "()V");
+    run_ = environment->GetMethodID(operation_class_, "run", "()V");
     cancel_ = environment->GetMethodID(operation_class_, "cancel", "()V");
     metadata_uri_ = environment->GetFieldID(metadata_class_, "uri", "Landroid/net/Uri;");
     metadata_name_ = environment->GetFieldID(metadata_class_, "name", "Ljava/lang/String;");
@@ -392,12 +403,17 @@ public:
     metadata_writable_ = environment->GetFieldID(metadata_class_, "writable", "Z");
     metadata_write_allowed_ = environment->GetFieldID(metadata_class_, "writeAllowed", "Z");
     uri_string_ = environment->GetMethodID(uri_class.Get(), "toString", "()Ljava/lang/String;");
+    parcel_methods_.check_error = environment->GetMethodID(descriptor_class.Get(), "checkError", "()V");
+    parcel_methods_.close = environment->GetMethodID(descriptor_class.Get(), "close", "()V");
+    parcel_methods_.close_with_error = environment->GetMethodID(descriptor_class.Get(), "closeWithError",
+                                                               "(Ljava/lang/String;)V");
     if (!metadata_uri_ || !metadata_name_ || !metadata_size_ || !metadata_content_type_ || !metadata_writable_ ||
         !metadata_write_allowed_ ||
         !uri_string_ || entry_key_ == nullptr || prepare_directory_ == nullptr || constructor_ == nullptr ||
         prepare_read_ == nullptr || prepare_import_ == nullptr || prepare_replace_ == nullptr ||
         prepare_open_read_ == nullptr || prepare_open_write_ == nullptr || prepare_open_random_access_ == nullptr ||
-        start_ == nullptr || cancel_ == nullptr ||
+        start_ == nullptr || run_ == nullptr || cancel_ == nullptr ||
+        !parcel_methods_.check_error || !parcel_methods_.close || !parcel_methods_.close_with_error ||
         environment->ExceptionCheck()) {
       Release(environment);
       throw std::runtime_error("HuxerUI Android file reference Java methods do not match the platform backend");
@@ -434,6 +450,10 @@ public:
     return virtual_machine_;
   }
 
+  [[nodiscard]] AndroidParcelDescriptorMethods ParcelMethods() const noexcept {
+    return parcel_methods_;
+  }
+
   [[nodiscard]] jmethodID PrepareDirectory() const noexcept {
     return prepare_directory_;
   }
@@ -465,8 +485,8 @@ public:
     return prepare_open_random_access_;
   }
 
-  [[nodiscard]] jmethodID Start() const noexcept {
-    return start_;
+  [[nodiscard]] jmethodID Dispatch(bool synchronous) const noexcept {
+    return synchronous ? run_ : start_;
   }
 
   [[nodiscard]] jmethodID Cancel() const noexcept {
@@ -519,31 +539,9 @@ private:
   jmethodID prepare_open_write_ = nullptr;
   jmethodID prepare_open_random_access_ = nullptr;
   jmethodID start_ = nullptr;
+  jmethodID run_ = nullptr;
   jmethodID cancel_ = nullptr;
-};
-
-class AndroidStreamDescriptor final {
-public:
-  explicit AndroidStreamDescriptor(int value) : value_(value) {}
-  AndroidStreamDescriptor(const AndroidStreamDescriptor&) = delete;
-  AndroidStreamDescriptor& operator=(const AndroidStreamDescriptor&) = delete;
-  ~AndroidStreamDescriptor() {
-    Close();
-  }
-
-  [[nodiscard]] int Get() const noexcept {
-    return value_;
-  }
-
-  bool Close() noexcept {
-    if (value_ < 0) {
-      return true;
-    }
-    return close(std::exchange(value_, -1)) == 0;
-  }
-
-private:
-  int value_;
+  AndroidParcelDescriptorMethods parcel_methods_;
 };
 
 IoError AndroidStreamError(std::string_view operation) {
@@ -554,86 +552,240 @@ IoError AndroidStreamError(std::string_view operation) {
   };
 }
 
-class AndroidInputStreamState final : public AsyncInputStreamState {
+// A reliable fd is borrowed from its Java owner. Only that owner can send the provider a close status.
+class AndroidReliableDescriptor final {
 public:
-  explicit AndroidInputStreamState(int descriptor)
-      : descriptor_(std::make_shared<AndroidStreamDescriptor>(descriptor)) {}
+  AndroidReliableDescriptor(const AndroidFileReferenceBridge& bridge, int fd, bool writing) noexcept
+      : virtual_machine_(bridge.VirtualMachine()), methods_(bridge.ParcelMethods()), fd_(fd), writing_(writing) {}
 
-  Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) override {
-    co_return co_await operations_.Run([descriptor = descriptor_, maximum_bytes](std::stop_token stop_token) {
-      if (stop_token.stop_requested()) {
-        return IoResult<Bytes>(Bytes{});
-      }
-      Bytes data(maximum_bytes);
-      while (true) {
-        errno = 0;
-        const ssize_t count =
-            read(descriptor->Get(), data.data(),
-                 std::min<std::size_t>(maximum_bytes, static_cast<std::size_t>(std::numeric_limits<ssize_t>::max())));
-        if (count < 0 && errno == EINTR) {
-          continue;
-        }
-        if (count < 0) {
-          return IoResult<Bytes>(AndroidStreamError("read"));
-        }
-        data.resize(static_cast<std::size_t>(count));
-        return IoResult<Bytes>(std::move(data));
-      }
-    });
+  AndroidReliableDescriptor(const AndroidReliableDescriptor&) = delete;
+  AndroidReliableDescriptor& operator=(const AndroidReliableDescriptor&) = delete;
+
+  ~AndroidReliableDescriptor() {
+    Close(writing_);
   }
 
-  void Cancel() noexcept override {}
+  bool Retain(JNIEnv* environment, jobject descriptor) noexcept {
+    descriptor_ = environment->NewGlobalRef(descriptor);
+    if (!descriptor_) {
+      ClearJavaException(environment);
+    }
+    return descriptor_ != nullptr;
+  }
+
+  [[nodiscard]] int Get() const noexcept { return fd_; }
+
+  bool CheckReadStatus() const noexcept {
+    JniEnvironment attached(virtual_machine_);
+    auto* environment = attached.Get();
+    if (!environment || environment->ExceptionCheck()) {
+      return false;
+    }
+    environment->CallVoidMethod(descriptor_, methods_.check_error);
+    const bool succeeded = !environment->ExceptionCheck();
+    ClearJavaException(environment);
+    return succeeded;
+  }
+
+  bool Close(bool abandoned) noexcept {
+    if (!descriptor_) {
+      return true;
+    }
+    JniEnvironment attached(virtual_machine_);
+    auto* environment = attached.Get();
+    if (!environment) {
+      return false;
+    }
+    // Cleanup may run while JNI is unwinding another failure. Preserve that exception across close.
+    android::LocalRef<jthrowable> pending(environment, environment->ExceptionOccurred());
+    ClearJavaException(environment);
+    const jobject descriptor = std::exchange(descriptor_, nullptr);
+    android::LocalRef<jstring> reason(
+        environment, abandoned ? environment->NewStringUTF("HuxerUI external file output was not finalized") : nullptr);
+    if (reason) {
+      environment->CallVoidMethod(descriptor, methods_.close_with_error, reason.Get());
+    } else {
+      ClearJavaException(environment);
+      environment->CallVoidMethod(descriptor, methods_.close);
+    }
+    const bool succeeded = !environment->ExceptionCheck();
+    ClearJavaException(environment);
+    environment->DeleteGlobalRef(descriptor);
+    if (pending) {
+      environment->Throw(pending.Get());
+    }
+    return succeeded;
+  }
 
 private:
-  std::shared_ptr<AndroidStreamDescriptor> descriptor_;
-  WorkerSequence operations_;
+  JavaVM* virtual_machine_;
+  AndroidParcelDescriptorMethods methods_;
+  jobject descriptor_ = nullptr;
+  int fd_;
+  bool writing_;
 };
 
-class AndroidOutputStreamState final : public AsyncOutputStreamState {
+class AndroidStreamDescriptor final {
 public:
-  explicit AndroidOutputStreamState(int descriptor)
-      : descriptor_(std::make_shared<AndroidStreamDescriptor>(descriptor)) {}
+  explicit AndroidStreamDescriptor(int fd) : native_(fd) {}
+  explicit AndroidStreamDescriptor(std::unique_ptr<AndroidReliableDescriptor> reliable)
+      : reliable_(std::move(reliable)) {}
+
+  [[nodiscard]] int Get() const { return reliable_ ? reliable_->Get() : native_.Get(); }
+  [[nodiscard]] int ReleaseNative() { return native_.Release(); }
+  [[nodiscard]] bool CheckReadStatus() const noexcept { return !reliable_ || reliable_->CheckReadStatus(); }
+
+  bool Close() {
+    if (reliable_) {
+      const bool closed = reliable_->Close(false);
+      reliable_.reset();
+      if (!closed) {
+        errno = EIO;
+      }
+      return closed;
+    }
+    return native_.Close();
+  }
+
+  void FailWrite() noexcept { reliable_.reset(); }
+
+private:
+  ReferenceDescriptor native_;
+  std::unique_ptr<AndroidReliableDescriptor> reliable_;
+};
+
+class AndroidInputStreamState final : public InputStreamState {
+public:
+  AndroidInputStreamState(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner)
+      : owner_(std::move(owner)), descriptor_(std::move(descriptor)) {}
+
+  IoResult<std::size_t> Read(std::span<std::byte> buffer) override {
+    ssize_t count;
+    do {
+      errno = 0;
+      count = read(descriptor_.Get(), buffer.data(),
+                   std::min<std::size_t>(buffer.size(), std::numeric_limits<ssize_t>::max()));
+    } while (count < 0 && errno == EINTR);
+    if (count < 0) {
+      return IoResult<std::size_t>(AndroidStreamError("read"));
+    }
+    if (count == 0 && !descriptor_.CheckReadStatus()) {
+      return IoResult<std::size_t>(IoError{IoErrorCode::Io, "HuxerUI Android provider reported a stream read error"});
+    }
+    return IoResult<std::size_t>(static_cast<std::size_t>(count));
+  }
+
+  void Release() noexcept override {
+    descriptor_.Close();
+    owner_.reset();
+  }
+
+private:
+  std::shared_ptr<FileReferenceState> owner_;
+  AndroidStreamDescriptor descriptor_;
+};
+
+InputStream MakeAndroidInput(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
+  return StreamAccess::MakeInputStream(
+      std::make_shared<AndroidInputStreamState>(std::move(descriptor), std::move(owner)));
+}
+
+class AndroidOutputStreamState final : public OutputStreamState,
+                                       public AsyncOutputStreamState,
+                                       public std::enable_shared_from_this<AndroidOutputStreamState> {
+public:
+  AndroidOutputStreamState(AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner)
+      : owner_(std::move(owner)), descriptor_(std::move(descriptor)) {}
+
+  IoResult<void> Write(std::span<const std::byte> data) override {
+    return Write(data, {});
+  }
+
+  IoResult<void> Close() override {
+    errno = 0;
+    if (!descriptor_.Close()) {
+      return IoResult<void>(AndroidStreamError("close"));
+    }
+    owner_.reset();
+    return IoResult<void>::Success();
+  }
 
   Task<IoResult<void>> WriteAsync(Bytes data) override {
     co_return co_await operations_.Run(
-        [descriptor = descriptor_](std::stop_token stop_token, Bytes value) {
-          std::span<const std::byte> remaining(value);
-          while (!remaining.empty() && !stop_token.stop_requested()) {
-            errno = 0;
-            const ssize_t count = write(
-                descriptor->Get(), remaining.data(),
-                std::min<std::size_t>(remaining.size(), static_cast<std::size_t>(std::numeric_limits<ssize_t>::max())));
-            if (count < 0 && errno == EINTR) {
-              continue;
-            }
-            if (count <= 0) {
-              return IoResult<void>(AndroidStreamError("write"));
-            }
-            remaining = remaining.subspan(static_cast<std::size_t>(count));
-          }
-          return IoResult<void>::Success();
+        [self = shared_from_this()](std::stop_token stop_token, Bytes value) {
+          return self->Write(value, stop_token);
         },
         std::move(data));
   }
 
   Task<IoResult<void>> CloseAsync() override {
-    co_return co_await operations_.Run([descriptor = descriptor_](std::stop_token stop_token) {
-      if (!stop_token.stop_requested()) {
-        errno = 0;
-        if (!descriptor->Close()) {
-          return IoResult<void>(AndroidStreamError("close"));
-        }
-      }
-      return IoResult<void>::Success();
+    co_return co_await operations_.Run([self = shared_from_this()](std::stop_token stop_token) {
+      return stop_token.stop_requested() ? IoResult<void>::Success() : self->Close();
     });
   }
 
+  // The worker retains the descriptor until an in-flight native write finishes.
   void Abort() noexcept override {}
 
 private:
-  std::shared_ptr<AndroidStreamDescriptor> descriptor_;
+  IoResult<void> Write(std::span<const std::byte> remaining, std::stop_token stop_token) {
+    while (!remaining.empty() && !stop_token.stop_requested()) {
+      errno = 0;
+      const ssize_t count = write(descriptor_.Get(), remaining.data(),
+                                  std::min<std::size_t>(remaining.size(), std::numeric_limits<ssize_t>::max()));
+      if (count < 0 && errno == EINTR) {
+        continue;
+      }
+      if (count <= 0) {
+        auto error = AndroidStreamError("write");
+        descriptor_.FailWrite();
+        return IoResult<void>(std::move(error));
+      }
+      remaining = remaining.subspan(static_cast<std::size_t>(count));
+    }
+    return IoResult<void>::Success();
+  }
+
+  std::shared_ptr<FileReferenceState> owner_;
+  AndroidStreamDescriptor descriptor_;
   WorkerSequence operations_;
 };
+
+AndroidStreamCompletion CompleteDescriptor(std::shared_ptr<AndroidFileReferenceBridge> bridge,
+                                            FileReferenceCompletion<AndroidStreamDescriptor> completion,
+                                            bool writing = false) {
+  return [bridge = std::move(bridge), completion = std::move(completion), writing](
+      JNIEnv* environment, jint result, jint error, jlong descriptor, jobject parcel, std::string message
+  ) {
+    if (static_cast<AndroidReferenceResult>(result) != AndroidReferenceResult::True ||
+        descriptor < 0 || descriptor > std::numeric_limits<int>::max()) {
+      completion(IoResult<AndroidStreamDescriptor>(IoError{ToFileErrorCode(error), std::move(message)}));
+      return false;
+    }
+    const int fd = static_cast<int>(descriptor);
+    if (!parcel) {
+      completion(IoResult<AndroidStreamDescriptor>(AndroidStreamDescriptor(fd)));
+      return true;
+    }
+    auto reliable = std::unique_ptr<AndroidReliableDescriptor>(new (std::nothrow)
+        AndroidReliableDescriptor(*bridge, fd, writing));
+    if (!reliable || !reliable->Retain(environment, parcel)) {
+      completion(IoResult<AndroidStreamDescriptor>(
+          IoError{IoErrorCode::Io, "HuxerUI Android provider descriptor could not be retained"}));
+      return false;
+    }
+    completion(IoResult<AndroidStreamDescriptor>(AndroidStreamDescriptor(std::move(reliable))));
+    return true;
+  };
+}
+
+template <class T, class Start>
+IoResult<T> RunAndroidReferenceSync(Start start) {
+  IoResult<T> result(IoError{IoErrorCode::Io, "HuxerUI Android external file operation did not complete"});
+  // Java run() finishes on this thread and delivers the same terminal result used by the executor path.
+  start(FileReferenceCompletion<T>([&result](IoResult<T> value) { result = std::move(value); }));
+  return result;
+}
 
 class AndroidFileReferenceState final : public FileReferenceState,
                                         public std::enable_shared_from_this<AndroidFileReferenceState> {
@@ -662,46 +814,90 @@ public:
     }
   }
 
+  IoResult<InputStream> OpenReadSync() override {
+    return RunAndroidReferenceSync<InputStream>([&](auto completion) {
+      OpenStream(bridge_->PrepareOpenRead(), std::move(completion), MakeAndroidInput, true);
+    });
+  }
+
+  IoResult<OutputStream> OpenWriteSync() override {
+    return RunAndroidReferenceSync<OutputStream>([&](auto completion) {
+      OpenStream(bridge_->PrepareOpenWrite(), std::move(completion),
+          [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
+            return StreamAccess::MakeOutputStream(
+                std::make_shared<AndroidOutputStreamState>(std::move(descriptor), std::move(owner)));
+          }, true);
+    });
+  }
+
+  IoResult<RandomAccessStream> OpenRandomAccessSync(FileAccessMode access, FileOpenMode mode) override {
+    auto opened = RunAndroidReferenceSync<AndroidStreamDescriptor>([&](auto completion) {
+      Start(CompleteDescriptor(bridge_, std::move(completion)), [&](JNIEnv* environment, jlong handle) {
+        const jboolean writing = access == FileAccessMode::ReadOnly ? JNI_FALSE : JNI_TRUE;
+        return android::LocalRef<jobject>(environment, environment->CallObjectMethod(
+            reference_, bridge_->PrepareOpenRandomAccess(), handle, writing));
+      }, true);
+    });
+    if (!opened.Succeeded()) {
+      return IoResult<RandomAccessStream>(std::move(opened).Error());
+    }
+    try {
+      auto owner = shared_from_this();
+      const int fd = opened.Value().ReleaseNative();
+      if (fd < 0) {
+        return IoResult<RandomAccessStream>(
+            IoError{IoErrorCode::Unsupported, "HuxerUI provider requires reliable stream close"});
+      }
+      auto state = OpenRandomAccessDescriptor(fd, access, mode, std::move(owner));
+      if (!state.Succeeded()) {
+        return IoResult<RandomAccessStream>(std::move(state).Error());
+      }
+      return IoResult<RandomAccessStream>(StreamAccess::MakeRandomAccessStream(std::move(state).Value()));
+    } catch (...) {
+      return IoResult<RandomAccessStream>(
+          IoError{IoErrorCode::Io, "HuxerUI Android random-access stream could not be opened"});
+    }
+  }
+
+  IoResult<Bytes> ReadBytesSync() override {
+    return RunAndroidReferenceSync<Bytes>([&](auto completion) {
+      Start(bridge_->PrepareRead(), nullptr, false, std::move(completion), true);
+    });
+  }
+
+  IoResult<std::vector<FileReference>> ListChildrenSync() override {
+    return RunAndroidReferenceSync<std::vector<FileReference>>([&](auto completion) {
+      ReadDirectory(std::move(completion), true);
+    });
+  }
+
+  IoResult<FileReference> CreateDirectorySync(std::string_view name) override {
+    auto created = RunAndroidReferenceSync<FileReferenceWriteResult>([&](auto completion) {
+      Directory<FileReferenceWriteResult>(create_directory_by_name, {}, {}, std::string(name), false,
+                                           std::move(completion), DecodeWrite, {}, true);
+    });
+    if (!created.Succeeded()) {
+      return IoResult<FileReference>(std::move(created).Error());
+    }
+    return IoResult<FileReference>(std::move(created).Value().reference);
+  }
+
   std::function<void()> ReadBytes(FileReferenceBytesCompletion completion) override {
     return Start(bridge_->PrepareRead(), nullptr, false, std::move(completion));
   }
 
   std::function<void()> OpenRead(FileReferenceInputStreamCompletion completion) override {
-    return OpenStream<AsyncInputStreamState, AndroidInputStreamState>(bridge_->PrepareOpenRead(),
-                                                                      std::move(completion));
+    return OpenStream(bridge_->PrepareOpenRead(), std::move(completion),
+        [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
+          return MakeWorkerAsyncInputState(MakeAndroidInput(std::move(descriptor), std::move(owner)));
+        });
   }
 
   std::function<void()> OpenWrite(FileReferenceOutputStreamCompletion completion) override {
-    return OpenStream<AsyncOutputStreamState, AndroidOutputStreamState>(bridge_->PrepareOpenWrite(),
-                                                                        std::move(completion));
-  }
-
-  std::function<void()> OpenRandomAccess(FileAccessMode access, FileOpenMode mode,
-                                         FileReferenceRandomAccessCompletion completion) override {
-    AndroidStreamCompletion opened =
-        [self = shared_from_this(), completion = std::move(completion), access, mode](
-            jint result, jint error, jlong descriptor, std::string message
-        ) {
-          using StateResult = IoResult<std::shared_ptr<RandomAccessStreamState>>;
-          if (static_cast<AndroidReferenceResult>(result) != AndroidReferenceResult::True ||
-              descriptor < 0 || descriptor > std::numeric_limits<int>::max()) {
-            completion(StateResult(IoError{ToFileErrorCode(error), std::move(message)}));
-            return;
-          }
-          auto state = [&] {
-            try {
-              return OpenRandomAccessDescriptor(static_cast<int>(descriptor), access, mode, self);
-            } catch (...) {
-              return StateResult(IoError{IoErrorCode::Io, "HuxerUI Android random-access stream could not be opened"});
-            }
-          }();
-          completion(std::move(state));
-        };
-    return Start(std::move(opened), [&](JNIEnv* environment, jlong handle) {
-      const jboolean writing = access == FileAccessMode::ReadOnly ? JNI_FALSE : JNI_TRUE;
-      return android::LocalRef<jobject>(
-          environment, environment->CallObjectMethod(reference_, bridge_->PrepareOpenRandomAccess(), handle, writing));
-    });
+    return OpenStream(bridge_->PrepareOpenWrite(), std::move(completion),
+        [](AndroidStreamDescriptor descriptor, std::shared_ptr<FileReferenceState> owner) {
+          return std::make_shared<AndroidOutputStreamState>(std::move(descriptor), std::move(owner));
+        });
   }
 
   std::function<void()> ImportTo(File destination, bool overwrite,
@@ -724,9 +920,7 @@ public:
   bool NeedsChildListingForLookup() const noexcept override { return true; }
 
   std::function<void()> ListChildren(FileReferenceCompletion<std::vector<FileReference>> completion) override {
-    return Directory<std::vector<FileReference>>(
-        list_children, {}, {}, {}, false, std::move(completion),
-        [](std::vector<FileReference> references, jlong, bool, jint) { return references; });
+    return ReadDirectory(std::move(completion), false);
   }
 
   std::function<void()> FindChild(std::string name,
@@ -744,8 +938,15 @@ public:
         });
   }
 
-  std::function<void()> CreateDirectory(std::string name, std::optional<FileReference> existing,
+  std::function<void()> CreateDirectory(std::string name,
                                         FileReferenceCompletion<FileReferenceWriteResult> completion) override {
+    return Directory<FileReferenceWriteResult>(create_directory_by_name, {}, {}, std::move(name), false,
+                                               std::move(completion), DecodeWrite);
+  }
+
+  std::function<void()> CreateDirectoryFromLookup(std::string name, std::optional<FileReference> existing,
+                                                  FileReferenceCompletion<FileReferenceWriteResult> completion)
+      override {
     return Directory<FileReferenceWriteResult>(create_directory, {}, {}, std::move(name), false,
                                                std::move(completion), DecodeWrite, std::move(existing));
   }
@@ -792,6 +993,7 @@ private:
   static constexpr jint create_directory = 5;
   static constexpr jint copy_file = 6;
   static constexpr jint check_destination = 7;
+  static constexpr jint create_directory_by_name = 12;
 
   static FileReferenceWriteResult DecodeWrite(std::vector<FileReference> references, jlong bytes, bool created, jint) {
     if (references.size() != 1 || bytes < 0) {
@@ -800,25 +1002,40 @@ private:
     return {std::move(references.front()), static_cast<std::uint64_t>(bytes), created};
   }
 
-  template <class StreamState, class AndroidState>
-  std::function<void()> OpenStream(jmethodID prepare, FileReferenceCompletion<std::shared_ptr<StreamState>> completion) {
-    AndroidStreamCompletion opened = [completion = std::move(completion)](jint result, jint error, jlong descriptor,
-                                                                          std::string message) mutable {
-      if (static_cast<AndroidReferenceResult>(result) == AndroidReferenceResult::True && descriptor >= 0 &&
-          descriptor <= std::numeric_limits<int>::max()) {
-        completion(
-            IoResult<std::shared_ptr<StreamState>>(std::make_shared<AndroidState>(static_cast<int>(descriptor))));
-        return;
-      }
-      completion(IoResult<std::shared_ptr<StreamState>>(IoError{ToFileErrorCode(error), std::move(message)}));
-    };
-    return Start(prepare, nullptr, false, std::move(opened));
+  std::function<void()> ReadDirectory(FileReferenceCompletion<std::vector<FileReference>> completion,
+                                        bool synchronous) {
+    return Directory<std::vector<FileReference>>(
+        list_children, {}, {}, {}, false, std::move(completion),
+        [](std::vector<FileReference> references, jlong, bool, jint) { return references; }, {}, synchronous);
+  }
+
+  template <class T, class MakeStream>
+  std::function<void()> OpenStream(jmethodID prepare, FileReferenceCompletion<T> completion, MakeStream make_stream,
+                                    bool synchronous = false) {
+    auto opened = CompleteDescriptor(bridge_,
+        [self = shared_from_this(), completion = std::move(completion), make_stream](
+            IoResult<AndroidStreamDescriptor> descriptor
+        ) {
+          if (!descriptor.Succeeded()) {
+            completion(IoResult<T>(std::move(descriptor).Error()));
+            return;
+          }
+          auto stream = [&] {
+            try {
+              return IoResult<T>(make_stream(std::move(descriptor).Value(), self));
+            } catch (...) {
+              return IoResult<T>(IoError{IoErrorCode::Io, "HuxerUI Android external file stream could not be opened"});
+            }
+          }();
+          completion(std::move(stream));
+        }, prepare == bridge_->PrepareOpenWrite());
+    return Start(prepare, nullptr, false, std::move(opened), synchronous);
   }
 
   template <class T, class Decode>
   std::function<void()> Directory(jint kind, std::string path, std::string source_uri, std::string name, bool overwrite,
                                   FileReferenceCompletion<T> completion, Decode decode,
-                                  std::optional<FileReference> existing = {}) {
+                                  std::optional<FileReference> existing = {}, bool synchronous = false) {
     auto bridge = bridge_;
     AndroidDirectoryCompletion decoded = [bridge, completion = std::move(completion),
                                           decode](JNIEnv* environment, jint result, jint error, jobjectArray values,
@@ -858,11 +1075,12 @@ private:
                            path.empty() ? nullptr : java_path.Get(), source_uri.empty() ? nullptr : java_source.Get(),
                            name.empty() ? nullptr : java_name.Get(), java_existing.Get(),
                            overwrite ? JNI_TRUE : JNI_FALSE));
-    });
+    }, synchronous);
   }
 
   template <class Completion>
-  std::function<void()> Start(jmethodID prepare, const File* file, bool overwrite, Completion completion) {
+  std::function<void()> Start(jmethodID prepare, const File* file, bool overwrite, Completion completion,
+                              bool synchronous = false) {
     return Start(std::move(completion), [&](JNIEnv* environment, jlong handle) {
       if (!file) {
         return android::LocalRef<jobject>(environment, environment->CallObjectMethod(reference_, prepare, handle));
@@ -876,18 +1094,18 @@ private:
                            ? environment->CallObjectMethod(reference_, prepare, handle, path.Get(),
                                                            overwrite ? JNI_TRUE : JNI_FALSE)
                            : environment->CallObjectMethod(reference_, prepare, handle, path.Get()));
-    });
+    }, synchronous);
   }
 
   template <class Completion, class Prepare>
-  std::function<void()> Start(Completion completion, Prepare prepare) {
+  std::function<void()> Start(Completion completion, Prepare prepare, bool synchronous = false) {
     // Prepare does not start Java work. Retain the operation and transfer its native callback holder
-    // before start(), since execution can complete immediately (including executor rejection).
+    // before dispatch, since execution can complete immediately on either the caller or executor.
     auto control = std::make_shared<AndroidReferenceOperationControl>(bridge_->VirtualMachine(), bridge_->Cancel(),
                                                                       std::move(completion));
     JniEnvironment attached(bridge_->VirtualMachine());
     auto* environment = attached.Get();
-    if (!environment) {
+    if (!environment || environment->ExceptionCheck()) {
       control->Fail();
       return {};
     }
@@ -900,10 +1118,13 @@ private:
         return {};
       }
       native_handle.release();
-      environment->CallVoidMethod(operation.Get(), bridge_->Start());
+      environment->CallVoidMethod(operation.Get(), bridge_->Dispatch(synchronous));
       if (environment->ExceptionCheck()) {
         ClearJavaException(environment);
         control->Cancel();
+      }
+      if (synchronous) {
+        return {};
       }
       return [control] { control->Cancel(); };
     } catch (...) {
@@ -1547,14 +1768,14 @@ CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, j
 
 extern "C" JNIEXPORT jboolean JNICALL Java_org_huxerui_HuxerUIFileReference_nativeComplete(
     JNIEnv* environment, jclass, jlong native_handle, jint result, jint error_code, jbyteArray bytes, jstring message,
-    jobjectArray references, jlong transferred, jboolean created) {
+    jobjectArray references, jlong transferred, jboolean created, jobject descriptor) {
   // Java's terminal completion consumes this holder exactly once, even after native cancellation.
   // The control may already be detached; destruction here still releases the callback's ownership.
   using Handle = std::shared_ptr<huxerui::detail::AndroidReferenceOperationControl>;
   std::unique_ptr<Handle> owner(reinterpret_cast<Handle*>(static_cast<std::uintptr_t>(native_handle)));
   if (owner && *owner) {
     return (*owner)->Complete(environment, result, error_code, bytes, message, references, transferred,
-                              created == JNI_TRUE)
+                              created == JNI_TRUE, descriptor)
                ? JNI_TRUE
                : JNI_FALSE;
   }

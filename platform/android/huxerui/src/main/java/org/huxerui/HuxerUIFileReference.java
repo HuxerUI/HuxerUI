@@ -415,6 +415,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
         static final int OPEN_WRITE = 9;
         static final int OPEN_RANDOM_READ = 10;
         static final int OPEN_RANDOM_WRITE = 11;
+        static final int CREATE_DIRECTORY_BY_NAME = 12;
 
         private final long nativeHandle;
         private final int kind;
@@ -454,11 +455,12 @@ public final class HuxerUIFileReference implements AutoCloseable {
             if (activeWorker != null) {
                 activeWorker.cancel(true);
             }
-            nativeComplete(nativeHandle, RESULT_CANCELED, ERROR_IO, null, null, null, 0, false);
+            nativeComplete(nativeHandle, RESULT_CANCELED, ERROR_IO, null, null, null, 0, false, null);
         }
 
         @Override
         public void run() {
+            // Synchronous JNI callers enter here directly and receive completion before this method returns.
             try {
                 if (kind == READ) {
                     finishBytes(readBytes());
@@ -472,7 +474,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
                     boolean writing = kind == OPEN_WRITE || kind == OPEN_RANDOM_WRITE;
                     boolean randomAccess = kind == OPEN_RANDOM_READ || kind == OPEN_RANDOM_WRITE;
                     if (writing && !writeAllowed) { throw new SecurityException(); }
-                    finishDescriptor(openDescriptor(writing, randomAccess));
+                    openStream(writing, randomAccess);
                 } else {
                     directoryOperation();
                 }
@@ -589,16 +591,22 @@ public final class HuxerUIFileReference implements AutoCloseable {
                 return;
             }
             if (!parent.writable) { throw new SecurityException(); }
+            boolean creatingDirectory = kind == CREATE_DIRECTORY || kind == CREATE_DIRECTORY_BY_NAME;
+            Uri targetUri = existingUri;
+            if (kind == CREATE_DIRECTORY_BY_NAME) {
+                Metadata found = find(name);
+                if (found != null) { targetUri = found.uri; }
+            }
             // Revalidate the looked-up document directly instead of scanning all siblings again.
             // This does not reserve an absent name: createDocument may normalize or suffix it, so the
             // actual returned name is checked below and only a newly created wrong-name item is removed.
-            Metadata existing = existingUri == null ? null : metadata(existingUri);
+            Metadata existing = targetUri == null ? null : metadata(targetUri);
             if (existing != null && !name.equals(existing.name)) { throw new OperationFailure(ERROR_UNSUPPORTED); }
-            if (existing != null && (isDirectory(existing) != (kind == CREATE_DIRECTORY) || (kind == COPY_FILE && !overwrite))) {
+            if (existing != null && (isDirectory(existing) != creatingDirectory || (kind == COPY_FILE && !overwrite))) {
                 throw new OperationFailure(ERROR_ALREADY_EXISTS);
             }
             if (copyState.canceled.get()) { throw new IOException(); }
-            String type = kind == CREATE_DIRECTORY ? DocumentsContract.Document.MIME_TYPE_DIR : "application/octet-stream";
+            String type = creatingDirectory ? DocumentsContract.Document.MIME_TYPE_DIR : "application/octet-stream";
             if (kind == COPY_FILE && sourceUri != null) {
                 String sourceType = resolver.getType(sourceUri);
                 if (DocumentsContract.Document.MIME_TYPE_DIR.equals(sourceType)) { throw new OperationFailure(ERROR_IS_DIRECTORY); }
@@ -637,7 +645,7 @@ public final class HuxerUIFileReference implements AutoCloseable {
 
         private void finishDirectory(Metadata[] references, long bytes, boolean created) {
             if (finished.compareAndSet(false, true)) {
-                nativeComplete(nativeHandle, RESULT_DIRECTORY, ERROR_IO, null, null, references, bytes, created);
+                nativeComplete(nativeHandle, RESULT_DIRECTORY, ERROR_IO, null, null, references, bytes, created, null);
             }
         }
 
@@ -666,32 +674,46 @@ public final class HuxerUIFileReference implements AutoCloseable {
             }
         }
 
-        private int openDescriptor(boolean writing, boolean randomAccess) throws IOException {
-            ParcelFileDescriptor descriptor = null;
+        private void openStream(boolean writing, boolean randomAccess) throws IOException {
+            ParcelFileDescriptor descriptor;
+            if (writing && randomAccess) {
+                // Native code validates seekability and access before applying any requested truncation.
+                descriptor = resolver.openFileDescriptor(uri, "rw");
+            } else if (writing) {
+                try {
+                    descriptor = resolver.openFileDescriptor(uri, "rwt");
+                } catch (FileNotFoundException ignored) {
+                    descriptor = resolver.openFileDescriptor(uri, "wt");
+                }
+            } else {
+                descriptor = resolver.openFileDescriptor(uri, "r");
+            }
+            if (descriptor == null) {
+                throw new FileNotFoundException("HuxerUI external file descriptor is unavailable");
+            }
+            boolean retained = false;
+            boolean reliable = false;
             try {
-                if (writing && randomAccess) {
-                    // Native code validates seekability and access before applying any requested truncation.
-                    descriptor = resolver.openFileDescriptor(uri, "rw");
-                } else if (writing) {
-                    try {
-                        descriptor = resolver.openFileDescriptor(uri, "rwt");
-                    } catch (FileNotFoundException ignored) {
-                        descriptor = resolver.openFileDescriptor(uri, "wt");
-                    }
+                reliable = descriptor.canDetectErrors();
+                if (reliable) {
+                    if (randomAccess) { throw new UnsupportedOperationException(); }
+                    // Keep the Java owner alive so the provider can exchange close and error status.
+                    retained = finishDescriptor(descriptor.getFd(), descriptor);
                 } else {
-                    descriptor = resolver.openFileDescriptor(uri, "r");
+                    int fd = descriptor.detachFd();
+                    try {
+                        retained = finishDescriptor(fd, null);
+                    } finally {
+                        if (!retained) { ParcelFileDescriptor.adoptFd(fd).close(); }
+                    }
                 }
-                if (descriptor == null) {
-                    throw new FileNotFoundException("HuxerUI external file descriptor is unavailable");
-                }
-                // Detaching a reliable descriptor breaks the Java close/error channel used by its provider.
-                if (randomAccess && descriptor.canDetectErrors()) {
-                    throw new UnsupportedOperationException();
-                }
-                return descriptor.detachFd();
             } finally {
-                if (descriptor != null) {
-                    descriptor.close();
+                if (!retained) {
+                    if (reliable && writing && !randomAccess) {
+                        descriptor.closeWithError("HuxerUI external file output was not finalized");
+                    } else {
+                        descriptor.close();
+                    }
                 }
             }
         }
@@ -731,31 +753,25 @@ public final class HuxerUIFileReference implements AutoCloseable {
 
         private void finishBytes(byte[] bytes) {
             if (finished.compareAndSet(false, true)) {
-                nativeComplete(nativeHandle, RESULT_BYTES, ERROR_IO, bytes, null, null, 0, false);
+                nativeComplete(nativeHandle, RESULT_BYTES, ERROR_IO, bytes, null, null, 0, false, null);
             }
         }
 
         private void finishBoolean(boolean result) {
             if (finished.compareAndSet(false, true)) {
-                nativeComplete(nativeHandle, result ? RESULT_TRUE : RESULT_FALSE, ERROR_IO, null, null, null, transferred, false);
+                nativeComplete(nativeHandle, result ? RESULT_TRUE : RESULT_FALSE, ERROR_IO,
+                        null, null, null, transferred, false, null);
             }
         }
 
-        private void finishDescriptor(int descriptor) {
-            if (finished.compareAndSet(false, true)) {
-                if (nativeComplete(nativeHandle, RESULT_TRUE, ERROR_IO, null, null, null, descriptor, false)) {
-                    return;
-                }
-            }
-            try {
-                ParcelFileDescriptor.adoptFd(descriptor).close();
-            } catch (IOException ignored) {
-            }
+        private boolean finishDescriptor(int fd, ParcelFileDescriptor descriptor) {
+            return finished.compareAndSet(false, true)
+                    && nativeComplete(nativeHandle, RESULT_TRUE, ERROR_IO, null, null, null, fd, false, descriptor);
         }
 
         private void finishError(int code, String message) {
             if (finished.compareAndSet(false, true)) {
-                nativeComplete(nativeHandle, RESULT_ERROR, code, null, message, null, 0, false);
+                nativeComplete(nativeHandle, RESULT_ERROR, code, null, message, null, 0, false, null);
             }
         }
     }
@@ -779,5 +795,5 @@ public final class HuxerUIFileReference implements AutoCloseable {
 
     private static native boolean nativeComplete(long nativeHandle, int result, int errorCode, byte[] bytes,
                                                  String message, Metadata[] references, long transferred,
-                                                 boolean created);
+                                                 boolean created, ParcelFileDescriptor descriptor);
 }

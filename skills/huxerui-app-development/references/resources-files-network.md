@@ -70,9 +70,9 @@ Destructive file operations require the user's intended scope. Prefer non-recurs
 
 ### Streams
 
-`<huxerui/stream.h>` provides move-only `InputStream`, `OutputStream`, `AsyncInputStream`, and `AsyncOutputStream`, together with `IoError` and `IoResult`. The generic `Result<T, ErrorT>` lives in `<huxerui/data.h>`. Synchronous `Read()` fills a caller-sized writable span and returns a byte count; `Write()` borrows a byte span for the call. Asynchronous `ReadAsync(maximum_bytes)` returns owned `Bytes` up to the caller's limit, and `WriteAsync(Bytes)` owns its input across suspension. A successful zero-byte read marks EOF, not an error.
+`<huxerui/stream.h>` provides move-only `InputStream`, `OutputStream`, `AsyncInputStream`, `AsyncOutputStream`, and `RandomAccessStream`, together with `IoError` and `IoResult`. The generic `Result<T, ErrorT>` lives in `<huxerui/data.h>`. Synchronous `Read()` fills a caller-sized writable span and returns a byte count; `Write()` borrows a byte span for the call. Asynchronous `ReadAsync(maximum_bytes)` returns owned `Bytes` up to the caller's limit, and `WriteAsync(Bytes)` owns its input across suspension. A successful zero-byte read marks EOF, not an error.
 
-Use `File::OpenRead()` / `OpenWrite()` for synchronous streams or their `Async` counterparts for asynchronous streams; each open returns the corresponding `IoResult`. `FileReference` exposes asynchronous opens so provider grants and platform coordination stay attached to the stream. Prefer these APIs for large transfers; `ReadBytes` and `ReadString` intentionally materialize complete content. Web local `File` streams operate on the virtual filesystem, whereas browser file references use browser readers and writable handles.
+Use `OpenRead()` and `OpenWrite()` for synchronous streams or their `Async` counterparts for asynchronous streams. Both forms on `FileReference` retain provider grants and platform coordination. Prefer asynchronous forms for browser-selected references, which report `Unsupported` for synchronous opens. Use streams for large transfers since `ReadBytes` and `ReadString` materialize complete content. `OpenRandomAccess()` opens a synchronous offset-based stream for supported providers.
 
 `CopyTo()` and `CopyToAsync()` are input-stream members and do not close the destination. Explicitly finish output with `Close()` or `CloseAsync()` and check its result, including Web persistence failures. Retain stream handles throughout pending operations and allow only one pending operation per endpoint. Cancellation can leave partial output; it is not rollback. Canceling an HTTP body copy also stops its transport while the copy waits for destination output.
 
@@ -100,7 +100,7 @@ Web directory selection requires a live browser directory capability. Start each
 
 ### Directory copying
 
-Use `CreateDirectoryAsync(name)` and `CopyFileFromAsync(source, name, overwrite)` for named children of a writable directory reference. Names are single path segments, not relative paths.
+Use `CreateDirectoryAsync(name)` and `CopyFileFromAsync(source, name, overwrite)` for named children of a writable directory reference. Native code can also use `CreateDirectory(name)` and `ListChildren()` for synchronous directory work. Names are single path segments, not relative paths.
 
 `CopyDirectoryContentsToAsync(destination, overwrite = false)` copies into an existing local `File` directory or writable directory reference. It copies the contents, not an extra source-root folder; existing directories merge and destination-only entries remain. Existing files require explicit overwrite. Inspect the `IoResult<DirectoryCopySummary>`: failure or cancellation may leave completed output, with no tree transaction or rollback. Links, cycles, overlapping roots, and relationships that cannot be established safely are rejected; do not assume snapshot isolation or atomic exclusion of concurrent provider writes.
 

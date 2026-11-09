@@ -11,6 +11,8 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
@@ -20,6 +22,8 @@ import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 final class HuxerUIFileReferenceTest {
     private static final Uri URI = Uri.parse("content://org.huxerui.test/opaque-provider-id");
@@ -42,12 +46,16 @@ final class HuxerUIFileReferenceTest {
                 @Override public Context getApplicationContext() { return this; }
                 @Override public ContentResolver getContentResolver() { return resolver; }
             };
-            for (int scenario = 0; scenario < 4; ++scenario) {
+            for (int scenario = 0; scenario < 6; ++scenario) {
                 provider.unknown = scenario == 1;
                 provider.revoked = false;
                 provider.sequential = false;
+                provider.reliable = false;
+                provider.readError = false;
                 final boolean revoke = scenario == 2;
-                final boolean sequential = scenario == 3;
+                final boolean sequential = scenario >= 3;
+                final boolean reliable = scenario >= 4;
+                final boolean readError = scenario == 5;
                 try (HuxerUIFileReference first = HuxerUIFileReference.fromUri(context, URI);
                         HuxerUIFileReference second = HuxerUIFileReference.fromUri(context, URI)) {
                     PlatformPayload payload = PlatformPayload.fileReference(first);
@@ -62,9 +70,16 @@ final class HuxerUIFileReferenceTest {
                         second.close();
                         provider.revoked = revoke;
                         provider.sequential = sequential;
-                    }, destination.getPath(), provider.unknown, revoke, sequential));
+                        provider.reliable = reliable;
+                        provider.readError = readError;
+                    }, destination.getPath(), provider.unknown, revoke, sequential, readError));
                     check("".equals(error[0]), "Native reference regression: " + error[0]);
                 }
+            }
+            for (boolean asynchronous : new boolean[] {false, true}) {
+                verifyOutput(instrumentation, context, provider, asynchronous, true, false);
+                verifyOutput(instrumentation, context, provider, asynchronous, false, false);
+                verifyOutput(instrumentation, context, provider, asynchronous, false, true);
             }
             provider.sequential = false;
             provider.revoked = true;
@@ -98,11 +113,44 @@ final class HuxerUIFileReferenceTest {
         if (!value) { throw new AssertionError(message); }
     }
 
+    private static void verifyOutput(Instrumentation instrumentation, Context context, Provider provider,
+            boolean asynchronous, boolean finalize, boolean writeError) throws InterruptedException {
+        OutputObserver observer = new OutputObserver(writeError);
+        provider.output = observer;
+        String[] error = new String[1];
+        Runnable verify = () -> error[0] = verifyReliableOutput(context, URI.toString(), asynchronous, finalize,
+                writeError);
+        if (asynchronous) { instrumentation.runOnMainSync(verify); }
+        else { verify.run(); }
+        check("".equals(error[0]), "Native reliable output regression: " + error[0]);
+        check(observer.closed.await(5, TimeUnit.SECONDS), "Provider must receive a close status");
+        check(!(observer.error instanceof ParcelFileDescriptor.FileDescriptorDetachedException),
+                "A reliable descriptor must preserve its provider's close channel");
+        check((observer.error == null) == finalize, "Provider must distinguish finalized and incomplete writes");
+        provider.output = null;
+    }
+
+    private static final class OutputObserver {
+        final boolean writeError;
+        final CountDownLatch closed = new CountDownLatch(1);
+        IOException error;
+
+        OutputObserver(boolean writeError) { this.writeError = writeError; }
+
+        void onClose(IOException failure) {
+            error = failure;
+            closed.countDown();
+        }
+    }
+
     private static final class Provider extends ContentProvider {
         final File source;
         volatile boolean unknown;
         volatile boolean revoked;
         volatile boolean sequential;
+        volatile boolean reliable;
+        volatile boolean readError;
+        volatile OutputObserver output;
         boolean directory;
 
         Provider(File source) { this.source = source; }
@@ -117,13 +165,28 @@ final class HuxerUIFileReferenceTest {
         }
         @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
             if (revoked) { throw new SecurityException("Test provider access revoked"); }
+            OutputObserver observer = output;
+            if (observer != null && mode.contains("w")) {
+                try {
+                    int flags = observer.writeError ? ParcelFileDescriptor.MODE_READ_ONLY
+                                                    : ParcelFileDescriptor.parseMode(mode);
+                    return ParcelFileDescriptor.open(source, flags, new Handler(Looper.getMainLooper()),
+                            observer::onClose);
+                } catch (IOException exception) {
+                    FileNotFoundException failure = new FileNotFoundException("Test provider output unavailable");
+                    failure.initCause(exception);
+                    throw failure;
+                }
+            }
             check("r".equals(mode), "A read-only factory must not request write access");
             if (sequential) {
                 try {
-                    ParcelFileDescriptor[] pipe = ParcelFileDescriptor.createPipe();
+                    ParcelFileDescriptor[] pipe = reliable ? ParcelFileDescriptor.createReliablePipe()
+                                                           : ParcelFileDescriptor.createPipe();
                     try (ParcelFileDescriptor.AutoCloseOutputStream output =
                             new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
                         output.write("content".getBytes(StandardCharsets.UTF_8));
+                        if (readError) { pipe[1].closeWithError("Test provider read failure"); }
                         return pipe[0];
                     } catch (IOException exception) {
                         pipe[0].close();
@@ -147,5 +210,7 @@ final class HuxerUIFileReferenceTest {
     }
 
     private static native String verifyNative(PlatformPayload payload, Runnable afterCapture,
-            String destination, boolean unknown, boolean revoked, boolean sequential);
+            String destination, boolean unknown, boolean revoked, boolean sequential, boolean readError);
+    private static native String verifyReliableOutput(Context context, String uri, boolean asynchronous,
+            boolean finalize, boolean writeError);
 }

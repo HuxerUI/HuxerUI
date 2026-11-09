@@ -15,6 +15,7 @@ namespace huxerui::detail {
 [[nodiscard]] IoErrorCode IoErrorCategory(const std::error_code& error) noexcept;
 Task<AsyncInputStream> OpenWorkerInput(std::function<InputStream()> open);
 [[nodiscard]] AsyncInputStream MakeWorkerAsyncInput(InputStream input);
+[[nodiscard]] std::shared_ptr<AsyncInputStreamState> MakeWorkerAsyncInputState(InputStream input);
 [[nodiscard]] AsyncInputStream MakeMemoryAsyncInput(InputStream input);
 #if defined(__EMSCRIPTEN__)
 Task<InputStream> RunQueuedInputOpen(std::function<InputStream()> open);
