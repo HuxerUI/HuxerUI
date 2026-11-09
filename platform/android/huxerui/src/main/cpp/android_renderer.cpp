@@ -549,7 +549,7 @@ void AndroidRenderer::RenderCommand(
     );
     return;
   }
-  std::shared_ptr<const AndroidGpuFrame> frame = GpuFrameFor(command.texture);
+  std::shared_ptr<const android::GlFrame> frame = GpuFrameFor(command.texture);
   if (texture_layers_ == nullptr) {
     throw std::logic_error("HuxerUI Android GPU texture layer host is unavailable");
   }
@@ -581,7 +581,7 @@ const AndroidBitmapFrame* AndroidRenderer::BitmapFrameFor(const std::shared_ptr<
   return cached->bitmap_frame.get();
 }
 
-std::shared_ptr<const AndroidGpuFrame> AndroidRenderer::GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture) {
+std::shared_ptr<const android::GlFrame> AndroidRenderer::GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture) {
   auto cached = std::ranges::find_if(external_textures_, [&texture](const CachedExternalTexture& entry) {
     return entry.texture.lock() == texture;
   });
@@ -590,7 +590,7 @@ std::shared_ptr<const AndroidGpuFrame> AndroidRenderer::GpuFrameFor(const std::s
     cached = external_textures_.end() - 1;
   }
   if (cached->draw_epoch != draw_epoch_) {
-    std::shared_ptr<const AndroidGpuFrame> frame;
+    std::shared_ptr<const android::GlFrame> frame;
     if (const auto gl_texture = std::dynamic_pointer_cast<android::GlTexture>(texture)) {
       frame = gl_texture->AcquireFrame();
     } else if (const auto stream_texture = std::dynamic_pointer_cast<android::SurfaceStreamTexture>(texture)) {

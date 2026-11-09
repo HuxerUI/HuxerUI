@@ -88,26 +88,26 @@ ComPtr<ID3D11Texture2D> CreateD3D11Source(
   return texture;
 }
 
-std::uint32_t ReadD3D11SnapshotPixel(D3D11TestDevice& device, const detail::Win32D3D11Frame& frame) {
-  ComPtr<IDXGIKeyedMutex> keyed_mutex;
-  REQUIRE(SUCCEEDED(frame.Texture()->QueryInterface(IID_PPV_ARGS(keyed_mutex.GetAddressOf()))));
-  REQUIRE(keyed_mutex->AcquireSync(1, INFINITE) == S_OK);
+std::uint32_t ReadD3D11SnapshotPixel(D3D11TestDevice& device, const windows::D3D11Frame& frame) {
+  const auto copied = CreateD3D11Source(
+      device, static_cast<UINT>(frame.PixelWidth()), static_cast<UINT>(frame.PixelHeight()), DXGI_FORMAT_B8G8R8A8_UNORM
+  );
+  REQUIRE(frame.TryCopyTo(*device.context.Get(), *copied.Get()));
 
   D3D11_TEXTURE2D_DESC description{};
-  frame.Texture()->GetDesc(&description);
+  copied->GetDesc(&description);
   description.Usage = D3D11_USAGE_STAGING;
   description.BindFlags = 0;
   description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
   description.MiscFlags = 0;
   ComPtr<ID3D11Texture2D> staging;
   REQUIRE(SUCCEEDED(device.device->CreateTexture2D(&description, nullptr, staging.GetAddressOf())));
-  device.context->CopyResource(staging.Get(), frame.Texture());
+  device.context->CopyResource(staging.Get(), copied.Get());
   D3D11_MAPPED_SUBRESOURCE mapped{};
   REQUIRE(SUCCEEDED(device.context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped)));
   std::uint32_t pixel = 0;
   std::memcpy(&pixel, mapped.pData, sizeof(pixel));
   device.context->Unmap(staging.Get(), 0);
-  REQUIRE(SUCCEEDED(keyed_mutex->ReleaseSync(1)));
   return pixel;
 }
 
@@ -254,26 +254,31 @@ TEST_CASE("WindowsD3D11TexturePublishesAnImmutableOwnedSnapshot") {
       device, 2, 1, DXGI_FORMAT_B8G8R8A8_UNORM, red_green.data(),
       static_cast<UINT>(sizeof(red_green))
   );
-  const auto texture = std::make_shared<windows::D3D11Texture>(Size{16.0F, 9.0F});
+  auto texture = std::make_shared<windows::D3D11Texture>(Size{16.0F, 9.0F});
+  REQUIRE(texture->AcquireFrame() == nullptr);
 
   texture->Publish({source.Get(), windows::D3D11Texture::Alpha::Premultiplied});
   REQUIRE(texture->Revision() == 1);
-  const std::shared_ptr<const detail::Win32D3D11Frame> first = detail::GetD3D11Frame(*texture);
+  const std::shared_ptr<const windows::D3D11Frame> first = texture->AcquireFrame();
   REQUIRE(first != nullptr);
   REQUIRE(first->PixelWidth() == 2);
   REQUIRE(first->PixelHeight() == 1);
   REQUIRE(first->Alpha() == windows::D3D11Texture::Alpha::Premultiplied);
-  REQUIRE(first->Texture() != source.Get());
 
   const std::array<std::uint32_t, 2> blue{0xFF0000FFU, 0xFF0000FFU};
   device.context->UpdateSubresource(source.Get(), 0, nullptr, blue.data(), static_cast<UINT>(sizeof(blue)), 0);
   REQUIRE(ReadD3D11SnapshotPixel(device, *first) == 0xFFFF0000U);
 
   texture->Publish({source.Get(), windows::D3D11Texture::Alpha::Opaque});
-  const std::shared_ptr<const detail::Win32D3D11Frame> second = detail::GetD3D11Frame(*texture);
+  const std::shared_ptr<const windows::D3D11Frame> second = texture->AcquireFrame();
   REQUIRE(texture->Revision() == 2);
   REQUIRE(second != first);
   REQUIRE(second->Alpha() == windows::D3D11Texture::Alpha::Opaque);
+  texture->Finish();
+  REQUIRE(texture->AcquireFrame() == second);
+  texture.reset();
+  source.Reset();
+  REQUIRE(ReadD3D11SnapshotPixel(device, *first) == 0xFFFF0000U);
   REQUIRE(ReadD3D11SnapshotPixel(device, *second) == 0xFF0000FFU);
 }
 
@@ -287,17 +292,18 @@ TEST_CASE("WindowsD3D11TextureValidatesSourcesAndPreservesTheLastFrameAfterFinis
   REQUIRE(texture->Revision() == 0);
 
   texture->Publish({valid.Get()});
-  const std::shared_ptr<const detail::Win32D3D11Frame> published = detail::GetD3D11Frame(*texture);
+  const std::shared_ptr<const windows::D3D11Frame> published = texture->AcquireFrame();
   REQUIRE(texture->Revision() == 1);
   REQUIRE_THROWS_AS(texture->Publish({wrong_format.Get()}), std::invalid_argument);
   REQUIRE_THROWS_AS(
       texture->Publish({valid.Get(), static_cast<windows::D3D11Texture::Alpha>(99)}), std::invalid_argument
   );
   REQUIRE(texture->Revision() == 1);
-  REQUIRE(detail::GetD3D11Frame(*texture) == published);
+  REQUIRE(texture->AcquireFrame() == published);
 
   texture->Finish();
-  REQUIRE(detail::GetD3D11Frame(*texture) == published);
+  REQUIRE(texture->AcquireFrame() == published);
+  REQUIRE_THROWS_AS(published->TryCopyTo(*device.context.Get(), *wrong_format.Get()), std::invalid_argument);
   REQUIRE_THROWS_AS(texture->Publish({valid.Get()}), std::logic_error);
   texture->Finish();
 }
@@ -339,12 +345,17 @@ TEST_CASE("WindowsD3D11TextureRetriesContentionAndRendersAcrossDevicesAfterReset
   second_renderer.Initialize();
   const RECT paint_rect{0, 0, 64, 64};
 
-  const std::shared_ptr<const detail::Win32D3D11Frame> published = detail::GetD3D11Frame(*texture);
+  const std::shared_ptr<const windows::D3D11Frame> published = texture->AcquireFrame();
+  const auto opened = detail::D3D11FrameAccess::Open(*published, *device.device.Get());
   ComPtr<IDXGIKeyedMutex> held_mutex;
-  REQUIRE(SUCCEEDED(published->Texture()->QueryInterface(IID_PPV_ARGS(held_mutex.GetAddressOf()))));
+  REQUIRE(SUCCEEDED(opened.As(&held_mutex)));
+  D3D11TestDevice consumer = CreateD3D11TestDevice();
+  const auto destination = CreateD3D11Source(consumer, 2, 2, DXGI_FORMAT_B8G8R8A8_UNORM);
   REQUIRE(held_mutex->AcquireSync(1, INFINITE) == S_OK);
+  REQUIRE_FALSE(published->TryCopyTo(*consumer.context.Get(), *destination.Get()));
   REQUIRE(first_renderer.Render(first_window, 96.0F, frame, paint_rect) == detail::Win32RenderResult::Retry);
   REQUIRE(SUCCEEDED(held_mutex->ReleaseSync(1)));
+  REQUIRE(published->TryCopyTo(*consumer.context.Get(), *destination.Get()));
 
   REQUIRE(first_renderer.Render(first_window, 96.0F, frame, paint_rect) == detail::Win32RenderResult::Presented);
   REQUIRE(second_renderer.Render(second_window, 96.0F, frame, paint_rect) == detail::Win32RenderResult::Presented);

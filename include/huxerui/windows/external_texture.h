@@ -7,19 +7,19 @@
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
 
+struct ID3D11DeviceContext;
 struct ID3D11Texture2D;
 
 namespace huxerui {
 
 namespace windows {
-class D3D11Texture;
+class D3D11Frame;
 class PixelTexture;
 } // namespace windows
 
 namespace detail {
-class Win32D3D11Frame;
+struct D3D11FrameAccess;
 class Win32PixelFrame;
-std::shared_ptr<const Win32D3D11Frame> GetD3D11Frame(const windows::D3D11Texture& texture) noexcept;
 std::shared_ptr<const Win32PixelFrame> GetPixelFrame(const windows::PixelTexture& texture) noexcept;
 } // namespace detail
 
@@ -116,7 +116,7 @@ public:
     Premultiplied,
   };
 
-  /// Describes one borrowed D3D11 source supplied to Publish().
+  /// Describes a D3D11 texture borrowed for one Publish() call.
   struct Frame {
     /// Borrowed source texture copied synchronously during Publish().
     ID3D11Texture2D* texture = nullptr;
@@ -141,15 +141,68 @@ public:
   /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
+  /// Retains the latest completed frame, or returns an empty pointer before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
+  /// publications and source destruction. Finish() keeps the last frame available for acquisition.
+  std::shared_ptr<const D3D11Frame> AcquireFrame() const noexcept;
+
 private:
   struct Storage;
 
-  [[nodiscard]] std::shared_ptr<const huxerui::detail::Win32D3D11Frame> AcquireFrame() const noexcept;
-
   std::unique_ptr<Storage> storage_;
+};
 
-  friend std::shared_ptr<const huxerui::detail::Win32D3D11Frame>
-  huxerui::detail::GetD3D11Frame(const D3D11Texture& texture) noexcept;
+/// Owns an immutable BGRA8 frame whose pixel row zero is the logical top edge.
+/// Use the frame while its D3D11 device is valid.
+class D3D11Frame final {
+public:
+  ~D3D11Frame();
+
+  D3D11Frame(const D3D11Frame&) = delete;
+  D3D11Frame& operator=(const D3D11Frame&) = delete;
+
+  /// Returns the width in physical pixels.
+  int PixelWidth() const noexcept {
+    return pixel_width_;
+  }
+
+  /// Returns the height in physical pixels.
+  int PixelHeight() const noexcept {
+    return pixel_height_;
+  }
+
+  /// Returns how the stored alpha channel is interpreted.
+  D3D11Texture::Alpha Alpha() const noexcept {
+    return alpha_;
+  }
+
+  /// Submits a GPU copy using the immediate context of the destination texture's device.
+  ///
+  /// The destination device must use the frame's adapter. The destination must match the frame's dimensions and use
+  /// DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_USAGE_DEFAULT, one mip level, one array slice, and one sample with quality zero.
+  /// Its CPU access flags must be zero.
+  /// Serialize access to the immediate context and retain the frame and destination until the GPU completes the copy.
+  /// Returns true once the copy is submitted. Subsequent commands on the same context are ordered after it.
+  /// Returns false when the frame is busy, leaving the destination untouched.
+  /// Throws std::invalid_argument for an invalid context or destination and std::runtime_error for device or
+  /// synchronization failures.
+  bool TryCopyTo(ID3D11DeviceContext& context, ID3D11Texture2D& destination) const;
+
+private:
+  D3D11Frame(
+      int pixel_width, int pixel_height, D3D11Texture::Alpha alpha, void* shared_handle, ID3D11Texture2D* texture
+  ) noexcept;
+  static std::shared_ptr<const D3D11Frame> Copy(D3D11Texture::Frame frame);
+
+  int pixel_width_;
+  int pixel_height_;
+  D3D11Texture::Alpha alpha_;
+  void* shared_handle_;
+  ID3D11Texture2D* texture_;
+
+  friend class D3D11Texture;
+  friend struct huxerui::detail::D3D11FrameAccess;
 };
 
 } // namespace windows

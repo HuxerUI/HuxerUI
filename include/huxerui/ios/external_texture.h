@@ -93,10 +93,6 @@ NS_ASSUME_NONNULL_END
 
 namespace huxerui {
 
-namespace detail {
-class UIKitRenderer;
-} // namespace detail
-
 namespace ios {
 
 /// A latest-frame iOS ExternalTexture backed by retained CVPixelBuffer objects.
@@ -127,21 +123,24 @@ public:
   /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
-private:
-  [[nodiscard]] CVPixelBufferRef AcquireFrame() const noexcept;
+  /// Returns the latest buffer with a retained reference, or nullptr before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The retained frame remains valid across later publications
+  /// and source destruction. Finish() keeps the last buffer available for acquisition.
+  /// Treat the buffer as read-only and call CVPixelBufferRelease after all CPU and GPU reads have completed.
+  [[nodiscard]] CVPixelBufferRef AcquireFrame() const noexcept CF_RETURNS_RETAINED;
 
+private:
   mutable std::mutex frame_mutex_;
   CVPixelBufferRef frame_ = nullptr;
   bool finished_ = false;
-
-  friend class huxerui::detail::UIKitRenderer;
 };
 
 /// A latest-frame iOS ExternalTexture backed by immutable HuxerUI-owned Metal snapshots.
 ///
 /// The source must be a non-framebuffer-only 2D BGRA8 or RGBA8 texture whose producer work is complete. Publish()
 /// synchronously copies level zero on the source device, so the producer may reuse or release its texture afterward.
-/// The native Publish() API is available to Objective-C++ translation units where id<MTLTexture> can be expressed.
+/// Publish() and AcquireFrame() use id<MTLTexture> in Objective-C++.
 class MetalTexture final : public huxerui::ExternalTexture {
 public:
   enum class Origin {
@@ -161,6 +160,7 @@ public:
   };
 
 #if defined(__OBJC__)
+  /// Describes a Metal texture borrowed for one Publish() call.
   struct Frame {
     /// Borrowed for the synchronous Publish() call; explicit non-ownership keeps ARC and non-ARC callers ABI-safe.
     __unsafe_unretained id<MTLTexture> texture = nil;
@@ -187,15 +187,19 @@ public:
   /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
-private:
 #if defined(__OBJC__)
-  [[nodiscard]] id<MTLTexture> AcquireFrame(Origin& origin) const noexcept;
+  /// Returns the latest premultiplied texture and its origin together, or nil before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The retained frame remains valid across later publications
+  /// and source destruction. Finish() keeps the last texture available for acquisition.
+  /// Sample the texture as read-only input on its owning Metal device. Hold the reference through GPU use.
+  /// ARC manages the returned reference. Without ARC, the caller balances it with release.
+  [[nodiscard]] id<MTLTexture> AcquireFrame(Origin& origin) const noexcept NS_RETURNS_RETAINED;
 #endif
 
+private:
   struct Storage;
   std::unique_ptr<Storage> storage_;
-
-  friend class huxerui::detail::UIKitRenderer;
 };
 
 } // namespace ios

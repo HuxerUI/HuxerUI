@@ -11,11 +11,47 @@ namespace huxerui {
 
 namespace detail {
 class AndroidBitmapFrame;
-class AndroidGpuFrame;
+class GpuContext;
 class AndroidRenderer;
 } // namespace detail
 
 namespace android {
+
+/// Owns the completed RGBA frame published by GlTexture or SurfaceStreamTexture.
+/// Its pixels are premultiplied, and texture coordinate v = 0 corresponds to the logical bottom edge.
+class GlFrame final {
+public:
+  ~GlFrame();
+
+  GlFrame(const GlFrame&) = delete;
+  GlFrame& operator=(const GlFrame&) = delete;
+
+  /// Returns the width in physical pixels.
+  int PixelWidth() const noexcept;
+  /// Returns the height in physical pixels.
+  int PixelHeight() const noexcept;
+
+  /// Imports this frame into the calling thread's current OpenGL ES context as a new GL_TEXTURE_2D.
+  ///
+  /// The current context must use the frame's EGLDisplay. Import requires EGL_KHR_image_base,
+  /// EGL_KHR_gl_texture_2D_image, and GL_OES_EGL_image.
+  /// The result shares the frame's read-only pixels and has independent sampling parameters.
+  /// The caller deletes the returned texture in a compatible context after GPU use. The active texture unit's
+  /// GL_TEXTURE_2D binding is restored before returning.
+  /// Throws std::logic_error when no EGL context is current and std::runtime_error when import is unsupported or fails.
+  [[nodiscard]] std::uint32_t ImportCurrent() const;
+
+private:
+  GlFrame(int pixel_width, int pixel_height) noexcept;
+
+  std::uint32_t texture_name_ = 0;
+  int pixel_width_ = 0;
+  int pixel_height_ = 0;
+  // Accessed by the compositor worker while the frame is retained.
+  mutable void* egl_image_ = nullptr;
+
+  friend class huxerui::detail::GpuContext;
+};
 
 /// A latest-frame ExternalTexture backed by retained android.graphics.Bitmap objects.
 ///
@@ -79,7 +115,7 @@ public:
     BottomLeft,
   };
 
-  /// Identifies the alpha representation stored in a published texture.
+  /// Identifies the alpha representation of the producer texture.
   enum class Alpha {
     /// Every texel is fully opaque and its stored alpha is ignored.
     Opaque,
@@ -89,7 +125,7 @@ public:
     Straight,
   };
 
-  /// Describes one GL_TEXTURE_2D publication captured by PublishCurrent().
+  /// Describes a producer texture and optional fence borrowed for one PublishCurrent() call.
   struct Frame {
     /// Texture name in the EGL context current on the calling thread.
     std::uint32_t texture_name = 0;
@@ -126,14 +162,16 @@ public:
   /// Idempotently stops publication while preserving the last successfully imported frame.
   void Finish() noexcept;
 
+  /// Retains the latest completed frame, or returns an empty pointer before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
+  /// publications and source destruction. Finish() keeps the last frame available for acquisition.
+  std::shared_ptr<const GlFrame> AcquireFrame() const noexcept;
+
 private:
   struct Storage;
 
-  [[nodiscard]] std::shared_ptr<const huxerui::detail::AndroidGpuFrame> AcquireFrame() const noexcept;
-
   std::unique_ptr<Storage> storage_;
-
-  friend class huxerui::detail::AndroidRenderer;
 };
 
 /// A latest-frame Android ExternalTexture backed by a producer-facing android.view.Surface.
@@ -168,16 +206,19 @@ public:
   /// Surface and SetDefaultBufferSize are unavailable after this call.
   void Finish() noexcept;
 
+  /// Retains the latest completed frame, or returns an empty pointer before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
+  /// publications and source destruction. Finish() keeps the last frame available for acquisition.
+  std::shared_ptr<const GlFrame> AcquireFrame() const noexcept;
+
 private:
   struct Storage;
 
   SurfaceStreamTexture(Size intrinsic_size, std::unique_ptr<Storage> storage);
   void FrameAvailable();
-  [[nodiscard]] std::shared_ptr<const huxerui::detail::AndroidGpuFrame> AcquireFrame() const noexcept;
 
   std::unique_ptr<Storage> storage_;
-
-  friend class huxerui::detail::AndroidRenderer;
 };
 
 } // namespace android

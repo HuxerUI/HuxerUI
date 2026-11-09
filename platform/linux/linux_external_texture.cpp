@@ -57,6 +57,8 @@ private:
   GdkGLContext* previous_ = nullptr;
 };
 
+} // namespace
+
 struct LinuxGlReleaseContext {
   explicit LinuxGlReleaseContext(GdkGLContext* value) : context(GDK_GL_CONTEXT(g_object_ref(value))) {}
 
@@ -69,24 +71,25 @@ struct LinuxGlReleaseContext {
 };
 
 struct LinuxGlResources {
+  ~LinuxGlResources() {
+    std::lock_guard lock(release_context->mutex);
+    CurrentGlContextScope current(release_context->context);
+    if (gdk_gl_context_get_current() != release_context->context) {
+      return;
+    }
+    glDeleteSync(sync);
+    glDeleteTextures(1, &texture);
+  }
+
   std::shared_ptr<LinuxGlReleaseContext> release_context;
   GLuint texture = 0;
   GLsync sync = nullptr;
 };
 
+namespace {
+
 void ReleaseGlResources(gpointer data) noexcept {
-  std::unique_ptr<LinuxGlResources> resources(static_cast<LinuxGlResources*>(data));
-  std::lock_guard lock(resources->release_context->mutex);
-  CurrentGlContextScope current(resources->release_context->context);
-  if (gdk_gl_context_get_current() != resources->release_context->context) {
-    return;
-  }
-  if (resources->sync != nullptr) {
-    glDeleteSync(resources->sync);
-  }
-  if (resources->texture != 0) {
-    glDeleteTextures(1, &resources->texture);
-  }
+  delete static_cast<std::shared_ptr<const LinuxGlResources>*>(data);
 }
 
 class GlStateScope final {
@@ -199,149 +202,6 @@ std::shared_ptr<LinuxGlReleaseContext> CreateReleaseContext(GdkGLContext* produc
   return result;
 }
 
-std::shared_ptr<const LinuxGdkTextureFrame>
-CopyGlFrame(const linux::GlTexture::Frame& frame, std::shared_ptr<LinuxGlReleaseContext>& release_context) {
-  if (frame.texture_name == 0) {
-    throw std::invalid_argument("HuxerUI Linux GL texture name must not be zero");
-  }
-  if (frame.pixel_width <= 0 || frame.pixel_height <= 0) {
-    throw std::invalid_argument("HuxerUI Linux GL texture dimensions must be positive");
-  }
-  if (!IsValidGlOrigin(frame.origin) || !IsValidGlAlpha(frame.alpha)) {
-    throw std::invalid_argument("HuxerUI Linux GL texture metadata is invalid");
-  }
-  GdkGLContext* producer_context = gdk_gl_context_get_current();
-  if (producer_context == nullptr) {
-    throw std::invalid_argument("HuxerUI Linux GL texture publication requires a current GdkGLContext");
-  }
-  int context_major = 0;
-  int context_minor = 0;
-  const GdkGLAPI context_api = gdk_gl_context_get_api(producer_context);
-  gdk_gl_context_get_version(producer_context, &context_major, &context_minor);
-  if (!SupportsLinuxGlVersion(context_api, context_major, context_minor)) {
-    throw std::runtime_error("HuxerUI Linux GL texture publication requires OpenGL 3.2 or OpenGL ES 3.1");
-  }
-  if (release_context == nullptr) {
-    release_context = CreateReleaseContext(producer_context);
-  } else if (gdk_gl_context_is_shared(release_context->context, producer_context) == FALSE) {
-    throw std::invalid_argument("HuxerUI Linux GL texture producer context does not share snapshot resources");
-  }
-
-  CurrentGlContextScope current(producer_context);
-  if (gdk_gl_context_get_current() != producer_context) {
-    throw std::runtime_error("HuxerUI could not restore the Linux GL producer context");
-  }
-  while (glGetError() != GL_NO_ERROR) {
-  }
-  GlStateScope state;
-  PendingGlObjects objects;
-
-  if (glIsTexture(frame.texture_name) == GL_FALSE) {
-    throw std::invalid_argument("HuxerUI Linux GL texture name is not visible to the producer context");
-  }
-  glBindTexture(GL_TEXTURE_2D, frame.texture_name);
-  if (glGetError() != GL_NO_ERROR) {
-    throw std::invalid_argument("HuxerUI Linux GL texture name does not identify a GL_TEXTURE_2D");
-  }
-  GLint source_width = 0;
-  GLint source_height = 0;
-  GLint source_format = 0;
-  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &source_width);
-  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &source_height);
-  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &source_format);
-  if (source_width != frame.pixel_width || source_height != frame.pixel_height) {
-    throw std::invalid_argument("HuxerUI Linux GL texture dimensions do not match level zero");
-  }
-  if (source_format != GL_RGBA8) {
-    throw std::invalid_argument("HuxerUI Linux GL texture source must use GL_RGBA8 storage");
-  }
-
-  glGenTextures(1, &objects.texture);
-  glBindTexture(GL_TEXTURE_2D, objects.texture);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-  glTexImage2D(
-      GL_TEXTURE_2D,
-      0,
-      GL_RGBA8,
-      frame.pixel_width,
-      frame.pixel_height,
-      0,
-      GL_RGBA,
-      GL_UNSIGNED_BYTE,
-      nullptr
-  );
-  glGenFramebuffers(1, &objects.read_framebuffer);
-  glGenFramebuffers(1, &objects.draw_framebuffer);
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, objects.read_framebuffer);
-  glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, frame.texture_name, 0);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, objects.draw_framebuffer);
-  glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, objects.texture, 0);
-  if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
-      glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    throw std::invalid_argument("HuxerUI Linux GL texture source is not framebuffer-copy compatible");
-  }
-  glDisable(GL_SCISSOR_TEST);
-  glBlitFramebuffer(
-      0,
-      0,
-      frame.pixel_width,
-      frame.pixel_height,
-      0,
-      0,
-      frame.pixel_width,
-      frame.pixel_height,
-      GL_COLOR_BUFFER_BIT,
-      GL_NEAREST
-  );
-  if (frame.alpha == linux::GlTexture::Alpha::Opaque) {
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
-    glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
-    glClear(GL_COLOR_BUFFER_BIT);
-  }
-  if (glGetError() != GL_NO_ERROR) {
-    throw std::runtime_error("HuxerUI could not copy the Linux GL texture snapshot");
-  }
-  objects.sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  if (objects.sync == nullptr) {
-    throw std::runtime_error("HuxerUI could not create the Linux GL texture fence");
-  }
-  glFlush();
-  glFinish();
-  if (glGetError() != GL_NO_ERROR) {
-    throw std::runtime_error("HuxerUI could not complete the Linux GL texture snapshot");
-  }
-
-  auto resources = std::make_unique<LinuxGlResources>();
-  resources->release_context = release_context;
-  resources->texture = objects.texture;
-  resources->sync = objects.sync;
-  GdkGLTextureBuilder* builder = gdk_gl_texture_builder_new();
-  gdk_gl_texture_builder_set_context(builder, release_context->context);
-  gdk_gl_texture_builder_set_id(builder, objects.texture);
-  gdk_gl_texture_builder_set_width(builder, frame.pixel_width);
-  gdk_gl_texture_builder_set_height(builder, frame.pixel_height);
-  gdk_gl_texture_builder_set_format(
-      builder,
-      frame.alpha == linux::GlTexture::Alpha::Straight ? GDK_MEMORY_R8G8B8A8 : GDK_MEMORY_R8G8B8A8_PREMULTIPLIED
-  );
-  gdk_gl_texture_builder_set_sync(builder, objects.sync);
-  ::GdkTexture* texture = gdk_gl_texture_builder_build(builder, ReleaseGlResources, resources.get());
-  g_object_unref(builder);
-  if (texture == nullptr) {
-    throw std::runtime_error("HuxerUI could not build the Linux GL texture snapshot");
-  }
-  HUXERUI_DISCARD(resources.release());
-  objects.texture = 0;
-  objects.sync = nullptr;
-  auto result = std::make_shared<const LinuxGdkTextureFrame>(texture, frame.origin);
-  g_object_unref(texture);
-  return result;
-}
-
 LinuxPixelFrame CopyFrame(const linux::PixelFrame& frame) {
   if (frame.pixel_width <= 0 || frame.pixel_height <= 0) {
     throw std::invalid_argument("HuxerUI Linux external texture frame dimensions must be positive");
@@ -407,9 +267,183 @@ LinuxPixelFrame CopyFrame(const linux::PixelFrame& frame) {
 
 namespace huxerui::linux {
 
+GdkFrame::GdkFrame(
+    ::GdkTexture* texture, GlTexture::Origin origin, std::shared_ptr<const detail::LinuxGlResources> gl_resources
+)
+    : texture_(static_cast<::GdkTexture*>(g_object_ref(texture))), origin_(origin),
+      gl_resources_(std::move(gl_resources)) {}
+
+GdkFrame::~GdkFrame() {
+  g_object_unref(texture_);
+}
+
+::GdkTexture* GdkFrame::Texture() const noexcept {
+  return texture_;
+}
+
+GlTexture::Origin GdkFrame::TextureOrigin() const noexcept {
+  return origin_;
+}
+
+std::uint32_t GdkFrame::GlTextureNameCurrent() const {
+  if (!gl_resources_) {
+    throw std::runtime_error("HuxerUI this GDK frame does not expose a GL texture");
+  }
+  GdkGLContext* current = gdk_gl_context_get_current();
+  if (current == nullptr) {
+    throw std::logic_error("HuxerUI Linux GL frame access requires a current GdkGLContext");
+  }
+  if (!gdk_gl_context_is_shared(current, gl_resources_->release_context->context)) {
+    throw std::runtime_error("HuxerUI Linux GL frame access requires a compatible GdkGLContext");
+  }
+  return gl_resources_->texture;
+}
+
+std::shared_ptr<const GdkFrame> GdkFrame::CopyGl(
+    const GlTexture::Frame& frame, std::shared_ptr<detail::LinuxGlReleaseContext>& release_context
+) {
+  if (frame.texture_name == 0) {
+    throw std::invalid_argument("HuxerUI Linux GL texture name must not be zero");
+  }
+  if (frame.pixel_width <= 0 || frame.pixel_height <= 0) {
+    throw std::invalid_argument("HuxerUI Linux GL texture dimensions must be positive");
+  }
+  if (!detail::IsValidGlOrigin(frame.origin) || !detail::IsValidGlAlpha(frame.alpha)) {
+    throw std::invalid_argument("HuxerUI Linux GL texture metadata is invalid");
+  }
+  GdkGLContext* producer_context = gdk_gl_context_get_current();
+  if (producer_context == nullptr) {
+    throw std::invalid_argument("HuxerUI Linux GL texture publication requires a current GdkGLContext");
+  }
+  int context_major = 0;
+  int context_minor = 0;
+  const GdkGLAPI context_api = gdk_gl_context_get_api(producer_context);
+  gdk_gl_context_get_version(producer_context, &context_major, &context_minor);
+  if (!detail::SupportsLinuxGlVersion(context_api, context_major, context_minor)) {
+    throw std::runtime_error("HuxerUI Linux GL texture publication requires OpenGL 3.2 or OpenGL ES 3.1");
+  }
+  if (release_context == nullptr) {
+    release_context = detail::CreateReleaseContext(producer_context);
+  } else if (gdk_gl_context_is_shared(release_context->context, producer_context) == FALSE) {
+    throw std::invalid_argument("HuxerUI Linux GL texture producer context does not share snapshot resources");
+  }
+
+  detail::CurrentGlContextScope current(producer_context);
+  if (gdk_gl_context_get_current() != producer_context) {
+    throw std::runtime_error("HuxerUI could not restore the Linux GL producer context");
+  }
+  while (glGetError() != GL_NO_ERROR) {
+  }
+  detail::GlStateScope state;
+  detail::PendingGlObjects objects;
+
+  if (glIsTexture(frame.texture_name) == GL_FALSE) {
+    throw std::invalid_argument("HuxerUI Linux GL texture name is not visible to the producer context");
+  }
+  glBindTexture(GL_TEXTURE_2D, frame.texture_name);
+  if (glGetError() != GL_NO_ERROR) {
+    throw std::invalid_argument("HuxerUI Linux GL texture name does not identify a GL_TEXTURE_2D");
+  }
+  GLint source_width = 0;
+  GLint source_height = 0;
+  GLint source_format = 0;
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &source_width);
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &source_height);
+  glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &source_format);
+  if (source_width != frame.pixel_width || source_height != frame.pixel_height) {
+    throw std::invalid_argument("HuxerUI Linux GL texture dimensions do not match level zero");
+  }
+  if (source_format != GL_RGBA8) {
+    throw std::invalid_argument("HuxerUI Linux GL texture source must use GL_RGBA8 storage");
+  }
+
+  glGenTextures(1, &objects.texture);
+  glBindTexture(GL_TEXTURE_2D, objects.texture);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  glTexImage2D(
+      GL_TEXTURE_2D,
+      0,
+      GL_RGBA8,
+      frame.pixel_width,
+      frame.pixel_height,
+      0,
+      GL_RGBA,
+      GL_UNSIGNED_BYTE,
+      nullptr
+  );
+  glGenFramebuffers(1, &objects.read_framebuffer);
+  glGenFramebuffers(1, &objects.draw_framebuffer);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, objects.read_framebuffer);
+  glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, frame.texture_name, 0);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, objects.draw_framebuffer);
+  glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, objects.texture, 0);
+  if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
+      glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    throw std::invalid_argument("HuxerUI Linux GL texture source is not framebuffer-copy compatible");
+  }
+  glDisable(GL_SCISSOR_TEST);
+  glBlitFramebuffer(
+      0,
+      0,
+      frame.pixel_width,
+      frame.pixel_height,
+      0,
+      0,
+      frame.pixel_width,
+      frame.pixel_height,
+      GL_COLOR_BUFFER_BIT,
+      GL_NEAREST
+  );
+  if (frame.alpha == GlTexture::Alpha::Opaque) {
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+    glClearColor(0.0F, 0.0F, 0.0F, 1.0F);
+    glClear(GL_COLOR_BUFFER_BIT);
+  }
+  if (glGetError() != GL_NO_ERROR) {
+    throw std::runtime_error("HuxerUI could not copy the Linux GL texture snapshot");
+  }
+  objects.sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  if (objects.sync == nullptr) {
+    throw std::runtime_error("HuxerUI could not create the Linux GL texture fence");
+  }
+  glFlush();
+  glFinish();
+  if (glGetError() != GL_NO_ERROR) {
+    throw std::runtime_error("HuxerUI could not complete the Linux GL texture snapshot");
+  }
+
+  auto resources = std::make_shared<detail::LinuxGlResources>();
+  resources->release_context = release_context;
+  resources->texture = std::exchange(objects.texture, 0);
+  resources->sync = std::exchange(objects.sync, nullptr);
+  auto gdk_resources = std::make_unique<std::shared_ptr<const detail::LinuxGlResources>>(resources);
+  GdkGLTextureBuilder* builder = gdk_gl_texture_builder_new();
+  gdk_gl_texture_builder_set_context(builder, release_context->context);
+  gdk_gl_texture_builder_set_id(builder, resources->texture);
+  gdk_gl_texture_builder_set_width(builder, frame.pixel_width);
+  gdk_gl_texture_builder_set_height(builder, frame.pixel_height);
+  gdk_gl_texture_builder_set_format(
+      builder,
+      frame.alpha == GlTexture::Alpha::Straight ? GDK_MEMORY_R8G8B8A8 : GDK_MEMORY_R8G8B8A8_PREMULTIPLIED
+  );
+  gdk_gl_texture_builder_set_sync(builder, resources->sync);
+  ::GdkTexture* texture = gdk_gl_texture_builder_build(builder, detail::ReleaseGlResources, gdk_resources.get());
+  g_object_unref(builder);
+  if (texture == nullptr) {
+    throw std::runtime_error("HuxerUI could not build the Linux GL texture snapshot");
+  }
+  HUXERUI_DISCARD(gdk_resources.release());
+  std::unique_ptr<::GdkTexture, decltype(&g_object_unref)> retained(texture, g_object_unref);
+  return std::shared_ptr<const GdkFrame>(new GdkFrame(texture, frame.origin, std::move(resources)));
+}
+
 struct GdkTexture::Storage {
   std::mutex mutex;
-  std::shared_ptr<const detail::LinuxGdkTextureFrame> frame;
+  std::shared_ptr<const GdkFrame> frame;
   bool finished = false;
 };
 
@@ -424,8 +458,8 @@ void GdkTexture::Publish(::GdkTexture* frame) {
   if (frame == nullptr) {
     throw std::invalid_argument("HuxerUI Linux external GDK texture frame must not be null");
   }
-  auto retained = std::make_shared<const detail::LinuxGdkTextureFrame>(frame);
-  std::shared_ptr<const detail::LinuxGdkTextureFrame> retired;
+  auto retained = std::shared_ptr<const GdkFrame>(new GdkFrame(frame));
+  std::shared_ptr<const GdkFrame> retired;
   {
     std::lock_guard lock(storage_->mutex);
     if (storage_->finished) {
@@ -442,7 +476,7 @@ void GdkTexture::Finish() noexcept {
   storage_->finished = true;
 }
 
-std::shared_ptr<const detail::LinuxGdkTextureFrame> GdkTexture::AcquireFrame() const noexcept {
+std::shared_ptr<const GdkFrame> GdkTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->mutex);
   return storage_->frame;
 }
@@ -451,7 +485,7 @@ struct GlTexture::Storage {
   std::mutex publish_mutex;
   std::mutex frame_mutex;
   std::shared_ptr<detail::LinuxGlReleaseContext> release_context;
-  std::shared_ptr<const detail::LinuxGdkTextureFrame> frame;
+  std::shared_ptr<const GdkFrame> frame;
   bool finished = false;
 };
 
@@ -460,7 +494,7 @@ GlTexture::GlTexture(Size intrinsic_size)
 
 GlTexture::~GlTexture() {
   std::unique_lock publish_lock(storage_->publish_mutex);
-  std::shared_ptr<const detail::LinuxGdkTextureFrame> frame;
+  std::shared_ptr<const GdkFrame> frame;
   {
     std::lock_guard frame_lock(storage_->frame_mutex);
     storage_->finished = true;
@@ -478,8 +512,8 @@ void GlTexture::PublishCurrent(Frame frame) {
       throw std::logic_error("HuxerUI Linux GL texture is finished");
     }
   }
-  std::shared_ptr<const detail::LinuxGdkTextureFrame> imported = detail::CopyGlFrame(frame, storage_->release_context);
-  std::shared_ptr<const detail::LinuxGdkTextureFrame> replaced;
+  std::shared_ptr<const GdkFrame> imported = GdkFrame::CopyGl(frame, storage_->release_context);
+  std::shared_ptr<const GdkFrame> replaced;
   {
     std::lock_guard frame_lock(storage_->frame_mutex);
     replaced = std::exchange(storage_->frame, std::move(imported));
@@ -495,7 +529,7 @@ void GlTexture::Finish() noexcept {
   storage_->finished = true;
 }
 
-std::shared_ptr<const detail::LinuxGdkTextureFrame> GlTexture::AcquireFrame() const noexcept {
+std::shared_ptr<const GdkFrame> GlTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->frame_mutex);
   return storage_->frame;
 }
@@ -538,14 +572,6 @@ std::shared_ptr<const detail::LinuxPixelFrame> PixelTexture::AcquireFrame() cons
 } // namespace huxerui::linux
 
 namespace huxerui::detail {
-
-std::shared_ptr<const LinuxGdkTextureFrame> GetGdkTextureFrame(const linux::GdkTexture& texture) noexcept {
-  return texture.AcquireFrame();
-}
-
-std::shared_ptr<const LinuxGdkTextureFrame> GetGlFrame(const linux::GlTexture& texture) noexcept {
-  return texture.AcquireFrame();
-}
 
 std::shared_ptr<const LinuxPixelFrame> GetPixelFrame(const linux::PixelTexture& texture) noexcept {
   return texture.AcquireFrame();

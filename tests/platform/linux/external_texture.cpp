@@ -55,7 +55,7 @@ struct ReentrantReleaseProbe {
 
 void AcquireReplacementOnRelease(gpointer data) {
   auto& probe = *static_cast<ReentrantReleaseProbe*>(data);
-  probe.released = detail::GetGdkTextureFrame(*probe.texture) != nullptr;
+  probe.released = probe.texture->AcquireFrame() != nullptr;
 }
 
 std::uint32_t PixelAt(const detail::LinuxPixelFrame& frame, int x, int y) {
@@ -178,15 +178,16 @@ TEST_CASE("LinuxGdkTextureRetainsTheLatestImmutableFrame") {
 
   texture->Publish(first);
   g_object_unref(first);
-  const std::shared_ptr<const detail::LinuxGdkTextureFrame> first_frame = detail::GetGdkTextureFrame(*texture);
+  const std::shared_ptr<const linux::GdkFrame> first_frame = texture->AcquireFrame();
   REQUIRE(first_frame != nullptr);
   REQUIRE(first_frame->Texture() == first);
+  REQUIRE_THROWS_AS(first_frame->GlTextureNameCurrent(), std::runtime_error);
   REQUIRE(texture->Revision() == 1);
 
   std::thread producer([&] { texture->Publish(second); });
   producer.join();
   g_object_unref(second);
-  const std::shared_ptr<const detail::LinuxGdkTextureFrame> second_frame = detail::GetGdkTextureFrame(*texture);
+  const std::shared_ptr<const linux::GdkFrame> second_frame = texture->AcquireFrame();
   REQUIRE(second_frame != nullptr);
   REQUIRE(second_frame->Texture() == second);
   REQUIRE(second_frame != first_frame);
@@ -194,17 +195,20 @@ TEST_CASE("LinuxGdkTextureRetainsTheLatestImmutableFrame") {
 }
 
 TEST_CASE("LinuxGdkTextureValidatesNullAndFinishedPublication") {
-  const auto texture = std::make_shared<linux::GdkTexture>(Size{1.0F, 1.0F});
+  auto texture = std::make_shared<linux::GdkTexture>(Size{1.0F, 1.0F});
   const std::array<std::byte, 4> pixel{};
   ::GdkTexture* frame = CreateMemoryTexture(1, 1, pixel);
 
   REQUIRE_THROWS_AS(texture->Publish(nullptr), std::invalid_argument);
   texture->Publish(frame);
   texture->Finish();
-  REQUIRE(detail::GetGdkTextureFrame(*texture)->Texture() == frame);
+  const auto retained = texture->AcquireFrame();
+  REQUIRE(retained->Texture() == frame);
   REQUIRE_THROWS_AS(texture->Publish(frame), std::logic_error);
   texture->Finish();
   g_object_unref(frame);
+  texture.reset();
+  REQUIRE(gdk_texture_get_width(retained->Texture()) == 1);
 }
 
 TEST_CASE("LinuxGdkTextureReleasesReplacedFramesOutsideTheMailboxLock") {
@@ -224,7 +228,7 @@ TEST_CASE("LinuxGdkTextureReleasesReplacedFramesOutsideTheMailboxLock") {
   g_object_unref(second);
 
   REQUIRE(probe.released);
-  REQUIRE(detail::GetGdkTextureFrame(*texture)->Texture() == second);
+  REQUIRE(texture->AcquireFrame()->Texture() == second);
 }
 
 TEST_CASE("LinuxGlTextureValidatesPublicationBeforeUsingAContext") {
@@ -318,7 +322,9 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
   });
   REQUIRE(gdk_gl_context_get_current() == context);
   REQUIRE(texture->Revision() == 1);
-  REQUIRE(detail::GetGlFrame(*texture) != nullptr);
+  const auto published = texture->AcquireFrame();
+  REQUIRE(published != nullptr);
+  REQUIRE(published->TextureOrigin() == linux::GlTexture::Origin::BottomLeft);
   GLint restored_pixel_unpack_buffer = 0;
   glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &restored_pixel_unpack_buffer);
   REQUIRE(restored_pixel_unpack_buffer == static_cast<GLint>(pixel_unpack_buffer));
@@ -344,6 +350,24 @@ TEST_CASE("LinuxGlTextureOwnsAnImmutableGpuSnapshotAndAppliesOrigin") {
   glBindTexture(GL_TEXTURE_2D, source);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, replacement_pixels.data());
   glDeleteTextures(1, &source);
+
+  GdkGLContext* consumer = CreateTestGlContext();
+  REQUIRE(consumer != nullptr);
+  gdk_gl_context_make_current(consumer);
+  const GLuint name = published->GlTextureNameCurrent();
+  GLuint framebuffer = 0;
+  glGenFramebuffers(1, &framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, name, 0);
+  REQUIRE(glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
+  std::array<std::uint32_t, 4> consumed{};
+  glReadPixels(0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, consumed.data());
+  glDeleteFramebuffers(1, &framebuffer);
+  REQUIRE(consumed == source_pixels);
+  gdk_gl_context_clear_current();
+  REQUIRE_THROWS_AS(published->GlTextureNameCurrent(), std::logic_error);
+  g_object_unref(consumer);
+  gdk_gl_context_make_current(context);
 
   rendered_texture = texture;
   TestPlatform platform;

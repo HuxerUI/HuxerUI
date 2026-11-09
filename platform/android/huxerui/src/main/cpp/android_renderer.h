@@ -42,7 +42,7 @@ private:
   struct CachedExternalTexture {
     std::weak_ptr<ExternalTexture> texture;
     std::shared_ptr<const AndroidBitmapFrame> bitmap_frame;
-    std::shared_ptr<const AndroidGpuFrame> gpu_frame;
+    std::shared_ptr<const android::GlFrame> gpu_frame;
     std::uint64_t draw_epoch = 0;
   };
 
@@ -50,7 +50,7 @@ private:
     std::uint64_t node_identity, bool foreground, CommandRange* range);
   bool RenderSceneNode(JNIEnv* environment, jobject view, jobject canvas, const RenderNode& node, CommandRange* range);
   [[nodiscard]] const AndroidBitmapFrame* BitmapFrameFor(const std::shared_ptr<ExternalTexture>& texture);
-  [[nodiscard]] std::shared_ptr<const AndroidGpuFrame> GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture);
+  [[nodiscard]] std::shared_ptr<const android::GlFrame> GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);

@@ -14,25 +14,6 @@
 
 namespace huxerui::detail {
 
-class AndroidGpuFrame final {
-public:
-  AndroidGpuFrame(GLuint texture_name, int pixel_width, int pixel_height) noexcept;
-  ~AndroidGpuFrame();
-
-  AndroidGpuFrame(const AndroidGpuFrame&) = delete;
-  AndroidGpuFrame& operator=(const AndroidGpuFrame&) = delete;
-
-  [[nodiscard]] explicit operator bool() const noexcept;
-  [[nodiscard]] GLuint TextureName() const noexcept;
-  [[nodiscard]] int PixelWidth() const noexcept;
-  [[nodiscard]] int PixelHeight() const noexcept;
-
-private:
-  GLuint texture_name_ = 0;
-  int pixel_width_ = 0;
-  int pixel_height_ = 0;
-};
-
 class AndroidBitmapFrame final {
 public:
   AndroidBitmapFrame() noexcept = default;
@@ -79,7 +60,7 @@ public:
   void Commit(JNIEnv* environment, const RenderFrame& frame);
   void Draw(
       JNIEnv* environment, jobject canvas, const AndroidTextureLayerKey& key, const DrawExternalTextureCommand& command,
-      const std::shared_ptr<const AndroidGpuFrame>& frame
+      const std::shared_ptr<const android::GlFrame>& frame
   );
   void SetSurface(JNIEnv* environment, std::uint64_t identity, jobject surface, int pixel_width, int pixel_height);
   void ClearSurface(std::uint64_t identity) noexcept;

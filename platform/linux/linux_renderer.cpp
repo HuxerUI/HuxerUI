@@ -842,13 +842,13 @@ struct LinuxRenderer::State {
   SnapshotTexture AcquireSnapshotTexture(const std::shared_ptr<ExternalTexture>& texture) {
     const std::shared_ptr<linux::GdkTexture> gdk_texture = std::dynamic_pointer_cast<linux::GdkTexture>(texture);
     if (gdk_texture) {
-      const std::shared_ptr<const LinuxGdkTextureFrame> frame = GetGdkTextureFrame(*gdk_texture);
+      const std::shared_ptr<const linux::GdkFrame> frame = gdk_texture->AcquireFrame();
       return {frame ? GDK_TEXTURE(g_object_ref(frame->Texture())) : nullptr, false};
     }
 
     const std::shared_ptr<linux::GlTexture> gl_texture = std::dynamic_pointer_cast<linux::GlTexture>(texture);
     if (gl_texture) {
-      const std::shared_ptr<const LinuxGdkTextureFrame> frame = GetGlFrame(*gl_texture);
+      const std::shared_ptr<const linux::GdkFrame> frame = gl_texture->AcquireFrame();
       return {
           frame ? GDK_TEXTURE(g_object_ref(frame->Texture())) : nullptr,
           frame && frame->TextureOrigin() == linux::GlTexture::Origin::BottomLeft,

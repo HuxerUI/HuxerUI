@@ -8,6 +8,14 @@ target_include_directories(huxerui_android_logic_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/platform/android/huxerui/src/main/cpp"
 )
 
+if (ANDROID)
+    huxerui_add_test_suite(huxerui_android_texture_tests HuxerUIAndroidTextureTests
+            LABELS platform android native
+            LIBRARIES ${HUXERUI_TEST_LIBRARY}
+            SOURCES external_texture.cpp
+    )
+endif ()
+
 if (NOT CMAKE_CROSSCOMPILING)
     find_package(Java 11 QUIET COMPONENTS Development)
     find_package(JNI QUIET)

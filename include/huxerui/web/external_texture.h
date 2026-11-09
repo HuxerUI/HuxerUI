@@ -9,10 +9,6 @@
 
 namespace huxerui {
 
-namespace detail {
-class WebRenderer;
-} // namespace detail
-
 namespace web {
 
 /// A latest-frame Web ExternalTexture backed by cloned WebCodecs VideoFrame objects.
@@ -45,13 +41,16 @@ public:
   /// Idempotently stops publication while preserving the last successfully published frame clone.
   void Finish() noexcept;
 
-private:
+  /// Returns an independent clone of the latest VideoFrame on the browser main thread.
+  ///
+  /// Returns undefined before the first publication and null if cloning fails.
+  /// The clone remains usable across later publications and source destruction. Finish() keeps the last frame
+  /// available for acquisition. Close the clone on the browser main thread after GPU use.
   [[nodiscard]] emscripten::val AcquireFrame() const noexcept;
 
+private:
   emscripten::val frame_ = emscripten::val::undefined();
   bool finished_ = false;
-
-  friend class huxerui::detail::WebRenderer;
 };
 
 } // namespace web

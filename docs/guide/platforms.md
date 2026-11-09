@@ -128,7 +128,7 @@ The installed SDK exposes AppKit PlatformModule, PlatformView, PlatformPayload, 
 FileReference payloads retain the shared grant and expose its path-backed `NSURL` as `fileURL` for native libraries.
 
 Native libraries include `<huxerui/macos/external_texture.h>` for `macos::PixelBufferTexture` and `macos::MetalTexture`.
-`PixelBufferTexture` retains an immutable `CVPixelBufferRef`; publish a different buffer before mutating later content.
+`PixelBufferTexture` retains a completed `CVPixelBufferRef`. The producer keeps its pixels immutable until all retained consumers release the buffer.
 `MetalTexture` synchronously copies level zero of a completed, non-framebuffer-only 2D BGRA8 or RGBA8 texture, so the producer may reuse or release its source after `Publish()` returns.
 
 ```objective-c++
@@ -368,6 +368,16 @@ FileReference payloads retain the shared grant and expose its path-backed `NSURL
 Native libraries include `<huxerui/ios/external_texture.h>` for the iOS forms of `PixelBufferTexture` and `MetalTexture`.
 They have the same ownership, format, origin, alpha, synchronization, and Image rendering contract as their macOS counterparts; the C++ types remain in `huxerui::ios` rather than a shared Apple namespace.
 Objective-C and Swift import the concrete objects as `HUXPixelBufferTexture`/`PixelBufferTexture` and `HUXMetalTexture`/`MetalTexture`.
+
+## Reading ExternalTexture frames
+
+The concrete texture's `AcquireFrame()` returns the latest successfully published frame, or an empty result before the first publication. Image and external consumers acquire independently, so a consumer may hold an old frame across publication, `Finish()`, or source destruction while its graphics device remains valid. Keep the frame or its imported resource alive through GPU use. Treat its pixels as read-only and write processing results to a separate output.
+
+- Android `GlTexture` and `SurfaceStreamTexture` return the same `GlFrame` type. Make the consumer's compatible OpenGL ES context current on the same `EGLDisplay`, then call `ImportCurrent()`. The result is a caller-owned `GL_TEXTURE_2D` with premultiplied pixels and bottom-left origin. Its sampling parameters are independent. Delete it from a compatible context after GPU use.
+- Windows `D3D11Texture` returns `D3D11Frame`. Pass the destination device's immediate context and a matching BGRA8 default-usage texture to `TryCopyTo()`. Devices must use the same adapter. The method submits a GPU copy, returns false for transient contention, and throws for invalid destinations or device failures. Serialize immediate context use and keep the frame and destination alive through the copy.
+- Linux `GdkTexture` and `GlTexture` return `GdkFrame` with a borrowed GDK texture and its orientation. Frames published by `GlTexture` also provide `GlTextureNameCurrent()` in a compatible current `GdkGLContext`. Borrow the name for sampling without changing texture parameters, and retain the frame through GPU use. Other GDK frames support consumption through GDK and GSK.
+- On iOS and macOS, `PixelBufferTexture` returns a retained `CVPixelBufferRef` that the caller releases. For compatible buffers, import their planes with `CVMetalTextureCache` and hold the resulting Core Video texture references through GPU use. In Objective-C++, `MetalTexture::AcquireFrame(origin)` returns a retained Metal texture and sets its origin in one call. ARC manages the returned reference. Without ARC, balance it with `release`. Sample on its owning device.
+- On Web, `VideoFrameTexture` returns an independent `VideoFrame` clone on the browser main thread. The result is `undefined` before publication and `null` if cloning fails. Close a valid clone on that thread after GPU use, including when using WebGPU `importExternalTexture()`.
 
 ## Shared behavior
 

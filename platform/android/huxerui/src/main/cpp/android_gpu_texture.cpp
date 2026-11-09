@@ -27,6 +27,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -275,7 +276,7 @@ private:
 
   std::unique_ptr<State> state_;
 
-  friend class GpuContext;
+  friend class huxerui::detail::GpuContext;
 };
 
 class SurfaceStream final {
@@ -295,8 +296,27 @@ private:
 
   std::unique_ptr<State> state_;
 
-  friend class GpuContext;
+  friend class huxerui::detail::GpuContext;
 };
+
+bool HasExtension(const char* list, std::string_view name) noexcept {
+  if (list == nullptr) {
+    return false;
+  }
+  std::string_view extensions(list);
+  for (;;) {
+    const std::size_t end = extensions.find(' ');
+    if (extensions.substr(0, end) == name) {
+      return true;
+    }
+    if (end == std::string_view::npos) {
+      return false;
+    }
+    extensions.remove_prefix(end + 1);
+  }
+}
+
+} // namespace
 
 class GpuContext final {
 public:
@@ -305,18 +325,19 @@ public:
   GpuContext(const GpuContext&) = delete;
   GpuContext& operator=(const GpuContext&) = delete;
 
-  [[nodiscard]] std::shared_ptr<const AndroidGpuFrame> ImportCurrentGlFrame(const android::GlTexture::Frame& frame);
+  [[nodiscard]] std::shared_ptr<const android::GlFrame> CopyCurrentGlFrame(const android::GlTexture::Frame& frame);
   [[nodiscard]] std::shared_ptr<SurfaceStream>
   CreateSurfaceStream(JNIEnv* environment, std::uint64_t callback_token, int pixel_width, int pixel_height);
-  [[nodiscard]] std::shared_ptr<const AndroidGpuFrame>
+  [[nodiscard]] std::shared_ptr<const android::GlFrame>
   LatchSurfaceStream(const std::shared_ptr<SurfaceStream>& stream, int pixel_width, int pixel_height);
   [[nodiscard]] std::shared_ptr<OutputSurface>
   CreateOutputSurface(JNIEnv* environment, jobject surface, int pixel_width, int pixel_height);
   [[nodiscard]] bool Render(
-      const std::shared_ptr<OutputSurface>& output, const std::shared_ptr<const AndroidGpuFrame>& frame, Rect source,
+      const std::shared_ptr<OutputSurface>& output, const std::shared_ptr<const android::GlFrame>& frame, Rect source,
       ImageSampling sampling
   );
-  void DeleteTexture(unsigned int texture_name) noexcept;
+  [[nodiscard]] GLuint ImportFrameCurrent(const android::GlFrame& frame);
+  void DeleteTexture(GLuint texture_name, EGLImageKHR image = EGL_NO_IMAGE_KHR) noexcept;
 
 private:
   struct State;
@@ -329,8 +350,6 @@ private:
   friend class OutputSurface;
   friend class SurfaceStream;
 };
-
-} // namespace
 
 struct OutputSurface::State {
   ANativeWindow* window = nullptr;
@@ -639,31 +658,6 @@ struct GpuContext::State {
   bool worker_attached = false;
 };
 
-AndroidGpuFrame::AndroidGpuFrame(GLuint texture_name, int pixel_width, int pixel_height) noexcept
-    : texture_name_(texture_name), pixel_width_(pixel_width), pixel_height_(pixel_height) {}
-
-AndroidGpuFrame::~AndroidGpuFrame() {
-  if (texture_name_ != 0) {
-    GpuContext::Instance().DeleteTexture(texture_name_);
-  }
-}
-
-AndroidGpuFrame::operator bool() const noexcept {
-  return texture_name_ != 0 && pixel_width_ > 0 && pixel_height_ > 0;
-}
-
-GLuint AndroidGpuFrame::TextureName() const noexcept {
-  return texture_name_;
-}
-
-int AndroidGpuFrame::PixelWidth() const noexcept {
-  return pixel_width_;
-}
-
-int AndroidGpuFrame::PixelHeight() const noexcept {
-  return pixel_height_;
-}
-
 OutputSurface::OutputSurface(std::unique_ptr<State> state) : state_(std::move(state)) {}
 
 OutputSurface::~OutputSurface() {
@@ -761,7 +755,7 @@ GpuContext::GpuContext() : state_(std::make_unique<State>()) {}
 
 GpuContext::~GpuContext() = default;
 
-std::shared_ptr<const AndroidGpuFrame> GpuContext::ImportCurrentGlFrame(const android::GlTexture::Frame& frame) {
+std::shared_ptr<const android::GlFrame> GpuContext::CopyCurrentGlFrame(const android::GlTexture::Frame& frame) {
   if (frame.texture_name == 0 || frame.pixel_width <= 0 || frame.pixel_height <= 0) {
     throw std::invalid_argument("HuxerUI Android GL texture frame dimensions and texture name must be valid");
   }
@@ -798,6 +792,7 @@ std::shared_ptr<const AndroidGpuFrame> GpuContext::ImportCurrentGlFrame(const an
     throw std::invalid_argument("HuxerUI Android GL texture name does not identify a current GL texture");
   }
 
+  auto published = std::shared_ptr<android::GlFrame>(new android::GlFrame(frame.pixel_width, frame.pixel_height));
   int fence_fd = -1;
   if (frame.acquire_fence_fd >= 0) {
     fence_fd = fcntl(frame.acquire_fence_fd, F_DUPFD_CLOEXEC, 0);
@@ -869,7 +864,8 @@ std::shared_ptr<const AndroidGpuFrame> GpuContext::ImportCurrentGlFrame(const an
     DeleteTexture(canonical);
     ThrowEgl("release a captured producer GL texture");
   }
-  return std::make_shared<AndroidGpuFrame>(canonical, frame.pixel_width, frame.pixel_height);
+  published->texture_name_ = canonical;
+  return published;
 }
 
 std::shared_ptr<SurfaceStream>
@@ -1015,7 +1011,7 @@ GpuContext::CreateSurfaceStream(JNIEnv* environment, std::uint64_t callback_toke
   }
 }
 
-std::shared_ptr<const AndroidGpuFrame>
+std::shared_ptr<const android::GlFrame>
 GpuContext::LatchSurfaceStream(const std::shared_ptr<SurfaceStream>& stream, int pixel_width, int pixel_height) {
   if (!stream || pixel_width <= 0 || pixel_height <= 0) {
     throw std::invalid_argument("HuxerUI Android Surface stream frame arguments must be valid");
@@ -1035,10 +1031,11 @@ GpuContext::LatchSurfaceStream(const std::shared_ptr<SurfaceStream>& stream, int
       throw std::runtime_error("HuxerUI could not read an Android Surface stream transform");
     }
     const std::array<GLfloat, 8> coordinates{0, 0, 1, 0, 0, 1, 1, 1};
-    const GLuint texture = state_->CopyToCanonical(
+    auto published = std::shared_ptr<android::GlFrame>(new android::GlFrame(pixel_width, pixel_height));
+    published->texture_name_ = state_->CopyToCanonical(
         source.external_texture, GL_TEXTURE_EXTERNAL_OES, pixel_width, pixel_height, coordinates, transform.data(), 0
     );
-    return std::make_shared<AndroidGpuFrame>(texture, pixel_width, pixel_height);
+    return published;
   });
 }
 
@@ -1079,10 +1076,10 @@ GpuContext::CreateOutputSurface(JNIEnv* environment, jobject surface, int pixel_
 }
 
 bool GpuContext::Render(
-    const std::shared_ptr<OutputSurface>& output, const std::shared_ptr<const AndroidGpuFrame>& frame, Rect source,
+    const std::shared_ptr<OutputSurface>& output, const std::shared_ptr<const android::GlFrame>& frame, Rect source,
     ImageSampling sampling
 ) {
-  if (!output || !frame || !*frame || source.IsEmpty()) {
+  if (!output || !frame || source.IsEmpty()) {
     return false;
   }
   return state_->Invoke([this, output, frame, source, sampling]() {
@@ -1112,24 +1109,87 @@ bool GpuContext::Render(
     glDisable(GL_BLEND);
     glClearColor(0.0F, 0.0F, 0.0F, 0.0F);
     glClear(GL_COLOR_BUFFER_BIT);
-    glBindTexture(GL_TEXTURE_2D, frame->TextureName());
+    glBindTexture(GL_TEXTURE_2D, frame->texture_name_);
     const GLint filter = sampling == ImageSampling::Nearest ? GL_NEAREST : GL_LINEAR;
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-    state_->Draw(state_->texture_program, GL_TEXTURE_2D, frame->TextureName(), coordinates, kIdentityMatrix.data(), 1);
+    state_->Draw(state_->texture_program, GL_TEXTURE_2D, frame->texture_name_, coordinates, kIdentityMatrix.data(), 1);
     const bool presented = eglSwapBuffers(state_->display, target.surface) == EGL_TRUE;
     state_->MakeUtilityCurrent();
     return presented;
   });
 }
 
-void GpuContext::DeleteTexture(unsigned int texture_name) noexcept {
-  if (texture_name == 0) {
-    return;
+GLuint GpuContext::ImportFrameCurrent(const android::GlFrame& frame) {
+  const EGLContext context = eglGetCurrentContext();
+  const EGLDisplay display = eglGetCurrentDisplay();
+  if (context == EGL_NO_CONTEXT || display == EGL_NO_DISPLAY) {
+    throw std::logic_error("HuxerUI Android GL frame import requires a current EGL context");
   }
-  state_->Post([texture_name]() {
-    const GLuint texture = texture_name;
+  EGLint client_type = EGL_NONE;
+  if (display != state_->display ||
+      eglQueryContext(display, context, EGL_CONTEXT_CLIENT_TYPE, &client_type) != EGL_TRUE ||
+      client_type != EGL_OPENGL_ES_API) {
+    throw std::runtime_error("HuxerUI Android GL frame import requires a compatible OpenGL ES context");
+  }
+  const char* egl_extensions = eglQueryString(display, EGL_EXTENSIONS);
+  if (state_->create_image == nullptr || state_->destroy_image == nullptr || state_->image_target_texture == nullptr ||
+      !HasExtension(egl_extensions, "EGL_KHR_image_base") ||
+      !HasExtension(egl_extensions, "EGL_KHR_gl_texture_2D_image") ||
+      !HasExtension(reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)), "GL_OES_EGL_image")) {
+    throw std::runtime_error("HuxerUI Android GL frame import requires EGL image support");
+  }
+
+  const EGLImageKHR image = state_->Invoke([this, &frame]() {
+    if (frame.egl_image_ == EGL_NO_IMAGE_KHR) {
+      state_->MakeUtilityCurrent();
+      const EGLint attributes[] = {EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE};
+      frame.egl_image_ = state_->create_image(
+          state_->display, state_->context, EGL_GL_TEXTURE_2D_KHR,
+          reinterpret_cast<EGLClientBuffer>(static_cast<std::uintptr_t>(frame.texture_name_)), attributes
+      );
+      if (frame.egl_image_ == EGL_NO_IMAGE_KHR) {
+        ThrowEgl("export a published GL frame");
+      }
+    }
+    return frame.egl_image_;
+  });
+
+  GLint previous_texture = 0;
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous_texture);
+  if (glGetError() != GL_NO_ERROR) {
+    throw std::runtime_error("HuxerUI could not query the Android GL import texture binding");
+  }
+  GLuint texture = 0;
+  glGenTextures(1, &texture);
+  if (texture == 0) {
+    throw std::runtime_error("HuxerUI could not create an Android GL import texture");
+  }
+  glBindTexture(GL_TEXTURE_2D, texture);
+  if (glGetError() != GL_NO_ERROR) {
     glDeleteTextures(1, &texture);
+    throw std::runtime_error("HuxerUI could not bind the Android GL import texture");
+  }
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  state_->image_target_texture(GL_TEXTURE_2D, image);
+  glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous_texture));
+  if (glGetError() != GL_NO_ERROR) {
+    glDeleteTextures(1, &texture);
+    throw std::runtime_error("HuxerUI could not bind an Android GL frame in the current EGL context");
+  }
+  return texture;
+}
+
+void GpuContext::DeleteTexture(GLuint texture_name, EGLImageKHR image) noexcept {
+  State* service = state_.get();
+  service->Post([service, texture_name, image]() {
+    if (image != EGL_NO_IMAGE_KHR) {
+      HUXERUI_DISCARD(service->destroy_image(service->display, image));
+    }
+    glDeleteTextures(1, &texture_name);
   });
 }
 
@@ -1213,7 +1273,7 @@ struct AndroidTextureLayers::State {
     std::uint64_t seen_generation = 0;
     std::shared_ptr<OutputSurface> output;
     std::weak_ptr<ExternalTexture> presented_texture;
-    std::shared_ptr<const AndroidGpuFrame> presented_frame;
+    std::shared_ptr<const android::GlFrame> presented_frame;
     Rect presented_source;
     ImageSampling presented_sampling = ImageSampling::Linear;
     bool has_presentation = false;
@@ -1363,7 +1423,7 @@ void AndroidTextureLayers::Commit(JNIEnv* environment, const RenderFrame& frame)
 
 void AndroidTextureLayers::Draw(
     JNIEnv* environment, jobject canvas, const AndroidTextureLayerKey& key, const DrawExternalTextureCommand& command,
-    const std::shared_ptr<const AndroidGpuFrame>& frame
+    const std::shared_ptr<const android::GlFrame>& frame
 ) {
   const auto found = state_->layers.find(key);
   if (found == state_->layers.end() || found->second.java_identity == 0) {
@@ -1476,10 +1536,30 @@ void AndroidTextureLayers::Shutdown(JNIEnv* environment) noexcept {
 
 namespace huxerui::android {
 
+GlFrame::GlFrame(int pixel_width, int pixel_height) noexcept : pixel_width_(pixel_width), pixel_height_(pixel_height) {}
+
+GlFrame::~GlFrame() {
+  if (texture_name_ != 0) {
+    huxerui::detail::GpuContext::Instance().DeleteTexture(texture_name_, egl_image_);
+  }
+}
+
+int GlFrame::PixelWidth() const noexcept {
+  return pixel_width_;
+}
+
+int GlFrame::PixelHeight() const noexcept {
+  return pixel_height_;
+}
+
+std::uint32_t GlFrame::ImportCurrent() const {
+  return huxerui::detail::GpuContext::Instance().ImportFrameCurrent(*this);
+}
+
 struct GlTexture::Storage {
   std::mutex publish_mutex;
   std::mutex frame_mutex;
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> frame;
+  std::shared_ptr<const GlFrame> frame;
   bool finished = false;
 };
 
@@ -1488,7 +1568,7 @@ GlTexture::GlTexture(Size intrinsic_size)
 
 GlTexture::~GlTexture() {
   std::unique_lock publish_lock(storage_->publish_mutex);
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> frame;
+  std::shared_ptr<const GlFrame> frame;
   {
     std::lock_guard frame_lock(storage_->frame_mutex);
     storage_->finished = true;
@@ -1506,9 +1586,9 @@ void GlTexture::PublishCurrent(Frame frame) {
       throw std::logic_error("HuxerUI Android GL texture is finished");
     }
   }
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> imported =
-      huxerui::detail::GpuContext::Instance().ImportCurrentGlFrame(frame);
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> replaced;
+  std::shared_ptr<const GlFrame> imported =
+      huxerui::detail::GpuContext::Instance().CopyCurrentGlFrame(frame);
+  std::shared_ptr<const GlFrame> replaced;
   {
     std::lock_guard frame_lock(storage_->frame_mutex);
     replaced = std::move(storage_->frame);
@@ -1525,7 +1605,7 @@ void GlTexture::Finish() noexcept {
   storage_->finished = true;
 }
 
-std::shared_ptr<const huxerui::detail::AndroidGpuFrame> GlTexture::AcquireFrame() const noexcept {
+std::shared_ptr<const GlFrame> GlTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->frame_mutex);
   return storage_->frame;
 }
@@ -1533,7 +1613,7 @@ std::shared_ptr<const huxerui::detail::AndroidGpuFrame> GlTexture::AcquireFrame(
 struct SurfaceStreamTexture::Storage {
   std::mutex mutex;
   std::shared_ptr<huxerui::detail::SurfaceStream> stream;
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> frame;
+  std::shared_ptr<const GlFrame> frame;
   std::uint64_t callback_token = 0;
   int pixel_width = 0;
   int pixel_height = 0;
@@ -1571,7 +1651,7 @@ SurfaceStreamTexture::SurfaceStreamTexture(Size intrinsic_size, std::unique_ptr<
 
 SurfaceStreamTexture::~SurfaceStreamTexture() {
   Finish();
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> frame;
+  std::shared_ptr<const GlFrame> frame;
   {
     std::lock_guard lock(storage_->mutex);
     frame = std::move(storage_->frame);
@@ -1635,7 +1715,7 @@ void SurfaceStreamTexture::FrameAvailable() {
     pixel_width = storage_->pixel_width;
     pixel_height = storage_->pixel_height;
   }
-  std::shared_ptr<const huxerui::detail::AndroidGpuFrame> frame =
+  std::shared_ptr<const GlFrame> frame =
       huxerui::detail::GpuContext::Instance().LatchSurfaceStream(stream, pixel_width, pixel_height);
   {
     std::lock_guard lock(storage_->mutex);
@@ -1647,7 +1727,7 @@ void SurfaceStreamTexture::FrameAvailable() {
   NotifyFrameAvailable();
 }
 
-std::shared_ptr<const huxerui::detail::AndroidGpuFrame> SurfaceStreamTexture::AcquireFrame() const noexcept {
+std::shared_ptr<const GlFrame> SurfaceStreamTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->mutex);
   return storage_->frame;
 }

@@ -190,6 +190,20 @@ TEST_CASE("MacPixelBufferTextureIsTheSharedExternalTextureIdentity") {
   REQUIRE_THROWS_AS(pixel_buffer_texture->Publish(nullptr), std::invalid_argument);
 }
 
+TEST_CASE("MacPixelBufferTextureAcquiresAFrameThatOutlivesItsSource") {
+  auto texture = std::make_unique<macos::PixelBufferTexture>(Size{2.0F, 2.0F});
+  REQUIRE(texture->AcquireFrame() == nullptr);
+  CVPixelBufferRef source = CreatePixelBuffer({0, 0, 255, 255});
+  texture->Publish(source);
+  CVPixelBufferRelease(source);
+  texture->Finish();
+  CVPixelBufferRef retained = texture->AcquireFrame();
+  REQUIRE(retained == source);
+  texture.reset();
+  REQUIRE(CVPixelBufferGetWidth(retained) == 2);
+  CVPixelBufferRelease(retained);
+}
+
 TEST_CASE("MacMetalTextureCopiesPublishedFramesForEveryRenderer") {
   @autoreleasepool {
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -205,6 +219,15 @@ TEST_CASE("MacMetalTextureCopiesPublishedFramesForEveryRenderer") {
     const std::uint64_t initial_revision = texture->Revision();
     texture->Publish({source, macos::MetalTexture::Origin::TopLeft, macos::MetalTexture::Alpha::Opaque});
     REQUIRE(texture->Revision() == initial_revision + 1);
+    auto origin = macos::MetalTexture::Origin::BottomLeft;
+    id<MTLTexture> acquired = texture->AcquireFrame(origin);
+    REQUIRE(acquired != nil);
+    REQUIRE(acquired != source);
+    REQUIRE(origin == macos::MetalTexture::Origin::TopLeft);
+    REQUIRE(acquired.device == device);
+#if !__has_feature(objc_arc)
+    [acquired release];
+#endif
 
     ReplaceMetalPixels(source, SolidMetalPixels({0, 255, 0, 255}));
     mac_external_texture = texture;

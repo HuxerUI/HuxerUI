@@ -506,7 +506,7 @@ struct Win32Renderer::State {
   struct CachedD3D11Texture {
     std::weak_ptr<windows::D3D11Texture> texture;
     // The producer-device snapshot survives renderer device resets and can be reopened without another publication.
-    std::shared_ptr<const Win32D3D11Frame> frame;
+    std::shared_ptr<const windows::D3D11Frame> frame;
     ComPtr<ID3D11Texture2D> shared_texture;
     ComPtr<IDXGIKeyedMutex> keyed_mutex;
     ComPtr<ID2D1Bitmap1> bitmap;
@@ -1999,23 +1999,11 @@ struct Win32Renderer::State {
       return S_OK;
     }
     if (!cached.shared_texture) {
-#if defined(HUXERUI_WINDOWS_7_COMPAT)
-      throw std::runtime_error("HuxerUI Windows D3D11 textures require Windows 10 or later");
-#else
-      ComPtr<ID3D11Device1> device;
-      ThrowIfFailed(d3d_device_.As(&device), "HuxerUI could not access the Windows D3D11.1 renderer device");
-      ThrowIfFailed(
-          device->OpenSharedResource1(
-              cached.frame->SharedHandle(), __uuidof(ID3D11Texture2D),
-              reinterpret_cast<void**>(cached.shared_texture.GetAddressOf())
-          ),
-          "HuxerUI could not open a Windows D3D11 texture; producer and renderer must use the same adapter"
-      );
+      cached.shared_texture = D3D11FrameAccess::Open(*cached.frame, *d3d_device_.Get());
       ThrowIfFailed(
           cached.shared_texture.As(&cached.keyed_mutex),
           "HuxerUI could not synchronize a Windows D3D11 texture"
       );
-#endif
     }
 
     const HRESULT acquire_result = cached.keyed_mutex->AcquireSync(1, 0);
@@ -2063,7 +2051,7 @@ struct Win32Renderer::State {
         d3d11_textures_.push_back({.texture = texture});
         cached = d3d11_textures_.end() - 1;
       }
-      const std::shared_ptr<const Win32D3D11Frame> frame = GetD3D11Frame(*texture);
+      const std::shared_ptr<const windows::D3D11Frame> frame = texture->AcquireFrame();
       if (frame != cached->frame) {
         ResetD3D11Import(*cached);
         cached->frame = frame;
@@ -2079,7 +2067,7 @@ struct Win32Renderer::State {
       }
     }
     std::ranges::sort(acquisitions, [](const CachedD3D11Texture* left, const CachedD3D11Texture* right) {
-      return std::less<const Win32D3D11Frame*>{}(left->frame.get(), right->frame.get());
+      return std::less<const windows::D3D11Frame*>{}(left->frame.get(), right->frame.get());
     });
 
     try {

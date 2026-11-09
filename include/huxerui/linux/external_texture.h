@@ -13,16 +13,14 @@ typedef struct _GdkTexture GdkTexture;
 namespace huxerui {
 
 namespace linux {
-class GdkTexture;
-class GlTexture;
+class GdkFrame;
 class PixelTexture;
 } // namespace linux
 
 namespace detail {
-class LinuxGdkTextureFrame;
+struct LinuxGlReleaseContext;
+struct LinuxGlResources;
 class LinuxPixelFrame;
-std::shared_ptr<const LinuxGdkTextureFrame> GetGdkTextureFrame(const linux::GdkTexture& texture) noexcept;
-std::shared_ptr<const LinuxGdkTextureFrame> GetGlFrame(const linux::GlTexture& texture) noexcept;
 std::shared_ptr<const LinuxPixelFrame> GetPixelFrame(const linux::PixelTexture& texture) noexcept;
 } // namespace detail
 
@@ -67,15 +65,16 @@ public:
   /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
+  /// Retains the latest published frame, or returns an empty pointer before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
+  /// publications and source destruction. Finish() keeps the last frame available for acquisition.
+  std::shared_ptr<const GdkFrame> AcquireFrame() const noexcept;
+
 private:
   struct Storage;
 
-  [[nodiscard]] std::shared_ptr<const huxerui::detail::LinuxGdkTextureFrame> AcquireFrame() const noexcept;
-
   std::unique_ptr<Storage> storage_;
-
-  friend std::shared_ptr<const huxerui::detail::LinuxGdkTextureFrame>
-  huxerui::detail::GetGdkTextureFrame(const GdkTexture& texture) noexcept;
 };
 
 /// A latest-frame Linux ExternalTexture synchronously copied from GL_TEXTURE_2D content.
@@ -93,7 +92,7 @@ public:
     BottomLeft,
   };
 
-  /// Identifies the alpha representation stored in a published texture.
+  /// Identifies the alpha representation of the producer texture.
   enum class Alpha {
     /// Every texel is fully opaque and its stored alpha is ignored.
     Opaque,
@@ -103,7 +102,7 @@ public:
     Straight,
   };
 
-  /// Describes one GL_TEXTURE_2D publication captured by PublishCurrent().
+  /// Describes a producer texture borrowed for one PublishCurrent() call.
   struct Frame {
     /// Texture name visible to the GdkGLContext current on the calling thread.
     std::uint32_t texture_name = 0;
@@ -137,15 +136,56 @@ public:
   /// Idempotently stops publication while preserving the last successfully imported frame.
   void Finish() noexcept;
 
+  /// Retains the latest published frame, or returns an empty pointer before the first publication.
+  ///
+  /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
+  /// publications and source destruction. Finish() keeps the last frame available for acquisition.
+  std::shared_ptr<const GdkFrame> AcquireFrame() const noexcept;
+
 private:
   struct Storage;
 
-  [[nodiscard]] std::shared_ptr<const huxerui::detail::LinuxGdkTextureFrame> AcquireFrame() const noexcept;
-
   std::unique_ptr<Storage> storage_;
+};
 
-  friend std::shared_ptr<const huxerui::detail::LinuxGdkTextureFrame>
-  huxerui::detail::GetGlFrame(const GlTexture& texture) noexcept;
+/// Owns one immutable GDK frame and its image orientation.
+/// GL-backed frames follow GdkGLContext thread affinity, including release of the last reference.
+class GdkFrame final {
+public:
+  ~GdkFrame();
+
+  GdkFrame(const GdkFrame&) = delete;
+  GdkFrame& operator=(const GdkFrame&) = delete;
+
+  /// Borrows the GDK texture for the lifetime of this frame. Its GDK memory format describes the pixel layout
+  /// and alpha representation.
+  ::GdkTexture* Texture() const noexcept;
+  /// Returns which logical edge corresponds to vertical texture coordinate zero.
+  GlTexture::Origin TextureOrigin() const noexcept;
+
+  /// Borrows the GL_TEXTURE_2D name of a frame from GlTexture.
+  ///
+  /// The current GdkGLContext must share resources with the frame's GL context. Keep the frame alive through GPU use
+  /// and treat the pixels and texture parameters as read-only.
+  /// Throws std::logic_error when a GL frame is accessed without a current GdkGLContext and std::runtime_error when
+  /// the frame has no accessible GL texture or the current context is incompatible.
+  std::uint32_t GlTextureNameCurrent() const;
+
+private:
+  explicit GdkFrame(
+      ::GdkTexture* texture, GlTexture::Origin origin = GlTexture::Origin::TopLeft,
+      std::shared_ptr<const huxerui::detail::LinuxGlResources> gl_resources = {}
+  );
+  static std::shared_ptr<const GdkFrame> CopyGl(
+      const GlTexture::Frame& frame, std::shared_ptr<huxerui::detail::LinuxGlReleaseContext>& release_context
+  );
+
+  ::GdkTexture* texture_;
+  GlTexture::Origin origin_;
+  std::shared_ptr<const huxerui::detail::LinuxGlResources> gl_resources_;
+
+  friend class GdkTexture;
+  friend class GlTexture;
 };
 
 /// Describes one borrowed Linux software frame supplied to PixelTexture::Publish().
