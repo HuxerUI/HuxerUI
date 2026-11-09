@@ -206,6 +206,20 @@ endif ()
 run(${configure})
 run("${CMAKE_COMMAND}" --build "${build}" --config Release --parallel 2)
 include("${build}/Release/paths.cmake")
+if (CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+    file(MAKE_DIRECTORY "${root}/old-patchelf")
+    file(WRITE "${root}/old-patchelf/patchelf" [=[#!/bin/sh
+if [ "$1" = "--version" ]; then
+    printf '%s\n' 'patchelf 0.18.0'
+    exit 0
+fi
+exit 99
+]=])
+    file(CHMOD "${root}/old-patchelf/patchelf"
+            PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    install_fixture("${root}/unsupported-patchelf" "requires patchelf 0\\.19\\.0 or newer"
+            "PATH=${root}/old-patchelf:$ENV{PATH}")
+endif ()
 install_fixture("${root}/staging" "")
 foreach (name IN ITEMS "${leaf_payload}" "${module_leaf_name}")
     if (NOT EXISTS "${root}/staging/${content}/${library_directory}/${name}")
