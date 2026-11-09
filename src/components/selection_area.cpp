@@ -225,10 +225,7 @@ struct TextEntry {
   std::uint64_t node_identity = 0;
   TextBlockId block = 0;
   AttributedText text;
-  TextStyle style;
-  TextLayoutOptions options;
-  float width = 0.0F;
-  std::shared_ptr<detail::TextLayout> layout;
+  std::shared_ptr<detail::TextLayoutBackend> layout;
   TextEntryGeometry geometry;
 };
 
@@ -547,19 +544,12 @@ private:
         }
       }
       const bool body_changed = !detail::InternalAccess::SameBody(entry.text, node.text);
-      const bool layout_changed =
-          !detail::TextLayoutInputsEqual(entry.text, entry.style.font, node.text, node.properties.text_style.font);
       entry.text = node.text;
       document_changed = document_changed || body_changed || entry.block != block;
       const auto content = node.ContentBounds();
-      if (!entry.layout || layout_changed ||
-          entry.options != node.properties.text_layout_options || entry.width != content.width) {
-        entry.style = node.properties.text_style;
-        entry.options = node.properties.text_layout_options;
-        entry.width = content.width;
-        entry.layout = detail::GetParagraphLayout(node, ui_window);
-        changed = true;
-      }
+      auto layout = detail::GetParagraphLayout(node, ui_window);
+      changed = changed || entry.layout != layout;
+      entry.layout = std::move(layout);
       entry.node_identity = node.identity;
       entry.block = block;
       const auto transform =
@@ -576,9 +566,9 @@ private:
       };
       if (entry.layout) {
         const float remaining = std::max(0.0F, content.height - entry.layout->Measure().height);
-        if (entry.options.vertical_align == TextVerticalAlign::Center) {
+        if (node.properties.text_layout_options.vertical_align == TextVerticalAlign::Center) {
           geometry.origin.y += remaining * 0.5F;
-        } else if (entry.options.vertical_align == TextVerticalAlign::Bottom) {
+        } else if (node.properties.text_layout_options.vertical_align == TextVerticalAlign::Bottom) {
           geometry.origin.y += remaining;
         }
       }

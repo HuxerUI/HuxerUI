@@ -12,7 +12,7 @@
 
 namespace huxerui::detail {
 
-class TextLayout;
+class TextLayoutBackend;
 class WebTextLayout;
 void ResetWebFonts();
 
@@ -32,8 +32,8 @@ public:
   MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options = {});
   [[nodiscard]] TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
       const TextLayoutOptions& options = {});
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
-      float max_width, const TextLayoutOptions& options = {});
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
 
   void Draw(const RenderFrame& frame);
   void DrawSlice(

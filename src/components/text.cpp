@@ -57,21 +57,17 @@ public:
       pressed_.reset();
       focused_link_ = 0;
     }
-    if (!layout_ || !TextLayoutInputsEqual(text_, style_.font, node.text, node.properties.text_style.font) ||
-        width_ != content.width || options_ != node.properties.text_layout_options) {
-      if (!platform) {
-        throw std::logic_error("HuxerUI link geometry requires a platform text layout service");
-      }
-      width_ = content.width;
-      style_ = node.properties.text_style;
-      options_ = node.properties.text_layout_options;
-      layout_ = GetParagraphLayout(node, *platform);
-      changed = true;
+    if (!platform) {
+      throw std::logic_error("HuxerUI link geometry requires a platform text layout service");
     }
+    auto layout = GetParagraphLayout(node, *platform);
+    changed = changed || layout_ != layout;
+    layout_ = std::move(layout);
     text_ = node.text;
     const float remaining = layout_ ? std::max(0.0F, content.height - layout_->Measure().height) : 0.0F;
-    const float vertical = options_.vertical_align == TextVerticalAlign::Center ? remaining * 0.5F
-                           : options_.vertical_align == TextVerticalAlign::Bottom ? remaining : 0.0F;
+    const TextVerticalAlign align = node.properties.text_layout_options.vertical_align;
+    const float vertical = align == TextVerticalAlign::Center ? remaining * 0.5F
+                           : align == TextVerticalAlign::Bottom ? remaining : 0.0F;
     const Point origin{content.x, content.y + vertical};
     changed = changed || content_ != content || origin_ != origin;
     content_ = content;
@@ -257,15 +253,12 @@ private:
   }
 
   AttributedText text_;
-  TextStyle style_;
-  TextLayoutOptions options_;
-  std::shared_ptr<TextLayout> layout_;
+  std::shared_ptr<TextLayoutBackend> layout_;
   std::vector<std::vector<Rect>> fragments_;
   Rect content_;
   Point origin_;
   Point down_;
   FocusRing focus_ring_;
-  float width_ = 0.0F;
   float pointer_slop_ = 6.0F;
   std::size_t focused_link_ = 0;
   std::optional<std::size_t> pressed_;

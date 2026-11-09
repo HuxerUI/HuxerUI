@@ -6,9 +6,9 @@
 
 namespace huxerui::detail {
 
-class TextLayout;
+class TextLayoutBackend;
 
-[[nodiscard]] std::unique_ptr<TextLayout>
+[[nodiscard]] std::unique_ptr<TextLayoutBackend>
 CreateAndroidTextLayout(JavaVM* virtual_machine, JNIEnv* environment, jobject layout);
 
 } // namespace huxerui::detail

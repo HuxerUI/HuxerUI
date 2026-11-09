@@ -481,8 +481,10 @@ export namespace huxerui {
     using huxerui::TextInputSyncAction;
     using huxerui::TextInputType;
     using huxerui::TextInputUnit;
+    using huxerui::TextLayout;
     using huxerui::TextLayoutMetrics;
     using huxerui::TextLayoutOptions;
+    using huxerui::TextLineMetrics;
     using huxerui::TextLinkActivation;
     using huxerui::TextLinkRange;
     using huxerui::TextMeasurer;

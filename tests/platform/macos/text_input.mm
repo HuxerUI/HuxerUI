@@ -240,8 +240,8 @@ TEST_CASE("MacTextLayoutAlignsExplicitNoWrapLinesWithinAvailableWidth") {
       const std::string text = direction == TextDirection::LeftToRight ? "ab\nabcd" : "אב\nאבגד";
       for (const TextAlign align : {TextAlign::Leading, TextAlign::Center, TextAlign::Trailing}) {
         const TextLayoutOptions options{.shaping = {.direction = direction}, .align = align, .wrap = TextWrap::NoWrap};
-        const auto narrow = renderer.CreateTextLayout(text, style, 160.0F, options);
-        const auto wide = renderer.CreateTextLayout(text, style, 240.0F, options);
+        const auto narrow = renderer.CreatePlatformTextLayout(text, style, 160.0F, options);
+        const auto wide = renderer.CreatePlatformTextLayout(text, style, 240.0F, options);
         const float shift = align == TextAlign::Center ? 40.0F
             : ((align == TextAlign::Trailing) == (direction == TextDirection::LeftToRight) ? 80.0F : 0.0F);
         REQUIRE(narrow->Measure() == wide->Measure());
@@ -264,6 +264,59 @@ TEST_CASE("MacTextLayoutAlignsExplicitNoWrapLinesWithinAvailableWidth") {
   }
 }
 
+TEST_CASE("MacRetainedTextLayoutKeepsEmptyLinesAndWrappedCaretAffinity") {
+  @autoreleasepool {
+    class NativeLayoutPlatform final : public TestPlatform {
+    public:
+      FontMetrics Metrics(const Font& font) override { return renderer_.Metrics(font); }
+      std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+          const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) override {
+        return renderer_.CreatePlatformTextLayout(text, style, width, options);
+      }
+
+    private:
+      detail::AppKitRenderer renderer_;
+    };
+    NativeLayoutPlatform platform;
+    UiWindow window(MacTextFieldApp, platform);
+    const TextStyle style{Font::Monospace(20.0F), Color::Black()};
+    const auto layout = platform.CreateTextLayout(AttributedText("alpha beta\n"), style, 80.0F);
+    const auto lines = layout.Lines();
+    REQUIRE(lines.size() == 3);
+    CAPTURE(lines.back().range.start, lines.back().range.end);
+    REQUIRE(lines.front().range.start == 0);
+    REQUIRE(lines.front().range.end == lines[1].range.start);
+    REQUIRE(lines[1].range.end == 10);
+    REQUIRE(lines.back().range == TextRange{11, 11});
+    const TextOffset wrap = lines[1].range.start;
+    REQUIRE(layout.LineIndex({wrap, TextAffinity::Upstream}) == 0);
+    REQUIRE(layout.LineIndex({wrap, TextAffinity::Downstream}) == 1);
+    REQUIRE(layout.CaretRect({wrap, TextAffinity::Upstream}).y < layout.CaretRect({wrap, TextAffinity::Downstream}).y);
+    const Rect end = layout.CaretRect({11});
+    REQUIRE(end.y == Catch::Approx(lines.back().bounds.y));
+    REQUIRE(layout.CaretRect({11, TextAffinity::Upstream}) == end);
+    REQUIRE(layout.HitTest({end.x, end.y + end.height * 0.5F}).offset == 11);
+    const auto empty = platform.CreateTextLayout(AttributedText{}, style, 80.0F);
+    REQUIRE(empty.Lines().size() == 1);
+    REQUIRE(empty.CaretRect({0}).height > 0.0F);
+
+    for (const std::string separator : {"\n", "\r", "\r\n", "\u2028", "\u2029"}) {
+      CAPTURE(separator);
+      const TextOffset break_length = separator == "\r\n" ? 2 : 1;
+      const auto no_wrap = platform.CreateTextLayout(AttributedText("aa" + separator + "bb" + separator),
+          style, 200.0F, {.wrap = TextWrap::NoWrap});
+      const auto rows = no_wrap.Lines();
+      REQUIRE(rows.size() == 3);
+      REQUIRE(rows[0].range == TextRange{0, 2});
+      REQUIRE(rows[1].range == TextRange{2 + break_length, 4 + break_length});
+      REQUIRE(rows[2].range == TextRange{4 + 2 * break_length, 4 + 2 * break_length});
+      const Rect& first = rows.front().bounds;
+      REQUIRE(no_wrap.HitTest({200.0F, first.y + first.height * 0.5F}).offset == 2);
+      REQUIRE(no_wrap.Metrics().size.height > rows[2].bounds.y);
+    }
+  }
+}
+
 TEST_CASE("MacCustomFontsUseSelectedBytesInMetricsRichTextAndRetainedLayouts") {
   @autoreleasepool {
     auto renderer = std::make_unique<detail::AppKitRenderer>();
@@ -276,7 +329,7 @@ TEST_CASE("MacCustomFontsUseSelectedBytesInMetricsRichTextAndRetainedLayouts") {
     REQUIRE(renderer->MeasureRun("AA", TextStyle{font.WithSlant(FontSlant::Italic), Color::Black()}, {}).advance ==
         Catch::Approx(26.0F));
     const auto paragraph = AttributedText::FromRanges("AA", {{{1, 2}, {.font_weight = FontWeight::Bold}}});
-    auto layout = renderer->CreateTextLayout(paragraph, style, 200.0F, {.wrap = TextWrap::NoWrap});
+    auto layout = renderer->CreatePlatformTextLayout(paragraph, style, 200.0F, {.wrap = TextWrap::NoWrap});
     REQUIRE(layout->Measure().width == Catch::Approx(26.0F));
     REQUIRE(layout->CaretRect(1, TextAffinity::Downstream).x == Catch::Approx(10.0F));
     REQUIRE(layout->CaretRect(2, TextAffinity::Upstream).x == Catch::Approx(26.0F));

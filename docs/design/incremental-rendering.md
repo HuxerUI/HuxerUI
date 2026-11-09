@@ -371,7 +371,7 @@ Paint callbacks are pure:
 - Replaying a cached record has the same visible result as invoking paint again with the same committed inputs.
 
 Geometry preparation that can change state occurs before paint.
-`NodeExtension::PrepareGeometry()` receives a borrowed `TextMeasurer` for synchronously preparing labels and other text-dependent retained geometry; extensions retain only the resulting value metrics.
+`NodeExtension::PrepareGeometry()` receives a borrowed `TextMeasurer` for synchronously preparing labels and other text-dependent geometry. Extensions may retain the returned metrics or immutable layouts on the UI thread.
 It may also convert local geometry through the final resolved transform when publishing a value snapshot to a window-owned boundary such as anchored-layer placement.
 For example, `TextField` resolves text layout, caret geometry, selection geometry, and horizontal scroll adjustment after layout and before paint recording.
 If preparation changes a visual value, it marks the relevant paint record dirty.

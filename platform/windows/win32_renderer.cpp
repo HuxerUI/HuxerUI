@@ -340,7 +340,7 @@ TextDirection ResolveTextDirection(std::wstring_view text, TextDirection request
 
 } // namespace
 
-class Win32TextLayout final : public TextLayout {
+class Win32TextLayout final : public TextLayoutBackend {
 public:
   Win32TextLayout(std::wstring text, ComPtr<IDWriteTextLayout> layout, std::vector<TextOffset> caret_offsets,
       FontRetentions fonts)
@@ -372,6 +372,34 @@ public:
         std::ceil(metrics.widthIncludingTrailingWhitespace),
         std::ceil(metrics.height),
     };
+  }
+
+  std::vector<TextLineMetrics> LineMetrics() const override {
+    DWRITE_TEXT_METRICS paragraph{};
+    ThrowIfFailed(layout_->GetMetrics(&paragraph), "HuxerUI could not measure a DirectWrite text layout");
+    std::vector<DWRITE_LINE_METRICS> lines(paragraph.lineCount);
+    UINT32 count = 0;
+    ThrowIfFailed(layout_->GetLineMetrics(lines.data(), paragraph.lineCount, &count),
+        "HuxerUI could not query DirectWrite line metrics");
+    std::vector<TextLineMetrics> result;
+    result.reserve(count);
+    TextOffset offset = 0;
+    float top = paragraph.top;
+    for (UINT32 index = 0; index < count; ++index) {
+      const DWRITE_LINE_METRICS& line = lines[index];
+      const TextOffset end = offset + line.length - line.newlineLength;
+      const auto fragments = RangeRects({offset, end});
+      float left = fragments.empty() ? CaretRect(offset, TextAffinity::Downstream).x : fragments.front().x;
+      float right = left;
+      for (const Rect& fragment : fragments) {
+        left = std::min(left, fragment.x);
+        right = std::max(right, fragment.x + fragment.width);
+      }
+      result.push_back({{offset, end}, {left, top, right - left, line.height}, top + line.baseline});
+      offset += line.length;
+      top += line.height;
+    }
+    return result;
   }
 
   TextPosition HitTest(Point point) const override {
@@ -717,8 +745,8 @@ struct Win32Renderer::Impl {
     return TextRunFor(text, style, options).metrics;
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style, float max_width,
-      const TextLayoutOptions& options) {
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
     ValidateParagraphLength(text);
     std::wstring wide = Utf8ToWide(text.PlainText());
     FontRetentions fonts;
@@ -2850,9 +2878,9 @@ TextLayoutMetrics Win32Renderer::MeasureText(const AttributedText& text, const T
   return impl_->MeasureText(text, style, max_width, options);
 }
 
-std::unique_ptr<TextLayout> Win32Renderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
-    float max_width, const TextLayoutOptions& options) {
-  return impl_->CreateTextLayout(text, style, max_width, options);
+std::unique_ptr<TextLayoutBackend> Win32Renderer::CreatePlatformTextLayout(
+    const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
+  return impl_->CreatePlatformTextLayout(text, style, max_width, options);
 }
 
 Win32RenderResult Win32Renderer::Render(HWND window, float dpi, const RenderFrame& frame, const RECT& paint_rect) {

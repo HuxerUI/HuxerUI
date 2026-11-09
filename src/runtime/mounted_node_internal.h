@@ -36,7 +36,7 @@ namespace huxerui::detail {
 
 class AppResources;
 class RecomposeScope;
-struct ParagraphLayout;
+struct CachedParagraphLayout;
 class ScrollConnection;
 struct ExecutionContext;
 
@@ -260,7 +260,7 @@ struct MountedNode final : public huxerui::ViewNode {
   std::uint64_t identity = 0;
   std::optional<ViewKey> key;
   AttributedText text;
-  std::shared_ptr<ParagraphLayout> paragraph_layout;
+  std::shared_ptr<CachedParagraphLayout> cached_paragraph_layout;
   ViewProperties properties;
   SemanticPatch component_semantics;
   std::optional<SemanticPatch> author_semantics;

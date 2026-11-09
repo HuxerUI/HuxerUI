@@ -13,7 +13,7 @@ namespace huxerui::detail {
 namespace {
 
 // Scalar cells deliberately do not emulate native shaping, bidi, ligatures, or grapheme navigation.
-class ReferenceTextLayout final : public TextLayout {
+class ReferenceTextLayout final : public TextLayoutBackend {
 public:
   ReferenceTextLayout(std::string_view text, float size, float width, const TextLayoutOptions& options)
       : line_height_(size * 1.25F), ascent_(size), maximum_width_(width) {
@@ -50,6 +50,16 @@ public:
   }
   TextLayoutMetrics Metrics() const {
     return {Measure(), ascent_, ascent_ + line_height_ * static_cast<float>(lines_.size() - 1), lines_.size()};
+  }
+  std::vector<TextLineMetrics> LineMetrics() const override {
+    std::vector<TextLineMetrics> result;
+    result.reserve(lines_.size());
+    for (const auto& line : lines_) {
+      const float y = static_cast<float>(result.size()) * line_height_;
+      result.push_back({{line.points.front().offset, line.points.back().offset + (line.hard_break ? 1 : 0)},
+                        {0, y, line.points.back().x, line_height_}, y + ascent_});
+    }
+    return result;
   }
   TextPosition HitTest(Point point) const override {
     const auto index = static_cast<std::size_t>(std::clamp(std::floor(point.y / line_height_),
@@ -164,8 +174,8 @@ TextLayoutMetrics TestingWindow::MeasureText(const AttributedText& text, const T
   return ReferenceTextLayout(text.PlainText(), style.font.Size(), width, options).Metrics();
 }
 
-std::unique_ptr<TextLayout> TestingWindow::CreateTextLayout(const AttributedText& text, const TextStyle& style,
-                                                                  float width, const TextLayoutOptions& options) {
+std::unique_ptr<TextLayoutBackend> TestingWindow::CreatePlatformTextLayout(
+    const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) {
   return std::make_unique<ReferenceTextLayout>(text.PlainText(), style.font.Size(), width, options);
 }
 

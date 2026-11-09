@@ -10,7 +10,7 @@
 
 namespace huxerui::detail {
 
-class TextLayout;
+class TextLayoutBackend;
 
 // Records the platform-neutral scene into GTK Snapshot nodes, using Cairo nodes
 // for ordinary drawing and texture nodes for GPU-backed external frames.
@@ -34,12 +34,12 @@ public:
   MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options);
   [[nodiscard]] TextLayoutMetrics
   MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(std::string_view text, const TextStyle& style,
-      float max_width, const TextLayoutOptions& options = {});
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
   [[nodiscard]] TextLayoutMetrics
   MeasureText(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
-      float max_width, const TextLayoutOptions& options);
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
 
   void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame);
 

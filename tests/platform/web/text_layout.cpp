@@ -33,7 +33,7 @@ TEST_CASE("WebParagraphPreservesHardBreakOffsets") {
     const AttributedText text("ab" + separator + "cd");
     const auto metrics = renderer.MeasureText(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
     REQUIRE(metrics.line_count == 2);
-    const auto layout = renderer.CreateTextLayout(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
+    const auto layout = renderer.CreatePlatformTextLayout(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
     const TextOffset second_start = 2 + static_cast<TextOffset>(separator.size());
     const Rect second = layout->CaretRect(second_start, TextAffinity::Downstream);
     REQUIRE(second.y > 0.0F);
@@ -63,7 +63,7 @@ TEST_CASE("WebParagraphMeasurementConstrainsWidthWithoutChangingNaturalGeometry"
       CAPTURE(wrap, width);
       const TextLayoutOptions options{.wrap = wrap};
       const auto metrics = renderer.MeasureText(text, style, width, options);
-      const auto layout = renderer.CreateTextLayout(text, style, width, options);
+      const auto layout = renderer.CreatePlatformTextLayout(text, style, width, options);
       REQUIRE(metrics.size.width <= width);
       REQUIRE(metrics.size.height == layout->Measure().height);
       if (wrap == TextWrap::NoWrap) {
@@ -89,8 +89,8 @@ TEST_CASE("WebParagraphMeasurementConstrainsWidthWithoutChangingNaturalGeometry"
 TEST_CASE("WebParagraphReusesWrapMeasurementsForCaretGeometry") {
   const auto canvas = TextTestCanvas();
   detail::WebRenderer renderer(0, canvas);
-  const auto layout = renderer.CreateTextLayout(AttributedText("abcdef"), {Font::Monospace(10.0F), Color::Black()},
-      35.0F, {});
+  const auto layout = renderer.CreatePlatformTextLayout(
+      AttributedText("abcdef"), {Font::Monospace(10.0F), Color::Black()}, 35.0F, {});
   REQUIRE(layout->Measure().height > 12.0F);
   const auto calls = emscripten::vecFromJSArray<std::string>(canvas["context"]["calls"]);
   for (const std::string prefix : {"a", "ab", "abc", "d", "de", "def"}) {
@@ -125,11 +125,11 @@ TEST_CASE("WebCustomFontReadinessRebuildsCachedParagraphAndCaretGeometry") {
   detail::WebRenderer renderer(0, canvas);
   const TextStyle style{Font::FromBytes(huxerui::test::TestFontBytes(), 20.0F), Color::Black()};
   const AttributedText text("AA");
-  const auto before = renderer.CreateTextLayout(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
+  const auto before = renderer.CreatePlatformTextLayout(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(before->CaretRect(2, TextAffinity::Upstream).x == 20.0F);
   EM_ASM({ Module.fontTestComplete(); });
   renderer.InvalidateTextMetrics();
-  const auto after = renderer.CreateTextLayout(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
+  const auto after = renderer.CreatePlatformTextLayout(text, style, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(renderer.MeasureText(text, style, 200.0F).size.width == 40.0F);
   REQUIRE(after->CaretRect(2, TextAffinity::Upstream).x == 40.0F);
   REQUIRE(after->HitTest({30.0F, 5.0F}).offset == 2);

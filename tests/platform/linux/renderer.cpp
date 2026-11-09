@@ -339,13 +339,13 @@ TEST_CASE("LinuxTextLayoutHonorsExplicitDirection") {
   renderer.Initialize();
 
   const TextStyle style{Font::System(14.0F), Color::Black()};
-  const std::unique_ptr<detail::TextLayout> left_to_right = renderer.CreateTextLayout(
+  const std::unique_ptr<detail::TextLayoutBackend> left_to_right = renderer.CreatePlatformTextLayout(
       "abc",
       style,
       200.0F,
       {.shaping = {.direction = TextDirection::LeftToRight}, .wrap = TextWrap::NoWrap}
   );
-  const std::unique_ptr<detail::TextLayout> right_to_left = renderer.CreateTextLayout(
+  const std::unique_ptr<detail::TextLayoutBackend> right_to_left = renderer.CreatePlatformTextLayout(
       "abc",
       style,
       200.0F,
@@ -365,8 +365,8 @@ TEST_CASE("LinuxTextLayoutReturnsDisjointRangesForMixedDirectionText") {
   renderer.Initialize();
 
   const TextStyle style{Font::System(14.0F), Color::Black()};
-  const std::unique_ptr<detail::TextLayout> layout =
-      renderer.CreateTextLayout("abc \u05D0\u05D1\u05D2 def", style, 300.0F, {.wrap = TextWrap::NoWrap});
+  const std::unique_ptr<detail::TextLayoutBackend> layout =
+      renderer.CreatePlatformTextLayout("abc \u05D0\u05D1\u05D2 def", style, 300.0F, {.wrap = TextWrap::NoWrap});
   const std::vector<Rect> rects = layout->RangeRects({1, 6});
 
   REQUIRE(rects.size() == 2);
@@ -385,8 +385,8 @@ TEST_CASE("LinuxWordWrappingPreservesUtf8ScalarBoundaries") {
   const TextLayoutMetrics metrics =
       renderer.MeasureText("\u4E16\u754C", style, character_width + 0.1F, {.wrap = TextWrap::Word});
   REQUIRE(metrics.line_count == 2);
-  const std::unique_ptr<detail::TextLayout> layout =
-      renderer.CreateTextLayout("\u4E16\u754C", style, character_width + 0.1F, {.wrap = TextWrap::Word});
+  const std::unique_ptr<detail::TextLayoutBackend> layout =
+      renderer.CreatePlatformTextLayout("\u4E16\u754C", style, character_width + 0.1F, {.wrap = TextWrap::Word});
   REQUIRE(layout->NextCaretOffset(0) == 1);
   REQUIRE(layout->NextCaretOffset(1) == 2);
   renderer.Discard();
@@ -469,8 +469,8 @@ TEST_CASE("LinuxTextLayoutCaretOffsetsSkipSurrogatePairs") {
 
   const TextStyle style{Font::System(14.0F), Color::Black()};
   // "A" (1 UTF-16 unit), emoji (2 units), "B" (1 unit); offsets are UTF-16 units.
-  const std::unique_ptr<detail::TextLayout> layout =
-      renderer.CreateTextLayout("A\U0001F600B", style, 200.0F, {.wrap = TextWrap::NoWrap});
+  const std::unique_ptr<detail::TextLayoutBackend> layout =
+      renderer.CreatePlatformTextLayout("A\U0001F600B", style, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(layout != nullptr);
   REQUIRE(layout->Measure().width > 0.0F);
 
@@ -495,8 +495,8 @@ TEST_CASE("LinuxTextLayoutCaretOffsetsCrossMultibyteCjk") {
 
   const TextStyle style{Font::System(14.0F), Color::Black()};
   // Each CJK character occupies 3 UTF-8 bytes but 1 UTF-16 unit.
-  const std::unique_ptr<detail::TextLayout> layout =
-      renderer.CreateTextLayout("A\u4E16B", style, 200.0F, {.wrap = TextWrap::NoWrap});
+  const std::unique_ptr<detail::TextLayoutBackend> layout =
+      renderer.CreatePlatformTextLayout("A\u4E16B", style, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(layout != nullptr);
   REQUIRE(layout->Measure().width > 0.0F);
 
@@ -519,8 +519,8 @@ TEST_CASE("LinuxTextLayoutHitTestStaysWithinUtf16Length") {
   renderer.Initialize();
 
   const TextStyle style{Font::System(14.0F), Color::Black()};
-  const std::unique_ptr<detail::TextLayout> layout =
-      renderer.CreateTextLayout("hello \U0001F600 world", style, 400.0F, {.wrap = TextWrap::NoWrap});
+  const std::unique_ptr<detail::TextLayoutBackend> layout =
+      renderer.CreatePlatformTextLayout("hello \U0001F600 world", style, 400.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(layout != nullptr);
 
   const float width = layout->Measure().width;
@@ -548,11 +548,11 @@ TEST_CASE("LinuxShapeRunCacheReturnsIdenticalResults") {
   const TextRunMetrics second = renderer.MeasureRun("Hello", style, {});
   REQUIRE(second.advance == first.advance);
 
-  const std::unique_ptr<detail::TextLayout> layout =
-      renderer.CreateTextLayout("Hello World", style, 200.0F, {.wrap = TextWrap::NoWrap});
+  const std::unique_ptr<detail::TextLayoutBackend> layout =
+      renderer.CreatePlatformTextLayout("Hello World", style, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(layout != nullptr);
-  const std::unique_ptr<detail::TextLayout> repeated =
-      renderer.CreateTextLayout("Hello World", style, 200.0F, {.wrap = TextWrap::NoWrap});
+  const std::unique_ptr<detail::TextLayoutBackend> repeated =
+      renderer.CreatePlatformTextLayout("Hello World", style, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(repeated != nullptr);
   REQUIRE(repeated->Measure() == layout->Measure());
   renderer.Discard();
@@ -656,18 +656,18 @@ TEST_CASE("LinuxAttributedParagraphKeepsMixedFontAndRangeGeometryAligned") {
   };
   const auto metrics = renderer.MeasureText(text, style, 300.0F, {});
   const auto plain = renderer.MeasureText(text.PlainText(), style, 300.0F, {});
-  const auto layout = renderer.CreateTextLayout(text, style, 300.0F, {.align = TextAlign::Center});
+  const auto layout = renderer.CreatePlatformTextLayout(text, style, 300.0F, {.align = TextAlign::Center});
   REQUIRE(metrics.size.height > plain.size.height);
   REQUIRE(layout->Measure().height == metrics.size.height);
   const auto rects = layout->RangeRects({0, text.Length()});
   REQUIRE_FALSE(rects.empty());
   const auto caret = layout->CaretRect(0, TextAffinity::Downstream);
   REQUIRE(std::abs(rects.front().x - caret.x) < 1.0F);
-  const auto combining = renderer.CreateTextLayout(
+  const auto combining = renderer.CreatePlatformTextLayout(
       AttributedText::FromRanges("a\u0301b", {{{1, 2}, {.font_size = 24.0F}}}), style, 200.0F, {});
   REQUIRE(combining->NextCaretOffset(0) == 2);
   REQUIRE(combining->PreviousCaretOffset(2) == 0);
-  const auto bidi = renderer.CreateTextLayout(AttributedText("abc \u05D0\u05D1\u05D2 xyz"), style, 300.0F, {});
+  const auto bidi = renderer.CreatePlatformTextLayout(AttributedText("abc \u05D0\u05D1\u05D2 xyz"), style, 300.0F, {});
   REQUIRE(bidi->RangeRects({2, 5}).size() >= 2);
 }
 
@@ -678,7 +678,7 @@ TEST_CASE("LinuxTextLayoutPreservesAffinityAtSoftWraps") {
   for (const TextDirection direction : {TextDirection::LeftToRight, TextDirection::RightToLeft}) {
     const std::string text = direction == TextDirection::LeftToRight ? "abcdefghijklm" : "אבגדהוזחטיכלמ";
     for (const TextAlign align : {TextAlign::Leading, TextAlign::Center, TextAlign::Trailing}) {
-      const auto layout = renderer.CreateTextLayout(text, style, 62.0F,
+      const auto layout = renderer.CreatePlatformTextLayout(text, style, 62.0F,
           {.shaping = {.direction = direction}, .align = align});
       TextOffset boundary = 1;
       while (boundary < 13 &&
@@ -708,7 +708,7 @@ TEST_CASE("LinuxTextLayoutDoesNotMoveBackAcrossExplicitLineBreaks") {
   renderer.Initialize();
   const TextStyle style{Font::Monospace(20.0F), Color::Black()};
   for (const std::string separator : {"\n", "\r\n", "\r"}) {
-    const auto layout = renderer.CreateTextLayout("abc" + separator + "xyz", style, 200.0F);
+    const auto layout = renderer.CreatePlatformTextLayout("abc" + separator + "xyz", style, 200.0F);
     const TextOffset offset = 3 + static_cast<TextOffset>(separator.size());
     const Rect before = layout->CaretRect(offset, TextAffinity::Upstream);
     const Rect after = layout->CaretRect(offset, TextAffinity::Downstream);
@@ -723,7 +723,8 @@ TEST_CASE("LinuxTextLayoutCaretHitTestingPreservesAlignedBidiGeometry") {
   const TextStyle style{Font::Monospace(20.0F), Color::Black()};
   const std::string text = "abc אבג xyz";
   for (const TextAlign align : {TextAlign::Leading, TextAlign::Center, TextAlign::Trailing}) {
-    const auto layout = renderer.CreateTextLayout(text, style, 300.0F, {.align = align, .wrap = TextWrap::NoWrap});
+    const auto layout = renderer.CreatePlatformTextLayout(
+        text, style, 300.0F, {.align = align, .wrap = TextWrap::NoWrap});
     for (TextOffset offset = 0; offset <= 11; ++offset) {
       for (const TextAffinity affinity : {TextAffinity::Upstream, TextAffinity::Downstream}) {
         const Rect caret = layout->CaretRect(offset, affinity);
@@ -827,7 +828,7 @@ TEST_CASE("LinuxTextDpiScalesEveryFontKindAndRefreshesCachedParagraphs") {
     const TextStyle style{font, Color::Black()};
     const TextLayoutOptions options{.wrap = TextWrap::NoWrap};
     const auto initial = renderer.MeasureText("AA", style, 200.0F, options);
-    const auto retained = renderer.CreateTextLayout("AA", style, 200.0F, options);
+    const auto retained = renderer.CreatePlatformTextLayout("AA", style, 200.0F, options);
     const auto original_caret = retained->CaretRect(2, TextAffinity::Upstream);
 
     for (const double dpi : {144.0, 96.0, 72.0}) {
@@ -840,8 +841,8 @@ TEST_CASE("LinuxTextDpiScalesEveryFontKindAndRefreshesCachedParagraphs") {
       REQUIRE(renderer.MeasureRun("AA", style, {}).advance ==
           Catch::Approx(reference.MeasureRun("AA", expected, {}).advance));
       REQUIRE(renderer.Metrics(font).ascent == Catch::Approx(reference.Metrics(expected.font).ascent));
-      const auto layout = renderer.CreateTextLayout("AA", style, 200.0F, options);
-      const auto expected_layout = reference.CreateTextLayout("AA", expected, 200.0F, options);
+      const auto layout = renderer.CreatePlatformTextLayout("AA", style, 200.0F, options);
+      const auto expected_layout = reference.CreatePlatformTextLayout("AA", expected, 200.0F, options);
       REQUIRE(layout->Measure() == expected_layout->Measure());
       REQUIRE(layout->CaretRect(2, TextAffinity::Upstream) ==
           expected_layout->CaretRect(2, TextAffinity::Upstream));
@@ -870,11 +871,11 @@ TEST_CASE("LinuxTextDpiKeepsAttributedMeasurementCaretAndPaintAlignedAtDeviceSca
   const auto expected =
       AttributedText::FromRanges("AA", {{{1, 2}, {.font_size = 45.0F, .font_weight = FontWeight::Bold}}});
   const TextLayoutOptions options{.wrap = TextWrap::NoWrap};
-  const auto retained = renderer.CreateTextLayout(rich, style, 160.0F, options);
+  const auto retained = renderer.CreatePlatformTextLayout(rich, style, 160.0F, options);
   const auto original_size = retained->Measure();
   REQUIRE(renderer.UpdateTextDpi(144.0));
-  const auto layout = renderer.CreateTextLayout(rich, style, 160.0F, options);
-  const auto expected_layout = reference.CreateTextLayout(expected, expected_style, 160.0F, options);
+  const auto layout = renderer.CreatePlatformTextLayout(rich, style, 160.0F, options);
+  const auto expected_layout = reference.CreatePlatformTextLayout(expected, expected_style, 160.0F, options);
   REQUIRE(renderer.MeasureText(rich, style, 160.0F, options).size == expected_layout->Measure());
   REQUIRE(layout->Measure() == expected_layout->Measure());
   REQUIRE(layout->CaretRect(2, TextAffinity::Upstream).x == Catch::Approx(51.0F));
@@ -916,7 +917,7 @@ TEST_CASE("LinuxCustomFontsKeepExactFaceAndPrivateMapAcrossRendererDiscard") {
   REQUIRE(renderer.MeasureRun("AA", regular, {}).advance == Catch::Approx(20.0F));
   REQUIRE(renderer.MeasureRun("AA", {font.WithWeight(FontWeight::Bold), Color::Black()}, {}).advance == Catch::Approx(32.0F));
   const auto rich = AttributedText::FromRanges("AA", {{{1, 2}, {.font_weight = FontWeight::Bold}}});
-  auto layout = renderer.CreateTextLayout(rich, regular, 200.0F, {.wrap = TextWrap::NoWrap});
+  auto layout = renderer.CreatePlatformTextLayout(rich, regular, 200.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(layout->CaretRect(2, TextAffinity::Upstream).x == Catch::Approx(26.0F));
   renderer.Discard();
   REQUIRE(layout->Measure().width == Catch::Approx(26.0F));

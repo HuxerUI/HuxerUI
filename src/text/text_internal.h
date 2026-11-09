@@ -88,20 +88,21 @@ std::size_t ParagraphCacheCost(const AttributedText& text) noexcept;
 
 // Geometry is paragraph-local in logical pixels; callers apply vertical placement and presentation transforms.
 // Offsets remain UTF-16 positions, and range geometry may contain disjoint visual fragments for one logical range.
-class TextLayout {
+class TextLayoutBackend {
 public:
-  virtual ~TextLayout() = default;
+  virtual ~TextLayoutBackend() = default;
 
-  [[nodiscard]] virtual Size Measure() const = 0;
-  [[nodiscard]] virtual TextPosition HitTest(Point point) const = 0;
-  [[nodiscard]] virtual Rect CaretRect(TextOffset offset, TextAffinity affinity) const = 0;
-  [[nodiscard]] virtual std::vector<Rect> RangeRects(TextRange range) const = 0;
-  [[nodiscard]] virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
-  [[nodiscard]] virtual TextOffset NextCaretOffset(TextOffset offset) const = 0;
+  virtual Size Measure() const = 0;
+  virtual std::vector<TextLineMetrics> LineMetrics() const { return {}; }
+  virtual TextPosition HitTest(Point point) const = 0;
+  virtual Rect CaretRect(TextOffset offset, TextAffinity affinity) const = 0;
+  virtual std::vector<Rect> RangeRects(TextRange range) const = 0;
+  virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
+  virtual TextOffset NextCaretOffset(TextOffset offset) const = 0;
 };
 
 // These inputs describe shaping geometry, not the foreground colors or link targets of the latest declaration.
-struct ParagraphLayout {
+struct CachedParagraphLayout {
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   std::uint64_t revision = 0;
 #endif
@@ -109,10 +110,26 @@ struct ParagraphLayout {
   Font font;
   TextLayoutOptions options;
   float width = 0.0F;
-  std::shared_ptr<TextLayout> layout;
+  std::shared_ptr<TextLayoutBackend> layout;
 };
 
 // A mounted paragraph shares its shaping geometry between selection and links, never through a global text cache.
-std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_window);
+std::shared_ptr<TextLayoutBackend> GetParagraphLayout(MountedNode& node, UiWindow& ui_window);
 
 } // namespace huxerui::detail
+
+namespace huxerui {
+
+struct TextLayout::Data {
+  AttributedText text;
+  TextStyle style;
+  TextLayoutOptions options;
+  float width = 0.0F;
+  TextLayoutMetrics metrics;
+  std::vector<TextLineMetrics> lines;
+  std::unique_ptr<detail::TextLayoutBackend> backend;
+  bool synthesized_last_line = false;
+  std::size_t cache_cost = 0;
+};
+
+} // namespace huxerui

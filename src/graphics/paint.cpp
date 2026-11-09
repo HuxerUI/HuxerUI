@@ -14,6 +14,7 @@
 #include "path_internal.h"
 #include "shadow_internal.h"
 #include "internal_access.h"
+#include "text/text_internal.h"
 
 namespace huxerui {
 namespace {
@@ -309,6 +310,17 @@ void PaintContext::DrawText(Rect rect, AttributedText text, TextStyle style, Tex
   sequence_.commands_.emplace_back(
       DrawTextCommand{rect, std::move(text), std::move(style), std::move(options), paragraph_offset}
   );
+  Include(rect);
+}
+
+void PaintContext::DrawText(Point origin, const TextLayout& layout) {
+  RequireOpen();
+  const auto& data = *layout.data_;
+  const Rect rect{origin.x, origin.y, data.width, data.metrics.size.height};
+  RequireRect(rect);
+  RequireTextStyle(data.style);
+  // The retained layout already resolved shaping. Do not inherit the Canvas locale here.
+  sequence_.commands_.emplace_back(DrawTextCommand{rect, data.text, data.style, data.options, {}});
   Include(rect);
 }
 

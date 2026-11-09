@@ -262,7 +262,7 @@ View ShapingUnrelatedContent() {
 
 View ExplicitTextMeasurerContent() {
   ++text_measurer_shaping_compositions;
-  HUXERUI_DISCARD(UseTextMeasurer().MeasureText("explicit measurer", TextStyle::Default()));
+  UseTextMeasurer().MeasureText("explicit measurer", TextStyle::Default());
   return Spacer();
 }
 

@@ -59,6 +59,22 @@ final class HuxerUITextLayout {
         };
     }
 
+    private double[] lineMetrics() {
+        int count = layout.getLineCount();
+        double[] result = new double[count * 7];
+        for (int line = 0; line < count; ++line) {
+            int slot = line * 7;
+            result[slot] = layout.getLineStart(line);
+            result[slot + 1] = layout.getLineEnd(line);
+            result[slot + 2] = horizontalOffset + layout.getLineLeft(line);
+            result[slot + 3] = layout.getLineTop(line);
+            result[slot + 4] = layout.getLineWidth(line);
+            result[slot + 5] = layout.getLineBottom(line) - layout.getLineTop(line);
+            result[slot + 6] = layout.getLineBaseline(line);
+        }
+        return result;
+    }
+
     private long hitTest(float x, float y) {
         int line = layout.getLineForVertical((int) Math.max(0.0F, y));
         int offset = layout.getOffsetForHorizontal(line, x - horizontalOffset);

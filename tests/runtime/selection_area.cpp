@@ -418,10 +418,11 @@ TEST_CASE("TestSelectionAreaCopiesLogicalBlocksWithoutRealizingOffscreenViews") 
 TEST_CASE("TestSelectionAreaRetainsLayoutsWhenOnlyTheTailOrPresentationChanges") {
   class CountingPlatform final : public TestPlatform {
   public:
-    std::unique_ptr<detail::TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+    std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+        const huxerui::AttributedText& text, const TextStyle& style,
         float width, const TextLayoutOptions& options) override {
       ++layouts;
-      return TestPlatform::CreateTextLayout(text, style, width, options);
+      return TestPlatform::CreatePlatformTextLayout(text, style, width, options);
     }
     int layouts = 0;
   } platform;

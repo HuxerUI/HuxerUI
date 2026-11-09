@@ -1412,8 +1412,9 @@ public:
     };
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style, float max_width,
-      const TextLayoutOptions& options = {}) override {
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style,
+      float max_width, const TextLayoutOptions& options = {}) override {
     JNIEnv* environment = Environment();
     if (environment == nullptr || view_ == nullptr) {
       return {};
@@ -1453,7 +1454,7 @@ public:
     if (layout == nullptr) {
       return {};
     }
-    std::unique_ptr<TextLayout> result = CreateAndroidTextLayout(virtual_machine_, environment, layout);
+    std::unique_ptr<TextLayoutBackend> result = CreateAndroidTextLayout(virtual_machine_, environment, layout);
     environment->DeleteLocalRef(layout);
     return result;
   }

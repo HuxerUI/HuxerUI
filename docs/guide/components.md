@@ -85,6 +85,14 @@ Controlled text, selection, and focus survive that update.
 On Web and Linux, `UseTextMeasurer()` subscribes composition to font readiness and text DPI changes respectively; remeasure during recomposition to update geometry derived from its results.
 Previously returned measurements remain snapshots and do not update themselves.
 
+### Custom text layout
+
+Use `UseTextMeasurer().CreateTextLayout(text, style, width, options)` when drawing and interaction need the same paragraph geometry. Keep the resulting `TextLayout` on the UI thread and recreate it during composition or `NodeExtension::PrepareGeometry()` when its inputs change. Pass the effective shaping locale explicitly when the editor should inherit it.
+
+`Lines()`, `HitTest()`, `CaretRect()`, and `RangeRects()` use coordinates relative to the paragraph origin and UTF-16 text offsets. `LineIndex()` uses caret affinity at soft wraps, and `PreviousCaretOffset()` and `NextCaretOffset()` step through logical caret boundaries. Pass the layout to `PaintContext::DrawText(origin, layout)` and use the same origin to translate pointer and selection geometry.
+
+The [custom editor example](../../examples/custom_editor/main.cpp) lays out rich paragraphs around a drawn block using public APIs. Its scrollable toolbar includes character styles, a size menu, text color and highlight palettes, rounded inline code backgrounds, and a clear formatting action. It applies styles to selections across paragraphs, shares undo and redo across text and formatting edits, and uses a single `TextInputClient` session for the whole document.
+
 ### Selection and virtualized text
 
 Wrap ordinary content in `SelectionArea` to select across descendant Text nodes. Nested areas are independent; copied paragraphs are separated by newlines. Static content supports Copy and Select All but never starts an IME session. Mouse dragging, double-click, Shift-click, touch long press, and selection handles use retained geometry.

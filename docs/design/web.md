@@ -155,15 +155,15 @@ The Web `example_platform_module` creates an unattached Canvas, wraps its genera
 
 ## Text layout and drawing
 
-WebTextLayout implements the existing synchronous TextLayout contract and uses UTF-16 offsets, matching browser string and selection coordinates.
+WebTextLayout implements the private synchronous TextLayoutBackend contract and uses UTF-16 offsets, matching browser string and selection coordinates.
 
 Each WebRenderer owns one Canvas measurement context rather than a DOM element for every HuxerUI Text node. Canvas TextMetrics supplies font metrics, advances, baselines, and painted bounds.
 
 Creating a WebTextLayout materializes an immutable C++ snapshot containing measured size, baselines, line records, grapheme caret boundaries from `Intl.Segmenter`, and measured caret advances. Hit testing, caret lookup, and range geometry query that snapshot without returning to Canvas.
 
-Paragraph drawing uses a renderer-owned WebTextLayout cache bounded by 256 entries and an estimated eight-megabyte retention budget. Its geometry key contains the text body, effective font ranges, layout options, and logical width; paint-only style and link changes reuse that geometry. Measurement and layouts returned through `CreateTextLayout()` are independently owned so secure source text never enters this cache.
+Paragraph drawing uses a renderer-owned WebTextLayout cache bounded by 256 entries and an estimated eight-megabyte retention budget. Its geometry key contains the text body, effective font ranges, layout options, and logical width. Paint-only style and link changes reuse that geometry. The public layout cache belongs to the UiWindow, and secure editing constructs its geometry through the uncached platform hook.
 
-Drawing uses the same resolved CSS font description, direction, locale, alignment, wrapping decisions, and line records as measurement. The generated example entry waits for `document.fonts.ready` before mounting; direct integrations must do the same after loading application fonts. Runtime font-generation invalidation is not implemented by the Web backend.
+Drawing uses the same resolved CSS font description, direction, locale, alignment, wrapping decisions, and line records as measurement. When runtime custom fonts become ready, the window invalidates its text caches and recomputes composition-derived and mounted text geometry.
 
 Attributed paragraphs use one fallback layout with per-line mixed-font metrics, shared caret advances, range backgrounds, and text decorations. Styles do not create separate Views. The backend resolves paragraph direction from the first strong character and supports whole-paragraph left-to-right or right-to-left placement, links, and basic selection.
 

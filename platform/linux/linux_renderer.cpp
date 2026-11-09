@@ -362,7 +362,7 @@ TextLayoutMetrics LayoutMetrics(PangoLayout* layout) {
   return result;
 }
 
-class PangoTextLayout final : public TextLayout {
+class PangoTextLayout final : public TextLayoutBackend {
 public:
   PangoTextLayout(PangoContext* context, const AttributedText& text, const TextStyle& style, float max_width,
       const TextLayoutOptions& options)
@@ -392,6 +392,36 @@ public:
 
   const TextLayoutMetrics& MetricsValue() const noexcept {
     return metrics_;
+  }
+
+  std::vector<TextLineMetrics> LineMetrics() const override {
+    std::vector<TextLineMetrics> result;
+    result.reserve(metrics_.line_count);
+    PangoLayoutIter* iterator = pango_layout_get_iter(layout_);
+    const char* current = text_.data();
+    TextOffset offset = 0;
+    // Pango's line indices advance in byte order, so visit each scalar only once.
+    const auto advance_to = [&](int byte) {
+      while (current < text_.data() + byte) {
+        offset += g_utf8_get_char(current) > 0xFFFFU ? 2 : 1;
+        current = g_utf8_next_char(current);
+      }
+      return offset;
+    };
+    do {
+      const PangoLayoutLine* line = pango_layout_iter_get_line_readonly(iterator);
+      PangoRectangle bounds{};
+      pango_layout_iter_get_line_extents(iterator, nullptr, &bounds);
+      const TextOffset start = advance_to(line->start_index);
+      const TextOffset end = advance_to(line->start_index + line->length);
+      result.push_back({
+          {start, end},
+          {PangoUnits(bounds.x), PangoUnits(bounds.y), PangoUnits(bounds.width), PangoUnits(bounds.height)},
+          PangoUnits(pango_layout_iter_get_baseline(iterator)),
+      });
+    } while (pango_layout_iter_next_line(iterator));
+    pango_layout_iter_free(iterator);
+    return result;
   }
 
   TextPosition HitTest(Point point) const override {
@@ -1989,9 +2019,9 @@ TextLayoutMetrics LinuxRenderer::MeasureText(std::string_view text, const TextSt
   return MeasureText(AttributedText(std::string(text)), style, max_width, options);
 }
 
-std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(std::string_view text, const TextStyle& style,
-    float max_width, const TextLayoutOptions& options) {
-  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+std::unique_ptr<TextLayoutBackend> LinuxRenderer::CreatePlatformTextLayout(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
+  return CreatePlatformTextLayout(AttributedText(std::string(text)), style, max_width, options);
 }
 
 TextLayoutMetrics LinuxRenderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
@@ -2006,8 +2036,8 @@ TextLayoutMetrics LinuxRenderer::MeasureText(const AttributedText& text, const T
   return metrics;
 }
 
-std::unique_ptr<TextLayout> LinuxRenderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
-    float max_width, const TextLayoutOptions& options) {
+std::unique_ptr<TextLayoutBackend> LinuxRenderer::CreatePlatformTextLayout(
+    const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
   return std::make_unique<PangoTextLayout>(impl_->context, text, style, max_width, options);
 }
 

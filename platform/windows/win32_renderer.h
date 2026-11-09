@@ -11,7 +11,7 @@
 
 namespace huxerui::detail {
 
-class TextLayout;
+class TextLayoutBackend;
 
 enum class Win32RenderResult {
   Presented,
@@ -41,8 +41,8 @@ public:
   MeasureText(std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
   [[nodiscard]] TextLayoutMetrics
   MeasureText(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
-  [[nodiscard]] std::unique_ptr<TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
-      float max_width, const TextLayoutOptions& options);
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
   [[nodiscard]] Win32RenderResult Render(HWND window, float dpi, const RenderFrame& frame, const RECT& paint_rect);
 
 private:

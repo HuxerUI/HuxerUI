@@ -97,6 +97,7 @@ TextMeasurer remains stateless and explicit: custom composition code reads `Loca
 FontMetrics font_metrics = measurer.Metrics(style.font);
 TextRunMetrics run = measurer.MeasureRun(text, style, shaping);
 TextLayoutMetrics paragraph = measurer.MeasureText(text, style, max_width, options);
+TextLayout layout = measurer.CreateTextLayout(text, style, width, options);
 ```
 
 `FontMetrics` describes one resolved font.
@@ -104,8 +105,7 @@ TextLayoutMetrics paragraph = measurer.MeasureText(text, style, max_width, optio
 An exact run does not contain line breaks; line ownership remains with the caller.
 Its bounds use a baseline origin at `(0, 0)`, so ascent occupies negative y coordinates.
 `TextLayoutMetrics` contains the paragraph size, first and last baseline, and line count.
-It intentionally does not expose per-line geometry; editable controls and editor components retain their own line model
-when hit testing, selection, or individual line metrics are required.
+`TextLayout` also exposes visual lines, affinity-aware caret and hit-test geometry, visual range fragments, and logical caret navigation. It uses a finite positive width, with an empty line for empty content and after a trailing hard break. Visual line ranges exclude hard breaks. Geometry uses paragraph-local logical coordinates and UTF-16 offsets.
 
 `TextWrap::NoWrap` disables automatic wrapping but preserves explicit line breaks in the source text.
 A finite `max_width` still constrains the reported paragraph width; it does not change the natural line geometry retained by an editable layout.
@@ -117,7 +117,7 @@ Components can obtain it with `UseTextMeasurer()` without depending on native pl
 Built-in layout and editing code use the same service contract directly through the host boundary.
 `TextMeasurer` calls occur synchronously on the Runtime and platform host thread.
 `NodeExtension::PrepareGeometry()` receives the same active measurer after final presentation geometry is resolved.
-Callers may retain returned value metrics, but they must not retain the service reference beyond the active composition, layout, or geometry-preparation operation.
+Callers may retain returned metrics and layout snapshots on the UI thread. The service reference belongs to the active composition, layout, or geometry-preparation operation.
 
 Measurement results are authoritative geometry.
 A caller that positions exact runs translates the returned run bounds to its chosen baseline and records both values.
@@ -146,6 +146,8 @@ When an unwrapped line is wider than the rectangle, Center and semantic trailing
 `DrawTextCommand::paragraph_offset` applies a post-layout translation inside that fixed rectangle.
 It does not affect paragraph measurement, alignment, cache identity, or clipping, and lets a scrolling editor keep retained text geometry and rendered text in the same coordinate system.
 This path serves Text, buttons, labels, validation text, and other ordinary UI paragraphs.
+
+`DrawText(origin, layout)` records the same command with the layout's text, width, style, and shaping inputs, including its locale. The supplied origin places the top of the paragraph. The draw command clips to the width and measured height. Interaction geometry remains paragraph-local and unclipped.
 
 `DrawTextRun()` is the exact baseline-positioned operation:
 
@@ -199,11 +201,11 @@ Secure TextField source text must not be retained in a global text or paragraph 
 ## TextField and selection
 
 TextField uses complete TextStyle values for editable text, placeholder text, and validation text.
-The platform TextLayout created for editing supplies hit testing, caret rectangles, selection rectangles, and grapheme movement from the same style and layout options used to paint the field.
-TextField applies horizontal alignment through that retained TextLayout and derives value, placeholder, caret, selection, hit-test, and IME geometry from one aligned origin.
+The platform `TextLayoutBackend` created for editing supplies hit testing, caret rectangles, selection rectangles, and grapheme movement from the same style and layout options used to paint the field.
+TextField applies horizontal alignment through that retained backend and derives value, placeholder, caret, selection, hit-test, and IME geometry from one aligned origin.
 Single-line fields vertically center editable content by default, while multiline fields default to top alignment; an explicit TextField vertical alignment overrides that adaptive default.
 Floating labels, icons, and supporting messages retain their own component geometry and are not moved by editable-text alignment.
-IME geometry therefore derives from the committed TextLayout and the node's local-to-host transform rather than from a renderer-side measurement.
+IME geometry derives from the committed layout and the node's local-to-host transform.
 
 Selection overlays remain Runtime-owned RenderNodes.
 Their labels use paragraph text commands and Theme-resolved TextStyle values.
@@ -292,17 +294,17 @@ Plain and attributed declarations normalize into the same mounted paragraph repr
 The generic State formatting constructor excludes attributed values, which have a dedicated Text input path.
 Ordinary controls retain their existing public plain-label inputs even when internal paragraph services accept attributed data.
 
-TextMeasurer, UiWindow text-layout creation, and DrawText consume the same attributed paragraph contract.
+TextMeasurer, the UiWindow platform layout hook, and DrawText consume the same attributed paragraph contract.
 Plain-string convenience calls delegate to that contract rather than retaining a second virtual implementation.
 DrawTextRuns remains the exact-run operation for callers that already own line layout and is not an attributed-paragraph fallback.
 
 Platform-private paragraph construction applies equivalent text, font ranges, options, and constraints to measurement, interaction geometry, and painting.
-Selection and links share one retained geometry layout on their mounted Text; geometry caches never pin unmounted blocks.
+Selection and links share one retained geometry layout on their mounted Text. The bounded window cache for public snapshots is keyed by attributed content, style, width, and shaping options. A font metrics change clears that cache, while previously returned values retain their geometry.
 Measurement and painting may create separate platform layout objects because they have different lifetimes and secure-text retention policies.
 Android uses `HuxerUITextLayout` to construct the StaticLayout for all three paths; renderer cache lookup precedes span construction and StaticLayout creation, while editing geometry remains outside that cache.
 Intrinsic and final width constraints can legitimately produce different layouts.
 Vertical placement, scrolling translation, and clipping remain presentation inputs where they do not affect shaping or line breaking.
-Platform font and layout objects never enter PaintCommands or application values, and previously published cached layouts are not mutated for another paragraph's appearance.
+PaintCommands carry neutral values. Platform font and layout objects remain behind the backend boundary.
 
 Invalidation compares the projections actually consumed by each stage:
 

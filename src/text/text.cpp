@@ -16,6 +16,7 @@
 #include "internal_access.h"
 #include "graphics/paint_internal.h"
 #include "text_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui {
 namespace {
@@ -229,6 +230,95 @@ TextMeasurer& UseTextMeasurer() {
   if (service->dependency) detail::ObserveDependency(service->dependency);
 #endif
   return *service->measurer;
+}
+
+TextLayout TextMeasurer::CreateTextLayout(const AttributedText&, const TextStyle&, float, const TextLayoutOptions&) {
+  throw std::logic_error("HuxerUI text measurer has no paragraph layout backend");
+}
+
+TextLayout::TextLayout(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+
+TextLayoutMetrics TextLayout::Metrics() const {
+  return data_->metrics;
+}
+
+std::span<const TextLineMetrics> TextLayout::Lines() const {
+  return data_->lines;
+}
+
+TextPosition TextLayout::SnapCaret(TextPosition position) const {
+  HUXERUI_DISCARD(data_->text.TextInRange({position.offset, position.offset}));
+  if (position.offset > 0 && position.offset < data_->text.Length()) {
+    const TextOffset previous = data_->backend->PreviousCaretOffset(position.offset);
+    const TextOffset next = data_->backend->NextCaretOffset(previous);
+    if (next != position.offset) {
+      position.offset = position.affinity == TextAffinity::Upstream ? previous : next;
+    }
+  }
+  return position;
+}
+
+std::size_t TextLayout::LineIndex(TextPosition position) const {
+  position = SnapCaret(position);
+  const auto& lines = data_->lines;
+  auto line = std::upper_bound(lines.begin(), lines.end(), position.offset,
+      [](TextOffset offset, const TextLineMetrics& candidate) { return offset < candidate.range.start; });
+  if (line != lines.begin()) {
+    --line;
+  }
+  if (line != lines.begin() && position.affinity == TextAffinity::Upstream &&
+      line->range.start == position.offset && std::prev(line)->range.end == position.offset) {
+    --line;
+  }
+  return static_cast<std::size_t>(line - lines.begin());
+}
+
+TextPosition TextLayout::HitTest(Point point) const {
+  if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
+    throw std::invalid_argument("HuxerUI text layout hit-test point must be finite");
+  }
+  if (data_->synthesized_last_line && (data_->lines.size() == 1 || point.y >= data_->lines.back().bounds.y)) {
+    return {data_->text.Length(), TextAffinity::Downstream};
+  }
+  return SnapCaret(data_->backend->HitTest(point));
+}
+
+Rect TextLayout::CaretRect(TextPosition position) const {
+  position = SnapCaret(position);
+  if (data_->synthesized_last_line && position.offset == data_->text.Length()) {
+    const Rect& line = data_->lines.back().bounds;
+    return {line.x, line.y, 1.0F, line.height};
+  }
+  if (position.affinity == TextAffinity::Upstream) {
+    const auto& lines = data_->lines;
+    const auto line = std::lower_bound(lines.begin(), lines.end(), position.offset,
+        [](const TextLineMetrics& candidate, TextOffset offset) { return candidate.range.start < offset; });
+    // A source separator consumes offsets. Only a soft wrap offers two visual lines at one boundary.
+    if (line != lines.begin() && line != lines.end() && line->range.start == position.offset &&
+        std::prev(line)->range.end < position.offset) {
+      position.affinity = TextAffinity::Downstream;
+    }
+  }
+  return data_->backend->CaretRect(position.offset, position.affinity);
+}
+
+std::vector<Rect> TextLayout::RangeRects(TextRange range) const {
+  HUXERUI_DISCARD(data_->text.TextInRange({range.start, range.start}));
+  HUXERUI_DISCARD(data_->text.TextInRange({range.end, range.end}));
+  if (range.end < range.start) {
+    throw std::invalid_argument("HuxerUI text layout range must be ordered");
+  }
+  return range.IsCollapsed() ? std::vector<Rect>{} : data_->backend->RangeRects(range);
+}
+
+TextOffset TextLayout::PreviousCaretOffset(TextOffset offset) const {
+  HUXERUI_DISCARD(data_->text.TextInRange({offset, offset}));
+  return data_->backend->PreviousCaretOffset(offset);
+}
+
+TextOffset TextLayout::NextCaretOffset(TextOffset offset) const {
+  HUXERUI_DISCARD(data_->text.TextInRange({offset, offset}));
+  return data_->backend->NextCaretOffset(offset);
 }
 
 // Attribute replacement shares the immutable body, its UTF-16 index, and its comparison hash.
@@ -497,14 +587,15 @@ bool TextPaintInputsEqual(const AttributedText& left, const TextStyle& left_base
   });
 }
 
-std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_window) {
+std::shared_ptr<TextLayoutBackend> GetParagraphLayout(MountedNode& node, UiWindow& ui_window) {
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   const auto revision = InternalAccess::TextMetricsRevision(ui_window);
 #endif
   const float width = node.ContentBounds().width;
   const auto& style = node.properties.text_style;
-  const auto& options = node.properties.text_layout_options;
-  const auto& previous = node.paragraph_layout;
+  auto options = node.properties.text_layout_options;
+  options.vertical_align = TextVerticalAlign::Top;
+  const auto& previous = node.cached_paragraph_layout;
   if (previous && previous->width == width && previous->options == options &&
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
       previous->revision == revision &&
@@ -512,7 +603,7 @@ std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_w
       TextLayoutInputsEqual(previous->text, previous->font, node.text, style.font)) {
     return previous->layout;
   }
-  auto next = std::make_shared<ParagraphLayout>();
+  auto next = std::make_shared<CachedParagraphLayout>();
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   next->revision = revision;
 #endif
@@ -520,9 +611,9 @@ std::shared_ptr<TextLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_w
   next->font = style.font;
   next->options = options;
   next->width = width;
-  next->layout = ui_window.CreateTextLayout(node.text, style, width, options);
-  node.paragraph_layout = std::move(next);
-  return node.paragraph_layout->layout;
+  next->layout = ui_window.CreatePlatformTextLayout(node.text, style, width, options);
+  node.cached_paragraph_layout = std::move(next);
+  return node.cached_paragraph_layout->layout;
 }
 
 } // namespace detail

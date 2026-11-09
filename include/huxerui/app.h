@@ -103,7 +103,7 @@ class PlatformChannelEndpoint;
 class PlatformRegistry;
 class PermissionTransport;
 class SystemTrayTransport;
-class TextLayout;
+class TextLayoutBackend;
 
 PlatformChannelEndpoint MakePlatformChannelEndpoint(UiWindow& ui_window);
 PlatformChannelEndpoint MakePlatformChannelEndpoint(Runtime& runtime);
@@ -771,22 +771,27 @@ public:
   /// Requests the cursor represented by the PointerCursorKind argument on this native window.
   /// Called on the application thread; the default implementation ignores the request on hosts without pointer cursors.
   virtual void SetPointerCursor(PointerCursorKind) {}
-  /// Creates native text measurement/layout state for attributed content on the application thread.
+  /// @copydoc TextMeasurer::CreateTextLayout
+  TextLayout CreateTextLayout(
+      const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options = {}) final;
+  /// Creates the host's paragraph geometry on the application thread.
   /// @param text Attributed content to retain or copy into the layout.
-  /// @param style Resolved default typography used where spans do not override it.
-  /// @param max_width Available wrapping width in logical units.
-  /// @param options Resolved text layout behavior, including line constraints and truncation.
-  /// @return An owned layout used by shared text measurement and rendering; it must not borrow temporary arguments.
-  virtual std::unique_ptr<detail::TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style,
-                                                               float max_width, const TextLayoutOptions& options = {});
+  /// @param style Base style for portions without an explicit override.
+  /// @param max_width Available width in logical units, or positive infinity for an unconstrained layout.
+  /// @param options Shaping, horizontal alignment, and wrapping.
+  /// @return An owned backend with a lifetime independent of the arguments, or nullptr if unavailable.
+  /// @see TextMeasurer::CreateTextLayout() for the application-facing API.
+  virtual std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
   /// Creates a text layout for a plain UTF-8 string through the attributed-text overload.
-  /// @param text Borrowed UTF-8 input, needed only during this call.
-  /// @param style Resolved typography.
-  /// @param max_width Available wrapping width in logical units.
-  /// @param options Resolved line and truncation behavior.
-  /// @return An owned native text layout for this window.
-  std::unique_ptr<detail::TextLayout> CreateTextLayout(std::string_view text, const TextStyle& style, float max_width,
-                                                       const TextLayoutOptions& options = {});
+  /// @param text UTF-8 source, borrowed for the duration of the call.
+  /// @param style Base style for the paragraph.
+  /// @param max_width Available width in logical units, or positive infinity for an unconstrained layout.
+  /// @param options Shaping, horizontal alignment, and wrapping.
+  /// @return An owned backend for this window, or nullptr if unavailable.
+  /// @throws std::invalid_argument If text is malformed UTF-8.
+  std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+      std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options = {});
   /// Borrows this window's native text-input/IME endpoint.
   /// @return A platform-owned endpoint valid until shared retirement, or null when text input is unsupported.
   virtual PlatformTextInput* TextInput() noexcept {

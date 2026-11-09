@@ -30,10 +30,10 @@ public:
 
 class ParagraphPlatform final : public TestPlatform {
 public:
-  std::unique_ptr<detail::TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style, float width,
-      const TextLayoutOptions& options) override {
+  std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) override {
     ++layouts;
-    return TestPlatform::CreateTextLayout(text, style, width, options);
+    return TestPlatform::CreatePlatformTextLayout(text, style, width, options);
   }
   TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float width,
       const TextLayoutOptions& options) override {
@@ -53,12 +53,21 @@ public:
     result.size.width *= layout_scale;
     return result;
   }
-  std::unique_ptr<detail::TextLayout> CreateTextLayout(const AttributedText& text, const TextStyle& style, float width,
-      const TextLayoutOptions& options) override {
-    class ScaledLayout final : public detail::TextLayout {
+  std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) override {
+    class ScaledLayout final : public detail::TextLayoutBackend {
     public:
-      ScaledLayout(std::unique_ptr<detail::TextLayout> inner, float scale) : inner_(std::move(inner)), scale_(scale) {}
+      ScaledLayout(std::unique_ptr<detail::TextLayoutBackend> inner, float scale)
+          : inner_(std::move(inner)), scale_(scale) {}
       Size Measure() const override { auto size = inner_->Measure(); size.width *= scale_; return size; }
+      std::vector<TextLineMetrics> LineMetrics() const override {
+        auto lines = inner_->LineMetrics();
+        for (auto& line : lines) {
+          line.bounds.x *= scale_;
+          line.bounds.width *= scale_;
+        }
+        return lines;
+      }
       TextPosition HitTest(Point point) const override { point.x /= scale_; return inner_->HitTest(point); }
       Rect CaretRect(TextOffset offset, TextAffinity affinity) const override {
         auto rect = inner_->CaretRect(offset, affinity); rect.x *= scale_; return rect;
@@ -71,13 +80,13 @@ public:
       TextOffset PreviousCaretOffset(TextOffset offset) const override { return inner_->PreviousCaretOffset(offset); }
       TextOffset NextCaretOffset(TextOffset offset) const override { return inner_->NextCaretOffset(offset); }
     private:
-      std::unique_ptr<detail::TextLayout> inner_;
+      std::unique_ptr<detail::TextLayoutBackend> inner_;
       float scale_;
     };
     ++layouts;
     const float layout_scale = scale * style.font.Size() / 20.0F;
     return std::make_unique<ScaledLayout>(
-        TestPlatform::CreateTextLayout(text, style, width / layout_scale, options), layout_scale);
+        TestPlatform::CreatePlatformTextLayout(text, style, width / layout_scale, options), layout_scale);
   }
   float scale = 1.0F;
   int layouts = 0;
@@ -102,6 +111,52 @@ void ParagraphPointer(UiWindow& runtime, PointerEventType type, Point position, 
 }
 
 } // namespace
+
+TEST_CASE("RetainedTextLayoutSharesLineGeometryAndPaintInputs") {
+  ParagraphPlatform platform;
+  UiWindow window{AttributedParagraphApp, platform};
+  const AttributedText text("ab🙂c\n");
+  const auto style = TextStyle::Default();
+  const TextLayoutOptions options{
+      .shaping = {.locale = "ja"},
+      .vertical_align = TextVerticalAlign::Bottom,
+  };
+  const auto layout = platform.CreateTextLayout(text, style, 20.0F, options);
+  const auto copy = platform.CreateTextLayout(text, style, 20.0F, options);
+  REQUIRE(platform.layouts == 1);
+  REQUIRE(copy.Lines().data() == layout.Lines().data());
+  REQUIRE(layout.Metrics().line_count == 4);
+  REQUIRE(layout.Lines()[0].range == TextRange{0, 2});
+  REQUIRE(layout.Lines()[1].range == TextRange{2, 4});
+  REQUIRE(layout.Lines()[2].range == TextRange{4, 5});
+  REQUIRE(layout.Lines()[3].range == TextRange{6, 6});
+  REQUIRE(layout.LineIndex({2, TextAffinity::Upstream}) == 0);
+  REQUIRE(layout.LineIndex({2, TextAffinity::Downstream}) == 1);
+  REQUIRE(layout.CaretRect({2, TextAffinity::Upstream}).y < layout.CaretRect({2, TextAffinity::Downstream}).y);
+  REQUIRE(layout.HitTest({18.0F, 10.0F}) == TextPosition{2, TextAffinity::Upstream});
+  REQUIRE(layout.HitTest({0.0F, 100.0F}).offset == 6);
+  REQUIRE(layout.PreviousCaretOffset(4) == 2);
+  REQUIRE(layout.NextCaretOffset(2) == 4);
+  REQUIRE(layout.RangeRects({1, 5}).size() == 3);
+  REQUIRE(layout.RangeRects({2, 2}).empty());
+  REQUIRE_THROWS_AS(layout.CaretRect({3}), std::invalid_argument);
+
+  PaintSequence sequence;
+  PaintContext paint(sequence, {0, 0, 100, 120});
+  paint.DrawText({3, 7}, layout);
+  paint.Finish();
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto& command = std::get<DrawTextCommand>(sequence.Commands().front());
+  REQUIRE(command.text == text);
+  REQUIRE(command.rect == Rect{3, 7, 20, layout.Metrics().size.height});
+  REQUIRE(command.options.shaping.locale == "ja");
+  REQUIRE(command.options.vertical_align == TextVerticalAlign::Top);
+
+  const auto empty = platform.CreateTextLayout(AttributedText{}, style, 20.0F);
+  REQUIRE(empty.Lines().size() == 1);
+  REQUIRE(empty.CaretRect({0}).height > 0.0F);
+  REQUIRE_THROWS_AS(platform.CreateTextLayout(text, style, 0.0F), std::invalid_argument);
+}
 
 TEST_CASE("AttributedParagraphLinksUseTypedPointerKeyboardAndSemanticActions") {
   ResetParagraph();
@@ -381,12 +436,15 @@ TEST_CASE("PlatformTextMetricsChangesRemainLocalToOneWindow") {
   ChangingTextPlatform first_platform;
   ChangingTextPlatform second_platform;
   float observed[2]{};
+  std::optional<TextLayout> snapshots[2];
   int compositions[2]{};
   int slot = 0;
   metric_root = [&]() -> View {
     ++compositions[slot];
     const TextStyle style{Font::System(20.0F), Color::Black()};
-    observed[slot] = UseTextMeasurer().MeasureText("measure", style).size.width;
+    auto& measurer = UseTextMeasurer();
+    observed[slot] = measurer.MeasureText("measure", style).size.width;
+    snapshots[slot] = measurer.CreateTextLayout(AttributedText("measure"), style, 300.0F);
     return Column {
       SelectionArea(Text("paragraph").Style(style)),
     };
@@ -401,6 +459,8 @@ TEST_CASE("PlatformTextMetricsChangesRemainLocalToOneWindow") {
   slot = 1;
   REQUIRE(FindText(second.BuildFrame(), "paragraph")->rect.width == initial_width);
   const auto initial_observed = observed[0];
+  const TextLayout first_snapshot = *snapshots[0];
+  const TextLayout second_snapshot = *snapshots[1];
   const auto second_layouts = second_platform.layouts;
 
   first_platform.scale = 1.5F;
@@ -411,6 +471,8 @@ TEST_CASE("PlatformTextMetricsChangesRemainLocalToOneWindow") {
   REQUIRE(FindText(second.BuildFrame(), "paragraph")->rect.width == initial_width);
   REQUIRE(observed[0] == Catch::Approx(initial_observed * 1.5F));
   REQUIRE(observed[1] == initial_observed);
+  REQUIRE(snapshots[0]->Metrics().size.width == Catch::Approx(first_snapshot.Metrics().size.width * 1.5F));
+  REQUIRE(snapshots[1]->Lines().data() == second_snapshot.Lines().data());
   REQUIRE(compositions[0] == 2);
   REQUIRE(compositions[1] == 1);
   REQUIRE(second_platform.layouts == second_layouts);

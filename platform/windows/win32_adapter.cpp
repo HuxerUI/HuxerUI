@@ -887,9 +887,10 @@ public:
     return renderer_.MeasureText(text, style, max_width, options);
   }
 
-  std::unique_ptr<TextLayout> CreateTextLayout(const huxerui::AttributedText& text, const TextStyle& style,
+  std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
+      const huxerui::AttributedText& text, const TextStyle& style,
       float max_width, const TextLayoutOptions& options) override {
-    return renderer_.CreateTextLayout(text, style, max_width, options);
+    return renderer_.CreatePlatformTextLayout(text, style, max_width, options);
   }
 
   PlatformTextInput* TextInput() noexcept override {

@@ -613,9 +613,9 @@ public:
     }
   }
 
-  class TextLayout final : public huxerui::detail::TextLayout {
+  class StubTextLayout final : public huxerui::detail::TextLayoutBackend {
   public:
-    TextLayout(std::string_view text, float max_width) {
+    StubTextLayout(std::string_view text, float max_width) {
       lines_.push_back({});
       offsets_.push_back(0);
       lines_.back().boundaries.push_back({0, 0.0F});
@@ -674,6 +674,16 @@ public:
         width = std::max(width, line.boundaries.back().x);
       }
       return {width, static_cast<float>(lines_.size()) * 20.0F};
+    }
+
+    std::vector<huxerui::TextLineMetrics> LineMetrics() const override {
+      std::vector<huxerui::TextLineMetrics> result;
+      for (const Line& line : lines_) {
+        const float y = static_cast<float>(result.size()) * 20.0F;
+        result.push_back({{line.boundaries.front().offset, line.boundaries.back().offset},
+                          {0.0F, y, line.boundaries.back().x, 20.0F}, y + 15.0F});
+      }
+      return result;
     }
 
     TextPosition HitTest(Point point) const override {
@@ -822,7 +832,7 @@ public:
   }
 
   using TextMeasurer::MeasureText;
-  using UiWindow::CreateTextLayout;
+  using UiWindow::CreatePlatformTextLayout;
 
   TextLayoutMetrics MeasureText(const huxerui::AttributedText& paragraph, const TextStyle&, float max_width,
       const TextLayoutOptions& options) override {
@@ -855,10 +865,10 @@ public:
     return {size, 15.0F, size.height - 5.0F, line_count};
   }
 
-  std::unique_ptr<huxerui::detail::TextLayout> CreateTextLayout(const huxerui::AttributedText& paragraph,
+  std::unique_ptr<huxerui::detail::TextLayoutBackend> CreatePlatformTextLayout(const huxerui::AttributedText& paragraph,
       const TextStyle&, float max_width, const TextLayoutOptions& options) override {
     const auto& text = paragraph.PlainText();
-    return std::make_unique<TextLayout>(
+    return std::make_unique<StubTextLayout>(
         text,
         options.wrap == TextWrap::NoWrap ? std::numeric_limits<float>::infinity() : max_width
     );

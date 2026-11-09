@@ -300,7 +300,7 @@ void MarkTextMetricsDirtyTree(MountedNode& node) {
   node.layout_dirty = true;
   node.content_paint_dirty = true;
   node.foreground_paint_dirty = true;
-  node.paragraph_layout.reset();
+  node.cached_paragraph_layout.reset();
   for (auto& child : node.children) {
     if (child) MarkTextMetricsDirtyTree(*child);
   }
@@ -1109,6 +1109,8 @@ void InternalAccess::InvalidateTextMetrics(UiWindow& ui_window) {
   // Platform font metrics can change without changing Font values, including composition-time measurements.
   BeginDependencyChange(state->text_metrics_dependency_);
   ++state->text_metrics_revision_;
+  state->text_layout_cache_.clear();
+  state->text_layout_cache_bytes_ = 0;
   CommitDependencyChange(state->text_metrics_dependency_);
   if (state->mounted_root_) MarkTextMetricsDirtyTree(*state->mounted_root_);
   state->extension_tree_dirty_ = true;
@@ -1245,12 +1247,91 @@ std::shared_ptr<detail::FilePickerTransport> UiWindow::CreateFilePickerTransport
   return {};
 }
 
-std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(std::string_view text, const TextStyle& style,
-                                                               float max_width, const TextLayoutOptions& options) {
-  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+TextLayout UiWindow::CreateTextLayout(const AttributedText& text, const TextStyle& style, float width,
+                                     const TextLayoutOptions& options) {
+  if (!std::isfinite(width) || width <= 0.0F) {
+    throw std::invalid_argument("HuxerUI text layout width must be finite and greater than zero");
+  }
+  if (!state_ || state_->retired_) {
+    throw std::logic_error("HuxerUI text layout requires a live window");
+  }
+  TextLayoutOptions shaping = options;
+  shaping.vertical_align = TextVerticalAlign::Top;
+  auto& cache = state_->text_layout_cache_;
+  for (auto entry = cache.begin(); entry != cache.end(); ++entry) {
+    const auto& data = *entry->data_;
+    if (data.width == width && data.options == shaping && data.style == style && data.text == text) {
+      std::rotate(entry, entry + 1, cache.end());
+      return cache.back();
+    }
+  }
+  auto data = std::make_shared<TextLayout::Data>();
+  data->backend = CreatePlatformTextLayout(text, style, width, shaping);
+  if (!data->backend) {
+    throw std::logic_error("HuxerUI window has no text layout backend");
+  }
+  data->text = text;
+  data->style = style;
+  data->options = std::move(shaping);
+  data->width = width;
+  data->lines = data->backend->LineMetrics();
+  const TextOffset length = text.Length();
+  const auto hard_break = [](std::string_view value) {
+    return value == "\n" || value == "\r" || value == "\r\n" || value == "\xE2\x80\xA8" ||
+           value == "\xE2\x80\xA9";
+  };
+  for (TextLineMetrics& line : data->lines) {
+    // Some native engines include the hard break in the preceding line's range.
+    while (line.range.end > line.range.start) {
+      const TextOffset previous = data->backend->PreviousCaretOffset(line.range.end);
+      if (previous < line.range.start || previous >= line.range.end ||
+          !hard_break(text.TextInRange({previous, line.range.end}))) {
+        break;
+      }
+      line.range.end = previous;
+    }
+  }
+  if (data->lines.empty() && length != 0) {
+    throw std::logic_error("HuxerUI text layout backend returned no visual lines");
+  }
+  const bool trailing_break = length > 0 && hard_break(
+      text.TextInRange({data->backend->PreviousCaretOffset(length), length}));
+  if (data->lines.empty() || (trailing_break && data->lines.back().range.start != length)) {
+    const FontMetrics font = Metrics(style.font);
+    const float top = data->lines.empty() ? 0.0F : data->backend->Measure().height;
+    const bool rtl = options.shaping.direction == TextDirection::RightToLeft;
+    const bool right = rtl ? options.align == TextAlign::Leading : options.align == TextAlign::Trailing;
+    const float x = options.align == TextAlign::Center ? width * 0.5F : right ? width : 0.0F;
+    data->lines.push_back({{length, length}, {x, top, 0.0F, font.LineHeight()}, top + font.ascent});
+    data->synthesized_last_line = true;
+  }
+  Size size = data->backend->Measure();
+  size.width = std::min(size.width, width);
+  const auto& last = data->lines.back().bounds;
+  if (data->synthesized_last_line) {
+    size.height = std::max(size.height, last.y + last.height);
+  }
+  data->metrics = {size, data->lines.front().baseline, data->lines.back().baseline, data->lines.size()};
+  data->cache_cost = detail::ParagraphCacheCost(text);
+  TextLayout layout(data);
+  if (data->cache_cost <= detail::paragraph_cache_budget) {
+    while (!cache.empty() && (cache.size() >= 64 ||
+           state_->text_layout_cache_bytes_ + data->cache_cost > detail::paragraph_cache_budget)) {
+      state_->text_layout_cache_bytes_ -= cache.front().data_->cache_cost;
+      cache.erase(cache.begin());
+    }
+    cache.push_back(layout);
+    state_->text_layout_cache_bytes_ += data->cache_cost;
+  }
+  return layout;
 }
 
-std::unique_ptr<detail::TextLayout> UiWindow::CreateTextLayout(const AttributedText&, const TextStyle&,
+std::unique_ptr<detail::TextLayoutBackend> UiWindow::CreatePlatformTextLayout(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
+  return CreatePlatformTextLayout(AttributedText(std::string(text)), style, max_width, options);
+}
+
+std::unique_ptr<detail::TextLayoutBackend> UiWindow::CreatePlatformTextLayout(const AttributedText&, const TextStyle&,
                                                                float, const TextLayoutOptions&) {
   return {};
 }
@@ -1398,6 +1479,8 @@ void UiWindow::Retire() noexcept {
   }
   ExecutionGuard guard(state_->execution_);
   state_->retired_ = true;
+  state_->text_layout_cache_.clear();
+  state_->text_layout_cache_bytes_ = 0;
   if (state_->file_drop_) {
     state_->file_drop_->DisconnectFileDrop();
   }

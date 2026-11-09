@@ -605,7 +605,7 @@ Their occupied width participates in text layout, selection, caret geometry, scr
 Vector assets resolve the TextField state color, while raster assets retain their encoded colors.
 
 `Align(TextAlign::...)` and `VerticalAlign(TextVerticalAlign::...)` configure the editable text region rather than the field container.
-The retained TextLayout applies horizontal alignment to the value, placeholder, selection, caret, hit testing, scrolling, and platform input geometry.
+The retained platform layout applies horizontal alignment to the value, placeholder, selection, caret, hit testing, scrolling, and platform input geometry.
 Vertical alignment places the same editing geometry within the available content height without changing intrinsic measurement.
 Single-line fields default to `Center`; multiline fields default to `Top`; an explicit value remains stable when line limits change.
 Floating labels, icons, and supporting messages keep their component-owned placement.
@@ -751,28 +751,9 @@ The existing whole-string text measurement is insufficient for an editable contr
 - Affinity at bidirectional boundaries.
 - Glyph cluster and grapheme boundaries.
 
-A minimal text layout capability uses the public `TextPosition` value:
-
-```cpp
-class TextLayout {
-public:
-  virtual ~TextLayout() = default;
-
-  [[nodiscard]] virtual Size Measure() const = 0;
-  [[nodiscard]] virtual TextPosition HitTest(Point point) const = 0;
-  [[nodiscard]] virtual Rect CaretRect(
-      TextOffset offset,
-      TextAffinity affinity
-  ) const = 0;
-  [[nodiscard]] virtual std::vector<Rect> RangeRects(
-      TextRange range
-  ) const = 0;
-};
-```
+The private `TextLayoutBackend` supplies platform geometry to both TextField and the public layout snapshot.
 
 Secure TextField creates grapheme boundaries from the platform text layout, then lays out only its mask string. A small mapped layout translates between real UTF-16 offsets and visual bullet offsets for hit testing, caret geometry, selection rectangles, and deletion. The PaintSequence never receives the real text.
-
-Editable `detail::TextLayout` remains internal to HuxerUI. Public Canvas and TextMeasurer expose immutable paragraph and run metrics plus paint commands, while hit testing, caret geometry, and range geometry remain owned by TextField and platform text layouts.
 
 The TextField caches layout by text, font, available width, multiline configuration, resolved shaping options, and relevant style values.
 On Linux and Web, the internal per-window [text-metrics revision](text.md#platform-caches) also invalidates these layouts when platform text metrics change without a Font value change.
@@ -780,7 +761,7 @@ TextField retains its controlled value, selection, composition, focus, and input
 An empty shaping locale resolves from the mounted TextField's effective inherited Locale, while `TextField::Shaping()` preserves a non-empty explicit locale.
 The resolved shaping value is shared by the controlled value, label, placeholder, validation message, grapheme boundaries, selection and caret geometry, measurement, and every DrawText command so platform layout and renderer replay cannot diverge.
 
-Editor components can use TextMeasurer for exact-run metrics while retaining their own line, selection, and document models. They do not reuse TextField's internal editable layout.
+Editor components obtain paragraph geometry with `TextMeasurer::CreateTextLayout()` and draw it with `PaintContext::DrawText()`. They own the document, selection, input commands, and mapping between document offsets and each paragraph. The [custom editor example](../../examples/custom_editor/main.cpp) uses one input session across the document.
 
 Candidate geometry is reported in node-local logical coordinates. UiWindow applies layout and presentation transforms to obtain host-view coordinates. The native input boundary converts those coordinates to the coordinate space required by its API.
 
@@ -828,7 +809,7 @@ A multiline field uses the same retained scroll state on the vertical axis when 
 
 The field participates in the same retained scroll chain as other scrollable nodes. Wheel and touch movement scroll the field first and pass unconsumed movement to an enclosing scroll container. Mouse and pen dragging retain text selection semantics, and dragging a selection beyond the viewport advances the internal text offset. Manual scrolling temporarily suppresses automatic caret reveal until editing or navigation resumes.
 
-The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. TextField uses `caret_width` for the painted stroke and fits it inside the clip at the trailing edge. Text hit testing, scrolling, and platform input geometry use the logical caret boundary from TextLayout.
+The caret blink timer and label transition are retained by the TextField extension. They request frames through the existing mounted extension scheduling path and respect resolved reduced-motion durations. Pointer or keyboard edits reset the visible caret phase. TextField uses `caret_width` for the painted stroke and fits it inside the clip at the trailing edge. Text hit testing, scrolling, and platform input geometry use the logical caret boundary from the platform layout.
 
 The first pointer behavior includes:
 

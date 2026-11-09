@@ -574,6 +574,13 @@ public:
   void DrawText(Rect rect, std::string text, TextStyle style, TextLayoutOptions options = {}, Point paragraph_offset = {});
   /// Records an attributed paragraph using the same layout and paint boundary as plain text.
   void DrawText(Rect rect, AttributedText text, TextStyle style, TextLayoutOptions options = {}, Point paragraph_offset = {});
+  /// Records a paragraph using the style and shaping options captured in its layout.
+  /// @param origin Top-left origin of the paragraph in this context's logical coordinates.
+  /// @param layout Text layout prepared for the current window and font environment.
+  /// Drawing is clipped to the layout width and measured height.
+  /// @throws std::invalid_argument If origin or the base foreground color contains a non-finite value.
+  /// @throws std::logic_error If recording has already finished.
+  void DrawText(Point origin, const TextLayout& layout);
   /// Records one positioned text run and coalesces it with an adjacent DrawTextRunsCommand when possible.
   ///
   /// text must not contain a line break. Empty text or empty bounds produces no command.

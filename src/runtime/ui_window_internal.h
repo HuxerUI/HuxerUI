@@ -530,6 +530,8 @@ struct UiWindow::State {
   std::shared_ptr<Environment> root_environment_;
   std::shared_ptr<detail::AppResources> app_resources_;
   std::shared_ptr<detail::DebugMetricsSampler> debug_metrics_;
+  std::vector<TextLayout> text_layout_cache_;
+  std::size_t text_layout_cache_bytes_ = 0;
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   std::uint64_t text_metrics_revision_ = 0;
   std::shared_ptr<detail::CompositionDependency> text_metrics_dependency_ =

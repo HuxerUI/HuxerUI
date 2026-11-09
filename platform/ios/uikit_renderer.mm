@@ -317,6 +317,11 @@ float TextAlignmentOffset(TextAlign align, TextDirection direction, float availa
   return 0.0F;
 }
 
+NSCharacterSet* HardLineBreakCharacters() {
+  static NSCharacterSet* characters = [NSCharacterSet characterSetWithCharactersInString:@"\r\n\u2028\u2029"];
+  return characters;
+}
+
 CFAttributedStringRef CreateAttributedString(
     std::string_view text,
     const TextStyle& style,
@@ -390,10 +395,12 @@ CFAttributedStringRef CreateAttributedString(const AttributedText& text, const T
     const TextLayoutOptions& options, CTFontRef supplied_font = nullptr, bool preserve_final_line = false) {
   CFRef<CFAttributedStringRef> base{CreateAttributedString(text.PlainText(), style, options, supplied_font)};
   CFMutableAttributedStringRef attributed = CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base.Get());
-  // A layout-only sentinel preserves the empty line after a trailing newline; source text and offsets stay unchanged.
-  if (preserve_final_line && !text.PlainText().empty() && text.PlainText().back() == '\n') {
-    CFAttributedStringReplaceString(attributed,
-        CFRangeMake(CFAttributedStringGetLength(attributed), 0), CFSTR("\u200B"));
+  // A layout-only sentinel preserves the empty line after a trailing hard break.
+  const CFStringRef source = CFAttributedStringGetString(attributed);
+  const CFIndex length = CFStringGetLength(source);
+  if (preserve_final_line && length > 0 &&
+      [HardLineBreakCharacters() characterIsMember:CFStringGetCharacterAtIndex(source, length - 1)]) {
+    CFAttributedStringReplaceString(attributed, CFRangeMake(length, 0), CFSTR("\u200B"));
   }
   // CoreText changes the CGContext fill color for explicit runs; context-driven runs would inherit that color.
   const Color base_color = style.foreground;
@@ -1094,7 +1101,7 @@ struct UIKitRenderer::Impl {
   std::vector<CachedExternalTexture> external_textures;
 };
 
-class UIKitTextLayout final : public TextLayout {
+class UIKitTextLayout final : public TextLayoutBackend {
 public:
   UIKitTextLayout(const AttributedText& paragraph, const TextStyle& style, float max_width,
       const TextLayoutOptions& options) {
@@ -1110,8 +1117,8 @@ public:
       return;
     }
 
-    const bool has_hard_break = text.find('\n') != std::string_view::npos;
-    if (!has_hard_break && (!constrained || options.wrap == TextWrap::NoWrap)) {
+    if ((!constrained || options.wrap == TextWrap::NoWrap) &&
+        [string_ rangeOfCharacterFromSet:HardLineBreakCharacters()].location == NSNotFound) {
       CFRef<CFAttributedStringRef> attributed{CreateAttributedString(paragraph, style, options)};
       line_ = CTLineCreateWithAttributedString(attributed.Get());
       CGFloat ascent = 0.0;
@@ -1208,6 +1215,28 @@ public:
     return size_;
   }
 
+  std::vector<TextLineMetrics> LineMetrics() const override {
+    if (string_.length == 0) {
+      return {};
+    }
+    if (line_records_.empty()) {
+      const float width = static_cast<float>(CTLineGetTypographicBounds(line_, nullptr, nullptr, nullptr));
+      return {{{0, static_cast<TextOffset>(string_.length)},
+               {horizontal_offset_, 0.0F, width, size_.height}, metrics_.first_baseline}};
+    }
+    std::vector<TextLineMetrics> result;
+    result.reserve(line_records_.size());
+    const CFIndex length = static_cast<CFIndex>(string_.length);
+    for (const LineRecord& record : line_records_) {
+      const float width = static_cast<float>(CTLineGetTypographicBounds(record.line, nullptr, nullptr, nullptr));
+      // The final empty line may include the layout-only sentinel.
+      result.push_back({{record.range.location, std::min(length, record.range.location + record.range.length)},
+                        {static_cast<float>(record.origin.x), record.top, width, record.height},
+                        size_.height - static_cast<float>(record.origin.y)});
+    }
+    return result;
+  }
+
   const TextLayoutMetrics& MetricsValue() const noexcept {
     return metrics_;
   }
@@ -1240,10 +1269,13 @@ public:
       index = point.x <= origin.x ? range.location : range.location + range.length;
     }
     const CFIndex line_end = range.location + range.length;
-    if (index == line_end && line_end <= static_cast<CFIndex>(string_.length) && range.length > 0 &&
-        [string_ characterAtIndex:static_cast<NSUInteger>(line_end - 1)] == '\n') {
-      --index;
+    CFIndex content_end = std::min(line_end, static_cast<CFIndex>(string_.length));
+    NSCharacterSet* breaks = HardLineBreakCharacters();
+    while (content_end > range.location &&
+           [breaks characterIsMember:[string_ characterAtIndex:static_cast<NSUInteger>(content_end - 1)]]) {
+      --content_end;
     }
+    index = std::min(index, content_end);
     const bool upstream = index == line_end && selected_line + 1 < line_records_.size() &&
                           line_records_[selected_line + 1].range.location == line_end;
     return {
@@ -1423,9 +1455,9 @@ TextLayoutMetrics UIKitRenderer::MeasureText(std::string_view text, const TextSt
   return MeasureText(AttributedText(std::string(text)), style, max_width, options);
 }
 
-std::unique_ptr<TextLayout> UIKitRenderer::CreateTextLayout(std::string_view text, const TextStyle& style,
-    float max_width, const TextLayoutOptions& options) {
-  return CreateTextLayout(AttributedText(std::string(text)), style, max_width, options);
+std::unique_ptr<TextLayoutBackend> UIKitRenderer::CreatePlatformTextLayout(
+    std::string_view text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
+  return CreatePlatformTextLayout(AttributedText(std::string(text)), style, max_width, options);
 }
 
 TextLayoutMetrics UIKitRenderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
@@ -1441,8 +1473,8 @@ TextLayoutMetrics UIKitRenderer::MeasureText(const AttributedText& text, const T
   return metrics;
 }
 
-std::unique_ptr<TextLayout> UIKitRenderer::CreateTextLayout(const AttributedText& text, const TextStyle& style,
-    float max_width, const TextLayoutOptions& options) {
+std::unique_ptr<TextLayoutBackend> UIKitRenderer::CreatePlatformTextLayout(
+    const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
   return std::make_unique<UIKitTextLayout>(text, style, max_width, options);
 }
 

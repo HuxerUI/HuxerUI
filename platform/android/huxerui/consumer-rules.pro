@@ -23,3 +23,12 @@
     org.huxerui.HuxerUIFilePicker filePicker();
     private void requestTextInputKeyboard(long, boolean);
 }
+-keepclassmembers class org.huxerui.HuxerUITextLayout {
+    float[] measure();
+    double[] lineMetrics();
+    long hitTest(float, float);
+    float[] caret(long, boolean);
+    float[] range(long, long);
+    long previous(long);
+    long next(long);
+}
