@@ -110,6 +110,8 @@ struct PlatformCommandContext {
   std::optional<std::string> optimization;
   /// Explicit release LTO override; an absent value preserves project settings.
   std::optional<bool> lto;
+  /// Canonical target ABI names, or an empty list to preserve the native build defaults.
+  std::vector<std::string> abis = {};
 };
 
 /// One file or directory published by the `package` command.
@@ -134,6 +136,9 @@ public:
 
   /// Returns the stable lowercase platform identifier used by CLI arguments and project directories.
   [[nodiscard]] virtual std::string_view Id() const noexcept = 0;
+
+  /// Returns the canonical ABI names accepted by this driver before host and destination checks.
+  virtual std::span<const std::string_view> TargetAbis() const noexcept = 0;
 
   /// Returns whether this driver can build from the current host.
   [[nodiscard]] virtual bool SupportsCurrentHost() const noexcept = 0;
@@ -182,6 +187,12 @@ public:
 
   /// Applies process-local environment preparation immediately before command planning.
   virtual void PrepareBuildEnvironment() const;
+
+  /// Rejects an explicit ABI selection incompatible with the current build inputs.
+  virtual void ValidateBuildAbis(const PlatformCommandContext& context) const;
+
+  /// Checks the output ABI where the target is selected by an external toolchain.
+  virtual void VerifyBuildAbis(const PlatformCommandContext& context) const;
 
   /// Plans commands that build the selected platform and profile.
   /// @param context Active build context.
@@ -248,6 +259,12 @@ protected:
 } // namespace huxerui::cli
 
 namespace huxerui::cli::detail {
+
+/// Resolves one CLI spelling to a canonical ABI supported by the selected platform.
+std::string_view NormalizeTargetAbi(const PlatformDriver& platform, std::string_view abi);
+
+/// Joins canonical ABI names for a native command or an incremental build directory.
+std::string JoinTargetAbis(std::span<const std::string> abis, char separator);
 
 /// Reports missing regular files below a generated-tree root.
 [[nodiscard]] std::vector<Diagnostic>

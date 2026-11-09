@@ -29,7 +29,7 @@ The shared request carries the following information where applicable:
 | Information | Meaning |
 | --- | --- |
 | Operation and project | Build, run, or package; project root, application identity, and selected build system. |
-| Host and target | Host OS/architecture for executable tools; target platform, architecture/ABI, platform SDK, and deployment minimum for produced binaries. |
+| Host and target | Host OS and architecture for executable tools; target platform, optional canonical ABI list, platform SDK, and deployment minimum for produced binaries. |
 | Framework selection | Selected HuxerUI SDK/package or source checkout, including its resolved version. |
 | Settings | Logical profile and explicit optimization, LTO, and framework-linkage choices. |
 | Destination and output | Selected device or simulator, incremental build location, and requested publication location. |
@@ -37,6 +37,10 @@ The shared request carries the following information where applicable:
 Integrations map this intent to native commands and settings; compiler flags are implementation details of that mapping.
 Native configuration names may differ from logical profiles, as with an Android Release variant using a CMake `RelWithDebInfo` configuration.
 The request's transport and command-line spelling must be agreed when wiring an integration into the CLI; this draft specifies their meaning.
+
+The CLI's `--abi` option selects one or more ABIs for a single target platform. The CLI resolves aliases to that platform's canonical spellings and passes a deduplicated list to the build-system integration. An absent list preserves native project defaults. Integrations must reject unsupported explicit selections and keep incremental outputs for different ABI selections distinct where the native tools require it.
+
+Report which ABIs each produced artifact contains. Integrations may produce one artifact with several ABIs where the platform supports it, or separate artifacts with unambiguous ABI-specific locations. The requested selection must be satisfied in full.
 
 ## Common settings
 

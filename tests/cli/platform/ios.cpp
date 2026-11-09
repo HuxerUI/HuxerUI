@@ -136,6 +136,16 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
 
   const std::vector<huxerui::cli::ProcessCommand> physical_build_commands = ios->BuildCommands(physical_context);
 
+  auto universal_context = context;
+  universal_context.abis = {"arm64", "x86_64"};
+  REQUIRE_NOTHROW(ios->ValidateBuildAbis(universal_context));
+  const auto universal_commands = ios->BuildCommands(universal_context);
+  const auto& arguments = universal_commands.front().arguments;
+  REQUIRE(std::ranges::find(arguments, "ARCHS=arm64 x86_64") != arguments.end());
+  REQUIRE(std::ranges::find(arguments, "ONLY_ACTIVE_ARCH=NO") != arguments.end());
+  universal_context.device = physical_context.device;
+  REQUIRE_THROWS_AS(ios->ValidateBuildAbis(universal_context), std::invalid_argument);
+
   REQUIRE(physical_build_commands.size() == 1);
   REQUIRE(
       physical_build_commands[0].arguments ==

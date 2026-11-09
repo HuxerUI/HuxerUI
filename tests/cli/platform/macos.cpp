@@ -31,6 +31,16 @@ TEST_CASE("HuxerUICliCreatesMacOSPackageCommands") {
   REQUIRE(std::find(build_commands[0].arguments.begin(), build_commands[0].arguments.end(),
                     "-DHUXERUI_PACKAGE=ON") != build_commands[0].arguments.end());
 
+  auto universal_context = context;
+  universal_context.abis = {"arm64", "x86_64"};
+  REQUIRE_THROWS_AS(macos->ValidateBuildAbis(universal_context), std::invalid_argument);
+  std::filesystem::create_directories(universal_context.huxerui_home);
+  std::ofstream(universal_context.huxerui_home / "CMakeLists.txt") << "project(huxerui)\n";
+  REQUIRE_NOTHROW(macos->ValidateBuildAbis(universal_context));
+  const auto universal_commands = macos->BuildCommands(universal_context);
+  const auto& configure = universal_commands.front().arguments;
+  REQUIRE(std::ranges::find(configure, "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64") != configure.end());
+
   const std::vector<huxerui::cli::ProcessCommand> package_commands = macos->PackageCommands(context);
   const std::filesystem::path root = context.project_root / ".huxerui/package/macos/release";
   REQUIRE(package_commands.size() == 5);

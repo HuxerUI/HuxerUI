@@ -68,7 +68,8 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui open ios [--source <path>]\n"
          << "  huxerui --version\n\n"
          << "A platform list is a comma-separated list or all.\n"
-         << "Build, run, and package accept --optimization default|size|minsize and --lto on|off.\n"
+         << "Build, run, and package accept --abi <abi-list> for a single platform.\n"
+         << "They also accept --optimization default|size|minsize and --lto on|off.\n"
          << "Without --platform, an app and a common library's Preview enable all platforms.\n"
          << "An agent list is comma-separated and supports ";
   for (std::size_t index = 0; index < agent_skill_mappings.size(); ++index) {
@@ -695,6 +696,7 @@ struct BuildOptions {
   bool package = false;
   std::optional<std::string> optimization;
   std::optional<bool> lto;
+  std::vector<std::string> abis;
 };
 
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
@@ -709,6 +711,15 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
       if (options.profile != "debug" && options.profile != "release") {
         throw UsageError("profile must be debug or release");
       }
+    } else if (arguments[index] == "--abi") {
+      if (!options.abis.empty()) {
+        throw UsageError("--abi may be specified only once");
+      }
+      if (++index >= arguments.size() || arguments[index].starts_with("--")) {
+        throw UsageError("--abi requires a comma-separated ABI list");
+      }
+      const auto abis = SplitList(arguments[index], "ABI");
+      options.abis.assign(abis.begin(), abis.end());
     } else if (arguments[index] == "--optimization") {
       if (options.optimization) {
         throw UsageError("--optimization may be specified only once");
@@ -781,7 +792,7 @@ std::filesystem::path ResolveAndExportBuildHome(const std::filesystem::path& sdk
 }
 
 std::vector<const PlatformDriver*>
-ResolveBuildPlatforms(const Project& project, const BuildOptions& options, std::string_view command) {
+ResolveBuildPlatforms(const Project& project, BuildOptions& options, std::string_view command) {
   std::vector<const PlatformDriver*> platforms;
   if (!options.platforms) {
     const PlatformDriver* current = FindPlatformDriver(CurrentHostId());
@@ -800,6 +811,24 @@ ResolveBuildPlatforms(const Project& project, const BuildOptions& options, std::
 
   if (!command.empty() && platforms.size() != 1) {
     throw UsageError(std::string(command) + " accepts exactly one platform");
+  }
+  if (!options.abis.empty()) {
+    if (platforms.size() != 1) {
+      throw UsageError("--abi requires exactly one build platform");
+    }
+    const PlatformDriver& platform = *platforms.front();
+    for (std::string& abi : options.abis) {
+      const std::string_view normalized = detail::NormalizeTargetAbi(platform, abi);
+      if (normalized.empty()) {
+        throw UsageError("unsupported ABI for " + std::string(platform.Id()) + ": " + abi);
+      }
+      abi = normalized;
+    }
+    std::ranges::sort(options.abis);
+    options.abis.erase(std::unique(options.abis.begin(), options.abis.end()), options.abis.end());
+    if (command == "run" && platform.Id() == "linux" && options.abis.size() > 1) {
+      throw UsageError("run linux accepts one ABI");
+    }
   }
   if (!options.device.empty()) {
     if (platforms.size() != 1) {
@@ -856,11 +885,15 @@ void ResolveJavaHome(BuildOptions& options, const std::filesystem::path& working
 }
 
 PlatformCommandContext MakeCommandContext(const Project& project, const PlatformDriver& platform,
-                                          const std::filesystem::path& huxerui_home, const BuildOptions& options) {
+                                          const std::filesystem::path& huxerui_home, const BuildOptions& options,
+                                          std::span<const std::string> abis = {}) {
   std::string build_variant(platform.Id());
   if (platform.Id() == "ios") {
     build_variant +=
         options.selected_device && options.selected_device->kind == DeviceKind::Physical ? "-device" : "-simulator";
+  }
+  if (!abis.empty()) {
+    build_variant += "-" + detail::JoinTargetAbis(abis, '+');
   }
   std::string build_profile = options.profile;
   if (options.optimization) {
@@ -896,7 +929,25 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
       options.package,
       options.optimization,
       options.lto,
+      {abis.begin(), abis.end()},
   };
+}
+
+std::vector<PlatformCommandContext> MakeBuildContexts(const Project& project, const PlatformDriver& platform,
+                                                      const std::filesystem::path& huxerui_home,
+                                                      const BuildOptions& options) {
+  std::vector<PlatformCommandContext> contexts;
+  if (platform.Id() == "linux" && options.abis.size() > 1) {
+    for (const std::string& abi : options.abis) {
+      contexts.push_back(MakeCommandContext(project, platform, huxerui_home, options, std::span(&abi, 1)));
+    }
+  } else {
+    contexts.push_back(MakeCommandContext(project, platform, huxerui_home, options, options.abis));
+  }
+  for (const PlatformCommandContext& context : contexts) {
+    platform.ValidateBuildAbis(context);
+  }
+  return contexts;
 }
 
 void ExecuteCommands(std::span<const ProcessCommand> commands, std::ostream& output) {
@@ -912,10 +963,13 @@ void ExecuteCommands(std::span<const ProcessCommand> commands, std::ostream& out
   }
 }
 
-void BuildPlatform(const Project& project, const PlatformDriver& platform,
-                   const std::filesystem::path& huxerui_home, const BuildOptions& options, std::ostream& output) {
-  output << "Building " << platform.Id() << " (" << options.profile << ")\n";
-  const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
+void BuildPlatform(const PlatformDriver& platform, const PlatformCommandContext& context,
+                   const BuildOptions& options, std::ostream& output) {
+  output << "Building " << platform.Id() << " (" << context.profile;
+  if (!context.abis.empty()) {
+    output << ", " << detail::JoinTargetAbis(context.abis, ',');
+  }
+  output << ")\n";
   platform.PrepareBuildEnvironment();
   ExecuteCommands(platform.LibraryGraphCommands(context), output);
   platform.UpdateProjectIntegration(context);
@@ -924,6 +978,7 @@ void BuildPlatform(const Project& project, const PlatformDriver& platform,
     SetProcessEnvironmentVariable("JAVA_HOME", options.java_home->string());
   }
   ExecuteCommands(platform.BuildCommands(context), output);
+  platform.VerifyBuildAbis(context);
 }
 
 std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::string_view requested) {
@@ -982,7 +1037,9 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
     options.selected_device = SelectDevice(*platforms.front(), options.device);
   }
   for (const PlatformDriver* platform : platforms) {
-    BuildPlatform(project, *platform, huxerui_home, options, output);
+    for (const PlatformCommandContext& context : MakeBuildContexts(project, *platform, huxerui_home, options)) {
+      BuildPlatform(*platform, context, options, output);
+    }
   }
   return 0;
 }
@@ -1007,10 +1064,11 @@ int RunApplication(std::span<const std::string_view> arguments, const std::files
     }
     output << '\n';
   }
-  BuildPlatform(project, platform, huxerui_home, options, output);
+  const auto contexts = MakeBuildContexts(project, platform, huxerui_home, options);
+  const auto& context = contexts.front();
+  BuildPlatform(platform, context, options, output);
 
   output << "Running " << platform.Id() << '\n';
-  const PlatformCommandContext context = MakeCommandContext(project, platform, huxerui_home, options);
   const std::vector<ProcessCommand> commands = platform.RunCommands(context);
   ExecuteCommands(commands, output);
   return 0;
@@ -1117,11 +1175,21 @@ int RunPackage(std::span<const std::string_view> arguments, const std::filesyste
   }
 
   for (const PlatformDriver* platform : platforms) {
-    BuildPlatform(project, *platform, huxerui_home, options, output);
-    const PlatformCommandContext context = MakeCommandContext(project, *platform, huxerui_home, options);
-    ExecuteCommands(platform->PackageCommands(context), output);
+    const auto contexts = MakeBuildContexts(project, *platform, huxerui_home, options);
+    std::vector<PackageArtifact> artifacts;
+    for (const PlatformCommandContext& context : contexts) {
+      BuildPlatform(*platform, context, options, output);
+      ExecuteCommands(platform->PackageCommands(context), output);
+      auto produced = platform->PackageArtifacts(context);
+      for (PackageArtifact& artifact : produced) {
+        if (contexts.size() > 1) {
+          artifact.destination = std::filesystem::path(context.abis.front()) / artifact.destination;
+        }
+        artifacts.push_back(std::move(artifact));
+      }
+    }
     const std::filesystem::path destination = project.root / "dist" / platform->Id();
-    PublishPackageArtifacts(platform->PackageArtifacts(context), destination, output);
+    PublishPackageArtifacts(artifacts, destination, output);
   }
   return 0;
 }
@@ -1133,7 +1201,7 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
     throw UsageError("open usage: huxerui open ios [--source <path>]");
   }
   if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty() || options.java_home ||
-      options.optimization || options.lto) {
+      options.optimization || options.lto || !options.abis.empty()) {
     throw UsageError("open accepts only --source <path>");
   }
   const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);

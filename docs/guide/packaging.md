@@ -24,6 +24,29 @@ Windows setup generation currently supports x64 applications.
 Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
 Linux requires `appimagetool`, `patchelf`, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
+## Target ABIs
+
+`build`, `run`, and `package` accept `--abi <abi-list>` when targeting one platform. Omit it to use the platform and project defaults. Separate multiple ABIs with commas. The CLI normalizes aliases and removes duplicates before building.
+
+| Platform | Canonical ABIs | Output |
+| --- | --- | --- |
+| Android | `arm64-v8a`, `x86_64` | One APK with the selected ABIs. Termux supports only `arm64-v8a`. |
+| Windows | `x86_64` | One application or installer. |
+| Linux | `aarch64`, `x86_64` | A separate build and AppImage per ABI. When packaging both, the CLI publishes them under `dist/linux/<abi>`. Use one ABI with `run`. |
+| macOS | `arm64`, `x86_64` | One app bundle and DMG. Building both architectures requires `--source` and universal dependencies. |
+| iOS | `arm64` for devices, `arm64` or `x86_64` for simulators | One bundle for the selected destination. Simulator builds can contain both slices when supported by Xcode. |
+| Web | `wasm32` | One Web deployment. |
+
+`x64` and `amd64` both resolve to `x86_64`. `arm64` and `aarch64` resolve to the selected platform's 64-bit ARM spelling, including `arm64-v8a` on Android. The canonical values in the table are also accepted.
+
+```bash
+huxerui package android --abi arm64
+huxerui build android --abi arm64-v8a,x64
+huxerui package macos --abi arm64,x86_64 --source ../HuxerUI
+```
+
+For an explicit Linux cross-build, select HuxerUI with `--source` and set `CMAKE_TOOLCHAIN_FILE` to a CMake toolchain for the non-host ABI. The toolchain must supply the target compiler and dependency paths. An explicit host ABI uses the native toolchain, so a two-ABI invocation can build both the native and cross targets.
+
 ## Android signing
 
 Generated Android applications and the repository example runner use the local debug signing configuration for Release APKs by default, so optimized builds can be installed directly for development and testing.

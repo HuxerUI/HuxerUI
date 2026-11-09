@@ -26,6 +26,32 @@ const std::array<const PlatformDriver*, 6>& PlatformDrivers() {
 
 namespace detail {
 
+std::string_view NormalizeTargetAbi(const PlatformDriver& platform, std::string_view abi) {
+  const auto supported = platform.TargetAbis();
+  if (const auto match = std::ranges::find(supported, abi); match != supported.end()) {
+    return *match;
+  }
+  if (abi == "x64" || abi == "amd64") {
+    abi = "x86_64";
+  }
+  const auto match = std::ranges::find_if(supported, [abi](std::string_view candidate) {
+    return candidate == abi || ((abi == "arm64" || abi == "aarch64") &&
+        (candidate == "arm64" || candidate == "aarch64" || candidate == "arm64-v8a"));
+  });
+  return match == supported.end() ? std::string_view{} : *match;
+}
+
+std::string JoinTargetAbis(std::span<const std::string> abis, char separator) {
+  std::string joined;
+  for (const std::string& abi : abis) {
+    if (!joined.empty()) {
+      joined += separator;
+    }
+    joined += abi;
+  }
+  return joined;
+}
+
 std::vector<Diagnostic>
 ValidateRequiredFiles(const std::filesystem::path& root, std::span<const std::string_view> paths) {
   std::vector<Diagnostic> diagnostics;
@@ -238,6 +264,10 @@ std::vector<ProcessCommand> PlatformDriver::PackageCommands(const PlatformComman
 }
 
 void PlatformDriver::PrepareBuildEnvironment() const {}
+
+void PlatformDriver::ValidateBuildAbis(const PlatformCommandContext&) const {}
+
+void PlatformDriver::VerifyBuildAbis(const PlatformCommandContext&) const {}
 
 std::vector<ProcessCommand> PlatformDriver::OpenCommands(const PlatformCommandContext&) const {
   throw std::logic_error("platform does not support opening a development project: " + std::string(Id()));

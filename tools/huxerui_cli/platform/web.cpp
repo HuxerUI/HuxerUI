@@ -52,6 +52,11 @@ public:
     return "web";
   }
 
+  std::span<const std::string_view> TargetAbis() const noexcept override {
+    static constexpr std::array abis{std::string_view{"wasm32"}};
+    return abis;
+  }
+
   bool SupportsCurrentHost() const noexcept override {
     return CurrentHostId() == "windows" || CurrentHostId() == "macos" || CurrentHostId() == "linux" ||
            CurrentHostId() == "android";

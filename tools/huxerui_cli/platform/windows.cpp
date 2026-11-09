@@ -138,6 +138,11 @@ public:
     return "windows";
   }
 
+  std::span<const std::string_view> TargetAbis() const noexcept override {
+    static constexpr std::array abis{std::string_view{"x86_64"}};
+    return abis;
+  }
+
   bool SupportsCurrentHost() const noexcept override {
     return CurrentHostId() == "windows";
   }

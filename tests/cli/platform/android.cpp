@@ -345,13 +345,15 @@ TEST_CASE("HuxerUICliRendersAndroidTemplatePathsAndContents") {
   REQUIRE(wrapper_jar->content.starts_with("PK"));
 }
 
-TEST_CASE("HuxerUICliPassesAndroidOptimizationOverridesToGradle") {
+TEST_CASE("HuxerUICliPassesAndroidBuildOverridesToGradle") {
   huxerui::cli::PlatformCommandContext context;
   context.profile = "release";
   context.optimization = "size";
   context.lto = false;
+  context.abis = {"arm64-v8a", "x86_64"};
   const auto commands = huxerui::cli::detail::AndroidBuildCommands(context, "windows", {});
   const auto& arguments = commands.front().arguments;
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiOptimization=size") != arguments.end());
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiLto=OFF") != arguments.end());
+  REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiAbis=arm64-v8a,x86_64") != arguments.end());
 }

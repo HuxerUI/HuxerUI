@@ -22,6 +22,11 @@ public:
     return "macos";
   }
 
+  std::span<const std::string_view> TargetAbis() const noexcept override {
+    static constexpr std::array abis{std::string_view{"arm64"}, std::string_view{"x86_64"}};
+    return abis;
+  }
+
   bool SupportsCurrentHost() const noexcept override {
     return CurrentHostId() == "macos";
   }
@@ -61,11 +66,21 @@ public:
     return detail::ValidateRequiredFiles(shell_root, required);
   }
 
+  void ValidateBuildAbis(const PlatformCommandContext& context) const override {
+    if (context.abis.size() > 1 && !std::filesystem::is_regular_file(context.huxerui_home / "CMakeLists.txt")) {
+      throw std::invalid_argument("HuxerUI universal macOS builds require --source and universal dependencies");
+    }
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     if (context.package && SupportsCurrentHost() && !FindExecutable("hdiutil")) {
       throw std::runtime_error("HuxerUI macOS packaging requires hdiutil on PATH");
     }
-    return detail::DesktopBuildCommands(context);
+    auto commands = detail::DesktopBuildCommands(context);
+    if (!context.abis.empty()) {
+      commands.front().arguments.push_back("-DCMAKE_OSX_ARCHITECTURES=" + detail::JoinTargetAbis(context.abis, ';'));
+    }
+    return commands;
   }
 
   std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {

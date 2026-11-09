@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <fstream>
 #include <iterator>
 #include <stdexcept>
 #include <utility>
@@ -11,6 +12,24 @@
 
 namespace huxerui::cli {
 namespace {
+
+std::string_view NativeLinuxAbi() {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  return "aarch64";
+#elif defined(__x86_64__) || defined(_M_X64)
+  return "x86_64";
+#else
+  return {};
+#endif
+}
+
+std::filesystem::path LinuxToolchain(const PlatformCommandContext& context) {
+  const auto toolchain = ReadEnvironmentVariable("CMAKE_TOOLCHAIN_FILE");
+  if (!toolchain || toolchain->empty() || context.abis.front() == NativeLinuxAbi()) {
+    return {};
+  }
+  return (context.project_root / *toolchain).lexically_normal();
+}
 
 std::filesystem::path AppImageTool() {
   const std::optional<std::filesystem::path> tool = FindExecutable("appimagetool");
@@ -23,14 +42,22 @@ std::filesystem::path AppImageTool() {
 std::filesystem::path LinuxPackageArtifact(const PlatformCommandContext& context, std::string_view plan) {
   const std::string target = detail::JsonString(plan, "target");
   const std::string version = detail::JsonString(plan, "version");
-  return context.project_root / ".huxerui/package/linux" / context.profile /
-         (target + "-" + version + ".AppImage");
+  auto root = context.project_root / ".huxerui/package/linux" / context.profile;
+  if (!context.abis.empty()) {
+    root /= context.abis.front();
+  }
+  return root / (target + "-" + version + ".AppImage");
 }
 
 class LinuxDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
     return "linux";
+  }
+
+  std::span<const std::string_view> TargetAbis() const noexcept override {
+    static constexpr std::array abis{std::string_view{"aarch64"}, std::string_view{"x86_64"}};
+    return abis;
   }
 
   bool SupportsCurrentHost() const noexcept override {
@@ -132,11 +159,42 @@ public:
     return detail::ValidateRequiredFiles(shell_root, required);
   }
 
+  void ValidateBuildAbis(const PlatformCommandContext& context) const override {
+    if (context.abis.empty() || context.abis.front() == NativeLinuxAbi()) {
+      return;
+    }
+    if (!std::filesystem::is_regular_file(context.huxerui_home / "CMakeLists.txt") ||
+        !std::filesystem::is_regular_file(LinuxToolchain(context))) {
+      throw std::invalid_argument(
+          "HuxerUI Linux cross-builds require --source and CMAKE_TOOLCHAIN_FILE for " + context.abis.front());
+    }
+  }
+
+  void VerifyBuildAbis(const PlatformCommandContext& context) const override {
+    if (context.abis.empty()) {
+      return;
+    }
+    const auto artifact = detail::JsonString(detail::ReadFile(detail::AppIntegrationPlan(context)), "artifact");
+    std::ifstream executable(std::filesystem::path(artifact), std::ios::binary);
+    std::array<unsigned char, 20> header{};
+    executable.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+    const unsigned char machine = context.abis.front() == "aarch64" ? 0xb7 : 0x3e;
+    if (!executable || header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F' ||
+        header[4] != 2 || header[5] != 1 || header[18] != machine || header[19] != 0) {
+      throw std::runtime_error("HuxerUI Linux build artifact does not match ABI " + context.abis.front() +
+                               ": " + artifact);
+    }
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     if (context.package && SupportsCurrentHost()) {
       (void)AppImageTool();
     }
-    return detail::DesktopBuildCommands(context);
+    auto commands = detail::DesktopBuildCommands(context);
+    if (!context.abis.empty()) {
+      commands.front().arguments.push_back("-DCMAKE_TOOLCHAIN_FILE=" + LinuxToolchain(context).string());
+    }
+    return commands;
   }
 
   std::vector<ProcessCommand> RunCommands(const PlatformCommandContext& context) const override {
@@ -162,7 +220,13 @@ public:
     const std::filesystem::path staging = root / "AppDir";
     std::vector<ProcessCommand> commands =
         detail::DesktopPackageStageCommands(context, staging, install_component);
-    commands.push_back({appimagetool.string(), {staging.string(), artifact.string()}, root});
+    if (context.abis.empty()) {
+      commands.push_back({appimagetool.string(), {staging.string(), artifact.string()}, root});
+    } else {
+      commands.push_back({"cmake",
+                          {"-E", "env", "ARCH=" + context.abis.front(), appimagetool.string(),
+                           staging.string(), artifact.string()}, root});
+    }
     return commands;
   }
 };

@@ -112,4 +112,16 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
   const std::filesystem::path app_image = project / ".huxerui/package/linux/debug/sample-1.2.3.AppImage";
   const std::vector<huxerui::cli::PackageArtifact> expected_package_artifacts{{app_image, app_image.filename()}};
   REQUIRE(package_artifacts == expected_package_artifacts);
+
+  auto explicit_context = context;
+  explicit_context.abis = {"aarch64"};
+  const std::array<unsigned char, 20> elf_header{0x7f, 'E', 'L', 'F', 2, 1, 0, 0, 0, 0,
+                                                0,    0,   0,   0,   0, 0, 0, 0, 0xb7, 0};
+  std::ofstream(artifact, std::ios::binary)
+      .write(reinterpret_cast<const char*>(elf_header.data()), static_cast<std::streamsize>(elf_header.size()));
+  REQUIRE_NOTHROW(linux->VerifyBuildAbis(explicit_context));
+  const auto explicit_package = linux->PackageArtifacts(explicit_context);
+  REQUIRE(explicit_package.front().source == app_image.parent_path() / "aarch64" / app_image.filename());
+  explicit_context.abis = {"x86_64"};
+  REQUIRE_THROWS_AS(linux->VerifyBuildAbis(explicit_context), std::runtime_error);
 }

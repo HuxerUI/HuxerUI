@@ -118,6 +118,11 @@ public:
     return "android";
   }
 
+  std::span<const std::string_view> TargetAbis() const noexcept override {
+    static constexpr std::array abis{std::string_view{"arm64-v8a"}, std::string_view{"x86_64"}};
+    return abis;
+  }
+
   bool SupportsCurrentHost() const noexcept override {
     return CurrentHostId() == "windows" || CurrentHostId() == "macos" || CurrentHostId() == "linux" ||
            CurrentHostId() == "android";
@@ -334,6 +339,13 @@ public:
     return detail::AndroidLibraryGraphCommands(context, CurrentHostId());
   }
 
+  void ValidateBuildAbis(const PlatformCommandContext& context) const override {
+    if (CurrentHostId() == "android" && !context.abis.empty() &&
+        (context.abis.size() != 1 || context.abis.front() != "arm64-v8a")) {
+      throw std::invalid_argument("HuxerUI Termux builds only support the arm64-v8a ABI");
+    }
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     const std::optional<std::filesystem::path> aapt2 =
         CurrentHostId() == "android" ? FindExecutable("aapt2") : std::optional<std::filesystem::path>{};
@@ -378,6 +390,8 @@ AndroidBuildCommands(const PlatformCommandContext& context, std::string_view hos
         "-PhuxeruiAbis=arm64-v8a",
         "-Pandroid.aapt2FromMavenOverride=" + aapt2.string(),
     };
+  } else if (!context.abis.empty()) {
+    arguments.push_back("-PhuxeruiAbis=" + JoinTargetAbis(context.abis, ','));
   }
   arguments.push_back(":app:assemble" + configuration);
   if (context.optimization) {

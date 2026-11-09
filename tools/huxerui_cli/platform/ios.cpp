@@ -319,6 +319,11 @@ public:
     return "ios";
   }
 
+  std::span<const std::string_view> TargetAbis() const noexcept override {
+    static constexpr std::array abis{std::string_view{"arm64"}, std::string_view{"x86_64"}};
+    return abis;
+  }
+
   bool SupportsCurrentHost() const noexcept override {
     return CurrentHostId() == "macos";
   }
@@ -435,6 +440,13 @@ public:
     UpdateIosLibraryIntegration(context.project_root);
   }
 
+  void ValidateBuildAbis(const PlatformCommandContext& context) const override {
+    if (!context.abis.empty() && IsIosPhysicalDevice(context) &&
+        (context.abis.size() != 1 || context.abis.front() != "arm64")) {
+      throw std::invalid_argument("HuxerUI iOS device builds only support the arm64 ABI");
+    }
+  }
+
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
     if (!context.cmake_generator.empty()) {
       throw std::invalid_argument("iOS native builds do not use a CMake generator option");
@@ -457,6 +469,10 @@ public:
     };
     if (IsIosPhysicalDevice(context)) {
       build_arguments.push_back("-allowProvisioningUpdates");
+    }
+    if (!context.abis.empty()) {
+      build_arguments.push_back("ARCHS=" + detail::JoinTargetAbis(context.abis, ' '));
+      build_arguments.push_back("ONLY_ACTIVE_ARCH=NO");
     }
     if (context.optimization) {
       build_arguments.push_back("HUXERUI_OPTIMIZATION=" + *context.optimization);

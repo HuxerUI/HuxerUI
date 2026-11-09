@@ -27,6 +27,7 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   REQUIRE(invocation.output.find("--target <public-cmake-target>") != std::string::npos);
   REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
   REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
+  REQUIRE(invocation.output.find("--abi <abi-list>") != std::string::npos);
   REQUIRE(invocation.output.find("a common library's Preview enable all platforms") != std::string::npos);
   REQUIRE(invocation.output.find("huxerui mcpp build") != std::string::npos);
 }
@@ -96,6 +97,42 @@ TEST_CASE("HuxerUICliRejectsInvalidOptimizationOverrides") {
   REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto"}).result == 2);
   REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto", "auto"}).result == 2);
   REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto", "off", "--lto", "on"}).result == 2);
+}
+
+TEST_CASE("HuxerUICliNormalizesAbiNamesForTheSelectedPlatform") {
+  using huxerui::cli::FindPlatformDriver;
+  using huxerui::cli::detail::NormalizeTargetAbi;
+
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("windows"), "x64") == "x86_64");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("windows"), "x86_64") == "x86_64");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("windows"), "arm64").empty());
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("android"), "arm64") == "arm64-v8a");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("android"), "arm64-v8a") == "arm64-v8a");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("android"), "x64") == "x86_64");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("linux"), "arm64") == "aarch64");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("macos"), "aarch64") == "arm64");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("ios"), "x64") == "x86_64");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("web"), "wasm32") == "wasm32");
+  REQUIRE(NormalizeTargetAbi(*FindPlatformDriver("web"), "wasm64").empty());
+}
+
+TEST_CASE("HuxerUICliRejectsInvalidAbiSelectionsBeforeBuilding") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--abi"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--abi", "arm64,"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "android", "--abi", "arm64", "--abi", "x64"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"open", "ios", "--abi", "arm64"}).result == 2);
+
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample"}).result == 0);
+  const auto project = temporary.Path() / "sample";
+  const auto unsupported =
+      Invoke(project, {"build", "web", "--abi", "wasm64", "--source", HUXERUI_TEST_SOURCE_DIRECTORY});
+  REQUIRE(unsupported.result == 2);
+  REQUIRE(unsupported.error.find("unsupported ABI for web: wasm64") != std::string::npos);
+  REQUIRE(Invoke(project, {"build", "android,web", "--abi", "arm64", "--source", HUXERUI_TEST_SOURCE_DIRECTORY})
+              .result == 2);
+  REQUIRE(Invoke(project, {"run", "linux", "--abi", "x64,arm64", "--source", HUXERUI_TEST_SOURCE_DIRECTORY})
+              .result == 2);
 }
 
 TEST_CASE("HuxerUICliRejectsUnknownPlatformsAsUsageErrors") {
