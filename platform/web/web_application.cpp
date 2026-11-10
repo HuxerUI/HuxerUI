@@ -3,9 +3,13 @@
 #include <emscripten.h>
 #include <emscripten/val.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
+#include <span>
+#include <string>
 #include <utility>
 
 #include "application/application_internal.h"
@@ -16,6 +20,81 @@ namespace {
 using emscripten::val;
 
 // clang-format off
+EM_JS(emscripten::EM_VAL, BeginWebClipboardRead, (bool rich, bool image, std::size_t limit), {
+  const operation = { callback: 0 };
+  const failure = (error) => ({
+    status: error?.name === "NotAllowedError" || error?.name === "SecurityError" ? 3 :
+      error?.name === "NotFoundError" ? 1 : 5,
+  });
+  try {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (!globalThis.isSecureContext || typeof clipboard?.read !== "function") {
+      operation.result = Promise.resolve({ status: 2 });
+    } else {
+      // Request access while the caller's browser gesture is active, before the Task is scheduled.
+      operation.result = clipboard.read().then(async (items) => {
+        const formats = image ? ["image/png", "image/jpeg"] : rich ? ["text/html", "text/plain"] : ["text/plain"];
+        let unsupported = false;
+        for (const item of items) {
+          if (image && item.presentationStyle === "attachment") continue;
+          const type = formats.find((candidate) => item.types.includes(candidate));
+          if (type) {
+            const blob = await item.getType(type);
+            if (blob.size > limit) return { status: 4 };
+            return { status: 0, type, bytes: new Uint8Array(await blob.arrayBuffer()) };
+          }
+          unsupported ||= image && item.types.some((candidate) => candidate.startsWith("image/"));
+        }
+        return { status: unsupported ? 2 : 1 };
+      }).catch(failure);
+    }
+  } catch (error) {
+    operation.result = Promise.resolve(failure(error));
+  }
+  return Emval.toHandle(operation);
+});
+
+EM_JS(emscripten::EM_VAL, BeginWebClipboardWrite,
+      (const char* text, const char* html, const std::byte* png, std::size_t png_size), {
+  const operation = { callback: 0, result: Promise.resolve(false) };
+  try {
+    const clipboard = globalThis.navigator?.clipboard;
+    if (!globalThis.isSecureContext || !clipboard) return Emval.toHandle(operation);
+
+    // Start the write during the browser gesture, even if the Task is scheduled later.
+    let request;
+    if (!html && !png && typeof clipboard.writeText === "function") {
+      request = clipboard.writeText(UTF8ToString(text));
+    } else if ((html || png) && typeof clipboard.write === "function" && typeof ClipboardItem === "function") {
+      const formats = png ? {
+        "image/png": new Blob([HEAPU8.slice(png, png + png_size)], { type: "image/png" }),
+      } : {
+        "text/html": new Blob([UTF8ToString(html)], { type: "text/html" }),
+        "text/plain": new Blob([UTF8ToString(text)], { type: "text/plain" }),
+      };
+      request = clipboard.write([new ClipboardItem(formats)]);
+    }
+    if (request) operation.result = request.then(() => true, () => false);
+  } catch (_) {
+    operation.result = Promise.resolve(false);
+  }
+  return Emval.toHandle(operation);
+});
+
+EM_JS(void, AwaitWebClipboardOperation, (emscripten::EM_VAL handle, std::uintptr_t callback), {
+  const operation = Emval.toValue(handle);
+  operation.callback = callback;
+  operation.result.then((result) => {
+    const callback = operation.callback;
+    operation.callback = 0;
+    if (callback) Module._huxerui_web_clipboard_complete(callback, Emval.toHandle(result));
+  });
+});
+
+EM_JS(void, CancelWebClipboardOperation, (emscripten::EM_VAL handle), {
+  Emval.toValue(handle).callback = 0;
+});
+
 EM_JS(emscripten::EM_VAL, CreateWebPermissionOperation, (const char* permission, bool request), {
   return Emval.toHandle({
     permission: UTF8ToString(permission),
@@ -82,6 +161,54 @@ EM_JS(void, CancelWebPermissionOperation, (emscripten::EM_VAL operation_handle),
   }
 });
 // clang-format on
+
+using ClipboardCompletion = std::function<void(const val&)>;
+
+template <class T> Task<T> AwaitClipboardResult(val operation, T (*decode)(const val&)) {
+  return AwaitCallback<T>([operation = std::move(operation), decode](CallbackCompletion<T> complete) {
+    auto callback = std::make_unique<ClipboardCompletion>([complete, decode](const val& value) {
+      try {
+        complete.Complete(decode(value));
+      } catch (...) {
+        complete.Fail(std::current_exception());
+      }
+    });
+    std::function<void()> cancel = [operation, handle = callback.get()] {
+      CancelWebClipboardOperation(operation.as_handle());
+      delete handle;
+    };
+    AwaitWebClipboardOperation(operation.as_handle(), reinterpret_cast<std::uintptr_t>(callback.release()));
+    return cancel;
+  });
+}
+
+IoResult<ClipboardContent> DecodeWebClipboard(const val& result) {
+  switch (result["status"].as<int>()) {
+  case 0: break;
+  case 1: return ClipboardFailure(IoErrorCode::NotFound);
+  case 2: return ClipboardFailure(IoErrorCode::Unsupported);
+  case 3: return ClipboardFailure(IoErrorCode::PermissionDenied);
+  case 4: return ClipboardFailure(IoErrorCode::TooLarge);
+  default: return ClipboardFailure(IoErrorCode::Io);
+  }
+  const std::string type = result["type"].as<std::string>();
+  const val source = result["bytes"];
+  const auto size = source["length"].as<std::size_t>();
+  if (type.starts_with("image/")) {
+    Bytes bytes(size);
+    if (size != 0) {
+      val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(bytes.data())))
+          .call<void>("set", source);
+    }
+    return ClipboardImage(std::move(bytes));
+  }
+  std::string text(size, '\0');
+  if (size != 0) {
+    val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(text.data()))).call<void>("set", source);
+  }
+  if (type == "text/html") return ReadClipboardHtml(text);
+  return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)});
+}
 
 class WebPermissionOperation final : public std::enable_shared_from_this<WebPermissionOperation> {
 public:
@@ -187,11 +314,50 @@ public:
 
 } // namespace
 
+Task<bool> WriteWebClipboardAsync(const ClipboardContent& content) {
+  const char* text = nullptr;
+  const char* markup = nullptr;
+  std::string html;
+  std::span<const std::byte> png;
+  if (const auto* plain = std::get_if<std::string>(&content)) {
+    text = plain->c_str();
+  } else if (const auto* rich = std::get_if<AttributedText>(&content)) {
+    html = ClipboardHtml(*rich);
+    if (html.empty() && !rich->PlainText().empty()) return ClipboardResult(false);
+    text = rich->PlainText().c_str();
+    markup = html.c_str();
+  } else if (const auto* image = std::get_if<ImageAsset>(&content); image && image->Format() == ImageFormat::Png) {
+    png = image->EncodedBytes();
+  } else {
+    return ClipboardResult(false);
+  }
+  const val operation = val::take_ownership(BeginWebClipboardWrite(text, markup, png.data(), png.size()));
+  return AwaitClipboardResult<bool>(operation, [](const val& result) { return result.as<bool>(); });
+}
+
+Task<IoResult<ClipboardContent>> ReadWebClipboardAsync(ClipboardKind kind) {
+  if (kind == ClipboardKind::Files) {
+    return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+  }
+  const bool image = kind == ClipboardKind::Image;
+  const val operation = val::take_ownership(
+      BeginWebClipboardRead(kind == ClipboardKind::RichText, image,
+                            image ? clipboard_max_image_bytes : clipboard_max_text_bytes));
+  return AwaitClipboardResult(operation, DecodeWebClipboard);
+}
+
 std::shared_ptr<PermissionTransport> CreateWebPermissionTransport() {
   return std::make_shared<WebPermissionTransport>();
 }
 
 } // namespace huxerui::detail
+
+extern "C" EMSCRIPTEN_KEEPALIVE void
+huxerui_web_clipboard_complete(std::uintptr_t callback, emscripten::EM_VAL result) {
+  using Completion = huxerui::detail::ClipboardCompletion;
+  const std::unique_ptr<Completion> completion(reinterpret_cast<Completion*>(callback));
+  (*completion)(emscripten::val::take_ownership(result));
+}
 
 extern "C" EMSCRIPTEN_KEEPALIVE void huxerui_web_permission_complete(std::uintptr_t native_handle, int status) {
   using Handle = std::shared_ptr<huxerui::detail::WebPermissionOperation>;

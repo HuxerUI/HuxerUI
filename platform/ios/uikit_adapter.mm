@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import <UserNotifications/UserNotifications.h>
 #import <dispatch/dispatch.h>
 #import <mach/mach.h>
@@ -9,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -16,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <huxerui/app.h>
@@ -31,6 +34,7 @@
 #include "uikit_renderer.h"
 #include "uikit_text_input.h"
 #include "uikit_view.h"
+#include "application/application_internal.h"
 #include "application/platform_frame_internal.h"
 #include "resources/resource_internal.h"
 #include "text/text_internal.h"
@@ -371,6 +375,195 @@ huxerui::KeyEvent MakeKeyEvent(UIPress* press, huxerui::KeyEventType type) {
 } // namespace
 
 namespace huxerui::detail {
+namespace {
+
+NSString* const clipboard_file_type = @"org.huxerui.clipboard-file";
+
+NSString* IosClipboardString(std::string_view text) {
+  return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+}
+
+NSString* IosClipboardFileType(NSItemProvider* provider) {
+  if ([provider hasItemConformingToTypeIdentifier:clipboard_file_type]) return clipboard_file_type;
+  if ([provider hasItemConformingToTypeIdentifier:UTTypeFileURL.identifier]) return UTTypeFileURL.identifier;
+  return [provider registeredTypeIdentifiersWithFileOptions:NSItemProviderFileOptionOpenInPlace].firstObject;
+}
+
+IoErrorCode IosClipboardError(NSError* error) {
+  if ([error.domain isEqualToString:NSCocoaErrorDomain] && error.code == NSFileReadNoPermissionError) {
+    return IoErrorCode::PermissionDenied;
+  }
+  return IoErrorCode::Io;
+}
+
+IoResult<ClipboardContent> DecodeIosClipboardData(NSData* data, ClipboardKind kind) {
+  const bool image = kind == ClipboardKind::Image;
+  if (data.length > (image ? clipboard_max_image_bytes : clipboard_max_text_bytes)) {
+    return ClipboardFailure(IoErrorCode::TooLarge);
+  }
+  if (image) {
+    Bytes bytes(data.length);
+    if (!bytes.empty()) std::memcpy(bytes.data(), data.bytes, bytes.size());
+    return ClipboardImage(std::move(bytes));
+  }
+  std::string text;
+  if (data.length != 0) text.assign(static_cast<const char*>(data.bytes), data.length);
+  if (kind == ClipboardKind::RichText) return ReadClipboardHtml(text);
+  return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)});
+}
+
+Task<IoResult<ClipboardContent>> LoadIosClipboardContent(NSItemProvider* provider, NSString* type, ClipboardKind kind) {
+  return AwaitCallback<IoResult<ClipboardContent>>([provider, type, kind](auto complete) {
+    auto decode = ^(NSData* data, NSError* error) {
+      try {
+        auto result = data != nil ? DecodeIosClipboardData(data, kind) : ClipboardFailure(IosClipboardError(error));
+        complete.Complete(std::move(result));
+      } catch (...) {
+        complete.Fail(std::current_exception());
+      }
+    };
+    NSProgress* progress = nil;
+    if (type == nil) {
+      progress = [provider loadObjectOfClass:NSString.class
+                          completionHandler:^(__kindof id<NSItemProviderReading> value, NSError* error) {
+        NSString* text = [value isKindOfClass:NSString.class] ? (NSString*)value : nil;
+        if ([text lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > clipboard_max_text_bytes) {
+          try {
+            complete.Complete(ClipboardFailure(IoErrorCode::TooLarge));
+          } catch (...) {
+            complete.Fail(std::current_exception());
+          }
+        } else {
+          decode([text dataUsingEncoding:NSUTF8StringEncoding], error);
+        }
+      }];
+    } else {
+      progress = [provider loadDataRepresentationForTypeIdentifier:type completionHandler:decode];
+    }
+    return [progress] { [progress cancel]; };
+  });
+}
+
+Task<IoResult<FileReference>> LoadIosClipboardFile(NSItemProvider* provider) {
+  return AwaitCallback<IoResult<FileReference>>([provider](auto complete) {
+    auto receive = ^(NSURL* url, BOOL in_place, NSError* error) {
+      try {
+        if (!url.isFileURL || error != nil) {
+          complete.Complete(IoResult<FileReference>::Failure(
+              {IosClipboardError(error), "HuxerUI could not read the iOS clipboard file"}));
+          return;
+        }
+        // Provider-owned copies may expire as soon as this callback returns.
+        auto reference = in_place ? MakeIosFileReference(url, false) : MakeCopiedIosFileReference(url);
+        if (reference.Type() == FileType::File) {
+          complete.Complete(IoResult<FileReference>::Success(std::move(reference)));
+        } else {
+          complete.Complete(IoResult<FileReference>::Failure(
+              {IoErrorCode::Unsupported, "HuxerUI clipboard requires an ordinary file"}));
+        }
+      } catch (...) {
+        complete.Complete(IoResult<FileReference>::Failure(
+            {IoErrorCode::Io, "HuxerUI could not retain the iOS clipboard file"}));
+      }
+    };
+    NSProgress* progress = nil;
+    NSString* type = IosClipboardFileType(provider);
+    if ([type isEqualToString:UTTypeFileURL.identifier]) {
+      progress = [provider loadObjectOfClass:NSURL.class
+                          completionHandler:^(__kindof id<NSItemProviderReading> value, NSError* error) {
+        receive([value isKindOfClass:NSURL.class] ? (NSURL*)value : nil, YES, error);
+      }];
+    } else {
+      progress = [provider loadInPlaceFileRepresentationForTypeIdentifier:type completionHandler:receive];
+    }
+    return [progress] { [progress cancel]; };
+  });
+}
+
+Task<IoResult<ClipboardContent>> ReadIosClipboardFiles(NSArray<NSItemProvider*>* providers) {
+  std::vector<FileReference> files;
+  files.reserve(providers.count);
+  for (NSUInteger index = 0; index < providers.count; ++index) {
+    auto file = co_await LoadIosClipboardFile(providers[index]);
+    if (!file.Succeeded()) co_return IoResult<ClipboardContent>::Failure(std::move(file).Error());
+    files.push_back(std::move(file).Value());
+  }
+  co_return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(files)});
+}
+
+Task<IoResult<ClipboardContent>> ReadIosClipboard(UIPasteboard* pasteboard, ClipboardKind kind) {
+  NSArray<NSItemProvider*>* providers = pasteboard.itemProviders;
+  if (providers.count == 0) {
+    const auto code = pasteboard.numberOfItems == 0 ? IoErrorCode::NotFound : IoErrorCode::PermissionDenied;
+    return ClipboardResult(ClipboardFailure(code));
+  }
+  if (kind == ClipboardKind::Files) {
+    NSMutableArray<NSItemProvider*>* files = [NSMutableArray array];
+    for (NSItemProvider* provider in providers) {
+      if (IosClipboardFileType(provider) == nil) continue;
+      if (files.count == clipboard_max_files) return ClipboardResult(ClipboardFailure(IoErrorCode::TooLarge));
+      [files addObject:provider];
+    }
+    return files.count != 0 ? ReadIosClipboardFiles(files) : ClipboardResult(ClipboardFailure(IoErrorCode::NotFound));
+  }
+  bool unsupported_image = false;
+  for (NSItemProvider* provider in providers) {
+    if (IosClipboardFileType(provider) != nil) continue;
+    if (kind == ClipboardKind::Image) {
+      for (NSString* type in @[UTTypePNG.identifier, UTTypeJPEG.identifier]) {
+        if ([provider hasItemConformingToTypeIdentifier:type]) return LoadIosClipboardContent(provider, type, kind);
+      }
+      unsupported_image |= [provider hasItemConformingToTypeIdentifier:UTTypeImage.identifier];
+    } else {
+      if (kind == ClipboardKind::RichText && [provider hasItemConformingToTypeIdentifier:UTTypeHTML.identifier]) {
+        return LoadIosClipboardContent(provider, UTTypeHTML.identifier, kind);
+      }
+      if ([provider canLoadObjectOfClass:NSString.class]) {
+        return LoadIosClipboardContent(provider, nil, ClipboardKind::Text);
+      }
+      if ([provider hasItemConformingToTypeIdentifier:UTTypeUTF8PlainText.identifier]) {
+        return LoadIosClipboardContent(provider, UTTypeUTF8PlainText.identifier, ClipboardKind::Text);
+      }
+    }
+  }
+  return ClipboardResult(ClipboardFailure(unsupported_image ? IoErrorCode::Unsupported : IoErrorCode::NotFound));
+}
+
+bool WriteIosClipboardFiles(UIPasteboard* pasteboard, const ClipboardContent& content) {
+  const auto paths = ClipboardFilePaths(content);
+  if (!paths) return false;
+  const auto* references = std::get_if<std::vector<FileReference>>(&content);
+  NSMutableArray<NSItemProvider*>* providers = [NSMutableArray arrayWithCapacity:paths->size()];
+  for (std::size_t index = 0; index < paths->size(); ++index) {
+    NSString* path = IosClipboardString((*paths)[index].Path());
+    if (path == nil) return false;
+    NSURL* url = [NSURL fileURLWithPath:path];
+    NSNumber* regular = nil;
+    if (![url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:nil] || !regular.boolValue) return false;
+    NSItemProvider* provider = [[NSItemProvider alloc] init];
+    provider.suggestedName = url.lastPathComponent;
+    NSString* extension = url.pathExtension;
+    UTType* type = extension.length != 0 ? [UTType typeWithFilenameExtension:extension] : nil;
+    NSString* file_type = type != nil ? type.identifier : UTTypeData.identifier;
+    const auto reference = references ? std::optional<FileReference>((*references)[index]) : std::nullopt;
+    auto load = ^NSProgress*(void (^complete)(NSURL*, BOOL, NSError*)) {
+      // Keep any security-scoped source alive while the system requests its file representation.
+      complete(url, reference.has_value(), nil);
+      return nil;
+    };
+    for (NSString* identifier in @[file_type, clipboard_file_type]) {
+      [provider registerFileRepresentationForTypeIdentifier:identifier
+                                                 fileOptions:0
+                                                  visibility:NSItemProviderRepresentationVisibilityAll
+                                                 loadHandler:load];
+    }
+    [providers addObject:provider];
+  }
+  [pasteboard setItemProviders:providers localOnly:YES expirationDate:nil];
+  return true;
+}
+
+} // namespace
 
 /// Owns UIKit application services and lazily attaches UI when the native application becomes active.
 /// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
@@ -516,6 +709,37 @@ public:
   }
 
 private:
+  bool WriteContent(ClipboardContent content) override {
+    if (const auto* text = std::get_if<std::string>(&content)) return WriteText(*text);
+    UIPasteboard* pasteboard = UIPasteboard.generalPasteboard;
+    if (pasteboard == nil) return false;
+    if (const auto* rich = std::get_if<AttributedText>(&content)) {
+      const auto html = ClipboardHtml(*rich);
+      if (html.empty() && !rich->PlainText().empty()) return false;
+      NSString* text = IosClipboardString(rich->PlainText());
+      if (text == nil) return false;
+      NSData* markup = [NSData dataWithBytes:html.data() length:html.size()];
+      pasteboard.items = @[@{UTTypeUTF8PlainText.identifier: text, UTTypeHTML.identifier: markup}];
+    } else if (const auto* image = std::get_if<ImageAsset>(&content)) {
+      const auto bytes = image->EncodedBytes();
+      NSString* type = image->Format() == ImageFormat::Png ? UTTypePNG.identifier : UTTypeJPEG.identifier;
+      pasteboard.items = @[@{type: [NSData dataWithBytes:bytes.data() length:bytes.size()]}];
+    } else {
+      return WriteIosClipboardFiles(pasteboard, content);
+    }
+    return true;
+  }
+
+  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
+    UIPasteboard* pasteboard = UIPasteboard.generalPasteboard;
+    if (pasteboard == nil) return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+    return ReadIosClipboard(pasteboard, kind);
+  }
+
+  bool MayHaveContent(ClipboardKind kind) const noexcept override {
+    return kind == ClipboardKind::Text && UIPasteboard.generalPasteboard.hasStrings;
+  }
+
   void OnRuntimeStopped() override;
   /// Creates the owned UIKit window only when an active application needs its first UI attachment.
   /// @return True when the attachment exists and is ready, false if it cannot be started.

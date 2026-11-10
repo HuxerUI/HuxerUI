@@ -874,7 +874,7 @@ void StopWebApplicationHost();
 
 /// Owns browser application services and timers independently of mounted DOM window surfaces.
 /// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
-class WebRuntime final : public Runtime {
+class WebRuntime final : public Runtime, public PlatformClipboard {
 public:
   WebRuntime() : Runtime(DispatchToWebUiThread), resources_(BrowserResourceConfiguration()) {}
 
@@ -891,6 +891,7 @@ public:
   }
 
   PlatformResources* Resources() noexcept override { return &resources_; }
+  PlatformClipboard* Clipboard() noexcept override { return this; }
   std::shared_ptr<HttpTransport> CreateHttpTransport() override { return CreateWebHttpTransport(); }
   std::shared_ptr<PermissionTransport> CreatePermissionTransport() override { return CreateWebPermissionTransport(); }
   std::optional<AppDirectories> CreateAppDirectories() override { return CreateWebAppDirectories(); }
@@ -913,6 +914,14 @@ public:
   }
 
 private:
+  std::optional<std::string> ReadText() override { return std::nullopt; }
+  bool WriteText(std::string_view) override { return false; }
+  bool SupportsSynchronousText() const noexcept override { return false; }
+  Task<bool> WriteContentAsync(ClipboardContent content) override { return WriteWebClipboardAsync(content); }
+  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
+    return ReadWebClipboardAsync(kind);
+  }
+
   /// Retained ordinary timer entry shared with its cancellation closure.
   /// owner is cleared before callback delivery or retirement so cancellation cannot target a replacement Runtime.
   struct Timer {

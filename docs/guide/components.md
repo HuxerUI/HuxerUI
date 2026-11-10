@@ -764,7 +764,7 @@ View PasswordField(State<TextEditingValue> password, ImageVariant visibility_ico
 Static text selection, TextField selection, clipboard actions, and platform IME behavior share one Runtime editing model.
 The platform adapter translates UTF-16 offsets or toolkit-specific conventions at the boundary while application text remains UTF-8.
 
-Application code obtains the plain-text clipboard through `UseApplication().Clipboard()` during composition and captures it in an event handler:
+Application code obtains the system clipboard through `UseApplication().Clipboard()` during composition and captures it in an event handler.
 
 ```cpp
 const auto clipboard = UseApplication().Clipboard();
@@ -774,9 +774,15 @@ return Button("Copy").OnClick([clipboard] {
 });
 ```
 
-`IsAvailable()` reports whether the current platform supplies synchronous clipboard access.
-`ReadText()` returns no value when text is absent or cannot be read, and `WriteText()` reports whether the platform accepted valid UTF-8 text.
+`IsAvailable()` reports synchronous plain-text support. `ReadText()` returns no value when text is absent or cannot be read, and `WriteText()` reports whether the system accepted valid UTF-8 text.
 Each Runtime has one shared Clipboard instance; a captured ApplicationHandle can retrieve it outside composition, and retained clipboard objects report unavailable results after their Runtime is destroyed.
-The Web backend reports this service as unavailable; browser-managed TextField copy, cut, and paste continue to work through trusted editing events.
+
+On Windows, macOS, Linux, Android, and iOS, use `WriteContent()` to publish a `ClipboardContent` value. It accepts text, `AttributedText`, an `ImageAsset`, or a nonempty list of `File` or `FileReference` values supported by the platform. Rich text publishes a plain-text alternative. `WriteContentAsync()` also works on these platforms and returns the result of the synchronous publication through a Task.
+
+Use `ReadTextAsync()`, `ReadRichTextAsync()`, `ReadImageAsync()`, or `ReadFilesAsync()` from a user-triggered action. A result with `IoErrorCode::NotFound` means there is no matching content. Rich text falls back to plain text when the clipboard offers only that representation. Files are delivered in order as read-only references. Use `OpenReadAsync()` to read an attachment, or `AsFile()` when an operation needs a local path, keeping the reference alive for its access grant.
+
+Image content and copied image files are separate clipboard representations. Desktop platforms copy local files and directories. Android copies ordinary local files and readable content URIs, which remain subject to system grants. iOS publishes ordinary local files on the device and reads explicit file URLs, open-in-place file representations, and file copies published by HuxerUI.
+
+On Web, start `WriteContentAsync()`, `ReadTextAsync()`, `ReadRichTextAsync()`, or `ReadImageAsync()` directly in the user action and then schedule or await the returned Task. The browser requires a secure context and may prompt for access. Writes support plain text, `AttributedText` as HTML with a plain-text alternative, and PNG images. The write Task yields true after browser acceptance, or false for unsupported content or rejection. Direct file reads are unsupported. Web TextField copy, cut, and paste use browser-managed editing events.
 
 For editing invariants and platform protocols, see [Text Input and TextField Design](../design/text-input.md).

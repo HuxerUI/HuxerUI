@@ -541,12 +541,20 @@ public:
       const jmethodID get_context = environment->GetMethodID(type.Get(), "getContext", "()Landroid/content/Context;");
       read_clipboard_text_ = environment->GetMethodID(type.Get(), "readClipboardText", "()[B");
       write_clipboard_text_ = environment->GetMethodID(type.Get(), "writeClipboardText", "([B)Z");
+      write_clipboard_html_ = environment->GetMethodID(type.Get(), "writeClipboardHtml", "([B[B)Z");
+      write_clipboard_image_ = environment->GetMethodID(type.Get(), "writeClipboardImage", "([BZ)Z");
+      write_clipboard_files_ = environment->GetMethodID(
+          type.Get(), "writeClipboardFiles", "([Ljava/lang/String;[Ljava/lang/String;)Z");
+      may_have_clipboard_text_ = environment->GetMethodID(type.Get(), "mayHaveClipboardText", "()Z");
+      capture_clipboard_ = environment->GetMethodID(
+          type.Get(), "captureClipboard", "(III)Lorg/huxerui/HuxerUIApplication$ClipboardRead;");
       resource_locale_ = environment->GetMethodID(type.Get(), "resourceLocale", "()[B");
       resource_scale_ = environment->GetMethodID(type.Get(), "resourceScale", "()F");
       process_pss_bytes_ = environment->GetMethodID(type.Get(), "processPssBytes", "()J");
       stopped_ = environment->GetMethodID(type.Get(), "onRuntimeStopped", "()V");
-      if (!get_context || !read_clipboard_text_ || !write_clipboard_text_ || !resource_locale_ ||
-          !resource_scale_ || !process_pss_bytes_ || !stopped_ || environment->ExceptionCheck()) {
+      if (!get_context || !read_clipboard_text_ || !write_clipboard_text_ || !write_clipboard_html_ ||
+          !write_clipboard_image_ || !write_clipboard_files_ || !may_have_clipboard_text_ || !capture_clipboard_ ||
+          !resource_locale_ || !resource_scale_ || !process_pss_bytes_ || !stopped_ || environment->ExceptionCheck()) {
         throw std::runtime_error("HuxerUI Android application methods do not match the platform backend");
       }
       android::LocalRef<jobject> context(environment, environment->CallObjectMethod(host, get_context));
@@ -677,10 +685,89 @@ public:
     }
     const bool result = environment->CallBooleanMethod(host_, write_clipboard_text_, bytes) == JNI_TRUE;
     environment->DeleteLocalRef(bytes);
-    return result && !environment->ExceptionCheck();
+    if (!result || environment->ExceptionCheck()) return false;
+    clipboard_references_.clear();
+    return true;
   }
 
 private:
+  bool WriteContent(ClipboardContent content) override {
+    if (const auto* text = std::get_if<std::string>(&content)) return WriteText(*text);
+    JNIEnv* environment = Environment();
+    if (!environment || !host_ || environment->ExceptionCheck()) return false;
+    bool accepted = false;
+    if (const auto* rich = std::get_if<AttributedText>(&content)) {
+      const std::string html = ClipboardHtml(*rich);
+      if (html.empty() && !rich->PlainText().empty()) return false;
+      android::LocalRef<jbyteArray> plain_bytes(environment, ToByteArray(environment, rich->PlainText()));
+      if (!plain_bytes) return false;
+      android::LocalRef<jbyteArray> html_bytes(environment, ToByteArray(environment, html));
+      accepted = html_bytes && environment->CallBooleanMethod(host_, write_clipboard_html_, plain_bytes.Get(),
+                                                               html_bytes.Get()) == JNI_TRUE;
+    } else if (const auto* image = std::get_if<ImageAsset>(&content)) {
+      const auto bytes = android::BytesToJavaByteArray(environment, image->EncodedBytes());
+      const jboolean png = image->Format() == ImageFormat::Png ? JNI_TRUE : JNI_FALSE;
+      accepted = bytes && environment->CallBooleanMethod(host_, write_clipboard_image_, bytes.Get(), png) == JNI_TRUE;
+    } else {
+      accepted = WriteClipboardFiles(environment, content);
+    }
+    if (!accepted || environment->ExceptionCheck()) return false;
+    clipboard_references_.clear();
+    if (auto* references = std::get_if<std::vector<FileReference>>(&content)) {
+      clipboard_references_ = std::move(*references);
+    }
+    return true;
+  }
+
+  bool WriteClipboardFiles(JNIEnv* environment, const ClipboardContent& content) {
+    const auto* local = std::get_if<std::vector<File>>(&content);
+    const auto* references = std::get_if<std::vector<FileReference>>(&content);
+    const auto count = static_cast<jsize>(local ? local->size() : references->size());
+    android::LocalRef<jclass> string_class(environment, environment->FindClass("java/lang/String"));
+    if (!string_class) return false;
+    android::LocalRef<jobjectArray> paths(environment, environment->NewObjectArray(count, string_class.Get(), nullptr));
+    if (!paths) return false;
+    android::LocalRef<jobjectArray> uris(environment, environment->NewObjectArray(count, string_class.Get(), nullptr));
+    if (!uris) return false;
+    for (jsize index = 0; index < count; ++index) {
+      const auto offset = static_cast<std::size_t>(index);
+      if (references && (*references)[offset].Type() != FileType::File) return false;
+      auto path = local ? std::optional<File>((*local)[offset]) : (*references)[offset].AsFile();
+      std::string value;
+      try {
+        value = path ? path->Path() : ProjectAndroidFileReference((*references)[offset]).uri;
+      } catch (const std::invalid_argument&) {
+        return false;
+      }
+      const auto encoded = android::Utf8ToJavaString(environment, value);
+      if (!encoded) return false;
+      environment->SetObjectArrayElement(path ? paths.Get() : uris.Get(), index, encoded.Get());
+      if (environment->ExceptionCheck()) return false;
+    }
+    return environment->CallBooleanMethod(host_, write_clipboard_files_, paths.Get(), uris.Get()) == JNI_TRUE;
+  }
+
+  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
+    static_assert(static_cast<jint>(ClipboardKind::Text) == 0 && static_cast<jint>(ClipboardKind::RichText) == 1 &&
+                  static_cast<jint>(ClipboardKind::Image) == 2 && static_cast<jint>(ClipboardKind::Files) == 3);
+    JNIEnv* environment = Environment();
+    if (!environment || !host_ || environment->ExceptionCheck()) {
+      return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+    }
+    const auto limit = kind == ClipboardKind::Image ? clipboard_max_image_bytes : clipboard_max_text_bytes;
+    android::LocalRef<jobject> capture(environment,
+        environment->CallObjectMethod(host_, capture_clipboard_, static_cast<jint>(kind), static_cast<jint>(limit),
+                                      static_cast<jint>(clipboard_max_files)));
+    if (!capture || environment->ExceptionCheck()) return ClipboardResult(ClipboardFailure(IoErrorCode::Io));
+    return ReadAndroidClipboardAsync(virtual_machine_, environment, context_, capture.Get(), kind);
+  }
+
+  bool MayHaveContent(ClipboardKind kind) const noexcept override {
+    JNIEnv* environment = Environment();
+    return kind == ClipboardKind::Text && environment && host_ && !environment->ExceptionCheck() &&
+        environment->CallBooleanMethod(host_, may_have_clipboard_text_) == JNI_TRUE && !environment->ExceptionCheck();
+  }
+
   std::optional<AppDirectories> CreateAppDirectories() override {
     return CreateAndroidAppDirectories(Environment(), context_);
   }
@@ -729,6 +816,12 @@ private:
   std::shared_ptr<AndroidAssetManager> asset_manager_;
   jmethodID read_clipboard_text_ = nullptr;
   jmethodID write_clipboard_text_ = nullptr;
+  jmethodID write_clipboard_html_ = nullptr;
+  jmethodID write_clipboard_image_ = nullptr;
+  jmethodID write_clipboard_files_ = nullptr;
+  jmethodID may_have_clipboard_text_ = nullptr;
+  jmethodID capture_clipboard_ = nullptr;
+  std::vector<FileReference> clipboard_references_;
   jmethodID resource_locale_ = nullptr;
   jmethodID resource_scale_ = nullptr;
   jmethodID process_pss_bytes_ = nullptr;

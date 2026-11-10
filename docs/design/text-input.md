@@ -942,7 +942,15 @@ Shift extends the selection for movement commands. macOS `NSTextInputClient` sel
 
 Clipboard uses the optional `PlatformClipboard` capability. UiWindow maps Ctrl/Command+A, C, V, and X to typed `TextEditingAction` values. TextField supports Select All, Copy, Paste, and Cut subject to its read-only and secure configuration; SelectionArea supports Select All and Copy. Undo and redo stay inside TextField rather than expanding `TextEditingAction` or the common input protocol. Secure fields allow Select All and Paste but reject Copy and Cut. Complex text clients retain ownership of their own history.
 
-The internal application service owns one public `Clipboard` per Runtime that delegates synchronous plain-text operations to the same stable `PlatformClipboard` instance. Applications obtain it with `UseApplication().Clipboard()`; unsupported and disconnected instances return unavailable results. Runtime disconnects the application service during application retirement so an application-retained clipboard cannot access a destroyed native capability. Public writes validate UTF-8 before entering the platform boundary, and unreadable platform text is returned as no value. Text editing continues to use `PlatformClipboard` directly rather than routing through the application facade.
+The application service owns one public `Clipboard` per Runtime and delegates to its stable `PlatformClipboard` capability. Runtime retirement disconnects this service before releasing the platform capability. Clipboard tasks capture their inputs and platform resources before they can outlive the service.
+
+Built-in editing actions use the synchronous plain-text operations on platforms that provide them. Paste availability checks use advertised formats where available and permit a paste attempt when the format is unknown. They do not request clipboard payloads. Application code uses `WriteContent()` and typed asynchronous reads for rich text, image content, and file lists on desktop platforms, Android, and iOS.
+
+Clipboard HTML conversion supports inline character styles, safe links, and text breaks. Conversion does not load external content. Windows stores HTML fragments with byte offsets and UTF-16 text separately. GDK uses bounded asynchronous streams for typed clipboard reads. AppKit uses pasteboard item representations. Image payloads and dimensions are bounded before delivery. File lists reuse existing read-only file reference factories, retain access through the reference lifetime, and never acknowledge a move.
+
+Android captures the current clip on the application thread and resolves URI contents on a worker. A non-exported content provider serves read-only URI grants for published images and local files. UIKit loads pasteboard item provider representations and retains explicit file URLs or copies callback-scoped files.
+
+Web begins browser clipboard operations during the triggering user action and delivers Promise results through the Task dispatcher. Reads expose text, HTML, and PNG or JPEG images. Writes use `writeText()` for plain text and one `ClipboardItem` for HTML with its plain-text alternative or for PNG. Canceling a Task detaches its callback from the Promise. Platforms with synchronous publication perform the write when `WriteContentAsync()` is called and return the result through the Task.
 
 ## Android adapter
 

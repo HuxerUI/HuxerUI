@@ -16,7 +16,7 @@ namespace huxerui {
 /// Each operation returns only categories applicable to its source; platforms may use Io when no finer mapping exists.
 /// Cancellation is not an error category: canceling an owning Task suppresses its result delivery.
 enum class IoErrorCode {
-  NotFound,         ///< The requested entry or a required parent does not exist.
+  NotFound,         ///< The requested entry, parent, or content does not exist.
   PermissionDenied, ///< Access was denied or the retained provider grant is insufficient.
   NotDirectory,     ///< An operation requiring a directory encountered another entry kind.
   IsDirectory,      ///< An operation requiring an ordinary file encountered a directory.

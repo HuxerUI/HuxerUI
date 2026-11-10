@@ -1742,6 +1742,13 @@ private:
 
 } // namespace
 
+AndroidFileReferenceDecoder CreateAndroidFileReferenceDecoder(JavaVM* vm, JNIEnv* environment, jobject context) {
+  auto bridge = std::make_shared<AndroidFileReferenceBridge>(vm, environment, context);
+  return [bridge = std::move(bridge)](JNIEnv* current, jobjectArray values) {
+    return AndroidFileReferenceBridge::DecodeReferences(bridge, current, values);
+  };
+}
+
 FileReference CreateAndroidFileReference(
     JavaVM* virtual_machine, JNIEnv* environment, jobject context, FileReferenceMetadata metadata, std::string_view uri
 ) {

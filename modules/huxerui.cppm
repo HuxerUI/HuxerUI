@@ -67,6 +67,7 @@ export namespace huxerui {
     using huxerui::ClipChildren;
     using huxerui::ClipShape;
     using huxerui::Clipboard;
+    using huxerui::ClipboardContent;
     using huxerui::Color;
     using huxerui::ColorScheme;
     using huxerui::Column;

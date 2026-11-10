@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <ImageIO/ImageIO.h>
 #import <QuartzCore/CADisplayLink.h>
 #import <UserNotifications/UserNotifications.h>
 #import <dispatch/dispatch.h>
@@ -18,6 +19,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include <huxerui/app.h>
@@ -33,6 +35,7 @@
 #include "macos_application_internal.h"
 #include "macos_file_internal.h"
 #include "macos_http_internal.h"
+#include "application/application_internal.h"
 #include "application/platform_frame_internal.h"
 #include "resources/resource_internal.h"
 #include "text/text_internal.h"
@@ -235,6 +238,149 @@ NSCursor* MacPointerCursor(huxerui::PointerCursorKind kind) {
 @end
 
 namespace huxerui::detail {
+
+namespace {
+
+NSPasteboardType MacClipboardType(NSPasteboard* pasteboard, ClipboardKind kind) {
+  switch (kind) {
+  case ClipboardKind::Text: return [pasteboard availableTypeFromArray:@[NSPasteboardTypeString]];
+  case ClipboardKind::RichText:
+    return [pasteboard availableTypeFromArray:@[NSPasteboardTypeHTML, NSPasteboardTypeString]];
+  case ClipboardKind::Image:
+    return [pasteboard availableTypeFromArray:@[NSPasteboardTypePNG, @"public.jpeg", NSPasteboardTypeTIFF]];
+  case ClipboardKind::Files: return [pasteboard availableTypeFromArray:@[NSPasteboardTypeFileURL]];
+  }
+  return nil;
+}
+
+NSString* MacClipboardString(std::string_view text) {
+  return [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
+}
+
+bool WriteMacClipboard(NSPasteboard* pasteboard, const ClipboardContent& content) {
+  return std::visit([&](const auto& value) -> bool {
+    using T = std::decay_t<decltype(value)>;
+    NSPasteboardItem* item = [[NSPasteboardItem alloc] init];
+    if constexpr (std::is_same_v<T, std::string>) {
+      NSString* text = MacClipboardString(value);
+      if (!text || ![item setString:text forType:NSPasteboardTypeString]) return false;
+    } else if constexpr (std::is_same_v<T, AttributedText>) {
+      const auto fragment = ClipboardHtml(value);
+      if (fragment.empty() && !value.PlainText().empty()) return false;
+      NSString* html = MacClipboardString(fragment);
+      NSString* text = MacClipboardString(value.PlainText());
+      if (!html || !text || ![item setString:html forType:NSPasteboardTypeHTML] ||
+          ![item setString:text forType:NSPasteboardTypeString]) return false;
+    } else if constexpr (std::is_same_v<T, ImageAsset>) {
+      const auto bytes = value.EncodedBytes();
+      NSData* data = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+      NSPasteboardType type = value.Format() == ImageFormat::Png ? NSPasteboardTypePNG : @"public.jpeg";
+      if (!data || ![item setData:data forType:type]) return false;
+    } else {
+      const auto files = ClipboardFilePaths(content);
+      if (!files) return false;
+      NSMutableArray<NSURL*>* urls = [NSMutableArray arrayWithCapacity:files->size()];
+      for (const auto& file : *files) {
+        NSString* path = MacClipboardString(file.Path());
+        if (!path) return false;
+        [urls addObject:[NSURL fileURLWithPath:path]];
+      }
+      [pasteboard clearContents];
+      return [pasteboard writeObjects:urls] == YES;
+    }
+    [pasteboard clearContents];
+    return [pasteboard writeObjects:@[item]] == YES;
+  }, content);
+}
+
+IoResult<ClipboardContent> ReadMacClipboardFiles(NSPasteboard* pasteboard) {
+  const NSInteger revision = pasteboard.changeCount;
+  std::size_t expected = 0;
+  for (NSPasteboardItem* item in pasteboard.pasteboardItems) {
+    if ([item.types containsObject:NSPasteboardTypeFileURL]) ++expected;
+  }
+  if (expected > clipboard_max_files) return ClipboardFailure(IoErrorCode::TooLarge);
+  NSArray<NSURL*>* urls = [pasteboard readObjectsForClasses:@[NSURL.class]
+                                                  options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+  if (pasteboard.changeCount != revision || urls.count == 0 || urls.count != expected) {
+    return ClipboardFailure(IoErrorCode::Io);
+  }
+  std::vector<FileReference> files;
+  files.reserve(urls.count);
+  try {
+    for (NSURL* url in urls) {
+      auto file = MakeMacFileReference(url, false);
+      if (file.Type() != FileType::File && file.Type() != FileType::Directory) {
+        return ClipboardFailure(IoErrorCode::Unsupported);
+      }
+      files.push_back(std::move(file));
+    }
+  } catch (const std::exception&) {
+    return ClipboardFailure(IoErrorCode::Io);
+  }
+  return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(files)});
+}
+
+Bytes MacClipboardBytes(NSData* data) {
+  Bytes bytes(data.length);
+  if (!bytes.empty()) std::memcpy(bytes.data(), data.bytes, bytes.size());
+  return bytes;
+}
+
+Task<IoResult<ClipboardContent>> DecodeMacClipboardImageAsync(Bytes bytes) {
+  co_return co_await RunWorker([bytes = std::move(bytes)] {
+    @autoreleasepool {
+      NSData* data = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+      CGImageSourceRef source = CGImageSourceCreateWithData((__bridge CFDataRef)data, nullptr);
+      if (!source) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+      NSDictionary* properties = CFBridgingRelease(CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr));
+      const auto width = [properties[(__bridge NSString*)kCGImagePropertyPixelWidth] unsignedLongLongValue];
+      const auto height = [properties[(__bridge NSString*)kCGImagePropertyPixelHeight] unsignedLongLongValue];
+      CGImageRef image = ClipboardImageSizeAllowed(width, height)
+          ? CGImageSourceCreateImageAtIndex(source, 0, nullptr) : nullptr;
+      CFRelease(source);
+      if (!image) return ClipboardFailure(width && height ? IoErrorCode::TooLarge : IoErrorCode::InvalidEncoding);
+      NSMutableData* png = [NSMutableData data];
+      CGImageDestinationRef destination =
+          CGImageDestinationCreateWithData((__bridge CFMutableDataRef)png, CFSTR("public.png"), 1, nullptr);
+      if (!destination) {
+        CGImageRelease(image);
+        return ClipboardFailure(IoErrorCode::Io);
+      }
+      CGImageDestinationAddImage(destination, image, nullptr);
+      const bool written = CGImageDestinationFinalize(destination);
+      CFRelease(destination);
+      CGImageRelease(image);
+      if (!written) return ClipboardFailure(IoErrorCode::Io);
+      if (png.length > clipboard_max_image_bytes) return ClipboardFailure(IoErrorCode::TooLarge);
+      return ClipboardImage(MacClipboardBytes(png));
+    }
+  });
+}
+
+Task<IoResult<ClipboardContent>> ReadMacClipboardAsync(NSPasteboard* pasteboard, ClipboardKind kind) {
+  const auto type = MacClipboardType(pasteboard, kind);
+  if (!type) return ClipboardResult(ClipboardFailure(IoErrorCode::NotFound));
+  if (kind == ClipboardKind::Files) return ClipboardResult(ReadMacClipboardFiles(pasteboard));
+  if (kind == ClipboardKind::Image) {
+    NSData* data = [pasteboard dataForType:type];
+    if (!data) return ClipboardResult(ClipboardFailure(IoErrorCode::Io));
+    if (data.length > clipboard_max_image_bytes) return ClipboardResult(ClipboardFailure(IoErrorCode::TooLarge));
+    if ([type isEqualToString:NSPasteboardTypeTIFF]) return DecodeMacClipboardImageAsync(MacClipboardBytes(data));
+    return ClipboardResult(ClipboardImage(MacClipboardBytes(data)));
+  }
+  NSString* value = [pasteboard stringForType:type];
+  if (!value) return ClipboardResult(ClipboardFailure(IoErrorCode::Io));
+  const auto length = [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+  if (length > clipboard_max_text_bytes) return ClipboardResult(ClipboardFailure(IoErrorCode::TooLarge));
+  const char* utf8 = value.UTF8String;
+  if (!utf8) return ClipboardResult(ClipboardFailure(IoErrorCode::InvalidEncoding));
+  std::string text(utf8, length);
+  if ([type isEqualToString:NSPasteboardTypeHTML]) return ClipboardResult(ReadClipboardHtml(text));
+  return ClipboardResult(IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)}));
+}
+
+} // namespace
 
 GestureSettings MacGestureDefaults() noexcept {
   GestureSettings settings;
@@ -473,7 +619,25 @@ public:
     }
     NSPasteboard* pasteboard = [NSPasteboard generalPasteboard];
     [pasteboard clearContents];
+    clipboard_references_.clear();
     return [pasteboard setString:value forType:NSPasteboardTypeString] == YES;
+  }
+
+  bool WriteContent(ClipboardContent content) override {
+    if (!WriteMacClipboard([NSPasteboard generalPasteboard], content)) return false;
+    clipboard_references_.clear();
+    if (auto* references = std::get_if<std::vector<FileReference>>(&content)) {
+      clipboard_references_ = std::move(*references);
+    }
+    return true;
+  }
+
+  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
+    return ReadMacClipboardAsync([NSPasteboard generalPasteboard], kind);
+  }
+
+  bool MayHaveContent(ClipboardKind kind) const noexcept override {
+    return MacClipboardType([NSPasteboard generalPasteboard], kind) != nil;
   }
 
 private:
@@ -487,6 +651,7 @@ private:
   }
 
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
+  std::vector<FileReference> clipboard_references_;
   std::vector<ApplicationActivation> pending_activations_;
   bool stopped_ = false;
   bool termination_pending_ = false;

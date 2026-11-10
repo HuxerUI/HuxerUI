@@ -488,7 +488,7 @@ public:
   virtual PlatformResources* Resources() noexcept {
     return nullptr;
   }
-  /// Borrows the native plain-text clipboard capability during application initialization.
+  /// Borrows the platform clipboard capability during application initialization.
   /// @return A capability kept alive until shared retirement, or null for an unsupported clipboard host.
   virtual PlatformClipboard* Clipboard() noexcept {
     return nullptr;
@@ -616,12 +616,12 @@ public:
   ///
   /// Reading the value during composition subscribes the current scope to later distinct state changes.
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
-  /// @brief Returns the shared plain-text clipboard for this application's Runtime.
-  /// @return The same non-null instance on every call, including on hosts without clipboard support. Query
-  /// Clipboard::IsAvailable() before presenting clipboard actions; individual reads and writes may still fail.
+  /// @brief Returns the shared system clipboard for this application's Runtime.
+  /// @return The same non-null instance on every call, including on hosts without clipboard support.
+  /// Clipboard::IsAvailable() reports synchronous plain-text support. Typed operations report their own results.
   ///
   /// This accessor does not require an active composition and may be called on a captured ApplicationHandle.
-  /// Clipboard operations run synchronously on the owning UI thread. After Runtime destruction, the returned
+  /// Clipboard operations start on the owning application thread. After Runtime destruction, the returned
   /// instance remains safe to retain and call but reports unavailable results.
   /// @code{.cpp}
   /// auto clipboard = UseApplication().Clipboard();

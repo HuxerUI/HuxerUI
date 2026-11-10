@@ -57,6 +57,9 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
 
 // An active editor owns clipboard actions and secure-text policy before any enclosing read-only selection area.
 bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
+  const auto& application = runtime_state_.application_;
+  PlatformClipboard* clipboard = application && application->owner ? application->owner->Clipboard() : nullptr;
+  if (clipboard && !clipboard->SupportsSynchronousText()) clipboard = nullptr;
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
@@ -64,24 +67,18 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
     detail::MountedNode* focused =
         detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    return client && client->CanPerformTextEditingAction(action, runtime_state_.application_->owner->Clipboard());
+    return client && client->CanPerformTextEditingAction(action, clipboard);
   }
   const detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
   switch (action) {
   case TextEditingAction::Cut:
     return !session.configuration.read_only && !session.configuration.secure && !selection.IsCollapsed() &&
-           runtime_state_.application_->owner->Clipboard() != nullptr;
+           clipboard != nullptr;
   case TextEditingAction::Copy:
-    return !session.configuration.secure && !selection.IsCollapsed() &&
-           runtime_state_.application_->owner->Clipboard() != nullptr;
-  case TextEditingAction::Paste: {
-    if (session.configuration.read_only) {
-      return false;
-    }
-    PlatformClipboard* clipboard = runtime_state_.application_->owner->Clipboard();
-    return clipboard != nullptr && clipboard->ReadText().has_value();
-  }
+    return !session.configuration.secure && !selection.IsCollapsed() && clipboard != nullptr;
+  case TextEditingAction::Paste:
+    return !session.configuration.read_only && clipboard && clipboard->MayHaveContent(ClipboardKind::Text);
   case TextEditingAction::SelectAll: {
     const TextInputContext context = session.client->QueryTextInputContext(session.session_id, 0, 0);
     return context.result_code == TextInputResultCode::Ok && context.total_length > 0 &&
@@ -92,6 +89,9 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
 }
 
 bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action) {
+  const auto& application = runtime_state_.application_;
+  PlatformClipboard* clipboard = application && application->owner ? application->owner->Clipboard() : nullptr;
+  if (clipboard && !clipboard->SupportsSynchronousText()) clipboard = nullptr;
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
@@ -99,7 +99,7 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
     detail::MountedNode* focused =
         detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    if (!client || !client->PerformTextEditingAction(action, runtime_state_.application_->owner->Clipboard())) {
+    if (!client || !client->PerformTextEditingAction(action, clipboard)) {
       return false;
     }
     focused->foreground_paint_dirty = true;
@@ -107,8 +107,6 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
   }
   detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
-  PlatformClipboard* clipboard = runtime_state_.application_->owner->Clipboard();
-
   if (action == TextEditingAction::Copy || action == TextEditingAction::Cut) {
     if (!CanPerformTextEditingAction(action) || clipboard == nullptr) {
       return false;
