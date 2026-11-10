@@ -12,6 +12,7 @@
 #include <concepts>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <stdexcept>
@@ -395,7 +396,8 @@ CFAttributedStringRef CreateAttributedString(
 CFAttributedStringRef CreateAttributedString(const AttributedText& text, const TextStyle& style,
     const TextLayoutOptions& options, CTFontRef supplied_font = nullptr, bool preserve_final_line = false) {
   CFRef<CFAttributedStringRef> base{CreateAttributedString(text.PlainText(), style, options, supplied_font)};
-  CFMutableAttributedStringRef attributed = CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base.Get());
+  CFRef<CFMutableAttributedStringRef> owner{CFAttributedStringCreateMutableCopy(kCFAllocatorDefault, 0, base.Get())};
+  CFMutableAttributedStringRef attributed = owner.Get();
   // A layout-only sentinel preserves the empty line after a trailing hard break.
   const CFStringRef source = CFAttributedStringGetString(attributed);
   const CFIndex length = CFStringGetLength(source);
@@ -439,7 +441,28 @@ CFAttributedStringRef CreateAttributedString(const AttributedText& text, const T
       CFAttributedStringSetAttribute(attributed, range, kCTForegroundColorAttributeName, foreground.Get());
     }
   }
-  return attributed;
+  if (!text.InlineObjects().empty()) {
+    const CTRunDelegateCallbacks callbacks{
+        kCTRunDelegateVersion1,
+        [](void* ref) { delete static_cast<TextInlineObject*>(ref); },
+        [](void* ref) -> CGFloat { return static_cast<const TextInlineObject*>(ref)->ascent; },
+        [](void* ref) -> CGFloat { return static_cast<const TextInlineObject*>(ref)->descent; },
+        [](void* ref) -> CGFloat { return static_cast<const TextInlineObject*>(ref)->width; },
+    };
+    CFRef<CGColorRef> transparent{CGColorCreateSRGB(0.0, 0.0, 0.0, 0.0)};
+    for (const auto& object : text.InlineObjects()) {
+      auto retained = std::make_unique<TextInlineObject>(object);
+      CFRef<CTRunDelegateRef> delegate{CTRunDelegateCreate(&callbacks, retained.get())};
+      if (delegate.Get() == nullptr) {
+        throw std::runtime_error("HuxerUI could not create a Core Text inline object");
+      }
+      retained.release();
+      const CFRange range = CFRangeMake(static_cast<CFIndex>(object.offset), 1);
+      CFAttributedStringSetAttribute(attributed, range, kCTRunDelegateAttributeName, delegate.Get());
+      CFAttributedStringSetAttribute(attributed, range, kCTForegroundColorAttributeName, transparent.Get());
+    }
+  }
+  return static_cast<CFAttributedStringRef>(CFRetain(attributed));
 }
 
 // Use the shaped glyph runs for both passes: backgrounds precede CTFrameDraw, while strikethrough follows it.
@@ -1397,6 +1420,48 @@ public:
       }
     }
     return rects;
+  }
+
+  std::vector<InlineObjectPlacement> InlineObjectPlacements(
+      std::span<const TextInlineObject> objects, std::span<const TextLineMetrics> lines) const override {
+    std::vector<InlineObjectPlacement> placements(objects.size());
+    std::size_t placed = 0;
+    const auto place_line = [&](CTLineRef line, CGFloat x, float baseline) {
+      CFArrayRef runs = CTLineGetGlyphRuns(line);
+      for (CFIndex index = 0; index < CFArrayGetCount(runs); ++index) {
+        auto run = static_cast<CTRunRef>(CFArrayGetValueAtIndex(runs, index));
+        if (!CFDictionaryContainsKey(CTRunGetAttributes(run), kCTRunDelegateAttributeName) ||
+            CTRunGetGlyphCount(run) == 0) {
+          continue;
+        }
+        const TextOffset offset = CTRunGetStringRange(run).location;
+        const auto object = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
+        if (object == objects.end() || object->offset != offset) {
+          continue;
+        }
+        CGPoint position;
+        CTRunGetPositions(run, CFRangeMake(0, 1), &position);
+        const float left = static_cast<float>(x + position.x);
+        const float right = left + static_cast<float>(CTRunGetTypographicBounds(run, CFRangeMake(0, 0),
+                                                                               nullptr, nullptr, nullptr));
+        const bool rtl = (CTRunGetStatus(run) & kCTRunStatusRightToLeft) != 0;
+        placements[static_cast<std::size_t>(object - objects.begin())] = {
+            rtl ? right : left, rtl ? left : right, baseline - static_cast<float>(position.y)};
+        ++placed;
+      }
+    };
+    if (line_records_.empty()) {
+      place_line(line_, horizontal_offset_, lines.front().baseline);
+    } else {
+      for (std::size_t index = 0; index < line_records_.size(); ++index) {
+        const auto& line = line_records_[index];
+        place_line(line.line, line.origin.x, lines[index].baseline);
+      }
+    }
+    if (placed != objects.size()) {
+      return {};
+    }
+    return placements;
   }
 
   TextOffset PreviousCaretOffset(TextOffset offset) const override {

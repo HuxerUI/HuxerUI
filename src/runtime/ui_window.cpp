@@ -1428,6 +1428,12 @@ TextLayout UiWindow::CreateTextLayout(const AttributedText& text, const TextStyl
     data->lines.push_back({{length, length}, {x, top, 0.0F, font.LineHeight()}, top + font.ascent});
     data->synthesized_last_line = true;
   }
+  if (!text.InlineObjects().empty()) {
+    data->inline_objects = data->backend->InlineObjectPlacements(text.InlineObjects(), data->lines);
+    if (data->inline_objects.size() != text.InlineObjects().size()) {
+      throw std::logic_error("HuxerUI text layout backend did not place every inline object");
+    }
+  }
   Size size = data->backend->Measure();
   size.width = std::min(size.width, width);
   const auto& last = data->lines.back().bounds;

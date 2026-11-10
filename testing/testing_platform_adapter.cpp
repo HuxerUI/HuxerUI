@@ -15,12 +15,18 @@ namespace {
 // Scalar cells deliberately do not emulate native shaping, bidi, ligatures, or grapheme navigation.
 class ReferenceTextLayout final : public TextLayoutBackend {
 public:
-  ReferenceTextLayout(std::string_view text, float size, float width, const TextLayoutOptions& options)
-      : line_height_(size * 1.25F), ascent_(size), maximum_width_(width) {
+  ReferenceTextLayout(std::string_view text, float size, float width, const TextLayoutOptions& options,
+      std::span<const TextInlineObject> objects = {})
+      : maximum_width_(width) {
     if (std::isnan(width) || width < 0) throw std::invalid_argument("HuxerUI testing text width is invalid");
-    lines_.push_back({{{0, 0.0F}}, false});
+    const auto append_line = [&](TextOffset offset) {
+      const float top = lines_.empty() ? 0.0F : lines_.back().top + lines_.back().Height();
+      lines_.push_back({{{offset, 0.0F}}, false, top, size, size * 1.25F - size});
+    };
+    append_line(0);
     offsets_.push_back(0);
     TextOffset offset = 0;
+    auto object = objects.begin();
     for (std::size_t index = 0; index < text.size();) {
       Utf8CodePoint scalar;
       if (!DecodeCodePoint(text, index, scalar)) throw std::invalid_argument("HuxerUI testing text is invalid UTF-8");
@@ -29,41 +35,49 @@ public:
         lines_.back().hard_break = true;
         ++offset;
         offsets_.push_back(offset);
-        lines_.push_back({{{offset, 0.0F}}, false});
+        append_line(offset);
         continue;
       }
-      const float advance = size * 0.6F;
+      const bool is_object = object != objects.end() && object->offset == offset;
+      const float advance = is_object ? object->width : size * 0.6F;
       if (options.wrap != TextWrap::NoWrap && lines_.back().points.back().x > 0 &&
           lines_.back().points.back().x + advance > width) {
-        lines_.push_back({{{offset, 0.0F}}, false});
+        append_line(offset);
+      }
+      auto& line = lines_.back();
+      if (is_object) {
+        line.ascent = std::max(line.ascent, object->ascent);
+        line.descent = std::max(line.descent, object->descent);
+        ++object;
       }
       offset += scalar.value > 0xFFFF ? 2 : 1;
       offsets_.push_back(offset);
-      lines_.back().points.push_back({offset, lines_.back().points.back().x + advance});
+      line.points.push_back({offset, line.points.back().x + advance});
     }
   }
 
   Size Measure() const override {
     float width = 0;
     for (const auto& line : lines_) width = std::max(width, line.points.back().x);
-    return {std::min(width, maximum_width_), line_height_ * static_cast<float>(lines_.size())};
+    return {std::min(width, maximum_width_), lines_.back().top + lines_.back().Height()};
   }
   TextLayoutMetrics Metrics() const {
-    return {Measure(), ascent_, ascent_ + line_height_ * static_cast<float>(lines_.size() - 1), lines_.size()};
+    return {Measure(), lines_.front().ascent, lines_.back().top + lines_.back().ascent, lines_.size()};
   }
   std::vector<TextLineMetrics> LineMetrics() const override {
     std::vector<TextLineMetrics> result;
     result.reserve(lines_.size());
     for (const auto& line : lines_) {
-      const float y = static_cast<float>(result.size()) * line_height_;
       result.push_back({{line.points.front().offset, line.points.back().offset + (line.hard_break ? 1 : 0)},
-                        {0, y, line.points.back().x, line_height_}, y + ascent_});
+                        {0, line.top, line.points.back().x, line.Height()}, line.top + line.ascent});
     }
     return result;
   }
   TextPosition HitTest(Point point) const override {
-    const auto index = static_cast<std::size_t>(std::clamp(std::floor(point.y / line_height_),
-                                                          0.0F, static_cast<float>(lines_.size() - 1)));
+    std::size_t index = 0;
+    while (index + 1 < lines_.size() && point.y >= lines_[index + 1].top) {
+      ++index;
+    }
     const auto& line = lines_[index];
     for (std::size_t i = 1; i < line.points.size(); ++i) {
       if (point.x < (line.points[i - 1].x + line.points[i].x) * 0.5F)
@@ -78,16 +92,15 @@ public:
       const auto end = lines_[line].points.back().offset;
       if (offset < end || (offset == end && (affinity == TextAffinity::Upstream || lines_[line].hard_break))) break;
     }
-    return {Position(lines_[line], offset), static_cast<float>(line) * line_height_, 1.0F, line_height_};
+    return {Position(lines_[line], offset), lines_[line].top, 1.0F, lines_[line].Height()};
   }
   std::vector<Rect> RangeRects(TextRange range) const override {
     std::vector<Rect> result;
-    for (std::size_t i = 0; i < lines_.size(); ++i) {
-      const auto& line = lines_[i];
+    for (const auto& line : lines_) {
       const auto start = std::max(range.start, line.points.front().offset);
       const auto end = std::min(range.end, line.points.back().offset);
-      if (start < end) result.push_back({Position(line, start), static_cast<float>(i) * line_height_,
-                                        Position(line, end) - Position(line, start), line_height_});
+      if (start < end) result.push_back({Position(line, start), line.top,
+                                        Position(line, end) - Position(line, start), line.Height()});
     }
     return result;
   }
@@ -102,14 +115,20 @@ public:
 
 private:
   struct Boundary { TextOffset offset; float x; };
-  struct Line { std::vector<Boundary> points; bool hard_break; };
+  struct Line {
+    std::vector<Boundary> points;
+    bool hard_break;
+    float top;
+    float ascent;
+    float descent;
+
+    float Height() const { return ascent + descent; }
+  };
   static float Position(const Line& line, TextOffset offset) {
     const auto found = std::lower_bound(line.points.begin(), line.points.end(), offset,
         [](const Boundary& point, TextOffset value) { return point.offset < value; });
     return found == line.points.end() ? line.points.back().x : found->x;
   }
-  float line_height_;
-  float ascent_;
   float maximum_width_;
   std::vector<Line> lines_;
   std::vector<TextOffset> offsets_;
@@ -171,12 +190,13 @@ TextRunMetrics TestingWindow::MeasureRun(std::string_view text, const TextStyle&
 
 TextLayoutMetrics TestingWindow::MeasureText(const AttributedText& text, const TextStyle& style,
                                                     float width, const TextLayoutOptions& options) {
-  return ReferenceTextLayout(text.PlainText(), style.font.Size(), width, options).Metrics();
+  return ReferenceTextLayout(text.PlainText(), style.font.Size(), width, options, text.InlineObjects()).Metrics();
 }
 
 std::unique_ptr<TextLayoutBackend> TestingWindow::CreatePlatformTextLayout(
     const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) {
-  return std::make_unique<ReferenceTextLayout>(text.PlainText(), style.font.Size(), width, options);
+  return std::make_unique<ReferenceTextLayout>(
+      text.PlainText(), style.font.Size(), width, options, text.InlineObjects());
 }
 
 std::optional<InputStream> TestingWindow::OpenRead(std::string_view path) {

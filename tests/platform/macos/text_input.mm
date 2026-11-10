@@ -12,6 +12,22 @@ namespace {
 State<TextEditingValue> mac_text_field_value;
 int mac_first_submissions = 0;
 
+class NativeLayoutPlatform final : public TestPlatform {
+public:
+  FontMetrics Metrics(const Font& font) override { return renderer_.Metrics(font); }
+  TextLayoutMetrics MeasureText(const AttributedText& text, const TextStyle& style, float width,
+      const TextLayoutOptions& options) override {
+    return renderer_.MeasureText(text, style, width, options);
+  }
+  std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
+      const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) override {
+    return renderer_.CreatePlatformTextLayout(text, style, width, options);
+  }
+
+private:
+  detail::AppKitRenderer renderer_;
+};
+
 View MacTextFieldApp() {
   auto value = UseState(TextEditingValue::FromText(""));
   mac_text_field_value = value;
@@ -266,17 +282,6 @@ TEST_CASE("MacTextLayoutAlignsExplicitNoWrapLinesWithinAvailableWidth") {
 
 TEST_CASE("MacRetainedTextLayoutKeepsEmptyLinesAndWrappedCaretAffinity") {
   @autoreleasepool {
-    class NativeLayoutPlatform final : public TestPlatform {
-    public:
-      FontMetrics Metrics(const Font& font) override { return renderer_.Metrics(font); }
-      std::unique_ptr<detail::TextLayoutBackend> CreatePlatformTextLayout(
-          const AttributedText& text, const TextStyle& style, float width, const TextLayoutOptions& options) override {
-        return renderer_.CreatePlatformTextLayout(text, style, width, options);
-      }
-
-    private:
-      detail::AppKitRenderer renderer_;
-    };
     NativeLayoutPlatform platform;
     UiWindow window(MacTextFieldApp, platform);
     const TextStyle style{Font::Monospace(20.0F), Color::Black()};
@@ -314,6 +319,73 @@ TEST_CASE("MacRetainedTextLayoutKeepsEmptyLinesAndWrappedCaretAffinity") {
       REQUIRE(no_wrap.HitTest({200.0F, first.y + first.height * 0.5F}).offset == 2);
       REQUIRE(no_wrap.Metrics().size.height > rows[2].bounds.y);
     }
+  }
+}
+
+TEST_CASE("MacInlineObjectLayoutKeepsFractionGeometryAndCaretEdgesTogether") {
+  @autoreleasepool {
+    NativeLayoutPlatform platform;
+    UiWindow window(MacTextFieldApp, platform);
+    const TextStyle style{Font::System(16.0F), Color::Black()};
+    const auto text = AttributedText("中文👩‍💻\uFFFC继续").WithInlineObjects({{7, 36.0F, 24.0F, 12.0F}});
+    const TextLayoutOptions options{.shaping = {.locale = "zh-Hans"}};
+    const auto wide = platform.CreateTextLayout(text, style, 300.0F, options);
+    REQUIRE(wide.Lines().size() == 1);
+    REQUIRE(wide.InlineObjectRect(7).has_value());
+    REQUIRE_FALSE(wide.InlineObjectRect(8).has_value());
+    REQUIRE(wide.NextCaretOffset(2) == 7);
+    REQUIRE(wide.NextCaretOffset(7) == 8);
+    REQUIRE(wide.PreviousCaretOffset(8) == 7);
+
+    for (const float width : {300.0F, wide.InlineObjectRect(7)->x + 35.0F, 30.0F}) {
+      CAPTURE(width);
+      const auto layout = platform.CreateTextLayout(text, style, width, options);
+      REQUIRE(layout.InlineObjectRect(7).has_value());
+      const Rect box = *layout.InlineObjectRect(7);
+      const auto line_index = layout.LineIndex({7});
+      const auto& line = layout.Lines()[line_index];
+      CHECK((line_index == 0) == (width == 300.0F));
+      CHECK(box.width == 36.0F);
+      CHECK(box.height == 36.0F);
+      CHECK(box.y + 24.0F == Catch::Approx(line.baseline));
+      CHECK(line.bounds.height >= box.height);
+      CHECK(layout.CaretRect({7, TextAffinity::Downstream}).x == Catch::Approx(box.x));
+      CHECK(layout.CaretRect({8, TextAffinity::Upstream}).x == Catch::Approx(box.x + box.width));
+      CHECK(layout.HitTest({box.x + 9.0F, box.y + 18.0F}) == TextPosition{7, TextAffinity::Downstream});
+      CHECK(layout.HitTest({box.x + 27.0F, box.y + 18.0F}) == TextPosition{8, TextAffinity::Upstream});
+      const auto selection = layout.RangeRects({7, 8});
+      REQUIRE(selection.size() == 1);
+      CHECK(selection[0].x == Catch::Approx(box.x));
+      CHECK(selection[0].width == Catch::Approx(box.width));
+      CHECK(selection[0].y <= box.y + 0.01F);
+      CHECK(selection[0].y + selection[0].height >= box.y + box.height - 0.01F);
+      CHECK(platform.MeasureText(text, style, width, options) == layout.Metrics());
+    }
+
+    const auto resized = text.WithInlineObjects({{7, 48.0F, 32.0F, 12.0F}});
+    const auto changed = platform.CreateTextLayout(resized, style, 300.0F, options);
+    CHECK(changed.InlineObjectRect(7).value().width == 48.0F);
+    CHECK(changed.Metrics().size.height > wide.Metrics().size.height);
+    CHECK(changed.CaretRect({9}).x > wide.CaretRect({9}).x);
+
+    const auto rtl_text = AttributedText("א\uFFFCב").WithInlineObjects({{1, 36.0F, 24.0F, 12.0F}});
+    const auto rtl = platform.CreateTextLayout(rtl_text, style, 160.0F,
+        {.shaping = {.direction = TextDirection::RightToLeft}, .wrap = TextWrap::NoWrap});
+    REQUIRE(rtl.InlineObjectRect(1).has_value());
+    const Rect box = *rtl.InlineObjectRect(1);
+    CHECK(rtl.CaretRect({1}).x == Catch::Approx(box.x + box.width));
+    CHECK(rtl.CaretRect({2, TextAffinity::Upstream}).x == Catch::Approx(box.x));
+    CHECK(rtl.HitTest({box.x + 9.0F, box.y + 18.0F}) == TextPosition{2, TextAffinity::Upstream});
+    CHECK(rtl.HitTest({box.x + 27.0F, box.y + 18.0F}) == TextPosition{1, TextAffinity::Downstream});
+
+    const auto adjacent = AttributedText("\uFFFC\uFFFC\u0301")
+        .WithInlineObjects({{0, 36.0F, 24.0F, 12.0F}, {1, 36.0F, 24.0F, 12.0F}});
+    const auto adjacent_layout = platform.CreateTextLayout(adjacent, style, 300.0F);
+    CHECK(adjacent_layout.NextCaretOffset(0) == 1);
+    CHECK(adjacent_layout.NextCaretOffset(1) == 2);
+    CHECK(adjacent_layout.PreviousCaretOffset(2) == 1);
+    CHECK(adjacent_layout.InlineObjectRect(1).value().x ==
+          Catch::Approx(adjacent_layout.InlineObjectRect(0).value().x + 36.0F));
   }
 }
 

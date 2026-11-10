@@ -459,6 +459,7 @@ export namespace huxerui {
     using huxerui::TextFieldStyle;
     using huxerui::TextFieldVariant;
     using huxerui::TextFieldVariantStyle;
+    using huxerui::TextInlineObject;
     using huxerui::TextInputAction;
     using huxerui::TextInputApplyResult;
     using huxerui::TextInputClient;

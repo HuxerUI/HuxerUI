@@ -9,9 +9,11 @@ import android.graphics.RectF;
 import android.graphics.Region;
 import android.graphics.RegionIterator;
 import android.text.Layout;
+import android.text.Spanned;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.text.TextDirectionHeuristics;
+import android.text.style.ReplacementSpan;
 
 import java.util.Arrays;
 
@@ -22,6 +24,35 @@ final class HuxerUITextLayout {
     private final TextPaint paint;
     private final StaticLayout layout;
     private final float horizontalOffset;
+
+    static final class InlineObjectSpan extends ReplacementSpan {
+        private final int width;
+        private final int ascent;
+        private final int descent;
+
+        InlineObjectSpan(float width, float ascent, float descent) {
+            // Round outwards because StaticLayout accepts only integer replacement metrics.
+            this.width = (int) Math.ceil(width);
+            this.ascent = (int) Math.ceil(ascent);
+            this.descent = (int) Math.ceil(descent);
+        }
+
+        @Override
+        public int getSize(Paint paint, CharSequence text, int start, int end, Paint.FontMetricsInt metrics) {
+            if (metrics != null) {
+                metrics.ascent = -ascent;
+                metrics.top = -ascent;
+                metrics.descent = descent;
+                metrics.bottom = descent;
+                metrics.leading = 0;
+            }
+            return width;
+        }
+
+        @Override
+        public void draw(Canvas canvas, CharSequence text, int start, int end, float x, int top, int baseline,
+                int bottom, Paint paint) {}
+    }
 
     HuxerUITextLayout(CharSequence text, TextPaint paint, float maxWidth, Layout.Alignment alignment, boolean wrap,
             int direction) {
@@ -124,6 +155,15 @@ final class HuxerUITextLayout {
         if (start == end || isHardBreak(start)) {
             return layout.getPrimaryHorizontal(offset);
         }
+        RectF bounds = clusterBounds(start, end, line);
+        boolean rtl = layout.isRtlCharAt(start);
+        if (bounds.isEmpty()) {
+            return rtl == upstream ? layout.getLineLeft(line) : layout.getLineRight(line);
+        }
+        return rtl == upstream ? bounds.left : bounds.right;
+    }
+
+    private RectF clusterBounds(int start, int end, int line) {
         // Use the adjacent cluster's Layout-reported edge; primary/secondary horizontals do not select a wrap side.
         Path selection = new Path();
         layout.getSelectionPath(start, end, selection);
@@ -135,11 +175,34 @@ final class HuxerUITextLayout {
         }
         RectF bounds = new RectF();
         selection.computeBounds(bounds, true);
-        boolean rtl = layout.isRtlCharAt(start);
-        if (bounds.isEmpty()) {
-            return rtl == upstream ? layout.getLineLeft(line) : layout.getLineRight(line);
+        return bounds;
+    }
+
+    private float[] inlineObjectPlacement(long requestedOffset) {
+        int offset = (int) requestedOffset;
+        int line = layout.getLineForOffset(offset);
+        InlineObjectSpan[] objects = ((Spanned) text).getSpans(offset, offset + 1, InlineObjectSpan.class);
+        if (objects.length != 1) {
+            return new float[0];
         }
-        return rtl == upstream ? bounds.left : bounds.right;
+        int width = objects[0].width;
+        boolean rtl = layout.isRtlCharAt(offset);
+        float leading;
+        if (width > layout.getWidth()) {
+            // Selection paths include continuation padding at a wrap, which can erase part of an overflowing object.
+            leading = layout.getPrimaryHorizontal(offset);
+        } else {
+            RectF bounds = clusterBounds(offset, offset + 1, line);
+            if (bounds.isEmpty()) {
+                return new float[0];
+            }
+            leading = rtl ? bounds.right : bounds.left;
+        }
+        return new float[] {
+                horizontalOffset + leading,
+                horizontalOffset + leading + (rtl ? -width : width),
+                layout.getLineBaseline(line),
+        };
     }
 
     int height() {
@@ -180,6 +243,7 @@ final class HuxerUITextLayout {
                 continue;
             }
             layout.getSelectionPath(lineStart, lineEnd, selection);
+            includeOverflowingObjects(selection, line, lineStart, lineEnd);
             selection.computeBounds(bounds, true);
             // Scale local coordinates, not a distant line's absolute position, to preserve Region's integer range.
             float originX = bounds.left;
@@ -208,6 +272,27 @@ final class HuxerUITextLayout {
             }
         }
         return output == result.length ? result : Arrays.copyOf(result, output);
+    }
+
+    private void includeOverflowingObjects(Path selection, int line, int start, int end) {
+        if (!(text instanceof Spanned) || layout.getLineWidth(line) <= layout.getWidth()) {
+            return;
+        }
+        Spanned attributed = (Spanned) text;
+        Path overflow = new Path();
+        for (InlineObjectSpan object : attributed.getSpans(start, end, InlineObjectSpan.class)) {
+            if (object.width <= layout.getWidth()) {
+                continue;
+            }
+            int offset = attributed.getSpanStart(object);
+            float leading = layout.getPrimaryHorizontal(offset);
+            float trailing = leading + (layout.isRtlCharAt(offset) ? -object.width : object.width);
+            overflow.addRect(Math.min(leading, trailing), layout.getLineTop(line), Math.max(leading, trailing),
+                    layout.getLineBottom(line), Path.Direction.CW);
+        }
+        if (!overflow.isEmpty() && !selection.op(overflow, Path.Op.UNION)) {
+            throw new IllegalStateException("HuxerUI could not resolve inline object selection");
+        }
     }
 
     static float resolveHorizontalOffset(

@@ -499,6 +499,17 @@ TEST_CASE("Windowless reference text measures scalar cells instead of UTF-8 byte
   REQUIRE(ui.Find(UiSelector::Key("unicode")).One().size == ui.Find(UiSelector::Key("ascii")).One().size);
 }
 
+TEST_CASE("Windowless reference text reserves inline object extents", "[ui-testing]") {
+  const Application application([]() -> View {
+    const auto text = AttributedText("\uFFFC").WithInlineObjects({{0, 36.0F, 24.0F, 12.0F}});
+    return Column {
+      Text(text).Key("object"),
+    };
+  }, {.show_debug_overlay = false});
+  UiTest ui(application);
+  REQUIRE(ui.Find(UiSelector::Key("object")).One().size == Size{36.0F, 36.0F});
+}
+
 TEST_CASE("Windowless shutdown delivers channel cancellation and disposal on its owner thread", "[ui-testing]") {
   ShutdownProbe probe;
   Application application(Empty, {

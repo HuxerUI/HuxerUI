@@ -220,7 +220,7 @@ The provider implements ordinary `OpenRead` and may open packaged files through 
 `UiTestOptions::resources` determines locale and density consistently, overriding the provider's configuration.
 Call `UpdateResourceConfiguration()` or `SetWindowMetrics()` and then Pump to publish observations for the new configuration.
 
-The reference text profile uses one scalar cell per decoded Unicode scalar, with advance `font.size * 0.6`, ascent `font.size`, and line height `font.size * 1.25`.
+The reference text profile uses one scalar cell per decoded Unicode scalar, with advance `font.size * 0.6`, ascent `font.size`, and line height `font.size * 1.25`. An annotated inline object uses its supplied width and baseline extents.
 It supports newline-separated hard lines and scalar wrapping except under `NoWrap`, and keeps caret/selection/hit positions on UTF-16 scalar boundaries.
 It does not reproduce native fonts, span-dependent metrics, alignment, ellipsis, bidi, ligatures, locale-sensitive breaking, or complex grapheme navigation.
 Use it for deterministic shared behavior, not native typography goldens.

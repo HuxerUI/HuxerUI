@@ -239,7 +239,7 @@ Platform adapters perform their required UTF-16 or platform-string conversion lo
 ### Scope and ownership
 
 The feature extends the existing `Text` node rather than adding a parallel rich-text component or drawing channel.
-Its scope includes mixed character styles, links, continuous selection, virtualized logical text, and bounded streaming update work.
+Its scope includes mixed character styles, links, inline object geometry, continuous selection, virtualized logical text, and bounded streaming update work.
 Markdown and HTML parsing, rich-text editing, undo history, arbitrary inline Views, document-format conversion, and virtualization inside one paragraph remain outside this feature.
 A paragraph is text with one set of layout options and may contain explicit line breaks; headings, list items, code groups, and other document blocks remain application-owned composition.
 
@@ -254,7 +254,7 @@ Editing operations, transaction history, insertion styles, and precise edit-posi
 
 ### Attributed values and construction
 
-`AttributedText` owns validated UTF-8 text, normalized style ranges, independent link ranges, cached UTF-16 length, and comparison metadata through shared immutable storage.
+`AttributedText` owns validated UTF-8 text, normalized style ranges, independent link ranges and inline object annotations, cached UTF-16 length, and comparison metadata through shared immutable storage.
 Text storage can be shared independently of attributes so recoloring does not require another copy of the body.
 Copying a value into State, a View declaration, a mounted payload, or a PaintCommand shares its storage.
 Constructing a changed continuous text body may still take time proportional to that body; immutable sharing is not a constant-time append guarantee.
@@ -283,6 +283,10 @@ Caller input errors use `std::invalid_argument` and the existing English HuxerUI
 User selection respects grapheme boundaries rather than treating style boundaries as extra caret stops.
 Combining sequences and emoji sequences must not be split by pointer or handle movement.
 Range backgrounds follow visual fragments across wrapping and bidirectional ordering; they are not one enclosing rectangle and introduce no inline padding or box layout.
+
+Inline object annotations identify an existing U+FFFC by its paragraph-local UTF-16 offset. A registered object contributes its width and baseline extents to the same paragraph used for measurement, interaction, and drawing. Object boundaries are caret stops, with visual affinity at wraps. An object wider than a wrapped line retains its dimensions. Ordinary clipping applies when the paragraph is drawn.
+
+`TextLayout::InlineObjectRect()` resolves the drawing box from the placed object's baseline and the supplied dimensions. A backend may reserve slightly larger dimensions at its native coordinate precision. Carets and selection follow the reserved extent. The text renderer leaves the object position available for application painting. Changes to the annotation or dimensions invalidate shaping and paint caches even when the body is unchanged.
 
 `Text(StringVariant)` remains the localized plain-text declaration path, while attributed values contain resolved direct text.
 Localization may reorder a sentence, so independently translated fragments are not a sentence-localization strategy.

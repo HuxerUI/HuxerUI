@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -73,6 +75,7 @@ struct ResolvedTextRun {
   std::size_t byte_end = 0;
   TextStyle style;
   Color background = Color::Transparent();
+  std::optional<TextInlineObject> inline_object;
 };
 
 TextStyle ResolveTextStyle(const TextStyle& base, const TextSpanStyle& overrides);
@@ -85,6 +88,12 @@ bool TextPaintInputsEqual(const AttributedText& left, const TextStyle& left_base
 inline constexpr std::size_t paragraph_cache_budget = 8 * 1024 * 1024;
 // Charges platform glyph/line bookkeeping conservatively; oversized paragraphs are never retained by a cache.
 std::size_t ParagraphCacheCost(const AttributedText& text) noexcept;
+
+struct InlineObjectPlacement {
+  float leading = 0.0F;
+  float trailing = 0.0F;
+  float baseline = 0.0F;
+};
 
 // Geometry is paragraph-local in logical pixels; callers apply vertical placement and presentation transforms.
 // Offsets remain UTF-16 positions, and range geometry may contain disjoint visual fragments for one logical range.
@@ -99,6 +108,8 @@ public:
   virtual std::vector<Rect> RangeRects(TextRange range) const = 0;
   virtual TextOffset PreviousCaretOffset(TextOffset offset) const = 0;
   virtual TextOffset NextCaretOffset(TextOffset offset) const = 0;
+  virtual std::vector<InlineObjectPlacement> InlineObjectPlacements(
+      std::span<const TextInlineObject> objects, std::span<const TextLineMetrics> lines) const;
 };
 
 // These inputs describe shaping geometry, not the foreground colors or link targets of the latest declaration.
@@ -127,9 +138,15 @@ struct TextLayout::Data {
   float width = 0.0F;
   TextLayoutMetrics metrics;
   std::vector<TextLineMetrics> lines;
+  std::vector<detail::InlineObjectPlacement> inline_objects;
   std::unique_ptr<detail::TextLayoutBackend> backend;
   bool synthesized_last_line = false;
   std::size_t cache_cost = 0;
+
+  std::size_t InlineObjectIndex(TextOffset offset) const;
+  Rect InlineObjectRect(std::size_t index) const;
+  TextOffset PreviousCaretOffset(TextOffset offset) const;
+  TextOffset NextCaretOffset(TextOffset offset) const;
 };
 
 } // namespace huxerui

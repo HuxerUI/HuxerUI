@@ -246,11 +246,42 @@ std::span<const TextLineMetrics> TextLayout::Lines() const {
   return data_->lines;
 }
 
+std::size_t TextLayout::Data::InlineObjectIndex(TextOffset offset) const {
+  const auto objects = text.InlineObjects();
+  const auto object = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
+  return object != objects.end() && object->offset == offset
+      ? static_cast<std::size_t>(object - objects.begin()) : objects.size();
+}
+
+Rect TextLayout::Data::InlineObjectRect(std::size_t index) const {
+  const auto& object = text.InlineObjects()[index];
+  const auto& placement = inline_objects[index];
+  const float x = placement.leading <= placement.trailing ? placement.leading : placement.leading - object.width;
+  return {x, placement.baseline - object.ascent, object.width, object.ascent + object.descent};
+}
+
+TextOffset TextLayout::Data::PreviousCaretOffset(TextOffset offset) const {
+  const TextOffset previous = backend->PreviousCaretOffset(offset);
+  const auto objects = text.InlineObjects();
+  const auto object = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
+  if (object == objects.begin()) {
+    return previous;
+  }
+  return std::max(previous, std::min(offset - 1, std::prev(object)->offset + 1));
+}
+
+TextOffset TextLayout::Data::NextCaretOffset(TextOffset offset) const {
+  const TextOffset next = backend->NextCaretOffset(offset);
+  const auto objects = text.InlineObjects();
+  const auto object = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
+  return object == objects.end() ? next : std::min(next, std::max(offset + 1, object->offset));
+}
+
 TextPosition TextLayout::SnapCaret(TextPosition position) const {
   HUXERUI_DISCARD(data_->text.TextInRange({position.offset, position.offset}));
   if (position.offset > 0 && position.offset < data_->text.Length()) {
-    const TextOffset previous = data_->backend->PreviousCaretOffset(position.offset);
-    const TextOffset next = data_->backend->NextCaretOffset(previous);
+    const TextOffset previous = data_->PreviousCaretOffset(position.offset);
+    const TextOffset next = data_->NextCaretOffset(previous);
     if (next != position.offset) {
       position.offset = position.affinity == TextAffinity::Upstream ? previous : next;
     }
@@ -277,6 +308,17 @@ TextPosition TextLayout::HitTest(Point point) const {
   if (!std::isfinite(point.x) || !std::isfinite(point.y)) {
     throw std::invalid_argument("HuxerUI text layout hit-test point must be finite");
   }
+  // A wrapped object's trailing edge can belong to the next line in native hit testing.
+  const auto objects = data_->text.InlineObjects();
+  for (std::size_t index = 0; index < objects.size(); ++index) {
+    const Rect box = data_->InlineObjectRect(index);
+    if (box.Contains(point)) {
+      const auto& placement = data_->inline_objects[index];
+      const bool right_half = point.x >= box.x + box.width * 0.5F;
+      const bool trailing = right_half == (placement.leading <= placement.trailing);
+      return {objects[index].offset + (trailing ? 1 : 0), trailing ? TextAffinity::Upstream : TextAffinity::Downstream};
+    }
+  }
   if (data_->synthesized_last_line && (data_->lines.size() == 1 || point.y >= data_->lines.back().bounds.y)) {
     return {data_->text.Length(), TextAffinity::Downstream};
   }
@@ -285,6 +327,13 @@ TextPosition TextLayout::HitTest(Point point) const {
 
 Rect TextLayout::CaretRect(TextPosition position) const {
   position = SnapCaret(position);
+  const bool upstream = position.affinity == TextAffinity::Upstream;
+  const std::size_t object = data_->InlineObjectIndex(position.offset - (upstream ? 1 : 0));
+  if (object < data_->inline_objects.size()) {
+    const auto& placement = data_->inline_objects[object];
+    const Rect line = data_->lines[LineIndex(position)].bounds;
+    return {upstream ? placement.trailing : placement.leading, line.y, 1.0F, line.height};
+  }
   if (data_->synthesized_last_line && position.offset == data_->text.Length()) {
     const Rect& line = data_->lines.back().bounds;
     return {line.x, line.y, 1.0F, line.height};
@@ -311,14 +360,20 @@ std::vector<Rect> TextLayout::RangeRects(TextRange range) const {
   return range.IsCollapsed() ? std::vector<Rect>{} : data_->backend->RangeRects(range);
 }
 
+std::optional<Rect> TextLayout::InlineObjectRect(TextOffset offset) const {
+  HUXERUI_DISCARD(data_->text.TextInRange({offset, offset}));
+  const auto index = data_->InlineObjectIndex(offset);
+  return index < data_->inline_objects.size() ? std::optional<Rect>(data_->InlineObjectRect(index)) : std::nullopt;
+}
+
 TextOffset TextLayout::PreviousCaretOffset(TextOffset offset) const {
   HUXERUI_DISCARD(data_->text.TextInRange({offset, offset}));
-  return data_->backend->PreviousCaretOffset(offset);
+  return data_->PreviousCaretOffset(offset);
 }
 
 TextOffset TextLayout::NextCaretOffset(TextOffset offset) const {
   HUXERUI_DISCARD(data_->text.TextInRange({offset, offset}));
-  return data_->backend->NextCaretOffset(offset);
+  return data_->NextCaretOffset(offset);
 }
 
 // Attribute replacement shares the immutable body, its UTF-16 index, and its comparison hash.
@@ -326,6 +381,7 @@ struct AttributedText::Storage {
   std::shared_ptr<const TextBody> body;
   std::vector<TextStyleRange> styles;
   std::vector<TextLinkRange> links;
+  std::vector<TextInlineObject> inline_objects;
 };
 
 TextSpan::TextSpan(std::string text) : text_(std::move(text)) {}
@@ -341,7 +397,7 @@ TextSpan TextSpan::Link(Uri target) && {
 }
 
 AttributedText::AttributedText() {
-  static const auto empty = std::make_shared<const Storage>(Storage{std::make_shared<const TextBody>(""), {}, {}});
+  static const auto empty = std::make_shared<const Storage>(Storage{std::make_shared<const TextBody>(""), {}, {}, {}});
   storage_ = empty;
 }
 
@@ -397,7 +453,8 @@ AttributedText::FromRanges(std::string text, std::vector<TextStyleRange> styles,
   ValidateRanges(*body, links);
   // Unlike styles, adjacent equal links remain separate activation and accessibility targets.
   std::erase_if(links, [](const TextLinkRange& link) { return link.range.IsCollapsed(); });
-  return AttributedText(std::make_shared<const Storage>(Storage{std::move(body), std::move(styles), std::move(links)}));
+  return AttributedText(std::make_shared<const Storage>(
+      Storage{std::move(body), std::move(styles), std::move(links), {}}));
 }
 
 AttributedText AttributedText::WithStyles(std::vector<TextStyleRange> styles) const {
@@ -405,13 +462,39 @@ AttributedText AttributedText::WithStyles(std::vector<TextStyleRange> styles) co
   if (styles == storage_->styles) {
     return *this;
   }
-  return AttributedText(std::make_shared<const Storage>(Storage{storage_->body, std::move(styles), storage_->links}));
+  return AttributedText(std::make_shared<const Storage>(
+      Storage{storage_->body, std::move(styles), storage_->links, storage_->inline_objects}));
+}
+
+AttributedText AttributedText::WithInlineObjects(std::vector<TextInlineObject> objects) const {
+  TextOffset previous = -1;
+  for (const auto& object : objects) {
+    if (object.offset <= previous || object.offset >= Length()) {
+      throw std::invalid_argument("HuxerUI inline object offsets must be in range and strictly increasing");
+    }
+    const std::size_t byte = storage_->body->ByteOffset(object.offset);
+    if (std::string_view(PlainText()).substr(byte, 3) != "\xEF\xBF\xBC") {
+      throw std::invalid_argument("HuxerUI inline object offset must name U+FFFC");
+    }
+    const float height = object.ascent + object.descent;
+    if (!std::isfinite(object.width) || object.width <= 0.0F || !std::isfinite(height) || height <= 0.0F ||
+        object.ascent < 0.0F || object.descent < 0.0F) {
+      throw std::invalid_argument("HuxerUI inline object size must be finite and positive, with nonnegative extents");
+    }
+    previous = object.offset;
+  }
+  if (objects == storage_->inline_objects) {
+    return *this;
+  }
+  return AttributedText(std::make_shared<const Storage>(
+      Storage{storage_->body, storage_->styles, storage_->links, std::move(objects)}));
 }
 
 const std::string& AttributedText::PlainText() const noexcept { return storage_->body->text; }
 TextOffset AttributedText::Length() const noexcept { return storage_->body->length; }
 std::span<const TextStyleRange> AttributedText::StyleRanges() const noexcept { return storage_->styles; }
 std::span<const TextLinkRange> AttributedText::LinkRanges() const noexcept { return storage_->links; }
+std::span<const TextInlineObject> AttributedText::InlineObjects() const noexcept { return storage_->inline_objects; }
 
 std::string AttributedText::TextInRange(TextRange range) const {
   storage_->body->ValidateRange(range);
@@ -424,7 +507,8 @@ bool AttributedText::operator==(const AttributedText& other) const noexcept {
     return true;
   }
   return detail::InternalAccess::SameBody(*this, other) &&
-         storage_->styles == other.storage_->styles && storage_->links == other.storage_->links;
+         storage_->styles == other.storage_->styles && storage_->links == other.storage_->links &&
+         storage_->inline_objects == other.storage_->inline_objects;
 }
 
 std::size_t detail::InternalAccess::BodyHash(const AttributedText& text) noexcept { return text.storage_->body->hash; }
@@ -441,9 +525,27 @@ bool detail::InternalAccess::SameBody(const AttributedText& left, const Attribut
 
 namespace detail {
 
+std::vector<InlineObjectPlacement> TextLayoutBackend::InlineObjectPlacements(
+    std::span<const TextInlineObject> objects, std::span<const TextLineMetrics> lines) const {
+  std::vector<InlineObjectPlacement> placements;
+  placements.reserve(objects.size());
+  auto line = lines.begin();
+  for (const auto& object : objects) {
+    while (line != lines.end() && line->range.end <= object.offset) {
+      ++line;
+    }
+    if (line == lines.end() || line->range.start > object.offset) {
+      throw std::logic_error("HuxerUI inline object is missing from the laid out lines");
+    }
+    placements.push_back({CaretRect(object.offset, TextAffinity::Downstream).x,
+                          CaretRect(object.offset + 1, TextAffinity::Upstream).x, line->baseline});
+  }
+  return placements;
+}
+
 std::size_t ParagraphCacheCost(const AttributedText& text) noexcept {
   const auto bytes = text.PlainText().size();
-  const auto ranges = text.StyleRanges().size() + text.LinkRanges().size();
+  const auto ranges = text.StyleRanges().size() + text.LinkRanges().size() + text.InlineObjects().size();
   if (bytes > paragraph_cache_budget / 64 || ranges > paragraph_cache_budget / 256) {
     return paragraph_cache_budget + 1;
   }
@@ -509,7 +611,7 @@ Font ResolveFont(const Font& base, const TextSpanStyle& overrides) {
 
 template <typename Equal>
 bool EqualProjections(const AttributedText& left, const AttributedText& right, Equal equal) {
-  if (!InternalAccess::SameBody(left, right)) {
+  if (!InternalAccess::SameBody(left, right) || !std::ranges::equal(left.InlineObjects(), right.InlineObjects())) {
     return false;
   }
   // Compare effective values over the union of range boundaries, not the way either input was fragmented.
@@ -536,12 +638,16 @@ std::vector<ResolvedTextRun> ResolveTextRuns(const AttributedText& text, const T
   std::vector<ResolvedTextRun> runs;
   // Advance byte and UTF-16 positions together; link boundaries do not introduce shaping or drawing runs.
   StyleCursor cursor(text.StyleRanges());
+  const auto objects = text.InlineObjects();
+  auto object = objects.begin();
   std::size_t byte = 0;
   TextOffset offset = 0;
   while (offset < text.Length()) {
     const TextOffset start = offset;
     const auto& overrides = cursor.At(offset);
-    const TextOffset end = cursor.Next(offset, text.Length());
+    const TextOffset next_object = object == objects.end() ? text.Length() : object->offset;
+    const bool is_object = offset == next_object;
+    const TextOffset end = is_object ? offset + 1 : std::min(cursor.Next(offset, text.Length()), next_object);
     const std::size_t byte_start = byte;
     while (offset < end) {
       Utf8CodePoint point;
@@ -551,11 +657,14 @@ std::vector<ResolvedTextRun> ResolveTextRuns(const AttributedText& text, const T
     }
     auto style = ResolveTextStyle(base, overrides);
     const Color background = overrides.background.value_or(Color::Transparent());
-    if (!runs.empty() && runs.back().style == style && runs.back().background == background) {
+    if (is_object) {
+      runs.push_back({{start, end}, byte_start, byte, std::move(style), background, *object++});
+    } else if (!runs.empty() && !runs.back().inline_object &&
+               runs.back().style == style && runs.back().background == background) {
       runs.back().range.end = end;
       runs.back().byte_end = byte;
     } else {
-      runs.push_back({{start, end}, byte_start, byte, std::move(style), background});
+      runs.push_back({{start, end}, byte_start, byte, std::move(style), background, {}});
     }
   }
   return runs;

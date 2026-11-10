@@ -91,6 +91,15 @@ Use `UseTextMeasurer().CreateTextLayout(text, style, width, options)` when drawi
 
 `Lines()`, `HitTest()`, `CaretRect()`, and `RangeRects()` use coordinates relative to the paragraph origin and UTF-16 text offsets. `LineIndex()` uses caret affinity at soft wraps, and `PreviousCaretOffset()` and `NextCaretOffset()` step through logical caret boundaries. Pass the layout to `PaintContext::DrawText(origin, layout)` and use the same origin to translate pointer and selection geometry.
 
+To reserve room for an inline formula or graphic, insert one U+FFFC into the paragraph and annotate its UTF-16 offset with `AttributedText::WithInlineObjects()`. Supply the object's width, ascent, and descent in logical units. The object takes part in line breaking and baseline alignment as one unit. `DrawText(origin, layout)` leaves its position blank. Draw the object using `layout.InlineObjectRect(offset)` translated by the same paragraph origin.
+
+```cpp
+const auto paragraph = AttributedText("中文👩‍💻\uFFFC继续").WithInlineObjects({{7, 36.0F, 24.0F, 12.0F}});
+const auto layout = measurer.CreateTextLayout(paragraph, style, width);
+```
+
+Here the emoji spans UTF-16 offsets 2 through 7 and the object spans 7 through 8. Use `HitTest()` for caret placement and test the object rectangle for object activation. Keep the formula content and editing state in the application. Create a new layout when the object's dimensions change.
+
 The [custom editor example](../../examples/custom_editor/main.cpp) lays out rich paragraphs around a drawn block using public APIs. Its scrollable toolbar includes character styles, a size menu, text color and highlight palettes, rounded inline code backgrounds, and a clear formatting action. It applies styles to selections across paragraphs, shares undo and redo across text and formatting edits, and uses a single `TextInputClient` session for the whole document.
 
 ### Selection and virtualized text

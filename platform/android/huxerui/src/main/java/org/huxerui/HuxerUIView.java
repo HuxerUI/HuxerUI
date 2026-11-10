@@ -1683,6 +1683,24 @@ public final class HuxerUIView extends ViewGroup {
         SpannableString result = new SpannableString(text);
         // Decode the AndroidTextAttributes record layout; start/end are UTF-16 indices, not UTF-8 byte positions.
         ByteBuffer data = ByteBuffer.wrap(attributes).order(ByteOrder.LITTLE_ENDIAN);
+        if (data.remaining() < Integer.BYTES) {
+            throw new IllegalArgumentException("HuxerUI received malformed paragraph attributes");
+        }
+        int objectCount = data.getInt();
+        if (objectCount < 0 || objectCount > data.remaining() / 16) {
+            throw new IllegalArgumentException("HuxerUI received malformed inline object attributes");
+        }
+        for (int index = 0; index < objectCount; ++index) {
+            int offset = data.getInt();
+            float width = data.getFloat();
+            float ascent = data.getFloat();
+            float descent = data.getFloat();
+            if (offset < 0 || offset >= text.length() || text.charAt(offset) != '\uFFFC') {
+                throw new IllegalArgumentException("HuxerUI received an invalid inline object offset");
+            }
+            result.setSpan(new HuxerUITextLayout.InlineObjectSpan(width, ascent, descent),
+                    offset, offset + 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
         while (data.hasRemaining()) {
             if (data.remaining() < 40) {
                 throw new IllegalArgumentException("HuxerUI received malformed paragraph attributes");

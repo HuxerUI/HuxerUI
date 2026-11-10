@@ -245,6 +245,36 @@ TEST_CASE("AttributedTextInvalidationComparesEffectiveStyleProjections") {
   REQUIRE_FALSE(detail::TextLayoutInputsEqual(AttributedText{}, base.font, AttributedText{}, Font::System(20.0F)));
 }
 
+TEST_CASE("AttributedTextInlineObjectsPreserveIndependentAttributesAndInvalidateGeometry") {
+  const TextStyle base{Font::System(16.0F), Color::Black()};
+  const auto text = AttributedText::FromRanges("中文👩‍💻\uFFFC继续",
+      {{{0, 10}, {.foreground = Color::White()}}}, {{{7, 8}, Uri("https://huxerui.org")}});
+  const TextInlineObject fraction{7, 36.0F, 24.0F, 12.0F};
+  const auto annotated = text.WithInlineObjects({fraction});
+  REQUIRE(annotated.PlainText().data() == text.PlainText().data());
+  REQUIRE(annotated.TextInRange({7, 8}) == "\uFFFC");
+  REQUIRE(annotated.InlineObjects().size() == 1);
+  REQUIRE(annotated.InlineObjects().front() == fraction);
+  REQUIRE(std::ranges::equal(annotated.LinkRanges(), text.LinkRanges()));
+  REQUIRE(annotated.WithStyles({}).InlineObjects().front() == fraction);
+  REQUIRE(annotated.WithInlineObjects({}) == text);
+  const auto resized = annotated.WithInlineObjects({{7, 40.0F, 26.0F, 12.0F}});
+  REQUIRE_FALSE(detail::TextLayoutInputsEqual(annotated, base.font, resized, base.font));
+  REQUIRE_FALSE(detail::TextPaintInputsEqual(annotated, base, resized, base));
+
+  const auto runs = detail::ResolveTextRuns(annotated, base);
+  REQUIRE(runs.size() == 3);
+  REQUIRE(runs[1].inline_object == fraction);
+  REQUIRE(runs[1].byte_start == 17);
+  REQUIRE(runs[1].byte_end == 20);
+  REQUIRE_THROWS_AS(text.WithInlineObjects({fraction, fraction}), std::invalid_argument);
+  REQUIRE_THROWS_AS(text.WithInlineObjects({{3, 36.0F, 24.0F, 12.0F}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(text.WithInlineObjects({{6, 36.0F, 24.0F, 12.0F}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(text.WithInlineObjects({{8, 36.0F, 24.0F, 12.0F}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(text.WithInlineObjects({{7, 0.0F, 24.0F, 12.0F}}), std::invalid_argument);
+  REQUIRE_THROWS_AS(text.WithInlineObjects({{7, 36.0F, -1.0F, 12.0F}}), std::invalid_argument);
+}
+
 TEST_CASE("AttributedTextResolvesByteAndUtf16RunsWithoutSplittingLogicalLinks") {
   const TextStyle base{Font::System(16.0F), Color::Black(), TextDecoration::Underline};
   const auto text = AttributedText::FromRanges("a😀中b",

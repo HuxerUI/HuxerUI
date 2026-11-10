@@ -542,7 +542,8 @@ public:
     font_metrics_ = ResolveWebFontMetrics(context_, font_);
     // Geometry depends on effective font runs, not color or link boundaries; merge equal-font neighbors first.
     for (const auto& run : ResolveTextRuns(text_, TextStyle{.font = font_})) {
-      if (!font_runs_.empty() && font_runs_.back().style.font == run.style.font) {
+      if (!run.inline_object && !font_runs_.empty() && !font_runs_.back().inline_object &&
+          font_runs_.back().style.font == run.style.font) {
         font_runs_.back().range.end = run.range.end;
       } else {
         font_runs_.push_back(run);
@@ -702,6 +703,14 @@ private:
 
   void BuildBoundaries() {
     boundaries_ = BrowserGraphemeBoundaries(text_.PlainText(), options_.shaping.locale);
+    if (!text_.InlineObjects().empty()) {
+      for (const auto& object : text_.InlineObjects()) {
+        boundaries_.push_back(object.offset);
+        boundaries_.push_back(object.offset + 1);
+      }
+      std::ranges::sort(boundaries_);
+      boundaries_.erase(std::ranges::unique(boundaries_).begin(), boundaries_.end());
+    }
   }
 
   // Shape each font-run prefix as a unit; adding isolated character widths would lose contextual advances.
@@ -712,16 +721,15 @@ private:
       return item.range.end <= offset;
     });
     for (; run != font_runs_.end() && run->range.start < end; ++run) {
+      if (run->inline_object) {
+        width += run->inline_object->width;
+        continue;
+      }
       const TextRange range{std::max(start, run->range.start), std::min(end, run->range.end)};
       context_.set("font", CssFont(run->style.font));
       width += MeasureWidth(context_, text_.TextInRange(range));
     }
     return width;
-  }
-
-  [[nodiscard]] bool IsBreak(TextOffset start, TextOffset end) const {
-    const std::string value = text_.TextInRange({start, end});
-    return value == " " || value == "\t" || value == "-";
   }
 
   void AddLine(TextOffset start, TextOffset end, const std::vector<CaretStop>& prefixes, bool caret_geometry) {
@@ -738,6 +746,11 @@ private:
       return item.range.end <= offset;
     });
     for (; run != font_runs_.end() && run->range.start < end; ++run) {
+      if (run->inline_object) {
+        ascent = std::max(ascent, run->inline_object->ascent);
+        descent = std::max(descent, run->inline_object->descent);
+        continue;
+      }
       const auto metrics = ResolveWebFontMetrics(context_, run->style.font);
       ascent = std::max(ascent, metrics.ascent + metrics.leading * 0.5F);
       descent = std::max(descent, metrics.descent + metrics.leading * 0.5F);
@@ -772,6 +785,8 @@ private:
     TextOffset previous = 0;
     // Prefix advances belong to the current line_start and must be discarded whenever a line break moves it.
     std::vector<CaretStop> prefixes;
+    const auto objects = text_.InlineObjects();
+    auto object = objects.begin();
     for (std::size_t index = 1; index < boundaries_.size(); ++index) {
       TextOffset boundary = boundaries_[index];
       const std::string cluster = text_.TextInRange({previous, boundary});
@@ -788,7 +803,10 @@ private:
         previous = boundary;
         continue;
       }
-      if (IsBreak(previous, boundary)) {
+      const bool is_object = object != objects.end() && object->offset == previous;
+      if (is_object && previous > line_start) {
+        last_break = previous;
+      } else if (cluster == " " || cluster == "\t" || cluster == "-") {
         last_break = boundary;
       }
       if (constrained && options_.wrap == TextWrap::Word && line_start < previous) {
@@ -804,6 +822,10 @@ private:
           line_start = end;
           last_break = -1;
         }
+      }
+      if (is_object) {
+        last_break = boundary;
+        ++object;
       }
       previous = boundary;
     }
@@ -1163,6 +1185,9 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command) {
       if (run->background.alpha > 0.0F) {
         context_.set("fillStyle", CssColor(run->background));
         context_.call<void>("fillRect", x, y + fragment.y, fragment.width, fragment.height);
+      }
+      if (run->inline_object) {
+        continue;
       }
       context_.set("font", CssFont(run->style.font));
       context_.set("fillStyle", CssColor(run->style.foreground));
