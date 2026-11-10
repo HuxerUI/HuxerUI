@@ -1300,7 +1300,7 @@ bool FindNodePath(MountedNode& node, std::uint64_t identity, std::vector<Mounted
 
 namespace huxerui {
 
-bool ViewHandle::RequestFocus() const {
+bool ViewHandle::RequestFocus(bool focus_visible) const {
   if (detail::Composer::Current()) {
     throw std::logic_error("HuxerUI cannot request focus during composition");
   }
@@ -1309,7 +1309,7 @@ bool ViewHandle::RequestFocus() const {
   const auto window = binding_->source->ui.lock();
   if (!window || !window->ui_window || binding_->node_identity == 0) return false;
   detail::ExecutionGuard guard(binding_->source);
-  return window->ui_window->RequestFocus(binding_->node_identity);
+  return window->ui_window->RequestFocus(binding_->node_identity, focus_visible);
 }
 
 ViewHandle UseViewHandle(const std::source_location& location) {
@@ -2455,7 +2455,7 @@ void UiWindow::RefreshInteractionTree() {
           const auto* candidate = window && window->ui_window == this
               ? FindNode(*focus_root, target->node_identity) : nullptr;
           if (candidate && candidate->interaction.enabled && candidate->focusable) {
-            SetFocusedNode(candidate->identity, true);
+            SetFocusedNode(candidate->identity);
           }
         }
       }
@@ -2661,13 +2661,13 @@ bool UiWindow::HandleBack(const BackEvent& incoming) {
   return handled;
 }
 
-bool UiWindow::RequestFocus(std::uint64_t identity) {
+bool UiWindow::RequestFocus(std::uint64_t identity, bool focus_visible) {
   if (state_->retired_ || state_->closing_ || state_->focus_change_in_progress_ || !state_->mounted_root_) return false;
   const auto* target = FindNode(*state_->mounted_root_, identity);
   if (!target || !target->interaction.enabled || !target->focusable) return false;
   if (const auto* root = ActiveFocusTrapRoot(); root && !ContainsNodeIdentity(*root, identity)) return false;
   detail::TextInteraction::KeyboardDispatch keyboard_dispatch(*state_->text_);
-  SetFocusedNode(identity, true);
+  SetFocusedNode(identity, focus_visible);
   keyboard_dispatch.Finish();
   return !state_->retired_ && !state_->closing_ && state_->focused_node_identity_ == identity;
 }

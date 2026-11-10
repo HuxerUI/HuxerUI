@@ -356,7 +356,7 @@ Do not recreate Button, Select, Menu, or text-editing key behavior in an applica
 
 ### Programmatic focus
 
-Create a stable `ViewHandle` with `UseViewHandle()` during composition and bind it with `.With(target)`. Binding the handle preserves the View's existing focus eligibility; use a built-in focusable control or add `Focusable{}` to a custom View. Call `RequestFocus()` on the application thread from an event handler or a resumed Task. It synchronously returns `true` when the mounted target accepts logical focus, including when it already owns focus, and makes its focus ring visible. Actual focus changes emit the existing `ViewEvents::FocusChanged` event.
+Create a stable `ViewHandle` with `UseViewHandle()` during composition and bind it with `.With(target)`. Binding the handle preserves the View's existing focus eligibility. Use a built-in focusable control or add `Focusable{}` to a custom View. Call `RequestFocus()` on the application thread from an event handler or a resumed Task. It synchronously returns `true` when the mounted target accepts logical focus, including when it already owns focus. Focus indication is hidden by default. Pass `true` to show it. Actual focus changes emit the existing `ViewEvents::FocusChanged` event.
 
 ```cpp
 [[huxerui::composable]]
@@ -392,7 +392,7 @@ View EditName(State<TextEditingValue> name) {
 }
 ```
 
-The Dialog tries the supplied target once when it mounts, before focusing its first eligible control. An unavailable target falls back to that default without retrying when content later changes. Content updates and closing a nested Dialog preserve or restore current focus instead of reapplying the initial target.
+The Dialog tries the supplied target once when it mounts, before focusing its first eligible control. An unavailable target falls back to that default without retrying when content later changes. Both targets use the window's current focus visibility. Content updates and closing a nested Dialog preserve or restore current focus instead of reapplying the initial target.
 
 ## Select
 

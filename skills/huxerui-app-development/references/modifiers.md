@@ -48,7 +48,7 @@ return Column {
 };
 ```
 
-Capture the handle in handlers or resumed Tasks and call `RequestFocus()` on the application thread, outside composition. A successful request makes logical focus visible. Actual focus changes emit `ViewEvents::FocusChanged`.
+Capture the handle in handlers or resumed Tasks and call `RequestFocus()` on the application thread, outside composition. Focus indication is hidden by default. Use `RequestFocus(true)` when the request should show it. Actual focus changes emit `ViewEvents::FocusChanged`.
 
 An unmounted, disabled, non-focusable, or modal-excluded target returns `false` without changing current focus. Requests during focus-change notifications also return `false`. Requests do not queue for a future mount or realize virtual items.
 

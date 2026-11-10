@@ -2629,6 +2629,75 @@ TEST_CASE("Keyed movement preserves requester identity and its logical target") 
   REQUIRE(ProgrammaticNodeFocused(runtime, "keyed second"));
 }
 
+TEST_CASE("Programmatic focus without indication preserves text input and modal navigation") {
+  const bool explicit_target = GENERATE(false, true);
+  static std::optional<ViewHandle> editor;
+  static std::optional<ViewHandle> opener;
+  static std::optional<ViewHandle> dialog_target;
+  static std::optional<DialogHandle> dialogs;
+  static State<TextEditingValue> editor_value;
+
+  TestPlatform platform;
+  UiWindow runtime{[] {
+    return FocusTestTheme(Scope([] {
+      editor = UseViewHandle();
+      opener = UseViewHandle();
+      dialog_target = UseViewHandle();
+      dialogs = UseDialog();
+      auto editing = UseState(TextEditingValue{});
+      editor_value = editing;
+      return Column {
+        TextField(editing).OnChanged([editing](const TextEditingValue& value) mutable { editing = value; }).With(*editor),
+        Button("dialog opener").With(*opener),
+      };
+    }));
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {480.0F, 480.0F}});
+  runtime.BuildFrame();
+  const auto shows_focus = [&] {
+    return FindBorderWithColor(runtime.BuildFrame(), Color::Rgb(40, 180, 90)) != nullptr;
+  };
+
+  REQUIRE(opener->RequestFocus(true));
+  REQUIRE(shows_focus());
+  REQUIRE(opener->RequestFocus());
+  REQUIRE_FALSE(shows_focus());
+
+  REQUIRE(editor->RequestFocus(true));
+  TextInputCommand preedit;
+  preedit.kind = TextInputCommandKind::UpdateComposition;
+  preedit.text = "pending";
+  REQUIRE(runtime.HandleTextInputCommands({1, {preedit}}).result_code == TextInputResultCode::Ok);
+  REQUIRE(editor_value->composition.has_value());
+  REQUIRE(opener->RequestFocus(false));
+  REQUIRE(editor_value->text == "pending");
+  REQUIRE_FALSE(editor_value->composition.has_value());
+
+  const auto dialog = dialogs->Show([target = *dialog_target] {
+    return Column {
+      Button("first dialog control"),
+      Button("second dialog control").With(target),
+    };
+  }, {.initial_focus = explicit_target ? dialog_target : std::nullopt});
+  const auto initial = explicit_target ? "second dialog control" : "first dialog control";
+  const auto next = explicit_target ? "first dialog control" : "second dialog control";
+  REQUIRE(ProgrammaticNodeFocused(runtime, initial));
+  REQUIRE_FALSE(opener->RequestFocus(true));
+  REQUIRE_FALSE(shows_focus());
+
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+  REQUIRE(ProgrammaticNodeFocused(runtime, next));
+  REQUIRE(shows_focus());
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab, .modifiers = {.shift = true}}));
+  REQUIRE(ProgrammaticNodeFocused(runtime, initial));
+  REQUIRE(shows_focus());
+
+  REQUIRE(dialogs->Dismiss(dialog));
+  SettlePresentation(platform, runtime);
+  REQUIRE(ProgrammaticNodeFocused(runtime, "dialog opener"));
+  REQUIRE(shows_focus());
+}
+
 TEST_CASE("Focus-change notifications cannot redirect a programmatic request") {
   programmatic_redirect_results.clear();
   programmatic_redirect = true;

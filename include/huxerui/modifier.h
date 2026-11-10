@@ -538,15 +538,16 @@ public:
   /// Returns the property modifier descriptor used by View::With().
   static const detail::ModifierDescriptor& Descriptor();
 
-  /// Requests visible logical focus for the currently bound control on the original application's thread.
+  /// Requests logical focus for the currently bound control on the original application's thread.
   ///
   /// Returns true when that control owns focus after the request, including an already-focused control. Returns
   /// false without changing focus when the target is unmounted, unavailable, disabled, excluded from input, outside
   /// the active modal scope, or a focus-change notification is running. Requests are not retained for future mounts.
   /// Text input and keyboard presentation use the existing window dispatch boundary; logical success does not
   /// guarantee that the operating system displays a software keyboard.
+  /// @param focus_visible Whether to show focus indication after an accepted request. Defaults to false.
   /// @throws std::logic_error If called during composition, from another thread, or in another application's context.
-  bool RequestFocus() const;
+  bool RequestFocus(bool focus_visible = false) const;
 
   bool operator==(const ViewHandle&) const = default;
 

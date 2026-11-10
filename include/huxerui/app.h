@@ -1013,8 +1013,9 @@ private:
   void RefreshInteractionTree();
   /// Requests focus only for an eligible mounted target in this window's current modal scope.
   /// @param identity Mounted node to focus without retaining a pending request.
+  /// @param focus_visible Whether to show focus indication for the accepted target.
   /// @return Whether the target owns focus after notification and text-input synchronization.
-  bool RequestFocus(std::uint64_t identity);
+  bool RequestFocus(std::uint64_t identity, bool focus_visible);
   void RequestKeyboard(bool show);
   bool DispatchKeyEvent(const KeyEvent& event);
   bool DispatchKeyboardContextMenu();

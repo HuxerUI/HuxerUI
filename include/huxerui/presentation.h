@@ -410,7 +410,7 @@ private:
 /// Reusable functions that call this composition-bound facility should be marked composable.
 SnackBarHandle UseSnackBar();
 
-/// Configures dismissal behavior for a Dialog request.
+/// Configures dismissal and initial focus for a Dialog request.
 struct DialogOptions {
   /// Whether a pointer press on the modal barrier requests dismissal.
   bool dismiss_on_outside_press = true;
@@ -420,6 +420,7 @@ struct DialogOptions {
   std::function<void()> on_dismiss_request{};
   /// Optional target captured by Show() and tried once when this Dialog first acquires focus.
   /// Invalid targets fall back to the first eligible control; content updates do not reapply the initial target.
+  /// Either target inherits the window's current focus visibility.
   std::optional<ViewHandle> initial_focus{};
 };
 
