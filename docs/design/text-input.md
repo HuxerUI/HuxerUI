@@ -533,6 +533,8 @@ optional composition
 
 Large document clients return only the requested surrounding context. TextField can return the complete short value when appropriate. Platform adapters must tolerate partial context and request another range when needed.
 
+The Web input proxy stores a surrounding slice and maps its DOM selection and edit offsets to document coordinates. It accounts for DOM line-break normalization while preserving the client's surrounding text. It requests more context when the current slice cannot cover the selection or composition. When no usable slice is available, it clears the proxy and makes it read-only until synchronization succeeds. The browser keeps its active composition while caret geometry updates, and the proxy refreshes its text after the composition ends.
+
 Client state changes outside an IME callback, including an authoritative controlled TextField update, increment the appropriate revisions.
 UiWindow synchronizes the new state after reconciliation.
 A configuration or ownership change requests a platform input restart; an ordinary selection change requests only an update and paint invalidation.
@@ -945,6 +947,8 @@ Clipboard uses the optional `PlatformClipboard` capability. UiWindow maps Ctrl/C
 The application service owns one public `Clipboard` per Runtime and delegates to its stable `PlatformClipboard` capability. Runtime retirement disconnects this service before releasing the platform capability. Clipboard tasks capture their inputs and platform resources before they can outlive the service.
 
 Built-in editing actions use the synchronous plain-text operations on platforms that provide them. Paste availability checks use advertised formats where available and permit a paste attempt when the format is unknown. They do not request clipboard payloads. Application code uses `WriteContent()` and typed asynchronous reads for rich text, image content, and file lists on desktop platforms, Android, and iOS.
+
+When a platform lacks synchronous clipboard access, unhandled Copy, Cut, and Paste shortcuts reach the platform's default editing path. The Web input proxy blocks browser Copy and Cut for secure entries. Read-only clients do not open a text-input session.
 
 Clipboard HTML conversion supports inline character styles, safe links, and text breaks. Conversion does not load external content. Windows stores HTML fragments with byte offsets and UTF-16 text separately. GDK uses bounded asynchronous streams for typed clipboard reads. AppKit uses pasteboard item representations. Image payloads and dimensions are bounded before delivery. File lists reuse existing read-only file reference factories, retain access through the reference lifetime, and never acknowledge a move.
 

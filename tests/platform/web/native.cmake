@@ -6,6 +6,7 @@ huxerui_add_test_suite(huxerui_web_tests HuxerUIWebTests
 target_sources(huxerui_web_tests PRIVATE
         external_texture.cpp
         test_entry.cpp
+        text_input.cpp
         text_layout.cpp
 )
 target_include_directories(huxerui_web_tests PRIVATE "${HUXERUI_PROJECT_DIR}/platform/web")

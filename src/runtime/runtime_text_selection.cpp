@@ -55,11 +55,23 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
 
 } // namespace detail
 
-// An active editor owns clipboard actions and secure-text policy before any enclosing read-only selection area.
-bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
+PlatformClipboard* detail::TextInteraction::FindSynchronousTextClipboard() const noexcept {
   const auto& application = runtime_state_.application_;
   PlatformClipboard* clipboard = application && application->owner ? application->owner->Clipboard() : nullptr;
-  if (clipboard && !clipboard->SupportsSynchronousText()) clipboard = nullptr;
+  return clipboard && clipboard->SupportsSynchronousText() ? clipboard : nullptr;
+}
+
+bool detail::TextInteraction::ShouldConsumeTextEditingShortcut(TextEditingAction action) const {
+  if (HasSession()) {
+    // A synchronous clipboard shortcut belongs to the editor even when its action is blocked.
+    return action == TextEditingAction::SelectAll || FindSynchronousTextClipboard() != nullptr;
+  }
+  return CanPerformTextEditingAction(action);
+}
+
+// An active editor owns clipboard actions and secure-text policy before any enclosing read-only selection area.
+bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
+  PlatformClipboard* clipboard = FindSynchronousTextClipboard();
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
@@ -89,9 +101,7 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
 }
 
 bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action) {
-  const auto& application = runtime_state_.application_;
-  PlatformClipboard* clipboard = application && application->owner ? application->owner->Clipboard() : nullptr;
-  if (clipboard && !clipboard->SupportsSynchronousText()) clipboard = nullptr;
+  PlatformClipboard* clipboard = FindSynchronousTextClipboard();
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;

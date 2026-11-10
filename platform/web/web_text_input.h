@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,8 +46,7 @@ public:
   void CommitEdit(std::uint32_t event_token, TextRange target, std::string text, TextSelection selection);
   void SetSelection(std::uint32_t event_token, TextSelection selection);
   void BeginComposition(std::uint32_t event_token, TextRange target);
-  void UpdateComposition(std::uint32_t event_token, std::string text, TextSelection selection);
-  void EndComposition(std::uint32_t event_token, std::string text, TextSelection selection);
+  void ApplyCompositionText(std::uint32_t event_token, std::string text, bool finish);
   void PerformAction(std::uint32_t event_token, TextInputAction action);
 
 private:
@@ -54,6 +54,7 @@ private:
   [[nodiscard]] std::uint32_t NextEventToken() noexcept;
   void Prepare(const TextInputGeometry& geometry);
   void Synchronize(const TextInputGeometry& geometry);
+  void Resynchronize();
   void Apply(std::vector<TextInputCommand> commands);
 
   std::uintptr_t web_session_id_ = 0;
@@ -62,6 +63,7 @@ private:
   std::uint32_t event_token_ = 0;
   TextInputConfiguration configuration_;
   TextInputState state_;
+  std::optional<TextRange> snapshot_range_;
 };
 
 } // namespace huxerui::detail

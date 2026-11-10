@@ -118,6 +118,7 @@ public:
   TextInputContext QueryTextInputContext(TextInputSessionId session, TextOffset start, TextOffset length) const;
   TextInputGeometry QueryTextInputGeometry(TextInputSessionId session, TextRange range) const;
   TextInputPositionResult QueryTextInputPosition(TextInputSessionId session, Point point) const;
+  bool ShouldConsumeTextEditingShortcut(TextEditingAction action) const;
   bool CanPerformTextEditingAction(TextEditingAction action) const;
   bool PerformTextEditingAction(TextEditingAction action);
   bool SelectTextWord(std::uint64_t node, Point position, bool show_overlay);
@@ -153,6 +154,7 @@ private:
 
   void QueueKeyboardRequest(KeyboardRequest request);
   void FlushKeyboardRequests();
+  PlatformClipboard* FindSynchronousTextClipboard() const noexcept;
   void InvalidateTextInputStateChange(std::uint64_t node, const TextInputState& previous, const TextInputState& current);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);
   std::optional<TextSelectionGeometry> QueryFocusedTextSelectionGeometry() const;

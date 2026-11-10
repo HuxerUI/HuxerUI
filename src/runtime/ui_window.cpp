@@ -3011,7 +3011,7 @@ bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
     default:
       break;
     }
-    if (action.has_value() && (state_->text_->HasSession() || CanPerformTextEditingAction(*action))) {
+    if (action.has_value() && state_->text_->ShouldConsumeTextEditingShortcut(*action)) {
       PerformTextEditingAction(*action);
       return finish_handled();
     }

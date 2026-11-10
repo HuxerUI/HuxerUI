@@ -360,6 +360,9 @@ TEST_CASE("Paste availability checks formats without reading the clipboard paylo
   platform_clipboard.synchronous_text = false;
   CHECK_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Paste));
   CHECK_FALSE(runtime.PerformTextEditingAction(TextEditingAction::Paste));
+  for (const Key key : {Key::C, Key::X, Key::V}) {
+    CHECK_FALSE(runtime.HandleKeyEvent({.key = key, .modifiers = {.control = true}}));
+  }
   CHECK(platform_clipboard.read_count == 0);
 }
 
