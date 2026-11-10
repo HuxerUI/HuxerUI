@@ -22,7 +22,7 @@ Normal `build` and `run` do not build installer targets or require packaging too
 Windows downloads the pinned WiX v5 package dependencies only during `package` and verifies their SHA-256 hashes.
 Windows setup generation currently supports x64 applications.
 Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
-Linux requires `appimagetool`, `patchelf`, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
+Linux requires `appimagetool`, `patchelf` 0.19.0 or newer, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
 ## Target ABIs
 
