@@ -49,6 +49,9 @@ inline constexpr std::wstring_view win32_notification_payload_flag = L"--huxerui
 
 inline constexpr std::uintptr_t win32_application_activation_data_id = 0x48555841U;
 inline constexpr std::size_t win32_application_activation_max_characters = 32768;
+/// Window property marking the initial window as the preferred target for forwarded single-instance activations.
+/// The value is never dereferenced; presence alone marks the window.
+inline constexpr wchar_t win32_primary_window_property[] = L"HuxerUI.PrimaryWindow";
 
 struct Win32StartupInput {
   std::vector<std::wstring> arguments;

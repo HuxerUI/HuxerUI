@@ -10,6 +10,7 @@
 #include <deque>
 #include <cwctype>
 #include <functional>
+#include <iterator>
 #include <filesystem>
 #include <limits>
 #include <memory>
@@ -1337,10 +1338,65 @@ std::wstring Win32ApplicationWindowClassName() {
   return L"HuxerUI.Win32.Window." + Hexadecimal(hash);
 }
 
+namespace {
+
+struct Win32ActivationTargetSearch {
+  std::wstring_view window_class;
+  HWND foreground = nullptr;
+  bool foreground_matched = false;
+  HWND primary = nullptr;
+  HWND visible = nullptr;
+  HWND any = nullptr;
+};
+
+BOOL CALLBACK CollectWin32ActivationTarget(HWND window, LPARAM parameter) {
+  auto& search = *reinterpret_cast<Win32ActivationTargetSearch*>(parameter);
+  wchar_t class_name[256] = {};
+  if (GetClassNameW(window, class_name, static_cast<int>(std::size(class_name))) == 0 ||
+      search.window_class != class_name) {
+    return TRUE;
+  }
+  if (search.any == nullptr) {
+    search.any = window;
+  }
+  if (window == search.foreground) {
+    search.foreground_matched = true;
+  }
+  if (!IsWindowVisible(window)) {
+    return TRUE;
+  }
+  if (search.visible == nullptr) {
+    search.visible = window;
+  }
+  if (search.primary == nullptr && GetPropW(window, win32_primary_window_property) != nullptr) {
+    search.primary = window;
+  }
+  return TRUE;
+}
+
+/// Prefers the visible initial window, then the foreground window of this class, then any visible window, so a
+/// single-instance application surfaces a predictable target while extra windows are open.
+HWND ResolveWin32ActivationTarget(std::wstring_view window_class) {
+  Win32ActivationTargetSearch search{.window_class = window_class, .foreground = GetForegroundWindow()};
+  static_cast<void>(EnumWindows(CollectWin32ActivationTarget, reinterpret_cast<LPARAM>(&search)));
+  if (search.primary != nullptr) {
+    return search.primary;
+  }
+  if (search.foreground_matched) {
+    return search.foreground;
+  }
+  if (search.visible != nullptr) {
+    return search.visible;
+  }
+  return search.any;
+}
+
+} // namespace
+
 bool TryForwardWin32ApplicationActivation(
     std::wstring_view window_class_name, std::span<const std::wstring> arguments
 ) {
-  HWND target = FindWindowW(std::wstring(window_class_name).c_str(), nullptr);
+  HWND target = ResolveWin32ActivationTarget(window_class_name);
   if (target == nullptr) {
     return false;
   }

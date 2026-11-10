@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #include <objbase.h>
 #include <ole2.h>
 #include <psapi.h>
@@ -57,6 +58,23 @@ constexpr UINT kRenderMessage = WM_APP + 1;
 constexpr UINT kWindowCommandMessage = WM_APP + 3;
 constexpr UINT_PTR kFrameTimer = 1;
 constexpr float kDipsPerInch = 96.0F;
+
+#ifndef HUXERUI_WINDOWS_APPLICATION_ICON_RESOURCE_ID
+#define HUXERUI_WINDOWS_APPLICATION_ICON_RESOURCE_ID 0
+#endif
+
+HICON LoadApplicationIcon(HINSTANCE instance, int width, int height) {
+#if HUXERUI_WINDOWS_APPLICATION_ICON_RESOURCE_ID
+  return static_cast<HICON>(LoadImageW(
+      instance, MAKEINTRESOURCEW(HUXERUI_WINDOWS_APPLICATION_ICON_RESOURCE_ID), IMAGE_ICON, width, height,
+      LR_DEFAULTCOLOR));
+#else
+  (void)instance;
+  (void)width;
+  (void)height;
+  return nullptr;
+#endif
+}
 
 // The Win7-compatible binary probes WinRT dynamically instead of importing newer OS entry points.
 class Win32SystemTheme final {
@@ -522,7 +540,10 @@ public:
       system_tray_->SetWindow(nullptr);
     }
     DestroyWindow(window_);
-    if (ui_class_registered_) UnregisterClassW(ui_window_class_.c_str(), GetModuleHandleW(nullptr));
+    if (ui_class_registered_ && UnregisterClassW(ui_window_class_.c_str(), GetModuleHandleW(nullptr))) {
+      if (window_class_icon_ != nullptr) DestroyIcon(window_class_icon_);
+      if (window_class_small_icon_ != nullptr) DestroyIcon(window_class_small_icon_);
+    }
     UnregisterClassW(window_class_.c_str(), GetModuleHandleW(nullptr));
   }
 
@@ -745,6 +766,9 @@ private:
   std::exception_ptr failure_;
   const std::wstring ui_window_class_ = Win32ApplicationWindowClassName() + L".Ui";
   bool ui_class_registered_ = false;
+  HICON window_class_icon_ = nullptr;
+  HICON window_class_small_icon_ = nullptr;
+  bool initial_window_created_ = false;
   HWND window_ = nullptr;
   std::wstring window_class_;
   Win32Api win32_api_;
@@ -808,17 +832,34 @@ public:
     if (ui && ui->IsInitialized()) ui->platform_views_->SynchronizeFocus(GetFocus());
   }
 
-  static void RegisterWindowClass(const std::wstring& name) {
+  static void RegisterWindowClass(const std::wstring& name, HICON& icon, HICON& small_icon) {
+    const HINSTANCE instance = GetModuleHandleW(nullptr);
+    HICON class_icon = LoadApplicationIcon(instance, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON));
+    HICON class_small_icon =
+        LoadApplicationIcon(instance, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON));
+#if HUXERUI_WINDOWS_APPLICATION_ICON_RESOURCE_ID
+    if (class_icon == nullptr || class_small_icon == nullptr) {
+      if (class_icon != nullptr) DestroyIcon(class_icon);
+      if (class_small_icon != nullptr) DestroyIcon(class_small_icon);
+      throw std::runtime_error("HuxerUI could not load its Windows application icon resource");
+    }
+#endif
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
     window_class.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     window_class.lpfnWndProc = WindowProcedure;
-    window_class.hInstance = GetModuleHandleW(nullptr);
+    window_class.hInstance = instance;
+    window_class.hIcon = class_icon;
     window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     window_class.lpszClassName = name.c_str();
+    window_class.hIconSm = class_small_icon;
     if (!RegisterClassExW(&window_class)) {
+      if (class_icon != nullptr) DestroyIcon(class_icon);
+      if (class_small_icon != nullptr) DestroyIcon(class_small_icon);
       throw std::runtime_error("HuxerUI could not register its Windows window class");
     }
+    icon = class_icon;
+    small_icon = class_small_icon;
   }
 
   void RequestFrameAt(double deadline) override {
@@ -971,6 +1012,16 @@ private:
     if (initialization_failure_) std::rethrow_exception(initialization_failure_);
     if (window_ == nullptr) {
       throw std::runtime_error("HuxerUI could not create its Windows application window");
+    }
+    if (custom_chrome_) {
+      // Win11 DWM rounds only windows that keep the standard frame. Custom chrome strips it through
+      // WM_NCCALCSIZE, so opt in explicitly; Windows 10 ignores the unknown attribute. Literals keep
+      // older SDKs compiling (DWMWA_WINDOW_CORNER_PREFERENCE / DWMWCP_ROUND).
+      constexpr DWORD kDwmWindowCornerPreference = 33;
+      constexpr DWORD kDwmWindowCornerRound = 2;
+      DWORD preference = kDwmWindowCornerRound;
+      static_cast<void>(
+          DwmSetWindowAttribute(window_, kDwmWindowCornerPreference, &preference, sizeof(preference)));
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     auto configuration = application.Resources()->Configuration();
@@ -1786,11 +1837,16 @@ private:
 
 std::unique_ptr<UiWindow> WindowsRuntime::CreateUiWindow(ViewFactory content, const WindowOptions& options) {
   if (!ui_class_registered_) {
-    WindowsUiWindow::RegisterWindowClass(ui_window_class_);
+    WindowsUiWindow::RegisterWindowClass(ui_window_class_, window_class_icon_, window_class_small_icon_);
     ui_class_registered_ = true;
   }
   auto window = std::make_unique<WindowsUiWindow>(dispatcher_, ui_window_class_);
   window->Initialize(*this, std::move(content), options);
+  if (!initial_window_created_) {
+    initial_window_created_ = true;
+    static_cast<void>(SetPropW(
+        window->Window(), win32_primary_window_property, reinterpret_cast<HANDLE>(window.get())));
+  }
   if (on_window_ready_) {
     auto ready = std::move(on_window_ready_);
     ready(dispatcher_.Bind(), window->Window());

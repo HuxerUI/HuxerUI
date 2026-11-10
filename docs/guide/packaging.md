@@ -216,6 +216,9 @@ Replace the generated file in place; no CMake option or HuxerUI resource registr
 The Windows installer reuses the application icon, and the macOS DMG retains its standard volume icon.
 HuxerUI does not convert a common source image into platform icon formats during application builds.
 
+Hand-written Windows applications that build HuxerUI from source can define `HUXERUI_WINDOWS_APPLICATION_ICON_RESOURCE_ID` on the HuxerUI Windows target as the integer resource ID of an icon in the executable.
+The Win32 window class then uses that resource for the title bar, taskbar, and application switcher; the default `0` leaves the class icon unset.
+
 ## Desktop system requirements
 
 Windows deployment targets the default Windows 10 version 1607 or later platform and keeps Windows system DLLs, API sets, and UCRT system-owned.
