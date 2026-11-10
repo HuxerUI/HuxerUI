@@ -6,6 +6,7 @@
 #include <oleauto.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <limits>
@@ -24,6 +25,7 @@
 #include "win32_internal.h"
 #include "win32_platform_view.h"
 #include "macros_internal.h"
+#include "runtime/semantics_internal.h"
 
 namespace huxerui::detail {
 
@@ -839,7 +841,7 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::GetPropertyValue(PROPERTYID pro
     return S_OK;
   }
   case UIA_OrientationPropertyId:
-    if (node->scroll) {
+    if (node->scroll && !node->additional_scroll) {
       return SetIntVariant(
           value,
           node->scroll->axis == Axis::Horizontal ? OrientationType_Horizontal : OrientationType_Vertical
@@ -1522,14 +1524,18 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::Scroll(ScrollAmount horizontal,
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  if (node->scroll->maximum_offset <= 0.0F ||
-      (node->scroll->axis == Axis::Horizontal && vertical != ScrollAmount_NoAmount) ||
-      (node->scroll->axis == Axis::Vertical && horizontal != ScrollAmount_NoAmount)) {
-    return UIA_E_INVALIDOPERATION;
+  Point offset;
+  const std::array amounts{std::pair{Axis::Horizontal, horizontal}, std::pair{Axis::Vertical, vertical}};
+  for (const auto& [axis, amount] : amounts) {
+    if (amount == ScrollAmount_NoAmount) {
+      continue;
+    }
+    const auto* metrics = FindScrollMetrics(*node, axis);
+    if (!metrics || metrics->maximum_offset <= 0.0F) {
+      return UIA_E_INVALIDOPERATION;
+    }
+    (axis == Axis::Horizontal ? offset.x : offset.y) = ScrollDelta(amount, *metrics);
   }
-  const float delta = node->scroll->axis == Axis::Horizontal ? ScrollDelta(horizontal, *node->scroll)
-                                                             : ScrollDelta(vertical, *node->scroll);
-  const Point offset = node->scroll->axis == Axis::Horizontal ? Point{delta, 0.0F} : Point{0.0F, delta};
   return Perform({SemanticActionKind::Scroll, offset});
 }
 
@@ -1538,24 +1544,23 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::SetScrollPercent(double horizon
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  if ((node->scroll->axis == Axis::Horizontal && vertical != UIA_ScrollPatternNoScroll) ||
-      (node->scroll->axis == Axis::Vertical && horizontal != UIA_ScrollPatternNoScroll)) {
-    return UIA_E_INVALIDOPERATION;
+  Point offset;
+  const std::array percentages{std::pair{Axis::Horizontal, horizontal}, std::pair{Axis::Vertical, vertical}};
+  for (const auto& [axis, percent] : percentages) {
+    if (percent == UIA_ScrollPatternNoScroll) {
+      continue;
+    }
+    const auto* metrics = FindScrollMetrics(*node, axis);
+    if (!metrics || metrics->maximum_offset <= 0.0F) {
+      return UIA_E_INVALIDOPERATION;
+    }
+    if (!std::isfinite(percent) || percent < 0.0 || percent > 100.0) {
+      return E_INVALIDARG;
+    }
+    const float target = static_cast<float>(percent / 100.0 * metrics->maximum_offset);
+    (axis == Axis::Horizontal ? offset.x : offset.y) = target - metrics->offset;
   }
-  const double percent = node->scroll->axis == Axis::Horizontal ? horizontal : vertical;
-  if (percent == UIA_ScrollPatternNoScroll) {
-    return S_OK;
-  }
-  if (node->scroll->maximum_offset <= 0.0F) {
-    return UIA_E_INVALIDOPERATION;
-  }
-  if (!std::isfinite(percent) || percent < 0.0 || percent > 100.0) {
-    return E_INVALIDARG;
-  }
-  const float target = static_cast<float>(percent / 100.0 * node->scroll->maximum_offset);
-  const float delta = target - node->scroll->offset;
-  const Point offset = node->scroll->axis == Axis::Horizontal ? Point{delta, 0.0F} : Point{0.0F, delta};
-  return Perform({SemanticActionKind::Scroll, offset});
+  return offset == Point{} ? S_OK : Perform({SemanticActionKind::Scroll, offset});
 }
 
 HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_HorizontalScrollPercent(double* percent) {
@@ -1566,7 +1571,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_HorizontalScrollPercent(dou
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  *percent = node->scroll->axis == Axis::Horizontal ? ScrollPercent(*node->scroll) : UIA_ScrollPatternNoScroll;
+  const auto* metrics = FindScrollMetrics(*node, Axis::Horizontal);
+  *percent = metrics ? ScrollPercent(*metrics) : UIA_ScrollPatternNoScroll;
   return S_OK;
 }
 
@@ -1578,7 +1584,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_VerticalScrollPercent(doubl
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  *percent = node->scroll->axis == Axis::Vertical ? ScrollPercent(*node->scroll) : UIA_ScrollPatternNoScroll;
+  const auto* metrics = FindScrollMetrics(*node, Axis::Vertical);
+  *percent = metrics ? ScrollPercent(*metrics) : UIA_ScrollPatternNoScroll;
   return S_OK;
 }
 
@@ -1590,7 +1597,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_HorizontalViewSize(double* 
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  *percent = node->scroll->axis == Axis::Horizontal ? ViewSizePercent(*node->scroll) : 100.0;
+  const auto* metrics = FindScrollMetrics(*node, Axis::Horizontal);
+  *percent = metrics ? ViewSizePercent(*metrics) : 100.0;
   return S_OK;
 }
 
@@ -1602,7 +1610,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_VerticalViewSize(double* pe
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  *percent = node->scroll->axis == Axis::Vertical ? ViewSizePercent(*node->scroll) : 100.0;
+  const auto* metrics = FindScrollMetrics(*node, Axis::Vertical);
+  *percent = metrics ? ViewSizePercent(*metrics) : 100.0;
   return S_OK;
 }
 
@@ -1614,7 +1623,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_HorizontallyScrollable(BOOL
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  *scrollable = node->scroll->axis == Axis::Horizontal && node->scroll->maximum_offset > 0.0F ? TRUE : FALSE;
+  const auto* metrics = FindScrollMetrics(*node, Axis::Horizontal);
+  *scrollable = metrics && metrics->maximum_offset > 0.0F ? TRUE : FALSE;
   return S_OK;
 }
 
@@ -1626,7 +1636,8 @@ HRESULT STDMETHODCALLTYPE Win32SemanticProvider::get_VerticallyScrollable(BOOL* 
   if (!node || !SupportsScroll(*node)) {
     return node ? UIA_E_NOTSUPPORTED : UIA_E_ELEMENTNOTAVAILABLE;
   }
-  *scrollable = node->scroll->axis == Axis::Vertical && node->scroll->maximum_offset > 0.0F ? TRUE : FALSE;
+  const auto* metrics = FindScrollMetrics(*node, Axis::Vertical);
+  *scrollable = metrics && metrics->maximum_offset > 0.0F ? TRUE : FALSE;
   return S_OK;
 }
 
@@ -1796,22 +1807,27 @@ void Win32Accessibility::Commit(std::shared_ptr<const SemanticFrame> frame, cons
       raise_double(UIA_RangeValueSmallChangePropertyId, old_small, new_small);
       raise_double(UIA_RangeValueLargeChangePropertyId, old_large, new_large);
     }
-    if (old->scroll && node.scroll && old->scroll->axis == node.scroll->axis) {
-      const bool horizontal = node.scroll->axis == Axis::Horizontal;
+    for (Axis axis : {Axis::Horizontal, Axis::Vertical}) {
+      const auto* before = FindScrollMetrics(*old, axis);
+      const auto* after = FindScrollMetrics(node, axis);
+      if (!before && !after) {
+        continue;
+      }
+      const bool horizontal = axis == Axis::Horizontal;
       raise_double(
           horizontal ? UIA_ScrollHorizontalScrollPercentPropertyId : UIA_ScrollVerticalScrollPercentPropertyId,
-          ScrollPercent(*old->scroll),
-          ScrollPercent(*node.scroll)
+          before ? ScrollPercent(*before) : UIA_ScrollPatternNoScroll,
+          after ? ScrollPercent(*after) : UIA_ScrollPatternNoScroll
       );
       raise_double(
           horizontal ? UIA_ScrollHorizontalViewSizePropertyId : UIA_ScrollVerticalViewSizePropertyId,
-          ViewSizePercent(*old->scroll),
-          ViewSizePercent(*node.scroll)
+          before ? ViewSizePercent(*before) : 100.0,
+          after ? ViewSizePercent(*after) : 100.0
       );
       raise_bool(
           horizontal ? UIA_ScrollHorizontallyScrollablePropertyId : UIA_ScrollVerticallyScrollablePropertyId,
-          old->scroll->maximum_offset > 0.0F,
-          node.scroll->maximum_offset > 0.0F
+          before && before->maximum_offset > 0.0F,
+          after && after->maximum_offset > 0.0F
       );
     }
     if (old->focused != node.focused && node.focused) {

@@ -38,7 +38,7 @@ std::vector<std::pair<std::string, HoverEvent>> received_hover_events;
 int stable_extension_updates = 0;
 
 std::optional<detail::ScrollBarGeometry> FindScrollBarGeometry(const detail::MountedNode& node) {
-  if (auto geometry = detail::ResolveScrollBarGeometry(node)) {
+  if (auto geometry = detail::ResolveScrollBarGeometry(node, detail::ScrollAxis(node))) {
     return geometry;
   }
   for (const auto& child : node.children) {
@@ -1562,7 +1562,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   vertical.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& vertical_display = vertical.BuildFrame();
 
-  const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
+  const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode(), Axis::Vertical);
   REQUIRE(vertical_bar.has_value());
   REQUIRE(vertical_bar->axis == Axis::Vertical);
   REQUIRE(vertical_bar->track.x == 91.0F);
@@ -1616,7 +1616,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(drag_item_clicks == 0);
   REQUIRE(drag_item_cancels == 0);
   vertical.BuildFrame();
-  const auto moved_vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
+  const auto moved_vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode(), Axis::Vertical);
   REQUIRE(moved_vertical_bar.has_value());
   REQUIRE(std::abs(moved_vertical_bar->thumb.y - 33.0F) < 0.01F);
 
@@ -1624,7 +1624,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   UiWindow horizontal{HorizontalDragScrollApp, horizontal_platform};
   horizontal.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   const FlattenedScene& horizontal_display = horizontal.BuildFrame();
-  const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode());
+  const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode(), Axis::Horizontal);
   REQUIRE(horizontal_bar.has_value());
   REQUIRE(horizontal_bar->axis == Axis::Horizontal);
   REQUIRE(horizontal_bar->track.x == 3.0F);
@@ -1661,7 +1661,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   UiWindow short_content{ShortScrollBarApp, short_content_platform};
   short_content.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   short_content.BuildFrame();
-  REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode()));
+  REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode(), Axis::Vertical));
 
   TestPlatform invalid_style_platform;
   UiWindow invalid_style{
@@ -1761,7 +1761,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
-  const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
+  const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode(), Axis::Vertical);
   REQUIRE(geometry.has_value());
   REQUIRE(ContainsRect(initial, geometry->thumb));
   REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
@@ -1795,7 +1795,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   runtime.BuildFrame();
   platform.AdvanceTime(0.12);
   const FlattenedScene& shown = runtime.BuildFrame();
-  const auto shown_geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
+  const auto shown_geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode(), Axis::Vertical);
   REQUIRE(shown_geometry.has_value());
   REQUIRE(ContainsRect(shown, shown_geometry->thumb));
 

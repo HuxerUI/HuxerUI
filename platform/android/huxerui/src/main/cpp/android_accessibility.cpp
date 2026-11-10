@@ -243,13 +243,16 @@ void EncodeNode(Writer& writer, const SemanticNode& node) {
     writer.Integer<std::int64_t>(node.text_selection->end);
   }
 
-  writer.Integer<std::uint8_t>(node.scroll.has_value() ? 1 : 0);
-  if (node.scroll.has_value()) {
-    writer.Integer<std::int32_t>(node.scroll->axis == Axis::Horizontal ? 0 : 1);
-    writer.Float(node.scroll->offset);
-    writer.Float(node.scroll->maximum_offset);
-    writer.Float(node.scroll->viewport_extent);
-    writer.Float(node.scroll->content_extent);
+  writer.Integer<std::uint8_t>(node.scroll.has_value() + node.additional_scroll.has_value());
+  for (const auto* scroll : {&node.scroll, &node.additional_scroll}) {
+    if (*scroll) {
+      const auto& metrics = **scroll;
+      writer.Integer<std::int32_t>(metrics.axis == Axis::Horizontal ? 0 : 1);
+      writer.Float(metrics.offset);
+      writer.Float(metrics.maximum_offset);
+      writer.Float(metrics.viewport_extent);
+      writer.Float(metrics.content_extent);
+    }
   }
 
   writer.Integer<std::uint8_t>(node.collection.has_value() ? 1 : 0);

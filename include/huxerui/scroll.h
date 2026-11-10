@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <memory>
 #include <source_location>
+#include <typeindex>
 
 #include <huxerui/geometry.h>
 #include <huxerui/state.h>
@@ -127,7 +128,7 @@ struct ScrollPhysics {
   bool operator==(const ScrollPhysics&) const = default;
 };
 
-/// Controls and observes one mounted scroll container.
+/// Controls and observes one axis of a mounted scroll container.
 ///
 /// Keep a controller stable with `UseScrollController()` when a component recomposes.
 class ScrollController {
@@ -151,7 +152,7 @@ public:
   bool ScrollTo(float offset) const;
   /// Requests a relative content offset and returns whether a current connection accepted the request.
   bool ScrollBy(float delta) const;
-  /// Requests item alignment from a connected virtual layout.
+  /// Requests item alignment along the bound axis of a connected virtual layout.
   /// Variable-size layouts refine the target after measurement; direct scrolling or a newer request cancels it.
   bool ScrollToItem(std::size_t index, ScrollAlignment alignment = ScrollAlignment::Start) const;
 
@@ -166,7 +167,7 @@ private:
 /// Remembers one ScrollController in the current composition scope.
 /// @code
 /// auto controller = UseScrollController();
-/// return VirtualList(items, BuildItem).With(controller);
+/// return VirtualList(items, BuildItem).Controller(controller);
 /// @endcode
 inline ScrollController UseScrollController(float initial_offset = 0.0F,
                                             const std::source_location& location = std::source_location::current()) {
@@ -178,6 +179,12 @@ namespace detail {
 struct ScrollControllerBinding {
   using Value = ScrollController;
 };
+
+struct ScrollBothAxesBinding {
+  using Value = bool;
+};
+
+std::type_index ScrollControllerBindingKey(Axis axis);
 
 } // namespace detail
 

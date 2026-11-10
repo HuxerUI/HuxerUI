@@ -30,7 +30,7 @@ import java.util.Objects;
 
 final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     private static final int SEMANTICS_MAGIC = 0x4D535848;
-    private static final int SEMANTICS_VERSION = 1;
+    private static final int SEMANTICS_VERSION = 2;
     private static final int NO_VIRTUAL_VIEW = Integer.MIN_VALUE;
     private static final int CUSTOM_ACTION_ID_START = 0x02000000;
 
@@ -79,6 +79,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     private static final int SEMANTIC_SET_SELECTED = 13;
 
     private static final int AXIS_HORIZONTAL = 0;
+    private static final int AXIS_VERTICAL = 1;
     private static final int LIVE_REGION_POLITE = 1;
     private static final int LIVE_REGION_ASSERTIVE = 2;
 
@@ -393,7 +394,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         info.setMultiLine(node.multiline);
         info.setPassword(node.secure);
         info.setContentInvalid(Boolean.TRUE.equals(node.invalid));
-        info.setScrollable(node.scroll != null && hasAction(node, SEMANTIC_SCROLL));
+        info.setScrollable(hasAction(node, SEMANTIC_SCROLL));
         info.setLiveRegion(node.liveRegion == LIVE_REGION_ASSERTIVE ? View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE
                                                                     : node.liveRegion == LIVE_REGION_POLITE
                         ? View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -500,14 +501,13 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
                 || hasAction(node, SEMANTIC_DECREMENT)) {
             info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD);
             info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD);
-            if (node.scroll != null) {
-                if (node.scroll.axis == AXIS_HORIZONTAL) {
-                    info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT);
-                    info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT);
-                } else {
-                    info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP);
-                    info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN);
-                }
+            if (canScroll(node.scrollX)) {
+                info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT);
+                info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT);
+            }
+            if (canScroll(node.scrollY)) {
+                info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP);
+                info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN);
             }
         }
         if (hasAction(node, SEMANTIC_SHOW_ON_SCREEN)) {
@@ -595,7 +595,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         boolean forward = action == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
                 || action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.getId()
                 || action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.getId();
-        if (node.scroll == null) {
+        if (node.scrollX == null && node.scrollY == null) {
             int kind = forward ? SEMANTIC_INCREMENT : SEMANTIC_DECREMENT;
             return hasAction(node, kind) && perform(node.id, kind, null, 0, 0, 0.0, 0.0F, 0.0F, 0L);
         }
@@ -606,14 +606,22 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
                 || action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.getId();
         boolean verticalAction = action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.getId()
                 || action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.getId();
-        if ((node.scroll.axis == AXIS_HORIZONTAL && verticalAction)
-                || (node.scroll.axis != AXIS_HORIZONTAL && horizontalAction)) {
+        boolean horizontal = horizontalAction || (!verticalAction && !canScroll(node.scrollY));
+        Scroll scroll = horizontal ? node.scrollX : node.scrollY;
+        if (!canScroll(scroll)) {
             return false;
         }
-        float delta = Math.max(48.0F, node.scroll.viewport * 0.8F) * (forward ? 1.0F : -1.0F);
-        float x = node.scroll.axis == AXIS_HORIZONTAL ? delta : 0.0F;
-        float y = node.scroll.axis == AXIS_HORIZONTAL ? 0.0F : delta;
-        return perform(node.id, SEMANTIC_SCROLL, null, 0, 0, 0.0, x, y, 0L);
+        float delta = Math.max(48.0F, scroll.viewport * 0.8F) * (forward ? 1.0F : -1.0F);
+        return perform(node.id, SEMANTIC_SCROLL, null, 0, 0, 0.0, horizontal ? delta : 0.0F,
+                horizontal ? 0.0F : delta, 0L);
+    }
+
+    private static boolean canScroll(Scroll scroll) {
+        return scroll != null && scroll.maximum > 0.0F;
+    }
+
+    private static boolean offsetChanged(Scroll before, Scroll after) {
+        return before != null && after != null && before.offset != after.offset;
     }
 
     private boolean perform(int nodeId, int kind, String text, long argument0, long argument1, double number, float x,
@@ -730,7 +738,7 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             if (!Arrays.equals(before.textSelection, current.textSelection) && current.textSelection != null) {
                 sendEvent(current.id, AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED);
             }
-            if (before.scroll != null && current.scroll != null && before.scroll.offset != current.scroll.offset) {
+            if (offsetChanged(before.scrollX, current.scrollX) || offsetChanged(before.scrollY, current.scrollY)) {
                 sendEvent(current.id, AccessibilityEvent.TYPE_VIEW_SCROLLED);
             }
             if (stateChanged(before, current)) {
@@ -795,16 +803,13 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
                 event.setToIndex(clampToInt(node.textSelection[1]));
                 event.setItemCount(node.secure ? 0 : node.value.length());
             }
-            if (node.scroll != null) {
-                int offset = Math.round(node.scroll.offset);
-                int maximum = Math.round(node.scroll.maximum);
-                if (node.scroll.axis == AXIS_HORIZONTAL) {
-                    event.setScrollX(offset);
-                    event.setMaxScrollX(maximum);
-                } else {
-                    event.setScrollY(offset);
-                    event.setMaxScrollY(maximum);
-                }
+            if (node.scrollX != null) {
+                event.setScrollX(Math.round(node.scrollX.offset));
+                event.setMaxScrollX(Math.round(node.scrollX.maximum));
+            }
+            if (node.scrollY != null) {
+                event.setScrollY(Math.round(node.scrollY.offset));
+                event.setMaxScrollY(Math.round(node.scrollY.maximum));
             }
         }
         return event;
@@ -1043,7 +1048,8 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
         int headingLevel;
         Range range;
         long[] textSelection;
-        Scroll scroll;
+        Scroll scrollX;
+        Scroll scrollY;
         Collection collection;
         CollectionItem collectionItem;
         int liveRegion;
@@ -1093,9 +1099,20 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
             if (readPresent(buffer)) {
                 node.textSelection = new long[] {buffer.getLong(), buffer.getLong()};
             }
-            if (readPresent(buffer)) {
-                node.scroll = new Scroll(buffer.getInt(), buffer.getFloat(), buffer.getFloat(), buffer.getFloat(),
-                        buffer.getFloat());
+            int scrollCount = buffer.get() & 0xFF;
+            if (scrollCount > 2) {
+                throw new IllegalArgumentException("HuxerUI Android semantic scroll count is invalid");
+            }
+            for (int index = 0; index < scrollCount; ++index) {
+                int axis = buffer.getInt();
+                Scroll scroll = new Scroll(buffer.getFloat(), buffer.getFloat(), buffer.getFloat(), buffer.getFloat());
+                if (axis == AXIS_HORIZONTAL && node.scrollX == null) {
+                    node.scrollX = scroll;
+                } else if (axis == AXIS_VERTICAL && node.scrollY == null) {
+                    node.scrollY = scroll;
+                } else {
+                    throw new IllegalArgumentException("HuxerUI Android semantic scroll axis is invalid");
+                }
             }
             if (readPresent(buffer)) {
                 node.collection = new Collection(buffer.getLong(), buffer.getLong(), buffer.getLong());
@@ -1133,14 +1150,12 @@ final class HuxerUIAccessibilityProvider extends AccessibilityNodeProvider {
     }
 
     private static final class Scroll {
-        final int axis;
         final float offset;
         final float maximum;
         final float viewport;
         final float content;
 
-        Scroll(int axis, float offset, float maximum, float viewport, float content) {
-            this.axis = axis;
+        Scroll(float offset, float maximum, float viewport, float content) {
             this.offset = offset;
             this.maximum = maximum;
             this.viewport = viewport;

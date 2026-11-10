@@ -328,7 +328,7 @@ private:
     node.scroll_state->allows_automatic_reveal = false;
     node.scroll_state->allows_leading_overscroll = false;
     node.scroll_state->allows_trailing_overscroll = false;
-    node.scroll_state->overscroll_offset = 0.0F;
+    node.scroll_state->Motion(behavior_.axis).overscroll_offset = 0.0F;
   }
 
   void UpdateAllowedSources(detail::MountedNode& node) const {

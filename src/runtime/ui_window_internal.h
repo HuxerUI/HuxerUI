@@ -1,6 +1,7 @@
 #pragma once
 
 #include <any>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -324,6 +325,7 @@ public:
 
   [[nodiscard]] std::size_t ItemCount() const noexcept;
   MountedNode& Item(std::size_t index);
+  std::array<std::optional<float>, 2> ScrollCorrections(const VirtualLayoutResult& result) const;
   void CommitRealization(const std::vector<VirtualLayoutResult::Placement>& placements);
 
 private:
@@ -561,6 +563,7 @@ struct UiWindow::State {
   std::optional<Point> current_interaction_origin_;
   std::unique_ptr<detail::FileDropReceiver> file_drop_;
   std::optional<std::uint64_t> focused_node_identity_;
+  bool focus_reveal_pending_ = false;
   bool focus_visible_ = false;
   bool focus_change_in_progress_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;

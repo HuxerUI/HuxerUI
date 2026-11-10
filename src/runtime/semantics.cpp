@@ -244,22 +244,6 @@ bool SupportsSemanticScroll(SemanticRole role) noexcept {
          role == SemanticRole::Tree;
 }
 
-ScrollMetrics MountedScrollMetrics(const detail::MountedNode& node) {
-  const Axis axis = detail::ScrollAxis(node);
-  const bool vertical = axis == Axis::Vertical;
-  const Rect viewport = detail::ScrollViewport(node);
-  const float viewport_extent = vertical ? viewport.height : viewport.width;
-  const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
-  const float offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
-  return {
-      .axis = axis,
-      .offset = offset,
-      .maximum_offset = std::max(0.0F, content_extent - viewport_extent),
-      .viewport_extent = viewport_extent,
-      .content_extent = content_extent,
-  };
-}
-
 Rect DescendantSemanticClip(const detail::MountedNode& node, Rect inherited) {
   for (const ClipShape& shape : node.presentation.children_clips) {
     inherited = inherited.Intersection(node.LocalToWindowBounds(detail::InternalAccess::ClipBounds(shape)));
@@ -598,8 +582,17 @@ void detail::SemanticTree::BuildSemantics() {
       return {};
     }
 
-    const std::optional<ScrollMetrics> actual_scroll =
-        mounted.scroll_state ? std::optional{MountedScrollMetrics(mounted)} : std::nullopt;
+    const auto& scroll = mounted.scroll_state;
+    const bool both_axes = scroll && scroll->both_axes;
+    const auto actual_scroll = scroll
+                                   ? std::optional{detail::ResolveScrollMetrics(
+                                         mounted, both_axes ? Axis::Vertical : scroll->axis)}
+                                   : std::nullopt;
+    const auto horizontal_scroll = both_axes
+                                       ? std::optional{detail::ResolveScrollMetrics(mounted, Axis::Horizontal)}
+                                       : std::nullopt;
+    const bool can_scroll = (actual_scroll && actual_scroll->maximum_offset > 0.0F) ||
+                            (horizontal_scroll && horizontal_scroll->maximum_offset > 0.0F);
     const bool publishes_scroll =
         actual_scroll.has_value() && SupportsSemanticScroll(resolved.role.value_or(SemanticRole::Generic));
     if (publishes_scroll) {
@@ -614,7 +607,7 @@ void detail::SemanticTree::BuildSemantics() {
     if (node_enabled && mounted.focusable) {
       actions |= SemanticActionMask(SemanticActionKind::Focus);
     }
-    if (node_enabled && publishes_scroll && actual_scroll->maximum_offset > 0.0F) {
+    if (node_enabled && publishes_scroll && can_scroll) {
       actions |= SemanticActionMask(SemanticActionKind::Scroll);
     }
     if (!node_enabled) {
@@ -665,6 +658,9 @@ void detail::SemanticTree::BuildSemantics() {
           owner_bounds,
           !owner_bounds.Intersects(visible_bounds)
       );
+      if (publishes_scroll) {
+        owner.additional_scroll = horizontal_scroll;
+      }
       owner.actions = actions;
       if (is_platform_view) {
         owner.platform_view_identity = mounted.identity;
@@ -687,8 +683,7 @@ void detail::SemanticTree::BuildSemantics() {
 
     std::vector<SemanticNodeId> children;
     const Rect descendant_visible_bounds = DescendantSemanticClip(mounted, visible_bounds);
-    const bool descendants_have_scroll =
-        has_scroll_ancestor || (actual_scroll.has_value() && actual_scroll->maximum_offset > 0.0F);
+    const bool descendants_have_scroll = has_scroll_ancestor || can_scroll;
     if (resolved.descendants.value_or(SemanticDescendantPolicy::Preserve) != SemanticDescendantPolicy::Exclude) {
       if (mounted.virtual_state && mounted.virtual_state->realized_placements.size() != mounted.children.size()) {
         throw std::logic_error("HuxerUI virtual semantic placements must match realized children");
@@ -974,15 +969,15 @@ bool detail::SemanticTree::PerformSemanticAction(SemanticNodeId node_id, const S
       return false;
     }
     const Point delta = std::get<Point>(action.value);
-    const float axis_delta = detail::ScrollAxis(*owner) == Axis::Vertical ? delta.y : delta.x;
-    if (!detail::CanScrollNode(*owner, axis_delta)) {
-      return false;
+    bool moved = false;
+    for (Axis axis : owner->scroll_state->Axes()) {
+      const float axis_delta = axis == Axis::Vertical ? delta.y : delta.x;
+      if (detail::CanScrollNode(*owner, axis, axis_delta)) {
+        detail::StopScrollNodeMotion(*owner, axis);
+        moved |= detail::ScrollNodeBy(*owner, axis, axis_delta, ScrollSource::Accessibility) != 0.0F;
+      }
     }
-    detail::StopScrollNodeMotion(*owner);
-    if (detail::ScrollNodeBy(*owner, axis_delta, ScrollSource::Accessibility) == 0.0F) {
-      return false;
-    }
-    return true;
+    return moved;
   }
   if (action.kind == SemanticActionKind::ShowOnScreen) {
     Rect target;

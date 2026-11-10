@@ -269,26 +269,30 @@ void detail::TextInteraction::AdvanceTextSelectionDrag(const FrameInfo& frame) {
         continue;
       }
       const Rect viewport = detail::ScrollViewport(node);
-      const bool vertical = detail::ScrollAxis(node) == Axis::Vertical;
-      const float start = vertical ? viewport.y : viewport.x;
-      const float extent = vertical ? viewport.height : viewport.width;
-      const float value = vertical ? local->y : local->x;
-      const float edge = std::min(32.0F, extent * 0.5F);
-      if (edge <= 0.0F) {
-        continue;
+      bool moved = false;
+      for (Axis axis : node.scroll_state->Axes()) {
+        const bool vertical = axis == Axis::Vertical;
+        const float start = vertical ? viewport.y : viewport.x;
+        const float extent = vertical ? viewport.height : viewport.width;
+        const float value = vertical ? local->y : local->x;
+        const float edge = std::min(32.0F, extent * 0.5F);
+        if (edge <= 0.0F) {
+          continue;
+        }
+        const float intensity = value < start + edge ? -std::clamp((start + edge - value) / edge, 0.0F, 1.0F)
+                                : value > start + extent - edge
+                                    ? std::clamp((value - start - extent + edge) / edge, 0.0F, 1.0F) : 0.0F;
+        if (!detail::CanScrollNode(node, axis, intensity)) {
+          continue;
+        }
+        if (frame.delta_time <= 0.0) {
+          runtime_state_.owner_.RequestFrame();
+          return;
+        }
+        const float delta = intensity * 600.0F * static_cast<float>(frame.delta_time);
+        moved |= detail::ScrollNodeBy(node, axis, delta, ScrollSource::FocusReveal) != 0.0F;
       }
-      const float intensity = value < start + edge ? -std::clamp((start + edge - value) / edge, 0.0F, 1.0F)
-                              : value > start + extent - edge
-                                  ? std::clamp((value - start - extent + edge) / edge, 0.0F, 1.0F) : 0.0F;
-      if (intensity == 0.0F || !detail::CanScrollNode(node, intensity)) {
-        continue;
-      }
-      if (frame.delta_time <= 0.0) {
-        runtime_state_.owner_.RequestFrame();
-        return;
-      }
-      const float delta = intensity * 600.0F * static_cast<float>(frame.delta_time);
-      if (detail::ScrollNodeBy(node, delta, ScrollSource::FocusReveal) != 0.0F) {
+      if (moved) {
         selection_scroll_pending_ = true;
         runtime_state_.owner_.RequestFrame();
         return;

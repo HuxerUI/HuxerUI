@@ -1089,6 +1089,30 @@ void ResolveFocusedFlags(MountedNode& node, const std::optional<std::uint64_t>& 
   }
 }
 
+bool RevealFocusInTwoAxes(MountedNode& root, std::uint64_t identity) {
+  std::vector<MountedNode*> path;
+  if (!FindNodePath(root, identity, path)) {
+    return false;
+  }
+  Rect target = path.back()->PresentationBounds();
+  path.pop_back();
+  if (std::ranges::none_of(path, [](const MountedNode* node) {
+        return node->scroll_state && node->scroll_state->both_axes;
+      })) {
+    return false;
+  }
+
+  bool revealed = false;
+  for (auto ancestor = path.rbegin(); ancestor != path.rend(); ++ancestor) {
+    auto& node = **ancestor;
+    if (node.scroll_state && !node.scroll_state->allows_automatic_reveal) {
+      break;
+    }
+    revealed |= ScrollNodeRectIntoView(node, target);
+  }
+  return revealed;
+}
+
 void CollectFocusableNodes(MountedNode& node, std::vector<MountedNode*>& nodes) {
   if (node.interaction.enabled && node.focusable) {
     nodes.push_back(&node);
@@ -1256,6 +1280,20 @@ std::optional<PlatformValue> InternalAccess::DispatchPlatformViewEvent(
     UiWindow& ui_window, std::uint64_t identity, std::type_index key, const PlatformValue& value
 ) {
   return ui_window.DispatchPlatformViewEvent(identity, key, value);
+}
+
+bool FindNodePath(MountedNode& node, std::uint64_t identity, std::vector<MountedNode*>& path) {
+  path.push_back(&node);
+  if (node.identity == identity) {
+    return true;
+  }
+  for (const std::unique_ptr<MountedNode>& child : node.children) {
+    if (FindNodePath(*child, identity, path)) {
+      return true;
+    }
+  }
+  path.pop_back();
+  return false;
 }
 
 } // namespace huxerui::detail
@@ -2227,7 +2265,10 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
   HUXERUI_PROFILE_NEXT(profile_stage, Geometry);
   // The first layout establishes resolved caret geometry. Revealing that caret can change ancestor scroll offsets and
   // virtual realization, so the incremental layout pipeline must settle those changes before geometry is published.
-  if (state_->text_->BringTextInputIntoView()) {
+  const bool focus_revealed = std::exchange(state_->focus_reveal_pending_, false) &&
+                              state_->focused_node_identity_ && !state_->text_->HasSession() &&
+                              RevealFocusInTwoAxes(*state_->mounted_root_, *state_->focused_node_identity_);
+  if (state_->text_->BringTextInputIntoView() || focus_revealed) {
     if (PropagateVirtualLayoutInvalidation(*state_->mounted_root_)) {
       MeasureNode(
           *state_->mounted_root_,
@@ -2681,6 +2722,7 @@ void UiWindow::SetFocusedNode(std::optional<std::uint64_t> identity, std::option
   state_->keyboard_activation_identity_.reset();
   state_->keyboard_press_id_.reset();
   state_->focused_node_identity_ = identity;
+  state_->focus_reveal_pending_ = identity.has_value();
   state_->focus_visible_ = next_focus_visible;
   if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
     if (detail::MountedNode* next = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
@@ -2855,8 +2897,8 @@ Point UiWindow::HandleScrollInput(const ScrollInputEvent& event) {
       return 0.0F;
     }
     for (detail::MountedNode* node : route) {
-      if (node->interaction.enabled && IsScrollContainer(*node) && ScrollAxis(*node) == axis) {
-        StopScrollNodeMotion(*node);
+      if (node->interaction.enabled && IsScrollContainer(*node) && node->scroll_state->Supports(axis)) {
+        StopScrollNodeMotion(*node, axis);
       }
     }
     return ApplyScrollTransaction(route, axis, delta, ScrollSource::Wheel);

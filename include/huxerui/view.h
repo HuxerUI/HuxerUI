@@ -643,9 +643,15 @@ protected:
 /// virtual measurement may request the same logical item more than once.
 template <class Derived> class VirtualLayout : public detail::TypedView<Derived> {
 public:
-  /// Connects a stable controller for programmatic scrolling and metric observation.
+  /// Connects a stable controller to a single-axis layout's scrolling axis.
   Derived Controller(huxerui::ScrollController controller) && {
     this->SetLayoutValue(typeid(detail::ScrollControllerBinding), std::move(controller));
+    return std::move(static_cast<Derived&>(*this));
+  }
+
+  /// Connects a stable controller to the specified axis of a two-axis layout.
+  Derived Controller(Axis axis, huxerui::ScrollController controller) && {
+    this->SetLayoutValue(detail::ScrollControllerBindingKey(axis), std::move(controller));
     return std::move(static_cast<Derived&>(*this));
   }
 
@@ -674,6 +680,13 @@ protected:
       : detail::TypedView<Derived>(
             detail::MakeVirtualLayoutSpec(detail::VirtualLayoutDescriptorFor<Derived>(), std::move(source))
         ) {}
+
+  /// Enables horizontal and vertical scrolling before measurement. Both viewport dimensions must be bounded.
+  /// Define an optional static `ItemBounds(ViewNode&, std::size_t)` returning `std::optional<Rect>` to support
+  /// ScrollController::ScrollToItem(). Return bounds in content coordinates, including estimates for unrealized items.
+  void EnableBothAxes() {
+    this->SetLayoutValue(typeid(detail::ScrollBothAxesBinding), true);
+  }
 };
 
 /// Displays localized or literal text using theme typography or an explicit TextStyle.
@@ -1734,7 +1747,7 @@ public:
   }
 };
 
-/// Makes one ordinary content subtree scrollable along a configured axis.
+/// Makes one ordinary content subtree scrollable within a clipped viewport.
 ///
 /// ScrollView owns clipping, direct drag, wheel and trackpad consumption, nested scrolling, fling, overscroll, focus
 /// reveal, and semantic scrolling through the shared scroll state.
@@ -1747,10 +1760,14 @@ class ScrollView final : public detail::TypedView<ScrollView> {
 public:
   explicit ScrollView(View content);
 
-  /// Selects the scrolling axis.
+  /// Selects one scrolling axis. The default is vertical.
   ScrollView ScrollAxis(Axis axis) &&;
-  /// Connects a stable controller for programmatic scrolling and metric observation.
+  /// Enables horizontal and vertical scrolling in the same viewport.
+  ScrollView ScrollBothAxes() &&;
+  /// Connects a stable controller to the selected single axis.
   ScrollView Controller(huxerui::ScrollController controller) &&;
+  /// Connects a stable controller to one axis selected by ScrollBothAxes(). Use a distinct controller for each axis.
+  ScrollView Controller(Axis axis, huxerui::ScrollController controller) &&;
 };
 
 /// Virtualizes a one-dimensional logical item source with fixed, estimated, or measured item extents.

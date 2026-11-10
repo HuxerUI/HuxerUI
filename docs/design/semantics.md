@@ -174,6 +174,8 @@ struct ScrollMetrics {
 };
 ```
 
+`SemanticNode::scroll` describes the sole axis of a single-axis container. A two-axis container publishes vertical metrics in `scroll` and horizontal metrics in `additional_scroll`. The existing `Point` scroll action can request movement on either or both axes.
+
 Ranges require finite values, `minimum <= maximum`, a current value inside the range, and a positive step when present.
 Collection spans must be positive.
 Collection and collection-item indices are zero-based; adapters convert them when a native API presents one-based positions.

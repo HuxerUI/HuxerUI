@@ -135,7 +135,7 @@ Use the window-level mode and `SafeArea` behavior documented in [Window Insets a
 
 ## ScrollView
 
-`ScrollView` measures one content subtree along its scrolling axis and clips presentation to the viewport.
+`ScrollView` measures one content subtree and clips presentation to the viewport.
 It owns direct drag, wheel and trackpad consumption, kinetic motion, nested-scroll arbitration, overscroll, focus reveal, and semantic scroll actions.
 
 ```cpp
@@ -146,7 +146,20 @@ return ScrollView {
 };
 ```
 
-Use `ScrollBar()` as a modifier when a visible indicator is required.
+`ScrollView` scrolls vertically by default. Use `ScrollAxis(Axis::Horizontal)` for a horizontal viewport, or `ScrollBothAxes()` to allow diagonal scrolling within one viewport.
+
+```cpp
+auto horizontal = UseScrollController();
+auto vertical = UseScrollController();
+
+return ScrollView(content)
+    .ScrollBothAxes()
+    .Controller(Axis::Horizontal, horizontal)
+    .Controller(Axis::Vertical, vertical)
+    .With(ScrollBar());
+```
+
+Use `ScrollBar()` as a modifier to draw an interactive indicator on each axis with a scroll range.
 The scrollbar reads committed scroll geometry; it does not own or duplicate the content offset.
 
 An explicit `ScrollPhysics` modifier configures fling and overscroll behavior for one container.
@@ -228,8 +241,10 @@ Pager does not map wheel or trackpad distance to page changes.
 
 ## ScrollController
 
-A `ScrollController` provides programmatic scrolling and observable metrics.
+A `ScrollController` provides programmatic scrolling and observable metrics for one axis.
 Keep the controller stable across recomposition.
+
+Bind a controller to a single-axis view with `.Controller(controller)`. Two-axis views use `.Controller(axis, controller)` for each axis that needs application control. Use distinct controllers when binding both axes.
 
 It can scroll to or by an offset and ask a supported virtual layout to scroll to an item.
 Focus and text-input reveal use the same authoritative scroll position internally rather than a separate controller path.
@@ -273,5 +288,7 @@ Measure children only through `LayoutContext`, return a constrained size, and re
 
 Derive from `VirtualLayout<Derived>` for a demand-driven logical item source.
 UiWindow owns item reconciliation, keys, saved state, clipping, input, semantics, scrolling, and cleanup; the custom layout owns visible-range selection and placement.
+
+For a two-axis layout, call the protected `EnableBothAxes()` in the derived constructor. Select the rows and columns intersecting `context.Viewport().Bounds()` and any layout-owned overscan. The [read-only virtual table example](../../examples/virtual_table/main.cpp) demonstrates this pattern with a million logical cells.
 
 See [Extending HuxerUI](extending.md) for the extension contracts.

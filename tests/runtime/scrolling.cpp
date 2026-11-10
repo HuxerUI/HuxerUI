@@ -525,7 +525,7 @@ TEST_CASE("Scroll input may consume the complete platform update before default 
   runtime.BuildFrame();
   const Point boundary_consumption = runtime.HandleScrollInput({{50.0F, 40.0F}, 0.0F, -20.0F});
   REQUIRE(boundary_consumption == Point{});
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
 }
 
 TEST_CASE("Diagonal scroll input coordinates each axis independently") {
@@ -537,6 +537,137 @@ TEST_CASE("Diagonal scroll input coordinates each axis independently") {
   REQUIRE(runtime.HandleScrollInput({{50.0F, 20.0F}, 25.0F, 30.0F}) == Point{25.0F, 30.0F});
   REQUIRE(cross_axis_inner_scroll.Offset() == 25.0F);
   REQUIRE(cross_axis_outer_scroll.Offset() == 30.0F);
+}
+
+TEST_CASE("A two-axis ScrollView keeps moving when one axis reaches its boundary", "[scroll2d]") {
+  static ScrollController horizontal;
+  static ScrollController vertical;
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    horizontal = UseScrollController();
+    vertical = UseScrollController();
+    return ScrollView(Spacer().With(huxerui::Frame{500.0F, 600.0F}))
+        .ScrollBothAxes()
+        .Controller(Axis::Horizontal, horizontal)
+        .Controller(Axis::Vertical, vertical)
+        .With(ScrollBar(), ScrollPhysics{.overscroll_enabled = true});
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.HandleScrollInput({{60.0F, 50.0F}, 24.0F, 30.0F}) == Point{24.0F, 30.0F});
+  REQUIRE(horizontal.Offset() == 24.0F);
+  REQUIRE(vertical.Offset() == 30.0F);
+  REQUIRE(horizontal.ScrollTo(horizontal.MaxOffset() - 10.0F));
+  runtime.BuildFrame();
+
+  platform.current_time = 1.0;
+  runtime.HandlePointerEvent({PointerEventType::Down, 88, {85.0F, 70.0F}, PointerDeviceKind::Touch});
+  platform.current_time = 1.02;
+  runtime.HandlePointerEvent({PointerEventType::Move, 88, {65.0F, 50.0F}, PointerDeviceKind::Touch});
+  REQUIRE(horizontal.Offset() == horizontal.MaxOffset());
+  REQUIRE(vertical.Offset() == 50.0F);
+  platform.current_time = 1.04;
+  runtime.HandlePointerEvent({PointerEventType::Move, 88, {45.0F, 30.0F}, PointerDeviceKind::Touch});
+  REQUIRE(horizontal.Offset() == horizontal.MaxOffset());
+  REQUIRE(vertical.Offset() == 70.0F);
+  platform.current_time = 1.05;
+  runtime.HandlePointerEvent({PointerEventType::Up, 88, {45.0F, 30.0F}, PointerDeviceKind::Touch});
+  runtime.BuildFrame();
+  platform.current_time = 1.09;
+  runtime.BuildFrame();
+  REQUIRE(horizontal.Offset() == horizontal.MaxOffset());
+  REQUIRE(vertical.Offset() > 70.0F);
+
+  const auto* root = runtime.RootNode();
+  const auto x_bar = detail::ResolveScrollBarGeometry(*root, Axis::Horizontal);
+  const auto y_bar = detail::ResolveScrollBarGeometry(*root, Axis::Vertical);
+  REQUIRE(x_bar);
+  REQUIRE(y_bar);
+  REQUIRE_FALSE(x_bar->track.Intersects(y_bar->track));
+  const Point thumb{x_bar->thumb.x + x_bar->thumb.width * 0.5F, x_bar->thumb.y + x_bar->thumb.height * 0.5F};
+  const float previous_y = vertical.Offset();
+  runtime.HandlePointerEvent({PointerEventType::Down, 89, thumb, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 89, {thumb.x - 12.0F, thumb.y}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Up, 89, {thumb.x - 12.0F, thumb.y}, PointerDeviceKind::Mouse});
+  REQUIRE(horizontal.Offset() < horizontal.MaxOffset());
+  REQUIRE(vertical.Offset() == previous_y);
+}
+
+TEST_CASE("Focusing mounted content reveals it in both axes of its ScrollView", "[scroll2d]") {
+  static std::optional<ViewHandle> target;
+  static ScrollController horizontal;
+  static ScrollController vertical;
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    target = UseViewHandle();
+    horizontal = UseScrollController();
+    vertical = UseScrollController();
+    return ScrollView(Column {
+      Spacer().With(huxerui::Frame{1.0F, 180.0F}),
+      Row {
+        Spacer().With(huxerui::Frame{220.0F, 1.0F}),
+        Button("Reveal").With(*target),
+      },
+    }).ScrollBothAxes()
+        .Controller(Axis::Horizontal, horizontal)
+        .Controller(Axis::Vertical, vertical);
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(target->RequestFocus());
+  const auto& frame = *runtime.BuildCommit().semantic_frame;
+  REQUIRE(horizontal.Offset() > 0.0F);
+  REQUIRE(vertical.Offset() > 0.0F);
+  const auto focused = std::ranges::find(frame.nodes, true, &SemanticNode::focused);
+  REQUIRE(focused != frame.nodes.end());
+  REQUIRE(focused->label == "Reveal");
+  REQUIRE(focused->bounds.Intersection({0.0F, 0.0F, 120.0F, 100.0F}) == focused->bounds);
+}
+
+TEST_CASE("Focusing oversized content in a two-axis ScrollView uses the nearest offset", "[scroll2d]") {
+  static std::optional<ViewHandle> target;
+  static ScrollController horizontal;
+  static ScrollController vertical;
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    target = UseViewHandle();
+    horizontal = UseScrollController();
+    vertical = UseScrollController();
+    return ScrollView(Column {
+      Spacer().With(huxerui::Frame{1.0F, 40.0F}),
+      Row {
+        Spacer().With(huxerui::Frame{50.0F, 1.0F}),
+        Button("Oversized").With(huxerui::Frame{500.0F, 600.0F}, *target),
+        Spacer().With(huxerui::Frame{50.0F, 1.0F}),
+      },
+      Spacer().With(huxerui::Frame{1.0F, 40.0F}),
+    }).ScrollBothAxes()
+        .Controller(Axis::Horizontal, horizontal)
+        .Controller(Axis::Vertical, vertical);
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  const auto check = [&](Point initial, Point expected) {
+    REQUIRE(horizontal.ScrollTo(initial.x));
+    REQUIRE(vertical.ScrollTo(initial.y));
+    runtime.BuildFrame();
+    REQUIRE(target->RequestFocus());
+    runtime.BuildFrame();
+    REQUIRE(Point{horizontal.Offset(), vertical.Offset()} == expected);
+  };
+
+  SECTION("The target already covers the viewport") {
+    check({60.0F, 80.0F}, {60.0F, 80.0F});
+  }
+  SECTION("The target starts inside the viewport") {
+    check({0.0F, 0.0F}, {50.0F, 40.0F});
+  }
+  SECTION("The target ends inside the viewport") {
+    check({480.0F, 570.0F}, {430.0F, 540.0F});
+  }
 }
 
 TEST_CASE("Nested scroll hooks preserve pre offset post order and actual consumption") {
@@ -611,16 +742,17 @@ TEST_CASE("Direct touch overscroll keeps metrics clamped and settles its present
   runtime.HandlePointerEvent({PointerEventType::Down, 101, {50.0F, 30.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Move, 101, {50.0F, 60.0F}, PointerDeviceKind::Touch});
   REQUIRE(activity_scroll.Offset() == 0.0F);
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset < 0.0F);
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->render_node.children_transform.translate_y > 0.0F);
 
   runtime.HandlePointerEvent({PointerEventType::Up, 101, {50.0F, 60.0F}, PointerDeviceKind::Touch});
-  for (int frame = 0; frame < 10 && runtime.RootNode()->scroll_state->overscroll_offset != 0.0F; ++frame) {
+  const auto& motion = runtime.RootNode()->scroll_state->Motion(Axis::Vertical);
+  for (int frame = 0; frame < 10 && motion.overscroll_offset != 0.0F; ++frame) {
     platform.AdvanceTime(0.05);
     runtime.BuildFrame();
   }
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
   REQUIRE(activity_scroll.Offset() == 0.0F);
   const auto settlement = std::ranges::find_if(scroll_activities, [](const ScrollActivity& activity) {
     return activity.source == ScrollSource::Overscroll && activity.phase == ScrollPhase::Begin;
@@ -638,11 +770,11 @@ TEST_CASE("Disabling an active scroll clears overscroll and cancels direct activ
 
   runtime.HandlePointerEvent({PointerEventType::Down, 103, {50.0F, 30.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Move, 103, {50.0F, 60.0F}, PointerDeviceKind::Touch});
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset < 0.0F);
 
   disableable_scroll_enabled = false;
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
   REQUIRE_FALSE(runtime.RootNode()->interaction.enabled);
 }
 
@@ -655,10 +787,10 @@ TEST_CASE("Reduced motion clears released overscroll without retained settlement
   runtime.HandlePointerEvent({PointerEventType::Down, 104, {50.0F, 30.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Move, 104, {50.0F, 60.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Up, 104, {50.0F, 60.0F}, PointerDeviceKind::Touch});
-  REQUIRE(runtime.RootNode()->children.front()->scroll_state->overscroll_offset < 0.0F);
+  REQUIRE(runtime.RootNode()->children.front()->scroll_state->Motion(Axis::Vertical).overscroll_offset < 0.0F);
 
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->children.front()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->children.front()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
 }
 
 TEST_CASE("Platform scroll defaults apply when a container has no explicit physics") {
@@ -673,7 +805,7 @@ TEST_CASE("Platform scroll defaults apply when a container has no explicit physi
   runtime.HandlePointerEvent({PointerEventType::Down, 102, {50.0F, 30.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Move, 102, {50.0F, 60.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Up, 102, {50.0F, 60.0F}, PointerDeviceKind::Touch});
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
 }
 
 TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
@@ -691,7 +823,7 @@ TEST_CASE("TestHorizontalScrollViewLayoutAndState") {
   REQUIRE(horizontal_view_scroll.ViewportExtent() == 100.0F);
   REQUIRE(horizontal_view_scroll.ContentExtent() == 180.0F);
   REQUIRE(horizontal_view_scroll.MaxOffset() == 80.0F);
-  const auto scroll_bar = huxerui::detail::ResolveScrollBarGeometry(*root);
+  const auto scroll_bar = huxerui::detail::ResolveScrollBarGeometry(*root, huxerui::detail::ScrollAxis(*root));
   REQUIRE(scroll_bar.has_value());
   REQUIRE(scroll_bar->axis == Axis::Horizontal);
 
@@ -1189,12 +1321,12 @@ TEST_CASE("RefreshBox transfers direct pull displacement into controlled refresh
 
   runtime.HandlePointerEvent({PointerEventType::Down, 401, {50.0F, 20.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Move, 401, {50.0F, 240.0F}, PointerDeviceKind::Touch});
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset < 0.0F);
   runtime.HandlePointerEvent({PointerEventType::Up, 401, {50.0F, 240.0F}, PointerDeviceKind::Touch});
 
   REQUIRE(refresh_requests == 1);
   REQUIRE(refresh_box_refreshing.Get());
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->children.front()->PresentationBounds().y > 0.0F);
 
@@ -1250,11 +1382,11 @@ TEST_CASE("RefreshBox preserves an active pull when controlled refreshing starts
 
   runtime.HandlePointerEvent({PointerEventType::Down, 406, {50.0F, 20.0F}, PointerDeviceKind::Touch});
   runtime.HandlePointerEvent({PointerEventType::Move, 406, {50.0F, 80.0F}, PointerDeviceKind::Touch});
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset < 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset < 0.0F);
 
   refresh_box_refreshing = true;
   runtime.BuildFrame();
-  REQUIRE(runtime.RootNode()->scroll_state->overscroll_offset == 0.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->Motion(Axis::Vertical).overscroll_offset == 0.0F);
   REQUIRE(runtime.RootNode()->children.front()->PresentationBounds().y > 0.0F);
   REQUIRE(refresh_requests == 0);
 }

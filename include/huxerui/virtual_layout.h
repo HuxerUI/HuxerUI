@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <typeindex>
@@ -54,6 +55,7 @@ struct VirtualViewport {
 
 namespace detail {
 struct InternalAccess;
+class VirtualMeasureSession;
 }
 
 class VirtualLayoutContext {
@@ -138,13 +140,22 @@ public:
     return *this;
   }
 
+  /// Selects the axis of a single-axis layout. The default is vertical.
   VirtualLayoutResult& SetAxis(Axis axis) noexcept {
     axis_ = axis;
     return *this;
   }
 
+  /// Corrects the offset on the axis selected by SetAxis().
   VirtualLayoutResult& SetScrollOffset(float offset) noexcept {
     scroll_offset_ = offset;
+    return *this;
+  }
+
+  /// Corrects one axis of a two-axis layout, for example to preserve an anchor after item extents change.
+  /// Measure() may run again with the corrected viewport before placement is committed.
+  VirtualLayoutResult& SetScrollOffset(Axis axis, float offset) noexcept {
+    axis_offsets_[axis == Axis::Vertical ? 1 : 0] = offset;
     return *this;
   }
 
@@ -157,7 +168,7 @@ public:
   }
 
   [[nodiscard]] Axis ScrollAxis() const noexcept {
-    return axis_;
+    return axis_.value_or(Axis::Vertical);
   }
 
   [[nodiscard]] std::optional<float> CorrectedScrollOffset() const noexcept {
@@ -171,14 +182,16 @@ public:
 private:
   Size size_;
   Size content_size_;
-  Axis axis_ = Axis::Vertical;
+  std::optional<Axis> axis_;
   std::optional<float> scroll_offset_;
+  std::array<std::optional<float>, 2> axis_offsets_;
   std::vector<Placement> placements_;
   SemanticRole collection_role_ = SemanticRole::Generic;
   SemanticRole collection_item_role_ = SemanticRole::Generic;
   std::optional<SemanticCollection> collection_;
 
   friend struct detail::InternalAccess;
+  friend class detail::VirtualMeasureSession;
 };
 
 namespace detail {
@@ -187,6 +200,7 @@ struct VirtualLayoutDescriptor {
   std::type_index type;
   VirtualLayoutResult (*measure)(VirtualLayoutContext&, ViewNode&, Constraints);
   std::optional<float> (*scroll_offset_for_item)(ViewNode&, std::size_t, ScrollAlignment, float);
+  std::optional<Rect> (*item_bounds)(ViewNode&, std::size_t);
 };
 
 template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorFor() {
@@ -199,6 +213,13 @@ template <class Derived> const VirtualLayoutDescriptor& VirtualLayoutDescriptorF
           -> std::optional<float> {
         if constexpr (requires { Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent); }) {
           return Derived::ScrollOffsetForItem(node, index, alignment, viewport_extent);
+        } else {
+          return std::nullopt;
+        }
+      },
+      [](ViewNode& node, std::size_t index) -> std::optional<Rect> {
+        if constexpr (requires { Derived::ItemBounds(node, index); }) {
+          return Derived::ItemBounds(node, index);
         } else {
           return std::nullopt;
         }

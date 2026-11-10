@@ -762,42 +762,47 @@ void detail::AutoScrollDropTarget(
     return;
   }
   for (auto candidate = std::make_reverse_iterator(target + 1); candidate != route.rend(); ++candidate) {
-    detail::MountedNode* node = *candidate;
-    if (!node->interaction.enabled || !IsScrollContainer(*node)) {
+    auto* node = *candidate;
+    if (!node->interaction.enabled || !IsScrollContainer(*node) || !AllowsScrollSource(*node, ScrollSource::DragDrop)) {
       continue;
     }
-    const std::optional<Point> local = node->WindowToLocal(window_position);
-    if (!local.has_value()) {
+    const auto local = node->WindowToLocal(window_position);
+    if (!local) {
       continue;
     }
-    const Axis axis = ScrollAxis(*node);
     const Rect viewport = ScrollViewport(*node);
-    const float position = axis == Axis::Vertical ? local->y : local->x;
-    const float start = axis == Axis::Vertical ? viewport.y : viewport.x;
-    const float extent = axis == Axis::Vertical ? viewport.height : viewport.width;
-    const float end = start + extent;
-    const float edge = std::min(edge_extent, extent * 0.5F);
-    float intensity = 0.0F;
-    if (position < start + edge) {
-      intensity = -std::clamp((start + edge - position) / edge, 0.0F, 1.0F);
-    } else if (position > end - edge) {
-      intensity = std::clamp((position - (end - edge)) / edge, 0.0F, 1.0F);
+    bool consumed_delta = false;
+    for (Axis axis : node->scroll_state->Axes()) {
+      const float position = axis == Axis::Vertical ? local->y : local->x;
+      const float start = axis == Axis::Vertical ? viewport.y : viewport.x;
+      const float extent = axis == Axis::Vertical ? viewport.height : viewport.width;
+      const float end = start + extent;
+      const float edge = std::min(edge_extent, extent * 0.5F);
+      if (edge <= 0.0F) {
+        continue;
+      }
+      float intensity = 0.0F;
+      if (position < start + edge) {
+        intensity = -std::clamp((start + edge - position) / edge, 0.0F, 1.0F);
+      } else if (position > end - edge) {
+        intensity = std::clamp((position - (end - edge)) / edge, 0.0F, 1.0F);
+      }
+      if (!CanScrollNode(*node, axis, intensity)) {
+        continue;
+      }
+      if (frame.delta_time <= 0.0) {
+        InternalAccess::RequestFrame(ui_window);
+        return;
+      }
+      const float delta = intensity * maximum_speed * static_cast<float>(frame.delta_time);
+      const float consumed = ScrollNodeBy(*node, axis, delta, ScrollSource::DragDrop);
+      if (consumed != 0.0F) {
+        InternalAccess::RequestFrame(ui_window);
+      }
+      consumed_delta |= std::abs(consumed - delta) < 0.001F;
     }
-    if (intensity == 0.0F || !AllowsScrollSource(*node, ScrollSource::DragDrop) ||
-        !CanScrollNode(*node, intensity)) {
-      continue;
-    }
-    if (frame.delta_time <= 0.0) {
-      InternalAccess::RequestFrame(ui_window);
-      break;
-    }
-    const float delta = intensity * maximum_speed * static_cast<float>(frame.delta_time);
-    const float consumed = ScrollNodeBy(*node, delta, ScrollSource::DragDrop);
-    if (consumed != 0.0F) {
-      InternalAccess::RequestFrame(ui_window);
-    }
-    if (std::abs(consumed - delta) < 0.001F) {
-      break;
+    if (consumed_delta) {
+      return;
     }
   }
 }
@@ -892,14 +897,8 @@ void detail::PointerInteraction::CancelPointerRecognition(PointerRecognition& re
       runtime_state_.owner_.RequestFrame();
     }
   } else if (auto* scroll_state = std::get_if<ScrollRecognitionState>(&recognition.state)) {
-    for (std::uint64_t identity : std::exchange(scroll_state->active_nodes, {})) {
-      if (detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, identity)) {
-        NotifyScrollNodeActivity(*node, ScrollSource::Drag, ScrollPhase::Cancel, 0.0F);
-        if (node->scroll_state->motion.StartOverscrollSettlement(*node)) {
-          runtime_state_.scroll_motion_active_ = true;
-          runtime_state_.owner_.RequestFrame();
-        }
-      }
+    for (Axis axis : ScrollAxes(scroll_state->axis, scroll_state->both_axes)) {
+      FinishDragScroll(*scroll_state, axis, ScrollPhase::Cancel);
     }
   } else if (auto* tap_state = std::get_if<TapRecognitionState>(&recognition.state)) {
     for (GestureRecognitionState& consumer : tap_state->consumers) {
@@ -1246,16 +1245,21 @@ GestureDecision detail::PointerInteraction::UpdatePointerRecognition(
       return GestureDecision::Continue;
     }
     const Axis dominant_axis = std::abs(distance_y) >= std::abs(distance_x) ? Axis::Vertical : Axis::Horizontal;
-    if (dominant_axis != scroll_state->axis) {
+    detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, scroll_state->node_identity);
+    if (!node || !node->interaction.enabled) {
       return GestureDecision::Continue;
     }
-    detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, scroll_state->node_identity);
-    const float delta = PointerDelta(session.down_position, event.position, scroll_state->axis);
-    const bool can_overscroll =
-        node && session.device_kind == PointerDeviceKind::Touch && CanOverscrollNode(*node, delta);
-    return node && node->interaction.enabled && (CanScrollNode(*node, delta) || can_overscroll)
-               ? GestureDecision::Accept
-               : GestureDecision::Continue;
+    for (Axis axis : ScrollAxes(scroll_state->axis, scroll_state->both_axes)) {
+      const float delta = PointerDelta(session.down_position, event.position, axis);
+      if ((!scroll_state->both_axes && axis != dominant_axis) || std::abs(delta) < detail::touch_gesture_slop) {
+        continue;
+      }
+      if (CanScrollNode(*node, axis, delta) ||
+          (session.device_kind == PointerDeviceKind::Touch && CanOverscrollNode(*node, axis, delta))) {
+        return GestureDecision::Accept;
+      }
+    }
+    return GestureDecision::Continue;
   }
   if (auto* tap_state = std::get_if<TapRecognitionState>(&recognition.state)) {
     recognition.active = true;
@@ -1404,9 +1408,9 @@ void detail::PointerInteraction::AdvancePointerRecognition(double timestamp) {
 }
 
 void detail::PointerInteraction::ApplyDragScroll(
-    const PointerSession& session, ScrollRecognitionState& scroll, float delta
+    const PointerSession& session, ScrollRecognitionState& scroll, Point previous, Point position
 ) {
-  if (delta == 0.0F) {
+  if (previous == position) {
     return;
   }
 
@@ -1417,13 +1421,32 @@ void detail::PointerInteraction::ApplyDragScroll(
   std::vector<detail::MountedNode*> route;
   route.reserve(static_cast<std::size_t>(origin - session.route.begin()) + 1);
   for (auto identity = session.route.begin(); identity != origin + 1; ++identity) {
-    detail::MountedNode* candidate = FindNode(*runtime_state_.mounted_root_, *identity);
-    if (candidate) {
+    if (auto* candidate = FindNode(*runtime_state_.mounted_root_, *identity)) {
       route.push_back(candidate);
     }
   }
-  HUXERUI_DISCARD(ApplyScrollTransaction(route, scroll.axis, delta, ScrollSource::Drag, &scroll.active_nodes,
-                                           session.device_kind == PointerDeviceKind::Touch));
+  for (Axis axis : ScrollAxes(scroll.axis, scroll.both_axes)) {
+    const bool allow_overscroll = session.device_kind == PointerDeviceKind::Touch;
+    ApplyScrollTransaction(route, axis, PointerDelta(previous, position, axis), ScrollSource::Drag,
+                           &scroll.active_nodes[ScrollAxisIndex(axis)], allow_overscroll);
+  }
+}
+
+bool detail::PointerInteraction::FinishDragScroll(ScrollRecognitionState& scroll, Axis axis, ScrollPhase phase) {
+  bool settling = false;
+  for (std::uint64_t identity : std::exchange(scroll.active_nodes[ScrollAxisIndex(axis)], {})) {
+    if (auto* node = FindNode(*runtime_state_.mounted_root_, identity); node && IsScrollContainer(*node)) {
+      NotifyScrollNodeActivity(*node, axis, ScrollSource::Drag, phase, 0.0F);
+      if (node->scroll_state->Supports(axis)) {
+        settling |= node->scroll_state->Motion(axis).StartOverscrollSettlement(*node, axis);
+      }
+    }
+  }
+  if (settling) {
+    runtime_state_.scroll_motion_active_ = true;
+    runtime_state_.owner_.RequestFrame();
+  }
+  return settling;
 }
 
 bool detail::PointerInteraction::HasContextMenuHandler(Point position) const {
@@ -1764,6 +1787,7 @@ void detail::PointerInteraction::HandlePointerDown(const PointerEvent& event) {
       session.recognitions.push_back(PointerRecognition{ScrollRecognitionState{
           .node_identity = (*node)->identity,
           .axis = ScrollAxis(**node),
+          .both_axes = (*node)->scroll_state->both_axes,
       }});
     }
   }
@@ -1874,14 +1898,10 @@ void detail::PointerInteraction::HandlePointerMove(const PointerEvent& event, bo
     session.pending_focus_identity.reset();
   }
 
-  const auto apply_scroll = [&](ScrollRecognitionState& scroll, float delta) {
-    ApplyDragScroll(session, scroll, delta);
-  };
-
   if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(session)) {
     PointerRecognition& recognition = session.recognitions[*owner];
     if (auto* scroll = std::get_if<ScrollRecognitionState>(&recognition.state)) {
-      apply_scroll(*scroll, PointerDelta(session.last_position, event.position, scroll->axis));
+      ApplyDragScroll(session, *scroll, session.last_position, event.position);
     } else {
       HUXERUI_DISCARD(UpdatePointerRecognition(session, *owner, event));
     }
@@ -1908,7 +1928,7 @@ void detail::PointerInteraction::HandlePointerMove(const PointerEvent& event, bo
     }
     AcceptPointerRecognition(session, index, event);
     if (auto* scroll = std::get_if<ScrollRecognitionState>(&session.recognitions[index].state)) {
-      apply_scroll(*scroll, PointerDelta(session.down_position, event.position, scroll->axis));
+      ApplyDragScroll(session, *scroll, session.down_position, event.position);
     }
     break;
   }
@@ -1991,23 +2011,18 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
     }
     return false;
   };
-  std::optional<float> scroll_velocity;
-  std::optional<Axis> scroll_axis;
+  std::array<std::optional<float>, 2> scroll_velocity;
+  std::optional<std::uint64_t> scroll_origin;
   if (const std::optional<std::size_t> owner = RecognitionOwnerIndex(session)) {
     PointerRecognition& recognition = session.recognitions[*owner];
     if (auto* scroll = std::get_if<ScrollRecognitionState>(&recognition.state)) {
-      scroll_axis = scroll->axis;
-      if (session.device_kind == PointerDeviceKind::Touch) {
-        scroll_velocity = EstimateScrollVelocity(session, scroll->axis, runtime_state_.owner_.Now());
+      if (scroll->both_axes) {
+        scroll_origin = scroll->node_identity;
       }
-      for (std::uint64_t identity : std::exchange(scroll->active_nodes, {})) {
-        if (detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, identity)) {
-          NotifyScrollNodeActivity(*node, ScrollSource::Drag, ScrollPhase::End, 0.0F);
-          if (node->scroll_state->motion.StartOverscrollSettlement(*node)) {
-            runtime_state_.scroll_motion_active_ = true;
-            runtime_state_.owner_.RequestFrame();
-            scroll_velocity.reset();
-          }
+      for (Axis axis : ScrollAxes(scroll->axis, scroll->both_axes)) {
+        const bool settling = FinishDragScroll(*scroll, axis, ScrollPhase::End);
+        if (!settling && session.device_kind == PointerDeviceKind::Touch) {
+          scroll_velocity[ScrollAxisIndex(axis)] = EstimateScrollVelocity(session, axis, runtime_state_.owner_.Now());
         }
       }
     } else {
@@ -2095,26 +2110,33 @@ void detail::PointerInteraction::HandlePointerUp(const PointerEvent& event) {
   if (final_release) {
     RecordTextSelectionTap(session, event);
   }
-  if (scroll_velocity.has_value() && scroll_axis.has_value()) {
+  if (scroll_velocity[0] || scroll_velocity[1]) {
     std::vector<detail::MountedNode*> route;
     route.reserve(session.route.size());
     for (std::uint64_t identity : session.route) {
-      if (detail::MountedNode* node = FindNode(*runtime_state_.mounted_root_, identity)) {
+      if (auto* node = FindNode(*runtime_state_.mounted_root_, identity)) {
         route.push_back(node);
       }
+      if (identity == scroll_origin) {
+        break;
+      }
     }
-    const float velocity = ApplyPreFling(route, *scroll_axis, *scroll_velocity);
-    for (auto candidate = route.rbegin(); candidate != route.rend(); ++candidate) {
-      if (!(*candidate)->interaction.enabled || !IsScrollContainer(**candidate) ||
-          ScrollAxis(**candidate) != *scroll_axis ||
-          !AllowsScrollSource(**candidate, ScrollSource::Momentum) || !CanScrollNode(**candidate, velocity)) {
+    for (Axis axis : scroll_axes) {
+      const auto requested = scroll_velocity[ScrollAxisIndex(axis)];
+      if (!requested) {
         continue;
       }
-      if ((*candidate)->scroll_state->motion.StartMomentum(**candidate, velocity)) {
-        runtime_state_.scroll_motion_active_ = true;
-        runtime_state_.owner_.RequestFrame();
+      const float velocity = ApplyPreFling(route, axis, *requested);
+      for (auto candidate = route.rbegin(); candidate != route.rend(); ++candidate) {
+        if (!AllowsScrollSource(**candidate, ScrollSource::Momentum) || !CanScrollNode(**candidate, axis, velocity)) {
+          continue;
+        }
+        if ((*candidate)->scroll_state->Motion(axis).StartMomentum(**candidate, axis, velocity)) {
+          runtime_state_.scroll_motion_active_ = true;
+          runtime_state_.owner_.RequestFrame();
+        }
+        break;
       }
-      break;
     }
   }
   if (final_release) {

@@ -79,7 +79,7 @@ public:
       const float current_displacement =
           drag_active_ ? LeadingDisplacement(mounted) : std::max(0.0F, displacement_.Value());
       drag_active_ = false;
-      mounted.scroll_state->overscroll_offset = 0.0F;
+      mounted.scroll_state->Motion(Axis::Vertical).overscroll_offset = 0.0F;
       displacement_.Set(current_displacement);
       mode_ = behavior_.refreshing ? Mode::Refreshing : Mode::Settling;
       displacement_.AnimateTo(
@@ -266,11 +266,11 @@ private:
   }
 
   static float LeadingDisplacement(const detail::MountedNode& node) {
-    return std::max(0.0F, -node.scroll_state->overscroll_offset);
+    return std::max(0.0F, -node.scroll_state->Motion(Axis::Vertical).overscroll_offset);
   }
 
   void TransferDragDisplacement(detail::MountedNode& node, float displacement) {
-    node.scroll_state->overscroll_offset = 0.0F;
+    node.scroll_state->Motion(Axis::Vertical).overscroll_offset = 0.0F;
     drag_active_ = false;
     drag_displacement_ = 0.0F;
     displacement_.Set(displacement);

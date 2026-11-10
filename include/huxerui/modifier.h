@@ -870,7 +870,7 @@ struct Grow {
   bool operator==(const Grow&) const = default;
 };
 
-/// Adds a themed, interactive scroll indicator to a scroll container.
+/// Adds a themed, interactive scroll indicator to each axis with a scroll range.
 ///
 /// The bar appears during scrolling, supports direct thumb dragging, and fades when idle. Leave style empty to resolve
 /// the active Theme value, or provide an explicit ScrollBarStyle for this View.
