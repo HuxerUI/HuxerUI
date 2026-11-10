@@ -367,7 +367,7 @@ struct Win32PlatformViews::Impl {
     return first_tab_stop != nullptr ? first_tab_stop : hosted.view;
   }
 
-  void ResizeOverlay() const noexcept {
+  void ResizeOverlay() {
     if (overlay == nullptr || platform_window == nullptr) {
       return;
     }
@@ -376,6 +376,71 @@ struct Win32PlatformViews::Impl {
     SetWindowPos(overlay, HWND_TOP, 0, 0, std::max(0L, client.right - client.left),
                  std::max(0L, client.bottom - client.top),
                  SWP_NOACTIVATE | (hosted_views.empty() && retired.empty() ? SWP_HIDEWINDOW : SWP_SHOWWINDOW));
+    UpdateOverlayRegion();
+  }
+
+  void UpdateOverlayRegion() {
+    if (overlay == nullptr || platform_window == nullptr) {
+      return;
+    }
+    RECT client{};
+    if (!GetClientRect(platform_window, &client)) {
+      return;
+    }
+    std::vector<RECT> holes;
+    const auto collect = [this, &holes](const std::unique_ptr<HostedView>& hosted) {
+      if (!hosted || !hosted->visible || hosted->container == nullptr) {
+        return;
+      }
+      RECT rect{};
+      if (!GetWindowRect(hosted->container, &rect)) {
+        return;
+      }
+      POINT top_left{rect.left, rect.top};
+      POINT bottom_right{rect.right, rect.bottom};
+      if (!ScreenToClient(overlay, &top_left) || !ScreenToClient(overlay, &bottom_right)) {
+        return;
+      }
+      holes.push_back(RECT{top_left.x, top_left.y, bottom_right.x, bottom_right.y});
+    };
+    for (const auto& [identity, hosted] : hosted_views) {
+      static_cast<void>(identity);
+      collect(hosted);
+    }
+    for (const auto& hosted : retired) {
+      collect(hosted);
+    }
+
+    const bool unchanged =
+        overlay_region_client.right == client.right && overlay_region_client.bottom == client.bottom &&
+        overlay_region_holes.size() == holes.size() &&
+        std::equal(holes.begin(), holes.end(), overlay_region_holes.begin(), [](const RECT& left, const RECT& right) {
+          return left.left == right.left && left.top == right.top && left.right == right.right &&
+                 left.bottom == right.bottom;
+        });
+    if (unchanged) {
+      return;
+    }
+
+    // A transparent hit test alone does not reliably hand mouse input to a platform view's HWND.
+    // Cut visible platform views out of the overlay's window region so the OS hit-tests them directly.
+    HRGN region = CreateRectRgn(0, 0, client.right, client.bottom);
+    if (region == nullptr) {
+      return;
+    }
+    for (const RECT& hole : holes) {
+      HRGN cut = CreateRectRgn(hole.left, hole.top, hole.right, hole.bottom);
+      if (cut != nullptr) {
+        CombineRgn(region, region, cut, RGN_DIFF);
+        DeleteObject(cut);
+      }
+    }
+    if (SetWindowRgn(overlay, region, TRUE) == 0) {
+      DeleteObject(region);
+      return;
+    }
+    overlay_region_client = client;
+    overlay_region_holes = std::move(holes);
   }
 
   static LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
@@ -435,6 +500,9 @@ struct Win32PlatformViews::Impl {
   std::unordered_map<std::uint64_t, std::unique_ptr<HostedView>> hosted_views;
   // Removed HWNDs stay behind the previous aperture until the replacement HuxerUI frame is presented.
   std::vector<std::unique_ptr<HostedView>> retired;
+  // Last region applied to the input overlay: the client rect minus visible platform views.
+  RECT overlay_region_client{};
+  std::vector<RECT> overlay_region_holes;
 };
 
 Win32PlatformViews::Win32PlatformViews(HINSTANCE instance, HWND platform_window, PlatformRegistry& registry,
