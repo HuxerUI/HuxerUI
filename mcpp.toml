@@ -182,6 +182,6 @@ ldflags  = ["-weak_framework", "UniformTypeIdentifiers"]
 # failing at link on macOS alone. Unconditional is correct: the engine renders
 # it only for Mach-O.
 [runtime]
-frameworks = ["AppKit", "AVFoundation", "Carbon", "CoreGraphics", "CoreImage",
-              "CoreText", "CoreVideo", "ImageIO", "Foundation", "Metal",
-              "MetalPerformanceShaders", "QuartzCore", "UserNotifications"]
+frameworks = ["AppKit", "AVFoundation", "Carbon", "Contacts", "CoreBluetooth",
+              "CoreGraphics", "CoreImage", "CoreLocation", "CoreText", "CoreVideo", "EventKit", "ImageIO",
+              "Foundation", "Metal", "MetalPerformanceShaders", "Photos", "QuartzCore", "UserNotifications"]

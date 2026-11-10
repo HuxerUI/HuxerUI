@@ -49,10 +49,28 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
          */
         void request(String permission, int requestCode);
         /**
-         * Opens system settings for this application's permissions through the owning Activity.
+         * Requests the Android permissions needed for one HuxerUI capability through the owning Activity.
+         * @param permissions Android permission names required by the selected capability.
+         * @param requestCode Framework correlation code to preserve in the result.
+         * @throws UnsupportedOperationException If this launcher does not support the supplied permission group.
+         */
+        default void request(String[] permissions, int requestCode) {
+            if (permissions.length != 1) {
+                throw new UnsupportedOperationException("HuxerUI permission launcher requires a single permission");
+            }
+            request(permissions[0], requestCode);
+        }
+        /**
+         * Opens Settings for this application's permissions through the owning Activity.
          * @return Whether the settings activity was successfully requested.
          */
         boolean openSettings();
+        /**
+         * Opens the requested permission settings page through the owning Activity.
+         * @param intent Public Android settings intent selected by the framework.
+         * @return Whether opening the page was requested successfully. The default implementation returns false.
+         */
+        default boolean openSettings(Intent intent) { return false; }
     }
 
     private static HuxerUIApplication active;
@@ -209,7 +227,6 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
     void retireLauncher(PermissionLauncher launcher) {
         if (launcher == null) return;
         permission.launcherRemoved(launcher);
-        localNotification.launcherRemoved(launcher);
     }
 
     /**
@@ -221,8 +238,7 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
      */
     public boolean dispatchPermissionResult(int requestCode, String[] permissions, int[] grantResults) {
         requireMainThread();
-        return localNotification.dispatchPermissionResult(requestCode)
-                || permission.dispatchResult(requestCode, permissions, grantResults);
+        return permission.dispatchResult(requestCode, permissions, grantResults);
     }
 
     /**
@@ -453,8 +469,8 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
     }
 
     /**
-     * Queries a permission without presenting native UI.
-     * @param permissionKind Framework PermissionKind wire value.
+     * Queries a permission without presenting a dialog.
+     * @param permissionKind Framework Permission wire value.
      * @return Framework PermissionStatus wire value.
      */
     int checkPermission(int permissionKind) {
@@ -463,8 +479,8 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
 
     /**
      * Requests authorization through the original presentation endpoint on the main thread.
-     * @param nativeHandle Native completion token for this request, not the application Runtime handle.
-     * @param permissionKind Framework PermissionKind wire value.
+     * @param nativeHandle C++ completion token for this request.
+     * @param permissionKind Framework Permission wire value.
      * @param source Original HuxerUIView, or null for the explicit application endpoint.
      */
     void requestPermission(long nativeHandle, int permissionKind, HuxerUIView source) {
@@ -472,13 +488,14 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
     }
 
     /**
-     * Opens application permission settings through the selected presentation endpoint.
-     * @param permissionKind Framework PermissionKind wire value.
+     * Opens the requested Settings page through the original Activity launcher.
+     * @param permissionKind Framework Permission wire value.
+     * @param target Framework PermissionSettingsTarget wire value.
      * @param source Original View, or null for the explicit application endpoint.
      * @return Whether the selected launcher requested settings successfully.
      */
-    boolean openPermissionSettings(int permissionKind, HuxerUIView source) {
-        return permission.openSettings(permissionKind, presentationLauncher(source));
+    boolean openPermissionSettings(int permissionKind, int target, HuxerUIView source) {
+        return permission.openSettings(permissionKind, target, presentationLauncher(source));
     }
 
     /**
@@ -503,7 +520,7 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
      * @param source Original View, or null for the explicit application endpoint.
      */
     void requestLocalNotificationAuthorization(long nativeHandle, HuxerUIView source) {
-        localNotification.requestAuthorization(nativeHandle, presentationLauncher(source));
+        localNotification.requestAuthorization(nativeHandle, permission, presentationLauncher(source));
     }
 
     /**

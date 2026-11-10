@@ -17,17 +17,22 @@ set(HUXERUI_PLATFORM_COMPILE_OPTIONS
         -fobjc-arc
 )
 set(HUXERUI_PLATFORM_LINK_LIBRARIES
+        "-framework Contacts"
+        "-framework CoreBluetooth"
         "-framework CoreFoundation"
         "-framework CoreGraphics"
         "-framework CoreImage"
+        "-framework CoreLocation"
         "-framework CoreText"
         "-framework CoreVideo"
+        "-framework EventKit"
         "-framework Foundation"
         "-framework ImageIO"
         "-framework Metal"
         "-framework MetalPerformanceShaders"
         "-framework MobileCoreServices"
         "-framework AVFoundation"
+        "-framework Photos"
         "-framework QuartzCore"
         "-framework UIKit"
         "-framework UserNotifications"

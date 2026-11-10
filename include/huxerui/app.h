@@ -649,17 +649,19 @@ public:
   /// @return A handle whose Show/Schedule calls resolve text using the calling context's current resource
   /// configuration.
   [[nodiscard]] LocalNotificationHandle LocalNotifications() const;
-  /// Queries current platform authorization without presenting system UI.
-  /// @param permission Permission capability to query; validation occurs before returning the lazy Task.
-  /// @return A Task resolving to current authorization or Unavailable when unsupported/disconnected.
+  /// Queries the current permission without presenting UI.
+  /// @param permission Access to check.
+  /// @return A lazy Task resolving to the current status or Unavailable when unsupported or disconnected.
+  /// @throws std::invalid_argument If permission is invalid.
   /// Call and await on the original application's thread; no UiWindow is required.
   Task<PermissionStatus> CheckPermissionAsync(Permission permission) const;
-  /// Requests authorization using the native presentation endpoint captured when this method is called.
-  /// @param permission Permission capability to request.
-  /// @return A lazy Task resolving to the platform's authorization result, or Unavailable if the original endpoint
-  /// expires.
-  /// Requires the application thread. Without a UiWindow, a platform-provided native endpoint may present the request;
-  /// unsupported hosts return Unavailable. Queued requests never borrow a replacement window or permission launcher.
+  /// Requests authorization using the presentation endpoint captured when this method is called.
+  /// @param permission Access to request.
+  /// @return A lazy Task resolving to the current status after the request or Unavailable if the request cannot run.
+  /// @throws std::invalid_argument If permission is invalid.
+  /// If the operating system requires a settings change, this returns the current status without opening Settings.
+  /// Requires the application thread. A host may provide a presentation endpoint without a UiWindow.
+  /// Queued requests never borrow a replacement window or permission launcher.
   /// Launch from an ApplicationHook or an ordinary application-thread callback, outside composition:
   /// @code{.cpp}
   /// auto application = UseApplication();
@@ -670,11 +672,16 @@ public:
   /// });
   /// @endcode
   Task<PermissionStatus> RequestPermissionAsync(Permission permission) const;
-  /// Requests the native settings surface for a permission using the original presentation endpoint.
-  /// @param permission Permission whose settings should be opened.
-  /// @return A lazy Task resolving true if the platform accepted the opening request, not if permission was granted.
-  /// False represents unsupported or expired presentation. Shares RequestPermissionAsync's thread and endpoint rules.
-  Task<bool> OpenPermissionSettingsAsync(Permission permission) const;
+  /// Opens Settings for a permission using the original presentation endpoint.
+  /// @param permission Access the user wants to manage.
+  /// @param target Whether to open settings for this application or system-wide settings for the capability.
+  /// @return A lazy Task resolving true when the request to open Settings is accepted, or false if the page cannot
+  /// be opened.
+  /// @throws std::invalid_argument If permission or target is invalid.
+  /// Shares RequestPermissionAsync's thread and presentation rules. Recheck authorization when the application
+  /// becomes active.
+  Task<bool> OpenPermissionSettingsAsync(
+      Permission permission, PermissionSettingsTarget target = PermissionSettingsTarget::Application) const;
   /// Requests orderly whole-application termination through Runtime.
   void Quit() const;
 

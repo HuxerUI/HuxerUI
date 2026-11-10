@@ -16,15 +16,16 @@ namespace {
 using emscripten::val;
 
 // clang-format off
-EM_JS(emscripten::EM_VAL, CreateWebPermissionCheck, (int permission), {
+EM_JS(emscripten::EM_VAL, CreateWebPermissionOperation, (const char* permission, bool request), {
   return Emval.toHandle({
-    permission,
+    permission: UTF8ToString(permission),
+    request,
     nativeHandle: 0,
     finished: false,
   });
 });
 
-EM_JS(void, StartWebPermissionCheck, (emscripten::EM_VAL operation_handle, std::uintptr_t native_handle), {
+EM_JS(void, StartWebPermissionOperation, (emscripten::EM_VAL operation_handle, std::uintptr_t native_handle), {
   const operation = Emval.toValue(operation_handle);
   if (!operation || operation.finished) {
     return;
@@ -42,22 +43,38 @@ EM_JS(void, StartWebPermissionCheck, (emscripten::EM_VAL operation_handle, std::
     }
   };
 
-  const name = operation.permission === 0 ? "camera" : operation.permission === 1 ? "microphone" : null;
-  if (!name || !navigator.permissions || typeof navigator.permissions.query !== "function") {
+  if (!globalThis.isSecureContext) {
     operation.finish(5);
     return;
   }
+  const name = operation.permission;
+  const resolve = (state) => state === "granted" ? 1 : state === "denied" ? 2 : 0;
   try {
-    navigator.permissions.query({ name }).then(
-      (result) => operation.finish(result.state === "granted" ? 1 : result.state === "prompt" ? 0 : 2),
-      () => operation.finish(5)
-    );
+    if (name === "notifications") {
+      if (typeof Notification !== "function") {
+        operation.finish(5);
+        return;
+      }
+      const current = resolve(Notification.permission);
+      if (!operation.request || current !== 0) {
+        operation.finish(current);
+      } else if (navigator.userActivation?.isActive && typeof Notification.requestPermission === "function") {
+        Notification.requestPermission().then((state) => operation.finish(resolve(state)), () => operation.finish(5));
+      } else {
+        operation.finish(5);
+      }
+    } else if (navigator.permissions && typeof navigator.permissions.query === "function") {
+      navigator.permissions.query({ name }).then((result) => operation.finish(resolve(result.state)),
+                                               () => operation.finish(5));
+    } else {
+      operation.finish(5);
+    }
   } catch (_) {
     operation.finish(5);
   }
 });
 
-EM_JS(void, CancelWebPermissionCheck, (emscripten::EM_VAL operation_handle), {
+EM_JS(void, CancelWebPermissionOperation, (emscripten::EM_VAL operation_handle), {
   const operation = Emval.toValue(operation_handle);
   if (operation) {
     operation.finished = true;
@@ -66,20 +83,20 @@ EM_JS(void, CancelWebPermissionCheck, (emscripten::EM_VAL operation_handle), {
 });
 // clang-format on
 
-class WebPermissionCheck final : public std::enable_shared_from_this<WebPermissionCheck> {
+class WebPermissionOperation final : public std::enable_shared_from_this<WebPermissionOperation> {
 public:
-  WebPermissionCheck(Permission permission, PermissionStatusCompletion completion)
-      : operation_(val::take_ownership(CreateWebPermissionCheck(static_cast<int>(permission)))),
+  WebPermissionOperation(const char* permission, bool request, PermissionStatusCompletion completion)
+      : operation_(val::take_ownership(CreateWebPermissionOperation(permission, request))),
         completion_(std::move(completion)) {}
 
-  ~WebPermissionCheck() {
+  ~WebPermissionOperation() {
     Cancel();
   }
 
   void Start() {
-    auto* handle = new std::shared_ptr<WebPermissionCheck>(shared_from_this());
+    auto* handle = new std::shared_ptr<WebPermissionOperation>(shared_from_this());
     native_handle_ = reinterpret_cast<std::uintptr_t>(handle);
-    StartWebPermissionCheck(operation_.as_handle(), native_handle_);
+    StartWebPermissionOperation(operation_.as_handle(), native_handle_);
   }
 
   void Complete(int status) noexcept {
@@ -94,11 +111,11 @@ public:
   void Cancel() noexcept {
     completion_ = {};
     if (!operation_.isUndefined()) {
-      CancelWebPermissionCheck(operation_.as_handle());
+      CancelWebPermissionOperation(operation_.as_handle());
       operation_ = val::undefined();
     }
     if (native_handle_ != 0) {
-      delete reinterpret_cast<std::shared_ptr<WebPermissionCheck>*>(native_handle_);
+      delete reinterpret_cast<std::shared_ptr<WebPermissionOperation>*>(native_handle_);
       native_handle_ = 0;
     }
   }
@@ -122,20 +139,47 @@ private:
   std::uintptr_t native_handle_ = 0;
 };
 
+const char* PermissionName(Permission permission) {
+  switch (permission) {
+  case Permission::Camera:
+    return "camera";
+  case Permission::Microphone:
+    return "microphone";
+  case Permission::Location:
+    return "geolocation";
+  case Permission::Notifications:
+    return "notifications";
+  default:
+    return nullptr;
+  }
+}
+
 class WebPermissionTransport final : public PermissionTransport {
 public:
   std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) override {
-    auto check = std::make_shared<WebPermissionCheck>(permission, std::move(completion));
+    const char* name = PermissionName(permission);
+    if (name == nullptr) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+    auto check = std::make_shared<WebPermissionOperation>(name, false, std::move(completion));
     check->Start();
     return [check] { check->Cancel(); };
   }
 
-  std::function<void()> Request(Permission, PermissionStatusCompletion completion) override {
-    completion(PermissionStatus::Unavailable);
+  std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) override {
+    if (permission != Permission::Notifications) {
+      completion(PermissionStatus::Unavailable);
+      return {};
+    }
+    auto request = std::make_shared<WebPermissionOperation>(PermissionName(permission), true, std::move(completion));
+    request->Start();
+    // The browser prompt cannot be dismissed. Retain the interaction until its promise settles.
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission, PermissionSettingsCompletion completion) override {
+  std::function<void()> OpenSettings(Permission, PermissionSettingsTarget,
+                                    PermissionSettingsCompletion completion) override {
     completion(false);
     return {};
   }
@@ -150,7 +194,7 @@ std::shared_ptr<PermissionTransport> CreateWebPermissionTransport() {
 } // namespace huxerui::detail
 
 extern "C" EMSCRIPTEN_KEEPALIVE void huxerui_web_permission_complete(std::uintptr_t native_handle, int status) {
-  using Handle = std::shared_ptr<huxerui::detail::WebPermissionCheck>;
+  using Handle = std::shared_ptr<huxerui::detail::WebPermissionOperation>;
   std::unique_ptr<Handle> owner(reinterpret_cast<Handle*>(native_handle));
   if (owner && *owner) {
     (*owner)->Complete(status);

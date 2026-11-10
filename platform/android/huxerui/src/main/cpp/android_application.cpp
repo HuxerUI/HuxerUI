@@ -98,6 +98,12 @@ PermissionStatus ToPermissionStatus(jint status) noexcept {
     return PermissionStatus::PermanentlyDenied;
   case 4:
     return PermissionStatus::Restricted;
+  case 6:
+    return PermissionStatus::Provisional;
+  case 7:
+    return PermissionStatus::Limited;
+  case 8:
+    return PermissionStatus::SystemDisabled;
   case 5:
   default:
     return PermissionStatus::Unavailable;
@@ -169,7 +175,7 @@ public:
     check_ = environment->GetMethodID(view_class_, "checkPermission", "(I)I");
     presentation_identity_ = environment->GetMethodID(view_class_, "presentationIdentity", "(Lorg/huxerui/HuxerUIView;)J");
     request_ = environment->GetMethodID(view_class_, "requestPermission", "(JILorg/huxerui/HuxerUIView;)V");
-    open_settings_ = environment->GetMethodID(view_class_, "openPermissionSettings", "(ILorg/huxerui/HuxerUIView;)Z");
+    open_settings_ = environment->GetMethodID(view_class_, "openPermissionSettings", "(IILorg/huxerui/HuxerUIView;)Z");
     if (view_class_ == nullptr || presentation_identity_ == nullptr || check_ == nullptr || request_ == nullptr || open_settings_ == nullptr ||
         environment->ExceptionCheck()) {
       ClearJavaException(environment);
@@ -229,7 +235,8 @@ public:
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
+  std::function<void()> OpenSettings(Permission permission, PermissionSettingsTarget target,
+                                    PermissionSettingsCompletion completion) override {
     JniEnvironment attached(virtual_machine_);
     JNIEnv* environment = attached.Get();
     if (environment == nullptr || view_ == nullptr) {
@@ -237,7 +244,7 @@ public:
       return {};
     }
     const bool opened =
-        environment->CallBooleanMethod(view_, open_settings_, static_cast<jint>(permission),
+        environment->CallBooleanMethod(view_, open_settings_, static_cast<jint>(permission), static_cast<jint>(target),
                                        CurrentAndroidPresentationView()) == JNI_TRUE;
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);

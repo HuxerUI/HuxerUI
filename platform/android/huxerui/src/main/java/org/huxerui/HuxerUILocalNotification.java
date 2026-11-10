@@ -3,7 +3,6 @@ package org.huxerui;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.AlarmManager;
-import android.app.AppOpsManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -13,13 +12,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
-import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Resources;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Process;
 
 import java.util.Collections;
 
@@ -37,9 +34,9 @@ final class HuxerUILocalNotification {
     private static final String BODY_EXTRA = "org.huxerui.extra.LOCAL_NOTIFICATION_BODY";
     private static final String TEMPLATE_EXTRA = "org.huxerui.extra.LOCAL_NOTIFICATION_TEMPLATE";
 
-    private static final int GRANTED = 1;
-    private static final int DENIED = 2;
-    private static final int UNAVAILABLE_AUTHORIZATION = 5;
+    private static final int GRANTED = HuxerUIPermission.GRANTED;
+    private static final int DENIED = HuxerUIPermission.DENIED;
+    private static final int UNAVAILABLE_AUTHORIZATION = HuxerUIPermission.UNAVAILABLE;
 
     private static final int ACCEPTED = 0;
     private static final int UNAUTHORIZED = 1;
@@ -52,13 +49,10 @@ final class HuxerUILocalNotification {
     private static final int CAN_ACTIVATE = 1 << 3;
     private static final int CAN_USE_TEMPLATES = 1 << 4;
 
-    private static final int REQUEST_CODE = 0x4852;
     private static final int NOTIFICATION_ID = 0x4855;
 
-    private HuxerUIApplication.PermissionLauncher activeLauncher;
     private final Context context;
     private final Configuration configuration;
-    private long activeNativeHandle;
 
     HuxerUILocalNotification(Context context) {
         this.context = context.getApplicationContext();
@@ -97,45 +91,14 @@ final class HuxerUILocalNotification {
         return checkAuthorization(context, configuration);
     }
 
-    void requestAuthorization(long nativeHandle, HuxerUIApplication.PermissionLauncher launcher) {
-        int status = checkAuthorization();
-        if (status == GRANTED || status == UNAVAILABLE_AUTHORIZATION || Build.VERSION.SDK_INT < 33) {
-            nativeCompleteAuthorization(nativeHandle, status);
-            return;
-        }
-        if (context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
-            nativeCompleteAuthorization(nativeHandle, status);
-            return;
-        }
-        if (launcher == null || activeNativeHandle != 0L) {
+    void requestAuthorization(long nativeHandle, HuxerUIPermission permission,
+            HuxerUIApplication.PermissionLauncher launcher) {
+        if (!configuration.canShow()) {
             nativeCompleteAuthorization(nativeHandle, UNAVAILABLE_AUTHORIZATION);
             return;
         }
-        activeNativeHandle = nativeHandle;
-        activeLauncher = launcher;
-        try {
-            launcher.request(Manifest.permission.POST_NOTIFICATIONS, REQUEST_CODE);
-        } catch (RuntimeException exception) {
-            completeAuthorization(UNAVAILABLE_AUTHORIZATION);
-        }
-    }
-
-    boolean dispatchPermissionResult(int requestCode) {
-        if (requestCode != REQUEST_CODE || activeNativeHandle == 0L) {
-            return false;
-        }
-        completeAuthorization(checkAuthorization());
-        return true;
-    }
-
-    /**
-     * Completes a pending request as unavailable when its original presentation endpoint is removed.
-     * @param launcher Exact former endpoint, checked on the main thread; other requests are unaffected.
-     */
-    void launcherRemoved(HuxerUIApplication.PermissionLauncher launcher) {
-        if (launcher == activeLauncher && activeNativeHandle != 0L) {
-            completeAuthorization(UNAVAILABLE_AUTHORIZATION);
-        }
+        permission.request(HuxerUIPermission.NOTIFICATIONS, launcher, status -> nativeCompleteAuthorization(
+                nativeHandle, status == GRANTED ? checkChannelAuthorization(configuration) : status));
     }
 
     int show(String identifier, String title, String body, String templateIdentifier, byte[] data) {
@@ -264,30 +227,16 @@ final class HuxerUILocalNotification {
         return authorization == GRANTED ? ACCEPTED : UNAUTHORIZED;
     }
 
-    private void completeAuthorization(int status) {
-        long nativeHandle = activeNativeHandle;
-        activeNativeHandle = 0L;
-        activeLauncher = null;
-        nativeCompleteAuthorization(nativeHandle, status);
-    }
-
     private static int checkAuthorization(Context context, Configuration configuration) {
         if (!configuration.canShow()) {
             return UNAVAILABLE_AUTHORIZATION;
         }
-        if (Build.VERSION.SDK_INT >= 33
-            && context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-            return DENIED;
-        }
+        int status = HuxerUIPermission.checkNotifications(context);
+        return status == GRANTED ? checkChannelAuthorization(configuration) : status;
+    }
+
+    private static int checkChannelAuthorization(Configuration configuration) {
         try {
-            if (Build.VERSION.SDK_INT >= 24) {
-                if (!Api24.areNotificationsEnabled(configuration.notificationManager)) {
-                    return DENIED;
-                }
-            } else if (!Api23.areNotificationsEnabled(context)) {
-                return DENIED;
-            }
             if (Build.VERSION.SDK_INT >= 26) {
                 int importance = Api26.channelImportance(configuration.notificationManager, configuration.channelId);
                 if (importance == Api26.MISSING_CHANNEL) {
@@ -412,24 +361,6 @@ final class HuxerUILocalNotification {
         return value == null || value.isEmpty();
     }
 
-    private static boolean hasPermissionDeclaration(Context context, String permission) {
-        try {
-            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(),
-                                                                          PackageManager.GET_PERMISSIONS);
-            if (info.requestedPermissions == null) {
-                return false;
-            }
-            for (String declared : info.requestedPermissions) {
-                if (permission.equals(declared)) {
-                    return true;
-                }
-            }
-        } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
-            return false;
-        }
-        return false;
-    }
-
     private static boolean hasReceiverDeclaration(Context context) {
         try {
             ComponentName receiver = new ComponentName(context, HuxerUILocalNotificationReceiver.class);
@@ -507,7 +438,7 @@ final class HuxerUILocalNotification {
                 }
             }
             boolean permissionDeclared = Build.VERSION.SDK_INT < 33
-                    || hasPermissionDeclaration(context, Manifest.permission.POST_NOTIFICATIONS);
+                    || HuxerUIPermission.hasDeclarations(context, Manifest.permission.POST_NOTIFICATIONS);
             boolean activationAvailable = false;
             try {
                 activationAvailable =
@@ -545,28 +476,9 @@ final class HuxerUILocalNotification {
         }
     }
 
-    private static final class Api23 {
-        private static final String POST_NOTIFICATION_OPERATION = "android:post_notification";
-
-        private Api23() {}
-
-        static boolean areNotificationsEnabled(Context context) {
-            AppOpsManager manager = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
-            if (manager == null) {
-                return false;
-            }
-            int mode = manager.checkOpNoThrow(POST_NOTIFICATION_OPERATION, Process.myUid(), context.getPackageName());
-            return mode == AppOpsManager.MODE_ALLOWED || mode == AppOpsManager.MODE_DEFAULT;
-        }
-    }
-
     @SuppressLint("NewApi")
     private static final class Api24 {
         private Api24() {}
-
-        static boolean areNotificationsEnabled(NotificationManager manager) {
-            return manager.areNotificationsEnabled();
-        }
 
         static void applyLayout(Notification.Builder builder, HuxerUILocalNotificationLayout layout) {
             builder.setStyle(new Notification.DecoratedCustomViewStyle());

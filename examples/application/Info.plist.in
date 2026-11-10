@@ -50,5 +50,7 @@
   <string>Demonstrate the HuxerUI application permission API.</string>
   <key>NSMicrophoneUsageDescription</key>
   <string>Demonstrate the HuxerUI application permission API.</string>
+  <key>NSLocationUsageDescription</key>
+  <string>Show how to request location access and update it in Settings.</string>
 </dict>
 </plist>

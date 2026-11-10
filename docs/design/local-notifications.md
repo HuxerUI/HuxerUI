@@ -8,7 +8,7 @@ It covers authorization, immediate presentation, one-shot scheduling, stable ide
 ## Goals
 
 - Expose local notifications as one typed application-shell capability.
-- Keep notification authorization operations independent of camera and microphone requests while sharing status semantics.
+- Share the operating-system notification grant with application permissions while keeping delivery configuration in the notification service.
 - Use stable application-owned identifiers for replacement and cancellation.
 - Deliver notification launches through the existing application activation queue.
 - Resume asynchronous application work on the owning Runtime's UI thread.
@@ -130,8 +130,7 @@ The shared service does not keep a process-global list of scheduled notification
 
 ## Authorization
 
-Notification authorization is not a `Permission` enum value.
-Unlike camera and microphone access, notification systems expose provisional and ephemeral authorization, platform settings that can disable all notification channels, hosts with no prompt API, and platforms where presentation is available without a permission request.
+`Permission::Notifications` exposes application-level authorization through `ApplicationHandle`. The notification handle also reports whether its delivery configuration permits use. For example, application-level authorization on Android can be granted while the notification handle reports unavailable because a required channel or icon is missing.
 
 `CheckAuthorizationAsync()` never presents system UI.
 `RequestAuthorizationAsync()` may present native UI only when the platform and application shell permit a prompt.
@@ -363,7 +362,7 @@ The full notification identifier and resource-free HUXP data are Base64-encoded 
 
 Immediate presentation removes matching pending and delivered notifications before submitting the replacement. Scheduling removes only the matching pending request and uses the operating system scheduler, which survives process exit; cancellation removes both forms. Native removal/submission calls do not form an OS transaction: a native failure after removal does not restore previous content. Accepted delivery remains subject to Windows settings, focus assistance, and scheduling policy.
 
-Authorization maps `NotificationSetting::Enabled` to `Granted`, user/application disablement to `Denied`, group policy to `Restricted`, and manifest/configuration failure to `Unavailable`. `RequestAuthorizationAsync()` queries this setting without opening a permission dialog or Settings.
+Authorization maps `NotificationSetting::Enabled` to `Granted`, application disablement to `Denied`, user-wide disablement to `SystemDisabled`, group policy to `Restricted`, and manifest or identity failure to `Unavailable`. `RequestAuthorizationAsync()` queries this setting without opening a permission dialog or Settings.
 
 The optional fourth registration argument is a `windows::LocalNotificationTemplateProvider`, retained in process configuration under the identity mutex and copied into each host's transport. Successful registration replaces it (omission clears it), failed registration preserves it, and matching unregistration releases the process copy. It is not part of native identity or persisted registry data. Registration changes are pre-host operations only; providers capture durable shell-owned values, not Runtime or composition objects. No provider means `can_use_templates == false`; otherwise the flag advertises the mechanism, not individual identifiers.
 

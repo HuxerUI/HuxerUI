@@ -183,7 +183,8 @@ public:
 
   virtual std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) = 0;
   virtual std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) = 0;
-  virtual std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) = 0;
+  virtual std::function<void()> OpenSettings(Permission permission, PermissionSettingsTarget target,
+                                             PermissionSettingsCompletion completion) = 0;
 };
 
 class PermissionController final {
@@ -200,7 +201,7 @@ public:
 
   Task<PermissionStatus> Check(Permission permission) const;
   Task<PermissionStatus> Request(Permission permission) const;
-  Task<bool> OpenSettings(Permission permission) const;
+  Task<bool> OpenSettings(Permission permission, PermissionSettingsTarget target) const;
   void Disconnect() noexcept;
 
 private:
@@ -292,7 +293,7 @@ public:
   [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(ApplicationLifecycleState)> handler);
   Task<PermissionStatus> CheckPermission(Permission permission) const;
   Task<PermissionStatus> RequestPermission(Permission permission) const;
-  Task<bool> OpenPermissionSettings(Permission permission) const;
+  Task<bool> OpenPermissionSettings(Permission permission, PermissionSettingsTarget target) const;
   [[nodiscard]] const std::shared_ptr<LocalNotificationService>& LocalNotifications() const noexcept;
   [[nodiscard]] const std::shared_ptr<SystemTrayService>& SystemTray() const noexcept;
   [[nodiscard]] const std::shared_ptr<huxerui::Clipboard>& Clipboard() const noexcept;

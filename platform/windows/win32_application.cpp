@@ -38,6 +38,7 @@
 #include <wincrypt.h>
 #include <wrl.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
+#include <winrt/Windows.Devices.Geolocation.h>
 #include <winrt/Windows.UI.Notifications.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
@@ -657,6 +658,30 @@ private:
   std::wstring app_id_;
 };
 
+PermissionStatus ReadNotificationAuthorization(const ToastNotifier& notifier) noexcept {
+  try {
+    switch (notifier.Setting()) {
+    case NotificationSetting::Enabled:
+      return PermissionStatus::Granted;
+    case NotificationSetting::DisabledForApplication:
+      return PermissionStatus::Denied;
+    case NotificationSetting::DisabledForUser:
+      return PermissionStatus::SystemDisabled;
+    case NotificationSetting::DisabledByGroupPolicy:
+      return PermissionStatus::Restricted;
+    case NotificationSetting::DisabledByManifest:
+      break;
+    }
+  } catch (const winrt::hresult_error& error) {
+    // An installed desktop identity has no settings record until its first toast submission.
+    if (error.code() == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) {
+      return PermissionStatus::NotDetermined;
+    }
+  } catch (...) {
+  }
+  return PermissionStatus::Unavailable;
+}
+
 class Win32LocalNotificationTransport final : public LocalNotificationTransport {
 public:
   Win32LocalNotificationTransport(std::wstring app_id, windows::LocalNotificationTemplateProvider template_provider)
@@ -673,30 +698,7 @@ public:
   }
 
   PermissionStatus Authorization() const noexcept {
-    PermissionStatus status = PermissionStatus::Unavailable;
-    try {
-      switch (notifier_.Setting()) {
-      case NotificationSetting::Enabled:
-        status = PermissionStatus::Granted;
-        break;
-      case NotificationSetting::DisabledForApplication:
-      case NotificationSetting::DisabledForUser:
-        status = PermissionStatus::Denied;
-        break;
-      case NotificationSetting::DisabledByGroupPolicy:
-        status = PermissionStatus::Restricted;
-        break;
-      case NotificationSetting::DisabledByManifest:
-        break;
-      }
-    } catch (const winrt::hresult_error& error) {
-      // An installed desktop identity has no notification settings record until its first native submission.
-      if (error.code() == HRESULT_FROM_WIN32(ERROR_NOT_FOUND)) {
-        status = PermissionStatus::NotDetermined;
-      }
-    } catch (...) {
-    }
-    return status;
+    return ReadNotificationAuthorization(notifier_);
   }
 
   std::function<void()> RequestAuthorization(PermissionStatusCompletion completion) override {
@@ -816,7 +818,8 @@ private:
             status = LocalNotificationOperationStatus::Accepted;
           } else {
             status = initialized_authorization == PermissionStatus::Denied ||
-                             initialized_authorization == PermissionStatus::Restricted
+                             initialized_authorization == PermissionStatus::Restricted ||
+                             initialized_authorization == PermissionStatus::SystemDisabled
                          ? LocalNotificationOperationStatus::Unauthorized
                          : LocalNotificationOperationStatus::Failed;
           }
@@ -843,6 +846,8 @@ private:
 using winrt::Windows::Foundation::AsyncStatus;
 using winrt::Windows::Foundation::IAsyncOperation;
 using winrt::Windows::Foundation::Metadata::ApiInformation;
+using winrt::Windows::Devices::Geolocation::Geolocator;
+using winrt::Windows::Devices::Geolocation::GeolocationAccessStatus;
 using winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapability;
 using winrt::Windows::Security::Authorization::AppCapabilityAccess::AppCapabilityAccessStatus;
 
@@ -852,18 +857,26 @@ std::wstring_view CapabilityName(Permission permission) {
     return L"webcam";
   case Permission::Microphone:
     return L"microphone";
+  case Permission::Location:
+    return L"location";
+  default:
+    return {};
   }
-  return {};
 }
 
-const wchar_t* SettingsUri(Permission permission) {
+const wchar_t* SettingsUri(Permission permission, PermissionSettingsTarget target) {
   switch (permission) {
   case Permission::Camera:
     return L"ms-settings:privacy-webcam";
   case Permission::Microphone:
     return L"ms-settings:privacy-microphone";
+  case Permission::Location:
+    return target == PermissionSettingsTarget::System ? L"ms-settings:privacy-location" : nullptr;
+  case Permission::Notifications:
+    return L"ms-settings:notifications";
+  default:
+    return nullptr;
   }
-  return nullptr;
 }
 
 PermissionStatus ResolveStatus(AppCapabilityAccessStatus status) noexcept {
@@ -882,6 +895,27 @@ PermissionStatus ResolveStatus(AppCapabilityAccessStatus status) noexcept {
   return PermissionStatus::Unavailable;
 }
 
+PermissionStatus ResolveStatus(GeolocationAccessStatus status) noexcept {
+  switch (status) {
+  case GeolocationAccessStatus::Allowed:
+    return PermissionStatus::Granted;
+  case GeolocationAccessStatus::Denied:
+    return PermissionStatus::Denied;
+  case GeolocationAccessStatus::Unspecified:
+    return PermissionStatus::Unavailable;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+PermissionStatus CheckRegisteredNotificationAuthorization() {
+  const std::wstring app_id = [] {
+    const std::scoped_lock lock(notification_identity_mutex);
+    return notification_identity ? notification_identity->app_id : std::wstring{};
+  }();
+  return app_id.empty() ? PermissionStatus::Unavailable
+                        : ReadNotificationAuthorization(ToastNotificationManager::CreateToastNotifier(app_id));
+}
+
 bool IsAppCapabilityAvailable() {
   try {
     return ApiInformation::IsTypePresent(L"Windows.Security.Authorization.AppCapabilityAccess.AppCapability");
@@ -894,15 +928,15 @@ AppCapability Capability(Permission permission) {
   return AppCapability::Create(winrt::hstring{CapabilityName(permission)});
 }
 
-class Win32PermissionRequest final : public std::enable_shared_from_this<Win32PermissionRequest> {
+template <class Status>
+class Win32PermissionRequest final : public std::enable_shared_from_this<Win32PermissionRequest<Status>> {
 public:
-  Win32PermissionRequest(IAsyncOperation<AppCapabilityAccessStatus> operation,
-      PermissionStatusCompletion completion)
+  Win32PermissionRequest(IAsyncOperation<Status> operation, PermissionStatusCompletion completion)
       : operation_(std::move(operation)), completion_(std::move(completion)) {}
 
   void Start() {
-    std::weak_ptr<Win32PermissionRequest> weak = shared_from_this();
-    operation_.Completed([weak](const IAsyncOperation<AppCapabilityAccessStatus>& operation, AsyncStatus status) {
+    std::weak_ptr<Win32PermissionRequest> weak = this->shared_from_this();
+    operation_.Completed([weak](const IAsyncOperation<Status>& operation, AsyncStatus status) {
       if (const std::shared_ptr<Win32PermissionRequest> request = weak.lock()) {
         request->Complete(operation, status);
       }
@@ -921,7 +955,7 @@ public:
   }
 
 private:
-  void Complete(const IAsyncOperation<AppCapabilityAccessStatus>& operation, AsyncStatus status) noexcept {
+  void Complete(const IAsyncOperation<Status>& operation, AsyncStatus status) noexcept {
     PermissionStatus result = PermissionStatus::Unavailable;
     if (status == AsyncStatus::Completed) {
       try {
@@ -940,43 +974,53 @@ private:
   }
 
   std::mutex mutex_;
-  IAsyncOperation<AppCapabilityAccessStatus> operation_;
+  IAsyncOperation<Status> operation_;
   PermissionStatusCompletion completion_;
 };
+
+template <class Status>
+std::function<void()> StartPermissionRequest(IAsyncOperation<Status> operation, PermissionStatusCompletion completion) {
+  auto request = std::make_shared<Win32PermissionRequest<Status>>(std::move(operation), std::move(completion));
+  request->Start();
+  return [request] { request->Cancel(); };
+}
 
 class Win32PermissionTransport final : public PermissionTransport {
 public:
   std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) override {
-    if (!IsAppCapabilityAvailable()) {
-      completion(PermissionStatus::Unavailable);
-      return {};
-    }
+    PermissionStatus status = PermissionStatus::Unavailable;
     try {
-      completion(ResolveStatus(Capability(permission).CheckAccess()));
+      if (permission == Permission::Notifications) {
+        status = CheckRegisteredNotificationAuthorization();
+      } else if (!CapabilityName(permission).empty() && IsAppCapabilityAvailable()) {
+        status = ResolveStatus(Capability(permission).CheckAccess());
+      }
     } catch (...) {
-      completion(PermissionStatus::Unavailable);
     }
+    completion(status);
     return {};
   }
 
   std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) override {
-    if (!IsAppCapabilityAvailable()) {
-      completion(PermissionStatus::Unavailable);
-      return {};
+    if (permission == Permission::Notifications) {
+      return Check(permission, std::move(completion));
     }
     try {
-      IAsyncOperation<AppCapabilityAccessStatus> operation = Capability(permission).RequestAccessAsync();
-      auto request = std::make_shared<Win32PermissionRequest>(std::move(operation), std::move(completion));
-      request->Start();
-      return [request] { request->Cancel(); };
+      if (permission == Permission::Location) {
+        return StartPermissionRequest(Geolocator::RequestAccessAsync(), completion);
+      }
+      if (!CapabilityName(permission).empty() && IsAppCapabilityAvailable()) {
+        return StartPermissionRequest(Capability(permission).RequestAccessAsync(), completion);
+      }
     } catch (...) {
-      completion(PermissionStatus::Unavailable);
-      return {};
     }
+    completion(PermissionStatus::Unavailable);
+    return {};
   }
 
-  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
-    const wchar_t* uri = SettingsUri(permission);
+  std::function<void()> OpenSettings(Permission permission, PermissionSettingsTarget target,
+                                    PermissionSettingsCompletion completion) override {
+    const wchar_t* uri = SettingsUri(permission, target);
     if (uri == nullptr) {
       completion(false);
       return {};

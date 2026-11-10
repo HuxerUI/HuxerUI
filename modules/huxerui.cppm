@@ -286,6 +286,7 @@ export namespace huxerui {
     using huxerui::Path;
     using huxerui::PathFillRule;
     using huxerui::Permission;
+    using huxerui::PermissionSettingsTarget;
     using huxerui::PermissionStatus;
     using huxerui::PlacePlatformViewCommand;
     using huxerui::PlatformChannel;

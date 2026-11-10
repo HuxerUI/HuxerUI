@@ -29,14 +29,23 @@ public class HuxerUIActivity extends Activity {
         HuxerUIApplication.PermissionLauncher permissionLauncher = new HuxerUIApplication.PermissionLauncher() {
             @Override
             public void request(String permission, int requestCode) {
-                requestPermissions(new String[] {permission}, requestCode);
+                request(new String[] {permission}, requestCode);
+            }
+
+            @Override
+            public void request(String[] permissions, int requestCode) {
+                requestPermissions(permissions, requestCode);
             }
 
             @Override
             public boolean openSettings() {
-                Intent intent = new Intent(
+                return openSettings(new Intent(
                         Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.fromParts("package", getPackageName(), null));
+                        Uri.fromParts("package", getPackageName(), null)));
+            }
+
+            @Override
+            public boolean openSettings(Intent intent) {
                 startActivity(intent);
                 return true;
             }

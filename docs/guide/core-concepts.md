@@ -221,8 +221,8 @@ Inspect its typed components directly rather than parsing the serialized string 
 `NotificationActivation` carries the stable identifier of the local notification that received primary interaction; application code maps that identifier to its own route or domain state.
 
 `UseApplication()` returns the application-level handle.
-Its permission methods query or request typed runtime capabilities and resume through the owning Task execution, so the continuation may update `State` directly.
-Native manifests, privacy strings, entitlements, request rationale, and final feature policy remain application-shell concerns.
+Its permission methods query or request access for application features and libraries. The Task continuation may update `State` directly. Supported permissions include location, notifications, contacts, calendar, media library, Bluetooth, camera, and microphone, with availability depending on the operating system.
+The application package supplies permission declarations, privacy descriptions, and entitlements. The application chooses when to request access and how to explain it.
 
 ```cpp
 tasks.Launch([=]() -> Task<void> {
@@ -230,9 +230,11 @@ tasks.Launch([=]() -> Task<void> {
 });
 ```
 
+`OpenPermissionSettingsAsync(permission)` opens settings for this application's access. Pass `PermissionSettingsTarget::System` to open a system-wide page, such as Android's location switch. Settings may be unavailable, and opening a page does not change the permission. Query again when the application becomes active. Check `Limited` separately when the feature can work with less access, such as approximate location or selected photos.
+
 `ApplicationHandle::LocalNotifications()` returns the focused local-notification handle.
 `LocalNotification::data` supplies a resource-free `PlatformPayload` snapshot to native templates and returns through `NotificationActivation::data`. It defaults to Null, is limited to 64 KiB of HUXP encoding, and rejects nested `ExternalTexture`, `FileReference`, and `BufferReference` values. Treat notification data as potentially stale or externally supplied, not as authorization or protected storage.
-It exposes independent capability snapshots, notification authorization returning `PermissionStatus`, immediate presentation, durable one-shot scheduling, and idempotent cancellation through stable application-owned identifiers. The shared permission types and notification API live in `<huxerui/system.h>`; `Granted` and `Provisional` permit notification submission, with provisional authorization retaining native presentation limits such as quiet delivery.
+It exposes independent capability snapshots, notification authorization returning `PermissionStatus`, immediate presentation, durable one-shot scheduling, and idempotent cancellation through stable application-owned identifiers. Use `Permission::Notifications` to query, request, or open settings for application-level authorization. The notification handle also checks the requirements for delivery, such as Android's configured channel. The permission types and notification API live in `<huxerui/system.h>`. `Granted` and `Provisional` permit submission, with provisional authorization retaining limits such as quiet delivery.
 The shared API is available on every host.
 Registered Windows applications use the system toast service and scheduler, configured Android hosts use `NotificationManager` and an inexact alarm, and iOS and macOS use User Notifications; Linux and Web currently report unavailable capabilities and operations. Windows requires [shell identity registration](packaging.md#windows-notification-registration), supports default presentation and application-provided XML templates, and routes notification clicks through `OnActivation()` even on cold launch.
 Android notification interaction may become `StartupActivation()` or `OnActivation()` according to Activity creation, while the independent iOS and macOS delegates always use `OnActivation()` because their native responses arrive after host launch.
