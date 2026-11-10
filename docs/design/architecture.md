@@ -1385,8 +1385,9 @@ Creation, update, disposal, placement, focus changes, and `PlatformEventEmitter`
 The emitter dispatches through the active mounted event route synchronously and returns no result from an inactive route.
 
 A single framework-private transparent input-shield HWND covers the client area while PlatformViews are present.
-It asks UiWindow for the committed frontmost hit target.
-When a PlatformView wins, the shield returns `HTTRANSPARENT` so the same-thread child HWND receives ordinary pointer input; when HuxerUI content wins, the shield routes input through the existing adapter path and prevents the covered child HWND from receiving it.
+The shield excludes rectangular regions where a committed PlatformView is the frontmost input target and the frontmost hosted HWND. This lets Windows hit-test its hierarchy, including descendants hosted on another thread.
+Potential HuxerUI hit bounds, higher hosted HWNDs, and custom chrome constrain these openings. Extension hit shapes use conservative bounds.
+At points still covered by the shield, UiWindow resolves the exact hit target. The shield returns `HTTRANSPARENT` for a winning PlatformView on the normal same-thread path, and routes input to HuxerUI when it wins.
 Pointer capture remains with the side that won the initial sequence.
 
 UiWindow-directed PlatformView focus selects the root HWND or its first focusable descendant.

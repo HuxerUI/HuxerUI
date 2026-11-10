@@ -1514,7 +1514,8 @@ private:
         }
       });
       committed_frame_ = &commit.render_frame;
-      const bool has_platform_views = platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale());
+      const bool has_platform_views =
+          platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale(), PlatformViewInputBounds());
       const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
       accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
       if (composition_changed || frame_coordinator_.PaintInterrupted()) {
@@ -1619,6 +1620,27 @@ private:
     const float maximize_left = controls_left + button_width;
     const float maximize_right = maximize_left + button_width;
     return point.x >= maximize_left && point.x < maximize_right ? HTMAXBUTTON : HTCLIENT;
+  }
+
+  std::optional<RECT> PlatformViewInputBounds() const noexcept {
+    if (!custom_chrome_) return std::nullopt;
+    RECT client{};
+    if (!GetClientRect(window_, &client)) return client;
+    const float scale = DpiScale();
+    const auto title_bar = QueryTitleBarMetrics(
+        {static_cast<float>(client.right) / scale, static_cast<float>(client.bottom) / scale});
+    if (!IsZoomed(window_)) {
+      const int horizontal = ResizeBorderX();
+      const int vertical = ResizeBorderY();
+      client.left += horizontal;
+      client.right -= horizontal;
+      client.top += vertical;
+      client.bottom -= vertical;
+    }
+    if (title_bar) {
+      client.top = std::max(client.top, static_cast<LONG>(std::ceil(title_bar->height * scale)));
+    }
+    return client;
   }
 
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
@@ -1972,6 +1994,9 @@ private:
           suggested->bottom - suggested->top,
           SWP_NOACTIVATE | SWP_NOZORDER
       );
+      if (platform_views_) {
+        platform_views_->Resize();
+      }
       UpdateRuntimeViewport();
       UiWindow::UpdateResourceConfiguration(Configuration());
       RequestFrameAt(Now());

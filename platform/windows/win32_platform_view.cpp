@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -22,7 +23,7 @@
 #include <huxerui/app.h>
 #include <huxerui/windows/platform_registry.h>
 
-#include "runtime/ui_window_internal.h"
+#include "runtime/mounted_node_internal.h"
 #include "macros_internal.h"
 
 namespace huxerui::detail {
@@ -378,6 +379,166 @@ struct Win32PlatformViews::Impl {
                  SWP_NOACTIVATE | (hosted_views.empty() && retired.empty() ? SWP_HIDEWINDOW : SWP_SHOWWINDOW));
   }
 
+  struct OverlayHitCandidate {
+    const MountedNode* node;
+    std::optional<Rect> bounds;
+    bool rectangular;
+  };
+
+  // Keep the shield over potential hit targets even when an extension's exact hit shape is unknown.
+  static void AppendOverlayHitCandidates(const MountedNode& node, Rect clip, bool input_enabled, bool rectangular,
+                                         bool include_drag_regions, std::vector<OverlayHitCandidate>& candidates) {
+    if (!node.participates_in_layout) {
+      return;
+    }
+    input_enabled = input_enabled && node.pointer_events_enabled;
+    const auto& transform = node.presentation.resolved_transform;
+    rectangular = rectangular && transform.m11 == 1.0F && transform.m22 == 1.0F &&
+                  transform.m12 == 0.0F && transform.m21 == 0.0F;
+    bool rectangular_children = rectangular;
+    Rect child_clip = clip;
+    if (input_enabled && !node.children.empty()) {
+      if (IsScrollContainer(node)) {
+        child_clip = child_clip.Intersection(node.LocalToWindowBounds(node.ContentBounds()));
+      }
+      if (node.properties.clip_children) {
+        child_clip = child_clip.Intersection(node.PresentationBounds());
+        rectangular_children = rectangular_children && node.properties.corner_radii == CornerRadii{};
+      }
+      for (const ClipShape& shape : node.presentation.children_clips) {
+        child_clip = child_clip.Intersection(node.LocalToWindowBounds(InternalAccess::ClipBounds(shape)));
+        if (rectangular_children) {
+          const RenderClip render_clip = InternalAccess::RenderClipShape(shape);
+          const auto* rectangle = std::get_if<PushClipCommand>(&render_clip);
+          rectangular_children = rectangle && rectangle->corner_radius == 0.0F;
+        }
+      }
+    }
+    for (std::size_t index = node.children.size(); index > 0; --index) {
+      AppendOverlayHitCandidates(ChildInPaintOrder(node, index - 1), child_clip, input_enabled, rectangular_children,
+                                 include_drag_regions, candidates);
+    }
+    const bool may_hit = input_enabled &&
+                         (node.activation || HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
+                          HasEventBinding<ViewEvents::Pointer>(node.event_bindings) || !node.extensions.empty() ||
+                          IsScrollContainer(node) || node.focusable ||
+                          (include_drag_regions && node.properties.window_drag_region));
+    if (node.kind == NodeKind::PlatformView || may_hit) {
+      const auto bounds = input_enabled ? std::optional{clip.Intersection(node.PresentationBounds())} : std::nullopt;
+      candidates.push_back({&node, bounds, rectangular});
+    }
+  }
+
+  static RECT OpeningPixelBounds(Rect bounds, float scale) noexcept {
+    return {
+        static_cast<LONG>(std::ceil(bounds.x * scale)),
+        static_cast<LONG>(std::ceil(bounds.y * scale)),
+        static_cast<LONG>(std::floor((bounds.x + bounds.width) * scale)),
+        static_cast<LONG>(std::floor((bounds.y + bounds.height) * scale)),
+    };
+  }
+
+  struct RegionDeleter {
+    void operator()(HRGN region) const noexcept { DeleteObject(region); }
+  };
+  using ScopedRegion = std::unique_ptr<std::remove_pointer_t<HRGN>, RegionDeleter>;
+
+  ScopedRegion BuildOverlayRegion(const std::vector<const PlatformViewPlacement*>& placements,
+                                  std::optional<RECT> custom_input_bounds) const {
+    const MountedNode* root = InternalAccess::MountedRoot(*ui_window);
+    RECT client{};
+    if (placements.empty() || root == nullptr || !GetClientRect(platform_window, &client) || IsRectEmpty(&client)) {
+      return {};
+    }
+    RECT input_bounds = client;
+    if (custom_input_bounds && !IntersectRect(&input_bounds, &client, &*custom_input_bounds)) {
+      return {};
+    }
+    std::vector<const PlatformViewPlacement*> visible;
+    for (const auto* placement : placements | std::views::reverse) {
+      if (!VisibleBounds(*placement).IsEmpty()) visible.push_back(placement);
+    }
+    if (visible.empty()) return {};
+
+    const Rect viewport{0.0F, 0.0F, static_cast<float>(client.right) / dpi_scale,
+                        static_cast<float>(client.bottom) / dpi_scale};
+    std::vector<OverlayHitCandidate> candidates;
+    AppendOverlayHitCandidates(*root, viewport, true, true, custom_input_bounds.has_value(), candidates);
+    ScopedRegion shield(CreateRectRgnIndirect(&client));
+    ScopedRegion covered(CreateRectRgn(0, 0, 0, 0));
+    ScopedRegion work(CreateRectRgn(0, 0, 0, 0));
+    if (!shield || !covered || !work) return {};
+
+    auto next = visible.begin();
+    bool has_opening = false;
+    for (const auto& candidate : candidates) {
+      if (next == visible.end()) break;
+      RECT cover{};
+      if (candidate.bounds && candidate.bounds->x <= viewport.width && candidate.bounds->y <= viewport.height) {
+        cover = PixelBounds(*candidate.bounds, dpi_scale);
+        // Shared hit testing includes the right and bottom edges.
+        ++cover.right;
+        ++cover.bottom;
+      }
+      if (candidate.node->kind == NodeKind::PlatformView && candidate.node->identity == (*next)->command->Identity()) {
+        const Rect visible_bounds = VisibleBounds(**next);
+        ++next;
+        const Rect opening = candidate.bounds && candidate.rectangular ? candidate.bounds->Intersection(visible_bounds)
+                                                                      : Rect{};
+        if (!opening.IsEmpty() && (!custom_input_bounds || candidate.node->focusable)) {
+          const RECT pixels = OpeningPixelBounds(opening, dpi_scale);
+          RECT clipped{};
+          if (IntersectRect(&clipped, &input_bounds, &pixels)) {
+            if (!SetRectRgn(work.get(), clipped.left, clipped.top, clipped.right, clipped.bottom)) return {};
+            const int result = CombineRgn(work.get(), work.get(), covered.get(), RGN_DIFF);
+            if (result == ERROR) return {};
+            if (result != NULLREGION) {
+              if (CombineRgn(shield.get(), shield.get(), work.get(), RGN_DIFF) == ERROR) return {};
+              has_opening = true;
+            }
+          }
+        }
+        // Even an input-disabled PlatformView can physically cover another HWND.
+        const RECT physical = PixelBounds(visible_bounds, dpi_scale);
+        UnionRect(&cover, &cover, &physical);
+      }
+      if (IntersectRect(&cover, &cover, &input_bounds) &&
+          (!SetRectRgn(work.get(), cover.left, cover.top, cover.right, cover.bottom) ||
+           CombineRgn(covered.get(), covered.get(), work.get(), RGN_OR) == ERROR)) {
+        return {};
+      }
+    }
+    // An incomplete correspondence with the committed HWND order cannot prove any opening is safe.
+    if (!has_opening || next != visible.end()) return {};
+    return shield;
+  }
+
+  void ClearOverlayRegion() {
+    if (overlay_region_set && !SetWindowRgn(overlay, nullptr, FALSE)) {
+      throw std::runtime_error("HuxerUI could not reset its Windows PlatformView input region");
+    }
+    overlay_region_set = false;
+  }
+
+  void UpdateOverlayRegion(const std::vector<const PlatformViewPlacement*>& placements,
+                           std::optional<RECT> custom_input_bounds) {
+    auto region = BuildOverlayRegion(placements, custom_input_bounds);
+    if (region) {
+      if (overlay_region_set) {
+        const ScopedRegion previous(CreateRectRgn(0, 0, 0, 0));
+        if (previous && GetWindowRgn(overlay, previous.get()) != ERROR && EqualRgn(region.get(), previous.get())) {
+          return;
+        }
+      }
+      if (SetWindowRgn(overlay, region.get(), FALSE)) {
+        HUXERUI_DISCARD(region.release());
+        overlay_region_set = true;
+        return;
+      }
+    }
+    ClearOverlayRegion();
+  }
+
   static LRESULT CALLBACK OverlayWindowProcedure(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
     Impl* impl = reinterpret_cast<Impl*>(GetWindowLongPtrW(window, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -424,6 +585,7 @@ struct Win32PlatformViews::Impl {
   HINSTANCE instance = nullptr;
   HWND platform_window = nullptr;
   HWND overlay = nullptr;
+  bool overlay_region_set = false;
   ATOM container_atom = 0;
   ATOM overlay_atom = 0;
   PlatformRegistry* registry = nullptr;
@@ -446,7 +608,7 @@ Win32PlatformViews::~Win32PlatformViews() {
   Shutdown();
 }
 
-bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
+bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale, std::optional<RECT> custom_input_bounds) {
   // Windows currently uses one HuxerUI surface, but the shared slice sequence remains the ordering contract.
   const RenderComposition composition = BuildRenderComposition(frame.scene);
   impl_->dpi_scale = std::isfinite(dpi_scale) && dpi_scale > 0.0F ? dpi_scale : 1.0F;
@@ -506,6 +668,7 @@ bool Win32PlatformViews::Commit(const RenderFrame& frame, float dpi_scale) {
     hosted->event_route->active = true;
   }
   impl_->ResizeOverlay();
+  impl_->UpdateOverlayRegion(placements, custom_input_bounds);
 
   const std::optional<std::uint64_t> focused = InternalAccess::FocusedPlatformView(*impl_->ui_window);
   const std::optional<std::uint64_t> current = impl_->IdentityForWindow(GetFocus());
@@ -539,6 +702,7 @@ void Win32PlatformViews::DidPresent() {
 }
 
 void Win32PlatformViews::Resize() {
+  impl_->ClearOverlayRegion();
   impl_->ResizeOverlay();
 }
 
