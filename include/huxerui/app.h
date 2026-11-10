@@ -385,6 +385,15 @@ struct AppOptions {
   std::vector<ApplicationHook> application_hooks{};
   /// Window service/layer installers, called in declaration order before each window first composes.
   std::vector<WindowHook> window_hooks{};
+
+  /// Whether the built-in composition error page shows the failing operation and exception message.
+  /// Applies to windows presented by the HuxerUI platform hosts and is independent of the debug overlay.
+  /// Defaults to true in debug application builds and false when the application defines `NDEBUG`.
+#if defined(NDEBUG)
+  bool show_composition_error_details = false;
+#else
+  bool show_composition_error_details = true;
+#endif
 };
 
 /// Function pointer that creates the application root View.
@@ -835,7 +844,7 @@ public:
   /// Builds and commits pending composition, layout, semantics, animation, and rendering work.
   /// @return A reference owned by this UiWindow, valid until its next frame build or retirement.
   /// Call after successful shared initialization on the application thread, then consume the commit in the native
-  /// renderer.
+  /// renderer. Exceptions propagate to the caller.
   const FrameCommit& BuildFrame();
   /// Delivers normalized pointer input to the shared interaction tree.
   /// @param event Pointer identity, phase, and position in logical window-local coordinates.
@@ -943,7 +952,7 @@ protected:
   /// @throws std::invalid_argument If brightness is not a declared ThemeBrightness value.
   void UpdateSystemThemeBrightness(ThemeBrightness brightness);
   /// Tests whether this window completed shared initialization and has not begun retirement.
-  /// @return False during WindowHook installation, after initialization failure, or after retirement begins.
+  /// @return False during WindowHook installation, while failed content retires, or once window retirement begins.
   /// Native callbacks may enter shared UI operations only while this is true.
   bool IsInitialized() const noexcept;
   /// Installs this native attachment once after its derived facilities are ready.
@@ -957,6 +966,14 @@ protected:
   void InitializeWindow(Runtime& application, ViewFactory content, const WindowOptions& options,
                         std::optional<ResourceConfiguration> configuration = std::nullopt,
                         WindowLifecycleState initial_lifecycle = WindowLifecycleState::Background);
+  /// Builds the next frame, replacing the window's content with the built-in error page on composition failure.
+  /// @param report_error Optional synchronous diagnostic sink. The UTF-8 message is borrowed during the call.
+  /// Passing null uses standard error.
+  /// @return A window-owned commit, valid until the next build or retirement, including a replacement error frame
+  /// when the failed composition can be isolated.
+  /// Call on the application thread and defer drawing until the new commit has replaced all borrowed scene data.
+  /// Failures outside composition and failures in the error page propagate to the caller.
+  const FrameCommit& BuildFrameOrErrorPage(void (*report_error)(const char*) noexcept = nullptr);
   /// Commits an accepted close of a Runtime-owned top-level window, without consulting close handlers again.
   /// Immediately stops native callback admission; shared and native cleanup waits for active UI calls to return.
   /// External attachments remain host-owned and use Retire at their host's safe teardown boundary.
@@ -1014,7 +1031,10 @@ private:
   );
   void BindExtensions(detail::MountedNode& node);
   void BuildSemantics();
+  const FrameCommit& BuildFrame(bool present_composition_errors);
   const FrameCommit& BuildFrame(FrameInfo frame);
+  void RetireContent() noexcept;
+  void ReconcileApplicationContent(View content);
   void InvalidateRoot();
   void InvalidateLayers();
   void DeactivateLayerInput(LayerId id);

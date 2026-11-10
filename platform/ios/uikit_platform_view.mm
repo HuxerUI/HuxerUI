@@ -16,13 +16,13 @@
 
 #include <huxerui/ios/platform_registry.h>
 
+#include "application/platform_frame_internal.h"
 #include "uikit_renderer.h"
 #include "runtime/ui_window_internal.h"
 
 @interface HuxerUIPlatformSliceView : UIView {
 @public
-  huxerui::detail::UIKitRenderer* huxeruiRenderer;
-  const huxerui::RenderFrame* huxeruiFrame;
+  huxerui::detail::UIKitPlatformViews* huxeruiPlatformViews;
   std::size_t huxeruiFirstCommand;
   std::size_t huxeruiCommandCount;
 }
@@ -44,12 +44,10 @@
 
 - (void)drawRect:(CGRect)rect {
   [super drawRect:rect];
-  if (huxeruiRenderer == nullptr) {
+  if (huxeruiPlatformViews == nullptr) {
     return;
   }
-  huxeruiRenderer->DrawSlice(
-      UIGraphicsGetCurrentContext(), rect, huxeruiFrame, huxeruiFirstCommand, huxeruiCommandCount, false
-  );
+  huxeruiPlatformViews->DrawSlice(UIGraphicsGetCurrentContext(), rect, huxeruiFirstCommand, huxeruiCommandCount);
 }
 
 @end
@@ -234,8 +232,10 @@ bool IsDescendant(UIView* view, UIView* ancestor) {
 } // namespace
 
 struct UIKitPlatformViews::Impl {
-  Impl(UIKitRenderer& renderer_value, PlatformRegistry& registry_value, UiWindow& ui_window_value)
-      : renderer(&renderer_value), registry(&registry_value), ui_window(&ui_window_value) {}
+  Impl(UIKitRenderer& renderer_value, FrameCoordinator& frame_coordinator_value, PlatformRegistry& registry_value,
+       UiWindow& ui_window_value)
+      : renderer(&renderer_value), frame_coordinator(frame_coordinator_value), registry(&registry_value),
+        ui_window(&ui_window_value) {}
 
   std::unique_ptr<HostedPlatformView> Create(UIView* root, const PlatformViewPlacement& placement) {
     const PlacePlatformViewCommand& command = *placement.command;
@@ -334,6 +334,7 @@ struct UIKitPlatformViews::Impl {
   }
 
   UIKitRenderer* renderer;
+  FrameCoordinator& frame_coordinator;
   PlatformRegistry* registry;
   UiWindow* ui_window;
   __weak UIView* root = nil;
@@ -343,8 +344,9 @@ struct UIKitPlatformViews::Impl {
   std::unordered_map<SliceKey, __strong HuxerUIPlatformSliceView*, SliceKeyHash> slices;
 };
 
-UIKitPlatformViews::UIKitPlatformViews(UIKitRenderer& renderer, PlatformRegistry& registry, UiWindow& ui_window)
-    : impl_(std::make_unique<Impl>(renderer, registry, ui_window)) {}
+UIKitPlatformViews::UIKitPlatformViews(UIKitRenderer& renderer, FrameCoordinator& frame_coordinator,
+                                       PlatformRegistry& registry, UiWindow& ui_window)
+    : impl_(std::make_unique<Impl>(renderer, frame_coordinator, registry, ui_window)) {}
 
 UIKitPlatformViews::~UIKitPlatformViews() {
   Shutdown();
@@ -404,10 +406,9 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
       if (slice_view == nil) {
         slice_view = [[HuxerUIPlatformSliceView alloc] initWithFrame:root.bounds];
         slice_view.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        slice_view->huxeruiPlatformViews = this;
         impl_->slices[key] = slice_view;
       }
-      slice_view->huxeruiRenderer = impl_->renderer;
-      slice_view->huxeruiFrame = &frame;
       slice_view->huxeruiFirstCommand = slice->first_command;
       slice_view->huxeruiCommandCount = slice->command_count;
       if (!CGRectEqualToRect(slice_view.frame, root.bounds)) {
@@ -428,6 +429,7 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
     if (retained_slices.contains(entry.first)) {
       return false;
     }
+    entry.second->huxeruiPlatformViews = nullptr;
     [entry.second removeFromSuperview];
     return true;
   });
@@ -474,13 +476,31 @@ bool UIKitPlatformViews::Commit(UIView* root, const RenderFrame& frame) {
   return composition_changed;
 }
 
-void UIKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect) {
+std::optional<double> UIKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect, bool platform_ready) {
+  if (impl_->frame_coordinator.DeferPaintIfCommitting()) {
+    return std::nullopt;
+  }
+  impl_->frame_coordinator.BeginPaint();
   if (impl_->base_slice.has_value()) {
     const RenderSlice& slice = *impl_->base_slice;
     impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, slice.first_command, slice.command_count, true);
-    return;
+  } else {
+    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, 0, 0, true);
   }
-  impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, 0, 0, true);
+  return impl_->frame_coordinator.EndPaint(platform_ready);
+}
+
+void UIKitPlatformViews::DrawSlice(CGContextRef context, CGRect dirty_rect, std::size_t first_command,
+                                  std::size_t command_count) {
+  if (!impl_->frame_coordinator.DeferPaintIfCommitting()) {
+    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, first_command, command_count, false);
+  }
+}
+
+void UIKitPlatformViews::InvalidateSlices() {
+  for (const auto& [key, slice] : impl_->slices) {
+    [slice setNeedsDisplay];
+  }
 }
 
 UIView* UIKitPlatformViews::HitTest(Point point, UIEvent* event) {
@@ -535,8 +555,7 @@ void UIKitPlatformViews::Shutdown() {
     hosted->event_route->ui_window = nullptr;
   }
   for (auto& [key, slice] : impl_->slices) {
-    slice->huxeruiRenderer = nullptr;
-    slice->huxeruiFrame = nullptr;
+    slice->huxeruiPlatformViews = nullptr;
     [slice removeFromSuperview];
   }
   impl_->slices.clear();

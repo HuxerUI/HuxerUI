@@ -166,6 +166,9 @@ public:
 
   void Stop(TextInputSessionId session_id) override {
     stopped_sessions.push_back(session_id);
+    if (on_stop) {
+      on_stop(session_id);
+    }
   }
 
   void RequestShowKeyboard(TextInputSessionId session_id) override {
@@ -189,6 +192,7 @@ public:
   std::vector<TextInputGeometry> restarted_geometry;
   std::vector<TextInputSessionId> stopped_sessions;
   std::vector<std::pair<TextInputSessionId, bool>> keyboard_requests;
+  std::function<void(TextInputSessionId)> on_stop;
 };
 
 struct TextInputProbe;
@@ -389,6 +393,45 @@ TEST_CASE("TestTextInputSessionFollowsFocus") {
   REQUIRE(second_text_client->end_count == 1);
   REQUIRE(second_text_client->end_reasons.back() == TextInputEndReason::RuntimeDestroyed);
   REQUIRE(text_input.stopped_sessions == std::vector<TextInputSessionId>{1, 2});
+}
+
+TEST_CASE("A hosted composition failure withdraws text input before client cleanup", "[composition-failure]") {
+  ResetTextInputProbes();
+  ProbePlatformTextInput text_input;
+  TestPlatform platform;
+  platform.platform_text_input = &text_input;
+  UiWindow window{
+      []() -> View {
+        text_client_visible = UseState(true);
+        if (!text_client_visible.Get()) {
+          throw std::runtime_error("editing composition failed");
+        }
+        return Text("Editable").With(Focusable{}, TextInputProbe{first_text_client});
+      },
+      platform,
+  };
+  window.SetWindowMetrics({.viewport = {400.0F, 250.0F}});
+  platform.BuildFrameOrErrorPage();
+  FocusNext(window);
+  REQUIRE(text_input.started_sessions == std::vector<TextInputSessionId>{1});
+
+  bool mounted_during_stop = true;
+  auto reentrant_result = TextInputResultCode::Ok;
+  text_input.on_stop = [&](TextInputSessionId session_id) {
+    mounted_during_stop = detail::InternalAccess::MountedRoot(platform) != nullptr;
+    reentrant_result = window.HandleTextInputCommands({.session_id = session_id}).result_code;
+  };
+  text_client_visible = false;
+  const auto& failed = platform.BuildFrameOrErrorPage();
+  REQUIRE(failed.render_frame.damage.full);
+  REQUIRE(detail::InternalAccess::MountedRoot(platform) != nullptr);
+  REQUIRE_FALSE(mounted_during_stop);
+  REQUIRE(reentrant_result == TextInputResultCode::SessionMismatch);
+  REQUIRE(first_text_client->apply_count == 0);
+  REQUIRE(first_text_client->end_count == 1);
+  REQUIRE(first_text_client->end_reasons.back() == TextInputEndReason::ClientRemoved);
+  REQUIRE(text_input.stopped_sessions == std::vector<TextInputSessionId>{1});
+  REQUIRE_FALSE(detail::InternalAccess::FocusedNodeIdentity(platform));
 }
 
 TEST_CASE("TestExitingDialogStopsAndCanRestoreTextInput") {

@@ -47,6 +47,10 @@ UI event callbacks may update State directly for synchronous navigation and othe
 State identity is determined by the current scope, source location, and occurrence at that location.
 Dynamic stateful content therefore needs stable scopes or keys when it can be inserted, removed, or reordered.
 
+When an exception escapes composition of the root, a component, a layer, or a virtual item, the built-in hosts replace the affected window's content with an error page. Other windows keep running. Closing and reopening the affected window starts a fresh composition.
+`AppOptions::show_composition_error_details` controls whether the page includes the failed operation and exception message. It defaults to enabled in debug builds and disabled in release builds. Hosts log the diagnostic in both modes.
+State slot type mismatches include the declaration's file, line, column, and occurrence within the scope.
+
 ## Identity and keys
 
 Unkeyed siblings reconcile by position.

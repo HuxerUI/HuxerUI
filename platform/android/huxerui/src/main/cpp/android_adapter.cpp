@@ -4,6 +4,7 @@
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
 #include <android/keycodes.h>
+#include <android/log.h>
 #include <jni.h>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -888,16 +889,29 @@ public:
   }
 
   std::optional<std::vector<std::uint8_t>> CommitFrame() {
-    if (BeginFrameCommit()) {
-      const FrameCommit& commit = UiWindow::BuildFrame();
-      CommitFrame(commit);
-      if (commit.semantic_frame && last_semantic_revision_ != commit.semantic_frame->revision) {
-        std::vector<std::uint8_t> encoded = EncodeAndroidSemanticFrame(*commit.semantic_frame);
-        last_semantic_revision_ = commit.semantic_frame->revision;
-        return encoded;
-      }
+    if (!IsInitialized()) {
+      return std::nullopt;
     }
-    return std::nullopt;
+    std::optional<std::vector<std::uint8_t>> semantics;
+    frame_coordinator_.Commit([&] {
+      const FrameCommit& commit = BuildFrameOrErrorPage([](const char* message) noexcept {
+        __android_log_write(ANDROID_LOG_ERROR, "HuxerUI", message);
+      });
+      if (platform_views_ == nullptr) {
+        throw std::logic_error("HuxerUI Android PlatformView host is not attached to UiWindow");
+      }
+      platform_views_->Commit(Environment(), commit.render_frame);
+      InvalidateDamage(commit.render_frame.damage, frame_coordinator_.PaintInterrupted());
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+      if (commit.semantic_frame && last_semantic_revision_ != commit.semantic_frame->revision) {
+        semantics = EncodeAndroidSemanticFrame(*commit.semantic_frame);
+        last_semantic_revision_ = commit.semantic_frame->revision;
+      }
+    });
+    FlushDeferredFrame();
+    return semantics;
   }
 
   void Pointer(PointerEventType type, PointerDeviceKind device_kind, std::int64_t pointer_id, float x, float y,
@@ -1109,35 +1123,20 @@ public:
     }
   }
 
-  bool BeginFrameCommit() {
-    return frame_coordinator_.BeginCommit();
-  }
-
-  void CommitFrame(const FrameCommit& commit) {
-    if (platform_views_ == nullptr) {
-      throw std::logic_error("HuxerUI Android PlatformView host is not attached to UiWindow");
-    }
-    platform_views_->Commit(Environment(), commit.render_frame);
-    HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
-    FlushDeferredFrame();
-  }
-
   void BeginDraw() {
+    if (frame_coordinator_.DeferPaintIfCommitting()) return;
     frame_coordinator_.BeginPaint();
     renderer_.BeginDraw();
   }
 
   void DrawBase(JNIEnv* environment, jobject canvas) {
-    if (platform_views_ != nullptr) {
+    if (!frame_coordinator_.DeferPaintIfCommitting() && platform_views_ != nullptr) {
       platform_views_->DrawBase(environment, canvas);
     }
   }
 
   void DrawSlice(JNIEnv* environment, jobject canvas, std::size_t first_command, std::size_t command_count) {
-    if (platform_views_ != nullptr) {
+    if (!frame_coordinator_.DeferPaintIfCommitting() && platform_views_ != nullptr) {
       platform_views_->DrawSlice(environment, canvas, first_command, command_count);
     }
   }
@@ -1157,6 +1156,7 @@ public:
   }
 
   void EndDraw() {
+    if (frame_coordinator_.DeferPaintIfCommitting()) return;
     if (const std::optional<double> deadline = frame_coordinator_.EndPaint(view_ != nullptr)) {
       ScheduleFrame(*deadline);
     }
@@ -1229,17 +1229,15 @@ private:
     }
   }
 
-  bool InvalidateDamage(const DamageRegion& damage) {
+  void InvalidateDamage(const DamageRegion& damage, bool repaint) {
     JNIEnv* environment = Environment();
-    if (environment == nullptr || view_ == nullptr || (!damage.full && damage.rects.empty())) {
-      return false;
+    if (environment == nullptr || view_ == nullptr || (!repaint && !damage.full && damage.rects.empty())) {
+      return;
     }
     environment->CallVoidMethod(view_, invalidate_full_frame_);
-    const bool invalidated = !environment->ExceptionCheck();
-    if (invalidated) {
+    if (!environment->ExceptionCheck()) {
       frame_coordinator_.MarkPaintPending();
     }
-    return invalidated;
   }
 
 public:
@@ -1621,7 +1619,7 @@ private:
   jmethodID system_dark_theme_ = nullptr;
   jmethodID set_system_bars_content_brightness_ = nullptr;
   jmethodID set_pointer_cursor_ = nullptr;
-  PlatformFrameCoordinator frame_coordinator_;
+  FrameCoordinator frame_coordinator_;
   std::optional<std::uint64_t> last_semantic_revision_;
 };
 

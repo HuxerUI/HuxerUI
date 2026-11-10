@@ -581,6 +581,7 @@ public:
   void OnRuntimeStopped() override { ++application_quit_requests; }
 
   using huxerui::UiWindow::UpdateSystemThemeBrightness;
+  using huxerui::UiWindow::BuildFrameOrErrorPage;
   ThemeBrightness QuerySystemThemeBrightness() const override { return system_theme_brightness; }
   ThemeBrightness system_theme_brightness = ThemeBrightness::Light;
 

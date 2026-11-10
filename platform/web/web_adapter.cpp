@@ -1122,18 +1122,19 @@ public:
   }
 
   void Frame() {
-    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
+    if (!IsInitialized()) {
       return;
     }
-    const FrameCommit& commit = UiWindow::BuildFrame();
-    frame_coordinator_.BeginPaint();
-    renderer_.BeginFrame();
-    platform_views_->Commit(commit.render_frame);
-    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(platform_ready_)) {
+    frame_coordinator_.Commit([&] {
+      const FrameCommit& commit = BuildFrameOrErrorPage();
+      renderer_.BeginFrame();
+      platform_views_->Commit(commit.render_frame);
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+    });
+    if (const std::optional<double> deadline = frame_coordinator_.TakeDeferred(platform_ready_)) {
       Schedule(*deadline);
-    }
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
     }
   }
 
@@ -1241,7 +1242,7 @@ private:
   val root_;
   val base_canvas_;
   std::unique_ptr<WebPlatformViews> platform_views_;
-  PlatformFrameCoordinator frame_coordinator_;
+  FrameCoordinator frame_coordinator_;
   Size viewport_;
   bool platform_ready_ = false;
 };

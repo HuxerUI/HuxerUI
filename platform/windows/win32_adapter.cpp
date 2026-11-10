@@ -1102,21 +1102,28 @@ private:
   }
 
   void CommitFrameAndInvalidate() {
-    if (!frame_coordinator_.BeginCommit()) {
-      return;
-    }
-    const FrameCommit& commit = UiWindow::BuildFrame();
-    committed_frame_ = &commit.render_frame;
-    const bool has_platform_views = platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale());
-    const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
-    accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
-    if (composition_changed) {
-      HUXERUI_DISCARD(InvalidateFullWindow());
-    }
-    HUXERUI_DISCARD(InvalidateDamage(committed_frame_->damage));
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
+    frame_coordinator_.Commit([&] {
+      const FrameCommit& commit = BuildFrameOrErrorPage([](const char* message) noexcept {
+        try {
+          const std::wstring line = Utf8ToWide(message) + L'\n';
+          OutputDebugStringW(line.c_str());
+        } catch (...) {
+          OutputDebugStringW(L"HuxerUI could not log the composition diagnostic\n");
+        }
+      });
+      committed_frame_ = &commit.render_frame;
+      const bool has_platform_views = platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale());
+      const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
+      accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
+      if (composition_changed || frame_coordinator_.PaintInterrupted()) {
+        HUXERUI_DISCARD(InvalidateFullWindow());
+      } else {
+        HUXERUI_DISCARD(InvalidateDamage(committed_frame_->damage));
+      }
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+    });
     FlushDeferredFrame();
   }
 
@@ -1592,6 +1599,10 @@ private:
     case Win32Accessibility::action_message:
       return accessibility_.HandleActionMessage(l_param);
     case WM_PAINT: {
+      if (frame_coordinator_.DeferPaintIfCommitting()) {
+        ValidateRect(window, nullptr);
+        return 0;
+      }
       frame_coordinator_.BeginPaint();
       if (committed_frame_ == nullptr ||
           (frame_coordinator_.FrameBuildPending() && !frame_coordinator_.PaintPending())) {
@@ -1601,7 +1612,8 @@ private:
       }
       PAINTSTRUCT paint{};
       BeginPaint(window, &paint);
-      const Win32RenderResult render_result = renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint);
+      const auto render_result = committed_frame_ != nullptr
+          ? renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint) : Win32RenderResult::Skipped;
       if (render_result == Win32RenderResult::Retry || render_result == Win32RenderResult::Recreate) {
         InvalidateFullWindow();
       }
@@ -1750,7 +1762,7 @@ private:
   bool first_nc_calc_ = true;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;
-  PlatformFrameCoordinator frame_coordinator_;
+  FrameCoordinator frame_coordinator_;
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   HWND mouse_tracking_window_ = nullptr;

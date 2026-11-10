@@ -66,6 +66,11 @@ public:
     return viewport_(state_);
   }
 
+  /// Creates or retrieves the logical item at index for this measure pass.
+  /// @throws std::out_of_range If index is greater than or equal to ItemCount().
+  /// Hosted frame builds report item composition failures through a framework exception. Handle recoverable
+  /// errors inside the item factory to catch their original type. Direct UiWindow::BuildFrame() calls propagate
+  /// item exceptions through this method with their original type.
   ViewNode& Item(std::size_t index) const {
     return item_(state_, index);
   }

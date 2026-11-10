@@ -360,6 +360,10 @@ void WindowService::Disconnect() noexcept {
   if (!ui_window_) return;
   BeginClose();
   ui_window_ = nullptr;
+  ClearHandlers();
+}
+
+void WindowService::ClearHandlers() noexcept {
   minimize_handler_ = {};
   close_handler_ = {};
   lifecycle_handlers_.clear();

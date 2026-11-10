@@ -983,18 +983,20 @@ private:
   void CommitFrame() {
     ExecutionGuard guard(InternalAccess::WindowExecution(*this));
     frame_source_ = 0;
-    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
+    if (!IsInitialized()) {
       return;
     }
-    // Keep the previous frame's text scale until its snapshot has finished, then rebuild all text geometry together.
-    RefreshTextDpi();
-    const FrameCommit& commit = UiWindow::BuildFrame();
-    committed_frame_ = &commit.render_frame;
-    frame_coordinator_.MarkPaintPending();
-    gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
+    frame_coordinator_.Commit([&] {
+      // Keep the previous frame's text scale until its snapshot has finished, then rebuild all text geometry together.
+      RefreshTextDpi();
+      const FrameCommit& commit = BuildFrameOrErrorPage();
+      committed_frame_ = &commit.render_frame;
+      frame_coordinator_.MarkPaintPending();
+      gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+    });
     FlushDeferredFrame();
   }
 
@@ -1005,7 +1007,7 @@ private:
   }
 
   void DrawFrame(GtkSnapshot* snapshot) {
-    if (!IsInitialized() || committed_frame_ == nullptr) {
+    if (frame_coordinator_.DeferPaintIfCommitting() || !IsInitialized() || committed_frame_ == nullptr) {
       return;
     }
     frame_coordinator_.BeginPaint();
@@ -1495,7 +1497,7 @@ private:
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   std::unique_ptr<LinuxFileDrop> file_drop_;
-  PlatformFrameCoordinator frame_coordinator_;
+  FrameCoordinator frame_coordinator_;
   const RenderFrame* committed_frame_ = nullptr;
   guint frame_source_ = 0;
   bool running_ = false;

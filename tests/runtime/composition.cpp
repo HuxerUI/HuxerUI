@@ -1,6 +1,9 @@
 #include "runtime_test_support.h"
 #include "macros_internal.h"
 
+#include <new>
+#include <source_location>
+
 namespace huxerui::test {
 
 struct SearchSubmitted : Event<void(std::string)> {};
@@ -1031,6 +1034,261 @@ TEST_CASE("TestRootCompositionRecoversAfterException") {
   runtime.BuildFrame();
   REQUIRE(runtime.RootNode()->identity == identity);
   REQUIRE(runtime.RootNode()->text.PlainText() == "3");
+}
+
+TEST_CASE("Hosted initial composition commits an independent error page", "[composition-failure]") {
+  bool show_details = true;
+  SECTION("Detailed presentation") {}
+  SECTION("Generic presentation") { show_details = false; }
+
+  TestPlatform platform;
+  UiWindow window{
+      []() -> View { throw std::runtime_error("root\nconstruction failed"); },
+      platform,
+      {
+          .window = {
+              .content_mode = WindowContentMode::EdgeToEdge,
+              .chrome_mode = WindowChromeMode::Custom,
+              .caption_labels = {.close = "Application close"},
+          },
+          .show_debug_overlay = false,
+          .show_composition_error_details = show_details,
+      },
+  };
+  window.SetWindowMetrics({
+      .viewport = {400.0F, 250.0F},
+      .safe_area = EdgeInsets::All(30.0F),
+      .title_bar = WindowTitleBarMetrics{.height = 32.0F, .right_inset = 138.0F},
+  });
+
+  const FrameCommit& commit = platform.BuildFrameOrErrorPage();
+  REQUIRE(commit.render_frame.revision == 1);
+  REQUIRE(commit.render_frame.scene.root != nullptr);
+  REQUIRE(commit.render_frame.damage.full);
+  REQUIRE(commit.semantic_frame);
+  const auto& nodes = commit.semantic_frame->nodes;
+  const auto title = std::ranges::find(nodes, "Unable to display this window", &SemanticNode::label);
+  REQUIRE(title != nodes.end());
+  REQUIRE(title->bounds.y >= 62.0F);
+  REQUIRE(std::ranges::find(nodes, "Close", &SemanticNode::label) != nodes.end());
+  REQUIRE(std::ranges::find(nodes, "Application close", &SemanticNode::label) == nodes.end());
+  const auto detail = std::ranges::find(
+      nodes, "HuxerUI initial composition failed in application root: root construction failed", &SemanticNode::label);
+  REQUIRE((detail != nodes.end()) == show_details);
+}
+
+TEST_CASE("Hosted recomposition retires only the failed window content", "[composition-failure]") {
+  class TestWindow final : public TestPlatform {
+  public:
+    TestWindow(Runtime& runtime, ViewFactory content) {
+      InitializeWindow(runtime, std::move(content), WindowOptions{});
+      SetWindowMetrics({.viewport = {400.0F, 250.0F}});
+    }
+  };
+
+  TestPlatform platform;
+  const Application application([]() -> View { return {}; }, {
+      .show_debug_overlay = false,
+      .show_composition_error_details = true,
+  });
+  RuntimeLifetime runtime(application, platform);
+  State<bool> change_kind;
+  TaskScope content_tasks;
+  std::optional<WindowHandle> window_handle;
+  int setups = 0;
+  int cleanups = 0;
+  int root_calls = 0;
+  int clicks = 0;
+  const auto slot = std::source_location::current();
+  TestWindow first(runtime, [&] {
+    ++root_calls;
+    change_kind = UseState(false);
+    content_tasks = UseTaskScope();
+    window_handle = UseWindow();
+    window_handle->OnCloseRequest([] { return true; });
+    return Column {
+      Scope([&] {
+        Lifecycle([&] {
+          ++setups;
+          return [&] { ++cleanups; };
+        }, change_kind.Get());
+        return Button("Old action").OnClick([&] { ++clicks; });
+      }),
+      Scope([&] {
+        if (change_kind.Get()) {
+          HUXERUI_DISCARD(UseStateList<int>(slot));
+        } else {
+          HUXERUI_DISCARD(UseState(0, slot));
+        }
+        return Text("Old content");
+      }),
+    };
+  });
+  TestWindow second(runtime, [] { return Text("Other window"); });
+  const FrameCommit& initial = first.BuildFrameOrErrorPage();
+  const auto old_scene = initial.semantic_frame;
+  REQUIRE(old_scene);
+  const auto action = std::ranges::find(old_scene->nodes, "Old action", &SemanticNode::label);
+  REQUIRE(action != old_scene->nodes.end());
+  REQUIRE(first.HandleWindowRequest(WindowCommand::Close));
+  REQUIRE(setups == 1);
+  const FrameCommit& other = second.BuildFrameOrErrorPage();
+  const auto* other_root = other.render_frame.scene.root;
+
+  int content_posts = 0;
+  int application_posts = 0;
+  content_tasks.Post([&] { ++content_posts; });
+  UseApplicationTaskScope().Post([&] { ++application_posts; });
+  change_kind = true;
+
+  const FrameCommit& failed = first.BuildFrameOrErrorPage();
+  REQUIRE(failed.render_frame.revision == 2);
+  REQUIRE(failed.render_frame.damage.full);
+  REQUIRE(failed.semantic_frame->revision > old_scene->revision);
+  const auto& nodes = failed.semantic_frame->nodes;
+  REQUIRE(std::ranges::find(nodes, "Old action", &SemanticNode::label) == nodes.end());
+  const std::string diagnostic = std::string("HuxerUI recomposition failed in component scope: ") +
+      "HuxerUI state kind or value type changed at " + slot.file_name() + ":" + std::to_string(slot.line()) +
+      ":" + std::to_string(slot.column()) + " (occurrence 1)";
+  REQUIRE(std::ranges::find(nodes, diagnostic, &SemanticNode::label) != nodes.end());
+  REQUIRE_FALSE(first.PerformSemanticAction(action->id, {.kind = SemanticActionKind::Activate}));
+  REQUIRE(clicks == 0);
+  REQUIRE(setups == 1);
+  REQUIRE(cleanups == 1);
+  REQUIRE(window_handle->IsOpen());
+  REQUIRE_FALSE(first.HandleWindowRequest(WindowCommand::Close));
+  window_handle->Close();
+  REQUIRE(first.window_commands == std::vector{WindowCommand::Close});
+
+  platform.RunPlatformModuleTasks();
+  REQUIRE(content_posts == 0);
+  REQUIRE(application_posts == 1);
+  first.SetWindowMetrics({.viewport = {440.0F, 250.0F}});
+  change_kind = false;
+  const FrameCommit& resized = first.BuildFrameOrErrorPage();
+  REQUIRE(resized.render_frame.damage.full);
+  REQUIRE(root_calls == 1);
+  REQUIRE(cleanups == 1);
+  const FrameCommit& healthy = second.BuildFrameOrErrorPage();
+  REQUIRE(healthy.render_frame.scene.root == other_root);
+  REQUIRE(std::ranges::find(healthy.semantic_frame->nodes, "Other window", &SemanticNode::label) !=
+          healthy.semantic_frame->nodes.end());
+}
+
+TEST_CASE("Hosted layer factory failures retire layer presentation", "[composition-failure]") {
+  TestPlatform platform;
+  std::optional<LayerController> layers;
+  LayerId layer = 0;
+  UiWindow window{
+      []() -> View { return Text("Application"); },
+      platform,
+      {
+          .show_debug_overlay = false,
+          .window_hooks = {[&](WindowContext& context) {
+            layers = context.Layers();
+            layer = layers->Attach({}, []() -> View { throw std::logic_error("layer factory failed"); });
+          }},
+          .show_composition_error_details = true,
+      },
+  };
+  window.SetWindowMetrics({.viewport = {400.0F, 250.0F}});
+  const auto& frame = platform.BuildFrameOrErrorPage();
+  REQUIRE(frame.semantic_frame);
+  const auto& nodes = frame.semantic_frame->nodes;
+  REQUIRE(std::ranges::find(nodes, "Unable to display this window", &SemanticNode::label) != nodes.end());
+  REQUIRE_FALSE(layers->Dismiss(layer));
+  REQUIRE_THROWS_AS(layers->Attach({}, [] { return Text("Stale"); }), std::logic_error);
+}
+
+TEST_CASE("Hosted frames propagate failures outside composition", "[composition-failure]") {
+  class CatchingLayout final : public VirtualLayout<CatchingLayout> {
+  public:
+    using VirtualLayout::VirtualLayout;
+
+    static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode&, Constraints) {
+      try {
+        HUXERUI_DISCARD(context.Item(0));
+      } catch (...) {
+        throw std::runtime_error("item failed");
+      }
+      return {};
+    }
+  };
+
+  TestPlatform platform;
+  RootFactory factory = nullptr;
+  const char* expected_message = nullptr;
+  SECTION("Allocation failure") {
+    factory = []() -> View { throw std::bad_alloc{}; };
+  }
+  SECTION("Lifecycle setup failure") {
+    expected_message = "setup failed";
+    factory = []() -> View {
+      Lifecycle([] { throw std::runtime_error("setup failed"); });
+      return Text("Pending");
+    };
+  }
+  SECTION("Measure replaces a virtual item exception") {
+    expected_message = "item failed";
+    factory = []() -> View {
+      return CatchingLayout(std::array{0}, [](int) -> View { throw std::runtime_error("item failed"); });
+    };
+  }
+  REQUIRE(factory);
+  UiWindow window{factory, platform};
+  window.SetWindowMetrics({.viewport = {400.0F, 250.0F}});
+  if (expected_message) {
+    REQUIRE_THROWS_WITH(platform.BuildFrameOrErrorPage(), expected_message);
+  } else {
+    REQUIRE_THROWS_AS(platform.BuildFrameOrErrorPage(), std::bad_alloc);
+  }
+}
+
+TEST_CASE("Virtual item errors show a hosted error page and keep their original type in strict builds",
+          "[composition-failure]") {
+  class TypedCatchingLayout final : public VirtualLayout<TypedCatchingLayout> {
+  public:
+    using VirtualLayout::VirtualLayout;
+
+    static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode&, Constraints) {
+      try {
+        HUXERUI_DISCARD(context.Item(0));
+      } catch (const std::runtime_error& error) {
+        throw std::logic_error(error.what());
+      }
+      return {};
+    }
+  };
+
+  RootFactory factory = []() -> View {
+    return VirtualList(std::array{0}, [](int) -> View { throw std::runtime_error("item failed"); });
+  };
+  bool custom_layout = false;
+  SECTION("Built-in virtual layout") {}
+  SECTION("Custom Measure catches the original type in strict builds") {
+    custom_layout = true;
+    factory = []() -> View {
+      return TypedCatchingLayout(std::array{0}, [](int) -> View { throw std::runtime_error("item failed"); });
+    };
+  }
+
+  TestPlatform platform;
+  UiWindow window{
+      factory,
+      platform,
+      {.show_debug_overlay = false, .show_composition_error_details = true},
+  };
+  window.SetWindowMetrics({.viewport = {400.0F, 250.0F}});
+  if (custom_layout) {
+    REQUIRE_THROWS_AS(platform.BuildFrame(), std::logic_error);
+  } else {
+    REQUIRE_THROWS_AS(platform.BuildFrame(), std::runtime_error);
+  }
+  const auto& frame = platform.BuildFrameOrErrorPage();
+  REQUIRE(frame.semantic_frame);
+  const auto& nodes = frame.semantic_frame->nodes;
+  REQUIRE(std::ranges::find(nodes, "HuxerUI initial composition failed in virtual item 0: item failed",
+                            &SemanticNode::label) != nodes.end());
 }
 
 TEST_CASE("TestChildReconciliationRecoversAfterException") {

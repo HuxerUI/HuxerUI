@@ -446,8 +446,13 @@ Calling a composition-bound `UseXxx()` operation with no active Composer remains
 Missing or duplicate virtual item keys are `std::logic_error` invariant failures.
 Invalid public Theme, resource, or View configuration remains an early `std::invalid_argument` caller error.
 
-A ViewSpec compilation failure propagates through the existing BuildFrame failure path before that node's mounted values are committed.
-Reconciliation is not a whole-subtree rollback transaction, but a failed frame does not publish a partial semantic frame, RenderScene, layer state, or lifecycle commit.
+A ViewSpec compilation failure propagates before that node's mounted values are committed. `UiWindow::BuildFrame()` discards pending lifecycle setup and propagates the original exception to custom hosts and test drivers. Reconciliation rolls back at node-local transaction boundaries.
+
+The built-in hosts call the protected `UiWindow::BuildFrameOrErrorPage()` entry point. Root, Scope, layer, and virtual item composition translate escaped errors into a single internal failure signal, including failures compiling declarations, mounting nodes, and restoring an item's composition. A custom `Measure()` can catch this signal through `std::exception` or `catch (...)`. A bare rethrow preserves the signal, and a new exception follows the layout error path. Handle recoverable item factory exceptions inside the factory to catch their original type.
+
+The failed window stops admitting input while its content retires. Retirement ends IME, cancels composition-owned tasks, discards pending lifecycle setup, runs committed cleanup, and disconnects old layers and texture routes. The window shell stays open. A built-in view with a fresh Environment and system fonts supplies the next full-damage render and semantic commit. The host defers drawing until that commit replaces all borrowed scene routes. Other windows and application-owned work retain their original lifetimes.
+
+Application and window installation, ordinary layout and painting, lifecycle setup, events, Tasks, native rendering, allocation failures, and failures while building the error page follow their existing error boundaries.
 
 ## Validation
 

@@ -57,6 +57,7 @@ public:
   [[nodiscard]] bool HandleRequest(WindowCommand command);
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler);
+  void ClearHandlers() noexcept;
   void Disconnect() noexcept;
   /// Reads the current native window state and subscribes active composition.
   /// @return This window's state, independent of application foreground aggregation.

@@ -572,7 +572,7 @@ public:
       auto configuration = application.Resources()->Configuration();
       if (view_.window.screen != nil) configuration.display_scale = static_cast<float>(view_.window.screen.scale);
       platform_views_ = std::make_unique<UIKitPlatformViews>(
-          renderer_, InternalAccess::ApplicationRegistry(application), *this);
+          renderer_, frame_coordinator_, InternalAccess::ApplicationRegistry(application), *this);
       text_input_ = std::make_unique<UIKitTextInput>(*this, view_);
       accessibility_ =
           std::make_unique<UIKitAccessibility>(*this, view_, *platform_views_, text_input_->Responder());
@@ -676,28 +676,33 @@ public:
 
   void CommitFrameAndInvalidate() {
     scheduled_frame_deadline_.reset();
-    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
+    if (!IsInitialized()) {
       return;
     }
-    const FrameCommit& commit = UiWindow::BuildFrame();
-    const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
-    accessibility_->Commit(commit.semantic_frame, composition_changed);
-    if (composition_changed) {
-      [view_ setNeedsDisplay];
-      frame_coordinator_.MarkPaintPending();
-    } else {
-      HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
-    }
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
+    frame_coordinator_.Commit([&] {
+      const FrameCommit& commit = BuildFrameOrErrorPage();
+      const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
+      accessibility_->Commit(commit.semantic_frame, composition_changed);
+      const bool repaint = frame_coordinator_.PaintInterrupted();
+      if (repaint) {
+        platform_views_->InvalidateSlices();
+      }
+      if (repaint || composition_changed) {
+        [view_ setNeedsDisplay];
+        frame_coordinator_.MarkPaintPending();
+      } else {
+        HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
+      }
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+    });
     FlushDeferredFrame();
   }
 
   void DrawCommittedFrame(CGContextRef context, CGRect dirty_rect) {
-    frame_coordinator_.BeginPaint();
-    platform_views_->DrawBase(context, dirty_rect);
-    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
+    if (!IsInitialized()) return;
+    if (const auto deadline = platform_views_->DrawBase(context, dirty_rect, frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -871,9 +876,9 @@ private:
   __strong HuxerUIView* view_ = nil;
   __strong HuxerUIIOSFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<UIKitTextInput> text_input_;
+  FrameCoordinator frame_coordinator_;
   std::unique_ptr<UIKitPlatformViews> platform_views_;
   std::unique_ptr<UIKitAccessibility> accessibility_;
-  PlatformFrameCoordinator frame_coordinator_;
   CGSize viewport_size_ = CGSizeZero;
   std::optional<CGRect> keyboard_frame_;
   std::optional<double> scheduled_frame_deadline_;

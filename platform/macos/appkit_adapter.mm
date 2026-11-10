@@ -548,7 +548,7 @@ public:
       if (window_.screen != nil) configuration.display_scale = static_cast<float>(window_.screen.backingScaleFactor);
       text_input_ = std::make_unique<MacTextInput>(*this, view_);
       platform_views_ = std::make_unique<AppKitPlatformViews>(
-          renderer_, InternalAccess::ApplicationRegistry(application_runtime), *this, window_);
+          renderer_, frame_coordinator_, InternalAccess::ApplicationRegistry(application_runtime), *this, window_);
       accessibility_ = std::make_unique<MacAccessibility>(*this, view_, *platform_views_);
       frame_scheduler_ = [[HuxerUIFrameScheduler alloc] initWithView:view_];
       InitializeWindow(application_runtime, std::move(content), options, configuration);
@@ -725,30 +725,34 @@ public:
 
   void CommitFrameAndInvalidate() {
     scheduled_frame_deadline_.reset();
-    if (!IsInitialized() || !frame_coordinator_.BeginCommit()) {
+    if (!IsInitialized()) {
       return;
     }
-    const FrameCommit& commit = UiWindow::BuildFrame();
-    const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
-    committed_frame_ = &commit.render_frame;
-    accessibility_->Commit(commit.semantic_frame);
-    if (composition_changed) {
-      [view_ setNeedsDisplay:YES];
-      frame_coordinator_.MarkPaintPending();
-    } else {
-      HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
-    }
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
+    frame_coordinator_.Commit([&] {
+      const FrameCommit& commit = BuildFrameOrErrorPage();
+      const bool composition_changed = platform_views_->Commit(view_, commit.render_frame);
+      committed_frame_ = &commit.render_frame;
+      accessibility_->Commit(commit.semantic_frame);
+      const bool repaint = frame_coordinator_.PaintInterrupted();
+      if (repaint) {
+        platform_views_->InvalidateSlices();
+      }
+      if (repaint || composition_changed) {
+        [view_ setNeedsDisplay:YES];
+        frame_coordinator_.MarkPaintPending();
+      } else {
+        HUXERUI_DISCARD(InvalidateDamage(commit.render_frame.damage));
+      }
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+    });
     FlushDeferredFrame();
   }
 
   void DrawCommittedFrame(CGContextRef context, NSRect dirty_rect) {
-    if (!IsInitialized()) return;
-    frame_coordinator_.BeginPaint();
-    platform_views_->DrawBase(context, NSRectToCGRect(dirty_rect));
-    if (const std::optional<double> deadline = frame_coordinator_.EndPaint(frame_scheduler_ != nil && view_ != nil)) {
+    if (const auto deadline =
+            platform_views_->DrawBase(context, NSRectToCGRect(dirty_rect), frame_scheduler_ != nil && view_ != nil)) {
       ScheduleFrame(*deadline);
     }
   }
@@ -1025,8 +1029,8 @@ private:
   __strong HuxerUIFrameScheduler* frame_scheduler_ = nil;
   std::unique_ptr<MacTextInput> text_input_;
   std::unique_ptr<MacAccessibility> accessibility_;
+  FrameCoordinator frame_coordinator_;
   std::unique_ptr<AppKitPlatformViews> platform_views_;
-  PlatformFrameCoordinator frame_coordinator_;
   std::optional<double> scheduled_frame_deadline_;
   const RenderFrame* committed_frame_ = nullptr;
   bool performing_minimize_ = false;

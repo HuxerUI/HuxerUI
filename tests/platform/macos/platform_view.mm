@@ -15,6 +15,7 @@
 
 #include <huxerui/macos/platform_registry.h>
 
+#include "application/platform_frame_internal.h"
 #include "macros_internal.h"
 
 namespace {
@@ -277,7 +278,9 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
                                                        defer:NO];
-    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime(), window);
+    detail::FrameCoordinator frame_coordinator;
+    detail::AppKitPlatformViews platform_views(
+        renderer, frame_coordinator, platform.Registry(), runtime.CoreRuntime(), window);
     NSView* root = [[NSView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
 
     REQUIRE(platform_views.Commit(root, runtime.BuildRenderFrame()));
@@ -294,6 +297,10 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
 
     const int placed_frame_sets = mac_platform_view_frame_sets;
     NSView* foreground_slice = root.subviews.lastObject;
+    REQUIRE(frame_coordinator.Request(0.0, 0.0, true));
+    frame_coordinator.Commit([&] { [foreground_slice drawRect:NSZeroRect]; });
+    REQUIRE(frame_coordinator.PaintInterrupted());
+
     [root setNeedsDisplay:NO];
     [foreground_slice setNeedsDisplay:NO];
     REQUIRE_FALSE(platform_views.Commit(root, runtime.BuildRenderFrame()));
@@ -336,6 +343,9 @@ TEST_CASE("MacPlatformViewsRetainUpdateOrderAndDisposeHostedViews") {
     REQUIRE(mac_platform_view_controller_operations.back() == "disconnect:2");
     REQUIRE(mac_created_platform_view == nil);
     REQUIRE(root.subviews.count == 0);
+    REQUIRE(frame_coordinator.Request(0.0, 0.0, true));
+    frame_coordinator.Commit([&] { [foreground_slice drawRect:NSZeroRect]; });
+    REQUIRE_FALSE(frame_coordinator.PaintInterrupted());
 
     mac_platform_view_events.Emit<MacPlatformViewEvents::Changed>(9);
     REQUIRE_FALSE(mac_platform_view_events.Emit<MacPlatformViewEvents::DecisionRequested>(42).has_value());
@@ -364,7 +374,9 @@ TEST_CASE("MacPlatformViewsBridgeFocusAndAccessibilityIdentity") {
                                                    styleMask:NSWindowStyleMaskBorderless
                                                      backing:NSBackingStoreBuffered
                                                        defer:NO];
-    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime(), window);
+    detail::FrameCoordinator frame_coordinator;
+    detail::AppKitPlatformViews platform_views(
+        renderer, frame_coordinator, platform.Registry(), runtime.CoreRuntime(), window);
     NSView* root = [[HuxerUITestPlatformRootView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
     window.contentView = root;
     REQUIRE([window makeFirstResponder:root]);
@@ -412,7 +424,9 @@ TEST_CASE("MacPlatformViewsTraverseBetweenHostedTextFieldAndRuntimeFocus") {
                                                      styleMask:NSWindowStyleMaskBorderless
                                                        backing:NSBackingStoreBuffered
                                                          defer:NO];
-    detail::AppKitPlatformViews platform_views(renderer, platform.Registry(), runtime.CoreRuntime(), window);
+    detail::FrameCoordinator frame_coordinator;
+    detail::AppKitPlatformViews platform_views(
+        renderer, frame_coordinator, platform.Registry(), runtime.CoreRuntime(), window);
     HuxerUITestPlatformRootView* root =
         [[HuxerUITestPlatformRootView alloc] initWithFrame:NSMakeRect(0.0, 0.0, 200.0, 120.0)];
     window->huxeruiPlatformViews = &platform_views;

@@ -16,7 +16,11 @@
 #include "macros_internal.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <exception>
+#include <new>
 #include <stdexcept>
+#include <utility>
 
 #include <huxerui/file.h>
 #include <huxerui/http.h>
@@ -25,6 +29,95 @@
 namespace huxerui::detail {
 
 namespace {
+
+class CompositionFailure final : public std::exception {
+public:
+  explicit CompositionFailure(std::string report) : report_(std::move(report)) {}
+
+  const char* what() const noexcept override { return report_.c_str(); }
+
+private:
+  std::string report_;
+};
+
+std::string DescribeCompositionFailure(bool initial, const char* operation, std::optional<std::size_t> item,
+                                       const char* message) {
+  std::string report = initial ? "HuxerUI initial composition failed in " : "HuxerUI recomposition failed in ";
+  report += operation;
+  if (item) {
+    report += " " + std::to_string(*item);
+  }
+  report += ": ";
+
+  if (message == nullptr || *message == '\0') {
+    report += "No exception message is available.";
+    return report;
+  }
+  constexpr std::size_t message_limit = 1024;
+  std::size_t length = 0;
+  while (length < message_limit && message[length] != '\0') {
+    ++length;
+  }
+  const bool truncated = length == message_limit && message[length] != '\0';
+  if (truncated) {
+    while (length > 0 && (static_cast<unsigned char>(message[length]) & 0xC0U) == 0x80U) {
+      --length;
+    }
+  }
+  const std::string_view text(message, length);
+  if (!IsValidUtf8(text)) {
+    report += "The exception message contains invalid UTF-8.";
+    return report;
+  }
+  for (const unsigned char character : text) {
+    report += character < 0x20U || character == 0x7FU ? ' ' : static_cast<char>(character);
+  }
+  if (truncated) {
+    report += "...";
+  }
+  return report;
+}
+
+AttributedText CompositionErrorDetails(std::string details) {
+  constexpr std::string_view state_slot_prefix = ": HuxerUI state kind or value type changed at ";
+  const std::size_t prefix = details.find(state_slot_prefix);
+  const std::size_t end = details.rfind(" (occurrence ");
+  if (prefix == std::string::npos || end == std::string::npos ||
+      end <= prefix + state_slot_prefix.size() || !details.ends_with(')')) {
+    return AttributedText(std::move(details));
+  }
+
+  const std::size_t start = prefix + state_slot_prefix.size();
+  return AttributedText{
+      TextSpan(details.substr(0, start)),
+      TextSpan(details.substr(start, end - start)).Style({
+          .foreground = Color::Rgb(166, 230, 255),
+          .decoration = TextDecoration::Underline,
+      }),
+      TextSpan(details.substr(end)),
+  };
+}
+
+View CompositionErrorPage(std::string details) {
+  const TextStyle title{.font = Font::System(24.0F).WithWeight(FontWeight::Bold), .foreground = Color::White()};
+  const TextStyle body{.font = Font::System(15.0F), .foreground = Color::Rgb(255, 235, 238)};
+  std::vector<View> content{
+    Text("Unable to display this window").Style(title).Shaping({.locale = "und"}),
+    Text("Close and reopen this window to try again.").Style(body).Shaping({.locale = "und"}),
+  };
+  if (!details.empty()) {
+    content.push_back(Text(CompositionErrorDetails(std::move(details))).Style(body).Shaping({.locale = "und"}));
+  }
+  return Column {
+    WindowTitleBar{},
+    ScrollView(Column(std::move(content)).With(Padding(24.0F), Spacing(10.0F))).With(Grow(1.0F)),
+  }.With(
+      Align(HorizontalAlignment::Stretch, VerticalAlignment::Stretch),
+      CrossAlign(CrossAxisAlignment::Stretch),
+      Background(Color::Rgb(159, 27, 46)),
+      SafeAreaPadding{}
+  );
+}
 
 int LayerLevelRank(LayerLevel level) noexcept {
   switch (level) {
@@ -1342,7 +1435,7 @@ UiWindow::State::~State() = default;
 UiWindow::UiWindow() = default;
 
 bool UiWindow::IsInitialized() const noexcept {
-  return state_ && state_->initialized_ && !state_->closing_ && !state_->retired_;
+  return state_ && state_->initialized_ && !state_->closing_ && !state_->retired_ && !state_->retiring_content_;
 }
 
 void UiWindow::InitializeWindow(Runtime& application_runtime, ViewFactory content, const WindowOptions& window_options,
@@ -1471,31 +1564,58 @@ void UiWindow::Retire() noexcept {
   }
   ExecutionGuard guard(state_->execution_);
   state_->retired_ = true;
+  RetireContent();
+  state_->root_environment_.reset();
+  if (state_->execution_) {
+    state_->execution_->environment.reset();
+  }
+  if (state_->ui_execution_) {
+    state_->ui_execution_->ui_window = nullptr;
+  }
+}
+
+void UiWindow::RetireContent() noexcept {
+  // Withdraw all routes before calling client cleanup, which may pump native input or change application state.
+  state_->frame_commit_.render_frame.scene.root = nullptr;
+  auto mounted_root = std::move(state_->mounted_root_);
+  state_->focused_node_identity_.reset();
+  state_->focus_visible_ = false;
+  state_->focus_trap_stack_.clear();
+  state_->keyboard_activation_identity_.reset();
+  state_->keyboard_press_id_.reset();
+  state_->back_target_.reset();
+  state_->scroll_motion_active_ = false;
+  if (state_->window_service_ && !state_->retired_) {
+    state_->window_service_->ClearHandlers();
+  }
+  if (state_->pointer_) {
+    state_->pointer_->Disconnect();
+  }
+  state_->layer_controller_.Disconnect();
+  if (state_->scene_transition_service_) {
+    state_->scene_transition_service_->Disconnect();
+  }
   state_->text_layout_cache_.clear();
   state_->text_layout_cache_bytes_ = 0;
   if (state_->file_drop_) {
     state_->file_drop_->DisconnectFileDrop();
   }
-  try {
-    if (state_->text_) {
-      state_->text_->StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
+  if (state_->text_) {
+    state_->text_->HideTextSelectionOverlay();
+    const auto reason = state_->retired_ ? TextInputEndReason::RuntimeDestroyed : TextInputEndReason::ClientRemoved;
+    try {
+      state_->text_->StopTextInputSession(reason);
+    } catch (...) {
     }
-  } catch (...) {
   }
   DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->owner_.external_texture_frame_requester_);
-  if (state_->pointer_) {
-    state_->pointer_->Disconnect();
-  }
-  state_->layer_controller_.Disconnect();
-
-  if (state_->window_service_) {
+  external_texture_frame_requester_->Close();
+  state_->has_committed_scene_snapshot_ = false;
+  if (state_->window_service_ && state_->retired_) {
     state_->window_service_->Disconnect();
   }
-  if (state_->scene_transition_service_) {
-    state_->scene_transition_service_->Disconnect();
-  }
   DiscardLifecycleCommits();
-  state_->mounted_root_.reset();
+  mounted_root.reset();
   state_->root_scope_.reset();
   state_->root_factory_ = {};
   for (detail::LifecycleCleanup& cleanup : state_->retired_lifecycle_cleanups_) {
@@ -1511,18 +1631,12 @@ void UiWindow::Retire() noexcept {
       }
     }
   }
-  state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
   state_->root_services_.clear();
-  if (state_->execution_) {
-    state_->execution_->environment.reset();
-  }
-  if (state_->ui_execution_) {
-    state_->ui_execution_->ui_window = nullptr;
-  }
-  external_texture_frame_requester_->Close();
+  state_->root_service_types_.clear();
+  state_->debug_metrics_.reset();
 }
 
 TextInputApplyResult UiWindow::HandleTextInputCommands(const TextInputCommandBatch& batch) {
@@ -1901,18 +2015,82 @@ void UiWindow::NotifyScrollActivity(detail::MountedNode& node, const ScrollActiv
 }
 
 const FrameCommit& UiWindow::BuildFrame() {
+  return BuildFrame(false);
+}
+
+const FrameCommit& UiWindow::BuildFrame(bool present_composition_errors) {
   const double timestamp = state_->owner_.Now();
   const double delta_time = state_->previous_frame_timestamp_.has_value()
                                 ? std::clamp(timestamp - *state_->previous_frame_timestamp_, 0.0, 0.25)
                                 : 0.0;
+  const bool previous_policy = std::exchange(state_->present_composition_errors_, present_composition_errors);
   state_->building_frame_ = true;
   try {
-    return BuildFrame({timestamp, delta_time});
+    const FrameCommit& frame = BuildFrame({timestamp, delta_time});
+    state_->present_composition_errors_ = previous_policy;
+    return frame;
   } catch (...) {
+    state_->present_composition_errors_ = previous_policy;
     DiscardLifecycleCommits();
     state_->building_frame_ = false;
     state_->frame_requested_ = false;
     throw;
+  }
+}
+
+[[noreturn]] void UiWindow::State::PropagateCompositionFailure(const char* operation, std::optional<std::size_t> item) {
+  if (!present_composition_errors_) {
+    throw;
+  }
+  const bool initial = frame_commit_.render_frame.revision == 0;
+  try {
+    throw;
+  } catch (const CompositionFailure&) {
+    throw;
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& error) {
+    throw CompositionFailure(DescribeCompositionFailure(initial, operation, item, error.what()));
+  } catch (...) {
+    throw CompositionFailure(DescribeCompositionFailure(initial, operation, item, nullptr));
+  }
+}
+
+const FrameCommit& UiWindow::BuildFrameOrErrorPage(void (*report_error)(const char*) noexcept) {
+  if (!state_->root_factory_) {
+    return BuildFrame();
+  }
+
+  ExecutionGuard guard(state_->execution_);
+  try {
+    return BuildFrame(true);
+  } catch (const CompositionFailure& failure) {
+    state_->retiring_content_ = true;
+    state_->building_frame_ = true;
+    RetireContent();
+    state_->building_frame_ = false;
+    state_->application_dirty_ = false;
+    state_->layers_dirty_ = false;
+
+    const char* report = failure.what();
+    if (report_error != nullptr) {
+      report_error(report);
+    } else {
+      std::fprintf(stderr, "%s\n", report);
+    }
+
+    try {
+      state_->root_environment_ = std::make_shared<Environment>();
+      state_->execution_->environment = state_->root_environment_;
+      state_->window_->caption_labels = {"Minimize", "Maximize or restore", "Close"};
+      const bool show_details = state_->application_->declaration->options.show_composition_error_details;
+      ReconcileApplicationContent(CompositionErrorPage(show_details ? report : ""));
+    } catch (...) {
+      state_->retiring_content_ = false;
+      throw;
+    }
+    state_->retiring_content_ = false;
+    return BuildFrame();
   }
 }
 
@@ -1969,7 +2147,11 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     ComposeApplication();
   }
   if (state_->mounted_root_) {
-    RecomposeDirtyScopes(*state_->mounted_root_);
+    try {
+      RecomposeDirtyScopes(*state_->mounted_root_);
+    } catch (...) {
+      state_->PropagateCompositionFailure("component scope");
+    }
   }
   if (state_->layers_dirty_) {
     ComposeLayers();
@@ -2878,6 +3060,9 @@ bool UiWindow::DispatchKeyboardContextMenu() {
 }
 
 void UiWindow::InvalidateRoot() {
+  if (!state_->root_factory_ || state_->retiring_content_) {
+    return;
+  }
   state_->application_dirty_ = true;
   RequestFrame();
 }
@@ -2924,7 +3109,7 @@ void UiWindow::InvalidateLayerPlacement(LayerId id) {
 }
 
 void UiWindow::InvalidateScope(std::uint64_t scope_id) {
-  if (scope_id == state_->root_scope_->Id()) {
+  if (state_->root_scope_ && scope_id == state_->root_scope_->Id()) {
     state_->application_dirty_ = true;
   }
   RequestFrame();
@@ -3102,24 +3287,7 @@ void UiWindow::ComposeApplication() {
     Composer composer{state_->root_scope_, state_->root_environment_};
     Composer::Guard guard{composer};
 
-    View application = state_->root_factory_();
-    EnsureRootStructure();
-    detail::MountedNode* application_content = FindApplicationContent(*state_->mounted_root_);
-    if (!application_content) {
-      throw std::logic_error("HuxerUI RuntimeRoot is missing its application content container");
-    }
-
-    std::vector<View> application_children;
-    if (application) {
-      application_children.push_back(std::move(application));
-    }
-    application_content->child_paint_order.clear();
-    if (ReconcileChildren(application_content->children, application_children, state_->root_environment_)) {
-      application_content->measure_dirty = true;
-      application_content->render_structure_dirty = true;
-      state_->mounted_root_->measure_dirty = true;
-      state_->mounted_root_->render_structure_dirty = true;
-    }
+    ReconcileApplicationContent(state_->root_factory_());
     state_->root_scope_->EndComposition();
     scope_composing = false;
   } catch (...) {
@@ -3129,19 +3297,37 @@ void UiWindow::ComposeApplication() {
       state_->root_scope_->Invalidate();
     }
     InvalidateRoot();
-    throw;
+    state_->PropagateCompositionFailure("application root");
+  }
+}
+
+void UiWindow::ReconcileApplicationContent(View content) {
+  EnsureRootStructure();
+  detail::MountedNode* application_content = FindApplicationContent(*state_->mounted_root_);
+  if (!application_content) {
+    throw std::logic_error("HuxerUI RuntimeRoot is missing its application content container");
+  }
+  std::vector<View> children;
+  if (content) {
+    children.push_back(std::move(content));
+  }
+  application_content->child_paint_order.clear();
+  if (ReconcileChildren(application_content->children, children, state_->root_environment_)) {
+    application_content->measure_dirty = true;
+    application_content->render_structure_dirty = true;
+    state_->mounted_root_->measure_dirty = true;
+    state_->mounted_root_->render_structure_dirty = true;
   }
 }
 
 void UiWindow::ComposeLayers() {
   state_->layers_dirty_ = false;
-  EnsureRootStructure();
-  detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
-  if (!layer_stack) {
-    throw std::logic_error("HuxerUI RuntimeRoot is missing its LayerStack");
-  }
-
   try {
+    EnsureRootStructure();
+    detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
+    if (!layer_stack) {
+      throw std::logic_error("HuxerUI RuntimeRoot is missing its LayerStack");
+    }
     // Factories may mutate the controller while composing; those mutations mark layers dirty for the next frame.
     const std::vector<LayerEntry> ordered = OrderedLayerEntries(state_->layer_controller_.state_->entries);
     std::vector<std::pair<View, std::shared_ptr<const Environment>>> layer_children;
@@ -3218,7 +3404,7 @@ void UiWindow::ComposeLayers() {
     }
   } catch (...) {
     InvalidateLayers();
-    throw;
+    state_->PropagateCompositionFailure("layer content");
   }
 }
 
@@ -3660,7 +3846,14 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
   if (const auto found = requested_positions_by_index_.find(index); found != requested_positions_by_index_.end()) {
     return *requested_nodes_[found->second];
   }
+  try {
+    return RealizeItem(index);
+  } catch (...) {
+    ui_window_->state_->PropagateCompositionFailure("virtual item", index);
+  }
+}
 
+MountedNode& VirtualMeasureSession::RealizeItem(std::size_t index) {
   auto& state = *owner_->virtual_state;
   bool declaration_created = false;
   auto item_declaration = state.item_declarations.find(index);

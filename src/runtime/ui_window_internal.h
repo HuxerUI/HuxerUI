@@ -327,6 +327,7 @@ public:
   void CommitRealization(const std::vector<VirtualLayoutResult::Placement>& placements);
 
 private:
+  MountedNode& RealizeItem(std::size_t index);
   VirtualItemState CaptureItemState(MountedNode& mounted);
   void RestoreItemState(MountedNode& mounted, VirtualItemState& state);
   void SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index);
@@ -503,6 +504,7 @@ struct LayerController::State {
 struct UiWindow::State {
   State(UiWindow& owner, const AppOptions& application, ViewFactory content, const WindowOptions& options);
   ~State();
+  [[noreturn]] void PropagateCompositionFailure(const char* operation, std::optional<std::size_t> item = std::nullopt);
 
   UiWindow& owner_;
   std::shared_ptr<detail::ApplicationRuntimeState> application_;
@@ -511,6 +513,7 @@ struct UiWindow::State {
   bool initialized_ = false;
   bool retired_ = false;
   bool closing_ = false;
+  bool retiring_content_ = false;
   ViewFactory root_factory_;
   ViewportBreakpoints viewport_breakpoints_;
   std::shared_ptr<detail::WindowState> window_;
@@ -549,6 +552,7 @@ struct UiWindow::State {
   bool extension_tree_dirty_ = true;
   bool scroll_motion_active_ = false;
   bool building_frame_ = false;
+  bool present_composition_errors_ = false;
   bool frame_requested_ = false;
   double frame_request_deadline_ = 0.0;
   std::optional<double> previous_frame_timestamp_;
