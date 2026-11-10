@@ -88,6 +88,7 @@ PlatformView composition requires DirectComposition and is unavailable when that
 Windows 7 without Platform Update is unsupported.
 
 Custom chrome keeps Win32 window behavior while HuxerUI draws the title-bar content and caption controls.
+On Windows 11, custom chrome requests rounded corners for eligible windows through the system compositor.
 Windows 11 Snap Layout is available through the shared maximize-button geometry on the default backend.
 System tray presentation uses the Windows notification area and restores its item after Explorer restarts.
 Application permissions use AppCapability when present, Windows location authorization, and the registered toast identity for notifications. The application package owns its capability declarations.

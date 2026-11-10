@@ -1,5 +1,6 @@
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #include <objbase.h>
 #include <ole2.h>
 #include <psapi.h>
@@ -1399,6 +1400,8 @@ private:
           )) {
         throw std::runtime_error("HuxerUI could not apply its custom Windows frame");
       }
+      const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+      HUXERUI_DISCARD(DwmSetWindowAttribute(window_, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference)));
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     accessibility_.SetDpiScale(DpiScale());
