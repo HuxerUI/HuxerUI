@@ -232,7 +232,7 @@ TEST_CASE("Clipboard rich text preserves character ranges and falls back to plai
   runtime.BuildFrame();
 
   const auto formatted = AttributedText::FromRanges(
-      "\xF0\x9F\x98\x80 Link\n", {{{0, 2}, {.font_weight = FontWeight::Bold}}},
+      "\xF0\x9F\x98\x80 Link\n", {{{0, 2}, {.font_size = 12.5F, .font_weight = FontWeight::Bold}}},
       {{{3, 7}, Uri("https://example.test/?a=1&b=2")}});
   REQUIRE(clipboard_service->WriteContent(formatted));
   REQUIRE(platform_clipboard.written_content);
@@ -254,6 +254,20 @@ TEST_CASE("Clipboard rich text preserves character ranges and falls back to plai
   REQUIRE(text->Succeeded());
   CHECK(text->Value().PlainText() == "plain");
   CHECK(text->Value().StyleRanges().empty());
+}
+
+TEST_CASE("Clipboard HTML preserves supported font sizes and ignores invalid sizes") {
+  const auto content = detail::ReadClipboardHtml(
+      "<span style=\"font-size:9pt\">A</span><span style=\"font-size:1e-40px\">B</span>"
+      "<span style=\"font-size:1000.00001px\">C</span><span style=\"font-size:12,5px\">D</span>"
+      "<span style=\"font-size:12 px\">E</span><span style=\"font-size:0x1p3px\">F</span>"
+      "<span style=\"font-size:+12px\">G</span><span style=\"font-size:1001px\">H</span>"
+      "<span style=\"font-size:1e-46px\">I</span><span style=\"font-size:1e100px\">J</span>");
+  REQUIRE(content.Succeeded());
+  const auto expected = AttributedText::FromRanges(
+      "ABCDEFGHIJ",
+      {{{0, 1}, {.font_size = 12.0F}}, {{1, 2}, {.font_size = 1.0e-40F}}, {{2, 3}, {.font_size = 1000.0F}}});
+  CHECK(std::get<AttributedText>(content.Value()) == expected);
 }
 
 TEST_CASE("Clipboard validates typed publication before calling the platform") {

@@ -4,6 +4,9 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <locale>
+#include <sstream>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -226,10 +229,18 @@ void ApplyCss(TextSpanStyle& style, std::string_view properties) {
       if (value.find("line-through") != value.npos) decoration = decoration | TextDecoration::StrikeThrough;
       style.decoration = decoration;
     } else if (name == "font-size" && (value.ends_with("px") || value.ends_with("pt"))) {
-      const char* end = value.data() + value.size() - 2;
-      float size = 0.0F;
-      const auto parsed = std::from_chars(value.data(), end, size);
-      if (parsed.ec == std::errc{} && parsed.ptr == end && size > 0.0F && size <= 1000.0F) {
+      const auto number = std::string_view(value).substr(0, value.size() - 2);
+      if (number.starts_with('+') || number.starts_with("0x")) continue;
+      std::istringstream input{std::string(number)};
+      input.imbue(std::locale::classic());
+      // Float extraction can report underflow for representable subnormal sizes.
+      double parsed_size = 0.0;
+      if (!(input >> std::noskipws >> parsed_size) || !input.eof() ||
+          !(parsed_size > 0.0 && parsed_size <= std::numeric_limits<float>::max())) {
+        continue;
+      }
+      const auto size = static_cast<float>(parsed_size);
+      if (size > 0.0F && size <= 1000.0F) {
         style.font_size = value.ends_with("pt") ? size * (4.0F / 3.0F) : size;
       }
     }
@@ -251,7 +262,12 @@ std::string CssColorValue(Color color) {
 std::string InlineCss(const TextSpanStyle& style) {
   std::string css;
   const auto size = style.font_size.value_or(style.font ? style.font->Size() : 0.0F);
-  if (size > 0.0F) css += "font-size:" + std::to_string(size) + "px;";
+  if (size > 0.0F) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << "font-size:" << std::fixed << size << "px;";
+    css += output.str();
+  }
   if (style.font_weight || style.font) {
     const auto weight = style.font_weight.value_or(style.font ? style.font->Weight() : FontWeight::Regular);
     css += "font-weight:" + std::to_string(static_cast<int>(weight)) + ";";
