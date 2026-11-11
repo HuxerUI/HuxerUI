@@ -11,11 +11,21 @@ set(BUILD_ROOT "${TEST_ROOT}/build")
 file(MAKE_DIRECTORY
         "${PROJECT_ROOT}/base/raw"
         "${PROJECT_ROOT}/framework-override/raw"
+        "${PROJECT_ROOT}/leaf/include"
+        "${PROJECT_ROOT}/leaf/resources/raw"
         "${PROJECT_ROOT}/library/resources/raw"
         "${PROJECT_ROOT}/override/raw"
         "${PROJECT_ROOT}/resources/raw"
+        "${PROJECT_ROOT}/transitive-override/raw"
 )
 file(WRITE "${PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
+file(WRITE "${PROJECT_ROOT}/resource_app.cpp" "#include <leaf.h>\nint wrapped();\nint main() { return wrapped() - leaf(); }\n")
+file(WRITE "${PROJECT_ROOT}/wrapper.cpp" "#include <leaf.h>\nint wrapped() { return leaf(); }\n")
+file(WRITE "${PROJECT_ROOT}/leaf/include/leaf.h" "#pragma once\nint leaf();\n")
+file(WRITE "${PROJECT_ROOT}/leaf/leaf.cpp" "#include <leaf.h>\nint leaf() { return 42; }\n")
+file(WRITE "${PROJECT_ROOT}/leaf/resources/raw/transitive.txt" "leaf")
+file(WRITE "${PROJECT_ROOT}/leaf/resources/raw/override.txt" "library")
+file(WRITE "${PROJECT_ROOT}/transitive-override/raw/override.txt" "application")
 file(WRITE "${PROJECT_ROOT}/base/raw/config.txt" "base")
 file(WRITE "${PROJECT_ROOT}/base/raw/kept.txt" "kept")
 file(WRITE "${PROJECT_ROOT}/library/resources/raw/tool.txt" "library")
@@ -29,21 +39,31 @@ file(WRITE "${PROJECT_ROOT}/library/CMakeLists.txt"
         "        NAMESPACE editor\n"
         ")\n"
 )
+file(WRITE "${PROJECT_ROOT}/leaf/CMakeLists.txt"
+        "huxerui_add_library(resource_leaf SOURCES leaf.cpp RESOURCES resources RESOURCE_NAMESPACE leaf)\n"
+        "target_include_directories(resource_leaf PUBLIC \"${PROJECT_ROOT}/leaf/include\")\n"
+)
 file(WRITE "${PROJECT_ROOT}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(huxerui_resource_merge LANGUAGES CXX)\n"
         "set(HUXERUI_HOST_TOOL_ROOT \"${SOURCE_DIRECTORY}/tools/prebuilt\")\n"
         "set(HUXERUI_PROJECT_DIR \"${PROJECT_ROOT}\")\n"
         "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUIBuild.cmake\")\n"
+        "add_library(framework INTERFACE)\n"
+        "add_library(HuxerUI::huxerui_static ALIAS framework)\n"
         "add_executable(no_resource_app main.cpp)\n"
         "_huxerui_schedule_resources(no_resource_app)\n"
-        "add_executable(resource_app MACOSX_BUNDLE main.cpp)\n"
+        "add_executable(resource_app MACOSX_BUNDLE resource_app.cpp)\n"
         "_huxerui_compile_builtin_resources(resource_app HUXERUI_BUILTIN_RESOURCE_PACKAGE)\n"
         "_huxerui_append_resource_package_input(resource_app \"\${HUXERUI_BUILTIN_RESOURCE_PACKAGE}\")\n"
+        "huxerui_add_library(resource_wrapper SOURCES wrapper.cpp)\n"
+        "huxerui_use_library(resource_app TARGET resource_wrapper)\n"
+        "huxerui_use_library(resource_wrapper PUBLIC TARGET resource_leaf PATH leaf)\n"
         "add_subdirectory(library)\n"
         "huxerui_add_resources(resource_app ROOT base NAMESPACE app)\n"
         "huxerui_add_resources(resource_app ROOT override NAMESPACE app)\n"
         "huxerui_add_resources(resource_app ROOT framework-override NAMESPACE huxerui)\n"
+        "huxerui_add_resources(resource_app ROOT transitive-override NAMESPACE leaf)\n"
 )
 
 execute_process(
@@ -86,6 +106,8 @@ file(READ "${RESOURCE_OUTPUT}/package/huxerui/app/raw/kept.txt" KEPT_VALUE)
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/editor/raw/tool.txt" LIBRARY_VALUE)
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/huxerui/raw/framework.txt" FRAMEWORK_VALUE)
 file(READ "${RESOURCE_OUTPUT}/package/huxerui/huxerui/raw/framework-kept.txt" FRAMEWORK_KEPT_VALUE)
+file(READ "${RESOURCE_OUTPUT}/package/huxerui/leaf/raw/transitive.txt" TRANSITIVE_VALUE)
+file(READ "${RESOURCE_OUTPUT}/package/huxerui/leaf/raw/override.txt" TRANSITIVE_OVERRIDE_VALUE)
 file(READ "${RESOURCE_OUTPUT}/include/app_resources.h" APP_HEADER)
 file(READ "${RESOURCE_OUTPUT}/include/editor_resources.h" LIBRARY_HEADER)
 file(READ "${RESOURCE_OUTPUT}/include/huxerui_resources.h" FRAMEWORK_HEADER)
@@ -94,7 +116,9 @@ if (NOT CONFIG_VALUE STREQUAL "override"
         OR NOT KEPT_VALUE STREQUAL "kept"
         OR NOT LIBRARY_VALUE STREQUAL "library"
         OR NOT FRAMEWORK_VALUE STREQUAL "application"
-        OR NOT FRAMEWORK_KEPT_VALUE STREQUAL "framework-kept")
+        OR NOT FRAMEWORK_KEPT_VALUE STREQUAL "framework-kept"
+        OR NOT TRANSITIVE_VALUE STREQUAL "leaf"
+        OR NOT TRANSITIVE_OVERRIDE_VALUE STREQUAL "application")
     message(FATAL_ERROR "Ordered resource merge produced unexpected payloads")
 endif ()
 if (NOT APP_HEADER MATCHES "namespace app \\{"

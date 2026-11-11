@@ -81,36 +81,36 @@ expect_library_configure_failure(
 expect_library_configure_failure(
         android_missing_framework
         "set(ANDROID TRUE)\n_huxerui_select_framework_target(framework_target)"
-        "HuxerUI Android integration requires the shared component"
+        "HuxerUI Android integration requires the static component"
 )
 
-set(ANDROID_SHARED_PROJECT_ROOT "${TEST_ROOT}/android-shared-source")
-set(ANDROID_SHARED_BUILD_ROOT "${TEST_ROOT}/android-shared-build")
-file(MAKE_DIRECTORY "${ANDROID_SHARED_PROJECT_ROOT}")
-file(WRITE "${ANDROID_SHARED_PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
-file(WRITE "${ANDROID_SHARED_PROJECT_ROOT}/CMakeLists.txt"
+set(ANDROID_STATIC_PROJECT_ROOT "${TEST_ROOT}/android-static-source")
+set(ANDROID_STATIC_BUILD_ROOT "${TEST_ROOT}/android-static-build")
+file(MAKE_DIRECTORY "${ANDROID_STATIC_PROJECT_ROOT}")
+file(WRITE "${ANDROID_STATIC_PROJECT_ROOT}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.20)\n"
-        "project(android_shared_framework LANGUAGES CXX)\n"
+        "project(android_static_framework LANGUAGES NONE)\n"
         "set(ANDROID TRUE)\n"
         "include(\"${SOURCE_DIRECTORY}/cmake/HuxerUILibraries.cmake\")\n"
         "add_library(HuxerUI::huxerui INTERFACE IMPORTED)\n"
+        "add_library(HuxerUI::huxerui_static INTERFACE IMPORTED)\n"
         "_huxerui_select_framework_target(framework_target)\n"
-        "if (NOT framework_target STREQUAL \"HuxerUI::huxerui\")\n"
-        "  message(FATAL_ERROR \"Android shared framework target was not selected\")\n"
+        "if (NOT framework_target STREQUAL \"HuxerUI::huxerui_static\")\n"
+        "    message(FATAL_ERROR \"Android static framework target was not selected\")\n"
         "endif ()\n"
 )
 execute_process(
         COMMAND "${CMAKE_COMMAND}"
-                -S "${ANDROID_SHARED_PROJECT_ROOT}"
-                -B "${ANDROID_SHARED_BUILD_ROOT}"
+                -S "${ANDROID_STATIC_PROJECT_ROOT}"
+                -B "${ANDROID_STATIC_BUILD_ROOT}"
                 -G "${HOST_GENERATOR}"
-        RESULT_VARIABLE ANDROID_SHARED_CONFIGURE_RESULT
-        OUTPUT_VARIABLE ANDROID_SHARED_CONFIGURE_OUTPUT
-        ERROR_VARIABLE ANDROID_SHARED_CONFIGURE_ERROR
+        RESULT_VARIABLE ANDROID_STATIC_CONFIGURE_RESULT
+        OUTPUT_VARIABLE ANDROID_STATIC_CONFIGURE_OUTPUT
+        ERROR_VARIABLE ANDROID_STATIC_CONFIGURE_ERROR
 )
-if (NOT ANDROID_SHARED_CONFIGURE_RESULT EQUAL 0)
+if (NOT ANDROID_STATIC_CONFIGURE_RESULT EQUAL 0)
     message(FATAL_ERROR
-            "Android shared framework target configure failed:\n${ANDROID_SHARED_CONFIGURE_OUTPUT}${ANDROID_SHARED_CONFIGURE_ERROR}"
+            "Android static framework target configure failed:\n${ANDROID_STATIC_CONFIGURE_OUTPUT}${ANDROID_STATIC_CONFIGURE_ERROR}"
     )
 endif ()
 
@@ -199,8 +199,11 @@ endif ()
 
 set(PREDECLARED_PROJECT_ROOT "${TEST_ROOT}/predeclared-source")
 set(PREDECLARED_BUILD_ROOT "${TEST_ROOT}/predeclared-build")
-file(MAKE_DIRECTORY "${PREDECLARED_PROJECT_ROOT}")
+file(MAKE_DIRECTORY "${PREDECLARED_PROJECT_ROOT}/consumer")
 file(WRITE "${PREDECLARED_PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
+file(WRITE "${PREDECLARED_PROJECT_ROOT}/consumer/CMakeLists.txt"
+        "add_library(library_consumer STATIC ../main.cpp)\n"
+)
 file(WRITE "${PREDECLARED_PROJECT_ROOT}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.20)\n"
         "project(predeclared_library LANGUAGES CXX)\n"
@@ -209,6 +212,8 @@ file(WRITE "${PREDECLARED_PROJECT_ROOT}/CMakeLists.txt"
         "add_library(PredeclaredLibrary::PredeclaredLibrary INTERFACE IMPORTED)\n"
         "set_property(TARGET PredeclaredLibrary::PredeclaredLibrary PROPERTY HUXERUI_LIBRARY TRUE)\n"
         "huxerui_use_library(library_app TARGET PredeclaredLibrary::PredeclaredLibrary)\n"
+        "add_subdirectory(consumer)\n"
+        "huxerui_use_library(library_consumer TARGET PredeclaredLibrary::PredeclaredLibrary)\n"
 )
 execute_process(
         COMMAND "${CMAKE_COMMAND}"
@@ -229,20 +234,31 @@ set(LIBRARY_GRAPH_PROJECT_ROOT "${TEST_ROOT}/library-graph-source")
 set(LIBRARY_GRAPH_BUILD_ROOT "${TEST_ROOT}/library-graph-build")
 set(LIBRARY_GRAPH_FIRST_ROOT "${TEST_ROOT}/library-graph-first")
 set(LIBRARY_GRAPH_SECOND_ROOT "${TEST_ROOT}/library-graph-second")
+set(LIBRARY_GRAPH_THIRD_ROOT "${TEST_ROOT}/library-graph-third")
 set(LIBRARY_GRAPH_OUTPUT "${TEST_ROOT}/library-graph.json")
 file(MAKE_DIRECTORY
         "${LIBRARY_GRAPH_PROJECT_ROOT}"
         "${LIBRARY_GRAPH_FIRST_ROOT}"
         "${LIBRARY_GRAPH_SECOND_ROOT}"
+        "${LIBRARY_GRAPH_THIRD_ROOT}"
 )
 file(WRITE "${LIBRARY_GRAPH_PROJECT_ROOT}/main.cpp" "int main() { return 0; }\n")
 file(WRITE "${LIBRARY_GRAPH_FIRST_ROOT}/CMakeLists.txt"
         "huxerui_add_library(first_library SOURCES first.cpp)\n"
         "add_library(FirstLibrary::FirstLibrary ALIAS first_library)\n"
+        "huxerui_use_library(first_library PUBLIC TARGET ThirdLibrary::ThirdLibrary PATH \"${LIBRARY_GRAPH_THIRD_ROOT}\")\n"
 )
 file(WRITE "${LIBRARY_GRAPH_SECOND_ROOT}/CMakeLists.txt"
         "huxerui_add_library(second_library SOURCES second.cpp)\n"
         "add_library(SecondLibrary::SecondLibrary ALIAS second_library)\n"
+        "huxerui_use_library(second_library TARGET FirstLibrary::FirstLibrary PATH \"${LIBRARY_GRAPH_FIRST_ROOT}\")\n"
+)
+file(WRITE "${LIBRARY_GRAPH_THIRD_ROOT}/CMakeLists.txt"
+        "huxerui_add_library(third_library SOURCES third.cpp)\n"
+        "add_library(ThirdLibrary::ThirdLibrary ALIAS third_library)\n"
+        "if (LIBRARY_GRAPH_CYCLE)\n"
+        "    huxerui_use_library(third_library TARGET SecondLibrary::SecondLibrary)\n"
+        "endif ()\n"
 )
 file(WRITE "${LIBRARY_GRAPH_PROJECT_ROOT}/CMakeLists.txt"
         "cmake_minimum_required(VERSION 3.20)\n"
@@ -256,7 +272,7 @@ file(WRITE "${LIBRARY_GRAPH_PROJECT_ROOT}/CMakeLists.txt"
         "set_property(TARGET predeclared_library PROPERTY HUXERUI_LIBRARY TRUE)\n"
         "huxerui_use_library(library_app TARGET SecondLibrary::SecondLibrary PATH \"${LIBRARY_GRAPH_SECOND_ROOT}\")\n"
         "huxerui_use_library(library_app TARGET predeclared_library)\n"
-        "huxerui_use_library(library_app TARGET FirstLibrary::FirstLibrary PATH \"${LIBRARY_GRAPH_FIRST_ROOT}\")\n"
+        "huxerui_use_library(library_app TARGET first_library)\n"
 )
 execute_process(
         COMMAND "${CMAKE_COMMAND}"
@@ -274,18 +290,38 @@ if (NOT LIBRARY_GRAPH_CONFIGURE_RESULT EQUAL 0)
 endif ()
 file(REAL_PATH "${LIBRARY_GRAPH_FIRST_ROOT}" LIBRARY_GRAPH_FIRST_ROOT)
 file(REAL_PATH "${LIBRARY_GRAPH_SECOND_ROOT}" LIBRARY_GRAPH_SECOND_ROOT)
+file(REAL_PATH "${LIBRARY_GRAPH_THIRD_ROOT}" LIBRARY_GRAPH_THIRD_ROOT)
 file(READ "${LIBRARY_GRAPH_OUTPUT}" LIBRARY_GRAPH_JSON)
 string(JSON LIBRARY_GRAPH_COUNT LENGTH "${LIBRARY_GRAPH_JSON}" libraries)
 string(JSON LIBRARY_GRAPH_FIRST_TARGET GET "${LIBRARY_GRAPH_JSON}" libraries 0 target)
 string(JSON LIBRARY_GRAPH_FIRST_SOURCE_ROOT GET "${LIBRARY_GRAPH_JSON}" libraries 0 sourceRoot)
 string(JSON LIBRARY_GRAPH_SECOND_TARGET GET "${LIBRARY_GRAPH_JSON}" libraries 1 target)
 string(JSON LIBRARY_GRAPH_SECOND_SOURCE_ROOT GET "${LIBRARY_GRAPH_JSON}" libraries 1 sourceRoot)
-if (NOT LIBRARY_GRAPH_COUNT EQUAL 2
+string(JSON LIBRARY_GRAPH_THIRD_TARGET GET "${LIBRARY_GRAPH_JSON}" libraries 2 target)
+string(JSON LIBRARY_GRAPH_THIRD_SOURCE_ROOT GET "${LIBRARY_GRAPH_JSON}" libraries 2 sourceRoot)
+if (NOT LIBRARY_GRAPH_COUNT EQUAL 3
         OR NOT LIBRARY_GRAPH_FIRST_TARGET STREQUAL "SecondLibrary::SecondLibrary"
         OR NOT LIBRARY_GRAPH_FIRST_SOURCE_ROOT STREQUAL "${LIBRARY_GRAPH_SECOND_ROOT}"
         OR NOT LIBRARY_GRAPH_SECOND_TARGET STREQUAL "FirstLibrary::FirstLibrary"
-        OR NOT LIBRARY_GRAPH_SECOND_SOURCE_ROOT STREQUAL "${LIBRARY_GRAPH_FIRST_ROOT}")
+        OR NOT LIBRARY_GRAPH_SECOND_SOURCE_ROOT STREQUAL "${LIBRARY_GRAPH_FIRST_ROOT}"
+        OR NOT LIBRARY_GRAPH_THIRD_TARGET STREQUAL "ThirdLibrary::ThirdLibrary"
+        OR NOT LIBRARY_GRAPH_THIRD_SOURCE_ROOT STREQUAL "${LIBRARY_GRAPH_THIRD_ROOT}")
     message(FATAL_ERROR "Library graph does not preserve library order and source roots")
+endif ()
+
+execute_process(
+        COMMAND "${CMAKE_COMMAND}"
+                -S "${LIBRARY_GRAPH_PROJECT_ROOT}"
+                -B "${LIBRARY_GRAPH_BUILD_ROOT}"
+                -DLIBRARY_GRAPH_CYCLE=ON
+        RESULT_VARIABLE LIBRARY_GRAPH_CYCLE_RESULT
+        OUTPUT_VARIABLE LIBRARY_GRAPH_CYCLE_OUTPUT
+        ERROR_VARIABLE LIBRARY_GRAPH_CYCLE_ERROR
+)
+if (LIBRARY_GRAPH_CYCLE_RESULT EQUAL 0 OR NOT LIBRARY_GRAPH_CYCLE_ERROR MATCHES "HuxerUI library dependency cycle")
+    message(FATAL_ERROR
+            "Library graph cycle did not produce the expected diagnostic:\n${LIBRARY_GRAPH_CYCLE_OUTPUT}${LIBRARY_GRAPH_CYCLE_ERROR}"
+    )
 endif ()
 
 file(REMOVE_RECURSE "${TEST_ROOT}")

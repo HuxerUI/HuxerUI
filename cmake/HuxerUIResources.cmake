@@ -82,6 +82,25 @@ function(_huxerui_compile_builtin_resources target_name output_variable)
     set(${output_variable} "${HUXERUI_BUILTIN_RESOURCE_PACKAGE}" PARENT_SCOPE)
 endfunction()
 
+function(_huxerui_get_library_resource_package target_name output_variable)
+    get_property(package TARGET ${target_name} PROPERTY HUXERUI_RESOURCE_PACKAGE)
+    if (NOT package)
+        # A forwarding library may be configured after its consumer in the same directory.
+        set(dependencies "")
+        set(requested_targets "")
+        _huxerui_collect_library_dependencies("${target_name}" "" dependencies requested_targets)
+        foreach (dependency IN LISTS dependencies)
+            get_property(dependency_package TARGET ${dependency} PROPERTY HUXERUI_RESOURCE_PACKAGE)
+            if (dependency_package)
+                _huxerui_get_resource_output(${target_name} resource_output)
+                set(package "${resource_output}/package")
+                break()
+            endif ()
+        endforeach ()
+    endif ()
+    set(${output_variable} "${package}" PARENT_SCOPE)
+endfunction()
+
 function(_huxerui_configure_resources target_name)
     get_property(HUXERUI_RESOURCE_PACKAGE_INPUTS
             TARGET ${target_name}
@@ -95,6 +114,13 @@ function(_huxerui_configure_resources target_name)
             TARGET ${target_name}
             PROPERTY HUXERUI_RESOURCE_NAMESPACES
     )
+    get_property(libraries TARGET ${target_name} PROPERTY HUXERUI_LIBRARIES)
+    foreach (library IN LISTS libraries)
+        _huxerui_get_library_resource_package(${library} package)
+        if (package)
+            list(APPEND HUXERUI_RESOURCE_PACKAGE_INPUTS "${package}")
+        endif ()
+    endforeach ()
     if (NOT HUXERUI_RESOURCE_PACKAGE_INPUTS AND NOT HUXERUI_RESOURCE_ROOTS)
         return()
     endif ()
@@ -118,6 +144,9 @@ function(_huxerui_configure_resources target_name)
     list(SORT HUXERUI_RESOURCE_INPUTS)
 
     _huxerui_get_resource_output(${target_name} HUXERUI_RESOURCE_OUTPUT)
+    set_property(TARGET ${target_name} PROPERTY
+            HUXERUI_RESOURCE_PACKAGE "${HUXERUI_RESOURCE_OUTPUT}/package"
+    )
     set(HUXERUI_RESOURCE_INDEX
             "${HUXERUI_RESOURCE_OUTPUT}/package/huxerui/resources.bin"
     )

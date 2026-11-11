@@ -104,38 +104,53 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     def resourceRoot = layout.buildDirectory.dir("generated/huxerui/resources/${variant.name}").get().asFile
     variant.externalNativeBuild.arguments.add("-DHUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT=${resourceRoot.absolutePath}")
     def nativeLibraries = variant.artifacts.get(SingleArtifact.MERGED_NATIVE_LIBS.INSTANCE)
-    def packagedAbis = nativeLibraries.map { directory ->
-        new File(directory.asFile, "lib").listFiles()?.findAll { it.isDirectory() }?.sort { it.name } ?: []
+    // A dependency can contribute native libraries for ABIs that CMake did not build for this variant.
+    def appLibraries = nativeLibraries.map { directory ->
+        def abiDirectories = new File(directory.asFile, "lib").listFiles()?.findAll { it.isDirectory() } ?: []
+        def libraries = abiDirectories.sort { it.name }.collect { abiDirectory ->
+            def planFile = new File(integrationRoot, "${abiDirectory.name}/app.json")
+            if (!planFile.isFile()) {
+                return null
+            }
+            def plan = new JsonSlurper().parse(planFile)
+            if (plan.schema != 1 || !(plan.target instanceof String) || !(plan.artifact instanceof String)) {
+                throw new GradleException("HuxerUI application integration plan is invalid: ${planFile}")
+            }
+            def fileName = new File(plan.artifact).name
+            if (!fileName.startsWith("lib") || !fileName.endsWith(".so") || fileName.length() <= 6) {
+                throw new GradleException("HuxerUI application artifact must be a lib<name>.so file: ${plan.artifact}")
+            }
+            if (!new File(abiDirectory, fileName).isFile()) {
+                return null
+            }
+            def libraryName = fileName.substring(3, fileName.length() - 3)
+            if (libraryName == "huxerui") {
+                throw new GradleException("HuxerUI application library must not use the framework name huxerui")
+            }
+            return [abi: abiDirectory.name, target: plan.target, library: libraryName]
+        }.findAll()
+        if (!libraries.isEmpty()) {
+            def applicationFile = "lib${libraries.first().library}.so"
+            def missingPlan = abiDirectories.find { abiDirectory ->
+                new File(abiDirectory, applicationFile).isFile() &&
+                        !libraries.any { it.abi == abiDirectory.name }
+            }
+            if (missingPlan != null) {
+                throw new GradleException("HuxerUI application integration plan is missing for ABI ${missingPlan.name}")
+            }
+        }
+        libraries
     }
     def libraryFile = layout.buildDirectory.file("generated/huxerui/app-library/${variant.name}.txt").get().asFile
     def resolveLibrary = tasks.register("resolveHuxerUI${variant.name.capitalize()}AppLibrary") {
-        // The public artifact carries the native build dependency and reflects device-only ABI builds.
         inputs.dir(nativeLibraries)
         inputs.dir(integrationRoot)
         outputs.file(libraryFile)
         doLast {
-            def applications = packagedAbis.get().collect { abiDirectory ->
-                def planFile = new File(integrationRoot, "${abiDirectory.name}/app.json")
-                if (!planFile.isFile()) {
-                    throw new GradleException("HuxerUI application integration plan is missing: ${planFile}")
-                }
-                def plan = new JsonSlurper().parse(planFile)
-                if (plan.schema != 1 || !(plan.target instanceof String) || !(plan.artifact instanceof String)) {
-                    throw new GradleException("HuxerUI application integration plan is invalid: ${planFile}")
-                }
-                def fileName = new File(plan.artifact).name
-                if (!fileName.startsWith("lib") || !fileName.endsWith(".so") || fileName.length() <= 6) {
-                    throw new GradleException("HuxerUI application artifact must be a lib<name>.so file: ${plan.artifact}")
-                }
-                def libraryName = fileName.substring(3, fileName.length() - 3)
-                if (libraryName == "huxerui") {
-                    throw new GradleException("HuxerUI application library must not use the framework name huxerui")
-                }
-                if (!new File(abiDirectory, fileName).isFile()) {
-                    throw new GradleException("HuxerUI application library is missing for ${abiDirectory.name}: ${fileName}")
-                }
-                return [target: plan.target, library: libraryName]
-            }.unique()
+            def applications = appLibraries.get().collect { [target: it.target, library: it.library] }.unique()
+            if (applications.isEmpty()) {
+                throw new GradleException("HuxerUI application libraries are missing for variant ${variant.name}")
+            }
             if (applications.size() != 1) {
                 throw new GradleException("HuxerUI application target and library name must match across Android ABIs")
             }
@@ -150,8 +165,8 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     })
 
     def stageAssets = tasks.register("stageHuxerUI${variant.name.capitalize()}Assets", StageHuxerUIAssets) {
-        packageDirectories.from(packagedAbis.map { directories ->
-            directories.collect { new File(resourceRoot, "${it.name}/package") }
+        packageDirectories.from(appLibraries.map { libraries ->
+            libraries.collect { new File(resourceRoot, "${it.abi}/package") }
         })
     }
     // Register ownership once so asset merging, lint, and other consumers all depend on staging.

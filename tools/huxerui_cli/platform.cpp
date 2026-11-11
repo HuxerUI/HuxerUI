@@ -208,7 +208,7 @@ std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandC
 
 } // namespace detail
 
-std::vector<GeneratedFile> PlatformDriver::CreateLibraryPackage(const LibraryTemplateContext&) const {
+GeneratedTree PlatformDriver::CreateLibraryPackage(const LibraryTemplateContext&, const std::filesystem::path&) const {
   return {};
 }
 

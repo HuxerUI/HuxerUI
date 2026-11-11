@@ -53,7 +53,7 @@ TEST_CASE("HuxerUICliCreatesAndroidPlatformShell") {
   REQUIRE(android_app.find("must match across Android ABIs") != std::string::npos);
   REQUIRE(android_app.find("new File(abiDirectory, fileName).isFile()") != std::string::npos);
   REQUIRE(android_app.find("variant.sources.assets.addGeneratedSourceDirectory(stageAssets)") != std::string::npos);
-  REQUIRE(android_app.find("packageDirectories.from(packagedAbis.map") != std::string::npos);
+  REQUIRE(android_app.find("packageDirectories.from(appLibraries.map") != std::string::npos);
   REQUIRE(android_app.find("assets.srcDir") == std::string::npos);
   REQUIRE(android_app.find("registerHuxerUIResourceStaging") == std::string::npos);
   REQUIRE(android_app.find("huxerui_app") == std::string::npos);

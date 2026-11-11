@@ -208,9 +208,9 @@ Each source-backed entry contains only:
 - The requested CMake target identity.
 - The resolved library source root.
 
-Entry order is `huxerui_use_library` declaration order.
+The graph follows `huxerui_use_library` edges depth-first in declaration order and emits each resolved CMake target once, using the requested target from its first visit.
 Predeclared binary targets without a source root do not appear; their platform artifacts are declared through the owning platform package manager.
-Android settings use the graph to include `platform/android` library projects, and the Apple library aggregator may use the same graph to resolve `platform/ios` Swift packages.
+Android settings use the graph to include `platform/android` library projects, and the iOS aggregator uses it to resolve `platform/ios/<Swift product>/` packages.
 Windows and Linux require no platform projection when their library integration remains entirely inside CMake.
 
 The library graph never contains an application identifier, SDK or NDK versions, ABIs, product names, permissions, platform dependencies, hooks, resource namespaces, or SDK selection.
@@ -364,9 +364,9 @@ The iOS Swift package projection is written only when its content changes.
 The ABI-specific C++ build remains exclusively owned by Gradle's root-project `externalNativeBuild` invocation.
 The Android application shared library defaults to its CMake target name; `OUTPUT_NAME` and configuration postfixes remain target-owned.
 The shell supplies `HUXERUI_ANDROID_APP_INTEGRATION_ROOT` with a variant-specific build directory, and each real NDK configure generates the existing application integration plan at `<root>/<abi>/app.json` with its final artifact path.
-AGP's public `MERGED_NATIVE_LIBS` artifact supplies the native build dependency and the ABI directories participating in this build, including Android Studio device-only builds; unused ABI plans from earlier builds do not participate in resolution.
-A Gradle resolver reads the corresponding application plans, validates the common target and loadable `lib<name>.so` filename and its presence in each ABI directory, and supplies the name through a task-backed Provider to `BuildConfig.HUXERUI_APP_LIBRARY`.
-The application library name must be distinct from the framework library, and missing plans or artifacts fail the build instead of falling back to a guessed name.
+AGP's public `MERGED_NATIVE_LIBS` artifact supplies the native build dependency and the merged ABI directories, which can include libraries supplied only by Android dependencies.
+The Gradle shell matches each ABI's application plan to its actual `lib<name>.so` in the merged artifact. The resolver validates the common target and library name, then supplies the name through a task-backed Provider to `BuildConfig.HUXERUI_APP_LIBRARY`. Resource staging uses the same matched ABIs.
+The application library name must be distinct from the framework library. The resolver requires at least one ABI with a matching plan and application library, and every merged copy of that application library must have its own plan.
 The application MainApplication loads that constant before any HuxerUI Java services or hosted Runtime are used; framework Java classes do not load a fixed library name.
 The static framework target retains named JNI entry points with the NDK linker's `--undefined-glob` options and exports `Java_*`, `JNI_OnLoad`, and `JNI_OnUnload` through a version script while hiding other symbols in the final application shared library.
 This covers JNI entry points in linked static libraries without a user-maintained export list or whole-archive linking; applications that require other dynamic exports own their separate library boundary.
@@ -602,6 +602,7 @@ HuxerUI built-in package
 ```
 
 Later matching variants replace earlier variants, so an application may deliberately override the `huxerui` namespace.
+Each library merges its dependency packages before its own resource roots. A library with resource-bearing dependencies produces a package even when it declares no resource root of its own.
 `hrc` validates its binary format while merging and rejects incompatible packages rather than requiring separate bundle metadata.
 The final package is staged into Android assets, an Apple application bundle, the Windows or Linux application resource directory, or the Web preload set by the owning platform build.
 Android resources and manifests, Apple asset catalogs and property lists, Windows resources, Linux desktop metadata, and Web shell assets remain platform resources and do not enter `resources.bin` unless the application explicitly declares them as HuxerUI resources.
@@ -776,8 +777,8 @@ Application creation retains the current all-platform default when `--platform` 
 Library creation without `--platform` creates no Library platform package, while its ordinary Preview application receives every platform shell.
 This keeps the Library platform-neutral and makes `huxerui run <platform>` immediately available from its root on a compatible host.
 Each platform selected for a library creates the matching application shell below `examples/preview`.
-Windows, Linux, and macOS create CMake source roots under `platform/<platform>/src`, Android additionally creates an independent Gradle library under `platform/android`, and iOS creates a Swift Package under `platform/ios`.
-The macOS source root may contain C++ and Objective-C++ sources compiled into the common library target; iOS native sources remain owned exclusively by its Swift Package and Xcode integration.
+Windows, Linux, and macOS create CMake source roots under `platform/<platform>/src`, Android additionally creates an independent Gradle library under `platform/android`, and iOS creates a Swift package under `platform/ios/<Swift product>/`.
+Library-owned iOS C++ and Objective-C++ sources can live alongside the package in `platform/ios/src` and compile into the common library target.
 Web currently adds only the Preview shell because no separate platform-package shape has been defined for it.
 `platform add` applies the same behavior after creation, fills whichever Library package or Preview shell is missing, and leaves an existing counterpart untouched.
 Later commands obtain launch artifacts from the owning platform or CMake build output, while platform-package attachment uses the platform-neutral generated library graph.
@@ -905,11 +906,12 @@ COMMIT requires a full 40-character SHA.
 TAG accepts an unqualified valid Git tag name and resolves it through the repository's exact `refs/tags/` namespace, so a branch with the same name is never selected.
 Remote source uses FetchContent's normal build-directory cache, and repeated use by several application targets acquires and configures the repository only once.
 FetchContent owns Git discovery and tag validation when it needs to clone or update a repository; supplying source through its standard override does not add a separate Git requirement.
-If the requested target already exists, PATH and URL must be omitted; the helper never assigns a requested origin to an unrelated target.
-The helper verifies that acquisition creates the requested CMake target, links it to the application, and appends its compiled resource package in declaration order without a separate finalize call.
+Use TARGET alone to consume a predeclared target. Repeated acquisitions of the same target from the same PATH or pinned URL reuse it, while a conflicting origin fails configuration.
+The helper verifies that acquisition creates the requested CMake target, records a direct dependency on the application or library calling it, and links it to that target. Resource assembly follows those direct dependencies in declaration order.
+The default link scope is `PRIVATE`. Pass `PUBLIC` when the consumer's public headers expose types or headers from the dependency so downstream CMake targets receive its compile usage requirements.
 Calling `target_link_libraries` alone links ordinary code but intentionally does not merge library resources or request platform-package discovery.
 
-The application CMakeLists is both the dependency declaration and version selection.
+Each application's or library's CMakeLists declares and selects versions for its own direct dependencies.
 A full commit SHA is the recommended reproducible remote form.
 A tag is easier to read but can be moved by the repository owner, so it does not provide the same immutable dependency identity.
 There is no second dependency list or lock manifest in the current design.
@@ -942,7 +944,7 @@ CMake does not parse platform directories or model platform dependencies, permis
 Its generated library graph exposes only the library target identity, declaration order, and resolved source root already established while acquiring the common target.
 The Android CLI driver uses that topology to locate `platform/android`, attaches each discovered Gradle library to the application shell, and delegates its contents to Gradle.
 The application platform CMake build includes the same root CMake project, so common library targets and Android C++ sources participate in one graph rather than a second library graph.
-The iOS CLI driver projects the same graph into one generated local Swift package aggregator below `.huxerui/generated/ios/libraries` before building or opening Xcode.
+The iOS CLI driver projects the same graph into one generated local Swift package aggregator below `.huxerui/generated/ios/libraries` before building or opening Xcode. The iOS CMake build walks the same direct dependencies to include each reachable static library once in the application core archive.
 The source-controlled Xcode application references one stable aggregator product, so adding or removing libraries does not rewrite the project file.
 The aggregator only composes library packages; application privacy text, entitlements, capabilities, signing, and final product policy stay in the Xcode shell.
 Windows, Linux, and Web library sources join the common target directly from their platform source roots, so those platforms do not need platform-package projection.
@@ -969,9 +971,9 @@ Generated platform attachment files remain build output rather than another edit
 
 Platform dependencies remain expressed in their owning ecosystem.
 An Android library's `platform/android` directory is an Android library whose Gradle build declares Java or Kotlin sources, Android resources, C++ dependencies, and third-party libraries, while its library manifest declares mergeable Android components and permissions.
-An Apple library's `platform/ios` directory is a Swift package whose `Package.swift` declares targets, resources, linked system libraries, and package dependencies.
-Its generated library product matches the suffix of a qualified public CMake target, such as `Camera` for `Scave::Camera`, so the generated aggregator can attach it without parsing `Package.swift` or duplicating product metadata in the library graph.
-For an unqualified target, the existing platform product-name normalization remains local to the iOS package generator.
+An iOS library's Swift package root is `platform/ios/<Swift product>/`. Its `Package.swift` declares targets, resources, linked system libraries, and Swift package dependencies.
+The product name matches the suffix of a qualified public CMake target, such as `Camera` for `Scave::Camera`, or the CLI's normalized product name for an unqualified target. The template and aggregator derive the same directory and product from that target.
+Migrate a manifest at `platform/ios/Package.swift` together with its `Sources` and package resources into the product directory, preserving their paths relative to the package root.
 Equivalent future platforms use their own package and build systems.
 
 The application shell owns final application policy even when a platform package contributes mergeable declarations.

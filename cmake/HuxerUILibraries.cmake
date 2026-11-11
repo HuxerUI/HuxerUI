@@ -53,40 +53,46 @@ function(_huxerui_json_escape input output)
     set(${output} "${value}" PARENT_SCOPE)
 endfunction()
 
-function(_huxerui_write_library_graph target_name)
-    if (NOT TARGET ${target_name})
-        message(FATAL_ERROR
-                "HuxerUI library graph application target does not exist: ${target_name}"
-        )
-    endif ()
-
-    get_property(output_file TARGET ${target_name} PROPERTY HUXERUI_LIBRARY_GRAPH_OUTPUT)
-    get_property(HUXERUI_GRAPH_LIBRARIES
-            TARGET ${target_name}
-            PROPERTY HUXERUI_LIBRARIES
-    )
-    get_property(HUXERUI_GRAPH_REQUESTED_TARGETS
-            TARGET ${target_name}
-            PROPERTY HUXERUI_REQUESTED_LIBRARY_TARGETS
-    )
-    list(LENGTH HUXERUI_GRAPH_LIBRARIES HUXERUI_GRAPH_LIBRARY_COUNT)
-    list(LENGTH HUXERUI_GRAPH_REQUESTED_TARGETS
-            HUXERUI_GRAPH_REQUESTED_TARGET_COUNT
-    )
-    if (NOT HUXERUI_GRAPH_LIBRARY_COUNT EQUAL
-            HUXERUI_GRAPH_REQUESTED_TARGET_COUNT)
+function(_huxerui_collect_library_dependencies target_name dependency_path libraries_variable requested_targets_variable)
+    get_property(libraries TARGET ${target_name} PROPERTY HUXERUI_LIBRARIES)
+    get_property(requested_targets TARGET ${target_name} PROPERTY HUXERUI_REQUESTED_LIBRARY_TARGETS)
+    list(LENGTH libraries library_count)
+    list(LENGTH requested_targets requested_target_count)
+    if (NOT library_count EQUAL requested_target_count)
         message(FATAL_ERROR
                 "HuxerUI library graph target identity is inconsistent for ${target_name}"
         )
     endif ()
-    set(HUXERUI_GRAPH_ENTRIES)
-    set(HUXERUI_GRAPH_INDEX 0)
-    foreach (HUXERUI_GRAPH_LIBRARY IN LISTS HUXERUI_GRAPH_LIBRARIES)
-        list(GET HUXERUI_GRAPH_REQUESTED_TARGETS
-                ${HUXERUI_GRAPH_INDEX}
-                HUXERUI_GRAPH_REQUESTED_TARGET
+
+    list(APPEND dependency_path "${target_name}")
+    foreach (library requested_target IN ZIP_LISTS libraries requested_targets)
+        if (library IN_LIST dependency_path)
+            list(JOIN dependency_path " -> " cycle)
+            message(FATAL_ERROR "HuxerUI library dependency cycle: ${cycle} -> ${library}")
+        endif ()
+        if (library IN_LIST ${libraries_variable})
+            continue()
+        endif ()
+        list(APPEND ${libraries_variable} "${library}")
+        list(APPEND ${requested_targets_variable} "${requested_target}")
+        _huxerui_collect_library_dependencies("${library}" "${dependency_path}"
+                "${libraries_variable}" "${requested_targets_variable}"
         )
-        math(EXPR HUXERUI_GRAPH_INDEX "${HUXERUI_GRAPH_INDEX} + 1")
+    endforeach ()
+    set(${libraries_variable} "${${libraries_variable}}" PARENT_SCOPE)
+    set(${requested_targets_variable} "${${requested_targets_variable}}" PARENT_SCOPE)
+endfunction()
+
+function(_huxerui_write_library_graph target_name)
+    get_property(output_file TARGET ${target_name} PROPERTY HUXERUI_LIBRARY_GRAPH_OUTPUT)
+    set(HUXERUI_GRAPH_LIBRARIES "")
+    set(HUXERUI_GRAPH_REQUESTED_TARGETS "")
+    _huxerui_collect_library_dependencies("${target_name}" ""
+            HUXERUI_GRAPH_LIBRARIES HUXERUI_GRAPH_REQUESTED_TARGETS
+    )
+    set(HUXERUI_GRAPH_ENTRIES)
+    foreach (HUXERUI_GRAPH_LIBRARY HUXERUI_GRAPH_REQUESTED_TARGET
+            IN ZIP_LISTS HUXERUI_GRAPH_LIBRARIES HUXERUI_GRAPH_REQUESTED_TARGETS)
         get_property(HUXERUI_GRAPH_SOURCE_ROOT_SET
                 TARGET ${HUXERUI_GRAPH_LIBRARY}
                 PROPERTY HUXERUI_LIBRARY_SOURCE_ROOT
@@ -208,11 +214,11 @@ endfunction()
 function(huxerui_use_library target_name)
     if (NOT TARGET ${target_name})
         message(FATAL_ERROR
-                "huxerui_use_library() application target does not exist: ${target_name}"
+                "huxerui_use_library() consumer target does not exist: ${target_name}"
         )
     endif ()
     cmake_parse_arguments(HUXERUI_USE_LIBRARY
-            ""
+            "PUBLIC"
             "TARGET;PATH;URL;COMMIT;TAG"
             ""
             ${ARGN}
@@ -270,13 +276,13 @@ function(huxerui_use_library target_name)
             string(SUBSTRING "${HUXERUI_LIBRARY_SOURCE_HASH}" 0 16
                     HUXERUI_LIBRARY_SOURCE_HASH
             )
-            get_target_property(HUXERUI_LIBRARY_APP_BINARY_DIR
+            get_target_property(HUXERUI_LIBRARY_CONSUMER_BINARY_DIR
                     ${target_name}
                     BINARY_DIR
             )
             add_subdirectory(
                     "${HUXERUI_LIBRARY_SOURCE_PATH}"
-                    "${HUXERUI_LIBRARY_APP_BINARY_DIR}/huxerui-libraries/sources/${HUXERUI_LIBRARY_SOURCE_HASH}"
+                    "${HUXERUI_LIBRARY_CONSUMER_BINARY_DIR}/huxerui-libraries/sources/${HUXERUI_LIBRARY_SOURCE_HASH}"
             )
         endif ()
     elseif (HUXERUI_USE_LIBRARY_URL)
@@ -399,9 +405,6 @@ function(huxerui_use_library target_name)
             TARGET ${target_name}
             PROPERTY HUXERUI_LIBRARY_GRAPH_ONLY
     )
-    if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
-        target_link_libraries(${target_name} PRIVATE ${HUXERUI_USE_LIBRARY_TARGET})
-    endif ()
     set_property(TARGET ${target_name} APPEND PROPERTY
             HUXERUI_LIBRARIES
             "${HUXERUI_RESOLVED_LIBRARY_TARGET}"
@@ -411,20 +414,20 @@ function(huxerui_use_library target_name)
             "${HUXERUI_USE_LIBRARY_TARGET}"
     )
     if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)
-        get_property(HUXERUI_LIBRARY_RESOURCE_PACKAGE_SET
-                TARGET ${HUXERUI_RESOLVED_LIBRARY_TARGET}
-                PROPERTY HUXERUI_RESOURCE_PACKAGE
-                SET
-        )
-        if (HUXERUI_LIBRARY_RESOURCE_PACKAGE_SET)
-            get_property(HUXERUI_LIBRARY_RESOURCE_PACKAGE
-                    TARGET ${HUXERUI_RESOLVED_LIBRARY_TARGET}
-                    PROPERTY HUXERUI_RESOURCE_PACKAGE
-            )
-            _huxerui_append_resource_package_input(
-                    ${target_name}
-                    "${HUXERUI_LIBRARY_RESOURCE_PACKAGE}"
-            )
+        if (HUXERUI_USE_LIBRARY_PUBLIC)
+            set(link_scope PUBLIC)
+        else ()
+            set(link_scope PRIVATE)
         endif ()
+        target_link_libraries(${target_name} ${link_scope} ${HUXERUI_USE_LIBRARY_TARGET})
+        get_target_property(consumer_directory ${target_name} BINARY_DIR)
+        if (NOT consumer_directory STREQUAL CMAKE_CURRENT_BINARY_DIR)
+            # A resource-free link may be declared after the consumer's directory has finished.
+            _huxerui_get_library_resource_package(${HUXERUI_RESOLVED_LIBRARY_TARGET} dependency_package)
+            if (NOT dependency_package)
+                return()
+            endif ()
+        endif ()
+        _huxerui_schedule_resources(${target_name})
     endif ()
 endfunction()

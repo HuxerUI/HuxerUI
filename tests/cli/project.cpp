@@ -212,12 +212,12 @@ TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   REQUIRE(android_library.find("id \"com.android.library\"") != std::string::npos);
   REQUIRE(android_library.find("namespace = \"dev.example.camera.kit\"") != std::string::npos);
   REQUIRE(Read(library / "platform/android/settings.gradle").find("version \"8.13.2\"") != std::string::npos);
-  REQUIRE(std::filesystem::is_regular_file(library / "platform/ios/Package.swift"));
-  REQUIRE(std::filesystem::is_regular_file(library / "platform/ios/Sources/HuxerUICameraKit/HuxerUICameraKit.swift"));
+  const std::filesystem::path ios_package = library / "platform/ios/HuxerUICameraKit";
+  REQUIRE(std::filesystem::is_regular_file(ios_package / "Sources/HuxerUICameraKit/HuxerUICameraKit.swift"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/linux/src/.gitkeep"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/macos/src/.gitkeep"));
   REQUIRE(std::filesystem::is_regular_file(library / "platform/windows/src/.gitkeep"));
-  const std::string swift_package = Read(library / "platform/ios/Package.swift");
+  const std::string swift_package = Read(ios_package / "Package.swift");
   REQUIRE(swift_package.find("name: \"HuxerUI-CameraKit\"") != std::string::npos);
   REQUIRE(swift_package.find(".iOS(.v15)") != std::string::npos);
   REQUIRE(swift_package.find("targets: [\"HuxerUICameraKit\"]") != std::string::npos);
@@ -332,14 +332,19 @@ TEST_CASE("HuxerUICliCreatesLibrariesWithIndependentPublicIdentities") {
   REQUIRE(identity->cpp_namespace == "scave::camera");
   REQUIRE(identity->public_target == "Scave::Camera");
 
+  const std::filesystem::path ios_source = library / "platform/ios/src/camera.mm";
+  std::filesystem::create_directories(ios_source.parent_path());
+  std::ofstream(ios_source) << "// Camera adapter\n";
   const Invocation platform_add = Invoke(library, {"platform", "add", "android,ios"});
   REQUIRE(platform_add.result == 0);
   REQUIRE(Read(library / "platform/android/build.gradle").find("namespace = \"dev.example.camera\"") !=
           std::string::npos);
-  const std::string swift_package = Read(library / "platform/ios/Package.swift");
+  const std::filesystem::path ios_package = library / "platform/ios/Camera";
+  const std::string swift_package = Read(ios_package / "Package.swift");
   REQUIRE(swift_package.find("name: \"CameraKit\"") != std::string::npos);
   REQUIRE(swift_package.find("targets: [\"Camera\"]") != std::string::npos);
-  REQUIRE(std::filesystem::is_regular_file(library / "platform/ios/Sources/Camera/Camera.swift"));
+  REQUIRE(std::filesystem::is_regular_file(ios_package / "Sources/Camera/Camera.swift"));
+  REQUIRE(Read(ios_source) == "// Camera adapter\n");
   REQUIRE(std::filesystem::is_regular_file(preview / "platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(preview / "platform/ios/example_camera_kit.xcodeproj/project.pbxproj"));
 }

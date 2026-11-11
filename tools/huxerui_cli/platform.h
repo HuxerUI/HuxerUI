@@ -124,6 +124,12 @@ struct PackageArtifact {
   bool operator==(const PackageArtifact&) const = default;
 };
 
+/// Rendered files and the directory where the CLI publishes them.
+struct GeneratedTree {
+  std::filesystem::path directory;
+  std::vector<GeneratedFile> files;
+};
+
 /// Owns CLI behavior for one target platform.
 ///
 /// Drivers describe environment requirements, generate the platform shell, and plan direct process invocations.
@@ -159,8 +165,10 @@ public:
 
   /// Generates the platform-owned package for a reusable library.
   /// @param context Library identity used to render templates.
-  /// @return Files relative to the library platform root, or an empty vector when no package is needed.
-  [[nodiscard]] virtual std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext& context) const;
+  /// @param library_root Project directory that will contain the package.
+  /// @return Package directory and files relative to it, or an empty tree when no package is needed.
+  [[nodiscard]] virtual GeneratedTree CreateLibraryPackage(const LibraryTemplateContext& context,
+      const std::filesystem::path& library_root) const;
 
   /// Validates a generated platform shell.
   /// @param shell_root Platform shell directory.

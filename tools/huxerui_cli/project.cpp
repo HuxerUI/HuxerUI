@@ -90,17 +90,20 @@ void WriteFiles(const std::filesystem::path& root, std::span<const GeneratedFile
   }
 }
 
-void PublishGeneratedTree(std::filesystem::path destination, std::span<const GeneratedFile> files,
+void PublishGeneratedTree(const std::filesystem::path& destination, std::span<const GeneratedFile> files,
                           std::vector<std::filesystem::path>& created) {
-  const std::filesystem::path parent = destination.parent_path();
-  const std::filesystem::path temporary = TemporaryPath(parent, destination.filename().string());
+  std::filesystem::path publish_root = destination;
+  while (!publish_root.parent_path().empty() && !std::filesystem::exists(publish_root.parent_path())) {
+    publish_root = publish_root.parent_path();
+  }
+  const std::filesystem::path temporary = TemporaryPath(publish_root.parent_path(), publish_root.filename().string());
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
-  WriteFiles(temporary, files);
+  WriteFiles(temporary / destination.lexically_relative(publish_root), files);
 
-  std::filesystem::rename(temporary, destination);
+  std::filesystem::rename(temporary, publish_root);
   cleanup.Commit();
-  created.push_back(std::move(destination));
+  created.push_back(std::move(publish_root));
 }
 
 bool IsAsciiLetter(char character) noexcept {
@@ -802,9 +805,9 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
     WriteFiles(temporary / "examples/preview", PreviewProjectFiles(*library));
     CreateResourceDirectories(temporary / "examples/preview");
     for (const PlatformDriver* platform : library_platforms) {
-      const std::vector<GeneratedFile> library_package = platform->CreateLibraryPackage(*library);
-      if (!library_package.empty()) {
-        WriteFiles(temporary / "platform" / platform->Id(), library_package);
+      const GeneratedTree package = platform->CreateLibraryPackage(*library, temporary);
+      if (!package.files.empty()) {
+        WriteFiles(package.directory, package.files);
       }
     }
     for (const PlatformDriver* platform : application_platforms) {
@@ -832,27 +835,18 @@ void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_
                                                               : project.root / "examples/preview/platform";
   const ProjectTemplateContext shell_context = library == nullptr ? context : PreviewContext(*library);
 
-  struct PlatformTrees {
-    const PlatformDriver* platform;
-    std::vector<GeneratedFile> library_package;
-    std::vector<GeneratedFile> shell;
-    bool publish_library = false;
-    bool publish_shell = false;
-  };
-  std::vector<PlatformTrees> generated;
-  generated.reserve(platforms.size());
+  std::vector<GeneratedTree> generated;
+  generated.reserve(platforms.size() * 2);
   for (const PlatformDriver* platform : platforms) {
-    PlatformTrees trees{
-        platform,
-        library != nullptr ? platform->CreateLibraryPackage(*library) : std::vector<GeneratedFile>{},
-        platform->CreateShell(shell_context),
-    };
-    const std::filesystem::path shell_destination = shell_root / platform->Id();
-    const std::filesystem::path library_destination = project.root / "platform" / platform->Id();
-    trees.publish_library = !trees.library_package.empty() && !std::filesystem::exists(library_destination);
-    trees.publish_shell = !std::filesystem::exists(shell_destination);
-    if (trees.publish_library || trees.publish_shell) {
-      generated.push_back(std::move(trees));
+    if (library != nullptr) {
+      GeneratedTree package = platform->CreateLibraryPackage(*library, project.root);
+      if (!package.files.empty() && !std::filesystem::exists(package.directory)) {
+        generated.push_back(std::move(package));
+      }
+    }
+    std::filesystem::path shell_destination = shell_root / platform->Id();
+    if (!std::filesystem::exists(shell_destination)) {
+      generated.push_back({std::move(shell_destination), platform->CreateShell(shell_context)});
     }
   }
   if (generated.empty()) {
@@ -860,15 +854,10 @@ void AddProjectPlatforms(const Project& project, const ProjectTemplate& project_
   }
 
   std::vector<std::filesystem::path> created;
-  created.reserve(platforms.size() * 2);
+  created.reserve(generated.size());
   try {
-    for (PlatformTrees& trees : generated) {
-      if (trees.publish_library) {
-        PublishGeneratedTree(project.root / "platform" / trees.platform->Id(), trees.library_package, created);
-      }
-      if (trees.publish_shell) {
-        PublishGeneratedTree(shell_root / trees.platform->Id(), trees.shell, created);
-      }
+    for (const GeneratedTree& tree : generated) {
+      PublishGeneratedTree(tree.directory, tree.files, created);
     }
   } catch (...) {
     for (const std::filesystem::path& path : created) {

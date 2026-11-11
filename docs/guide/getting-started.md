@@ -92,6 +92,10 @@ huxerui open ios
 
 Android and iOS commands first resolve the CMake library declarations so Gradle and Xcode can attach their platform packages before compiling. This graph-only configure does not require a host C++ compiler or host HuxerUI binaries. Keep library declarations and aliases available under `HUXERUI_LIBRARY_GRAPH_ONLY`; guard native target configuration and platform dependency discovery with `if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)`. The generated library template already separates these operations. After changing library dependencies, run the CLI build command (or `huxerui open ios`) to refresh platform integration before building directly in the IDE.
 
+A library can call `huxerui_use_library()` on its own CMake target to declare a dependency. Pass `PUBLIC` when the library's public headers use the dependency's types or headers. Keep the declaration available during graph discovery as well as compilation. For iOS, the CLI attaches Swift products from all reachable libraries, and the application core archive includes their CMake static libraries.
+
+An iOS Swift package uses `platform/ios/<Swift product>/`, such as `platform/ios/Camera/` for `HuxerUI::Camera`. When migrating an existing library, move its `Package.swift`, `Sources`, and Swift package resources into the product directory together. The CLI uses the new path when generating the package or attaching it to an app.
+
 ## Application source
 
 The application root is an ordinary function returning `View`.

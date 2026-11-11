@@ -163,7 +163,6 @@ void ExpectJsonKey(std::string_view json, std::size_t& offset, std::string_view 
 }
 
 struct IosLibraryPackage {
-  std::string target;
   std::filesystem::path path;
   std::string product;
 };
@@ -174,10 +173,19 @@ std::string LibraryProductName(std::string_view target) {
     return MakeLibraryProductName(target);
   }
   const std::string_view product = target.substr(separator + 2);
-  if (product.empty()) {
-    throw std::runtime_error("HuxerUI iOS library target has an empty product name: " + std::string(target));
+  if (product.empty() || product == "." || product == ".." || product.find_first_of("/\\") != std::string_view::npos) {
+    throw std::runtime_error("HuxerUI iOS library target has an invalid product name: " + std::string(target));
   }
   return std::string(product);
+}
+
+std::filesystem::path IosLibraryPackageDirectory(const std::filesystem::path& ios_root, std::string_view product) {
+  const std::filesystem::path package = ios_root / product;
+  if (std::filesystem::is_regular_file(ios_root / "Package.swift")) {
+    throw std::runtime_error(
+        "HuxerUI iOS library uses the old Swift package layout. Move the package to: " + package.string());
+  }
+  return package;
 }
 
 std::vector<IosLibraryPackage> ParseIosLibraryPackages(std::string_view json) {
@@ -205,19 +213,22 @@ std::vector<IosLibraryPackage> ParseIosLibraryPackages(std::string_view json) {
     const std::filesystem::path source_root = ParseJsonString(json, offset);
     ExpectJsonCharacter(json, offset, '}');
 
-    const std::filesystem::path package = source_root / "platform/ios";
-    if (std::filesystem::is_directory(package)) {
-      if (!std::filesystem::is_regular_file(package / "Package.swift")) {
-        throw std::runtime_error("HuxerUI iOS library package is missing Package.swift: " + package.string());
-      }
+    const std::filesystem::path ios_root = source_root / "platform/ios";
+    if (std::filesystem::is_directory(ios_root)) {
       std::string product = LibraryProductName(target);
-      if (!targets.insert(target).second) {
-        throw std::runtime_error("HuxerUI iOS library target is duplicated: " + target);
+      std::filesystem::path package = IosLibraryPackageDirectory(ios_root, product);
+      if (std::filesystem::exists(package)) {
+        if (!std::filesystem::is_regular_file(package / "Package.swift")) {
+          throw std::runtime_error("HuxerUI iOS library package is missing Package.swift: " + package.string());
+        }
+        if (!targets.insert(target).second) {
+          throw std::runtime_error("HuxerUI iOS library target is duplicated: " + target);
+        }
+        if (!products.insert(product).second) {
+          throw std::runtime_error("HuxerUI iOS library product is duplicated: " + product);
+        }
+        libraries.push_back({std::move(package), std::move(product)});
       }
-      if (!products.insert(product).second) {
-        throw std::runtime_error("HuxerUI iOS library product is duplicated: " + product);
-      }
-      libraries.push_back({std::move(target), package, std::move(product)});
     }
 
     SkipJsonWhitespace(json, offset);
@@ -348,14 +359,16 @@ public:
     return RenderTemplateTree("platform/ios/app", context);
   }
 
-  std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext& context) const override {
+  GeneratedTree CreateLibraryPackage(const LibraryTemplateContext& context,
+      const std::filesystem::path& library_root) const override {
     const std::string product_name = LibraryProductName(context.public_target);
+    std::filesystem::path package = IosLibraryPackageDirectory(library_root / "platform/ios", product_name);
     const std::array replacements{
         TemplateReplacement{"@LIBRARY_PRODUCT_NAME@", product_name},
     };
     std::vector<GeneratedFile> files = RenderTemplateTree("platform/ios/library", context.project, replacements);
     files.push_back({"Sources/" + product_name + "/" + product_name + ".swift", {}});
-    return files;
+    return {std::move(package), std::move(files)};
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {

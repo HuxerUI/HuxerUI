@@ -225,12 +225,14 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   const std::filesystem::path camera = temporary.Path() / "camera library";
   const std::filesystem::path maps = temporary.Path() / "maps";
   const std::filesystem::path common = temporary.Path() / "common";
+  const std::filesystem::path camera_package = camera / "platform/ios/HuxerUICameraKit";
+  const std::filesystem::path maps_package = maps / "platform/ios/MapView";
   std::filesystem::create_directories(project / ".huxerui/generated");
-  std::filesystem::create_directories(camera / "platform/ios");
-  std::filesystem::create_directories(maps / "platform/ios");
-  std::filesystem::create_directories(common);
-  std::ofstream(camera / "platform/ios/Package.swift") << "// camera\n";
-  std::ofstream(maps / "platform/ios/Package.swift") << "// maps\n";
+  std::filesystem::create_directories(camera_package);
+  std::filesystem::create_directories(maps_package);
+  std::filesystem::create_directories(common / "platform/ios/src");
+  std::ofstream(camera_package / "Package.swift") << "// camera\n";
+  std::ofstream(maps_package / "Package.swift") << "// maps\n";
   std::filesystem::create_directories(project / "platform/ios/Config");
   std::ofstream(project / ".huxerui/generated/libraries.json")
       << "{\n  \"schema\": 1,\n  \"libraries\": [\n"
@@ -257,7 +259,8 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   REQUIRE(manifest.find("HuxerUICameraKit") != std::string::npos);
   REQUIRE(manifest.find("MapView") != std::string::npos);
   REQUIRE(manifest.find("CommonTools") == std::string::npos);
-  REQUIRE(manifest.find(camera.generic_string()) != std::string::npos);
+  REQUIRE(manifest.find(camera_package.generic_string()) != std::string::npos);
+  REQUIRE(manifest.find(maps_package.generic_string()) != std::string::npos);
   REQUIRE(std::filesystem::is_regular_file(integration / "Sources/HuxerUILibraries/HuxerUILibraries.swift"));
   const std::array unchanged_files{
       integration / "Package.swift",
@@ -274,7 +277,7 @@ TEST_CASE("HuxerUICliGeneratesIosLibraryIntegrationFromTheCommonGraph") {
   }
 }
 
-TEST_CASE("HuxerUICliRejectsIncompleteIosLibraryPackages") {
+TEST_CASE("HuxerUICliRejectsIncompleteAndLegacyIosLibraryPackages") {
   TemporaryDirectory temporary;
   const std::filesystem::path project = temporary.Path() / "sample";
   const std::filesystem::path library = temporary.Path() / "camera";
@@ -288,10 +291,20 @@ TEST_CASE("HuxerUICliRejectsIncompleteIosLibraryPackages") {
   const huxerui::cli::PlatformDriver* ios = huxerui::cli::FindPlatformDriver("ios");
   REQUIRE(ios != nullptr);
   const huxerui::cli::PlatformCommandContext context{project, {}, {}, {}, "debug", {}};
-  REQUIRE_THROWS_WITH(
-      ios->UpdateProjectIntegration(context),
-      Catch::Matchers::ContainsSubstring("iOS library package is missing Package.swift")
-  );
+  SECTION("Product directory without a manifest") {
+    std::filesystem::create_directories(library / "platform/ios/CameraKit");
+    REQUIRE_THROWS_WITH(
+        ios->UpdateProjectIntegration(context),
+        Catch::Matchers::ContainsSubstring("iOS library package is missing Package.swift")
+    );
+  }
+  SECTION("Manifest in the old package directory") {
+    std::ofstream(library / "platform/ios/Package.swift") << "// camera\n";
+    REQUIRE_THROWS_WITH(
+        ios->UpdateProjectIntegration(context),
+        Catch::Matchers::ContainsSubstring("Move the package to: " + (library / "platform/ios/CameraKit").string())
+    );
+  }
 }
 
 TEST_CASE("HuxerUICliPreservesIosLocalSettings") {

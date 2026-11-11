@@ -146,8 +146,9 @@ public:
     return files;
   }
 
-  std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext&) const override {
-    return {{"src/.gitkeep", {}}};
+  GeneratedTree CreateLibraryPackage(const LibraryTemplateContext&,
+      const std::filesystem::path& library_root) const override {
+    return {library_root / "platform" / Id(), {{"src/.gitkeep", {}}}};
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {

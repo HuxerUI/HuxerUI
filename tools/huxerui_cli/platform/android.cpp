@@ -276,12 +276,13 @@ public:
     return files;
   }
 
-  std::vector<GeneratedFile> CreateLibraryPackage(const LibraryTemplateContext& context) const override {
+  GeneratedTree CreateLibraryPackage(const LibraryTemplateContext& context,
+      const std::filesystem::path& library_root) const override {
     std::vector<GeneratedFile> files =
         RenderTemplateTree("platform/android/library", context.project, android_template_replacements);
     AppendFiles(files, AndroidWrapperFiles());
     files.push_back({"consumer-rules.pro", {}});
-    return files;
+    return {library_root / "platform" / Id(), std::move(files)};
   }
 
   std::vector<Diagnostic> Diagnose(const std::filesystem::path& shell_root) const override {
