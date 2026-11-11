@@ -290,6 +290,7 @@ View Toolbar(State<DockTree> tree, State<Documents> documents, State<std::size_t
              bool compact) {
   const auto& colors = UseTheme().colors;
   const auto panels = UseMenu();
+  const auto panels_target = UseViewHandle();
   const std::size_t index = active;
   const auto& document = documents->at(index);
   return Row {
@@ -298,8 +299,8 @@ View Toolbar(State<DockTree> tree, State<Documents> documents, State<std::size_t
       Text("Session workspace", TextRole::Label).With(FontSize(11.0F), Foreground(colors.on_surface_variant)),
     }.With(Grow(), Spacing(2.0F)),
     Button("Panels").With(
-        panels.Anchor(), Background(colors.surface_container_high), Foreground(colors.on_surface)
-    ).OnClick([tree, panels, compact] {
+        panels_target, Background(colors.surface_container_high), Foreground(colors.on_surface)
+    ).OnClick([tree, panels, panels_target, compact] {
       const auto panel_item = [tree, compact](const char* id, const char* label, DockPlacement side) {
         return MenuItem(label, [tree, compact, id, side] {
           tree = tree->Contains(id)
@@ -307,7 +308,7 @@ View Toolbar(State<DockTree> tree, State<Documents> documents, State<std::size_t
               : tree->Dock(id, "editor", compact ? DockPlacement::TabAfter : side);
         }).Checked(tree->Contains(id));
       };
-      panels.Show({
+      panels.Show(panels_target, {
           panel_item("project", "Explorer", DockPlacement::Left),
           panel_item("inspector", "Inspector", DockPlacement::Right),
           panel_item("activity", "Activity", DockPlacement::Bottom),

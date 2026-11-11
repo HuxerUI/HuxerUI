@@ -1,6 +1,7 @@
 #include <catch2/catch_amalgamated.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -110,14 +111,31 @@ TEST_CASE("Android semantic frames preserve disabled nodes and their enabled fla
   REQUIRE((enabled.at(49) & 1U) != 0U);
 }
 
-TEST_CASE("Android semantic frames encode PlatformView anchors without changing the protocol version") {
+TEST_CASE("Android semantic frames preserve PlatformView anchors") {
   SemanticNode root;
   root.platform_view_identity = 0x0102030405060708ULL;
 
   const std::vector<std::uint8_t> encoded = EncodeAndroidSemanticFrame({7, 0, {root}});
-  REQUIRE(ReadUint32(encoded, 4) == 1U);
+  REQUIRE(ReadUint32(encoded, 4) == android_semantics_version);
   REQUIRE(encoded.at(32) == 1U);
   REQUIRE(ReadUint64(encoded, 33) == *root.platform_view_identity);
+}
+
+TEST_CASE("Android semantic frames encode both scroll axes", "[scroll2d]") {
+  SemanticNode node;
+  node.role = SemanticRole::Grid;
+  const auto baseline = EncodeAndroidSemanticFrame({1, 0, {node}});
+  node.scroll = ScrollMetrics{Axis::Vertical, 20.0F, 90.0F, 30.0F, 120.0F};
+  node.additional_scroll = ScrollMetrics{Axis::Horizontal, 12.0F, 52.0F, 28.0F, 80.0F};
+  const auto encoded = EncodeAndroidSemanticFrame({1, 0, {node}});
+  REQUIRE(encoded.size() == baseline.size() + 40);
+  const auto mismatch = std::mismatch(baseline.begin(), baseline.end(), encoded.begin());
+  const auto count = static_cast<std::size_t>(mismatch.second - encoded.begin());
+  REQUIRE(encoded.at(count) == 2);
+  REQUIRE(ReadUint32(encoded, count + 1) == 1U);
+  REQUIRE(std::bit_cast<float>(ReadUint32(encoded, count + 5)) == 20.0F);
+  REQUIRE(ReadUint32(encoded, count + 21) == 0U);
+  REQUIRE(std::bit_cast<float>(ReadUint32(encoded, count + 25)) == 12.0F);
 }
 
 TEST_CASE("Android semantic frame encoding rejects identities outside jint") {

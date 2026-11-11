@@ -1,6 +1,7 @@
 #pragma once
 
 #include <any>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -35,6 +36,7 @@
 
 namespace huxerui::detail {
 
+struct AnchoredPresentation;
 class AppResources;
 struct FrozenScene;
 struct WindowState;
@@ -224,8 +226,8 @@ struct LayerEntrySnapshot {
   std::uint64_t revision = 0;
   bool exiting = false;
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
-  std::optional<std::uint64_t> retained_focus_identity;
-  std::optional<FocusRequester> initial_focus;
+  std::optional<ViewHandle> retained_focus_target;
+  std::optional<ViewHandle> initial_focus;
 
   bool operator==(const LayerEntrySnapshot&) const = default;
 };
@@ -244,11 +246,12 @@ struct LayerEntry {
   std::shared_ptr<const Environment> environment;
   // Active menu layers share this token so one logical menu chain remains one semantic modal region.
   std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group;
-  std::optional<std::uint64_t> retained_focus_identity;
-  std::optional<FocusRequester> initial_focus;
+  std::optional<ViewHandle> retained_focus_target;
+  std::optional<ViewHandle> initial_focus;
   // Placement is non-null for every attached entry and may be updated without rebuilding its content scope.
   std::shared_ptr<LayerPlacement> placement;
   std::shared_ptr<LayerTransitionState> transition;
+  std::shared_ptr<AnchoredPresentation> anchored_presentation{};
 };
 
 struct SceneTransitionRequest {
@@ -277,16 +280,6 @@ private:
   std::optional<Point> previous_;
 };
 
-struct SceneTransitionAnchorState {
-  void Mount();
-  void Unmount() noexcept;
-  void UpdateBounds(Rect bounds) noexcept;
-  [[nodiscard]] std::optional<Point> Center() const noexcept;
-
-  std::optional<Rect> bounds;
-  bool mounted = false;
-};
-
 class SceneTransitionService {
 public:
   explicit SceneTransitionService(UiWindow::State& runtime_state) : runtime_state_(&runtime_state) {}
@@ -294,7 +287,7 @@ public:
   SceneTransitionService(const SceneTransitionService&) = delete;
   SceneTransitionService& operator=(const SceneTransitionService&) = delete;
 
-  [[nodiscard]] std::shared_ptr<SceneTransitionAnchorState> CreateAnchor() const;
+  Point ViewOrigin(const ViewHandle& target) const;
   [[nodiscard]] std::optional<Point> CurrentInteractionOrigin() const noexcept;
   void Run(SceneTransitionRequest request, std::function<void()> mutation, bool reduced_motion);
   [[nodiscard]] bool IsActive() const noexcept;
@@ -332,9 +325,11 @@ public:
 
   [[nodiscard]] std::size_t ItemCount() const noexcept;
   MountedNode& Item(std::size_t index);
+  std::array<std::optional<float>, 2> ScrollCorrections(const VirtualLayoutResult& result) const;
   void CommitRealization(const std::vector<VirtualLayoutResult::Placement>& placements);
 
 private:
+  MountedNode& RealizeItem(std::size_t index);
   VirtualItemState CaptureItemState(MountedNode& mounted);
   void RestoreItemState(MountedNode& mounted, VirtualItemState& state);
   void SaveUnmounted(std::unique_ptr<MountedNode> node, std::size_t index);
@@ -511,6 +506,7 @@ struct LayerController::State {
 struct UiWindow::State {
   State(UiWindow& owner, const AppOptions& application, ViewFactory content, const WindowOptions& options);
   ~State();
+  [[noreturn]] void PropagateCompositionFailure(const char* operation, std::optional<std::size_t> item = std::nullopt);
 
   UiWindow& owner_;
   std::shared_ptr<detail::ApplicationRuntimeState> application_;
@@ -519,6 +515,7 @@ struct UiWindow::State {
   bool initialized_ = false;
   bool retired_ = false;
   bool closing_ = false;
+  bool retiring_content_ = false;
   ViewFactory root_factory_;
   ViewportBreakpoints viewport_breakpoints_;
   std::shared_ptr<detail::WindowState> window_;
@@ -557,6 +554,7 @@ struct UiWindow::State {
   bool extension_tree_dirty_ = true;
   bool scroll_motion_active_ = false;
   bool building_frame_ = false;
+  bool present_composition_errors_ = false;
   bool frame_requested_ = false;
   double frame_request_deadline_ = 0.0;
   std::optional<double> previous_frame_timestamp_;
@@ -565,6 +563,7 @@ struct UiWindow::State {
   std::optional<Point> current_interaction_origin_;
   std::unique_ptr<detail::FileDropReceiver> file_drop_;
   std::optional<std::uint64_t> focused_node_identity_;
+  bool focus_reveal_pending_ = false;
   bool focus_visible_ = false;
   bool focus_change_in_progress_ = false;
   std::optional<std::uint64_t> keyboard_activation_identity_;

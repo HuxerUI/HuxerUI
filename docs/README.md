@@ -23,6 +23,7 @@ User guides describe the current public SDK, development guides cover this repos
 
 - [Building HuxerUI](development/building.md): configure, build, test, and run repository examples.
 - [SDK Packaging](development/sdk-packaging.md): produce and validate release-ready SDK archives.
+- Find the private vulnerability reporting channel in the [Security Policy](../SECURITY.md).
 
 ## Design reference
 

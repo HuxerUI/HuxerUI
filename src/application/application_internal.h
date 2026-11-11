@@ -31,6 +31,30 @@ class AppResources;
 class HttpTransport;
 class HttpOperation;
 
+enum class ClipboardKind { Text, RichText, Image, Files };
+
+inline constexpr std::size_t clipboard_max_text_bytes = 16 * 1024 * 1024;
+inline constexpr std::size_t clipboard_max_image_bytes = 64 * 1024 * 1024;
+inline constexpr std::size_t clipboard_max_image_pixels = 32 * 1024 * 1024;
+inline constexpr std::size_t clipboard_max_files = 4096;
+
+inline Task<IoResult<ClipboardContent>> ClipboardResult(IoResult<ClipboardContent> result) {
+  co_return std::move(result);
+}
+
+inline Task<bool> ClipboardResult(bool accepted) {
+  co_return accepted;
+}
+
+IoResult<ClipboardContent> ClipboardFailure(IoErrorCode code);
+IoResult<ClipboardContent> ClipboardImage(Bytes bytes);
+bool ClipboardImageSizeAllowed(std::size_t width, std::size_t height) noexcept;
+std::optional<std::vector<File>> ClipboardFilePaths(const ClipboardContent& content);
+
+// The fragment codec only handles character styles and links represented by AttributedText.
+std::string ClipboardHtml(const AttributedText& text);
+IoResult<ClipboardContent> ReadClipboardHtml(std::string_view fragment);
+
 /// Window identity and observable resource overrides retained independently of the native window.
 /// Callbacks capture this state weakly. Retirement clears ui_window before native facilities disappear, so keeping
 /// an Environment or task alive cannot silently select a replacement attachment.
@@ -183,7 +207,8 @@ public:
 
   virtual std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) = 0;
   virtual std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) = 0;
-  virtual std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) = 0;
+  virtual std::function<void()> OpenSettings(Permission permission, PermissionSettingsTarget target,
+                                             PermissionSettingsCompletion completion) = 0;
 };
 
 class PermissionController final {
@@ -200,7 +225,7 @@ public:
 
   Task<PermissionStatus> Check(Permission permission) const;
   Task<PermissionStatus> Request(Permission permission) const;
-  Task<bool> OpenSettings(Permission permission) const;
+  Task<bool> OpenSettings(Permission permission, PermissionSettingsTarget target) const;
   void Disconnect() noexcept;
 
 private:
@@ -292,7 +317,7 @@ public:
   [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(ApplicationLifecycleState)> handler);
   Task<PermissionStatus> CheckPermission(Permission permission) const;
   Task<PermissionStatus> RequestPermission(Permission permission) const;
-  Task<bool> OpenPermissionSettings(Permission permission) const;
+  Task<bool> OpenPermissionSettings(Permission permission, PermissionSettingsTarget target) const;
   [[nodiscard]] const std::shared_ptr<LocalNotificationService>& LocalNotifications() const noexcept;
   [[nodiscard]] const std::shared_ptr<SystemTrayService>& SystemTray() const noexcept;
   [[nodiscard]] const std::shared_ptr<huxerui::Clipboard>& Clipboard() const noexcept;

@@ -12,6 +12,7 @@
 
 #include "uikit_platform_view.h"
 #include "macros_internal.h"
+#include "runtime/semantics_internal.h"
 
 namespace huxerui::detail {
 class UIKitAccessibility;
@@ -330,6 +331,7 @@ struct UIKitAccessibility::State {
   __strong NSArray* root_elements = @[];
   __strong NSArray<UIView*>* bridged_views = @[];
   std::optional<SemanticNodeId> pending_scroll;
+  Axis pending_scroll_axis = Axis::Vertical;
   float pending_scroll_offset = 0.0F;
 };
 
@@ -579,8 +581,8 @@ void UIKitAccessibility::Commit(std::shared_ptr<const SemanticFrame> frame, bool
 
   if (state_->pending_scroll.has_value()) {
     const SemanticNode* scrolled = state_->Node(*state_->pending_scroll);
-    if (scrolled != nullptr && scrolled->scroll.has_value() &&
-        scrolled->scroll->offset != state_->pending_scroll_offset) {
+    const auto* metrics = scrolled ? FindScrollMetrics(*scrolled, state_->pending_scroll_axis) : nullptr;
+    if (metrics && metrics->offset != state_->pending_scroll_offset) {
       UIAccessibilityPostNotification(UIAccessibilityPageScrolledNotification, nil);
     }
     state_->pending_scroll.reset();
@@ -706,29 +708,31 @@ bool UIKitAccessibility::PerformScroll(SemanticNodeId id, UIAccessibilityScrollD
   }
 
   const SemanticNode* node = state_->Node(id);
-  float sign = 0.0F;
-  while (node != nullptr) {
-    if (node->enabled && node->scroll.has_value() && HasAction(*node, SemanticActionKind::Scroll)) {
-      sign = ScrollSign(direction, node->scroll->axis);
-      if (sign != 0.0F) {
-        break;
+  while (node) {
+    if (node->enabled && HasAction(*node, SemanticActionKind::Scroll)) {
+      for (const auto* scroll : {&node->scroll, &node->additional_scroll}) {
+        if (!*scroll || (*scroll)->maximum_offset <= 0.0F) {
+          continue;
+        }
+        const auto& metrics = **scroll;
+        const float sign = ScrollSign(direction, metrics.axis);
+        if (sign == 0.0F) {
+          continue;
+        }
+        const float delta = std::max(48.0F, metrics.viewport_extent * 0.8F) * sign;
+        const Point offset = metrics.axis == Axis::Horizontal ? Point{delta, 0.0F} : Point{0.0F, delta};
+        if (!state_->ui_window->PerformSemanticAction(node->id, {SemanticActionKind::Scroll, offset})) {
+          return false;
+        }
+        state_->pending_scroll = node->id;
+        state_->pending_scroll_axis = metrics.axis;
+        state_->pending_scroll_offset = metrics.offset;
+        return true;
       }
     }
-    node = node->parent.has_value() ? state_->Node(*node->parent) : nullptr;
+    node = node->parent ? state_->Node(*node->parent) : nullptr;
   }
-  if (node == nullptr) {
-    return false;
-  }
-
-  const bool horizontal = node->scroll->axis == Axis::Horizontal;
-  const float delta = std::max(48.0F, node->scroll->viewport_extent * 0.8F) * sign;
-  const Point offset = horizontal ? Point{delta, 0.0F} : Point{0.0F, delta};
-  if (!state_->ui_window->PerformSemanticAction(node->id, {SemanticActionKind::Scroll, offset})) {
-    return false;
-  }
-  state_->pending_scroll = node->id;
-  state_->pending_scroll_offset = node->scroll->offset;
-  return true;
+  return false;
 }
 
 void UIKitAccessibility::AccessibilityFocusChanged(SemanticNodeId id) {

@@ -143,7 +143,7 @@ Use `AnimateTo` with `Opacity`, `Offset`, `Scale`, `Rotation`, or `Transition` f
 
 Honor `FrameInfo::reduced_motion` or the resolved environment motion policy. Do not drive animation through state writes on every frame.
 
-`UseSceneTransition()` accepts TransitionSpec for built-in or custom effects around an application mutation. Attach its anchor modifier and use `Run` when a circular reveal belongs to stable View geometry, or use `RunAt` with an explicit window-logical point.
+`UseSceneTransition()` accepts TransitionSpec for built-in or custom effects around an application mutation. Pass a [bound ViewHandle](modifiers.md#mounted-view-targets) to `RunFromView` to capture its presentation center before the mutation. Use `RunAt` for an explicit window-logical point.
 Inside a synchronous Click, component event, Menu action, keyboard activation, or accessibility activation, `RunFromCurrentInteraction` uses the exact pointer position or the activated View center without changing semantic event signatures:
 
 ```cpp
@@ -178,11 +178,11 @@ Local scope input is blocked during playback; keep retarget controls outside it.
 - `UseMenu()` anchors menu entries with enabled, checked, nested, icon, and icon-tint state.
 - `Tooltip` is a modifier for hover/long-press help.
 
-Set `DialogOptions::initial_focus` to a [FocusRequester](modifiers.md#programmatic-focus) bound inside the Dialog. `Show()` captures it for one attempt before ordinary first-eligible focus; unavailable targets fall back without later retries. Content updates do not reapply it, and closing a nested Dialog restores the current prior focus through the existing modal behavior.
+Set `DialogOptions::initial_focus` to a [ViewHandle](modifiers.md#mounted-view-targets) bound inside the Dialog. `Show()` captures it for one attempt. An unavailable target falls back to the first eligible control without a later retry. Both targets inherit the window's current focus visibility. Content updates do not reapply the initial target, and closing a nested Dialog restores the previously focused View.
 
 Layer content is outside the ordinary application subtree but retains its captured live Environment. Open layers follow theme changes without replacing their identifiers, content state, focus, or timeout progress; after a provider unmounts, retained layers keep its last values. Keep modal dismissal and owner state explicit, and do not retain a presentation context after dismissal. Presentation handles belong to their window and cannot present from an application task with no live window context.
 Set `PopupOptions::retain_anchor_focus` only when pointer interaction with non-focusable popup content must keep an editor or other keyboard session on its mounted anchor; focusable popup descendants still receive focus.
 
-With `popup.Anchor()` attached to a View, `Show` follows that View's full bounds, while `ShowAtAnchor(local_bounds, ...)` follows a node-local rectangle through layout, scrolling, and presentation transforms. Use `UpdateAnchor(id, local_bounds)` to move the latter without replacing its layer or content; false means a stale id or another anchor mode. `ShowAt(window_point, ...)` remains a fixed window-DIP position. Choose the anchor mode directly instead of manually tracking transforms or dismissing and recreating a popup to reposition it.
+For Popup and Menu, `Show(target, ...)` follows the bound View's full bounds through layout, scrolling, and presentation transforms. Popup also supports `ShowAtAnchor(target, local_bounds, ...)` for a node-local rectangle. Use `UpdateAnchor(id, local_bounds)` to move that rectangle in place. It returns false for a stale id or another anchor mode. `ShowAt(window_point, ...)` uses a fixed window-DIP position.
 
 Prefer theme style overrides (`ToastStyle`, `DialogStyle`, `BottomSheetStyle`, `MenuStyle`, `TooltipStyle`) over copying built-in presentation implementations.

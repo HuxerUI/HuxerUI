@@ -15,36 +15,73 @@
 
 namespace huxerui {
 
-/// Identifies an application-level runtime permission with shared cross-platform semantics.
+/// Identifies the access an application or library can check or request.
+/// The application declares the required permissions and privacy descriptions in its package.
+/// Each host implements the permissions it can check, request, or manage through settings.
 enum class Permission {
   /// Access to cameras used for still-image or video capture.
   Camera,
   /// Access to microphones used for audio capture.
   Microphone,
+  /// Location access while the application is in use. Approximate access satisfies this permission.
+  Location,
+  /// Full-accuracy location access while the application is in use. An approximate grant reports Limited.
+  PreciseLocation,
+  /// Permission to receive location beyond foreground use. Location precision and background execution are separate.
+  BackgroundLocation,
+  /// Application-level notification authorization, independent of individual channels and delivery configuration.
+  Notifications,
+  /// Access to read contacts from the contact store. Access to selected contacts reports Limited.
+  ContactsRead,
+  /// Access to add events to the calendar. This permission is satisfied by an existing read-write grant.
+  CalendarAdd,
+  /// Access to read and write events in the calendar.
+  CalendarReadWrite,
+  /// Access to read photos in the media library. Access to selected items reports Limited.
+  PhotosRead,
+  /// Access to read videos in the media library. Access to selected items reports Limited.
+  VideosRead,
+  /// Access to add assets to the photo library. Browsing existing assets has its own permission.
+  PhotoLibraryAdd,
+  /// Access to discover nearby Bluetooth devices.
+  BluetoothScan,
+  /// Access to communicate with Bluetooth devices.
+  BluetoothConnect,
 };
 
 /// Describes the current authorization state of an application capability.
 ///
-/// Each capability returns only states supported by its native authorization model. A grant describes current access
-/// and does not promise indefinite authorization. Notification authorization also uses this type.
+/// A capability returns only the states its host can distinguish. Grants describe current access and may change.
+/// The local notification service also uses this type.
 enum class PermissionStatus {
-  /// The platform has not yet asked the user to decide.
+  /// The user has not made an authorization decision.
   NotDetermined,
   /// The application currently has access.
   Granted,
-  /// Access is currently denied, but the platform does not reliably expose whether another prompt is possible.
+  /// Access is currently denied. Another prompt may be possible.
   Denied,
-  /// Access is denied and the platform explicitly reports that an in-application request cannot prompt again.
+  /// The application cannot prompt again. The user may still change access in Settings.
   PermanentlyDenied,
-  /// Access is blocked by system, parental, or administrative policy.
+  /// A policy such as parental controls or device management restricts access.
   Restricted,
-  /// The host, platform API, or native application declaration cannot provide this permission capability.
+  /// The host does not support the permission, or a required application declaration is missing.
   Unavailable,
-  /// Trial access is granted with reduced behavior, such as quiet notification delivery.
+  /// Provisional access is granted with reduced behavior, such as quiet notification delivery.
   ///
-  /// Returned only when the native service explicitly reports provisional authorization. This does not describe
-  /// a fixed expiration time; applications may request ordinary authorization when appropriate.
+  /// Applications can request ordinary authorization when appropriate. The duration depends on the service.
   Provisional,
+  /// The application has access to a smaller scope, such as selected items or approximate location.
+  Limited,
+  /// The switch for this capability is off across applications. The application may still hold a grant.
+  SystemDisabled,
+};
+
+/// Selects where the user can manage the requested permission in Settings.
+enum class PermissionSettingsTarget {
+  /// The page where the user can manage this application's access. The destination may also list other applications.
+  Application,
+  /// The system-wide settings page for the requested capability, when available.
+  System,
 };
 
 class ApplicationHandle;

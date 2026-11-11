@@ -55,8 +55,23 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
 
 } // namespace detail
 
+PlatformClipboard* detail::TextInteraction::FindSynchronousTextClipboard() const noexcept {
+  const auto& application = runtime_state_.application_;
+  PlatformClipboard* clipboard = application && application->owner ? application->owner->Clipboard() : nullptr;
+  return clipboard && clipboard->SupportsSynchronousText() ? clipboard : nullptr;
+}
+
+bool detail::TextInteraction::ShouldConsumeTextEditingShortcut(TextEditingAction action) const {
+  if (HasSession()) {
+    // A synchronous clipboard shortcut belongs to the editor even when its action is blocked.
+    return action == TextEditingAction::SelectAll || FindSynchronousTextClipboard() != nullptr;
+  }
+  return CanPerformTextEditingAction(action);
+}
+
 // An active editor owns clipboard actions and secure-text policy before any enclosing read-only selection area.
 bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
+  PlatformClipboard* clipboard = FindSynchronousTextClipboard();
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
@@ -64,24 +79,18 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
     detail::MountedNode* focused =
         detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    return client && client->CanPerformTextEditingAction(action, runtime_state_.application_->owner->Clipboard());
+    return client && client->CanPerformTextEditingAction(action, clipboard);
   }
   const detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
   switch (action) {
   case TextEditingAction::Cut:
     return !session.configuration.read_only && !session.configuration.secure && !selection.IsCollapsed() &&
-           runtime_state_.application_->owner->Clipboard() != nullptr;
+           clipboard != nullptr;
   case TextEditingAction::Copy:
-    return !session.configuration.secure && !selection.IsCollapsed() &&
-           runtime_state_.application_->owner->Clipboard() != nullptr;
-  case TextEditingAction::Paste: {
-    if (session.configuration.read_only) {
-      return false;
-    }
-    PlatformClipboard* clipboard = runtime_state_.application_->owner->Clipboard();
-    return clipboard != nullptr && clipboard->ReadText().has_value();
-  }
+    return !session.configuration.secure && !selection.IsCollapsed() && clipboard != nullptr;
+  case TextEditingAction::Paste:
+    return !session.configuration.read_only && clipboard && clipboard->MayHaveContent(ClipboardKind::Text);
   case TextEditingAction::SelectAll: {
     const TextInputContext context = session.client->QueryTextInputContext(session.session_id, 0, 0);
     return context.result_code == TextInputResultCode::Ok && context.total_length > 0 &&
@@ -92,6 +101,7 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
 }
 
 bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action) {
+  PlatformClipboard* clipboard = FindSynchronousTextClipboard();
   if (!text_input_session_.has_value()) {
     if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
       return false;
@@ -99,7 +109,7 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
     detail::MountedNode* focused =
         detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
     TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    if (!client || !client->PerformTextEditingAction(action, runtime_state_.application_->owner->Clipboard())) {
+    if (!client || !client->PerformTextEditingAction(action, clipboard)) {
       return false;
     }
     focused->foreground_paint_dirty = true;
@@ -107,8 +117,6 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
   }
   detail::ActiveTextInputSession& session = *text_input_session_;
   const TextRange selection = session.state.selection.Range();
-  PlatformClipboard* clipboard = runtime_state_.application_->owner->Clipboard();
-
   if (action == TextEditingAction::Copy || action == TextEditingAction::Cut) {
     if (!CanPerformTextEditingAction(action) || clipboard == nullptr) {
       return false;
@@ -269,26 +277,30 @@ void detail::TextInteraction::AdvanceTextSelectionDrag(const FrameInfo& frame) {
         continue;
       }
       const Rect viewport = detail::ScrollViewport(node);
-      const bool vertical = detail::ScrollAxis(node) == Axis::Vertical;
-      const float start = vertical ? viewport.y : viewport.x;
-      const float extent = vertical ? viewport.height : viewport.width;
-      const float value = vertical ? local->y : local->x;
-      const float edge = std::min(32.0F, extent * 0.5F);
-      if (edge <= 0.0F) {
-        continue;
+      bool moved = false;
+      for (Axis axis : node.scroll_state->Axes()) {
+        const bool vertical = axis == Axis::Vertical;
+        const float start = vertical ? viewport.y : viewport.x;
+        const float extent = vertical ? viewport.height : viewport.width;
+        const float value = vertical ? local->y : local->x;
+        const float edge = std::min(32.0F, extent * 0.5F);
+        if (edge <= 0.0F) {
+          continue;
+        }
+        const float intensity = value < start + edge ? -std::clamp((start + edge - value) / edge, 0.0F, 1.0F)
+                                : value > start + extent - edge
+                                    ? std::clamp((value - start - extent + edge) / edge, 0.0F, 1.0F) : 0.0F;
+        if (!detail::CanScrollNode(node, axis, intensity)) {
+          continue;
+        }
+        if (frame.delta_time <= 0.0) {
+          runtime_state_.owner_.RequestFrame();
+          return;
+        }
+        const float delta = intensity * 600.0F * static_cast<float>(frame.delta_time);
+        moved |= detail::ScrollNodeBy(node, axis, delta, ScrollSource::FocusReveal) != 0.0F;
       }
-      const float intensity = value < start + edge ? -std::clamp((start + edge - value) / edge, 0.0F, 1.0F)
-                              : value > start + extent - edge
-                                  ? std::clamp((value - start - extent + edge) / edge, 0.0F, 1.0F) : 0.0F;
-      if (intensity == 0.0F || !detail::CanScrollNode(node, intensity)) {
-        continue;
-      }
-      if (frame.delta_time <= 0.0) {
-        runtime_state_.owner_.RequestFrame();
-        return;
-      }
-      const float delta = intensity * 600.0F * static_cast<float>(frame.delta_time);
-      if (detail::ScrollNodeBy(node, delta, ScrollSource::FocusReveal) != 0.0F) {
+      if (moved) {
         selection_scroll_pending_ = true;
         runtime_state_.owner_.RequestFrame();
         return;

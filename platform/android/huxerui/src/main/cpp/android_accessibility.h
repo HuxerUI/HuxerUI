@@ -8,7 +8,7 @@
 namespace huxerui::detail {
 
 inline constexpr std::uint32_t android_semantics_magic = 0x4D535848U;
-inline constexpr std::uint32_t android_semantics_version = 1U;
+inline constexpr std::uint32_t android_semantics_version = 2U;
 
 enum class AndroidSemanticAction : std::int32_t {
   Activate = 0,

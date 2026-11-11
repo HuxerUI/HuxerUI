@@ -50,20 +50,6 @@ std::shared_ptr<TextInputClient> FindTextInputClient(detail::MountedNode& node) 
   return result;
 }
 
-bool FindNodePath(detail::MountedNode& node, std::uint64_t identity, std::vector<detail::MountedNode*>& path) {
-  path.push_back(&node);
-  if (node.identity == identity) {
-    return true;
-  }
-  for (const std::unique_ptr<detail::MountedNode>& child : node.children) {
-    if (FindNodePath(*child, identity, path)) {
-      return true;
-    }
-  }
-  path.pop_back();
-  return false;
-}
-
 bool IsKnown(TextAffinity affinity) noexcept {
   return affinity == TextAffinity::Upstream || affinity == TextAffinity::Downstream;
 }

@@ -36,7 +36,8 @@ ResolveWin32AppDirectories(std::wstring_view executable_path, std::wstring_view 
 [[nodiscard]] AppDirectories
 CreateWin32AppDirectories(std::wstring_view executable_path, std::wstring_view local_app_data);
 [[nodiscard]] AppDirectories CreateWin32AppDirectories();
-[[nodiscard]] std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path, bool writable = true);
+[[nodiscard]] std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path,
+                                                                bool writable = true, bool directory = false);
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateWin32FilePickerTransport(std::function<HWND()> window_provider, UiThreadDispatcher dispatch_to_ui_thread);
 

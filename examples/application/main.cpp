@@ -91,6 +91,10 @@ std::string DescribePermissionStatus(PermissionStatus status) {
     return "provisional";
   case PermissionStatus::Unavailable:
     return "unavailable";
+  case PermissionStatus::Limited:
+    return "limited";
+  case PermissionStatus::SystemDisabled:
+    return "location services off";
   }
   return "unknown";
 }
@@ -154,30 +158,46 @@ View TextFilePreviewCard(const TextFilePreview& preview) {
 
 [[huxerui::composable]]
 View PermissionCard(const ApplicationHandle& application, TaskScope tasks) {
-  auto status = UseState(std::string{"not checked"});
+  auto status = UseState(std::optional<PermissionStatus>{});
+  auto settings_unavailable = UseState(false);
+  const auto refresh = [=] {
+    tasks.Launch([=]() -> Task<void> {
+      status = co_await application.CheckPermissionAsync(Permission::Location);
+    });
+  };
+  application.OnLifecycleChanged([=](ApplicationLifecycleState state) {
+    if (state == ApplicationLifecycleState::Active && status.Get().has_value()) {
+      refresh();
+    }
+  });
+  const auto current = status.Get();
   const ThemeSpec& theme = UseTheme();
   return Column {
-    Text("Camera permission", TextRole::Title),
-    Text::Format(TextRole::Label, "Camera: {}", status).With(Foreground(theme.colors.primary)),
-    Text("The native application shell owns privacy declarations and final permission policy."),
-    Button("Check camera").OnClick([=] {
+    Text("Location permission", TextRole::Title),
+    Text::Format(TextRole::Label, "Location: {}", current ? DescribePermissionStatus(*current) : "not checked")
+        .With(Foreground(theme.colors.primary)),
+    Button("Check location").OnClick(refresh),
+    Button("Request location").OnClick([=] {
       tasks.Launch([=]() -> Task<void> {
-        status = DescribePermissionStatus(co_await application.CheckPermissionAsync(Permission::Camera));
+        status = co_await application.RequestPermissionAsync(Permission::Location);
       });
     }),
-    Button("Request camera").OnClick([=] {
+    Button("Open location settings").OnClick([=] {
       tasks.Launch([=]() -> Task<void> {
-        status = DescribePermissionStatus(co_await application.RequestPermissionAsync(Permission::Camera));
-      });
-    }),
-    Button("Open permission settings").OnClick([=] {
-      tasks.Launch([=]() -> Task<void> {
-        const bool opened = co_await application.OpenPermissionSettingsAsync(Permission::Camera);
-        if (!opened) {
-          status = "settings unavailable";
+        const auto location = co_await application.CheckPermissionAsync(Permission::Location);
+        status = location;
+        const auto target = location == PermissionStatus::SystemDisabled
+                                ? PermissionSettingsTarget::System
+                                : PermissionSettingsTarget::Application;
+        bool opened = co_await application.OpenPermissionSettingsAsync(Permission::Location, target);
+        if (!opened && target == PermissionSettingsTarget::Application) {
+          opened = co_await application.OpenPermissionSettingsAsync(
+              Permission::Location, PermissionSettingsTarget::System);
         }
+        settings_unavailable = !opened;
       });
     }),
+    settings_unavailable.Get() ? View(Text("Open the location settings manually.")) : View{},
   }.With(
       Padding(theme.spacing.large),
       Spacing(theme.spacing.small),

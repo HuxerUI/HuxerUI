@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -98,6 +99,12 @@ PermissionStatus ToPermissionStatus(jint status) noexcept {
     return PermissionStatus::PermanentlyDenied;
   case 4:
     return PermissionStatus::Restricted;
+  case 6:
+    return PermissionStatus::Provisional;
+  case 7:
+    return PermissionStatus::Limited;
+  case 8:
+    return PermissionStatus::SystemDisabled;
   case 5:
   default:
     return PermissionStatus::Unavailable;
@@ -169,7 +176,7 @@ public:
     check_ = environment->GetMethodID(view_class_, "checkPermission", "(I)I");
     presentation_identity_ = environment->GetMethodID(view_class_, "presentationIdentity", "(Lorg/huxerui/HuxerUIView;)J");
     request_ = environment->GetMethodID(view_class_, "requestPermission", "(JILorg/huxerui/HuxerUIView;)V");
-    open_settings_ = environment->GetMethodID(view_class_, "openPermissionSettings", "(ILorg/huxerui/HuxerUIView;)Z");
+    open_settings_ = environment->GetMethodID(view_class_, "openPermissionSettings", "(IILorg/huxerui/HuxerUIView;)Z");
     if (view_class_ == nullptr || presentation_identity_ == nullptr || check_ == nullptr || request_ == nullptr || open_settings_ == nullptr ||
         environment->ExceptionCheck()) {
       ClearJavaException(environment);
@@ -229,7 +236,8 @@ public:
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission permission, PermissionSettingsCompletion completion) override {
+  std::function<void()> OpenSettings(Permission permission, PermissionSettingsTarget target,
+                                    PermissionSettingsCompletion completion) override {
     JniEnvironment attached(virtual_machine_);
     JNIEnv* environment = attached.Get();
     if (environment == nullptr || view_ == nullptr) {
@@ -237,7 +245,7 @@ public:
       return {};
     }
     const bool opened =
-        environment->CallBooleanMethod(view_, open_settings_, static_cast<jint>(permission),
+        environment->CallBooleanMethod(view_, open_settings_, static_cast<jint>(permission), static_cast<jint>(target),
                                        CurrentAndroidPresentationView()) == JNI_TRUE;
     if (environment->ExceptionCheck()) {
       ClearJavaException(environment);
@@ -347,6 +355,77 @@ std::optional<ApplicationActivation> DecodeAndroidApplicationActivation(
       CreateAndroidFileReference(virtual_machine, environment, context, std::move(metadata), *decoded_value)
   );
   return ApplicationActivation{FileActivation{std::move(files)}};
+}
+
+Task<IoResult<ClipboardContent>>
+ReadAndroidClipboardAsync(JavaVM* vm, JNIEnv* environment, jobject context, jobject capture, ClipboardKind kind) {
+  auto retained = std::shared_ptr<std::remove_pointer_t<jobject>>(
+      environment->NewGlobalRef(capture), [vm](jobject object) {
+        JniEnvironment attached(vm);
+        if (JNIEnv* current = attached.Get()) current->DeleteGlobalRef(object);
+      });
+  if (!retained) return ClipboardResult(ClipboardFailure(IoErrorCode::Io));
+  auto decode_files = kind == ClipboardKind::Files
+      ? CreateAndroidFileReferenceDecoder(vm, environment, context) : AndroidFileReferenceDecoder{};
+  return RunWorker([vm, retained = std::move(retained), decode_files = std::move(decode_files)] {
+    JniEnvironment attached(vm);
+    JNIEnv* environment = attached.Get();
+    if (!environment) return ClipboardFailure(IoErrorCode::Io);
+    const jobject capture = retained.get();
+    android::LocalRef<jclass> type(environment, environment->GetObjectClass(capture));
+    const jmethodID load = type ? environment->GetMethodID(type.Get(), "load", "()V") : nullptr;
+    if (!load) {
+      ClearJavaException(environment);
+      return ClipboardFailure(IoErrorCode::Io);
+    }
+    environment->CallVoidMethod(capture, load);
+    if (environment->ExceptionCheck()) {
+      ClearJavaException(environment);
+      return ClipboardFailure(IoErrorCode::Io);
+    }
+    const jfieldID status_field = environment->GetFieldID(type.Get(), "status", "I");
+    const jfieldID kind_field = status_field ? environment->GetFieldID(type.Get(), "kind", "I") : nullptr;
+    if (!status_field || !kind_field) {
+      ClearJavaException(environment);
+      return ClipboardFailure(IoErrorCode::Io);
+    }
+    switch (environment->GetIntField(capture, status_field)) {
+    case 0: break;
+    case 1: return ClipboardFailure(IoErrorCode::NotFound);
+    case 2: return ClipboardFailure(IoErrorCode::Unsupported);
+    case 3: return ClipboardFailure(IoErrorCode::PermissionDenied);
+    case 4: return ClipboardFailure(IoErrorCode::TooLarge);
+    default: return ClipboardFailure(IoErrorCode::Io);
+    }
+    const auto kind = static_cast<ClipboardKind>(environment->GetIntField(capture, kind_field));
+    try {
+      if (kind == ClipboardKind::Files) {
+        const jfieldID field = environment->GetFieldID(
+            type.Get(), "files", "[Lorg/huxerui/HuxerUIFileReference$Metadata;");
+        android::LocalRef<jobjectArray> files(environment, field
+            ? static_cast<jobjectArray>(environment->GetObjectField(capture, field)) : nullptr);
+        if (decode_files && files && !environment->ExceptionCheck()) {
+          auto references = decode_files(environment, files.Get());
+          return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(references)});
+        }
+      } else {
+        const jfieldID field = environment->GetFieldID(type.Get(), "bytes", "[B");
+        android::LocalRef<jbyteArray> bytes(environment, field
+            ? static_cast<jbyteArray>(environment->GetObjectField(capture, field)) : nullptr);
+        if (bytes && !environment->ExceptionCheck()) {
+          auto data = android::JavaByteArrayToBytes(environment, bytes.Get());
+          if (kind == ClipboardKind::Image) return ClipboardImage(std::move(data));
+          std::string text;
+          if (!data.empty()) text.assign(reinterpret_cast<const char*>(data.data()), data.size());
+          if (kind == ClipboardKind::RichText) return ReadClipboardHtml(text);
+          return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)});
+        }
+      }
+    } catch (const std::exception&) {
+    }
+    ClearJavaException(environment);
+    return ClipboardFailure(IoErrorCode::Io);
+  });
 }
 
 std::shared_ptr<PermissionTransport>

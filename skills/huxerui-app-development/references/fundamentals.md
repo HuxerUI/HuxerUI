@@ -134,10 +134,11 @@ Lifecycle([tasks] {
 
 `ApplicationHandle::LifecycleState()` reads and subscribes to the current `ApplicationLifecycleState` during composition. Use `ApplicationContext::OnLifecycleChanged()` for application-lifetime observation or `ApplicationHandle::OnLifecycleChanged()` for a mounted composition observer. Keep navigation or file-opening policy in application state.
 
-`ApplicationHandle::CheckPermissionAsync()`, `RequestPermissionAsync()`, and `OpenPermissionSettingsAsync()` expose typed camera and microphone authorization through the owning Task execution.
+`ApplicationHandle::CheckPermissionAsync()`, `RequestPermissionAsync()`, and `OpenPermissionSettingsAsync()` expose application permissions through the owning Task execution. Use the narrowest `Permission` needed, such as `Location` for approximate access or `PreciseLocation` for full-accuracy access.
 Await them from a `TaskScope`; the continuation resumes on its UI thread and may update `State` directly.
 Native manifests, Apple usage descriptions, entitlements, request rationale, and final feature policy remain application-shell responsibilities.
-Treat `PermissionStatus::Unavailable` as a normal platform-capability result rather than inventing a fallback permission path.
+`Limited` indicates a smaller grant, such as selected photos or approximate location. `SystemDisabled` indicates a confirmed system-wide switch is off. `Unavailable` is a supported result for a permission the host cannot provide.
+`OpenPermissionSettingsAsync(permission)` targets this application's access. Pass `PermissionSettingsTarget::System` for a system-wide setting. The return value reports whether opening was accepted. Recheck permission on return to the active application.
 
 `ApplicationHandle::LocalNotifications()` provides local operating-system notifications. For authorization, native templates, scheduling, and activation data, read [local-notifications.md](local-notifications.md).
 

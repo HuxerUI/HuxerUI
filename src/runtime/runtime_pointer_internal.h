@@ -49,7 +49,8 @@ private:
   void CancelPointerRecognition(PointerRecognition& recognition, const PointerEvent& event);
   void PublishTap(TapRecognitionState& tap, const PointerEvent& event);
   void PublishContextMenu(ContextMenuRecognitionState& context_menu, const PointerEvent& event);
-  void ApplyDragScroll(const PointerSession& session, ScrollRecognitionState& scroll, float delta);
+  void ApplyDragScroll(const PointerSession& session, ScrollRecognitionState& scroll, Point previous, Point position);
+  bool FinishDragScroll(ScrollRecognitionState& scroll, Axis axis, ScrollPhase phase);
 
   [[nodiscard]] bool TrackHoverPointer(const PointerEvent& event);
   void UpdateHoverRoute(PointerHoverState next, bool moved);

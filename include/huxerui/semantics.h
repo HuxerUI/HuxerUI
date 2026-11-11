@@ -359,7 +359,7 @@ struct SemanticNode {
   std::optional<SemanticRange> range{};
   /// Committed normalized UTF-16 selection; absent for secure text input.
   std::optional<TextRange> text_selection{};
-  /// Resolved scroll metrics in logical units.
+  /// Resolved scroll metrics in logical units. For two-axis containers this describes the vertical axis.
   std::optional<ScrollMetrics> scroll{};
   /// Logical collection dimensions, including unrealized items when known.
   std::optional<SemanticCollection> collection{};
@@ -383,6 +383,8 @@ struct SemanticNode {
   std::vector<std::pair<std::uint64_t, std::string>> custom_actions{};
   /// Full axis-aligned bounds in host-view logical coordinates after presentation transforms, not clipped bounds.
   Rect bounds;
+  /// Horizontal scroll metrics when this node scrolls along both axes.
+  std::optional<ScrollMetrics> additional_scroll{};
 
   bool operator==(const SemanticNode&) const = default;
 };

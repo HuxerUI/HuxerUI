@@ -31,6 +31,7 @@ State<int> windows_platform_view_controller;
 State<bool> windows_platform_view_controller_attached;
 State<bool> windows_platform_view_mounted;
 State<bool> windows_platform_view_visible;
+State<float> windows_platform_view_cover_width;
 int windows_platform_view_creates = 0;
 int windows_platform_view_updates = 0;
 int windows_platform_view_disposals = 0;
@@ -244,6 +245,20 @@ View FailingWindowsPlatformViewApp() {
   return PlatformView("test/FailingWindowsView", WindowsPlatformViewProperties{1}).With(Frame{80.0F, 40.0F});
 }
 
+View WindowsPlatformViewInputApp() {
+  auto cover_width = UseState(40.0F);
+  windows_platform_view_cover_width = cover_width;
+  const float width = cover_width;
+  View cover;
+  if (width > 0.0F) {
+    cover = Button("Cover").With(Frame{width, 40.0F});
+  }
+  return Stack {
+    PlatformView("test/PropertylessWindowsView").With(Frame{80.0F, 40.0F}),
+    std::move(cover),
+  }.With(Align{HorizontalAlignment::Start, VerticalAlignment::Start});
+}
+
 std::shared_ptr<PlatformViewState>
 CreateWindowsPlatformView(HWND parent, const WindowsPlatformViewProperties& properties, PlatformEventEmitter events) {
   ++windows_platform_view_creates;
@@ -331,6 +346,54 @@ public:
     return PlatformRegistry();
   }
 };
+
+bool InputShieldContains(HWND shield, int x, int y) {
+  const HRGN region = CreateRectRgn(0, 0, 0, 0);
+  REQUIRE(region != nullptr);
+  const bool contains = GetWindowRgn(shield, region) == ERROR || PtInRegion(region, x, y) != FALSE;
+  REQUIRE(DeleteObject(region));
+  return contains;
+}
+
+TEST_CASE("WindowsPlatformViewsOpenInputOnlyOutsideCoveringControls") {
+  WindowsPlatformViewTestPlatform platform;
+  AppOptions options{.show_debug_overlay = false};
+  options.application_hooks.push_back([](ApplicationContext& root) {
+    root.RegisterPlatformView<void>("test/PropertylessWindowsView", WindowsPropertylessPlatformViewFactory());
+  });
+  UiWindow runtime(WindowsPlatformViewInputApp, platform, std::move(options));
+  PlatformViewTestWindow window;
+  RECT client{};
+  REQUIRE(GetClientRect(window.Handle(), &client));
+  constexpr float scale = 1.25F;
+  runtime.SetWindowMetrics({{static_cast<float>(client.right) / scale, static_cast<float>(client.bottom) / scale}});
+  detail::Win32PlatformViews platform_views(
+      GetModuleHandleW(nullptr), window.Handle(), platform.Registry(), runtime.CoreRuntime(), {});
+
+  REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), scale));
+  const HWND shield = GetTopWindow(window.Handle());
+  REQUIRE(shield != nullptr);
+  REQUIRE(shield != GetParent(windows_platform_view_root));
+  CHECK(InputShieldContains(shield, 25, 25));
+  CHECK_FALSE(InputShieldContains(shield, 75, 25));
+  CHECK(InputShieldContains(shield, 125, 25));
+
+  windows_platform_view_cover_width = 80.0F;
+  REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), scale));
+  CHECK(InputShieldContains(shield, 75, 25));
+
+  windows_platform_view_cover_width = 0.0F;
+  REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), scale, RECT{8, 12, client.right - 8, client.bottom - 8}));
+  CHECK_FALSE(InputShieldContains(shield, 25, 25));
+  CHECK(InputShieldContains(shield, 25, 5));
+  CHECK(InputShieldContains(shield, 5, 25));
+
+  platform_views.Resize();
+  CHECK(InputShieldContains(shield, 25, 25));
+  REQUIRE(platform_views.Commit(runtime.BuildRenderFrame(), scale));
+  CHECK_FALSE(InputShieldContains(shield, 25, 25));
+  windows_platform_view_events = {};
+}
 
 TEST_CASE("WindowsPlatformViewsRetainUpdateHideRetireAndRemount") {
   ComApartment com;

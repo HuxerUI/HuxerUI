@@ -34,6 +34,7 @@ public final class HuxerUIUiTestingTest extends Instrumentation {
             }
             copyAssets(getContext().getAssets(), "package", packageRoot);
             System.loadLibrary("huxerui_ui_testing_smoke");
+            HuxerUIPermissionTest.verify(this);
             HuxerUIFileReferenceTest.verify(this);
             HuxerUIActivityResultTest.verify(this);
             String packagePath = packageRoot.getAbsolutePath();

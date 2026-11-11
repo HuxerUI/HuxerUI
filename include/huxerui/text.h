@@ -403,7 +403,21 @@ private:
   std::optional<Uri> target_;
 };
 
-/// An immutable paragraph value with shared text storage and independent style and link ranges.
+/// An atomic inline object occupying one U+FFFC in an attributed paragraph.
+struct TextInlineObject {
+  /// Paragraph-local UTF-16 offset of the replacement character.
+  TextOffset offset;
+  /// Positive width in logical units.
+  float width;
+  /// Distance above the object's baseline in logical units.
+  float ascent;
+  /// Distance below the object's baseline in logical units.
+  float descent;
+
+  bool operator==(const TextInlineObject&) const = default;
+};
+
+/// An immutable paragraph value with shared text storage and independent style, link, and inline object attributes.
 /// Copies share storage. Replacing styles shares the existing UTF-8 body. Text must be valid UTF-8; every range is
 /// paragraph-local UTF-16 and must be in bounds without splitting a surrogate pair. Styles and links are ordered
 /// and non-overlapping within their own lists, but may cross each other's boundaries. Invalid input throws
@@ -437,11 +451,18 @@ public:
   [[nodiscard]] static AttributedText
   FromRanges(std::string text, std::vector<TextStyleRange> styles, std::vector<TextLinkRange> links = {});
 
-  /// Replaces visual attributes while sharing the body and preserving logical links.
+  /// Replaces visual attributes while sharing the body and preserving logical links and inline objects.
   /// @param styles Ordered, non-overlapping UTF-16 style ranges; an empty list removes all explicit styles.
-  /// @return A new value preserving text and links; this value is unchanged.
+  /// @return A new value preserving the other paragraph attributes.
   /// @throws std::invalid_argument For invalid attributes or ranges.
   [[nodiscard]] AttributedText WithStyles(std::vector<TextStyleRange> styles) const;
+
+  /// Replaces inline object annotations while sharing the existing body and preserving styles and links.
+  /// @param objects Annotations in strictly increasing offset order. An empty list clears all annotations.
+  /// @return A new value whose annotated characters reserve space during layout and are left blank by text drawing.
+  /// @throws std::invalid_argument If an offset does not name a U+FFFC, offsets are unordered or duplicated, or
+  /// dimensions are non-finite. Width and total height must be positive, and ascent and descent nonnegative.
+  AttributedText WithInlineObjects(std::vector<TextInlineObject> objects) const;
 
   /// @return The resolved UTF-8 body, not markup. The reference borrows this value's shared text storage.
   /// Keep an owning AttributedText alive while using the reference; do not borrow from a temporary.
@@ -454,6 +475,8 @@ public:
   /// @return Logical links, without merging adjacent equal targets.
   /// The span borrows this value's shared attribute storage and does not retain it.
   [[nodiscard]] std::span<const TextLinkRange> LinkRanges() const noexcept;
+  /// @return The annotated objects in logical order. The span borrows this value's shared attribute storage.
+  std::span<const TextInlineObject> InlineObjects() const noexcept;
   /// Copies a UTF-16 range without rescanning the body from its beginning.
   /// @param range In-bounds range whose endpoints do not split surrogate pairs.
   /// @return An owning UTF-8 substring, or an empty string for a collapsed range.
@@ -682,7 +705,8 @@ public:
 
   /// Finds the insertion position for a point, including points outside the paragraph.
   /// @param point Point in paragraph-local logical coordinates.
-  /// @return The nearest caret boundary with its visual affinity.
+  /// @return The nearest caret boundary with its visual affinity. Within an inline object, its leading and trailing
+  /// halves resolve to the boundaries before and after that object.
   /// @throws std::invalid_argument If either coordinate is non-finite.
   TextPosition HitTest(Point point) const;
 
@@ -697,6 +721,12 @@ public:
   /// A range can yield several rectangles across lines or directional runs.
   /// @throws std::invalid_argument If the range is reversed or has an invalid endpoint.
   std::vector<Rect> RangeRects(TextRange range) const;
+
+  /// Returns the unclipped drawing rectangle of an annotated inline object.
+  /// @param offset The UTF-16 offset of the object's replacement character.
+  /// @return A paragraph-local rectangle with the supplied object dimensions, placed at its resolved baseline.
+  /// Returns an empty value at an unannotated position. The backend may reserve extra space due to rounding.
+  std::optional<Rect> InlineObjectRect(TextOffset offset) const;
 
   /// Finds the previous caret boundary in logical text order.
   /// @param offset Source UTF-16 offset.

@@ -64,6 +64,12 @@ In both ordinary and virtual layouts, `Measure()` updates the node's `LayoutSize
 UiWindow owns declaration reconciliation, keys, retained item state, clipping, hit testing, scrolling, semantics, and cleanup.
 The layout must not maintain a second mounted item tree.
 
+A derived layout can call `EnableBothAxes()` during construction to scroll within a bounded width and height. Return the viewport size with `SetSize()`, the full logical extent with `SetContentSize()`, and item placements in content coordinates. `Viewport()` supplies the candidate offset and size for the current measure pass.
+
+Use `SetScrollOffset(Axis, float)` to correct an axis after an extent change. The same measure session can retry with the corrected viewport before committing placements. Use committed geometry, such as the bound controllers' published metrics, as the anchor reference so the correction survives repeated measurements with different constraints.
+
+To support `ScrollToItem()` on two-axis layouts, define `static std::optional<Rect> ItemBounds(ViewNode&, std::size_t)`. Return the item's bounds in content coordinates without realizing it, using an estimate when exact geometry is unavailable. The controller applies `ScrollAlignment` along its bound axis. Single-axis layouts continue to report their axis and scalar correction through `SetAxis()` and `SetScrollOffset(float)` and can implement `ScrollOffsetForItem()`.
+
 ## Modifiers and NodeExtension
 
 Use a property modifier for reusable declaration data that applies directly to `ViewSpec`.

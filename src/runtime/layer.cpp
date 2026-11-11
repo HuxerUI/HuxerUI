@@ -47,8 +47,8 @@ LayerId LayerController::AttachCaptured(
     detail::LayerPlacement placement,
     std::shared_ptr<detail::LayerTransitionState> transition,
     std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group,
-    std::optional<std::uint64_t> retained_focus_identity,
-    std::optional<FocusRequester> initial_focus
+    std::optional<ViewHandle> retained_focus_target,
+    std::optional<ViewHandle> initial_focus
 ) const {
   return AttachCapturedReplacing(
       std::nullopt,
@@ -58,7 +58,7 @@ LayerId LayerController::AttachCaptured(
       std::move(placement),
       std::move(transition),
       std::move(semantic_modal_group),
-      retained_focus_identity,
+      retained_focus_target,
       std::move(initial_focus)
   );
 }
@@ -173,8 +173,8 @@ LayerId LayerController::AttachCapturedReplacing(
     detail::LayerPlacement placement,
     std::shared_ptr<detail::LayerTransitionState> transition,
     std::shared_ptr<const detail::SemanticModalGroupToken> semantic_modal_group,
-    std::optional<std::uint64_t> retained_focus_identity,
-    std::optional<FocusRequester> initial_focus
+    std::optional<ViewHandle> retained_focus_target,
+    std::optional<ViewHandle> initial_focus
 ) const {
   if (state_->ui_window == nullptr) {
     throw std::logic_error("HuxerUI layer controller is disconnected");
@@ -192,7 +192,7 @@ LayerId LayerController::AttachCapturedReplacing(
       .content = std::move(content),
       .environment = std::move(environment),
       .semantic_modal_group = std::move(semantic_modal_group),
-      .retained_focus_identity = retained_focus_identity,
+      .retained_focus_target = retained_focus_target,
       .initial_focus = std::move(initial_focus),
       .placement = std::make_shared<detail::LayerPlacement>(std::move(placement)),
       .transition = std::move(transition),
@@ -306,8 +306,8 @@ LayerId InternalAccess::AttachCaptured(
     LayerPlacement placement,
     std::shared_ptr<LayerTransitionState> transition,
     std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group,
-    std::optional<std::uint64_t> retained_focus_identity,
-    std::optional<FocusRequester> initial_focus
+    std::optional<ViewHandle> retained_focus_target,
+    std::optional<ViewHandle> initial_focus
 ) {
   return layers.AttachCaptured(
       std::move(options),
@@ -316,7 +316,7 @@ LayerId InternalAccess::AttachCaptured(
       std::move(placement),
       std::move(transition),
       std::move(semantic_modal_group),
-      retained_focus_identity,
+      retained_focus_target,
       std::move(initial_focus)
   );
 }
@@ -330,8 +330,8 @@ LayerId InternalAccess::AttachCapturedReplacing(
     LayerPlacement placement,
     std::shared_ptr<LayerTransitionState> transition,
     std::shared_ptr<const SemanticModalGroupToken> semantic_modal_group,
-    std::optional<std::uint64_t> retained_focus_identity,
-    std::optional<FocusRequester> initial_focus
+    std::optional<ViewHandle> retained_focus_target,
+    std::optional<ViewHandle> initial_focus
 ) {
   return layers.AttachCapturedReplacing(
       replaced,
@@ -341,7 +341,7 @@ LayerId InternalAccess::AttachCapturedReplacing(
       std::move(placement),
       std::move(transition),
       std::move(semantic_modal_group),
-      retained_focus_identity,
+      retained_focus_target,
       std::move(initial_focus)
   );
 }

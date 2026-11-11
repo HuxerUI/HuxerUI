@@ -131,11 +131,51 @@ TEST_CASE("Application permission prompts and settings are serialized") {
   platform.permission_transport->CompleteRequest(1, PermissionStatus::Granted);
   platform.RunPlatformModuleTasks();
   REQUIRE(platform.permission_transport->settings.size() == 1);
+  REQUIRE(platform.permission_transport->settings[0].target == PermissionSettingsTarget::Application);
 
   platform.permission_transport->CompleteSettings(0, true);
   platform.RunPlatformModuleTasks();
   REQUIRE(permission_results == std::vector{PermissionStatus::Denied, PermissionStatus::Granted});
   REQUIRE(settings_results == std::vector{true});
+}
+
+TEST_CASE("Application permissions preserve partial access and let the user open system settings explicitly") {
+  ResetPermissionState();
+  TestPlatform platform;
+  auto transport = std::make_shared<TestPermissionTransport>();
+  platform.permission_transport = transport;
+  UiWindow runtime(PermissionApp, platform);
+  MountPermissionApp(platform, runtime);
+
+  RequestPermission(Permission::PhotosRead);
+  CheckPermission(Permission::Location);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(transport->requests.size() == 1);
+  REQUIRE(transport->requests[0].permission == Permission::PhotosRead);
+  REQUIRE(transport->checks.size() == 1);
+  REQUIRE(transport->checks[0].permission == Permission::Location);
+  transport->CompleteRequest(0, PermissionStatus::Limited);
+  transport->CompleteCheck(0, PermissionStatus::SystemDisabled);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(permission_results == std::vector{PermissionStatus::Limited, PermissionStatus::SystemDisabled});
+  REQUIRE(transport->settings.empty());
+
+  permission_tasks.Launch([application = *permission_application]() -> Task<void> {
+    settings_results.push_back(co_await application.OpenPermissionSettingsAsync(
+        Permission::Location, PermissionSettingsTarget::System));
+    permission_results.push_back(co_await application.CheckPermissionAsync(Permission::Location));
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(transport->settings.size() == 1);
+  REQUIRE(transport->settings[0].permission == Permission::Location);
+  REQUIRE(transport->settings[0].target == PermissionSettingsTarget::System);
+  transport->CompleteSettings(0, true);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(settings_results == std::vector{true});
+  REQUIRE(transport->checks.size() == 2);
+  transport->CompleteCheck(1, PermissionStatus::Denied);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(permission_results.back() == PermissionStatus::Denied);
 }
 
 TEST_CASE("Canceling an application permission task detaches its continuation") {
@@ -203,6 +243,8 @@ TEST_CASE("Application permission methods reject invalid identifiers before laun
   REQUIRE_THROWS_AS(
       permission_application->OpenPermissionSettingsAsync(static_cast<Permission>(-1)), std::invalid_argument
   );
+  REQUIRE_THROWS_AS(permission_application->OpenPermissionSettingsAsync(
+      Permission::Location, static_cast<PermissionSettingsTarget>(-1)), std::invalid_argument);
 }
 
 namespace {

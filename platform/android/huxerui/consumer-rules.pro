@@ -29,6 +29,7 @@
     long hitTest(float, float);
     float[] caret(long, boolean);
     float[] range(long, long);
+    float[] inlineObjectPlacement(long);
     long previous(long);
     long next(long);
 }

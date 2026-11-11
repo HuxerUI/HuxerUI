@@ -3,9 +3,11 @@
 #include <jni.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <huxerui/file_drop.h>
 
@@ -34,5 +36,10 @@ CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, j
     JavaVM* virtual_machine, JNIEnv* environment, jobject context, FileReferenceMetadata metadata, std::string_view uri
 );
 [[nodiscard]] AndroidFileReferenceProjection ProjectAndroidFileReference(const FileReference& reference);
+
+using AndroidFileReferenceDecoder = std::function<std::vector<FileReference>(JNIEnv*, jobjectArray)>;
+
+/// Retains the Java classes on the application thread before file references can be decoded on a worker.
+AndroidFileReferenceDecoder CreateAndroidFileReferenceDecoder(JavaVM* vm, JNIEnv* environment, jobject context);
 
 } // namespace huxerui::detail

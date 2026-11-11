@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <string>
 
 #include "task_internal.h"
 
@@ -319,7 +320,9 @@ std::shared_ptr<StateCellBase> RecomposeScope::UseState(
   auto found = pending_state_slots_.slots.find(key);
   if (found != pending_state_slots_.slots.end()) {
     if (found->second->Type() != type) {
-      throw std::logic_error("HuxerUI state kind or value type changed at the same call site");
+      throw std::logic_error("HuxerUI state kind or value type changed at " + key.file + ":" +
+                             std::to_string(key.line) + ":" + std::to_string(key.column) +
+                             " (occurrence " + std::to_string(key.occurrence + 1) + ")");
     }
     return found->second;
   }

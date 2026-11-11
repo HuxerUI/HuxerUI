@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <any>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -40,12 +41,18 @@ struct CachedParagraphLayout;
 class ScrollConnection;
 struct ExecutionContext;
 
-/// Keeps a focus target attached to its original window without retaining that window or its Environment.
-struct FocusRequesterState {
-  explicit FocusRequesterState(std::shared_ptr<ExecutionContext> source) : source(std::move(source)) {}
+struct ViewHandleGeometry {
+  Rect bounds;
+  Transform2D local_to_window;
+};
+
+/// Keeps a target attached to its original window without retaining that window or its Environment.
+struct ViewHandleBinding {
+  explicit ViewHandleBinding(std::shared_ptr<ExecutionContext> source) : source(std::move(source)) {}
 
   std::shared_ptr<ExecutionContext> source;
   std::uint64_t node_identity = 0;
+  std::optional<ViewHandleGeometry> geometry;
 };
 
 inline std::optional<double> EarliestWakeAfter(std::optional<double> first, std::optional<double> second) noexcept {
@@ -168,8 +175,19 @@ struct VirtualNodeState {
   std::unique_ptr<VirtualItemStateCache> item_state_cache;
   bool viewport_dirty = true;
   // A parent may measure the same child repeatedly; only the candidate selected for layout commits its correction.
-  std::optional<float> pending_scroll_offset;
+  std::optional<Point> pending_scroll_offset;
 };
+
+inline constexpr std::array scroll_axes{Axis::Horizontal, Axis::Vertical};
+
+inline constexpr std::size_t ScrollAxisIndex(Axis axis) noexcept {
+  return axis == Axis::Vertical ? 1 : 0;
+}
+
+inline std::span<const Axis> ScrollAxes(Axis axis, bool both_axes) noexcept {
+  return both_axes ? std::span<const Axis>{scroll_axes}
+                   : std::span<const Axis>{scroll_axes}.subspan(ScrollAxisIndex(axis), 1);
+}
 
 struct ScrollMotionFrameResult {
   bool needs_frame = false;
@@ -178,10 +196,12 @@ struct ScrollMotionFrameResult {
 
 class ScrollMotion {
 public:
-  void Stop(MountedNode& node, ScrollPhase phase = ScrollPhase::Cancel);
-  bool StartMomentum(MountedNode& node, float velocity);
-  bool StartOverscrollSettlement(MountedNode& node);
-  ScrollMotionFrameResult Advance(MountedNode& node, const FrameInfo& frame);
+  void Stop(MountedNode& node, Axis axis, ScrollPhase phase = ScrollPhase::Cancel);
+  bool StartMomentum(MountedNode& node, Axis axis, float velocity);
+  bool StartOverscrollSettlement(MountedNode& node, Axis axis);
+  ScrollMotionFrameResult Advance(MountedNode& node, Axis axis, const FrameInfo& frame);
+
+  float overscroll_offset = 0.0F;
 
 private:
   enum class Mode {
@@ -199,6 +219,7 @@ private:
 
 struct ScrollNodeState {
   Axis axis = Axis::Vertical;
+  bool both_axes = false;
   std::uint32_t allowed_sources = std::numeric_limits<std::uint32_t>::max();
   bool touch_drag_only = false;
   bool allows_automatic_reveal = true;
@@ -206,12 +227,23 @@ struct ScrollNodeState {
   bool allows_trailing_overscroll = true;
   float offset_y = 0.0F;
   float offset_x = 0.0F;
-  float overscroll_offset = 0.0F;
   float content_height = 0.0F;
   float content_width = 0.0F;
   std::optional<Rect> viewport_override;
-  ScrollMotion motion;
-  std::shared_ptr<ScrollConnection> connection;
+  std::array<ScrollMotion, 2> motion;
+  // The first slot follows a single-axis layout if its axis changes during measurement.
+  std::array<std::shared_ptr<ScrollConnection>, 2> connections;
+
+  std::span<const Axis> Axes() const noexcept { return ScrollAxes(axis, both_axes); }
+  bool Supports(Axis value) const noexcept { return both_axes || axis == value; }
+  float& Offset(Axis value) noexcept { return value == Axis::Vertical ? offset_y : offset_x; }
+  float Offset(Axis value) const noexcept { return value == Axis::Vertical ? offset_y : offset_x; }
+  float ContentExtent(Axis value) const noexcept { return value == Axis::Vertical ? content_height : content_width; }
+  ScrollMotion& Motion(Axis value) noexcept { return motion[ScrollAxisIndex(value)]; }
+  const ScrollMotion& Motion(Axis value) const noexcept { return motion[ScrollAxisIndex(value)]; }
+  ScrollConnection* Connection(Axis value) const noexcept {
+    return connections[both_axes ? ScrollAxisIndex(value) : 0].get();
+  }
 };
 
 struct NodeExtensionEntry {
@@ -254,6 +286,7 @@ struct NodePresentation {
 // NodeKind branches, while layout, paint, interaction, and extension state persist across compatible declarations.
 struct MountedNode final : public huxerui::ViewNode {
   ~MountedNode() override;
+  void PublishViewBinding();
 
   UiWindow* ui_window = nullptr;
   NodeKind kind = NodeKind::Layout;
@@ -328,7 +361,7 @@ struct MountedNode final : public huxerui::ViewNode {
   // Re-resolved during geometry preparation from static indication geometry or a component's dynamic control bounds.
   std::optional<Rect> indication_bounds_override;
   bool focusable = false;
-  std::shared_ptr<FocusRequesterState> focus_target;
+  std::shared_ptr<ViewHandleBinding> view_handle;
   bool initial_focus_consumed = false;
   bool trap_focus = false;
   bool subtree_has_extensions = true;
@@ -462,9 +495,9 @@ inline Color InterpolateColor(Color from, Color to, float progress) noexcept {
 
 class ScrollConnection : public std::enable_shared_from_this<ScrollConnection> {
 public:
-  ScrollConnection(MountedNode& node, const ScrollController& controller);
+  ScrollConnection(MountedNode& node, const ScrollController& controller, std::optional<Axis> axis);
 
-  [[nodiscard]] bool Matches(const ScrollController& controller) const noexcept;
+  [[nodiscard]] bool Matches(const ScrollController& controller, std::optional<Axis> axis) const noexcept;
   [[nodiscard]] bool IsCurrent() const noexcept;
   void Connect();
   bool ScrollTo(float offset);
@@ -472,20 +505,22 @@ public:
   bool ScrollToItem(std::size_t index, ScrollAlignment alignment);
   void CancelPending();
   void ApplyPending(bool after_layout = false);
+  std::optional<float> PendingItemOffset(float viewport_extent) const;
   void PublishMetrics();
 
 private:
-  [[nodiscard]] bool IsVertical() const noexcept;
-  [[nodiscard]] float ViewportExtent() const noexcept;
-  [[nodiscard]] float ContentExtent() const noexcept;
+  Axis BoundAxis() const noexcept;
+  std::optional<float> ItemOffset(std::size_t index, ScrollAlignment alignment, float viewport_extent) const;
   [[nodiscard]] float CurrentOffset() const noexcept;
   bool ScrollToOffset(float offset);
   void SetCurrentOffset(float offset) noexcept;
 
   MountedNode* node_;
   std::shared_ptr<ScrollControllerState> state_;
+  std::optional<Axis> axis_;
 };
 
+void ConfigureScrollAxes(MountedNode& node, Axis axis, bool both_axes);
 void PrepareScrollController(MountedNode& node);
 void CompleteScrollController(MountedNode& node);
 
@@ -559,6 +594,7 @@ struct ScrollBarGeometry {
 inline constexpr float touch_gesture_slop = 6.0F;
 
 MountedNode* FindNode(MountedNode& root, std::uint64_t identity);
+bool FindNodePath(MountedNode& node, std::uint64_t identity, std::vector<MountedNode*>& path);
 NodeExtension* FindExtension(MountedNode& root, const NodeExtensionHandle& handle);
 void ActivateNode(MountedNode& node);
 bool ContainsNodeIdentity(const MountedNode& root, std::uint64_t identity);
@@ -606,20 +642,22 @@ bool BuildPointerCursorRoute(MountedNode& node, Point position, std::vector<Moun
 bool BuildHoverRoute(MountedNode& node, Point position, std::vector<MountedNode*>& route);
 MountedNode* HitTestPointer(MountedNode& node, Point position);
 bool HitTestWindowDragRegion(MountedNode& node, Point position);
-std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node);
+std::optional<ScrollBarGeometry> ResolveScrollBarGeometry(const MountedNode& node, Axis axis);
 bool IsScrollContainer(const MountedNode& node) noexcept;
 Axis ScrollAxis(const MountedNode& node) noexcept;
 Rect ScrollViewport(const MountedNode& node) noexcept;
 bool AllowsScrollSource(const MountedNode& node, ScrollSource source) noexcept;
-bool CanScrollNode(const MountedNode& node, float delta);
-bool CanOverscrollNode(const MountedNode& node, float delta);
-float ScrollNodeBy(MountedNode& node, float delta, ScrollSource source);
+bool CanScrollNode(const MountedNode& node, Axis axis, float delta);
+bool CanOverscrollNode(const MountedNode& node, Axis axis, float delta);
+float ScrollNodeBy(MountedNode& node, Axis axis, float delta, ScrollSource source);
 bool ScrollNodeRectIntoView(MountedNode& node, Rect& rect);
+float AlignedScrollOffset(float start, float extent, float viewport_extent, ScrollAlignment alignment);
 
-ScrollMetrics ResolveScrollMetrics(const MountedNode& node) noexcept;
+ScrollMetrics ResolveScrollMetrics(const MountedNode& node, Axis axis) noexcept;
 const ScrollPhysics& ResolveScrollPhysics(const MountedNode& node);
 void ValidateScrollPhysics(const ScrollPhysics& physics);
-void NotifyScrollNodeActivity(MountedNode& node, ScrollSource source, ScrollPhase phase, float delta);
+void NotifyScrollNodeActivity(MountedNode& node, Axis axis, ScrollSource source, ScrollPhase phase, float delta);
+void StopScrollNodeMotion(MountedNode& node, Axis axis, ScrollPhase phase = ScrollPhase::Cancel);
 void StopScrollNodeMotion(MountedNode& node, ScrollPhase phase = ScrollPhase::Cancel);
 float ApplyScrollTransaction(const std::vector<MountedNode*>& route, Axis axis, float delta, ScrollSource source,
                              std::vector<std::uint64_t>* direct_activity_nodes = nullptr,

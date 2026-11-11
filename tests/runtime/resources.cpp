@@ -168,6 +168,7 @@ public:
 };
 
 std::optional<MenuHandle> resource_menu;
+std::optional<ViewHandle> resource_menu_target;
 std::optional<DialogHandle> resource_dialog;
 int density_image_compositions = 0;
 int density_unrelated_compositions = 0;
@@ -281,7 +282,8 @@ View InheritedTextShapingApp() {
 View ResourceMenuApp() {
   auto menu = UseMenu();
   resource_menu = menu;
-  return Button("resource menu").With(huxerui::Frame{120.0F, 36.0F}, menu.Anchor());
+  resource_menu_target = UseViewHandle();
+  return Button("resource menu").With(huxerui::Frame{120.0F, 36.0F}, *resource_menu_target);
 }
 
 View FrameworkDialogResourceApp() {
@@ -1464,7 +1466,7 @@ TEST_CASE("MenuItemsResolveStringAndImageResources") {
   runtime.BuildFrame();
   REQUIRE(resource_menu.has_value());
 
-  resource_menu->Show({
+  resource_menu->Show(*resource_menu_target, {
       MenuItem(ImageResource("test", "images/menu_icon"), StringResource("test", "strings/menu_item"), [] {}),
       MenuItem(StringVariant::Format(StringResource("test", "strings/greeting"), "Ada"), [] {}),
   });
@@ -1505,7 +1507,7 @@ TEST_CASE("PresentedStringVariantsRefreshWhenTheResourceConfigurationChanges") {
   runtime.BuildFrame();
   REQUIRE(resource_menu.has_value());
 
-  resource_menu->Show({MenuItem(StringResource("test", "strings/menu_item"), [] {})});
+  resource_menu->Show(*resource_menu_target, {MenuItem(StringResource("test", "strings/menu_item"), [] {})});
   REQUIRE(ContainsText(runtime.BuildFrame(), "Chinese item"));
 
   resources.configuration.locale = Locale::FromLanguageTag("en-US");

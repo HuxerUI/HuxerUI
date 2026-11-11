@@ -80,8 +80,8 @@ cmake --build "$simulator_build_directory" --config "$configuration" \
 [ -f "$device_library" ] || fail "device build did not produce libhuxerui_static.a"
 [ -f "$simulator_library" ] || fail "Simulator build did not produce libhuxerui_static.a"
 lipo "$device_library" -verify_arch arm64 || fail "device library does not contain arm64"
-lipo "$simulator_library" -verify_arch arm64 x86_64 || \
-  fail "Simulator library does not contain arm64 and x86_64"
+lipo "$simulator_library" -verify_arch arm64 || fail "Simulator library does not contain arm64"
+lipo "$simulator_library" -verify_arch x86_64 || fail "Simulator library does not contain x86_64"
 
 rm -rf -- "$headers_directory"
 mkdir -p "$headers_directory"
@@ -96,7 +96,8 @@ xcodebuild -create-xcframework \
   -output "$output_path"
 
 lipo "$device_testing_library" -verify_arch arm64 || fail "testing device library does not contain arm64"
-lipo "$simulator_testing_library" -verify_arch arm64 x86_64 || fail "testing Simulator library is incomplete"
+lipo "$simulator_testing_library" -verify_arch arm64 || fail "testing Simulator library does not contain arm64"
+lipo "$simulator_testing_library" -verify_arch x86_64 || fail "testing Simulator library does not contain x86_64"
 rm -rf -- "$testing_output_path"
 xcodebuild -create-xcframework \
   -library "$device_testing_library" \
@@ -139,16 +140,21 @@ xcrun --sdk iphonesimulator swiftc \
   -lhuxerui_static \
   -lc++ \
   -framework AVFoundation \
+  -framework Contacts \
+  -framework CoreBluetooth \
   -framework CoreFoundation \
   -framework CoreGraphics \
   -framework CoreImage \
+  -framework CoreLocation \
   -framework CoreText \
   -framework CoreVideo \
+  -framework EventKit \
   -framework Foundation \
   -framework ImageIO \
   -framework Metal \
   -framework MetalPerformanceShaders \
   -framework MobileCoreServices \
+  -framework Photos \
   -framework QuartzCore \
   -framework UIKit \
   -Xlinker -weak_framework \

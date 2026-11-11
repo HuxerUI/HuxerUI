@@ -56,6 +56,10 @@ std::string DescribePermissionStatus(PermissionStatus status) {
     return "provisional";
   case PermissionStatus::Unavailable:
     return "unavailable";
+  case PermissionStatus::Limited:
+    return "limited";
+  case PermissionStatus::SystemDisabled:
+    return "notifications off across applications";
   }
   return "unknown";
 }

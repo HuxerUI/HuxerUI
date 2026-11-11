@@ -1,14 +1,19 @@
 #include <windows.h>
 #include <windowsx.h>
+#include <dwmapi.h>
 #include <objbase.h>
 #include <ole2.h>
 #include <psapi.h>
 #include <roapi.h>
+#include <shellapi.h>
+#include <shlobj.h>
+#include <wincodec.h>
 #include <winstring.h>
 #include <windows.ui.viewmanagement.h>
 #include <wrl.h>
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -25,6 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -489,6 +495,382 @@ private:
   bool initialized_ = false;
 };
 
+using Microsoft::WRL::ComPtr;
+
+UINT HtmlFormat() { return RegisterClipboardFormatW(L"HTML Format"); }
+UINT PngFormat() { return RegisterClipboardFormatW(L"PNG"); }
+
+class ClipboardAccess {
+public:
+  explicit ClipboardAccess(HWND window) : opened_(window && OpenClipboard(window)) {}
+  ~ClipboardAccess() { if (opened_) CloseClipboard(); }
+  explicit operator bool() const noexcept { return opened_; }
+
+private:
+  bool opened_;
+};
+
+struct GlobalFreeDeleter {
+  void operator()(HGLOBAL block) const noexcept { GlobalFree(block); }
+};
+using GlobalBlock = std::unique_ptr<void, GlobalFreeDeleter>;
+using ClipboardFormats = std::vector<std::pair<UINT, GlobalBlock>>;
+
+bool AddFormat(ClipboardFormats& formats, UINT format, std::span<const std::byte> bytes) {
+  if (!format || bytes.empty()) return false;
+  GlobalBlock block(GlobalAlloc(GMEM_MOVEABLE, bytes.size()));
+  if (!block) return false;
+  void* destination = GlobalLock(block.get());
+  if (!destination) return false;
+  std::memcpy(destination, bytes.data(), bytes.size());
+  GlobalUnlock(block.get());
+  formats.emplace_back(format, std::move(block));
+  return true;
+}
+
+bool AddText(ClipboardFormats& formats, std::string_view text) {
+  auto wide = StrictUtf8ToWide(text);
+  return wide && AddFormat(formats, CF_UNICODETEXT, std::as_bytes(std::span(wide->c_str(), wide->size() + 1)));
+}
+
+IoResult<Bytes> CopyFormat(UINT format, std::size_t limit) {
+  const HANDLE handle = GetClipboardData(format);
+  const SIZE_T size = handle ? GlobalSize(handle) : 0;
+  if (size > limit) return IoResult<Bytes>::Failure({IoErrorCode::TooLarge, "HuxerUI clipboard format is too large"});
+  if (size == 0) return IoResult<Bytes>::Failure({IoErrorCode::Io, "HuxerUI clipboard format has no storage"});
+  Bytes bytes(size);
+  const void* source = GlobalLock(handle);
+  if (!source) return IoResult<Bytes>::Failure({IoErrorCode::Io, "HuxerUI could not access clipboard storage"});
+  std::memcpy(bytes.data(), source, size);
+  GlobalUnlock(handle);
+  return IoResult<Bytes>::Success(std::move(bytes));
+}
+
+IoResult<ClipboardContent> ReadUnicodeText() {
+  if (!IsClipboardFormatAvailable(CF_UNICODETEXT)) return ClipboardFailure(IoErrorCode::NotFound);
+  auto bytes = CopyFormat(CF_UNICODETEXT, (clipboard_max_text_bytes + 1) * sizeof(wchar_t));
+  if (!bytes.Succeeded()) return IoResult<ClipboardContent>::Failure(std::move(bytes).Error());
+  if (bytes.Value().size() % sizeof(wchar_t) != 0) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  std::wstring wide(bytes.Value().size() / sizeof(wchar_t), L'\0');
+  std::memcpy(wide.data(), bytes.Value().data(), bytes.Value().size());
+  const auto end = wide.find(L'\0');
+  if (end == wide.npos) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  auto text = StrictWideToUtf8(std::wstring_view(wide).substr(0, end));
+  if (!text) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(*text)});
+}
+
+std::string Win32Html(const AttributedText& text) {
+  constexpr std::string_view prefix = "<html><body><!--StartFragment-->";
+  constexpr std::string_view suffix = "<!--EndFragment--></body></html>";
+  std::string result = "Version:0.9\r\nStartHTML:0000000000\r\nEndHTML:0000000000\r\n"
+                       "StartFragment:0000000000\r\nEndFragment:0000000000\r\n";
+  const auto fragment = ClipboardHtml(text);
+  if (fragment.empty() && !text.PlainText().empty()) return {};
+  const auto html_start = result.size();
+  const auto fragment_start = html_start + prefix.size();
+  const auto fragment_end = fragment_start + fragment.size();
+  const auto set = [&](std::string_view name, std::size_t offset) {
+    const auto digits = std::to_string(offset);
+    result.replace(result.find(name) + name.size() + 10 - digits.size(), digits.size(), digits);
+  };
+  set("StartHTML:", html_start);
+  set("EndHTML:", fragment_end + suffix.size());
+  set("StartFragment:", fragment_start);
+  set("EndFragment:", fragment_end);
+  result += prefix;
+  result += fragment;
+  result += suffix;
+  return result;
+}
+
+IoResult<ClipboardContent> ReadWin32Html(UINT format) {
+  auto bytes = CopyFormat(format, clipboard_max_text_bytes + 1024);
+  if (!bytes.Succeeded()) return IoResult<ClipboardContent>::Failure(std::move(bytes).Error());
+  std::string_view html(reinterpret_cast<const char*>(bytes.Value().data()), bytes.Value().size());
+  html = html.substr(0, html.find('\0'));
+  const auto offset = [&](std::string_view field) -> std::optional<std::size_t> {
+    const auto header = html.substr(0, 1024);
+    const auto start = header.find(field);
+    if (start == header.npos) return std::nullopt;
+    std::size_t value = 0;
+    const auto parsed = std::from_chars(header.data() + start + field.size(), header.data() + header.size(), value);
+    return parsed.ec == std::errc{} ? std::optional(value) : std::nullopt;
+  };
+  const auto start = offset("StartFragment:");
+  const auto end = offset("EndFragment:");
+  if (start && end && *start <= *end && *end <= html.size()) {
+    return ReadClipboardHtml(html.substr(*start, *end - *start));
+  }
+  constexpr std::string_view marker = "<!--StartFragment-->";
+  const auto marker_start = html.find(marker);
+  const auto marker_end = html.find("<!--EndFragment-->");
+  if (marker_start == html.npos || marker_end == html.npos || marker_end < marker_start + marker.size()) {
+    return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  }
+  return ReadClipboardHtml(html.substr(marker_start + marker.size(), marker_end - marker_start - marker.size()));
+}
+
+IoResult<std::vector<std::wstring>> CapturePaths() {
+  using Paths = IoResult<std::vector<std::wstring>>;
+  if (!IsClipboardFormatAvailable(CF_HDROP)) {
+    const UINT promise = RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW);
+    const auto code = promise && IsClipboardFormatAvailable(promise) ? IoErrorCode::Unsupported : IoErrorCode::NotFound;
+    return Paths::Failure({code, "HuxerUI clipboard has no supported Windows file list"});
+  }
+  const auto drop = static_cast<HDROP>(GetClipboardData(CF_HDROP));
+  if (!drop) return Paths::Failure({IoErrorCode::Io, "HuxerUI could not read the Windows clipboard file list"});
+  const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+  if (count == 0 || count > clipboard_max_files) {
+    return Paths::Failure({count ? IoErrorCode::TooLarge : IoErrorCode::NotFound,
+                           "HuxerUI clipboard has no supported Windows file list"});
+  }
+  std::vector<std::wstring> paths;
+  paths.reserve(count);
+  for (UINT index = 0; index < count; ++index) {
+    const UINT length = DragQueryFileW(drop, index, nullptr, 0);
+    if (length == 0 || length > 32767) {
+      return Paths::Failure({IoErrorCode::Io, "HuxerUI clipboard contains an invalid Windows file path"});
+    }
+    std::wstring path(static_cast<std::size_t>(length) + 1, L'\0');
+    if (DragQueryFileW(drop, index, path.data(), length + 1) != length) {
+      return Paths::Failure({IoErrorCode::Io, "HuxerUI could not read a Windows clipboard file path"});
+    }
+    path.resize(length);
+    paths.push_back(std::move(path));
+  }
+  return Paths::Success(std::move(paths));
+}
+
+Task<IoResult<ClipboardContent>> RetainPaths(std::vector<std::wstring> paths) {
+  co_return co_await RunWorker([paths = std::move(paths)] {
+    std::vector<FileReference> files;
+    files.reserve(paths.size());
+    for (const auto& path : paths) {
+      if (!std::filesystem::path(path).is_absolute()) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+      const DWORD attributes = GetFileAttributesW(path.c_str());
+      if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const auto code = GetLastError() == ERROR_ACCESS_DENIED ? IoErrorCode::PermissionDenied : IoErrorCode::Io;
+        return ClipboardFailure(code);
+      }
+      auto file = MakeWin32FileReference(path, false, (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0);
+      if (!file) return ClipboardFailure(IoErrorCode::Io);
+      files.push_back(std::move(*file));
+    }
+    return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(files)});
+  });
+}
+
+bool AddFiles(ClipboardFormats& formats, const ClipboardContent& content) {
+  const auto files = ClipboardFilePaths(content);
+  if (!files) return false;
+  std::wstring paths;
+  for (const auto& file : *files) {
+    auto path = StrictUtf8ToWide(file.Path());
+    if (!path || path->empty()) return false;
+    std::ranges::replace(*path, L'/', L'\\');
+    paths += *path;
+    paths += L'\0';
+  }
+  paths += L'\0';
+  DROPFILES header{};
+  header.pFiles = sizeof(DROPFILES);
+  header.fWide = TRUE;
+  Bytes data(sizeof(header) + paths.size() * sizeof(wchar_t));
+  std::memcpy(data.data(), &header, sizeof(header));
+  std::memcpy(data.data() + sizeof(header), paths.data(), paths.size() * sizeof(wchar_t));
+  const DWORD effect = DROPEFFECT_COPY;
+  return AddFormat(formats, CF_HDROP, data) &&
+      AddFormat(formats, RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT), std::as_bytes(std::span(&effect, 1)));
+}
+
+ComPtr<IWICBitmapFrameDecode> DecodeImage(IWICImagingFactory& factory, std::span<const std::byte> bytes) {
+  ComPtr<IWICStream> stream;
+  ComPtr<IWICBitmapDecoder> decoder;
+  ComPtr<IWICBitmapFrameDecode> frame;
+  if (bytes.empty() || bytes.size() > MAXDWORD || FAILED(factory.CreateStream(&stream)) ||
+      FAILED(stream->InitializeFromMemory(
+          reinterpret_cast<BYTE*>(const_cast<std::byte*>(bytes.data())), static_cast<DWORD>(bytes.size()))) ||
+      FAILED(factory.CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, &decoder)) ||
+      FAILED(decoder->GetFrame(0, &frame))) return {};
+  return frame;
+}
+
+ComPtr<IWICImagingFactory> ImagingFactory() {
+  ComPtr<IWICImagingFactory> factory;
+  if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) {
+    return {};
+  }
+  return factory;
+}
+
+bool AddImage(ClipboardFormats& formats, const ImageAsset& image) {
+  auto factory = ImagingFactory();
+  if (!factory) return false;
+  auto frame = DecodeImage(*factory.Get(), image.EncodedBytes());
+  ComPtr<IWICFormatConverter> pixels;
+  if (!frame || FAILED(factory->CreateFormatConverter(&pixels)) ||
+      FAILED(pixels->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone,
+                               nullptr, 0.0, WICBitmapPaletteTypeCustom))) return false;
+  BITMAPV5HEADER header{};
+  header.bV5Size = sizeof(header);
+  header.bV5Width = static_cast<LONG>(image.PixelWidth());
+  header.bV5Height = -static_cast<LONG>(image.PixelHeight());
+  header.bV5Planes = 1;
+  header.bV5BitCount = 32;
+  header.bV5Compression = BI_BITFIELDS;
+  header.bV5SizeImage = image.PixelWidth() * image.PixelHeight() * 4;
+  header.bV5RedMask = 0x00FF0000;
+  header.bV5GreenMask = 0x0000FF00;
+  header.bV5BlueMask = 0x000000FF;
+  header.bV5AlphaMask = 0xFF000000;
+  header.bV5CSType = LCS_sRGB;
+  header.bV5Intent = LCS_GM_IMAGES;
+  Bytes dib(sizeof(header) + header.bV5SizeImage);
+  std::memcpy(dib.data(), &header, sizeof(header));
+  if (FAILED(pixels->CopyPixels(nullptr, image.PixelWidth() * 4, header.bV5SizeImage,
+                                reinterpret_cast<BYTE*>(dib.data() + sizeof(header))))) return false;
+  return AddFormat(formats, CF_DIBV5, dib) &&
+      (image.Format() != ImageFormat::Png || AddFormat(formats, PngFormat(), image.EncodedBytes()));
+}
+
+IoResult<ClipboardContent> DecodeDib(Bytes dib) {
+  BITMAPINFOHEADER info{};
+  if (dib.size() < sizeof(info)) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  std::memcpy(&info, dib.data(), sizeof(info));
+  if (info.biSize < sizeof(info) || info.biSize > dib.size() || info.biWidth <= 0 || info.biHeight == 0 ||
+      info.biPlanes != 1 || (info.biCompression != BI_RGB && info.biCompression != BI_BITFIELDS) ||
+      (info.biBitCount != 1 && info.biBitCount != 4 && info.biBitCount != 8 && info.biBitCount != 16 &&
+       info.biBitCount != 24 && info.biBitCount != 32)) {
+    return ClipboardFailure(IoErrorCode::Unsupported);
+  }
+  const auto height = static_cast<std::size_t>(info.biHeight < 0 ? -std::int64_t(info.biHeight) : info.biHeight);
+  if (!ClipboardImageSizeAllowed(info.biWidth, height)) return ClipboardFailure(IoErrorCode::TooLarge);
+  const std::size_t masks = info.biSize == sizeof(info) && info.biCompression == BI_BITFIELDS ? 12 : 0;
+  const std::size_t palette = info.biClrUsed ? info.biClrUsed : info.biBitCount <= 8 ? 1U << info.biBitCount : 0U;
+  if (dib.size() - info.biSize < masks || palette > (dib.size() - info.biSize - masks) / 4) {
+    return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  }
+  const std::size_t pixels = info.biSize + masks + palette * 4;
+  const auto stride = (static_cast<std::size_t>(info.biWidth) * info.biBitCount + 31) / 32 * 4;
+  if (stride > (dib.size() - pixels) / height) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+
+  BITMAPFILEHEADER file{};
+  file.bfType = 0x4D42;
+  file.bfSize = static_cast<DWORD>(sizeof(file) + dib.size());
+  file.bfOffBits = static_cast<DWORD>(sizeof(file) + pixels);
+  dib.insert(dib.begin(), reinterpret_cast<const std::byte*>(&file),
+             reinterpret_cast<const std::byte*>(&file) + sizeof(file));
+  auto factory = ImagingFactory();
+  if (!factory) return ClipboardFailure(IoErrorCode::Io);
+  auto decoded = DecodeImage(*factory.Get(), dib);
+  if (!decoded) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+  ComPtr<IStream> stream;
+  ComPtr<IWICBitmapEncoder> encoder;
+  ComPtr<IWICBitmapFrameEncode> frame;
+  if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) ||
+      FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+      FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
+      FAILED(encoder->CreateNewFrame(&frame, nullptr)) || FAILED(frame->Initialize(nullptr)) ||
+      FAILED(frame->WriteSource(decoded.Get(), nullptr)) || FAILED(frame->Commit()) || FAILED(encoder->Commit())) {
+    return ClipboardFailure(IoErrorCode::Io);
+  }
+  STATSTG stat{};
+  if (FAILED(stream->Stat(&stat, STATFLAG_NONAME))) return ClipboardFailure(IoErrorCode::Io);
+  if (stat.cbSize.QuadPart > clipboard_max_image_bytes) return ClipboardFailure(IoErrorCode::TooLarge);
+  Bytes png(static_cast<std::size_t>(stat.cbSize.QuadPart));
+  ULONG read = 0;
+  if (FAILED(stream->Seek({}, STREAM_SEEK_SET, nullptr)) ||
+      FAILED(stream->Read(png.data(), static_cast<ULONG>(png.size()), &read)) || read != png.size()) {
+    return ClipboardFailure(IoErrorCode::Io);
+  }
+  return ClipboardImage(std::move(png));
+}
+
+Task<IoResult<ClipboardContent>> DecodeDibAsync(Bytes bytes) {
+  co_return co_await RunWorker([bytes = std::move(bytes)]() mutable {
+    const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) return ClipboardFailure(IoErrorCode::Io);
+    struct Apartment {
+      HRESULT initialized;
+      ~Apartment() { if (SUCCEEDED(initialized)) CoUninitialize(); }
+    } apartment{initialized};
+    return DecodeDib(std::move(bytes));
+  });
+}
+
+bool Win32ClipboardMayHave(ClipboardKind kind) noexcept {
+  const auto advertised = [](UINT format) { return format && IsClipboardFormatAvailable(format); };
+  switch (kind) {
+  case ClipboardKind::Text: return advertised(CF_UNICODETEXT);
+  case ClipboardKind::RichText: return advertised(HtmlFormat()) || advertised(CF_UNICODETEXT);
+  case ClipboardKind::Image: return advertised(PngFormat()) || advertised(CF_DIBV5) || advertised(CF_DIB);
+  case ClipboardKind::Files: return advertised(CF_HDROP);
+  }
+  return false;
+}
+
+bool WriteWin32Clipboard(HWND window, const ClipboardContent& content) {
+  ClipboardFormats formats;
+  const bool prepared = std::visit([&](const auto& value) {
+    using T = std::decay_t<decltype(value)>;
+    if constexpr (std::is_same_v<T, std::string>) {
+      return AddText(formats, value);
+    } else if constexpr (std::is_same_v<T, AttributedText>) {
+      const auto html = Win32Html(value);
+      return !html.empty() && AddText(formats, value.PlainText()) &&
+          AddFormat(formats, HtmlFormat(), std::as_bytes(std::span(html.c_str(), html.size() + 1)));
+    } else if constexpr (std::is_same_v<T, ImageAsset>) {
+      return AddImage(formats, value);
+    } else {
+      return AddFiles(formats, content);
+    }
+  }, content);
+  if (!prepared) return false;
+  ClipboardAccess access(window);
+  if (!access || !EmptyClipboard()) return false;
+  for (auto& [format, block] : formats) {
+    if (!SetClipboardData(format, block.get())) {
+      EmptyClipboard();
+      return false;
+    }
+    block.release();
+  }
+  return true;
+}
+
+Task<IoResult<ClipboardContent>> ReadWin32ClipboardAsync(HWND window, ClipboardKind kind) {
+  ClipboardAccess access(window);
+  if (!access) return ClipboardResult(ClipboardFailure(IoErrorCode::Io));
+  switch (kind) {
+  case ClipboardKind::Text:
+    return ClipboardResult(ReadUnicodeText());
+  case ClipboardKind::RichText: {
+    const UINT html = HtmlFormat();
+    return ClipboardResult(html && IsClipboardFormatAvailable(html) ? ReadWin32Html(html) : ReadUnicodeText());
+  }
+  case ClipboardKind::Files: {
+    auto paths = CapturePaths();
+    if (!paths.Succeeded()) return ClipboardResult(IoResult<ClipboardContent>::Failure(std::move(paths).Error()));
+    return RetainPaths(std::move(paths).Value());
+  }
+  case ClipboardKind::Image: {
+    const UINT png = PngFormat();
+    if (png && IsClipboardFormatAvailable(png)) {
+      auto bytes = CopyFormat(png, clipboard_max_image_bytes);
+      if (!bytes.Succeeded()) return ClipboardResult(IoResult<ClipboardContent>::Failure(std::move(bytes).Error()));
+      return ClipboardResult(ClipboardImage(std::move(bytes).Value()));
+    }
+    const UINT format = IsClipboardFormatAvailable(CF_DIBV5) ? CF_DIBV5 : CF_DIB;
+    if (!IsClipboardFormatAvailable(format)) return ClipboardResult(ClipboardFailure(IoErrorCode::NotFound));
+    auto bytes = CopyFormat(format, clipboard_max_image_pixels * 4 + 64 * 1024);
+    if (!bytes.Succeeded()) return ClipboardResult(IoResult<ClipboardContent>::Failure(std::move(bytes).Error()));
+    return DecodeDibAsync(std::move(bytes).Value());
+  }
+  }
+  return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+}
+
 } // namespace
 
 /// Owns process services and a hidden facilities HWND independently of visible WindowsUiWindow attachments.
@@ -698,6 +1080,22 @@ public:
     return true;
   }
 
+  bool WriteContent(ClipboardContent content) override {
+    if (!WriteWin32Clipboard(window_, content)) return false;
+    if (auto* references = std::get_if<std::vector<FileReference>>(&content)) {
+      clipboard_references_ = std::move(*references);
+    }
+    return true;
+  }
+
+  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
+    return ReadWin32ClipboardAsync(window_, kind);
+  }
+
+  bool MayHaveContent(ClipboardKind kind) const noexcept override {
+    return window_ && Win32ClipboardMayHave(kind);
+  }
+
 protected:
   void OnRuntimeStopped() override { PostQuitMessage(0); }
 
@@ -709,6 +1107,10 @@ private:
       SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(runtime));
     }
     if (runtime) {
+      if (message == WM_DESTROYCLIPBOARD) {
+        runtime->clipboard_references_.clear();
+        return 0;
+      }
       if (message == WM_COPYDATA && runtime->IsInitialized()) {
         const auto* data = reinterpret_cast<const COPYDATASTRUCT*>(l_param);
         if (data == nullptr || data->dwData != win32_application_activation_data_id || data->lpData == nullptr ||
@@ -746,6 +1148,7 @@ private:
   const std::wstring ui_window_class_ = Win32ApplicationWindowClassName() + L".Ui";
   bool ui_class_registered_ = false;
   HWND window_ = nullptr;
+  std::vector<FileReference> clipboard_references_;
   std::wstring window_class_;
   Win32Api win32_api_;
   std::shared_ptr<Win32SystemTrayTransport> system_tray_;
@@ -997,6 +1400,8 @@ private:
           )) {
         throw std::runtime_error("HuxerUI could not apply its custom Windows frame");
       }
+      const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
+      HUXERUI_DISCARD(DwmSetWindowAttribute(window_, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference)));
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     accessibility_.SetDpiScale(DpiScale());
@@ -1102,21 +1507,29 @@ private:
   }
 
   void CommitFrameAndInvalidate() {
-    if (!frame_coordinator_.BeginCommit()) {
-      return;
-    }
-    const FrameCommit& commit = UiWindow::BuildFrame();
-    committed_frame_ = &commit.render_frame;
-    const bool has_platform_views = platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale());
-    const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
-    accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
-    if (composition_changed) {
-      HUXERUI_DISCARD(InvalidateFullWindow());
-    }
-    HUXERUI_DISCARD(InvalidateDamage(committed_frame_->damage));
-    if (commit.next_frame_deadline.has_value()) {
-      RequestFrameAt(*commit.next_frame_deadline);
-    }
+    frame_coordinator_.Commit([&] {
+      const FrameCommit& commit = BuildFrameOrErrorPage([](const char* message) noexcept {
+        try {
+          const std::wstring line = Utf8ToWide(message) + L'\n';
+          OutputDebugStringW(line.c_str());
+        } catch (...) {
+          OutputDebugStringW(L"HuxerUI could not log the composition diagnostic\n");
+        }
+      });
+      committed_frame_ = &commit.render_frame;
+      const bool has_platform_views =
+          platform_views_ && platform_views_->Commit(*committed_frame_, DpiScale(), PlatformViewInputBounds());
+      const bool composition_changed = has_platform_views && renderer_.EnablePlatformComposition(window_);
+      accessibility_.Commit(commit.semantic_frame, has_platform_views ? platform_views_.get() : nullptr);
+      if (composition_changed || frame_coordinator_.PaintInterrupted()) {
+        HUXERUI_DISCARD(InvalidateFullWindow());
+      } else {
+        HUXERUI_DISCARD(InvalidateDamage(committed_frame_->damage));
+      }
+      if (commit.next_frame_deadline.has_value()) {
+        RequestFrameAt(*commit.next_frame_deadline);
+      }
+    });
     FlushDeferredFrame();
   }
 
@@ -1210,6 +1623,27 @@ private:
     const float maximize_left = controls_left + button_width;
     const float maximize_right = maximize_left + button_width;
     return point.x >= maximize_left && point.x < maximize_right ? HTMAXBUTTON : HTCLIENT;
+  }
+
+  std::optional<RECT> PlatformViewInputBounds() const noexcept {
+    if (!custom_chrome_) return std::nullopt;
+    RECT client{};
+    if (!GetClientRect(window_, &client)) return client;
+    const float scale = DpiScale();
+    const auto title_bar = QueryTitleBarMetrics(
+        {static_cast<float>(client.right) / scale, static_cast<float>(client.bottom) / scale});
+    if (!IsZoomed(window_)) {
+      const int horizontal = ResizeBorderX();
+      const int vertical = ResizeBorderY();
+      client.left += horizontal;
+      client.right -= horizontal;
+      client.top += vertical;
+      client.bottom -= vertical;
+    }
+    if (title_bar) {
+      client.top = std::max(client.top, static_cast<LONG>(std::ceil(title_bar->height * scale)));
+    }
+    return client;
   }
 
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
@@ -1563,6 +1997,9 @@ private:
           suggested->bottom - suggested->top,
           SWP_NOACTIVATE | SWP_NOZORDER
       );
+      if (platform_views_) {
+        platform_views_->Resize();
+      }
       UpdateRuntimeViewport();
       UiWindow::UpdateResourceConfiguration(Configuration());
       RequestFrameAt(Now());
@@ -1592,6 +2029,10 @@ private:
     case Win32Accessibility::action_message:
       return accessibility_.HandleActionMessage(l_param);
     case WM_PAINT: {
+      if (frame_coordinator_.DeferPaintIfCommitting()) {
+        ValidateRect(window, nullptr);
+        return 0;
+      }
       frame_coordinator_.BeginPaint();
       if (committed_frame_ == nullptr ||
           (frame_coordinator_.FrameBuildPending() && !frame_coordinator_.PaintPending())) {
@@ -1601,7 +2042,8 @@ private:
       }
       PAINTSTRUCT paint{};
       BeginPaint(window, &paint);
-      const Win32RenderResult render_result = renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint);
+      const auto render_result = committed_frame_ != nullptr
+          ? renderer_.Render(window_, dpi_, *committed_frame_, paint.rcPaint) : Win32RenderResult::Skipped;
       if (render_result == Win32RenderResult::Retry || render_result == Win32RenderResult::Recreate) {
         InvalidateFullWindow();
       }
@@ -1750,7 +2192,7 @@ private:
   bool first_nc_calc_ = true;
   bool render_message_posted_ = false;
   bool timer_armed_ = false;
-  PlatformFrameCoordinator frame_coordinator_;
+  FrameCoordinator frame_coordinator_;
   MouseTrackingArea mouse_tracking_area_ = MouseTrackingArea::None;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   HWND mouse_tracking_window_ = nullptr;

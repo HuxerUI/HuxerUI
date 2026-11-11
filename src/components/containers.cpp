@@ -395,18 +395,6 @@ float CrossOffset(float available, float child, CrossAxisAlignment alignment) {
   return 0.0F;
 }
 
-float AlignedScrollOffset(float start, float extent, float viewport_extent, ScrollAlignment alignment) {
-  switch (alignment) {
-  case ScrollAlignment::Center:
-    return start - (viewport_extent - extent) * 0.5F;
-  case ScrollAlignment::End:
-    return start - (viewport_extent - extent);
-  case ScrollAlignment::Start:
-    return start;
-  }
-  return start;
-}
-
 float HorizontalOffset(float available, float child, HorizontalAlignment alignment) {
   const float remaining = std::max(0.0F, available - child);
   switch (alignment) {
@@ -803,7 +791,7 @@ std::optional<float> VirtualList::ScrollOffsetForItem(
   if (!metrics.Initialized() || index >= metrics.ItemCount()) {
     return std::nullopt;
   }
-  return AlignedScrollOffset(metrics.Offset(index), metrics.Extent(index), viewport_extent, alignment);
+  return detail::AlignedScrollOffset(metrics.Offset(index), metrics.Extent(index), viewport_extent, alignment);
 }
 
 VirtualLayoutResult VirtualGrid::Measure(VirtualLayoutContext& context, ViewNode& node, Constraints constraints) {
@@ -966,7 +954,7 @@ std::optional<float> VirtualGrid::ScrollOffsetForItem(
     return std::nullopt;
   }
   const std::size_t row = metrics.RowForItem(index);
-  return AlignedScrollOffset(metrics.Offset(row), metrics.RowExtent(row), viewport_extent, alignment);
+  return detail::AlignedScrollOffset(metrics.Offset(row), metrics.RowExtent(row), viewport_extent, alignment);
 }
 
 LayoutResult Column::Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
@@ -1114,11 +1102,22 @@ ScrollView::ScrollView(View content) : detail::TypedView<ScrollView>(MakeScrollV
 
 ScrollView ScrollView::ScrollAxis(Axis axis) && {
   SetLayoutValue(typeid(detail::ScrollAxisBinding), axis);
+  SetLayoutValue(typeid(detail::ScrollBothAxesBinding), false);
+  return std::move(*this);
+}
+
+ScrollView ScrollView::ScrollBothAxes() && {
+  SetLayoutValue(typeid(detail::ScrollBothAxesBinding), true);
   return std::move(*this);
 }
 
 ScrollView ScrollView::Controller(huxerui::ScrollController controller) && {
   SetLayoutValue(typeid(detail::ScrollControllerBinding), std::move(controller));
+  return std::move(*this);
+}
+
+ScrollView ScrollView::Controller(Axis axis, huxerui::ScrollController controller) && {
+  SetLayoutValue(detail::ScrollControllerBindingKey(axis), std::move(controller));
   return std::move(*this);
 }
 

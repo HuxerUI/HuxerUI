@@ -51,9 +51,30 @@ void ValidatePermission(Permission permission) {
   switch (permission) {
   case Permission::Camera:
   case Permission::Microphone:
+  case Permission::Location:
+  case Permission::PreciseLocation:
+  case Permission::BackgroundLocation:
+  case Permission::Notifications:
+  case Permission::ContactsRead:
+  case Permission::CalendarAdd:
+  case Permission::CalendarReadWrite:
+  case Permission::PhotosRead:
+  case Permission::VideosRead:
+  case Permission::PhotoLibraryAdd:
+  case Permission::BluetoothScan:
+  case Permission::BluetoothConnect:
     return;
   }
   throw std::invalid_argument("HuxerUI permission is invalid");
+}
+
+void ValidatePermissionSettingsTarget(PermissionSettingsTarget target) {
+  switch (target) {
+  case PermissionSettingsTarget::Application:
+  case PermissionSettingsTarget::System:
+    return;
+  }
+  throw std::invalid_argument("HuxerUI permission settings target is invalid");
 }
 
 void InvokeCancellation(std::function<void()> cancellation) noexcept {
@@ -367,12 +388,14 @@ Task<PermissionStatus> RequestPermission(std::shared_ptr<PermissionController::I
       PermissionStatus::Unavailable, true);
 }
 
-Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::Impl> controller, Permission permission) {
+Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::Impl> controller, Permission permission,
+                                  PermissionSettingsTarget target) {
   auto source = CapturePresentationContext(controller->application_source);
   const auto identity = controller->transport ? controller->transport->PresentationIdentity() : 0;
   return RunPermissionOperation<bool>(
       std::move(controller),
-      [permission, identity, source = std::move(source)](PermissionTransport& transport, PermissionSettingsCompletion completion) {
+      [permission, target, identity, source = std::move(source)](PermissionTransport& transport,
+                                                                  PermissionSettingsCompletion completion) {
         if (!IsPresentationSourceAvailable(source)) {
           completion(false);
           return std::function<void()>{};
@@ -382,7 +405,7 @@ Task<bool> OpenPermissionSettings(std::shared_ptr<PermissionController::Impl> co
           completion(false);
           return std::function<void()>{};
         }
-        return transport.OpenSettings(permission, std::move(completion));
+        return transport.OpenSettings(permission, target, std::move(completion));
       },
       false, true);
 }
@@ -407,9 +430,10 @@ Task<PermissionStatus> PermissionController::Request(Permission permission) cons
   return RequestPermission(impl_, permission);
 }
 
-Task<bool> PermissionController::OpenSettings(Permission permission) const {
+Task<bool> PermissionController::OpenSettings(Permission permission, PermissionSettingsTarget target) const {
   ValidatePermission(permission);
-  return OpenPermissionSettings(impl_, permission);
+  ValidatePermissionSettingsTarget(target);
+  return OpenPermissionSettings(impl_, permission, target);
 }
 
 void PermissionController::Disconnect() noexcept {
@@ -529,8 +553,8 @@ Task<PermissionStatus> ApplicationService::RequestPermission(Permission permissi
   return permissions_->Request(permission);
 }
 
-Task<bool> ApplicationService::OpenPermissionSettings(Permission permission) const {
-  return permissions_->OpenSettings(permission);
+Task<bool> ApplicationService::OpenPermissionSettings(Permission permission, PermissionSettingsTarget target) const {
+  return permissions_->OpenSettings(permission, target);
 }
 
 bool ApplicationService::SupportsMultipleWindows() const {
@@ -671,8 +695,9 @@ Task<PermissionStatus> ApplicationHandle::RequestPermissionAsync(Permission perm
   return service_->RequestPermission(permission);
 }
 
-Task<bool> ApplicationHandle::OpenPermissionSettingsAsync(Permission permission) const {
-  return service_->OpenPermissionSettings(permission);
+Task<bool> ApplicationHandle::OpenPermissionSettingsAsync(
+    Permission permission, PermissionSettingsTarget target) const {
+  return service_->OpenPermissionSettings(permission, target);
 }
 
 bool ApplicationHandle::SupportsMultipleWindows() const {

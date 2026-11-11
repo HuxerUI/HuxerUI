@@ -2,6 +2,7 @@
 #include "internal_access.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <concepts>
 #include <optional>
@@ -42,10 +43,6 @@ ScrollBarStyle ResolveScrollBarStyle(
   return style;
 }
 
-std::optional<detail::ScrollBarGeometry> ResolveLocalScrollBarGeometry(const ViewNode& node) {
-  return detail::ResolveScrollBarGeometry(static_cast<const detail::MountedNode&>(node));
-}
-
 class ScrollBarExtension final : public NodeExtension {
 public:
   ScrollBarExtension(ViewNode& node, const ScrollBar& modifier) {
@@ -68,7 +65,10 @@ public:
       }
       return result;
     };
-    if (!node.IsEnabled() || !detail::ResolveScrollBarGeometry(mounted).has_value()) {
+    const bool has_bar = mounted.scroll_state && std::ranges::any_of(mounted.scroll_state->Axes(), [&](Axis axis) {
+      return detail::ResolveScrollBarGeometry(mounted, axis).has_value();
+    });
+    if (!node.IsEnabled() || !has_bar) {
       opacity_.Set(0.0F);
       initialized_ = false;
       return finish({});
@@ -89,7 +89,7 @@ public:
       hide_delay_pending_ = false;
     }
 
-    const bool held = hovered_ || pointer_dragging_ || scroll_dragging_;
+    const bool held = hovered_ || pointer_dragging_ || scroll_dragging_[0] || scroll_dragging_[1];
     if (held) {
       opacity_.AnimateTo(1.0F, TweenSpec{style_.fade_in_duration});
     } else if (frame.timestamp >= hide_deadline_) {
@@ -116,16 +116,15 @@ public:
     activity_pending_ = true;
     InvalidatePaint();
     if (activity.phase == ScrollPhase::Begin) {
-      scroll_dragging_ = true;
+      scroll_dragging_[detail::ScrollAxisIndex(activity.axis)] = true;
     } else if (activity.phase == ScrollPhase::End || activity.phase == ScrollPhase::Cancel) {
-      scroll_dragging_ = false;
+      scroll_dragging_[detail::ScrollAxisIndex(activity.axis)] = false;
       hide_delay_pending_ = true;
     }
   }
 
   bool HitTest(ViewNode& node, Point position) const override {
-    const auto geometry = ResolveLocalScrollBarGeometry(node);
-    return node.IsEnabled() && geometry.has_value() && opacity_.Value() > 0.01F && geometry->track.Contains(position);
+    return node.IsEnabled() && opacity_.Value() > 0.01F && BarAt(node, position).has_value();
   }
 
   bool HoverHitTest(ViewNode& node, Point position) const override {
@@ -149,7 +148,7 @@ public:
     auto& mounted = static_cast<detail::MountedNode&>(node);
     if (!node.IsEnabled()) {
       if (pointer_dragging_) {
-        detail::NotifyScrollNodeActivity(mounted, ScrollSource::Scrollbar, ScrollPhase::Cancel, 0.0F);
+        detail::NotifyScrollNodeActivity(mounted, pointer_axis_, ScrollSource::Scrollbar, ScrollPhase::Cancel, 0.0F);
       }
       pointer_id_.reset();
       pointer_dragging_ = false;
@@ -157,8 +156,8 @@ public:
       return NodeExtension::PointerResult::Ignored;
     }
     if (event.type == PointerEventType::Down) {
-      const auto geometry = ResolveLocalScrollBarGeometry(node);
-      if (!geometry.has_value() || opacity_.Value() <= 0.01F || !geometry->track.Contains(event.position)) {
+      const auto geometry = BarAt(node, event.position);
+      if (!geometry || opacity_.Value() <= 0.01F) {
         return NodeExtension::PointerResult::Ignored;
       }
 
@@ -171,7 +170,7 @@ public:
       pointer_draggable_ = geometry->thumb_travel > 0.0F && geometry->thumb.Contains(event.position);
       pointer_dragging_ = true;
       activity_pending_ = true;
-      detail::NotifyScrollNodeActivity(mounted, ScrollSource::Scrollbar, ScrollPhase::Begin, 0.0F);
+      detail::NotifyScrollNodeActivity(mounted, pointer_axis_, ScrollSource::Scrollbar, ScrollPhase::Begin, 0.0F);
       return NodeExtension::PointerResult::Capture;
     }
 
@@ -186,8 +185,8 @@ public:
           0.0F,
           maximum_offset_
       );
-      const float current = pointer_axis_ == Axis::Vertical ? mounted.scroll_state->offset_y : mounted.scroll_state->offset_x;
-      if (detail::ScrollNodeBy(mounted, desired - current, ScrollSource::Scrollbar) != 0.0F) {
+      const float current = mounted.scroll_state->Offset(pointer_axis_);
+      if (detail::ScrollNodeBy(mounted, pointer_axis_, desired - current, ScrollSource::Scrollbar) != 0.0F) {
         activity_pending_ = true;
         InvalidatePaint();
       }
@@ -196,7 +195,7 @@ public:
 
     if (event.type == PointerEventType::Up || event.type == PointerEventType::Cancel) {
       const ScrollPhase phase = event.type == PointerEventType::Up ? ScrollPhase::End : ScrollPhase::Cancel;
-      detail::NotifyScrollNodeActivity(mounted, ScrollSource::Scrollbar, phase, 0.0F);
+      detail::NotifyScrollNodeActivity(mounted, pointer_axis_, ScrollSource::Scrollbar, phase, 0.0F);
       pointer_id_.reset();
       pointer_dragging_ = false;
       pointer_draggable_ = false;
@@ -208,24 +207,42 @@ public:
   }
 
   void PaintAboveContent(const ViewNode& node, PaintContext& context) const override {
-    const auto geometry = ResolveLocalScrollBarGeometry(node);
-    if (!geometry.has_value() || opacity_.Value() <= 0.0F) {
+    const auto& mounted = static_cast<const detail::MountedNode&>(node);
+    if (!mounted.scroll_state || opacity_.Value() <= 0.0F) {
       return;
     }
-
-    Color track_color = geometry->style.track_color;
-    track_color.alpha *= opacity_.Value();
-    Color thumb_color = geometry->style.thumb_color;
-    thumb_color.alpha *= opacity_.Value();
-    if (track_color.alpha > 0.0F) {
-      context.DrawRect(geometry->track, track_color, geometry->style.corner_radius);
-    }
-    if (thumb_color.alpha > 0.0F) {
-      context.DrawRect(geometry->thumb, thumb_color, geometry->style.corner_radius);
+    for (Axis axis : mounted.scroll_state->Axes()) {
+      const auto geometry = detail::ResolveScrollBarGeometry(mounted, axis);
+      if (!geometry) {
+        continue;
+      }
+      Color track_color = geometry->style.track_color;
+      track_color.alpha *= opacity_.Value();
+      Color thumb_color = geometry->style.thumb_color;
+      thumb_color.alpha *= opacity_.Value();
+      if (track_color.alpha > 0.0F) {
+        context.DrawRect(geometry->track, track_color, geometry->style.corner_radius);
+      }
+      if (thumb_color.alpha > 0.0F) {
+        context.DrawRect(geometry->thumb, thumb_color, geometry->style.corner_radius);
+      }
     }
   }
 
 private:
+  static std::optional<detail::ScrollBarGeometry> BarAt(const ViewNode& node, Point position) {
+    const auto& mounted = static_cast<const detail::MountedNode&>(node);
+    if (mounted.scroll_state) {
+      for (Axis axis : mounted.scroll_state->Axes()) {
+        auto geometry = detail::ResolveScrollBarGeometry(mounted, axis);
+        if (geometry && geometry->track.Contains(position)) {
+          return geometry;
+        }
+      }
+    }
+    return std::nullopt;
+  }
+
   ScrollBarStyle style_;
   MotionController opacity_{1.0F};
   double hide_deadline_ = 0.0;
@@ -234,7 +251,7 @@ private:
   bool hide_delay_pending_ = false;
   bool hovered_ = false;
   bool pointer_dragging_ = false;
-  bool scroll_dragging_ = false;
+  std::array<bool, 2> scroll_dragging_{};
   std::optional<std::int64_t> pointer_id_;
   Axis pointer_axis_ = Axis::Vertical;
   float pointer_origin_ = 0.0F;
@@ -589,9 +606,9 @@ const detail::ModifierDescriptor& Focusable::Descriptor() {
   return ApplyOnlyModifierDescriptor<Focusable, ApplyFocusable>();
 }
 
-const detail::ModifierDescriptor& FocusTarget::Descriptor() {
-  return ApplyOnlyModifierDescriptor<FocusTarget, [](detail::ViewSpec& spec, const FocusTarget& modifier) {
-    spec.focus_target = modifier.requester.state_;
+const detail::ModifierDescriptor& ViewHandle::Descriptor() {
+  return ApplyOnlyModifierDescriptor<ViewHandle, [](detail::ViewSpec& spec, const ViewHandle& modifier) {
+    spec.view_handle = modifier.binding_;
   }>();
 }
 

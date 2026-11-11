@@ -6,6 +6,7 @@
 #include <optional>
 
 #include <huxerui/app.h>
+#include <huxerui/clipboard.h>
 
 namespace huxerui::detail {
 
@@ -45,6 +46,10 @@ struct AndroidApplicationActivationInput {
     jobject context,
     const AndroidApplicationActivationInput& input
 );
+
+/// Retains the captured clip and resolves its payload on a worker.
+Task<IoResult<ClipboardContent>>
+ReadAndroidClipboardAsync(JavaVM* vm, JNIEnv* environment, jobject context, jobject capture, ClipboardKind kind);
 
 /// Creates the application's permission bridge; presentation is selected separately for each request.
 /// @param virtual_machine VM used by the retained Java bridge.

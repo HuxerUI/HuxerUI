@@ -516,12 +516,29 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            binutils ca-certificates fontconfig fonts-dejavu-core git libepoxy-dev libgtk-4-dev \
-            libsoup-3.0-dev ninja-build patchelf pkg-config python3-pip software-properties-common
+            binutils ca-certificates curl fontconfig fonts-dejavu-core git libepoxy-dev libgtk-4-dev \
+            libsoup-3.0-dev ninja-build pkg-config python3-pip software-properties-common
           add-apt-repository -y ppa:ubuntu-toolchain-r/test
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y gcc-14 g++-14
           python3 -m pip install --break-system-packages cmake==3.31.10
+      - name: Install Linux runtime deployment tool
+        run: |
+          case "${{ matrix.architecture }}" in
+            x86_64) patchelf_sha256=2abdc34fbe949c995a1baa4ec310896a085588a45a99cd0d726851bdfac2a4bb ;;
+            aarch64) patchelf_sha256=ba6850c1a6f4cbdb050e1cc22fa5239159ad31c43606846e49c408d335f594ff ;;
+            *) exit 1 ;;
+          esac
+          patchelf_archive="${RUNNER_TEMP}/patchelf-0.19.2-${{ matrix.architecture }}.tar.gz"
+          patchelf_root="${RUNNER_TEMP}/huxerui-patchelf"
+          curl --fail --location --retry 3 \
+            "https://github.com/NixOS/patchelf/releases/download/0.19.2/patchelf-0.19.2-${{ matrix.architecture }}.tar.gz" \
+            --output "${patchelf_archive}"
+          printf '%s  %s\n' "${patchelf_sha256}" "${patchelf_archive}" | sha256sum --check --status
+          mkdir -p "${patchelf_root}"
+          tar -xzf "${patchelf_archive}" -C "${patchelf_root}"
+          printf '%s\n' "${patchelf_root}/bin" >> "${GITHUB_PATH}"
+          "${patchelf_root}/bin/patchelf" --version
       - name: Prepare executables
         run: >-
           chmod +x

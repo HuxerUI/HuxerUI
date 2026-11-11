@@ -1,4 +1,9 @@
 #import <AVFoundation/AVFoundation.h>
+#import <Contacts/Contacts.h>
+#import <CoreBluetooth/CoreBluetooth.h>
+#import <CoreLocation/CoreLocation.h>
+#import <EventKit/EventKit.h>
+#import <Photos/Photos.h>
 #import <UIKit/UIKit.h>
 #import <UserNotifications/UserNotifications.h>
 
@@ -17,96 +22,519 @@
 
 #include "application/application_internal.h"
 #include "ios_file_internal.h"
+#include "macros_internal.h"
+
+namespace huxerui::detail {
+namespace {
+
+bool HasUsageDescription(NSString* key) {
+  id value = [NSBundle.mainBundle objectForInfoDictionaryKey:key];
+  return [value isKindOfClass:NSString.class] && [static_cast<NSString*>(value) length] > 0;
+}
+
+bool CanPresentPrompt() {
+  return UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+}
+
+bool IsLocationPermission(Permission permission) {
+  return permission == Permission::Location || permission == Permission::PreciseLocation ||
+         permission == Permission::BackgroundLocation;
+}
+
+bool HasLocationUsageDescription(Permission permission) {
+  if (permission != Permission::BackgroundLocation) {
+    return HasUsageDescription(@"NSLocationWhenInUseUsageDescription");
+  }
+  return HasUsageDescription(@"NSLocationWhenInUseUsageDescription") &&
+         HasUsageDescription(@"NSLocationAlwaysAndWhenInUseUsageDescription");
+}
+
+PermissionStatus ResolveLocationPermission(Permission permission, CLLocationManager* manager, bool services_enabled) {
+  const CLAuthorizationStatus status = manager.authorizationStatus;
+  if (!services_enabled && status != kCLAuthorizationStatusRestricted) {
+    return PermissionStatus::SystemDisabled;
+  }
+  switch (status) {
+  case kCLAuthorizationStatusNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case kCLAuthorizationStatusDenied:
+    return PermissionStatus::PermanentlyDenied;
+  case kCLAuthorizationStatusAuthorizedAlways:
+  case kCLAuthorizationStatusAuthorizedWhenInUse:
+    if (permission == Permission::BackgroundLocation && status == kCLAuthorizationStatusAuthorizedWhenInUse) {
+      return PermissionStatus::Denied;
+    }
+    return permission == Permission::PreciseLocation &&
+                   manager.accuracyAuthorization == CLAccuracyAuthorizationReducedAccuracy
+               ? PermissionStatus::Limited
+               : PermissionStatus::Granted;
+  case kCLAuthorizationStatusRestricted:
+    return PermissionStatus::Restricted;
+  default:
+    return PermissionStatus::Unavailable;
+  }
+}
+
+void ReadLocationPermission(Permission permission, CLLocationManager* manager, PermissionStatusCompletion completion) {
+  // The global switch can block. Keep the manager and its delegate on the application thread.
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    const bool services_enabled = [CLLocationManager locationServicesEnabled];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      completion(ResolveLocationPermission(permission, manager, services_enabled));
+    });
+  });
+}
+
+PermissionStatus ResolveBluetoothAuthorization() {
+  switch (CBManager.authorization) {
+  case CBManagerAuthorizationNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case CBManagerAuthorizationRestricted:
+    return PermissionStatus::Restricted;
+  case CBManagerAuthorizationDenied:
+    return PermissionStatus::PermanentlyDenied;
+  case CBManagerAuthorizationAllowedAlways:
+    return PermissionStatus::Granted;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+} // namespace
+} // namespace huxerui::detail
+
+@interface HuxerUIIosPermissionPrompt : NSObject <CLLocationManagerDelegate, CBCentralManagerDelegate> {
+@private
+  huxerui::Permission permission_;
+  huxerui::detail::PermissionStatusCompletion completion_;
+  CLLocationManager* location_;
+  CBCentralManager* bluetooth_;
+}
+- (instancetype)initWithPermission:(huxerui::Permission)permission
+                        completion:(huxerui::detail::PermissionStatusCompletion)completion;
+- (void)requestLocation:(CLLocationManager*)manager;
+- (void)requestBluetooth;
+@end
+
+@implementation HuxerUIIosPermissionPrompt
+
+- (instancetype)initWithPermission:(huxerui::Permission)permission
+                        completion:(huxerui::detail::PermissionStatusCompletion)completion {
+  if ((self = [super init])) {
+    permission_ = permission;
+    completion_ = std::move(completion);
+  }
+  return self;
+}
+
+- (void)requestLocation:(CLLocationManager*)manager {
+  location_ = manager;
+  manager.delegate = self;
+  [manager requestWhenInUseAuthorization];
+}
+
+- (void)locationManagerDidChangeAuthorization:(CLLocationManager*)manager {
+  if (completion_ && manager.authorizationStatus != kCLAuthorizationStatusNotDetermined) {
+    auto completion = std::move(completion_);
+    manager.delegate = nil;
+    location_ = nil;
+    huxerui::detail::ReadLocationPermission(permission_, manager, std::move(completion));
+  }
+}
+
+- (void)requestBluetooth {
+  bluetooth_ = [[CBCentralManager alloc] initWithDelegate:self queue:nil
+                                                   options:@{CBCentralManagerOptionShowPowerAlertKey: @NO}];
+}
+
+- (void)centralManagerDidUpdateState:(CBCentralManager*)manager {
+  using huxerui::PermissionStatus;
+  if (!completion_ || manager.state == CBManagerStateUnknown || manager.state == CBManagerStateResetting) {
+    return;
+  }
+  PermissionStatus status = huxerui::detail::ResolveBluetoothAuthorization();
+  if (manager.state == CBManagerStateUnsupported) {
+    status = PermissionStatus::Unavailable;
+  } else if (manager.state == CBManagerStatePoweredOff) {
+    status = PermissionStatus::SystemDisabled;
+  } else if (status == PermissionStatus::NotDetermined) {
+    return;
+  }
+  auto completion = std::move(completion_);
+  manager.delegate = nil;
+  bluetooth_ = nil;
+  completion(status);
+}
+
+@end
 
 namespace huxerui::detail {
 
 namespace {
 
-AVMediaType MediaType(Permission permission) {
-  switch (permission) {
-  case Permission::Camera:
-    return AVMediaTypeVideo;
-  case Permission::Microphone:
-    return AVMediaTypeAudio;
+PermissionStatus ResolveNotificationAuthorizationStatus(UNAuthorizationStatus status) noexcept {
+  switch (status) {
+  case UNAuthorizationStatusNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case UNAuthorizationStatusDenied:
+    return PermissionStatus::Denied;
+  case UNAuthorizationStatusAuthorized:
+  case UNAuthorizationStatusEphemeral:
+    return PermissionStatus::Granted;
+  case UNAuthorizationStatusProvisional:
+    return PermissionStatus::Provisional;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+void QueryNotificationAuthorization(UNUserNotificationCenter* center, PermissionStatusCompletion completion) {
+  if (center == nil) {
+    completion(PermissionStatus::Unavailable);
+    return;
+  }
+  [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings* settings) {
+    completion(settings == nil ? PermissionStatus::Unavailable
+                                : ResolveNotificationAuthorizationStatus(settings.authorizationStatus));
+  }];
+}
+
+void CheckNotificationAuthorization(PermissionStatusCompletion completion) {
+  @try {
+    QueryNotificationAuthorization(UNUserNotificationCenter.currentNotificationCenter, completion);
+  } @catch (NSException*) {
+    completion(PermissionStatus::Unavailable);
   }
 }
 
-NSString* UsageDescriptionKey(Permission permission) {
-  switch (permission) {
-  case Permission::Camera:
-    return @"NSCameraUsageDescription";
-  case Permission::Microphone:
-    return @"NSMicrophoneUsageDescription";
+void RequestNotificationAuthorization(PermissionStatusCompletion completion) {
+  @try {
+    UNUserNotificationCenter* center = UNUserNotificationCenter.currentNotificationCenter;
+    if (center == nil) {
+      completion(PermissionStatus::Unavailable);
+      return;
+    }
+    [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert completionHandler:^(BOOL, NSError* error) {
+      if (error != nil) {
+        completion(PermissionStatus::Unavailable);
+        return;
+      }
+      @try {
+        QueryNotificationAuthorization(center, completion);
+      } @catch (NSException*) {
+        completion(PermissionStatus::Unavailable);
+      }
+    }];
+  } @catch (NSException*) {
+    completion(PermissionStatus::Unavailable);
   }
 }
 
-bool HasUsageDescription(Permission permission) {
-  id value = [NSBundle.mainBundle objectForInfoDictionaryKey:UsageDescriptionKey(permission)];
-  return [value isKindOfClass:NSString.class] && [static_cast<NSString*>(value) length] > 0;
-}
-
-PermissionStatus ResolveStatus(AVAuthorizationStatus status) {
+PermissionStatus ResolveCaptureAuthorization(AVAuthorizationStatus status) {
   switch (status) {
   case AVAuthorizationStatusNotDetermined:
     return PermissionStatus::NotDetermined;
-  case AVAuthorizationStatusAuthorized:
-    return PermissionStatus::Granted;
-  case AVAuthorizationStatusDenied:
-    return PermissionStatus::PermanentlyDenied;
   case AVAuthorizationStatusRestricted:
     return PermissionStatus::Restricted;
+  case AVAuthorizationStatusDenied:
+    return PermissionStatus::PermanentlyDenied;
+  case AVAuthorizationStatusAuthorized:
+    return PermissionStatus::Granted;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+PermissionStatus ResolveContactsAuthorization(CNAuthorizationStatus status) {
+  switch (status) {
+  case CNAuthorizationStatusNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case CNAuthorizationStatusRestricted:
+    return PermissionStatus::Restricted;
+  case CNAuthorizationStatusDenied:
+    return PermissionStatus::PermanentlyDenied;
+  case CNAuthorizationStatusAuthorized:
+    return PermissionStatus::Granted;
+  case CNAuthorizationStatusLimited:
+    return PermissionStatus::Limited;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+NSString* const calendar_full_access_usage_key = @"NSCalendarsFullAccessUsageDescription";
+
+PermissionStatus CheckCalendarAuthorization(Permission permission) {
+  const bool add_only = permission == Permission::CalendarAdd;
+  const auto status = [EKEventStore authorizationStatusForEntityType:EKEntityTypeEvent];
+  if (@available(iOS 17.0, *)) {
+    if (status == EKAuthorizationStatusFullAccess) {
+      return PermissionStatus::Granted;
+    }
+    if (status == EKAuthorizationStatusWriteOnly) {
+      return add_only ? PermissionStatus::Granted : PermissionStatus::Limited;
+    }
+    NSString* usage_key = add_only ? @"NSCalendarsWriteOnlyAccessUsageDescription" : calendar_full_access_usage_key;
+    if (!HasUsageDescription(usage_key)) {
+      return PermissionStatus::Unavailable;
+    }
+  } else {
+    if (!HasUsageDescription(@"NSCalendarsUsageDescription")) {
+      return PermissionStatus::Unavailable;
+    }
+    if (status == EKAuthorizationStatusAuthorized) {
+      return PermissionStatus::Granted;
+    }
+    if (add_only) {
+      return PermissionStatus::Unavailable;
+    }
+  }
+  switch (status) {
+  case EKAuthorizationStatusNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case EKAuthorizationStatusRestricted:
+    return PermissionStatus::Restricted;
+  case EKAuthorizationStatusDenied:
+    return PermissionStatus::PermanentlyDenied;
+  default:
+    return PermissionStatus::Unavailable;
   }
 }
 
-class IosPermissionTransport final : public PermissionTransport {
+PermissionStatus ResolvePhotoAuthorization(PHAuthorizationStatus status) {
+  switch (status) {
+  case PHAuthorizationStatusNotDetermined:
+    return PermissionStatus::NotDetermined;
+  case PHAuthorizationStatusRestricted:
+    return PermissionStatus::Restricted;
+  case PHAuthorizationStatusDenied:
+    return PermissionStatus::PermanentlyDenied;
+  case PHAuthorizationStatusAuthorized:
+    return PermissionStatus::Granted;
+  case PHAuthorizationStatusLimited:
+    return PermissionStatus::Limited;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+AVMediaType CaptureMediaType(Permission permission) {
+  return permission == Permission::Camera ? AVMediaTypeVideo : AVMediaTypeAudio;
+}
+
+PHAccessLevel PhotoAccessLevel(Permission permission) {
+  return permission == Permission::PhotoLibraryAdd ? PHAccessLevelAddOnly : PHAccessLevelReadWrite;
+}
+
+PermissionStatus CheckAuthorization(Permission permission) {
+  switch (permission) {
+  case Permission::Camera:
+  case Permission::Microphone:
+    if (HasUsageDescription(permission == Permission::Camera ? @"NSCameraUsageDescription"
+                                                             : @"NSMicrophoneUsageDescription")) {
+      AVMediaType media_type = CaptureMediaType(permission);
+      return ResolveCaptureAuthorization([AVCaptureDevice authorizationStatusForMediaType:media_type]);
+    }
+    break;
+  case Permission::ContactsRead:
+    if (HasUsageDescription(@"NSContactsUsageDescription")) {
+      return ResolveContactsAuthorization([CNContactStore authorizationStatusForEntityType:CNEntityTypeContacts]);
+    }
+    break;
+  case Permission::CalendarAdd:
+  case Permission::CalendarReadWrite:
+    return CheckCalendarAuthorization(permission);
+  case Permission::PhotosRead:
+  case Permission::VideosRead:
+  case Permission::PhotoLibraryAdd:
+    if (permission == Permission::PhotoLibraryAdd && HasUsageDescription(@"NSPhotoLibraryUsageDescription")) {
+      const auto read_write = [PHPhotoLibrary authorizationStatusForAccessLevel:PHAccessLevelReadWrite];
+      // Limited access restricts which existing assets are visible and still allows creating new assets.
+      if (read_write == PHAuthorizationStatusAuthorized || read_write == PHAuthorizationStatusLimited) {
+        return PermissionStatus::Granted;
+      }
+    }
+    if (HasUsageDescription(permission == Permission::PhotoLibraryAdd ? @"NSPhotoLibraryAddUsageDescription"
+                                                                     : @"NSPhotoLibraryUsageDescription")) {
+      return ResolvePhotoAuthorization([PHPhotoLibrary authorizationStatusForAccessLevel:PhotoAccessLevel(permission)]);
+    }
+    break;
+  case Permission::BluetoothScan:
+  case Permission::BluetoothConnect:
+    if (HasUsageDescription(@"NSBluetoothAlwaysUsageDescription")) {
+      return ResolveBluetoothAuthorization();
+    }
+    break;
+  default:
+    break;
+  }
+  return PermissionStatus::Unavailable;
+}
+
+void RequestCalendarAuthorization(Permission permission, PermissionStatusCompletion completion) {
+  EKEventStore* store = [[EKEventStore alloc] init];
+  const auto reply = ^(BOOL, NSError*) {
+    // Keep the event store alive until EventKit calls back.
+    HUXERUI_UNUSED(store);
+    completion(CheckCalendarAuthorization(permission));
+  };
+  if (@available(iOS 17.0, *)) {
+    if (permission == Permission::CalendarAdd) {
+      [store requestWriteOnlyAccessToEventsWithCompletion:reply];
+    } else {
+      [store requestFullAccessToEventsWithCompletion:reply];
+    }
+  } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [store requestAccessToEntityType:EKEntityTypeEvent completion:reply];
+#pragma clang diagnostic pop
+  }
+}
+
+class IosPermissionTransport final : public PermissionTransport,
+                                       public std::enable_shared_from_this<IosPermissionTransport> {
 public:
   std::function<void()> Check(Permission permission, PermissionStatusCompletion completion) override {
-    if (!HasUsageDescription(permission)) {
-      completion(PermissionStatus::Unavailable);
-      return {};
+    if (permission == Permission::Notifications) {
+      CheckNotificationAuthorization(std::move(completion));
+    } else if (IsLocationPermission(permission)) {
+      if (HasLocationUsageDescription(permission)) {
+        ReadLocationPermission(permission, [[CLLocationManager alloc] init], std::move(completion));
+      } else {
+        completion(PermissionStatus::Unavailable);
+      }
+    } else {
+      completion(CheckAuthorization(permission));
     }
-    completion(ResolveStatus([AVCaptureDevice authorizationStatusForMediaType:MediaType(permission)]));
     return {};
   }
 
   std::function<void()> Request(Permission permission, PermissionStatusCompletion completion) override {
-    if (!HasUsageDescription(permission)) {
+    if (permission == Permission::Notifications) {
+      RequestNotificationAuthorization(std::move(completion));
+      return {};
+    }
+    if (IsLocationPermission(permission)) {
+      RequestLocation(permission, std::move(completion));
+      return {};
+    }
+    const auto status = CheckAuthorization(permission);
+    const bool can_upgrade_calendar = permission == Permission::CalendarReadWrite &&
+                                      status == PermissionStatus::Limited &&
+                                      HasUsageDescription(calendar_full_access_usage_key);
+    if (status != PermissionStatus::NotDetermined && !can_upgrade_calendar) {
+      completion(status);
+      return {};
+    }
+    @try {
+      switch (permission) {
+      case Permission::Camera:
+      case Permission::Microphone: {
+        AVMediaType media_type = CaptureMediaType(permission);
+        [AVCaptureDevice requestAccessForMediaType:media_type completionHandler:^(BOOL granted) {
+          completion(granted ? PermissionStatus::Granted :
+              ResolveCaptureAuthorization([AVCaptureDevice authorizationStatusForMediaType:media_type]));
+        }];
+        break;
+      }
+      case Permission::ContactsRead: {
+        CNContactStore* store = [[CNContactStore alloc] init];
+        [store requestAccessForEntityType:CNEntityTypeContacts completionHandler:^(BOOL, NSError*) {
+          // Keep the contact store alive until Contacts calls back.
+          HUXERUI_UNUSED(store);
+          completion(CheckAuthorization(permission));
+        }];
+        break;
+      }
+      case Permission::CalendarAdd:
+      case Permission::CalendarReadWrite:
+        RequestCalendarAuthorization(permission, completion);
+        break;
+      case Permission::PhotosRead:
+      case Permission::VideosRead:
+      case Permission::PhotoLibraryAdd: {
+        [PHPhotoLibrary requestAuthorizationForAccessLevel:PhotoAccessLevel(permission)
+                                                   handler:^(PHAuthorizationStatus authorization) {
+          completion(ResolvePhotoAuthorization(authorization));
+        }];
+        break;
+      }
+      case Permission::BluetoothScan:
+      case Permission::BluetoothConnect:
+        if (CanPresentPrompt()) {
+          prompt_ = [[HuxerUIIosPermissionPrompt alloc] initWithPermission:permission completion:completion];
+          [prompt_ requestBluetooth];
+        } else {
+          completion(PermissionStatus::Unavailable);
+        }
+        break;
+      default:
+        completion(PermissionStatus::Unavailable);
+        break;
+      }
+    } @catch (NSException*) {
+      prompt_ = nil;
       completion(PermissionStatus::Unavailable);
-      return {};
     }
-    const AVMediaType media_type = MediaType(permission);
-    const PermissionStatus current = ResolveStatus([AVCaptureDevice authorizationStatusForMediaType:media_type]);
-    if (current != PermissionStatus::NotDetermined) {
-      completion(current);
-      return {};
-    }
-    auto retained = std::make_shared<PermissionStatusCompletion>(std::move(completion));
-    [AVCaptureDevice requestAccessForMediaType:media_type
-                            completionHandler:^(BOOL granted) {
-                              (*retained)(granted
-                                      ? PermissionStatus::Granted
-                                      : ResolveStatus([AVCaptureDevice authorizationStatusForMediaType:media_type]));
-                            }];
     return {};
   }
 
-  std::function<void()> OpenSettings(Permission, PermissionSettingsCompletion completion) override {
-    NSURL* url = [NSURL URLWithString:UIApplicationOpenSettingsURLString];
-    if (url == nil) {
-      completion(false);
-      return {};
+  std::function<void()> OpenSettings(Permission permission, PermissionSettingsTarget target,
+                                    PermissionSettingsCompletion completion) override {
+    if (target == PermissionSettingsTarget::Application) {
+      NSString* address = UIApplicationOpenSettingsURLString;
+      if (@available(iOS 16.0, *)) {
+        if (permission == Permission::Notifications) {
+          address = UIApplicationOpenNotificationSettingsURLString;
+        }
+      }
+      NSURL* url = [NSURL URLWithString:address];
+      if (url != nil) {
+        [UIApplication.sharedApplication openURL:url options:@{} completionHandler:^(BOOL opened) {
+          completion(opened);
+        }];
+        return {};
+      }
     }
-    auto retained = std::make_shared<PermissionSettingsCompletion>(std::move(completion));
-    [UIApplication.sharedApplication openURL:url
-                                    options:@{}
-                          completionHandler:^(BOOL opened) {
-                            (*retained)(opened);
-                          }];
+    completion(false);
     return {};
   }
+
+private:
+  void RequestLocation(Permission permission, PermissionStatusCompletion completion) {
+    if (!HasLocationUsageDescription(permission)) {
+      completion(PermissionStatus::Unavailable);
+      return;
+    }
+    CLLocationManager* manager = [[CLLocationManager alloc] init];
+    auto weak = weak_from_this();
+    ReadLocationPermission(permission, manager,
+        [weak, permission, manager, completion = std::move(completion)](PermissionStatus current) {
+      auto owner = weak.lock();
+      if (!owner) {
+        return;
+      }
+      // Core Location may omit a callback after an Always upgrade that leaves the existing grant intact.
+      if (permission == Permission::BackgroundLocation || current != PermissionStatus::NotDetermined) {
+        completion(current);
+      } else if (!CanPresentPrompt()) {
+        completion(PermissionStatus::Unavailable);
+      } else {
+        @try {
+          owner->prompt_ = [[HuxerUIIosPermissionPrompt alloc] initWithPermission:permission completion:completion];
+          [owner->prompt_ requestLocation:manager];
+        } @catch (NSException*) {
+          owner->prompt_ = nil;
+          completion(PermissionStatus::Unavailable);
+        }
+      }
+    });
+  }
+
+  HuxerUIIosPermissionPrompt* prompt_ = nil;
 };
 
 } // namespace
+
+std::shared_ptr<PermissionTransport> CreateIosPermissionTransport() {
+  return std::make_shared<IosPermissionTransport>();
+}
 
 std::optional<ApplicationActivation> DecodeIosApplicationActivation(NSURL* url, bool copy_file_before_use) {
   if (url == nil) {
@@ -139,10 +567,6 @@ std::optional<ApplicationActivation> DecodeIosApplicationActivation(NSURL* url, 
   }
 }
 
-std::shared_ptr<PermissionTransport> CreateIosPermissionTransport() {
-  return std::make_shared<IosPermissionTransport>();
-}
-
 namespace {
 
 NSString* const local_notification_marker_key = @"org.huxerui.ios.local-notification";
@@ -150,7 +574,6 @@ NSString* const local_notification_data_key = @"org.huxerui.ios.local-notificati
 NSString* const local_notification_request_prefix = @"org.huxerui.ios.local-notification:";
 
 UNMutableNotificationContent* MakeIosLocalNotificationContent(const ResolvedLocalNotification& notification) noexcept;
-PermissionStatus ResolveIosNotificationAuthorizationStatus(UNAuthorizationStatus status) noexcept;
 
 template <typename Completion, typename Value>
 void Complete(const std::shared_ptr<Completion>& completion, Value value) noexcept {
@@ -224,18 +647,7 @@ std::set<std::string> DiscoverTemplateIdentifiers() noexcept {
 }
 
 bool CanSubmit(PermissionStatus status) noexcept {
-  switch (status) {
-  case PermissionStatus::Granted:
-  case PermissionStatus::Provisional:
-    return true;
-  case PermissionStatus::NotDetermined:
-  case PermissionStatus::Denied:
-  case PermissionStatus::PermanentlyDenied:
-  case PermissionStatus::Restricted:
-  case PermissionStatus::Unavailable:
-    return false;
-  }
-  return false;
+  return status == PermissionStatus::Granted || status == PermissionStatus::Provisional;
 }
 
 LocalNotificationOperationStatus SubmissionStatus(PermissionStatus status) noexcept {
@@ -244,6 +656,8 @@ LocalNotificationOperationStatus SubmissionStatus(PermissionStatus status) noexc
   case PermissionStatus::Denied:
   case PermissionStatus::PermanentlyDenied:
   case PermissionStatus::Restricted:
+  case PermissionStatus::Limited:
+  case PermissionStatus::SystemDisabled:
     return LocalNotificationOperationStatus::Unauthorized;
   case PermissionStatus::Unavailable:
     return LocalNotificationOperationStatus::Unavailable;
@@ -252,16 +666,6 @@ LocalNotificationOperationStatus SubmissionStatus(PermissionStatus status) noexc
     return LocalNotificationOperationStatus::Accepted;
   }
   return LocalNotificationOperationStatus::Unavailable;
-}
-
-template <typename Completion>
-void QueryAuthorization(UNUserNotificationCenter* center, std::shared_ptr<Completion> completion) {
-  [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings* settings) {
-    const PermissionStatus status =
-        settings == nil ? PermissionStatus::Unavailable
-                        : ResolveIosNotificationAuthorizationStatus(settings.authorizationStatus);
-    Complete(completion, status);
-  }];
 }
 
 UNNotificationRequest* MakeRequest(const ResolvedLocalNotification& notification, UNNotificationTrigger* trigger) {
@@ -290,34 +694,12 @@ public:
   }
 
   std::function<void()> CheckAuthorization(PermissionStatusCompletion completion) override {
-    auto retained = std::make_shared<PermissionStatusCompletion>(std::move(completion));
-    @try {
-      QueryAuthorization(center_, retained);
-    } @catch (NSException*) {
-      Complete(retained, PermissionStatus::Unavailable);
-    }
+    CheckNotificationAuthorization(std::move(completion));
     return {};
   }
 
   std::function<void()> RequestAuthorization(PermissionStatusCompletion completion) override {
-    auto retained = std::make_shared<PermissionStatusCompletion>(std::move(completion));
-    UNUserNotificationCenter* center = center_;
-    @try {
-      [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
-                            completionHandler:^(BOOL, NSError* error) {
-                              if (error != nil) {
-                                Complete(retained, PermissionStatus::Unavailable);
-                                return;
-                              }
-                              @try {
-                                QueryAuthorization(center, retained);
-                              } @catch (NSException*) {
-                                Complete(retained, PermissionStatus::Unavailable);
-                              }
-                            }];
-    } @catch (NSException*) {
-      Complete(retained, PermissionStatus::Unavailable);
-    }
+    RequestNotificationAuthorization(std::move(completion));
     return {};
   }
 
@@ -376,7 +758,7 @@ private:
       [center getNotificationSettingsWithCompletionHandler:^(UNNotificationSettings* settings) {
         const PermissionStatus authorization =
             settings == nil ? PermissionStatus::Unavailable
-                            : ResolveIosNotificationAuthorizationStatus(settings.authorizationStatus);
+                            : ResolveNotificationAuthorizationStatus(settings.authorizationStatus);
         if (!CanSubmit(authorization)) {
           Complete(retained, SubmissionStatus(authorization));
           return;
@@ -438,23 +820,6 @@ UNMutableNotificationContent* MakeIosLocalNotificationContent(const ResolvedLoca
   } @catch (NSException*) {
     return nil;
   }
-}
-
-PermissionStatus ResolveIosNotificationAuthorizationStatus(UNAuthorizationStatus status) noexcept {
-  switch (status) {
-  case UNAuthorizationStatusNotDetermined:
-    return PermissionStatus::NotDetermined;
-  case UNAuthorizationStatusDenied:
-    return PermissionStatus::Denied;
-  case UNAuthorizationStatusAuthorized:
-    return PermissionStatus::Granted;
-  case UNAuthorizationStatusProvisional:
-    return PermissionStatus::Provisional;
-  case UNAuthorizationStatusEphemeral:
-    // Ephemeral authorization grants current access without promising an indefinite lifetime.
-    return PermissionStatus::Granted;
-  }
-  return PermissionStatus::Unavailable;
 }
 
 bool IsIosLocalNotificationRequest(UNNotificationRequest* request) noexcept {

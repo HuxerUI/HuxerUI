@@ -16,7 +16,11 @@
 #include "macros_internal.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <exception>
+#include <new>
 #include <stdexcept>
+#include <utility>
 
 #include <huxerui/file.h>
 #include <huxerui/http.h>
@@ -25,6 +29,95 @@
 namespace huxerui::detail {
 
 namespace {
+
+class CompositionFailure final : public std::exception {
+public:
+  explicit CompositionFailure(std::string report) : report_(std::move(report)) {}
+
+  const char* what() const noexcept override { return report_.c_str(); }
+
+private:
+  std::string report_;
+};
+
+std::string DescribeCompositionFailure(bool initial, const char* operation, std::optional<std::size_t> item,
+                                       const char* message) {
+  std::string report = initial ? "HuxerUI initial composition failed in " : "HuxerUI recomposition failed in ";
+  report += operation;
+  if (item) {
+    report += " " + std::to_string(*item);
+  }
+  report += ": ";
+
+  if (message == nullptr || *message == '\0') {
+    report += "No exception message is available.";
+    return report;
+  }
+  constexpr std::size_t message_limit = 1024;
+  std::size_t length = 0;
+  while (length < message_limit && message[length] != '\0') {
+    ++length;
+  }
+  const bool truncated = length == message_limit && message[length] != '\0';
+  if (truncated) {
+    while (length > 0 && (static_cast<unsigned char>(message[length]) & 0xC0U) == 0x80U) {
+      --length;
+    }
+  }
+  const std::string_view text(message, length);
+  if (!IsValidUtf8(text)) {
+    report += "The exception message contains invalid UTF-8.";
+    return report;
+  }
+  for (const unsigned char character : text) {
+    report += character < 0x20U || character == 0x7FU ? ' ' : static_cast<char>(character);
+  }
+  if (truncated) {
+    report += "...";
+  }
+  return report;
+}
+
+AttributedText CompositionErrorDetails(std::string details) {
+  constexpr std::string_view state_slot_prefix = ": HuxerUI state kind or value type changed at ";
+  const std::size_t prefix = details.find(state_slot_prefix);
+  const std::size_t end = details.rfind(" (occurrence ");
+  if (prefix == std::string::npos || end == std::string::npos ||
+      end <= prefix + state_slot_prefix.size() || !details.ends_with(')')) {
+    return AttributedText(std::move(details));
+  }
+
+  const std::size_t start = prefix + state_slot_prefix.size();
+  return AttributedText{
+      TextSpan(details.substr(0, start)),
+      TextSpan(details.substr(start, end - start)).Style({
+          .foreground = Color::Rgb(166, 230, 255),
+          .decoration = TextDecoration::Underline,
+      }),
+      TextSpan(details.substr(end)),
+  };
+}
+
+View CompositionErrorPage(std::string details) {
+  const TextStyle title{.font = Font::System(24.0F).WithWeight(FontWeight::Bold), .foreground = Color::White()};
+  const TextStyle body{.font = Font::System(15.0F), .foreground = Color::Rgb(255, 235, 238)};
+  std::vector<View> content{
+    Text("Unable to display this window").Style(title).Shaping({.locale = "und"}),
+    Text("Close and reopen this window to try again.").Style(body).Shaping({.locale = "und"}),
+  };
+  if (!details.empty()) {
+    content.push_back(Text(CompositionErrorDetails(std::move(details))).Style(body).Shaping({.locale = "und"}));
+  }
+  return Column {
+    WindowTitleBar{},
+    ScrollView(Column(std::move(content)).With(Padding(24.0F), Spacing(10.0F))).With(Grow(1.0F)),
+  }.With(
+      Align(HorizontalAlignment::Stretch, VerticalAlignment::Stretch),
+      CrossAlign(CrossAxisAlignment::Stretch),
+      Background(Color::Rgb(159, 27, 46)),
+      SafeAreaPadding{}
+  );
+}
 
 int LayerLevelRank(LayerLevel level) noexcept {
   switch (level) {
@@ -743,11 +836,12 @@ void ApplyViewDeclaration(MountedNode& mounted, ViewSpec& compiled, std::shared_
   mounted.pointer_events_enabled = compiled.pointer_events_enabled;
   mounted.local_enabled = compiled.local_enabled;
   mounted.focusable = compiled.focusable;
-  if (mounted.focus_target != compiled.focus_target) {
-    if (mounted.focus_target && mounted.focus_target->node_identity == mounted.identity) {
-      mounted.focus_target->node_identity = 0;
+  if (mounted.view_handle != compiled.view_handle) {
+    if (mounted.view_handle && mounted.view_handle->node_identity == mounted.identity) {
+      mounted.view_handle->node_identity = 0;
+      mounted.view_handle->geometry.reset();
     }
-    mounted.focus_target = std::move(compiled.focus_target);
+    mounted.view_handle = std::move(compiled.view_handle);
   }
   mounted.trap_focus = compiled.trap_focus;
 }
@@ -948,16 +1042,8 @@ void PrepareExtensionGeometry(MountedNode& node, TextMeasurer& text_measurer) {
 
 void ResolveEnabledTree(MountedNode& node, bool parent_enabled) {
   // Publish targets after reconciliation so replacement and keyed movement cannot overlap previous bindings.
-  if (node.focus_target) {
-    auto& target = *node.focus_target;
-    const auto window = target.source->ui.lock();
-    if (!window || window->ui_window != node.ui_window) {
-      throw std::logic_error("HuxerUI focus target belongs to another window");
-    }
-    if (target.node_identity != 0 && target.node_identity != node.identity) {
-      throw std::logic_error("HuxerUI focus requester is bound to multiple mounted controls");
-    }
-    target.node_identity = node.identity;
+  if (node.view_handle) {
+    node.PublishViewBinding();
   }
   const bool enabled = parent_enabled && node.participates_in_layout && node.local_enabled &&
       !node.exclude_input;
@@ -1001,6 +1087,30 @@ void ResolveFocusedFlags(MountedNode& node, const std::optional<std::uint64_t>& 
   for (auto& child : node.children) {
     ResolveFocusedFlags(*child, focused_identity, focus_visible);
   }
+}
+
+bool RevealFocusInTwoAxes(MountedNode& root, std::uint64_t identity) {
+  std::vector<MountedNode*> path;
+  if (!FindNodePath(root, identity, path)) {
+    return false;
+  }
+  Rect target = path.back()->PresentationBounds();
+  path.pop_back();
+  if (std::ranges::none_of(path, [](const MountedNode* node) {
+        return node->scroll_state && node->scroll_state->both_axes;
+      })) {
+    return false;
+  }
+
+  bool revealed = false;
+  for (auto ancestor = path.rbegin(); ancestor != path.rend(); ++ancestor) {
+    auto& node = **ancestor;
+    if (node.scroll_state && !node.scroll_state->allows_automatic_reveal) {
+      break;
+    }
+    revealed |= ScrollNodeRectIntoView(node, target);
+  }
+  return revealed;
 }
 
 void CollectFocusableNodes(MountedNode& node, std::vector<MountedNode*>& nodes) {
@@ -1172,31 +1282,44 @@ std::optional<PlatformValue> InternalAccess::DispatchPlatformViewEvent(
   return ui_window.DispatchPlatformViewEvent(identity, key, value);
 }
 
+bool FindNodePath(MountedNode& node, std::uint64_t identity, std::vector<MountedNode*>& path) {
+  path.push_back(&node);
+  if (node.identity == identity) {
+    return true;
+  }
+  for (const std::unique_ptr<MountedNode>& child : node.children) {
+    if (FindNodePath(*child, identity, path)) {
+      return true;
+    }
+  }
+  path.pop_back();
+  return false;
+}
+
 } // namespace huxerui::detail
 
 namespace huxerui {
 
-bool FocusRequester::RequestFocus() const {
+bool ViewHandle::RequestFocus(bool focus_visible) const {
   if (detail::Composer::Current()) {
     throw std::logic_error("HuxerUI cannot request focus during composition");
   }
-  if (!state_ || !state_->source->application.lock()) return false;
-  detail::ValidateApplicationCall(state_->source);
-  const auto window = state_->source->ui.lock();
-  if (!window || !window->ui_window || state_->node_identity == 0) return false;
-  detail::ExecutionGuard guard(state_->source);
-  return window->ui_window->RequestFocus(state_->node_identity);
+  if (!binding_ || !binding_->source->application.lock()) return false;
+  detail::ValidateApplicationCall(binding_->source);
+  const auto window = binding_->source->ui.lock();
+  if (!window || !window->ui_window || binding_->node_identity == 0) return false;
+  detail::ExecutionGuard guard(binding_->source);
+  return window->ui_window->RequestFocus(binding_->node_identity, focus_visible);
 }
 
-FocusRequester UseFocusRequester(const std::source_location& location) {
+ViewHandle UseViewHandle(const std::source_location& location) {
   if (!detail::Composer::Current()) {
-    throw std::logic_error("HuxerUI UseFocusRequester() requires window composition");
+    throw std::logic_error("HuxerUI UseViewHandle() requires window composition");
   }
   auto* window = detail::CurrentUiWindow();
-  if (!window) throw std::logic_error("HuxerUI UseFocusRequester() requires window composition");
+  if (!window) throw std::logic_error("HuxerUI UseViewHandle() requires window composition");
   auto source = detail::CapturePresentationContext(detail::InternalAccess::WindowExecution(*window));
-  auto requester = FocusRequester(std::make_shared<detail::FocusRequesterState>(std::move(source)));
-  return UseState(std::move(requester), location);
+  return UseState(ViewHandle{std::make_shared<detail::ViewHandleBinding>(std::move(source))}, location);
 }
 
 Runtime& UiWindow::ApplicationRuntime() const {
@@ -1305,6 +1428,12 @@ TextLayout UiWindow::CreateTextLayout(const AttributedText& text, const TextStyl
     data->lines.push_back({{length, length}, {x, top, 0.0F, font.LineHeight()}, top + font.ascent});
     data->synthesized_last_line = true;
   }
+  if (!text.InlineObjects().empty()) {
+    data->inline_objects = data->backend->InlineObjectPlacements(text.InlineObjects(), data->lines);
+    if (data->inline_objects.size() != text.InlineObjects().size()) {
+      throw std::logic_error("HuxerUI text layout backend did not place every inline object");
+    }
+  }
   Size size = data->backend->Measure();
   size.width = std::min(size.width, width);
   const auto& last = data->lines.back().bounds;
@@ -1350,7 +1479,7 @@ UiWindow::State::~State() = default;
 UiWindow::UiWindow() = default;
 
 bool UiWindow::IsInitialized() const noexcept {
-  return state_ && state_->initialized_ && !state_->closing_ && !state_->retired_;
+  return state_ && state_->initialized_ && !state_->closing_ && !state_->retired_ && !state_->retiring_content_;
 }
 
 void UiWindow::InitializeWindow(Runtime& application_runtime, ViewFactory content, const WindowOptions& window_options,
@@ -1479,31 +1608,58 @@ void UiWindow::Retire() noexcept {
   }
   ExecutionGuard guard(state_->execution_);
   state_->retired_ = true;
+  RetireContent();
+  state_->root_environment_.reset();
+  if (state_->execution_) {
+    state_->execution_->environment.reset();
+  }
+  if (state_->ui_execution_) {
+    state_->ui_execution_->ui_window = nullptr;
+  }
+}
+
+void UiWindow::RetireContent() noexcept {
+  // Withdraw all routes before calling client cleanup, which may pump native input or change application state.
+  state_->frame_commit_.render_frame.scene.root = nullptr;
+  auto mounted_root = std::move(state_->mounted_root_);
+  state_->focused_node_identity_.reset();
+  state_->focus_visible_ = false;
+  state_->focus_trap_stack_.clear();
+  state_->keyboard_activation_identity_.reset();
+  state_->keyboard_press_id_.reset();
+  state_->back_target_.reset();
+  state_->scroll_motion_active_ = false;
+  if (state_->window_service_ && !state_->retired_) {
+    state_->window_service_->ClearHandlers();
+  }
+  if (state_->pointer_) {
+    state_->pointer_->Disconnect();
+  }
+  state_->layer_controller_.Disconnect();
+  if (state_->scene_transition_service_) {
+    state_->scene_transition_service_->Disconnect();
+  }
   state_->text_layout_cache_.clear();
   state_->text_layout_cache_bytes_ = 0;
   if (state_->file_drop_) {
     state_->file_drop_->DisconnectFileDrop();
   }
-  try {
-    if (state_->text_) {
-      state_->text_->StopTextInputSession(TextInputEndReason::RuntimeDestroyed);
+  if (state_->text_) {
+    state_->text_->HideTextSelectionOverlay();
+    const auto reason = state_->retired_ ? TextInputEndReason::RuntimeDestroyed : TextInputEndReason::ClientRemoved;
+    try {
+      state_->text_->StopTextInputSession(reason);
+    } catch (...) {
     }
-  } catch (...) {
   }
   DeactivateExternalTextures(state_->committed_scene_snapshot_, state_->owner_.external_texture_frame_requester_);
-  if (state_->pointer_) {
-    state_->pointer_->Disconnect();
-  }
-  state_->layer_controller_.Disconnect();
-
-  if (state_->window_service_) {
+  external_texture_frame_requester_->Close();
+  state_->has_committed_scene_snapshot_ = false;
+  if (state_->window_service_ && state_->retired_) {
     state_->window_service_->Disconnect();
   }
-  if (state_->scene_transition_service_) {
-    state_->scene_transition_service_->Disconnect();
-  }
   DiscardLifecycleCommits();
-  state_->mounted_root_.reset();
+  mounted_root.reset();
   state_->root_scope_.reset();
   state_->root_factory_ = {};
   for (detail::LifecycleCleanup& cleanup : state_->retired_lifecycle_cleanups_) {
@@ -1519,18 +1675,12 @@ void UiWindow::Retire() noexcept {
       }
     }
   }
-  state_->root_environment_.reset();
   for (auto service = state_->root_services_.rbegin(); service != state_->root_services_.rend(); ++service) {
     service->reset();
   }
   state_->root_services_.clear();
-  if (state_->execution_) {
-    state_->execution_->environment.reset();
-  }
-  if (state_->ui_execution_) {
-    state_->ui_execution_->ui_window = nullptr;
-  }
-  external_texture_frame_requester_->Close();
+  state_->root_service_types_.clear();
+  state_->debug_metrics_.reset();
 }
 
 TextInputApplyResult UiWindow::HandleTextInputCommands(const TextInputCommandBatch& batch) {
@@ -1909,18 +2059,82 @@ void UiWindow::NotifyScrollActivity(detail::MountedNode& node, const ScrollActiv
 }
 
 const FrameCommit& UiWindow::BuildFrame() {
+  return BuildFrame(false);
+}
+
+const FrameCommit& UiWindow::BuildFrame(bool present_composition_errors) {
   const double timestamp = state_->owner_.Now();
   const double delta_time = state_->previous_frame_timestamp_.has_value()
                                 ? std::clamp(timestamp - *state_->previous_frame_timestamp_, 0.0, 0.25)
                                 : 0.0;
+  const bool previous_policy = std::exchange(state_->present_composition_errors_, present_composition_errors);
   state_->building_frame_ = true;
   try {
-    return BuildFrame({timestamp, delta_time});
+    const FrameCommit& frame = BuildFrame({timestamp, delta_time});
+    state_->present_composition_errors_ = previous_policy;
+    return frame;
   } catch (...) {
+    state_->present_composition_errors_ = previous_policy;
     DiscardLifecycleCommits();
     state_->building_frame_ = false;
     state_->frame_requested_ = false;
     throw;
+  }
+}
+
+[[noreturn]] void UiWindow::State::PropagateCompositionFailure(const char* operation, std::optional<std::size_t> item) {
+  if (!present_composition_errors_) {
+    throw;
+  }
+  const bool initial = frame_commit_.render_frame.revision == 0;
+  try {
+    throw;
+  } catch (const CompositionFailure&) {
+    throw;
+  } catch (const std::bad_alloc&) {
+    throw;
+  } catch (const std::exception& error) {
+    throw CompositionFailure(DescribeCompositionFailure(initial, operation, item, error.what()));
+  } catch (...) {
+    throw CompositionFailure(DescribeCompositionFailure(initial, operation, item, nullptr));
+  }
+}
+
+const FrameCommit& UiWindow::BuildFrameOrErrorPage(void (*report_error)(const char*) noexcept) {
+  if (!state_->root_factory_) {
+    return BuildFrame();
+  }
+
+  ExecutionGuard guard(state_->execution_);
+  try {
+    return BuildFrame(true);
+  } catch (const CompositionFailure& failure) {
+    state_->retiring_content_ = true;
+    state_->building_frame_ = true;
+    RetireContent();
+    state_->building_frame_ = false;
+    state_->application_dirty_ = false;
+    state_->layers_dirty_ = false;
+
+    const char* report = failure.what();
+    if (report_error != nullptr) {
+      report_error(report);
+    } else {
+      std::fprintf(stderr, "%s\n", report);
+    }
+
+    try {
+      state_->root_environment_ = std::make_shared<Environment>();
+      state_->execution_->environment = state_->root_environment_;
+      state_->window_->caption_labels = {"Minimize", "Maximize or restore", "Close"};
+      const bool show_details = state_->application_->declaration->options.show_composition_error_details;
+      ReconcileApplicationContent(CompositionErrorPage(show_details ? report : ""));
+    } catch (...) {
+      state_->retiring_content_ = false;
+      throw;
+    }
+    state_->retiring_content_ = false;
+    return BuildFrame();
   }
 }
 
@@ -1977,7 +2191,11 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     ComposeApplication();
   }
   if (state_->mounted_root_) {
-    RecomposeDirtyScopes(*state_->mounted_root_);
+    try {
+      RecomposeDirtyScopes(*state_->mounted_root_);
+    } catch (...) {
+      state_->PropagateCompositionFailure("component scope");
+    }
   }
   if (state_->layers_dirty_) {
     ComposeLayers();
@@ -1990,6 +2208,10 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     state_->pointer_->RefreshCursor();
     state_->pointer_->RefreshHover(false);
     RefreshInteractionTree();
+    if (state_->layer_controller_.RefreshAnchors(false)) {
+      ComposeLayers();
+      RefreshInteractionTree();
+    }
     state_->file_drop_->AdvanceFileDrop(frame);
     state_->text_->RefreshTextInputSession();
     HUXERUI_PROFILE_NEXT(profile_stage, Semantics);
@@ -2049,7 +2271,10 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
   HUXERUI_PROFILE_NEXT(profile_stage, Geometry);
   // The first layout establishes resolved caret geometry. Revealing that caret can change ancestor scroll offsets and
   // virtual realization, so the incremental layout pipeline must settle those changes before geometry is published.
-  if (state_->text_->BringTextInputIntoView()) {
+  const bool focus_revealed = std::exchange(state_->focus_reveal_pending_, false) &&
+                              state_->focused_node_identity_ && !state_->text_->HasSession() &&
+                              RevealFocusInTwoAxes(*state_->mounted_root_, *state_->focused_node_identity_);
+  if (state_->text_->BringTextInputIntoView() || focus_revealed) {
     if (PropagateVirtualLayoutInvalidation(*state_->mounted_root_)) {
       MeasureNode(
           *state_->mounted_root_,
@@ -2065,6 +2290,10 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
   // Extensions prepare node-local geometry after the final layout. Text input geometry is then converted to host-view
   // coordinates while the platform IME session is synchronized.
   PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
+  bool anchor_layers_dismissed = state_->layer_controller_.RefreshAnchors(true);
+  if (anchor_layers_dismissed) {
+    ComposeLayers();
+  }
   // Anchors can be nested inside other anchored layers. Settle the bounded dependency chain in this commit so a child
   // presentation does not retain geometry from its parent's previous placement.
   const detail::MountedNode* const committed_layer_stack = FindLayerStack(*state_->mounted_root_);
@@ -2082,8 +2311,15 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
         state_->window_->metrics.title_bar ? &*state_->window_->metrics.title_bar : nullptr
     );
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
+    if (anchor_layers_dismissed) {
+      RefreshInteractionTree();
+    }
     ResolvePresentationTree(*state_->mounted_root_);
     PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
+    anchor_layers_dismissed = state_->layer_controller_.RefreshAnchors(true);
+    if (anchor_layers_dismissed) {
+      ComposeLayers();
+    }
   }
   if (state_->mounted_root_->measure_dirty) {
     RequestFrame();
@@ -2214,12 +2450,12 @@ void UiWindow::RefreshInteractionTree() {
         focus_root->initial_focus_consumed = true;
         const auto* snapshot = focus_root->LayoutValue<LayerEntrySnapshotValue>();
         if (snapshot && snapshot->initial_focus) {
-          const auto& target = snapshot->initial_focus->state_;
+          const auto& target = snapshot->initial_focus->binding_;
           const auto window = target ? target->source->ui.lock() : nullptr;
           const auto* candidate = window && window->ui_window == this
               ? FindNode(*focus_root, target->node_identity) : nullptr;
           if (candidate && candidate->interaction.enabled && candidate->focusable) {
-            SetFocusedNode(candidate->identity, true);
+            SetFocusedNode(candidate->identity);
           }
         }
       }
@@ -2274,7 +2510,8 @@ std::optional<std::uint64_t> UiWindow::ResolvePointerFocusTarget(const std::vect
     const bool retains_focus = std::ranges::any_of(route, [this, pointer_target](const detail::MountedNode* node) {
       const auto* snapshot = node->LayoutValue<detail::LayerEntrySnapshotValue>();
       return node != pointer_target && snapshot != nullptr &&
-             snapshot->retained_focus_identity == state_->focused_node_identity_;
+             snapshot->retained_focus_target && snapshot->retained_focus_target->binding_ &&
+             snapshot->retained_focus_target->binding_->node_identity == state_->focused_node_identity_;
     });
     if (retains_focus) {
       return state_->focused_node_identity_;
@@ -2424,13 +2661,13 @@ bool UiWindow::HandleBack(const BackEvent& incoming) {
   return handled;
 }
 
-bool UiWindow::RequestFocus(std::uint64_t identity) {
+bool UiWindow::RequestFocus(std::uint64_t identity, bool focus_visible) {
   if (state_->retired_ || state_->closing_ || state_->focus_change_in_progress_ || !state_->mounted_root_) return false;
   const auto* target = FindNode(*state_->mounted_root_, identity);
   if (!target || !target->interaction.enabled || !target->focusable) return false;
   if (const auto* root = ActiveFocusTrapRoot(); root && !ContainsNodeIdentity(*root, identity)) return false;
   detail::TextInteraction::KeyboardDispatch keyboard_dispatch(*state_->text_);
-  SetFocusedNode(identity, true);
+  SetFocusedNode(identity, focus_visible);
   keyboard_dispatch.Finish();
   return !state_->retired_ && !state_->closing_ && state_->focused_node_identity_ == identity;
 }
@@ -2491,6 +2728,7 @@ void UiWindow::SetFocusedNode(std::optional<std::uint64_t> identity, std::option
   state_->keyboard_activation_identity_.reset();
   state_->keyboard_press_id_.reset();
   state_->focused_node_identity_ = identity;
+  state_->focus_reveal_pending_ = identity.has_value();
   state_->focus_visible_ = next_focus_visible;
   if (state_->focused_node_identity_.has_value() && state_->mounted_root_) {
     if (detail::MountedNode* next = FindNode(*state_->mounted_root_, *state_->focused_node_identity_)) {
@@ -2665,8 +2903,8 @@ Point UiWindow::HandleScrollInput(const ScrollInputEvent& event) {
       return 0.0F;
     }
     for (detail::MountedNode* node : route) {
-      if (node->interaction.enabled && IsScrollContainer(*node) && ScrollAxis(*node) == axis) {
-        StopScrollNodeMotion(*node);
+      if (node->interaction.enabled && IsScrollContainer(*node) && node->scroll_state->Supports(axis)) {
+        StopScrollNodeMotion(*node, axis);
       }
     }
     return ApplyScrollTransaction(route, axis, delta, ScrollSource::Wheel);
@@ -2773,7 +3011,7 @@ bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
     default:
       break;
     }
-    if (action.has_value() && (state_->text_->HasSession() || CanPerformTextEditingAction(*action))) {
+    if (action.has_value() && state_->text_->ShouldConsumeTextEditingShortcut(*action)) {
       PerformTextEditingAction(*action);
       return finish_handled();
     }
@@ -2870,6 +3108,9 @@ bool UiWindow::DispatchKeyboardContextMenu() {
 }
 
 void UiWindow::InvalidateRoot() {
+  if (!state_->root_factory_ || state_->retiring_content_) {
+    return;
+  }
   state_->application_dirty_ = true;
   RequestFrame();
 }
@@ -2916,7 +3157,7 @@ void UiWindow::InvalidateLayerPlacement(LayerId id) {
 }
 
 void UiWindow::InvalidateScope(std::uint64_t scope_id) {
-  if (scope_id == state_->root_scope_->Id()) {
+  if (state_->root_scope_ && scope_id == state_->root_scope_->Id()) {
     state_->application_dirty_ = true;
   }
   RequestFrame();
@@ -3094,24 +3335,7 @@ void UiWindow::ComposeApplication() {
     Composer composer{state_->root_scope_, state_->root_environment_};
     Composer::Guard guard{composer};
 
-    View application = state_->root_factory_();
-    EnsureRootStructure();
-    detail::MountedNode* application_content = FindApplicationContent(*state_->mounted_root_);
-    if (!application_content) {
-      throw std::logic_error("HuxerUI RuntimeRoot is missing its application content container");
-    }
-
-    std::vector<View> application_children;
-    if (application) {
-      application_children.push_back(std::move(application));
-    }
-    application_content->child_paint_order.clear();
-    if (ReconcileChildren(application_content->children, application_children, state_->root_environment_)) {
-      application_content->measure_dirty = true;
-      application_content->render_structure_dirty = true;
-      state_->mounted_root_->measure_dirty = true;
-      state_->mounted_root_->render_structure_dirty = true;
-    }
+    ReconcileApplicationContent(state_->root_factory_());
     state_->root_scope_->EndComposition();
     scope_composing = false;
   } catch (...) {
@@ -3121,19 +3345,37 @@ void UiWindow::ComposeApplication() {
       state_->root_scope_->Invalidate();
     }
     InvalidateRoot();
-    throw;
+    state_->PropagateCompositionFailure("application root");
+  }
+}
+
+void UiWindow::ReconcileApplicationContent(View content) {
+  EnsureRootStructure();
+  detail::MountedNode* application_content = FindApplicationContent(*state_->mounted_root_);
+  if (!application_content) {
+    throw std::logic_error("HuxerUI RuntimeRoot is missing its application content container");
+  }
+  std::vector<View> children;
+  if (content) {
+    children.push_back(std::move(content));
+  }
+  application_content->child_paint_order.clear();
+  if (ReconcileChildren(application_content->children, children, state_->root_environment_)) {
+    application_content->measure_dirty = true;
+    application_content->render_structure_dirty = true;
+    state_->mounted_root_->measure_dirty = true;
+    state_->mounted_root_->render_structure_dirty = true;
   }
 }
 
 void UiWindow::ComposeLayers() {
   state_->layers_dirty_ = false;
-  EnsureRootStructure();
-  detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
-  if (!layer_stack) {
-    throw std::logic_error("HuxerUI RuntimeRoot is missing its LayerStack");
-  }
-
   try {
+    EnsureRootStructure();
+    detail::MountedNode* layer_stack = FindLayerStack(*state_->mounted_root_);
+    if (!layer_stack) {
+      throw std::logic_error("HuxerUI RuntimeRoot is missing its LayerStack");
+    }
     // Factories may mutate the controller while composing; those mutations mark layers dirty for the next frame.
     const std::vector<LayerEntry> ordered = OrderedLayerEntries(state_->layer_controller_.state_->entries);
     std::vector<std::pair<View, std::shared_ptr<const Environment>>> layer_children;
@@ -3181,7 +3423,7 @@ void UiWindow::ComposeLayers() {
           .revision = entry.revision,
           .exiting = exiting,
           .semantic_modal_group = entry.semantic_modal_group,
-          .retained_focus_identity = entry.retained_focus_identity,
+          .retained_focus_target = entry.retained_focus_target,
           .initial_focus = entry.initial_focus,
       });
       // An exiting modal keeps its focus barrier until removal so input cannot fall through while its content fades.
@@ -3210,7 +3452,7 @@ void UiWindow::ComposeLayers() {
     }
   } catch (...) {
     InvalidateLayers();
-    throw;
+    state_->PropagateCompositionFailure("layer content");
   }
 }
 
@@ -3549,7 +3791,21 @@ bool UiWindow::ReconcileLayerChildren(
 namespace huxerui::detail {
 
 MountedNode::~MountedNode() {
-  if (focus_target && focus_target->node_identity == identity) focus_target->node_identity = 0;
+  if (view_handle && view_handle->node_identity == identity) {
+    view_handle->node_identity = 0;
+    view_handle->geometry.reset();
+  }
+}
+
+void MountedNode::PublishViewBinding() {
+  const auto window = view_handle->source->ui.lock();
+  if (!window || window->ui_window != ui_window) {
+    throw std::logic_error("HuxerUI ViewHandle belongs to another window");
+  }
+  if (view_handle->node_identity != 0 && view_handle->node_identity != identity) {
+    throw std::logic_error("HuxerUI ViewHandle is bound to multiple mounted Views");
+  }
+  view_handle->node_identity = identity;
 }
 
 VirtualMeasureSession::VirtualMeasureSession(UiWindow& ui_window, MountedNode& owner)
@@ -3638,7 +3894,14 @@ MountedNode& VirtualMeasureSession::Item(std::size_t index) {
   if (const auto found = requested_positions_by_index_.find(index); found != requested_positions_by_index_.end()) {
     return *requested_nodes_[found->second];
   }
+  try {
+    return RealizeItem(index);
+  } catch (...) {
+    ui_window_->state_->PropagateCompositionFailure("virtual item", index);
+  }
+}
 
+MountedNode& VirtualMeasureSession::RealizeItem(std::size_t index) {
   auto& state = *owner_->virtual_state;
   bool declaration_created = false;
   auto item_declaration = state.item_declarations.find(index);

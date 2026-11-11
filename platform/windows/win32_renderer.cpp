@@ -48,7 +48,7 @@ namespace {
 
 using Microsoft::WRL::ComPtr;
 
-template <class Interface> class FontComObject : public Interface {
+template <class Interface> class ComObject : public Interface {
 public:
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id, void** result) override {
     if (!result)
@@ -71,13 +71,13 @@ public:
   }
 
 protected:
-  virtual ~FontComObject() = default;
+  virtual ~ComObject() = default;
 
 private:
   std::atomic<ULONG> references_{1};
 };
 
-class Win32FontStream final : public FontComObject<IDWriteFontFileStream> {
+class Win32FontStream final : public ComObject<IDWriteFontFileStream> {
 public:
   explicit Win32FontStream(std::shared_ptr<const FontFaceData> face) : face_(std::move(face)) {}
   HRESULT STDMETHODCALLTYPE ReadFileFragment(const void** data, UINT64 offset, UINT64 size, void** context) override {
@@ -105,7 +105,7 @@ private:
   std::shared_ptr<const FontFaceData> face_;
 };
 
-class Win32FontFileLoader final : public FontComObject<IDWriteFontFileLoader> {
+class Win32FontFileLoader final : public ComObject<IDWriteFontFileLoader> {
 public:
   explicit Win32FontFileLoader(std::shared_ptr<const FontFaceData> face) : face_(std::move(face)) {}
   HRESULT STDMETHODCALLTYPE CreateStreamFromKey(const void* key, UINT32 size, IDWriteFontFileStream** stream) override {
@@ -122,7 +122,7 @@ private:
   std::shared_ptr<const FontFaceData> face_;
 };
 
-class Win32FontEnumerator final : public FontComObject<IDWriteFontFileEnumerator> {
+class Win32FontEnumerator final : public ComObject<IDWriteFontFileEnumerator> {
 public:
   explicit Win32FontEnumerator(IDWriteFontFile* file) : file_(file) {}
   HRESULT STDMETHODCALLTYPE MoveNext(BOOL* current) override {
@@ -146,7 +146,7 @@ private:
   bool current_ = false;
 };
 
-class Win32FontCollectionLoader final : public FontComObject<IDWriteFontCollectionLoader> {
+class Win32FontCollectionLoader final : public ComObject<IDWriteFontCollectionLoader> {
 public:
   explicit Win32FontCollectionLoader(IDWriteFontFile* file) : file_(file) {}
   HRESULT STDMETHODCALLTYPE CreateEnumeratorFromKey(IDWriteFactory*, const void*, UINT32,
@@ -339,6 +339,32 @@ TextDirection ResolveTextDirection(std::wstring_view text, TextDirection request
 }
 
 } // namespace
+
+class Win32InlineObject final : public ComObject<IDWriteInlineObject> {
+public:
+  explicit Win32InlineObject(const TextInlineObject& object)
+      : metrics_{object.width, object.ascent + object.descent, object.ascent, FALSE} {}
+
+  HRESULT STDMETHODCALLTYPE Draw(void*, IDWriteTextRenderer*, FLOAT, FLOAT, BOOL, BOOL, IUnknown*) override {
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GetMetrics(DWRITE_INLINE_OBJECT_METRICS* metrics) override {
+    *metrics = metrics_;
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GetOverhangMetrics(DWRITE_OVERHANG_METRICS* metrics) override {
+    *metrics = {};
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GetBreakConditions(DWRITE_BREAK_CONDITION* before, DWRITE_BREAK_CONDITION* after) override {
+    *before = DWRITE_BREAK_CONDITION_CAN_BREAK;
+    *after = DWRITE_BREAK_CONDITION_CAN_BREAK;
+    return S_OK;
+  }
+
+private:
+  DWRITE_INLINE_OBJECT_METRICS metrics_;
+};
 
 class Win32TextLayout final : public TextLayoutBackend {
 public:
@@ -800,6 +826,12 @@ struct Win32Renderer::Impl {
       ThrowIfFailed(
           layout.SetStrikethrough(HasTextDecoration(run.style.decoration, TextDecoration::StrikeThrough), range),
           "HuxerUI could not set paragraph strikethrough");
+    }
+    for (const auto& object : text.InlineObjects()) {
+      ComPtr<IDWriteInlineObject> replacement;
+      replacement.Attach(new Win32InlineObject(object));
+      ThrowIfFailed(layout.SetInlineObject(replacement.Get(), {static_cast<UINT32>(object.offset), 1}),
+          "HuxerUI could not configure a DirectWrite inline object");
     }
     // Only drawing layouts retain device brushes; measurement and interaction layouts stay device-independent.
     if (drawing) {

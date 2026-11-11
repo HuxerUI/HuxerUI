@@ -20,11 +20,12 @@ public:
     hit_test_ = environment->GetMethodID(layout_class, "hitTest", "(FF)J");
     caret_ = environment->GetMethodID(layout_class, "caret", "(JZ)[F");
     range_ = environment->GetMethodID(layout_class, "range", "(JJ)[F");
+    inline_object_placement_ = environment->GetMethodID(layout_class, "inlineObjectPlacement", "(J)[F");
     previous_ = environment->GetMethodID(layout_class, "previous", "(J)J");
     next_ = environment->GetMethodID(layout_class, "next", "(J)J");
     environment->DeleteLocalRef(layout_class);
     if (measure_ == nullptr || line_metrics_ == nullptr || hit_test_ == nullptr || caret_ == nullptr ||
-        range_ == nullptr || previous_ == nullptr || next_ == nullptr) {
+        range_ == nullptr || inline_object_placement_ == nullptr || previous_ == nullptr || next_ == nullptr) {
       environment->DeleteGlobalRef(layout_);
       layout_ = nullptr;
       throw std::runtime_error("HuxerUI Android text layout methods do not match the platform backend");
@@ -104,6 +105,20 @@ public:
     return rects;
   }
 
+  std::vector<InlineObjectPlacement> InlineObjectPlacements(
+      std::span<const TextInlineObject> objects, std::span<const TextLineMetrics>) const override {
+    std::vector<InlineObjectPlacement> placements;
+    placements.reserve(objects.size());
+    for (const auto& object : objects) {
+      const auto values = FloatArray(inline_object_placement_, static_cast<jlong>(object.offset));
+      if (values.size() != 3) {
+        return {};
+      }
+      placements.push_back({values[0], values[1], values[2]});
+    }
+    return placements;
+  }
+
   TextOffset PreviousCaretOffset(TextOffset offset) const override {
     JNIEnv* environment = Environment();
     return environment == nullptr
@@ -153,6 +168,7 @@ private:
   jmethodID hit_test_ = nullptr;
   jmethodID caret_ = nullptr;
   jmethodID range_ = nullptr;
+  jmethodID inline_object_placement_ = nullptr;
   jmethodID previous_ = nullptr;
   jmethodID next_ = nullptr;
 };

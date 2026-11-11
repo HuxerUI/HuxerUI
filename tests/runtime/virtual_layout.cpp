@@ -16,6 +16,63 @@ State<int> virtual_grid_declaration_revision;
 State<bool> horizontal_virtual_list;
 ScrollController custom_virtual_scroll;
 
+class TestTwoAxisGrid final : public VirtualLayout<TestTwoAxisGrid> {
+public:
+  static constexpr std::size_t rows = 10000;
+  static constexpr std::size_t columns = 100;
+
+  TestTwoAxisGrid(Size cell, int& factory_calls)
+      : VirtualLayout(rows * columns, [&factory_calls](std::size_t index) {
+          ++factory_calls;
+          return Text::Format("Cell {}", index).Key(index);
+        }) {
+    EnableBothAxes();
+    SetLayoutValue(typeid(CellExtent), cell);
+  }
+
+  static std::optional<Rect> ItemBounds(ViewNode& node, std::size_t index) {
+    const Size cell = node.LayoutValueOr<CellExtent>({});
+    return Rect{static_cast<float>(index % columns) * cell.width, static_cast<float>(index / columns) * cell.height,
+                cell.width, cell.height};
+  }
+
+  static VirtualLayoutResult Measure(VirtualLayoutContext& context, ViewNode& node, Constraints) {
+    const auto viewport = context.Viewport();
+    const Size cell = node.LayoutValueOr<CellExtent>({});
+    VirtualLayoutResult result;
+    result.SetSize(viewport.size)
+        .SetContentSize({columns * cell.width, rows * cell.height})
+        .SetCollectionSemantics(SemanticRole::Grid, SemanticRole::GridCell,
+                                {.item_count = context.ItemCount(), .row_count = rows, .column_count = columns});
+    auto& previous = node.Cache<Size>();
+    if (previous.width > 0.0F && previous != cell) {
+      result.SetScrollOffset(Axis::Horizontal, viewport.offset.x * (cell.width / previous.width))
+          .SetScrollOffset(Axis::Vertical, viewport.offset.y * (cell.height / previous.height));
+    }
+    previous = cell;
+    const auto first_row = static_cast<std::size_t>(viewport.offset.y / cell.height);
+    const auto first_column = static_cast<std::size_t>(viewport.offset.x / cell.width);
+    const auto last_row = static_cast<std::size_t>(std::ceil((viewport.offset.y + viewport.size.height) / cell.height));
+    const auto last_column =
+        static_cast<std::size_t>(std::ceil((viewport.offset.x + viewport.size.width) / cell.width));
+    for (std::size_t row = first_row; row < std::min(rows, last_row); ++row) {
+      for (std::size_t column = first_column; column < std::min(columns, last_column); ++column) {
+        const std::size_t index = row * columns + column;
+        auto& item = context.Item(index);
+        context.Measure(item, {cell.width, cell.width, cell.height, cell.height});
+        result.Place(item, {column * cell.width, row * cell.height},
+                     {.index = index, .row_index = row, .column_index = column});
+      }
+    }
+    return result;
+  }
+
+private:
+  struct CellExtent {
+    using Value = Size;
+  };
+};
+
 class TestVirtualStrip final : public VirtualLayout<TestVirtualStrip> {
 public:
   using VirtualLayout::VirtualLayout;
@@ -988,7 +1045,7 @@ TEST_CASE("TestCustomVirtualLayoutProtocol") {
   REQUIRE(root->children.size() == 5);
   REQUIRE(root->virtual_state->realized_indices.front() == 0);
   REQUIRE(FirstText(initial) == "0");
-  REQUIRE(huxerui::detail::ResolveScrollBarGeometry(*root).has_value());
+  REQUIRE(huxerui::detail::ResolveScrollBarGeometry(*root, huxerui::detail::ScrollAxis(*root)).has_value());
 
   runtime.HandleScrollInput(
       ScrollInputEvent{
@@ -1493,6 +1550,62 @@ TEST_CASE("TestVariableVirtualGridRetainsMetricsAcrossItemDeclarationRefresh") {
   REQUIRE(root->children[position]->children.front()->text.PlainText() == "1:59");
   const float last_end = root->children[position]->layout_offset.y + root->children[position]->bounds.height;
   REQUIRE(std::abs(last_end - root->ContentBounds().height) < 0.01F);
+}
+
+TEST_CASE("Two-axis virtualization commits corrected offsets and visible cells together", "[scroll2d]") {
+  static State<Size> cell;
+  static ScrollController horizontal;
+  static ScrollController vertical;
+  static int factory_calls;
+  factory_calls = 0;
+
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    cell = UseState(Size{40.0F, 20.0F});
+    horizontal = UseScrollController(90.0F);
+    vertical = UseScrollController(52.0F);
+    return TestTwoAxisGrid(cell.Get(), factory_calls)
+        .Controller(Axis::Horizontal, horizontal)
+        .Controller(Axis::Vertical, vertical);
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+
+  const auto check_commit = [&](Point offset, Size extent) {
+    const auto& frame = *runtime.BuildCommit().semantic_frame;
+    const auto grid = std::ranges::find(frame.nodes, SemanticRole::Grid, &SemanticNode::role);
+    REQUIRE(grid != frame.nodes.end());
+    REQUIRE(grid->collection->item_count == 1000000);
+    REQUIRE(grid->scroll == vertical.Metrics());
+    REQUIRE(grid->additional_scroll == horizontal.Metrics());
+    REQUIRE(Point{horizontal.Offset(), vertical.Offset()} == offset);
+    REQUIRE_FALSE(grid->children.empty());
+    REQUIRE(grid->children.size() <= 54);
+    const auto first = std::ranges::find(frame.nodes, grid->children.front(), &SemanticNode::id);
+    REQUIRE(first != frame.nodes.end());
+    const auto row = static_cast<std::size_t>(offset.y / extent.height);
+    const auto column = static_cast<std::size_t>(offset.x / extent.width);
+    REQUIRE(first->collection_item->row_index == row);
+    REQUIRE(first->collection_item->column_index == column);
+    REQUIRE(first->bounds == Rect{column * extent.width - offset.x, row * extent.height - offset.y,
+                                   extent.width, extent.height});
+    return grid->id;
+  };
+
+  const auto id = check_commit({90.0F, 52.0F}, {40.0F, 20.0F});
+  REQUIRE(runtime.CoreRuntime().PerformSemanticAction(id, {SemanticActionKind::Scroll, Point{10.0F, 8.0F}}));
+  check_commit({100.0F, 60.0F}, {40.0F, 20.0F});
+  REQUIRE(factory_calls < 50);
+
+  constexpr std::size_t target = 6000 * TestTwoAxisGrid::columns + 99;
+  REQUIRE(horizontal.ScrollToItem(target, ScrollAlignment::End));
+  REQUIRE(vertical.ScrollToItem(target, ScrollAlignment::Center));
+  check_commit({3880.0F, 119970.0F}, {40.0F, 20.0F});
+  REQUIRE(runtime.HandleScrollInput({{50.0F, 30.0F}, 20.0F, 30.0F}) == Point{0.0F, 30.0F});
+  check_commit({3880.0F, 120000.0F}, {40.0F, 20.0F});
+
+  cell = Size{20.0F, 10.0F};
+  check_commit({1880.0F, 60000.0F}, {20.0F, 10.0F});
+  REQUIRE(factory_calls < 180);
 }
 
 TEST_CASE("TestVirtualListAxisChangePreservesAnchorAndIdentity") {

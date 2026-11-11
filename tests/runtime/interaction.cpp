@@ -38,7 +38,7 @@ std::vector<std::pair<std::string, HoverEvent>> received_hover_events;
 int stable_extension_updates = 0;
 
 std::optional<detail::ScrollBarGeometry> FindScrollBarGeometry(const detail::MountedNode& node) {
-  if (auto geometry = detail::ResolveScrollBarGeometry(node)) {
+  if (auto geometry = detail::ResolveScrollBarGeometry(node, detail::ScrollAxis(node))) {
     return geometry;
   }
   for (const auto& child : node.children) {
@@ -1562,7 +1562,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   vertical.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& vertical_display = vertical.BuildFrame();
 
-  const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
+  const auto vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode(), Axis::Vertical);
   REQUIRE(vertical_bar.has_value());
   REQUIRE(vertical_bar->axis == Axis::Vertical);
   REQUIRE(vertical_bar->track.x == 91.0F);
@@ -1616,7 +1616,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   REQUIRE(drag_item_clicks == 0);
   REQUIRE(drag_item_cancels == 0);
   vertical.BuildFrame();
-  const auto moved_vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode());
+  const auto moved_vertical_bar = huxerui::detail::ResolveScrollBarGeometry(*vertical.RootNode(), Axis::Vertical);
   REQUIRE(moved_vertical_bar.has_value());
   REQUIRE(std::abs(moved_vertical_bar->thumb.y - 33.0F) < 0.01F);
 
@@ -1624,7 +1624,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   UiWindow horizontal{HorizontalDragScrollApp, horizontal_platform};
   horizontal.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
   const FlattenedScene& horizontal_display = horizontal.BuildFrame();
-  const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode());
+  const auto horizontal_bar = huxerui::detail::ResolveScrollBarGeometry(*horizontal.RootNode(), Axis::Horizontal);
   REQUIRE(horizontal_bar.has_value());
   REQUIRE(horizontal_bar->axis == Axis::Horizontal);
   REQUIRE(horizontal_bar->track.x == 3.0F);
@@ -1661,7 +1661,7 @@ TEST_CASE("TestScrollBarGeometryRenderingAndDragging") {
   UiWindow short_content{ShortScrollBarApp, short_content_platform};
   short_content.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   short_content.BuildFrame();
-  REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode()));
+  REQUIRE(!huxerui::detail::ResolveScrollBarGeometry(*short_content.RootNode(), Axis::Vertical));
 
   TestPlatform invalid_style_platform;
   UiWindow invalid_style{
@@ -1761,7 +1761,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   UiWindow runtime{DragScrollApp, platform};
   runtime.SetWindowMetrics({.viewport = {100.0F, 100.0F}});
   const FlattenedScene& initial = runtime.BuildFrame();
-  const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
+  const auto geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode(), Axis::Vertical);
   REQUIRE(geometry.has_value());
   REQUIRE(ContainsRect(initial, geometry->thumb));
   REQUIRE(runtime.LastCommit().next_frame_deadline.has_value());
@@ -1795,7 +1795,7 @@ TEST_CASE("TestFrameClockAndScrollBarAutoHide") {
   runtime.BuildFrame();
   platform.AdvanceTime(0.12);
   const FlattenedScene& shown = runtime.BuildFrame();
-  const auto shown_geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode());
+  const auto shown_geometry = huxerui::detail::ResolveScrollBarGeometry(*runtime.RootNode(), Axis::Vertical);
   REQUIRE(shown_geometry.has_value());
   REQUIRE(ContainsRect(shown, shown_geometry->thumb));
 
@@ -2522,7 +2522,7 @@ TEST_CASE("TestModalDialogTrapsAndRestoresFocusTraversal") {
 
 namespace {
 
-std::array<std::optional<FocusRequester>, 3> programmatic_focus;
+std::array<std::optional<ViewHandle>, 3> programmatic_focus;
 State<bool> programmatic_first_enabled;
 State<bool> programmatic_first_visible;
 State<bool> programmatic_first_is_text;
@@ -2535,24 +2535,24 @@ View ProgrammaticFocusApp() {
   programmatic_first_enabled = UseState(true);
   programmatic_first_visible = UseState(true);
   programmatic_first_is_text = UseState(false);
-  const auto first = UseFocusRequester();
-  const auto second = UseFocusRequester();
-  const auto plain = UseFocusRequester();
+  const auto first = UseViewHandle();
+  const auto second = UseViewHandle();
+  const auto plain = UseViewHandle();
   programmatic_focus = {first, second, plain};
   View first_control = programmatic_first_is_text
       ? View(Text("request first").With(Focusable{})) : View(Button("request first"));
   first_control = std::move(first_control)
-      .With(Enabled{programmatic_first_enabled}, FocusTarget{first})
+      .With(Enabled{programmatic_first_enabled}, first)
       .On<ViewEvents::FocusChanged>([](bool focused) {
         programmatic_focus_events.emplace_back("first", focused);
         if (programmatic_redirect) programmatic_redirect_results.push_back(programmatic_focus[1]->RequestFocus());
       });
   return Column {
     programmatic_first_visible ? std::move(first_control) : View(Spacer()),
-    Button("request second").With(FocusTarget{second}).On<ViewEvents::FocusChanged>([](bool focused) {
+    Button("request second").With(second).On<ViewEvents::FocusChanged>([](bool focused) {
       programmatic_focus_events.emplace_back("second", focused);
     }),
-    Text("not focusable").With(FocusTarget{plain}),
+    Text("not focusable").With(plain),
   };
 }
 
@@ -2562,9 +2562,9 @@ View KeyedProgrammaticFocusApp() {
   const auto order = programmatic_reverse ? std::array{1, 0} : std::array{0, 1};
   for (const int id : order) {
     rows.push_back(Scope([id] {
-      const auto requester = UseFocusRequester();
+      const auto requester = UseViewHandle();
       programmatic_focus[id] = requester;
-      return Button(id == 0 ? "keyed first" : "keyed second").With(FocusTarget{requester});
+      return Button(id == 0 ? "keyed first" : "keyed second").With(requester);
     }).Key(id));
   }
   return Column(std::move(rows));
@@ -2629,6 +2629,75 @@ TEST_CASE("Keyed movement preserves requester identity and its logical target") 
   REQUIRE(ProgrammaticNodeFocused(runtime, "keyed second"));
 }
 
+TEST_CASE("Programmatic focus without indication preserves text input and modal navigation") {
+  const bool explicit_target = GENERATE(false, true);
+  static std::optional<ViewHandle> editor;
+  static std::optional<ViewHandle> opener;
+  static std::optional<ViewHandle> dialog_target;
+  static std::optional<DialogHandle> dialogs;
+  static State<TextEditingValue> editor_value;
+
+  TestPlatform platform;
+  UiWindow runtime{[] {
+    return FocusTestTheme(Scope([] {
+      editor = UseViewHandle();
+      opener = UseViewHandle();
+      dialog_target = UseViewHandle();
+      dialogs = UseDialog();
+      auto editing = UseState(TextEditingValue{});
+      editor_value = editing;
+      return Column {
+        TextField(editing).OnChanged([editing](const TextEditingValue& value) mutable { editing = value; }).With(*editor),
+        Button("dialog opener").With(*opener),
+      };
+    }));
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {480.0F, 480.0F}});
+  runtime.BuildFrame();
+  const auto shows_focus = [&] {
+    return FindBorderWithColor(runtime.BuildFrame(), Color::Rgb(40, 180, 90)) != nullptr;
+  };
+
+  REQUIRE(opener->RequestFocus(true));
+  REQUIRE(shows_focus());
+  REQUIRE(opener->RequestFocus());
+  REQUIRE_FALSE(shows_focus());
+
+  REQUIRE(editor->RequestFocus(true));
+  TextInputCommand preedit;
+  preedit.kind = TextInputCommandKind::UpdateComposition;
+  preedit.text = "pending";
+  REQUIRE(runtime.HandleTextInputCommands({1, {preedit}}).result_code == TextInputResultCode::Ok);
+  REQUIRE(editor_value->composition.has_value());
+  REQUIRE(opener->RequestFocus(false));
+  REQUIRE(editor_value->text == "pending");
+  REQUIRE_FALSE(editor_value->composition.has_value());
+
+  const auto dialog = dialogs->Show([target = *dialog_target] {
+    return Column {
+      Button("first dialog control"),
+      Button("second dialog control").With(target),
+    };
+  }, {.initial_focus = explicit_target ? dialog_target : std::nullopt});
+  const auto initial = explicit_target ? "second dialog control" : "first dialog control";
+  const auto next = explicit_target ? "first dialog control" : "second dialog control";
+  REQUIRE(ProgrammaticNodeFocused(runtime, initial));
+  REQUIRE_FALSE(opener->RequestFocus(true));
+  REQUIRE_FALSE(shows_focus());
+
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+  REQUIRE(ProgrammaticNodeFocused(runtime, next));
+  REQUIRE(shows_focus());
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab, .modifiers = {.shift = true}}));
+  REQUIRE(ProgrammaticNodeFocused(runtime, initial));
+  REQUIRE(shows_focus());
+
+  REQUIRE(dialogs->Dismiss(dialog));
+  SettlePresentation(platform, runtime);
+  REQUIRE(ProgrammaticNodeFocused(runtime, "dialog opener"));
+  REQUIRE(shows_focus());
+}
+
 TEST_CASE("Focus-change notifications cannot redirect a programmatic request") {
   programmatic_redirect_results.clear();
   programmatic_redirect = true;
@@ -2646,9 +2715,9 @@ TEST_CASE("Focus-change notifications cannot redirect a programmatic request") {
 
 TEST_CASE("Focus requester lifetime and calling-context errors are explicit") {
   programmatic_redirect = false;
-  REQUIRE_THROWS_AS(UseFocusRequester(), std::logic_error);
+  REQUIRE_THROWS_AS(UseViewHandle(), std::logic_error);
   TestPlatform platform;
-  std::optional<FocusRequester> retired;
+  std::optional<ViewHandle> retired;
   {
     UiWindow runtime{ProgrammaticFocusApp, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
@@ -2678,7 +2747,7 @@ TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are r
   SECTION("Focus requests cannot mutate composition") {
     TestPlatform platform;
     UiWindow runtime{[]() -> View {
-      auto requester = UseFocusRequester();
+      auto requester = UseViewHandle();
       requester.RequestFocus();
       return Button("invalid focus");
     }, platform};
@@ -2688,10 +2757,10 @@ TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are r
   SECTION("One requester cannot bind two controls") {
     TestPlatform platform;
     UiWindow runtime{[]() -> View {
-      auto requester = UseFocusRequester();
+      auto requester = UseViewHandle();
       return Column {
-        Button("first binding").With(FocusTarget{requester}),
-        Button("second binding").With(FocusTarget{requester}),
+        Button("first binding").With(requester),
+        Button("second binding").With(requester),
       };
     }, platform};
     runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
@@ -2705,7 +2774,7 @@ TEST_CASE("Composition, duplicate targets, and cross-window focus bindings are r
     original.BuildFrame();
     TestPlatform other_platform;
     UiWindow other{[] {
-      return Button("foreign target").With(FocusTarget{*programmatic_focus[0]});
+      return Button("foreign target").With(*programmatic_focus[0]);
     }, other_platform};
     other.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
     REQUIRE_THROWS_AS(other.BuildFrame(), std::logic_error);

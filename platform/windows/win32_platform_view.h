@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 
 #include <huxerui/platform_registry.h>
 #include <huxerui/render_scene.h>
@@ -26,7 +27,8 @@ public:
   Win32PlatformViews(const Win32PlatformViews&) = delete;
   Win32PlatformViews& operator=(const Win32PlatformViews&) = delete;
 
-  [[nodiscard]] bool Commit(const RenderFrame& frame, float dpi_scale);
+  [[nodiscard]] bool Commit(const RenderFrame& frame, float dpi_scale,
+                            std::optional<RECT> custom_input_bounds = std::nullopt);
   void DidPresent();
   void Resize();
   [[nodiscard]] bool HandleFocusTraversal(const MSG& message);

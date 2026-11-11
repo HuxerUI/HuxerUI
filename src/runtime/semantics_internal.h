@@ -21,6 +21,13 @@ namespace huxerui::detail {
 class AppResources;
 struct MountedNode;
 
+inline const ScrollMetrics* FindScrollMetrics(const SemanticNode& node, Axis axis) noexcept {
+  if (node.scroll && node.scroll->axis == axis) {
+    return &*node.scroll;
+  }
+  return node.additional_scroll && node.additional_scroll->axis == axis ? &*node.additional_scroll : nullptr;
+}
+
 struct SemanticExtensionRoute {
   NodeExtensionHandle extension;
   std::uint64_t local_id = 0;

@@ -305,16 +305,15 @@ std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
 }
 
 Transform2D ResolveChildrenTransform(const MountedNode& node) {
-  Transform2D scroll_transform;
-  if (node.scroll_state != nullptr) {
-    const bool vertical = ScrollAxis(node) == Axis::Vertical;
-    const float content_offset = node.kind == NodeKind::ScrollView
-                                     ? (vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x)
-                                     : 0.0F;
-    const float translation = -content_offset - node.scroll_state->overscroll_offset;
-    scroll_transform = vertical ? TranslationTransform({0.0F, translation})
-                                : TranslationTransform({translation, 0.0F});
+  Point translation;
+  if (const auto& scroll = node.scroll_state) {
+    for (Axis axis : scroll->Axes()) {
+      const float content_offset = node.kind == NodeKind::ScrollView ? scroll->Offset(axis) : 0.0F;
+      float& component = axis == Axis::Vertical ? translation.y : translation.x;
+      component = -content_offset - scroll->Motion(axis).overscroll_offset;
+    }
   }
+  const Transform2D scroll_transform = TranslationTransform(translation);
   return ComposeTransform(node.presentation.children_transform, scroll_transform);
 }
 
@@ -598,6 +597,11 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
     node.presentation.render_opacity = 0.0F;
     node.presentation.resolved_opacity = 0.0F;
     return;
+  }
+  if (node.view_handle) {
+    // A geometry pass can realize additional virtual items after interaction was refreshed.
+    node.PublishViewBinding();
+    node.view_handle->geometry = ViewHandleGeometry{node.PresentationBounds(), node.presentation.resolved_transform};
   }
   // render_opacity is emitted as this node's group opacity. resolved_opacity is the inherited product used for
   // visibility and descendant geometry without baking ancestor opacity into retained paint commands.

@@ -6,6 +6,7 @@ This document defines scroll input, nested consumption, authoritative offset own
 
 Each mounted scroll container owns one actual offset per supported axis.
 `ScrollController::Metrics()` is an observable projection of that offset and geometry, not another writable scroll position.
+Two-axis containers share one clip and viewport. Each axis has its own optional controller connection, motion, and overscroll displacement.
 Momentum owns only its current velocity, while overscroll owns only a temporary presentation displacement outside the clamped content range.
 Neither value is copied into `ScrollMetrics`.
 
@@ -86,6 +87,7 @@ It does not create another offset, connection, controller, dispatcher, or observ
 Direct dragging remains one recognizer in `PointerSession`.
 After movement crosses slop on the recognizer's axis, the deepest compatible scroll recognizer owns the pointer sequence.
 Its committed route supplies the same pre-scroll, offset, and post-scroll transaction used by indirect input.
+Single-axis containers use the dominant direction to compete for the gesture. A two-axis container can win on either axis and then dispatch both components along its committed route.
 
 Touch may accept at a content boundary when terminal overscroll is enabled for that container.
 Mouse and pen dragging require ordinary scroll capacity and do not acquire ownership solely for overscroll.
@@ -102,6 +104,7 @@ float OnPostFling(ViewNode& node, Axis axis, float consumed_velocity, float avai
 
 Pre-fling visits outer containers before the selected inner momentum owner.
 When that owner finishes or reaches a boundary, its post-fling extensions receive the remaining velocity before the nearest compatible ancestor may continue the momentum.
+Velocity transfer and overscroll settlement are independent for each axis.
 Consumption follows the same finite, direction, and magnitude invariants as scroll delta consumption.
 
 `ScrollPhysics` is the only scroll motion policy value.
@@ -158,7 +161,15 @@ Controller requests, focus reveal, text-input reveal, scrollbar dragging, drag-a
 They target the addressed container directly and do not automatically chain a remainder to ancestors.
 Only user scroll transactions and fling continuation perform nested consumption.
 
+Focus reveal in a two-axis container uses the nearest offset that exposes as much of the target as fits on each axis. A target that already covers the viewport leaves that axis in place.
+
 `ScrollToItem` retains a pending index and alignment until measured placement agrees with the requested offset. Newly realized variable-height items may change the estimated target, so completion occurs after layout rather than when the initial offset is applied. Direct scrolling, a newer offset request, disablement, or an invalidated target cancels the pending request; correction never becomes a competing scroll position. Requests accepted by an old connection are not replayed after rebinding or remounting.
+
+For a two-axis virtual layout, `ItemBounds` provides the item's content rectangle. UiWindow aligns that rectangle along the requesting controller's axis using the measured viewport. Both pending targets can be resolved during the same measurement.
+
+## Two-axis virtual measurement
+
+A two-axis virtual layout enables both axes before measurement so both initial offsets are available to `VirtualLayoutContext`. The Runtime clamps the candidate against the measured content and viewport, applying any layout correction or pending item alignment on each axis. When the viewport changes, the existing realization session measures again and commits only the placements for the settled viewport. A layout that keeps changing the viewport beyond the bounded refinement fails measurement instead of publishing mismatched geometry.
 
 ## Invariants
 

@@ -482,7 +482,7 @@ Focus, input-session ownership, and software-keyboard visibility remain separate
 
 `WindowHandle::ShowKeyboard()` and `HideKeyboard()` address the editor focused in that window at the time of the call. The protected `NodeExtension` methods address the extension's own node, including during the event that first focuses it. UiWindow resolves requests after dispatch and input-session synchronization. The last valid explicit request takes precedence over an automatic request. The mounted node, client, and session must still match. An explicit request made before session start can resolve only for that same editor during the current dispatch.
 
-`FocusRequester::RequestFocus()` uses the same dispatch boundary to synchronize the accepted target's text-input session. Outside input dispatch, this synchronization completes before the call returns, including from a resumed Task. Inside an event handler it completes at the outer dispatch boundary; a subsequent `WindowHandle::ShowKeyboard()` in that handler addresses the newly focused editor. Requests captured for a previous editor cannot transfer to the new one. With `SoftwareKeyboardPolicy::Manual`, programmatic focus alone starts the input session without requesting keyboard presentation.
+`ViewHandle::RequestFocus()` uses the same dispatch boundary to synchronize the accepted target's text-input session. Outside input dispatch, this synchronization completes before the call returns, including from a resumed Task. Inside an event handler it completes at the outer dispatch boundary; a subsequent `WindowHandle::ShowKeyboard()` in that handler addresses the newly focused editor. Requests captured for a previous editor cannot transfer to the new one. With `SoftwareKeyboardPolicy::Manual`, programmatic focus alone starts the input session without requesting keyboard presentation.
 
 `RequestShowKeyboard` and `RequestHideKeyboard` are best-effort platform operations for the active session. Hiding preserves HuxerUI focus, the session, and its selection. Native IME events, including a final composition update during dismissal, still use the ordinary command path. Platforms without a software keyboard can keep both hooks as no-ops. On Web, presentation depends on whether the browser allows the input proxy to focus and open the keyboard during the current user gesture.
 
@@ -532,6 +532,8 @@ optional composition
 ```
 
 Large document clients return only the requested surrounding context. TextField can return the complete short value when appropriate. Platform adapters must tolerate partial context and request another range when needed.
+
+The Web input proxy stores a surrounding slice and maps its DOM selection and edit offsets to document coordinates. It accounts for DOM line-break normalization while preserving the client's surrounding text. It requests more context when the current slice cannot cover the selection or composition. When no usable slice is available, it clears the proxy and makes it read-only until synchronization succeeds. The browser keeps its active composition while caret geometry updates, and the proxy refreshes its text after the composition ends.
 
 Client state changes outside an IME callback, including an authoritative controlled TextField update, increment the appropriate revisions.
 UiWindow synchronizes the new state after reconciliation.
@@ -942,7 +944,17 @@ Shift extends the selection for movement commands. macOS `NSTextInputClient` sel
 
 Clipboard uses the optional `PlatformClipboard` capability. UiWindow maps Ctrl/Command+A, C, V, and X to typed `TextEditingAction` values. TextField supports Select All, Copy, Paste, and Cut subject to its read-only and secure configuration; SelectionArea supports Select All and Copy. Undo and redo stay inside TextField rather than expanding `TextEditingAction` or the common input protocol. Secure fields allow Select All and Paste but reject Copy and Cut. Complex text clients retain ownership of their own history.
 
-The internal application service owns one public `Clipboard` per Runtime that delegates synchronous plain-text operations to the same stable `PlatformClipboard` instance. Applications obtain it with `UseApplication().Clipboard()`; unsupported and disconnected instances return unavailable results. Runtime disconnects the application service during application retirement so an application-retained clipboard cannot access a destroyed native capability. Public writes validate UTF-8 before entering the platform boundary, and unreadable platform text is returned as no value. Text editing continues to use `PlatformClipboard` directly rather than routing through the application facade.
+The application service owns one public `Clipboard` per Runtime and delegates to its stable `PlatformClipboard` capability. Runtime retirement disconnects this service before releasing the platform capability. Clipboard tasks capture their inputs and platform resources before they can outlive the service.
+
+Built-in editing actions use the synchronous plain-text operations on platforms that provide them. Paste availability checks use advertised formats where available and permit a paste attempt when the format is unknown. They do not request clipboard payloads. Application code uses `WriteContent()` and typed asynchronous reads for rich text, image content, and file lists on desktop platforms, Android, and iOS.
+
+When a platform lacks synchronous clipboard access, unhandled Copy, Cut, and Paste shortcuts reach the platform's default editing path. The Web input proxy blocks browser Copy and Cut for secure entries. Read-only clients do not open a text-input session.
+
+Clipboard HTML conversion supports inline character styles, safe links, and text breaks. Conversion does not load external content. Windows stores HTML fragments with byte offsets and UTF-16 text separately. GDK uses bounded asynchronous streams for typed clipboard reads. AppKit uses pasteboard item representations. Image payloads and dimensions are bounded before delivery. File lists reuse existing read-only file reference factories, retain access through the reference lifetime, and never acknowledge a move.
+
+Android captures the current clip on the application thread and resolves URI contents on a worker. A non-exported content provider serves read-only URI grants for published images and local files. UIKit loads pasteboard item provider representations and retains explicit file URLs or copies callback-scoped files.
+
+Web begins browser clipboard operations during the triggering user action and delivers Promise results through the Task dispatcher. Reads expose text, HTML, and PNG or JPEG images. Writes use `writeText()` for plain text and one `ClipboardItem` for HTML with its plain-text alternative or for PNG. Canceling a Task detaches its callback from the Promise. Platforms with synchronous publication perform the write when `WriteContentAsync()` is called and return the result through the Task.
 
 ## Android adapter
 

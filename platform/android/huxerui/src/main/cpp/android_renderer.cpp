@@ -851,8 +851,9 @@ void AndroidRenderer::DrawSlice(
   }
 }
 
-// Wire format shared with HuxerUIView.attributedText: ten little-endian 32-bit fields, then UTF-8 font-family bytes.
-// Text ranges use UTF-16 offsets, matching Java String indices; the font-family length counts bytes instead.
+// Nonempty attributes start with an inline object count and its offset, width, ascent and descent records.
+// Each style record then contains ten little-endian 32-bit fields followed by UTF-8 font-family bytes.
+// Text offsets use UTF-16 units, matching Java String indices.
 android::LocalRef<jbyteArray>
 AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const TextStyle& base) {
   if (text.Length() > std::numeric_limits<jint>::max()) {
@@ -864,6 +865,20 @@ AndroidTextAttributes(JNIEnv* environment, const AttributedText& text, const Tex
       bytes.push_back(static_cast<std::byte>((value >> shift) & 0xFFU));
     }
   };
+  if (!text.StyleRanges().empty() || !text.InlineObjects().empty()) {
+    append(static_cast<std::uint32_t>(text.InlineObjects().size()));
+    for (const auto& object : text.InlineObjects()) {
+      const double height = std::ceil(static_cast<double>(object.ascent)) +
+          std::ceil(static_cast<double>(object.descent));
+      if (std::max(std::ceil(static_cast<double>(object.width)), height) > std::numeric_limits<jint>::max()) {
+        throw std::invalid_argument("HuxerUI inline object exceeds the Android coordinate range");
+      }
+      append(static_cast<std::uint32_t>(object.offset));
+      append(std::bit_cast<std::uint32_t>(object.width));
+      append(std::bit_cast<std::uint32_t>(object.ascent));
+      append(std::bit_cast<std::uint32_t>(object.descent));
+    }
+  }
   if (!text.StyleRanges().empty()) {
     for (const auto& run : ResolveTextRuns(text, base)) {
       const auto& font = run.style.font;

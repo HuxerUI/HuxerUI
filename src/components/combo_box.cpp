@@ -48,6 +48,7 @@ struct ComboBoxSession {
   ComboBoxStyle style;
   EventEmitter events;
   std::optional<PopupHandle> popup;
+  std::optional<ViewHandle> popup_target;
   std::optional<LayerId> layer;
   std::shared_ptr<ComboBoxPopupState> popup_state;
   ViewFactory empty_content;
@@ -535,7 +536,7 @@ void UpdateOpenPopup(const std::shared_ptr<ComboBoxSession>& session) {
 }
 
 void OpenComboBox(const std::shared_ptr<ComboBoxSession>& session, bool allow_unfocused = false) {
-  if (!session || !session->popup.has_value() || session->layer.has_value() ||
+  if (!session || !session->popup || !session->popup_target || session->layer.has_value() ||
       (!session->focused && !allow_unfocused) ||
       session->dismissed_revision == session->query_revision ||
       !HasPopupContent(session)) {
@@ -554,7 +555,8 @@ void OpenComboBox(const std::shared_ptr<ComboBoxSession>& session, bool allow_un
       DismissComboBox(session, true);
     }
   };
-  SetPopupLayer(session, session->popup->Show(ComboBoxPopupContentFactory(session), std::move(options)));
+  SetPopupLayer(
+      session, session->popup->Show(*session->popup_target, ComboBoxPopupContentFactory(session), std::move(options)));
 }
 
 void HandleEditedValue(const std::shared_ptr<ComboBoxSession>& session, const TextEditingValue& value) {
@@ -632,6 +634,7 @@ struct ComboBoxFieldBehavior {
   ComboBoxStyle style;
   EventEmitter events;
   PopupHandle popup;
+  ViewHandle popup_target;
   std::shared_ptr<ComboBoxSession> session;
   ViewFactory empty_content;
 };
@@ -652,6 +655,7 @@ public:
     session_->style = modifier.style;
     session_->events = modifier.events;
     session_->popup = modifier.popup;
+    session_->popup_target = modifier.popup_target;
     session_->empty_content = modifier.empty_content;
     session_->focused = node.IsFocused();
     session_->composing = HasActiveTextComposition(static_cast<detail::MountedNode&>(node));
@@ -752,6 +756,7 @@ std::function<View()> MakeComboBoxScopeFactory(ComboBoxConfiguration configurati
     ValidateComboBoxStyle(style);
     const EventEmitter events = UseEvents();
     const PopupHandle popup = UsePopup();
+    const ViewHandle popup_target = UseViewHandle();
     auto session_state = UseState(std::make_shared<ComboBoxSession>());
     const std::shared_ptr<ComboBoxSession> session = session_state.Get();
 
@@ -787,12 +792,13 @@ std::function<View()> MakeComboBoxScopeFactory(ComboBoxConfiguration configurati
                     [session](const KeyEvent& event) { return HandleComboBoxKey(session, event); }
                 )
                 .With(
-                    popup.Anchor(),
+                    popup_target,
                     ComboBoxFieldBehavior{
                         .source = configuration.source,
                         .style = style,
                         .events = events,
                         .popup = popup,
+                        .popup_target = popup_target,
                         .session = session,
                         .empty_content = configuration.empty_content,
                     }

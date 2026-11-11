@@ -60,6 +60,10 @@ Retain one concrete texture through `std::shared_ptr` and pass it directly to Im
 
 PixelTexture copies its rows; Android Bitmap and Apple pixel-buffer publication retain objects whose contents must remain immutable while HuxerUI may render them. GPU publication has source-specific synchronization and snapshot costs, not a universal zero-copy guarantee.
 
+### Acquire frames for external use
+
+Use the concrete texture's `AcquireFrame()` where its public platform header supports external consumers. It returns the latest published frame or an empty result before publication. Keep the acquired frame or imported resource alive through GPU use, treat its pixels as read-only, and follow the platform contract for synchronization and context or device compatibility. Publication inputs and acquired frames have separate ownership rules.
+
 ### Windows GPU input
 
 `D3D11Texture::Publish` synchronously copies into an immutable shared snapshot, allowing source reuse or release afterward. Submit source writes first and externally serialize its device and immediate context. The source must be single-sampled, one-mip, one-slice BGRA8 UNORM with D3D11_USAGE_DEFAULT and no CPU access; row zero is the top edge and alpha is opaque or premultiplied. Producer and renderer must use the same graphics adapter. Rendering consumes the shared snapshot without a second GPU copy or implicit CPU fallback. This type is unavailable in Windows 7 compatibility builds; device removal requires publishing from a valid replacement device.

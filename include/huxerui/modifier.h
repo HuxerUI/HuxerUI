@@ -30,12 +30,14 @@ struct GestureSettings;
 struct SemanticAction;
 
 namespace detail {
+struct AnchoredPresentation;
 struct DragSourceCapability;
 struct DropTargetCapability;
 struct FileDropTargetCapability;
-struct FocusRequesterState;
+struct ViewHandleBinding;
 class GestureRecognizer;
 struct InternalAccess;
+class SceneTransitionService;
 }
 
 /// Describes the timing and accessibility policy for one extension frame callback.
@@ -527,57 +529,50 @@ struct Focusable {
   bool operator==(const Focusable&) const = default;
 };
 
-/// A copyable focus target belonging to the window where UseFocusRequester() created it.
+/// A copyable, non-owning target in the window where UseViewHandle() created it.
 ///
-/// Copies share one target. Compatible recomposition and keyed movement preserve its mounted identity; unmounting
-/// disconnects the target. A requester never activates a window or changes platform screen-reader focus.
-class FocusRequester final {
+/// Pass the handle to With() to bind it to one View. Copies share the same target and may be passed to multiple
+/// consumers. Reconciliation can transfer the binding to a replacement node. Removing the binding disconnects it.
+class ViewHandle final {
 public:
-  /// Requests visible logical focus for the currently bound control on the original application's thread.
+  /// Returns the property modifier descriptor used by View::With().
+  static const detail::ModifierDescriptor& Descriptor();
+
+  /// Requests logical focus for the currently bound control on the original application's thread.
   ///
   /// Returns true when that control owns focus after the request, including an already-focused control. Returns
   /// false without changing focus when the target is unmounted, unavailable, disabled, excluded from input, outside
   /// the active modal scope, or a focus-change notification is running. Requests are not retained for future mounts.
   /// Text input and keyboard presentation use the existing window dispatch boundary; logical success does not
   /// guarantee that the operating system displays a software keyboard.
+  /// @param focus_visible Whether to show focus indication after an accepted request. Defaults to false.
   /// @throws std::logic_error If called during composition, from another thread, or in another application's context.
-  bool RequestFocus() const;
+  bool RequestFocus(bool focus_visible = false) const;
 
-  bool operator==(const FocusRequester&) const = default;
+  bool operator==(const ViewHandle&) const = default;
 
 private:
-  explicit FocusRequester(std::shared_ptr<detail::FocusRequesterState> state) : state_(std::move(state)) {}
+  explicit ViewHandle(std::shared_ptr<detail::ViewHandleBinding> binding) : binding_(std::move(binding)) {}
 
-  std::shared_ptr<detail::FocusRequesterState> state_;
+  std::shared_ptr<detail::ViewHandleBinding> binding_;
 
-  friend FocusRequester UseFocusRequester(const std::source_location&);
+  friend ViewHandle UseViewHandle(const std::source_location&);
   friend class UiWindow;
-  friend struct FocusTarget;
+  friend struct detail::AnchoredPresentation;
+  friend class detail::SceneTransitionService;
 };
 
-/// Retains one requester at this composition location and occurrence.
+/// Retains one handle at this composition location and occurrence.
 /// @param location Hook identity within the current RecomposeScope; normally supplied automatically.
-/// @return A requester bound to the composing window's lifetime.
+/// @return A handle bound to the composing window's lifetime.
 /// @throws std::logic_error If there is no active window composition.
+/// Binding the handle does not make the View focusable. Binding the handle to multiple mounted Views or to a View
+/// in another window throws std::logic_error.
 /// @code
-/// auto email_focus = UseFocusRequester();
-/// return TextField(email).With(FocusTarget{email_focus});
+/// auto email_focus = UseViewHandle();
+/// return TextField(email).With(email_focus);
 /// @endcode
-FocusRequester UseFocusRequester(const std::source_location& location = std::source_location::current());
-
-/// Binds a requester to this mounted View without making it focusable.
-///
-/// Component defaults and Focusable still determine eligibility. One requester can name only one mounted control
-/// in its original window; duplicate or cross-window bindings throw std::logic_error during mounting.
-struct FocusTarget {
-  /// Returns the property modifier descriptor used by View::With().
-  static const detail::ModifierDescriptor& Descriptor();
-
-  /// Stable requester to bind; copying this modifier preserves the same requester identity.
-  FocusRequester requester;
-
-  bool operator==(const FocusTarget&) const = default;
-};
+ViewHandle UseViewHandle(const std::source_location& location = std::source_location::current());
 
 /// Selects the pointer cursor while a mouse or pen points at a View.
 ///
@@ -876,7 +871,7 @@ struct Grow {
   bool operator==(const Grow&) const = default;
 };
 
-/// Adds a themed, interactive scroll indicator to a scroll container.
+/// Adds a themed, interactive scroll indicator to each axis with a scroll range.
 ///
 /// The bar appears during scrolling, supports direct thumb dragging, and fades when idle. Leave style empty to resolve
 /// the active Theme value, or provide an explicit ScrollBarStyle for this View.

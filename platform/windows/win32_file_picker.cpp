@@ -517,8 +517,8 @@ private:
 
 } // namespace
 
-std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path, bool writable) {
-  return MakeWin32FileReferenceInternal(platform_path, false, writable);
+std::optional<FileReference> MakeWin32FileReference(std::wstring_view platform_path, bool writable, bool directory) {
+  return MakeWin32FileReferenceInternal(platform_path, directory, writable);
 }
 
 std::shared_ptr<FilePickerTransport>

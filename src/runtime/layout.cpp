@@ -66,6 +66,21 @@ std::optional<VirtualCollectionSemantics> InternalAccess::CollectionSemantics(co
   };
 }
 
+std::array<std::optional<float>, 2> VirtualMeasureSession::ScrollCorrections(const VirtualLayoutResult& result) const {
+  if (owner_->scroll_state->both_axes) {
+    if (result.axis_ || result.scroll_offset_) {
+      throw std::logic_error("HuxerUI two-axis virtual layout must report corrections by axis");
+    }
+    return result.axis_offsets_;
+  }
+  if (result.axis_offsets_[0] || result.axis_offsets_[1]) {
+    throw std::logic_error("HuxerUI single-axis virtual layout must report a scalar correction");
+  }
+  std::array<std::optional<float>, 2> offsets{};
+  offsets[ScrollAxisIndex(result.ScrollAxis())] = result.scroll_offset_;
+  return offsets;
+}
+
 namespace {
 
 struct LayoutContextState {
@@ -107,35 +122,35 @@ Size MeasureScopeChild(MountedNode& node, const Constraints& constraints, Layout
                      state.title_bar_metrics);
 }
 
+void SetScrollContentSize(MountedNode& node, Size size) {
+  auto& scroll = *node.scroll_state;
+  if (scroll.content_width != size.width || scroll.content_height != size.height) {
+    scroll.content_width = size.width;
+    scroll.content_height = size.height;
+    node.foreground_paint_dirty = true;
+  }
+}
+
 Size MeasureScrollChild(MountedNode& node, const Constraints& constraints, LayoutContextState& state) {
   if (node.children.empty()) {
-    node.scroll_state->content_width = 0.0F;
-    node.scroll_state->content_height = 0.0F;
+    SetScrollContentSize(node, {});
     return constraints.Constrain({});
   }
 
-  const bool vertical = ScrollAxis(node) == Axis::Vertical;
+  const bool horizontal = node.scroll_state->Supports(Axis::Horizontal);
+  const bool vertical = node.scroll_state->Supports(Axis::Vertical);
   const bool fill_viewport = node.LayoutValueOr<detail::ScrollFillViewport>(false);
-  const float viewport_width = std::isfinite(constraints.max_width) ? constraints.max_width : constraints.min_width;
-  const float viewport_height = std::isfinite(constraints.max_height) ? constraints.max_height : constraints.min_height;
-  const Constraints child_constraints =
-      vertical
-          ? Constraints{
-                constraints.min_width,
-                constraints.max_width,
-                fill_viewport ? viewport_height : 0.0F,
-                std::numeric_limits<float>::infinity(),
-            }
-          : Constraints{
-                fill_viewport ? viewport_width : 0.0F,
-                std::numeric_limits<float>::infinity(),
-                constraints.min_height,
-                constraints.max_height,
-            };
+  const float viewport_width = constraints.HasBoundedWidth() ? constraints.max_width : constraints.min_width;
+  const float viewport_height = constraints.HasBoundedHeight() ? constraints.max_height : constraints.min_height;
+  const Constraints child_constraints{
+      horizontal ? (fill_viewport ? viewport_width : 0.0F) : constraints.min_width,
+      horizontal ? std::numeric_limits<float>::infinity() : constraints.max_width,
+      vertical ? (fill_viewport ? viewport_height : 0.0F) : constraints.min_height,
+      vertical ? std::numeric_limits<float>::infinity() : constraints.max_height,
+  };
   const Size child_size = MeasureNode(*node.children.front(), child_constraints, *state.ui_window,
                                       state.safe_area, state.title_bar_metrics);
-  node.scroll_state->content_width = child_size.width;
-  node.scroll_state->content_height = child_size.height;
+  SetScrollContentSize(node, child_size);
   return constraints.Constrain(child_size);
 }
 
@@ -272,6 +287,98 @@ Size MeasureVirtualItem(void* state, huxerui::ViewNode& item, Constraints constr
                      layout_state.safe_area, layout_state.title_bar_metrics);
 }
 
+Size MeasureVirtualLayout(MountedNode& node, const Constraints& constraints, LayoutContextState& state) {
+  if (!node.virtual_layout_descriptor || !node.virtual_layout_descriptor->measure || !node.virtual_state) {
+    throw std::logic_error("HuxerUI virtual layout node has no measure function");
+  }
+  auto& scroll = *node.scroll_state;
+  if (scroll.both_axes && (!constraints.HasBoundedWidth() || !constraints.HasBoundedHeight())) {
+    throw std::logic_error("HuxerUI two-axis virtual layout requires bounded width and height");
+  }
+
+  VirtualMeasureSession session{*state.ui_window, node};
+  VirtualLayoutContextState context_state{
+      &session,
+      &state,
+      {
+          {scroll.offset_x, scroll.offset_y},
+          {
+              constraints.HasBoundedWidth() ? constraints.max_width
+                                           : std::max(constraints.min_width, node.measured_size.width),
+              constraints.HasBoundedHeight() ? constraints.max_height
+                                            : std::max(constraints.min_height, node.measured_size.height),
+          },
+      },
+  };
+  VirtualLayoutContext context = InternalAccess::CreateVirtualLayoutContext(
+      &context_state, VirtualItemCount, CurrentVirtualViewport, ObtainVirtualItem, MeasureVirtualItem);
+
+  const auto item_offset = [&](Axis axis, Size viewport) -> std::optional<float> {
+    const auto* connection = scroll.Connection(axis);
+    return connection ? connection->PendingItemOffset(axis == Axis::Vertical ? viewport.height : viewport.width)
+                      : std::nullopt;
+  };
+  if (scroll.both_axes) {
+    auto& viewport = context_state.viewport;
+    viewport.offset.x = std::max(0.0F, item_offset(Axis::Horizontal, viewport.size).value_or(viewport.offset.x));
+    viewport.offset.y = std::max(0.0F, item_offset(Axis::Vertical, viewport.size).value_or(viewport.offset.y));
+  }
+
+  constexpr int maximum_passes = 8;
+  for (int pass = 0; pass < maximum_passes; ++pass) {
+    VirtualLayoutResult result = node.virtual_layout_descriptor->measure(context, node, constraints);
+    const Size size = constraints.Constrain(result.MeasuredSize());
+    const Size content_size = result.ContentSize();
+    const auto offsets = session.ScrollCorrections(result);
+    auto& viewport = context_state.viewport;
+    std::optional<Point> corrected_offset;
+    if (scroll.both_axes) {
+      const auto valid_size = [](Size value) {
+        return std::isfinite(value.width) && std::isfinite(value.height) && value.width >= 0.0F && value.height >= 0.0F;
+      };
+      if (!valid_size(size) || !valid_size(content_size)) {
+        throw std::logic_error("HuxerUI two-axis virtual layout must report finite non-negative sizes");
+      }
+      const auto resolve_offset = [&](Axis axis, float current, float viewport_extent, float content_extent) {
+        const auto correction = offsets[ScrollAxisIndex(axis)];
+        if (correction && !std::isfinite(*correction)) {
+          throw std::logic_error("HuxerUI virtual scroll correction must be finite");
+        }
+        const float requested = item_offset(axis, size).value_or(correction.value_or(current));
+        return std::clamp(requested, 0.0F, std::max(0.0F, content_extent - viewport_extent));
+      };
+      const VirtualViewport resolved{
+          {
+              resolve_offset(Axis::Horizontal, viewport.offset.x, size.width, content_size.width),
+              resolve_offset(Axis::Vertical, viewport.offset.y, size.height, content_size.height),
+          },
+          size,
+      };
+      if (resolved != viewport) {
+        // Keep all measurement attempts in one realization session and commit only the settled viewport.
+        viewport = resolved;
+        continue;
+      }
+      corrected_offset = resolved.offset;
+    } else {
+      ConfigureScrollAxes(node, result.ScrollAxis(), false);
+      if (result.CorrectedScrollOffset()) {
+        corrected_offset = Point{offsets[0].value_or(scroll.offset_x), offsets[1].value_or(scroll.offset_y)};
+      }
+    }
+
+    auto collection_semantics = InternalAccess::CollectionSemantics(result);
+    session.CommitRealization(result.Placements());
+    node.virtual_state->realized_placements = result.Placements();
+    node.virtual_state->collection_semantics = std::move(collection_semantics);
+    node.virtual_state->pending_scroll_offset = corrected_offset;
+    node.virtual_state->viewport_dirty = false;
+    SetScrollContentSize(node, content_size);
+    return size;
+  }
+  throw std::logic_error("HuxerUI two-axis virtual layout did not settle its viewport");
+}
+
 Size MeasureLabelContent(MountedNode& node, UiWindow& ui_window, const Constraints& constraints) {
   const LabelContentMetrics metrics = node.LayoutValueOr<LabelContentMetrics>({});
   const Size icon_size{
@@ -296,20 +403,19 @@ Size MeasureLabelContent(MountedNode& node, UiWindow& ui_window, const Constrain
 }
 
 void ClampScrollOffsetAndCompleteController(MountedNode& node) {
-  const bool vertical = ScrollAxis(node) == Axis::Vertical;
-  const Rect viewport = ScrollViewport(node);
-  const float viewport_extent = vertical ? viewport.height : viewport.width;
-  const float content_extent = vertical ? node.scroll_state->content_height : node.scroll_state->content_width;
-  float& scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
-  const float max_offset = std::max(0.0F, content_extent - viewport_extent);
-  scroll_offset = std::clamp(scroll_offset, 0.0F, max_offset);
+  for (Axis axis : node.scroll_state->Axes()) {
+    float& offset = node.scroll_state->Offset(axis);
+    const float clamped = std::clamp(offset, 0.0F, ResolveScrollMetrics(node, axis).maximum_offset);
+    if (offset != clamped) {
+      offset = clamped;
+      node.foreground_paint_dirty = true;
+    }
+  }
   CompleteScrollController(node);
 }
 
 void StopScrollMotionTree(MountedNode& node) {
-  if (node.scroll_state) {
-    node.scroll_state->motion.Stop(node);
-  }
+  StopScrollNodeMotion(node);
   for (auto& child : node.children) {
     StopScrollMotionTree(*child);
   }
@@ -435,8 +541,10 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui
       node.properties.padding.left + consumed_safe_area.left,
   };
   LayoutContextState layout_state{&ui_window, safe_area, title_bar_metrics};
-  if (node.kind == NodeKind::ScrollView) {
-    node.scroll_state->axis = node.LayoutValueOr<detail::ScrollAxisBinding>(Axis::Vertical);
+  if (node.kind == NodeKind::ScrollView || node.kind == NodeKind::VirtualLayout) {
+    const Axis fallback = node.kind == NodeKind::ScrollView ? Axis::Vertical : ScrollAxis(node);
+    ConfigureScrollAxes(node, node.LayoutValueOr<detail::ScrollAxisBinding>(fallback),
+                        node.LayoutValueOr<detail::ScrollBothAxesBinding>(false));
   }
   if (IsScrollContainer(node)) {
     PrepareScrollController(node);
@@ -557,41 +665,9 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui
       content_size = MeasureScrollChild(node, content_constraints, layout_state);
     }
     break;
-  case NodeKind::VirtualLayout: {
-    if (node.virtual_layout_descriptor == nullptr || node.virtual_layout_descriptor->measure == nullptr ||
-        !node.virtual_state) {
-      throw std::logic_error("HuxerUI virtual layout node has no measure function");
-    }
-    const Size provisional_viewport{
-        content_constraints.HasBoundedWidth() ? content_constraints.max_width
-                                             : std::max(content_constraints.min_width, node.measured_size.width),
-        content_constraints.HasBoundedHeight() ? content_constraints.max_height
-                                              : std::max(content_constraints.min_height, node.measured_size.height),
-    };
-    VirtualMeasureSession session{ui_window, node};
-    VirtualLayoutContextState virtual_context_state{
-        &session,
-        &layout_state,
-        {
-            {node.scroll_state->offset_x, node.scroll_state->offset_y},
-            provisional_viewport,
-        },
-    };
-    VirtualLayoutContext context = InternalAccess::CreateVirtualLayoutContext(
-        &virtual_context_state, VirtualItemCount, CurrentVirtualViewport, ObtainVirtualItem, MeasureVirtualItem);
-    VirtualLayoutResult result = node.virtual_layout_descriptor->measure(context, node, content_constraints);
-    std::optional<VirtualCollectionSemantics> collection_semantics = InternalAccess::CollectionSemantics(result);
-    session.CommitRealization(result.Placements());
-    node.virtual_state->realized_placements = result.Placements();
-    node.virtual_state->collection_semantics = std::move(collection_semantics);
-    node.virtual_state->pending_scroll_offset = result.CorrectedScrollOffset();
-    node.scroll_state->axis = result.ScrollAxis();
-    node.scroll_state->content_width = result.ContentSize().width;
-    node.scroll_state->content_height = result.ContentSize().height;
-    node.virtual_state->viewport_dirty = false;
-    content_size = content_constraints.Constrain(result.MeasuredSize());
+  case NodeKind::VirtualLayout:
+    content_size = MeasureVirtualLayout(node, content_constraints, layout_state);
     break;
-  }
   }
 
   const Size measured{
@@ -663,17 +739,21 @@ void LayoutNode(MountedNode& node, Point offset) {
   case NodeKind::VirtualLayout: {
     // Virtual scrolling changes which items are realized and their viewport-relative placements, so its offset is
     // resolved during layout. A regular ScrollView retains its subtree and moves it with children_transform instead.
-    const bool vertical = ScrollAxis(node) == Axis::Vertical;
-    if (node.virtual_state->pending_scroll_offset.has_value()) {
-      float& committed_scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
-      committed_scroll_offset = *node.virtual_state->pending_scroll_offset;
-      node.virtual_state->pending_scroll_offset.reset();
+    auto& scroll = *node.scroll_state;
+    if (const auto offset = std::exchange(node.virtual_state->pending_scroll_offset, std::nullopt)) {
+      if (Point{scroll.offset_x, scroll.offset_y} != *offset) {
+        node.foreground_paint_dirty = true;
+        scroll.offset_x = offset->x;
+        scroll.offset_y = offset->y;
+      }
     }
     ClampScrollOffsetAndCompleteController(node);
-    const float scroll_offset = vertical ? node.scroll_state->offset_y : node.scroll_state->offset_x;
+    const Point scroll_offset{
+        scroll.Supports(Axis::Horizontal) ? scroll.offset_x : 0.0F,
+        scroll.Supports(Axis::Vertical) ? scroll.offset_y : 0.0F,
+    };
     for (const auto& placement : node.virtual_state->realized_placements) {
-      const Point item_offset = vertical ? Point{placement.offset.x, placement.offset.y - scroll_offset}
-                                        : Point{placement.offset.x - scroll_offset, placement.offset.y};
+      const Point item_offset = placement.offset - scroll_offset;
       LayoutNode(
           static_cast<MountedNode&>(*placement.item),
           {

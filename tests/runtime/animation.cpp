@@ -11,6 +11,7 @@ namespace {
 
 State<bool> scene_transition_changed;
 State<bool> scene_transition_anchor_visible;
+std::optional<ViewHandle> scene_target;
 State<bool> platform_scene_transition_changed;
 State<bool> synchronized_transition_selected;
 std::optional<SceneTransitionHandle> interaction_scene_transition;
@@ -45,12 +46,15 @@ View PlatformSceneTransitionApp() {
   auto changed = UseState(false);
   platform_scene_transition_changed = changed;
   auto transition = UseSceneTransition();
+  auto target = UseViewHandle();
   return Column {
     Button("Change")
-        .OnClick([transition, changed] {
-          transition.Run(TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}}, [changed] { changed = true; });
+        .OnClick([transition, target, changed] {
+          transition.RunFromView(
+              target, TransitionSpec{CircularRevealTransition{}, TweenSpec{0.36, Easing::EaseInOut}},
+              [changed] { changed = true; });
         })
-        .With(transition.Anchor(), Frame{80.0F, 40.0F}),
+        .With(target, Frame{80.0F, 40.0F}),
     Stack {
       huxerui::PlatformView("test/View").With(Frame{80.0F, 40.0F}),
       Text(changed ? "new" : "old"),
@@ -61,19 +65,20 @@ View PlatformSceneTransitionApp() {
 View SceneTransitionAnchorLifecycleApp() {
   auto visible = UseState(true);
   scene_transition_anchor_visible = visible;
-  auto transition = UseSceneTransition();
+  interaction_scene_transition = UseSceneTransition();
+  scene_target = UseViewHandle();
   View anchor = Stack {};
   if (visible.Get()) {
-    anchor = std::move(anchor).With(transition.Anchor());
+    anchor = std::move(anchor).With(*scene_target);
   }
   return anchor;
 }
 
 View DuplicateSceneTransitionAnchorApp() {
-  auto transition = UseSceneTransition();
+  auto target = UseViewHandle();
   return Row {
-    Stack {}.With(transition.Anchor()),
-    Stack {}.With(transition.Anchor()),
+    Stack {}.With(target),
+    Stack {}.With(target),
   };
 }
 
@@ -222,7 +227,18 @@ TEST_CASE("SceneTransitionAnchorCanUnmountAndMountAgain") {
 
   scene_transition_anchor_visible = false;
   runtime.BuildRenderFrame();
+  const TransitionSpec effect{CircularRevealTransition{}, TweenSpec{0.36}};
+  int mutations = 0;
+  REQUIRE_THROWS_AS(interaction_scene_transition->RunFromView(*scene_target, effect, [&] { ++mutations; }),
+                    std::logic_error);
+  REQUIRE(mutations == 0);
   scene_transition_anchor_visible = true;
+  runtime.BuildRenderFrame();
+  interaction_scene_transition->RunFromView(*scene_target, effect, [&] {
+    ++mutations;
+    scene_transition_anchor_visible = false;
+  });
+  REQUIRE(mutations == 1);
   REQUIRE_NOTHROW(runtime.BuildRenderFrame());
 }
 

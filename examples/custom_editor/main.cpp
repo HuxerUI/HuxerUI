@@ -1095,11 +1095,13 @@ View ColorPalette(PopupContext popup, const char* label, std::span<const Swatch>
 View ColorTool(const ImageResource& icon, const char* label, bool available, std::span<const Swatch> colors,
                std::function<void(std::optional<Color>)> apply) {
   auto palette = UsePopup();
+  auto palette_target = UseViewHandle();
   return ToolbarButton(icon, label, available)
-      .With(palette.Anchor())
-      .OnClick([palette, label, available, colors, apply = std::move(apply)] {
+      .With(palette_target)
+      .OnClick([palette, palette_target, label, available, colors, apply = std::move(apply)] {
         if (available) {
           palette.Show(
+              palette_target,
               [label, colors, apply](PopupContext popup) { return ColorPalette(popup, label, colors, apply); },
               PopupOptions{.trap_focus = true}
           );
@@ -1110,6 +1112,7 @@ View ColorTool(const ImageResource& icon, const char* label, bool available, std
 [[huxerui::composable]]
 View EditorToolbar(std::shared_ptr<EditorClient> editor, State<std::uint64_t> changes) {
   auto size_menu = UseMenu();
+  auto size_target = UseViewHandle();
   std::ignore = changes.Get();
   const auto format = editor->SelectedFormat();
   const bool has_text = format.has_text;
@@ -1132,10 +1135,10 @@ View EditorToolbar(std::shared_ptr<EditorClient> editor, State<std::uint64_t> ch
       ToolbarButton(inline_code, "Inline code", has_text, format.inline_code)
           .OnClick([editor] { editor->ToggleInlineCode(); }),
       ToolbarButton(font_size, "Font size", has_text)
-          .With(size_menu.Anchor())
-          .OnClick([editor, size_menu, has_text] {
+          .With(size_target)
+          .OnClick([editor, size_menu, size_target, has_text] {
             if (has_text) {
-              size_menu.Show({
+              size_menu.Show(size_target, {
                   MenuItem("Font size 14", [editor] { editor->SetFontSize(14.0F); }),
                   MenuItem("Font size 18", [editor] { editor->SetFontSize(18.0F); }),
                   MenuItem("Font size 24", [editor] { editor->SetFontSize(24.0F); }),

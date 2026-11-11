@@ -48,9 +48,11 @@ Text, built-in labels, TextField, and Canvas text inherit the effective `Locale`
 
 ## Clipboard
 
-Obtain the application's plain-text clipboard with `UseApplication().Clipboard()` on the application thread, including outside composition. `IsAvailable()` reports whether the Runtime currently has synchronous clipboard access. `ReadText()` returns an optional UTF-8 string, and `WriteText(text)` reports whether valid UTF-8 text was accepted.
+Obtain the application clipboard with `UseApplication().Clipboard()` on the application thread. `IsAvailable()` reports synchronous plain-text support. `ReadText()` returns an optional UTF-8 string, and `WriteText(text)` reports whether the system accepted valid UTF-8 text.
 
-Clipboard operations are synchronous and may enter native APIs. Do not call them from `RunWorker()` or another application worker thread. A captured handle remains safe after its Runtime is destroyed but reports unavailable results. Web does not expose this application clipboard service; browser-managed TextField copy, cut, and paste continue through trusted editing events.
+On desktop, Android, and iOS, publish `ClipboardContent` with `WriteContent()`. Use `ReadTextAsync()`, `ReadRichTextAsync()`, `ReadImageAsync()`, or `ReadFilesAsync()` for typed reads. Handle `NotFound` as absent content. Keep copied image files as `FileReference` attachments and use `ImageAsset` for image content.
+
+On Web, use `WriteContentAsync()` for text, `AttributedText` as HTML with a plain-text alternative, and PNG images. Call the write or supported read directly in the user action before scheduling the returned Task. Browser-managed TextField copy, cut, and paste use browser editing events.
 
 ## Files and directories
 

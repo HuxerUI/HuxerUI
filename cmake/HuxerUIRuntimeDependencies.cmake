@@ -670,6 +670,19 @@ function(_huxerui_deploy_runtime source_executable content_directory executable)
         set(system_excludes "^/System/Library/" "^/usr/lib/")
     else ()
         find_program(patchelf patchelf REQUIRED)
+        # Before 0.19.0, --set-rpath could relocate .init without updating DT_INIT, so the loader jumped to
+        # overwritten bytes and the packaged application crashed (NixOS/patchelf#639).
+        _huxerui_runtime_command(patchelf_version "${patchelf}" --version)
+        if (NOT patchelf_version MATCHES "^patchelf ([0-9]+\\.[0-9]+(\\.[0-9]+)?)")
+            message(FATAL_ERROR "HuxerUI could not determine the patchelf version at ${patchelf}: ${patchelf_version}")
+        endif ()
+        set(patchelf_version "${CMAKE_MATCH_1}")
+        if (patchelf_version VERSION_LESS "0.19.0")
+            message(FATAL_ERROR
+                    "HuxerUI Linux runtime deployment requires patchelf 0.19.0 or newer; "
+                    "found ${patchelf_version} at ${patchelf}. "
+                    "Older versions can corrupt ELF initialization code when changing RUNPATH.")
+        endif ()
         find_program(readelf readelf REQUIRED)
         set(library_directory "${content_directory}/lib")
         set(system_excludes "^ld-linux.*" "^lib(c|m|dl|pthread|rt|resolv|util|anl|BrokenLocale)\\.so(\\.[0-9]+)*$"

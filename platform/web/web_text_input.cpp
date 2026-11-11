@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <exception>
 #include <limits>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -12,6 +13,8 @@
 #include <emscripten.h>
 
 #include <huxerui/app.h>
+
+#include "text/text_input_internal.h"
 
 namespace huxerui::detail {
 
@@ -42,11 +45,59 @@ void DispatchWebTextInput(std::uintptr_t web_session_id, const char* operation, 
   }
 }
 
-std::int32_t WebOffset(TextOffset offset) noexcept {
-  return static_cast<std::int32_t>(
-      std::clamp<TextOffset>(offset, std::numeric_limits<std::int32_t>::min(), std::numeric_limits<std::int32_t>::max())
-  );
+bool Contains(TextRange outer, TextRange inner) noexcept {
+  return inner.IsValid() && inner.start >= outer.start && inner.end <= outer.end;
 }
+
+TextRange RequiredContextRange(const TextInputContext& context) noexcept {
+  auto required = context.selection.Range();
+  if (context.composition) {
+    required.start = std::min(required.start, context.composition->start);
+    required.end = std::max(required.end, context.composition->end);
+  }
+  return required;
+}
+
+struct WebTextSnapshot {
+  std::string text;
+  TextRange range;
+  TextSelection selection;
+};
+
+std::optional<WebTextSnapshot> MakeWebTextSnapshot(TextInputContext context) {
+  if (context.result_code != TextInputResultCode::Ok) return std::nullopt;
+  const auto length = Utf16Length(context.text);
+  if (!length || *length > std::numeric_limits<std::int32_t>::max()) return std::nullopt;
+  const TextRange range{context.slice_start, context.slice_start + *length};
+  if (!Contains(range, RequiredContextRange(context))) return std::nullopt;
+  return WebTextSnapshot{std::move(context.text), range, context.selection};
+}
+
+std::optional<WebTextSnapshot> ReadWebTextSnapshot(UiWindow& window, TextInputSessionId session) {
+  auto context = window.QueryTextInputContext(session, 0, 0);
+  if (context.result_code != TextInputResultCode::Ok) return std::nullopt;
+  const auto required = RequiredContextRange(context);
+  constexpr TextOffset surrounding_units = 2048;
+  const TextRange surrounding{
+      required.start - std::min(required.start, surrounding_units),
+      required.end + std::min(context.total_length - required.end, surrounding_units),
+  };
+  auto snapshot = MakeWebTextSnapshot(std::move(context));
+  if (!snapshot || !Contains(snapshot->range, surrounding)) {
+    auto expanded = MakeWebTextSnapshot(window.QueryTextInputContext(session, surrounding.start, surrounding.Length()));
+    if (expanded) return expanded;
+  }
+  return snapshot;
+}
+
+std::optional<TextSelection> ToDocumentSelection(TextSelection selection, TextRange snapshot) noexcept {
+  if (!Contains({0, snapshot.Length()}, selection.Range())) return std::nullopt;
+  selection.anchor += snapshot.start;
+  selection.active += snapshot.start;
+  return selection;
+}
+
+enum class SnapshotSync { Unavailable, Published, Composing };
 
 // clang-format off
 EM_JS(bool, PrepareWebTextInput, (
@@ -77,6 +128,13 @@ EM_JS(bool, PrepareWebTextInput, (
       const end = element.selectionEnd || start;
       return element.selectionDirection === "backward" ? [end, start] : [start, end];
     };
+    const toSliceOffset = (offset) => {
+      for (const omitted of session.textOmittedOffsets) {
+        if (omitted > offset) break;
+        ++offset;
+      }
+      return offset;
+    };
     const isSurrogateBoundary = (value, offset) => {
       if (offset <= 0 || offset >= value.length) {
         return true;
@@ -92,7 +150,8 @@ EM_JS(bool, PrepareWebTextInput, (
       };
 
       listen("input", () => {
-        if (session.activeTextInput !== element || session.textComposing) {
+        if (session.activeTextInput !== element || element.readOnly || session.textSynchronizing ||
+            session.textComposing) {
           return;
         }
         const previous = session.textValue || "";
@@ -120,28 +179,35 @@ EM_JS(bool, PrepareWebTextInput, (
         while (!isSurrogateBoundary(current, currentEnd)) {
           ++currentEnd;
         }
-        const selected = selection(element);
-        session.textValue = current;
+        const targetStart = toSliceOffset(prefix);
+        const targetEnd = toSliceOffset(previousEnd);
         const inserted = current.slice(prefix, currentEnd);
+        const toEditedSliceOffset = (offset) => {
+          if (offset <= prefix) return toSliceOffset(offset);
+          if (offset <= currentEnd) return targetStart + offset - prefix;
+          return toSliceOffset(previousEnd + offset - currentEnd) + inserted.length - (targetEnd - targetStart);
+        };
+        const [anchor, active] = selection(element);
         const pointer = Module.stringToNewUTF8(inserted);
         Module._huxerui_web_text_edit(
             web_session_id,
             session.textToken,
-            prefix,
-            previousEnd,
+            targetStart,
+            targetEnd,
             pointer,
-            selected[0],
-            selected[1]
+            toEditedSliceOffset(anchor),
+            toEditedSliceOffset(active)
         );
         _free(pointer);
       });
 
       listen("select", () => {
-        if (session.activeTextInput !== element || session.textSynchronizing || session.textComposing) {
+        if (session.activeTextInput !== element || session.textSynchronizing || session.textComposing ||
+            element.value !== session.textValue) {
           return;
         }
-        const selected = selection(element);
-        Module._huxerui_web_text_selection(web_session_id, session.textToken, selected[0], selected[1]);
+        const [anchor, active] = selection(element).map(toSliceOffset);
+        Module._huxerui_web_text_selection(web_session_id, session.textToken, anchor, active);
       });
 
       listen("copy", (event) => {
@@ -157,17 +223,16 @@ EM_JS(bool, PrepareWebTextInput, (
       });
 
       listen("compositionstart", () => {
-        if (session.activeTextInput !== element) {
+        if (session.activeTextInput !== element || element.readOnly) {
           return;
         }
-        const selected = selection(element);
+        const [anchor, active] = selection(element).map(toSliceOffset);
         session.textComposing = true;
-        session.textCompositionStart = Math.min(selected[0], selected[1]);
         Module._huxerui_web_text_composition_start(
             web_session_id,
             session.textToken,
-            Math.min(selected[0], selected[1]),
-            Math.max(selected[0], selected[1])
+            Math.min(anchor, active),
+            Math.max(anchor, active)
         );
       });
 
@@ -176,15 +241,8 @@ EM_JS(bool, PrepareWebTextInput, (
           return;
         }
         const value = event.data || "";
-        const caret = session.textCompositionStart + value.length;
         const pointer = Module.stringToNewUTF8(value);
-        Module._huxerui_web_text_composition_update(
-            web_session_id,
-            session.textToken,
-            pointer,
-            caret,
-            caret
-        );
+        Module._huxerui_web_text_composition_update(web_session_id, session.textToken, pointer);
         _free(pointer);
       });
 
@@ -194,15 +252,8 @@ EM_JS(bool, PrepareWebTextInput, (
         }
         session.textComposing = false;
         const value = event.data || "";
-        const caret = session.textCompositionStart + value.length;
         const pointer = Module.stringToNewUTF8(value);
-        Module._huxerui_web_text_composition_end(
-            web_session_id,
-            session.textToken,
-            pointer,
-            caret,
-            caret
-        );
+        Module._huxerui_web_text_composition_end(web_session_id, session.textToken, pointer);
         _free(pointer);
       });
 
@@ -240,6 +291,35 @@ EM_JS(bool, PrepareWebTextInput, (
     };
 
     if (!session.textInput) {
+      const multilineBreaks = new RegExp("\\r\\n?", "g");
+      const singlelineBreaks = new RegExp("[\\r\\n]", "g");
+      session.publishTextSnapshot = (element, textPointer, anchor, active) => {
+        const source = textPointer ? UTF8ToString(textPointer) : "";
+        const multiline = element === session.textArea;
+        const omittedOffsets = [];
+        // The DOM normalizes line breaks before exposing value and selection offsets.
+        const value = source.replace(multiline ? multilineBreaks : singlelineBreaks, (lineBreak, offset) => {
+          if (!multiline || lineBreak.length === 2) omittedOffsets.push(offset + lineBreak.length - 1);
+          return multiline ? "\n" : "";
+        });
+        const toDomOffset = (offset) => {
+          let omitted = 0;
+          while (omitted < omittedOffsets.length && omittedOffsets[omitted] < offset) ++omitted;
+          return offset - omitted;
+        };
+        session.textSynchronizing = true;
+        try {
+          session.textValue = value;
+          session.textOmittedOffsets = omittedOffsets;
+          element.readOnly = !textPointer;
+          if (element.value !== value) element.value = value;
+          const start = toDomOffset(Math.min(anchor, active));
+          const end = toDomOffset(Math.max(anchor, active));
+          element.setSelectionRange(start, end, anchor > active ? "backward" : "forward");
+        } finally {
+          session.textSynchronizing = false;
+        }
+      };
       const configureElement = (element) => {
         element.setAttribute("aria-hidden", "true");
         element.style.position = "fixed";
@@ -281,7 +361,6 @@ EM_JS(bool, PrepareWebTextInput, (
     session.textMultiline = multiline;
     session.textSecure = secure;
     session.textComposing = false;
-    session.textValue = UTF8ToString(text);
 
     element.style.display = "block";
     if (element === session.textInput) {
@@ -292,17 +371,12 @@ EM_JS(bool, PrepareWebTextInput, (
     element.enterKeyHint = ["enter", "done", "go", "next", "search", "send", "enter"][action] || "enter";
     element.autocomplete = secure ? "new-password" : autocorrect ? "on" : "off";
     element.spellcheck = autocorrect;
-    element.value = session.textValue;
 
     const rootBounds = session.root.getBoundingClientRect();
     element.style.left = String(rootBounds.left + caret_x) + "px";
     element.style.top = String(rootBounds.top + caret_y) + "px";
     element.style.height = String(Math.max(1, caret_height)) + "px";
-    const start = Math.min(anchor, active);
-    const end = Math.max(anchor, active);
-    session.textSynchronizing = true;
-    element.setSelectionRange(start, end, anchor > active ? "backward" : "forward");
-    session.textSynchronizing = false;
+    session.publishTextSnapshot(element, text, anchor, active);
     return true;
   } catch (error) {
     session.activeTextInput = null;
@@ -325,12 +399,13 @@ EM_JS(bool, PrepareWebTextInput, (
   }
 });
 
-EM_JS(void, SynchronizeWebTextInput, (
+EM_JS(int, SynchronizeWebTextInput, (
     std::uintptr_t web_session_id,
     std::uint32_t event_token,
     const char* text,
     std::int32_t anchor,
     std::int32_t active,
+    bool has_caret,
     float caret_x,
     float caret_y,
     float caret_height
@@ -338,26 +413,28 @@ EM_JS(void, SynchronizeWebTextInput, (
   const sessions = Module.huxerUIWebSessions;
   const session = sessions && sessions.get(web_session_id);
   if (!session || !session.activeTextInput || session.textToken !== event_token) {
-    return;
+    return 0;
   }
+  const element = session.activeTextInput;
   try {
-    const element = session.activeTextInput;
-    session.textValue = UTF8ToString(text);
-    session.textSynchronizing = true;
-    if (element.value !== session.textValue) {
-      element.value = session.textValue;
+    if (has_caret) {
+      const rootBounds = session.root.getBoundingClientRect();
+      element.style.left = String(rootBounds.left + caret_x) + "px";
+      element.style.top = String(rootBounds.top + caret_y) + "px";
+      element.style.height = String(Math.max(1, caret_height)) + "px";
     }
-    const start = Math.min(anchor, active);
-    const end = Math.max(anchor, active);
-    element.setSelectionRange(start, end, anchor > active ? "backward" : "forward");
-    const rootBounds = session.root.getBoundingClientRect();
-    element.style.left = String(rootBounds.left + caret_x) + "px";
-    element.style.top = String(rootBounds.top + caret_y) + "px";
-    element.style.height = String(Math.max(1, caret_height)) + "px";
+    // Replacing the DOM value during composition can cancel the browser's IME session.
+    if (session.textComposing) return 2;
+
+    session.publishTextSnapshot(element, text, anchor, active);
+    return 1;
   } catch (error) {
+    element.readOnly = true;
+    element.value = "";
+    session.textValue = "";
+    session.textOmittedOffsets = [];
     console.error("HuxerUI Web text input synchronization failed", error);
-  } finally {
-    session.textSynchronizing = false;
+    return 0;
   }
 });
 
@@ -430,6 +507,7 @@ void WebTextInput::Reset() noexcept {
   event_token_ = 0;
   configuration_ = {};
   state_ = {};
+  snapshot_range_.reset();
 }
 
 void WebTextInput::Start(
@@ -483,6 +561,7 @@ void WebTextInput::Stop(TextInputSessionId session_id) {
   event_token_ = 0;
   configuration_ = {};
   state_ = {};
+  snapshot_range_.reset();
 }
 
 void WebTextInput::RequestShowKeyboard(TextInputSessionId session_id) {
@@ -498,7 +577,7 @@ void WebTextInput::RequestHideKeyboard(TextInputSessionId session_id) {
 }
 
 bool WebTextInput::Accepts(std::uint32_t event_token) const noexcept {
-  return ui_window_ != nullptr && session_id_ != 0 && event_token != 0 && event_token == event_token_;
+  return ui_window_ != nullptr && snapshot_range_ && session_id_ != 0 && event_token != 0 && event_token == event_token_;
 }
 
 std::uint32_t WebTextInput::NextEventToken() noexcept {
@@ -510,14 +589,11 @@ std::uint32_t WebTextInput::NextEventToken() noexcept {
 }
 
 void WebTextInput::Prepare(const TextInputGeometry& geometry) {
-  if (ui_window_ == nullptr || geometry.result_code != TextInputResultCode::Ok) {
-    return;
-  }
-  const TextInputContext context = ui_window_->QueryTextInputContext(session_id_, 0, 0);
-  if (context.result_code != TextInputResultCode::Ok) {
-    return;
-  }
-  PrepareWebTextInput(
+  snapshot_range_.reset();
+  if (!ui_window_) return;
+  const auto snapshot = ReadWebTextSnapshot(*ui_window_, session_id_);
+  const Rect caret = geometry.result_code == TextInputResultCode::Ok ? geometry.caret : Rect{};
+  const bool prepared = PrepareWebTextInput(
       web_session_id_,
       event_token_,
       static_cast<int>(configuration_.type),
@@ -526,33 +602,35 @@ void WebTextInput::Prepare(const TextInputGeometry& geometry) {
       configuration_.multiline,
       configuration_.secure,
       configuration_.autocorrect,
-      context.text.c_str(),
-      WebOffset(context.selection.anchor),
-      WebOffset(context.selection.active),
-      geometry.caret.x,
-      geometry.caret.y,
-      geometry.caret.height
+      snapshot ? snapshot->text.c_str() : nullptr,
+      snapshot ? static_cast<std::int32_t>(snapshot->selection.anchor - snapshot->range.start) : 0,
+      snapshot ? static_cast<std::int32_t>(snapshot->selection.active - snapshot->range.start) : 0,
+      caret.x, caret.y, caret.height
   );
+  if (prepared && snapshot) snapshot_range_ = snapshot->range;
 }
 
 void WebTextInput::Synchronize(const TextInputGeometry& geometry) {
-  if (ui_window_ == nullptr || geometry.result_code != TextInputResultCode::Ok || event_token_ == 0) {
-    return;
-  }
-  const TextInputContext context = ui_window_->QueryTextInputContext(session_id_, 0, 0);
-  if (context.result_code != TextInputResultCode::Ok) {
-    return;
-  }
-  SynchronizeWebTextInput(
+  if (!ui_window_ || event_token_ == 0) return;
+  const auto snapshot = ReadWebTextSnapshot(*ui_window_, session_id_);
+  const bool has_caret = geometry.result_code == TextInputResultCode::Ok;
+  const Rect caret = has_caret ? geometry.caret : Rect{};
+  const auto result = static_cast<SnapshotSync>(SynchronizeWebTextInput(
       web_session_id_,
       event_token_,
-      context.text.c_str(),
-      WebOffset(context.selection.anchor),
-      WebOffset(context.selection.active),
-      geometry.caret.x,
-      geometry.caret.y,
-      geometry.caret.height
-  );
+      snapshot ? snapshot->text.c_str() : nullptr,
+      snapshot ? static_cast<std::int32_t>(snapshot->selection.anchor - snapshot->range.start) : 0,
+      snapshot ? static_cast<std::int32_t>(snapshot->selection.active - snapshot->range.start) : 0,
+      has_caret, caret.x, caret.y, caret.height));
+  if (result != SnapshotSync::Composing) {
+    snapshot_range_ = result == SnapshotSync::Published && snapshot ? std::optional(snapshot->range) : std::nullopt;
+  }
+}
+
+void WebTextInput::Resynchronize() {
+  if (ui_window_ && session_id_ != 0) {
+    Synchronize(ui_window_->QueryTextInputGeometry(session_id_, state_.selection.Range()));
+  }
 }
 
 void WebTextInput::Apply(std::vector<TextInputCommand> commands) {
@@ -563,67 +641,65 @@ void WebTextInput::Apply(std::vector<TextInputCommand> commands) {
   batch.session_id = session_id_;
   batch.commands = std::move(commands);
   const TextInputApplyResult result = ui_window_->HandleTextInputCommands(batch);
-  if (result.result_code != TextInputResultCode::Ok && session_id_ != 0) {
-    Synchronize(ui_window_->QueryTextInputGeometry(session_id_, state_.selection.Range()));
-  }
+  if (result.result_code != TextInputResultCode::Ok) Resynchronize();
 }
 
 void WebTextInput::CommitEdit(std::uint32_t event_token, TextRange target, std::string text, TextSelection selection) {
-  if (!Accepts(event_token)) {
+  if (!Accepts(event_token)) return;
+  const auto length = Utf16Length(text);
+  if (!length || !Contains({0, snapshot_range_->Length()}, target)) {
+    Resynchronize();
+    return;
+  }
+  const TextOffset unchanged_end = snapshot_range_->end - target.Length();
+  if (*length > std::numeric_limits<TextOffset>::max() - unchanged_end) {
+    Resynchronize();
+    return;
+  }
+  const auto selected = ToDocumentSelection(selection, {snapshot_range_->start, unchanged_end + *length});
+  if (!selected) {
+    Resynchronize();
     return;
   }
   TextInputCommand command;
   command.kind = TextInputCommandKind::CommitText;
-  command.target = target;
-  command.selection_after = selection;
+  command.target = TextRange{snapshot_range_->start + target.start, snapshot_range_->start + target.end};
+  command.selection_after = *selected;
   command.text = std::move(text);
   Apply({std::move(command)});
 }
 
 void WebTextInput::SetSelection(std::uint32_t event_token, TextSelection selection) {
-  if (!Accepts(event_token) || selection == state_.selection) {
-    return;
-  }
+  if (!Accepts(event_token)) return;
+  const auto selected = ToDocumentSelection(selection, *snapshot_range_);
+  if (!selected || *selected == state_.selection) return;
   TextInputCommand command;
   command.kind = TextInputCommandKind::SetSelection;
-  command.selection_after = selection;
+  command.selection_after = *selected;
   Apply({std::move(command)});
 }
 
 void WebTextInput::BeginComposition(std::uint32_t event_token, TextRange target) {
-  if (!Accepts(event_token)) {
+  if (!Accepts(event_token) || !Contains({0, snapshot_range_->Length()}, target)) {
     return;
   }
   TextInputCommand command;
   command.kind = TextInputCommandKind::BeginComposition;
-  command.target = target;
+  command.target = TextRange{snapshot_range_->start + target.start, snapshot_range_->start + target.end};
   Apply({std::move(command)});
 }
 
-void WebTextInput::UpdateComposition(std::uint32_t event_token, std::string text, TextSelection selection) {
-  if (!Accepts(event_token)) {
-    return;
-  }
-  TextInputCommand command;
-  command.kind = TextInputCommandKind::UpdateComposition;
-  command.selection_after = selection;
-  command.text = std::move(text);
-  Apply({std::move(command)});
-}
-
-void WebTextInput::EndComposition(std::uint32_t event_token, std::string text, TextSelection selection) {
-  if (!Accepts(event_token)) {
+void WebTextInput::ApplyCompositionText(std::uint32_t event_token, std::string text, bool finish) {
+  if (!Accepts(event_token)) return;
+  if (!state_.composition) {
+    if (finish) Resynchronize();
     return;
   }
   std::vector<TextInputCommand> commands;
-  TextInputCommand update;
+  auto& update = commands.emplace_back();
   update.kind = TextInputCommandKind::UpdateComposition;
-  update.selection_after = selection;
   update.text = std::move(text);
-  commands.push_back(std::move(update));
-  TextInputCommand finish;
-  finish.kind = TextInputCommandKind::FinishComposition;
-  commands.push_back(std::move(finish));
+  if (finish) commands.emplace_back().kind = TextInputCommandKind::FinishComposition;
   Apply(std::move(commands));
 }
 
@@ -668,19 +744,17 @@ EMSCRIPTEN_KEEPALIVE void huxerui_web_text_composition_start(
   });
 }
 
-EMSCRIPTEN_KEEPALIVE void huxerui_web_text_composition_update(
-    std::uintptr_t web_session_id, std::uint32_t event_token, const char* text, std::int32_t anchor, std::int32_t active
-) {
+EMSCRIPTEN_KEEPALIVE void
+huxerui_web_text_composition_update(std::uintptr_t web_session_id, std::uint32_t event_token, const char* text) {
   huxerui::detail::DispatchWebTextInput(web_session_id, "composition update", [&](auto& input) {
-    input.UpdateComposition(event_token, text == nullptr ? std::string{} : text, {anchor, active});
+    input.ApplyCompositionText(event_token, text == nullptr ? std::string{} : text, false);
   });
 }
 
-EMSCRIPTEN_KEEPALIVE void huxerui_web_text_composition_end(
-    std::uintptr_t web_session_id, std::uint32_t event_token, const char* text, std::int32_t anchor, std::int32_t active
-) {
+EMSCRIPTEN_KEEPALIVE void
+huxerui_web_text_composition_end(std::uintptr_t web_session_id, std::uint32_t event_token, const char* text) {
   huxerui::detail::DispatchWebTextInput(web_session_id, "composition end", [&](auto& input) {
-    input.EndComposition(event_token, text == nullptr ? std::string{} : text, {anchor, active});
+    input.ApplyCompositionText(event_token, text == nullptr ? std::string{} : text, true);
   });
 }
 

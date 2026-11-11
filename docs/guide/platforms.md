@@ -7,15 +7,16 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 
 | Platform | Rendering and text | HTTP and files | Accessibility | PlatformView | ExternalTexture | Permissions | Local notifications | System tray |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
-| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | AppCapability | Registered Win32 toast identity | Yes |
-| macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Camera and microphone | User Notifications | Yes |
+| Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | Camera, microphone, location, notifications | Registered Win32 toast identity | Yes |
+| macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Application permissions | User Notifications | Yes |
 | Linux | GSK, Cairo, and Pango | Yes | Not supported | No | Yes | Unavailable | Unavailable | StatusNotifierItem host |
-| Web | Canvas 2D and browser text metrics | Yes | Not supported | Yes | Yes | Query only | Unavailable | No |
-| Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | Camera and microphone | Configured NotificationManager | No |
-| iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Camera and microphone | User Notifications | No |
+| Web | Canvas 2D and browser text metrics | Yes | Not supported | Yes | Yes | Browser permissions, limited requests | Unavailable | No |
+| Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | Application permissions | Configured NotificationManager | No |
+| iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Application permissions | User Notifications | No |
 
 Capabilities not listed as implemented are not implied by the shared API.
 OHOS does not currently have a repository-owned backend.
+See [Application Permissions](../design/permissions.md#supported-capabilities) for supported queries, requests, and settings targets on each operating system.
 
 The shared local-notification API is available on every listed platform.
 Registered Windows applications, configured Android hosts, and the iOS and macOS adapters install native transports; Linux and Web currently report unavailable capabilities and operations.
@@ -87,9 +88,10 @@ PlatformView composition requires DirectComposition and is unavailable when that
 Windows 7 without Platform Update is unsupported.
 
 Custom chrome keeps Win32 window behavior while HuxerUI draws the title-bar content and caption controls.
+On Windows 11, custom chrome requests rounded corners for eligible windows through the system compositor.
 Windows 11 Snap Layout is available through the shared maximize-button geometry on the default backend.
 System tray presentation uses the Windows notification area and restores its item after Explorer restarts.
-Runtime camera and microphone permissions use AppCapability when present; package capability declarations remain application-owned.
+Application permissions use AppCapability when present, Windows location authorization, and the registered toast identity for notifications. The application package owns its capability declarations.
 Custom application URL schemes use `windows::RegisterUrlScheme()` and `UnregisterUrlScheme()` from `<huxerui/system.h>` for explicit current-user registration and cleanup, including in the Windows 7 compatibility backend. See [Windows URL scheme registration](packaging.md#windows-url-scheme-registration) for ownership, persistent registration, and default-app limitations.
 Local notifications use the Windows system toast service without MSIX or Windows App SDK dependencies. Before `RunApplication()`, pass an application-owned App ID, display name, and fixed CLSID to `windows::RegisterLocalNotifications()` from `<huxerui/system.h>`; no CMake notification metadata is required. See [Windows notification registration](packaging.md#windows-notification-registration) for registration and explicit cleanup. Default presentation, scheduling, cancellation, and data-bearing activation are supported. An optional `windows::LocalNotificationTemplateProvider` passed during registration enables application-owned ToastGeneric XML templates; custom actions and in-place progress updates are not supported. The Windows 7 compatibility backend remains unavailable. Notification clicks enter `OnActivation()` even when they launch the process.
 
@@ -120,7 +122,7 @@ Build with Xcode 26 or later and the macOS SDK; release CI uses Xcode 26.2. This
 Custom chrome extends application content into the title bar while preserving AppKit traffic lights and window behavior.
 External file references preserve security-scoped access when required.
 System tray presentation uses an AppKit status item and platform menu.
-Camera and microphone permissions use AVFoundation and require the corresponding bundle usage descriptions.
+Application permissions use the corresponding macOS frameworks and require the bundle usage descriptions where applicable.
 Local notifications use User Notifications for authorization, immediate presentation, durable one-shot scheduling, cancellation, and primary-action activation.
 Notification interactions enter `OnActivation()` even when they launched the process.
 macOS supports only `DefaultNotificationPresentation`; template requests return `Unavailable`.
@@ -218,7 +220,7 @@ The public `PlatformPayload.encode()` remains a capability-free byte API; the fr
 
 Typed routed navigation can bind the authoritative `NavigationPath` to browser URL and history state.
 Browser restrictions still govern clipboard, file pickers, autoplay, cross-origin requests, and storage persistence.
-Camera and microphone permission state is queried through the Permissions API when supported; requesting access remains coupled to browser media acquisition and is not emulated by the shared permission API.
+Camera, microphone, and location can be queried through the browser Permissions API. The browser prompts during media or location acquisition. Notification authorization can also be queried and can be requested while a browser user gesture is active.
 HuxerUI-rendered content does not have a semantic DOM accessibility bridge; DOM PlatformViews retain their browser-provided accessibility.
 
 ## Android
@@ -357,7 +359,7 @@ huxerui run ios --device <id>
 
 Physical-device builds use Xcode signing settings owned by the generated project and local developer configuration.
 External files preserve security-scoped access when required.
-Camera and microphone permissions use AVFoundation, require native usage descriptions, and can open the application settings page through UIKit.
+Application permissions use the corresponding iOS frameworks and require bundle usage descriptions where applicable. UIKit opens application permission settings and, when available, the app's notification settings page.
 Local notifications use User Notifications for authorization, immediate presentation, durable one-shot scheduling, cancellation, and primary-action activation.
 Notification interactions enter `OnActivation()` even when they launched the process.
 Embedded Notification Content Extensions declare stable `UNNotificationExtensionCategory` values; discovered categories enable template presentation and receive matching requests through `categoryIdentifier`.

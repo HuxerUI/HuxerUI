@@ -385,6 +385,15 @@ struct AppOptions {
   std::vector<ApplicationHook> application_hooks{};
   /// Window service/layer installers, called in declaration order before each window first composes.
   std::vector<WindowHook> window_hooks{};
+
+  /// Whether the built-in composition error page shows the failing operation and exception message.
+  /// Applies to windows presented by the HuxerUI platform hosts and is independent of the debug overlay.
+  /// Defaults to true in debug application builds and false when the application defines `NDEBUG`.
+#if defined(NDEBUG)
+  bool show_composition_error_details = false;
+#else
+  bool show_composition_error_details = true;
+#endif
 };
 
 /// Function pointer that creates the application root View.
@@ -479,7 +488,7 @@ public:
   virtual PlatformResources* Resources() noexcept {
     return nullptr;
   }
-  /// Borrows the native plain-text clipboard capability during application initialization.
+  /// Borrows the platform clipboard capability during application initialization.
   /// @return A capability kept alive until shared retirement, or null for an unsupported clipboard host.
   virtual PlatformClipboard* Clipboard() noexcept {
     return nullptr;
@@ -607,12 +616,12 @@ public:
   ///
   /// Reading the value during composition subscribes the current scope to later distinct state changes.
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
-  /// @brief Returns the shared plain-text clipboard for this application's Runtime.
-  /// @return The same non-null instance on every call, including on hosts without clipboard support. Query
-  /// Clipboard::IsAvailable() before presenting clipboard actions; individual reads and writes may still fail.
+  /// @brief Returns the shared system clipboard for this application's Runtime.
+  /// @return The same non-null instance on every call, including on hosts without clipboard support.
+  /// Clipboard::IsAvailable() reports synchronous plain-text support. Typed operations report their own results.
   ///
   /// This accessor does not require an active composition and may be called on a captured ApplicationHandle.
-  /// Clipboard operations run synchronously on the owning UI thread. After Runtime destruction, the returned
+  /// Clipboard operations start on the owning application thread. After Runtime destruction, the returned
   /// instance remains safe to retain and call but reports unavailable results.
   /// @code{.cpp}
   /// auto clipboard = UseApplication().Clipboard();
@@ -649,17 +658,19 @@ public:
   /// @return A handle whose Show/Schedule calls resolve text using the calling context's current resource
   /// configuration.
   [[nodiscard]] LocalNotificationHandle LocalNotifications() const;
-  /// Queries current platform authorization without presenting system UI.
-  /// @param permission Permission capability to query; validation occurs before returning the lazy Task.
-  /// @return A Task resolving to current authorization or Unavailable when unsupported/disconnected.
+  /// Queries the current permission without presenting UI.
+  /// @param permission Access to check.
+  /// @return A lazy Task resolving to the current status or Unavailable when unsupported or disconnected.
+  /// @throws std::invalid_argument If permission is invalid.
   /// Call and await on the original application's thread; no UiWindow is required.
   Task<PermissionStatus> CheckPermissionAsync(Permission permission) const;
-  /// Requests authorization using the native presentation endpoint captured when this method is called.
-  /// @param permission Permission capability to request.
-  /// @return A lazy Task resolving to the platform's authorization result, or Unavailable if the original endpoint
-  /// expires.
-  /// Requires the application thread. Without a UiWindow, a platform-provided native endpoint may present the request;
-  /// unsupported hosts return Unavailable. Queued requests never borrow a replacement window or permission launcher.
+  /// Requests authorization using the presentation endpoint captured when this method is called.
+  /// @param permission Access to request.
+  /// @return A lazy Task resolving to the current status after the request or Unavailable if the request cannot run.
+  /// @throws std::invalid_argument If permission is invalid.
+  /// If the operating system requires a settings change, this returns the current status without opening Settings.
+  /// Requires the application thread. A host may provide a presentation endpoint without a UiWindow.
+  /// Queued requests never borrow a replacement window or permission launcher.
   /// Launch from an ApplicationHook or an ordinary application-thread callback, outside composition:
   /// @code{.cpp}
   /// auto application = UseApplication();
@@ -670,11 +681,16 @@ public:
   /// });
   /// @endcode
   Task<PermissionStatus> RequestPermissionAsync(Permission permission) const;
-  /// Requests the native settings surface for a permission using the original presentation endpoint.
-  /// @param permission Permission whose settings should be opened.
-  /// @return A lazy Task resolving true if the platform accepted the opening request, not if permission was granted.
-  /// False represents unsupported or expired presentation. Shares RequestPermissionAsync's thread and endpoint rules.
-  Task<bool> OpenPermissionSettingsAsync(Permission permission) const;
+  /// Opens Settings for a permission using the original presentation endpoint.
+  /// @param permission Access the user wants to manage.
+  /// @param target Whether to open settings for this application or system-wide settings for the capability.
+  /// @return A lazy Task resolving true when the request to open Settings is accepted, or false if the page cannot
+  /// be opened.
+  /// @throws std::invalid_argument If permission or target is invalid.
+  /// Shares RequestPermissionAsync's thread and presentation rules. Recheck authorization when the application
+  /// becomes active.
+  Task<bool> OpenPermissionSettingsAsync(
+      Permission permission, PermissionSettingsTarget target = PermissionSettingsTarget::Application) const;
   /// Requests orderly whole-application termination through Runtime.
   void Quit() const;
 
@@ -828,7 +844,7 @@ public:
   /// Builds and commits pending composition, layout, semantics, animation, and rendering work.
   /// @return A reference owned by this UiWindow, valid until its next frame build or retirement.
   /// Call after successful shared initialization on the application thread, then consume the commit in the native
-  /// renderer.
+  /// renderer. Exceptions propagate to the caller.
   const FrameCommit& BuildFrame();
   /// Delivers normalized pointer input to the shared interaction tree.
   /// @param event Pointer identity, phase, and position in logical window-local coordinates.
@@ -936,7 +952,7 @@ protected:
   /// @throws std::invalid_argument If brightness is not a declared ThemeBrightness value.
   void UpdateSystemThemeBrightness(ThemeBrightness brightness);
   /// Tests whether this window completed shared initialization and has not begun retirement.
-  /// @return False during WindowHook installation, after initialization failure, or after retirement begins.
+  /// @return False during WindowHook installation, while failed content retires, or once window retirement begins.
   /// Native callbacks may enter shared UI operations only while this is true.
   bool IsInitialized() const noexcept;
   /// Installs this native attachment once after its derived facilities are ready.
@@ -950,6 +966,14 @@ protected:
   void InitializeWindow(Runtime& application, ViewFactory content, const WindowOptions& options,
                         std::optional<ResourceConfiguration> configuration = std::nullopt,
                         WindowLifecycleState initial_lifecycle = WindowLifecycleState::Background);
+  /// Builds the next frame, replacing the window's content with the built-in error page on composition failure.
+  /// @param report_error Optional synchronous diagnostic sink. The UTF-8 message is borrowed during the call.
+  /// Passing null uses standard error.
+  /// @return A window-owned commit, valid until the next build or retirement, including a replacement error frame
+  /// when the failed composition can be isolated.
+  /// Call on the application thread and defer drawing until the new commit has replaced all borrowed scene data.
+  /// Failures outside composition and failures in the error page propagate to the caller.
+  const FrameCommit& BuildFrameOrErrorPage(void (*report_error)(const char*) noexcept = nullptr);
   /// Commits an accepted close of a Runtime-owned top-level window, without consulting close handlers again.
   /// Immediately stops native callback admission; shared and native cleanup waits for active UI calls to return.
   /// External attachments remain host-owned and use Retire at their host's safe teardown boundary.
@@ -989,8 +1013,9 @@ private:
   void RefreshInteractionTree();
   /// Requests focus only for an eligible mounted target in this window's current modal scope.
   /// @param identity Mounted node to focus without retaining a pending request.
+  /// @param focus_visible Whether to show focus indication for the accepted target.
   /// @return Whether the target owns focus after notification and text-input synchronization.
-  bool RequestFocus(std::uint64_t identity);
+  bool RequestFocus(std::uint64_t identity, bool focus_visible);
   void RequestKeyboard(bool show);
   bool DispatchKeyEvent(const KeyEvent& event);
   bool DispatchKeyboardContextMenu();
@@ -1007,7 +1032,10 @@ private:
   );
   void BindExtensions(detail::MountedNode& node);
   void BuildSemantics();
+  const FrameCommit& BuildFrame(bool present_composition_errors);
   const FrameCommit& BuildFrame(FrameInfo frame);
+  void RetireContent() noexcept;
+  void ReconcileApplicationContent(View content);
   void InvalidateRoot();
   void InvalidateLayers();
   void DeactivateLayerInput(LayerId id);
@@ -1050,7 +1078,7 @@ private:
 
   friend class Runtime;
   friend class LayerController;
-  friend class FocusRequester;
+  friend class ViewHandle;
   friend class detail::ApplicationService;
   friend class detail::FileDropReceiver;
   friend class detail::PointerInteraction;

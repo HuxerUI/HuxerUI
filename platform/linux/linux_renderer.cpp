@@ -273,12 +273,13 @@ void ConfigureLayout(PangoLayout* layout, const AttributedText& text, const Text
     const TextLayoutOptions& options) {
   ConfigureLayout(layout, text.PlainText(), style, max_width, options);
   // Copy the paragraph attributes before adding resolved overrides; range indices below are UTF-8 byte offsets.
-  PangoAttrList* attributes = pango_attr_list_copy(pango_layout_get_attributes(layout));
+  const std::unique_ptr<PangoAttrList, decltype(&pango_attr_list_unref)> attributes(
+      pango_attr_list_copy(pango_layout_get_attributes(layout)), pango_attr_list_unref);
   for (const auto& run : ResolveTextRuns(text, style)) {
     const auto insert = [&](PangoAttribute* attribute) {
       attribute->start_index = static_cast<guint>(run.byte_start);
       attribute->end_index = static_cast<guint>(run.byte_end);
-      pango_attr_list_change(attributes, attribute);
+      pango_attr_list_change(attributes.get(), attribute);
     };
     PangoFontDescription* font = CreateFontDescription(run.style.font, pango_layout_get_context(layout));
     insert(pango_attr_font_desc_new(font));
@@ -297,9 +298,23 @@ void ConfigureLayout(PangoLayout* layout, const AttributedText& text, const Text
       insert(pango_attr_background_new(channel(background.red), channel(background.green), channel(background.blue)));
       insert(pango_attr_background_alpha_new(channel(background.alpha)));
     }
+    if (run.inline_object) {
+      const auto& object = *run.inline_object;
+      const double width = std::ceil(static_cast<double>(object.width) * PANGO_SCALE);
+      const double ascent = std::ceil(static_cast<double>(object.ascent) * PANGO_SCALE);
+      const double descent = std::ceil(static_cast<double>(object.descent) * PANGO_SCALE);
+      if (std::max(width, ascent + descent) > std::numeric_limits<int>::max()) {
+        throw std::invalid_argument("HuxerUI inline object exceeds the Pango coordinate range");
+      }
+      const PangoRectangle ink{};
+      const PangoRectangle logical{0, -static_cast<int>(ascent), static_cast<int>(width),
+                                   static_cast<int>(ascent + descent)};
+      // Keep the UTF-16 offset with the shape as Pango itemizes and visually reorders its byte ranges.
+      insert(pango_attr_shape_new_with_data(&ink, &logical, GINT_TO_POINTER(static_cast<int>(object.offset)),
+                                          nullptr, nullptr));
+    }
   }
-  pango_layout_set_attributes(layout, attributes);
-  pango_attr_list_unref(attributes);
+  pango_layout_set_attributes(layout, attributes.get());
 }
 
 std::optional<TextOffset> Utf8ByteToUtf16(std::string_view text, int byte_offset) noexcept {
@@ -372,7 +387,9 @@ public:
     PangoContext* layout_context = pango_font_map_create_context(font_map);
     pango_context_set_language(layout_context, pango_context_get_language(context));
     pango_cairo_context_set_resolution(layout_context, pango_cairo_context_get_resolution(context));
-    layout_ = pango_layout_new(layout_context);
+    std::unique_ptr<PangoLayout, decltype(&g_object_unref)> owned_layout{
+        pango_layout_new(layout_context), g_object_unref};
+    layout_ = owned_layout.get();
     g_object_unref(layout_context);
     ConfigureLayout(layout_, text, style, max_width, options);
     metrics_ = LayoutMetrics(layout_);
@@ -380,6 +397,7 @@ public:
       pango_layout_set_width(layout_, static_cast<int>(std::ceil(max_width * PANGO_SCALE)));
     }
     BuildCaretOffsets();
+    owned_layout.release();
   }
 
   ~PangoTextLayout() override {
@@ -555,6 +573,46 @@ public:
     } while (pango_layout_iter_next_line(iterator));
     pango_layout_iter_free(iterator);
     return result;
+  }
+
+  std::vector<InlineObjectPlacement> InlineObjectPlacements(
+      std::span<const TextInlineObject> objects, std::span<const TextLineMetrics>) const override {
+    std::vector<InlineObjectPlacement> placements(objects.size());
+    std::size_t placed = 0;
+    PangoLayoutIter* iterator = pango_layout_get_iter(layout_);
+    do {
+      const PangoLayoutRun* run = pango_layout_iter_get_run_readonly(iterator);
+      if (run == nullptr) {
+        continue;
+      }
+      for (const GSList* attribute = run->item->analysis.extra_attrs; attribute != nullptr;
+           attribute = attribute->next) {
+        const auto* base = static_cast<const PangoAttribute*>(attribute->data);
+        if (base->klass->type != PANGO_ATTR_SHAPE) {
+          continue;
+        }
+        const auto* shape = reinterpret_cast<const PangoAttrShape*>(base);
+        const TextOffset offset = GPOINTER_TO_INT(shape->data);
+        const auto object = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
+        if (object == objects.end() || object->offset != offset) {
+          continue;
+        }
+        PangoRectangle logical{};
+        pango_layout_iter_get_run_extents(iterator, nullptr, &logical);
+        const float left = PangoUnits(logical.x);
+        const float right = left + PangoUnits(logical.width);
+        const float baseline = PangoUnits(logical.y) - PangoUnits(shape->logical_rect.y);
+        const bool rtl = (run->item->analysis.level & 1) != 0;
+        placements[static_cast<std::size_t>(object - objects.begin())] = {
+            rtl ? right : left, rtl ? left : right, baseline};
+        ++placed;
+      }
+    } while (pango_layout_iter_next_run(iterator));
+    pango_layout_iter_free(iterator);
+    if (placed != objects.size()) {
+      return {};
+    }
+    return placements;
   }
 
   TextOffset PreviousCaretOffset(TextOffset offset) const override {
@@ -1022,12 +1080,14 @@ struct LinuxRenderer::Impl {
     PangoContext* layout_context = pango_font_map_create_context(font_map);
     pango_context_set_language(layout_context, pango_context_get_language(context));
     pango_cairo_context_set_resolution(layout_context, pango_cairo_context_get_resolution(context));
-    PangoLayout* layout = pango_layout_new(layout_context);
+    std::unique_ptr<PangoLayout, decltype(&g_object_unref)> owned_layout{
+        pango_layout_new(layout_context), g_object_unref};
+    PangoLayout* layout = owned_layout.get();
     g_object_unref(layout_context);
     ConfigureLayout(layout, text, style, max_width, options);
 
     // Cost accounting matches the Windows, UIKit, and AppKit paragraph caches:
-    // ParagraphCacheCost() conservatively charges the text, its style and link
+    // ParagraphCacheCost() conservatively charges the text, its attributes,
     // metadata, and the platform's shaped-glyph bookkeeping.
     TextLayoutCacheEntry entry;
     entry.key = {text, style, max_width, options};
@@ -1040,7 +1100,7 @@ struct LinuxRenderer::Impl {
     // layout outside the budget, and skip eviction so one oversized entry
     // cannot displace the entire reusable working set.
     if (entry.bytes > paragraph_cache_budget) {
-      return ScopedTextLayout::Owning(layout, entry.metrics);
+      return ScopedTextLayout::Owning(owned_layout.release(), entry.metrics);
     }
     while (!text_layouts.empty() &&
            (text_layout_bytes + entry.bytes > paragraph_cache_budget ||
@@ -1051,8 +1111,9 @@ struct LinuxRenderer::Impl {
       }
       text_layouts.erase(text_layouts.begin());
     }
-    text_layout_bytes += entry.bytes;
     text_layouts.push_back(std::move(entry));
+    text_layout_bytes += text_layouts.back().bytes;
+    owned_layout.release();
     return ScopedTextLayout::Cached(text_layouts.back());
   }
 
