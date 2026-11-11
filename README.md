@@ -170,6 +170,28 @@ Explore complete application demos in [HuxerUI-Demos](https://github.com/HuxerUI
 
 See [Platform Support](docs/guide/platforms.md) for host requirements and platform-specific capabilities.
 
+## Official Libraries
+
+| Library | Purpose |
+|---|---|
+| [Lib-WebView](https://github.com/HuxerUI/Lib-WebView) | Embeds web content with navigation, JavaScript evaluation, and messaging between pages and the app. |
+| [Lib-RichEditor](https://github.com/HuxerUI/Lib-RichEditor) | Edits structured rich-text documents with Markdown and JSON import and export. |
+| [Lib-CodeEditor](https://github.com/HuxerUI/Lib-CodeEditor) | Provides a code editor with syntax highlighting, completion, and search. |
+| [Lib-Media](https://github.com/HuxerUI/Lib-Media) | Plays audio and video and provides encoding, decoding, and container I/O. |
+| [Lib-SQLite](https://github.com/HuxerUI/Lib-SQLite) | Maps C++ records to SQLite with typed queries, transactions, and schema migrations. |
+| [Lib-Markdown](https://github.com/HuxerUI/Lib-Markdown) | Parses CommonMark with GFM extensions and renders themed Markdown views. |
+| [Lib-DataTable](https://github.com/HuxerUI/Lib-DataTable) | Displays virtualized tables with resizable columns and application-controlled sorting, selection, and editing. |
+| [Lib-Charts](https://github.com/HuxerUI/Lib-Charts) | Displays interactive charts with tooltips, selection, and animated data updates. |
+| [Lib-PDF](https://github.com/HuxerUI/Lib-PDF) | Displays PDF pages and supports asynchronous rendering, text extraction, and search. |
+| [Lib-Camera](https://github.com/HuxerUI/Lib-Camera) | Provides camera previews, photo capture, and silent video recording. |
+| [Lib-AudioCapture](https://github.com/HuxerUI/Lib-AudioCapture) | Captures timestamped microphone audio as PCM and exports recordings. |
+| [Lib-QRCode](https://github.com/HuxerUI/Lib-QRCode) | Generates and decodes QR codes and barcodes with declarative views and SVG export. |
+| [Lib-Lottie](https://github.com/HuxerUI/Lib-Lottie) | Plays Lottie animations with playback and seeking controls. |
+| [Lib-Map](https://github.com/HuxerUI/Lib-Map) | Embeds AMap and Baidu Map views on Android and iOS. |
+| [Lib-Live2D](https://github.com/HuxerUI/Lib-Live2D) | Displays interactive Live2D Cubism characters with motion and expression controls. |
+| [Lib-PluginKit](https://github.com/HuxerUI/Lib-PluginKit) | Design for a C++20 plugin toolkit with typed interfaces, package management, and isolated execution. |
+| [Lib-AVKit](https://github.com/HuxerUI/Lib-AVKit) | Planned toolkit for recording, real-time effects, timeline editing, and media export. |
+
 ## Documentation
 
 - [Documentation index](docs/README.md)
