@@ -303,9 +303,15 @@ const Application application{
 ```
 
 `InstallerHandle` starts install, repair, and uninstall operations, requests cooperative cancellation, and answers the current identified prompt.
+`InstallerStatus::product` distinguishes a fresh install (`Absent`), an older installed release (`Present`), this exact installed release (`SameVersion`), and a newer installed release (`NewerVersion`).
+Both installed states support repair and uninstall; a surviving bundle registration also remains removable when its MSI is absent.
 `InstallerInstallOptions` overrides the authored destination or desktop-shortcut choice for one install request; leaving either field unset preserves the matching Burn variable.
 `ChooseDestinationAsync()` opens the Windows folder picker from a Task launched by the component's `TaskScope` and returns no value when the user dismisses it.
 `InstallerStatus` is the single observable status value for phase, detected product state, expanded defaults, action, progress, current package, prompt, failure, and restart requirement.
+Runs whose engine display suppresses the interface — related-bundle runs embedded by a parent bundle (such as a previous version asked to uninstall itself during an upgrade), quiet or passive displays — execute the engine's action automatically after detection and exit when it completes; they never wait on a page, and engine questions carry the engine or parent resolution instead of a local prompt.
+An explicit action switch such as `/uninstall` or `/repair` with a full display keeps the normal interface, so the user still confirms removing an existing product.
+Embedded related-bundle and quiet runs create no visible installer interface. They keep a hidden native owner window and message loop alive through detection, planning, and apply because Burn requires a valid HWND even without local prompts. Passive runs may show the installer progress window, while full-display launches retain the normal interface.
+Interactive launches keep the full page flow, including the newer-version gate that blocks downgrade attempts.
 Do not use this API in the ordinary application executable or introduce another installer state store beside it.
 
 Signing, notarization, store submission, and platform-specific release credentials remain application and release-pipeline responsibilities.
