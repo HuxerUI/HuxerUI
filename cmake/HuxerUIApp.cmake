@@ -220,9 +220,7 @@ function(huxerui_add_app target_name)
     )
 
     target_compile_features(${target_name} PRIVATE cxx_std_20)
-    target_compile_options(${target_name} PRIVATE
-            "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"
-    )
+    target_compile_options(${target_name} PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>")
     _huxerui_configure_optimization(${target_name})
     target_link_libraries(${target_name} PRIVATE
             ${HUXERUI_APP_FRAMEWORK_TARGET}
