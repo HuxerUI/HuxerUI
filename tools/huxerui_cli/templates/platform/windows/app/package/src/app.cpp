@@ -103,7 +103,7 @@ View SecondaryAction(View action, const ThemeSpec& theme) {
       .padding = EdgeInsets::Symmetric(20.0F, 8.0F),
       .minimum_width = 72.0F,
       .minimum_height = 40.0F,
-      .corner_radius = theme.shapes.full,
+      .corner_radii = CornerRadii{theme.shapes.full},
       .indication = theme.interactions.indication,
   });
   return Theme {std::move(definition), std::move(action)};
@@ -196,7 +196,7 @@ View InstallerContent() {
     actions.push_back(
         Button(installer_strings::close).OnClick([window] { window.Close(); }).With(Frame{.min_width = 112.0F})
     );
-  } else if (status.phase == InstallerPhase::Ready && status.product == InstallerProductState::Present) {
+  } else if (status.phase == InstallerPhase::Ready && status.product == InstallerProductState::SameVersion) {
     eyebrow = installer_strings::maintenance;
     heading = installer_strings::manage_installation;
     details.push_back(
@@ -213,7 +213,8 @@ View InstallerContent() {
             .OnClick([installer] { installer.Repair(); })
             .With(Frame{.min_width = 112.0F})
     );
-  } else if (status.phase == InstallerPhase::Ready && status.product == InstallerProductState::Absent) {
+  } else if (status.phase == InstallerPhase::Ready &&
+             (status.product == InstallerProductState::Absent || status.product == InstallerProductState::Present)) {
     const TextEditingValue destination_value = destination.Get().value_or(
         TextEditingValue::FromText(InstallPathText(status.default_destination))
     );

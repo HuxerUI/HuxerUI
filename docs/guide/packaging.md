@@ -303,9 +303,15 @@ const Application application{
 ```
 
 `InstallerHandle` starts install, repair, and uninstall operations, requests cooperative cancellation, and answers the current identified prompt.
+`InstallerStatus::product` distinguishes a fresh install (`Absent`), an older installed release (`Present`), this exact installed release (`SameVersion`), and a newer installed release (`NewerVersion`). The generated installer uses the install page for a fresh install or upgrade and offers repair and uninstall for the same version. It shows the newer-version message even when only the newer bundle registration remains.
+Both installed states support repair and uninstall; a surviving bundle registration also remains removable when its MSI is absent.
 `InstallerInstallOptions` overrides the authored destination or desktop-shortcut choice for one install request; leaving either field unset preserves the matching Burn variable.
 `ChooseDestinationAsync()` opens the Windows folder picker from a Task launched by the component's `TaskScope` and returns no value when the user dismisses it.
 `InstallerStatus` is the single observable status value for phase, detected product state, expanded defaults, action, progress, current package, prompt, failure, and restart requirement.
+Full-display launches wait for confirmation, including launches with `/uninstall` or `/repair`.
+A `/quiet` or `/passive` launch performs the requested install, repair, or uninstall automatically and exits after completion. An older bundle called by a newer bundle during an upgrade also runs automatically, including when Burn restores it after a failed upgrade. An automatic launch with an unsupported action exits with an error. A successful install that still requires a system restart returns Windows exit code 3010. Use `/norestart` to leave restarting to the caller.
+Burn or the parent bundle answers engine questions during automatic runs. Quiet and embedded runs keep a hidden owner window for Burn, while passive runs can show progress.
+Interactive launches keep the full page flow, including the newer-version gate that blocks downgrade attempts.
 Do not use this API in the ordinary application executable or introduce another installer state store beside it.
 
 Signing, notarization, store submission, and platform-specific release credentials remain application and release-pipeline responsibilities.

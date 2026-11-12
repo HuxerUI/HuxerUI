@@ -458,6 +458,8 @@ Its coalesced status contains the current phase, detected product state, expande
 Commands choose an installation directory asynchronously through the window-owned system picker, start install with one optional override object, repair or uninstall, request cooperative cancellation, and answer the currently identified prompt.
 It does not expose WiX interfaces, HRESULT callbacks, a second event stream, duplicated `can_xxx` flags, or a generic cross-platform installer abstraction.
 Installing over an older product is the ordinary install action rather than a separate update command.
+Detection compares the related bundle version with `WixBundleVersion`: an older registration reports `Present`, the current release reports `SameVersion`, and a newer registration reports `NewerVersion` without allowing package absence to erase that downgrade blocker.
+Both `Present` and `SameVersion` pass the same repair eligibility check in interactive and commanded paths.
 
 Burn's `InstallFolder` and `CreateDesktopShortcut` variables are the only authored defaults and the only values passed into the matching MSI properties.
 The generated HuxerUI interface keeps only controlled local drafts, initializes them from the expanded Burn values, and submits one `InstallerInstallOptions` value when installation begins.
@@ -468,6 +470,7 @@ Its Task is launched from the interface's composition-owned `TaskScope`, whose q
 
 Burn callbacks publish immutable status changes through the Windows UI dispatcher before notifying composition dependencies.
 User commands enter Burn from the bootstrapper UI thread, while callback-driven continuation follows Burn's callback thread model.
+Embedded and quiet runs use a hidden top-level native owner HWND without initializing HuxerUI composition. Its owning thread pumps messages until a terminal result, destroys the window, and then calls Burn Quit; detection and apply always receive the live HWND. The thread retains the bootstrapper across synchronous shutdown callbacks, which must not wait for the thread already calling Quit.
 Synchronous engine questions expose one identified prompt at a time; answering a stale prompt has no effect.
 Closing during an active apply requests cancellation and allows Burn to finish rollback before the bootstrapper exits.
 The installer operation is root-owned and never belongs to a component `TaskScope`, because unmounting one component must not cancel a process-wide installation transaction.

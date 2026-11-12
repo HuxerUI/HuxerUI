@@ -6,6 +6,8 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <condition_variable>
 #include <exception>
 #include <functional>
@@ -14,6 +16,8 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 
 #include <dutil.h>
@@ -63,7 +67,13 @@ std::string ErrorMessage(HRESULT result) {
   return text;
 }
 
-DWORD InstallerExitCode(HRESULT result) {
+DWORD InstallerExitCode(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart = BOOTSTRAPPER_APPLY_RESTART_NONE) {
+  if (restart == BOOTSTRAPPER_APPLY_RESTART_INITIATED) {
+    return SUCCEEDED(result) ? ERROR_SUCCESS_REBOOT_INITIATED : ERROR_FAIL_REBOOT_INITIATED;
+  }
+  if (restart == BOOTSTRAPPER_APPLY_RESTART_REQUIRED) {
+    return SUCCEEDED(result) ? ERROR_SUCCESS_REBOOT_REQUIRED : ERROR_FAIL_REBOOT_REQUIRED;
+  }
   if (HRESULT_SEVERITY(result) == SEVERITY_ERROR && HRESULT_FACILITY(result) == FACILITY_WIN32) {
     return HRESULT_CODE(result);
   }
@@ -187,6 +197,132 @@ std::vector<windows::InstallerPromptChoice> PromptChoices(DWORD hint) {
   }
 }
 
+// Burn numeric versions may omit trailing zero fields. Invalid and overflowing fields must not
+// escape an engine callback as exceptions or be mistaken for an equal version.
+std::optional<int> InstallerCompareVersions(std::string_view candidate, std::string_view current) {
+  const auto parse = [](std::string_view text, std::array<unsigned long long, 4>& fields) {
+    for (std::size_t index = 0; index < fields.size(); ++index) {
+      const std::size_t end = text.find('.');
+      const std::string_view field = text.substr(0, end);
+      if (field.empty()) {
+        return false;
+      }
+      const auto result = std::from_chars(field.data(), field.data() + field.size(), fields[index]);
+      if (result.ec != std::errc{} || result.ptr != field.data() + field.size()) {
+        return false;
+      }
+      if (end == std::string_view::npos) {
+        return true;
+      }
+      text.remove_prefix(end + 1);
+    }
+    return false;
+  };
+  std::array<unsigned long long, 4> left{};
+  std::array<unsigned long long, 4> right{};
+  if (!parse(candidate, left) || !parse(current, right)) {
+    return std::nullopt;
+  }
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// Maps a detected package state to the observable product state. PRESENT means the detected
+// ProductCode belongs to this exact release build, so it reports SameVersion. A superseded package
+// during a commanded run still owns a live registration that must be removed — the related bundle
+// asked to uninstall itself detects its own MSI as superseded while the newer MSI is being
+// installed — so only interactive runs are gated behind NewerVersion.
+windows::InstallerProductState
+InstallerProductStateForPackage(BOOTSTRAPPER_PACKAGE_STATE package_state, bool preempts) {
+  switch (package_state) {
+  case BOOTSTRAPPER_PACKAGE_STATE_PRESENT:
+    return windows::InstallerProductState::SameVersion;
+  case BOOTSTRAPPER_PACKAGE_STATE_ABSENT:
+    return windows::InstallerProductState::Absent;
+  case BOOTSTRAPPER_PACKAGE_STATE_OBSOLETE:
+  case BOOTSTRAPPER_PACKAGE_STATE_SUPERSEDED:
+    return preempts ? windows::InstallerProductState::Present : windows::InstallerProductState::NewerVersion;
+  default:
+    return windows::InstallerProductState::Unknown;
+  }
+}
+
+// A commanded repair reinstalls the detected registration; it applies to this exact build
+// (SameVersion) and to a different, older registration (Present) alike.
+bool InstallerRepairIsMeaningful(windows::InstallerProductState product) {
+  return product == windows::InstallerProductState::Present ||
+         product == windows::InstallerProductState::SameVersion;
+}
+
+bool InstallerUninstallIsMeaningful(windows::InstallerProductState product, bool bundle_registered) {
+  // The bundle registration can survive removal of its MSI.
+  return InstallerRepairIsMeaningful(product) || bundle_registered;
+}
+
+std::optional<windows::InstallerAction> InstallerCommandedAction(BOOTSTRAPPER_ACTION action,
+                                                                 BOOTSTRAPPER_DISPLAY display,
+                                                                 BOOTSTRAPPER_RELATION_TYPE relation) {
+  const bool automatic_display = display == BOOTSTRAPPER_DISPLAY_NONE || display == BOOTSTRAPPER_DISPLAY_PASSIVE;
+  // Burn also calls the old bundle in embedded mode when restoring it after a failed upgrade.
+  const bool embedded_upgrade = display == BOOTSTRAPPER_DISPLAY_EMBEDDED && relation == BOOTSTRAPPER_RELATION_UPGRADE;
+  if (!automatic_display && !embedded_upgrade) {
+    return std::nullopt;
+  }
+
+  switch (action) {
+  case BOOTSTRAPPER_ACTION_INSTALL:
+    return windows::InstallerAction::Install;
+  case BOOTSTRAPPER_ACTION_UNINSTALL:
+  case BOOTSTRAPPER_ACTION_UNSAFE_UNINSTALL:
+    return windows::InstallerAction::Uninstall;
+  case BOOTSTRAPPER_ACTION_REPAIR:
+    return windows::InstallerAction::Repair;
+  default:
+    return std::nullopt;
+  }
+}
+
+// The hidden window gives Burn an owner during quiet and embedded runs.
+class InstallerNativeWindow {
+public:
+  InstallerNativeWindow()
+      : window_(CreateWindowExW(WS_EX_TOOLWINDOW, L"STATIC", L"HuxerUI installer", WS_POPUP,
+                                0, 0, 0, 0, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr)) {}
+
+  ~InstallerNativeWindow() {
+    if (window_ != nullptr) {
+      DestroyWindow(window_);
+    }
+  }
+
+  InstallerNativeWindow(const InstallerNativeWindow&) = delete;
+  InstallerNativeWindow& operator=(const InstallerNativeWindow&) = delete;
+
+  [[nodiscard]] HWND Handle() const { return window_; }
+
+  [[nodiscard]] DWORD Run() const {
+    MSG message{};
+    for (;;) {
+      const BOOL result = GetMessageW(&message, nullptr, 0, 0);
+      if (result == -1) {
+        return GetLastError();
+      }
+      if (result == 0 || (message.hwnd == window_ && message.message == exit_message)) {
+        return static_cast<DWORD>(message.wParam);
+      }
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+  }
+
+  [[nodiscard]] static bool RequestExit(HWND window, DWORD exit_code) {
+    return PostMessageW(window, exit_message, exit_code, 0) != FALSE;
+  }
+
+private:
+  static constexpr UINT exit_message = WM_APP + 1;
+  HWND window_ = nullptr;
+};
+
 class HuxerUIBootstrapperApplication;
 
 std::mutex& CurrentInstallerMutex() {
@@ -224,10 +360,32 @@ public:
     SchedulePublish();
   }
 
+  void BindHeadless(HuxerUIBootstrapperApplication& application, HWND window) {
+    std::lock_guard lock(mutex_);
+    application_ = &application;
+    window_ = window;
+  }
+
   void Install(windows::InstallerInstallOptions options);
   [[nodiscard]] std::optional<std::filesystem::path> ChooseDestination(const std::filesystem::path& initial) const;
   void Repair();
   void Uninstall();
+
+  // Captures the engine command once at application creation, before detection starts.
+  void SetCommand(const BOOTSTRAPPER_COMMAND& command) {
+    command_action_ = command.action;
+    command_display_ = command.display;
+    command_relation_ = command.relationType;
+  }
+
+  [[nodiscard]] bool CommandPreemptsInteraction() const {
+    return RunsHeadless() || command_display_ == BOOTSTRAPPER_DISPLAY_PASSIVE;
+  }
+
+  [[nodiscard]] bool RunsHeadless() const {
+    return command_display_ == BOOTSTRAPPER_DISPLAY_EMBEDDED || command_display_ == BOOTSTRAPPER_DISPLAY_NONE;
+  }
+
   void Cancel();
 
   void SetDefaults(std::filesystem::path destination, bool create_desktop_shortcut) {
@@ -248,7 +406,10 @@ public:
     prompt_condition_.notify_all();
   }
 
-  void Detecting() {
+  void Detecting(BOOTSTRAPPER_REGISTRATION_TYPE registration_type) {
+    // Written once before package detection starts and read-only afterwards.
+    bundle_registered_ = registration_type != BOOTSTRAPPER_REGISTRATION_TYPE_NONE;
+    related_version_comparison_.reset();
     Mutate([](windows::InstallerStatus& status) {
       status.phase = windows::InstallerPhase::Detecting;
       status.product = windows::InstallerProductState::Unknown;
@@ -261,18 +422,14 @@ public:
       Fail(result);
       return;
     }
-    Mutate([package_state](windows::InstallerStatus& status) {
+    const bool preempts = CommandPreemptsInteraction();
+    Mutate([package_state, preempts](windows::InstallerStatus& status) {
       if (status.product == windows::InstallerProductState::NewerVersion) {
         return;
       }
-      if (package_state == BOOTSTRAPPER_PACKAGE_STATE_PRESENT) {
-        status.product = windows::InstallerProductState::Present;
-      } else if (package_state == BOOTSTRAPPER_PACKAGE_STATE_ABSENT) {
-        status.product = windows::InstallerProductState::Absent;
-      } else if (
-          package_state == BOOTSTRAPPER_PACKAGE_STATE_OBSOLETE || package_state == BOOTSTRAPPER_PACKAGE_STATE_SUPERSEDED
-      ) {
-        status.product = windows::InstallerProductState::NewerVersion;
+      const windows::InstallerProductState detected = InstallerProductStateForPackage(package_state, preempts);
+      if (detected != windows::InstallerProductState::Unknown) {
+        status.product = detected;
       }
     });
   }
@@ -282,14 +439,40 @@ public:
       Fail(result);
       return;
     }
-    Mutate([](windows::InstallerStatus& status) {
+    Mutate([comparison = related_version_comparison_](windows::InstallerStatus& status) {
+      using windows::InstallerProductState;
+      if (comparison && status.product != InstallerProductState::NewerVersion) {
+        if (*comparison > 0) {
+          status.product = InstallerProductState::NewerVersion;
+        } else if (*comparison == 0) {
+          status.product = InstallerProductState::SameVersion;
+        } else if (status.product == InstallerProductState::Unknown || status.product == InstallerProductState::Absent) {
+          status.product = InstallerProductState::Present;
+        }
+      }
       status.phase = windows::InstallerPhase::Ready;
       status.progress = 0.0F;
     });
+    RunCommandedAction();
   }
 
-  void NewerVersionDetected() {
-    Mutate([](windows::InstallerStatus& status) { status.product = windows::InstallerProductState::NewerVersion; });
+  void RelatedBundleDetected(BOOTSTRAPPER_RELATION_TYPE relation, std::string_view version) {
+    if (relation != BOOTSTRAPPER_RELATION_UPGRADE) {
+      return;
+    }
+    const auto comparison = InstallerCompareVersions(version, bundle_version_);
+    // Automatic upgrade steps act on this bundle's own registration.
+    if (!comparison || (CommandPreemptsInteraction() && *comparison >= 0)) {
+      return;
+    }
+    if (!related_version_comparison_ || *comparison > *related_version_comparison_) {
+      related_version_comparison_ = comparison;
+    }
+  }
+
+  // Written once by OnCreate before the engine starts detecting; read on the engine thread only.
+  void SetBundleVersion(std::string version) {
+    bundle_version_ = std::move(version);
   }
 
   void ApplyStarted() {
@@ -311,13 +494,14 @@ public:
   }
 
   void ApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart) {
-    bool should_quit = false;
+    const DWORD exit_code = InstallerExitCode(result, restart);
     {
       std::lock_guard lock(mutex_);
       status_.prompt.reset();
       status_.current_package.clear();
       status_.restart = restart == BOOTSTRAPPER_APPLY_RESTART_NONE ? windows::InstallerRestart::None
                                                                    : windows::InstallerRestart::Required;
+      restart_exit_code_ = restart == BOOTSTRAPPER_APPLY_RESTART_NONE ? std::nullopt : std::optional{exit_code};
       if (result == HRESULT_FROM_WIN32(ERROR_INSTALL_USEREXIT)) {
         status_.phase = windows::InstallerPhase::Canceled;
         status_.failure.reset();
@@ -330,16 +514,12 @@ public:
       }
       prompt_response_ = windows::InstallerPromptChoice::Cancel;
       prompt_condition_.notify_all();
-      should_quit = ui_closed_;
     }
     SchedulePublish();
-    if (should_quit) {
-      Quit(InstallerExitCode(result));
-    }
+    FinishRun(exit_code);
   }
 
-  int Ask(windows::InstallerPromptKind kind, std::string message,
-          std::vector<windows::InstallerPromptChoice> choices,
+  int Ask(windows::InstallerPromptKind kind, std::string message, std::vector<windows::InstallerPromptChoice> choices,
           std::optional<windows::InstallerPromptChoice> recommended) {
     std::unique_lock lock(mutex_);
     const std::uint64_t id = next_prompt_id_++;
@@ -362,12 +542,15 @@ public:
     {
       std::lock_guard lock(mutex_);
       ui_closed_ = true;
+      window_ = nullptr;
       active = status_.phase == windows::InstallerPhase::Planning ||
                status_.phase == windows::InstallerPhase::Applying ||
                status_.phase == windows::InstallerPhase::Canceling;
       if (active) {
         cancel_requested_ = true;
         status_.phase = windows::InstallerPhase::Canceling;
+      } else if (restart_exit_code_) {
+        engine_exit_code = *restart_exit_code_;
       } else if (status_.phase == windows::InstallerPhase::Failed && status_.failure) {
         engine_exit_code = InstallerExitCode(static_cast<HRESULT>(status_.failure->code));
       } else if (status_.phase == windows::InstallerPhase::Canceled) {
@@ -383,25 +566,87 @@ public:
     }
   }
 
+  [[nodiscard]] bool UiLoopExited() const {
+    std::lock_guard lock(mutex_);
+    return ui_closed_;
+  }
+
   void Fail(HRESULT result, std::string message = {}) {
-    bool should_quit = false;
     {
       std::lock_guard lock(mutex_);
       if (message.empty()) {
         message = ErrorMessage(result);
       }
       SetFailureLocked(result, std::move(message));
-      should_quit = ui_closed_;
     }
     SchedulePublish();
-    if (should_quit) {
-      Quit(InstallerExitCode(result));
-    }
+    FinishRun(InstallerExitCode(result));
   }
 
 private:
   void Start(windows::InstallerAction action, windows::InstallerInstallOptions options);
   void Quit(DWORD exit_code);
+
+  void FinishRun(DWORD exit_code) {
+    if (RunsHeadless() || UiLoopExited()) {
+      Quit(exit_code);
+    } else if (CommandPreemptsInteraction()) {
+      CloseInstallerWindow();
+    }
+  }
+
+  // Close on the UI thread so UiExited can quit Burn after the window loop returns.
+  void CloseInstallerWindow() {
+    UiThreadDispatcher dispatcher;
+    HWND window = nullptr;
+    {
+      std::lock_guard lock(mutex_);
+      if (ui_closed_) {
+        // The UI thread already exited and UiExited performed the engine quit; the window handle
+        // must not be messaged anymore.
+        return;
+      }
+      dispatcher = dispatcher_;
+      window = window_;
+    }
+    if (dispatcher && window != nullptr) {
+      dispatcher([window] { SendMessageW(window, WM_CLOSE, 0, 0); });
+    }
+  }
+
+  // Starts the commanded action after detection when the engine command leaves no user to click.
+  // Repair of an absent product and uninstall of a product with no registration left have nothing
+  // to do, so the run ends quietly instead of parking an unreachable page.
+  void RunCommandedAction() {
+    if (!CommandPreemptsInteraction()) {
+      return;
+    }
+    const std::optional<windows::InstallerAction> action =
+        InstallerCommandedAction(command_action_, command_display_, command_relation_);
+    if (!action) {
+      Fail(E_NOTIMPL, "HuxerUI Windows installer does not support this automatic action");
+      return;
+    }
+    windows::InstallerProductState product = windows::InstallerProductState::Unknown;
+    {
+      std::lock_guard lock(mutex_);
+      product = status_.product;
+    }
+    if (*action == windows::InstallerAction::Repair && !InstallerRepairIsMeaningful(product)) {
+      FinishRun(0);
+      return;
+    }
+    if (*action == windows::InstallerAction::Uninstall &&
+        !InstallerUninstallIsMeaningful(product, bundle_registered_)) {
+      FinishRun(0);
+      return;
+    }
+    try {
+      Start(*action, {});
+    } catch (const std::logic_error& error) {
+      Fail(E_FAIL, error.what());
+    }
+  }
 
   template <class Function> void Mutate(Function&& mutation) {
     {
@@ -450,6 +695,18 @@ private:
   mutable std::mutex mutex_;
   std::condition_variable prompt_condition_;
   windows::InstallerStatus status_;
+  std::optional<DWORD> restart_exit_code_;
+  // Written once by SetCommand before the engine starts detecting and read-only afterwards, so
+  // the helpers above intentionally skip the mutex. bundle_registered_ is likewise written once
+  // by Detecting before package detection starts.
+  BOOTSTRAPPER_ACTION command_action_ = BOOTSTRAPPER_ACTION_UNKNOWN;
+  BOOTSTRAPPER_DISPLAY command_display_ = BOOTSTRAPPER_DISPLAY_UNKNOWN;
+  BOOTSTRAPPER_RELATION_TYPE command_relation_ = BOOTSTRAPPER_RELATION_NONE;
+  bool bundle_registered_ = false;
+  // Detection inputs written by engine-thread callbacks and read by DetectionComplete on the same
+  // thread, so they need no mutex under Burn's single detection thread.
+  std::string bundle_version_;
+  std::optional<int> related_version_comparison_;
   std::shared_ptr<StateCell<windows::InstallerStatus>> status_cell_;
   UiThreadDispatcher dispatcher_;
   HuxerUIBootstrapperApplication* application_ = nullptr;
@@ -459,6 +716,9 @@ private:
   bool publish_scheduled_ = false;
   bool cancel_requested_ = false;
   bool ui_closed_ = false;
+  // Set by the first delivered engine quit so terminal paths racing with the UI exit cannot
+  // request duplicate quits.
+  bool engine_quit_started_ = false;
 };
 
 namespace {
@@ -468,14 +728,37 @@ public:
   explicit HuxerUIBootstrapperApplication(std::shared_ptr<WindowsInstallerSession> session)
       : session_(std::move(session)) {}
 
+  STDMETHODIMP OnCreate(IBootstrapperEngine* pEngine, BOOTSTRAPPER_COMMAND* pCommand) override {
+    if (pCommand != nullptr) {
+      session_->SetCommand(*pCommand);
+    }
+    const HRESULT created = CBootstrapperApplicationBase::OnCreate(pEngine, pCommand);
+    if (SUCCEEDED(created)) {
+      session_->SetBundleVersion(EngineVariableString(L"WixBundleVersion"));
+    }
+    return created;
+  }
+
   STDMETHODIMP OnStartup() override {
-    ui_thread_ = CreateThread(nullptr, 0, RunUi, this, 0, nullptr);
-    return ui_thread_ == nullptr ? HRESULT_FROM_WIN32(GetLastError()) : S_OK;
+    AddRef();
+    ui_thread_ = CreateThread(nullptr, 0, session_->RunsHeadless() ? RunHeadless : RunUi, this, 0, nullptr);
+    if (ui_thread_ == nullptr) {
+      const HRESULT result = HRESULT_FROM_WIN32(GetLastError());
+      Release();
+      return result;
+    }
+    return S_OK;
   }
 
   STDMETHODIMP OnShutdown(BOOTSTRAPPER_SHUTDOWN_ACTION* action) override {
     if (ui_thread_ != nullptr) {
-      WaitForSingleObject(ui_thread_, INFINITE);
+      // UiExited calls Engine::Quit after the window loop returns. Burn can synchronously enter
+      // OnShutdown from that call, while the UI thread is still inside Quit. Waiting for the
+      // thread here then waits for the very call that cannot return until OnShutdown finishes.
+      // The UI loop is already gone in this case; RunUi keeps this BA alive across Quit.
+      if (!session_->UiLoopExited()) {
+        WaitForSingleObject(ui_thread_, INFINITE);
+      }
       CloseHandle(ui_thread_);
       ui_thread_ = nullptr;
     }
@@ -484,7 +767,7 @@ public:
 
   STDMETHODIMP OnDetectBegin(BOOL cached, BOOTSTRAPPER_REGISTRATION_TYPE registration_type, DWORD packages,
                              BOOL* cancel) override {
-    session_->Detecting();
+    session_->Detecting(registration_type);
     return CBootstrapperApplicationBase::OnDetectBegin(cached, registration_type, packages, cancel);
   }
 
@@ -494,17 +777,17 @@ public:
     return CBootstrapperApplicationBase::OnDetectPackageComplete(package, result, state, cached);
   }
 
+  STDMETHODIMP OnDetectRelatedBundle(const wchar_t* bundle, BOOTSTRAPPER_RELATION_TYPE relation,
+                                     const wchar_t* tag, BOOL per_machine, const wchar_t* version,
+                                     BOOL missing_from_cache, BOOL* cancel) override {
+    session_->RelatedBundleDetected(relation, WideToUtf8(version));
+    return CBootstrapperApplicationBase::OnDetectRelatedBundle(bundle, relation, tag, per_machine, version,
+                                                               missing_from_cache, cancel);
+  }
+
   STDMETHODIMP OnDetectComplete(HRESULT result, BOOL eligible_for_cleanup) override {
     session_->DetectionComplete(result);
     return CBootstrapperApplicationBase::OnDetectComplete(result, eligible_for_cleanup);
-  }
-
-  STDMETHODIMP OnDetectForwardCompatibleBundle(const wchar_t* bundle, BOOTSTRAPPER_RELATION_TYPE relation,
-                                                const wchar_t* tag, BOOL per_machine, const wchar_t* version,
-                                                BOOL missing_from_cache, BOOL* cancel) override {
-    session_->NewerVersionDetected();
-    return CBootstrapperApplicationBase::OnDetectForwardCompatibleBundle(
-        bundle, relation, tag, per_machine, version, missing_from_cache, cancel);
   }
 
   STDMETHODIMP OnPlanComplete(HRESULT result) override {
@@ -525,18 +808,25 @@ public:
   STDMETHODIMP OnExecutePackageBegin(const wchar_t* package, BOOL execute, BOOTSTRAPPER_ACTION_STATE action,
                                       INSTALLUILEVEL ui_level, BOOL disable_external_ui, BOOL* cancel) override {
     session_->PackageStarted(package);
-    return CBootstrapperApplicationBase::OnExecutePackageBegin(
-        package, execute, action, ui_level, disable_external_ui, cancel);
+    return CBootstrapperApplicationBase::OnExecutePackageBegin(package, execute, action, ui_level, disable_external_ui,
+                                                               cancel);
   }
 
-  STDMETHODIMP OnError(BOOTSTRAPPER_ERROR_TYPE type, const wchar_t* package, DWORD code,
-                       const wchar_t* message, DWORD ui_hint, DWORD data_count, const wchar_t** data,
-                       int recommendation, int* result) override {
+  STDMETHODIMP OnError(BOOTSTRAPPER_ERROR_TYPE type, const wchar_t* package, DWORD code, const wchar_t* message,
+                       DWORD ui_hint, DWORD data_count, const wchar_t** data, int recommendation,
+                       int* result) override {
     int engine_result = recommendation;
     const HRESULT engine_status = CBootstrapperApplicationBase::OnError(
         type, package, code, message, ui_hint, data_count, data, recommendation, &engine_result);
     if (FAILED(engine_status)) {
       return engine_status;
+    }
+    if (session_->CommandPreemptsInteraction()) {
+      // No local user can answer: the base implementation already resolved the response (embedded
+      // runs answer through the parent bundle via SendEmbeddedError), so return it deterministically
+      // instead of blocking on a prompt nobody can click.
+      *result = engine_result;
+      return S_OK;
     }
     const std::vector<windows::InstallerPromptChoice> choices = PromptChoices(ui_hint);
     std::optional<windows::InstallerPromptChoice> recommended = PromptChoice(recommendation);
@@ -547,13 +837,17 @@ public:
     return S_OK;
   }
 
-  STDMETHODIMP OnExecuteFilesInUse(const wchar_t* package, DWORD file_count, const wchar_t** files,
-                                   int recommendation, BOOTSTRAPPER_FILES_IN_USE_TYPE source,
-                                   int* result) override {
+  STDMETHODIMP OnExecuteFilesInUse(const wchar_t* package, DWORD file_count, const wchar_t** files, int recommendation,
+                                   BOOTSTRAPPER_FILES_IN_USE_TYPE source, int* result) override {
     const HRESULT engine_status =
         CBootstrapperApplicationBase::OnExecuteFilesInUse(package, file_count, files, recommendation, source, result);
     if (FAILED(engine_status)) {
       return engine_status;
+    }
+    if (session_->CommandPreemptsInteraction()) {
+      // Deterministic noninteractive policy: keep the engine/base resolution (the recommendation,
+      // or IDCANCEL once canceled) instead of blocking on a prompt nobody can click.
+      return S_OK;
     }
     const std::vector<windows::InstallerPromptChoice> choices{
         windows::InstallerPromptChoice::Retry,
@@ -571,8 +865,13 @@ public:
   STDMETHODIMP OnApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart,
                                BOOTSTRAPPER_APPLYCOMPLETE_ACTION recommendation,
                                BOOTSTRAPPER_APPLYCOMPLETE_ACTION* action) override {
+    const HRESULT status = CBootstrapperApplicationBase::OnApplyComplete(result, restart, recommendation, action);
+    // The WiX base can request a restart for a quiet run even with /norestart.
+    if (m_BalInfoCommand.restart == BAL_INFO_RESTART_NEVER) {
+      *action = BOOTSTRAPPER_APPLYCOMPLETE_ACTION_NONE;
+    }
     session_->ApplyComplete(result, restart);
-    return CBootstrapperApplicationBase::OnApplyComplete(result, restart, recommendation, action);
+    return status;
   }
 
   HRESULT Detect(HWND window) {
@@ -612,6 +911,26 @@ public:
     return value != 0;
   }
 
+  // Reads one engine string variable with the two-call size probe. A missing variable yields an
+  // empty string instead of an error: WixBundleVersion is absent in layout/design runs.
+  std::string EngineVariableString(const wchar_t* variable) {
+    SIZE_T length = 0;
+    const HRESULT probe = m_pEngine->GetVariableString(variable, nullptr, &length);
+    if ((FAILED(probe) && probe != E_MOREDATA) || length == 0) {
+      return {};
+    }
+    // Burn reports the character count without the terminating null.
+    ++length;
+    std::wstring value(length, L'\0');
+    if (FAILED(m_pEngine->GetVariableString(variable, value.data(), &length))) {
+      return {};
+    }
+    while (!value.empty() && value.back() == L'\0') {
+      value.pop_back();
+    }
+    return WideToUtf8(value.c_str());
+  }
+
   HRESULT SetInstallFolder(const std::filesystem::path& destination) {
     return m_pEngine->SetVariableString(L"InstallFolder", destination.c_str(), FALSE);
   }
@@ -625,10 +944,36 @@ public:
   }
 
   void Quit(DWORD exit_code) {
+    AddRef();
     m_pEngine->Quit(exit_code);
+    Release();
   }
 
 private:
+  static DWORD WINAPI RunHeadless(void* context) {
+    auto& application = *static_cast<HuxerUIBootstrapperApplication*>(context);
+    const std::shared_ptr<WindowsInstallerSession> session = application.session_;
+    DWORD exit_code = 0;
+    {
+      InstallerNativeWindow window;
+      const DWORD creation_error = window.Handle() == nullptr ? GetLastError() : ERROR_SUCCESS;
+      session->BindHeadless(application, window.Handle());
+      if (window.Handle() == nullptr) {
+        exit_code = creation_error == ERROR_SUCCESS ? ERROR_INVALID_WINDOW_HANDLE : creation_error;
+      } else {
+        const HRESULT result = application.Detect(window.Handle());
+        if (FAILED(result)) {
+          session->Fail(result);
+        }
+        exit_code = window.Run();
+      }
+    }
+    // Destroy the HWND on its owning thread before Quit can synchronously shut Burn down.
+    session->UiExited(exit_code);
+    application.Release();
+    return exit_code;
+  }
+
   /// Runs the installer application's native UI loop on its dedicated application thread.
   /// @param context Bootstrapper instance kept alive until the UI thread exits.
   /// @return Native UI exit code, also reported to the installer session for shutdown coordination.
@@ -652,7 +997,11 @@ private:
     } catch (...) {
       application.session_->Fail(E_FAIL, "HuxerUI Windows installer interface failed");
     }
-    application.session_->UiExited(exit_code);
+    // Quit may synchronously run OnShutdown and OnDestroy. Keep both objects alive until it
+    // returns; neither the UI thread nor the session may use a destroyed BA during that call.
+    const std::shared_ptr<WindowsInstallerSession> session = application.session_;
+    session->UiExited(exit_code);
+    application.Release();
     return exit_code;
   }
 
@@ -703,10 +1052,11 @@ void WindowsInstallerSession::Start(windows::InstallerAction action, windows::In
     if (status_.phase != windows::InstallerPhase::Ready) {
       throw std::logic_error("HuxerUI Windows installer action requires a ready session");
     }
-    if (action == windows::InstallerAction::Repair && status_.product != windows::InstallerProductState::Present) {
+    if (action == windows::InstallerAction::Repair && !InstallerRepairIsMeaningful(status_.product)) {
       throw std::logic_error("HuxerUI Windows installer cannot repair an absent product");
     }
-    if (action == windows::InstallerAction::Uninstall && status_.product != windows::InstallerProductState::Present) {
+    if (action == windows::InstallerAction::Uninstall &&
+        !InstallerUninstallIsMeaningful(status_.product, bundle_registered_)) {
       throw std::logic_error("HuxerUI Windows installer cannot uninstall an absent product");
     }
     application = application_;
@@ -752,22 +1102,18 @@ void WindowsInstallerSession::PlanComplete(HRESULT result) {
   HuxerUIBootstrapperApplication* application = nullptr;
   HWND window = nullptr;
   bool canceled = false;
-  bool ui_closed = false;
   {
     std::lock_guard lock(mutex_);
     application = application_;
     window = window_;
     canceled = result == HRESULT_FROM_WIN32(ERROR_INSTALL_USEREXIT) || (cancel_requested_ && SUCCEEDED(result));
-    ui_closed = ui_closed_;
     if (canceled) {
       status_.phase = windows::InstallerPhase::Canceled;
     }
   }
   if (canceled) {
     SchedulePublish();
-    if (ui_closed) {
-      Quit(ERROR_INSTALL_USEREXIT);
-    }
+    FinishRun(ERROR_INSTALL_USEREXIT);
     return;
   }
   if (FAILED(result)) {
@@ -808,11 +1154,22 @@ void WindowsInstallerSession::Quit(DWORD exit_code) {
   HuxerUIBootstrapperApplication* application = nullptr;
   {
     std::lock_guard lock(mutex_);
+    if (engine_quit_started_) {
+      return;
+    }
     application = application_;
+    if (application == nullptr) {
+      // The engine is not attached yet; RunUi always ends in UiExited, which retries the quit.
+      return;
+    }
+    if (RunsHeadless() && !ui_closed_ && window_ != nullptr) {
+      if (InstallerNativeWindow::RequestExit(window_, exit_code)) {
+        return;
+      }
+    }
+    engine_quit_started_ = true;
   }
-  if (application != nullptr) {
-    application->Quit(exit_code);
-  }
+  application->Quit(exit_code);
 }
 
 } // namespace huxerui::detail

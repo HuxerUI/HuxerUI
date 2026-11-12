@@ -31,10 +31,16 @@ enum class InstallerPhase {
 
 /// Describes the product state detected by the Windows installation engine.
 enum class InstallerProductState {
+  /// Detection produced no usable signal yet.
   Unknown,
+  /// No product registration was found; a fresh install can proceed.
   Absent,
+  /// A registered product with a different, older version was found; installing upgrades it.
   Present,
+  /// A registered product with a newer version was found; installing would downgrade.
   NewerVersion,
+  /// This exact release build is already registered on this computer.
+  SameVersion,
 };
 
 /// Identifies the operation currently planned or applied by the installation engine.
