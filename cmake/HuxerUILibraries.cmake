@@ -276,13 +276,9 @@ function(huxerui_use_library target_name)
             string(SUBSTRING "${HUXERUI_LIBRARY_SOURCE_HASH}" 0 16
                     HUXERUI_LIBRARY_SOURCE_HASH
             )
-            get_target_property(HUXERUI_LIBRARY_CONSUMER_BINARY_DIR
-                    ${target_name}
-                    BINARY_DIR
-            )
             add_subdirectory(
                     "${HUXERUI_LIBRARY_SOURCE_PATH}"
-                    "${HUXERUI_LIBRARY_CONSUMER_BINARY_DIR}/huxerui-libraries/sources/${HUXERUI_LIBRARY_SOURCE_HASH}"
+                    "${CMAKE_BINARY_DIR}/huxerui-libs/${HUXERUI_LIBRARY_SOURCE_HASH}"
             )
         endif ()
     elseif (HUXERUI_USE_LIBRARY_URL)

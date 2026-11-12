@@ -302,7 +302,7 @@ TEST_CASE("HuxerUICliRejectsIncompleteAndLegacyIosLibraryPackages") {
     std::ofstream(library / "platform/ios/Package.swift") << "// camera\n";
     REQUIRE_THROWS_WITH(
         ios->UpdateProjectIntegration(context),
-        Catch::Matchers::ContainsSubstring("Move the package to: " + (library / "platform/ios/CameraKit").string())
+        Catch::Matchers::ContainsSubstring("Move the package to: " + (library / "platform/ios/CameraKit").generic_string())
     );
   }
 }

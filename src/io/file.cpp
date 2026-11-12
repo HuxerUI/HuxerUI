@@ -1275,7 +1275,9 @@ void CheckReferenceStatus(NTSTATUS status) {
   static const auto status_to_error = reinterpret_cast<decltype(&RtlNtStatusToDosError)>(
       GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlNtStatusToDosError"));
   CheckReference(status_to_error != nullptr, IoErrorCode::Unsupported);
-  throw ReferenceFailure(IoErrorCategory(std::error_code(status_to_error(status), std::system_category())));
+  const auto error = status_to_error(status);
+  CheckReference(error != ERROR_DIRECTORY, IoErrorCode::NotDirectory);
+  throw ReferenceFailure(IoErrorCategory(std::error_code(error, std::system_category())));
 }
 
 class ReferenceHandle final {

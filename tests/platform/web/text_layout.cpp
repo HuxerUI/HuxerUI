@@ -123,6 +123,19 @@ TEST_CASE("WebParagraphMeasurementConstrainsWidthWithoutChangingNaturalGeometry"
   }
 }
 
+TEST_CASE("WebParagraphWrapSkipsAnOverwideBreakOpportunity") {
+  const auto canvas = TextTestCanvas();
+  detail::WebRenderer renderer(0, canvas);
+  const auto layout = renderer.CreatePlatformTextLayout(
+      AttributedText("ab cdef-gh"), {Font::Monospace(10.0F), Color::Black()}, 75.0F, {});
+  const auto lines = layout->LineMetrics();
+  REQUIRE(lines.size() == 2);
+  CHECK(lines[0].range == TextRange{0, 3});
+  CHECK(lines[0].bounds.width == 30.0F);
+  CHECK(lines[1].range == TextRange{3, 10});
+  CHECK(lines[1].bounds.width == 70.0F);
+}
+
 TEST_CASE("WebParagraphReusesWrapMeasurementsForCaretGeometry") {
   const auto canvas = TextTestCanvas();
   detail::WebRenderer renderer(0, canvas);

@@ -65,9 +65,11 @@ endif ()
                     -G "${HOST_GENERATOR}"
                     "-DCMAKE_PROJECT_INCLUDE=${TEST_ROOT}/check_deployment.cmake"
                     "-DEXPECTED_DEPLOYMENT_TARGET=${expected}" ${project_arguments} ${arguments})
-            file(STRINGS "${build}/CMakeCache.txt" deployment REGEX "^CMAKE_OSX_DEPLOYMENT_TARGET:STRING=")
-            if (NOT deployment STREQUAL "CMAKE_OSX_DEPLOYMENT_TARGET:STRING=${expected}")
-                message(FATAL_ERROR "${project} ${mode} deployment target: ${deployment}; expected ${expected}")
+            unset(cache_CMAKE_OSX_DEPLOYMENT_TARGET)
+            load_cache("${build}" READ_WITH_PREFIX cache_ CMAKE_OSX_DEPLOYMENT_TARGET)
+            if (NOT cache_CMAKE_OSX_DEPLOYMENT_TARGET STREQUAL expected)
+                message(FATAL_ERROR
+                        "${project} ${mode} deployment target: ${cache_CMAKE_OSX_DEPLOYMENT_TARGET}; expected ${expected}")
             endif ()
         endforeach ()
     endforeach ()

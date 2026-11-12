@@ -811,27 +811,26 @@ private:
         continue;
       }
       const bool is_object = object != objects.end() && object->offset == previous;
-      if (is_object && previous > line_start) {
-        last_break = previous;
-      } else if (cluster == " " || cluster == "\t" || cluster == "-") {
-        last_break = boundary;
-      }
       if (constrained && options_.wrap == TextWrap::Word && line_start < previous) {
         const float width = Width(context_, line_start, boundary);
         prefixes.push_back({boundary, width});
         if (width > max_width) {
-          TextOffset end = last_break > line_start ? last_break : previous;
-          if (end <= line_start) {
-            end = boundary;
-          }
+          const TextOffset end = !is_object && last_break > line_start ? last_break : previous;
           AddLine(line_start, end, prefixes, caret_geometry);
           prefixes.clear();
           line_start = end;
           last_break = -1;
+          // Reconsider the remaining clusters with advances and break opportunities relative to the new line.
+          const auto next = std::lower_bound(boundaries_.begin(), boundaries_.begin() + index, end);
+          index = static_cast<std::size_t>(next - boundaries_.begin());
+          previous = end;
+          continue;
         }
       }
-      if (is_object) {
+      if (is_object || cluster == " " || cluster == "\t" || cluster == "-") {
         last_break = boundary;
+      }
+      if (is_object) {
         ++object;
       }
       previous = boundary;

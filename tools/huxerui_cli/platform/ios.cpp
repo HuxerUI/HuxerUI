@@ -183,7 +183,7 @@ std::filesystem::path IosLibraryPackageDirectory(const std::filesystem::path& io
   const std::filesystem::path package = ios_root / product;
   if (std::filesystem::is_regular_file(ios_root / "Package.swift")) {
     throw std::runtime_error(
-        "HuxerUI iOS library uses the old Swift package layout. Move the package to: " + package.string());
+        "HuxerUI iOS library uses the old Swift package layout. Move the package to: " + package.generic_string());
   }
   return package;
 }

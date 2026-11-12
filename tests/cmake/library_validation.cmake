@@ -273,6 +273,13 @@ file(WRITE "${LIBRARY_GRAPH_PROJECT_ROOT}/CMakeLists.txt"
         "huxerui_use_library(library_app TARGET SecondLibrary::SecondLibrary PATH \"${LIBRARY_GRAPH_SECOND_ROOT}\")\n"
         "huxerui_use_library(library_app TARGET predeclared_library)\n"
         "huxerui_use_library(library_app TARGET first_library)\n"
+        "foreach (library IN ITEMS first_library second_library third_library)\n"
+        "    get_target_property(binary_dir \${library} BINARY_DIR)\n"
+        "    get_filename_component(parent_dir \"\${binary_dir}\" DIRECTORY)\n"
+        "    if (NOT parent_dir STREQUAL \"\${CMAKE_BINARY_DIR}/huxerui-libs\")\n"
+        "        message(FATAL_ERROR \"Unexpected library build directory: \${binary_dir}\")\n"
+        "    endif ()\n"
+        "endforeach ()\n"
 )
 execute_process(
         COMMAND "${CMAKE_COMMAND}"
