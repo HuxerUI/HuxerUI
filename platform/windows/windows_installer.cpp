@@ -67,7 +67,13 @@ std::string ErrorMessage(HRESULT result) {
   return text;
 }
 
-DWORD InstallerExitCode(HRESULT result) {
+DWORD InstallerExitCode(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart = BOOTSTRAPPER_APPLY_RESTART_NONE) {
+  if (restart == BOOTSTRAPPER_APPLY_RESTART_INITIATED) {
+    return SUCCEEDED(result) ? ERROR_SUCCESS_REBOOT_INITIATED : ERROR_FAIL_REBOOT_INITIATED;
+  }
+  if (restart == BOOTSTRAPPER_APPLY_RESTART_REQUIRED) {
+    return SUCCEEDED(result) ? ERROR_SUCCESS_REBOOT_REQUIRED : ERROR_FAIL_REBOOT_REQUIRED;
+  }
   if (HRESULT_SEVERITY(result) == SEVERITY_ERROR && HRESULT_FACILITY(result) == FACILITY_WIN32) {
     return HRESULT_CODE(result);
   }
@@ -488,12 +494,14 @@ public:
   }
 
   void ApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart) {
+    const DWORD exit_code = InstallerExitCode(result, restart);
     {
       std::lock_guard lock(mutex_);
       status_.prompt.reset();
       status_.current_package.clear();
       status_.restart = restart == BOOTSTRAPPER_APPLY_RESTART_NONE ? windows::InstallerRestart::None
                                                                    : windows::InstallerRestart::Required;
+      restart_exit_code_ = restart == BOOTSTRAPPER_APPLY_RESTART_NONE ? std::nullopt : std::optional{exit_code};
       if (result == HRESULT_FROM_WIN32(ERROR_INSTALL_USEREXIT)) {
         status_.phase = windows::InstallerPhase::Canceled;
         status_.failure.reset();
@@ -508,7 +516,7 @@ public:
       prompt_condition_.notify_all();
     }
     SchedulePublish();
-    FinishRun(InstallerExitCode(result));
+    FinishRun(exit_code);
   }
 
   int Ask(windows::InstallerPromptKind kind, std::string message, std::vector<windows::InstallerPromptChoice> choices,
@@ -541,6 +549,8 @@ public:
       if (active) {
         cancel_requested_ = true;
         status_.phase = windows::InstallerPhase::Canceling;
+      } else if (restart_exit_code_) {
+        engine_exit_code = *restart_exit_code_;
       } else if (status_.phase == windows::InstallerPhase::Failed && status_.failure) {
         engine_exit_code = InstallerExitCode(static_cast<HRESULT>(status_.failure->code));
       } else if (status_.phase == windows::InstallerPhase::Canceled) {
@@ -685,6 +695,7 @@ private:
   mutable std::mutex mutex_;
   std::condition_variable prompt_condition_;
   windows::InstallerStatus status_;
+  std::optional<DWORD> restart_exit_code_;
   // Written once by SetCommand before the engine starts detecting and read-only afterwards, so
   // the helpers above intentionally skip the mutex. bundle_registered_ is likewise written once
   // by Detecting before package detection starts.
@@ -854,8 +865,13 @@ public:
   STDMETHODIMP OnApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart,
                                BOOTSTRAPPER_APPLYCOMPLETE_ACTION recommendation,
                                BOOTSTRAPPER_APPLYCOMPLETE_ACTION* action) override {
+    const HRESULT status = CBootstrapperApplicationBase::OnApplyComplete(result, restart, recommendation, action);
+    // The WiX base can request a restart for a quiet run even with /norestart.
+    if (m_BalInfoCommand.restart == BAL_INFO_RESTART_NEVER) {
+      *action = BOOTSTRAPPER_APPLYCOMPLETE_ACTION_NONE;
+    }
     session_->ApplyComplete(result, restart);
-    return CBootstrapperApplicationBase::OnApplyComplete(result, restart, recommendation, action);
+    return status;
   }
 
   HRESULT Detect(HWND window) {
