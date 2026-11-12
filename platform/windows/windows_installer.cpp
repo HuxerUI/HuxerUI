@@ -403,6 +403,7 @@ public:
   void Detecting(BOOTSTRAPPER_REGISTRATION_TYPE registration_type) {
     // Written once before package detection starts and read-only afterwards.
     bundle_registered_ = registration_type != BOOTSTRAPPER_REGISTRATION_TYPE_NONE;
+    related_version_comparison_.reset();
     Mutate([](windows::InstallerStatus& status) {
       status.phase = windows::InstallerPhase::Detecting;
       status.product = windows::InstallerProductState::Unknown;
@@ -432,52 +433,35 @@ public:
       Fail(result);
       return;
     }
-    CoalesceDetectedProduct();
-    Mutate([](windows::InstallerStatus& status) {
+    Mutate([comparison = related_version_comparison_](windows::InstallerStatus& status) {
+      using windows::InstallerProductState;
+      if (comparison && status.product != InstallerProductState::NewerVersion) {
+        if (*comparison > 0) {
+          status.product = InstallerProductState::NewerVersion;
+        } else if (*comparison == 0) {
+          status.product = InstallerProductState::SameVersion;
+        } else if (status.product == InstallerProductState::Unknown || status.product == InstallerProductState::Absent) {
+          status.product = InstallerProductState::Present;
+        }
+      }
       status.phase = windows::InstallerPhase::Ready;
       status.progress = 0.0F;
     });
     RunCommandedAction();
   }
 
-  void NewerVersionDetected() {
-    Mutate([](windows::InstallerStatus& status) { status.product = windows::InstallerProductState::NewerVersion; });
-  }
-
-  // Called with the version of a forward-compatible related registration. Burn reports
-  // equal-version bundles through this callback too, so the comparison — not the callback —
-  // decides between NewerVersion (a real downgrade blocker) and SameVersion (this exact release
-  // already installed).
-  void ForwardCompatibleBundleDetected(std::string version) {
-    const auto comparison = InstallerCompareVersions(version, bundle_version_);
-    if (!comparison || *comparison > 0) {
-      // Incomparable version strings keep the conservative reading and treat the registration as
-      // newer, so an interactive run still lands on an explanatory page.
-      NewerVersionDetected();
-      return;
-    }
-    if (*comparison == 0) {
-      SameVersionDetected();
-    }
-  }
-
-  void SameVersionDetected() {
-    Mutate([](windows::InstallerStatus& status) {
-      if (status.product != windows::InstallerProductState::NewerVersion) {
-        status.product = windows::InstallerProductState::SameVersion;
-      }
-    });
-  }
-
-  // Records a registered related bundle with the same UpgradeCode. DetectionComplete promotes an
-  // older registration to Present so an interactive run offers an upgrade instead of a fresh
-  // install page.
-  void RelatedBundleDetected(BOOTSTRAPPER_RELATION_TYPE relation, std::string version) {
+  void RelatedBundleDetected(BOOTSTRAPPER_RELATION_TYPE relation, std::string_view version) {
     if (relation != BOOTSTRAPPER_RELATION_UPGRADE) {
       return;
     }
-    registered_version_ = std::move(version);
-    registered_version_seen_ = true;
+    const auto comparison = InstallerCompareVersions(version, bundle_version_);
+    // Automatic upgrade steps act on this bundle's own registration.
+    if (!comparison || (CommandPreemptsInteraction() && *comparison >= 0)) {
+      return;
+    }
+    if (!related_version_comparison_ || *comparison > *related_version_comparison_) {
+      related_version_comparison_ = comparison;
+    }
   }
 
   // Written once by OnCreate before the engine starts detecting; read on the engine thread only.
@@ -592,23 +576,6 @@ public:
 private:
   void Start(windows::InstallerAction action, windows::InstallerInstallOptions options);
   void Quit(DWORD exit_code);
-
-  // Related-bundle callbacks and package detection interleave; once the engine finishes detection
-  // this settles the remaining combination: an older registered product promotes Absent to
-  // Present (upgrade page). SameVersion comes from package detection of this exact build, and
-  // NewerVersion from the forward-compatible comparison, both of which land immediately.
-  void CoalesceDetectedProduct() {
-    const auto comparison = InstallerCompareVersions(registered_version_, bundle_version_);
-    if (!registered_version_seen_ || !comparison || *comparison >= 0) {
-      return;
-    }
-    Mutate([](windows::InstallerStatus& status) {
-      if (status.product == windows::InstallerProductState::Unknown ||
-          status.product == windows::InstallerProductState::Absent) {
-        status.product = windows::InstallerProductState::Present;
-      }
-    });
-  }
 
   void FinishRun(DWORD exit_code) {
     if (RunsHeadless() || UiLoopExited()) {
@@ -728,8 +695,7 @@ private:
   // Detection inputs written by engine-thread callbacks and read by DetectionComplete on the same
   // thread, so they need no mutex under Burn's single detection thread.
   std::string bundle_version_;
-  std::string registered_version_;
-  bool registered_version_seen_ = false;
+  std::optional<int> related_version_comparison_;
   std::shared_ptr<StateCell<windows::InstallerStatus>> status_cell_;
   UiThreadDispatcher dispatcher_;
   HuxerUIBootstrapperApplication* application_ = nullptr;
@@ -811,19 +777,6 @@ public:
   STDMETHODIMP OnDetectComplete(HRESULT result, BOOL eligible_for_cleanup) override {
     session_->DetectionComplete(result);
     return CBootstrapperApplicationBase::OnDetectComplete(result, eligible_for_cleanup);
-  }
-
-  STDMETHODIMP OnDetectForwardCompatibleBundle(const wchar_t* bundle, BOOTSTRAPPER_RELATION_TYPE relation,
-                                               const wchar_t* tag, BOOL per_machine, const wchar_t* version,
-                                               BOOL missing_from_cache, BOOL* cancel) override {
-    // Forward-compatible detection must not hijack a commanded run; the engine already chose
-    // its action. The callback also fires for equal-version related bundles, so the session
-    // compares versions: only a genuinely newer registration reports NewerVersion.
-    if (!session_->CommandPreemptsInteraction()) {
-      session_->ForwardCompatibleBundleDetected(WideToUtf8(version));
-    }
-    return CBootstrapperApplicationBase::OnDetectForwardCompatibleBundle(bundle, relation, tag, per_machine, version,
-                                                                         missing_from_cache, cancel);
   }
 
   STDMETHODIMP OnPlanComplete(HRESULT result) override {
