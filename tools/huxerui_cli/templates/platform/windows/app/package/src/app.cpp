@@ -134,10 +134,10 @@ std::vector<View> PromptActions(const InstallerHandle& installer, const Installe
       label = installer_strings::ignore;
       break;
     case InstallerPromptChoice::Yes:
-      label = installer_strings::yes;
+      label = prompt.kind == InstallerPromptKind::Restart ? installer_strings::restart_now : installer_strings::yes;
       break;
     case InstallerPromptChoice::No:
-      label = installer_strings::no;
+      label = prompt.kind == InstallerPromptKind::Restart ? installer_strings::restart_later : installer_strings::no;
       break;
     case InstallerPromptChoice::Continue:
       label = installer_strings::continue_action;
@@ -155,6 +155,22 @@ std::vector<View> PromptActions(const InstallerHandle& installer, const Installe
 }
 
 [[huxerui::composable]]
+View RestartDialog(const InstallerHandle& installer, const InstallerPrompt& prompt) {
+  const ThemeSpec& theme = UseTheme();
+  return Column {
+    Text(installer_strings::restart_title, TextRole::Title),
+    Text(installer_strings::restart_confirmation).With(Foreground(theme.colors.on_surface_variant)),
+    Row(PromptActions(installer, prompt, theme)).With(Spacing(10.0F), MainAlign(MainAxisAlignment::End)),
+  }.With(
+      Frame{.width = 420.0F},
+      Padding(24.0F),
+      Spacing(16.0F),
+      Background(theme.colors.surface_container_high),
+      CornerRadius(theme.shapes.large)
+  );
+}
+
+[[huxerui::composable]]
 View InstallerContent() {
   const InstallerHandle installer = UseInstaller();
   const WindowHandle window = UseWindow();
@@ -169,7 +185,8 @@ View InstallerContent() {
   std::vector<View> actions;
   MainAxisAlignment panel_alignment = MainAxisAlignment::Start;
 
-  if (status.prompt) {
+  const bool restart_prompt = status.prompt && status.prompt->kind == InstallerPromptKind::Restart;
+  if (status.prompt && !restart_prompt) {
     eyebrow = installer_strings::action_required;
     heading = installer_strings::setup_needs_attention;
     StringVariant prompt_message = status.prompt->message;
@@ -372,6 +389,16 @@ View InstallerContent() {
     ));
   }
 
+  Dialog restart_dialog;
+  if (restart_prompt) {
+    restart_dialog = Dialog{
+        .visible = true,
+        .content = [installer, prompt = *status.prompt] { return RestartDialog(installer, prompt); },
+        .dismiss_on_cancel = true,
+        .on_dismiss_request = [installer, id = status.prompt->id] { installer.Respond(id, InstallerPromptChoice::No); },
+    };
+  }
+
   return Row {
     BrandPanel(theme),
     Column(std::move(content)).With(
@@ -380,7 +407,7 @@ View InstallerContent() {
         CrossAlign(CrossAxisAlignment::Stretch),
         Grow()
     ),
-  }.With(CrossAlign(CrossAxisAlignment::Stretch), Background(theme.colors.surface), Grow());
+  }.With(CrossAlign(CrossAxisAlignment::Stretch), Background(theme.colors.surface), Grow(), std::move(restart_dialog));
 }
 
 View InstallerPage() {

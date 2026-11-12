@@ -56,10 +56,12 @@ enum class InstallerRestart {
   Required,
 };
 
-/// Identifies a question that must be answered before the installation engine can continue.
+/// Identifies a question presented by the installer.
 enum class InstallerPromptKind {
   Error,
   FilesInUse,
+  /// Asks whether to restart Windows after a completed operation.
+  Restart,
 };
 
 /// Identifies one answer accepted by an installer prompt.
@@ -93,7 +95,7 @@ struct InstallerPrompt {
   std::string message;
   /// Answers accepted by this prompt.
   std::vector<InstallerPromptChoice> choices;
-  /// Engine-recommended answer when it is represented by `choices`.
+  /// Recommended answer when it is represented by `choices`.
   std::optional<InstallerPromptChoice> recommended;
 };
 
@@ -187,7 +189,8 @@ public:
   void Uninstall() const;
   /// Requests cooperative cancellation and rollback of an active operation.
   void Cancel() const;
-  /// Answers the currently identified engine prompt; stale prompt identities are ignored.
+  /// Answers the currently identified prompt. Stale prompt identities are ignored.
+  /// For a restart prompt, Yes requests a restart and No defers it. Both choices close the installer.
   void Respond(std::uint64_t prompt_id, InstallerPromptChoice choice) const;
 
 private:

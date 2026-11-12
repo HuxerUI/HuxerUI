@@ -396,14 +396,23 @@ public:
   }
 
   void Respond(std::uint64_t prompt_id, windows::InstallerPromptChoice choice) {
-    std::lock_guard lock(mutex_);
-    if (!status_.prompt || status_.prompt->id != prompt_id ||
-        std::find(status_.prompt->choices.begin(), status_.prompt->choices.end(), choice) ==
-            status_.prompt->choices.end()) {
-      return;
+    {
+      std::lock_guard lock(mutex_);
+      if (ui_closed_ || !status_.prompt || status_.prompt->id != prompt_id ||
+          std::find(status_.prompt->choices.begin(), status_.prompt->choices.end(), choice) ==
+              status_.prompt->choices.end()) {
+        return;
+      }
+      if (status_.prompt->kind != windows::InstallerPromptKind::Restart) {
+        prompt_response_ = choice;
+        prompt_condition_.notify_all();
+        return;
+      }
+      restart_confirmed_ = choice == windows::InstallerPromptChoice::Yes;
+      status_.prompt.reset();
     }
-    prompt_response_ = choice;
-    prompt_condition_.notify_all();
+    SchedulePublish();
+    CloseInstallerWindow();
   }
 
   void Detecting(BOOTSTRAPPER_REGISTRATION_TYPE registration_type) {
@@ -493,7 +502,7 @@ public:
     Mutate([name = WideToUtf8(package)](windows::InstallerStatus& status) { status.current_package = name; });
   }
 
-  void ApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart) {
+  void ApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart, bool allow_restart_prompt) {
     const DWORD exit_code = InstallerExitCode(result, restart);
     {
       std::lock_guard lock(mutex_);
@@ -511,6 +520,17 @@ public:
         status_.phase = windows::InstallerPhase::Completed;
         status_.progress = 1.0F;
         status_.failure.reset();
+        if (restart == BOOTSTRAPPER_APPLY_RESTART_REQUIRED && allow_restart_prompt && !ui_closed_ &&
+            command_display_ == BOOTSTRAPPER_DISPLAY_FULL && command_relation_ == BOOTSTRAPPER_RELATION_NONE) {
+          using windows::InstallerPromptChoice;
+          status_.prompt = windows::InstallerPrompt{
+              next_prompt_id_++,
+              windows::InstallerPromptKind::Restart,
+              {},
+              {InstallerPromptChoice::No, InstallerPromptChoice::Yes},
+              InstallerPromptChoice::No,
+          };
+        }
       }
       prompt_response_ = windows::InstallerPromptChoice::Cancel;
       prompt_condition_.notify_all();
@@ -569,6 +589,11 @@ public:
   [[nodiscard]] bool UiLoopExited() const {
     std::lock_guard lock(mutex_);
     return ui_closed_;
+  }
+
+  bool RestartConfirmed() const {
+    std::lock_guard lock(mutex_);
+    return restart_confirmed_;
   }
 
   void Fail(HRESULT result, std::string message = {}) {
@@ -696,6 +721,7 @@ private:
   std::condition_variable prompt_condition_;
   windows::InstallerStatus status_;
   std::optional<DWORD> restart_exit_code_;
+  bool restart_confirmed_ = false;
   // Written once by SetCommand before the engine starts detecting and read-only afterwards, so
   // the helpers above intentionally skip the mutex. bundle_registered_ is likewise written once
   // by Detecting before package detection starts.
@@ -762,7 +788,8 @@ public:
       CloseHandle(ui_thread_);
       ui_thread_ = nullptr;
     }
-    return CBootstrapperApplicationBase::OnShutdown(action);
+    *action = session_->RestartConfirmed() ? BOOTSTRAPPER_SHUTDOWN_ACTION_RESTART : BOOTSTRAPPER_SHUTDOWN_ACTION_NONE;
+    return S_OK;
   }
 
   STDMETHODIMP OnDetectBegin(BOOL cached, BOOTSTRAPPER_REGISTRATION_TYPE registration_type, DWORD packages,
@@ -863,15 +890,12 @@ public:
   }
 
   STDMETHODIMP OnApplyComplete(HRESULT result, BOOTSTRAPPER_APPLY_RESTART restart,
-                               BOOTSTRAPPER_APPLYCOMPLETE_ACTION recommendation,
+                               BOOTSTRAPPER_APPLYCOMPLETE_ACTION,
                                BOOTSTRAPPER_APPLYCOMPLETE_ACTION* action) override {
-    const HRESULT status = CBootstrapperApplicationBase::OnApplyComplete(result, restart, recommendation, action);
-    // The WiX base can request a restart for a quiet run even with /norestart.
-    if (m_BalInfoCommand.restart == BAL_INFO_RESTART_NEVER) {
-      *action = BOOTSTRAPPER_APPLYCOMPLETE_ACTION_NONE;
-    }
-    session_->ApplyComplete(result, restart);
-    return status;
+    // The engine callback returns before the user decides whether to restart.
+    *action = BOOTSTRAPPER_APPLYCOMPLETE_ACTION_NONE;
+    session_->ApplyComplete(result, restart, m_BalInfoCommand.restart != BAL_INFO_RESTART_NEVER);
+    return S_OK;
   }
 
   HRESULT Detect(HWND window) {
