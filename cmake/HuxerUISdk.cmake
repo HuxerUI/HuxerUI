@@ -110,7 +110,6 @@ install(FILES
 if (WIN32)
     install(FILES
             "${HUXERUI_PROJECT_DIR}/platform/windows/win32_application_runner.h"
-            "${HUXERUI_PROJECT_DIR}/platform/windows/installer_command_policy.h"
             "${HUXERUI_PROJECT_DIR}/platform/windows/windows_installer.cpp"
             DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
     )
