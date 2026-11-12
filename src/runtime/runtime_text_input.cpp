@@ -263,7 +263,7 @@ void detail::TextInteraction::KeyboardDispatch::Finish() {
 
 void detail::TextInteraction::RequestKeyboardForNode(std::uint64_t node, bool show) {
   MountedNode* mounted = runtime_state_.mounted_root_ ? FindNode(*runtime_state_.mounted_root_, node) : nullptr;
-  if (!mounted || !mounted->focusable || !mounted->interaction.enabled) {
+  if (!mounted || !mounted->IsFocusable() || !mounted->interaction.enabled) {
     return;
   }
   const std::shared_ptr<TextInputClient> client = FindTextInputClient(*mounted);
@@ -305,7 +305,8 @@ void detail::TextInteraction::FlushKeyboardRequests() {
     return;
   }
   MountedNode* focused = FindNode(*runtime_state_.mounted_root_, active.node_identity);
-  if (!focused || !focused->focusable || !focused->interaction.enabled || FindTextInputClient(*focused) != active.client) {
+  if (!focused || !focused->IsFocusable() || !focused->interaction.enabled ||
+      FindTextInputClient(*focused) != active.client) {
     return;
   }
   const TextInputConfiguration configuration = active.client->Configuration();
@@ -489,7 +490,7 @@ void detail::TextInteraction::RefreshTextInputSession() {
   std::shared_ptr<TextInputClient> client;
   if (runtime_state_.mounted_root_ && runtime_state_.focused_node_identity_.has_value()) {
     focused = FindNode(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
-    if (focused && focused->interaction.enabled && focused->focusable) {
+    if (focused && focused->interaction.enabled && focused->IsFocusable()) {
       client = FindTextInputClient(*focused);
     }
   }

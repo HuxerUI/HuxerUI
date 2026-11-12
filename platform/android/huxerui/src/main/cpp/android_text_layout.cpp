@@ -133,6 +133,8 @@ public:
                : static_cast<TextOffset>(environment->CallLongMethod(layout_, next_, static_cast<jlong>(offset)));
   }
 
+  jobject Object() const noexcept { return layout_; }
+
 private:
   JNIEnv* Environment() const noexcept {
     if (virtual_machine_ == nullptr) {
@@ -176,6 +178,11 @@ private:
 std::unique_ptr<TextLayoutBackend> CreateAndroidTextLayout(
     JavaVM* virtual_machine, JNIEnv* environment, jobject layout) {
   return std::make_unique<AndroidTextLayout>(virtual_machine, environment, layout);
+}
+
+jobject AndroidTextLayoutObject(const TextLayoutBackend& layout) noexcept {
+  const auto* android_layout = dynamic_cast<const AndroidTextLayout*>(&layout);
+  return android_layout ? android_layout->Object() : nullptr;
 }
 
 } // namespace huxerui::detail

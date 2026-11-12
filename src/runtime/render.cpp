@@ -17,6 +17,7 @@
 #include "graphics/external_texture_internal.h"
 #include "graphics/paint_internal.h"
 #include "profiling_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
 
@@ -744,6 +745,9 @@ void RecordNodePaint(MountedNode& node) {
     if (node.kind == NodeKind::Text) {
       if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
         PaintLabelContent(node, content, text_style);
+      } else if (const auto& paragraph = node.cached_paragraph_layout; paragraph && paragraph->HasOverflowPolicy()) {
+        paragraph->Draw(*node.ui_window, content, node.ContentBounds(), node.text, text_style,
+                        node.properties.text_layout_options.vertical_align);
       } else {
         content.DrawText(node.ContentBounds(), node.text, text_style, node.properties.text_layout_options);
       }

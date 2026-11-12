@@ -20,6 +20,19 @@ return Text("مرحبا")
 Canvas `DrawText`, `DrawTextRun`, and `DrawTextRuns` calls inherit the Canvas node Locale only for entries whose shaping locale is empty.
 TextMeasurer has no implicit Environment lookup; pass a locale explicitly when custom composition measurement needs it.
 
+### Line limits and overflow
+
+Use `Text::LineLimit(maximum)` to cap the number of displayed lines. A limit of one disables automatic wrapping, and a larger limit caps the wrapped paragraph. The available content width comes from the parent layout or a width modifier. The visible lines determine the natural height.
+
+```cpp
+return Text(file_name)
+    .LineLimit(1)
+    .Overflow(TextOverflow::MiddleEllipsis)
+    .With(Frame{.width = 160.0F});
+```
+
+`TextOverflow::Clip` is the default. `TextOverflow::Ellipsis` marks omitted text at the end of the last visible line. `StartEllipsis` and `MiddleEllipsis` require `LineLimit(1)` and operate on the first source line. An ellipsis is drawn when it fits, and cuts occur at extended grapheme boundaries. Shaping and alignment retain the original paragraph direction. The accessible label uses the complete original text. Selection and visible links continue to address the original UTF-16 ranges. Tab traversal skips links that were fully omitted.
+
 ### Attributed paragraphs and links
 
 Use one `Text` for a paragraph with mixed character styles. `AttributedText` is an immutable shared value, not a tree of span Views:

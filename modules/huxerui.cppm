@@ -488,6 +488,7 @@ export namespace huxerui {
     using huxerui::TextLinkRange;
     using huxerui::TextMeasurer;
     using huxerui::TextOffset;
+    using huxerui::TextOverflow;
     using huxerui::TextPosition;
     using huxerui::TextRange;
     using huxerui::TextRole;

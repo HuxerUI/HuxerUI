@@ -52,7 +52,8 @@ private:
   [[nodiscard]] const AndroidBitmapFrame* BitmapFrameFor(const std::shared_ptr<ExternalTexture>& texture);
   [[nodiscard]] std::shared_ptr<const android::GlFrame> GpuFrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawRectCommand& command);
-  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command);
+  void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextCommand& command,
+                     const TextLayoutBackend* prepared);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawTextRunsCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command);
   void RenderCommand(JNIEnv* environment, jobject view, jobject canvas, const DrawExternalTextureCommand& command, const AndroidTextureLayerKey& key);
@@ -73,6 +74,7 @@ private:
 
   jmethodID draw_brush_rect_ = nullptr;
   jmethodID draw_text_ = nullptr;
+  jmethodID draw_prepared_text_ = nullptr;
   jmethodID draw_text_runs_ = nullptr;
   jmethodID draw_image_ = nullptr;
   jmethodID draw_external_texture_ = nullptr;

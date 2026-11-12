@@ -150,7 +150,7 @@ bool HasFocus(ViewNode& node) {
 }
 
 void CollectFocusOwners(const detail::MountedNode& node, std::uint64_t row, TreeSession& session) {
-  if (node.focusable) {
+  if (node.IsFocusable()) {
     session.focus_owners.emplace(node.identity, row);
   }
   for (const auto& child : node.children) {

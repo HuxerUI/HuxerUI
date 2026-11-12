@@ -412,6 +412,8 @@ public:
     return metrics_;
   }
 
+  PangoLayout* Layout() const noexcept { return layout_; }
+
   std::vector<TextLineMetrics> LineMetrics() const override {
     std::vector<TextLineMetrics> result;
     result.reserve(metrics_.line_count);
@@ -1167,6 +1169,10 @@ public:
     DrawCommand(command);
   }
 
+  void Draw(const DrawTextCommand& command, const TextLayoutBackend* prepared) {
+    DrawCommand(command, dynamic_cast<const PangoTextLayout*>(prepared));
+  }
+
 private:
   int MaskDimension(float length) const noexcept {
     const double pixels = std::ceil(static_cast<double>(length) * device_scale_);
@@ -1229,15 +1235,16 @@ private:
     cairo_fill(context_);
   }
 
-  void DrawCommand(const DrawTextCommand& command) {
+  void DrawCommand(const DrawTextCommand& command, const PangoTextLayout* prepared) {
     if (command.text.PlainText().empty() || command.rect.IsEmpty()) {
       return;
     }
-    auto shaped = impl_.TextLayoutFor(command.text, command.style, command.rect.width, command.options);
-    PangoLayout* layout = shaped.layout();
+    auto shaped = prepared ? LinuxRenderer::Impl::ScopedTextLayout{}
+                           : impl_.TextLayoutFor(command.text, command.style, command.rect.width, command.options);
+    PangoLayout* layout = prepared ? prepared->Layout() : shaped.layout();
     PangoRectangle logical{};
     pango_layout_get_extents(layout, nullptr, &logical);
-    if (command.options.wrap == TextWrap::NoWrap && PangoUnits(logical.width) < command.rect.width) {
+    if (!prepared && command.options.wrap == TextWrap::NoWrap && PangoUnits(logical.width) < command.rect.width) {
       pango_layout_set_width(layout, static_cast<int>(std::ceil(command.rect.width * PANGO_SCALE)));
     }
     const float remaining_height = std::max(0.0F, command.rect.height - PangoUnits(logical.height));
@@ -1816,6 +1823,7 @@ public:
 
 private:
   struct CairoBatch {
+    const PaintSequence& sequence;
     std::vector<const PaintCommand*> commands;
     Rect bounds;
   };
@@ -1856,7 +1864,7 @@ private:
   }
 
   void DrawSequence(const PaintSequence& sequence) {
-    CairoBatch batch;
+    CairoBatch batch{sequence, {}, {}};
     batch.commands.reserve(sequence.Commands().size());
     for (const PaintCommand& command : sequence.Commands()) {
       std::visit([this, &batch, &command](const auto& value) { DrawCommand(batch, command, value); }, command);
@@ -1961,9 +1969,12 @@ private:
     CairoCommandPainter painter(impl_, context);
     for (const PaintCommand* command : batch.commands) {
       std::visit(
-          [&painter](const auto& value) {
+          [&painter, &batch](const auto& value) {
             using Value = std::decay_t<decltype(value)>;
-            if constexpr (CairoPaintCommand<Value>) {
+            if constexpr (std::same_as<Value, DrawTextCommand>) {
+              const auto prepared = CachedParagraphLayout::ForPaint(batch.sequence, value);
+              painter.Draw(value, prepared.get());
+            } else if constexpr (CairoPaintCommand<Value>) {
               painter.Draw(value);
             } else {
               throw std::logic_error("HuxerUI GTK snapshot contains a non-Cairo command in a Cairo batch");

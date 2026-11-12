@@ -360,7 +360,7 @@ struct MountedNode final : public huxerui::ViewNode {
   CornerRadii resolved_corner_radii;
   // Re-resolved during geometry preparation from static indication geometry or a component's dynamic control bounds.
   std::optional<Rect> indication_bounds_override;
-  bool focusable = false;
+  bool declared_focusable = false;
   std::shared_ptr<ViewHandleBinding> view_handle;
   bool initial_focus_consumed = false;
   bool trap_focus = false;
@@ -431,6 +431,8 @@ struct MountedNode final : public huxerui::ViewNode {
   [[nodiscard]] bool IsEnabled() const noexcept override {
     return interaction.enabled;
   }
+
+  bool IsFocusable() const noexcept;
 
   [[nodiscard]] bool IsFocused() const noexcept override {
     return interaction.focused;

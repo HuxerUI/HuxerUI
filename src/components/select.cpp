@@ -71,7 +71,7 @@ bool HasIndependentSelectInteraction(const detail::MountedNode& node, bool is_ch
   const bool handles_pointer = static_cast<bool>(node.activation) ||
                                detail::HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
                                detail::HasEventBinding<ViewEvents::Pointer>(node.event_bindings);
-  if (handles_pointer || (!is_choice_root && node.focusable)) {
+  if (handles_pointer || (!is_choice_root && node.IsFocusable())) {
     return true;
   }
   return std::ranges::any_of(node.children, [](const std::unique_ptr<detail::MountedNode>& child) {

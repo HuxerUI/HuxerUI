@@ -514,6 +514,8 @@ public:
     return found == caret_offsets_.end() ? caret_offsets_.back() : *found;
   }
 
+  IDWriteTextLayout* Layout() const noexcept { return layout_.Get(); }
+
 private:
   std::wstring text_;
   FontRetentions fonts_;
@@ -835,18 +837,22 @@ struct Win32Renderer::Impl {
     }
     // Only drawing layouts retain device brushes; measurement and interaction layouts stay device-independent.
     if (drawing) {
-      for (const auto& item : text.StyleRanges()) {
-        // Inherited foreground is supplied by DrawTextLayout's brush; only explicit span colors become effects.
-        if (item.style.foreground) {
-          ComPtr<ID2D1SolidColorBrush> foreground;
-          ThrowIfFailed(device_context_->CreateSolidColorBrush(ToD2DColor(*item.style.foreground), &foreground),
-              "HuxerUI could not create paragraph foreground");
-          ThrowIfFailed(
-              layout.SetDrawingEffect(foreground.Get(),
-                  {static_cast<UINT32>(item.range.start), static_cast<UINT32>(item.range.Length())}),
-              "HuxerUI could not set paragraph foreground"
-          );
-        }
+      ApplyTextForeground(layout, text);
+    }
+  }
+
+  void ApplyTextForeground(IDWriteTextLayout& layout, const AttributedText& text) {
+    // Inherited foreground is supplied by DrawTextLayout's brush; only explicit span colors become effects.
+    for (const auto& item : text.StyleRanges()) {
+      if (item.style.foreground) {
+        ComPtr<ID2D1SolidColorBrush> foreground;
+        ThrowIfFailed(device_context_->CreateSolidColorBrush(ToD2DColor(*item.style.foreground), &foreground),
+            "HuxerUI could not create paragraph foreground");
+        ThrowIfFailed(
+            layout.SetDrawingEffect(foreground.Get(),
+                {static_cast<UINT32>(item.range.start), static_cast<UINT32>(item.range.Length())}),
+            "HuxerUI could not set paragraph foreground"
+        );
       }
     }
   }
@@ -1621,7 +1627,14 @@ struct Win32Renderer::Impl {
 
   void RenderSequence(const PaintSequence& sequence) {
     for (const PaintCommand& command : sequence.Commands()) {
-      std::visit([this](const auto& value) { RenderCommand(value); }, command);
+      std::visit([this, &sequence](const auto& value) {
+        if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, DrawTextCommand>) {
+          const auto prepared = CachedParagraphLayout::ForPaint(sequence, value);
+          RenderCommand(value, prepared.get());
+        } else {
+          RenderCommand(value);
+        }
+      }, command);
     }
   }
 
@@ -1699,12 +1712,30 @@ struct Win32Renderer::Impl {
     }
   }
 
-  void RenderCommand(const DrawTextCommand& command) {
+  void RenderCommand(const DrawTextCommand& command, const TextLayoutBackend* prepared) {
     if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
       return;
     }
-    auto paragraph = ParagraphFor(command);
-    const auto& layout = paragraph.layout;
+    const auto* resolved = dynamic_cast<const Win32TextLayout*>(prepared);
+    const auto paragraph = resolved ? CachedParagraph{} : ParagraphFor(command);
+    auto* layout = resolved ? resolved->Layout() : paragraph.layout.Get();
+    struct TemporaryForeground {
+      IDWriteTextLayout* layout;
+      UINT32 length;
+      ~TemporaryForeground() {
+        if (layout != nullptr) {
+          HUXERUI_DISCARD(layout->SetDrawingEffect(nullptr, {0, length}));
+        }
+      }
+    };
+    const bool has_foreground = resolved && std::ranges::any_of(command.text.StyleRanges(), [](const auto& item) {
+      return item.style.foreground.has_value();
+    });
+    // The retained layout must release device brushes before another frame or device can use it.
+    const TemporaryForeground foreground{has_foreground ? layout : nullptr, static_cast<UINT32>(command.text.Length())};
+    if (has_foreground) {
+      ApplyTextForeground(*layout, command.text);
+    }
     DWRITE_TEXT_METRICS metrics{};
     ThrowIfFailed(layout->GetMetrics(&metrics), "HuxerUI could not measure a DirectWrite text paragraph");
     const float remaining_height = std::max(0.0F, command.rect.height - metrics.height);
@@ -1745,7 +1776,7 @@ struct Win32Renderer::Impl {
             command.rect.x + command.paragraph_offset.x,
             command.rect.y + vertical_offset + command.paragraph_offset.y
         ),
-        layout.Get(),
+        layout,
         brush_.Get(),
         D2D1_DRAW_TEXT_OPTIONS_NONE
     );

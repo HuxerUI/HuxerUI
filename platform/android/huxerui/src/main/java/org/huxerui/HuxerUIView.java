@@ -1776,7 +1776,7 @@ public final class HuxerUIView extends ViewGroup {
             return new float[5];
         }
         HuxerUITextLayout layout = (HuxerUITextLayout) createTextLayout(utf8, fontSize, maxWidth, familyKind,
-                familyName, weight, slant, alignment, wrap, direction, utf8Locale, attributes);
+                familyName, weight, slant, 0, alignment, wrap, direction, utf8Locale, attributes);
         float[] metrics = layout.measure();
         if (Float.isFinite(maxWidth)) {
             metrics[0] = (float) Math.ceil(Math.min(metrics[0], maxWidth));
@@ -1825,8 +1825,9 @@ public final class HuxerUIView extends ViewGroup {
     }
 
     private Object createTextLayout(byte[] utf8, float fontSize, float maxWidth, int familyKind, byte[] familyName,
-            int weight, int slant, int alignment, int wrap, int direction, byte[] utf8Locale, byte[] attributes) {
-        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, 0, utf8Locale);
+            int weight, int slant, int decoration, int alignment, int wrap, int direction, byte[] utf8Locale,
+            byte[] attributes) {
+        prepareTextPaint(fontSize, 0xFF000000, familyKind, familyName, weight, slant, decoration, utf8Locale);
         // Geometry may contain secure editing text; keep it uncached and detach its Paint from the reusable host Paint.
         return new HuxerUITextLayout(attributedText(new String(utf8, StandardCharsets.UTF_8), attributes),
                 new TextPaint(textPaint), maxWidth, toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
@@ -1879,9 +1880,16 @@ public final class HuxerUIView extends ViewGroup {
         } else if (verticalAlignment == TEXT_VERTICAL_ALIGN_BOTTOM) {
             verticalOffset = remainingHeight;
         }
+        drawPreparedText(canvas, layout, x, y, width, height, paragraphOffsetX, verticalOffset + paragraphOffsetY,
+                color);
+    }
+
+    private void drawPreparedText(Canvas canvas, Object paragraph, float x, float y, float width, float height,
+            float paragraphOffsetX, float paragraphOffsetY, int color) {
+        HuxerUITextLayout layout = (HuxerUITextLayout) paragraph;
         int saveCount = canvas.save();
         canvas.clipRect(x, y, x + width, y + height);
-        canvas.translate(x + layout.horizontalOffset() + paragraphOffsetX, y + verticalOffset + paragraphOffsetY);
+        canvas.translate(x + layout.horizontalOffset() + paragraphOffsetX, y + paragraphOffsetY);
         layout.draw(canvas, color);
         canvas.restoreToCount(saveCount);
     }

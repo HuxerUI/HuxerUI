@@ -465,8 +465,66 @@ CFAttributedStringRef CreateAttributedString(const AttributedText& text, const T
   return static_cast<CFAttributedStringRef>(CFRetain(attributed));
 }
 
-// Use the shaped glyph runs for both passes: backgrounds precede CTFrameDraw, while strikethrough follows it.
+// Use the shaped glyph runs to paint backgrounds before the glyphs and strikethrough after them.
 // Logical ranges can cross bidi runs, so decoration widths come from visual glyph positions rather than text offsets.
+void DrawLineDecorations(CGContextRef context, CTLineRef line, CGPoint origin, Color foreground,
+                         bool backgrounds) {
+  CFArrayRef runs = CTLineGetGlyphRuns(line);
+  for (CFIndex run_index = 0; run_index < CFArrayGetCount(runs); ++run_index) {
+    CTRunRef run = static_cast<CTRunRef>(CFArrayGetValueAtIndex(runs, run_index));
+    CFDictionaryRef attributes = CTRunGetAttributes(run);
+    CGColorRef background = static_cast<CGColorRef>(
+        const_cast<void*>(CFDictionaryGetValue(attributes, CFSTR("HuxerUIBackgroundColor"))));
+    CFNumberRef strike = static_cast<CFNumberRef>(
+        CFDictionaryGetValue(attributes, (__bridge CFStringRef)NSStrikethroughStyleAttributeName));
+    int strike_style = 0;
+    if (strike != nullptr) {
+      CFNumberGetValue(strike, kCFNumberIntType, &strike_style);
+    }
+    if ((backgrounds && background == nullptr) || (!backgrounds && strike_style == 0)) {
+      continue;
+    }
+    const CFIndex glyph_count = CTRunGetGlyphCount(run);
+    if (glyph_count == 0) {
+      continue;
+    }
+    std::vector<CGPoint> positions(static_cast<std::size_t>(glyph_count));
+    std::vector<CGSize> advances(static_cast<std::size_t>(glyph_count));
+    CTRunGetPositions(run, CFRangeMake(0, 0), positions.data());
+    CTRunGetAdvances(run, CFRangeMake(0, 0), advances.data());
+    CGFloat left = CGFLOAT_MAX;
+    CGFloat right = -CGFLOAT_MAX;
+    for (CFIndex glyph = 0; glyph < glyph_count; ++glyph) {
+      const auto position = static_cast<std::size_t>(glyph);
+      left = std::min(left, positions[position].x);
+      right = std::max(right, positions[position].x + advances[position].width);
+    }
+    CTFontRef font = static_cast<CTFontRef>(CFDictionaryGetValue(attributes, kCTFontAttributeName));
+    CGContextSaveGState(context);
+    if (backgrounds) {
+      CGFloat ascent = 0.0;
+      CGFloat descent = 0.0;
+      CGFloat leading = 0.0;
+      CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
+      CGContextSetFillColorWithColor(context, background);
+      CGContextFillRect(context,
+          CGRectMake(origin.x + left, origin.y - descent, right - left, ascent + descent + leading));
+    } else {
+      CGColorRef color = static_cast<CGColorRef>(
+          const_cast<void*>(CFDictionaryGetValue(attributes, kCTForegroundColorAttributeName)));
+      if (color != nullptr) {
+        CGContextSetFillColorWithColor(context, color);
+      } else {
+        CGContextSetRGBFillColor(context, foreground.red, foreground.green, foreground.blue, foreground.alpha);
+      }
+      const CGFloat thickness = std::max<CGFloat>(1.0, CTFontGetUnderlineThickness(font));
+      CGContextFillRect(context,
+          CGRectMake(origin.x + left, origin.y + CTFontGetXHeight(font) * 0.5, right - left, thickness));
+    }
+    CGContextRestoreGState(context);
+  }
+}
+
 void DrawParagraphDecorations(CGContextRef context, CTFrameRef frame, Color foreground, bool backgrounds) {
   CFArrayRef lines = CTFrameGetLines(frame);
   const CFIndex count = CFArrayGetCount(lines);
@@ -474,61 +532,7 @@ void DrawParagraphDecorations(CGContextRef context, CTFrameRef frame, Color fore
   CTFrameGetLineOrigins(frame, CFRangeMake(0, count), origins.data());
   for (CFIndex index = 0; index < count; ++index) {
     CTLineRef line = static_cast<CTLineRef>(CFArrayGetValueAtIndex(lines, index));
-    CFArrayRef runs = CTLineGetGlyphRuns(line);
-    for (CFIndex run_index = 0; run_index < CFArrayGetCount(runs); ++run_index) {
-      CTRunRef run = static_cast<CTRunRef>(CFArrayGetValueAtIndex(runs, run_index));
-      CFDictionaryRef attributes = CTRunGetAttributes(run);
-      CGColorRef background = static_cast<CGColorRef>(
-          const_cast<void*>(CFDictionaryGetValue(attributes, CFSTR("HuxerUIBackgroundColor"))));
-      CFNumberRef strike = static_cast<CFNumberRef>(
-          CFDictionaryGetValue(attributes, (__bridge CFStringRef)NSStrikethroughStyleAttributeName));
-      int strike_style = 0;
-      if (strike != nullptr) {
-        CFNumberGetValue(strike, kCFNumberIntType, &strike_style);
-      }
-      if ((backgrounds && background == nullptr) || (!backgrounds && strike_style == 0)) {
-        continue;
-      }
-      const CFIndex glyph_count = CTRunGetGlyphCount(run);
-      if (glyph_count == 0) {
-        continue;
-      }
-      std::vector<CGPoint> positions(static_cast<std::size_t>(glyph_count));
-      std::vector<CGSize> advances(static_cast<std::size_t>(glyph_count));
-      CTRunGetPositions(run, CFRangeMake(0, 0), positions.data());
-      CTRunGetAdvances(run, CFRangeMake(0, 0), advances.data());
-      CGFloat left = CGFLOAT_MAX;
-      CGFloat right = -CGFLOAT_MAX;
-      for (CFIndex glyph = 0; glyph < glyph_count; ++glyph) {
-        const auto position = static_cast<std::size_t>(glyph);
-        left = std::min(left, positions[position].x);
-        right = std::max(right, positions[position].x + advances[position].width);
-      }
-      const CGPoint origin = origins[static_cast<std::size_t>(index)];
-      CTFontRef font = static_cast<CTFontRef>(CFDictionaryGetValue(attributes, kCTFontAttributeName));
-      CGContextSaveGState(context);
-      if (backgrounds) {
-        CGFloat ascent = 0.0;
-        CGFloat descent = 0.0;
-        CGFloat leading = 0.0;
-        CTLineGetTypographicBounds(line, &ascent, &descent, &leading);
-        CGContextSetFillColorWithColor(context, background);
-        CGContextFillRect(context,
-            CGRectMake(origin.x + left, origin.y - descent, right - left, ascent + descent + leading));
-      } else {
-        CGColorRef color = static_cast<CGColorRef>(
-            const_cast<void*>(CFDictionaryGetValue(attributes, kCTForegroundColorAttributeName)));
-        if (color != nullptr) {
-          CGContextSetFillColorWithColor(context, color);
-        } else {
-          CGContextSetRGBFillColor(context, foreground.red, foreground.green, foreground.blue, foreground.alpha);
-        }
-        const CGFloat thickness = std::max<CGFloat>(1.0, CTFontGetUnderlineThickness(font));
-        CGContextFillRect(context,
-            CGRectMake(origin.x + left, origin.y + CTFontGetXHeight(font) * 0.5, right - left, thickness));
-      }
-      CGContextRestoreGState(context);
-    }
+    DrawLineDecorations(context, line, origins[static_cast<std::size_t>(index)], foreground, backgrounds);
   }
 }
 
@@ -1262,6 +1266,10 @@ public:
     return result;
   }
 
+  CTFrameRef Frame() const noexcept { return frame_; }
+  CTLineRef Line() const noexcept { return line_; }
+  float HorizontalOffset() const noexcept { return horizontal_offset_; }
+
   const TextLayoutMetrics& MetricsValue() const noexcept {
     return metrics_;
   }
@@ -1563,7 +1571,14 @@ void AppKitRenderer::RenderSequence(const PaintSequence& sequence, CGContextRef 
     if (!selected) {
       continue;
     }
-    std::visit([this, context](const auto& value) { RenderCommand(context, value); }, command);
+    std::visit([this, context, &sequence](const auto& value) {
+      if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, DrawTextCommand>) {
+        const auto prepared = CachedParagraphLayout::ForPaint(sequence, value);
+        RenderCommand(context, value, prepared.get());
+      } else {
+        RenderCommand(context, value);
+      }
+    }, command);
   }
 }
 
@@ -1646,13 +1661,17 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawRectCommand& 
   );
 }
 
-void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& command) {
+void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& command,
+    const TextLayoutBackend* prepared) {
   if (command.rect.width <= 0.0F || command.rect.height <= 0.0F) {
     return;
   }
-  const auto retained = impl_->ParagraphFor(command);
-  const Impl::CachedParagraph& paragraph = *retained;
-  const float remaining_height = std::max(0.0F, command.rect.height - paragraph.content_height);
+  const auto* resolved = dynamic_cast<const MacTextLayout*>(prepared);
+  const auto paragraph = resolved ? nullptr : impl_->ParagraphFor(command);
+  const float content_height = resolved ? resolved->MetricsValue().size.height : paragraph->content_height;
+  const float frame_height = resolved ? content_height : paragraph->frame_height;
+  const float horizontal_offset = resolved ? resolved->HorizontalOffset() : 0.0F;
+  const float remaining_height = std::max(0.0F, command.rect.height - content_height);
   float vertical_offset = 0.0F;
   if (command.options.vertical_align == TextVerticalAlign::Center) {
     vertical_offset = remaining_height * 0.5F;
@@ -1664,14 +1683,22 @@ void AppKitRenderer::RenderCommand(CGContextRef context, const DrawTextCommand& 
   CGContextClipToRect(context, CGRectMake(command.rect.x, command.rect.y, command.rect.width, command.rect.height));
   CGContextTranslateCTM(
       context,
-      command.rect.x + command.paragraph_offset.x,
-      command.rect.y + paragraph.frame_height + vertical_offset + command.paragraph_offset.y
+      command.rect.x + command.paragraph_offset.x + horizontal_offset,
+      command.rect.y + frame_height + vertical_offset + command.paragraph_offset.y
   );
   CGContextScaleCTM(context, 1.0, -1.0);
   CGContextSetTextMatrix(context, CGAffineTransformIdentity);
-  DrawParagraphDecorations(context, paragraph.frame.Get(), command.style.foreground, true);
-  CTFrameDraw(paragraph.frame.Get(), context);
-  DrawParagraphDecorations(context, paragraph.frame.Get(), command.style.foreground, false);
+  if (const CTLineRef line = resolved ? resolved->Line() : nullptr) {
+    const CGPoint origin{0.0, frame_height - resolved->MetricsValue().first_baseline};
+    DrawLineDecorations(context, line, origin, command.style.foreground, true);
+    CGContextSetTextPosition(context, origin.x, origin.y);
+    CTLineDraw(line, context);
+    DrawLineDecorations(context, line, origin, command.style.foreground, false);
+  } else if (const CTFrameRef frame = resolved ? resolved->Frame() : paragraph->frame.Get()) {
+    DrawParagraphDecorations(context, frame, command.style.foreground, true);
+    CTFrameDraw(frame, context);
+    DrawParagraphDecorations(context, frame, command.style.foreground, false);
+  }
   CGContextRestoreGState(context);
 }
 

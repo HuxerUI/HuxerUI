@@ -64,11 +64,8 @@ public:
     changed = changed || layout_ != layout;
     layout_ = std::move(layout);
     text_ = node.text;
-    const float remaining = layout_ ? std::max(0.0F, content.height - layout_->Measure().height) : 0.0F;
     const TextVerticalAlign align = node.properties.text_layout_options.vertical_align;
-    const float vertical = align == TextVerticalAlign::Center ? remaining * 0.5F
-                           : align == TextVerticalAlign::Bottom ? remaining : 0.0F;
-    const Point origin{content.x, content.y + vertical};
+    const Point origin = layout_ ? layout_->Origin(content, align) : Point{content.x, content.y};
     changed = changed || content_ != content || origin_ != origin;
     content_ = content;
     origin_ = origin;
@@ -77,6 +74,9 @@ public:
       fragments_.clear();
       for (const auto& link : text_.LinkRanges()) {
         fragments_.push_back(Rects(link.range));
+      }
+      if (!IsLinkAvailable(focused_link_)) {
+        focused_link_ = FindAvailableLink(0, false).value_or(fragments_.size());
       }
       InvalidateSemantics();
     }
@@ -121,7 +121,8 @@ public:
 
   void OnFocusChanged(huxerui::ViewNode&, bool focused, bool reverse) override {
     // UiWindow traverses the Text node; this extension chooses the entry link within that composite focus target.
-    focused_link_ = focused && reverse && !text_.LinkRanges().empty() ? text_.LinkRanges().size() - 1 : 0;
+    const bool from_end = focused && reverse;
+    focused_link_ = FindAvailableLink(from_end ? fragments_.size() : 0, from_end).value_or(fragments_.size());
     if (!focused) {
       pressed_.reset();
     }
@@ -129,7 +130,7 @@ public:
   }
 
   bool OnKey(huxerui::ViewNode& node, const KeyEvent& event) override {
-    if (!node.IsEnabled() || event.type != KeyEventType::Down || text_.LinkRanges().empty()) {
+    if (!node.IsEnabled() || event.type != KeyEventType::Down || !IsLinkAvailable(focused_link_)) {
       return false;
     }
     if (event.key == Key::Enter) {
@@ -139,8 +140,9 @@ public:
       return true;
     }
     if (event.key == Key::Tab && !event.repeat) {
-      if (event.modifiers.shift ? focused_link_ > 0 : focused_link_ + 1 < text_.LinkRanges().size()) {
-        focused_link_ = event.modifiers.shift ? focused_link_ - 1 : focused_link_ + 1;
+      const bool reverse = event.modifiers.shift;
+      if (const auto next = FindAvailableLink(reverse ? focused_link_ : focused_link_ + 1, reverse)) {
+        focused_link_ = *next;
         InvalidatePaint();
         return true;
       }
@@ -161,18 +163,28 @@ public:
   }
 
   void BuildSemantics(SemanticBuilder& builder) const override {
-    // Children expose each logical segment once; retaining the owner label would duplicate the spoken paragraph.
-    builder.SetOwner(Semantics{.role = SemanticRole::Generic, .label = std::string{}});
+    const bool omitted = layout_ && layout_->elision;
+    // An elided paragraph exposes the original reading text even where a segment has no visible bounds.
+    builder.SetOwner(omitted ? Semantics{.role = SemanticRole::Text, .label = text_.PlainText()}
+                             : Semantics{.role = SemanticRole::Generic, .label = std::string{}});
     TextOffset previous = 0;
     std::uint64_t id = 1;
-    for (const auto& link : text_.LinkRanges()) {
+    const auto links = text_.LinkRanges();
+    for (std::size_t index = 0; index < links.size(); ++index) {
+      const auto& link = links[index];
       if (previous < link.range.start) {
-        AddSemanticText(builder, id++, {previous, link.range.start}, false);
+        if (!omitted) {
+          AddSemanticText(builder, id, {previous, link.range.start}, false);
+        }
+        ++id;
       }
-      AddSemanticText(builder, id++, link.range, true);
+      if (IsLinkAvailable(index)) {
+        AddSemanticText(builder, id, link.range, true);
+      }
+      ++id;
       previous = link.range.end;
     }
-    if (previous < text_.Length()) {
+    if (!omitted && previous < text_.Length()) {
       AddSemanticText(builder, id, {previous, text_.Length()}, false);
     }
   }
@@ -195,8 +207,23 @@ public:
   }
 
 private:
+  bool IsLinkAvailable(std::size_t index) const {
+    const auto links = text_.LinkRanges();
+    return index < links.size() && (!layout_ || layout_->RetainsSourceRange(links[index].range));
+  }
+
+  std::optional<std::size_t> FindAvailableLink(std::size_t boundary, bool reverse) const {
+    while (reverse ? boundary > 0 : boundary < fragments_.size()) {
+      const auto index = reverse ? --boundary : boundary++;
+      if (IsLinkAvailable(index)) {
+        return index;
+      }
+    }
+    return {};
+  }
+
   bool Activate(std::size_t index) {
-    if (!enabled_ || index >= text_.LinkRanges().size()) {
+    if (!enabled_ || !IsLinkAvailable(index)) {
       return false;
     }
     const auto link = text_.LinkRanges()[index];
@@ -253,7 +280,7 @@ private:
   }
 
   AttributedText text_;
-  std::shared_ptr<TextLayoutBackend> layout_;
+  std::shared_ptr<const CachedParagraphLayout> layout_;
   std::vector<std::vector<Rect>> fragments_;
   Rect content_;
   Point origin_;
@@ -319,7 +346,6 @@ void CompileTextLinks(ViewSpec& spec, const std::shared_ptr<const Environment>& 
     offset = end;
   }
   text = text.WithStyles(std::move(resolved));
-  spec.focusable = true;
   spec.modifiers.push_back(MakeModifierSpec(TextLinkModifier{spec.properties.focus_ring}));
   // The extension paints a ring around the focused link fragments instead of the entire paragraph node.
   spec.properties.focus_ring.width = 0.0F;
@@ -330,6 +356,11 @@ void CompileTextLinks(ViewSpec& spec, const std::shared_ptr<const Environment>& 
 namespace {
 
 void ApplyTextDefaults(detail::ViewSpec& spec, const std::shared_ptr<const Environment>& environment) {
+  const auto overflow = spec.properties.text_overflow;
+  if ((overflow == TextOverflow::StartEllipsis || overflow == TextOverflow::MiddleEllipsis) &&
+      spec.properties.text_line_limit != 1) {
+    throw std::invalid_argument("HuxerUI start and middle ellipsis require Text::LineLimit(1)");
+  }
   const ThemeSpec& theme = detail::ResolveThemeSpec(environment);
   spec.properties.text_style = detail::DefaultTextStyle(theme, spec.text_role);
   if (const std::any* value = detail::FindThemeStyleValue(environment, typeid(TextStyle))) {
@@ -375,6 +406,30 @@ Text Text::Align(TextAlign align) && {
 
 Text Text::VerticalAlign(TextVerticalAlign align) && {
   SetTextVerticalAlign(align);
+  return std::move(*this);
+}
+
+Text Text::LineLimit(std::size_t maximum) && {
+  if (maximum == 0) {
+    throw std::invalid_argument("HuxerUI Text line limit must be greater than zero");
+  }
+  EnsureUniqueSpec();
+  spec_->properties.text_line_limit = maximum;
+  return std::move(*this);
+}
+
+Text Text::Overflow(TextOverflow overflow) && {
+  switch (overflow) {
+  case TextOverflow::Clip:
+  case TextOverflow::Ellipsis:
+  case TextOverflow::StartEllipsis:
+  case TextOverflow::MiddleEllipsis:
+    break;
+  default:
+    throw std::invalid_argument("HuxerUI Text overflow must be a known value");
+  }
+  EnsureUniqueSpec();
+  spec_->properties.text_overflow = overflow;
   return std::move(*this);
 }
 

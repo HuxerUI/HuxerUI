@@ -147,6 +147,10 @@ When an unwrapped line is wider than the rectangle, Center and semantic trailing
 It does not affect paragraph measurement, alignment, cache identity, or clipping, and lets a scrolling editor keep retained text geometry and rendered text in the same coordinate system.
 This path serves Text, buttons, labels, validation text, and other ordinary UI paragraphs.
 
+Text with a line limit or an ellipsis policy retains the visible paragraph in its mounted layout cache. The final layout provides the measured height, baselines, selection and link geometry, and the drawable platform paragraph. When all the text fits, that layout is ready for replay. An overflowing paragraph fits the marker and retained text together using extended grapheme boundaries from [Unicode UAX #29](https://www.unicode.org/reports/tr29/). The original paragraph supplies the base direction for elided text when the retained characters would resolve a different direction under [Unicode UAX #9](https://www.unicode.org/reports/tr9/#P2).
+
+The portable draw command contains the visible text and resolved bounds. Its paint sequence may borrow the mounted layout through a private weak reference for immediate replay. Captured scenes can replay the command after the layout expires. The original attributed text supplies semantic labels and selection offsets, while the retained layout maps the visible ranges to those original offsets. A link contributes to keyboard focus only when its range intersects the retained text.
+
 `DrawText(origin, layout)` records the same command with the layout's text, width, style, and shaping inputs, including its locale. The supplied origin places the top of the paragraph. The draw command clips to the width and measured height. Interaction geometry remains paragraph-local and unclipped.
 
 `DrawTextRun()` is the exact baseline-positioned operation:

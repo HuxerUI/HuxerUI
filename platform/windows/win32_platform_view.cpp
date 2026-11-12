@@ -421,7 +421,7 @@ struct Win32PlatformViews::Impl {
     const bool may_hit = input_enabled &&
                          (node.activation || HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
                           HasEventBinding<ViewEvents::Pointer>(node.event_bindings) || !node.extensions.empty() ||
-                          IsScrollContainer(node) || node.focusable ||
+                          IsScrollContainer(node) || node.IsFocusable() ||
                           (include_drag_regions && node.properties.window_drag_region));
     if (node.kind == NodeKind::PlatformView || may_hit) {
       const auto bounds = input_enabled ? std::optional{clip.Intersection(node.PresentationBounds())} : std::nullopt;
@@ -485,7 +485,7 @@ struct Win32PlatformViews::Impl {
         ++next;
         const Rect opening = candidate.bounds && candidate.rectangular ? candidate.bounds->Intersection(visible_bounds)
                                                                       : Rect{};
-        if (!opening.IsEmpty() && (!custom_input_bounds || candidate.node->focusable)) {
+        if (!opening.IsEmpty() && (!custom_input_bounds || candidate.node->IsFocusable())) {
           const RECT pixels = OpeningPixelBounds(opening, dpi_scale);
           RECT clipped{};
           if (IntersectRect(&clipped, &input_bounds, &pixels)) {

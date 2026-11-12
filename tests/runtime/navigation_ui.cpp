@@ -221,7 +221,7 @@ const SemanticNode* FindSemanticNode(const SemanticFrame& frame, std::string_vie
 }
 
 const detail::MountedNode* FindFocusableContaining(const detail::MountedNode& node, std::string_view text) {
-  if (node.focusable && ContainsMountedText(node, text)) {
+  if (node.IsFocusable() && ContainsMountedText(node, text)) {
     return &node;
   }
   for (const auto& child : node.children) {

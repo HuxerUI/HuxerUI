@@ -22,6 +22,10 @@
 -keepclassmembers class org.huxerui.HuxerUIView {
     org.huxerui.HuxerUIFilePicker filePicker();
     private void requestTextInputKeyboard(long, boolean);
+    private java.lang.Object createTextLayout(byte[], float, float, int, byte[], int, int, int, int, int, int, byte[],
+        byte[]);
+    private void drawPreparedText(android.graphics.Canvas, java.lang.Object, float, float, float, float, float, float,
+        int);
 }
 -keepclassmembers class org.huxerui.HuxerUITextLayout {
     float[] measure();

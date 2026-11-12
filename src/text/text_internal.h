@@ -12,7 +12,11 @@
 #include <huxerui/text.h>
 
 namespace huxerui {
+struct DrawTextCommand;
+class PaintContext;
+class PaintSequence;
 class UiWindow;
+enum class TextOverflow;
 }
 
 namespace huxerui::detail {
@@ -80,6 +84,7 @@ struct ResolvedTextRun {
 
 TextStyle ResolveTextStyle(const TextStyle& base, const TextSpanStyle& overrides);
 std::vector<ResolvedTextRun> ResolveTextRuns(const AttributedText& text, const TextStyle& base);
+std::vector<TextOffset> GraphemeBoundaries(std::string_view text);
 bool TextLayoutInputsEqual(const AttributedText& left, const Font& left_base, const AttributedText& right,
     const Font& right_base);
 bool TextPaintInputsEqual(const AttributedText& left, const TextStyle& left_base, const AttributedText& right,
@@ -112,20 +117,50 @@ public:
       std::span<const TextInlineObject> objects, std::span<const TextLineMetrics> lines) const;
 };
 
-// These inputs describe shaping geometry, not the foreground colors or link targets of the latest declaration.
 struct CachedParagraphLayout {
+  struct ElidedText {
+    TextOffset prefix_end = 0;
+    TextRange suffix{};
+    bool ellipsis = false;
+    AttributedText text{};
+    TextDirection direction = TextDirection::Auto;
+
+    AttributedText Apply(const AttributedText& source) const;
+    TextLayoutOptions LayoutOptions(TextLayoutOptions options) const;
+    TextOffset DisplaySuffixStart() const noexcept { return prefix_end + (ellipsis ? 1 : 0); }
+  };
+
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   std::uint64_t revision = 0;
 #endif
-  AttributedText text;
-  Font font;
+  AttributedText source;
+  TextStyle style;
   TextLayoutOptions options;
-  float width = 0.0F;
+  std::size_t line_limit = 0;
+  TextOverflow overflow{};
+  float min_width = 0.0F;
+  float max_width = 0.0F;
+  Size size;
+  std::unique_ptr<ElidedText> elision;
   std::shared_ptr<TextLayoutBackend> layout;
+
+  bool HasOverflowPolicy() const noexcept;
+  bool RetainsSourceRange(TextRange range) const noexcept;
+  Point Origin(Rect content, TextVerticalAlign align) const noexcept;
+  TextPosition HitTest(Point point) const;
+  Rect CaretRect(TextOffset offset, TextAffinity affinity) const;
+  std::vector<Rect> RangeRects(TextRange range) const;
+  void Draw(UiWindow& window, PaintContext& paint, Rect content, const AttributedText& current_text,
+            const TextStyle& current_style, TextVerticalAlign vertical_align);
+  static std::shared_ptr<const TextLayoutBackend> ForPaint(
+      const PaintSequence& sequence, const DrawTextCommand& command);
+
+private:
+  const AttributedText& DisplayText() const noexcept { return elision ? elision->text : source; }
 };
 
-// A mounted paragraph shares its shaping geometry between selection and links, never through a global text cache.
-std::shared_ptr<TextLayoutBackend> GetParagraphLayout(MountedNode& node, UiWindow& ui_window);
+Size MeasureTextParagraph(MountedNode& node, UiWindow& ui_window, const Constraints& constraints);
+std::shared_ptr<const CachedParagraphLayout> GetParagraphLayout(MountedNode& node, UiWindow& ui_window);
 
 } // namespace huxerui::detail
 

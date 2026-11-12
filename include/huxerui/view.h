@@ -204,6 +204,7 @@ private:
   std::shared_ptr<detail::ViewSpec> spec_;
 
   friend View ProvideEnvironment(Environment environment, View content);
+  friend class Text;
   friend class UiWindow;
   friend class detail::VirtualMeasureSession;
   friend struct detail::InternalAccess;
@@ -689,6 +690,18 @@ protected:
   }
 };
 
+/// Controls how Text presents content that exceeds its width or visible line limit.
+enum class TextOverflow {
+  /// Clips overflowing content at the view bounds.
+  Clip,
+  /// Omits text at the end and marks the omission with an ellipsis on the last visible line.
+  Ellipsis,
+  /// Omits text from the logical start of a single line.
+  StartEllipsis,
+  /// Omits text from the middle of a single line, keeping both ends when space permits.
+  MiddleEllipsis,
+};
+
 /// Displays localized or literal text using theme typography or an explicit TextStyle.
 /// @code
 /// return Text("Account", TextRole::Title)
@@ -709,6 +722,15 @@ public:
   Text Align(TextAlign align) &&;
   /// Sets vertical paragraph alignment when the Text receives extra height.
   Text VerticalAlign(TextVerticalAlign align) &&;
+  /// Limits the number of displayed lines while sizing their height from the laid-out text.
+  /// A limit of one disables automatic wrapping. Without a limit, Text wraps as needed.
+  /// @throws std::invalid_argument If maximum is zero.
+  Text LineLimit(std::size_t maximum) &&;
+  /// Sets the presentation of overflowing text. The default is TextOverflow::Clip.
+  /// Ellipsizing preserves grapheme clusters and the accessible label uses the complete text.
+  /// StartEllipsis and MiddleEllipsis require LineLimit(1), in either declaration order.
+  /// @throws std::invalid_argument If overflow is unknown, or at composition if a required line limit is missing.
+  Text Overflow(TextOverflow overflow) &&;
   /// Binds this complete paragraph to a logical block in the enclosing SelectionArea source.
   /// @param id Stable source identity, independent of the sibling Key used for reconciliation.
   Text SelectionBlock(TextBlockId id) &&;

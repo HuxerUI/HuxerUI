@@ -17,8 +17,15 @@
 #include "components/text_field_internal.h"
 #include "components/selection_area_internal.h"
 #include "profiling_internal.h"
+#include "text/text_internal.h"
 
 namespace huxerui::detail {
+
+bool MountedNode::IsFocusable() const noexcept {
+  return declared_focusable || std::ranges::any_of(text.LinkRanges(), [this](const auto& link) {
+    return !cached_paragraph_layout || cached_paragraph_layout->RetainsSourceRange(link.range);
+  });
+}
 
 LayoutContext InternalAccess::CreateLayoutContext(
     void* state, LayoutContext::MeasureFunction measure, EdgeInsets safe_area,
@@ -214,7 +221,7 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
 
   if (within_node &&
       (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) ||
-       ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.focusable ||
+       ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.IsFocusable() ||
        (purpose == PointerRoutePurpose::Cursor && node.properties.pointer_cursor.has_value()) ||
        (purpose == PointerRoutePurpose::Hover && HasEventBinding<ViewEvents::Hover>(node.event_bindings)) ||
        node.kind == NodeKind::PlatformView)) {
@@ -253,7 +260,7 @@ WindowHitTarget HitTestWindowTarget(MountedNode& node, Point position) {
     return WindowHitTarget::None;
   }
   if (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) || IsScrollContainer(node) ||
-      node.focusable) {
+      node.IsFocusable()) {
     return WindowHitTarget::Client;
   }
   return node.properties.window_drag_region ? WindowHitTarget::Drag : WindowHitTarget::None;
@@ -558,9 +565,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui
     if (node.image_properties.HasValue() || node.layout_values.contains(typeid(LabelContentMetrics))) {
       content_size = MeasureLabelContent(node, ui_window, content_constraints);
     } else {
-      content_size =
-          ui_window.MeasureText(node.text, node.properties.text_style, content_constraints.max_width,
-                               node.properties.text_layout_options).size;
+      content_size = MeasureTextParagraph(node, ui_window, content_constraints);
     }
     break;
   case NodeKind::Button:

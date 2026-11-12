@@ -612,9 +612,9 @@ TEST_CASE("TestControlledTogglesAndAnimation") {
   REQUIRE(checkbox->kind == huxerui::detail::NodeKind::Checkbox);
   REQUIRE(switch_node->kind == huxerui::detail::NodeKind::Switch);
   REQUIRE(radio->kind == huxerui::detail::NodeKind::RadioButton);
-  REQUIRE(checkbox->focusable);
-  REQUIRE(switch_node->focusable);
-  REQUIRE(radio->focusable);
+  REQUIRE(checkbox->IsFocusable());
+  REQUIRE(switch_node->IsFocusable());
+  REQUIRE(radio->IsFocusable());
   REQUIRE(checkbox->measured_size.width == 20.0F);
   REQUIRE(switch_node->measured_size.width == 40.0F);
   REQUIRE(radio->measured_size.width == 20.0F);
@@ -778,9 +778,9 @@ TEST_CASE("TestActionSelectableAndDisabledChips") {
   REQUIRE(action->kind == detail::NodeKind::Chip);
   REQUIRE(selectable->kind == detail::NodeKind::Chip);
   REQUIRE(disabled->kind == detail::NodeKind::Chip);
-  REQUIRE(action->focusable);
-  REQUIRE(selectable->focusable);
-  REQUIRE(disabled->focusable);
+  REQUIRE(action->IsFocusable());
+  REQUIRE(selectable->IsFocusable());
+  REQUIRE(disabled->IsFocusable());
   REQUIRE(action->measured_size.height == ChipStyle::Default().minimum_height);
 
   const DrawTextCommand* initial_selectable = FindText(initial, "Selectable");
@@ -963,7 +963,7 @@ TEST_CASE("SegmentedButton preserves layout and controlled interaction contracts
     REQUIRE(narrow_scope->children.size() == 1);
     const auto* group = group_scope->children[0].get();
     const auto* narrow_group = narrow_scope->children[0].get();
-    REQUIRE(group->focusable);
+    REQUIRE(group->IsFocusable());
     REQUIRE(group->children.size() == 3);
     REQUIRE(group->children[0]->measured_size == group->children[1]->measured_size);
     REQUIRE(group->children[1]->measured_size == group->children[2]->measured_size);
@@ -1164,7 +1164,7 @@ TEST_CASE("TestTabsSelectionOverflowAndKeyboard") {
   REQUIRE(scroll->children.size() == 1);
   const auto* tabs = scroll->children[0].get();
   REQUIRE(tabs->kind == detail::NodeKind::Layout);
-  REQUIRE(tabs->focusable);
+  REQUIRE(tabs->IsFocusable());
   REQUIRE(tabs->children.size() == 4);
   REQUIRE(tabs->measured_size.width > scroll->measured_size.width);
   REQUIRE(tabs->children[0]->measured_size.height >= TabsStyle::Default().minimum_height);
@@ -1366,7 +1366,7 @@ TEST_CASE("TestIconButtonGeometryInteractionAndValidation") {
   const auto* disabled = row->children[1].get();
   REQUIRE(active->kind == detail::NodeKind::IconButton);
   REQUIRE(disabled->kind == detail::NodeKind::IconButton);
-  REQUIRE(active->focusable);
+  REQUIRE(active->IsFocusable());
   REQUIRE(active->measured_size == Size{48.0F, 48.0F});
   REQUIRE(disabled->measured_size == Size{48.0F, 48.0F});
   REQUIRE(MountedIndication(*active) != nullptr);
@@ -1745,7 +1745,7 @@ TEST_CASE("TestControlledSliderPointerKeyboardAndDrawing") {
   REQUIRE(root->children.size() == 1);
   const auto* slider = root->children[0].get();
   REQUIRE(slider->kind == huxerui::detail::NodeKind::Slider);
-  REQUIRE(slider->focusable);
+  REQUIRE(slider->IsFocusable());
   REQUIRE(slider->measured_size.width == style.width);
   REQUIRE(slider->measured_size.height == style.height);
 

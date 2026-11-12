@@ -275,6 +275,7 @@ PaintContext::PaintContext(PaintSequence& sequence, Rect bounds, std::string def
     : sequence_(sequence), bounds_(bounds), default_shaping_locale_(std::move(default_shaping_locale)) {
   RequireRect(bounds);
   sequence_.commands_.clear();
+  sequence_.prepared_text_layout_.reset();
   sequence_.bounds_ = {};
   sequence_.has_external_texture_commands_ = false;
 }

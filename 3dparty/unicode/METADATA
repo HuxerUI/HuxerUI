@@ -1,0 +1,5 @@
+Upstream: Unicode Character Database 17.0.0
+Source: https://www.unicode.org/Public/17.0.0/ucd/
+Files: auxiliary/GraphemeBreakProperty.txt, DerivedCoreProperties.txt, emoji/emoji-data.txt, extracted/DerivedBidiClass.txt
+License: Unicode License V3, reproduced in the project LICENSE
+Regenerate: python3 3dparty/unicode/generate_text_properties.py <ucd-directory> > src/text/unicode_text_properties.inc

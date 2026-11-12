@@ -184,6 +184,8 @@ struct ViewProperties {
   std::optional<Shadow> shadow;
   TextStyle text_style;
   TextLayoutOptions text_layout_options;
+  std::optional<std::size_t> text_line_limit;
+  TextOverflow text_overflow = TextOverflow::Clip;
   std::optional<Color> disabled_foreground;
   CornerRadii corner_radii;
   // The Theme supplies the ordinary value; specialized controls may override or suppress the generic focus ring.
@@ -205,6 +207,7 @@ struct ViewProperties {
   [[nodiscard]] bool LayoutEquals(const ViewProperties& other) const {
     return padding == other.padding && safe_area_padding == other.safe_area_padding && frame == other.frame &&
            text_style.font == other.text_style.font && text_layout_options == other.text_layout_options &&
+           text_line_limit == other.text_line_limit && text_overflow == other.text_overflow &&
            spacing == other.spacing && main_axis_alignment == other.main_axis_alignment &&
            cross_axis_alignment == other.cross_axis_alignment && horizontal_alignment == other.horizontal_alignment &&
            vertical_alignment == other.vertical_alignment;
@@ -215,6 +218,7 @@ struct ViewProperties {
            disabled_background == other.disabled_background && border == other.border &&
            disabled_border == other.disabled_border && shadow == other.shadow && text_style == other.text_style &&
            text_layout_options == other.text_layout_options &&
+           text_line_limit == other.text_line_limit && text_overflow == other.text_overflow &&
            disabled_foreground == other.disabled_foreground && corner_radii == other.corner_radii;
   }
 

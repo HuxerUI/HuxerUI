@@ -864,7 +864,7 @@ public:
     measure_text_ = environment->GetMethodID(view_class, "measureText", "([BFFI[BIIIII[B[B)[F");
     measure_text_run_ = environment->GetMethodID(view_class, "measureTextRun", "([BFI[BIIII[B)[F");
     create_text_layout_ =
-        environment->GetMethodID(view_class, "createTextLayout", "([BFFI[BIIIII[B[B)Ljava/lang/Object;");
+        environment->GetMethodID(view_class, "createTextLayout", "([BFFI[BIIIIII[B[B)Ljava/lang/Object;");
     start_text_input_ = environment->GetMethodID(view_class, "startTextInput", "(JIIIZZZJJJIJJIFFFF)V");
     update_text_input_ = environment->GetMethodID(view_class, "updateTextInput", "(JJJJIJJIFFFF)V");
     restart_text_input_ = environment->GetMethodID(view_class, "restartTextInput", "(JIIIZZZJJJIJJIFFFF)V");
@@ -1531,8 +1531,8 @@ public:
     }
     jobject layout = environment->CallObjectMethod(view_, create_text_layout_, bytes, style.font.Size(), max_width,
         static_cast<jint>(style.font.FamilyKind()), family, static_cast<jint>(style.font.Weight()),
-        static_cast<jint>(style.font.Slant()), static_cast<jint>(options.align), static_cast<jint>(options.wrap),
-        static_cast<jint>(options.shaping.direction), locale, attributes.Get());
+        static_cast<jint>(style.font.Slant()), static_cast<jint>(style.decoration), static_cast<jint>(options.align),
+        static_cast<jint>(options.wrap), static_cast<jint>(options.shaping.direction), locale, attributes.Get());
     environment->DeleteLocalRef(locale);
     environment->DeleteLocalRef(family);
     environment->DeleteLocalRef(bytes);

@@ -129,7 +129,7 @@ bool HasIndependentPopupInteraction(const detail::MountedNode& node) {
   const bool handles_pointer = static_cast<bool>(node.activation) ||
                                detail::HasEventBinding<ViewEvents::Click>(node.event_bindings) ||
                                detail::HasEventBinding<ViewEvents::Pointer>(node.event_bindings);
-  if (handles_pointer || node.focusable) {
+  if (handles_pointer || node.IsFocusable()) {
     return true;
   }
   return std::ranges::any_of(node.children, [](const std::unique_ptr<detail::MountedNode>& child) {

@@ -10,11 +10,13 @@
 
 #include <huxerui/app.h>
 #include <huxerui/file.h>
+#include <huxerui/paint.h>
 #include <huxerui/resource.h>
 
 #include "runtime/mounted_node_internal.h"
 #include "internal_access.h"
 #include "graphics/paint_internal.h"
+#include "text_input_internal.h"
 #include "text_internal.h"
 #include "macros_internal.h"
 
@@ -696,33 +698,512 @@ bool TextPaintInputsEqual(const AttributedText& left, const TextStyle& left_base
   });
 }
 
-std::shared_ptr<TextLayoutBackend> GetParagraphLayout(MountedNode& node, UiWindow& ui_window) {
+AttributedText CachedParagraphLayout::ElidedText::Apply(const AttributedText& source) const {
+  std::string body;
+  std::vector<TextStyleRange> styles;
+  std::vector<TextInlineObject> objects;
+  const auto append = [&](TextRange range, TextOffset display_start) {
+    if (range.IsCollapsed()) {
+      return;
+    }
+    const TextOffset shift = display_start - range.start;
+    body += source.TextInRange(range);
+    for (const auto& item : source.StyleRanges()) {
+      const auto start = std::max(item.range.start, range.start);
+      const auto end = std::min(item.range.end, range.end);
+      if (start < end) {
+        styles.push_back({{start + shift, end + shift}, item.style});
+      }
+    }
+    for (auto object : source.InlineObjects()) {
+      if (range.start <= object.offset && object.offset < range.end) {
+        object.offset += shift;
+        objects.push_back(object);
+      }
+    }
+  };
+  append({0, prefix_end}, 0);
+  if (ellipsis) {
+    body += "\xE2\x80\xA6";
+  }
+  append(suffix, DisplaySuffixStart());
+  auto result = AttributedText::FromRanges(std::move(body), std::move(styles));
+  return objects.empty() ? result : result.WithInlineObjects(std::move(objects));
+}
+
+TextLayoutOptions CachedParagraphLayout::ElidedText::LayoutOptions(TextLayoutOptions options) const {
+  options.shaping.direction = direction;
+  return options;
+}
+
+bool CachedParagraphLayout::HasOverflowPolicy() const noexcept {
+  return line_limit != 0 || overflow != TextOverflow::Clip;
+}
+
+bool CachedParagraphLayout::RetainsSourceRange(TextRange range) const noexcept {
+  return !elision || range.start < std::min(range.end, elision->prefix_end) ||
+         std::max(range.start, elision->suffix.start) < std::min(range.end, elision->suffix.end);
+}
+
+Point CachedParagraphLayout::Origin(Rect content, TextVerticalAlign align) const noexcept {
+  const float remaining = std::max(0.0F, content.height - size.height);
+  const float offset = align == TextVerticalAlign::Center ? remaining * 0.5F
+                       : align == TextVerticalAlign::Bottom ? remaining : 0.0F;
+  return {content.x, content.y + offset};
+}
+
+TextPosition CachedParagraphLayout::HitTest(Point point) const {
+  auto hit = layout->HitTest(point);
+  const TextOffset display_length = DisplayText().Length();
+  hit.offset = std::clamp(hit.offset, TextOffset{0}, display_length);
+  // Style boundaries can introduce positions inside a shaped cluster.
+  if (hit.offset > 0 && hit.offset < display_length) {
+    const auto previous = layout->PreviousCaretOffset(hit.offset);
+    const auto next = layout->NextCaretOffset(previous);
+    if (next != hit.offset) {
+      hit.offset = hit.affinity == TextAffinity::Upstream ? next : previous;
+    }
+  }
+  if (!elision) {
+    return hit;
+  }
+  const auto& visible = *elision;
+  // The marker has no source offset. Its two caret edges border the retained source ranges.
+  if (visible.prefix_end == 0 && !visible.suffix.IsCollapsed() && hit.offset < visible.DisplaySuffixStart()) {
+    hit.offset = visible.suffix.start;
+  } else if (!visible.suffix.IsCollapsed() && hit.offset >= visible.DisplaySuffixStart()) {
+    hit.offset += visible.suffix.start - visible.DisplaySuffixStart();
+  } else {
+    hit.offset = std::min(hit.offset, visible.prefix_end);
+  }
+  return hit;
+}
+
+Rect CachedParagraphLayout::CaretRect(TextOffset offset, TextAffinity affinity) const {
+  if (!elision || offset <= elision->prefix_end) {
+    return layout->CaretRect(offset, affinity);
+  }
+  const auto& visible = *elision;
+  if (visible.suffix.IsCollapsed()) {
+    return layout->CaretRect(visible.prefix_end, affinity);
+  }
+  if (offset < visible.suffix.start) {
+    return layout->CaretRect(
+        affinity == TextAffinity::Upstream ? visible.prefix_end : visible.DisplaySuffixStart(), affinity);
+  }
+  return layout->CaretRect(visible.DisplaySuffixStart() + std::min(offset, visible.suffix.end) - visible.suffix.start,
+                           affinity);
+}
+
+std::vector<Rect> CachedParagraphLayout::RangeRects(TextRange range) const {
+  if (!elision) {
+    return layout->RangeRects(range);
+  }
+  const auto& visible = *elision;
+  std::vector<Rect> result;
+  if (range.start < visible.prefix_end) {
+    result = layout->RangeRects({range.start, std::min(range.end, visible.prefix_end)});
+  }
+  const TextOffset start = std::max(range.start, visible.suffix.start);
+  const TextOffset end = std::min(range.end, visible.suffix.end);
+  if (start < end) {
+    const auto shift = visible.DisplaySuffixStart() - visible.suffix.start;
+    const auto rects = layout->RangeRects({start + shift, end + shift});
+    result.insert(result.end(), rects.begin(), rects.end());
+  }
+  return result;
+}
+
+void CachedParagraphLayout::Draw(UiWindow& window, PaintContext& paint, Rect content,
+    const AttributedText& current_text, const TextStyle& current_style, TextVerticalAlign vertical_align) {
+  if (content.IsEmpty() || DisplayText().Length() == 0) {
+    return;
+  }
+  const auto display_options = elision ? elision->LayoutOptions(options) : options;
+  if (source != current_text || style != current_style) {
+    auto display = elision ? elision->Apply(current_text) : current_text;
+    if (!TextPaintInputsEqual(DisplayText(), style, display, current_style)) {
+      // Some backends store colors and decorations in the shaped paragraph. Keep the resolved cuts when repainting.
+      auto updated_layout = window.CreatePlatformTextLayout(display, current_style, size.width, display_options);
+      if (!updated_layout) {
+        throw std::logic_error("HuxerUI Text requires a paragraph layout service");
+      }
+      layout = std::move(updated_layout);
+    }
+    if (elision) {
+      elision->text = std::move(display);
+    }
+    source = current_text;
+    style = current_style;
+  }
+  const Point offset = Origin(content, vertical_align) - Point{content.x, content.y};
+  paint.DrawText(content, DisplayText(), current_style, display_options, offset);
+  // A captured scene can replay the portable command after this mounted layout has expired.
+  paint.sequence_.prepared_text_command_ = paint.sequence_.commands_.size() - 1;
+  paint.sequence_.prepared_text_layout_ = layout;
+}
+
+std::shared_ptr<const TextLayoutBackend> CachedParagraphLayout::ForPaint(
+    const PaintSequence& sequence, const DrawTextCommand& command) {
+  const auto index = sequence.prepared_text_command_;
+  if (index >= sequence.commands_.size() ||
+      std::get_if<DrawTextCommand>(&sequence.commands_[index]) != &command) {
+    return {};
+  }
+  return sequence.prepared_text_layout_.lock();
+}
+
+namespace {
+
+enum class GraphemeBreak : std::uint8_t {
+  Other, CR, LF, Control, Extend, ZWJ, RegionalIndicator, Prepend, SpacingMark, L, V, T, LV, LVT,
+};
+
+enum class IndicBreak : std::uint8_t { None, Consonant, Linker, Extend };
+
+enum class ParagraphBidiClass : std::uint8_t { Neutral, LeftToRight, RightToLeft, Isolate, PopIsolate, Separator };
+
+struct GraphemeProperties {
+  GraphemeBreak boundary;
+  IndicBreak indic;
+  bool pictographic;
+};
+
+#include "unicode_text_properties.inc"
+
+std::uint32_t UnicodeProperty(std::span<const std::uint32_t> ranges, std::uint32_t code_point) {
+  return *std::prev(std::upper_bound(ranges.begin(), ranges.end(), (code_point << 8U) | 0xFFU)) & 0xFFU;
+}
+
+GraphemeProperties PropertiesForGrapheme(std::uint32_t code_point) {
+  if (code_point >= 0xAC00U && code_point <= 0xD7A3U) {
+    const auto boundary = (code_point - 0xAC00U) % 28U == 0 ? GraphemeBreak::LV : GraphemeBreak::LVT;
+    return {boundary, IndicBreak::None, false};
+  }
+  const auto properties = UnicodeProperty(grapheme_properties, code_point);
+  return {static_cast<GraphemeBreak>(properties & 0xFU), static_cast<IndicBreak>((properties >> 4U) & 0x3U),
+          (properties & 0x40U) != 0};
+}
+
+bool IsGraphemeControl(GraphemeBreak boundary) {
+  return boundary == GraphemeBreak::CR || boundary == GraphemeBreak::LF || boundary == GraphemeBreak::Control;
+}
+
+bool ContinuesGrapheme(GraphemeBreak left, GraphemeProperties right, bool regional_odd, bool emoji_zwj,
+                       bool indic_linker) {
+  using enum GraphemeBreak;
+  const auto boundary = right.boundary;
+  if (left == CR && boundary == LF) {
+    return true;
+  }
+  if (IsGraphemeControl(left) || IsGraphemeControl(boundary)) {
+    return false;
+  }
+  if (left == L && (boundary == L || boundary == V || boundary == LV || boundary == LVT)) {
+    return true;
+  }
+  if ((left == LV || left == V) && (boundary == V || boundary == T)) {
+    return true;
+  }
+  if ((left == LVT || left == T) && boundary == T) {
+    return true;
+  }
+  return boundary == Extend || boundary == ZWJ || boundary == SpacingMark || left == Prepend ||
+         (right.indic == IndicBreak::Consonant && indic_linker) || (right.pictographic && emoji_zwj) ||
+         (boundary == RegionalIndicator && regional_odd);
+}
+
+TextOffset FirstHardBreak(const AttributedText& paragraph) {
+  const std::string_view text = paragraph.PlainText();
+  const auto end = std::min({text.find_first_of("\r\n"), text.find("\xE2\x80\xA8"), text.find("\xE2\x80\xA9")});
+  return end == std::string_view::npos ? paragraph.Length() : Utf16Length(text.substr(0, end)).value();
+}
+
+bool IsHardBreak(std::string_view text) {
+  return text == "\n" || text == "\r" || text == "\r\n" || text == "\xE2\x80\xA8" || text == "\xE2\x80\xA9";
+}
+
+TextDirection ResolveParagraphDirection(std::string_view text) {
+  // UAX #9 resolves the base direction from the first strong character outside directional isolates.
+  std::size_t isolate_depth = 0;
+  for (std::size_t byte = 0; byte < text.size();) {
+    Utf8CodePoint point;
+    if (!DecodeCodePoint(text, byte, point)) {
+      throw std::logic_error("HuxerUI paragraph direction requires valid UTF-8");
+    }
+    byte += point.byte_length;
+    const auto property = static_cast<ParagraphBidiClass>(UnicodeProperty(paragraph_direction_properties, point.value));
+    if (property == ParagraphBidiClass::Separator) {
+      break;
+    }
+    if (property == ParagraphBidiClass::Isolate) {
+      ++isolate_depth;
+    } else if (isolate_depth != 0) {
+      isolate_depth -= property == ParagraphBidiClass::PopIsolate ? 1 : 0;
+    } else if (property == ParagraphBidiClass::LeftToRight || property == ParagraphBidiClass::RightToLeft) {
+      return property == ParagraphBidiClass::RightToLeft ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+    }
+  }
+  return TextDirection::LeftToRight;
+}
+
+struct ParagraphCandidate {
+  std::optional<CachedParagraphLayout::ElidedText> elision;
+  std::unique_ptr<TextLayoutBackend> layout;
+  Size size;
+};
+
+ParagraphCandidate ShapeParagraph(UiWindow& window, const CachedParagraphLayout& paragraph,
+    std::optional<CachedParagraphLayout::ElidedText> elision, float width) {
+  const auto& display = elision ? elision->text : paragraph.source;
+  const auto options = elision ? elision->LayoutOptions(paragraph.options) : paragraph.options;
+  auto layout = window.CreatePlatformTextLayout(display, paragraph.style, width, options);
+  if (!layout) {
+    throw std::logic_error("HuxerUI Text requires a paragraph layout service");
+  }
+  const Size size = layout->Measure();
+  return {std::move(elision), std::move(layout), size};
+}
+
+bool FitsParagraph(const ParagraphCandidate& candidate, float width, std::size_t line_limit) {
+  if (line_limit == 1 && candidate.size.width <= width) {
+    return true;
+  }
+  const auto lines = candidate.layout->LineMetrics();
+  return lines.size() <= line_limit && std::ranges::all_of(lines, [width](const auto& line) {
+    return line.bounds.width <= width;
+  });
+}
+
+ParagraphCandidate FitParagraph(UiWindow& window, const CachedParagraphLayout& paragraph, float width) {
+  const auto limit = paragraph.line_limit == 0 ? std::numeric_limits<std::size_t>::max() : paragraph.line_limit;
+  const TextOffset length = paragraph.source.Length();
+  const TextOffset first_end = limit == 1 ? FirstHardBreak(paragraph.source) : length;
+  std::optional<TextDirection> source_direction;
+  const auto shape = [&](CachedParagraphLayout::ElidedText visible) {
+    if (visible.prefix_end == length && !visible.ellipsis) {
+      return ShapeParagraph(window, paragraph, {}, width);
+    }
+    visible.text = visible.Apply(paragraph.source);
+    visible.direction = paragraph.options.shaping.direction;
+    if (visible.direction == TextDirection::Auto) {
+      if (!source_direction) {
+        source_direction = ResolveParagraphDirection(paragraph.source.PlainText());
+      }
+      // Keep native automatic direction for unchanged multi-line paragraphs, which can contain mixed directions.
+      if (limit == 1 || ResolveParagraphDirection(visible.text.PlainText()) != *source_direction) {
+        visible.direction = *source_direction;
+      }
+    }
+    return ShapeParagraph(window, paragraph, std::move(visible), width);
+  };
+  auto original = shape({.prefix_end = first_end});
+  const bool ellipsize = paragraph.overflow != TextOverflow::Clip;
+  if (limit == 1 && (first_end == length || !ellipsize) &&
+      (!ellipsize || FitsParagraph(original, width, limit))) {
+    return original;
+  }
+
+  TextOffset last_end = first_end;
+  TextOffset last_start = 0;
+  std::size_t visible_lines = 1;
+  if (limit != 1) {
+    const auto lines = original.layout->LineMetrics();
+    if (lines.empty()) {
+      return original;
+    }
+    visible_lines = std::min(limit, lines.size());
+    if (ellipsize) {
+      const auto wide = std::find_if(lines.begin(), lines.begin() + visible_lines, [width](const auto& line) {
+        return line.bounds.width > width;
+      });
+      if (wide != lines.begin() + visible_lines) {
+        visible_lines = static_cast<std::size_t>(wide - lines.begin()) + 1;
+      }
+    }
+    const auto& last = lines[visible_lines - 1];
+    if (visible_lines == lines.size() && last.range.end == length &&
+        (!ellipsize || last.bounds.width <= width)) {
+      return original;
+    }
+    last_start = last.range.start;
+    last_end = last.range.end;
+  }
+
+  auto boundaries = GraphemeBoundaries(paragraph.source.PlainText());
+  boundaries.erase(std::upper_bound(boundaries.begin(), boundaries.end(), last_end), boundaries.end());
+  if (boundaries.size() > 1) {
+    const auto previous = boundaries[boundaries.size() - 2];
+    if (previous >= last_start && IsHardBreak(paragraph.source.TextInRange({previous, boundaries.back()}))) {
+      boundaries.pop_back();
+    }
+  }
+  if (!ellipsize) {
+    return shape({.prefix_end = boundaries.back()});
+  }
+
+  const auto candidate_at = [&](std::size_t count) {
+    const std::size_t suffix_count = paragraph.overflow == TextOverflow::StartEllipsis ? count
+                                   : paragraph.overflow == TextOverflow::MiddleEllipsis ? count / 2 : 0;
+    CachedParagraphLayout::ElidedText visible{.prefix_end = boundaries[count - suffix_count], .ellipsis = true};
+    if (suffix_count != 0) {
+      visible.suffix = {boundaries[boundaries.size() - 1 - suffix_count], boundaries.back()};
+    }
+    return shape(std::move(visible));
+  };
+
+  // Search only the final visible line on a wrapped paragraph. Each candidate is shaped with its marker so
+  // kerning, contextual forms, and fallback fonts take part in the fit decision.
+  std::size_t low = static_cast<std::size_t>(
+      std::upper_bound(boundaries.begin(), boundaries.end(), last_start) - boundaries.begin() - 1);
+  std::size_t high = boundaries.size() - 1;
+  if (boundaries.back() == length && high > low) {
+    --high;
+  }
+  auto best = candidate_at(low);
+  if (!FitsParagraph(best, width, visible_lines)) {
+    // If the marker is wider than the available space, keep the preceding lines and their natural metrics.
+    auto before_last = low;
+    if (before_last > 0 && IsHardBreak(paragraph.source.TextInRange(
+        {boundaries[before_last - 1], boundaries[before_last]}))) {
+      --before_last;
+    }
+    return shape({.prefix_end = boundaries[before_last]});
+  }
+  while (low < high) {
+    const auto middle = low + (high - low + 1) / 2;
+    auto candidate = candidate_at(middle);
+    if (FitsParagraph(candidate, width, visible_lines)) {
+      low = middle;
+      best = std::move(candidate);
+    } else {
+      high = middle - 1;
+    }
+  }
+  return best;
+}
+
+std::shared_ptr<CachedParagraphLayout> EnsureParagraphLayout(
+    MountedNode& node, UiWindow& window, const Constraints& constraints, bool limit_display) {
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
-  const auto revision = InternalAccess::TextMetricsRevision(ui_window);
+  const auto revision = InternalAccess::TextMetricsRevision(window);
 #endif
-  const float width = node.ContentBounds().width;
   const auto& style = node.properties.text_style;
   auto options = node.properties.text_layout_options;
   options.vertical_align = TextVerticalAlign::Top;
+  const auto line_limit = limit_display ? node.properties.text_line_limit.value_or(0) : 0;
+  const auto overflow = limit_display ? node.properties.text_overflow : TextOverflow::Clip;
+  if (line_limit == 1) {
+    options.wrap = TextWrap::NoWrap;
+  }
   const auto& previous = node.cached_paragraph_layout;
-  if (previous && previous->width == width && previous->options == options &&
+  if (previous && previous->max_width == constraints.max_width && previous->min_width == constraints.min_width &&
+      previous->options == options && previous->line_limit == line_limit && previous->overflow == overflow &&
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
       previous->revision == revision &&
 #endif
-      TextLayoutInputsEqual(previous->text, previous->font, node.text, style.font)) {
-    return previous->layout;
+      TextLayoutInputsEqual(previous->source, previous->style.font, node.text, style.font)) {
+    return previous;
   }
   auto next = std::make_shared<CachedParagraphLayout>();
 #if defined(__EMSCRIPTEN__) || (defined(__linux__) && !defined(__ANDROID__))
   next->revision = revision;
 #endif
-  next->text = node.text;
-  next->font = style.font;
+  next->source = node.text;
+  next->style = style;
   next->options = options;
-  next->width = width;
-  next->layout = ui_window.CreatePlatformTextLayout(node.text, style, width, options);
+  next->line_limit = line_limit;
+  next->overflow = overflow;
+  next->min_width = constraints.min_width;
+  next->max_width = constraints.max_width;
+  if (limit_display) {
+    const float layout_width = constraints.max_width > 0.0F ? constraints.max_width : 1.0F;
+    auto candidate = FitParagraph(window, *next, layout_width);
+    const float measured_width = constraints.ConstrainWidth(candidate.size.width);
+    if (measured_width > 0.0F && measured_width != layout_width) {
+      // A loose parent can give the node less than the measuring width. Resolve alignment and wrapping against
+      // the width that will actually be recorded for replay.
+      auto arranged = ShapeParagraph(window, *next, std::move(candidate.elision), measured_width);
+      const auto limit = line_limit == 0 ? std::numeric_limits<std::size_t>::max() : line_limit;
+      if (FitsParagraph(arranged, measured_width, limit)) {
+        candidate = std::move(arranged);
+      } else {
+        candidate = FitParagraph(window, *next, measured_width);
+      }
+    }
+    next->size = {measured_width, candidate.size.height};
+    if (candidate.elision) {
+      next->elision = std::make_unique<CachedParagraphLayout::ElidedText>(std::move(*candidate.elision));
+    }
+    next->layout = std::move(candidate.layout);
+    node.content_paint_dirty = true;
+  } else {
+    next->layout = window.CreatePlatformTextLayout(node.text, style, constraints.max_width, options);
+    if (next->layout) {
+      next->size = next->layout->Measure();
+    }
+  }
   node.cached_paragraph_layout = std::move(next);
-  return node.cached_paragraph_layout->layout;
+  return node.cached_paragraph_layout;
+}
+
+} // namespace
+
+std::vector<TextOffset> GraphemeBoundaries(std::string_view text) {
+  std::vector<TextOffset> boundaries{0};
+  TextOffset offset = 0;
+  auto previous = GraphemeBreak::Other;
+  bool regional_odd = false;
+  bool pictographic = false;
+  bool emoji_zwj = false;
+  bool indic_consonant = false;
+  bool indic_linker = false;
+  // Track the preceding context required by the extended grapheme rules in Unicode UAX #29.
+  for (std::size_t byte = 0; byte < text.size();) {
+    Utf8CodePoint point;
+    if (!DecodeCodePoint(text, byte, point)) {
+      throw std::invalid_argument("HuxerUI grapheme segmentation requires valid UTF-8");
+    }
+    const auto current = PropertiesForGrapheme(point.value);
+    if (offset != 0 && !ContinuesGrapheme(previous, current, regional_odd, emoji_zwj, indic_linker)) {
+      boundaries.push_back(offset);
+    }
+    previous = current.boundary;
+    regional_odd = previous == GraphemeBreak::RegionalIndicator && !regional_odd;
+    emoji_zwj = previous == GraphemeBreak::ZWJ && pictographic;
+    pictographic = current.pictographic || (previous == GraphemeBreak::Extend && pictographic);
+    if (current.indic == IndicBreak::Linker) {
+      indic_linker = indic_consonant;
+    } else if (current.indic != IndicBreak::Extend) {
+      indic_consonant = current.indic == IndicBreak::Consonant;
+      indic_linker = false;
+    }
+    byte += point.byte_length;
+    offset += point.value > 0xFFFFU ? 2 : 1;
+  }
+  if (offset != 0) {
+    boundaries.push_back(offset);
+  }
+  return boundaries;
+}
+
+Size MeasureTextParagraph(MountedNode& node, UiWindow& window, const Constraints& constraints) {
+  if (node.properties.text_line_limit || node.properties.text_overflow != TextOverflow::Clip) {
+    return EnsureParagraphLayout(node, window, constraints, true)->size;
+  }
+  if (node.cached_paragraph_layout && node.cached_paragraph_layout->HasOverflowPolicy()) {
+    node.cached_paragraph_layout.reset();
+  }
+  return window.MeasureText(node.text, node.properties.text_style, constraints.max_width,
+                            node.properties.text_layout_options).size;
+}
+
+std::shared_ptr<const CachedParagraphLayout> GetParagraphLayout(MountedNode& node, UiWindow& window) {
+  auto paragraph = node.cached_paragraph_layout;
+  if (!paragraph || !paragraph->HasOverflowPolicy()) {
+    paragraph = EnsureParagraphLayout(node, window, {.max_width = node.ContentBounds().width}, false);
+  }
+  return paragraph->layout ? paragraph : nullptr;
 }
 
 } // namespace detail

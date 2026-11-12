@@ -158,6 +158,237 @@ TEST_CASE("RetainedTextLayoutSharesLineGeometryAndPaintInputs") {
   REQUIRE_THROWS_AS(platform.CreateTextLayout(text, style, 0.0F), std::invalid_argument);
 }
 
+TEST_CASE("TextOverflowUsesNaturalLineHeightAndCompleteGraphemes") {
+  ParagraphPlatform platform;
+  metric_root = []() -> View {
+    return Column {
+      Text("Alignment.md").Overflow(TextOverflow::MiddleEllipsis).LineLimit(1).With(Frame{.width = 70.0F}),
+      Text("中文👩‍💻é.md").LineLimit(1).Overflow(TextOverflow::MiddleEllipsis).With(Frame{.width = 100.0F}),
+      Text("AéBC").LineLimit(1).Overflow(TextOverflow::Ellipsis).With(Frame{.width = 30.0F}),
+      Text("Alignment.md").LineLimit(1).Overflow(TextOverflow::StartEllipsis).With(Frame{.width = 40.0F}),
+      Text("one\nlong line\nthree").LineLimit(2).Overflow(TextOverflow::Ellipsis).With(Frame{.width = 70.0F}),
+      Text("one\n\nthree").LineLimit(2).With(Frame{.width = 70.0F}),
+      Text("Narrow").LineLimit(1).Overflow(TextOverflow::Ellipsis).With(Frame{.width = 5.0F}),
+    };
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {220.0F, 200.0F}});
+  const auto& frame = window.BuildFrame();
+  for (const std::string_view visible : {"Ali….md", "中文👩‍💻…md", "Aé…", "….md"}) {
+    const auto* command = FindText(frame, visible);
+    REQUIRE(command);
+    REQUIRE(command->rect.height == 20.0F);
+  }
+  for (const std::string_view visible : {"one\nlong l…", "one\n"}) {
+    const auto* command = FindText(frame, visible);
+    REQUIRE(command);
+    REQUIRE(command->rect.height == 40.0F);
+  }
+  REQUIRE_FALSE(ContainsText(frame, "Narrow"));
+  const auto semantics = window.BuildCommit().semantic_frame;
+  for (const std::string_view label : {"Alignment.md", "中文👩‍💻é.md", "one\n\nthree", "Narrow"}) {
+    REQUIRE(std::ranges::any_of(semantics->nodes, [label](const auto& node) { return node.label == label; }));
+  }
+}
+
+TEST_CASE("TextOverflowReusesTheMeasuredParagraphWhenTextFits") {
+  ParagraphPlatform platform;
+  metric_root = [] {
+    return Text("Alignment.md").LineLimit(1).Overflow(TextOverflow::MiddleEllipsis).With(Frame{.width = 160.0F});
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {160.0F, 20.0F}});
+  const auto& frame = window.BuildCommit().render_frame;
+  const auto find_layout =
+      [](const auto& self, const RenderNode& node) -> std::shared_ptr<const detail::TextLayoutBackend> {
+    for (const auto& command : node.content.Commands()) {
+      if (const auto* text = std::get_if<DrawTextCommand>(&command); text && text->text.PlainText() == "Alignment.md") {
+        return detail::CachedParagraphLayout::ForPaint(node.content, *text);
+      }
+    }
+    for (const auto* child : node.children) {
+      if (auto layout = self(self, *child)) {
+        return layout;
+      }
+    }
+    return {};
+  };
+  const auto layout = find_layout(find_layout, *frame.scene.root);
+  REQUIRE(layout);
+  REQUIRE(layout->Measure().height == 20.0F);
+  REQUIRE(platform.layouts == 1);
+  window.InvalidateRoot();
+  REQUIRE(find_layout(find_layout, *window.BuildCommit().render_frame.scene.root) == layout);
+  REQUIRE(platform.layouts == 1);
+}
+
+TEST_CASE("TextOverflowPreservesOriginalParagraphDirection") {
+  ParagraphPlatform platform;
+  metric_root = [] {
+    return Column {
+      Text("123 مرحبا example.txt").LineLimit(1).Overflow(TextOverflow::StartEllipsis)
+          .With(Frame{.width = 40.0F}),
+      Text("file שלום").LineLimit(1).Overflow(TextOverflow::StartEllipsis)
+          .With(Frame{.width = 40.0F}),
+      Text("مرحبا").LineLimit(1).Overflow(TextOverflow::Ellipsis)
+          .Shaping({.direction = TextDirection::LeftToRight}).With(Frame{.width = 10.0F}),
+    };
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {160.0F, 100.0F}});
+  const auto& frame = window.BuildFrame();
+  const auto* rtl = FindText(frame, "…txt");
+  const auto* ltr = FindText(frame, "…לום");
+  const auto* explicit_ltr = FindText(frame, "…");
+  REQUIRE(rtl);
+  REQUIRE(ltr);
+  REQUIRE(explicit_ltr);
+  REQUIRE(rtl->options.shaping.direction == TextDirection::RightToLeft);
+  REQUIRE(ltr->options.shaping.direction == TextDirection::LeftToRight);
+  REQUIRE(explicit_ltr->options.shaping.direction == TextDirection::LeftToRight);
+}
+
+TEST_CASE("TextOverflowValidatesLineLimitsAtTheDeclarationBoundary") {
+  REQUIRE_THROWS_AS(Text("Name").LineLimit(0), std::invalid_argument);
+  ParagraphPlatform platform;
+  metric_root = [] { return Text("Name").LineLimit(2).Overflow(TextOverflow::MiddleEllipsis); };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {150.0F, 40.0F}});
+  REQUIRE_THROWS_AS(window.BuildFrame(), std::invalid_argument);
+}
+
+TEST_CASE("TextOverflowReusesLayoutWhenOnlyOmittedColorsChange") {
+  ParagraphPlatform platform;
+  AttributedText source("Alignment.md");
+  metric_root = [&source] {
+    return Column {
+      Text(source).LineLimit(1).Overflow(TextOverflow::MiddleEllipsis).With(Frame{.width = 70.0F}),
+    };
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
+  REQUIRE(ContainsText(window.BuildFrame(), "Ali….md"));
+  const int layouts = platform.layouts;
+  const Color accent = Color::Rgb(200, 30, 80);
+
+  source = source.WithStyles({{{3, 9}, {.foreground = accent}}});
+  window.InvalidateRoot();
+  REQUIRE(ContainsText(window.BuildFrame(), "Ali….md"));
+  REQUIRE(platform.layouts == layouts);
+
+  source = source.WithStyles({{{1, 2}, {.foreground = accent}}});
+  window.InvalidateRoot();
+  const auto* painted = FindText(window.BuildFrame(), "Ali….md");
+  REQUIRE(painted);
+  REQUIRE(painted->text.StyleRanges().size() == 1);
+  REQUIRE(painted->text.StyleRanges().front().range == TextRange{1, 2});
+  REQUIRE(painted->text.StyleRanges().front().style.foreground == accent);
+  REQUIRE(platform.layouts == layouts + 1);
+}
+
+TEST_CASE("TextOverflowPreservesSourceOffsetsAndLinkSemantics") {
+  ParagraphPlatform platform;
+  ParagraphClipboard clipboard;
+  platform.platform_clipboard = &clipboard;
+  const auto source = AttributedText::FromRanges("Alignment.md", {},
+      {{{3, 8}, Uri("https://example.com/hidden")}, {{8, 12}, Uri("https://example.com/extension")}});
+  activated_link.reset();
+  metric_root = [source] {
+    return SelectionArea(Column {
+      Text(source).LineLimit(1).Overflow(TextOverflow::MiddleEllipsis)
+          .On<TextEvents::LinkActivated>([](const auto& link) { activated_link = link; })
+          .With(Frame{.width = 70.0F}),
+    });
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
+  const auto semantics = window.BuildCommit().semantic_frame;
+  REQUIRE(std::ranges::any_of(semantics->nodes, [](const auto& node) { return node.label == "Alignment.md"; }));
+  REQUIRE(std::ranges::count_if(semantics->nodes, [](const auto& node) {
+    return node.role == SemanticRole::Link;
+  }) == 1);
+  ParagraphPointer(window, PointerEventType::Down, {34.0F, 10.0F});
+  ParagraphPointer(window, PointerEventType::Up, {34.0F, 10.0F});
+  REQUIRE_FALSE(activated_link);
+  platform.AdvanceTime(1.0);
+  ParagraphPointer(window, PointerEventType::Down, {45.0F, 10.0F});
+  ParagraphPointer(window, PointerEventType::Up, {45.0F, 10.0F});
+  REQUIRE(activated_link);
+  REQUIRE(activated_link->range == TextRange{8, 12});
+  platform.AdvanceTime(1.0);
+  ParagraphPointer(window, PointerEventType::Down, {1.0F, 10.0F});
+  ParagraphPointer(window, PointerEventType::Move, {69.0F, 10.0F});
+  ParagraphPointer(window, PointerEventType::Up, {69.0F, 10.0F});
+  REQUIRE(window.PerformTextEditingAction(TextEditingAction::Copy));
+  REQUIRE(clipboard.text == "Alignment.md");
+}
+
+TEST_CASE("TextOverflowPreservesKeyboardAndSemanticActionsForFrameClippedLinks") {
+  ParagraphPlatform platform;
+  const auto source = AttributedText::FromRanges("first\nsecond", {}, {
+      {{6, 12}, Uri("https://example.com/second")},
+  });
+  activated_link.reset();
+  metric_root = [source] {
+    return Column {
+      Text(source).On<TextEvents::LinkActivated>([](const auto& link) { activated_link = link; })
+          .With(Frame{.width = 110.0F, .height = 20.0F}),
+    };
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
+  const auto semantics = window.BuildCommit().semantic_frame;
+  const auto link = std::ranges::find(semantics->nodes, SemanticRole::Link, &SemanticNode::role);
+  REQUIRE(link != semantics->nodes.end());
+  REQUIRE(window.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+  REQUIRE(window.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Enter}));
+  REQUIRE(activated_link);
+  REQUIRE(activated_link->range == TextRange{6, 12});
+  activated_link.reset();
+  REQUIRE(window.CoreRuntime().PerformSemanticAction(link->id, {SemanticActionKind::Activate, {}}));
+  REQUIRE(activated_link);
+  REQUIRE(activated_link->range == TextRange{6, 12});
+}
+
+TEST_CASE("TextOverflowSkipsParagraphWhenAllLinksAreOmitted") {
+  ParagraphPlatform platform;
+  const auto source = AttributedText::FromRanges("first\nsecond", {}, {
+      {{6, 12}, Uri("https://example.com/second")},
+  });
+  bool show_link = false;
+  bool link_focused = false;
+  bool button_focused = false;
+  metric_root = [&] {
+    return Column {
+      Text(source).LineLimit(show_link ? 2 : 1).With(Frame{.width = 110.0F})
+          .On<ViewEvents::FocusChanged>([&](bool focused) { link_focused = focused; }),
+      Button("Next").On<ViewEvents::FocusChanged>([&](bool focused) { button_focused = focused; }),
+    };
+  };
+  UiWindow window(MetricApp, platform);
+  window.SetWindowMetrics({.viewport = {220.0F, 100.0F}});
+  const auto semantics = window.BuildCommit().semantic_frame;
+  const auto paragraph = std::ranges::find(semantics->nodes, "first\nsecond", &SemanticNode::label);
+  REQUIRE(paragraph != semantics->nodes.end());
+  REQUIRE((paragraph->actions & SemanticActionMask(SemanticActionKind::Focus)) == 0);
+  REQUIRE(window.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+  REQUIRE(button_focused);
+  REQUIRE_FALSE(link_focused);
+
+  show_link = true;
+  window.InvalidateRoot();
+  window.BuildFrame();
+  REQUIRE(window.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab, .modifiers = {.shift = true}}));
+  REQUIRE(link_focused);
+
+  show_link = false;
+  window.InvalidateRoot();
+  window.BuildFrame();
+  REQUIRE_FALSE(link_focused);
+  REQUIRE(window.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+  REQUIRE(button_focused);
+}
+
 TEST_CASE("AttributedParagraphLinksUseTypedPointerKeyboardAndSemanticActions") {
   ResetParagraph();
   ParagraphPlatform platform;

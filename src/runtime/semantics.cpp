@@ -604,7 +604,8 @@ void detail::SemanticTree::BuildSemantics() {
         (mounted.activation || detail::HasEventBinding<ViewEvents::Click>(mounted.event_bindings))) {
       actions |= SemanticActionMask(SemanticActionKind::Activate);
     }
-    if (node_enabled && mounted.focusable) {
+    const bool focusable = mounted.IsFocusable();
+    if (node_enabled && focusable) {
       actions |= SemanticActionMask(SemanticActionKind::Focus);
     }
     if (node_enabled && publishes_scroll && can_scroll) {
@@ -623,7 +624,7 @@ void detail::SemanticTree::BuildSemantics() {
     }
 
     const bool is_platform_view = mounted.kind == detail::NodeKind::PlatformView;
-    const bool has_control = owner_extension_actions != 0 || mounted.focusable || mounted.activation ||
+    const bool has_control = owner_extension_actions != 0 || focusable || mounted.activation ||
                              detail::HasEventBinding<ViewEvents::Click>(mounted.event_bindings) ||
                              text_input_configuration.has_value() || is_platform_view ||
                              resolved.range.has_value() || has_virtual_children;
@@ -958,7 +959,7 @@ bool detail::SemanticTree::PerformSemanticAction(SemanticNodeId node_id, const S
     if (!handled) {
       return false;
     }
-    if (action.kind == SemanticActionKind::Focus && owner->focusable) {
+    if (action.kind == SemanticActionKind::Focus && owner->IsFocusable()) {
       runtime_state_.owner_.SetFocusedNode(owner->identity, true);
     }
     runtime_state_.owner_.RequestFrame();

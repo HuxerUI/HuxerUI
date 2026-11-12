@@ -225,7 +225,7 @@ struct TextEntry {
   std::uint64_t node_identity = 0;
   TextBlockId block = 0;
   AttributedText text;
-  std::shared_ptr<detail::TextLayoutBackend> layout;
+  std::shared_ptr<const detail::CachedParagraphLayout> layout;
   TextEntryGeometry geometry;
 };
 
@@ -558,20 +558,13 @@ private:
       const float opacity = owner.PresentationOpacity();
       TextEntryGeometry geometry{
           content,
-          {content.x, content.y},
+          entry.layout ? entry.layout->Origin(content, node.properties.text_layout_options.vertical_align)
+                       : Point{content.x, content.y},
           transform,
           std::move(info.clips),
           opacity > 0.0F ? std::clamp(node.PresentationOpacity() / opacity, 0.0F, 1.0F) : 0.0F,
           entry.layout && inverse.has_value() && detail::InverseTransform(transform).has_value()
       };
-      if (entry.layout) {
-        const float remaining = std::max(0.0F, content.height - entry.layout->Measure().height);
-        if (node.properties.text_layout_options.vertical_align == TextVerticalAlign::Center) {
-          geometry.origin.y += remaining * 0.5F;
-        } else if (node.properties.text_layout_options.vertical_align == TextVerticalAlign::Bottom) {
-          geometry.origin.y += remaining;
-        }
-      }
       changed = changed || geometry != entry.geometry;
       entry.geometry = std::move(geometry);
       next.push_back(std::move(entry));
@@ -645,17 +638,7 @@ private:
     }
     // Choose the nearest visible paragraph in owner space, then query its untransformed paragraph layout.
     const auto local = best->geometry.to_owner.Inverse(position);
-    TextPosition hit = best->layout->HitTest(*local - best->geometry.origin);
-    hit.offset = std::clamp(hit.offset, TextOffset{0}, best->text.Length());
-    // Layout hits may land inside a cluster; style boundaries must not become extra selection stops.
-    if (hit.offset > 0 && hit.offset < best->text.Length()) {
-      const TextOffset previous = best->layout->PreviousCaretOffset(hit.offset);
-      const TextOffset next = best->layout->NextCaretOffset(previous);
-      if (next != hit.offset) {
-        hit.offset = hit.affinity == TextAffinity::Upstream ? next : previous;
-      }
-    }
-    return detail::LogicalTextPosition{best->block, hit};
+    return detail::LogicalTextPosition{best->block, best->layout->HitTest(*local - best->geometry.origin)};
   }
 
   std::optional<Rect> CaretRect(const detail::LogicalTextPosition& position) const {
