@@ -1,5 +1,7 @@
 #include "runtime_test_support.h"
 
+#include "runtime/transition_internal.h"
+
 namespace huxerui::test {
 namespace {
 
@@ -158,6 +160,44 @@ TEST_CASE("RetainedTextLayoutSharesLineGeometryAndPaintInputs") {
   REQUIRE_THROWS_AS(platform.CreateTextLayout(text, style, 0.0F), std::invalid_argument);
 }
 
+TEST_CASE("PaintSequenceRetainsEachPreparedTextLayoutUntilRerecorded") {
+  PaintSequence sequence;
+  const Rect bounds{0, 0, 160, 120};
+  const auto style = TextStyle::Default();
+  {
+    ParagraphPlatform platform;
+    UiWindow window{AttributedParagraphApp, platform};
+    PaintContext paint(sequence, bounds);
+    paint.DrawText({0, 0}, platform.CreateTextLayout(AttributedText("first"), style, 80.0F));
+    paint.DrawRect({0, 20, 8, 8}, Color::Black());
+    paint.DrawText(Rect{0, 30, 80, 20}, "portable", style);
+    paint.DrawText({0, 50}, platform.CreateTextLayout(AttributedText("second"), style, 60.0F));
+    paint.Finish();
+  }
+
+  const auto& commands = sequence.Commands();
+  REQUIRE(commands.size() == 4);
+  const auto* first = detail::InternalAccess::TextLayoutForPaint(sequence, commands[0]);
+  const auto* second = detail::InternalAccess::TextLayoutForPaint(sequence, commands[3]);
+  REQUIRE(first);
+  REQUIRE(second);
+  CHECK(first != second);
+  CHECK(first->Measure().width == 50.0F);
+  CHECK(second->Measure().width == 60.0F);
+  CHECK(detail::InternalAccess::TextLayoutForPaint(sequence, commands[2]) == nullptr);
+
+  const auto frozen = detail::FrozenScene::CopyPaintSequence(sequence);
+  REQUIRE(frozen.Commands() == commands);
+  CHECK(detail::InternalAccess::TextLayoutForPaint(frozen, frozen.Commands()[0]) == nullptr);
+  CHECK(detail::InternalAccess::TextLayoutForPaint(frozen, frozen.Commands()[3]) == nullptr);
+
+  PaintContext replacement(sequence, bounds);
+  replacement.DrawText(bounds, "replacement", style);
+  replacement.Finish();
+  REQUIRE(sequence.Commands().size() == 1);
+  CHECK(detail::InternalAccess::TextLayoutForPaint(sequence, sequence.Commands().front()) == nullptr);
+}
+
 TEST_CASE("TextOverflowUsesNaturalLineHeightAndCompleteGraphemes") {
   ParagraphPlatform platform;
   metric_root = []() -> View {
@@ -200,10 +240,10 @@ TEST_CASE("TextOverflowReusesTheMeasuredParagraphWhenTextFits") {
   window.SetWindowMetrics({.viewport = {160.0F, 20.0F}});
   const auto& frame = window.BuildCommit().render_frame;
   const auto find_layout =
-      [](const auto& self, const RenderNode& node) -> std::shared_ptr<const detail::TextLayoutBackend> {
+      [](const auto& self, const RenderNode& node) -> const detail::TextLayoutBackend* {
     for (const auto& command : node.content.Commands()) {
       if (const auto* text = std::get_if<DrawTextCommand>(&command); text && text->text.PlainText() == "Alignment.md") {
-        return detail::CachedParagraphLayout::ForPaint(node.content, *text);
+        return detail::InternalAccess::TextLayoutForPaint(node.content, command);
       }
     }
     for (const auto* child : node.children) {

@@ -1571,10 +1571,10 @@ void AppKitRenderer::RenderSequence(const PaintSequence& sequence, CGContextRef 
     if (!selected) {
       continue;
     }
-    std::visit([this, context, &sequence](const auto& value) {
+    std::visit([this, context, &sequence, &command](const auto& value) {
       if constexpr (std::same_as<std::remove_cvref_t<decltype(value)>, DrawTextCommand>) {
-        const auto prepared = CachedParagraphLayout::ForPaint(sequence, value);
-        RenderCommand(context, value, prepared.get());
+        const auto* prepared = InternalAccess::TextLayoutForPaint(sequence, command);
+        RenderCommand(context, value, prepared);
       } else {
         RenderCommand(context, value);
       }

@@ -248,6 +248,33 @@ std::span<const TextLineMetrics> TextLayout::Lines() const {
   return data_->lines;
 }
 
+bool TextLayout::Data::NormalizeLineRanges() {
+  const std::string_view source = text.PlainText();
+  std::size_t byte = 0;
+  TextOffset offset = 0;
+  TextOffset content_end = 0;
+  const auto advance_to = [&](TextOffset end) {
+    while (offset < end && byte < source.size()) {
+      detail::Utf8CodePoint point;
+      detail::DecodeCodePoint(source, byte, point);
+      byte += point.byte_length;
+      offset += point.value > 0xFFFFU ? 2 : 1;
+      if (point.value != '\r' && point.value != '\n' && point.value != 0x2028U && point.value != 0x2029U) {
+        content_end = offset;
+      }
+    }
+  };
+  // Native line ranges can include hard breaks. Scan the source once to exclude them without querying caret stops.
+  for (auto& line : lines) {
+    advance_to(line.range.end);
+    if (line.range.end == offset) {
+      line.range.end = std::max(line.range.start, content_end);
+    }
+  }
+  advance_to(text.Length());
+  return content_end < offset;
+}
+
 std::size_t TextLayout::Data::InlineObjectIndex(TextOffset offset) const {
   const auto objects = text.InlineObjects();
   const auto object = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
@@ -838,19 +865,7 @@ void CachedParagraphLayout::Draw(UiWindow& window, PaintContext& paint, Rect con
   }
   const Point offset = Origin(content, vertical_align) - Point{content.x, content.y};
   paint.DrawText(content, DisplayText(), current_style, display_options, offset);
-  // A captured scene can replay the portable command after this mounted layout has expired.
-  paint.sequence_.prepared_text_command_ = paint.sequence_.commands_.size() - 1;
-  paint.sequence_.prepared_text_layout_ = layout;
-}
-
-std::shared_ptr<const TextLayoutBackend> CachedParagraphLayout::ForPaint(
-    const PaintSequence& sequence, const DrawTextCommand& command) {
-  const auto index = sequence.prepared_text_command_;
-  if (index >= sequence.commands_.size() ||
-      std::get_if<DrawTextCommand>(&sequence.commands_[index]) != &command) {
-    return {};
-  }
-  return sequence.prepared_text_layout_.lock();
+  paint.RetainTextLayout(layout);
 }
 
 namespace {

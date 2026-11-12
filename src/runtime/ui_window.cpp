@@ -1399,26 +1399,10 @@ TextLayout UiWindow::CreateTextLayout(const AttributedText& text, const TextStyl
   data->width = width;
   data->lines = data->backend->LineMetrics();
   const TextOffset length = text.Length();
-  const auto hard_break = [](std::string_view value) {
-    return value == "\n" || value == "\r" || value == "\r\n" || value == "\xE2\x80\xA8" ||
-           value == "\xE2\x80\xA9";
-  };
-  for (TextLineMetrics& line : data->lines) {
-    // Some native engines include the hard break in the preceding line's range.
-    while (line.range.end > line.range.start) {
-      const TextOffset previous = data->backend->PreviousCaretOffset(line.range.end);
-      if (previous < line.range.start || previous >= line.range.end ||
-          !hard_break(text.TextInRange({previous, line.range.end}))) {
-        break;
-      }
-      line.range.end = previous;
-    }
-  }
   if (data->lines.empty() && length != 0) {
     throw std::logic_error("HuxerUI text layout backend returned no visual lines");
   }
-  const bool trailing_break = length > 0 && hard_break(
-      text.TextInRange({data->backend->PreviousCaretOffset(length), length}));
+  const bool trailing_break = data->NormalizeLineRanges();
   if (data->lines.empty() || (trailing_break && data->lines.back().range.start != length)) {
     const FontMetrics font = Metrics(style.font);
     const float top = data->lines.empty() ? 0.0F : data->backend->Measure().height;

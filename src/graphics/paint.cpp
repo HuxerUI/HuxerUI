@@ -275,7 +275,7 @@ PaintContext::PaintContext(PaintSequence& sequence, Rect bounds, std::string def
     : sequence_(sequence), bounds_(bounds), default_shaping_locale_(std::move(default_shaping_locale)) {
   RequireRect(bounds);
   sequence_.commands_.clear();
-  sequence_.prepared_text_layout_.reset();
+  sequence_.prepared_text_.clear();
   sequence_.bounds_ = {};
   sequence_.has_external_texture_commands_ = false;
 }
@@ -322,7 +322,23 @@ void PaintContext::DrawText(Point origin, const TextLayout& layout) {
   RequireTextStyle(data.style);
   // The retained layout already resolved shaping. Do not inherit the Canvas locale here.
   sequence_.commands_.emplace_back(DrawTextCommand{rect, data.text, data.style, data.options, {}});
+  RetainTextLayout(std::shared_ptr<const detail::TextLayoutBackend>(layout.data_, data.backend.get()));
   Include(rect);
+}
+
+void PaintContext::RetainTextLayout(std::shared_ptr<const detail::TextLayoutBackend> layout) {
+  sequence_.prepared_text_.push_back({sequence_.commands_.size() - 1, std::move(layout)});
+}
+
+const detail::TextLayoutBackend* detail::InternalAccess::TextLayoutForPaint(
+    const PaintSequence& sequence, const PaintCommand& command) noexcept {
+  const auto& layouts = sequence.prepared_text_;
+  if (layouts.empty()) {
+    return nullptr;
+  }
+  const auto index = static_cast<std::size_t>(&command - sequence.commands_.data());
+  const auto entry = std::ranges::lower_bound(layouts, index, {}, &PaintSequence::PreparedText::command_index);
+  return entry != layouts.end() && entry->command_index == index ? entry->layout.get() : nullptr;
 }
 
 void PaintContext::DrawTextRun(

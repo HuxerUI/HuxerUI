@@ -319,6 +319,19 @@ TEST_CASE("MacRetainedTextLayoutKeepsEmptyLinesAndWrappedCaretAffinity") {
       REQUIRE(no_wrap.HitTest({200.0F, first.y + first.height * 0.5F}).offset == 2);
       REQUIRE(no_wrap.Metrics().size.height > rows[2].bounds.y);
     }
+
+    const AttributedText crlf_text("🙂\r\n\r\n中\r\n");
+    const auto crlf = platform.CreateTextLayout(crlf_text, style, 200.0F);
+    const auto native = platform.CreatePlatformTextLayout(crlf_text, style, 200.0F, {});
+    const auto rows = crlf.Lines();
+    REQUIRE(rows.size() == 4);
+    CHECK(rows[0].range == TextRange{0, 2});
+    CHECK(rows[1].range == TextRange{4, 4});
+    CHECK(rows[2].range == TextRange{6, 7});
+    CHECK(rows[3].range == TextRange{9, 9});
+    CHECK(crlf.LineIndex({4, TextAffinity::Upstream}) == 1);
+    CHECK(crlf.NextCaretOffset(0) == 2);
+    CHECK(crlf.PreviousCaretOffset(4) == native->PreviousCaretOffset(4));
   }
 }
 

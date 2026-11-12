@@ -12,9 +12,7 @@
 #include <huxerui/text.h>
 
 namespace huxerui {
-struct DrawTextCommand;
 class PaintContext;
-class PaintSequence;
 class UiWindow;
 enum class TextOverflow;
 }
@@ -152,9 +150,6 @@ struct CachedParagraphLayout {
   std::vector<Rect> RangeRects(TextRange range) const;
   void Draw(UiWindow& window, PaintContext& paint, Rect content, const AttributedText& current_text,
             const TextStyle& current_style, TextVerticalAlign vertical_align);
-  static std::shared_ptr<const TextLayoutBackend> ForPaint(
-      const PaintSequence& sequence, const DrawTextCommand& command);
-
 private:
   const AttributedText& DisplayText() const noexcept { return elision ? elision->text : source; }
 };
@@ -178,6 +173,7 @@ struct TextLayout::Data {
   bool synthesized_last_line = false;
   std::size_t cache_cost = 0;
 
+  bool NormalizeLineRanges();
   std::size_t InlineObjectIndex(TextOffset offset) const;
   Rect InlineObjectRect(std::size_t index) const;
   TextOffset PreviousCaretOffset(TextOffset offset) const;

@@ -106,6 +106,7 @@ An exact run does not contain line breaks; line ownership remains with the calle
 Its bounds use a baseline origin at `(0, 0)`, so ascent occupies negative y coordinates.
 `TextLayoutMetrics` contains the paragraph size, first and last baseline, and line count.
 `TextLayout` also exposes visual lines, affinity-aware caret and hit-test geometry, visual range fragments, and logical caret navigation. It uses a finite positive width, with an empty line for empty content and after a trailing hard break. Visual line ranges exclude hard breaks. Geometry uses paragraph-local logical coordinates and UTF-16 offsets.
+The shared layout reads the original text to exclude hard breaks from native line ranges. Caret queries run when callers request caret geometry or navigation.
 
 `TextWrap::NoWrap` disables automatic wrapping but preserves explicit line breaks in the source text.
 A finite `max_width` still constrains the reported paragraph width; it does not change the natural line geometry retained by an editable layout.
@@ -149,9 +150,9 @@ This path serves Text, buttons, labels, validation text, and other ordinary UI p
 
 Text with a line limit or an ellipsis policy retains the visible paragraph in its mounted layout cache. The final layout provides the measured height, baselines, selection and link geometry, and the drawable platform paragraph. When all the text fits, that layout is ready for replay. An overflowing paragraph fits the marker and retained text together using extended grapheme boundaries from [Unicode UAX #29](https://www.unicode.org/reports/tr29/). The original paragraph supplies the base direction for elided text when the retained characters would resolve a different direction under [Unicode UAX #9](https://www.unicode.org/reports/tr9/#P2).
 
-The portable draw command contains the visible text and resolved bounds. Its paint sequence may borrow the mounted layout through a private weak reference for immediate replay. Captured scenes can replay the command after the layout expires. The original attributed text supplies semantic labels and selection offsets, while the retained layout maps the visible ranges to those original offsets. A link contributes to keyboard focus only when its range intersects the retained text.
+The portable draw command contains the visible text and resolved bounds. The live paint sequence retains the platform layout privately at its command index. Captured scenes replay the portable command. The original attributed text supplies semantic labels and selection offsets, while the retained layout maps the visible ranges to those original offsets. A link contributes to keyboard focus only when its range intersects the retained text.
 
-`DrawText(origin, layout)` records the same command with the layout's text, width, style, and shaping inputs, including its locale. The supplied origin places the top of the paragraph. The draw command clips to the width and measured height. Interaction geometry remains paragraph-local and unclipped.
+`DrawText(origin, layout)` records the same command with the layout's text, width, style, and shaping inputs, including its locale. It retains the supplied platform layout for live replay. A sequence can replay several prepared paragraphs alongside ordinary draw commands. The supplied origin places the top of the paragraph. The draw command clips to the width and measured height. Interaction geometry remains paragraph-local and unclipped.
 
 `DrawTextRun()` is the exact baseline-positioned operation:
 

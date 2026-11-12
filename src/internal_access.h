@@ -217,6 +217,9 @@ struct InternalAccess {
 #pragma region Paint
 
   static PaintContext CreatePaintContext(PaintSequence& sequence, Rect bounds, std::string default_shaping_locale);
+  // command belongs to sequence.Commands().
+  static const TextLayoutBackend* TextLayoutForPaint(
+      const PaintSequence& sequence, const PaintCommand& command) noexcept;
 
 #pragma endregion
 

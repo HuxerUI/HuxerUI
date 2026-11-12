@@ -1969,11 +1969,11 @@ private:
     CairoCommandPainter painter(impl_, context);
     for (const PaintCommand* command : batch.commands) {
       std::visit(
-          [&painter, &batch](const auto& value) {
+          [&painter, &batch, command](const auto& value) {
             using Value = std::decay_t<decltype(value)>;
             if constexpr (std::same_as<Value, DrawTextCommand>) {
-              const auto prepared = CachedParagraphLayout::ForPaint(batch.sequence, value);
-              painter.Draw(value, prepared.get());
+              const auto* prepared = InternalAccess::TextLayoutForPaint(batch.sequence, *command);
+              painter.Draw(value, prepared);
             } else if constexpr (CairoPaintCommand<Value>) {
               painter.Draw(value);
             } else {

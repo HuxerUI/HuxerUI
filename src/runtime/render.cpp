@@ -114,7 +114,11 @@ void FragmentRenderGroup::Update(
 }
 
 PaintSequence FrozenScene::CopyPaintSequence(const PaintSequence& source) {
-  PaintSequence copy = source;
+  PaintSequence copy;
+  copy.commands_ = source.commands_;
+  copy.bounds_ = source.bounds_;
+  copy.revision_ = source.revision_;
+  copy.has_external_texture_commands_ = source.has_external_texture_commands_;
   std::erase_if(copy.commands_, [](const PaintCommand& command) {
     return std::holds_alternative<PlacePlatformViewCommand>(command);
   });

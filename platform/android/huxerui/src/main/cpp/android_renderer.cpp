@@ -276,11 +276,11 @@ bool AndroidRenderer::RenderSequence(
       );
     } else {
       std::visit(
-          [this, environment, view, canvas, &sequence](const auto& value) {
+          [this, environment, view, canvas, &sequence, &command](const auto& value) {
             using Command = std::remove_cvref_t<decltype(value)>;
             if constexpr (std::same_as<Command, DrawTextCommand>) {
-              const auto prepared = CachedParagraphLayout::ForPaint(sequence, value);
-              RenderCommand(environment, view, canvas, value, prepared.get());
+              const auto* prepared = InternalAccess::TextLayoutForPaint(sequence, command);
+              RenderCommand(environment, view, canvas, value, prepared);
             } else if constexpr (!std::same_as<Command, DrawExternalTextureCommand>) {
               RenderCommand(environment, view, canvas, value);
             }

@@ -533,16 +533,20 @@ public:
   }
 
 private:
+  struct PreparedText {
+    std::size_t command_index;
+    std::shared_ptr<const detail::TextLayoutBackend> layout;
+  };
+
   std::vector<PaintCommand> commands_;
   Rect bounds_;
   std::uint64_t revision_ = 0;
   bool has_external_texture_commands_ = false;
-  std::size_t prepared_text_command_ = 0;
-  std::weak_ptr<const detail::TextLayoutBackend> prepared_text_layout_;
+  std::vector<PreparedText> prepared_text_;
 
   friend class PaintContext;
-  friend struct detail::CachedParagraphLayout;
   friend struct detail::FrozenScene;
+  friend struct detail::InternalAccess;
 };
 
 /// Records one complete PaintSequence in a caller-provided logical coordinate space.
@@ -677,6 +681,7 @@ private:
   void Include(Rect rect) noexcept;
   void PlacePlatformView(PlacePlatformViewCommand command);
   void RequireOpen() const;
+  void RetainTextLayout(std::shared_ptr<const detail::TextLayoutBackend> layout);
 
   PaintSequence& sequence_;
   Rect bounds_;
