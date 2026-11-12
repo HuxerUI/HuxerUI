@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <emscripten/val.h>
 #include <emscripten.h>
+#include <huxerui/paint.h>
 #include "web_renderer.h"
 #include "text/text_internal.h"
 #include "font_test_support.h"
@@ -14,6 +15,11 @@ emscripten::val TextTestCanvas() {
   const auto factory = emscripten::val::global("Function").new_(std::string(R"js(
     const context = {
       calls: [],
+      draws: [],
+      globalAlpha: 1,
+      save() {}, restore() {}, setTransform() {}, beginPath() {}, clearRect() {}, rect() {}, clip() {},
+      transform() {},
+      fillText(text, x, y) { this.draws.push({text, x, y}); },
       measureText(text) {
         this.calls.push(text);
         const advance = this.font && this.font.includes("huxerui_font_") ? 20 : 10;
@@ -51,6 +57,37 @@ TEST_CASE("WebParagraphMeasurementDoesNotBuildEveryCaret") {
       20000.0F, {.wrap = TextWrap::NoWrap});
   REQUIRE(metrics.line_count == 1);
   REQUIRE(canvas["context"]["calls"]["length"].as<unsigned>() < 8);
+}
+
+TEST_CASE("WebParagraphDrawingReusesMeasuredLinesAndFillsMissingFragmentPositions") {
+  const auto canvas = TextTestCanvas();
+  detail::WebRenderer renderer(0, canvas);
+  const auto text = AttributedText::FromRanges("abcd", {{{1, 3}, {.foreground = Color::White()}}});
+  const TextStyle style{Font::Monospace(10.0F), Color::Black()};
+  const TextLayoutOptions options{.align = TextAlign::Center, .wrap = TextWrap::NoWrap};
+  const Rect bounds{0.0F, 0.0F, 80.0F, 24.0F};
+  const auto metrics = renderer.MeasureText(text, style, bounds.width, options);
+
+  RenderNode root;
+  PaintContext paint(root.content, bounds);
+  paint.DrawText(bounds, text, style, options);
+  paint.Finish();
+  const RenderFrame frame{.scene = {.root = &root}, .damage = {.rects = {bounds}}, .revision = 1};
+  renderer.DrawSlice(canvas, frame, 0, 1, false, false);
+  renderer.DrawSlice(canvas, frame, 0, 1, false, false);
+
+  const auto context = canvas["context"];
+  const auto draws = context["draws"];
+  REQUIRE(draws["length"].as<unsigned>() == 6);
+  REQUIRE(draws[0]["x"].as<float>() == 20.0F);
+  REQUIRE(draws[1]["x"].as<float>() == 30.0F);
+  REQUIRE(draws[2]["x"].as<float>() == 50.0F);
+  REQUIRE(draws[1]["y"].as<float>() == metrics.first_baseline);
+  const auto calls = emscripten::vecFromJSArray<std::string>(context["calls"]);
+  REQUIRE(std::ranges::count(calls, "abcd") == 1);
+  REQUIRE(std::ranges::count(calls, "a") == 1);
+  REQUIRE(std::ranges::count(calls, "abc") == 1);
+  REQUIRE(renderer.MeasureText(text, style, bounds.width, options) == metrics);
 }
 
 TEST_CASE("WebParagraphMeasurementConstrainsWidthWithoutChangingNaturalGeometry") {

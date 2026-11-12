@@ -524,7 +524,7 @@ public:
     float baseline = 0.0F;
     float top = 0.0F;
     float height = 0.0F;
-    std::vector<CaretStop> carets;
+    mutable std::vector<CaretStop> carets;
   };
 
   WebTextLayout(val context, const AttributedText& text, Font font, float max_width, TextLayoutOptions options,
@@ -532,7 +532,7 @@ public:
       : context_(std::move(context)), text_(text), font_(std::move(font)), options_(std::move(options)),
         max_width_(max_width) {
     direction_ = ResolveWebTextDirection(text_.PlainText(), options_.shaping.direction);
-    ConfigureContext();
+    ConfigureContext(context_);
     font_metrics_ = ResolveWebFontMetrics(context_, font_);
     // Geometry depends on effective font runs, not color or link boundaries; merge equal-font neighbors first.
     for (const auto& run : ResolveTextRuns(text_, TextStyle{.font = font_})) {
@@ -669,8 +669,25 @@ public:
 
   // This Canvas fallback mirrors whole RTL lines; it does not implement mixed-bidi visual run reordering.
   [[nodiscard]] Rect FragmentRect(const Line& line, TextRange range) const noexcept {
-    float left = LineAdvance(line, range.start);
-    float right = LineAdvance(line, range.end);
+    return FragmentRect(line, LineAdvance(line, range.start), LineAdvance(line, range.end));
+  }
+
+  Rect PaintFragmentRect(val& context, const Line& line, TextRange range) const {
+    const float left = PaintAdvance(context, line, range.start);
+    const float right = PaintAdvance(context, line, range.end);
+    return FragmentRect(line, left, right);
+  }
+
+  [[nodiscard]] std::size_t RetainedBytes() const noexcept {
+    std::size_t bytes = sizeof(*this) + ParagraphCacheCost(text_) + boundaries_.size() * sizeof(TextOffset);
+    bytes += font_runs_.size() * sizeof(ResolvedTextRun) + lines_.size() * sizeof(Line);
+    // Charge possible advances and vector capacity up front, even when drawing fills only a few offsets.
+    bytes += 2 * (boundaries_.size() + 2 * lines_.size()) * sizeof(CaretStop);
+    return bytes;
+  }
+
+private:
+  Rect FragmentRect(const Line& line, float left, float right) const noexcept {
     if (direction_ == TextDirection::RightToLeft) {
       left = line.width - left;
       right = line.width - right;
@@ -678,21 +695,11 @@ public:
     return {LineOffset(line) + std::min(left, right), line.top, std::abs(right - left), line.height};
   }
 
-  [[nodiscard]] std::size_t RetainedBytes() const noexcept {
-    std::size_t bytes = sizeof(*this) + ParagraphCacheCost(text_) + boundaries_.size() * sizeof(TextOffset);
-    bytes += font_runs_.size() * sizeof(ResolvedTextRun) + lines_.size() * sizeof(Line);
-    for (const auto& line : lines_) {
-      bytes += line.carets.size() * sizeof(CaretStop);
-    }
-    return bytes;
-  }
-
-private:
-  void ConfigureContext() const {
-    context_.set("font", CssFont(font_));
-    context_.set("textBaseline", std::string("alphabetic"));
-    context_.set("direction", std::string(CssDirection(direction_)));
-    context_.set("lang", options_.shaping.locale.empty() ? std::string("inherit") : options_.shaping.locale);
+  void ConfigureContext(val& context) const {
+    context.set("font", CssFont(font_));
+    context.set("textBaseline", std::string("alphabetic"));
+    context.set("direction", std::string(CssDirection(direction_)));
+    context.set("lang", options_.shaping.locale.empty() ? std::string("inherit") : options_.shaping.locale);
   }
 
   void BuildBoundaries() {
@@ -708,9 +715,9 @@ private:
   }
 
   // Shape each font-run prefix as a unit; adding isolated character widths would lose contextual advances.
-  [[nodiscard]] float Width(TextOffset start, TextOffset end) const {
+  [[nodiscard]] float Width(val& context, TextOffset start, TextOffset end) const {
     float width = 0.0F;
-    ConfigureContext();
+    ConfigureContext(context);
     auto run = std::lower_bound(font_runs_.begin(), font_runs_.end(), start, [](const auto& item, TextOffset offset) {
       return item.range.end <= offset;
     });
@@ -720,8 +727,8 @@ private:
         continue;
       }
       const TextRange range{std::max(start, run->range.start), std::min(end, run->range.end)};
-      context_.set("font", CssFont(run->style.font));
-      width += MeasureWidth(context_, text_.TextInRange(range));
+      context.set("font", CssFont(run->style.font));
+      width += MeasureWidth(context, text_.TextInRange(range));
     }
     return width;
   }
@@ -731,7 +738,7 @@ private:
     const auto advance = [&](TextOffset offset) {
       const auto found = std::lower_bound(prefixes.begin(), prefixes.end(), offset,
           [](const CaretStop& stop, TextOffset target) { return stop.offset < target; });
-      return found != prefixes.end() && found->offset == offset ? found->advance : Width(start, offset);
+      return found != prefixes.end() && found->offset == offset ? found->advance : Width(context_, start, offset);
     };
     const float width = advance(end);
     float ascent = font_metrics_.ascent + font_metrics_.leading * 0.5F;
@@ -751,17 +758,23 @@ private:
     }
     const float top = lines_.empty() ? 0.0F : lines_.back().top + lines_.back().height;
     lines_.push_back({start, end, width, top + ascent, top, std::max(1.0F, ascent + descent), {}});
-    // Measurement callers need line metrics only, not a complete UTF-16-offset-to-x map.
+    Line& line = lines_.back();
+    line.carets.push_back({start, 0.0F});
     if (caret_geometry) {
-      Line& line = lines_.back();
-      line.carets.push_back({start, 0.0F});
       auto boundary = std::upper_bound(boundaries_.begin(), boundaries_.end(), start);
       for (; boundary != boundaries_.end() && *boundary < end; ++boundary) {
         line.carets.push_back({*boundary, advance(*boundary)});
       }
-      if (end != start) {
-        line.carets.push_back({end, width});
+    } else {
+      // Keep advances already computed for wrapping. Drawing measures any missing fragment boundaries.
+      for (const auto& prefix : prefixes) {
+        if (start < prefix.offset && prefix.offset < end) {
+          line.carets.push_back(prefix);
+        }
       }
+    }
+    if (end != start) {
+      line.carets.push_back({end, width});
     }
     widest_line_ = std::max(widest_line_, width);
   }
@@ -804,7 +817,7 @@ private:
         last_break = boundary;
       }
       if (constrained && options_.wrap == TextWrap::Word && line_start < previous) {
-        const float width = Width(line_start, boundary);
+        const float width = Width(context_, line_start, boundary);
         prefixes.push_back({boundary, width});
         if (width > max_width) {
           TextOffset end = last_break > line_start ? last_break : previous;
@@ -838,6 +851,19 @@ private:
 
   [[nodiscard]] float LineTop(const Line& line) const noexcept {
     return line.top;
+  }
+
+  float PaintAdvance(val& context, const Line& line, TextOffset offset) const {
+    const auto boundary = std::upper_bound(boundaries_.begin(), boundaries_.end(), offset);
+    const auto aligned = std::clamp(*std::prev(boundary), line.start, line.end);
+    const auto found = std::lower_bound(line.carets.begin(), line.carets.end(), aligned,
+        [](const CaretStop& stop, TextOffset target) { return stop.offset < target; });
+    if (found != line.carets.end() && found->offset == aligned) {
+      return found->advance;
+    }
+    const float advance = Width(context, line.start, aligned);
+    line.carets.insert(found, {aligned, advance});
+    return advance;
   }
 
   [[nodiscard]] float LineAdvance(const Line& line, TextOffset offset) const noexcept {
@@ -936,8 +962,10 @@ void WebRenderer::Invalidate() noexcept {
 }
 
 void WebRenderer::InvalidateTextMetrics() noexcept {
-  paragraph_cache_.clear();
+  measured_paragraphs_.clear();
+  drawn_paragraphs_.clear();
   paragraph_bytes_ = 0;
+  drawn_paragraph_bytes_ = 0;
   Invalidate();
 }
 
@@ -995,30 +1023,49 @@ const val* WebRenderer::FrameFor(const std::shared_ptr<ExternalTexture>& texture
   return entry.frame.isNull() || entry.frame.isUndefined() ? nullptr : &entry.frame;
 }
 
-std::shared_ptr<const WebTextLayout> WebRenderer::ParagraphFor(const AttributedText& text, const TextStyle& style,
-    float max_width, const TextLayoutOptions& options) {
-  const auto cached = std::find_if(paragraph_cache_.begin(), paragraph_cache_.end(), [&](const auto& layout) {
-    return layout->Matches(text, style.font, max_width, options);
-  });
-  if (cached != paragraph_cache_.end()) {
-    return *cached;
+std::shared_ptr<WebTextLayout> WebRenderer::ParagraphFor(const AttributedText& text, const TextStyle& style,
+    float max_width, const TextLayoutOptions& options, bool drawing) {
+  auto shaping = options;
+  shaping.vertical_align = TextVerticalAlign::Top;
+  const auto matches = [&](const auto& layout) { return layout->Matches(text, style.font, max_width, shaping); };
+  const auto drawn = std::find_if(drawn_paragraphs_.begin(), drawn_paragraphs_.end(), matches);
+  if (drawn != drawn_paragraphs_.end()) {
+    return *drawn;
   }
-
-  auto paragraph = std::make_shared<WebTextLayout>(context_, text, style.font, max_width, options);
-  constexpr std::size_t maximum_paragraphs = 256;
-  constexpr std::size_t maximum_bytes = 8 * 1024 * 1024;
-  const auto bytes = paragraph->RetainedBytes();
-  if (bytes > maximum_bytes) {
+  const auto measured = std::find_if(measured_paragraphs_.begin(), measured_paragraphs_.end(), matches);
+  if (measured != measured_paragraphs_.end()) {
+    auto paragraph = *measured;
+    if (drawing) {
+      drawn_paragraphs_.push_back(paragraph);
+      drawn_paragraph_bytes_ += paragraph->RetainedBytes();
+      measured_paragraphs_.erase(measured);
+    }
     return paragraph;
   }
-  while (!paragraph_cache_.empty() &&
-         (paragraph_cache_.size() >= maximum_paragraphs || paragraph_bytes_ + bytes > maximum_bytes)) {
-    paragraph_bytes_ -= paragraph_cache_.front()->RetainedBytes();
-    paragraph_cache_.erase(paragraph_cache_.begin());
+
+  auto paragraph = std::make_shared<WebTextLayout>(context_, text, style.font, max_width, std::move(shaping), false);
+  constexpr std::size_t maximum_paragraphs = 256;
+  const auto bytes = paragraph->RetainedBytes();
+  if (bytes > paragraph_cache_budget || (!drawing &&
+      (drawn_paragraphs_.size() >= maximum_paragraphs || drawn_paragraph_bytes_ + bytes > paragraph_cache_budget))) {
+    return paragraph;
   }
+  while (measured_paragraphs_.size() + drawn_paragraphs_.size() >= maximum_paragraphs ||
+         paragraph_bytes_ + bytes > paragraph_cache_budget) {
+    auto& entries = measured_paragraphs_.empty() ? drawn_paragraphs_ : measured_paragraphs_;
+    const auto removed = entries.front()->RetainedBytes();
+    paragraph_bytes_ -= removed;
+    if (measured_paragraphs_.empty()) {
+      drawn_paragraph_bytes_ -= removed;
+    }
+    entries.erase(entries.begin());
+  }
+  (drawing ? drawn_paragraphs_ : measured_paragraphs_).push_back(paragraph);
   paragraph_bytes_ += bytes;
-  paragraph_cache_.push_back(std::move(paragraph));
-  return paragraph_cache_.back();
+  if (drawing) {
+    drawn_paragraph_bytes_ += bytes;
+  }
+  return paragraph;
 }
 
 FontMetrics WebRenderer::Metrics(const Font& font) {
@@ -1058,7 +1105,10 @@ WebRenderer::MeasureRun(std::string_view text, const TextStyle& style, const Tex
 
 TextLayoutMetrics WebRenderer::MeasureText(const AttributedText& text, const TextStyle& style, float max_width,
     const TextLayoutOptions& options) {
-  auto metrics = WebTextLayout(context_, text, style.font, max_width, options, false).Metrics();
+  if (std::isfinite(max_width) && max_width <= 0.0F) {
+    return {};
+  }
+  auto metrics = ParagraphFor(text, style, max_width, options, false)->Metrics();
   // Constrain the public result without clipping the natural geometry used by hit testing and drawing.
   if (std::isfinite(max_width)) {
     metrics.size.width = std::min(metrics.size.width, std::max(0.0F, max_width));
@@ -1155,7 +1205,7 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command, const TextLayout
   }
   const auto* resolved = dynamic_cast<const WebTextLayout*>(prepared);
   const auto paragraph = resolved ? nullptr : ParagraphFor(command.text, command.style, command.rect.width,
-                                                           command.options);
+                                                           command.options, true);
   const WebTextLayout& layout = resolved ? *resolved : *paragraph;
   const float remaining_height = std::max(0.0F, command.rect.height - layout.Metrics().size.height);
   float vertical_offset = 0.0F;
@@ -1182,7 +1232,8 @@ void WebRenderer::RenderCommand(const DrawTextCommand& command, const TextLayout
     });
     for (; run != runs.end() && run->range.start < line.end; ++run) {
       const TextRange range{std::max(line.start, run->range.start), std::min(line.end, run->range.end)};
-      const Rect fragment = layout.FragmentRect(line, range);
+      const Rect fragment =
+          resolved ? layout.FragmentRect(line, range) : layout.PaintFragmentRect(context_, line, range);
       const float x = command.rect.x + command.paragraph_offset.x + fragment.x;
       const float y = command.rect.y + command.paragraph_offset.y + vertical_offset;
       if (run->background.alpha > 0.0F) {

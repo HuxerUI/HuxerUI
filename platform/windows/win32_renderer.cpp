@@ -700,36 +700,129 @@ struct Win32Renderer::Impl {
     }
   };
 
+  struct ResolvedFont {
+    ComPtr<IDWriteFontCollection> collection;
+    std::wstring name;
+    DWRITE_FONT_WEIGHT weight;
+    DWRITE_FONT_STYLE style;
+    DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
+  };
+
+  struct ParagraphFontRun {
+    DWRITE_TEXT_RANGE range;
+    ResolvedFont font;
+    float size;
+    TextDecoration decoration;
+  };
+
+  struct ParagraphInputs {
+    std::wstring text;
+    ResolvedFont base_font;
+    std::vector<ParagraphFontRun> runs;
+    TextDirection direction;
+    std::optional<TextLayoutMetrics> metrics;
+    float measured_width = 0.0F;
+    TextWrap measured_wrap = TextWrap::Word;
+  };
+
   struct CachedParagraph {
     FontRetentions fonts;
     ComPtr<IDWriteTextLayout> layout;
     std::size_t cost = 0;
+    std::unique_ptr<ParagraphInputs> inputs;
   };
+
+  struct ParagraphCache {
+    using Entries = std::unordered_map<ParagraphKey, std::shared_ptr<CachedParagraph>,
+                                       ParagraphKeyHash, ParagraphKeyEqual>;
+    Entries measured;
+    Entries drawn;
+    std::size_t bytes = 0;
+    std::size_t drawn_bytes = 0;
+
+    std::shared_ptr<CachedParagraph> Find(const ParagraphKeyView& key) const {
+      const auto paint = drawn.find(key);
+      if (paint != drawn.end()) {
+        return paint->second;
+      }
+      const auto measure = measured.find(key);
+      return measure == measured.end() ? nullptr : measure->second;
+    }
+
+    void Store(ParagraphKey key, const std::shared_ptr<CachedParagraph>& paragraph, bool drawing) {
+      constexpr std::size_t maximum_paragraphs = 256;
+      const auto cost = paragraph->cost;
+      if (cost > paragraph_cache_budget || (!drawing &&
+          (drawn.size() >= maximum_paragraphs || drawn_bytes + cost > paragraph_cache_budget))) {
+        return;
+      }
+      while (measured.size() + drawn.size() >= maximum_paragraphs || bytes + cost > paragraph_cache_budget) {
+        auto& entries = measured.empty() ? drawn : measured;
+        const auto entry = entries.begin();
+        bytes -= entry->second->cost;
+        if (measured.empty()) {
+          drawn_bytes -= entry->second->cost;
+        }
+        entries.erase(entry);
+      }
+      (drawing ? drawn : measured).emplace(std::move(key), paragraph);
+      bytes += cost;
+      if (drawing) {
+        drawn_bytes += cost;
+      }
+    }
+  };
+
+  std::shared_ptr<CachedParagraph> ParagraphInputsFor(
+      const AttributedText& text, const TextStyle& style, const TextShapingOptions& shaping, bool drawing) {
+    const TextLayoutOptions key_options{.shaping = shaping};
+    if (auto cached = paragraphs_.Find({text, style.font, style.decoration, key_options, {}})) {
+      return cached;
+    }
+    ValidateParagraphLength(text);
+    auto paragraph = std::make_shared<CachedParagraph>();
+    paragraph->inputs = std::make_unique<ParagraphInputs>();
+    auto& inputs = *paragraph->inputs;
+    inputs.text = Utf8ToWide(text.PlainText());
+    inputs.direction = ResolveTextDirection(inputs.text, shaping.direction);
+    inputs.base_font = ResolveFont(style.font, paragraph->fonts);
+    inputs.runs = ResolveParagraphFonts(text, style, paragraph->fonts);
+    paragraph->cost = ParagraphCacheCost(text);
+    // A draw without a preceding measurement retains only its drawable layout.
+    if (!drawing) {
+      paragraphs_.Store({text, style.font, style.decoration, key_options, {}}, paragraph, false);
+    }
+    return paragraph;
+  }
 
   TextLayoutMetrics
   MeasureText(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options) {
-    ValidateParagraphLength(text);
-    const std::wstring wide = Utf8ToWide(text.PlainText());
-    FontRetentions fonts;
-    ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, fonts, options.shaping.locale);
     const bool constrained = std::isfinite(max_width);
     if (constrained && max_width <= 0.0F) {
+      ValidateParagraphLength(text);
       return {};
     }
     TextLayoutOptions measurement_options = options;
+    ResolveDefaultLocale(measurement_options.shaping);
+    const auto paragraph = ParagraphInputsFor(text, style, measurement_options.shaping, false);
+    auto& inputs = *paragraph->inputs;
+    if (inputs.metrics && inputs.measured_width == max_width && inputs.measured_wrap == options.wrap) {
+      return *inputs.metrics;
+    }
+    auto format = CreateTextFormat(inputs.base_font, style.font.Size(), Utf8ToWide(measurement_options.shaping.locale));
     // Alignment does not affect intrinsic metrics. Keeping text at the physical left avoids precision loss when an
     // unbounded DirectWrite layout uses its maximum finite width.
-    const TextDirection direction = ResolveTextDirection(wide, options.shaping.direction);
-    measurement_options.shaping.direction = direction;
-    measurement_options.align = direction == TextDirection::RightToLeft ? TextAlign::Trailing : TextAlign::Leading;
-    ConfigureTextFormat(*format.Get(), measurement_options, wide);
+    measurement_options.shaping.direction = inputs.direction;
+    measurement_options.align =
+        inputs.direction == TextDirection::RightToLeft ? TextAlign::Trailing : TextAlign::Leading;
+    ConfigureTextFormat(*format.Get(), measurement_options, inputs.text);
 
     const float layout_width = constrained ? max_width : std::numeric_limits<float>::max();
     ComPtr<IDWriteTextLayout> layout;
     ThrowIfFailed(
         write_factory_->CreateTextLayout(
-            wide.data(),
-            static_cast<UINT32>(wide.size()),
+            inputs.text.data(),
+            static_cast<UINT32>(inputs.text.size()),
             format.Get(),
             layout_width,
             std::numeric_limits<float>::max(),
@@ -738,7 +831,7 @@ struct Win32Renderer::Impl {
         "HuxerUI could not create a DirectWrite text layout"
     );
 
-    ApplyTextAttributes(*layout.Get(), text, style, false, fonts);
+    ApplyTextAttributes(*layout.Get(), text, inputs.runs);
     DWRITE_TEXT_METRICS metrics{};
     ThrowIfFailed(layout->GetMetrics(&metrics), "HuxerUI could not measure a DirectWrite text layout");
     const float width = constrained ? std::min(metrics.widthIncludingTrailingWhitespace, max_width)
@@ -755,12 +848,15 @@ struct Win32Renderer::Impl {
     const float first_baseline = lines.empty() ? 0.0F : lines.front().baseline;
     const float last_baseline = lines.empty() ? 0.0F : metrics.height - lines.back().height + lines.back().baseline;
     const Size size{std::ceil(width), std::ceil(metrics.height)};
-    return {
+    inputs.metrics = TextLayoutMetrics{
         .size = size,
         .first_baseline = first_baseline,
         .last_baseline = last_baseline,
         .line_count = line_count,
     };
+    inputs.measured_width = max_width;
+    inputs.measured_wrap = options.wrap;
+    return *inputs.metrics;
   }
 
   TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
@@ -796,7 +892,7 @@ struct Win32Renderer::Impl {
     );
     // Font overrides may split DirectWrite glyph runs inside a grapheme; caret stops belong to the undecorated body.
     auto caret_offsets = Win32TextLayout::CaretOffsets(*layout.Get());
-    ApplyTextAttributes(*layout.Get(), text, style, false, fonts);
+    ApplyTextAttributes(*layout.Get(), text, ResolveParagraphFonts(text, style, fonts));
     return std::make_unique<Win32TextLayout>(std::move(wide), std::move(layout), std::move(caret_offsets), std::move(fonts));
   }
 
@@ -806,16 +902,28 @@ struct Win32Renderer::Impl {
     }
   }
 
-  void ApplyTextAttributes(IDWriteTextLayout& layout, const AttributedText& text, const TextStyle& base, bool drawing,
-      FontRetentions& fonts) {
-    for (const auto& run : ResolveTextRuns(text, base)) {
-      const DWRITE_TEXT_RANGE range{static_cast<UINT32>(run.range.start), static_cast<UINT32>(run.range.Length())};
-      const auto resolved = ResolveFont(run.style.font, fonts);
+  std::vector<ParagraphFontRun> ResolveParagraphFonts(
+      const AttributedText& text, const TextStyle& style, FontRetentions& fonts) {
+    const auto resolved = ResolveTextRuns(text, style);
+    std::vector<ParagraphFontRun> runs;
+    runs.reserve(resolved.size());
+    for (const auto& run : resolved) {
+      runs.push_back({{static_cast<UINT32>(run.range.start), static_cast<UINT32>(run.range.Length())},
+                      ResolveFont(run.style.font, fonts), run.style.font.Size(), run.style.decoration});
+    }
+    return runs;
+  }
+
+  void ApplyTextAttributes(IDWriteTextLayout& layout, const AttributedText& text,
+      std::span<const ParagraphFontRun> runs) {
+    for (const auto& run : runs) {
+      const auto range = run.range;
+      const auto& resolved = run.font;
       ThrowIfFailed(layout.SetFontCollection(resolved.collection.Get(), range),
           "HuxerUI could not set paragraph font collection");
       ThrowIfFailed(layout.SetFontStretch(resolved.stretch, range), "HuxerUI could not set paragraph font stretch");
       ThrowIfFailed(layout.SetFontFamilyName(resolved.name.c_str(), range), "HuxerUI could not set paragraph font family");
-      ThrowIfFailed(layout.SetFontSize(run.style.font.Size(), range), "HuxerUI could not set paragraph font size");
+      ThrowIfFailed(layout.SetFontSize(run.size, range), "HuxerUI could not set paragraph font size");
       ThrowIfFailed(layout.SetFontWeight(resolved.weight, range),
           "HuxerUI could not set paragraph font weight");
       ThrowIfFailed(
@@ -823,10 +931,10 @@ struct Win32Renderer::Impl {
               resolved.style, range),
           "HuxerUI could not set paragraph font slant"
       );
-      ThrowIfFailed(layout.SetUnderline(HasTextDecoration(run.style.decoration, TextDecoration::Underline), range),
+      ThrowIfFailed(layout.SetUnderline(HasTextDecoration(run.decoration, TextDecoration::Underline), range),
           "HuxerUI could not set paragraph underline");
       ThrowIfFailed(
-          layout.SetStrikethrough(HasTextDecoration(run.style.decoration, TextDecoration::StrikeThrough), range),
+          layout.SetStrikethrough(HasTextDecoration(run.decoration, TextDecoration::StrikeThrough), range),
           "HuxerUI could not set paragraph strikethrough");
     }
     for (const auto& object : text.InlineObjects()) {
@@ -834,10 +942,6 @@ struct Win32Renderer::Impl {
       replacement.Attach(new Win32InlineObject(object));
       ThrowIfFailed(layout.SetInlineObject(replacement.Get(), {static_cast<UINT32>(object.offset), 1}),
           "HuxerUI could not configure a DirectWrite inline object");
-    }
-    // Only drawing layouts retain device brushes; measurement and interaction layouts stay device-independent.
-    if (drawing) {
-      ApplyTextForeground(layout, text);
     }
   }
 
@@ -898,14 +1002,6 @@ struct Win32Renderer::Impl {
     return L"Segoe UI";
   }
 
-  struct ResolvedFont {
-    ComPtr<IDWriteFontCollection> collection;
-    std::wstring name;
-    DWRITE_FONT_WEIGHT weight;
-    DWRITE_FONT_STYLE style;
-    DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
-  };
-
   ResolvedFont ResolveFont(const Font& font, FontRetentions& retained) {
     if (auto face = ResolveFontFace(font)) {
       auto cached = custom_fonts_.find(face->identity);
@@ -930,30 +1026,42 @@ struct Win32Renderer::Impl {
         font.Slant() == FontSlant::Italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL};
   }
 
-  ComPtr<IDWriteTextFormat> CreateTextFormat(const Font& font, FontRetentions& retained, std::string_view locale = {}) {
-    wchar_t locale_name[LOCALE_NAME_MAX_LENGTH]{};
-    std::wstring requested_locale;
-    if (locale.empty()) {
-      if (GetUserDefaultLocaleName(locale_name, static_cast<int>(std::size(locale_name))) == 0) {
-        wcscpy_s(locale_name, L"en-us");
-      }
-    } else {
-      requested_locale = Utf8ToWide(locale);
+  static std::wstring DefaultTextLocale() {
+    wchar_t name[LOCALE_NAME_MAX_LENGTH]{};
+    if (GetUserDefaultLocaleName(name, static_cast<int>(std::size(name))) == 0) {
+      return L"en-us";
     }
+    return name;
+  }
 
+  void UpdateTextLocale() {
+    auto locale = WideToUtf8(DefaultTextLocale());
+    if (locale != paragraph_locale_) {
+      paragraph_locale_ = std::move(locale);
+      paragraphs_ = {};
+    }
+  }
+
+  void ResolveDefaultLocale(TextShapingOptions& shaping) {
+    if (!shaping.locale.empty()) {
+      return;
+    }
+    if (paragraph_locale_.empty()) {
+      UpdateTextLocale();
+    }
+    shaping.locale = paragraph_locale_;
+  }
+
+  ComPtr<IDWriteTextFormat> CreateTextFormat(const Font& font, FontRetentions& retained, std::string_view locale = {}) {
+    return CreateTextFormat(ResolveFont(font, retained), font.Size(),
+                            locale.empty() ? DefaultTextLocale() : Utf8ToWide(locale));
+  }
+
+  ComPtr<IDWriteTextFormat> CreateTextFormat(const ResolvedFont& font, float size, const std::wstring& locale) {
     ComPtr<IDWriteTextFormat> format;
-    const auto resolved = ResolveFont(font, retained);
     ThrowIfFailed(
-        write_factory_->CreateTextFormat(
-            resolved.name.c_str(),
-            resolved.collection.Get(),
-            resolved.weight,
-            resolved.style,
-            resolved.stretch,
-            font.Size(),
-            requested_locale.empty() ? locale_name : requested_locale.c_str(),
-            format.GetAddressOf()
-        ),
+        write_factory_->CreateTextFormat(font.name.c_str(), font.collection.Get(), font.weight, font.style,
+            font.stretch, size, locale.c_str(), format.GetAddressOf()),
         "HuxerUI could not create a DirectWrite text format"
     );
     return format;
@@ -1075,47 +1183,40 @@ struct Win32Renderer::Impl {
     return inserted->second;
   }
 
-  CachedParagraph ParagraphFor(const DrawTextCommand& command) {
-    ValidateParagraphLength(command.text);
+  std::shared_ptr<CachedParagraph> ParagraphFor(const DrawTextCommand& command) {
     const Size size{command.rect.width, command.rect.height};
-    const auto cached = paragraphs_.find(
-        ParagraphKeyView{command.text, command.style.font, command.style.decoration, command.options, size}
-    );
-    if (cached != paragraphs_.end()) {
-      return cached->second;
+    auto options = command.options;
+    options.vertical_align = TextVerticalAlign::Top;
+    ResolveDefaultLocale(options.shaping);
+    if (auto cached = paragraphs_.Find({command.text, command.style.font, command.style.decoration, options, size})) {
+      return cached;
     }
 
-    const std::wstring text = Utf8ToWide(command.text.PlainText());
-    FontRetentions fonts;
-    ComPtr<IDWriteTextFormat> format = CreateTextFormat(command.style.font, fonts, command.options.shaping.locale);
-    ConfigureTextFormat(*format.Get(), command.options, text);
-    ComPtr<IDWriteTextLayout> layout;
+    const auto paragraph = ParagraphInputsFor(command.text, command.style, options.shaping, true);
+    const auto& inputs = *paragraph->inputs;
+    auto format = CreateTextFormat(inputs.base_font, command.style.font.Size(), Utf8ToWide(options.shaping.locale));
+    auto drawing_options = options;
+    drawing_options.shaping.direction = inputs.direction;
+    ConfigureTextFormat(*format.Get(), drawing_options, inputs.text);
+    auto result = std::make_shared<CachedParagraph>();
     ThrowIfFailed(
         write_factory_->CreateTextLayout(
-            text.data(),
-            static_cast<UINT32>(text.size()),
+            inputs.text.data(),
+            static_cast<UINT32>(inputs.text.size()),
             format.Get(),
             command.rect.width,
             command.rect.height,
-            layout.GetAddressOf()
+            result->layout.GetAddressOf()
         ),
         "HuxerUI could not create a DirectWrite text paragraph"
     );
-    ApplyTextAttributes(*layout.Get(), command.text, command.style, true, fonts);
-    constexpr std::size_t maximum_paragraphs = 256;
-    const auto cost = ParagraphCacheCost(command.text);
-    // Draw oversized paragraphs without retaining their full body or evicting reusable cache entries.
-    if (cost > paragraph_cache_budget) {
-      return {std::move(fonts), layout, cost};
-    }
-    while (!paragraphs_.empty() &&
-           (paragraphs_.size() >= maximum_paragraphs || paragraph_bytes_ + cost > paragraph_cache_budget)) {
-      paragraph_bytes_ -= paragraphs_.begin()->second.cost;
-      paragraphs_.erase(paragraphs_.begin());
-    }
-    paragraph_bytes_ += cost;
-    CachedParagraph result{std::move(fonts), layout, cost};
-    paragraphs_.emplace(ParagraphKey{command.text, command.style.font, command.style.decoration, command.options, size}, result);
+    ApplyTextAttributes(*result->layout.Get(), command.text, inputs.runs);
+    // Only the drawable layout owns D2D effects.
+    ApplyTextForeground(*result->layout.Get(), command.text);
+    result->fonts = paragraph->fonts;
+    result->cost = ParagraphCacheCost(command.text);
+    paragraphs_.Store(
+        {command.text, command.style.font, command.style.decoration, std::move(options), size}, result, true);
     return result;
   }
 
@@ -1485,8 +1586,7 @@ struct Win32Renderer::Impl {
 
   void DiscardDeviceResources() noexcept {
     // Paragraph drawing effects retain D2D brushes, so those layouts cannot survive device resource recreation.
-    paragraphs_.clear();
-    paragraph_bytes_ = 0;
+    paragraphs_ = {};
     clip_stack_.clear();
     transform_stack_.clear();
     DiscardSizeDependentResources();
@@ -1717,8 +1817,8 @@ struct Win32Renderer::Impl {
       return;
     }
     const auto* resolved = dynamic_cast<const Win32TextLayout*>(prepared);
-    const auto paragraph = resolved ? CachedParagraph{} : ParagraphFor(command);
-    auto* layout = resolved ? resolved->Layout() : paragraph.layout.Get();
+    const auto paragraph = resolved ? nullptr : ParagraphFor(command);
+    auto* layout = resolved ? resolved->Layout() : paragraph->layout.Get();
     struct TemporaryForeground {
       IDWriteTextLayout* layout;
       UINT32 length;
@@ -2855,8 +2955,8 @@ struct Win32Renderer::Impl {
   std::uint64_t external_texture_draw_epoch_ = 0;
   std::unordered_map<Font, FontMetrics, FontHash> font_metrics_;
   std::unordered_map<TextRunKey, CachedTextRun, TextRunKeyHash, TextRunKeyEqual> text_runs_;
-  std::unordered_map<ParagraphKey, CachedParagraph, ParagraphKeyHash, ParagraphKeyEqual> paragraphs_;
-  std::size_t paragraph_bytes_ = 0;
+  ParagraphCache paragraphs_;
+  std::string paragraph_locale_;
   std::vector<ClipState> clip_stack_;
   std::vector<D2D1_MATRIX_3X2_F> transform_stack_;
 #if defined(HUXERUI_WINDOWS_7_COMPAT)
@@ -2877,8 +2977,7 @@ void Win32Renderer::Discard() noexcept {
   impl_->pixel_textures_.clear();
   impl_->d3d11_textures_.clear();
   impl_->platform_composition_ = false;
-  impl_->paragraphs_.clear();
-  impl_->paragraph_bytes_ = 0;
+  impl_->paragraph_locale_.clear();
   impl_->text_runs_.clear();
   impl_->font_metrics_.clear();
   impl_->wic_factory_.Reset();
@@ -2892,6 +2991,10 @@ void Win32Renderer::Discard() noexcept {
   }
 #endif
   impl_->window_ = nullptr;
+}
+
+void Win32Renderer::UpdateTextLocale() {
+  impl_->UpdateTextLocale();
 }
 
 void Win32Renderer::ResetDeviceResources() noexcept {

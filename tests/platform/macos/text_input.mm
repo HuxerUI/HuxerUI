@@ -248,6 +248,46 @@ TEST_CASE("TestMacTextInputNextSelectorUsesRuntimeFocusAction") {
 
 } // namespace
 
+TEST_CASE("MacParagraphMeasurementDoesNotChangeDrawingBaselines") {
+  @autoreleasepool {
+    const auto text = AttributedText::FromRanges(
+        "Ag · 👩‍💻 العربية", {{{0, 2}, {.font_weight = FontWeight::Bold}}});
+    const TextStyle style{Font::System(15.0F), Color::Black()};
+    detail::AppKitRenderer measured;
+    detail::AppKitRenderer direct;
+    for (const auto wrap : {TextWrap::Word, TextWrap::NoWrap}) {
+      const TextLayoutOptions options{.align = TextAlign::Center, .vertical_align = TextVerticalAlign::Center,
+                                      .wrap = wrap};
+      constexpr float width = 160.0F;
+      const float measure_width = wrap == TextWrap::Word ? width : std::numeric_limits<float>::infinity();
+      const auto metrics = measured.MeasureText(text, style, measure_width, options);
+      for (const float height : {metrics.size.height, metrics.size.height + 8.0F}) {
+        const Rect bounds{0.0F, 0.0F, width, height};
+        RenderNode root;
+        PaintContext paint(root.content, bounds);
+        paint.DrawText(bounds, text, style, options);
+        paint.Finish();
+        const RenderFrame frame{.scene = {.root = &root}};
+        const auto draw = [&](detail::AppKitRenderer& renderer) {
+          std::vector<std::uint32_t> pixels(160 * 48);
+          CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
+          CGContextRef context = CGBitmapContextCreate(pixels.data(), 160, 48, 8, 160 * sizeof(std::uint32_t),
+              color_space, kCGImageAlphaPremultipliedLast);
+          CGColorSpaceRelease(color_space);
+          REQUIRE(context);
+          CGContextTranslateCTM(context, 0.0F, 48.0F);
+          CGContextScaleCTM(context, 1.0F, -1.0F);
+          renderer.Draw(context, CGRectMake(0.0F, 0.0F, 160.0F, 48.0F), &frame);
+          CGContextRelease(context);
+          return pixels;
+        };
+        REQUIRE(draw(measured) == draw(direct));
+        REQUIRE(measured.MeasureText(text, style, measure_width, options) == metrics);
+      }
+    }
+  }
+}
+
 TEST_CASE("MacTextLayoutAlignsExplicitNoWrapLinesWithinAvailableWidth") {
   @autoreleasepool {
     detail::AppKitRenderer renderer;

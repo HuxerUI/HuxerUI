@@ -56,6 +56,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -168,14 +169,7 @@ public final class HuxerUIView extends ViewGroup {
     private final LruCache<PathKey, Path> pathCache = new LruCache<>(128);
     private final LruCache<FontKey, Typeface> fontCache = new LruCache<>(32);
     private final LruCache<String, Typeface> customFontCache = new LruCache<>(32);
-    private static final int PARAGRAPH_CACHE_BUDGET = 8 * 1024 * 1024;
-    private final LruCache<ParagraphKey, HuxerUITextLayout> paragraphCache =
-            new LruCache<ParagraphKey, HuxerUITextLayout>(PARAGRAPH_CACHE_BUDGET) {
-                @Override
-                protected int sizeOf(ParagraphKey key, HuxerUITextLayout layout) {
-                    return key.retainedBytes();
-                }
-            };
+    private final ParagraphCache paragraphCache = new ParagraphCache();
     private final LruCache<Long, Bitmap> imageCache = new LruCache<Long, Bitmap>(IMAGE_CACHE_BUDGET) {
         @Override
         protected int sizeOf(Long identity, Bitmap bitmap) {
@@ -590,7 +584,7 @@ public final class HuxerUIView extends ViewGroup {
             shadowRenderer = null;
         }
         pathCache.evictAll();
-        paragraphCache.evictAll();
+        paragraphCache.clear();
         imageCache.evictAll();
         frameScheduled = false;
         frameTime = 0L;
@@ -614,6 +608,7 @@ public final class HuxerUIView extends ViewGroup {
     @Override
     protected void onConfigurationChanged(Configuration newConfiguration) {
         super.onConfigurationChanged(newConfiguration);
+        paragraphCache.clear();
         if (nativeHandle != 0L) {
             float displayScale = resourceScale();
             if (density != displayScale) {
@@ -1775,8 +1770,8 @@ public final class HuxerUIView extends ViewGroup {
         if (Float.isFinite(maxWidth) && maxWidth <= 0.0F) {
             return new float[5];
         }
-        HuxerUITextLayout layout = (HuxerUITextLayout) createTextLayout(utf8, fontSize, maxWidth, familyKind,
-                familyName, weight, slant, 0, alignment, wrap, direction, utf8Locale, attributes);
+        HuxerUITextLayout layout = paragraphFor(utf8, fontSize, maxWidth, familyKind,
+                familyName, weight, slant, 0, alignment, wrap, direction, utf8Locale, attributes, false);
         float[] metrics = layout.measure();
         if (Float.isFinite(maxWidth)) {
             metrics[0] = (float) Math.ceil(Math.min(metrics[0], maxWidth));
@@ -1853,26 +1848,8 @@ public final class HuxerUIView extends ViewGroup {
         if (width <= 0.0F || height <= 0.0F) {
             return;
         }
-        String text = new String(utf8, StandardCharsets.UTF_8);
-        String resolvedFamily = new String(familyName, StandardCharsets.UTF_8);
-        String locale = new String(utf8Locale, StandardCharsets.UTF_8);
-        ParagraphKey key = new ParagraphKey(text, attributes, fontSize, familyKind, resolvedFamily, weight,
-                slant, decoration, alignment, wrap, direction, locale, width);
-        // Look up raw immutable inputs before constructing spans, resolving fonts, or measuring natural width.
-        HuxerUITextLayout layout = paragraphCache.get(key);
-        if (layout == null) {
-            prepareTextPaint(fontSize, color, familyKind, resolvedFamily, weight, slant, decoration, locale);
-            layout = new HuxerUITextLayout(attributedText(text, attributes), new TextPaint(textPaint), width,
-                    toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
-            // Bypass retention before insertion so one oversized paragraph cannot evict every reusable entry.
-            if (key.retainedBytes() <= PARAGRAPH_CACHE_BUDGET) {
-                java.util.Map<ParagraphKey, HuxerUITextLayout> retained = paragraphCache.snapshot();
-                if (retained.size() >= 256) {
-                    paragraphCache.remove(retained.keySet().iterator().next());
-                }
-                paragraphCache.put(key, layout);
-            }
-        }
+        HuxerUITextLayout layout = paragraphFor(utf8, fontSize, width, familyKind, familyName, weight, slant,
+                decoration, alignment, wrap, direction, utf8Locale, attributes, true);
         float remainingHeight = Math.max(0.0F, height - layout.height());
         float verticalOffset = 0.0F;
         if (verticalAlignment == TEXT_VERTICAL_ALIGN_CENTER) {
@@ -1880,16 +1857,47 @@ public final class HuxerUIView extends ViewGroup {
         } else if (verticalAlignment == TEXT_VERTICAL_ALIGN_BOTTOM) {
             verticalOffset = remainingHeight;
         }
-        drawPreparedText(canvas, layout, x, y, width, height, paragraphOffsetX, verticalOffset + paragraphOffsetY,
-                color);
+        float horizontalOffset = wrap == TEXT_WRAP_WORD ? 0.0F
+                : layout.horizontalOffset(width, toTextAlignment(alignment), direction);
+        drawParagraph(canvas, layout, x + horizontalOffset + paragraphOffsetX, y + (verticalOffset + paragraphOffsetY),
+                x, y, width, height, color);
+    }
+
+    private HuxerUITextLayout paragraphFor(byte[] utf8, float fontSize, float width, int familyKind, byte[] familyName,
+            int weight, int slant, int decoration, int alignment, int wrap, int direction, byte[] utf8Locale,
+            byte[] attributes, boolean drawing) {
+        Locale defaultLocale = utf8Locale.length == 0 ? Locale.getDefault() : null;
+        // NoWrap shapes at natural width. The viewport offset belongs to the draw, not the cached layout.
+        float layoutWidth = wrap == TEXT_WRAP_WORD ? width : Float.POSITIVE_INFINITY;
+        ParagraphKey key = new ParagraphKey(utf8, attributes, fontSize, familyKind, familyName, weight,
+                slant, decoration, alignment, wrap, direction, utf8Locale, defaultLocale, layoutWidth);
+        HuxerUITextLayout cached = paragraphCache.get(key, drawing);
+        if (cached != null) {
+            return cached;
+        }
+        String text = new String(utf8, StandardCharsets.UTF_8);
+        String family = new String(familyName, StandardCharsets.UTF_8);
+        Locale locale = defaultLocale != null ? defaultLocale
+                : Locale.forLanguageTag(new String(utf8Locale, StandardCharsets.UTF_8));
+        prepareTextPaint(fontSize, 0xFF000000, familyKind, family, weight, slant, decoration, locale);
+        HuxerUITextLayout layout = new HuxerUITextLayout(attributedText(text, attributes), new TextPaint(textPaint),
+                layoutWidth, toTextAlignment(alignment), wrap == TEXT_WRAP_WORD, direction);
+        paragraphCache.put(key, layout, drawing);
+        return layout;
     }
 
     private void drawPreparedText(Canvas canvas, Object paragraph, float x, float y, float width, float height,
             float paragraphOffsetX, float paragraphOffsetY, int color) {
         HuxerUITextLayout layout = (HuxerUITextLayout) paragraph;
+        drawParagraph(canvas, layout, x + layout.horizontalOffset() + paragraphOffsetX, y + paragraphOffsetY,
+                x, y, width, height, color);
+    }
+
+    private void drawParagraph(Canvas canvas, HuxerUITextLayout layout, float originX, float originY,
+            float x, float y, float width, float height, int color) {
         int saveCount = canvas.save();
         canvas.clipRect(x, y, x + width, y + height);
-        canvas.translate(x + layout.horizontalOffset() + paragraphOffsetX, y + paragraphOffsetY);
+        canvas.translate(originX, originY);
         layout.draw(canvas, color);
         canvas.restoreToCount(saveCount);
     }
@@ -1912,7 +1920,7 @@ public final class HuxerUIView extends ViewGroup {
             String locale = new String(metadata, metadataRanges[metadataIndex + 2], metadataRanges[metadataIndex + 3],
                     StandardCharsets.UTF_8);
             prepareTextPaint(fontSizes[index], colors[index], styles[styleIndex], familyName, styles[styleIndex + 1],
-                    styles[styleIndex + 2], styles[styleIndex + 3], locale);
+                    styles[styleIndex + 2], styles[styleIndex + 3], textLocale(locale));
             boolean rightToLeft = HuxerUITextLayout.isRightToLeft(text, styles[styleIndex + 4]);
             canvas.drawTextRun(text, 0, text.length(), 0, text.length(), baselines[textIndex], baselines[textIndex + 1],
                     rightToLeft, textPaint);
@@ -2228,26 +2236,94 @@ public final class HuxerUIView extends ViewGroup {
             int slant, int decoration, byte[] utf8Locale) {
         String familyName = utf8FamilyName == null ? "" : new String(utf8FamilyName, StandardCharsets.UTF_8);
         String locale = utf8Locale == null ? "" : new String(utf8Locale, StandardCharsets.UTF_8);
-        prepareTextPaint(fontSize, color, familyKind, familyName, weight, slant, decoration, locale);
+        prepareTextPaint(fontSize, color, familyKind, familyName, weight, slant, decoration, textLocale(locale));
+    }
+
+    private static Locale textLocale(String locale) {
+        return locale.isEmpty() ? Locale.getDefault() : Locale.forLanguageTag(locale);
+    }
+
+    private static final class ParagraphCache {
+        private static final int MAX_ENTRIES = 512;
+        private static final int BYTE_BUDGET = 8 * 1024 * 1024;
+        private final LinkedHashMap<ParagraphKey, HuxerUITextLayout> measured = new LinkedHashMap<>(16, 0.75F, true);
+        private final LinkedHashMap<ParagraphKey, HuxerUITextLayout> drawn = new LinkedHashMap<>(16, 0.75F, true);
+        private int bytes;
+        private int drawnBytes;
+
+        HuxerUITextLayout get(ParagraphKey key, boolean drawing) {
+            HuxerUITextLayout layout = drawn.get(key);
+            if (layout != null) {
+                return layout;
+            }
+            layout = drawing ? measured.remove(key) : measured.get(key);
+            if (drawing && layout != null) {
+                drawn.put(key, layout);
+                drawnBytes += key.retainedBytes();
+            }
+            return layout;
+        }
+
+        void put(ParagraphKey key, HuxerUITextLayout layout, boolean drawing) {
+            int cost = key.retainedBytes();
+            // Measurement can use the remaining budget without displacing a paragraph used for drawing.
+            if (cost > BYTE_BUDGET || (!drawing &&
+                    (drawn.size() >= MAX_ENTRIES || drawnBytes + cost > BYTE_BUDGET))) {
+                return;
+            }
+            while (measured.size() + drawn.size() >= MAX_ENTRIES || bytes + cost > BYTE_BUDGET) {
+                if (measured.isEmpty()) {
+                    int removed = evictOldest(drawn);
+                    bytes -= removed;
+                    drawnBytes -= removed;
+                } else {
+                    bytes -= evictOldest(measured);
+                }
+            }
+            if (drawing) {
+                drawn.put(key, layout);
+                drawnBytes += cost;
+            } else {
+                measured.put(key, layout);
+            }
+            bytes += cost;
+        }
+
+        private static int evictOldest(LinkedHashMap<ParagraphKey, HuxerUITextLayout> entries) {
+            java.util.Iterator<ParagraphKey> keys = entries.keySet().iterator();
+            int cost = keys.next().retainedBytes();
+            keys.remove();
+            return cost;
+        }
+
+        void clear() {
+            measured.clear();
+            drawn.clear();
+            bytes = 0;
+            drawnBytes = 0;
+        }
     }
 
     private static final class ParagraphKey {
-        final String text;
+        final byte[] text;
         final byte[] attributes;
         final float fontSize;
         final int familyKind;
-        final String familyName;
+        final byte[] familyName;
         final int weight;
         final int slant;
         final int decoration;
         final int alignment;
         final int wrap;
         final int direction;
-        final String locale;
+        final byte[] locale;
+        final Locale defaultLocale;
         final float width;
+        private final int hash;
 
-        ParagraphKey(String text, byte[] attributes, float fontSize, int familyKind, String familyName, int weight,
-                int slant, int decoration, int alignment, int wrap, int direction, String locale, float width) {
+        ParagraphKey(byte[] text, byte[] attributes, float fontSize, int familyKind, byte[] familyName, int weight,
+                int slant, int decoration, int alignment, int wrap, int direction, byte[] locale, Locale defaultLocale,
+                float width) {
             this.text = text;
             this.attributes = attributes;
             this.fontSize = fontSize;
@@ -2260,11 +2336,28 @@ public final class HuxerUIView extends ViewGroup {
             this.wrap = wrap;
             this.direction = direction;
             this.locale = locale;
+            this.defaultLocale = defaultLocale;
             this.width = width;
+
+            // JNI supplies fresh byte arrays. A lookup can visit both buckets without decoding or rehashing them.
+            int result = Arrays.hashCode(text);
+            result = 31 * result + Arrays.hashCode(attributes);
+            result = 31 * result + Float.floatToIntBits(fontSize);
+            result = 31 * result + familyKind;
+            result = 31 * result + Arrays.hashCode(familyName);
+            result = 31 * result + weight;
+            result = 31 * result + slant;
+            result = 31 * result + decoration;
+            result = 31 * result + alignment;
+            result = 31 * result + wrap;
+            result = 31 * result + direction;
+            result = 31 * result + Arrays.hashCode(locale);
+            result = 31 * result + Objects.hashCode(defaultLocale);
+            hash = 31 * result + Float.floatToIntBits(width);
         }
 
         int retainedBytes() {
-            long bytes = 256L + text.length() * 32L + attributes.length * 2L;
+            long bytes = 256L + text.length * 32L + attributes.length * 2L + familyName.length + locale.length;
             return (int) Math.min(Integer.MAX_VALUE, bytes);
         }
 
@@ -2280,14 +2373,14 @@ public final class HuxerUIView extends ViewGroup {
             return Float.compare(fontSize, key.fontSize) == 0 && familyKind == key.familyKind && weight == key.weight
                     && slant == key.slant && decoration == key.decoration && alignment == key.alignment
                     && wrap == key.wrap && direction == key.direction && Float.compare(width, key.width) == 0
-                    && Objects.equals(text, key.text) && Objects.equals(familyName, key.familyName)
-                    && Objects.equals(locale, key.locale) && Arrays.equals(attributes, key.attributes);
+                    && Arrays.equals(text, key.text) && Arrays.equals(familyName, key.familyName)
+                    && Arrays.equals(locale, key.locale) && Objects.equals(defaultLocale, key.defaultLocale)
+                    && Arrays.equals(attributes, key.attributes);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(text, fontSize, familyKind, familyName, weight, slant, decoration, alignment, wrap,
-                    direction, locale, width, Arrays.hashCode(attributes));
+            return hash;
         }
     }
 
@@ -2343,7 +2436,7 @@ public final class HuxerUIView extends ViewGroup {
     }
 
     private void prepareTextPaint(float fontSize, int color, int familyKind, String familyName, int weight, int slant,
-            int decoration, String locale) {
+            int decoration, Locale locale) {
         Typeface typeface = resolveTypeface(familyKind, familyName, weight, slant);
         textPaint.setTextSize(fontSize);
         textPaint.setColor(color);
@@ -2352,11 +2445,7 @@ public final class HuxerUIView extends ViewGroup {
         textPaint.setUnderlineText((decoration & TEXT_DECORATION_UNDERLINE) != 0);
         textPaint.setStrikeThruText((decoration & TEXT_DECORATION_STRIKE_THROUGH) != 0);
         textPaint.setTextAlign(Paint.Align.LEFT);
-        if (locale == null || locale.isEmpty()) {
-            textPaint.setTextLocale(Locale.getDefault());
-        } else {
-            textPaint.setTextLocale(Locale.forLanguageTag(locale));
-        }
+        textPaint.setTextLocale(locale);
     }
 
     private Layout.Alignment toTextAlignment(int alignment) {
@@ -2424,7 +2513,7 @@ public final class HuxerUIView extends ViewGroup {
             nativeDestroy(nativeHandle);
             nativeHandle = 0L;
         }
-        paragraphCache.evictAll();
+        paragraphCache.clear();
         customFontCache.evictAll();
         fontCache.evictAll();
     }

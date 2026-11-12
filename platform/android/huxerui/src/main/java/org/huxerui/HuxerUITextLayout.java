@@ -213,6 +213,10 @@ final class HuxerUITextLayout {
         return horizontalOffset;
     }
 
+    float horizontalOffset(float availableWidth, Layout.Alignment alignment, int direction) {
+        return resolveHorizontalOffset(text, availableWidth, layout.getWidth(), alignment, direction);
+    }
+
     void draw(Canvas canvas, int color) {
         // Default foreground is late-bound for cache reuse; explicit span colors override it during drawing.
         layout.getPaint().setColor(color);

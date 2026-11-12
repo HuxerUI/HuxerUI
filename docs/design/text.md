@@ -309,9 +309,9 @@ DrawTextRuns remains the exact-run operation for callers that already own line l
 
 Platform-private paragraph construction applies equivalent text, font ranges, options, and constraints to measurement, interaction geometry, and painting.
 Selection and links share one retained geometry layout on their mounted Text. The bounded window cache for public snapshots is keyed by attributed content, style, width, and shaping options. A font metrics change clears that cache, while previously returned values retain their geometry.
-Measurement and painting may create separate platform layout objects because they have different lifetimes and secure-text retention policies.
-Android uses `HuxerUITextLayout` to construct the StaticLayout for all three paths; renderer cache lookup precedes span construction and StaticLayout creation, while editing geometry remains outside that cache.
-Intrinsic and final width constraints can legitimately produce different layouts.
+Ordinary paragraph measurement and drawing share a cache in the platform renderer or host view. Intrinsic and final constraints can produce different layouts. The backend reuses a drawable layout only when its shaping and placement match the draw command, and otherwise reuses compatible inputs.
+Android shares StaticLayout across measurement and drawing. NoWrap uses the natural-width layout and resolves horizontal placement against the draw rectangle. AppKit and UIKit share attributed strings and can reuse a measured CTFrame when the frame dimensions match. DirectWrite shares UTF-16 text and resolved font ranges while keeping device brushes with drawable layouts. Pango already shares its layout cache. Web shares line metrics and computes missing fragment positions at drawing time.
+Editable geometry remains outside the ordinary paragraph cache.
 Vertical placement, scrolling translation, and clipping remain presentation inputs where they do not affect shaping or line breaking.
 PaintCommands carry neutral values. Platform font and layout objects remain behind the backend boundary.
 
@@ -327,9 +327,9 @@ Invalidation compares the projections actually consumed by each stage:
 
 A full attributed-value comparison must not turn every paint-only change into a layout change.
 Caches have bounded memory retention as well as appropriate entry limits, and superseded streaming versions cannot accumulate indefinitely.
-Renderer paragraph caches admit at most 256 entries and charge an estimated eight-megabyte retention budget; oversized entries are used without retention.
+Each renderer bounds the entry count and charges an estimated eight-megabyte retention budget. Oversized entries are used without retention.
 The budget includes source text, attributes, and conservative platform glyph bookkeeping estimates, not a guarantee about the platform allocator's exact resident bytes.
-Linux does not retain a renderer paragraph cache.
+In caches that admit measurement-only entries alongside drawable entries, measurement-only misses cannot evict drawable entries. Drawing promotes a measured entry only when its layout can be drawn directly, and evicts measurement-only entries first.
 Unifying paragraph services must not put secure TextField source text into ordinary renderer caches.
 
 ### Logical selection source

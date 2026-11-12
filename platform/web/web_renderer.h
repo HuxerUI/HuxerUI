@@ -49,8 +49,8 @@ private:
   struct CachedExternalTexture;
   struct CommandRange;
 
-  [[nodiscard]] std::shared_ptr<const WebTextLayout>
-  ParagraphFor(const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
+  std::shared_ptr<WebTextLayout> ParagraphFor(const AttributedText& text, const TextStyle& style, float max_width,
+      const TextLayoutOptions& options, bool drawing);
   [[nodiscard]] const emscripten::val* FrameFor(const std::shared_ptr<ExternalTexture>& texture);
   void DrawTarget(
       const emscripten::val& canvas,
@@ -83,8 +83,10 @@ private:
 
   emscripten::val canvas_;
   emscripten::val context_;
-  std::vector<std::shared_ptr<WebTextLayout>> paragraph_cache_;
+  std::vector<std::shared_ptr<WebTextLayout>> measured_paragraphs_;
+  std::vector<std::shared_ptr<WebTextLayout>> drawn_paragraphs_;
   std::size_t paragraph_bytes_ = 0;
+  std::size_t drawn_paragraph_bytes_ = 0;
   std::vector<std::unique_ptr<CachedExternalTexture>> external_textures_;
   Size viewport_;
   float display_scale_ = 1.0F;

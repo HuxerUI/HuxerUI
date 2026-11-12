@@ -852,6 +852,62 @@ struct AppKitRenderer::Impl {
     float frame_height = 0.0F;
     float content_height = 0.0F;
     std::size_t cost = 0;
+    CFRef<CFAttributedStringRef> attributed{};
+    TextLayoutMetrics metrics;
+
+    bool CanDrawAtHeight(float height) const noexcept {
+      return frame.Get() && frame_height == height;
+    }
+  };
+
+  struct ParagraphCache {
+    using Entries = std::unordered_map<ParagraphKey, std::shared_ptr<CachedParagraph>,
+                                       ParagraphKeyHash, ParagraphKeyEqual>;
+    Entries measured;
+    Entries drawn;
+    std::size_t bytes = 0;
+    std::size_t drawn_bytes = 0;
+
+    std::shared_ptr<CachedParagraph> Find(const ParagraphKeyView& key, float draw_height = 0.0F) {
+      const auto paint = drawn.find(key);
+      if (paint != drawn.end()) {
+        return paint->second;
+      }
+      const auto measure = measured.find(key);
+      if (measure == measured.end()) {
+        return nullptr;
+      }
+      auto paragraph = measure->second;
+      if (draw_height > 0.0F && paragraph->CanDrawAtHeight(draw_height)) {
+        drawn.insert(measured.extract(measure));
+        drawn_bytes += paragraph->cost;
+      }
+      return paragraph;
+    }
+
+    void Store(ParagraphKey key, const std::shared_ptr<CachedParagraph>& paragraph, bool drawing) {
+      constexpr std::size_t maximum_paragraphs = 256;
+      const auto cost = paragraph->cost;
+      // Measurement can use the remaining budget without evicting paragraphs already used by drawing.
+      if (cost > paragraph_cache_budget || (!drawing &&
+          (drawn.size() >= maximum_paragraphs || drawn_bytes + cost > paragraph_cache_budget))) {
+        return;
+      }
+      while (measured.size() + drawn.size() >= maximum_paragraphs || bytes + cost > paragraph_cache_budget) {
+        auto& entries = measured.empty() ? drawn : measured;
+        const auto entry = entries.begin();
+        bytes -= entry->second->cost;
+        if (measured.empty()) {
+          drawn_bytes -= entry->second->cost;
+        }
+        entries.erase(entry);
+      }
+      (drawing ? drawn : measured).emplace(std::move(key), paragraph);
+      bytes += cost;
+      if (drawing) {
+        drawn_bytes += cost;
+      }
+    }
   };
 
   CachedFont& FontFor(const Font& font) {
@@ -946,16 +1002,26 @@ struct AppKitRenderer::Impl {
 
   std::shared_ptr<CachedParagraph> ParagraphFor(const DrawTextCommand& command) {
     const Size size{command.rect.width, command.rect.height};
-    const auto cached = paragraphs.find(ParagraphKeyView{command.text, command.style, command.options, size});
-    if (cached != paragraphs.end()) {
-      return cached->second;
+    auto options = command.options;
+    options.vertical_align = TextVerticalAlign::Top;
+    if (auto cached = paragraphs.Find({command.text, command.style, options, size})) {
+      return cached;
     }
 
-    CachedFont& cached_font = FontFor(command.style.font);
-    CFRef<CFAttributedStringRef> attributed{
-        CreateAttributedString(command.text, command.style, command.options, cached_font.ct_font.Get(), true)
-    };
-    CFRef<CTFramesetterRef> framesetter{CTFramesetterCreateWithAttributedString(attributed.Get())};
+    auto measured = paragraphs.Find({command.text, command.style, options, {size.width, 0.0F}}, size.height);
+    if (!measured && options.wrap == TextWrap::NoWrap) {
+      measured = paragraphs.Find(
+          {command.text, command.style, options, {std::numeric_limits<float>::infinity(), 0.0F}});
+    }
+    if (measured && measured->CanDrawAtHeight(size.height)) {
+      return measured;
+    }
+
+    const auto& font = FontFor(command.style.font);
+    CFRef<CFAttributedStringRef> attributed{measured ? nullptr
+        : CreateAttributedString(command.text, command.style, options, font.ct_font.Get(), true)};
+    CFRef<CTFramesetterRef> framesetter{
+        CTFramesetterCreateWithAttributedString(measured ? measured->attributed.Get() : attributed.Get())};
     const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
         framesetter.Get(),
         CFRangeMake(0, 0),
@@ -964,27 +1030,15 @@ struct AppKitRenderer::Impl {
         nullptr
     );
     const float content_height =
-        std::max(cached_font.metrics.LineHeight(), std::ceil(static_cast<float>(suggested.height)));
-    const float frame_height =
-        command.options.wrap == TextWrap::NoWrap ? std::max(size.height, content_height) : size.height;
+        std::max(font.metrics.LineHeight(), std::ceil(static_cast<float>(suggested.height)));
+    const float frame_height = options.wrap == TextWrap::NoWrap ? std::max(size.height, content_height) : size.height;
     CFRef<CGPathRef> path{CGPathCreateWithRect(CGRectMake(0.0, 0.0, size.width, frame_height), nullptr)};
     CFRef<CTFrameRef> frame{CTFramesetterCreateFrame(framesetter.Get(), CFRangeMake(0, 0), path.Get(), nullptr)};
 
-    const auto cost = ParagraphCacheCost(command.text);
-    // Return an owning handle even when an oversized frame bypasses cache retention.
     auto paragraph = std::make_shared<CachedParagraph>(
-        CachedParagraph{std::move(frame), frame_height, content_height, cost});
-    if (cost > paragraph_cache_budget) {
-      return paragraph;
-    }
-    constexpr std::size_t maximum_paragraphs = 256;
-    while (!paragraphs.empty() &&
-           (paragraphs.size() >= maximum_paragraphs || paragraph_bytes + cost > paragraph_cache_budget)) {
-      paragraph_bytes -= paragraphs.begin()->second->cost;
-      paragraphs.erase(paragraphs.begin());
-    }
-    paragraph_bytes += cost;
-    paragraphs.emplace(ParagraphKey{command.text, command.style, command.options, size}, paragraph);
+        CachedParagraph{std::move(frame), frame_height, content_height, ParagraphCacheCost(command.text),
+                        CFRef<CFAttributedStringRef>{}, {}});
+    paragraphs.Store({command.text, command.style, std::move(options), size}, paragraph, true);
     return paragraph;
   }
 
@@ -1121,8 +1175,7 @@ struct AppKitRenderer::Impl {
 
   std::unordered_map<Font, CachedFont, FontHash> fonts;
   std::unordered_map<RunKey, CachedRun, RunKeyHash, RunKeyEqual> runs;
-  std::unordered_map<ParagraphKey, std::shared_ptr<CachedParagraph>, ParagraphKeyHash, ParagraphKeyEqual> paragraphs;
-  std::size_t paragraph_bytes = 0;
+  ParagraphCache paragraphs;
   std::vector<CachedImage> images;
   std::size_t image_cache_bytes = 0;
   __strong CIContext* external_texture_context = nil;
@@ -1133,7 +1186,7 @@ struct AppKitRenderer::Impl {
 class MacTextLayout final : public TextLayoutBackend {
 public:
   MacTextLayout(const AttributedText& paragraph, const TextStyle& style, float max_width,
-      const TextLayoutOptions& options) {
+      const TextLayoutOptions& options, CFAttributedStringRef prepared = nullptr) {
     const auto& text = paragraph.PlainText();
     string_ = [[NSString alloc] initWithBytes:text.data() length:text.size() encoding:NSUTF8StringEncoding];
     CTFontRef font = CreateFont(style.font);
@@ -1148,8 +1201,8 @@ public:
 
     if ((!constrained || options.wrap == TextWrap::NoWrap) &&
         [string_ rangeOfCharacterFromSet:HardLineBreakCharacters()].location == NSNotFound) {
-      CFRef<CFAttributedStringRef> attributed{CreateAttributedString(paragraph, style, options)};
-      line_ = CTLineCreateWithAttributedString(attributed.Get());
+      CFRef<CFAttributedStringRef> attributed{prepared ? nullptr : CreateAttributedString(paragraph, style, options)};
+      line_ = CTLineCreateWithAttributedString(prepared ? prepared : attributed.Get());
       CGFloat ascent = 0.0;
       CGFloat descent = 0.0;
       CGFloat leading = 0.0;
@@ -1169,8 +1222,9 @@ public:
       return;
     }
 
-    CFAttributedStringRef attributed = CreateAttributedString(paragraph, style, options, nullptr, true);
-    CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(attributed);
+    CFRef<CFAttributedStringRef> attributed{
+        prepared ? nullptr : CreateAttributedString(paragraph, style, options, nullptr, true)};
+    CTFramesetterRef framesetter = CTFramesetterCreateWithAttributedString(prepared ? prepared : attributed.Get());
     const bool soft_wrap = constrained && options.wrap == TextWrap::Word;
     const CGFloat suggested_width = soft_wrap ? static_cast<CGFloat>(std::max(1.0F, max_width)) : CGFLOAT_MAX;
     const CGSize suggested = CTFramesetterSuggestFrameSizeWithConstraints(
@@ -1181,7 +1235,8 @@ public:
         nullptr
     );
     const float width = soft_wrap ? suggested_width : std::max(1.0F, std::ceil(static_cast<float>(suggested.width)));
-    const float height = std::max(line_height_, std::ceil(static_cast<float>(suggested.height)));
+    suggested_height_ = std::ceil(static_cast<float>(suggested.height));
+    const float height = std::max(line_height_, suggested_height_);
     // NoWrap measures at natural width; translate explicit lines to match drawing within the available width.
     horizontal_offset_ = soft_wrap ? 0.0F : TextAlignmentOffset(options.align, direction, max_width, width);
     CGPathRef path = CGPathCreateWithRect(CGRectMake(0.0, 0.0, width, height), nullptr);
@@ -1215,7 +1270,7 @@ public:
       });
     }
     if (line_records_.empty()) {
-      line_ = CTLineCreateWithAttributedString(attributed);
+      line_ = CTLineCreateWithAttributedString(prepared ? prepared : attributed.Get());
     }
     const float first_baseline = line_records_.empty() ? line_height_ : height - line_records_.front().origin.y;
     const float last_baseline = line_records_.empty() ? first_baseline : height - line_records_.back().origin.y;
@@ -1228,7 +1283,6 @@ public:
 
     CGPathRelease(path);
     CFRelease(framesetter);
-    CFRelease(attributed);
   }
 
   ~MacTextLayout() override {
@@ -1269,6 +1323,8 @@ public:
   CTFrameRef Frame() const noexcept { return frame_; }
   CTLineRef Line() const noexcept { return line_; }
   float HorizontalOffset() const noexcept { return horizontal_offset_; }
+
+  float SuggestedHeight() const noexcept { return suggested_height_; }
 
   const TextLayoutMetrics& MetricsValue() const noexcept {
     return metrics_;
@@ -1506,6 +1562,7 @@ private:
   Size size_;
   TextLayoutMetrics metrics_;
   float line_height_ = 0.0F;
+  float suggested_height_ = 0.0F;
   float horizontal_offset_ = 0.0F;
 };
 
@@ -1540,12 +1597,31 @@ TextLayoutMetrics AppKitRenderer::MeasureText(const AttributedText& text, const 
   if (std::isfinite(max_width) && max_width <= 0.0F) {
     return {};
   }
-  MacTextLayout layout(text, style, max_width, options);
-  TextLayoutMetrics metrics = layout.MetricsValue();
-  if (std::isfinite(max_width)) {
-    metrics.size.width = std::min(metrics.size.width, max_width);
+  auto shaping = options;
+  shaping.vertical_align = TextVerticalAlign::Top;
+  const Size key_size{max_width, 0.0F}; // Drawing entries have a positive height.
+  if (const auto cached = impl_->paragraphs.Find({text, style, shaping, key_size})) {
+    return cached->metrics;
   }
-  return metrics;
+
+  const auto& font = impl_->FontFor(style.font);
+  auto paragraph = std::make_shared<Impl::CachedParagraph>();
+  paragraph->attributed =
+      CFRef<CFAttributedStringRef>{CreateAttributedString(text, style, shaping, font.ct_font.Get(), true)};
+  MacTextLayout layout(text, style, max_width, shaping, paragraph->attributed.Get());
+  paragraph->metrics = layout.MetricsValue();
+  if (std::isfinite(max_width)) {
+    paragraph->metrics.size.width = std::min(paragraph->metrics.size.width, max_width);
+  }
+  // A measured CTFrame has the same line origins as drawing only for an identical frame rectangle.
+  if (shaping.wrap == TextWrap::Word && std::isfinite(max_width) && max_width >= 1.0F && layout.Frame()) {
+    paragraph->frame = CFRef<CTFrameRef>{static_cast<CTFrameRef>(CFRetain(layout.Frame()))};
+    paragraph->frame_height = paragraph->metrics.size.height;
+    paragraph->content_height = std::max(font.metrics.LineHeight(), layout.SuggestedHeight());
+  }
+  paragraph->cost = ParagraphCacheCost(text);
+  impl_->paragraphs.Store({text, style, std::move(shaping), key_size}, paragraph, false);
+  return paragraph->metrics;
 }
 
 std::unique_ptr<TextLayoutBackend> AppKitRenderer::CreatePlatformTextLayout(

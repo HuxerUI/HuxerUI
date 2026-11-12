@@ -596,6 +596,29 @@ TEST_CASE("LinuxParagraphCacheRepeatedWrapsAreStable") {
   renderer.Discard();
 }
 
+TEST_CASE("LinuxParagraphMeasurementIsStableAfterDrawingAnAlignedNoWrapParagraph") {
+  detail::LinuxRenderer renderer;
+  renderer.Initialize();
+  const AttributedText text("Ag · 👩‍💻 العربية");
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  const TextLayoutOptions options{.align = TextAlign::Center, .wrap = TextWrap::NoWrap};
+  const Rect bounds{0.0F, 0.0F, 240.0F, 32.0F};
+  const auto before = renderer.MeasureText(text, style, bounds.width, options);
+
+  RenderNode root;
+  PaintContext paint(root.content, bounds);
+  paint.DrawText(bounds, text, style, options);
+  paint.Finish();
+  const RenderFrame frame{.scene = {.root = &root}, .damage = {.full = true}, .revision = 1};
+  cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 240, 32);
+  REQUIRE(cairo_surface_status(surface) == CAIRO_STATUS_SUCCESS);
+  RenderSnapshot(renderer, frame, surface);
+  cairo_surface_destroy(surface);
+
+  REQUIRE(renderer.MeasureText(text, style, bounds.width, options) == before);
+  renderer.Discard();
+}
+
 TEST_CASE("LinuxParagraphCacheSurvivesEviction") {
   detail::LinuxRenderer renderer;
   renderer.Initialize();
