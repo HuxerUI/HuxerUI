@@ -174,6 +174,7 @@ Only a top-level desktop HuxerUI build registers SDK installation and CPack beha
 `huxerui_add_app`:
 
 - Creates an executable, application bundle, or Android application library for the active platform.
+- Enables MSVC `/utf-8` for application sources so ordinary string literals preserve the text APIs' UTF-8 contract.
 - Links a canonical HuxerUI target.
 - Enables composable code generation after all declared sources are known.
 - Registers the optional resource root.

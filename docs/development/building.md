@@ -40,6 +40,7 @@ cmake --build build --parallel
 
 On Windows, select an installed Visual Studio generator or use a developer shell configured for MSVC.
 Do not use MinGW for the Windows backend.
+`huxerui_add_app` enables MSVC `/utf-8` so source text and ordinary string literals use UTF-8, including in generated composable sources. Manually created application targets must select UTF-8 themselves when passing non-ASCII literals to HuxerUI text APIs.
 
 Useful project options:
 
