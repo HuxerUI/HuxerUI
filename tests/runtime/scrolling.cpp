@@ -934,6 +934,101 @@ TEST_CASE("TestScrollControllerExampleButtonsAndFollowUpFrame") {
   REQUIRE(runtime.RootNode()->children[1]->scroll_state->offset_y == 0.0F);
 }
 
+const detail::MountedNode* FindTextNode(const detail::MountedNode& node, std::string_view text) {
+  if (node.text.PlainText() == text) {
+    return &node;
+  }
+  for (const std::unique_ptr<detail::MountedNode>& child : node.children) {
+    if (child) {
+      if (const detail::MountedNode* found = FindTextNode(*child, text)) {
+        return found;
+      }
+    }
+  }
+  return nullptr;
+}
+
+TEST_CASE("ScrollView without FillViewport keeps short content at its natural extent") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return ScrollView(Column {
+      Text("Short content"),
+    }.With(MainAlign(MainAxisAlignment::End)));
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  runtime.BuildFrame();
+  const detail::MountedNode* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->scroll_state != nullptr);
+  REQUIRE(root->scroll_state->content_height == 20.0F);
+  const detail::MountedNode* text = FindTextNode(*root, "Short content");
+  REQUIRE(text != nullptr);
+  REQUIRE(text->PresentationBounds().y == 0.0F);
+}
+
+TEST_CASE("ScrollView FillViewport raises short content to the viewport extent") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return ScrollView(Column {
+      Text("Short content"),
+    }.With(MainAlign(MainAxisAlignment::End))).FillViewport();
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  runtime.BuildFrame();
+  const detail::MountedNode* root = runtime.RootNode();
+  REQUIRE(root != nullptr);
+  REQUIRE(root->scroll_state != nullptr);
+  REQUIRE(root->scroll_state->content_height == 200.0F);
+  const detail::MountedNode* text = FindTextNode(*root, "Short content");
+  REQUIRE(text != nullptr);
+  REQUIRE(text->PresentationBounds().y == Catch::Approx(180.0F));
+}
+
+TEST_CASE("ScrollView FillViewport follows the horizontal scroll axis") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return ScrollView(Row {
+      Text("Abc"),
+    }.With(MainAlign(MainAxisAlignment::End)))
+        .ScrollAxis(Axis::Horizontal)
+        .FillViewport();
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 40.0F}});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->scroll_state->content_width == 200.0F);
+  const detail::MountedNode* text = FindTextNode(*runtime.RootNode(), "Abc");
+  REQUIRE(text != nullptr);
+  REQUIRE(text->PresentationBounds().x == Catch::Approx(170.0F));
+}
+
+TEST_CASE("ScrollView FillViewport keeps larger content scrollable") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return ScrollView(Column {
+      Text("Oversized"),
+    }.With(Frame{.height = 400.0F}, MainAlign(MainAxisAlignment::End))).FillViewport();
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->scroll_state->content_height == 400.0F);
+  runtime.HandleScrollInput(ScrollInputEvent{{100.0F, 100.0F}, 0.0F, 100.0F});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->scroll_state->offset_y == 100.0F);
+}
+
+TEST_CASE("ScrollView FillViewport raises both enabled axes") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return ScrollView(Column {
+      Spacer().With(Frame{40.0F, 30.0F}),
+    }).ScrollBothAxes().FillViewport();
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 150.0F}});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->scroll_state->content_width == 200.0F);
+  REQUIRE(runtime.RootNode()->scroll_state->content_height == 150.0F);
+}
+
 TEST_CASE("TestScrollControllerRefinesVariableItemAlignmentAfterRealization") {
   TestPlatform platform;
   UiWindow runtime{VariableExtentScrollApp, platform};
