@@ -1791,11 +1791,8 @@ public:
   /// Connects a stable controller to one axis selected by ScrollBothAxes(). Use a distinct controller for each axis.
   ScrollView Controller(Axis axis, huxerui::ScrollController controller) &&;
   /// Raises the content's minimum extent along every enabled scroll axis.
-  ///
-  /// Bottom-anchored feeds combine this with a MainAlign(MainAxisAlignment::End) content column:
-  /// short content sits at the viewport end, and content larger than the viewport still scrolls normally.
-  /// Only enabled scroll axes are affected. When an axis has no bounded viewport, its incoming minimum constraint
-  /// is forwarded to the content instead of zero, so a positive parent minimum still reaches short content.
+  /// Uses the bounded viewport extent or the incoming minimum on an unbounded axis.
+  /// Larger content can still scroll normally.
   ScrollView FillViewport() &&;
 };
 

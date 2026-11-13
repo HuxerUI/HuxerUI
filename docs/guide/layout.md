@@ -162,9 +162,9 @@ return ScrollView(content)
 Use `ScrollBar()` as a modifier to draw an interactive indicator on each axis with a scroll range.
 The scrollbar reads committed scroll geometry; it does not own or duplicate the content offset.
 
-Call `.FillViewport()` when short content should occupy the whole scroll viewport.
-It raises the content's minimum extent on every enabled axis, using the viewport extent on a bounded axis and the scroll view's incoming minimum on an unbounded one; content that is intrinsically larger keeps its size and still scrolls.
-Bottom-anchored feeds combine it with a `MainAlign(MainAxisAlignment::End)` content column so a short transcript sits at the end of the viewport.
+Use `.FillViewport()` to give short content the viewport's extent along each scroll axis. On an unbounded axis it uses the incoming minimum. Larger content still scrolls normally.
+
+Combine it with `MainAlign(MainAxisAlignment::End)` to place a short transcript at the bottom.
 
 ```cpp
 return ScrollView(
@@ -173,20 +173,6 @@ return ScrollView(
     }.With(MainAlign(MainAxisAlignment::End))
 ).FillViewport();
 ```
-
-Typical uses:
-
-- Bottom-anchored transcripts, logs, and activity feeds whose short content should sit against the composer or footer.
-- Empty states and placeholder pages that should center or bottom-align inside the viewport instead of shrinking to the top.
-- Form sheets with footer actions that stay at the bottom until the form grows beyond the viewport.
-- Full-viewport canvases, backgrounds, and selection surfaces whose painted and hit-tested area must cover the complete viewport.
-- Short horizontal rows, tab strips, and carousels that should span the viewport while still scrolling when they overflow.
-- Two-axis boards whose pan surface should be at least the viewport in both directions.
-
-The method only changes measurement: on each enabled scroll axis it raises the content minimum to the bounded viewport extent or, when that axis has no bounded extent, to the scroll view's incoming minimum constraint.
-It leaves the maximum unbounded and does not affect offset ownership, maximum offset, interaction, or the default shrink-wrapped behavior.
-Content that is intrinsically larger keeps its natural size and scrolls as before.
-With the usual zero minimum, an unbounded axis sees no difference; a positive parent minimum is forwarded to the content instead of being replaced by zero.
 
 An explicit `ScrollPhysics` modifier configures fling and overscroll behavior for one container.
 Without one, the container uses the current platform adapter's default physics.

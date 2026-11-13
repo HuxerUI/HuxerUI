@@ -1029,6 +1029,21 @@ TEST_CASE("ScrollView FillViewport raises both enabled axes") {
   REQUIRE(runtime.RootNode()->scroll_state->content_height == 150.0F);
 }
 
+TEST_CASE("ScrollView FillViewport forwards a minimum on an unbounded axis") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    View inner = ScrollView(Text("Short content")).FillViewport().With(Frame{.min_height = 100.0F});
+    return ScrollView(std::move(inner));
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 200.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.RootNode()->children.size() == 1);
+  const auto& inner = *runtime.RootNode()->children.front();
+  REQUIRE(inner.scroll_state != nullptr);
+  REQUIRE(inner.scroll_state->content_height == 100.0F);
+}
+
 TEST_CASE("TestScrollControllerRefinesVariableItemAlignmentAfterRealization") {
   TestPlatform platform;
   UiWindow runtime{VariableExtentScrollApp, platform};
