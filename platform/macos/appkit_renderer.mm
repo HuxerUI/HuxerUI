@@ -1029,8 +1029,9 @@ struct AppKitRenderer::Impl {
         CGSizeMake(size.width, CGFLOAT_MAX),
         nullptr
     );
-    const float content_height =
-        std::max(font.metrics.LineHeight(), std::ceil(static_cast<float>(suggested.height)));
+    // A paragraph shaped with fallback fonts can be shorter than the base font's line height.
+    const float content_height = suggested.height > 0.0
+        ? std::ceil(static_cast<float>(suggested.height)) : font.metrics.LineHeight();
     const float frame_height = options.wrap == TextWrap::NoWrap ? std::max(size.height, content_height) : size.height;
     CFRef<CGPathRef> path{CGPathCreateWithRect(CGRectMake(0.0, 0.0, size.width, frame_height), nullptr)};
     CFRef<CTFrameRef> frame{CTFramesetterCreateFrame(framesetter.Get(), CFRangeMake(0, 0), path.Get(), nullptr)};
@@ -1207,7 +1208,8 @@ public:
       CGFloat descent = 0.0;
       CGFloat leading = 0.0;
       const double width = CTLineGetTypographicBounds(line_, &ascent, &descent, &leading);
-      line_height_ = std::ceil(std::max(line_height_, static_cast<float>(ascent + descent + leading)));
+      const float shaped_height = static_cast<float>(ascent + descent + leading);
+      line_height_ = std::ceil(shaped_height > 0.0F ? shaped_height : line_height_);
       size_ = {
           std::ceil(static_cast<float>(width)),
           line_height_,
@@ -1235,8 +1237,8 @@ public:
         nullptr
     );
     const float width = soft_wrap ? suggested_width : std::max(1.0F, std::ceil(static_cast<float>(suggested.width)));
-    suggested_height_ = std::ceil(static_cast<float>(suggested.height));
-    const float height = std::max(line_height_, suggested_height_);
+    const float height = suggested.height > 0.0
+        ? std::ceil(static_cast<float>(suggested.height)) : line_height_;
     // NoWrap measures at natural width; translate explicit lines to match drawing within the available width.
     horizontal_offset_ = soft_wrap ? 0.0F : TextAlignmentOffset(options.align, direction, max_width, width);
     CGPathRef path = CGPathCreateWithRect(CGRectMake(0.0, 0.0, width, height), nullptr);
@@ -1261,12 +1263,13 @@ public:
       CGFloat descent = 0.0;
       CGFloat leading = 0.0;
       HUXERUI_DISCARD(CTLineGetTypographicBounds(line, &ascent, &descent, &leading));
+      const float shaped_height = static_cast<float>(ascent + descent + leading);
       line_records_.push_back({
           line,
           origins[static_cast<std::size_t>(index)],
           CTLineGetStringRange(line),
           height - static_cast<float>(origins[static_cast<std::size_t>(index)].y) - static_cast<float>(ascent),
-          std::max(line_height_, static_cast<float>(ascent + descent + leading)),
+          shaped_height > 0.0F ? shaped_height : line_height_,
       });
     }
     if (line_records_.empty()) {
@@ -1323,8 +1326,6 @@ public:
   CTFrameRef Frame() const noexcept { return frame_; }
   CTLineRef Line() const noexcept { return line_; }
   float HorizontalOffset() const noexcept { return horizontal_offset_; }
-
-  float SuggestedHeight() const noexcept { return suggested_height_; }
 
   const TextLayoutMetrics& MetricsValue() const noexcept {
     return metrics_;
@@ -1562,7 +1563,6 @@ private:
   Size size_;
   TextLayoutMetrics metrics_;
   float line_height_ = 0.0F;
-  float suggested_height_ = 0.0F;
   float horizontal_offset_ = 0.0F;
 };
 
@@ -1617,7 +1617,7 @@ TextLayoutMetrics AppKitRenderer::MeasureText(const AttributedText& text, const 
   if (shaping.wrap == TextWrap::Word && std::isfinite(max_width) && max_width >= 1.0F && layout.Frame()) {
     paragraph->frame = CFRef<CTFrameRef>{static_cast<CTFrameRef>(CFRetain(layout.Frame()))};
     paragraph->frame_height = paragraph->metrics.size.height;
-    paragraph->content_height = std::max(font.metrics.LineHeight(), layout.SuggestedHeight());
+    paragraph->content_height = paragraph->metrics.size.height;
   }
   paragraph->cost = ParagraphCacheCost(text);
   impl_->paragraphs.Store({text, style, std::move(shaping), key_size}, paragraph, false);

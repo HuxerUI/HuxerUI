@@ -5,6 +5,7 @@
 #include "text/text_internal.h"
 #include "runtime_test_support.h"
 #include "font_test_support.h"
+#include "../support/apple_text_test_support.h"
 
 namespace huxerui::test {
 namespace {
@@ -248,6 +249,14 @@ TEST_CASE("TestMacTextInputNextSelectorUsesRuntimeFocusAction") {
 
 } // namespace
 
+TEST_CASE("MacFallbackTextCentersAtTheExpectedHeight") {
+  REQUIRE(CheckAppleFallbackTextCentering<detail::AppKitRenderer>() == "");
+}
+
+TEST_CASE("MacMixedParagraphGeometryMatchesColdAndWarmDrawing") {
+  REQUIRE(CheckAppleParagraphReplay<detail::AppKitRenderer>() == "");
+}
+
 TEST_CASE("MacParagraphMeasurementDoesNotChangeDrawingBaselines") {
   @autoreleasepool {
     const auto text = AttributedText::FromRanges(
@@ -263,25 +272,10 @@ TEST_CASE("MacParagraphMeasurementDoesNotChangeDrawingBaselines") {
       const auto metrics = measured.MeasureText(text, style, measure_width, options);
       for (const float height : {metrics.size.height, metrics.size.height + 8.0F}) {
         const Rect bounds{0.0F, 0.0F, width, height};
-        RenderNode root;
-        PaintContext paint(root.content, bounds);
-        paint.DrawText(bounds, text, style, options);
-        paint.Finish();
-        const RenderFrame frame{.scene = {.root = &root}};
-        const auto draw = [&](detail::AppKitRenderer& renderer) {
-          std::vector<std::uint32_t> pixels(160 * 48);
-          CGColorSpaceRef color_space = CGColorSpaceCreateDeviceRGB();
-          CGContextRef context = CGBitmapContextCreate(pixels.data(), 160, 48, 8, 160 * sizeof(std::uint32_t),
-              color_space, kCGImageAlphaPremultipliedLast);
-          CGColorSpaceRelease(color_space);
-          REQUIRE(context);
-          CGContextTranslateCTM(context, 0.0F, 48.0F);
-          CGContextScaleCTM(context, 1.0F, -1.0F);
-          renderer.Draw(context, CGRectMake(0.0F, 0.0F, 160.0F, 48.0F), &frame);
-          CGContextRelease(context);
-          return pixels;
-        };
-        REQUIRE(draw(measured) == draw(direct));
+        constexpr Size viewport{width, 48.0F};
+        const auto cold = RasterizeAppleText(direct, text, style, options, bounds, viewport, 1);
+        REQUIRE_FALSE(cold.empty());
+        REQUIRE(RasterizeAppleText(measured, text, style, options, bounds, viewport, 1) == cold);
         REQUIRE(measured.MeasureText(text, style, measure_width, options) == metrics);
       }
     }

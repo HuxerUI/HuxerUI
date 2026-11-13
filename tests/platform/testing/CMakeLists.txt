@@ -15,6 +15,8 @@ elseif (IOS)
     )
     xctest_add_bundle(huxerui_ui_testing_smoke huxerui_ui_testing_host ios.mm smoke.cpp
             ../ios/file_reference.mm ../ios/presentation.mm)
+    target_include_directories(huxerui_ui_testing_smoke PRIVATE
+            "${HUXERUI_PROJECT_DIR}/src" "${HUXERUI_PROJECT_DIR}/platform/ios")
     set_source_files_properties(../ios/file_reference.mm ../ios/presentation.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
     # Xcode embeds the test bundle itself; making PlugIns a build directory duplicates its mkdir output.
     set_target_properties(huxerui_ui_testing_smoke PROPERTIES
