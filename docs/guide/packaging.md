@@ -33,7 +33,7 @@ Linux requires `appimagetool`, `patchelf` 0.19.0 or newer, and binutils on `PATH
 | Android | `arm64-v8a`, `x86_64` | One APK with the selected ABIs. Termux supports only `arm64-v8a`. |
 | Windows | `x86_64` | One application or installer. |
 | Linux | `aarch64`, `x86_64` | A separate build and AppImage per ABI. When packaging both, the CLI publishes them under `dist/linux/<abi>`. Use one ABI with `run`. |
-| macOS | `arm64`, `x86_64` | One app bundle and DMG. Building both architectures requires `--source` and universal dependencies. |
+| macOS | `arm64`, `x86_64` | One app bundle and DMG. Building both architectures requires a HuxerUI source checkout selected with `--sdk` and universal dependencies. |
 | iOS | `arm64` for devices, `arm64` or `x86_64` for simulators | One bundle for the selected destination. Simulator builds can contain both slices when supported by Xcode. |
 | Web | `wasm32` | One Web deployment. |
 
@@ -42,10 +42,10 @@ Linux requires `appimagetool`, `patchelf` 0.19.0 or newer, and binutils on `PATH
 ```bash
 huxerui package android --abi arm64
 huxerui build android --abi arm64-v8a,x64
-huxerui package macos --abi arm64,x86_64 --source ../HuxerUI
+huxerui package macos --abi arm64,x86_64 --sdk ../HuxerUI
 ```
 
-For an explicit Linux cross-build, select HuxerUI with `--source` and set `CMAKE_TOOLCHAIN_FILE` to a CMake toolchain for the non-host ABI. The toolchain must supply the target compiler and dependency paths. An explicit host ABI uses the native toolchain, so a two-ABI invocation can build both the native and cross targets.
+For an explicit Linux cross-build, select a HuxerUI source checkout with `--sdk` and set `CMAKE_TOOLCHAIN_FILE` to a CMake toolchain for the non-host ABI. The toolchain must supply the target compiler and dependency paths. An explicit host ABI uses the native toolchain, so a two-ABI invocation can build both the native and cross targets.
 
 ## Android signing
 
@@ -76,7 +76,7 @@ huxerui build web --profile release --optimization minsize --lto on
 
 Direct CMake builds use `-DHUXERUI_OPTIMIZATION=size -DHUXERUI_ENABLE_LTO=ON`.
 Android Studio builds use Gradle properties `huxeruiOptimization` and `huxeruiLto`; iOS shells use the corresponding `HUXERUI_OPTIMIZATION` and `HUXERUI_ENABLE_LTO` build settings.
-Prebuilt SDK archives retain their published optimization level; use `--source` to rebuild HuxerUI itself with different settings.
+Prebuilt SDK archives retain their published optimization level. Select a source checkout with `--sdk` to rebuild HuxerUI with different settings.
 Measure the final APK or platform package with the same ABIs and resources when choosing an optimization level.
 
 ## Windows URL scheme registration

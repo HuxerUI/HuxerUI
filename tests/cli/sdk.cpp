@@ -2,25 +2,17 @@
 
 using namespace huxerui::cli::test;
 
-TEST_CASE("HuxerUICliBuildSelectionRequiresAnExplicitSourceOverride") {
+TEST_CASE("HuxerUICliBuildSelectionRequiresAnExplicitSdkOverrideForSource") {
   using namespace huxerui::cli;
   TemporaryDirectory temporary;
   const auto source = std::filesystem::path(HUXERUI_TEST_SOURCE_DIRECTORY);
   REQUIRE_THROWS_WITH(ResolveBuildHome(source, std::nullopt, temporary.Path()),
-                      Catch::Matchers::ContainsSubstring("--source"));
+                      Catch::Matchers::ContainsSubstring("--sdk"));
   REQUIRE_THROWS_AS(ResolveBuildHome({}, std::nullopt, temporary.Path()), std::runtime_error);
   const auto selected = ResolveBuildHome(temporary.Path() / "missing-sdk", source, temporary.Path());
   REQUIRE(std::filesystem::equivalent(selected, source));
   REQUIRE(BuildHomeKey(selected) == BuildHomeKey(source / "."));
   REQUIRE(BuildHomeKey(selected) != BuildHomeKey(temporary.Path()));
-}
-
-TEST_CASE("HuxerUICliValidatesExplicitSourceCheckouts") {
-  const std::filesystem::path source = huxerui::cli::ResolveHuxerUISource(HUXERUI_TEST_SOURCE_DIRECTORY);
-  REQUIRE(std::filesystem::equivalent(source, HUXERUI_TEST_SOURCE_DIRECTORY));
-
-  TemporaryDirectory temporary;
-  REQUIRE_THROWS_AS(huxerui::cli::ResolveHuxerUISource(temporary.Path()), std::runtime_error);
 }
 
 TEST_CASE("HuxerUICliValidatesUpdateOptionsBeforeLocatingSdk") {

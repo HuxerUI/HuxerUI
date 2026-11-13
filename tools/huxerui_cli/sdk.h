@@ -11,9 +11,9 @@ namespace huxerui::cli {
 /// Identifies incremental output by the normalized framework location.
 [[nodiscard]] std::string BuildHomeKey(const std::filesystem::path& home);
 
-/// Validates an explicit source override before validating the configured SDK candidate.
+/// Resolves an explicit SDK installation or source checkout, or validates the default installed SDK.
 [[nodiscard]] std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
-    const std::optional<std::filesystem::path>& source, const std::filesystem::path& working_directory);
+    const std::optional<std::filesystem::path>& sdk_override, const std::filesystem::path& working_directory);
 
 /// Identifies how the CLI located the active HuxerUI SDK.
 enum class SdkLocationSource {
@@ -45,7 +45,7 @@ struct SdkLocation {
 ///
 /// @param executable_path Resolved CLI executable path.
 /// @return The configured location, or source `Missing` when no SDK is available.
-/// Environment selections are validated by the consuming command so --source can override an invalid SDK path.
+/// Environment selections are validated by the consuming command so --sdk can override an invalid SDK path.
 [[nodiscard]] SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path);
 
 /// Rejects source checkouts, missing installations, and a CLI belonging to another SDK.
@@ -63,12 +63,6 @@ void ValidateSdkUpdate(const SdkLocation& sdk, const std::filesystem::path& exec
 /// @return Installer exit code, or zero after a successful Windows updater handoff.
 int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool check_only, bool assume_yes,
               std::ostream& output);
-
-/// Resolves and validates an explicit HuxerUI source checkout.
-/// @param path Repository root, either absolute or relative to the current working directory.
-/// @return The absolute, normalized repository root.
-/// @throws std::runtime_error if `path` is not a HuxerUI source checkout.
-[[nodiscard]] std::filesystem::path ResolveHuxerUISource(const std::filesystem::path& path);
 
 /// Locates the canonical application-development Skill in an SDK or source checkout.
 /// @param huxerui_home SDK prefix or repository root.

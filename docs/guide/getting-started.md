@@ -55,25 +55,25 @@ huxerui run web
 
 Use `--profile release` for a release configuration.
 Use `--generator <name>` only when the host has multiple compatible CMake generators and an explicit selection is required.
-Use `--source <path>` to compile HuxerUI from one explicit source checkout for that build instead of consuming the installed SDK binaries:
+Use `--sdk <path>` to select an installed SDK or a HuxerUI source checkout for `build`, `run`, `package`, or `open ios`. A source checkout builds HuxerUI from source.
 
 ```bash
-huxerui run windows --source ../HuxerUI
+huxerui run windows --sdk ../HuxerUI
 ```
 
-The source override applies only to that CLI process and its build children; it does not replace the configured `HUXERUI_HOME` in the parent shell. It works without an installed SDK. Without `--source`, the CLI requires an installed SDK; setting `HUXERUI_HOME` to a source checkout does not implicitly select source mode.
+The selection applies only to that invocation and its build children. Without `--sdk`, the CLI looks for an installed SDK via `HUXERUI_HOME` or the CLI's own installation. Pass `--sdk` explicitly for a source checkout.
 
 Direct CMake builds of generated projects use `-DHUXERUI_HOME=<path>`. CMake loads the source checkout or installed package at that location. Use a separate build directory for each framework location; the CLI does this automatically.
 
 The SDK CLI also provides an independent mcpp frontend for projects that own an `mcpp.toml` manifest:
 
 ```bash
-huxerui mcpp build --source ../my-mcpp-project
+huxerui mcpp build --project ../my-mcpp-project
 ```
 
-This command invokes mcpp directly and does not change the existing HuxerUI CMake build or platform commands. It is a generic mcpp entry point; the mcpp project remains responsible for its own sources, dependencies, and framework integration.
+`--project` defaults to the current directory. The CLI invokes mcpp directly, and the mcpp project owns its sources, dependencies, and framework integration.
 
-The CLI passes the selected framework home through its process environment and build arguments without writing it into platform configuration files. Direct Android Studio builds require `HUXERUI_HOME` in the IDE's environment; direct Xcode builds require it in the IDE's environment or explicit build settings, such as `Config/Local.xcconfig`. An already running IDE does not inherit the CLI's temporary environment or remember its last `--source` selection.
+The CLI passes the selected framework home through its process environment and build arguments without writing it into platform configuration files. Direct Android Studio builds require `HUXERUI_HOME` in the IDE's environment; direct Xcode builds require it in the IDE's environment or explicit build settings, such as `Config/Local.xcconfig`. An already running IDE does not inherit the CLI's temporary environment or remember its last `--sdk` selection.
 
 Android and iOS accept a device selected from:
 
@@ -183,19 +183,21 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
-huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
-huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] [--source <path>] [--java-home <path>]
-huxerui open ios [--source <path>]
+huxerui build [platform-list] [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
+huxerui run <platform> [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui package <platform-list> [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui open ios [--sdk <path>]
 ```
+
+Use `b`, `r`, and `pkg` as short forms of `build`, `run`, and `package`. These commands and `open` accept `-h` or `--help` immediately after the command name.
 
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
 Packaged application artifacts are collected under `dist/<platform>`.
 Desktop packages are a Windows setup executable, macOS DMG, or Linux AppImage; see [Packaging Applications](packaging.md) for runtime payload and custom Windows installer guidance.
 Use [`--abi <abi-list>`](packaging.md#target-abis) with `build`, `run`, or `package` to select target ABIs for one platform.
 Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
-Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`; set it to a positive job count to limit concurrent compilation, including builds using `--source`. When unset, the selected build tool uses its default concurrency.
+Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`; set it to a positive job count to limit concurrent compilation, including builds using `--sdk`. When unset, the selected build tool uses its default concurrency.
 The generated `CMakeLists.txt` keeps source discovery, target creation, resources, and library dependencies explicit.
 Its sibling `HuxerUIProject.cmake` contains the generated project plan, SDK discovery, and platform-shell connection details.
 New applications start at version `0.1.0`, independently of the HuxerUI SDK version; Android and iOS retain their own platform version settings.

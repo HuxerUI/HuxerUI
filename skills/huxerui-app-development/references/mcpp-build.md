@@ -24,10 +24,10 @@ Read the installed exported targets and platform package fragments for include p
 The frontend accepts:
 
 ```text
-huxerui mcpp build --source <project> [--release] [--locked] [--offline] [--verbose]
+huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
 ```
 
-Here `--source` selects the mcpp project directory containing `mcpp.toml`; it is not the CMake CLI's framework-source override. Use `mcpp run` when the configured project supplies a runnable target. Follow the installed mcpp version's manifest syntax rather than treating CMake settings as interchangeable keys.
+`--project` selects the directory containing `mcpp.toml` and defaults to the current directory. Use `mcpp run` when the configured project supplies a runnable target. Follow the installed mcpp version's manifest syntax.
 
 ## Diagnose and validate
 

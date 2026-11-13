@@ -28,6 +28,11 @@ public:
 };
 
 constexpr std::string_view version = HUXERUI_CLI_VERSION;
+constexpr std::array<std::pair<std::string_view, std::string_view>, 3> command_aliases{{
+    {"b", "build"},
+    {"r", "run"},
+    {"pkg", "package"},
+}};
 
 struct AgentSkillMapping {
   std::string_view id;
@@ -45,6 +50,28 @@ constexpr std::array agent_skill_mappings{
     AgentSkillMapping{"zcode", AgentSkillDirectory::ZCode},
 };
 
+constexpr std::string_view build_options =
+    "[-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]";
+constexpr std::string_view sdk_option_help =
+    "--sdk <path> selects an installed SDK or a HuxerUI source checkout for this invocation.\n";
+
+void PrintBuildOptions(std::ostream& output) {
+  output << sdk_option_help
+         << "Build, run, and package accept --abi <abi-list> for a single platform.\n"
+         << "They also accept --optimization default|size|minsize and --lto on|off.\n";
+}
+
+void PrintBuildHelp(std::ostream& output, std::string_view command) {
+  output << "Usage:\n  huxerui " << command;
+  if (command == "open") {
+    output << " ios [--sdk <path>]\n\n" << sdk_option_help;
+    return;
+  }
+  const auto platforms = command == "build" ? "[platform-list]" : command == "run" ? "<platform>" : "<platform-list>";
+  output << ' ' << platforms << ' ' << build_options << "\n\n";
+  PrintBuildOptions(output);
+}
+
 void PrintHelp(std::ostream& output) {
   output << "HuxerUI project and platform tool\n\n"
          << "Usage:\n"
@@ -58,19 +85,19 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui setup <platform-list> [--yes]\n"
          << "  huxerui update [--check] [--version <version>] [--yes]\n"
          << "  huxerui devices [platform]\n"
-         << "  huxerui build [platform-list] [--device <id>] [--profile debug|release] [--generator <name>] "
-            "[--source <path>] [--java-home <path>]\n"
-         << "  huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]\n"
-         << "  huxerui run <platform> [--device <id>] [--profile debug|release] [--generator <name>] "
-            "[--source <path>] [--java-home <path>]\n"
-         << "  huxerui package <platform-list> [--device <id>] [--profile debug|release] [--generator <name>] "
-            "[--source <path>] [--java-home <path>]\n"
-         << "  huxerui open ios [--source <path>]\n"
-         << "  huxerui --version\n\n"
-         << "A platform list is a comma-separated list or all.\n"
-         << "Build, run, and package accept --abi <abi-list> for a single platform.\n"
-         << "They also accept --optimization default|size|minsize and --lto on|off.\n"
-         << "Without --platform, an app and a common library's Preview enable all platforms.\n"
+         << "  huxerui build [platform-list] " << build_options << '\n'
+         << "  huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]\n"
+         << "  huxerui run <platform> " << build_options << '\n'
+         << "  huxerui package <platform-list> " << build_options << '\n'
+         << "  huxerui open ios [--sdk <path>]\n"
+         << "  huxerui --version\n\n";
+  output << "Command aliases:\n";
+  for (const auto& [alias, command] : command_aliases) {
+    output << "  " << alias << "  " << command << '\n';
+  }
+  output << "\nA platform list is a comma-separated list or all.\n";
+  PrintBuildOptions(output);
+  output << "Without --platform, an app and a common library's Preview enable all platforms.\n"
          << "An agent list is comma-separated and supports ";
   for (std::size_t index = 0; index < agent_skill_mappings.size(); ++index) {
     if (index > 0) {
@@ -686,7 +713,7 @@ int RunDevices(std::span<const std::string_view> arguments, std::ostream& output
 
 struct BuildOptions {
   std::optional<std::string_view> platforms;
-  std::optional<std::filesystem::path> source;
+  std::optional<std::filesystem::path> sdk_override;
   std::optional<std::filesystem::path> java_home;
   std::string profile = "debug";
   std::string device;
@@ -702,79 +729,66 @@ struct BuildOptions {
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
   BuildOptions options;
   for (std::size_t index = 1; index < arguments.size(); ++index) {
-    if (arguments[index] == "--profile") {
-      if (++index >= arguments.size()) {
-        throw UsageError("--profile requires a value");
+    const std::string_view option = arguments[index];
+    const auto read_value = [&]() {
+      if (++index == arguments.size() || arguments[index].empty() || arguments[index].starts_with('-')) {
+        throw UsageError(std::string(option) + " requires a value");
       }
-      options.profile = arguments[index];
+      return arguments[index];
+    };
+    if (option == "--profile") {
+      options.profile = read_value();
       options.profile_explicit = true;
       if (options.profile != "debug" && options.profile != "release") {
         throw UsageError("profile must be debug or release");
       }
-    } else if (arguments[index] == "--abi") {
+    } else if (option == "--abi") {
       if (!options.abis.empty()) {
         throw UsageError("--abi may be specified only once");
       }
-      if (++index >= arguments.size() || arguments[index].starts_with("--")) {
-        throw UsageError("--abi requires a comma-separated ABI list");
-      }
-      const auto abis = SplitList(arguments[index], "ABI");
+      const auto abis = SplitList(read_value(), "ABI");
       options.abis.assign(abis.begin(), abis.end());
-    } else if (arguments[index] == "--optimization") {
+    } else if (option == "--optimization") {
       if (options.optimization) {
         throw UsageError("--optimization may be specified only once");
       }
-      if (++index >= arguments.size()) {
-        throw UsageError("--optimization requires a value");
-      }
-      if (arguments[index] != "default" && arguments[index] != "size" && arguments[index] != "minsize") {
+      const auto optimization = read_value();
+      if (optimization != "default" && optimization != "size" && optimization != "minsize") {
         throw UsageError("optimization must be default, size, or minsize");
       }
-      options.optimization = arguments[index];
-    } else if (arguments[index] == "--lto") {
+      options.optimization = optimization;
+    } else if (option == "--lto") {
       if (options.lto) {
         throw UsageError("--lto may be specified only once");
       }
-      if (++index >= arguments.size()) {
-        throw UsageError("--lto requires a value");
-      }
-      if (arguments[index] != "on" && arguments[index] != "off") {
+      const auto lto = read_value();
+      if (lto != "on" && lto != "off") {
         throw UsageError("lto must be on or off");
       }
-      options.lto = arguments[index] == "on";
-    } else if (arguments[index] == "--device") {
-      if (++index >= arguments.size()) {
-        throw UsageError("--device requires a value");
+      options.lto = lto == "on";
+    } else if (option == "--device" || option == "-d") {
+      if (!options.device.empty()) {
+        throw UsageError("--device may be specified only once");
       }
-      options.device = arguments[index];
-    } else if (arguments[index] == "--generator") {
-      if (++index >= arguments.size()) {
-        throw UsageError("--generator requires a value");
+      options.device = read_value();
+    } else if (option == "--generator") {
+      options.cmake_generator = read_value();
+    } else if (option == "--sdk") {
+      if (options.sdk_override) {
+        throw UsageError("--sdk may be specified only once");
       }
-      options.cmake_generator = arguments[index];
-    } else if (arguments[index] == "--source") {
-      if (options.source) {
-        throw UsageError("--source may be specified only once");
-      }
-      if (++index >= arguments.size()) {
-        throw UsageError("--source requires a value");
-      }
-      options.source = std::filesystem::path(arguments[index]);
-    } else if (arguments[index] == "--java-home") {
+      options.sdk_override = std::filesystem::path(read_value());
+    } else if (option == "--java-home") {
       if (options.java_home) {
         throw UsageError("--java-home may be specified only once");
       }
-      if (++index >= arguments.size()) {
-        throw UsageError("--java-home requires a value");
-      }
-      if (arguments[index].empty()) {
-        throw UsageError("--java-home requires a non-empty path");
-      }
-      options.java_home = std::filesystem::path(arguments[index]);
+      options.java_home = std::filesystem::path(read_value());
+    } else if (option.starts_with('-')) {
+      throw UsageError("unknown option: " + std::string(option));
     } else if (!options.platforms) {
-      options.platforms = arguments[index];
+      options.platforms = option;
     } else {
-      throw UsageError("unexpected argument: " + std::string(arguments[index]));
+      throw UsageError("unexpected argument: " + std::string(option));
     }
   }
   if (!command.empty() && !options.platforms) {
@@ -784,9 +798,9 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
 }
 
 std::filesystem::path ResolveAndExportBuildHome(const std::filesystem::path& sdk_home,
-                                                const std::optional<std::filesystem::path>& source,
+                                                const std::optional<std::filesystem::path>& sdk_override,
                                                 const std::filesystem::path& working_directory) {
-  const std::filesystem::path huxerui_home = ResolveBuildHome(sdk_home, source, working_directory);
+  const std::filesystem::path huxerui_home = ResolveBuildHome(sdk_home, sdk_override, working_directory);
   SetProcessEnvironmentVariable("HUXERUI_HOME", huxerui_home.string());
   return huxerui_home;
 }
@@ -1026,7 +1040,7 @@ std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::
 int RunBuild(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
              const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, {});
-  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -1047,7 +1061,7 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
 int RunApplication(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
                    const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "run");
-  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -1159,7 +1173,7 @@ void PublishPackageArtifacts(std::span<const PackageArtifact> artifacts, const s
 int RunPackage(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
                const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "package");
-  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
   if (!options.profile_explicit) {
     options.profile = "release";
   }
@@ -1198,13 +1212,13 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
             const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "open");
   if (!options.platforms || *options.platforms != "ios") {
-    throw UsageError("open usage: huxerui open ios [--source <path>]");
+    throw UsageError("open usage: huxerui open ios [--sdk <path>]");
   }
   if (options.profile_explicit || !options.device.empty() || !options.cmake_generator.empty() || options.java_home ||
       options.optimization || options.lto || !options.abis.empty()) {
-    throw UsageError("open accepts only --source <path>");
+    throw UsageError("open accepts only --sdk <path>");
   }
-  const std::filesystem::path huxerui_home = ResolveAndExportBuildHome(sdk_home, options.source, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -1257,37 +1271,49 @@ int Run(std::span<const std::string_view> arguments, const std::filesystem::path
       output << "huxerui " << version << '\n';
       return 0;
     }
-    if (arguments[0] == "create") {
+    std::string_view command = arguments.front();
+    for (const auto& [alias, canonical] : command_aliases) {
+      if (command == alias) {
+        command = canonical;
+        break;
+      }
+    }
+    if (arguments.size() == 2 && (arguments[1] == "--help" || arguments[1] == "-h") &&
+        (command == "build" || command == "run" || command == "package" || command == "open")) {
+      PrintBuildHelp(output, command);
+      return 0;
+    }
+    if (command == "create") {
       return RunCreate(arguments, working_directory, sdk.home, output);
     }
-    if (arguments[0] == "platform") {
+    if (command == "platform") {
       return RunPlatform(arguments, working_directory, output);
     }
-    if (arguments[0] == "doctor") {
+    if (command == "doctor") {
       return RunDoctor(arguments, working_directory, sdk, output);
     }
-    if (arguments[0] == "setup") {
+    if (command == "setup") {
       return RunSetup(arguments, sdk, input, output);
     }
-    if (arguments[0] == "update") {
+    if (command == "update") {
       return RunUpdate(arguments, sdk, output);
     }
-    if (arguments[0] == "devices") {
+    if (command == "devices") {
       return RunDevices(arguments, output);
     }
-    if (arguments[0] == "mcpp") {
+    if (command == "mcpp") {
       return mcpp::Run(arguments.subspan(1), working_directory, output, error);
     }
-    if (arguments[0] == "build") {
+    if (command == "build") {
       return RunBuild(arguments, working_directory, sdk.home, output);
     }
-    if (arguments[0] == "run") {
+    if (command == "run") {
       return RunApplication(arguments, working_directory, sdk.home, output);
     }
-    if (arguments[0] == "package") {
+    if (command == "package") {
       return RunPackage(arguments, working_directory, sdk.home, output);
     }
-    if (arguments[0] == "open") {
+    if (command == "open") {
       return RunOpen(arguments, working_directory, sdk.home, output);
     }
     throw UsageError("unknown command: " + std::string(arguments[0]));

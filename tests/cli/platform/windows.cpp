@@ -165,7 +165,9 @@ TEST_CASE("HuxerUICliRejectsDeviceSelectionForDesktopRunsBeforeBuilding") {
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
-  const std::vector<std::string_view> arguments{"run", "windows", "--device", "phone", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
+  const std::vector<std::string_view> arguments{
+      "r", "windows", "-d", "phone", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY
+  };
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;

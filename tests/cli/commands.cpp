@@ -25,7 +25,9 @@ TEST_CASE("HuxerUICliHelpListsSupportedAgents") {
   REQUIRE(invocation.output.find("none") != std::string::npos);
   REQUIRE(invocation.output.find("--namespace <cpp-namespace>") != std::string::npos);
   REQUIRE(invocation.output.find("--target <public-cmake-target>") != std::string::npos);
-  REQUIRE(invocation.output.find("--source <path>") != std::string::npos);
+  REQUIRE(invocation.output.find("--sdk <path>") != std::string::npos);
+  REQUIRE(invocation.output.find("--project <dir>") != std::string::npos);
+  REQUIRE(invocation.output.find("-d|--device <id>") != std::string::npos);
   REQUIRE(invocation.output.find("--java-home <path>") != std::string::npos);
   REQUIRE(invocation.output.find("--abi <abi-list>") != std::string::npos);
   REQUIRE(invocation.output.find("a common library's Preview enable all platforms") != std::string::npos);
@@ -57,22 +59,58 @@ TEST_CASE("HuxerUICliMcppRequiresAManifest") {
 
   REQUIRE(invocation.result == 1);
   REQUIRE(invocation.error.find("mcpp.toml") != std::string::npos);
+
+  std::filesystem::create_directory(temporary.Path() / "other project");
+  const auto selected = Invoke(temporary.Path(), {"mcpp", "build", "--project", "other project"});
+  REQUIRE(selected.result == 1);
+  REQUIRE(selected.error.find((temporary.Path() / "other project").string()) != std::string::npos);
+  const auto missing = Invoke(temporary.Path(), {"mcpp", "build", "--project", "--release"});
+  REQUIRE(missing.result == 2);
+  REQUIRE(missing.error.find("--project requires a directory") != std::string::npos);
 }
 
-TEST_CASE("HuxerUICliRejectsInvalidSourceBuildOptions") {
+TEST_CASE("HuxerUICliRejectsInvalidSdkAndDeviceOptions") {
   TemporaryDirectory temporary;
-  const Invocation missing = Invoke(temporary.Path(), {"build", "windows", "--source"});
-  REQUIRE(missing.result == 2);
-  REQUIRE(missing.error.find("--source requires a value") != std::string::npos);
+  for (const auto option : {"--sdk", "-d", "--generator", "--profile", "--abi", "--java-home"}) {
+    const Invocation missing = Invoke(temporary.Path(), {"build", "windows", option, "--help"});
+    REQUIRE(missing.result == 2);
+    REQUIRE(missing.error.find(std::string(option) + " requires a value") != std::string::npos);
+  }
 
-  const Invocation duplicate =
-      Invoke(temporary.Path(), {"build", "windows", "--source", ".", "--source", "."});
+  const Invocation duplicate = Invoke(temporary.Path(), {"build", "windows", "--sdk", ".", "--sdk", "."});
   REQUIRE(duplicate.result == 2);
-  REQUIRE(duplicate.error.find("--source may be specified only once") != std::string::npos);
+  REQUIRE(duplicate.error.find("--sdk may be specified only once") != std::string::npos);
 
-  const Invocation invalid = Invoke(temporary.Path(), {"build", "windows", "--source", "missing"});
+  const Invocation duplicate_device = Invoke(temporary.Path(), {"r", "ios", "-d", "one", "--device", "two"});
+  REQUIRE(duplicate_device.result == 2);
+  REQUIRE(duplicate_device.error.find("--device may be specified only once") != std::string::npos);
+
+  const Invocation invalid = Invoke(temporary.Path(), {"build", "windows", "--sdk", "missing"});
   REQUIRE(invalid.result == 1);
-  REQUIRE(invalid.error.find("HuxerUI source checkout is invalid:") != std::string::npos);
+  REQUIRE(invalid.error.find("HuxerUI SDK or source checkout is invalid:") != std::string::npos);
+
+  REQUIRE(Invoke(temporary.Path(), {"build", "--source", "."}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"mcpp", "build", "--source", "."}).result == 2);
+}
+
+TEST_CASE("HuxerUICliShortCommandsShareDispatchAndHelp") {
+  TemporaryDirectory temporary;
+  const auto general_help = Invoke(temporary.Path(), {"--help"});
+  for (const auto& [alias, command] : std::array{
+           std::pair{"b", "build"}, std::pair{"r", "run"}, std::pair{"pkg", "package"},
+       }) {
+    const auto help = Invoke(temporary.Path(), {command, "--help"});
+    REQUIRE(help.result == 0);
+    REQUIRE(help.output.find(std::string("huxerui ") + command + " ") != std::string::npos);
+    REQUIRE(Invoke(temporary.Path(), {alias, "-h"}).output == help.output);
+    REQUIRE(general_help.output.find(std::string(alias) + "  " + command) != std::string::npos);
+
+    const auto full = Invoke(temporary.Path(), {command, "windows", "--sdk", "missing"});
+    const auto short_form = Invoke(temporary.Path(), {alias, "windows", "--sdk", "missing"});
+    REQUIRE(short_form.result == full.result);
+    REQUIRE(short_form.error == full.error);
+  }
+  REQUIRE(Invoke(temporary.Path(), {"open", "--help"}).output.find("open ios [--sdk <path>]") != std::string::npos);
 }
 
 TEST_CASE("HuxerUICliDoctorReportsIncompleteAndUnknownPlatforms") {
@@ -126,12 +164,12 @@ TEST_CASE("HuxerUICliRejectsInvalidAbiSelectionsBeforeBuilding") {
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample"}).result == 0);
   const auto project = temporary.Path() / "sample";
   const auto unsupported =
-      Invoke(project, {"build", "web", "--abi", "wasm64", "--source", HUXERUI_TEST_SOURCE_DIRECTORY});
+      Invoke(project, {"build", "web", "--abi", "wasm64", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY});
   REQUIRE(unsupported.result == 2);
   REQUIRE(unsupported.error.find("unsupported ABI for web: wasm64") != std::string::npos);
-  REQUIRE(Invoke(project, {"build", "android,web", "--abi", "arm64", "--source", HUXERUI_TEST_SOURCE_DIRECTORY})
+  REQUIRE(Invoke(project, {"build", "android,web", "--abi", "arm64", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY})
               .result == 2);
-  REQUIRE(Invoke(project, {"run", "linux", "--abi", "x64,arm64", "--source", HUXERUI_TEST_SOURCE_DIRECTORY})
+  REQUIRE(Invoke(project, {"run", "linux", "--abi", "x64,arm64", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY})
               .result == 2);
 }
 
@@ -186,7 +224,9 @@ TEST_CASE("HuxerUICliRejectsJavaHomeOverridesForNonAndroidBuilds") {
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
-  const std::vector<std::string_view> arguments{"build", "windows", "--java-home", "jdk", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
+  const std::vector<std::string_view> arguments{
+      "build", "windows", "--java-home", "jdk", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY
+  };
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;
@@ -210,7 +250,7 @@ TEST_CASE("HuxerUICliRejectsUnknownProjectPlatformsBeforeRun") {
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
   const std::filesystem::path project = temporary.Path() / "sample";
   std::filesystem::create_directories(project / "platform/custom");
-  const std::vector<std::string_view> arguments{"run", "windows", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
+  const std::vector<std::string_view> arguments{"run", "windows", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY};
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;

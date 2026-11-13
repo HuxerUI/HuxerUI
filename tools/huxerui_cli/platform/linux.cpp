@@ -167,7 +167,8 @@ public:
     if (!std::filesystem::is_regular_file(context.huxerui_home / "CMakeLists.txt") ||
         !std::filesystem::is_regular_file(LinuxToolchain(context))) {
       throw std::invalid_argument(
-          "HuxerUI Linux cross-builds require --source and CMAKE_TOOLCHAIN_FILE for " + context.abis.front());
+          "HuxerUI Linux cross-builds require a source checkout via --sdk and CMAKE_TOOLCHAIN_FILE for " +
+          context.abis.front());
     }
   }
 

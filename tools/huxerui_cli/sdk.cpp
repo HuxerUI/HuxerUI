@@ -128,14 +128,6 @@ SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
   return {};
 }
 
-std::filesystem::path ResolveHuxerUISource(const std::filesystem::path& path) {
-  const std::filesystem::path source = Normalize(path);
-  if (!IsSourceHome(source)) {
-    throw std::runtime_error("HuxerUI source checkout is invalid: " + source.string());
-  }
-  return source;
-}
-
 std::string BuildHomeKey(const std::filesystem::path& home) {
   const std::string location = Normalize(home).generic_string();
   std::uint64_t hash = 14695981039346656037ULL;
@@ -148,13 +140,17 @@ std::string BuildHomeKey(const std::filesystem::path& home) {
 }
 
 std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
-    const std::optional<std::filesystem::path>& source, const std::filesystem::path& working_directory) {
-  if (source) {
-    return ResolveHuxerUISource(source->is_absolute() ? *source : working_directory / *source);
+    const std::optional<std::filesystem::path>& sdk_override, const std::filesystem::path& working_directory) {
+  if (sdk_override) {
+    const auto home = Normalize(working_directory / *sdk_override);
+    if (!IsInstalledHome(home) && !IsSourceHome(home)) {
+      throw std::runtime_error("HuxerUI SDK or source checkout is invalid: " + home.string());
+    }
+    return home;
   }
   const auto home = sdk_home.empty() ? std::filesystem::path{} : Normalize(sdk_home);
   if (home.empty() || !IsInstalledHome(home)) {
-    throw std::runtime_error("HuxerUI build requires an installed SDK in HUXERUI_HOME or an explicit --source <path>");
+    throw std::runtime_error("HuxerUI build requires an installed SDK or an explicit --sdk <path>");
   }
   return home;
 }

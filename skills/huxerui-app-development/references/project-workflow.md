@@ -24,8 +24,7 @@ huxerui build windows --profile debug
 huxerui run windows --profile debug
 ```
 
-Use `--source <path>` only when the user explicitly wants the application to compile HuxerUI from a local source checkout instead of the installed SDK binaries.
-The path must name the HuxerUI repository root, and the override applies only to that `build`, `run`, `package`, or `open ios` invocation; do not rewrite the user's persistent `HUXERUI_HOME` for this workflow.
+Use `--sdk <path>` with `build`, `run`, `package`, or `open ios` to select a specific SDK installation or HuxerUI repository root for one invocation. Use a source checkout when the user wants to compile HuxerUI from source. Keep the user's persistent `HUXERUI_HOME` as configured.
 For an Android build that requires a specific JDK, pass `--java-home <path>` instead of changing the user's persistent `JAVA_HOME` or generated Gradle files.
 
 On another host, replace `windows` with an available requested platform. Do not claim a platform ran unless it did.

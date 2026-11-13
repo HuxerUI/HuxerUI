@@ -284,7 +284,9 @@ TEST_CASE("HuxerUICliValidatesJavaHomeOverridesBeforeAndroidBuilds") {
   const std::filesystem::path project = temporary.Path() / "sample";
   const std::filesystem::path java_home = project / "jdk";
   std::filesystem::create_directories(java_home);
-  const std::vector<std::string_view> arguments{"build", "android", "--java-home", "jdk", "--source", HUXERUI_TEST_SOURCE_DIRECTORY};
+  const std::vector<std::string_view> arguments{
+      "build", "android", "--java-home", "jdk", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY
+  };
   std::ostringstream output;
   std::ostringstream error;
   std::istringstream input;

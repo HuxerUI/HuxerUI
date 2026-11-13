@@ -19,8 +19,8 @@ public:
 void PrintHelp(std::ostream& output) {
   output << "HuxerUI standalone mcpp build frontend\n\n"
          << "Usage:\n"
-         << "  huxerui mcpp build [--source <path>] [--release] [--locked] [--offline] [--verbose]\n\n"
-         << "The source directory must contain mcpp.toml.\n";
+         << "  huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]\n\n"
+         << "The project directory defaults to the current directory and must contain mcpp.toml.\n";
 }
 
 void RequireOnce(bool& selected, std::string_view option) {
@@ -31,11 +31,10 @@ void RequireOnce(bool& selected, std::string_view option) {
 }
 
 std::filesystem::path ResolveProjectRoot(const std::filesystem::path& working_directory,
-                                         const std::filesystem::path& source) {
-  const std::filesystem::path candidate = source.is_absolute() ? source : working_directory / source;
-  const std::filesystem::path project_root = std::filesystem::absolute(candidate).lexically_normal();
+                                         const std::filesystem::path& project) {
+  const std::filesystem::path project_root = std::filesystem::absolute(working_directory / project).lexically_normal();
   if (!std::filesystem::is_directory(project_root)) {
-    throw std::runtime_error("mcpp source directory does not exist: " + project_root.string());
+    throw std::runtime_error("mcpp project directory does not exist: " + project_root.string());
   }
   if (!std::filesystem::is_regular_file(project_root / "mcpp.toml")) {
     throw std::runtime_error("mcpp project is missing mcpp.toml: " + project_root.string());
@@ -46,16 +45,16 @@ std::filesystem::path ResolveProjectRoot(const std::filesystem::path& working_di
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments,
                                const std::filesystem::path& working_directory) {
   BuildOptions options;
-  bool source_selected = false;
-  std::filesystem::path source = working_directory;
+  bool project_selected = false;
+  std::filesystem::path project = ".";
   for (std::size_t index = 1; index < arguments.size(); ++index) {
     const std::string_view argument = arguments[index];
-    if (argument == "--source") {
-      RequireOnce(source_selected, argument);
+    if (argument == "--project") {
+      RequireOnce(project_selected, argument);
       if (++index == arguments.size() || arguments[index].empty() || arguments[index].starts_with('-')) {
-        throw UsageError("mcpp build --source requires a directory");
+        throw UsageError("mcpp build --project requires a directory");
       }
-      source = std::filesystem::path(arguments[index]);
+      project = arguments[index];
     } else if (argument == "--release") {
       RequireOnce(options.release, argument);
     } else if (argument == "--locked") {
@@ -64,13 +63,11 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments,
       RequireOnce(options.offline, argument);
     } else if (argument == "--verbose") {
       RequireOnce(options.verbose, argument);
-    } else if (argument == "--help" || argument == "-h") {
-      throw UsageError("help must be requested as `huxerui mcpp --help`");
     } else {
       throw UsageError("unknown mcpp build option: " + std::string(argument));
     }
   }
-  options.project_root = ResolveProjectRoot(working_directory, source);
+  options.project_root = ResolveProjectRoot(working_directory, project);
   return options;
 }
 

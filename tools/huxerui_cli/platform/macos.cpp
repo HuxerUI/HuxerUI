@@ -69,7 +69,9 @@ public:
 
   void ValidateBuildAbis(const PlatformCommandContext& context) const override {
     if (context.abis.size() > 1 && !std::filesystem::is_regular_file(context.huxerui_home / "CMakeLists.txt")) {
-      throw std::invalid_argument("HuxerUI universal macOS builds require --source and universal dependencies");
+      throw std::invalid_argument(
+          "HuxerUI universal macOS builds require a source checkout via --sdk and universal dependencies"
+      );
     }
   }
 
