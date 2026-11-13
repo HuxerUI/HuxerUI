@@ -830,6 +830,42 @@ public:
     UpdateWindowLifecycleState();
   }
 
+  void RequestFullscreen(bool fullscreen) override {
+    if (!IsInitialized()) return;
+    if (fullscreen_transition_) {
+      pending_fullscreen_ = fullscreen;
+      return;
+    }
+    pending_fullscreen_.reset();
+    if (fullscreen == ((window_.styleMask & NSWindowStyleMaskFullScreen) != 0)) return;
+    fullscreen_transition_ = true;
+    [window_ toggleFullScreen:nil];
+  }
+
+  void FullscreenTransitionStarted() {
+    if (!fullscreen_transition_) pending_fullscreen_.reset();
+    fullscreen_transition_ = true;
+  }
+
+  void FullscreenTransitionFinished(std::optional<bool> fullscreen) {
+    fullscreen_transition_ = false;
+    if (!fullscreen.has_value()) pending_fullscreen_.reset();
+    if (!IsInitialized()) return;
+    ExecutionGuard guard(InternalAccess::WindowExecution(*this));
+    if (fullscreen.has_value()) UpdateFullscreen(*fullscreen);
+    WindowGeometryChanged();
+    if (pending_fullscreen_.has_value()) {
+      // AppKit must finish delivering the current transition before another toggle can start.
+      HuxerUIWindowDelegate* delegate = delegate_;
+      dispatch_async(dispatch_get_main_queue(), ^{
+        if (auto* window = delegate->huxeruiWindow;
+            window != nullptr && !window->fullscreen_transition_ && window->pending_fullscreen_.has_value()) {
+          window->RequestFullscreen(*window->pending_fullscreen_);
+        }
+      });
+    }
+  }
+
   bool AllowWindowRequest(WindowCommand command) {
     if (!IsInitialized()) return false;
     if (command == WindowCommand::Minimize && performing_minimize_) {
@@ -1108,7 +1144,7 @@ private:
   }
 
   std::optional<WindowTitleBarMetrics> UpdateTitleBarLayout(Size viewport) noexcept {
-    if (!custom_chrome_) {
+    if (!custom_chrome_ || (window_.styleMask & NSWindowStyleMaskFullScreen) != 0) {
       return std::nullopt;
     }
     const std::optional<Rect> system_controls = SystemTitleBarControlBounds();
@@ -1200,6 +1236,8 @@ private:
   const RenderFrame* committed_frame_ = nullptr;
   bool performing_minimize_ = false;
   bool performing_close_ = false;
+  bool fullscreen_transition_ = false;
+  std::optional<bool> pending_fullscreen_;
 };
 
 std::unique_ptr<UiWindow> MacRuntime::CreateUiWindow(ViewFactory content, const WindowOptions& options) {
@@ -1888,20 +1926,28 @@ NSWindow* GetAppKitWindow(UiWindow& ui_window) {
   }
 }
 
+- (void)windowWillEnterFullScreen:(NSNotification*)notification {
+  if (huxeruiWindow != nullptr) huxeruiWindow->FullscreenTransitionStarted();
+}
+
+- (void)windowWillExitFullScreen:(NSNotification*)notification {
+  if (huxeruiWindow != nullptr) huxeruiWindow->FullscreenTransitionStarted();
+}
+
 - (void)windowDidEnterFullScreen:(NSNotification*)notification {
-  huxerui::detail::ExecutionGuard guard(huxeruiWindow == nullptr ? nullptr :
-      huxerui::detail::InternalAccess::WindowExecution(*huxeruiWindow));
-  if (huxeruiWindow != nullptr && huxeruiWindow->IsInitialized()) {
-    huxeruiWindow->WindowGeometryChanged();
-  }
+  if (huxeruiWindow != nullptr) huxeruiWindow->FullscreenTransitionFinished(true);
 }
 
 - (void)windowDidExitFullScreen:(NSNotification*)notification {
-  huxerui::detail::ExecutionGuard guard(huxeruiWindow == nullptr ? nullptr :
-      huxerui::detail::InternalAccess::WindowExecution(*huxeruiWindow));
-  if (huxeruiWindow != nullptr && huxeruiWindow->IsInitialized()) {
-    huxeruiWindow->WindowGeometryChanged();
-  }
+  if (huxeruiWindow != nullptr) huxeruiWindow->FullscreenTransitionFinished(false);
+}
+
+- (void)windowDidFailToEnterFullScreen:(NSWindow*)window {
+  if (huxeruiWindow != nullptr) huxeruiWindow->FullscreenTransitionFinished(std::nullopt);
+}
+
+- (void)windowDidFailToExitFullScreen:(NSWindow*)window {
+  if (huxeruiWindow != nullptr) huxeruiWindow->FullscreenTransitionFinished(std::nullopt);
 }
 
 - (void)windowDidBecomeKey:(NSNotification*)notification {

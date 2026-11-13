@@ -1159,6 +1159,15 @@ public:
     }
   }
 
+  void RequestFullscreen(bool fullscreen) override {
+    if (!IsInitialized() || window_ == nullptr) return;
+    if (fullscreen) {
+      gtk_window_fullscreen(window_);
+    } else {
+      gtk_window_unfullscreen(window_);
+    }
+  }
+
   bool DispatchWindowRequest(WindowCommand command) noexcept {
     try {
       return IsInitialized() && UiWindow::HandleWindowRequest(command);
@@ -1308,7 +1317,7 @@ private:
       return;
     }
     WindowMetrics metrics{.viewport = viewport, .safe_area = {}, .title_bar = std::nullopt};
-    if (custom_chrome_) {
+    if (custom_chrome_ && !gtk_window_is_fullscreen(window_)) {
       metrics.title_bar = ResolveLinuxTitleBarMetrics(
           custom_title_bar_height_, viewport, window_ != nullptr && gtk_window_is_maximized(window_)
       );
@@ -1395,7 +1404,8 @@ private:
   }
 
   bool BeginWindowOperation(GdkEvent* event, guint button, Point point) {
-    if (!custom_chrome_ || window_ == nullptr || !IsInitialized() || event == nullptr) {
+    if (!custom_chrome_ || window_ == nullptr || !IsInitialized() || event == nullptr ||
+        gtk_window_is_fullscreen(window_)) {
       return false;
     }
     GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
@@ -1452,13 +1462,14 @@ private:
     if (!IsInitialized()) {
       return false;
     }
-    return UiWindow::HandleKeyEvent({
+    const KeyEvent key_event{
         type,
         TranslateKey(UnmodifiedKeyValue(event, key_value)),
         type == KeyEventType::Down ? KeyText(key_value, state) : std::string{},
         TranslateModifiers(state),
         repeat,
-    });
+    };
+    return UiWindow::HandleKeyEvent(key_event) || HandleFullscreenShortcut(key_event);
   }
 
   unsigned long X11WindowId() const noexcept {
@@ -1589,6 +1600,7 @@ private:
   static void WindowResizeStateChanged(GObject*, GParamSpec*, gpointer data) {
     auto& self = *static_cast<LinuxUiWindow*>(data);
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    if (self.IsInitialized()) self.UpdateFullscreen(gtk_window_is_fullscreen(self.window_));
     self.UpdateRuntimeViewport();
   }
 

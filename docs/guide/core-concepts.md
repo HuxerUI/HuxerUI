@@ -280,6 +280,14 @@ Retained handles never target a replacement window; commands after closure are i
 Minimize and close handlers may issue the other command; recursive requests for the same command are consumed.
 If a handler closes the window, the pending native operation is suppressed even when the handler returns false.
 
+Use `window.SetFullscreen(true)` or `window.SetFullscreen(false)` to request a fullscreen transition. `window.IsFullscreen()` is observable and updates after the host confirms entry or exit, including exits initiated by the host. Desktop windows return to their previous windowed placement, including maximized state, subject to the window manager. On Web, request entry directly from a user interaction callback. The browser controls whether the request succeeds. Android and iOS ignore fullscreen requests and report false.
+
+On Windows, `Maximize()`, `Restore()`, and `ToggleMaximize()` have no effect during fullscreen. Call `SetFullscreen(false)` to restore the previous windowed placement.
+
+Register window keyboard shortcuts with `window.OnShortcut(key, modifiers, handler, dependencies...)`. Each binding lasts as long as the declaring composition and matches a non-repeating press with exactly the given modifiers. Two active bindings for the same key and modifiers in one window are an error. The focused controls handle the press first, including inside a modal focus trap. The window shortcut runs next and can return true to consume the press or false to allow defaults such as Tab traversal or Escape dismissal.
+
+An unhandled F11 press without modifiers toggles fullscreen on Windows and Linux. An application can override that default with a window shortcut. On Web, the browser handles unmodified F11.
+
 Each new window has its own root scope, local `UseState`, Environment, resource configuration, services, layers, focus, and frame scheduling.
 Application services and application-owned State are shared, so a State write invalidates subscribed scopes in every live window.
 The content factory is retained and evaluated later in that window; capture data with the required lifetime.

@@ -363,12 +363,18 @@ Activation visuals, high-contrast integration, and exhaustive keyboard and syste
 
 ## Platform mapping
 
-The shared API exposes only `WindowChromeMode::System`, `WindowChromeMode::Custom`, `WindowTitleBar`, `WindowDragRegion`, and `UseWindow()`.
+The shared chrome API exposes `WindowChromeMode::System`, `WindowChromeMode::Custom`, `WindowTitleBar`, `WindowDragRegion`, and `UseWindow()`.
 The removed Windows Extended experiment has no compatibility alias or retained DWM transparency path.
 
 Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
 macOS Custom mode uses full-size AppKit content, AppKit traffic lights, converted left-side control geometry, AppKit dragging, and system window commands.
 Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, GTK decoration policy and window commands, GDK move and resize operations, and GTK-tracked maximized state.
+
+## Fullscreen and keyboard shortcuts
+
+`WindowService` owns the observable fullscreen value. Window commands request entry or exit through the host, and the host publishes the confirmed state separately. Windows saves the window style and placement before removing the frame. AppKit and GTK own their fullscreen transitions and restore windowed geometry and decorations according to host policy. The Web adapter requests fullscreen on the mounted root and observes whether that root owns fullscreen. Android and iOS have no window fullscreen transition.
+
+Window shortcuts register through the declaring composition's `Lifecycle`, with the key and modifiers as dependencies. The window service rejects a duplicate active binding. The Runtime dispatches the focused route and control behavior first, then the window binding, then framework defaults. Modal focus trapping constrains the focused route while preserving the window binding and default dispatch. Windows and Linux handle their default F11 toggle after shared dispatch declines the event.
 
 ## Testing
 

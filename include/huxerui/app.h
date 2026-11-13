@@ -943,6 +943,16 @@ public:
 
 protected:
   UiWindow();
+
+  /// Requests a fullscreen transition from the native host. Unsupported attachments ignore the request.
+  virtual void RequestFullscreen(bool) {}
+
+  /// Publishes the actual fullscreen state after the host confirms a change.
+  void UpdateFullscreen(bool fullscreen);
+
+  /// Applies the desktop F11 default after an unhandled key event on a host that opts into this behavior.
+  bool HandleFullscreenShortcut(const KeyEvent& event);
+
   /// Queries the native host after derived facilities are ready; unavailable preferences use Light.
   /// Must not block on asynchronous platform queries. Called on the application thread.
   virtual ThemeBrightness QuerySystemThemeBrightness() const;

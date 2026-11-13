@@ -339,6 +339,193 @@ TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
   REQUIRE(platform.window_commands == expected);
 }
 
+namespace {
+
+class FullscreenTestPlatform final : public TestPlatform {
+public:
+  using huxerui::UiWindow::UpdateFullscreen;
+
+  bool Press(const KeyEvent& event) {
+    return HandleKeyEvent(event) || HandleFullscreenShortcut(event);
+  }
+
+  void RequestFullscreen(bool fullscreen) override {
+    fullscreen_requests.push_back(fullscreen);
+  }
+
+  std::vector<bool> fullscreen_requests;
+};
+
+} // namespace
+
+TEST_CASE("Window fullscreen is observable only after host confirmation") {
+  FullscreenTestPlatform platform;
+  window_handle.reset();
+  {
+    UiWindow ui([]() -> View {
+      window_handle = UseWindow();
+      return Text(window_handle->IsFullscreen() ? "Fullscreen" : "Windowed");
+    }, platform);
+    ui.SetWindowMetrics({.viewport = {200, 120}});
+    REQUIRE(ContainsText(ui.BuildFrame(), "Windowed"));
+    REQUIRE_FALSE(window_handle->IsFullscreen());
+
+    window_handle->SetFullscreen(true);
+    REQUIRE(platform.fullscreen_requests == std::vector<bool>{true});
+    REQUIRE_FALSE(window_handle->IsFullscreen());
+    platform.UpdateFullscreen(true);
+    REQUIRE(window_handle->IsFullscreen());
+    REQUIRE(ContainsText(ui.BuildFrame(), "Fullscreen"));
+
+    window_handle->SetFullscreen(false);
+    REQUIRE(platform.fullscreen_requests == std::vector<bool>{true, false});
+    REQUIRE(window_handle->IsFullscreen());
+    platform.UpdateFullscreen(false);
+    REQUIRE_FALSE(window_handle->IsFullscreen());
+    platform.UpdateFullscreen(true);
+  }
+  REQUIRE_FALSE(window_handle->IsFullscreen());
+  window_handle->SetFullscreen(false);
+  REQUIRE(platform.fullscreen_requests == std::vector<bool>{true, false});
+}
+
+namespace {
+
+std::optional<LayerController> shortcut_layers;
+int shortcut_calls;
+int button_clicks;
+bool consume_shortcut;
+State<int> shortcut_choice;
+
+View ShortcutPriorityApp() {
+  const auto window = UseWindow();
+  const auto shortcut = [] {
+    ++shortcut_calls;
+    return consume_shortcut;
+  };
+  window.OnShortcut(Key::Enter, {}, shortcut);
+  window.OnShortcut(Key::Space, {}, shortcut);
+  window.OnShortcut(Key::Escape, {}, shortcut);
+  window.OnShortcut(Key::F11, {}, shortcut);
+  return Button("Focus").OnClick([] { ++button_clicks; })
+      .On<ViewEvents::KeyIntercept>([](const KeyEvent& event) { return event.key == Key::F11; });
+}
+
+View ShortcutLifetimeApp() {
+  shortcut_choice = UseState(1);
+  const int choice = shortcut_choice.Get();
+  if (choice == 0) return Spacer();
+  return huxerui::Scope([choice]() -> View {
+    UseWindow().OnShortcut(choice <= 2 ? Key::A : Key::B, {.control = true}, [choice] {
+      shortcut_calls += choice;
+      return true;
+    }, choice >= 2);
+    return Spacer();
+  });
+}
+
+} // namespace
+
+TEST_CASE("Window shortcuts run between focused controls and default actions") {
+  shortcut_calls = 0;
+  button_clicks = 0;
+  consume_shortcut = true;
+  FullscreenTestPlatform platform;
+  AppOptions options{.show_debug_overlay = false};
+  options.window_hooks.push_back([](WindowContext& root) { shortcut_layers = root.Layers(); });
+  UiWindow ui(ShortcutPriorityApp, platform, options);
+  ui.SetWindowMetrics({.viewport = {240, 120}});
+  ui.BuildFrame();
+  REQUIRE(platform.Press({KeyEventType::Down, Key::Tab}));
+  REQUIRE(platform.Press({KeyEventType::Down, Key::Enter}));
+  REQUIRE(platform.Press({KeyEventType::Down, Key::Space}));
+  REQUIRE(platform.Press({KeyEventType::Up, Key::Space}));
+  REQUIRE(platform.Press({KeyEventType::Down, Key::F11}));
+  REQUIRE(button_clicks == 2);
+  REQUIRE(shortcut_calls == 0);
+
+  REQUIRE(shortcut_layers.has_value());
+  const auto modal = shortcut_layers->Attach(
+      {.trap_focus = true, .cancel_policy = LayerCancelPolicy::Dismiss}, [] { return Button("Modal"); });
+  REQUIRE(ContainsText(ui.BuildFrame(), "Modal"));
+  REQUIRE(platform.Press({KeyEventType::Down, Key::Escape}));
+  REQUIRE(shortcut_calls == 1);
+  REQUIRE(ContainsText(ui.BuildFrame(), "Modal"));
+  REQUIRE(platform.Press({KeyEventType::Down, Key::F11}));
+  REQUIRE(shortcut_calls == 2);
+  REQUIRE(platform.fullscreen_requests.empty());
+
+  consume_shortcut = false;
+  REQUIRE_FALSE(platform.Press({.key = Key::F11, .modifiers = {.shift = true}}));
+  REQUIRE_FALSE(platform.Press({.key = Key::F11, .repeat = true}));
+  REQUIRE_FALSE(platform.Press({KeyEventType::Up, Key::F11}));
+  REQUIRE(platform.Press({KeyEventType::Down, Key::F11}));
+  REQUIRE(shortcut_calls == 3);
+  REQUIRE(platform.fullscreen_requests == std::vector<bool>{true});
+  platform.UpdateFullscreen(true);
+  REQUIRE(platform.Press({KeyEventType::Down, Key::F11}));
+  REQUIRE(platform.fullscreen_requests == std::vector<bool>{true, false});
+  REQUIRE(platform.Press({KeyEventType::Down, Key::Escape}));
+  REQUIRE_FALSE(ContainsText(ui.BuildFrame(), "Modal"));
+  REQUIRE_FALSE(shortcut_layers->Dismiss(modal));
+}
+
+TEST_CASE("Window shortcut bindings follow composition and stay local to the window") {
+  shortcut_calls = 0;
+  TestPlatform application_platform;
+  TestPlatform first_platform;
+  TestPlatform second_platform;
+  const Application application(ShortcutLifetimeApp, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, application_platform);
+  UiWindow first(runtime, first_platform);
+  UiWindow second(runtime, second_platform);
+  first.BuildFrame();
+  const auto first_choice = shortcut_choice;
+  second.BuildFrame();
+  const KeyEvent first_key{.key = Key::A, .modifiers = {.control = true}};
+  const KeyEvent second_key{.key = Key::B, .modifiers = {.control = true}};
+  REQUIRE(first.HandleKeyEvent(first_key));
+  REQUIRE(second.HandleKeyEvent(first_key));
+  REQUIRE(shortcut_calls == 2);
+  first_choice = 2;
+  first.BuildFrame();
+  REQUIRE(first.HandleKeyEvent(first_key));
+  REQUIRE(shortcut_calls == 4);
+  first_choice = 3;
+  first.BuildFrame();
+  REQUIRE_FALSE(first.HandleKeyEvent(first_key));
+  REQUIRE(first.HandleKeyEvent(second_key));
+  REQUIRE(shortcut_calls == 7);
+  first_choice = 0;
+  first.BuildFrame();
+  REQUIRE_FALSE(first.HandleKeyEvent(second_key));
+  REQUIRE(second.HandleKeyEvent(first_key));
+  REQUIRE(shortcut_calls == 8);
+}
+
+TEST_CASE("A window rejects duplicate shortcut bindings") {
+  TestPlatform platform;
+  UiWindow ui([]() -> View {
+    const auto window = UseWindow();
+    window.OnShortcut(Key::A, {}, [] { return true; });
+    window.OnShortcut(Key::A, {}, [] { return false; });
+    return Spacer();
+  }, platform);
+  REQUIRE_THROWS_AS(ui.BuildFrame(), std::logic_error);
+}
+
+TEST_CASE("Window shortcut dispatch preserves mutable callback state") {
+  TestPlatform platform;
+  UiWindow ui([]() -> View {
+    UseWindow().OnShortcut(Key::F8, {}, [presses = 0]() mutable { return ++presses == 1; });
+    return Spacer();
+  }, platform);
+  ui.BuildFrame();
+
+  REQUIRE(ui.HandleKeyEvent({KeyEventType::Down, Key::F8}));
+  REQUIRE_FALSE(ui.HandleKeyEvent({KeyEventType::Down, Key::F8}));
+}
+
 TEST_CASE("WindowInitialSizeRespectsEachConfiguredMinimumDimension") {
   WindowOptions options;
   options.initial_size = {800.0F, 360.0F};

@@ -12,6 +12,7 @@
 
 #include <huxerui/color.h>
 #include <huxerui/environment.h>
+#include <huxerui/event.h>
 #include <huxerui/geometry.h>
 #include <huxerui/layer.h>
 #include <huxerui/lifecycle.h>
@@ -370,6 +371,12 @@ public:
   /// Reads on the application thread and observes changes during composition. Hidden/minimized windows remain open.
   /// A handle outliving its original window or Runtime reports false and never targets a replacement window.
   [[nodiscard]] bool IsOpen() const;
+
+  /// Reads the host-confirmed fullscreen state on the application thread.
+  /// @return Whether the window is fullscreen. Unsupported and closed windows report false.
+  /// Reading during composition subscribes the current scope to changes.
+  bool IsFullscreen() const;
+
   /// Reads this window's current native foreground state on the application thread.
   /// @return The latest state; reading during composition subscribes the current scope to changes.
   /// The returned value describes only this window, not the aggregate ApplicationHandle lifecycle.
@@ -422,6 +429,12 @@ public:
   /// Toggles between the platform's maximized and restored states.
   void ToggleMaximize() const;
 
+  /// Requests entering or exiting fullscreen on the application thread.
+  /// @param fullscreen True to enter fullscreen or false to restore the windowed placement.
+  /// The host may complete the request asynchronously, refuse it, or exit fullscreen independently.
+  /// On Web, request entry directly from a user interaction callback. Hosts without fullscreen support ignore it.
+  void SetFullscreen(bool fullscreen) const;
+
   /// Requests the platform's normal close path after consulting the active close handler.
   void Close() const;
 
@@ -437,6 +450,32 @@ public:
   template <class... Dependencies>
   void OnCloseRequest(std::function<bool()> handler, Dependencies&&... dependencies) const {
     RegisterRequest(WindowCommand::Close, std::move(handler), std::forward<Dependencies>(dependencies)...);
+  }
+
+  /// Binds a non-repeating key press with exactly these modifiers in this window's active composition.
+  /// Runs after focused controls, including within a modal focus trap, and before framework defaults.
+  /// The handler runs synchronously on the application thread. Return true to consume the press or false to continue.
+  /// The binding is removed on unmount and replaced when the key, modifiers, or a dependency changes.
+  /// @tparam Dependencies Values compared by Lifecycle when deciding whether to reconnect the handler.
+  /// @param key Portable key identity. The host may reserve some keys.
+  /// @param modifiers Exact set of required modifiers.
+  /// @param handler Nonempty callback returning whether it consumed the press.
+  /// @param dependencies Captured values compared by Lifecycle when deciding whether to replace the handler.
+  /// @throws std::invalid_argument If the key is invalid or the handler is empty.
+  /// @throws std::logic_error Outside this window's composition or if the same binding is already active.
+  template <class... Dependencies>
+  void OnShortcut(
+      Key key, KeyModifiers modifiers, std::function<bool()> handler, Dependencies&&... dependencies
+  ) const {
+    if (key <= Key::Unknown || key > Key::NumpadClear || !handler) {
+      throw std::invalid_argument("HuxerUI window shortcut requires a known key and a handler");
+    }
+    Lifecycle(
+        [window = *this, key, modifiers, handler = std::move(handler)]() mutable {
+          return window.ConnectShortcut(key, modifiers, std::move(handler));
+        },
+        service_, key, modifiers, std::forward<Dependencies>(dependencies)...
+    );
   }
 
 private:
@@ -457,10 +496,13 @@ private:
 
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler) const;
+
   /// Registers a window transition observer for the composition-owned Lifecycle wrapper.
   /// @param handler Nonempty callback tied to this handle's original window service.
   /// @return A callback that disconnects this observer; it is safe after the service is retired.
   [[nodiscard]] std::function<void()> ConnectLifecycle(std::function<void(WindowLifecycleState)> handler) const;
+
+  std::function<void()> ConnectShortcut(Key key, KeyModifiers modifiers, std::function<bool()> handler) const;
 
   explicit WindowHandle(std::shared_ptr<detail::WindowService> service) : service_(std::move(service)) {}
 

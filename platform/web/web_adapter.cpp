@@ -605,6 +605,9 @@ EM_JS(
           return keyValues[code] || 0;
         };
         const sendKey = (event, type, includeText = true) => {
+          if (event.key === "F11" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+            return false;
+          }
           const text =
               includeText && type === 0 && !event.ctrlKey && !event.metaKey && !event.altKey &&
                       Array.from(event.key).length === 1
@@ -715,7 +718,12 @@ EM_JS(
           );
         };
         session.resizeObserver = new ResizeObserver(resize);
-        session.resizeObserver.observe(host);
+        session.resizeObserver.observe(root);
+        const updateFullscreen = () => {
+          Module._huxerui_web_fullscreen_changed(session_id, root.getRootNode().fullscreenElement === root);
+          resize();
+        };
+        listen(root.ownerDocument, "fullscreenchange", updateFullscreen);
         const observeResolution = () => {
           if (session.resolutionQuery) {
             session.resolutionQuery.removeEventListener("change", observeResolution);
@@ -775,6 +783,19 @@ EM_JS(void, UninstallWebSession, (std::uintptr_t session_id), {
     session.dispose();
   } catch (error) {
     console.error("HuxerUI Web session removal failed", error);
+  }
+});
+
+EM_JS(void, RequestWebFullscreen, (std::uintptr_t session_id, bool fullscreen), {
+  const session = Module.huxerUIWebSessions?.get(session_id);
+  if (!session || !session.root.isConnected) return;
+  const root = session.root;
+  const isFullscreen = root.getRootNode().fullscreenElement === root;
+  // Calling the browser before returning from the input callback preserves transient user activation.
+  if (fullscreen && !isFullscreen && root.requestFullscreen) {
+    root.requestFullscreen().catch(() => {});
+  } else if (!fullscreen && isFullscreen && root.ownerDocument.exitFullscreen) {
+    root.ownerDocument.exitFullscreen().catch(() => {});
   }
 });
 
@@ -1002,6 +1023,12 @@ void InitializeWebApplication() {
 /// Owns one DOM surface and its text/rendering state; deferred frames wait until the JavaScript session is ready.
 class WebUiWindow final : public UiWindow {
 public:
+  void RequestFullscreen(bool fullscreen) override {
+    if (platform_ready_ && IsInitialized()) RequestWebFullscreen(session_id_, fullscreen);
+  }
+
+  using UiWindow::UpdateFullscreen;
+
   ThemeBrightness QuerySystemThemeBrightness() const override {
     const val window = val::global("window");
     if (window["matchMedia"].isUndefined()) return ThemeBrightness::Light;
@@ -1420,6 +1447,12 @@ huxerui_web_platform_view_move_focus(std::uintptr_t session_id, std::uint32_t to
 EMSCRIPTEN_KEEPALIVE void huxerui_web_application_lifecycle(std::uintptr_t session_id, int state) {
   huxerui::detail::DispatchWebSession(session_id, "application lifecycle update", [=](auto& platform) {
     platform.UpdateApplicationLifecycleState(state);
+  });
+}
+
+EMSCRIPTEN_KEEPALIVE void huxerui_web_fullscreen_changed(std::uintptr_t session_id, bool fullscreen) {
+  huxerui::detail::DispatchWebSession(session_id, "fullscreen change", [=](auto& platform) {
+    platform.UpdateFullscreen(fullscreen);
   });
 }
 

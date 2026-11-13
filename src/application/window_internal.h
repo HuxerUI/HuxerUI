@@ -4,6 +4,7 @@
 #include <memory>
 #include <map>
 #include <optional>
+#include <tuple>
 #include <utility>
 
 #include <huxerui/window.h>
@@ -49,11 +50,18 @@ public:
   explicit WindowService(UiWindow& ui_window);
 
   [[nodiscard]] bool IsOpen() const;
+  bool IsFullscreen() const;
   void Open();
   void BeginClose();
 
   void Request(WindowCommand command);
   void RequestKeyboard(bool show);
+  void RequestFullscreen(bool fullscreen);
+  void UpdateFullscreen(bool fullscreen);
+
+  bool HandleShortcut(const KeyEvent& event);
+  std::function<void()> ConnectShortcut(Key key, KeyModifiers modifiers, std::function<bool()> handler);
+
   [[nodiscard]] bool HandleRequest(WindowCommand command);
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler);
@@ -82,10 +90,12 @@ private:
 
   UiWindow* ui_window_;
   State<bool> open_{false};
+  State<bool> fullscreen_{false};
   bool handling_minimize_request_ = false;
   bool handling_close_request_ = false;
   RequestHandler minimize_handler_;
   RequestHandler close_handler_;
+  std::map<std::tuple<Key, bool, bool, bool, bool>, std::shared_ptr<std::function<bool()>>> shortcuts_;
   std::uint64_t next_connection_ = 1;
   State<WindowLifecycleState> lifecycle_state_{WindowLifecycleState::Background};
   std::map<std::uint64_t, std::function<void(WindowLifecycleState)>> lifecycle_handlers_;

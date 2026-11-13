@@ -2382,6 +2382,23 @@ void UiWindow::UpdateWindowLifecycleState(WindowLifecycleState lifecycle_state) 
   state_->window_service_->UpdateLifecycleState(lifecycle_state);
 }
 
+void UiWindow::UpdateFullscreen(bool fullscreen) {
+  if (!IsInitialized()) return;
+  state_->application_->RequireThread();
+  ExecutionGuard guard(state_->execution_);
+  state_->window_service_->UpdateFullscreen(fullscreen);
+}
+
+bool UiWindow::HandleFullscreenShortcut(const KeyEvent& event) {
+  if (!IsInitialized() || event.type != KeyEventType::Down || event.key != Key::F11 || event.repeat ||
+      event.modifiers != KeyModifiers{}) {
+    return false;
+  }
+  const auto& window = state_->window_service_;
+  window->RequestFullscreen(!window->IsFullscreen());
+  return true;
+}
+
 bool UiWindow::HandleWindowRequest(WindowCommand command) {
   ExecutionGuard execution_guard(state_->execution_);
   return state_->window_service_->HandleRequest(command);
@@ -3007,6 +3024,42 @@ bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
     return finish_handled();
   }
 
+  if (focused && detail::IsActivatable(*focused)) {
+    if (event.type == KeyEventType::Down) {
+      if (event.key == Key::Enter) {
+        if (!event.repeat) {
+          ActivateNode(*focused);
+        }
+        return finish_handled();
+      }
+      if (event.key == Key::Space) {
+        if (!event.repeat && !state_->keyboard_activation_identity_.has_value()) {
+          state_->keyboard_activation_identity_ = focused->identity;
+          state_->keyboard_press_id_ = BeginInteraction(*focused, InteractionEvent::Source::Keyboard);
+        }
+        return finish_handled();
+      }
+    } else if (event.key == Key::Enter) {
+      return finish_handled();
+    } else if (event.key == Key::Space) {
+      if (state_->keyboard_activation_identity_.has_value() &&
+          *state_->keyboard_activation_identity_ == focused->identity) {
+        if (state_->keyboard_press_id_.has_value()) {
+          EndInteraction(*focused, InteractionEvent::Type::Release, InteractionEvent::Source::Keyboard,
+                         *state_->keyboard_press_id_);
+        }
+        ActivateNode(*focused);
+        state_->keyboard_activation_identity_.reset();
+        state_->keyboard_press_id_.reset();
+      }
+      return finish_handled();
+    }
+  }
+
+  const bool shortcut_handled = state_->window_service_->HandleShortcut(event);
+  if (!IsInitialized()) return true;
+  if (shortcut_handled) return finish_handled();
+
   const bool cancel_key = event.type == KeyEventType::Down && event.key == Key::Escape && !event.repeat &&
                           !event.modifiers.shift && !event.modifiers.control && !event.modifiers.alt &&
                           !event.modifiers.meta;
@@ -3025,40 +3078,6 @@ bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
                          !event.modifiers.alt && !event.modifiers.meta;
   if (event.type == KeyEventType::Down && !event.repeat && (context_menu_key || shift_f10) &&
       DispatchKeyboardContextMenu()) {
-    return finish_handled();
-  }
-  if (!focused) {
-    return false;
-  }
-
-  const bool activatable = detail::IsActivatable(*focused);
-  if (event.type == KeyEventType::Down) {
-    if (activatable && event.key == Key::Enter) {
-      if (!event.repeat) {
-        ActivateNode(*focused);
-      }
-      return finish_handled();
-    }
-    if (activatable && event.key == Key::Space) {
-      if (!event.repeat && !state_->keyboard_activation_identity_.has_value()) {
-        state_->keyboard_activation_identity_ = focused->identity;
-        state_->keyboard_press_id_ = BeginInteraction(*focused, InteractionEvent::Source::Keyboard);
-      }
-      return finish_handled();
-    }
-  } else if (activatable && event.key == Key::Enter) {
-    return finish_handled();
-  } else if (activatable && event.key == Key::Space) {
-    if (state_->keyboard_activation_identity_.has_value() &&
-        *state_->keyboard_activation_identity_ == focused->identity) {
-      if (state_->keyboard_press_id_.has_value()) {
-        EndInteraction(*focused, InteractionEvent::Type::Release, InteractionEvent::Source::Keyboard,
-                       *state_->keyboard_press_id_);
-      }
-      ActivateNode(*focused);
-      state_->keyboard_activation_identity_.reset();
-      state_->keyboard_press_id_.reset();
-    }
     return finish_handled();
   }
   return false;
