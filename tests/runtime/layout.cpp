@@ -199,11 +199,16 @@ struct GrowProbeId {
   using Value = std::size_t;
 };
 
+struct GrowProbeSize {
+  using Value = Size;
+};
+
 std::array<std::size_t, 3> grow_measure_calls{};
 std::array<Size, 3> grow_measured_sizes{};
 bool grow_horizontal = false;
 bool grow_loose_cross = false;
 CrossAxisAlignment grow_cross_alignment = CrossAxisAlignment::Stretch;
+float layout_priority = 0.0F;
 
 class GrowMeasureProbe final : public Layout<GrowMeasureProbe> {
 public:
@@ -212,7 +217,7 @@ public:
   static LayoutResult Measure(LayoutContext&, ViewNode& node, Constraints constraints) {
     const auto id = node.LayoutValueOr<GrowProbeId>(0);
     ++grow_measure_calls[id];
-    const Size size = constraints.Constrain({110.0F, 40.0F});
+    const Size size = constraints.Constrain(node.LayoutValueOr<GrowProbeSize>({110.0F, 40.0F}));
     grow_measured_sizes[id] = size;
     return LayoutResult{}.SetSize(size);
   }
@@ -1281,6 +1286,167 @@ TEST_CASE("Deep grow layouts keep virtual list measurement bounded while scrolli
   REQUIRE(list->virtual_state->realized_indices.front() > 0);
   REQUIRE(grow_measure_calls[0] > initial_calls);
   REQUIRE(grow_measure_calls[0] < 200);
+}
+
+TEST_CASE("Layout priority protects measured sizes across the Grow threshold", "[layout-priority]") {
+  for (const bool vertical : {false, true}) {
+    CAPTURE(vertical);
+    grow_horizontal = !vertical;
+    TestPlatform platform;
+    UiWindow runtime{[] {
+      View first = GrowMeasureProbe {}.LayoutValue<GrowProbeSize>({80.0F, 80.0F}).With(LayoutPriority(1.0F), Grow());
+      View second = GrowMeasureProbe {}.LayoutValue<GrowProbeSize>({20.0F, 20.0F}).With(LayoutPriority(-1.0F), Grow());
+      View layout = grow_horizontal ? View{Row {first, second}} : View{Column {first, second}};
+      return std::move(layout).With(Spacing(8.0F));
+    }, platform};
+
+    for (const float extra : {-10.0F, 0.0F, 40.0F}) {
+      CAPTURE(extra);
+      const float extent = 108.0F + extra;
+      runtime.SetWindowMetrics({.viewport = vertical ? Size{300.0F, extent} : Size{extent, 300.0F}});
+      runtime.BuildFrame();
+      const auto& children = runtime.RootNode()->children;
+      REQUIRE(children.size() == 2);
+      const float first = vertical ? children[0]->bounds.height : children[0]->bounds.width;
+      const float second = vertical ? children[1]->bounds.height : children[1]->bounds.width;
+      CHECK(first == 80.0F + std::max(0.0F, extra * 0.5F));
+      CHECK(second == 20.0F + (extra < 0.0F ? extra : extra * 0.5F));
+    }
+  }
+}
+
+TEST_CASE("Equal layout priorities share only the size above Frame minima", "[layout-priority]") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return Row {
+      GrowMeasureProbe {}.With(LayoutPriority(0.0F), Frame{.min_width = 30.0F}),
+      Scope([] { return GrowMeasureProbe {}.With(Frame{.width = 80.0F, .min_width = 60.0F}); }),
+    };
+  }, platform};
+
+  runtime.SetWindowMetrics({.viewport = {140.0F, 200.0F}});
+  runtime.BuildFrame();
+  const auto& children = runtime.RootNode()->children;
+  CHECK(children[0]->bounds.width == 70.0F);
+  CHECK(children[1]->bounds.width == 70.0F);
+
+  runtime.SetWindowMetrics({.viewport = {70.0F, 200.0F}});
+  runtime.BuildFrame();
+  CHECK(runtime.RootNode()->bounds.width == 70.0F);
+  CHECK(children[0]->bounds.width == 30.0F);
+  CHECK(children[1]->bounds.width == 60.0F);
+  CHECK(children[1]->layout_offset.x == 30.0F);
+}
+
+TEST_CASE("Grow redistributes surplus after a priority child reaches its Frame maximum", "[layout-priority]") {
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return Row {
+      Scope([] {
+        return GrowMeasureProbe {}.With(LayoutPriority(1.0F), Grow(3.0F), Frame{.max_width = 130.0F});
+      }),
+      GrowMeasureProbe {}.With(Grow()),
+    };
+  }, platform};
+
+  runtime.SetWindowMetrics({.viewport = {300.0F, 200.0F}});
+  runtime.BuildFrame();
+  CHECK(runtime.RootNode()->children[0]->bounds.width == 130.0F);
+  CHECK(runtime.RootNode()->children[1]->bounds.width == 170.0F);
+}
+
+TEST_CASE("Layout priority uses wrapped text height after compression", "[layout-priority]") {
+  for (const auto alignment : {CrossAxisAlignment::Start, CrossAxisAlignment::Stretch}) {
+    CAPTURE(alignment);
+    grow_cross_alignment = alignment;
+    TestPlatform platform;
+    UiWindow runtime{[]() -> View {
+      return Stack {
+        Row {
+          Text("abcdefghij"),
+          Spacer().With(Frame{.width = 20.0F}, Grow(0.0F), LayoutPriority(1.0F)),
+        }.With(CrossAlign(grow_cross_alignment)),
+      }.With(Align(HorizontalAlignment::Start, VerticalAlignment::Start));
+    }, platform};
+
+    runtime.SetWindowMetrics({.viewport = {60.0F, 100.0F}});
+    runtime.BuildFrame();
+    const auto& row = *runtime.RootNode()->children[0];
+    CHECK(row.children[0]->bounds.width == 40.0F);
+    CHECK(row.children[0]->bounds.height == 60.0F);
+    CHECK(row.children[1]->bounds.width == 20.0F);
+    CHECK(row.bounds.height == 60.0F);
+  }
+}
+
+TEST_CASE("Layout priority allocates space from the stretched child sizes", "[layout-priority]") {
+  struct AspectProbe : Layout<AspectProbe> {
+    using Layout::Layout;
+
+    static LayoutResult Measure(LayoutContext&, ViewNode&, Constraints constraints) {
+      const float height = constraints.ConstrainHeight(20.0F);
+      return LayoutResult{}.SetSize(constraints.Constrain({2.0F * height, height}));
+    }
+  };
+
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return Stack {
+      Row {
+        AspectProbe {}.With(Grow()),
+        GrowMeasureProbe {}.LayoutValue<GrowProbeSize>({50.0F, 60.0F}).With(Grow(), LayoutPriority(1.0F)),
+      }.With(CrossAlign(CrossAxisAlignment::Stretch)),
+    }.With(Align(HorizontalAlignment::Start, VerticalAlignment::Start));
+  }, platform};
+
+  const std::array cases{
+      std::array{130.0F, 80.0F, 50.0F},
+      std::array{170.0F, 120.0F, 50.0F},
+      std::array{200.0F, 135.0F, 65.0F},
+  };
+  for (const auto& [width, first_width, second_width] : cases) {
+    CAPTURE(width);
+    runtime.SetWindowMetrics({.viewport = {width, 100.0F}});
+    runtime.BuildFrame();
+    const auto& row = *runtime.RootNode()->children[0];
+    CHECK(row.children[0]->bounds == Rect{0.0F, 0.0F, first_width, 60.0F});
+    CHECK(row.children[1]->bounds == Rect{0.0F, 0.0F, second_width, 60.0F});
+    CHECK(row.children[1]->layout_offset.x == first_width);
+  }
+}
+
+TEST_CASE("Custom layouts read priority through the effective layout value", "[layout-priority]") {
+  struct Probe : Layout<Probe> {
+    using Layout::Layout;
+
+    static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
+      auto& child = node.ChildAt(0);
+      const auto value = child.LayoutValueOr<LayoutPriority>(0.0F);
+      const auto size = context.Measure(child, constraints.LooseWidth().TightWidth(20.0F + value));
+      return LayoutResult{}.Place(child, {}).SetSize(size);
+    }
+  };
+
+  layout_priority = -5.0F;
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    return Probe {
+      Scope([] { return GrowMeasureProbe {}.With(LayoutPriority(4.0F)); }).With(LayoutPriority(layout_priority)),
+    };
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {90.0F, 100.0F}});
+  runtime.BuildFrame();
+  CHECK(runtime.RootNode()->children[0]->bounds.width == 15.0F);
+}
+
+TEST_CASE("Layout priority rejects nonfinite declarations", "[layout-priority]") {
+  for (const float priority : {std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+                               std::numeric_limits<float>::quiet_NaN()}) {
+    layout_priority = priority;
+    TestPlatform platform;
+    UiWindow runtime{[] { return Text("Invalid").With(LayoutPriority(layout_priority)); }, platform};
+    CHECK_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
+  }
 }
 
 TEST_CASE("TestWrappedTextMeasurement") {

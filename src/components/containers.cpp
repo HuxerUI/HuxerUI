@@ -559,6 +559,208 @@ void MeasureFlowLine(LayoutContext& context, const ViewNode& node, FlowLine& lin
   }
 }
 
+LayoutResult PlaceAxisChildren(ViewNode& node, float target_main, float target_cross, bool vertical) {
+  LayoutResult result;
+  const AxisPlacement placement = ResolveAxisPlacement(node, target_main, vertical);
+  float main = placement.leading;
+  for (ViewNode& child : node.Children()) {
+    const Size child_size = child.LayoutSize();
+    const float cross = CrossOffset(target_cross, LayoutCrossSize(child_size, vertical), node.CrossAlignment());
+    result.Place(child, vertical ? Point{cross, main} : Point{main, cross});
+    main += LayoutMainSize(child_size, vertical) + placement.gap;
+  }
+  result.SetSize(MakeAxisSize(target_main, target_cross, vertical));
+  return result;
+}
+
+struct AxisChildAllocation {
+  ViewNode* child;
+  float priority;
+  float grow;
+  float natural;
+  float minimum;
+  float maximum;
+  double extent;
+};
+
+std::pair<float, float> MainFrameLimits(const detail::MountedNode& node, bool vertical) {
+  const Frame& frame = node.properties.frame;
+  float minimum = (vertical ? frame.min_height : frame.min_width).value_or(0.0F);
+  float maximum = (vertical ? frame.max_height : frame.max_width).value_or(std::numeric_limits<float>::infinity());
+  if ((node.kind == detail::NodeKind::Scope || node.kind == detail::NodeKind::Environment) &&
+      node.children.size() == 1) {
+    const auto [child_minimum, child_maximum] = MainFrameLimits(*node.children.front(), vertical);
+    const float padding = vertical ? node.resolved_padding.Vertical() : node.resolved_padding.Horizontal();
+    if (child_minimum > 0.0F) {
+      minimum = std::clamp(child_minimum + padding, minimum, maximum);
+    }
+    maximum = std::clamp(child_maximum + padding, minimum, maximum);
+  }
+  return {minimum, maximum};
+}
+
+void CompressAxisChildren(std::vector<AxisChildAllocation>& children, double available) {
+  if (available <= 0.0) {
+    for (auto& child : children) {
+      child.extent = child.minimum;
+    }
+    return;
+  }
+
+  std::vector<AxisChildAllocation*> ordered;
+  ordered.reserve(children.size());
+  for (auto& child : children) {
+    ordered.push_back(&child);
+  }
+  std::stable_sort(ordered.begin(), ordered.end(), [](const auto* left, const auto* right) {
+    return left->priority > right->priority;
+  });
+
+  for (auto first = ordered.begin(); first != ordered.end();) {
+    auto last = first;
+    double demand = 0.0;
+    do {
+      const auto& child = **last;
+      demand += static_cast<double>(child.natural) - child.minimum;
+      ++last;
+    } while (last != ordered.end() && (*last)->priority == (*first)->priority);
+
+    const double fraction = demand <= available ? 1.0 : available / demand;
+    for (; first != last; ++first) {
+      auto& child = **first;
+      child.extent = child.minimum + (static_cast<double>(child.natural) - child.minimum) * fraction;
+    }
+    available = std::max(0.0, available - demand);
+  }
+}
+
+void GrowAxisChildren(std::vector<AxisChildAllocation>& children, double surplus) {
+  struct Share {
+    AxisChildAllocation* child;
+    double limit;
+    double remaining_weight = 0.0;
+  };
+
+  std::vector<Share> shares;
+  for (auto& child : children) {
+    if (child.grow > 0.0F && child.maximum > child.natural) {
+      shares.push_back({&child, (static_cast<double>(child.maximum) - child.natural) / child.grow});
+    }
+  }
+  std::stable_sort(shares.begin(), shares.end(), [](const Share& left, const Share& right) {
+    return left.limit < right.limit;
+  });
+
+  // Sum the remaining weights from the end so a capped large weight cannot erase a smaller one by rounding.
+  double weight = 0.0;
+  for (auto share = shares.rbegin(); share != shares.rend(); ++share) {
+    weight += share->child->grow;
+    share->remaining_weight = weight;
+  }
+  auto share = shares.begin();
+  for (; share != shares.end(); ++share) {
+    if (surplus / share->remaining_weight <= share->limit) {
+      break;
+    }
+    auto& child = *share->child;
+    child.extent = child.maximum;
+    surplus = std::max(0.0, surplus - (static_cast<double>(child.maximum) - child.natural));
+  }
+  if (share != shares.end()) {
+    const double extra_per_weight = surplus / share->remaining_weight;
+    for (; share != shares.end(); ++share) {
+      auto& child = *share->child;
+      child.extent = std::min<double>(child.maximum, child.natural + child.grow * extra_per_weight);
+    }
+  }
+}
+
+Constraints AllocatedAxisConstraints(const AxisChildAllocation& child, Constraints constraints, bool vertical) {
+  const float extent = static_cast<float>(child.extent);
+  if (extent > child.natural) {
+    return TightMain(constraints, vertical, extent);
+  }
+  if (vertical) {
+    constraints.max_height = extent;
+  } else {
+    constraints.max_width = extent;
+  }
+  return constraints;
+}
+
+LayoutResult MeasurePriorityAxisLayout(LayoutContext& context, ViewNode& node, Constraints constraints,
+                                       Constraints child_constraints, bool vertical, bool stretch_cross) {
+  const float minimum_cross = MinimumCross(constraints, vertical);
+  const float maximum_cross = MaximumCross(constraints, vertical);
+  if (stretch_cross) {
+    for (ViewNode& child : node.Children()) {
+      context.Measure(child, child_constraints);
+    }
+    const float target_cross = std::clamp(MaxCrossSize(node, vertical), minimum_cross, maximum_cross);
+    child_constraints = TightCross(child_constraints, vertical, target_cross);
+  }
+
+  const float max_main = MaximumMain(constraints, vertical);
+  const float spacing = TotalSpacing(node);
+  const double available = std::max(0.0, static_cast<double>(max_main) - spacing);
+  std::vector<AxisChildAllocation> children;
+  children.reserve(node.ChildCount());
+  double natural_sum = 0.0;
+  double minimum_sum = 0.0;
+  bool has_grow = false;
+  for (ViewNode& child : node.Children()) {
+    const float priority = child.LayoutValueOr<LayoutPriority>(0.0F);
+    if (!std::isfinite(priority)) {
+      throw std::invalid_argument("HuxerUI layout priority must be finite");
+    }
+    const float grow = child.GrowFactor();
+    const float natural = LayoutMainSize(context.Measure(child, child_constraints), vertical);
+    const auto [frame_minimum, frame_maximum] = MainFrameLimits(static_cast<const detail::MountedNode&>(child), vertical);
+    const float minimum = std::min(natural, frame_minimum);
+    const float maximum = std::min(max_main, frame_maximum);
+    children.push_back({&child, priority, grow, natural, minimum, maximum, natural});
+    natural_sum += natural;
+    minimum_sum += minimum;
+    has_grow = has_grow || grow > 0.0F;
+  }
+
+  if (natural_sum > available) {
+    CompressAxisChildren(children, available - minimum_sum);
+  } else if (has_grow && natural_sum < available) {
+    GrowAxisChildren(children, available - natural_sum);
+  }
+  // Compression can make wrapped content taller, so measure it with the original cross-axis maximum.
+  const Constraints compression_constraints = stretch_cross ? constraints.Loose() : child_constraints;
+  bool needs_restretch = false;
+  for (const auto& child : children) {
+    const float extent = static_cast<float>(child.extent);
+    if (extent < child.natural) {
+      context.Measure(*child.child, AllocatedAxisConstraints(child, compression_constraints, vertical));
+      needs_restretch = stretch_cross;
+    } else if (extent > child.natural) {
+      context.Measure(*child.child, AllocatedAxisConstraints(child, child_constraints, vertical));
+    }
+  }
+
+  float target_cross = std::clamp(MaxCrossSize(node, vertical), minimum_cross, maximum_cross);
+  if (needs_restretch) {
+    target_cross = std::max(target_cross, MinimumCross(child_constraints, vertical));
+    const Constraints stretched = TightCross(constraints.Loose(), vertical, target_cross);
+    // A larger cross extent must still fit the main-axis budget already assigned to each child.
+    for (const auto& child : children) {
+      if (stretched != child_constraints || static_cast<float>(child.extent) < child.natural) {
+        context.Measure(*child.child, AllocatedAxisConstraints(child, stretched, vertical));
+      }
+    }
+  }
+
+  const float target_main = has_grow || node.MainAlignment() != MainAxisAlignment::Start
+                                ? max_main
+                                : std::clamp(SumMainSizes(node, vertical) + spacing,
+                                             MinimumMain(constraints, vertical), max_main);
+  return PlaceAxisChildren(node, target_main, target_cross, vertical);
+}
+
 LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constraints constraints, bool vertical) {
   const Constraints loose = constraints.Loose();
   const bool stretch = node.CrossAlignment() == CrossAxisAlignment::Stretch;
@@ -567,6 +769,11 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constrain
   const bool tight_cross = stretch && std::isfinite(maximum_cross) && minimum_cross == maximum_cross;
   const Constraints initial = tight_cross ? TightCross(loose, vertical, maximum_cross) : loose;
   const float max_main = MaximumMain(constraints, vertical);
+  if (std::isfinite(max_main) && std::ranges::any_of(node.Children(), [](const ViewNode& child) {
+        return child.LayoutValue<LayoutPriority>() != nullptr;
+      })) {
+    return MeasurePriorityAxisLayout(context, node, constraints, initial, vertical, stretch && !tight_cross);
+  }
   float total_grow = 0.0F;
 
   for (ViewNode& child : node.Children()) {
@@ -622,18 +829,7 @@ LayoutResult MeasureAxisLayout(LayoutContext& context, ViewNode& node, Constrain
     target_cross = std::clamp(MaxCrossSize(node, vertical), minimum_cross, maximum_cross);
   }
 
-  LayoutResult result;
-  const AxisPlacement placement = ResolveAxisPlacement(node, target_main, vertical);
-  float main = placement.leading;
-  for (ViewNode& child : node.Children()) {
-    const Size child_size = child.LayoutSize();
-    const float cross = CrossOffset(target_cross, LayoutCrossSize(child_size, vertical), node.CrossAlignment());
-    result.Place(child, vertical ? Point{cross, main} : Point{main, cross});
-    main += LayoutMainSize(child_size, vertical) + placement.gap;
-  }
-
-  result.SetSize(MakeAxisSize(target_main, target_cross, vertical));
-  return result;
+  return PlaceAxisChildren(node, target_main, target_cross, vertical);
 }
 
 } // namespace

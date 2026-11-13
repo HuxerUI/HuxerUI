@@ -228,6 +228,7 @@ export namespace huxerui {
     using huxerui::LayerPointerPolicy;
     using huxerui::Layout;
     using huxerui::LayoutContext;
+    using huxerui::LayoutPriority;
     using huxerui::LayoutResult;
     using huxerui::Lifecycle;
     using huxerui::LinearGradient;

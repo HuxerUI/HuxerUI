@@ -40,6 +40,21 @@ It affects participation in a compatible parent layout and propagates across tra
 Growing children avoid speculative measurement when the cross axis does not stretch or its stretched size is already fixed by tight constraints.
 Stretching under loose cross-axis constraints still measures intrinsic cross sizes before allocating space.
 
+### Layout priority
+
+Set `LayoutPriority` on a child of `Row` or `Column` to give it more room when the children compete for space. Higher values keep more of their measured size. An explicit priority, including zero, enables this policy when the main axis has a finite maximum. Children without a priority use zero.
+
+```cpp
+return Row {
+  Text(title).LineLimit(1).Overflow(TextOverflow::Ellipsis),
+  Button("Open").With(LayoutPriority(1.0F)),
+}.With(Spacing(8.0F));
+```
+
+`Row` and `Column` measure the children with loose main-axis constraints and use the stretched cross-axis extent when `CrossAlign(Stretch)` applies. If the sizes plus spacing fit, positive `Grow()` factors divide the surplus and add it to the measured sizes, up to each child's `Frame` maximum. If space is short, the layout reserves `Frame` minima first and gives each priority group, highest first, as much of its measured size as possible. Children with equal priority share that budget in proportion to the size each can give up. A child measured under a smaller maximum can wrap text or use less than its allocation. If the minima plus spacing exceed the available extent, the container still respects its own constraints and its existing overflow behavior applies.
+
+Use `child.LayoutValueOr<LayoutPriority>(0.0F)` to read the same metadata in a custom layout. The custom layout decides how to use it.
+
 ## Resizable panes
 
 SplitLayout accepts ordinary children and Views groups, ignoring empty Views. It defaults to Horizontal; `.Orientation(Axis::Vertical)` stacks panes vertically. Use stable keys when panes can be inserted, removed, or reordered.

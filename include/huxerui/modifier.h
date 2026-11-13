@@ -871,6 +871,30 @@ struct Grow {
   bool operator==(const Grow&) const = default;
 };
 
+/// Sets how strongly a child keeps its measured main-axis size when a Row or Column is short of space.
+///
+/// Higher values shrink later. Unspecified children have priority zero. One explicit priority, including zero,
+/// enables this policy for the parent when its main axis is bounded. Grow distributes surplus above the measured
+/// sizes in that layout. Custom layouts can read this value with ViewNode::LayoutValue<LayoutPriority>().
+/// @code
+/// Row {
+///   Text(title).LineLimit(1).Overflow(TextOverflow::Ellipsis),
+///   Button("Open").With(LayoutPriority(1.0F)),
+/// };
+/// @endcode
+struct LayoutPriority {
+  /// Stored layout value for the parent to read.
+  using Value = float;
+
+  /// Returns the modifier descriptor used by View::With().
+  static const detail::ModifierDescriptor& Descriptor();
+
+  /// Relative priority. Applying a nonfinite value throws std::invalid_argument.
+  float value = 0.0F;
+
+  bool operator==(const LayoutPriority&) const = default;
+};
+
 /// Adds a themed, interactive scroll indicator to each axis with a scroll range.
 ///
 /// The bar appears during scrolling, supports direct thumb dragging, and fades when idle. Leave style empty to resolve

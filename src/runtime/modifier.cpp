@@ -551,6 +551,13 @@ void ApplyGrow(detail::ViewSpec& spec, const Grow& modifier) {
   );
 }
 
+void ApplyLayoutPriority(detail::ViewSpec& spec, const LayoutPriority& modifier) {
+  if (!std::isfinite(modifier.value)) {
+    throw std::invalid_argument("HuxerUI layout priority must be finite");
+  }
+  spec.layout_values.insert_or_assign(typeid(LayoutPriority), detail::MakeErasedLayoutValue(modifier.value));
+}
+
 void ApplyEnabled(detail::ViewSpec& spec, const Enabled& modifier) {
   spec.local_enabled = modifier.value;
 }
@@ -666,6 +673,10 @@ const detail::ModifierDescriptor& Align::Descriptor() {
 
 const detail::ModifierDescriptor& Grow::Descriptor() {
   return ApplyOnlyModifierDescriptor<Grow, ApplyGrow>();
+}
+
+const detail::ModifierDescriptor& LayoutPriority::Descriptor() {
+  return ApplyOnlyModifierDescriptor<LayoutPriority, ApplyLayoutPriority>();
 }
 
 void View::SetTextStyle(TextStyle style) {
