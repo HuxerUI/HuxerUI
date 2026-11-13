@@ -9,10 +9,12 @@ profile_end="# huxerui-sdk environment end"
 version=""
 prefix=""
 profile=""
+explicit_profile=false
 archive=""
 assume_yes=false
 uninstall=false
 update=false
+sdk_command=""
 check=false
 explicit_version=false
 lock_directory=""
@@ -81,6 +83,7 @@ while [ "$#" -gt 0 ]; do
   --profile)
     require_value "$@"
     profile=$2
+    explicit_profile=true
     shift 2
     ;;
   --archive)
@@ -100,6 +103,11 @@ while [ "$#" -gt 0 ]; do
     update=true
     shift
     ;;
+  --sdk)
+    require_value "$@"
+    sdk_command=$2
+    shift 2
+    ;;
   --check)
     check=true
     shift
@@ -114,8 +122,13 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ "$check" = true ] && [ "$update" != true ]; then
-  fail "--check requires --update"
+if [ "$check" = true ] && [ "$update" != true ] && [ "$sdk_command" != update ]; then
+  fail "--check requires an update"
+fi
+if [ -n "$sdk_command" ]; then
+  case "$sdk_command" in list | use | update) ;; *) fail "unknown SDK command: $sdk_command" ;; esac
+  [ -n "$prefix" ] && [ "$uninstall" = false ] && [ "$update" = false ] && [ -z "$archive" ] ||
+    fail "SDK management requires the current SDK prefix"
 fi
 if [ "$update" = true ]; then
   [ -n "$prefix" ] || fail "--update requires --prefix"
@@ -251,11 +264,26 @@ sdk_version() {
   esac
 }
 
-validate_version() {
+is_version() {
   printf '%s\n' "$1" | LC_ALL=C awk '
     /^[0-9]+\.[0-9]+\.[0-9]+$/ { valid = 1 }
-    END { exit !valid }
-  ' || fail "expected a major.minor.patch release version: $1"
+    END { exit !(NR == 1 && valid) }
+  '
+}
+
+validate_version() {
+  is_version "$1" || fail "expected a major.minor.patch release version: $1"
+}
+
+version_is_older() {
+  awk -v first="$1" -v second="$2" 'BEGIN {
+    split(first, a, "."); split(second, b, ".");
+    for (i = 1; i <= 3; ++i) {
+      if (a[i] + 0 < b[i] + 0) exit 0
+      if (a[i] + 0 > b[i] + 0) exit 1
+    }
+    exit 1
+  }'
 }
 
 shell_quote() {
@@ -275,11 +303,12 @@ profile_mode() {
 rewrite_profile() {
   rewrite_mode=$1
   profile_directory=$(dirname "$profile")
-  mkdir -p "$profile_directory"
-  profile_temporary=$(mktemp "$profile_directory/.huxerui-profile.XXXXXX")
+  [ ! -d "$profile" ] || return 1
+  mkdir -p "$profile_directory" || return 1
+  profile_temporary=$(mktemp "$profile_directory/.huxerui-profile.XXXXXX") || return 1
   original_mode=""
   if [ -f "$profile" ]; then
-    original_mode=$(profile_mode "$profile")
+    original_mode=$(profile_mode "$profile") || { rm -f "$profile_temporary"; return 1; }
     if ! awk -v begin="$profile_begin" -v end="$profile_end" '
       $0 == begin { skipping = 1; next }
       skipping && $0 == end { skipping = 0; next }
@@ -293,18 +322,18 @@ rewrite_profile() {
 
   if [ "$rewrite_mode" = add ]; then
     quoted_prefix=$(shell_quote "$prefix")
-    {
-      printf '%s\n' "$profile_begin"
-      printf 'export HUXERUI_HOME=%s\n' "$quoted_prefix"
-      printf '%s\n' 'export PATH="$HUXERUI_HOME/bin:$PATH"'
-      printf '%s\n' "$profile_end"
-    } >>"$profile_temporary"
+    if ! printf '%s\n' "$profile_begin" "export HUXERUI_HOME=$quoted_prefix" \
+      'export PATH="$HUXERUI_HOME/bin:$PATH"' "export _HUXERUI_SDK_PROFILE=$(shell_quote "$profile")" \
+      "$profile_end" >>"$profile_temporary"; then
+      rm -f "$profile_temporary"
+      return 1
+    fi
   fi
 
   if [ -n "$original_mode" ]; then
-    chmod "$original_mode" "$profile_temporary"
+    chmod "$original_mode" "$profile_temporary" || { rm -f "$profile_temporary"; return 1; }
   fi
-  mv "$profile_temporary" "$profile"
+  mv -f "$profile_temporary" "$profile" || { rm -f "$profile_temporary"; return 1; }
 }
 
 remove_owned_profile_environment() {
@@ -330,6 +359,103 @@ normalize_prefix() {
   "/" | "$HOME" | "$HOME/") fail "unsafe installation prefix: $prefix" ;;
   esac
 }
+
+profile_sdk_selection() {
+  [ -f "$1" ] || return 0
+  awk -v begin="$profile_begin" -v end="$profile_end" '
+    $0 == begin { managed = 1; next }
+    $0 == end { managed = 0 }
+    managed && /^export HUXERUI_HOME=/ { selection = $0 }
+    END { if (selection != "") print selection }
+  ' "$1"
+}
+
+list_sdk() {
+  marker=' '
+  if [ "$profile_selection" = "export HUXERUI_HOME=$(shell_quote "$1")" ]; then
+    marker='*'
+  fi
+  printf '%s %-10s %s\n' "$marker" "$2" "$1"
+}
+
+find_sdk_profile() {
+  original_selection="export HUXERUI_HOME=$(shell_quote "$original_prefix")"
+  version_selection="export HUXERUI_HOME=$(shell_quote "$versions_directory/")"
+  # Match the quoted directory prefix and validate the remaining version.
+  version_selection=${version_selection%?}
+  for candidate in "${_HUXERUI_SDK_PROFILE:-}" "$profile" \
+    "$HOME/.zprofile" "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
+    candidate_selection=$(profile_sdk_selection "$candidate")
+    case "$candidate_selection" in
+    "$original_selection") ;;
+    "$version_selection"*"'")
+      selected_version=${candidate_selection#"$version_selection"}
+      is_version "${selected_version%?}" || continue
+      ;;
+    *) continue ;;
+    esac
+    profile=$candidate
+    return
+  done
+}
+
+verify_sdk_selection() {
+  is_sdk "$1" && [ -d "$1/share/huxerui/tools" ] && [ -d "$1/share/huxerui/skills/huxerui-app-development" ] ||
+    fail "SDK directory is incomplete: $1"
+  [ "$(sdk_version "$1")" = "$version" ] || fail "SDK version does not match $version: $1"
+  HUXERUI_HOME="$1" "$1/bin/huxerui" sdk --help >/dev/null 2>&1 ||
+    fail "HuxerUI $version does not support SDK switching"
+}
+
+select_sdk() {
+  verify_sdk_selection "$prefix"
+  rewrite_profile add || fail "profile contains an incomplete HuxerUI environment block: $profile"
+}
+
+print_selection() {
+  printf 'Selected HuxerUI SDK %s at %s\n' "$version" "$prefix"
+  printf 'Restart the terminal to use the updated environment. Shell profile: %s\n' "$profile"
+}
+
+if [ -n "$sdk_command" ]; then
+  is_sdk "$prefix" || fail "SDK management requires an installed SDK: $prefix"
+  current_prefix=$prefix
+  current_version=$(sdk_version "$current_prefix")
+  validate_version "$current_version"
+  original_prefix=$current_prefix
+  current_parent=$(dirname "$current_prefix")
+  if [ "$(basename "$current_prefix")" = "$current_version" ]; then
+    case "$current_parent" in
+    *-versions) original_prefix=${current_parent%-versions} ;;
+    esac
+  fi
+  versions_directory="$original_prefix-versions"
+  [ ! -L "$versions_directory" ] || fail "SDK versions directory must not be a symbolic link: $versions_directory"
+  if [ "$explicit_profile" = false ]; then
+    find_sdk_profile
+  fi
+
+  if [ "$sdk_command" = list ]; then
+    profile_selection=$(profile_sdk_selection "$profile")
+    printf 'Installed HuxerUI SDKs (* default):\n'
+    if is_sdk "$original_prefix"; then
+      list_sdk "$original_prefix" "$(sdk_version "$original_prefix")"
+    fi
+    for installed in "$versions_directory"/*; do
+      installed_version=${installed##*/}
+      if [ -d "$installed" ] && [ ! -L "$installed" ] && is_version "$installed_version" && is_sdk "$installed"; then
+        list_sdk "$installed" "$installed_version"
+      fi
+    done
+    exit 0
+  fi
+  if [ "$sdk_command" = use ]; then
+    version=${version#v}
+    validate_version "$version"
+  elif [ -n "$version" ]; then
+    fail "SDK update selects the latest stable release; use sdk use to select a version"
+  fi
+fi
 
 if [ "$uninstall" = true ]; then
   [ -d "$prefix" ] || fail "HuxerUI SDK is not installed at $prefix"
@@ -399,15 +525,7 @@ if [ "$update" = true ]; then
     printf 'HuxerUI SDK is already at the requested version.\n'
     exit 0
   fi
-  if [ "$explicit_version" = false ] && [ -z "$archive" ] &&
-    awk -v current="$current_version" -v target="$version" 'BEGIN {
-      split(current, a, "."); split(target, b, ".")
-      for (i = 1; i <= 3; ++i) {
-        if (a[i] + 0 > b[i] + 0) exit 0
-        if (a[i] + 0 < b[i] + 0) exit 1
-      }
-      exit 1
-    }'; then
+  if [ "$explicit_version" = false ] && [ -z "$archive" ] && version_is_older "$version" "$current_version"; then
     printf 'The installed SDK is newer; use --version to explicitly downgrade.\n'
     exit 0
   fi
@@ -416,6 +534,46 @@ if [ "$update" = true ]; then
     exit 0
   fi
   printf 'The entire SDK will be replaced, including local modifications. Stop SDK builds and tools first.\n'
+elif [ -n "$sdk_command" ]; then
+  validate_version "$version"
+  if [ "$sdk_command" = update ]; then
+    printf 'Current HuxerUI SDK: %s\nLatest stable SDK: %s\n' "$current_version" "$version"
+    if version_is_older "$version" "$current_version"; then
+      printf 'The installed SDK is newer than the latest stable release.\n'
+      exit 0
+    fi
+    if [ "$current_version" = "$version" ]; then
+      printf 'HuxerUI SDK is up to date.\n'
+      exit 0
+    fi
+    if [ "$check" = true ]; then
+      printf 'HuxerUI SDK update available.\n'
+      exit 0
+    fi
+  fi
+  if version_is_older "$version" 0.4.0; then
+    fail "SDK switching starts with HuxerUI 0.4.0"
+  fi
+
+  prefix="$versions_directory/$version"
+  if [ "$version" = "$current_version" ]; then
+    prefix=$current_prefix
+  elif [ ! -e "$prefix" ] && is_sdk "$original_prefix" &&
+    [ "$(sdk_version "$original_prefix")" = "$version" ]; then
+    prefix=$original_prefix
+  fi
+  [ ! -L "$prefix" ] || fail "SDK directory must not be a symbolic link: $prefix"
+  if [ -e "$prefix" ]; then
+    if [ "$sdk_command" = update ]; then
+      printf 'Switch to the installed HuxerUI SDK %s at %s\n' "$version" "$prefix"
+      confirm
+    fi
+    acquire_lock
+    select_sdk
+    print_selection
+    exit 0
+  fi
+  printf 'Install and select HuxerUI SDK %s at %s\n' "$version" "$prefix"
 else
   printf 'Install HuxerUI SDK\n  Archive: %s\n  SDK: %s\n  Profile: %s\n' "$archive_display" "$prefix" "$profile"
 fi
@@ -491,11 +649,18 @@ find "$extracted_sdk" -type l -exec sh -c '
 is_sdk "$extracted_sdk" || fail "archive does not contain a complete HuxerUI SDK"
 if [ "$update" = true ]; then
   [ "$(sdk_version "$extracted_sdk")" = "$version" ] || fail "archive SDK version does not match $version"
+elif [ -n "$sdk_command" ]; then
+  verify_sdk_selection "$extracted_sdk"
 fi
 
 normalize_prefix
 if [ -z "$lock_directory" ]; then
   acquire_lock
+fi
+if [ -n "$sdk_command" ] && [ -e "$prefix" ]; then
+  select_sdk
+  print_selection
+  exit 0
 fi
 staging_directory=$(mktemp -d "$(dirname "$prefix")/.huxerui-install.XXXXXX")
 rmdir "$staging_directory"
@@ -520,6 +685,8 @@ published_directory="$prefix"
 
 if [ "$update" = true ]; then
   [ "$(sdk_version "$prefix")" = "$version" ] || fail "installed SDK version does not match $version"
+elif [ -n "$sdk_command" ]; then
+  select_sdk
 elif ! rewrite_profile add; then
   rm -rf "$prefix"
   published_directory=""
@@ -540,7 +707,11 @@ if [ -n "$backup_directory" ] && [ -d "$backup_directory" ]; then
   backup_directory=""
 fi
 
-printf 'HuxerUI SDK installed at %s\n' "$prefix"
-if [ "$update" = false ]; then
-  printf 'Restart the terminal or run: . %s\n' "$profile"
+if [ -n "$sdk_command" ]; then
+  print_selection
+else
+  printf 'HuxerUI SDK installed at %s\n' "$prefix"
+  if [ "$update" = false ]; then
+    printf 'Restart the terminal or run: . %s\n' "$profile"
+  fi
 fi

@@ -112,7 +112,8 @@ std::filesystem::path ExecutablePath(std::string_view argument_zero) {
 
 SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path) {
   if (const std::optional<std::string> environment = ReadEnvironmentVariable("HUXERUI_HOME")) {
-    return {environment->empty() ? std::filesystem::path{} : Normalize(*environment), SdkLocationSource::Environment};
+    const auto path = std::filesystem::path(std::u8string(environment->begin(), environment->end()));
+    return {path.empty() ? path : Normalize(path), SdkLocationSource::Environment};
   }
 
   const std::filesystem::path executable_directory = executable_path.parent_path();
@@ -155,12 +156,12 @@ std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
   return home;
 }
 
-void ValidateSdkUpdate(const SdkLocation& sdk, const std::filesystem::path& executable_path) {
+void ValidateManagedSdk(const SdkLocation& sdk, const std::filesystem::path& executable_path) {
   if (!sdk.home.empty() && IsSourceHome(sdk.home)) {
-    throw std::runtime_error("HuxerUI source checkouts must be updated through the source workflow");
+    throw std::runtime_error("HuxerUI sdk commands require an installed SDK; use the source workflow for checkouts");
   }
   if (sdk.home.empty() || !IsInstalledHome(sdk.home)) {
-    throw std::runtime_error("HuxerUI update requires an installed SDK");
+    throw std::runtime_error("HuxerUI sdk commands require an installed SDK");
   }
 #if defined(_WIN32)
   constexpr std::string_view executable_name = "huxerui.exe";
@@ -174,36 +175,43 @@ void ValidateSdkUpdate(const SdkLocation& sdk, const std::filesystem::path& exec
   }
 }
 
-int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool check_only, bool assume_yes,
-              std::ostream& output) {
-  ValidateSdkUpdate(sdk, ExecutablePath({}));
+int RunSdkInstaller(const SdkLocation& sdk, std::string_view sdk_command, std::string_view target_version,
+    bool check_only, bool assume_yes, std::ostream& output) {
+  ValidateManagedSdk(sdk, ExecutablePath({}));
   std::random_device random;
   std::filesystem::path directory;
   for (int attempt = 0; attempt < 16; ++attempt) {
-    const auto candidate = std::filesystem::temp_directory_path() / ("huxerui-update-" + std::to_string(random()));
+    const auto candidate = std::filesystem::temp_directory_path() / ("huxerui-sdk-" + std::to_string(random()));
     if (std::filesystem::create_directory(candidate)) {
       directory = candidate;
       break;
     }
   }
   if (directory.empty()) {
-    throw std::runtime_error("HuxerUI cannot create an updater temporary directory");
+    throw std::runtime_error("HuxerUI cannot create an installer temporary directory");
   }
-  bool handed_off = false;
   const auto cleanup = [&] {
-    if (!handed_off) {
-      std::error_code error;
-      std::filesystem::remove_all(directory, error);
-    }
+    std::error_code error;
+    std::filesystem::remove_all(directory, error);
   };
   try {
     std::filesystem::permissions(directory, std::filesystem::perms::owner_all);
 #if defined(_WIN32)
     constexpr std::string_view script_name = "install.ps1";
     ProcessCommand command{"powershell.exe", {"-NoProfile", "-ExecutionPolicy", "Bypass", "-File"}, directory};
+    constexpr auto sdk_option = "-Sdk";
+    constexpr auto prefix_option = "-Prefix";
+    constexpr auto version_option = "-Version";
+    constexpr auto check_option = "-Check";
+    constexpr auto yes_option = "-Yes";
 #else
     constexpr std::string_view script_name = "install.sh";
     ProcessCommand command{"sh", {}, directory};
+    constexpr auto sdk_option = "--sdk";
+    constexpr auto prefix_option = "--prefix";
+    constexpr auto version_option = "--version";
+    constexpr auto check_option = "--check";
+    constexpr auto yes_option = "--yes";
 #endif
     const auto resource = cmrc::huxerui_cli_installers::get_filesystem().open(std::string(script_name));
     const auto script = directory / script_name;
@@ -213,41 +221,24 @@ int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool chec
     if (!stream) {
       throw std::runtime_error("HuxerUI cannot write the temporary installer");
     }
-    command.arguments.push_back(script.string());
-#if defined(_WIN32)
-    command.arguments.insert(command.arguments.end(), {"-Update", "-Prefix", sdk.home.string(), "-WaitForCli",
-                                                       std::to_string(GetCurrentProcessId())});
+    const auto script_path = script.u8string();
+    const auto sdk_path = sdk.home.u8string();
+    command.arguments.insert(command.arguments.end(),
+        {std::string(script_path.begin(), script_path.end()), sdk_option, std::string(sdk_command), prefix_option,
+         std::string(sdk_path.begin(), sdk_path.end())});
     if (check_only) {
-      command.arguments.push_back("-Check");
+      command.arguments.push_back(check_option);
     }
     if (assume_yes) {
-      command.arguments.push_back("-Yes");
+      command.arguments.push_back(yes_option);
     }
     if (!target_version.empty()) {
-      command.arguments.insert(command.arguments.end(), {"-Version", std::string(target_version)});
+      command.arguments.insert(command.arguments.end(), {version_option, std::string(target_version)});
     }
-#else
-    command.arguments.insert(command.arguments.end(), {"--update", "--prefix", sdk.home.string()});
-    if (check_only) {
-      command.arguments.push_back("--check");
-    }
-    if (assume_yes) {
-      command.arguments.push_back("--yes");
-    }
-    if (!target_version.empty()) {
-      command.arguments.insert(command.arguments.end(), {"--version", std::string(target_version)});
-    }
-#endif
     output.flush();
     const int result = RunProcess(command);
-#if defined(_WIN32)
-    if (result == 10) {
-      handed_off = true;
-      output << "HuxerUI update handed off; final result: " << (directory / "update.log").string() << '\n';
-    }
-#endif
     cleanup();
-    return handed_off ? 0 : result;
+    return result;
   } catch (...) {
     cleanup();
     throw;

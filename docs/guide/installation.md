@@ -57,39 +57,26 @@ sh install.sh --version 0.4.0 --prefix "$HOME/Environment/HuxerUI" --yes
 Omitting the version installs the latest GitHub release.
 Running the installer again upgrades or replaces an existing HuxerUI SDK at the same prefix after validating that the directory contains an SDK.
 
-## Update
+## SDK versions
 
-Update the installed SDK, including its CLI, host tools, headers, libraries, and packaged target artifacts:
+Manage SDK versions from any directory:
 
 ```bash
-huxerui update --check
-huxerui update
-huxerui update --yes
-huxerui update --version 0.4.0
+huxerui sdk list
+huxerui sdk use 0.4.0
+huxerui sdk update --check
+huxerui sdk update
 ```
 
-Without `--version`, the command selects the latest stable GitHub release and never downgrades a newer installation.
-An explicit `major.minor.patch` version can select an older release; an identical version is a no-op.
-`--check` only reports the version comparison and does not download an SDK archive or change the installation.
-Updates require confirmation unless `--yes` is present; use `--yes` for unattended invocations.
+- `sdk list` shows the original SDK and locally installed versions, with `*` beside the default recorded by the installer.
+- `sdk use` selects an installed version without a network request. It asks before downloading a missing version.
+- `sdk update` compares the running SDK with the latest stable GitHub release. It asks before selecting a newer release and retains earlier versions. Add `--check` to show the comparison without downloading or switching.
 
-The command replaces the entire selected SDK, including local modifications inside its installation directory.
-Stop builds and tools using that SDK before updating.
-Custom installation directories are supported, but the running CLI must belong to the SDK selected by `HUXERUI_HOME`.
-If they differ, invoke the selected SDK's `bin/huxerui` or correct the environment first.
-Source checkouts must be updated through the source workflow, not this command.
-Application projects, external toolchains, shell profiles, user PATH, and persistent `HUXERUI_HOME` remain unchanged.
+Use `--yes` with `sdk use` or `sdk update` to skip confirmation. Version switching requires HuxerUI 0.4.0 or newer with the `sdk` command.
 
-The installer verifies the archive checksum, stages the replacement beside the existing SDK, and retains the old SDK until the replacement CLI reports the expected version.
-Handled publication failures restore the old SDK; abrupt termination or power loss is not an atomic-update guarantee.
-On Unix hosts, failure to remove the old backup after successful publication only produces a warning with the remaining backup path; the new SDK remains installed.
-Concurrent installers targeting the same prefix are rejected.
-After an interrupted run, inspect any reported backup and `<prefix>.huxerui-lock` before manually removing a stale lock.
-
-On Windows, a temporary PowerShell worker waits for the original CLI to exit before replacing its installation.
-The initial command's successful exit means the update was handed off, not that installation finished.
-The command prints an `update.log` path containing the worker's final result; the temporary worker directory remains available for diagnosis and can be removed after the worker exits.
-On macOS and Linux, the command waits for the installer and returns its result.
+For an installation at `<prefix>`, additional versions are stored at `<prefix>-versions/<version>`. The running CLI must belong to the SDK pointed to by `HUXERUI_HOME`.
+After a successful switch, `HUXERUI_HOME` and the corresponding `bin` entry on `PATH` point to the chosen SDK in new terminals. On Unix, switches reuse the shell profile already managing those SDK versions and print its path.
+Use `--sdk <path>` with a build command to select a different SDK for one invocation.
 
 ## Local archive
 

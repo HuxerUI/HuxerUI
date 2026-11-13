@@ -82,9 +82,8 @@ huxerui build <host>
 The generated smoke project must contain `.agents/skills/huxerui-app-development/SKILL.md` copied from the installed SDK.
 
 The CLI embeds the SDK installers from the same source revision; no separate runtime script installation is required.
-`HuxerUISdkUpdateTests` exercises the Unix installer with local SDK fixtures and a stub release transport, including version checks, upgrade and explicit downgrade, unchanged profile content, conflicting installations, checksum rejection, unsafe links, update locking, and publication failure recovery.
+`HuxerUISdkUpdateTests` uses local SDK fixtures and a stub release transport to check version comparisons, repeated switches in the same shell, default-version markers, profile preservation, checksum rejection, unsafe links, locking, and publication failure recovery.
 These tests must not query public releases or replace a developer's SDK.
-Windows validation additionally requires exercising the PowerShell process handoff and inspecting its transcript on a Windows host; a successful CLI handoff alone does not establish installation success.
 
 On macOS, also create an iOS-only smoke project and run `huxerui build ios --profile release` so the installed XCFramework participates in a complete Simulator application-core build.
 

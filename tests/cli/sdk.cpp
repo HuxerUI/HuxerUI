@@ -15,21 +15,26 @@ TEST_CASE("HuxerUICliBuildSelectionRequiresAnExplicitSdkOverrideForSource") {
   REQUIRE(BuildHomeKey(selected) != BuildHomeKey(temporary.Path()));
 }
 
-TEST_CASE("HuxerUICliValidatesUpdateOptionsBeforeLocatingSdk") {
+TEST_CASE("HuxerUICliValidatesSdkOptionsBeforeLocatingSdk") {
   TemporaryDirectory temporary;
-  REQUIRE(Invoke(temporary.Path(), {"--help"}).output.find("huxerui update") != std::string::npos);
-  for (const auto arguments : {std::initializer_list<std::string_view>{"update", "--version"},
-                               {"update", "--version", ""}, {"update", "--version", "--check"},
-                               {"update", "--check", "--check"}, {"update", "--yes", "--yes"},
-                               {"update", "--prefix", "elsewhere"}, {"update", "--unknown"}}) {
+  REQUIRE(Invoke(temporary.Path(), {"--help"}).output.find("huxerui sdk update") != std::string::npos);
+  const auto help = Invoke(temporary.Path(), {"sdk", "--help"});
+  REQUIRE(help.result == 0);
+  REQUIRE(help.output.find("huxerui sdk list") != std::string::npos);
+  REQUIRE(help.output.find("huxerui sdk use <version>") != std::string::npos);
+  for (const auto arguments : {std::initializer_list<std::string_view>{"sdk", "use"},
+                               {"sdk", "use", ""}, {"sdk", "use", "../0.4.0"}, {"sdk", "use", "0.4..0"},
+                               {"sdk", "use", "0.4.0", "--check"}, {"sdk", "list", "--yes"},
+                               {"sdk", "update", "--check", "--check"}, {"sdk", "update", "--yes", "--yes"},
+                               {"sdk", "update", "--version", "0.4.0"}, {"update", "--check"}}) {
     REQUIRE(Invoke(temporary.Path(), arguments).result == 2);
   }
-  const auto missing = Invoke(temporary.Path(), {"update", "--check"});
+  const auto missing = Invoke(temporary.Path(), {"sdk", "update", "--check"});
   REQUIRE(missing.result == 1);
-  REQUIRE(missing.error.find("requires an installed SDK") != std::string::npos);
+  REQUIRE(missing.error.find("require an installed SDK") != std::string::npos);
 }
 
-TEST_CASE("HuxerUICliUpdateRequiresTheSelectedInstallationsExecutable") {
+TEST_CASE("HuxerUICliSdkManagementRequiresTheSelectedInstallationsExecutable") {
   using namespace huxerui::cli;
   TemporaryDirectory temporary;
   const auto root = temporary.Path();
@@ -48,10 +53,10 @@ TEST_CASE("HuxerUICliUpdateRequiresTheSelectedInstallationsExecutable") {
     std::ofstream(path) << "fixture";
   }
   const SdkLocation sdk{root, SdkLocationSource::Environment};
-  REQUIRE_NOTHROW(ValidateSdkUpdate(sdk, executable));
-  REQUIRE_THROWS_WITH(ValidateSdkUpdate(sdk, ExecutablePath({})),
+  REQUIRE_NOTHROW(ValidateManagedSdk(sdk, executable));
+  REQUIRE_THROWS_WITH(ValidateManagedSdk(sdk, ExecutablePath({})),
                       Catch::Matchers::ContainsSubstring("different installations"));
-  REQUIRE_THROWS_WITH(ValidateSdkUpdate({HUXERUI_TEST_SOURCE_DIRECTORY, SdkLocationSource::Environment}, executable),
+  REQUIRE_THROWS_WITH(ValidateManagedSdk({HUXERUI_TEST_SOURCE_DIRECTORY, SdkLocationSource::Environment}, executable),
                       Catch::Matchers::ContainsSubstring("source workflow"));
 }
 

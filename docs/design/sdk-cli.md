@@ -302,34 +302,22 @@ Dependencies that require manual interaction, account acceptance, platform licen
 `setup` does not install, select, upgrade, or remove HuxerUI itself.
 That remains the responsibility of the SDK installer and avoids a recursive dependency in which the installed CLI owns its own installation.
 
-### Update
+### SDK versions
 
 ```text
-huxerui update [--check] [--version <version>] [--yes]
+huxerui sdk list
+huxerui sdk use <version> [--yes]
+huxerui sdk update [--check] [--yes]
 ```
 
-`update` is a project-independent entry point into the SDK installer, not a second installation engine.
-The command uses normal SDK discovery but rejects source checkouts and a selected SDK whose `bin/huxerui` is not the running executable.
-The CLI embeds the repository's installation scripts at build time, extracts the applicable script to a private temporary directory, and invokes it with explicit arguments.
-It does not download executable scripts from a moving latest-release URL or link against the framework HTTP implementation.
+The `sdk` commands use normal SDK discovery and require the running CLI to belong to the selected installation.
+The CLI invokes the embedded installation script and waits for its result on all hosts.
 
-The installer owns release resolution, version comparison, confirmation, downloads, checksum and archive checks, staging, publication, and failure recovery.
-Update mode requires an existing SDK and never rewrites persistent environment selection or application files.
-Latest-release selection does not downgrade; explicit `major.minor.patch` versions may downgrade, and the same version does not reinstall.
-`--check` reports the comparison without downloading an archive or writing the installation.
-The current version comes from the selected SDK CLI, not a separate SDK manifest.
+Additional versions of an SDK installed at `<prefix>` live at `<prefix>-versions/<version>`. Each directory is a complete SDK with its own CLI, tools, and artifacts. `sdk list` discovers versions in this directory and identifies the default from the installer-managed environment.
+`sdk use` selects a local version or asks before it downloads a missing release. `sdk update` selects the latest stable release after confirmation if it is newer than the running SDK. `--check` only compares versions.
 
-Install, update, and uninstall serialize mutation through a per-prefix lock.
-An update verifies the replacement CLI's version before and after publication and preserves the old SDK until publication succeeds.
-The Unix installer ends the rollback phase before deleting the old backup; backup cleanup failure warns about remaining files without reverting a successfully published SDK.
-This provides recovery from handled failures, not atomic recovery from power loss or forced termination.
-The user must stop other SDK tools and builds before updating; the installer does not terminate them.
-
-On Windows, the embedded installer launches a temporary PowerShell worker after confirmation and returns a distinct handoff status.
-The worker waits for the original CLI to exit, uses the already selected release version, and records its result in a transcript beside the temporary script.
-The CLI reports the transcript location and treats a successful handoff separately from a completed update; its zero exit status cannot attest to the worker's eventual installation result.
-The temporary worker directory is retained for diagnosis.
-Other hosts run the installer synchronously and return its result.
+The installer reuses its download, checksum, archive validation, staging, and per-prefix locking logic. A candidate SDK must report the requested version and support the `sdk` command before its path is published.
+The installer sets `HUXERUI_HOME` to the chosen SDK and publishes the corresponding `bin` path using the user environment on Windows or the shell profile on Unix. Earlier versions stay available at their existing paths.
 
 ### Devices
 
@@ -534,7 +522,7 @@ The CLI resolves its home in this order:
 - A valid installed SDK derived from the running `huxerui` executable.
 
 SDK discovery locates the configured candidate before command parsing. An explicit `--sdk <path>` takes precedence over that candidate, including when `HUXERUI_HOME` is invalid. Without the option, build commands validate the candidate as an installed SDK.
-The CLI exports the effective `HUXERUI_HOME` to build children. It never changes the parent shell or persistent system environment, and `doctor` diagnoses the normally selected installed SDK.
+The CLI exports the effective `HUXERUI_HOME` to build children. SDK switching persists the default through the installer, and `doctor` diagnoses the SDK selected by the current process environment.
 Select a source checkout through `--sdk`. `doctor`, `setup`, project creation, and platform-shell generation continue to use the normally resolved SDK.
 The CLI must remain usable when the environment variable is absent, because a platform installer can place `huxerui` on `PATH` more reliably than every operating system can persist an arbitrary environment variable for all shells and GUI processes.
 Generated projects accept `HUXERUI_HOME` as the framework location and load its source or installed layout. Direct consumers of the installed package may still use standard `find_package(HuxerUI CONFIG REQUIRED)` lookup.

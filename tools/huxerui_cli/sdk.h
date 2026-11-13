@@ -51,18 +51,19 @@ struct SdkLocation {
 /// Rejects source checkouts, missing installations, and a CLI belonging to another SDK.
 /// @param sdk Selected SDK location.
 /// @param executable_path Running CLI executable, resolved independently of HUXERUI_HOME.
-/// @throws std::runtime_error if replacing the selected SDK would be ambiguous or unsafe.
-void ValidateSdkUpdate(const SdkLocation& sdk, const std::filesystem::path& executable_path);
+/// @throws std::runtime_error if SDK management cannot identify the current installation.
+void ValidateManagedSdk(const SdkLocation& sdk, const std::filesystem::path& executable_path);
 
-/// Runs the embedded SDK installer without changing persistent environment selection.
+/// Runs an SDK management command through the embedded installer.
 /// @param sdk Installed SDK selected by the running CLI.
-/// @param target_version Explicit release version, or empty for the latest stable release.
-/// @param check_only Query versions without replacing the SDK.
+/// @param command Validated `list`, `use`, or `update` command.
+/// @param target_version Explicit release version for `use`.
+/// @param check_only Query the latest release without selecting an SDK.
 /// @param assume_yes Skip the installer's interactive confirmation.
-/// @param output Destination for process handoff diagnostics; the installer inherits standard streams.
-/// @return Installer exit code, or zero after a successful Windows updater handoff.
-int UpdateSdk(const SdkLocation& sdk, std::string_view target_version, bool check_only, bool assume_yes,
-              std::ostream& output);
+/// @param output CLI stream to flush before the installer inherits standard streams.
+/// @return Installer exit code.
+int RunSdkInstaller(const SdkLocation& sdk, std::string_view command, std::string_view target_version,
+    bool check_only, bool assume_yes, std::ostream& output);
 
 /// Locates the canonical application-development Skill in an SDK or source checkout.
 /// @param huxerui_home SDK prefix or repository root.

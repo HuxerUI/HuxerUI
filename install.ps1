@@ -7,8 +7,7 @@ param(
     [switch]$Uninstall,
     [switch]$Update,
     [switch]$Check,
-    [int]$WaitForCli,
-    [int]$WaitProcessId
+    [ValidateSet("list", "use", "update")][string]$Sdk
 )
 
 Set-StrictMode -Version Latest
@@ -16,14 +15,6 @@ $ErrorActionPreference = "Stop"
 
 $RepositoryUrl = "https://github.com/HuxerUI/HuxerUI"
 $ExplicitVersion = [bool]$Version
-
-if ($WaitProcessId) {
-    Start-Transcript -Path (Join-Path $PSScriptRoot "update.log") -Force | Out-Null
-    $ParentProcess = Get-Process -Id $WaitProcessId -ErrorAction SilentlyContinue
-    if ($ParentProcess -and -not $ParentProcess.WaitForExit(60000)) {
-        throw "HuxerUI updater timed out waiting for the original CLI to exit"
-    }
-}
 
 function Fail([string]$Message) {
     throw "HuxerUI installer: $Message"
@@ -58,8 +49,7 @@ function Get-SdkVersion([string]$Root) {
 }
 
 function Lock-Sdk {
-    if ((Test-Path -LiteralPath $Prefix) -and
-        ((Get-Item -LiteralPath $Prefix).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    if (Test-SdkLink $Prefix) {
         Fail "installation prefix must not be a link: $Prefix"
     }
     try {
@@ -134,14 +124,50 @@ function Remove-UserEnvironment([string]$SdkRoot) {
     [Environment]::SetEnvironmentVariable("Path", ($Entries -join ";"), "User")
 }
 
-if ($Check -and -not $Update) {
-    Fail "-Check requires -Update"
+function Test-SdkLink([string]$Path) {
+    $Item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    return $Item -and ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+}
+
+function Assert-SdkSelection([string]$Root, [string]$ExpectedVersion) {
+    if (-not (Test-HuxerUISdk $Root) -or
+        -not (Test-Path -LiteralPath (Join-Path $Root "share/huxerui/tools") -PathType Container) -or
+        -not (Test-Path -LiteralPath (Join-Path $Root "share/huxerui/skills/huxerui-app-development") -PathType Container)) {
+        Fail "SDK directory is incomplete: $Root"
+    }
+    if ((Get-SdkVersion $Root) -ne $ExpectedVersion) {
+        Fail "SDK version does not match $($ExpectedVersion): $Root"
+    }
+    $PreviousHome = $env:HUXERUI_HOME
+    try {
+        $env:HUXERUI_HOME = $Root
+        & (Join-Path $Root "bin/huxerui.exe") sdk --help 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Fail "HuxerUI $ExpectedVersion does not support SDK switching"
+        }
+    } finally {
+        $env:HUXERUI_HOME = $PreviousHome
+    }
+}
+
+function Write-SdkSelection {
+    Write-Host "Selected HuxerUI SDK $Version at $Prefix"
+    Write-Host "Restart the terminal to use the updated user environment."
+}
+
+function Select-Sdk {
+    Assert-SdkSelection $Prefix $Version
+    Set-UserEnvironment $Prefix
+}
+
+if ($Check -and -not $Update -and $Sdk -ne "update") {
+    Fail "-Check requires an update"
 }
 if ($Update -and (-not $Prefix -or $Uninstall)) {
     Fail "-Update requires -Prefix and cannot be combined with -Uninstall"
 }
-if (($WaitForCli -or $WaitProcessId) -and (-not $Update -or $Archive)) {
-    Fail "CLI handoff requires -Update without -Archive"
+if ($Sdk -and (-not $Prefix -or $Update -or $Uninstall -or $Archive)) {
+    Fail "SDK management requires the current SDK prefix"
 }
 if ($Uninstall -and ($Version -or $Archive)) {
     Fail "-Uninstall cannot be combined with -Version or -Archive"
@@ -157,6 +183,49 @@ if (-not $Prefix) {
 }
 $Prefix = Get-AbsolutePath $Prefix
 Assert-SafePrefix $Prefix
+
+if ($Sdk) {
+    if (-not (Test-HuxerUISdk $Prefix)) {
+        Fail "SDK management requires an installed SDK: $Prefix"
+    }
+    $CurrentPrefix = $Prefix
+    $CurrentVersion = Get-SdkVersion $CurrentPrefix
+    $OriginalPrefix = $CurrentPrefix
+    $VersionsDirectory = Split-Path -Parent $CurrentPrefix
+    if ($VersionsDirectory.EndsWith("-versions", [StringComparison]::OrdinalIgnoreCase) -and
+        (Split-Path -Leaf $CurrentPrefix) -eq $CurrentVersion) {
+        $OriginalPrefix = $VersionsDirectory.Substring(0, $VersionsDirectory.Length - "-versions".Length)
+    } else {
+        $VersionsDirectory = "$OriginalPrefix-versions"
+    }
+    if (Test-SdkLink $VersionsDirectory) {
+        Fail "SDK versions directory must not be a link: $VersionsDirectory"
+    }
+    if ($Sdk -eq "list") {
+        $DefaultPrefix = [Environment]::GetEnvironmentVariable("HUXERUI_HOME", "User")
+        Write-Host "Installed HuxerUI SDKs (* default):"
+        if (Test-HuxerUISdk $OriginalPrefix) {
+            $Marker = if ($OriginalPrefix -eq $DefaultPrefix) { "*" } else { " " }
+            Write-Host ("{0} {1,-10} {2}" -f $Marker, (Get-SdkVersion $OriginalPrefix), $OriginalPrefix)
+        }
+        if (Test-Path -LiteralPath $VersionsDirectory -PathType Container) {
+            Get-ChildItem -LiteralPath $VersionsDirectory -Directory | Where-Object {
+                $_.Name -match '^\d+\.\d+\.\d+$' -and
+                -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and (Test-HuxerUISdk $_.FullName)
+            } | ForEach-Object {
+                $Marker = if ($_.FullName -eq $DefaultPrefix) { "*" } else { " " }
+                Write-Host ("{0} {1,-10} {2}" -f $Marker, $_.Name, $_.FullName)
+            }
+        }
+        exit 0
+    }
+    if ($Sdk -eq "use" -and $Version -cnotmatch '^v?[0-9]+\.[0-9]+\.[0-9]+$') {
+        Fail "expected a major.minor.patch release version"
+    }
+    if ($Sdk -eq "update" -and $Version) {
+        Fail "SDK update selects the latest stable release; use sdk use to select a version"
+    }
+}
 
 if ($Uninstall) {
     if (-not (Test-HuxerUISdk $Prefix)) {
@@ -261,16 +330,55 @@ if ($Update) {
         exit 0
     }
     Confirm-Action "The entire SDK will be replaced, including local modifications. Stop SDK builds and tools first."
-    if ($WaitForCli) {
-        $QuotedScript = $PSCommandPath.Replace("'", "''")
-        $QuotedPrefix = $Prefix.Replace("'", "''")
-        $Worker = "& '$QuotedScript' -Update -Prefix '$QuotedPrefix' -Version '$Version' -Yes -WaitProcessId $WaitForCli"
-        $Encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Worker))
-        Start-Process -FilePath (Join-Path $PSHOME "powershell.exe") -ArgumentList @(
-            "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $Encoded
-        ) -NoNewWindow | Out-Null
-        exit 10
+} elseif ($Sdk) {
+    if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+        Fail "expected a major.minor.patch release version"
     }
+    if ($Sdk -eq "update") {
+        Write-Host "Current HuxerUI SDK: $CurrentVersion"
+        Write-Host "Latest stable SDK: $Version"
+        if ([version]$CurrentVersion -gt [version]$Version) {
+            Write-Host "The installed SDK is newer than the latest stable release."
+            exit 0
+        }
+        if ([version]$CurrentVersion -eq [version]$Version) {
+            Write-Host "HuxerUI SDK is up to date."
+            exit 0
+        }
+        if ($Check) {
+            Write-Host "HuxerUI SDK update available."
+            exit 0
+        }
+    }
+    if ([version]$Version -lt [version]"0.4.0") {
+        Fail "SDK switching starts with HuxerUI 0.4.0"
+    }
+
+    $Prefix = Join-Path $VersionsDirectory $Version
+    if ($Version -eq $CurrentVersion) {
+        $Prefix = $CurrentPrefix
+    } elseif (-not (Test-Path -LiteralPath $Prefix) -and (Test-HuxerUISdk $OriginalPrefix) -and
+        (Get-SdkVersion $OriginalPrefix) -eq $Version) {
+        $Prefix = $OriginalPrefix
+    }
+    if (Test-SdkLink $Prefix) {
+        Fail "SDK directory must not be a link: $Prefix"
+    }
+    if (Test-Path -LiteralPath $Prefix) {
+        if ($Sdk -eq "update") {
+            Confirm-Action "Switch to the installed HuxerUI SDK $Version at $Prefix"
+        }
+        $SdkLock = Lock-Sdk
+        try {
+            Select-Sdk
+        } finally {
+            $SdkLock.Dispose()
+            Remove-Item -LiteralPath "$Prefix.huxerui-lock"
+        }
+        Write-SdkSelection
+        exit 0
+    }
+    Confirm-Action "Install and select HuxerUI SDK $Version at $Prefix"
 } else {
     Confirm-Action "Install HuxerUI SDK`n  Archive: $ArchiveDisplay`n  SDK: $Prefix"
 }
@@ -330,11 +438,19 @@ try {
     if ($Update -and (Get-SdkVersion $ExtractedSdk) -ne $Version) {
         Fail "archive SDK version does not match $Version"
     }
+    if ($Sdk) {
+        Assert-SdkSelection $ExtractedSdk $Version
+    }
 
     $Parent = Split-Path -Parent $Prefix
     New-Item -ItemType Directory -Path $Parent -Force | Out-Null
     if (-not $SdkLock) {
         $SdkLock = Lock-Sdk
+    }
+    if ($Sdk -and (Test-Path -LiteralPath $Prefix)) {
+        Select-Sdk
+        Write-SdkSelection
+        exit 0
     }
     $StagingDirectory = Join-Path $Parent (".huxerui-install-" + [guid]::NewGuid())
     Move-Item -LiteralPath $ExtractedSdk -Destination $StagingDirectory
@@ -349,6 +465,8 @@ try {
             if ((Get-SdkVersion $Prefix) -ne $Version) {
                 Fail "installed SDK version does not match $Version"
             }
+        } elseif ($Sdk) {
+            Select-Sdk
         } else {
             Set-UserEnvironment $Prefix
         }
@@ -381,10 +499,11 @@ try {
     }
 }
 
-Write-Host "HuxerUI SDK installed at $Prefix"
-if (-not $Update) {
-    Write-Host "Restart the terminal to use the updated user environment."
-}
-if ($WaitProcessId) {
-    Stop-Transcript | Out-Null
+if ($Sdk) {
+    Write-SdkSelection
+} else {
+    Write-Host "HuxerUI SDK installed at $Prefix"
+    if (-not $Update) {
+        Write-Host "Restart the terminal to use the updated user environment."
+    }
 }

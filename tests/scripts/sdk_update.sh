@@ -80,7 +80,11 @@ set -eu
 if [ -f "$HUXERUI_HOME/fail-publication" ] && [ "$HUXERUI_HOME" = "$TEST_PREFIX" ]; then
   exit 1
 fi
-printf 'huxerui %s\n' "$(cat "$HUXERUI_HOME/version")"
+case "$*" in
+  --version) printf 'huxerui %s\n' "$(cat "$HUXERUI_HOME/version")" ;;
+  'sdk --help') [ ! -f "$HUXERUI_HOME/legacy-cli" ] && printf '  huxerui sdk list\n' ;;
+  *) exit 2 ;;
+esac
 EOF
   chmod +x "$root/bin/huxerui"
 }
@@ -169,13 +173,69 @@ run_update 1 'checksum does not match' --version 0.2.0 --yes
 cp "$cli" "$TEST_PREFIX/bin/huxerui"
 export HUXERUI_HOME="$TEST_PREFIX"
 current_version=$("$TEST_PREFIX/bin/huxerui" --version)
-"$TEST_PREFIX/bin/huxerui" update --version "${current_version#huxerui }" --yes >"$test_root/output"
-grep -q 'already at' "$test_root/output"
-"$TEST_PREFIX/bin/huxerui" update --version 9.0.0 --check >"$test_root/output"
+current_version=${current_version#huxerui }
+export HOME="$test_root/home"
+export SHELL=/bin/bash
+unset _HUXERUI_SDK_PROFILE
+mkdir "$HOME"
+profile="$HOME/.bashrc"
+printf 'export KEEP_TEST=preserved\n' >"$profile"
+sh "$installer" --sdk use --prefix "$TEST_PREFIX" --version "$current_version" --profile "$profile" >"$test_root/output"
+cp "$profile" "$test_root/original-profile"
+export TEST_LATEST=9.0.0
+"$TEST_PREFIX/bin/huxerui" sdk update --check >"$test_root/output"
 grep -q 'update available' "$test_root/output"
-if "$cli" update --check >"$test_root/output" 2>&1; then
+cmp -s "$profile" "$test_root/original-profile"
+if "$cli" sdk update --check >"$test_root/output" 2>&1; then
   printf 'CLI accepted a different installation\n' >&2
   exit 1
 fi
 grep -q 'different installations' "$test_root/output"
+
+name="huxerui-sdk-$TEST_LATEST-$host-$arch"
+make_sdk "$test_root/$name" "$TEST_LATEST"
+tar -czf "$TEST_PACKAGES/$name.tar.gz" -C "$test_root" "$name"
+(cd "$TEST_PACKAGES" && shasum -a 256 "$name.tar.gz" >"$name.tar.gz.sha256")
+"$TEST_PREFIX/bin/huxerui" sdk update --yes >"$test_root/output"
+selected="$TEST_PREFIX-versions/$TEST_LATEST"
+( . "$profile"; test "$HUXERUI_HOME" = "$selected"; test "$(huxerui --version)" = "huxerui $TEST_LATEST" )
+test -f "$TEST_PREFIX/local-modification"
+grep -Fqx 'export KEEP_TEST=preserved' "$profile"
+"$TEST_PREFIX/bin/huxerui" sdk list >"$test_root/output"
+test "$(awk '$1 == "*" { print $2 }' "$test_root/output")" = "$TEST_LATEST"
+grep -Fq "$current_version" "$test_root/output"
+
+export TEST_NETWORK_FAILURE=true
+"$TEST_PREFIX/bin/huxerui" sdk use "$current_version" >"$test_root/output"
+( . "$profile"; test "$HUXERUI_HOME" = "$TEST_PREFIX"; test "$(huxerui --version)" = "huxerui $current_version" )
+test ! -e "$HOME/.bash_profile"
+"$TEST_PREFIX/bin/huxerui" sdk list >"$test_root/output"
+test "$(awk '$1 == "*" { print $2 }' "$test_root/output")" = "$current_version"
+
+custom_profile="$HOME/custom 'settings'"
+sh "$installer" --sdk use --prefix "$TEST_PREFIX" --version "$current_version" \
+  --profile "$custom_profile" >"$test_root/output"
+(
+  . "$custom_profile"
+  "$TEST_PREFIX/bin/huxerui" sdk use "$TEST_LATEST" >"$test_root/output"
+  "$TEST_PREFIX/bin/huxerui" sdk list >"$test_root/output"
+  test "$(awk '$1 == "*" { print $2 }' "$test_root/output")" = "$TEST_LATEST"
+  ( . "$custom_profile"; test "$HUXERUI_HOME" = "$selected" )
+  "$TEST_PREFIX/bin/huxerui" sdk use "$current_version" >"$test_root/output"
+  ( . "$custom_profile"; test "$HUXERUI_HOME" = "$TEST_PREFIX" )
+)
+cmp -s "$profile" "$test_root/original-profile"
+
+if "$TEST_PREFIX/bin/huxerui" sdk use 0.3.0 --yes >"$test_root/output" 2>&1; then
+  printf 'CLI selected a release without SDK management\n' >&2
+  exit 1
+fi
+grep -q 'SDK switching starts with' "$test_root/output"
+touch "$selected/legacy-cli"
+if "$TEST_PREFIX/bin/huxerui" sdk use "$TEST_LATEST" >"$test_root/output" 2>&1; then
+  printf 'CLI selected an SDK without the sdk command\n' >&2
+  exit 1
+fi
+grep -q 'does not support SDK switching' "$test_root/output"
+( . "$profile"; test "$HUXERUI_HOME" = "$TEST_PREFIX" )
 printf 'SDK update tests passed.\n'

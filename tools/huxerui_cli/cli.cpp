@@ -54,6 +54,10 @@ constexpr std::string_view build_options =
     "[-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]";
 constexpr std::string_view sdk_option_help =
     "--sdk <path> selects an installed SDK or a HuxerUI source checkout for this invocation.\n";
+constexpr std::string_view sdk_commands =
+    "  huxerui sdk list\n"
+    "  huxerui sdk use <version> [--yes]\n"
+    "  huxerui sdk update [--check] [--yes]\n";
 
 void PrintBuildOptions(std::ostream& output) {
   output << sdk_option_help
@@ -83,7 +87,7 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui platform add <platform-list>\n"
          << "  huxerui doctor [platform-list]\n"
          << "  huxerui setup <platform-list> [--yes]\n"
-         << "  huxerui update [--check] [--version <version>] [--yes]\n"
+         << sdk_commands
          << "  huxerui devices [platform]\n"
          << "  huxerui build [platform-list] " << build_options << '\n'
          << "  huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]\n"
@@ -1236,26 +1240,47 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
   return 0;
 }
 
-int RunUpdate(std::span<const std::string_view> arguments, const SdkLocation& sdk, std::ostream& output) {
+int RunSdk(std::span<const std::string_view> arguments, const SdkLocation& sdk, std::ostream& output) {
+  if (arguments.empty() || (arguments.size() == 1 && (arguments[0] == "--help" || arguments[0] == "-h"))) {
+    output << "Manage installed HuxerUI SDK versions.\n\nUsage:\n" << sdk_commands;
+    return 0;
+  }
+
+  const auto command = arguments.front();
+  arguments = arguments.subspan(1);
+  if (command == "list" && arguments.empty()) {
+    return RunSdkInstaller(sdk, command, {}, false, false, output);
+  }
   bool check = false;
   bool yes = false;
   std::string_view target_version;
-  for (std::size_t index = 1; index < arguments.size(); ++index) {
-    const auto argument = arguments[index];
-    if (argument == "--check" && !check) {
+  if (command == "use") {
+    if (arguments.empty()) {
+      throw UsageError("sdk use requires a major.minor.patch version");
+    }
+    target_version = arguments.front();
+    auto number = target_version;
+    if (number.starts_with('v')) {
+      number.remove_prefix(1);
+    }
+    if (std::ranges::count(number, '.') != 2 || number.starts_with('.') || number.ends_with('.') ||
+        number.find_first_not_of("0123456789.") != number.npos || number.find("..") != number.npos) {
+      throw UsageError("sdk use requires a major.minor.patch version");
+    }
+    arguments = arguments.subspan(1);
+  } else if (command != "update") {
+    throw UsageError("expected sdk list, sdk use <version>, or sdk update");
+  }
+  for (const auto argument : arguments) {
+    if (command == "update" && argument == "--check" && !check) {
       check = true;
     } else if (argument == "--yes" && !yes) {
       yes = true;
-    } else if (argument == "--version" && target_version.empty()) {
-      if (++index == arguments.size() || arguments[index].empty() || arguments[index].starts_with('-')) {
-        throw UsageError("update --version requires a release version");
-      }
-      target_version = arguments[index];
     } else {
-      throw UsageError("unknown or repeated update option: " + std::string(argument));
+      throw UsageError("unknown or repeated sdk option: " + std::string(argument));
     }
   }
-  return UpdateSdk(sdk, target_version, check, yes, output);
+  return RunSdkInstaller(sdk, command, target_version, check, yes, output);
 }
 
 } // namespace
@@ -1295,8 +1320,8 @@ int Run(std::span<const std::string_view> arguments, const std::filesystem::path
     if (command == "setup") {
       return RunSetup(arguments, sdk, input, output);
     }
-    if (command == "update") {
-      return RunUpdate(arguments, sdk, output);
+    if (command == "sdk") {
+      return RunSdk(arguments.subspan(1), sdk, output);
     }
     if (command == "devices") {
       return RunDevices(arguments, output);
