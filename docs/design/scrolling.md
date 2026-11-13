@@ -13,6 +13,7 @@ Neither value is copied into `ScrollMetrics`.
 UiWindow owns scroll recognition and coordination without branching on concrete component types.
 `ScrollView`, virtual layouts, and editable text configure the same mounted scroll state and use the same offset mutation path.
 Platform adapters normalize host input and report Runtime's consumption result; they do not implement nested scrolling or component behavior.
+A disabled container rejects every user-driven scroll source while still accepting `ScrollSource::Programmatic` from its connected `ScrollController`, including item alignment; focus reveal remains gated by the disabled state.
 
 ## Platform scroll input
 

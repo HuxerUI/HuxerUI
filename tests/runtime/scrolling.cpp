@@ -7,6 +7,7 @@ std::string scroll_clicked;
 State<bool> show_controlled_scroll;
 ScrollController controlled_list_scroll;
 ScrollController variable_list_scroll;
+ScrollController disabled_estimated_scroll;
 ScrollController controlled_grid_scroll;
 ScrollController controlled_view_scroll;
 ScrollController horizontal_view_scroll;
@@ -32,6 +33,8 @@ ScrollController cross_axis_inner_scroll;
 ScrollController hook_outer_scroll;
 ScrollController hook_inner_scroll;
 ScrollController activity_scroll;
+ScrollController disabled_rail_scroll;
+State<bool> programmatic_rail_enabled;
 ScrollController refresh_content_scroll;
 State<bool> disableable_scroll_enabled;
 State<bool> refresh_box_refreshing;
@@ -159,6 +162,14 @@ View VariableExtentScrollApp() {
   return VirtualList(std::size_t{1001}, [](std::size_t index) {
     return Text::Format("Block {}", index).With(Frame{.height = index == 1000 ? 120.0F : 46.0F}).Key(index);
   }).EstimatedItemExtent(84.0F).CacheExtent(100.0F).Controller(scroll);
+}
+
+View DisabledEstimatedItemScrollApp() {
+  auto scroll = UseScrollController();
+  disabled_estimated_scroll = scroll;
+  return VirtualList(std::size_t{1001}, [](std::size_t index) {
+    return Text::Format("Block {}", index).With(Frame{.height = index == 1000 ? 120.0F : 84.0F}).Key(index);
+  }).EstimatedItemExtent(84.0F).CacheExtent(100.0F).Controller(scroll).With(Enabled(false));
 }
 
 View ScrollControllerExampleApp() {
@@ -375,6 +386,20 @@ View DisableableOverscrollApp() {
   return ScrollView {
     Spacer().With(huxerui::Frame{100.0F, 300.0F}),
   }.With(Enabled(enabled.Get()), ScrollPhysics{.fling_enabled = false});
+}
+
+View ProgrammaticRailApp() {
+  auto enabled = UseState(false);
+  programmatic_rail_enabled = enabled;
+  auto rail = UseScrollController();
+  disabled_rail_scroll = rail;
+  // Paint-only rail: the user cannot interact with the viewport, but the application can still move it
+  // through its controller to mirror another scroll position.
+  return Column {
+    ScrollView {
+      Spacer().With(huxerui::Frame{60.0F, 160.0F}),
+    }.Controller(rail).With(huxerui::Frame{60.0F, 80.0F}, Enabled(enabled.Get())),
+  };
 }
 
 View ReducedMotionOverscrollApp() {
@@ -778,6 +803,54 @@ TEST_CASE("Disabling an active scroll clears overscroll and cancels direct activ
   REQUIRE_FALSE(runtime.RootNode()->interaction.enabled);
 }
 
+TEST_CASE("Disabled scroll containers reject input but keep programmatic controller scrolls") {
+  TestPlatform platform;
+  UiWindow runtime{ProgrammaticRailApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 300.0F}});
+  runtime.BuildFrame();
+
+  const auto rail_node = [&]() -> const detail::MountedNode* {
+    const detail::MountedNode* root = runtime.RootNode();
+    return root != nullptr && !root->children.empty() ? root->children.front().get() : nullptr;
+  };
+  const detail::MountedNode* rail = rail_node();
+  REQUIRE(rail != nullptr);
+  REQUIRE(rail->scroll_state != nullptr);
+  REQUIRE_FALSE(rail->interaction.enabled);
+  REQUIRE(rail->scroll_state->Offset(Axis::Vertical) == 0.0F);
+
+  // Control: an upward drag from offset zero must move the container while it is enabled.
+  programmatic_rail_enabled = true;
+  runtime.BuildFrame();
+  rail = rail_node();
+  REQUIRE(rail->interaction.enabled);
+  runtime.HandlePointerEvent({PointerEventType::Down, 201, {30.0F, 40.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 201, {30.0F, 10.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 201, {30.0F, 10.0F}, PointerDeviceKind::Touch});
+  REQUIRE(rail->scroll_state->Offset(Axis::Vertical) > 0.0F);
+
+  // The same upward drag from zero must be rejected while the container is disabled.
+  programmatic_rail_enabled = false;
+  runtime.BuildFrame();
+  rail = rail_node();
+  REQUIRE_FALSE(rail->interaction.enabled);
+  REQUIRE(disabled_rail_scroll.ScrollTo(0.0F));
+  runtime.BuildFrame();
+  rail = rail_node();
+  REQUIRE(rail->scroll_state->Offset(Axis::Vertical) == 0.0F);
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 202, {30.0F, 40.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 202, {30.0F, 10.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 202, {30.0F, 10.0F}, PointerDeviceKind::Touch});
+  REQUIRE(rail->scroll_state->Offset(Axis::Vertical) == 0.0F);
+  REQUIRE(disabled_rail_scroll.Offset() == 0.0F);
+
+  REQUIRE(disabled_rail_scroll.ScrollTo(30.0F));
+  REQUIRE(disabled_rail_scroll.Offset() == 30.0F);
+  runtime.BuildFrame();
+  REQUIRE(rail->scroll_state->Offset(Axis::Vertical) == 30.0F);
+}
+
 TEST_CASE("Reduced motion clears released overscroll without retained settlement") {
   TestPlatform platform;
   UiWindow runtime{ReducedMotionOverscrollApp, platform};
@@ -950,6 +1023,28 @@ TEST_CASE("TestScrollControllerRefinesVariableItemAlignmentAfterRealization") {
   const auto settled = variable_list_scroll.Metrics();
   runtime.BuildFrame();
   REQUIRE(variable_list_scroll.Metrics() == settled);
+}
+
+TEST_CASE("Disabled virtual list refines item alignment after realization") {
+  TestPlatform platform;
+  UiWindow runtime{DisabledEstimatedItemScrollApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 400.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(disabled_estimated_scroll.ScrollToItem(1000, ScrollAlignment::End));
+  REQUIRE(disabled_estimated_scroll.Offset() == Catch::Approx(83684.0F));
+
+  for (int frame = 0; frame < 8; ++frame) {
+    runtime.BuildFrame();
+  }
+  REQUIRE(disabled_estimated_scroll.MaxOffset() > 83684.0F);
+  REQUIRE(disabled_estimated_scroll.Offset() == Catch::Approx(disabled_estimated_scroll.MaxOffset()));
+  const auto* root = runtime.RootNode();
+  REQUIRE_FALSE(root->interaction.enabled);
+  REQUIRE(root->virtual_state->realized_indices.back() == 1000);
+  REQUIRE(root->children.back()->layout_offset.y == Catch::Approx(280.0F));
+  REQUIRE(root->children.back()->layout_offset.y + root->children.back()->bounds.height ==
+          Catch::Approx(400.0F));
 }
 
 TEST_CASE("TestScrollControllerDirectScrollingCancelsPendingItemAlignment") {
