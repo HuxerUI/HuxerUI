@@ -10,6 +10,8 @@ Two-axis containers share one clip and viewport. Each axis has its own optional 
 Momentum owns only its current velocity, while overscroll owns only a temporary presentation displacement outside the clamped content range.
 Neither value is copied into `ScrollMetrics`.
 
+`ScrollView::FillViewport()` and the Tabs strip share the `ScrollFillViewport` measurement policy. On each scroll axis, it passes the bounded viewport extent or the incoming minimum to the child as its minimum extent. The child's maximum extent stays unbounded.
+
 UiWindow owns scroll recognition and coordination without branching on concrete component types.
 `ScrollView`, virtual layouts, and editable text configure the same mounted scroll state and use the same offset mutation path.
 Platform adapters normalize host input and report Runtime's consumption result; they do not implement nested scrolling or component behavior.

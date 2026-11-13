@@ -1790,6 +1790,10 @@ public:
   ScrollView Controller(huxerui::ScrollController controller) &&;
   /// Connects a stable controller to one axis selected by ScrollBothAxes(). Use a distinct controller for each axis.
   ScrollView Controller(Axis axis, huxerui::ScrollController controller) &&;
+  /// Raises the content's minimum extent along every enabled scroll axis.
+  /// Uses the bounded viewport extent or the incoming minimum on an unbounded axis.
+  /// Larger content can still scroll normally.
+  ScrollView FillViewport() &&;
 };
 
 /// Virtualizes a one-dimensional logical item source with fixed, estimated, or measured item extents.
