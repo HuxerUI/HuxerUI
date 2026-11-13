@@ -130,6 +130,7 @@ struct ScrollPhysics {
 
 /// Controls and observes one axis of a mounted scroll container.
 ///
+/// A disabled container rejects every user-driven source but still accepts controller requests, including item alignment.
 /// Keep a controller stable with `UseScrollController()` when a component recomposes.
 class ScrollController {
 public:

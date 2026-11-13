@@ -1552,6 +1552,39 @@ TEST_CASE("TestVariableVirtualGridRetainsMetricsAcrossItemDeclarationRefresh") {
   REQUIRE(std::abs(last_end - root->ContentBounds().height) < 0.01F);
 }
 
+TEST_CASE("Disabled two-axis virtual layout still aligns controller items", "[scroll2d]") {
+  static ScrollController horizontal;
+  static ScrollController vertical;
+  static int factory_calls;
+  factory_calls = 0;
+
+  TestPlatform platform;
+  UiWindow runtime{[]() -> View {
+    horizontal = UseScrollController();
+    vertical = UseScrollController();
+    return TestTwoAxisGrid(Size{40.0F, 20.0F}, factory_calls)
+        .Controller(Axis::Horizontal, horizontal)
+        .Controller(Axis::Vertical, vertical)
+        .With(Enabled(false));
+  }, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 80.0F}});
+  runtime.BuildFrame();
+  REQUIRE_FALSE(runtime.RootNode()->interaction.enabled);
+
+  constexpr std::size_t target = 6000 * TestTwoAxisGrid::columns + 99;
+  REQUIRE(horizontal.ScrollToItem(target, ScrollAlignment::End));
+  REQUIRE(vertical.ScrollToItem(target, ScrollAlignment::Center));
+  for (int frame = 0; frame < 4; ++frame) {
+    runtime.BuildFrame();
+  }
+  REQUIRE(horizontal.Offset() == 3880.0F);
+  REQUIRE(vertical.Offset() == 119970.0F);
+  const auto* root = runtime.RootNode();
+  const auto item = std::find(root->virtual_state->realized_indices.begin(),
+                              root->virtual_state->realized_indices.end(), target);
+  REQUIRE(item != root->virtual_state->realized_indices.end());
+}
+
 TEST_CASE("Two-axis virtualization commits corrected offsets and visible cells together", "[scroll2d]") {
   static State<Size> cell;
   static ScrollController horizontal;

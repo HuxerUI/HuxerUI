@@ -247,6 +247,8 @@ Keep the controller stable across recomposition.
 Bind a controller to a single-axis view with `.Controller(controller)`. Two-axis views use `.Controller(axis, controller)` for each axis that needs application control. Use distinct controllers when binding both axes.
 
 It can scroll to or by an offset and ask a supported virtual layout to scroll to an item.
+A disabled scroll container still accepts controller requests; drag, wheel, trackpad, momentum, and focus reveal stay rejected.
+This supports paint-only rails that mirror another scroll position without becoming interactive.
 Focus and text-input reveal use the same authoritative scroll position internally rather than a separate controller path.
 User input, animation, focus reveal, and controller requests all update one authoritative scroll position.
 Observe `Metrics()` for content-offset and extent changes instead of deriving position from raw scroll input.

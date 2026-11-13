@@ -208,7 +208,7 @@ void ScrollConnection::CancelPending() {
 }
 
 std::optional<float> ScrollConnection::PendingItemOffset(float viewport_extent) const {
-  if (!IsCurrent() || !state_->pending_item || !node_->interaction.enabled) {
+  if (!IsCurrent() || !state_->pending_item) {
     return std::nullopt;
   }
   const auto request = *state_->pending_item;
@@ -233,8 +233,7 @@ void ScrollConnection::ApplyPending(bool after_layout) {
     }
     return;
   }
-  if (!node_->interaction.enabled || !node_->virtual_state ||
-      state_->pending_item->index >= node_->virtual_state->source.size) {
+  if (!node_->virtual_state || state_->pending_item->index >= node_->virtual_state->source.size) {
     CancelPending();
     return;
   }
@@ -431,8 +430,9 @@ void NotifyScrollNodeActivity(MountedNode& node, Axis axis, ScrollSource source,
 }
 
 float ScrollNodeBy(MountedNode& node, Axis axis, float delta, ScrollSource source) {
-  if (!node.interaction.enabled || !IsScrollContainer(node) || !node.scroll_state->Supports(axis) ||
-      !AllowsScrollSource(node, source)) {
+  // A disabled container rejects user-driven sources but remains drivable by its connected controller.
+  if ((!node.interaction.enabled && source != ScrollSource::Programmatic) || !IsScrollContainer(node) ||
+      !node.scroll_state->Supports(axis) || !AllowsScrollSource(node, source)) {
     return 0.0F;
   }
   auto& scroll = *node.scroll_state;
