@@ -100,7 +100,7 @@ public:
     }
     ConfigureScrollState(mounted);
     if (!behavior_.drag_enabled && (mode_ == Mode::Dragging || mode_ == Mode::AwaitingCommit)) {
-      BeginAnimation(mounted, displayed_index_);
+      BeginAnimation(mounted, behavior_.selected_index);
       return;
     }
     if (behavior_.selected_index != previous_selected) {
