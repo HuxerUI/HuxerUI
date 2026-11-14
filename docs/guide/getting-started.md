@@ -174,6 +174,10 @@ return Column {
 };
 ```
 
+In an application-thread callback, `UseService<Resources>()->GetString(app::strings::welcome)` resolves a value immediately. Use the same service's `GetImage`, `GetVectorImage`, or `GetRawResource` for other resource types.
+
+To read a separate resource package, pass the directory produced by `hrc` to `Resources::OpenPackage(File("path/to/package"))`. The returned resolver can be shared across threads. String and image lookups use `en` and `1x` by default and accept an explicit `ResourceConfiguration`. Keep a copy of the `Resources` value alive while reading uncached raw assets.
+
 ## Project commands
 
 ```text

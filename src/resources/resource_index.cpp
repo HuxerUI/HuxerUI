@@ -53,12 +53,14 @@ public:
   }
 
   [[nodiscard]] bool AtEnd() const noexcept {
-    return offset_ == bytes_.size();
+    return Remaining() == 0;
   }
+
+  [[nodiscard]] std::size_t Remaining() const noexcept { return bytes_.size() - offset_; }
 
 private:
   void Require(std::size_t count) const {
-    if (count > bytes_.size() - offset_) {
+    if (count > Remaining()) {
       throw std::logic_error("HuxerUI resource index is truncated");
     }
   }
@@ -98,6 +100,11 @@ std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index) {
     throw std::logic_error("HuxerUI resource index version is unsupported: " + std::to_string(version));
   }
   const std::uint32_t count = reader.U32();
+  // Each entry has a kind, six string lengths, six 32-bit fields, and a 64-bit hash.
+  constexpr std::size_t minimum_entry_size = 1 + 12 * 4 + 8;
+  if (count > reader.Remaining() / minimum_entry_size) {
+    throw std::logic_error("HuxerUI resource index is truncated");
+  }
   std::vector<ResourceIndexEntry> entries;
   entries.reserve(count);
   for (std::uint32_t index_value = 0; index_value < count; ++index_value) {

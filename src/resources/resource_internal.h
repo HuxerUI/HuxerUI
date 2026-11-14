@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <huxerui/file.h>
 #include <huxerui/resource.h>
 #include <huxerui/state.h>
 #include <huxerui/text.h>
@@ -23,6 +24,7 @@ namespace huxerui::detail {
 inline constexpr std::string_view resource_index_path = "huxerui/resources.bin";
 
 [[nodiscard]] Bytes ReadStreamBytes(InputStream input);
+[[nodiscard]] std::optional<InputStream> OpenPackageFile(const File& file);
 [[nodiscard]] std::optional<InputStream> OpenPackageFile(const std::filesystem::path& path);
 
 enum class ResourceEntryKind {
@@ -61,12 +63,14 @@ using ResolvedImageAsset = std::variant<ImageAsset, VectorAsset>;
 class AppResources : public std::enable_shared_from_this<AppResources> {
 public:
   explicit AppResources(PlatformResources* platform_resources);
+  explicit AppResources(const File& directory);
   void Disconnect();
   [[nodiscard]] InputStream OpenRead(std::string_view package_path);
+  bool IsIndependentPackage() const noexcept { return directory_.has_value(); }
 
   void UpdateConfiguration(ResourceConfiguration configuration);
   [[nodiscard]] ResourceConfiguration Configuration(bool observe = true) const;
-  /// Resolves application defaults, original-window overrides, and local Locale for the calling context.
+  /// Resolves application defaults, original-window overrides, and local Locale, or the independent package defaults.
   /// @param observe Whether configuration dependencies should subscribe the active composition.
   /// @return An owned effective configuration; ordinary Resources Get methods pass false.
   [[nodiscard]] ResourceConfiguration EffectiveConfiguration(bool observe) const;
@@ -80,13 +84,17 @@ public:
   [[nodiscard]] ResolvedStringResource Resolve(const StringResource& resource, const Locale& locale) const;
 
 private:
+  void LoadIndex(Bytes bytes);
+  [[nodiscard]] std::unique_lock<std::mutex> LockCache();
   [[nodiscard]] std::span<const ResourceIndexEntry> FindEntries(ResourceEntryKind kind, const ResourceId& id) const;
   [[nodiscard]] std::span<const ResourceIndexEntry>
   ResolveLocalized(const ResourceId& id, ResourceEntryKind kind, const Locale& locale) const;
-  [[nodiscard]] RawAsset ReadEntry(const ResourceIndexEntry& entry);
+  [[nodiscard]] ResolvedImageAsset ReadImage(const ResourceIndexEntry& entry);
 
+  const std::optional<File> directory_;
   PlatformResources* platform_resources_ = nullptr;
-  std::mutex platform_mutex_;
+  // Guards the borrowed platform source or the independent package's raw and image caches.
+  std::mutex mutex_;
   ResourceConfiguration configuration_;
   std::shared_ptr<CompositionDependency> configuration_dependency_ = std::make_shared<CompositionDependency>();
   std::vector<ResourceIndexEntry> entries_;

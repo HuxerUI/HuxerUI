@@ -1,15 +1,20 @@
 #include <catch2/catch_amalgamated.hpp>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <span>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include <huxerui/file.h>
 #include <huxerui/paint.h>
 #include <huxerui/resource.h>
 
@@ -133,6 +138,107 @@ TEST_CASE("ResourceCompilerGeneratesTypedKeysIndexAndPayloads") {
   REQUIRE(index[10] == 0);
   REQUIRE(index[11] == 0);
   REQUIRE_FALSE(std::filesystem::exists(output / "resources.stamp"));
+}
+
+TEST_CASE("IndependentResourcePackagesResolveTheirOwnKeysWithoutARuntime") {
+  using namespace huxerui;
+  TemporaryDirectory temporary;
+  const auto root = temporary.Path() / "assets";
+  const auto output = temporary.Path() / "first";
+  Write(root / "strings" / "default.properties", "title = Hello {0}\n");
+  Write(root / "strings" / "fr.properties", "title = Bonjour {0}\n");
+  Write(root / "images" / "icon.png", test::MakeTestPng(8, 4));
+  Write(root / "images" / "icon@2x.png", test::MakeTestPng(16, 8));
+  Write(root / "images" / "mark.svg", R"svg(<svg viewBox="0 0 8 4"><path d="M0 0 L8 0 L0 4 Z"/></svg>)svg");
+  resource_compiler::Compile({root, output, "test_app"});
+  const auto package = Resources::OpenPackage(File((output / "package").generic_u8string()));
+  const auto title = StringVariant::Format(StringResource("test_app", "strings/title"), "Ada");
+  const ResourceConfiguration configuration{Locale::FromLanguageTag("fr-CA"), 2.0F};
+  const ImageResource icon("test_app", "images/icon");
+  REQUIRE(package.Configuration() == ResourceConfiguration{});
+  REQUIRE(package.GetString(title) == "Hello Ada");
+  REQUIRE(package.GetString(title, configuration) == "Bonjour Ada");
+  REQUIRE(package.GetImage(icon).PixelWidth() == 8);
+  REQUIRE(package.GetImage(icon, configuration).PixelWidth() == 16);
+  REQUIRE(package.GetVectorImage(ImageResource("test_app", "images/mark")).IntrinsicSize() == Size{8.0F, 4.0F});
+
+  const auto other_output = temporary.Path() / "second";
+  Write(root / "strings" / "default.properties", "title = Welcome {0}\n");
+  resource_compiler::Compile({root, other_output, "test_app"});
+  const auto other = Resources::OpenPackage(File((other_output / "package").generic_u8string()));
+  REQUIRE(other.GetString(title) == "Welcome Ada");
+  REQUIRE(package.GetString(title) == "Hello Ada");
+  REQUIRE_THROWS_AS(package.GetString(StringResource("test_app", "strings/missing")), std::logic_error);
+}
+
+TEST_CASE("IndependentRawResourceReadsFollowThePackageLifetime") {
+  using namespace huxerui;
+  TemporaryDirectory temporary;
+  const auto root = temporary.Path() / "assets";
+  const auto output = temporary.Path() / "output";
+  Write(root / "raw" / "data.txt", "payload");
+  resource_compiler::Compile({root, output, "test_app"});
+  const RawResource key("test_app", "raw/data.txt");
+  RawAsset asset;
+  auto opened = [&] {
+    const auto package = Resources::OpenPackage(File((output / "package").generic_u8string()));
+    asset = package.GetRawResource(key);
+    REQUIRE(asset.HasValue());
+    return asset.OpenRead();
+  }();
+  REQUIRE_THROWS_AS(asset.OpenRead(), std::logic_error);
+  std::array<std::byte, 7> bytes{};
+  const auto read = opened.Read(bytes);
+  REQUIRE(read.Succeeded());
+  REQUIRE(read.Value() == bytes.size());
+  REQUIRE(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()) == "payload");
+}
+
+#if !defined(__EMSCRIPTEN__)
+TEST_CASE("IndependentResourcePackagesSupportConcurrentLookup") {
+  using namespace huxerui;
+  TemporaryDirectory temporary;
+  const auto root = temporary.Path() / "assets";
+  const auto output = temporary.Path() / "output";
+  Write(root / "raw" / "data.txt", "payload");
+  Write(root / "images" / "icon.png", test::MakeTestPng(8, 4));
+  resource_compiler::Compile({root, output, "test_app"});
+  const auto package = Resources::OpenPackage(File((output / "package").generic_u8string()));
+  const RawResource raw("test_app", "raw/data.txt");
+  const ImageResource icon("test_app", "images/icon");
+
+  std::promise<void> ready;
+  const auto start = ready.get_future().share();
+  auto lookup = [&] {
+    start.wait();
+    return std::pair{package.GetRawResource(raw), package.GetImage(icon)};
+  };
+  auto first = std::async(std::launch::async, lookup);
+  ready.set_value();
+
+  const auto [second_raw, second_image] = lookup();
+  const auto [first_raw, first_image] = first.get();
+  REQUIRE(first_raw.ReadString() == "payload");
+  REQUIRE(second_raw == first_raw);
+  REQUIRE(first_image.PixelWidth() == 8);
+  REQUIRE(second_image.EncodedBytes().data() == first_image.EncodedBytes().data());
+  REQUIRE(package.GetImage(icon).EncodedBytes().data() == first_image.EncodedBytes().data());
+}
+#endif
+
+TEST_CASE("IndependentResourcePackagesRequireAValidIndex") {
+  using namespace huxerui;
+  TemporaryDirectory temporary;
+  const File directory(temporary.Path().generic_u8string());
+  const auto index = temporary.Path() / "huxerui" / "resources.bin";
+  SECTION("Missing") {}
+  SECTION("Empty") { Write(index, std::string_view{}); }
+  SECTION("Invalid signature") { Write(index, "invalid"); }
+  SECTION("Truncated entry table") {
+    const std::string_view truncated("HUXRES\0\0\1\0\0\0\xff\xff\xff\xff", 16);
+    Write(index, truncated);
+  }
+  REQUIRE_THROWS_AS(Resources::OpenPackage(directory), std::logic_error);
 }
 
 TEST_CASE("ResourceCompilerRejectsAnEmptyResourceRoot") {

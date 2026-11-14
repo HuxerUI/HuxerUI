@@ -571,8 +571,8 @@ Bytes ReadStreamBytes(InputStream input) {
   return result;
 }
 
-std::optional<InputStream> OpenPackageFile(const std::filesystem::path& path) {
-  auto opened = File(std::u8string_view(path.u8string())).OpenRead();
+std::optional<InputStream> OpenPackageFile(const File& file) {
+  auto opened = file.OpenRead();
   if (opened.Succeeded()) {
     return std::move(opened).Value();
   }
@@ -580,6 +580,10 @@ std::optional<InputStream> OpenPackageFile(const std::filesystem::path& path) {
     return std::nullopt;
   }
   throw std::runtime_error(opened.Error().message);
+}
+
+std::optional<InputStream> OpenPackageFile(const std::filesystem::path& path) {
+  return OpenPackageFile(File(std::u8string_view(path.u8string())));
 }
 
 const std::variant<std::string, StringResource>& InternalAccess::StringValue(const StringVariant& value) noexcept {

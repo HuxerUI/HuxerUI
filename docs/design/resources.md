@@ -135,6 +135,12 @@ The converting `StringVariant` constructors keep literal, string, and StringReso
 The named Format operation avoids a variadic constructor that could conflict with TextRole or future Text configuration.
 UseString remains the explicit operation for application logic that needs resolved UTF-8 immediately, while StringVariant lets component, validation, semantics, and presentation APIs retain direct text or a StringResource until mounted reconciliation.
 
+## Independent resource packages
+
+`Resources::OpenPackage(const File&)` loads the index from an `hrc` package directory without a Runtime. It uses the same typed lookup, locale fallback, density selection, and per-package caches as the application service. Independent packages support concurrent lookups and use `ResourceConfiguration{}` unless the caller supplies a configuration snapshot. Lookups stay within the opened index and do not subscribe composition. Cache access for independent packages is synchronized, while file reads and parsing run outside the cache lock.
+
+Opening requires a present, structurally valid index. Payloads are opened on demand. Callers supply a verified local directory and keep its contents stable while the resolver is in use. Package authenticity and payload integrity belong to the installer or other owner that supplies the directory.
+
 ## Build and package model
 
 The recommended source root is named `resources` and contains resource kinds directly rather than another domain directory:
@@ -503,6 +509,7 @@ Cancellation suppresses delivery and requests cooperative worker stop; an active
 
 Runtime disconnects AppResources from the adapter under the same lock used during package opening; the lock is released before stream consumption.
 After disconnect, uncached package opens throw `std::logic_error`, even if another object still retains AppResources.
+For an independent package, uncached opens require a retained copy of the resolver. The already opened stream and cached-byte rules apply to both resource sources.
 Already opened streams and retained memory remain usable independently of the Runtime.
 Opening a missing default asset throws `std::logic_error`; its complete-buffer reads return empty values.
 `HasValue()` reports a memory value or resolved package reference, without checking payload existence or reading bytes.

@@ -21,6 +21,7 @@
 
 namespace huxerui {
 
+class File;
 class StringVariant;
 /// Resolves direct text or a localized template into an owned string.
 /// @param value Literal text or a resource identity with already captured formatting arguments.
@@ -189,8 +190,8 @@ struct ResourceConfiguration {
 
 /// A copyable raw-resource value backed by immutable memory or a lazily opened installed-package entry.
 /// UseRawResource() resolves identity and metadata without reading payload bytes. Copies share optional cached bytes.
-/// Reads may run on workers. Uncached package access requires a connected Runtime resource service; retained memory
-/// and already opened streams remain usable after Runtime destruction. Cache retention lasts as long as shared data.
+/// Reads may run on workers. Uncached package access requires a live resource source. Retained memory and already
+/// opened streams remain usable after the source is released. Cache retention lasts as long as shared data.
 /// @code{.cpp}
 /// RawAsset asset = RawAsset::FromBytes({std::byte{'o'}, std::byte{'k'}}, "text/plain");
 /// std::string text = asset.ReadString();
@@ -364,9 +365,9 @@ private:
 /// ExternalTexture is separate because it represents a live shared texture rather than an immutable image value.
 using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 
-/// Resolves owned resource values on the original application thread without subscribing composition.
-/// Implicit configuration follows the calling window and local Locale; application-only tasks use application defaults.
-/// Methods reject a stopped or different application lifetime. Resolved values can be retained independently.
+/// Resolves immediate resource values without subscribing composition.
+/// The application service uses the original application thread and the calling context's effective configuration.
+/// An independent package supports concurrent lookup and uses ResourceConfiguration{} for implicit configuration.
 /// @code{.cpp}
 /// auto resources = UseService<Resources>();
 /// const ResourceConfiguration configuration = resources->Configuration();
@@ -376,20 +377,31 @@ using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
 /// to configuration changes; Get methods return an immediate value and do not establish that subscription.
 class Resources final {
 public:
+  /// Opens an independent, locally accessible resource package and reads its index synchronously.
+  /// @param directory The directory containing the huxerui/resources.bin index produced by hrc and its payloads.
+  /// @return A resource resolver that can be shared across threads and used outside a Runtime.
+  /// @throws std::logic_error If the index is missing or its structure is invalid.
+  /// @throws std::invalid_argument If an indexed resource identity is invalid.
+  /// @throws std::runtime_error If the index cannot be read.
+  /// Keep the verified directory contents stable while the package is in use. Payloads are opened on demand.
+  /// Uncached RawAsset reads require a retained copy of this resolver. Open streams and resolved strings and images
+  /// have independent lifetimes.
+  static Resources OpenPackage(const File& directory);
+
   /// Reads effective resource configuration without observing composition dependencies.
-  /// @return An owned snapshot including application defaults, original-window overrides, and local Locale.
-  /// @throws std::logic_error If the original application lifetime, thread, or context is invalid.
+  /// @return Application defaults with window and Locale overrides, or default configuration for an independent package.
+  /// @throws std::logic_error If the resource lifetime, thread, or context is invalid.
   [[nodiscard]] ResourceConfiguration Configuration() const;
   /// Resolves a raw-resource identity without reading its payload.
   /// @param resource Installed package raw-resource key.
   /// @return A lazy asset that can later open or read its own stream.
-  /// @throws std::logic_error If the key is absent or the application lifetime/thread is invalid.
+  /// @throws std::logic_error If the key is absent or the resource lifetime/thread is invalid.
   [[nodiscard]] RawAsset GetRawResource(RawResource resource) const;
   /// Resolves a packaged raster image with this call's effective resource configuration.
   /// @param resource Installed image key whose selected payload is raster data.
   /// @return A retained asset; first resolution may synchronously read and parse package data.
   /// @throws std::invalid_argument If the selected payload is vector data or malformed.
-  /// Missing keys and invalid application lifetime/thread raise std::logic_error; native I/O errors may propagate.
+  /// Missing keys and invalid resource lifetime/thread raise std::logic_error; platform I/O errors may propagate.
   [[nodiscard]] ImageAsset GetImage(ImageResource resource) const;
   /// Resolves a packaged raster image using an explicit configuration snapshot.
   /// @param resource Installed key selecting raster image data.
@@ -402,7 +414,7 @@ public:
   /// @param resource Installed image key whose selected payload is vector data.
   /// @return A retained asset; first resolution may synchronously read and parse package data.
   /// @throws std::invalid_argument If the selected payload is raster data or malformed.
-  /// Missing keys and invalid application lifetime/thread raise std::logic_error; native I/O errors may propagate.
+  /// Missing keys and invalid resource lifetime/thread raise std::logic_error; platform I/O errors may propagate.
   [[nodiscard]] VectorAsset GetVectorImage(ImageResource resource) const;
   /// Resolves a packaged vector image using an explicit configuration snapshot.
   /// @param resource Installed key selecting vector image data.
@@ -414,7 +426,7 @@ public:
   /// Resolves text immediately using this call's effective Locale.
   /// @param value Literal text or an installed string key with owned formatting arguments.
   /// @return Owned resolved text with no composition dependency.
-  /// @throws std::logic_error If a key is absent or the original application lifetime/thread is invalid.
+  /// @throws std::logic_error If a key is absent or the resource lifetime/thread is invalid.
   /// @throws std::invalid_argument If formatting arguments do not satisfy the selected template.
   [[nodiscard]] std::string GetString(const StringVariant& value) const;
   /// Resolves text with an explicit configuration snapshot.
@@ -427,7 +439,7 @@ public:
 private:
   Resources(std::shared_ptr<detail::AppResources> resources, std::weak_ptr<detail::ApplicationRuntimeState> application)
       : resources_(std::move(resources)), application_(std::move(application)) {}
-  /// Rejects access outside this resource service's original live application and its owning thread.
+  /// Requires the owning thread and validates the application lifetime for Runtime-owned resources.
   void RequireLifetime() const;
   std::shared_ptr<detail::AppResources> resources_;
   std::weak_ptr<detail::ApplicationRuntimeState> application_;
