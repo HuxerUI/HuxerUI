@@ -272,6 +272,8 @@ void PaintLabelContent(const MountedNode& node, PaintContext& context, const Tex
                    node.properties.text_layout_options);
 }
 
+} // namespace
+
 Rect RenderClipBounds(const RenderClip& clip) {
   return std::visit(
       [](const auto& command) -> Rect {
@@ -285,8 +287,6 @@ Rect RenderClipBounds(const RenderClip& clip) {
       clip
   );
 }
-
-} // namespace
 
 std::vector<RenderClip> ResolveChildClips(const MountedNode& node) {
   std::vector<RenderClip> clips;

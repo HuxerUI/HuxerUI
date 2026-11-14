@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <huxerui/animation.h>
@@ -1300,6 +1301,259 @@ constexpr Color debug_panel_secondary = Color::Rgb(164, 174, 190);
 constexpr Color debug_metric_background = Color::Rgb(255, 255, 255, 0.065F);
 constexpr Color debug_shadow_color = Color::Rgb(0, 0, 0, 0.42F);
 constexpr Color debug_live_color = Color::Rgb(67, 209, 125);
+constexpr Color debug_layout_bounds_color = Color::Rgb(45, 212, 191, 0.9F);
+constexpr Color debug_layout_padding_color = Color::Rgb(251, 191, 36, 0.28F);
+constexpr Color debug_layout_content_color = Color::Rgb(251, 191, 36, 0.9F);
+constexpr Color debug_layout_gap_color = Color::Rgb(236, 72, 153, 0.3F);
+constexpr Color debug_layout_alignment_color = Color::Rgb(74, 222, 128, 0.9F);
+constexpr Color debug_layout_scroll_color = Color::Rgb(96, 165, 250, 0.95F);
+constexpr Color debug_layout_clip_color = Color::Rgb(248, 113, 113, 0.95F);
+
+struct DebugLayoutGuides {
+  bool visible;
+
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool operator==(const DebugLayoutGuides&) const = default;
+};
+
+struct DebugGuideLine {
+  Point start;
+  Point end;
+
+  bool operator==(const DebugGuideLine&) const = default;
+};
+
+struct DebugGuide {
+  std::variant<Rect, DebugGuideLine> geometry;
+  Rect clip;
+  Color color;
+  float stroke_width = 0.0F;
+
+  bool operator==(const DebugGuide&) const = default;
+};
+
+void AppendDebugGuide(std::vector<DebugGuide>& guides, Rect bounds, Rect clip, Color color, float stroke_width = 0.0F) {
+  if (bounds.Intersects(clip)) {
+    guides.push_back({bounds, clip, color, stroke_width});
+  }
+}
+
+void CollectDebugPadding(std::vector<DebugGuide>& guides, const detail::MountedNode& node, Rect clip) {
+  if (node.resolved_padding == EdgeInsets{} || node.bounds.IsEmpty()) {
+    return;
+  }
+  const Rect content = node.ContentBounds().Intersection(node.bounds);
+  const float right = node.bounds.x + node.bounds.width;
+  const float bottom = node.bounds.y + node.bounds.height;
+  const float left_edge = std::clamp(content.x, node.bounds.x, right);
+  const float top_edge = std::clamp(content.y, node.bounds.y, bottom);
+  const float right_edge = left_edge + content.width;
+  const float bottom_edge = top_edge + content.height;
+  const Rect padding[] = {
+      {node.bounds.x, node.bounds.y, node.bounds.width, top_edge - node.bounds.y},
+      {node.bounds.x, bottom_edge, node.bounds.width, bottom - bottom_edge},
+      {node.bounds.x, top_edge, left_edge - node.bounds.x, content.height},
+      {right_edge, top_edge, right - right_edge, content.height},
+  };
+  for (const Rect band : padding) {
+    if (!band.IsEmpty()) {
+      AppendDebugGuide(guides, node.LocalToWindowBounds(band), clip, debug_layout_padding_color);
+    }
+  }
+  if (!content.IsEmpty()) {
+    AppendDebugGuide(guides, node.LocalToWindowBounds(content), clip, debug_layout_content_color, 1.0F);
+  }
+}
+
+void CollectDebugAxisLayout(std::vector<DebugGuide>& guides, const detail::MountedNode& node, Rect clip, bool vertical) {
+  const Rect content = node.ContentBounds();
+  if (content.IsEmpty()) {
+    return;
+  }
+  const float main_start = vertical ? content.y : content.x;
+  const float main_extent = vertical ? content.height : content.width;
+  const float cross_start = vertical ? content.x : content.y;
+  const float cross_extent = vertical ? content.width : content.height;
+  const auto append_gap = [&](float start, float end) {
+    if (end > start) {
+      const float extent = end - start;
+      const Rect gap = vertical ? Rect{cross_start, start, cross_extent, extent}
+                                : Rect{start, cross_start, extent, cross_extent};
+      AppendDebugGuide(guides, node.LocalToWindowBounds(gap), clip, debug_layout_gap_color);
+    }
+  };
+
+  std::optional<float> previous_end;
+  for (const auto& child : node.children) {
+    if (!child->participates_in_layout) {
+      continue;
+    }
+    const float start = vertical ? child->layout_offset.y : child->layout_offset.x;
+    const float end = start + (vertical ? child->bounds.height : child->bounds.width);
+    if (previous_end.has_value()) {
+      append_gap(*previous_end, start);
+    }
+    if (child->kind == detail::NodeKind::Spacer) {
+      append_gap(start, end);
+    }
+    previous_end = end;
+  }
+  if (!previous_end.has_value()) {
+    return;
+  }
+
+  const auto window_point = [&](float main, float cross) {
+    return node.LocalToWindow(vertical ? Point{cross, main} : Point{main, cross});
+  };
+  const auto append_line = [&](Point start, Point end) {
+    const Rect bounds{
+        std::min(start.x, end.x) - 0.5F,
+        std::min(start.y, end.y) - 0.5F,
+        std::abs(start.x - end.x) + 1.0F,
+        std::abs(start.y - end.y) + 1.0F,
+    };
+    if (start != end && bounds.Intersects(clip)) {
+      guides.push_back({DebugGuideLine{start, end}, clip, debug_layout_alignment_color});
+    }
+  };
+  const auto main_line = [&](float fraction) {
+    const float main = main_start + main_extent * fraction;
+    append_line(window_point(main, cross_start), window_point(main, cross_start + cross_extent));
+  };
+  const auto cross_line = [&](float fraction) {
+    const float cross = cross_start + cross_extent * fraction;
+    append_line(window_point(main_start, cross), window_point(main_start + main_extent, cross));
+  };
+  switch (node.MainAlignment()) {
+  case MainAxisAlignment::Start:
+    main_line(0.0F);
+    break;
+  case MainAxisAlignment::Center:
+    main_line(0.5F);
+    break;
+  case MainAxisAlignment::End:
+    main_line(1.0F);
+    break;
+  case MainAxisAlignment::SpaceBetween:
+  case MainAxisAlignment::SpaceAround:
+  case MainAxisAlignment::SpaceEvenly:
+    break;
+  }
+  switch (node.CrossAlignment()) {
+  case CrossAxisAlignment::Start:
+    cross_line(0.0F);
+    break;
+  case CrossAxisAlignment::Center:
+    cross_line(0.5F);
+    break;
+  case CrossAxisAlignment::End:
+    cross_line(1.0F);
+    break;
+  case CrossAxisAlignment::Stretch:
+    cross_line(0.0F);
+    cross_line(1.0F);
+    break;
+  }
+}
+
+void CollectDebugLayout(std::vector<DebugGuide>& guides, const detail::MountedNode& node, Rect clip) {
+  if (clip.IsEmpty() || !node.participates_in_layout || node.presentation.suppress_render ||
+      node.PresentationOpacity() <= 0.0F) {
+    return;
+  }
+  CollectDebugPadding(guides, node, clip);
+  if (!node.bounds.IsEmpty() && node.kind != detail::NodeKind::Scope && node.kind != detail::NodeKind::Environment) {
+    AppendDebugGuide(guides, node.PresentationBounds(), clip, debug_layout_bounds_color, 1.0F);
+  }
+  if (node.layout_descriptor != nullptr) {
+    const auto type = node.layout_descriptor->type;
+    if (type == typeid(Row) || type == typeid(Column)) {
+      CollectDebugAxisLayout(guides, node, clip, type == typeid(Column));
+    }
+  }
+  Rect child_clip = clip;
+  const bool scrolls = detail::IsScrollContainer(node);
+  const auto child_clips = detail::ResolveChildClips(node);
+  for (std::size_t index = 0; index < child_clips.size(); ++index) {
+    const Rect local_bounds = detail::RenderClipBounds(child_clips[index]);
+    const Rect bounds = local_bounds.IsEmpty() ? Rect{} : node.LocalToWindowBounds(local_bounds);
+    // ResolveChildClips appends the scroll viewport after any explicit clips.
+    const Color color =
+        scrolls && index + 1 == child_clips.size() ? debug_layout_scroll_color : debug_layout_clip_color;
+    AppendDebugGuide(guides, bounds, clip, color, 2.0F);
+    child_clip = child_clip.Intersection(bounds);
+  }
+  for (const auto& child : node.children) {
+    CollectDebugLayout(guides, *child, child_clip);
+  }
+}
+
+class DebugLayoutGuidesExtension final : public NodeExtension {
+public:
+  DebugLayoutGuidesExtension(ViewNode&, const DebugLayoutGuides& modifier) : visible_(modifier.visible) {}
+
+  void Update(ViewNode&, const DebugLayoutGuides& modifier) {
+    visible_ = modifier.visible;
+  }
+
+  PaintInvalidation PrepareGeometry(ViewNode& node, TextMeasurer&) override {
+    if (!visible_) {
+      if (guides_.empty()) {
+        return PaintInvalidation::None;
+      }
+      guides_.clear();
+      return PaintInvalidation::Content;
+    }
+    const auto& mounted = static_cast<const detail::MountedNode&>(node);
+    const detail::MountedNode* root = detail::InternalAccess::RootNode(*mounted.ui_window);
+    next_guides_.clear();
+    if (root != nullptr) {
+      // The debug overlay fills the window, so window coordinates are also its local paint coordinates.
+      CollectDebugLayout(next_guides_, *root, mounted.bounds);
+    }
+    if (guides_ == next_guides_) {
+      return PaintInvalidation::None;
+    }
+    guides_.swap(next_guides_);
+    return PaintInvalidation::Content;
+  }
+
+  void PaintBehindContent(const ViewNode& node, PaintContext& context) const override {
+    const Rect viewport = node.Bounds();
+    Rect clip = viewport;
+    for (const DebugGuide& guide : guides_) {
+      if (clip != guide.clip) {
+        if (clip != viewport) {
+          context.PopClip();
+        }
+        clip = guide.clip;
+        if (clip != viewport) {
+          context.PushClip(clip);
+        }
+      }
+      if (const auto* line = std::get_if<DebugGuideLine>(&guide.geometry)) {
+        context.DrawLine(line->start, line->end, guide.color, StrokeStyle{});
+      } else if (guide.stroke_width > 0.0F) {
+        context.DrawBorder(std::get<Rect>(guide.geometry), guide.color, StrokeStyle{.width = guide.stroke_width});
+      } else {
+        context.DrawRect(std::get<Rect>(guide.geometry), guide.color);
+      }
+    }
+    if (clip != viewport) {
+      context.PopClip();
+    }
+  }
+
+private:
+  bool visible_;
+  std::vector<DebugGuide> guides_;
+  std::vector<DebugGuide> next_guides_;
+};
+
+const detail::ModifierDescriptor& DebugLayoutGuides::Descriptor() {
+  return detail::ModifierDescriptorFor<DebugLayoutGuides, DebugLayoutGuidesExtension>();
+}
 
 struct DebugSampler {
   std::shared_ptr<detail::DebugMetricsSampler> metrics;
@@ -1392,7 +1646,8 @@ View DebugMetricCard(std::string label, std::string value, std::string detail, C
 View DebugPanel(
     const detail::DebugMetricsSnapshot& snapshot,
     const std::shared_ptr<detail::DebugMetricsSampler>& metrics,
-    State<detail::DebugMetricsSnapshot> snapshot_state
+    State<detail::DebugMetricsSnapshot> snapshot_state,
+    State<bool> layout_guides
 ) {
   const std::string fps =
       snapshot.painted_frame_count == 0 ? "Idle" : std::to_string(static_cast<int>(std::lround(snapshot.fps)));
@@ -1429,6 +1684,9 @@ View DebugPanel(
       DebugMetricCard("CPU", cpu, "Process / all cores", Color::Rgb(255, 183, 77)),
       DebugMetricCard("MEMORY", memory, "Process footprint", Color::Rgb(186, 132, 255)),
     }.With(Spacing{8.0F}, CrossAlign{CrossAxisAlignment::Stretch}),
+    Switch("Layout guides", layout_guides)
+        .With(Foreground{debug_panel_foreground}, FontSize{11.0F})
+        .OnChanged([layout_guides](bool checked) { layout_guides = checked; }),
     Text(footer).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
   }.With(
       panel_frame,
@@ -2210,14 +2468,15 @@ public:
         [metrics = std::move(metrics)] {
           auto expanded = UseState(false);
           auto snapshot = UseState(DebugMetricsSnapshot{});
+          auto layout_guides = UseState(false);
           std::vector<View> children;
           if (expanded.Get()) {
-            children.push_back(DebugPanel(snapshot.Get(), metrics, snapshot));
+            children.push_back(DebugPanel(snapshot, metrics, snapshot, layout_guides));
           } else {
             children.push_back(Spacer());
           }
           children.push_back(DebugRibbon(expanded, snapshot));
-          return DebugOverlayLayout {std::move(children)};
+          return DebugOverlayLayout {std::move(children)}.With(DebugLayoutGuides{layout_guides});
         },
         {},
         std::move(placement)

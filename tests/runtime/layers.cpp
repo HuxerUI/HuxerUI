@@ -23,6 +23,7 @@ std::optional<MenuHandle> nested_menu;
 std::optional<ViewHandle> nested_menu_target;
 std::optional<DialogHandle> retained_environment_dialog;
 std::optional<LayerController> raw_layers;
+ScrollController debug_layout_scroll;
 State<float> layer_anchor_offset;
 State<bool> layer_anchor_visible;
 State<int> layer_anchor_variant;
@@ -216,6 +217,24 @@ View RetainedLayerEnvironmentApp() {
 View DebugOverlayApp() {
   ++layer_app_compositions;
   return Button("debug application").With(huxerui::Frame{240.0F, 120.0F}).OnClick([] { ++layer_background_clicks; });
+}
+
+View DebugLayoutApp() {
+  ++layer_app_compositions;
+  layer_popup = UsePopup();
+  debug_layout_scroll = UseScrollController();
+  return Column {
+    Row {
+      Button("application button").With(Frame{44.0F, 24.0F}).OnClick([] { ++layer_background_clicks; }),
+      Spacer(),
+      Text("end").With(Frame{30.0F, 24.0F}),
+    }.With(Frame{.height = 40.0F}, Padding{8.0F}, Spacing{4.0F}, CrossAlign{CrossAxisAlignment::Center}),
+    ScrollView(Column {
+      Text("first").With(Frame{72.0F, 30.0F}),
+      Text("second").With(Frame{73.0F, 36.0F}),
+      Text("third").With(Frame{74.0F, 100.0F}),
+    }).Controller(debug_layout_scroll).With(Frame{100.0F, 64.0F}, Padding{5.0F}),
+  };
 }
 
 View LayerKeyCollisionApp() {
@@ -1858,6 +1877,121 @@ TEST_CASE("TestDebugOverlayDefaultMatchesBuildConfiguration") {
 #else
   REQUIRE(options.show_debug_overlay);
 #endif
+}
+
+TEST_CASE("TestDebugLayoutGuidesFollowScrollClipsAndDoNotRequestFramesOrConsumeClicks", "[layout-guides]") {
+  constexpr Color alignment_color = Color::Rgb(74, 222, 128, 0.9F);
+  constexpr Color bounds_color = Color::Rgb(45, 212, 191, 0.9F);
+  constexpr Color gap_color = Color::Rgb(236, 72, 153, 0.3F);
+  constexpr Color padding_color = Color::Rgb(251, 191, 36, 0.28F);
+  constexpr Color viewport_color = Color::Rgb(96, 165, 250, 0.95F);
+  const auto has_border = [](const FlattenedScene& scene, Rect bounds, Color color) {
+    return std::ranges::any_of(scene.Commands(), [&](const PaintCommand& command) {
+      const auto* border = std::get_if<DrawBorderCommand>(&command);
+      return border != nullptr && border->rect == bounds && border->color == color;
+    });
+  };
+  const auto has_fill = [](const FlattenedScene& scene, Rect bounds, Color color) {
+    return std::ranges::any_of(scene.Commands(), [&](const PaintCommand& command) {
+      const auto* fill = std::get_if<DrawRectCommand>(&command);
+      return fill != nullptr && fill->rect == bounds && BrushIsColor(fill->brush, color);
+    });
+  };
+
+  layer_app_compositions = 0;
+  layer_background_clicks = 0;
+  TestPlatform platform;
+  UiWindow runtime{DebugLayoutApp, platform, AppOptions{.show_debug_overlay = true}};
+  const Point ribbon{450.0F, 30.0F};
+  const Rect spacer{56.0F, 8.0F, 382.0F, 24.0F};
+  const Rect viewport{5.0F, 45.0F, 90.0F, 54.0F};
+  runtime.SetWindowMetrics({.viewport = {480.0F, 300.0F}});
+  REQUIRE_FALSE(has_fill(runtime.BuildFrame(), spacer, gap_color));
+
+  const auto toggle_guides = [&](SemanticCheckedState checked) {
+    ClickAt(runtime, ribbon);
+    runtime.BuildFrame();
+    const auto& nodes = runtime.LastCommit().semantic_frame->nodes;
+    const auto toggle = std::ranges::find(nodes, "Layout guides", &SemanticNode::label);
+    REQUIRE(toggle != nodes.end());
+    REQUIRE(toggle->role == SemanticRole::Switch);
+    REQUIRE(toggle->checked == checked);
+    ClickAt(runtime, {toggle->bounds.x + 8.0F, toggle->bounds.y + toggle->bounds.height * 0.5F});
+    runtime.BuildFrame();
+    ClickAt(runtime, ribbon);
+    runtime.HandlePointerEvent({PointerEventType::Move, 0, {400.0F, 200.0F}});
+    SettlePresentation(platform, runtime, 2.0);
+    SettlePresentation(platform, runtime);
+  };
+
+  toggle_guides(SemanticCheckedState::Unchecked);
+  const auto& enabled = runtime.BuildFrame();
+  REQUIRE_FALSE(ContainsText(enabled, "HuxerUI Performance"));
+  REQUIRE(has_fill(enabled, spacer, gap_color));
+  REQUIRE(has_fill(enabled, {52.0F, 8.0F, 4.0F, 24.0F}, gap_color));
+  REQUIRE(has_fill(enabled, {0.0F, 0.0F, 480.0F, 8.0F}, padding_color));
+  REQUIRE(has_border(enabled, viewport, viewport_color));
+  REQUIRE(has_border(enabled, {5.0F, 45.0F, 72.0F, 30.0F}, bounds_color));
+  REQUIRE(std::ranges::any_of(enabled.Commands(), [&](const PaintCommand& command) {
+    const auto* line = std::get_if<DrawLineCommand>(&command);
+    return line != nullptr && line->color == alignment_color &&
+           line->start == Point{8.0F, 20.0F} && line->end == Point{472.0F, 20.0F};
+  }));
+
+  const int requested_frames = platform.requested_frames;
+  platform.AdvanceTime(2.0);
+  const auto& idle = runtime.BuildCommit();
+  REQUIRE_FALSE(idle.next_frame_deadline.has_value());
+  REQUIRE_FALSE(idle.render_frame.damage.full);
+  REQUIRE(idle.render_frame.damage.rects.empty());
+  REQUIRE(platform.requested_frames == requested_frames);
+
+  REQUIRE(debug_layout_scroll.ScrollTo(40.0F));
+  const auto& scrolled = runtime.BuildFrame();
+  REQUIRE_FALSE(has_border(scrolled, {5.0F, 5.0F, 72.0F, 30.0F}, bounds_color));
+  std::vector<Rect> clips;
+  bool found_partial_guide = false;
+  for (const auto& command : scrolled.Commands()) {
+    if (const auto* clip = std::get_if<PushClipCommand>(&command)) {
+      clips.push_back(clip->rect);
+    } else if (std::holds_alternative<PopClipCommand>(command)) {
+      REQUIRE_FALSE(clips.empty());
+      clips.pop_back();
+    } else if (const auto* border = std::get_if<DrawBorderCommand>(&command);
+               border != nullptr && border->rect == Rect{5.0F, 35.0F, 73.0F, 36.0F} && border->color == bounds_color) {
+      REQUIRE_FALSE(clips.empty());
+      REQUIRE(clips.back() == viewport);
+      found_partial_guide = true;
+    }
+  }
+  REQUIRE(found_partial_guide);
+
+  const auto padding_guides = [&](const FlattenedScene& scene) {
+    return std::ranges::count_if(scene.Commands(), [&](const PaintCommand& command) {
+      const auto* fill = std::get_if<DrawRectCommand>(&command);
+      return fill != nullptr && BrushIsColor(fill->brush, padding_color);
+    });
+  };
+  const auto application_padding = padding_guides(scrolled);
+  const LayerId popup_id = layer_popup->ShowAt({350.0F, 250.0F}, [] {
+    return Text("popup content").With(Padding{13.0F});
+  });
+  REQUIRE(popup_id != LayerId{});
+  const auto& popup = runtime.BuildFrame();
+  REQUIRE(ContainsText(popup, "popup content"));
+  REQUIRE(padding_guides(popup) == application_padding);
+
+  REQUIRE(layer_popup->Dismiss(popup_id));
+  runtime.BuildFrame();
+  ClickAt(runtime, {25.0F, 20.0F});
+  REQUIRE(layer_background_clicks == 1);
+  REQUIRE(layer_app_compositions == 1);
+
+  toggle_guides(SemanticCheckedState::Checked);
+  const auto& disabled = runtime.BuildFrame();
+  REQUIRE_FALSE(has_fill(disabled, spacer, gap_color));
+  REQUIRE_FALSE(has_border(disabled, viewport, viewport_color));
+  REQUIRE(layer_app_compositions == 1);
 }
 
 TEST_CASE("TestBottomSheetDoesNotUseDialogStyleScrim") {

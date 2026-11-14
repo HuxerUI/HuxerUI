@@ -1974,6 +1974,8 @@ The built-in debug overlay attaches one persistent System entry after window hoo
 
 The sampling modifier is mounted only with the expanded panel. It wakes once per second and updates the panel's local scope. That update is an ordinary painted frame, keeping the metric tied to actual work without coupling UiWindow accounting to the overlay's reconciliation timing. Collapsing the panel removes the modifier and its deadline, so a static application does not animate merely because the debug ribbon is enabled.
 
+Layout guides remain visible with the panel collapsed. A retained extension on the full-viewport overlay reads the resolved presentation geometry of the mounted application tree and records it behind the panel and ribbon. Guide collection reuses renderer clip bounds, uses axis-aligned window coordinates, and skips branches with an empty effective clip. It runs only in existing frames with guides enabled and retains the previous paint sequence while guide geometry is unchanged.
+
 LayerController entries without a transition are removed immediately. Dialog, BottomSheet, Menu, Toast, and SnackBar entries with configured motion first become non-interactive, retain their presentation state through the exit animation, and are removed after completion. Modal barriers remain until actual removal, so focus cannot be restored and content behind a visually exiting modal cannot be activated early.
 
 ## ApplicationHook and WindowHook

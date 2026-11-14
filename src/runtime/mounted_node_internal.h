@@ -581,6 +581,7 @@ using RenderDamageSnapshot = std::unordered_map<std::uint64_t, RenderNodeSnapsho
 
 Transform2D ResolveChildrenTransform(const MountedNode& node);
 std::vector<RenderClip> ResolveChildClips(const MountedNode& node);
+Rect RenderClipBounds(const RenderClip& clip);
 bool RenderSceneHasPlatformViews(const RenderNode* root);
 
 struct ScrollBarGeometry {
