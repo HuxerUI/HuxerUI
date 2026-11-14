@@ -19,6 +19,7 @@ return Text("مرحبا")
 
 Canvas `DrawText`, `DrawTextRun`, and `DrawTextRuns` calls inherit the Canvas node Locale only for entries whose shaping locale is empty.
 TextMeasurer has no implicit Environment lookup; pass a locale explicitly when custom composition measurement needs it.
+On Windows, paragraphs and positioned text runs use color glyphs when the font supplies them and all foreground colors for that paragraph or run are fully opaque.
 
 ### Line limits and overflow
 

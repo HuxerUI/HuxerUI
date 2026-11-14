@@ -1871,6 +1871,11 @@ struct Win32Renderer::Impl {
       }
     }
     SetBrushColor(command.style.foreground);
+    // Direct2D color glyph layers ignore the foreground brush's alpha.
+    const bool opaque_foreground = command.style.foreground.alpha >= 1.0F &&
+        std::ranges::all_of(command.text.StyleRanges(), [](const auto& item) {
+          return !item.style.foreground || item.style.foreground->alpha >= 1.0F;
+        });
     device_context_->DrawTextLayout(
         D2D1::Point2F(
             command.rect.x + command.paragraph_offset.x,
@@ -1878,7 +1883,7 @@ struct Win32Renderer::Impl {
         ),
         layout,
         brush_.Get(),
-        D2D1_DRAW_TEXT_OPTIONS_NONE
+        opaque_foreground ? D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT : D2D1_DRAW_TEXT_OPTIONS_NONE
     );
     device_context_->PopAxisAlignedClip();
   }
@@ -1890,11 +1895,12 @@ struct Win32Renderer::Impl {
       }
       CachedTextRun& cached = TextRunFor(run.text, run.style, run.shaping);
       SetBrushColor(run.style.foreground);
+      const bool opaque_foreground = run.style.foreground.alpha >= 1.0F;
       device_context_->DrawTextLayout(
           D2D1::Point2F(run.baseline_origin.x, run.baseline_origin.y - cached.baseline),
           cached.layout.Get(),
           brush_.Get(),
-          D2D1_DRAW_TEXT_OPTIONS_NONE
+          opaque_foreground ? D2D1_DRAW_TEXT_OPTIONS_ENABLE_COLOR_FONT : D2D1_DRAW_TEXT_OPTIONS_NONE
       );
     }
   }

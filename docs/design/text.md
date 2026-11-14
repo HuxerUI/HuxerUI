@@ -442,6 +442,7 @@ Appending to a single indefinitely growing paragraph can still require complete 
 ### Platform limits and verification
 
 Non-Web backends provide the complete paragraph, selection, and interaction contracts through their platform text boundary; different platform font engines need not produce pixel-identical output.
+Direct2D applies the color-font option to a complete `DrawTextLayout` call. The Windows renderer enables it only when the base foreground and all explicit span foregrounds are fully opaque because color glyph layers ignore brush alpha.
 Web deliberately retains the existing Canvas backend without adding a paragraph-engine dependency.
 It supports attributed styles, wrapping, links, and basic selection, but does not promise parity with non-Web backends for mixed bidirectional layout, ligatures across style boundaries, or contextual shaping across separately drawn runs.
 Web measurement, drawing, and selection must use the same fallback paragraph geometry, including mixed font metrics; independently positioned span views are not a substitute for this shared layout.
