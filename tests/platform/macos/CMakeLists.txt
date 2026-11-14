@@ -52,3 +52,19 @@ foreach (bridge_test IN ITEMS HuxerUIMacStaticPlatformBridgeImport HuxerUIMacSha
         set_tests_properties(${bridge_test} PROPERTIES LABELS "platform;macos;native;headers")
     endif ()
 endforeach ()
+
+# AppKit termination ends the process run loop, so this scenario runs in its own executable and process.
+add_executable(huxerui_macos_quit_probe quit_native.mm)
+target_compile_features(huxerui_macos_quit_probe PRIVATE cxx_std_20)
+target_compile_options(huxerui_macos_quit_probe PRIVATE -Wall -Wextra -Wpedantic)
+target_link_libraries(huxerui_macos_quit_probe PRIVATE
+        ${HUXERUI_TEST_LIBRARY} "-framework AppKit" "-framework Foundation"
+)
+set_source_files_properties(quit_native.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+set_target_properties(huxerui_macos_quit_probe PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "org.huxerui.tests.quit-probe"
+)
+add_test(NAME HuxerUIMacOSNativeApplicationQuit COMMAND huxerui_macos_quit_probe)
+set_tests_properties(HuxerUIMacOSNativeApplicationQuit PROPERTIES
+        LABELS "platform;macos;native" TIMEOUT 30)

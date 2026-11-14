@@ -483,13 +483,12 @@ public:
   }
 
   /// Coordinates AppKit termination with asynchronous shared Runtime shutdown.
-  /// @return NSTerminateLater while shutdown is pending, NSTerminateNow when stopped, or Cancel before startup.
+  /// @return Cancel native process termination so RunApplication can return after shared teardown.
   NSApplicationTerminateReply ShouldTerminate() {
-    if (stopped_) return NSTerminateNow;
-    if (!IsInitialized()) return NSTerminateCancel;
-    termination_pending_ = true;
-    Runtime::RequestShutdown();
-    return NSTerminateLater;
+    if (IsInitialized() && !stopped_) Runtime::RequestShutdown();
+    // NSTerminateLater runs AppKit's termination modal loop, which can starve the shared shutdown task queued from
+    // the current main-queue callback. Cancel native termination and let the stopped Runtime unwind RunApplication.
+    return NSTerminateCancel;
   }
   void OpenURLs(NSArray* urls) noexcept {
     try {
@@ -643,18 +642,24 @@ public:
 private:
   void OnRuntimeStopped() override {
     stopped_ = true;
-    if (termination_pending_) {
-      [NSApplication.sharedApplication replyToApplicationShouldTerminate:YES];
-    } else {
-      [NSApplication.sharedApplication terminate:nil];
-    }
+    NSApplication* application = NSApplication.sharedApplication;
+    [application stop:nil];
+    [application postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                           location:NSZeroPoint
+                                      modifierFlags:0
+                                          timestamp:0
+                                       windowNumber:0
+                                            context:nil
+                                            subtype:0
+                                              data1:0
+                                              data2:0]
+                    atStart:NO];
   }
 
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   std::vector<FileReference> clipboard_references_;
   std::vector<ApplicationActivation> pending_activations_;
   bool stopped_ = false;
-  bool termination_pending_ = false;
   std::exception_ptr failure_;
 };
 
