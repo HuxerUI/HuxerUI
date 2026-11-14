@@ -3,6 +3,7 @@
 #include <objbase.h>
 
 #include <limits>
+#include <stdexcept>
 
 #include <huxerui/text.h>
 
@@ -32,6 +33,38 @@ TEST_CASE("Win32UnboundedTextMeasurementIgnoresParagraphAlignment") {
   REQUIRE(trailing.size == leading.size);
   renderer.Discard();
   CoUninitialize();
+}
+
+TEST_CASE("Win32AutomaticDirectionUsesTheFirstStrongCharacter") {
+  REQUIRE(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
+  struct ComLifetime { ~ComLifetime() { CoUninitialize(); } } com;
+  detail::Win32Renderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(20.0F), Color::Black()};
+  const AttributedText text("\U0001F642 \u05E9\u05DC\u05D5\u05DD");
+  constexpr float width = 240.0F;
+  const auto automatic = renderer.CreatePlatformTextLayout(text, style, width, {});
+  const auto rtl = renderer.CreatePlatformTextLayout(text, style, width,
+      {.shaping = {.direction = TextDirection::RightToLeft}});
+  const auto ltr = renderer.CreatePlatformTextLayout(text, style, width,
+      {.shaping = {.direction = TextDirection::LeftToRight}});
+  const auto rtl_x = rtl->LineMetrics().front().bounds.x;
+  CHECK(rtl_x > ltr->LineMetrics().front().bounds.x);
+  CHECK(automatic->LineMetrics().front().bounds.x == Catch::Approx(rtl_x));
+}
+
+TEST_CASE("Win32RunMeasurementRejectsUnicodeLineBreaks") {
+  REQUIRE(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
+  struct ComLifetime { ~ComLifetime() { CoUninitialize(); } } com;
+  detail::Win32Renderer renderer;
+  renderer.Initialize();
+
+  const TextStyle style{Font::System(14.0F), Color::Black()};
+  for (const auto* text : {"a\u0085b", "a\u2028b", "a\u2029b"}) {
+    CHECK_THROWS_AS(renderer.MeasureRun(text, style, {}), std::invalid_argument);
+  }
+  CHECK(renderer.MeasureRun("\u2026", style, {}).advance > 0.0F);
 }
 
 TEST_CASE("Win32AttributedParagraphSharesNativeMeasurementAndSelectionMetrics") {

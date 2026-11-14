@@ -55,12 +55,6 @@ void RequireTextStyle(const TextStyle& style) {
   }
 }
 
-void RequireTextRun(std::string_view text) {
-  if (text.find_first_of("\r\n") != std::string_view::npos) {
-    throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
-  }
-}
-
 void RequireNonNegative(float value, const char* message) {
   if (!std::isfinite(value) || value < 0.0F) {
     throw std::invalid_argument(message);
@@ -350,7 +344,7 @@ void PaintContext::DrawTextRun(
     throw std::invalid_argument("HuxerUI text run baseline origin must be finite");
   }
   RequireTextStyle(style);
-  RequireTextRun(text);
+  detail::RequireSingleLineTextRun(text);
   if (text.empty() || bounds.IsEmpty()) {
     return;
   }
@@ -378,7 +372,7 @@ void PaintContext::DrawTextRuns(std::vector<TextRun> runs) {
       throw std::invalid_argument("HuxerUI text run baseline origin must be finite");
     }
     RequireTextStyle(run.style);
-    RequireTextRun(run.text);
+    detail::RequireSingleLineTextRun(run.text);
   }
   for (TextRun& run : runs) {
     ApplyDefaultShapingLocale(run.shaping, default_shaping_locale_);

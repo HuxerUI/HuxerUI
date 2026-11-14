@@ -315,29 +315,6 @@ std::size_t HashShaping(const TextShapingOptions& shaping) noexcept {
   return result;
 }
 
-TextDirection ResolveTextDirection(std::wstring_view text, TextDirection requested) {
-  if (requested != TextDirection::Auto) {
-    return requested;
-  }
-  if (text.empty() || text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
-    return TextDirection::LeftToRight;
-  }
-
-  std::vector<WORD> character_types(text.size());
-  if (GetStringTypeW(CT_CTYPE2, text.data(), static_cast<int>(text.size()), character_types.data()) == 0) {
-    return TextDirection::LeftToRight;
-  }
-  for (WORD type : character_types) {
-    if (type == C2_RIGHTTOLEFT) {
-      return TextDirection::RightToLeft;
-    }
-    if (type == C2_LEFTTORIGHT) {
-      return TextDirection::LeftToRight;
-    }
-  }
-  return TextDirection::LeftToRight;
-}
-
 } // namespace
 
 class Win32InlineObject final : public ComObject<IDWriteInlineObject> {
@@ -784,7 +761,7 @@ struct Win32Renderer::Impl {
     paragraph->inputs = std::make_unique<ParagraphInputs>();
     auto& inputs = *paragraph->inputs;
     inputs.text = Utf8ToWide(text.PlainText());
-    inputs.direction = ResolveTextDirection(inputs.text, shaping.direction);
+    inputs.direction = ResolveParagraphDirection(text.PlainText(), shaping.direction);
     inputs.base_font = ResolveFont(style.font, paragraph->fonts);
     inputs.runs = ResolveParagraphFonts(text, style, paragraph->fonts);
     paragraph->cost = ParagraphCacheCost(text);
@@ -812,10 +789,9 @@ struct Win32Renderer::Impl {
     auto format = CreateTextFormat(inputs.base_font, style.font.Size(), Utf8ToWide(measurement_options.shaping.locale));
     // Alignment does not affect intrinsic metrics. Keeping text at the physical left avoids precision loss when an
     // unbounded DirectWrite layout uses its maximum finite width.
-    measurement_options.shaping.direction = inputs.direction;
     measurement_options.align =
         inputs.direction == TextDirection::RightToLeft ? TextAlign::Trailing : TextAlign::Leading;
-    ConfigureTextFormat(*format.Get(), measurement_options, inputs.text);
+    ConfigureTextFormat(*format.Get(), measurement_options, inputs.direction);
 
     const float layout_width = constrained ? max_width : std::numeric_limits<float>::max();
     ComPtr<IDWriteTextLayout> layout;
@@ -860,9 +836,7 @@ struct Win32Renderer::Impl {
   }
 
   TextRunMetrics MeasureRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
-    if (text.find_first_of("\r\n") != std::string_view::npos) {
-      throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
-    }
+    RequireSingleLineTextRun(text);
     if (text.empty()) {
       return {.font_metrics = Metrics(style.font)};
     }
@@ -876,7 +850,7 @@ struct Win32Renderer::Impl {
     FontRetentions fonts;
     ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, fonts, options.shaping.locale);
     const bool constrained = std::isfinite(max_width);
-    ConfigureTextFormat(*format.Get(), options, wide);
+    ConfigureTextFormat(*format.Get(), options, ResolveParagraphDirection(text.PlainText(), options.shaping.direction));
 
     ComPtr<IDWriteTextLayout> layout;
     ThrowIfFailed(
@@ -1067,7 +1041,7 @@ struct Win32Renderer::Impl {
     return format;
   }
 
-  static void ConfigureTextFormat(IDWriteTextFormat& format, const TextLayoutOptions& options, std::wstring_view text) {
+  static void ConfigureTextFormat(IDWriteTextFormat& format, const TextLayoutOptions& options, TextDirection direction) {
     format.SetWordWrapping(options.wrap == TextWrap::Word ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
     switch (options.align) {
     case TextAlign::Center:
@@ -1080,7 +1054,7 @@ struct Win32Renderer::Impl {
       format.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
       break;
     }
-    if (ResolveTextDirection(text, options.shaping.direction) == TextDirection::RightToLeft) {
+    if (direction == TextDirection::RightToLeft) {
       format.SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
     } else {
       format.SetReadingDirection(DWRITE_READING_DIRECTION_LEFT_TO_RIGHT);
@@ -1096,7 +1070,8 @@ struct Win32Renderer::Impl {
     const std::wstring wide = Utf8ToWide(text);
     FontRetentions fonts;
     ComPtr<IDWriteTextFormat> format = CreateTextFormat(style.font, fonts, shaping.locale);
-    ConfigureTextFormat(*format.Get(), TextLayoutOptions{.shaping = shaping, .wrap = TextWrap::NoWrap}, wide);
+    const auto direction = ResolveParagraphDirection(text, shaping.direction);
+    ConfigureTextFormat(*format.Get(), TextLayoutOptions{.wrap = TextWrap::NoWrap}, direction);
     ComPtr<IDWriteTextLayout> layout;
     ThrowIfFailed(
         write_factory_->CreateTextLayout(
@@ -1195,9 +1170,7 @@ struct Win32Renderer::Impl {
     const auto paragraph = ParagraphInputsFor(command.text, command.style, options.shaping, true);
     const auto& inputs = *paragraph->inputs;
     auto format = CreateTextFormat(inputs.base_font, command.style.font.Size(), Utf8ToWide(options.shaping.locale));
-    auto drawing_options = options;
-    drawing_options.shaping.direction = inputs.direction;
-    ConfigureTextFormat(*format.Get(), drawing_options, inputs.text);
+    ConfigureTextFormat(*format.Get(), options, inputs.direction);
     auto result = std::make_shared<CachedParagraph>();
     ThrowIfFailed(
         write_factory_->CreateTextLayout(

@@ -554,6 +554,21 @@ bool detail::InternalAccess::SameBody(const AttributedText& left, const Attribut
 
 namespace detail {
 
+void RequireSingleLineTextRun(std::string_view text) {
+  // Only two UTF-8 lead bytes can begin the non-ASCII mandatory breaks.
+  constexpr std::string_view candidates = "\r\n\v\f\xC2\xE2";
+  for (auto offset = text.find_first_of(candidates); offset != text.npos;
+       offset = text.find_first_of(candidates, offset + 1)) {
+    if (text[offset] == '\xC2' || text[offset] == '\xE2') {
+      const auto tail = text.substr(offset);
+      if (!tail.starts_with("\xC2\x85") && !tail.starts_with("\xE2\x80\xA8") && !tail.starts_with("\xE2\x80\xA9")) {
+        continue;
+      }
+    }
+    throw std::invalid_argument("HuxerUI text runs must not contain line breaks");
+  }
+}
+
 std::vector<InlineObjectPlacement> TextLayoutBackend::InlineObjectPlacements(
     std::span<const TextInlineObject> objects, std::span<const TextLineMetrics> lines) const {
   std::vector<InlineObjectPlacement> placements;
@@ -938,30 +953,6 @@ bool IsHardBreak(std::string_view text) {
   return text == "\n" || text == "\r" || text == "\r\n" || text == "\xE2\x80\xA8" || text == "\xE2\x80\xA9";
 }
 
-TextDirection ResolveParagraphDirection(std::string_view text) {
-  // UAX #9 resolves the base direction from the first strong character outside directional isolates.
-  std::size_t isolate_depth = 0;
-  for (std::size_t byte = 0; byte < text.size();) {
-    Utf8CodePoint point;
-    if (!DecodeCodePoint(text, byte, point)) {
-      throw std::logic_error("HuxerUI paragraph direction requires valid UTF-8");
-    }
-    byte += point.byte_length;
-    const auto property = static_cast<ParagraphBidiClass>(UnicodeProperty(paragraph_direction_properties, point.value));
-    if (property == ParagraphBidiClass::Separator) {
-      break;
-    }
-    if (property == ParagraphBidiClass::Isolate) {
-      ++isolate_depth;
-    } else if (isolate_depth != 0) {
-      isolate_depth -= property == ParagraphBidiClass::PopIsolate ? 1 : 0;
-    } else if (property == ParagraphBidiClass::LeftToRight || property == ParagraphBidiClass::RightToLeft) {
-      return property == ParagraphBidiClass::RightToLeft ? TextDirection::RightToLeft : TextDirection::LeftToRight;
-    }
-  }
-  return TextDirection::LeftToRight;
-}
-
 struct ParagraphCandidate {
   std::optional<CachedParagraphLayout::ElidedText> elision;
   std::unique_ptr<TextLayoutBackend> layout;
@@ -1163,6 +1154,33 @@ std::shared_ptr<CachedParagraphLayout> EnsureParagraphLayout(
 }
 
 } // namespace
+
+TextDirection ResolveParagraphDirection(std::string_view text, TextDirection requested) {
+  if (requested != TextDirection::Auto) {
+    return requested;
+  }
+  // UAX #9 resolves the base direction from the first strong character outside directional isolates.
+  std::size_t isolate_depth = 0;
+  for (std::size_t byte = 0; byte < text.size();) {
+    Utf8CodePoint point;
+    if (!DecodeCodePoint(text, byte, point)) {
+      throw std::logic_error("HuxerUI paragraph direction requires valid UTF-8");
+    }
+    byte += point.byte_length;
+    const auto property = static_cast<ParagraphBidiClass>(UnicodeProperty(paragraph_direction_properties, point.value));
+    if (property == ParagraphBidiClass::Separator) {
+      break;
+    }
+    if (property == ParagraphBidiClass::Isolate) {
+      ++isolate_depth;
+    } else if (isolate_depth != 0) {
+      isolate_depth -= property == ParagraphBidiClass::PopIsolate ? 1 : 0;
+    } else if (property == ParagraphBidiClass::LeftToRight || property == ParagraphBidiClass::RightToLeft) {
+      return property == ParagraphBidiClass::RightToLeft ? TextDirection::RightToLeft : TextDirection::LeftToRight;
+    }
+  }
+  return TextDirection::LeftToRight;
+}
 
 std::vector<TextOffset> GraphemeBoundaries(std::string_view text) {
   std::vector<TextOffset> boundaries{0};

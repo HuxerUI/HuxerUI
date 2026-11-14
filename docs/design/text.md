@@ -102,7 +102,7 @@ TextLayout layout = measurer.CreateTextLayout(text, style, width, options);
 
 `FontMetrics` describes one resolved font.
 `TextRunMetrics` contains advance, a conservative visual bound, and the resolved font metrics for one unwrapped shaped run.
-An exact run does not contain line breaks; line ownership remains with the caller.
+An exact run contains one line. Paint recording and Windows run measurement reject Unicode mandatory line breaks with `std::invalid_argument`.
 Its bounds use a baseline origin at `(0, 0)`, so ascent occupies negative y coordinates.
 `TextLayoutMetrics` contains the paragraph size, first and last baseline, and line count.
 `TextLayout` also exposes visual lines, affinity-aware caret and hit-test geometry, visual range fragments, and logical caret navigation. It uses a finite positive width, with an empty line for empty content and after a trailing hard break. Visual line ranges exclude hard breaks. Geometry uses paragraph-local logical coordinates and UTF-16 offsets.

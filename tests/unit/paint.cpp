@@ -370,6 +370,26 @@ TEST_CASE("PaintContextValidatesExternalTextureAndOpacity") {
   REQUIRE_THROWS_AS(context.DrawImage(std::shared_ptr<ExternalTexture>{}, {}), std::invalid_argument);
 }
 
+TEST_CASE("PaintContextRejectsMandatoryLineBreaksInTextRuns") {
+  PaintSequence sequence;
+  const Rect bounds{0.0F, 0.0F, 100.0F, 80.0F};
+  const Point baseline{0.0F, 24.0F};
+  const TextStyle style{};
+  PaintContext context{sequence, bounds};
+  for (const auto* text : {"a\rb", "a\nb", "a\r\nb", "a\vb", "a\fb", "a\u0085b", "a\u2028b", "a\u2029b"}) {
+    const TextRun run{bounds, baseline, text, style, {}};
+    CHECK_THROWS_AS(context.DrawTextRun(bounds, baseline, text, style), std::invalid_argument);
+    CHECK_THROWS_AS(context.DrawTextRuns({run}), std::invalid_argument);
+  }
+  CHECK(sequence.Commands().empty());
+
+  const std::string text = "\u00A9 \u2026 \U0001F642 \u4E2D";
+  context.DrawTextRun(bounds, baseline, text, style);
+  context.Finish();
+  REQUIRE(sequence.Commands().size() == 1);
+  CHECK(std::get<DrawTextRunsCommand>(sequence.Commands().front()).runs.front().text == text);
+}
+
 TEST_CASE("PaintContextOmitsTextRunsWithoutVisibleBounds") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
@@ -471,10 +491,6 @@ TEST_CASE("PaintContextRejectsInvalidDrawingParameters") {
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};
   REQUIRE_THROWS_AS(context.DrawRect({0.0F, 0.0F, nan, 10.0F}, Color::White()), std::invalid_argument);
   REQUIRE_THROWS_AS(Font::System(0.0F), std::invalid_argument);
-  REQUIRE_THROWS_AS(
-      context.DrawTextRun({0.0F, 0.0F, 10.0F, 10.0F}, {0.0F, 8.0F}, "first\nsecond", TextStyle{}),
-      std::invalid_argument
-  );
   REQUIRE_THROWS_AS(context.DrawCircle({}, -1.0F, Color::White()), std::invalid_argument);
   REQUIRE_THROWS_AS(context.DrawLine({nan, 0.0F}, {}, Color::White(), StrokeStyle{}), std::invalid_argument);
   REQUIRE_THROWS_AS(

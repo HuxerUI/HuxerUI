@@ -82,6 +82,8 @@ struct ResolvedTextRun {
 
 TextStyle ResolveTextStyle(const TextStyle& base, const TextSpanStyle& overrides);
 std::vector<ResolvedTextRun> ResolveTextRuns(const AttributedText& text, const TextStyle& base);
+void RequireSingleLineTextRun(std::string_view text);
+TextDirection ResolveParagraphDirection(std::string_view text, TextDirection requested = TextDirection::Auto);
 std::vector<TextOffset> GraphemeBoundaries(std::string_view text);
 bool TextLayoutInputsEqual(const AttributedText& left, const Font& left_base, const AttributedText& right,
     const Font& right_base);
