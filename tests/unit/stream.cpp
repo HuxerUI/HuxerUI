@@ -123,6 +123,70 @@ TEST_CASE("InputStreamCopyToUsesCallerBufferAndLeavesOutputOpen") {
   REQUIRE_THROWS_AS(output.Write({}), std::logic_error);
 }
 
+TEST_CASE("StreamFactoriesRejectEmptyReadersAndWriters", "[stream-callbacks]") {
+  REQUIRE_THROWS_AS(InputStream::FromReader({}), std::invalid_argument);
+  REQUIRE_THROWS_AS(OutputStream::FromWriter({}), std::invalid_argument);
+  REQUIRE_THROWS_AS(AsyncInputStream::FromReader({}), std::invalid_argument);
+  REQUIRE_THROWS_AS(AsyncOutputStream::FromWriter({}), std::invalid_argument);
+}
+
+TEST_CASE("CallbackStreamsCopyAndFinalizeThroughTheOrdinaryStreamAPI", "[stream-callbacks]") {
+  const Bytes source{std::byte{1}, std::byte{2}, std::byte{3}};
+  std::size_t reads = 0;
+  auto input = InputStream::FromReader([source, &reads, offset = std::size_t{0}](std::span<std::byte> buffer) mutable {
+    ++reads;
+    REQUIRE(buffer.size() == 2);
+    const auto chunk = std::span<const std::byte>(source).subspan(offset);
+    const auto size = std::min(chunk.size(), buffer.size());
+    std::ranges::copy(chunk.first(size), buffer.begin());
+    offset += size;
+    return IoResult<std::size_t>(size);
+  });
+
+  Bytes received;
+  int close_count = 0;
+  int abort_count = 0;
+  auto write = [&](std::span<const std::byte> data) {
+    REQUIRE_FALSE(data.empty());
+    received.insert(received.end(), data.begin(), data.end());
+    return IoResult<void>::Success();
+  };
+  auto close = [&] {
+    ++close_count;
+    return IoResult<void>::Success();
+  };
+  auto abort = [&]() noexcept { ++abort_count; };
+
+  {
+    auto output = OutputStream::FromWriter(write, close, abort);
+    REQUIRE(reads == 0);
+    REQUIRE(output.Write({}).Succeeded());
+    Bytes buffer(2);
+    REQUIRE(input.CopyTo(output, buffer).Value() == source.size());
+    REQUIRE(input.Read(buffer).Value() == 0);
+    REQUIRE(reads == 3);
+    REQUIRE(received == source);
+    REQUIRE(close_count == 0);
+    REQUIRE(output.Close().Succeeded());
+    REQUIRE(output.Close().Succeeded());
+  }
+  REQUIRE(close_count == 1);
+  REQUIRE(abort_count == 0);
+  {
+    auto output = OutputStream::FromWriter(write, {}, abort);
+    REQUIRE(output.Write({}).Succeeded());
+  }
+  REQUIRE(abort_count == 1);
+}
+
+TEST_CASE("CallbackReaderRejectsAnOutOfRangeByteCount", "[stream-callbacks]") {
+  auto input = InputStream::FromReader([](std::span<std::byte> buffer) {
+    return IoResult<std::size_t>(buffer.size() + 1);
+  });
+  Bytes buffer(1);
+  REQUIRE_THROWS_AS(input.Read(buffer), std::logic_error);
+}
+
 TEST_CASE("OutputStreamAbortsOnlyWhenDestroyedBeforeClose") {
   auto abandoned_backend = std::make_shared<MemoryOutputBackend>();
   {

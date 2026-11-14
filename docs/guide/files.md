@@ -138,6 +138,10 @@ Copy errors preserve the source or destination error; a written prefix may remai
 A failed stream cannot be reused. Task cancellation suppresses result delivery instead of returning an error or EOF.
 Native `File` asynchronous streams serialize their blocking operations through a worker sequence, while provider and browser streams retain their native asynchronous resource.
 
+Use `InputStream::FromReader()` or `AsyncInputStream::FromReader()` to read from an application-defined source. The synchronous reader fills a borrowed buffer and returns the byte count. The asynchronous reader takes a stop token and a maximum byte count, then returns a `Task<IoResult<Bytes>>`.
+
+Use `OutputStream::FromWriter()` or `AsyncOutputStream::FromWriter()` to supply a destination. The writer accepts the entire chunk on success. Pass a close callback if the destination needs to finalize output, and an abort callback if it needs cleanup when released without a successful close. Async writes own their chunk, and both async write and close callbacks receive a stop token. All four factories return ordinary streams that work with the existing copy operations.
+
 ## Random-access streams
 
 `File::OpenRandomAccess()` opens a local file, and `FileReference::OpenRandomAccess()` acquires a compatible provider descriptor. Both open on the calling thread and return a move-only `RandomAccessStream` with synchronous byte operations. On native platforms, use `RunWorker()` to move a blocking open and its reads or writes off the UI thread.

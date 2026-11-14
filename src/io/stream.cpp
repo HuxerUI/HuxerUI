@@ -1,9 +1,12 @@
 #include <huxerui/stream.h>
 
+#include <coroutine>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <utility>
 
@@ -13,6 +16,173 @@
 namespace huxerui::detail {
 
 namespace {
+
+class CallbackInputStreamBackend final : public InputStreamBackend {
+public:
+  explicit CallbackInputStreamBackend(InputStream::Reader read) : read_(std::move(read)) {}
+
+  IoResult<std::size_t> Read(std::span<std::byte> buffer) override {
+    return read_(buffer);
+  }
+
+  void Release() noexcept override {}
+
+private:
+  InputStream::Reader read_;
+};
+
+class CallbackOutputStreamBackend final : public OutputStreamBackend {
+public:
+  CallbackOutputStreamBackend(OutputStream::Writer write, std::function<IoResult<void>()> close,
+                              std::function<void()> abort)
+      : write_(std::move(write)), close_(std::move(close)), abort_(std::move(abort)) {}
+
+  IoResult<void> Write(std::span<const std::byte> data) override {
+    return data.empty() ? IoResult<void>::Success() : write_(data);
+  }
+
+  IoResult<void> Close() override {
+    return close_ ? close_() : IoResult<void>::Success();
+  }
+
+  void Abort() noexcept override {
+    if (abort_) {
+      abort_();
+    }
+  }
+
+private:
+  OutputStream::Writer write_;
+  std::function<IoResult<void>()> close_;
+  std::function<void()> abort_;
+};
+
+class StreamCallbackCancellation final {
+  template <class T> class Awaiter final {
+  public:
+    Awaiter(StreamCallbackCancellation& cancellation, Task<T> task, std::stop_source stop)
+        : cancellation_(cancellation), stop_(std::move(stop)), awaiter_(std::move(task).operator co_await()) {}
+
+    ~Awaiter() {
+      // Signal while the callback's coroutine frame and any stop registrations are still alive.
+      if (!finished_) {
+        stop_.request_stop();
+      }
+      cancellation_.Finish();
+    }
+
+    bool await_ready() const noexcept { return awaiter_.await_ready(); }
+
+    template <class Promise>
+    std::coroutine_handle<> await_suspend(std::coroutine_handle<Promise> parent) noexcept {
+      return awaiter_.await_suspend(parent);
+    }
+
+    T await_resume() {
+      finished_ = true;
+      return awaiter_.await_resume();
+    }
+
+  private:
+    StreamCallbackCancellation& cancellation_;
+    std::stop_source stop_;
+    typename Task<T>::Awaiter awaiter_;
+    bool finished_ = false;
+  };
+
+public:
+  template <class Function, class... Args> auto Await(const Function& callback, Args&&... args) {
+    std::stop_source stop;
+    {
+      std::scoped_lock lock(mutex_);
+      if (stopped_) {
+        throw std::logic_error("HuxerUI cannot start an operation on a stopped callback stream");
+      }
+      active_ = stop;
+    }
+    try {
+      auto task = callback(stop.get_token(), std::forward<Args>(args)...);
+      return Awaiter(*this, std::move(task), std::move(stop));
+    } catch (...) {
+      Finish();
+      throw;
+    }
+  }
+
+  void RequestStop() noexcept {
+    std::stop_source stop(std::nostopstate);
+    {
+      std::scoped_lock lock(mutex_);
+      stopped_ = true;
+      stop = active_;
+    }
+    stop.request_stop();
+  }
+
+private:
+  void Finish() noexcept {
+    std::scoped_lock lock(mutex_);
+    active_ = std::stop_source(std::nostopstate);
+  }
+
+  std::mutex mutex_;
+  std::stop_source active_{std::nostopstate};
+  bool stopped_ = false;
+};
+
+class CallbackAsyncInputStreamBackend final : public AsyncInputStreamBackend {
+public:
+  explicit CallbackAsyncInputStreamBackend(AsyncInputStream::Reader read) : read_(std::move(read)) {}
+
+  Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) override {
+    co_return co_await cancellation_.Await(read_, maximum_bytes);
+  }
+
+  void Cancel() noexcept override {
+    cancellation_.RequestStop();
+  }
+
+  void CancelCopy() noexcept override {}
+
+private:
+  AsyncInputStream::Reader read_;
+  StreamCallbackCancellation cancellation_;
+};
+
+class CallbackAsyncOutputStreamBackend final : public AsyncOutputStreamBackend {
+public:
+  CallbackAsyncOutputStreamBackend(AsyncOutputStream::Writer write,
+                                   std::function<Task<IoResult<void>>(std::stop_token)> close,
+                                   std::function<void()> abort)
+      : write_(std::move(write)), close_(std::move(close)), abort_(std::move(abort)) {}
+
+  Task<IoResult<void>> WriteAsync(Bytes data) override {
+    if (data.empty()) {
+      co_return IoResult<void>::Success();
+    }
+    co_return co_await cancellation_.Await(write_, std::move(data));
+  }
+
+  Task<IoResult<void>> CloseAsync() override {
+    if (!close_) {
+      co_return IoResult<void>::Success();
+    }
+    co_return co_await cancellation_.Await(close_);
+  }
+
+  void Abort() noexcept override {
+    cancellation_.RequestStop();
+    if (abort_) {
+      abort_();
+    }
+  }
+
+private:
+  AsyncOutputStream::Writer write_;
+  std::function<Task<IoResult<void>>(std::stop_token)> close_;
+  std::function<void()> abort_;
+  StreamCallbackCancellation cancellation_;
+};
 
 class AsyncInputStreamAdapter final : public AsyncInputStreamBackend,
                                       public std::enable_shared_from_this<AsyncInputStreamAdapter> {
@@ -72,7 +242,7 @@ public:
   ~InputOperation() {
     if (backend_) {
       if (cancel_on_release_) {
-        backend_->Cancel();
+        backend_->CancelCopy();
       }
       backend_->FinishOperation();
     }
@@ -212,7 +382,7 @@ Task<IoResult<std::uint64_t>> CopyOperation(std::shared_ptr<AsyncInputStreamBack
     }
     copied += static_cast<std::uint64_t>(data.size());
     try {
-      // The input's read task has finished, but cancellation during output must still stop the source.
+      // A streaming transport can remain active while the copy waits for output.
       input_operation.CancelOnRelease(true);
       auto result = co_await output->WriteAsync(std::move(data));
       input_operation.CancelOnRelease(false);
@@ -413,6 +583,13 @@ InputStream::~InputStream() {
   }
 }
 
+InputStream InputStream::FromReader(Reader read) {
+  if (!read) {
+    throw std::invalid_argument("HuxerUI input stream reader must not be empty");
+  }
+  return InputStream(std::make_shared<detail::CallbackInputStreamBackend>(std::move(read)));
+}
+
 IoResult<std::size_t> InputStream::Read(std::span<std::byte> buffer) {
   if (!backend_) {
     throw std::logic_error("HuxerUI cannot read from a moved-from input stream");
@@ -489,6 +666,14 @@ OutputStream::~OutputStream() {
   Release();
 }
 
+OutputStream OutputStream::FromWriter(Writer write, std::function<IoResult<void>()> close, std::function<void()> abort) {
+  if (!write) {
+    throw std::invalid_argument("HuxerUI output stream writer must not be empty");
+  }
+  return OutputStream(
+      std::make_shared<detail::CallbackOutputStreamBackend>(std::move(write), std::move(close), std::move(abort)));
+}
+
 IoResult<void> OutputStream::Write(std::span<const std::byte> data) {
   RequireWritable();
   auto result = backend_->Write(data);
@@ -548,6 +733,13 @@ AsyncInputStream& AsyncInputStream::operator=(AsyncInputStream&& other) noexcept
 
 AsyncInputStream::~AsyncInputStream() {
   Release();
+}
+
+AsyncInputStream AsyncInputStream::FromReader(Reader read) {
+  if (!read) {
+    throw std::invalid_argument("HuxerUI async input stream reader must not be empty");
+  }
+  return AsyncInputStream(std::make_shared<detail::CallbackAsyncInputStreamBackend>(std::move(read)));
 }
 
 Task<IoResult<Bytes>> AsyncInputStream::ReadAsync(std::size_t maximum_bytes) {
@@ -610,6 +802,15 @@ AsyncOutputStream& AsyncOutputStream::operator=(AsyncOutputStream&& other) noexc
 
 AsyncOutputStream::~AsyncOutputStream() {
   Release();
+}
+
+AsyncOutputStream AsyncOutputStream::FromWriter(Writer write, std::function<Task<IoResult<void>>(std::stop_token)> close,
+                                                std::function<void()> abort) {
+  if (!write) {
+    throw std::invalid_argument("HuxerUI async output stream writer must not be empty");
+  }
+  return AsyncOutputStream(
+      std::make_shared<detail::CallbackAsyncOutputStreamBackend>(std::move(write), std::move(close), std::move(abort)));
 }
 
 Task<IoResult<void>> AsyncOutputStream::WriteAsync(Bytes data) {

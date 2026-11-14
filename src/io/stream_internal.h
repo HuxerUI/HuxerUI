@@ -45,6 +45,8 @@ public:
 
   virtual Task<IoResult<Bytes>> ReadAsync(std::size_t maximum_bytes) = 0;
   virtual void Cancel() noexcept = 0;
+  // A transport may need to stop its transfer after reading the chunk being written.
+  virtual void CancelCopy() noexcept { Cancel(); }
 
   void Reserve(const char* operation);
   void FinishOperation() noexcept;

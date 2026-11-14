@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 
 #include <huxerui/data.h>
@@ -66,7 +68,7 @@ struct StreamAccess;
 /// Read() consumes at most the caller-provided buffer size and returns zero at EOF. A zero-length buffer is rejected
 /// because it cannot distinguish a successful no-op from EOF. Operational failures return IoError; reusing a failed
 /// or moved-from stream throws std::logic_error. Destruction releases the source without additional reads.
-/// Obtain a stream from File::OpenRead(), FileReference::OpenRead(), or RawAsset::OpenRead().
+/// Obtain a stream from File::OpenRead(), FileReference::OpenRead(), RawAsset::OpenRead(), or FromReader().
 /// Operations run on the calling thread.
 /// @code{.cpp}
 /// IoResult<Bytes> ReadFirstChunk(InputStream& input) {
@@ -81,11 +83,20 @@ struct StreamAccess;
 /// @endcode
 class InputStream final {
 public:
+  /// Reads into a borrowed nonempty buffer and returns the number of bytes produced, zero at EOF, or IoError.
+  using Reader = std::function<IoResult<std::size_t>(std::span<std::byte>)>;
+
   InputStream(const InputStream&) = delete;
   InputStream& operator=(const InputStream&) = delete;
   InputStream(InputStream&& other) noexcept;
   InputStream& operator=(InputStream&& other) noexcept;
   ~InputStream();
+
+  /// Creates a stream that owns a reader and invokes it on the calling thread when bytes are requested.
+  /// @param read Required reader. It may produce a short read and must not retain the buffer after returning.
+  /// @return A stream positioned at the reader's current cursor. Construction does not invoke the reader.
+  /// @throws std::invalid_argument If read is empty.
+  static InputStream FromReader(Reader read);
 
   /// Consumes the next bytes without requiring the source to fill the supplied buffer.
   /// @param buffer Nonempty writable scratch range, borrowed only for this call.
@@ -121,7 +132,8 @@ private:
 /// Write() accepts the complete span on success or returns IoError. A failure may leave a written prefix and makes
 /// the stream unusable. Close() finalizes buffered output and is idempotent after success. Destroying
 /// a stream that was not closed releases or aborts the destination without promising that buffered bytes are durable.
-/// Obtain a stream from File::OpenWrite() or FileReference::OpenWrite(). Operations run on the calling thread.
+/// Obtain a stream from File::OpenWrite(), FileReference::OpenWrite(), or FromWriter().
+/// Operations run on the calling thread.
 /// @code{.cpp}
 /// IoResult<void> WriteAndClose(OutputStream& output, std::span<const std::byte> data) {
 ///   auto written = output.Write(data);
@@ -133,11 +145,24 @@ private:
 /// @endcode
 class OutputStream final {
 public:
+  /// Accepts every byte in a borrowed range on success, or returns IoError.
+  using Writer = std::function<IoResult<void>(std::span<const std::byte>)>;
+
   OutputStream(const OutputStream&) = delete;
   OutputStream& operator=(const OutputStream&) = delete;
   OutputStream(OutputStream&& other) noexcept;
   OutputStream& operator=(OutputStream&& other) noexcept;
   ~OutputStream();
+
+  /// Creates a stream that owns its callbacks and invokes them on the calling thread.
+  /// @param write Required writer for nonempty writes. It must not retain the supplied bytes after returning.
+  /// @param close Optional finalizer invoked by Close(). With no finalizer, Close() succeeds without additional I/O.
+  /// @param abort Optional cleanup invoked when the stream is released before successful close. It must not block or
+  /// throw and is also used after a failed write or close when the stream is released.
+  /// @return An open stream. Construction does not invoke a callback.
+  /// @throws std::invalid_argument If write is empty.
+  static OutputStream FromWriter(Writer write, std::function<IoResult<void>()> close = {},
+                                 std::function<void()> abort = {});
 
   /// Writes the complete supplied range; success does not imply finalization or durable storage.
   /// @param data Read-only bytes borrowed until return; an empty range is a successful no-op on a usable stream.
@@ -228,7 +253,7 @@ private:
 /// CopyToAsync(), may be outstanding on the stream. Destroying an unfinished stream requests cancellation.
 /// Operational failures return IoError. Task cancellation suppresses result delivery; it is not EOF or an IoError.
 /// Reusing a failed or moved-from stream, or overlapping operations, throws std::logic_error.
-/// Obtain it from File::OpenReadAsync(), RawAsset::OpenReadAsync(), or FileReference::OpenReadAsync().
+/// Obtain it from File::OpenReadAsync(), RawAsset::OpenReadAsync(), FileReference::OpenReadAsync(), or FromReader().
 /// HTTP response streams expose it through Body().
 /// Tasks retain operation state, but callers should keep endpoint handles alive until their operations finish.
 /// @code{.cpp}
@@ -246,11 +271,23 @@ private:
 /// @endcode
 class AsyncInputStream final {
 public:
+  /// Lazily reads at most the requested number of owned bytes, returning empty Bytes at EOF or IoError on failure.
+  using Reader = std::function<Task<IoResult<Bytes>>(std::stop_token, std::size_t)>;
+
   AsyncInputStream(const AsyncInputStream&) = delete;
   AsyncInputStream& operator=(const AsyncInputStream&) = delete;
   AsyncInputStream(AsyncInputStream&& other) noexcept;
   AsyncInputStream& operator=(AsyncInputStream&& other) noexcept;
   ~AsyncInputStream();
+
+  /// Creates a stream that owns its reader and invokes it from the consuming Task's execution context.
+  /// @param read Required reader. Canceling its Task or releasing the stream requests stop for a pending read.
+  /// @return A stream positioned at the reader's current cursor. Construction does not invoke the reader.
+  /// @throws std::invalid_argument If read is empty.
+  /// Keep the stream alive until the Task finishes. If a copy is canceled while writing a chunk, the reader remains
+  /// usable from its advanced position. Work that outlives cancellation must retain its own resources and coordinate
+  /// access to the source with later operations.
+  static AsyncInputStream FromReader(Reader read);
 
   /// Reads the next caller-bounded chunk into independently owned storage.
   /// @param maximum_bytes Positive maximum returned chunk size, not a required exact read length.
@@ -291,7 +328,7 @@ private:
 /// Only one operation may be outstanding. CloseAsync() finalizes output and is idempotent. Destroying an unclosed
 /// stream requests cancellation or aborts the destination.
 /// Reusing a failed or moved-from stream, or overlapping operations, throws std::logic_error.
-/// Obtain a stream from File::OpenWriteAsync() or FileReference::OpenWriteAsync().
+/// Obtain a stream from File::OpenWriteAsync(), FileReference::OpenWriteAsync(), or FromWriter().
 /// Task continuations follow their owning Task execution context; async does not promise a dedicated worker thread.
 /// @code{.cpp}
 /// Task<IoResult<void>> WriteAndCloseAsync(AsyncOutputStream output, Bytes data) {
@@ -304,11 +341,27 @@ private:
 /// @endcode
 class AsyncOutputStream final {
 public:
+  /// Lazily accepts all supplied bytes on success, or returns IoError. The callback owns the payload.
+  using Writer = std::function<Task<IoResult<void>>(std::stop_token, Bytes)>;
+
   AsyncOutputStream(const AsyncOutputStream&) = delete;
   AsyncOutputStream& operator=(const AsyncOutputStream&) = delete;
   AsyncOutputStream(AsyncOutputStream&& other) noexcept;
   AsyncOutputStream& operator=(AsyncOutputStream&& other) noexcept;
   ~AsyncOutputStream();
+
+  /// Creates a stream that owns its callbacks. Write and close run in the consuming Task's execution context.
+  /// @param write Required writer for nonempty writes.
+  /// @param close Optional finalizer invoked by CloseAsync(). With no finalizer, close succeeds without further I/O.
+  /// @param abort Optional cleanup invoked on the releasing thread if the stream is released before successful close.
+  /// It must not block or throw.
+  /// @return An open stream. Construction does not invoke a callback.
+  /// @throws std::invalid_argument If write is empty.
+  /// Canceling a pending Task requests stop through its callback token. Releasing the unclosed stream requests stop
+  /// for a pending write or close before abort. Keep the stream alive until operations finish. Work that outlives
+  /// cancellation must retain its own resources and coordinate access to the destination with later operations.
+  static AsyncOutputStream FromWriter(Writer write, std::function<Task<IoResult<void>>(std::stop_token)> close = {},
+                                      std::function<void()> abort = {});
 
   /// Writes every supplied byte without requiring the caller to retain the original buffer.
   /// @param data Owned payload retained across suspension; move a buffer here to transfer its storage.

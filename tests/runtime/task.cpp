@@ -16,6 +16,7 @@
 #include <utility>
 #include <vector>
 
+#include "macros_internal.h"
 #include "runtime/task_internal.h"
 
 namespace huxerui::test {
@@ -1330,6 +1331,157 @@ TEST_CASE("AwaitCallbackDoesNotCancelACompletedOperationWhenItsContinuationIsCan
   platform.RunPlatformModuleTasks();
   REQUIRE(cancellations == 0);
   REQUIRE_FALSE(resumed);
+}
+
+TEST_CASE("AsyncCallbackStreamsCopyAndFinalizeWhenAwaited", "[stream-callbacks]") {
+  TestPlatform platform;
+  Application application([]() -> View { return {}; });
+  RuntimeLifetime runtime(application, platform);
+  int reads = 0;
+  int closes = 0;
+  int aborts = 0;
+  {
+    auto input = AsyncInputStream::FromReader([&](std::stop_token stop, std::size_t maximum) -> Task<IoResult<Bytes>> {
+      REQUIRE_FALSE(stop.stop_requested());
+      REQUIRE(maximum == 2);
+      ++reads;
+      co_return IoResult<Bytes>(reads == 1 ? Bytes{std::byte{4}} : Bytes{});
+    });
+    Bytes received;
+    auto output = AsyncOutputStream::FromWriter(
+        [&](std::stop_token stop, Bytes data) -> Task<IoResult<void>> {
+          REQUIRE_FALSE(stop.stop_requested());
+          REQUIRE_FALSE(data.empty());
+          received = std::move(data);
+          co_return IoResult<void>::Success();
+        },
+        [&](std::stop_token stop) -> Task<IoResult<void>> {
+          REQUIRE_FALSE(stop.stop_requested());
+          ++closes;
+          co_return IoResult<void>::Success();
+        },
+        [&]() noexcept { ++aborts; });
+
+    {
+      auto pending = input.CopyToAsync(output, 2);
+      REQUIRE_THROWS_AS(input.ReadAsync(2), std::logic_error);
+      REQUIRE_THROWS_AS(output.CloseAsync(), std::logic_error);
+    }
+    REQUIRE(reads == 0);
+    bool completed = false;
+    UseApplicationTaskScope().Launch([&]() -> Task<void> {
+      const auto empty_write = co_await output.WriteAsync({});
+      REQUIRE(empty_write.Succeeded());
+      const auto copied = co_await input.CopyToAsync(output, 2);
+      REQUIRE(copied.Value() == 1);
+      const auto eof = co_await input.ReadAsync(2);
+      REQUIRE(eof.Value().empty());
+      REQUIRE(received == Bytes{std::byte{4}});
+      REQUIRE(closes == 0);
+      const auto closed = co_await output.CloseAsync();
+      REQUIRE(closed.Succeeded());
+      const auto closed_again = co_await output.CloseAsync();
+      REQUIRE(closed_again.Succeeded());
+      completed = true;
+    });
+    platform.RunPlatformModuleTasks();
+    REQUIRE(completed);
+  }
+  REQUIRE(reads == 2);
+  REQUIRE(closes == 1);
+  REQUIRE(aborts == 0);
+}
+
+TEST_CASE("CancelingCopyDuringWriteLeavesTheCallbackReaderUsable", "[stream-callbacks]") {
+  TestPlatform platform;
+  Application application([]() -> View { return {}; });
+  RuntimeLifetime runtime(application, platform);
+  std::stop_token read_stop;
+  std::stop_token write_stop;
+  auto input = AsyncInputStream::FromReader(
+      [&read_stop, next = 1](std::stop_token stop, std::size_t) mutable -> Task<IoResult<Bytes>> {
+        read_stop = stop;
+        co_return IoResult<Bytes>(Bytes{static_cast<std::byte>(next++)});
+      });
+  auto output = AsyncOutputStream::FromWriter([&](std::stop_token stop, Bytes data) -> Task<IoResult<void>> {
+    REQUIRE(data == Bytes{std::byte{1}});
+    write_stop = stop;
+    co_await Delay(std::chrono::seconds(1));
+    co_return IoResult<void>::Success();
+  });
+  auto tasks = UseApplicationTaskScope();
+  auto copy = tasks.Launch([&]() -> Task<void> { HUXERUI_DISCARD(co_await input.CopyToAsync(output, 1)); });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(write_stop.stop_possible());
+
+  copy.Cancel();
+  REQUIRE(write_stop.stop_requested());
+  REQUIRE_FALSE(read_stop.stop_requested());
+
+  Bytes next_chunk;
+  tasks.Launch([&]() -> Task<void> {
+    auto result = co_await input.ReadAsync(1);
+    next_chunk = std::move(result).Value();
+  });
+  platform.RunPlatformModuleTasks();
+  REQUIRE(next_chunk == Bytes{std::byte{2}});
+}
+
+TEST_CASE("AsyncStreamCallbacksReceiveStopBeforeTheirFrameIsDestroyed", "[stream-callbacks]") {
+  TestPlatform platform;
+  Application application([]() -> View { return {}; });
+  RuntimeLifetime runtime(application, platform);
+  int stops = 0;
+  int aborts = 0;
+  bool resumed = false;
+  enum class Operation { Read, Write, Close };
+  const auto operation = GENERATE(Operation::Read, Operation::Write, Operation::Close);
+  auto stop_action = [&]() noexcept { ++stops; };
+  std::optional<CallbackCompletion<void>> pending;
+  auto pause = AwaitCallback<void>([&](auto completion) {
+    pending = completion;
+    return std::function<void()>{};
+  });
+  auto input = AsyncInputStream::FromReader([&](std::stop_token stop, std::size_t) -> Task<IoResult<Bytes>> {
+    const std::stop_callback on_stop(stop, stop_action);
+    co_await std::move(pause);
+    co_return IoResult<Bytes>(Bytes{std::byte{1}});
+  });
+  {
+    auto output = AsyncOutputStream::FromWriter(
+        [&](std::stop_token stop, Bytes) -> Task<IoResult<void>> {
+          const std::stop_callback on_stop(stop, stop_action);
+          co_await std::move(pause);
+          co_return IoResult<void>::Success();
+        },
+        [&](std::stop_token stop) -> Task<IoResult<void>> {
+          const std::stop_callback on_stop(stop, stop_action);
+          co_await std::move(pause);
+          co_return IoResult<void>::Success();
+        },
+        [&]() noexcept { ++aborts; });
+    auto handle = UseApplicationTaskScope().Launch([&]() -> Task<void> {
+      if (operation == Operation::Read) {
+        HUXERUI_DISCARD(co_await input.ReadAsync(1));
+      } else if (operation == Operation::Close) {
+        HUXERUI_DISCARD(co_await output.CloseAsync());
+      } else {
+        HUXERUI_DISCARD(co_await output.WriteAsync(Bytes(1)));
+      }
+      resumed = true;
+    });
+    platform.RunPlatformModuleTasks();
+    REQUIRE(pending.has_value());
+    REQUIRE(stops == 0);
+    handle.Cancel();
+    REQUIRE(stops == 1);
+    REQUIRE(aborts == 0);
+    pending->Complete();
+    platform.RunPlatformModuleTasks();
+    REQUIRE_FALSE(resumed);
+  }
+  REQUIRE(stops == 1);
+  REQUIRE(aborts == 1);
 }
 
 TEST_CASE("AwaitCallbackSettlesHostFailureWithoutAWindowAndCancelsOnRuntimeShutdown") {
