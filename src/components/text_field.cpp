@@ -1134,37 +1134,34 @@ public:
     return result;
   }
 
-  bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const override {
-    if (!node_ || !node_->interaction.enabled) {
-      return false;
+  TextEditingActionStatus GetTextEditingActionStatus(TextEditingAction action, const Clipboard& clipboard) const override {
+    if (!configuration_.read_only) {
+      return TextEditingActionStatus::UseDefault;
     }
     const TextRange selection = editing_.value.selection.Range();
-    switch (action) {
-    case TextEditingAction::Copy:
-      return !configuration_.secure && !selection.IsCollapsed() && clipboard != nullptr;
-    case TextEditingAction::SelectAll: {
-      const TextOffset length = detail::Utf16Length(editing_.value.text).value_or(0);
-      return length > 0 && selection != TextRange{0, length};
-    }
-    case TextEditingAction::Cut:
-    case TextEditingAction::Paste:
-      return false;
-    }
-    return false;
-  }
-
-  bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) override {
-    if (!CanPerformTextEditingAction(action, clipboard)) {
-      return false;
+    if (action == TextEditingAction::Copy && !selection.IsCollapsed() && clipboard.IsAvailable()) {
+      return TextEditingActionStatus::Handle;
     }
     if (action == TextEditingAction::SelectAll) {
       const TextOffset length = detail::Utf16Length(editing_.value.text).value_or(0);
+      if (length > 0 && selection != TextRange{0, length}) {
+        return TextEditingActionStatus::Handle;
+      }
+    }
+    return TextEditingActionStatus::UseDefault;
+  }
+
+  void PerformTextEditingAction(TextEditingAction action, const Clipboard& clipboard) override {
+    if (action == TextEditingAction::SelectAll) {
+      const TextOffset length = detail::Utf16Length(editing_.value.text).value_or(0);
       SetSelection({0, length});
-      return true;
+      return;
     }
     const std::optional<std::string> selected =
         detail::Utf8TextInRange(editing_.value.text, editing_.value.selection.Range());
-    return selected.has_value() && clipboard->WriteText(*selected);
+    if (selected) {
+      clipboard.WriteText(*selected);
+    }
   }
 
   bool ClearSelection() override {

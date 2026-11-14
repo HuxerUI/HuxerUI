@@ -37,7 +37,7 @@ using ClipboardContent =
 enum class TextEditingAction {
   Cut,       ///< Copies the current selection to the clipboard and requests its removal from an editable client.
   Copy,      ///< Copies the current selection to the clipboard without changing the client.
-  Paste,     ///< Requests insertion of the current plain-text clipboard contents into an editable client.
+  Paste,     ///< Requests insertion of clipboard content into an editable client.
   SelectAll, ///< Selects the complete editable or selectable text exposed by the current client.
 };
 

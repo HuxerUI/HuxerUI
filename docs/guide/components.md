@@ -800,4 +800,6 @@ Image content and copied image files are separate clipboard representations. Des
 
 On Web, start `WriteContentAsync()`, `ReadTextAsync()`, `ReadRichTextAsync()`, or `ReadImageAsync()` directly in the user action and then schedule or await the returned Task. The browser requires a secure context and may prompt for access. Writes support plain text, `AttributedText` as HTML with a plain-text alternative, and PNG images. The write Task yields true after browser acceptance, or false for unsupported content or rejection. Direct file reads are unsupported. Web TextField copy, cut, and paste use browser-managed editing events.
 
+Custom editors can override `TextSelectionClient::GetTextEditingActionStatus()` and `PerformTextEditingAction()` to handle shortcuts and touch selection menu actions together. Return `Handle` to claim an action, `Disabled` to block it, or `UseDefault` to allow the framework's default behavior. Start clipboard operations in the execution callback. Wait for a successful write before deleting text for Cut, and verify that delayed results still apply to the original editor and selection.
+
 For editing invariants and platform protocols, see [Text Input and TextField Design](../design/text-input.md).

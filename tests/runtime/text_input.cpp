@@ -12,7 +12,7 @@
 namespace huxerui::test {
 namespace {
 
-class ProbeTextInputClient final : public huxerui::TextInputClient {
+class ProbeTextInputClient : public huxerui::TextInputClient {
 public:
   TextInputConfiguration Configuration() const override {
     return configuration;
@@ -132,6 +132,55 @@ public:
   std::vector<TextInputEndReason> end_reasons;
 };
 
+class EditingActionProbe final : public ProbeTextInputClient, public TextSelectionClient {
+public:
+  TextEditingActionStatus GetTextEditingActionStatus(TextEditingAction, const Clipboard&) const override {
+    return status;
+  }
+
+  void PerformTextEditingAction(TextEditingAction action, const Clipboard& clipboard) override {
+    actions.push_back(action);
+    tasks.Launch(ReceiveWriteResult(clipboard.WriteContentAsync(std::string("custom"))));
+  }
+
+  bool ClearSelection() override { return false; }
+  bool SelectWord(Point) override {
+    SetSelection({0, 2});
+    return true;
+  }
+  bool ExtendSelection(Point, bool) override { return false; }
+  std::optional<TextSelectionGeometry> QuerySelectionGeometry() const override {
+    return TextSelectionGeometry{.toolbar_anchor = Rect{0.0F, 0.0F, 30.0F, 20.0F}};
+  }
+  Color SelectionHandleColor() const noexcept override { return {}; }
+
+  TextEditingActionStatus status = TextEditingActionStatus::Handle;
+  std::vector<TextEditingAction> actions;
+  TaskScope tasks;
+  std::optional<bool> write_result;
+
+private:
+  Task<void> ReceiveWriteResult(Task<bool> pending) {
+    write_result = co_await std::move(pending);
+  }
+};
+
+class EditingActionClipboard final : public PlatformClipboard {
+public:
+  std::optional<std::string> ReadText() override { return "clipboard"; }
+  bool WriteText(std::string_view text) override {
+    written_text = text;
+    return true;
+  }
+
+  std::optional<std::string> written_text;
+
+private:
+  bool WriteContent(ClipboardContent) override { return false; }
+};
+
+std::shared_ptr<EditingActionProbe> editing_action_probe;
+
 class ProbePlatformTextInput final : public huxerui::PlatformTextInput {
 public:
   void Start(
@@ -205,6 +254,10 @@ public:
 
   std::shared_ptr<huxerui::TextInputClient> GetTextInputClient() noexcept override {
     return client_;
+  }
+
+  TextSelectionClient* GetTextSelectionClient() noexcept override {
+    return dynamic_cast<TextSelectionClient*>(client_.get());
   }
 
   void OnFocusChanged(ViewNode&, bool focused, bool) override {
@@ -824,6 +877,82 @@ TEST_CASE("TestReadOnlyTextInputConfigurationDoesNotOpenKeyboard") {
   REQUIRE(first_text_client->end_count == 1);
   REQUIRE(first_text_client->end_reasons.back() == TextInputEndReason::ReadOnly);
   REQUIRE(text_input.stopped_sessions == std::vector<TextInputSessionId>{1});
+}
+
+TEST_CASE("Focused text selection client routes editing actions", "[editing-actions]") {
+  editing_action_probe = std::make_shared<EditingActionProbe>();
+  auto& client = *editing_action_probe;
+  EditingActionClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  UiWindow runtime{
+      []() -> View {
+        editing_action_probe->tasks = UseTaskScope();
+        return ProvideEnvironment(TextSelectionMenuLabels{"Cut", "Copy", "Paste", "Select all"},
+                                  Text("Editable").With(Focusable{}, TextInputProbe{editing_action_probe}));
+      },
+      platform,
+  };
+  runtime.SetWindowMetrics({.viewport = {300.0F, 120.0F}});
+  runtime.BuildFrame();
+  const auto shortcut = [&](Key key, bool repeat = false) {
+    return runtime.HandleKeyEvent({.key = key, .modifiers = {.control = true}, .repeat = repeat});
+  };
+
+  SECTION("Keyboard and touch both dispatch to the editor") {
+    SECTION("Keyboard") {
+      FocusNext(runtime);
+      client.SetSelection({0, 2});
+      REQUIRE(runtime.CanPerformTextEditingAction(TextEditingAction::Copy));
+      REQUIRE(client.actions.empty());
+      REQUIRE(shortcut(Key::C));
+      REQUIRE(shortcut(Key::C, true));
+    }
+    SECTION("Touch menu") {
+      runtime.HandlePointerEvent({PointerEventType::Down, 1, {12.0F, 12.0F}, PointerDeviceKind::Touch});
+      platform.AdvanceTime(0.5);
+      const auto* copy = FindText(runtime.BuildFrame(), "Copy");
+      REQUIRE(copy);
+      const Point center{copy->rect.x + copy->rect.width * 0.5F, copy->rect.y + copy->rect.height * 0.5F};
+      REQUIRE(client.actions.empty());
+      runtime.HandlePointerEvent({PointerEventType::Down, 2, center, PointerDeviceKind::Touch});
+      runtime.HandlePointerEvent({PointerEventType::Up, 2, center, PointerDeviceKind::Touch});
+    }
+    REQUIRE(client.actions == std::vector<TextEditingAction>{TextEditingAction::Copy});
+    REQUIRE_FALSE(client.write_result);
+    platform.RunPlatformModuleTasks();
+    REQUIRE(client.write_result == std::optional{false});
+    REQUIRE_FALSE(clipboard.written_text);
+  }
+
+  SECTION("Explicit default and disabled actions") {
+    FocusNext(runtime);
+    client.SetSelection({0, 2});
+    client.status = TextEditingActionStatus::Disabled;
+    REQUIRE_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Copy));
+    REQUIRE(shortcut(Key::C));
+    REQUIRE_FALSE(clipboard.written_text);
+
+    client.status = TextEditingActionStatus::UseDefault;
+    REQUIRE(runtime.CanPerformTextEditingAction(TextEditingAction::Copy));
+    REQUIRE(shortcut(Key::C));
+    REQUIRE(clipboard.written_text == "ab");
+    REQUIRE(client.actions.empty());
+  }
+
+  SECTION("Live input policy limits what the editor can handle") {
+    FocusNext(runtime);
+    client.configuration.read_only = true;
+    client.configuration.secure = true;
+    REQUIRE_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Paste));
+    REQUIRE(shortcut(Key::V));
+    REQUIRE(client.state.session_id == 0);
+    REQUIRE_FALSE(runtime.CanPerformTextEditingAction(TextEditingAction::Copy));
+    REQUIRE_FALSE(runtime.PerformTextEditingAction(TextEditingAction::Cut));
+    REQUIRE(shortcut(Key::C));
+    REQUIRE(client.actions.empty());
+    REQUIRE_FALSE(clipboard.written_text);
+  }
 }
 
 TEST_CASE("TestFocusableNodeRejectsMultipleTextInputClients") {

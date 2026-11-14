@@ -15,6 +15,8 @@ class IndicationController;
 struct MountedNode;
 class GestureRecognizer;
 
+std::shared_ptr<TextInputClient> FindTextInputClient(MountedNode& node);
+
 struct ActiveTextInputSession {
   struct GeometrySnapshot {
     std::uint64_t client_revision = 0;
@@ -83,6 +85,8 @@ struct TextSelectionOverlay {
 
 class TextInteraction final {
 public:
+  enum class EditingActionSource { Menu, Shortcut, ShortcutRepeat };
+
   explicit TextInteraction(UiWindow::State& runtime_state) : runtime_state_(runtime_state) {}
 
   class KeyboardDispatch {
@@ -118,9 +122,8 @@ public:
   TextInputContext QueryTextInputContext(TextInputSessionId session, TextOffset start, TextOffset length) const;
   TextInputGeometry QueryTextInputGeometry(TextInputSessionId session, TextRange range) const;
   TextInputPositionResult QueryTextInputPosition(TextInputSessionId session, Point point) const;
-  bool ShouldConsumeTextEditingShortcut(TextEditingAction action) const;
   bool CanPerformTextEditingAction(TextEditingAction action) const;
-  bool PerformTextEditingAction(TextEditingAction action);
+  bool PerformTextEditingAction(TextEditingAction action, EditingActionSource source = EditingActionSource::Menu);
   bool SelectTextWord(std::uint64_t node, Point position, bool show_overlay);
   void HandleTextSelectionTap(std::optional<std::uint64_t> target);
   void HideTextSelectionOverlay();
@@ -152,9 +155,20 @@ private:
     bool automatic;
   };
 
+  struct EditingActionTarget {
+    std::uint64_t node_identity = 0;
+    std::shared_ptr<TextInputClient> input;
+    TextSelectionClient* selection = nullptr;
+    const ActiveTextInputSession* session = nullptr;
+  };
+
   void QueueKeyboardRequest(KeyboardRequest request);
   void FlushKeyboardRequests();
-  PlatformClipboard* FindSynchronousTextClipboard() const noexcept;
+  EditingActionTarget FindEditingActionTarget() const;
+  TextEditingActionStatus ResolveEditingActionStatus(const EditingActionTarget& target, TextEditingAction action,
+                                                    const Clipboard& clipboard) const;
+  bool PerformDefaultTextEditingAction(const ActiveTextInputSession& session, TextEditingAction action,
+                                       const Clipboard& clipboard);
   void InvalidateTextInputStateChange(std::uint64_t node, const TextInputState& previous, const TextInputState& current);
   bool ExtendFocusedTextSelection(Point position, bool start_handle);
   std::optional<TextSelectionGeometry> QueryFocusedTextSelectionGeometry() const;

@@ -360,45 +360,44 @@ public:
     }
   }
 
-  bool CanPerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) const override {
+  TextEditingActionStatus GetTextEditingActionStatus(TextEditingAction action, const Clipboard& clipboard) const override {
     if (!enabled_) {
-      return false;
+      return TextEditingActionStatus::UseDefault;
     }
     switch (action) {
     case TextEditingAction::Copy:
-      return clipboard && selection_.Range().has_value();
+      return clipboard.IsAvailable() && selection_.Range() ? TextEditingActionStatus::Handle
+                                                          : TextEditingActionStatus::UseDefault;
     case TextEditingAction::SelectAll: {
       const auto& source = selection_.Source();
       if (!source || source->Count() == 0) {
-        return false;
+        return TextEditingActionStatus::UseDefault;
       }
       const auto last_index = source->Count() - 1;
       const auto last_length = source->BlockAt(last_index).text.Length();
       const auto range = selection_.Range();
-      return (last_index != 0 || last_length != 0) &&
-             (!range || range->start_index != 0 || range->start.position.offset != 0 ||
-              range->end_index != last_index || range->end.position.offset != last_length);
+      const bool available = (last_index != 0 || last_length != 0) &&
+                             (!range || range->start_index != 0 || range->start.position.offset != 0 ||
+                              range->end_index != last_index || range->end.position.offset != last_length);
+      return available ? TextEditingActionStatus::Handle : TextEditingActionStatus::UseDefault;
     }
     case TextEditingAction::Cut:
     case TextEditingAction::Paste:
-      return false;
+      break;
     }
-    return false;
+    return TextEditingActionStatus::UseDefault;
   }
 
-  bool PerformTextEditingAction(TextEditingAction action, PlatformClipboard* clipboard) override {
-    if (!CanPerformTextEditingAction(action, clipboard)) {
-      return false;
-    }
+  void PerformTextEditingAction(TextEditingAction action, const Clipboard& clipboard) override {
     if (action == TextEditingAction::SelectAll) {
-      const bool changed = selection_.SelectAll();
-      if (changed) {
+      if (selection_.SelectAll()) {
         InvalidatePaint();
       }
-      return changed;
+      return;
     }
-    const auto text = selection_.Copy();
-    return text && clipboard->WriteText(*text);
+    if (const auto text = selection_.Copy()) {
+      clipboard.WriteText(*text);
+    }
   }
 
   bool ClearSelection() override {

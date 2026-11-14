@@ -32,24 +32,6 @@ bool IsValidTextInputStateTransition(const TextInputState& previous, const TextI
   return !observable_change || current.revision > previous.revision;
 }
 
-std::shared_ptr<TextInputClient> FindTextInputClient(detail::MountedNode& node) {
-  std::shared_ptr<TextInputClient> result;
-  for (detail::NodeExtensionEntry& entry : node.extensions) {
-    if (!entry.extension) {
-      continue;
-    }
-    std::shared_ptr<TextInputClient> client = entry.extension->GetTextInputClient();
-    if (!client) {
-      continue;
-    }
-    if (result) {
-      throw std::logic_error("HuxerUI focusable node must not expose multiple text input clients");
-    }
-    result = std::move(client);
-  }
-  return result;
-}
-
 bool IsKnown(TextAffinity affinity) noexcept {
   return affinity == TextAffinity::Upstream || affinity == TextAffinity::Downstream;
 }
@@ -234,6 +216,24 @@ TextInputPositionResult SessionMismatchPosition(TextInputSessionId session_id) {
 }
 
 } // namespace
+
+std::shared_ptr<TextInputClient> detail::FindTextInputClient(MountedNode& node) {
+  std::shared_ptr<TextInputClient> result;
+  for (NodeExtensionEntry& entry : node.extensions) {
+    if (!entry.extension) {
+      continue;
+    }
+    std::shared_ptr<TextInputClient> client = entry.extension->GetTextInputClient();
+    if (!client) {
+      continue;
+    }
+    if (result) {
+      throw std::logic_error("HuxerUI focusable node must not expose multiple text input clients");
+    }
+    result = std::move(client);
+  }
+  return result;
+}
 
 bool detail::TextInteraction::HasSession() const noexcept {
   return text_input_session_.has_value();

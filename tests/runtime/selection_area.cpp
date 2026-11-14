@@ -375,14 +375,15 @@ TEST_CASE("TestSelectionAreaCopiesLogicalBlocksWithoutRealizingOffscreenViews") 
   UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 60.0F}});
   runtime.BuildFrame();
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
   auto* client = SelectionClient(runtime.RootNode());
   REQUIRE(client != nullptr);
   const int initial_factories = factory_calls;
   REQUIRE(initial_factories < 10);
   source->reads = 0;
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::SelectAll, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::SelectAll));
   REQUIRE(source->reads < 10);
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(factory_calls == initial_factories);
   REQUIRE(clipboard.text->size() == 4999);
   REQUIRE(clipboard.text->starts_with("line\nline"));
@@ -401,17 +402,16 @@ TEST_CASE("TestSelectionAreaCopiesLogicalBlocksWithoutRealizingOffscreenViews") 
   REQUIRE_FALSE(middle->end.has_value());
   REQUIRE(middle->toolbar_anchor.has_value());
   const int middle_factories = factory_calls;
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text->size() == 4999);
   REQUIRE(factory_calls == middle_factories);
 
   source = std::make_shared<const SelectionSource>(1000, "line appended");
   runtime.InvalidateRoot();
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text->ends_with("\nline"));
   runtime.BuildFrame();
-  client = SelectionClient(runtime.RootNode());
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text->ends_with("\nline"));
 }
 
@@ -475,15 +475,16 @@ TEST_CASE("TestSelectionAreaRejectsMismatchedSourceBodiesAndDuplicateBindings") 
   }
   SECTION("Decorative text is excluded") {
     SelectionClipboard clipboard;
+    platform.platform_clipboard = &clipboard;
     selection_test_root = [&]() -> View {
       return SelectionArea(Column {Text("decoration"), Text("line").SelectionBlock(100)}).Source(source);
     };
     UiWindow runtime{DynamicSelectionApp, platform};
     runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
     runtime.BuildFrame();
-    auto* client = SelectionClient(runtime.RootNode());
-    REQUIRE(client->PerformTextEditingAction(TextEditingAction::SelectAll, &clipboard));
-    REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+    REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+    REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::SelectAll));
+    REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
     REQUIRE(clipboard.text == "line\nline");
   }
 }
@@ -540,6 +541,7 @@ TEST_CASE("TestSelectionAreaEdgeDragAdvancesVirtualBlocksAndStopsWhenUnavailable
 TEST_CASE("TestSelectionAreaRejectedSourceUpdateCanRecoverWithoutLosingOldSelection") {
   TestPlatform platform;
   SelectionClipboard clipboard;
+  platform.platform_clipboard = &clipboard;
   auto source = std::make_shared<const SelectionSource>(2);
   selection_test_root = [&]() -> View {
     return SelectionArea(Column {
@@ -550,17 +552,17 @@ TEST_CASE("TestSelectionAreaRejectedSourceUpdateCanRecoverWithoutLosingOldSelect
   UiWindow runtime{DynamicSelectionApp, platform};
   runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
   runtime.BuildFrame();
-  auto* client = SelectionClient(runtime.RootNode());
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::SelectAll, &clipboard));
+  REQUIRE(runtime.HandleKeyEvent({.type = KeyEventType::Down, .key = Key::Tab}));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::SelectAll));
   source = std::make_shared<const SelectionSource>(2, "mismatch");
   runtime.InvalidateRoot();
   REQUIRE_THROWS_AS(runtime.BuildFrame(), std::invalid_argument);
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text == "line\nline");
   source = std::make_shared<const SelectionSource>(2);
   runtime.InvalidateRoot();
   REQUIRE_NOTHROW(runtime.BuildFrame());
-  REQUIRE(client->PerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(runtime.PerformTextEditingAction(TextEditingAction::Copy));
   REQUIRE(clipboard.text == "line\nline");
 }
 
@@ -582,7 +584,7 @@ TEST_CASE("TestSelectionAreaTouchTapClearsSelectionWithoutConsumingTarget") {
   runtime.BuildFrame();
   SelectByTouch(runtime, platform, {20.0F, 10.0F});
   auto* client = SelectionClient(runtime.RootNode());
-  REQUIRE(client->CanPerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(client->QuerySelectionGeometry());
 
   Point target{260.0F, 90.0F};
   int expected_clicks = 0;
@@ -591,9 +593,9 @@ TEST_CASE("TestSelectionAreaTouchTapClearsSelectionWithoutConsumingTarget") {
   SECTION("Outside button") { target = {20.0F, 144.0F}; expected_clicks = 1; }
   SECTION("Descendant link") { target = {85.0F, 10.0F}; expected_clicks = 1; }
   Touch(runtime, PointerEventType::Down, target);
-  REQUIRE(client->CanPerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE(client->QuerySelectionGeometry());
   Touch(runtime, PointerEventType::Up, target);
-  REQUIRE_FALSE(client->CanPerformTextEditingAction(TextEditingAction::Copy, &clipboard));
+  REQUIRE_FALSE(client->QuerySelectionGeometry());
   REQUIRE(FindText(runtime.BuildFrame(), "Copy") == nullptr);
   REQUIRE(clicks == expected_clicks);
 }

@@ -911,8 +911,8 @@ public:
   /// @return Whether the focused client currently allows it; this query does not mutate text.
   [[nodiscard]] bool CanPerformTextEditingAction(TextEditingAction action) const;
   /// Executes a supported action on the focused editing or selection client.
-  /// @param action Normalized editing action requested by a native menu or shortcut.
-  /// @return Whether the action was handled; controlled text changes still use the shared editing protocol.
+  /// @param action Normalized editing action requested by a menu or shortcut.
+  /// @return True if the default action succeeded or the selection client accepted the action for execution.
   bool PerformTextEditingAction(TextEditingAction action);
   /// Applies an ordered native text-input command batch to its original active session.
   /// @param batch Session/revision-qualified commands in the text-input contract's UTF-16 coordinates.

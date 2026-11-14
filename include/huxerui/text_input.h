@@ -473,7 +473,17 @@ struct TextSelectionGeometry {
   bool operator==(const TextSelectionGeometry&) const = default;
 };
 
-/// Selection gestures and overlay geometry exposed by NodeExtension::GetTextSelectionClient().
+/// How a selection client routes an editing action.
+enum class TextEditingActionStatus {
+  /// Allow the default action for the active text-input session, including platform handling when applicable.
+  UseDefault,
+  /// Hide the action from the selection menu and consume its shortcut without executing it.
+  Disabled,
+  /// Show the action in the selection menu and let the selection client execute it.
+  Handle,
+};
+
+/// Selection gestures, overlay geometry, and editing actions exposed by NodeExtension::GetTextSelectionClient().
 ///
 /// This capability does not start an IME session or require editable content. A SelectionArea can expose Copy and
 /// Select All across virtualized blocks; an editor may implement both selection and input capabilities.
@@ -483,20 +493,22 @@ class TextSelectionClient {
 public:
   virtual ~TextSelectionClient() = default;
 
-  /// Tests whether an action is currently available without changing the selection or clipboard.
-  /// The clipboard service is borrowed and may be nullptr when unavailable. Do not retain the pointer.
-  /// @return True if supported by the current selection and policy; the default returns false.
-  [[nodiscard]] virtual bool CanPerformTextEditingAction(TextEditingAction, PlatformClipboard*) const {
-    return false;
+  /// Chooses how to route an action after UiWindow applies the focused client's read-only and secure input policy.
+  /// @param action Action requested by a shortcut or queried for the selection menu.
+  /// @param clipboard Borrowed application clipboard. Access and formats depend on the platform.
+  /// @return The action route. The default leaves the action to UiWindow.
+  /// Status queries must not read clipboard payloads, start tasks, or change editor state.
+  virtual TextEditingActionStatus GetTextEditingActionStatus(TextEditingAction, const Clipboard&) const {
+    return TextEditingActionStatus::UseDefault;
   }
 
-  /// Performs an available shared editing action, rechecking current selection and disclosure policy.
-  /// The clipboard service is borrowed and may be nullptr when unavailable. Do not retain the pointer.
-  /// Read-only clients can support Copy and Select All without implementing editing or IME behavior.
-  /// @return Whether the action succeeded; the default returns false.
-  virtual bool PerformTextEditingAction(TextEditingAction, PlatformClipboard*) {
-    return false;
-  }
+  /// Executes an action whose status is Handle. UiWindow consumes the action when it dispatches this call.
+  /// @param action Editing action to execute.
+  /// @param clipboard Borrowed application clipboard, valid for this call.
+  /// Override this method for actions you claim. Held shortcuts execute once per press.
+  /// Start asynchronous clipboard operations during this call to preserve platform user activation. Use an
+  /// editor-owned task scope and revalidate the target, selection, and policy before applying delayed changes.
+  virtual void PerformTextEditingAction(TextEditingAction, const Clipboard&) {}
 
   /// Cancels the current range selection without changing text or starting an input session.
   /// @return Whether selection changed; false when there is nothing to clear.

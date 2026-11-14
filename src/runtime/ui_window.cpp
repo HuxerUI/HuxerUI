@@ -2993,7 +2993,7 @@ bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
     }
   }
 
-  if (focused && event.type == KeyEventType::Down && !event.repeat && !event.modifiers.alt &&
+  if (focused && event.type == KeyEventType::Down && !event.modifiers.alt &&
       (event.modifiers.control || event.modifiers.meta)) {
     std::optional<TextEditingAction> action;
     switch (event.key) {
@@ -3012,8 +3012,9 @@ bool UiWindow::DispatchKeyEvent(const KeyEvent& event) {
     default:
       break;
     }
-    if (action.has_value() && state_->text_->ShouldConsumeTextEditingShortcut(*action)) {
-      PerformTextEditingAction(*action);
+    using EditingActionSource = detail::TextInteraction::EditingActionSource;
+    const auto source = event.repeat ? EditingActionSource::ShortcutRepeat : EditingActionSource::Shortcut;
+    if (action.has_value() && state_->text_->PerformTextEditingAction(*action, source)) {
       return finish_handled();
     }
   }

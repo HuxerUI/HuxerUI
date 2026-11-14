@@ -287,6 +287,9 @@ class TextSelectionClient {
 public:
   virtual ~TextSelectionClient() = default;
 
+  virtual TextEditingActionStatus GetTextEditingActionStatus(TextEditingAction action, const Clipboard& clipboard) const;
+  virtual void PerformTextEditingAction(TextEditingAction action, const Clipboard& clipboard);
+
   virtual bool ClearSelection() = 0;
   virtual bool SelectWord(Point position) = 0;
   virtual bool ExtendSelection(Point position, bool start_handle) = 0;
@@ -299,7 +302,7 @@ Selection points and geometry use the owning node's local logical coordinates.
 `TextSelectionGeometry` contains independent optional `start`, `end`, and `toolbar_anchor` rectangles; an offscreen endpoint does not hide a visible handle or clear the logical selection.
 `QuerySelectionGeometry()` returns `std::nullopt` when no logical selection or editor caret exists, ending the old menu intent; an existing selection with no visible geometry returns `TextSelectionGeometry{}` and can restore its menu when visible again.
 UiWindow maps them through the node's resolved presentation transform exactly once at the host boundary.
-The optional editing-action methods allow read-only clients to expose Copy and Select All through the shared clipboard menu without pretending to be IME clients.
+The editing-action methods are optional. Read-only clients can expose Copy and Select All through the shared selection menu without opening an IME session.
 
 `ClearSelection()` cancels a range without needing visible geometry: a read-only client removes its logical selection, while an editor collapses to its active endpoint through its normal controlled update path. UiWindow invokes it after a confirmed touch tap elsewhere. A tap inside the active editor retains its ordinary caret-placement path instead of emitting a second selection update.
 
@@ -942,11 +945,13 @@ Default behavior is:
 
 Shift extends the selection for movement commands. macOS `NSTextInputClient` selectors retain their word, line, page, and document semantics when converted to common key events.
 
-Clipboard uses the optional `PlatformClipboard` capability. UiWindow maps Ctrl/Command+A, C, V, and X to typed `TextEditingAction` values. TextField supports Select All, Copy, Paste, and Cut subject to its read-only and secure configuration; SelectionArea supports Select All and Copy. Undo and redo stay inside TextField rather than expanding `TextEditingAction` or the common input protocol. Secure fields allow Select All and Paste but reject Copy and Cut. Complex text clients retain ownership of their own history.
+UiWindow maps Ctrl/Command+A, C, V, and X to typed `TextEditingAction` values and dispatches them through the same entry point as the touch selection menu. The focused editor owns its editing actions even when its read-only configuration closes the input session. UiWindow checks the current configuration before asking the selection client. Read-only input blocks Cut and Paste. Secure input blocks Copy and Cut. SelectionArea supports Select All and Copy. Editors retain ownership of their own history.
 
 The application service owns one public `Clipboard` per Runtime and delegates to its stable `PlatformClipboard` capability. Runtime retirement disconnects this service before releasing the platform capability. Clipboard tasks capture their inputs and platform resources before they can outlive the service.
 
 Built-in editing actions use the synchronous plain-text operations on platforms that provide them. Paste availability checks use advertised formats where available and permit a paste attempt when the format is unknown. They do not request clipboard payloads. Application code uses `WriteContent()` and typed asynchronous reads for rich text, image content, and file lists on desktop platforms, Android, and iOS.
+
+`GetTextEditingActionStatus()` returns `UseDefault` to leave an action with the framework, `Disabled` to suppress it, or `Handle` to execute it through the selection client. The menu queries availability without reading payloads. Dispatch checks the status again and consumes a claimed action immediately, including when an asynchronous clipboard operation later fails. Editors revalidate the original editing target, selection, and policy before applying a delayed result.
 
 When a platform lacks synchronous clipboard access, unhandled Copy, Cut, and Paste shortcuts reach the platform's default editing path. The Web input proxy blocks browser Copy and Cut for secure entries. Read-only clients do not open a text-input session.
 

@@ -453,6 +453,7 @@ export namespace huxerui {
     using huxerui::TextDecoration;
     using huxerui::TextDirection;
     using huxerui::TextEditingAction;
+    using huxerui::TextEditingActionStatus;
     using huxerui::TextEditingValue;
     using huxerui::TextEvents;
     using huxerui::TextField;

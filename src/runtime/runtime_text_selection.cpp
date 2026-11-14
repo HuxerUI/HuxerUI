@@ -55,74 +55,119 @@ TextSelectionClient* FindTextSelectionClient(MountedNode& node) {
 
 } // namespace detail
 
-PlatformClipboard* detail::TextInteraction::FindSynchronousTextClipboard() const noexcept {
-  const auto& application = runtime_state_.application_;
-  PlatformClipboard* clipboard = application && application->owner ? application->owner->Clipboard() : nullptr;
-  return clipboard && clipboard->SupportsSynchronousText() ? clipboard : nullptr;
-}
-
-bool detail::TextInteraction::ShouldConsumeTextEditingShortcut(TextEditingAction action) const {
-  if (HasSession()) {
-    // A synchronous clipboard shortcut belongs to the editor even when its action is blocked.
-    return action == TextEditingAction::SelectAll || FindSynchronousTextClipboard() != nullptr;
+detail::TextInteraction::EditingActionTarget detail::TextInteraction::FindEditingActionTarget() const {
+  if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_) {
+    return {};
   }
-  return CanPerformTextEditingAction(action);
+  MountedNode& root = *runtime_state_.mounted_root_;
+  const auto identity = *runtime_state_.focused_node_identity_;
+  MountedNode* focused = FindNode(root, identity);
+  if (!focused || !focused->interaction.enabled) {
+    return {};
+  }
+  auto input = FindTextInputClient(*focused);
+  // A focused editor owns its actions even when its configuration closes the IME session.
+  MountedNode* owner = input ? focused : FindTextSelectionOwner(root, identity);
+  if (!owner || !owner->interaction.enabled) {
+    return {};
+  }
+  const bool has_session = text_input_session_ && text_input_session_->node_identity == identity &&
+                           text_input_session_->client == input;
+  const auto* session = has_session ? &*text_input_session_ : nullptr;
+  return {owner->identity, std::move(input), FindTextSelectionClient(*owner), session};
 }
 
-// An active editor owns clipboard actions and secure-text policy before any enclosing read-only selection area.
-bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
-  PlatformClipboard* clipboard = FindSynchronousTextClipboard();
-  if (!text_input_session_.has_value()) {
-    if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
-      return false;
+TextEditingActionStatus detail::TextInteraction::ResolveEditingActionStatus(
+    const EditingActionTarget& target, TextEditingAction action, const Clipboard& clipboard
+) const {
+  if (target.input) {
+    const TextInputConfiguration configuration = target.input->Configuration();
+    if ((configuration.secure && (action == TextEditingAction::Copy || action == TextEditingAction::Cut)) ||
+        (configuration.read_only && (action == TextEditingAction::Cut || action == TextEditingAction::Paste))) {
+      return TextEditingActionStatus::Disabled;
     }
-    detail::MountedNode* focused =
-        detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
-    TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    return client && client->CanPerformTextEditingAction(action, clipboard);
   }
-  const detail::ActiveTextInputSession& session = *text_input_session_;
-  const TextRange selection = session.state.selection.Range();
+  return target.selection ? target.selection->GetTextEditingActionStatus(action, clipboard)
+                          : TextEditingActionStatus::UseDefault;
+}
+
+bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction action) const {
+  const EditingActionTarget target = FindEditingActionTarget();
+  if (!target.input && !target.selection) {
+    return false;
+  }
+  const Clipboard& clipboard = *runtime_state_.application_->application_service->Clipboard();
+  const auto status = ResolveEditingActionStatus(target, action, clipboard);
+  if (status == TextEditingActionStatus::Handle) {
+    return true;
+  }
+  if (status == TextEditingActionStatus::Disabled || !target.session) {
+    return false;
+  }
+  const auto& session = *target.session;
   switch (action) {
   case TextEditingAction::Cut:
-    return !session.configuration.read_only && !session.configuration.secure && !selection.IsCollapsed() &&
-           clipboard != nullptr;
   case TextEditingAction::Copy:
-    return !session.configuration.secure && !selection.IsCollapsed() && clipboard != nullptr;
-  case TextEditingAction::Paste:
-    return !session.configuration.read_only && clipboard && clipboard->MayHaveContent(ClipboardKind::Text);
+    return clipboard.IsAvailable() && !session.client->State().selection.IsCollapsed();
+  case TextEditingAction::Paste: {
+    auto* runtime = runtime_state_.application_->owner;
+    auto* platform_clipboard = runtime ? runtime->Clipboard() : nullptr;
+    return clipboard.IsAvailable() && platform_clipboard && platform_clipboard->MayHaveContent(ClipboardKind::Text);
+  }
   case TextEditingAction::SelectAll: {
     const TextInputContext context = session.client->QueryTextInputContext(session.session_id, 0, 0);
     return context.result_code == TextInputResultCode::Ok && context.total_length > 0 &&
-           selection != TextRange{0, context.total_length};
+           session.client->State().selection.Range() != TextRange{0, context.total_length};
   }
   }
   return false;
 }
 
-bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action) {
-  PlatformClipboard* clipboard = FindSynchronousTextClipboard();
-  if (!text_input_session_.has_value()) {
-    if (!runtime_state_.mounted_root_ || !runtime_state_.focused_node_identity_.has_value()) {
-      return false;
+bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action, EditingActionSource source) {
+  const EditingActionTarget target = FindEditingActionTarget();
+  if (!target.input && !target.selection) {
+    return false;
+  }
+  const auto clipboard = runtime_state_.application_->application_service->Clipboard();
+  const auto status = ResolveEditingActionStatus(target, action, *clipboard);
+  if (status == TextEditingActionStatus::Disabled) {
+    return source != EditingActionSource::Menu;
+  }
+  if (status == TextEditingActionStatus::Handle) {
+    if (source == EditingActionSource::ShortcutRepeat) {
+      return true;
     }
-    detail::MountedNode* focused =
-        detail::FindTextSelectionOwner(*runtime_state_.mounted_root_, *runtime_state_.focused_node_identity_);
-    TextSelectionClient* client = focused ? detail::FindTextSelectionClient(*focused) : nullptr;
-    if (!client || !client->PerformTextEditingAction(action, clipboard)) {
-      return false;
+    const auto session_id = target.session ? target.session->session_id : 0;
+    const auto previous = target.session ? std::optional{target.session->state} : std::nullopt;
+    target.selection->PerformTextEditingAction(action, *clipboard);
+    if (previous && text_input_session_ && text_input_session_->session_id == session_id) {
+      InvalidateTextInputStateChange(target.node_identity, *previous, target.input->State());
+    } else if (runtime_state_.mounted_root_) {
+      if (auto* node = FindNode(*runtime_state_.mounted_root_, target.node_identity)) {
+        node->foreground_paint_dirty = true;
+        runtime_state_.owner_.RequestFrame();
+      }
     }
-    focused->foreground_paint_dirty = true;
     return true;
   }
-  detail::ActiveTextInputSession& session = *text_input_session_;
-  const TextRange selection = session.state.selection.Range();
+  if (source == EditingActionSource::ShortcutRepeat || !target.session ||
+      (action != TextEditingAction::SelectAll && !clipboard->IsAvailable())) {
+    return false;
+  }
+  return PerformDefaultTextEditingAction(*target.session, action, *clipboard) || source == EditingActionSource::Shortcut;
+}
+
+bool detail::TextInteraction::PerformDefaultTextEditingAction(
+    const ActiveTextInputSession& session, TextEditingAction action, const Clipboard& clipboard) {
+  const auto session_id = session.session_id;
+  const auto client = session.client;
+  const TextInputState state = client->State();
+  const TextRange selection = state.selection.Range();
   if (action == TextEditingAction::Copy || action == TextEditingAction::Cut) {
-    if (!CanPerformTextEditingAction(action) || clipboard == nullptr) {
+    if (selection.IsCollapsed()) {
       return false;
     }
-    const TextInputContext context =
-        session.client->QueryTextInputContext(session.session_id, selection.start, selection.Length());
+    const TextInputContext context = client->QueryTextInputContext(session_id, selection.start, selection.Length());
     if (context.result_code != TextInputResultCode::Ok || context.slice_start > selection.start) {
       return false;
     }
@@ -131,7 +176,7 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
         selection.end - context.slice_start,
     };
     const std::optional<std::string> selected = detail::Utf8TextInRange(context.text, relative);
-    if (!selected.has_value() || !clipboard->WriteText(*selected)) {
+    if (!selected.has_value() || !clipboard.WriteText(*selected)) {
       return false;
     }
     if (action == TextEditingAction::Copy) {
@@ -141,20 +186,17 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
 
   TextInputCommand command;
   if (action == TextEditingAction::Paste) {
-    if (session.configuration.read_only || clipboard == nullptr) {
-      return false;
-    }
-    const std::optional<std::string> text = clipboard->ReadText();
+    const std::optional<std::string> text = clipboard.ReadText();
     if (!text.has_value()) {
       return false;
     }
     command.kind = TextInputCommandKind::CommitText;
     command.text = *text;
-    if (!session.state.composition.has_value()) {
+    if (!state.composition.has_value()) {
       command.target = selection;
     }
   } else if (action == TextEditingAction::SelectAll) {
-    const TextInputContext context = session.client->QueryTextInputContext(session.session_id, 0, 0);
+    const TextInputContext context = client->QueryTextInputContext(session_id, 0, 0);
     if (context.result_code != TextInputResultCode::Ok || context.total_length <= 0) {
       return false;
     }
@@ -166,7 +208,12 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action)
     return false;
   }
 
-  const TextInputApplyResult result = HandleTextInputCommands({session.session_id, {std::move(command)}});
+  // A platform clipboard call may dispatch events before it returns.
+  if (!text_input_session_ || text_input_session_->session_id != session_id || client->State() != state ||
+      (action != TextEditingAction::SelectAll && client->Configuration().read_only)) {
+    return false;
+  }
+  const TextInputApplyResult result = HandleTextInputCommands({session_id, {std::move(command)}});
   return result.result_code == TextInputResultCode::Ok;
 }
 
