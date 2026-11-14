@@ -52,6 +52,7 @@ constexpr std::array agent_skill_mappings{
 
 constexpr std::string_view build_options =
     "[-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]";
+constexpr std::string_view package_format_option = " [-f|--format appimage|deb|rpm]";
 constexpr std::string_view sdk_option_help =
     "--sdk <path> selects an installed SDK or a HuxerUI source checkout for this invocation.\n";
 constexpr std::string_view sdk_commands =
@@ -65,6 +66,10 @@ void PrintBuildOptions(std::ostream& output) {
          << "They also accept --optimization default|size|minsize and --lto on|off.\n";
 }
 
+void PrintPackageOptions(std::ostream& output) {
+  output << "With Linux as the sole packaging platform, -f or --format selects appimage (default), deb, or rpm.\n";
+}
+
 void PrintBuildHelp(std::ostream& output, std::string_view command) {
   output << "Usage:\n  huxerui " << command;
   if (command == "open") {
@@ -72,8 +77,15 @@ void PrintBuildHelp(std::ostream& output, std::string_view command) {
     return;
   }
   const auto platforms = command == "build" ? "[platform-list]" : command == "run" ? "<platform>" : "<platform-list>";
-  output << ' ' << platforms << ' ' << build_options << "\n\n";
+  output << ' ' << platforms << ' ' << build_options;
+  if (command == "package") {
+    output << package_format_option;
+  }
+  output << "\n\n";
   PrintBuildOptions(output);
+  if (command == "package") {
+    PrintPackageOptions(output);
+  }
 }
 
 void PrintHelp(std::ostream& output) {
@@ -92,7 +104,7 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui build [platform-list] " << build_options << '\n'
          << "  huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]\n"
          << "  huxerui run <platform> " << build_options << '\n'
-         << "  huxerui package <platform-list> " << build_options << '\n'
+         << "  huxerui package <platform-list> " << build_options << package_format_option << '\n'
          << "  huxerui open ios [--sdk <path>]\n"
          << "  huxerui --version\n\n";
   output << "Command aliases:\n";
@@ -101,6 +113,7 @@ void PrintHelp(std::ostream& output) {
   }
   output << "\nA platform list is a comma-separated list or all.\n";
   PrintBuildOptions(output);
+  PrintPackageOptions(output);
   output << "Without --platform, an app and a common library's Preview enable all platforms.\n"
          << "An agent list is comma-separated and supports ";
   for (std::size_t index = 0; index < agent_skill_mappings.size(); ++index) {
@@ -728,6 +741,7 @@ struct BuildOptions {
   std::optional<std::string> optimization;
   std::optional<bool> lto;
   std::vector<std::string> abis;
+  std::optional<std::string> package_format;
 };
 
 BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std::string_view command) {
@@ -752,6 +766,15 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
       }
       const auto abis = SplitList(read_value(), "ABI");
       options.abis.assign(abis.begin(), abis.end());
+    } else if (command == "package" && (option == "--format" || option == "-f")) {
+      if (options.package_format) {
+        throw UsageError("--format may be specified only once");
+      }
+      const auto format = read_value();
+      if (format != "appimage" && format != "deb" && format != "rpm") {
+        throw UsageError("Linux package format must be appimage, deb, or rpm");
+      }
+      options.package_format = format;
     } else if (option == "--optimization") {
       if (options.optimization) {
         throw UsageError("--optimization may be specified only once");
@@ -829,6 +852,9 @@ ResolveBuildPlatforms(const Project& project, BuildOptions& options, std::string
 
   if (!command.empty() && platforms.size() != 1) {
     throw UsageError(std::string(command) + " accepts exactly one platform");
+  }
+  if (options.package_format && (platforms.size() != 1 || platforms.front()->Id() != "linux")) {
+    throw UsageError("--format requires Linux as the sole packaging platform");
   }
   if (!options.abis.empty()) {
     if (platforms.size() != 1) {
@@ -948,6 +974,7 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
       options.optimization,
       options.lto,
       {abis.begin(), abis.end()},
+      options.package_format,
   };
 }
 

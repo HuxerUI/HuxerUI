@@ -398,10 +398,10 @@ Desktop platforms intentionally use different containers:
 
 - Windows produces one Burn `setup.exe` containing the application MSI and its HuxerUI bootstrapper application.
 - macOS produces one DMG containing the complete application bundle and an Applications link.
-- Linux produces one executable AppImage containing the application, its HuxerUI resources, and application-declared runtime payloads.
+- Linux produces an AppImage by default. Linux-only packaging accepts `--format` or `-f` to select AppImage, DEB, or RPM. DEB and RPM use the native distribution tools and architecture.
 
 Application icons remain editable native assets in their generated platform shells.
-Windows uses one `app.ico` for the application executable, installer executable, Burn bundle, shortcuts, and installed-product metadata; macOS embeds `AppIcon.icns` in the application bundle; Linux installs its target-named SVG beside the AppImage desktop entry.
+Windows uses one `app.ico` for the application executable, installer executable, Burn bundle, shortcuts, and installed-product metadata. macOS embeds `AppIcon.icns` in the application bundle. Linux reuses the target-named SVG with the desktop entry in each package format.
 Android owns launcher density and adaptive icon resources, iOS owns its AppIcon asset catalog, and Web owns its favicon and touch icon.
 The generated defaults share the HuxerUI brand mark, while the build and package layers do not add a cross-platform icon property, perform image conversion, customize the macOS volume icon, or introduce a second Windows installer icon.
 
@@ -421,7 +421,8 @@ Installation entries read the final target-owned input list, including declarati
 Dependency discovery uses original binaries, while copying, load-path rewriting, and final validation operate on fresh staging trees.
 Collection classifies explicit and discovered dependencies before copying; staged validation enforces the same system-runtime boundary.
 Windows uses executable-local dependencies and toolchain Release VC++ redistributables, resolving them through an explicit CMake setting, CMake discovery, the active compiler installation, or its developer environment in that order.
-macOS uses bundle Frameworks and PlugIns with relative load commands and signatures applied after fixup; Linux uses AppDir `usr/lib` and per-binary relative RUNPATHs while retaining the distribution-owned desktop stack.
+macOS uses bundle Frameworks and PlugIns with relative load commands and signatures applied after fixup.
+The Linux shell selects AppDir `usr` or system-package `usr/lib/<project-id>` as the root for the same executable, resource, and runtime-dependency rules. The desktop entry and icon go in the AppDir root for AppImage and the system directories for DEB and RPM. CPack wraps the staged system package and derives package-manager dependencies from its ELF files, with GTK 4.14 declared explicitly. The RPM packaging hook uses the staged private libraries' ELF capabilities to filter their exports and matching internal requirements.
 Missing required dependencies, conflicting destinations, invalid architectures, unsupported Debug CRTs, and external non-system dependencies remaining after deployment are fatal.
 
 ### Windows installer

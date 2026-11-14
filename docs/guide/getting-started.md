@@ -194,7 +194,7 @@ Use `b`, `r`, and `pkg` as short forms of `build`, `run`, and `package`. These c
 
 Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
 Packaged application artifacts are collected under `dist/<platform>`.
-Desktop packages are a Windows setup executable, macOS DMG, or Linux AppImage; see [Packaging Applications](packaging.md) for runtime payload and custom Windows installer guidance.
+Desktop packages are a Windows setup executable, a macOS DMG, or a Linux AppImage by default. See [Packaging Applications](packaging.md) for Linux DEB and RPM packaging, runtime payloads, and the custom Windows installer interface.
 Use [`--abi <abi-list>`](packaging.md#target-abis) with `build`, `run`, or `package` to select target ABIs for one platform.
 Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
 Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`; set it to a positive job count to limit concurrent compilation, including builds using `--sdk`. When unset, the selected build tool uses its default concurrency.

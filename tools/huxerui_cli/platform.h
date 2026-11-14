@@ -112,6 +112,8 @@ struct PlatformCommandContext {
   std::optional<bool> lto;
   /// Canonical target ABI names, or an empty list to preserve the native build defaults.
   std::vector<std::string> abis = {};
+  /// Explicit Linux package format, or no override to use AppImage.
+  std::optional<std::string> package_format = std::nullopt;
 };
 
 /// One file or directory published by the `package` command.

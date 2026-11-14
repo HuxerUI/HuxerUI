@@ -137,6 +137,25 @@ TEST_CASE("HuxerUICliRejectsInvalidOptimizationOverrides") {
   REQUIRE(Invoke(temporary.Path(), {"build", "android", "--lto", "off", "--lto", "on"}).result == 2);
 }
 
+TEST_CASE("HuxerUICliRestrictsPackageFormatToLinuxPackaging") {
+  TemporaryDirectory temporary;
+  const auto help = Invoke(temporary.Path(), {"package", "--help"});
+  REQUIRE(help.output.find("[-f|--format appimage|deb|rpm]") != std::string::npos);
+  REQUIRE(Invoke(temporary.Path(), {"package", "linux", "-f"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"package", "linux", "--format", "zip"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"pkg", "linux", "-f", "deb", "--format", "rpm"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "linux", "--format", "deb"}).result == 2);
+
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample"}).result == 0);
+  const auto project = temporary.Path() / "sample";
+  for (const auto platforms : {"windows", "linux,windows"}) {
+    const auto rejected =
+        Invoke(project, {"package", platforms, "--format", "rpm", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY});
+    REQUIRE(rejected.result == 2);
+    REQUIRE(rejected.error.find("--format requires Linux as the sole packaging platform") != std::string::npos);
+  }
+}
+
 TEST_CASE("HuxerUICliNormalizesAbiNamesForTheSelectedPlatform") {
   using huxerui::cli::FindPlatformDriver;
   using huxerui::cli::detail::NormalizeTargetAbi;

@@ -15,14 +15,30 @@ Desktop outputs are platform-native:
 
 - Windows produces one self-contained Burn setup executable containing the application MSI and a HuxerUI installer interface.
 - macOS produces one DMG containing the application bundle and an Applications link.
-- Linux produces one AppImage.
+- Linux produces an AppImage by default and can produce a DEB or RPM.
 - Android publishes the generated APK, iOS publishes its built application bundle, and Web publishes the generated deployment files.
 
 Normal `build` and `run` do not build installer targets or require packaging tools.
 Windows downloads the pinned WiX v5 package dependencies only during `package` and verifies their SHA-256 hashes.
 Windows setup generation currently supports x64 applications.
 Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
-Linux requires `appimagetool`, `patchelf` 0.19.0 or newer, and binutils on `PATH` for `package`; macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
+macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
+
+## Linux package formats
+
+```bash
+huxerui package linux
+huxerui package linux --format deb
+huxerui package linux -f rpm
+```
+
+Use `--format` or `-f` with Linux as the sole packaging platform. The supported values are `appimage` (default), `deb`, and `rpm`. The selected format is published under `dist/linux` and replaces the previous Linux output on success.
+
+All three formats use the same CMake installation component and require `patchelf` 0.19.0 or newer and binutils on the build machine. AppImage needs `appimagetool`, DEB needs CPack and `dpkg-shlibdeps` from `dpkg-dev`, and RPM needs CPack and `rpmbuild` from `rpm-build`. Build DEB and RPM natively on the intended distribution family so its tools can resolve the system library dependencies. Use the current `platform/linux/huxerui.cmake` installation rules when adding DEB or RPM packaging to an existing project.
+
+DEB and RPM use the project ID as the package name and the CMake project version as the package version. APT and DNF install the distribution libraries needed by the package, including GTK 4.14 or newer. The package installs the desktop entry and icon in the system application and icon directories. The application, its resource sidecar, and its private libraries live together under `/usr/lib/<project-id>/`.
+
+Installation, desktop launch, and removal were verified on Ubuntu 24.04 LTS for DEB and Fedora 44 for RPM, both on x86_64.
 
 ## Target ABIs
 
@@ -32,7 +48,7 @@ Linux requires `appimagetool`, `patchelf` 0.19.0 or newer, and binutils on `PATH
 | --- | --- | --- |
 | Android | `arm64-v8a`, `x86_64` | One APK with the selected ABIs. Termux supports only `arm64-v8a`. |
 | Windows | `x86_64` | One application or installer. |
-| Linux | `aarch64`, `x86_64` | A separate build and AppImage per ABI. When packaging both, the CLI publishes them under `dist/linux/<abi>`. Use one ABI with `run`. |
+| Linux | `aarch64`, `x86_64` | A separate build and AppImage per ABI, under `dist/linux/<abi>` when packaging both. DEB and RPM use the host ABI. Use one ABI with `run`. |
 | macOS | `arm64`, `x86_64` | One app bundle and DMG. Building both architectures requires a HuxerUI source checkout selected with `--sdk` and universal dependencies. |
 | iOS | `arm64` for devices, `arm64` or `x86_64` for simulators | One bundle for the selected destination. Simulator builds can contain both slices when supported by Xcode. |
 | Web | `wasm32` | One Web deployment. |
@@ -208,7 +224,7 @@ Replace the generated file in place; no CMake option or HuxerUI resource registr
 
 - Windows uses `platform/windows/app.ico` for the application executable, installer executable, Burn setup, Start menu and desktop shortcuts, and the installed-app entry.
 - macOS uses `platform/macos/AppIcon.icns` for the application bundle displayed by Finder, Dock, and the application switcher.
-- Linux uses `platform/linux/package/<target>.svg` for the AppImage and its desktop entry.
+- Linux uses `platform/linux/package/<target>.svg` for the desktop entry in all three Linux package formats.
 - Android uses the legacy density icons and adaptive icon resources under `platform/android/app/src/main/res`.
 - iOS uses the complete `platform/ios/App/Assets.xcassets/AppIcon.appiconset` catalog.
 - Web uses `platform/web/favicon.svg` for browser tabs and `apple-touch-icon.png` for home-screen bookmarks.

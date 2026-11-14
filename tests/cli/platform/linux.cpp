@@ -97,6 +97,7 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
   std::ofstream(artifact) << "test\n";
   std::ofstream(plan) << "{\n"
                          "  \"target\": \"sample\",\n"
+                         "  \"bundleIdentifier\": \"com.example.sample\",\n"
                          "  \"version\": \"1.2.3\",\n"
                          "  \"installComponent\": \"HuxerUIApplication\",\n"
                          "  \"artifact\": \""
@@ -112,6 +113,16 @@ TEST_CASE("HuxerUICliCreatesAndRunsLinuxApplicationsThroughTheRootCMakeProject")
   const std::filesystem::path app_image = project / ".huxerui/package/linux/debug/sample-1.2.3.AppImage";
   const std::vector<huxerui::cli::PackageArtifact> expected_package_artifacts{{app_image, app_image.filename()}};
   REQUIRE(package_artifacts == expected_package_artifacts);
+
+  auto system_package = context;
+  system_package.package = true;
+  for (const std::string format : {"deb", "rpm"}) {
+    system_package.package_format = format;
+    const auto system_artifact = app_image.parent_path() / ("com.example.sample-1.2.3." + format);
+    REQUIRE(linux->PackageArtifacts(system_package) ==
+            std::vector<huxerui::cli::PackageArtifact>{{system_artifact, system_artifact.filename()}});
+    REQUIRE_THROWS_AS(linux->VerifyBuildAbis(system_package), std::runtime_error);
+  }
 
   auto explicit_context = context;
   explicit_context.abis = {"aarch64"};

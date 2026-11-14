@@ -31,22 +31,29 @@ std::filesystem::path LinuxToolchain(const PlatformCommandContext& context) {
   return (context.project_root / *toolchain).lexically_normal();
 }
 
-std::filesystem::path AppImageTool() {
-  const std::optional<std::filesystem::path> tool = FindExecutable("appimagetool");
+std::filesystem::path LinuxPackageTool(std::string_view name) {
+  const std::optional<std::filesystem::path> tool = FindExecutable(name);
   if (!tool) {
-    throw std::runtime_error("HuxerUI Linux packaging requires appimagetool on PATH");
+    throw std::runtime_error("HuxerUI Linux packaging requires " + std::string(name) + " on PATH");
   }
   return *tool;
 }
 
+bool IsLinuxSystemPackage(const PlatformCommandContext& context) {
+  return context.package_format == "deb" || context.package_format == "rpm";
+}
+
 std::filesystem::path LinuxPackageArtifact(const PlatformCommandContext& context, std::string_view plan) {
-  const std::string target = detail::JsonString(plan, "target");
   const std::string version = detail::JsonString(plan, "version");
   auto root = context.project_root / ".huxerui/package/linux" / context.profile;
   if (!context.abis.empty()) {
     root /= context.abis.front();
   }
-  return root / (target + "-" + version + ".AppImage");
+  if (IsLinuxSystemPackage(context)) {
+    const std::string id = detail::JsonString(plan, "bundleIdentifier");
+    return root / (id + "-" + version + "." + *context.package_format);
+  }
+  return root / (detail::JsonString(plan, "target") + "-" + version + ".AppImage");
 }
 
 class LinuxDriver final : public PlatformDriver {
@@ -164,6 +171,9 @@ public:
     if (context.abis.empty() || context.abis.front() == NativeLinuxAbi()) {
       return;
     }
+    if (IsLinuxSystemPackage(context)) {
+      throw std::invalid_argument("HuxerUI DEB and RPM packages require a native Linux build");
+    }
     if (!std::filesystem::is_regular_file(context.huxerui_home / "CMakeLists.txt") ||
         !std::filesystem::is_regular_file(LinuxToolchain(context))) {
       throw std::invalid_argument(
@@ -173,26 +183,36 @@ public:
   }
 
   void VerifyBuildAbis(const PlatformCommandContext& context) const override {
-    if (context.abis.empty()) {
+    if (context.abis.empty() && !IsLinuxSystemPackage(context)) {
       return;
     }
+    const std::string_view abi = context.abis.empty() ? NativeLinuxAbi() : std::string_view(context.abis.front());
     const auto artifact = detail::JsonString(detail::ReadFile(detail::AppIntegrationPlan(context)), "artifact");
     std::ifstream executable(std::filesystem::path(artifact), std::ios::binary);
     std::array<unsigned char, 20> header{};
     executable.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
-    const unsigned char machine = context.abis.front() == "aarch64" ? 0xb7 : 0x3e;
+    const unsigned char machine = abi == "aarch64" ? 0xb7 : 0x3e;
     if (!executable || header[0] != 0x7f || header[1] != 'E' || header[2] != 'L' || header[3] != 'F' ||
         header[4] != 2 || header[5] != 1 || header[18] != machine || header[19] != 0) {
-      throw std::runtime_error("HuxerUI Linux build artifact does not match ABI " + context.abis.front() +
-                               ": " + artifact);
+      throw std::runtime_error("HuxerUI Linux build artifact does not match ABI " + std::string(abi) + ": " + artifact);
     }
   }
 
   std::vector<ProcessCommand> BuildCommands(const PlatformCommandContext& context) const override {
+    const bool system_package = IsLinuxSystemPackage(context);
     if (context.package && SupportsCurrentHost()) {
-      (void)AppImageTool();
+      if (system_package) {
+        (void)LinuxPackageTool("cpack");
+        (void)LinuxPackageTool(context.package_format == "deb" ? "dpkg-shlibdeps" : "rpmbuild");
+      } else {
+        (void)LinuxPackageTool("appimagetool");
+      }
     }
     auto commands = detail::DesktopBuildCommands(context);
+    if (context.package) {
+      commands.front().arguments.push_back(
+          std::string("-DHUXERUI_LINUX_SYSTEM_PACKAGE=") + (system_package ? "ON" : "OFF"));
+    }
     if (!context.abis.empty()) {
       commands.front().arguments.push_back("-DCMAKE_TOOLCHAIN_FILE=" + LinuxToolchain(context).string());
     }
@@ -216,9 +236,28 @@ public:
   std::vector<ProcessCommand> PackageCommands(const PlatformCommandContext& context) const override {
     const std::string plan = detail::ReadFile(detail::AppIntegrationPlan(context));
     const std::string install_component = detail::JsonString(plan, "installComponent");
-    const std::filesystem::path appimagetool = AppImageTool();
     const std::filesystem::path artifact = LinuxPackageArtifact(context, plan);
     const std::filesystem::path root = artifact.parent_path();
+    if (IsLinuxSystemPackage(context)) {
+      const auto config = context.build_directory / "huxerui-package/LinuxCPack.cmake";
+      if (!std::filesystem::is_regular_file(config)) {
+        throw std::runtime_error(
+            "HuxerUI DEB and RPM packaging requires the updated platform/linux/huxerui.cmake install rules");
+      }
+      const std::filesystem::path stage = root / *context.package_format;
+      auto commands = detail::DesktopPackageStageCommands(context, stage, install_component);
+      const bool deb = context.package_format == "deb";
+      commands.push_back({
+          LinuxPackageTool("cpack").string(),
+          {"-G", deb ? "DEB" : "RPM", "--config", config.string(), "-B", root.string(),
+           "-D", "CPACK_INSTALLED_DIRECTORIES=" + stage.string() + ";/",
+           "-D", "CPACK_PACKAGE_VERSION=" + detail::JsonString(plan, "version"),
+           "-D", "CPACK_PACKAGE_FILE_NAME=" + artifact.stem().string()},
+          context.project_root,
+      });
+      return commands;
+    }
+    const std::filesystem::path appimagetool = LinuxPackageTool("appimagetool");
     const std::filesystem::path staging = root / "AppDir";
     std::vector<ProcessCommand> commands =
         detail::DesktopPackageStageCommands(context, staging, install_component);
