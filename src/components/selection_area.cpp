@@ -366,8 +366,8 @@ public:
     }
     switch (action) {
     case TextEditingAction::Copy:
-      return clipboard.IsAvailable() && selection_.Range() ? TextEditingActionStatus::Handle
-                                                          : TextEditingActionStatus::UseDefault;
+      return clipboard.SupportsSynchronousText() && selection_.Range()
+          ? TextEditingActionStatus::Handle : TextEditingActionStatus::UseDefault;
     case TextEditingAction::SelectAll: {
       const auto& source = selection_.Source();
       if (!source || source->Count() == 0) {

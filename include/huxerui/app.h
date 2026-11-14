@@ -618,7 +618,7 @@ public:
   [[nodiscard]] ApplicationLifecycleState LifecycleState() const;
   /// @brief Returns the shared system clipboard for this application's Runtime.
   /// @return The same non-null instance on every call, including on hosts without clipboard support.
-  /// Clipboard::IsAvailable() reports synchronous plain-text support. Typed operations report their own results.
+  /// Clipboard::SupportsSynchronousText() reports synchronous plain-text support.
   ///
   /// This accessor does not require an active composition and may be called on a captured ApplicationHandle.
   /// Clipboard operations start on the owning application thread. After Runtime destruction, the returned

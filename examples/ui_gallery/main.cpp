@@ -374,7 +374,7 @@ View ActionsDemo() {
         Flow {
           Button("Copy HuxerUI")
               .OnClick([clipboard] { clipboard->WriteText("HuxerUI"); })
-              .With(Enabled(clipboard->IsAvailable())),
+              .With(Enabled(clipboard->SupportsSynchronousText())),
           Button("Disabled").OnClick([] {}).With(Enabled(false)),
           IconButton(ui_gallery::images::link, "Open link").OnClick([] {}).With(Tooltip("Open link")),
           IconButton(ui_gallery::images::lock, "Unavailable secure action")

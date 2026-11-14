@@ -47,9 +47,12 @@ struct AndroidApplicationActivationInput {
     const AndroidApplicationActivationInput& input
 );
 
-/// Retains the captured clip and resolves its payload on a worker.
-Task<IoResult<ClipboardContent>>
-ReadAndroidClipboardAsync(JavaVM* vm, JNIEnv* environment, jobject context, jobject capture, ClipboardKind kind);
+/// Retains the captured clip and resolves one item's requested representations on a worker.
+Task<IoResult<ClipboardItem>> ReadAndroidClipboardItem(JavaVM* vm, JNIEnv* environment, jobject capture,
+                                                       std::vector<std::string> types);
+/// Retains the captured file list and resolves its read grants on a worker.
+Task<IoResult<std::vector<FileReference>>> ReadAndroidClipboardFiles(JavaVM* vm, JNIEnv* environment, jobject context,
+                                                                     jobject capture);
 
 /// Creates the application's permission bridge; presentation is selected separately for each request.
 /// @param virtual_machine VM used by the retained Java bridge.

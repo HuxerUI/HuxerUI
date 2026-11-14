@@ -789,16 +789,21 @@ return Button("Copy").OnClick([clipboard] {
 });
 ```
 
-`IsAvailable()` reports synchronous plain-text support. `ReadText()` returns no value when text is absent or cannot be read, and `WriteText()` reports whether the system accepted valid UTF-8 text.
-Each Runtime has one shared Clipboard instance; a captured ApplicationHandle can retrieve it outside composition, and retained clipboard objects report unavailable results after their Runtime is destroyed.
+`SupportsSynchronousText()` reports support for `ReadText()` and `WriteText()`. `ReadText()` returns no value when text is absent or unavailable, and `WriteText()` reports whether the system accepted it. Each Runtime owns one Clipboard instance, which becomes unavailable when that Runtime retires.
 
-On Windows, macOS, Linux, Android, and iOS, use `WriteContent()` to publish a `ClipboardContent` value. It accepts text, `AttributedText`, an `ImageAsset`, or a nonempty list of `File` or `FileReference` values supported by the platform. Rich text publishes a plain-text alternative. `WriteContentAsync()` also works on these platforms and returns the result of the synchronous publication through a Task.
+Publish an item in one call to `WriteItem()` or `WriteItemAsync()`. A `ClipboardItem` can hold plain text, an HTML fragment, an encoded image, and application-specific bytes keyed by MIME type. `ClipboardItem::FromAttributedText()` supplies both HTML and plain text. When supplying HTML directly, set `text` to offer a suitable plain-text alternative. A successful write means the platform accepted all supplied representations. A failed write can leave the clipboard empty.
 
-Use `ReadTextAsync()`, `ReadRichTextAsync()`, `ReadImageAsync()`, or `ReadFilesAsync()` from a user-triggered action. A result with `IoErrorCode::NotFound` means there is no matching content. Rich text falls back to plain text when the clipboard offers only that representation. Files are delivered in order as read-only references. Use `OpenReadAsync()` to read an attachment, or `AsFile()` when an operation needs a local path, keeping the reference alive for its access grant.
+```cpp
+auto item = ClipboardItem::FromAttributedText(AttributedText("Selected text"));
+item.custom_formats.emplace("application/vnd.example.selection", serialized_selection);
+const bool copied = clipboard->WriteItem(std::move(item));
+```
 
-Image content and copied image files are separate clipboard representations. Desktop platforms copy local files and directories. Android copies ordinary local files and readable content URIs, which remain subject to system grants. iOS publishes ordinary local files on the device and reads explicit file URLs, open-in-place file representations, and file copies published by HuxerUI.
+`ReadItemAsync()` reads plain text and HTML from one clipboard item by default. Request image data or custom MIME types with `ClipboardReadOptions`. Missing or unreadable representations are absent. The operation fails if no requested representation can be read, or if a clipboard change prevents the platform from finishing the original capture. Call `ToAttributedText()` for styled text derived from HTML or a plain-text fallback. `ReadTextAsync()` and `ReadImageAsync()` request a single kind of representation.
 
-On Web, start `WriteContentAsync()`, `ReadTextAsync()`, `ReadRichTextAsync()`, or `ReadImageAsync()` directly in the user action and then schedule or await the returned Task. The browser requires a secure context and may prompt for access. Writes support plain text, `AttributedText` as HTML with a plain-text alternative, and PNG images. The write Task yields true after browser acceptance, or false for unsupported content or rejection. Direct file reads are unsupported. Web TextField copy, cut, and paste use browser-managed editing events.
+Use `WriteFiles()` to publish a nonempty list of paths or file references. `ReadFilesAsync()` returns the complete ordered list of read-only references with their available access grants. Desktop platforms can copy local files and directories. Android copies ordinary local files and readable content URIs. iOS publishes ordinary local files and reads explicit file URLs or provider-backed copies. Use `ClipboardItem::image` to exchange the pixels of an image.
+
+On Web, start `WriteItemAsync()` or a supported asynchronous read directly in the user action and then schedule or await the returned Task. Clipboard access requires a secure context. Writing supports plain text, HTML, PNG, and custom formats on browsers that expose them. Custom formats use the browser's web clipboard namespace. Android requires a plain-text representation when publishing HTML. Web file lists are unsupported. Browser-managed TextField editing events still handle its default clipboard actions.
 
 Custom editors can override `TextSelectionClient::GetTextEditingActionStatus()` and `PerformTextEditingAction()` to handle shortcuts and touch selection menu actions together. Return `Handle` to claim an action, `Disabled` to block it, or `UseDefault` to allow the framework's default behavior. Start clipboard operations in the execution callback. Wait for a successful write before deleting text for Cut, and verify that delayed results still apply to the original editor and selection.
 

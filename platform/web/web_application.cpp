@@ -20,58 +20,79 @@ namespace {
 using emscripten::val;
 
 // clang-format off
-EM_JS(emscripten::EM_VAL, BeginWebClipboardRead, (bool rich, bool image, std::size_t limit), {
+EM_JS(emscripten::EM_VAL, BeginWebClipboardRead,
+      (emscripten::EM_VAL requested_types, std::size_t text_limit, std::size_t image_limit, std::size_t custom_limit), {
   const operation = { callback: 0 };
-  const failure = (error) => ({
-    status: error?.name === "NotAllowedError" || error?.name === "SecurityError" ? 3 :
-      error?.name === "NotFoundError" ? 1 : 5,
-  });
+  const status = (error) => error?.name === "NotAllowedError" || error?.name === "SecurityError" ? 3 :
+    error?.name === "NotFoundError" ? 1 : error?.name === "InvalidStateError" ? 6 : 5;
   try {
     const clipboard = globalThis.navigator?.clipboard;
     if (!globalThis.isSecureContext || typeof clipboard?.read !== "function") {
       operation.result = Promise.resolve({ status: 2 });
     } else {
-      // Request access while the caller's browser gesture is active, before the Task is scheduled.
+      const formats = Emval.toValue(requested_types);
+      // Start clipboard access while the user's browser gesture is active.
       operation.result = clipboard.read().then(async (items) => {
-        const formats = image ? ["image/png", "image/jpeg"] : rich ? ["text/html", "text/plain"] : ["text/plain"];
-        let unsupported = false;
-        for (const item of items) {
-          if (image && item.presentationStyle === "attachment") continue;
-          const type = formats.find((candidate) => item.types.includes(candidate));
-          if (type) {
-            const blob = await item.getType(type);
-            if (blob.size > limit) return { status: 4 };
-            return { status: 0, type, bytes: new Uint8Array(await blob.arrayBuffer()) };
-          }
-          unsupported ||= image && item.types.some((candidate) => candidate.startsWith("image/"));
+        const available = (item, type) => item.types.includes(type) &&
+          (!type.startsWith("image/") || item.presentationStyle !== "attachment");
+        const item = items.find((candidate) => formats.some((type) => available(candidate, type)));
+        if (!item) {
+          const unsupportedImage = formats.includes("image/png") && items.some((candidate) =>
+            candidate.presentationStyle !== "attachment" && candidate.types.some((type) => type.startsWith("image/")));
+          return { status: unsupportedImage ? 2 : 1 };
         }
-        return { status: unsupported ? 2 : 1 };
-      }).catch(failure);
+        const representations = [];
+        let error = 1;
+        let hasImage = false;
+        for (const type of formats) {
+          const image = type.startsWith("image/");
+          if ((image && hasImage) || !available(item, type)) continue;
+          const custom = type.startsWith("web ");
+          try {
+            const blob = await item.getType(type);
+            const limit = custom ? custom_limit : image ? image_limit : text_limit;
+            if (blob.size > limit) {
+              if (error === 1) error = 4;
+              continue;
+            }
+            const bytes = new Uint8Array(await blob.arrayBuffer());
+            if (custom) custom_limit -= bytes.length;
+            representations.push({ type, bytes });
+            hasImage ||= image;
+          } catch (failure) {
+            const code = status(failure);
+            // Browsers can reject a lazy read when the original item changes.
+            if (code === 6 || failure?.name === "DataError") return { status: 6 };
+            if (code === 3) return { status: 3 };
+            if (error === 1) error = code;
+          }
+        }
+        return { status: 0, error, representations };
+      }).catch((error) => ({ status: status(error) }));
     }
   } catch (error) {
-    operation.result = Promise.resolve(failure(error));
+    operation.result = Promise.resolve({ status: status(error) });
   }
   return Emval.toHandle(operation);
 });
 
-EM_JS(emscripten::EM_VAL, BeginWebClipboardWrite,
-      (const char* text, const char* html, const std::byte* png, std::size_t png_size), {
+EM_JS(emscripten::EM_VAL, BeginWebClipboardWrite, (emscripten::EM_VAL item_handle), {
   const operation = { callback: 0, result: Promise.resolve(false) };
   try {
     const clipboard = globalThis.navigator?.clipboard;
     if (!globalThis.isSecureContext || !clipboard) return Emval.toHandle(operation);
 
-    // Start the write during the browser gesture, even if the Task is scheduled later.
+    const item = Emval.toValue(item_handle);
+    const types = Object.keys(item);
     let request;
-    if (!html && !png && typeof clipboard.writeText === "function") {
-      request = clipboard.writeText(UTF8ToString(text));
-    } else if ((html || png) && typeof clipboard.write === "function" && typeof ClipboardItem === "function") {
-      const formats = png ? {
-        "image/png": new Blob([HEAPU8.slice(png, png + png_size)], { type: "image/png" }),
-      } : {
-        "text/html": new Blob([UTF8ToString(html)], { type: "text/html" }),
-        "text/plain": new Blob([UTF8ToString(text)], { type: "text/plain" }),
-      };
+    if (types.length === 1 && types[0] === "text/plain" && typeof clipboard.writeText === "function") {
+      request = clipboard.writeText(item["text/plain"]);
+    } else if (typeof clipboard.write === "function" && typeof ClipboardItem === "function") {
+      const formats = Object.create(null);
+      for (const type of types) {
+        const mime = type.startsWith("web ") ? type.slice(4) : type;
+        formats[type] = new Blob([item[type]], { type: mime });
+      }
       request = clipboard.write([new ClipboardItem(formats)]);
     }
     if (request) operation.result = request.then(() => true, () => false);
@@ -182,32 +203,59 @@ template <class T> Task<T> AwaitClipboardResult(val operation, T (*decode)(const
   });
 }
 
-IoResult<ClipboardContent> DecodeWebClipboard(const val& result) {
-  switch (result["status"].as<int>()) {
-  case 0: break;
-  case 1: return ClipboardFailure(IoErrorCode::NotFound);
-  case 2: return ClipboardFailure(IoErrorCode::Unsupported);
-  case 3: return ClipboardFailure(IoErrorCode::PermissionDenied);
-  case 4: return ClipboardFailure(IoErrorCode::TooLarge);
-  default: return ClipboardFailure(IoErrorCode::Io);
+IoError WebClipboardError(int status) {
+  switch (status) {
+  case 1: return ClipboardError(IoErrorCode::NotFound);
+  case 2: return ClipboardError(IoErrorCode::Unsupported);
+  case 3: return ClipboardError(IoErrorCode::PermissionDenied);
+  case 4: return ClipboardError(IoErrorCode::TooLarge);
+  case 6: return ClipboardChangedError();
+  default: return ClipboardError(IoErrorCode::Io);
   }
-  const std::string type = result["type"].as<std::string>();
-  const val source = result["bytes"];
-  const auto size = source["length"].as<std::size_t>();
-  if (type.starts_with("image/")) {
-    Bytes bytes(size);
-    if (size != 0) {
-      val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(bytes.data())))
-          .call<void>("set", source);
+}
+
+IoResult<ClipboardItem> DecodeWebClipboard(const val& result) {
+  const auto status = result["status"].as<int>();
+  if (status != 0) return IoResult<ClipboardItem>::Failure(WebClipboardError(status));
+  ClipboardItemRead item;
+  item.RecordError(WebClipboardError(result["error"].as<int>()));
+  const auto representations = result["representations"];
+  const auto count = representations["length"].as<unsigned>();
+  for (unsigned index = 0; index < count; ++index) {
+    const auto representation = representations[index];
+    const auto mime = representation["type"].as<std::string>();
+    const auto source = representation["bytes"];
+    const auto size = source["length"].as<std::size_t>();
+    const auto copy = [&](void* data) {
+      if (size != 0) {
+        val(emscripten::typed_memory_view(size, static_cast<unsigned char*>(data))).call<void>("set", source);
+      }
+    };
+    if (mime == "text/plain" || mime == "text/html") {
+      std::string text(size, '\0');
+      copy(text.data());
+      item.SetText(mime == "text/plain" ? &ClipboardItem::text : &ClipboardItem::html,
+                   IoResult<std::string>::Success(std::move(text)));
+    } else {
+      Bytes bytes(size);
+      copy(bytes.data());
+      if (mime.starts_with("web ")) {
+        item.SetCustom(std::string_view(mime).substr(4), IoResult<Bytes>::Success(std::move(bytes)));
+      } else {
+        item.SetImage(ClipboardImage(std::move(bytes)));
+      }
     }
-    return ClipboardImage(std::move(bytes));
   }
-  std::string text(size, '\0');
-  if (size != 0) {
-    val(emscripten::typed_memory_view(size, reinterpret_cast<unsigned char*>(text.data()))).call<void>("set", source);
+  return std::move(item).Finish();
+}
+
+val WebClipboardBytes(std::span<const std::byte> bytes) {
+  auto copy = val::global("Uint8Array").new_(bytes.size());
+  if (!bytes.empty()) {
+    copy.call<void>("set", val(emscripten::typed_memory_view(
+        bytes.size(), reinterpret_cast<const unsigned char*>(bytes.data()))));
   }
-  if (type == "text/html") return ReadClipboardHtml(text);
-  return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)});
+  return copy;
 }
 
 class WebPermissionOperation final : public std::enable_shared_from_this<WebPermissionOperation> {
@@ -314,35 +362,30 @@ public:
 
 } // namespace
 
-Task<bool> WriteWebClipboardAsync(const ClipboardContent& content) {
-  const char* text = nullptr;
-  const char* markup = nullptr;
-  std::string html;
-  std::span<const std::byte> png;
-  if (const auto* plain = std::get_if<std::string>(&content)) {
-    text = plain->c_str();
-  } else if (const auto* rich = std::get_if<AttributedText>(&content)) {
-    html = ClipboardHtml(*rich);
-    if (html.empty() && !rich->PlainText().empty()) return ClipboardResult(false);
-    text = rich->PlainText().c_str();
-    markup = html.c_str();
-  } else if (const auto* image = std::get_if<ImageAsset>(&content); image && image->Format() == ImageFormat::Png) {
-    png = image->EncodedBytes();
-  } else {
-    return ClipboardResult(false);
+Task<bool> WriteWebClipboardAsync(const ClipboardItem& item) {
+  if (item.image && item.image->Format() != ImageFormat::Png) return ClipboardResult(false);
+  auto formats = val::object();
+  if (item.text) formats.set("text/plain", *item.text);
+  if (item.html) formats.set("text/html", *item.html);
+  if (item.image) formats.set("image/png", WebClipboardBytes(item.image->EncodedBytes()));
+  for (const auto& [mime, bytes] : item.custom_formats) {
+    formats.set(("web " + mime).c_str(), WebClipboardBytes(bytes));
   }
-  const val operation = val::take_ownership(BeginWebClipboardWrite(text, markup, png.data(), png.size()));
+  const val operation = val::take_ownership(BeginWebClipboardWrite(formats.as_handle()));
   return AwaitClipboardResult<bool>(operation, [](const val& result) { return result.as<bool>(); });
 }
 
-Task<IoResult<ClipboardContent>> ReadWebClipboardAsync(ClipboardKind kind) {
-  if (kind == ClipboardKind::Files) {
-    return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+Task<IoResult<ClipboardItem>> ReadWebClipboardAsync(const ClipboardReadOptions& options) {
+  auto formats = val::array();
+  if (options.text) formats.call<void>("push", std::string("text/plain"));
+  if (options.html) formats.call<void>("push", std::string("text/html"));
+  if (options.image) {
+    formats.call<void>("push", std::string("image/png"));
+    formats.call<void>("push", std::string("image/jpeg"));
   }
-  const bool image = kind == ClipboardKind::Image;
-  const val operation = val::take_ownership(
-      BeginWebClipboardRead(kind == ClipboardKind::RichText, image,
-                            image ? clipboard_max_image_bytes : clipboard_max_text_bytes));
+  for (const auto& mime : options.custom_mime_types) formats.call<void>("push", "web " + mime);
+  const val operation = val::take_ownership(BeginWebClipboardRead(formats.as_handle(), clipboard_max_text_bytes,
+      clipboard_max_image_bytes, clipboard_max_custom_bytes));
   return AwaitClipboardResult(operation, DecodeWebClipboard);
 }
 

@@ -27,31 +27,43 @@ public:
     return write_succeeds;
   }
 
-  bool WriteContent(ClipboardContent content) override {
-    written_content = std::move(content);
+  bool WriteItem(ClipboardItem item) override {
+    written_item = std::move(item);
     return write_succeeds;
   }
 
-  Task<IoResult<ClipboardContent>> ReadContentAsync(detail::ClipboardKind kind) override {
-    requested_kind = kind;
-    if (html && kind == detail::ClipboardKind::RichText) {
-      return detail::ClipboardResult(detail::ReadClipboardHtml(*html));
+  Task<IoResult<ClipboardItem>> ReadItemAsync(ClipboardReadOptions options) override {
+    ++item_reads;
+    if (changed) return detail::ClipboardResult(IoResult<ClipboardItem>::Failure(detail::ClipboardChangedError()));
+    detail::ClipboardItemRead read;
+    read.RecordError(detail::ClipboardError(read_error));
+    if (options.text && item.text) read.SetText(&ClipboardItem::text, IoResult<std::string>::Success(*item.text));
+    if (options.html && item.html) read.SetText(&ClipboardItem::html, IoResult<std::string>::Success(*item.html));
+    for (const auto& mime : options.custom_mime_types) {
+      if (const auto found = item.custom_formats.find(mime); found != item.custom_formats.end()) {
+        read.SetCustom(mime, IoResult<Bytes>::Success(found->second));
+      }
     }
-    if (read_content) {
-      return detail::ClipboardResult(IoResult<ClipboardContent>::Success(*read_content));
-    }
-    return detail::ClipboardResult(detail::ClipboardFailure(read_error));
+    return detail::ClipboardResult(std::move(read).Finish());
   }
 
-  bool MayHaveContent(detail::ClipboardKind kind) const noexcept override {
-    return kind == detail::ClipboardKind::Text && text.has_value();
+  bool WriteFiles(detail::ClipboardFiles files) override {
+    written_files = std::move(files);
+    return write_succeeds;
   }
+
+  Task<IoResult<std::vector<FileReference>>> ReadFilesAsync() override {
+    return detail::ClipboardResult(detail::ClipboardFailure<std::vector<FileReference>>(read_error));
+  }
+
+  bool MayHaveText() const noexcept override { return text.has_value(); }
 
   std::optional<std::string> text;
-  std::optional<std::string> html;
-  std::optional<ClipboardContent> read_content;
-  std::optional<ClipboardContent> written_content;
-  std::optional<detail::ClipboardKind> requested_kind;
+  ClipboardItem item;
+  std::optional<ClipboardItem> written_item;
+  std::optional<detail::ClipboardFiles> written_files;
+  int item_reads = 0;
+  bool changed = false;
   IoErrorCode read_error = IoErrorCode::NotFound;
   int read_count = 0;
   int write_count = 0;
@@ -103,7 +115,7 @@ TEST_CASE("ApplicationProvidesStableClipboardOutsideComposition") {
 
   REQUIRE(clipboard_service);
   REQUIRE(application_handle->Clipboard() == clipboard_service);
-  REQUIRE(clipboard_service->IsAvailable());
+  REQUIRE(clipboard_service->SupportsSynchronousText());
   REQUIRE(clipboard_service->ReadText() == std::optional<std::string>{"initial"});
   REQUIRE(platform_clipboard.read_count == 1);
 
@@ -119,11 +131,12 @@ TEST_CASE("UnsupportedClipboardServiceReturnsUnavailableResults") {
   runtime.BuildFrame();
 
   REQUIRE(clipboard_service);
-  REQUIRE_FALSE(clipboard_service->IsAvailable());
+  REQUIRE_FALSE(clipboard_service->SupportsSynchronousText());
   REQUIRE_FALSE(clipboard_service->ReadText().has_value());
   REQUIRE_FALSE(clipboard_service->WriteText("text"));
   std::optional<bool> result;
-  clipboard_tasks.Launch(Receive(clipboard_service->WriteContentAsync(std::string("text")), result));
+  clipboard_tasks.Launch(Receive(
+      clipboard_service->WriteItemAsync({.text = "text", .html = {}, .image = {}, .custom_formats = {}}), result));
   platform.RunPlatformModuleTasks();
   REQUIRE(result.has_value());
   CHECK_FALSE(*result);
@@ -154,10 +167,10 @@ TEST_CASE("ClipboardServiceDisconnectsWhenRuntimeIsDestroyed") {
   {
     UiWindow runtime(ClipboardApp, platform);
     runtime.BuildFrame();
-    REQUIRE(clipboard_service->IsAvailable());
+    REQUIRE(clipboard_service->SupportsSynchronousText());
   }
 
-  REQUIRE_FALSE(clipboard_service->IsAvailable());
+  REQUIRE_FALSE(clipboard_service->SupportsSynchronousText());
   REQUIRE_FALSE(clipboard_service->ReadText().has_value());
   REQUIRE_FALSE(clipboard_service->WriteText("ignored"));
   REQUIRE(application_handle->Clipboard() == clipboard_service);
@@ -185,8 +198,8 @@ TEST_CASE("ApplicationClipboardUsesItsOwningPlatformAndLifetime") {
     REQUIRE(first_clipboard.text == std::optional<std::string>{"first"});
     REQUIRE(second_clipboard.text == std::optional<std::string>{"second"});
   }
-  REQUIRE_FALSE(clipboard_service->IsAvailable());
-  REQUIRE(first_service->IsAvailable());
+  REQUIRE_FALSE(clipboard_service->SupportsSynchronousText());
+  REQUIRE(first_service->SupportsSynchronousText());
   REQUIRE(first_service->ReadText() == std::optional<std::string>{"first"});
 }
 
@@ -199,7 +212,7 @@ TEST_CASE("Typed clipboard reads distinguish absent content and denied access") 
   runtime.BuildFrame();
 
   std::optional<IoResult<std::string>> text;
-  platform_clipboard.read_content = std::string{};
+  platform_clipboard.item.text = std::string{};
   clipboard_tasks.Launch(Receive(clipboard_service->ReadTextAsync(), text));
   platform.RunPlatformModuleTasks();
   REQUIRE(text);
@@ -207,7 +220,7 @@ TEST_CASE("Typed clipboard reads distinguish absent content and denied access") 
   CHECK(text->Value().empty());
 
   std::optional<IoResult<ImageAsset>> image;
-  platform_clipboard.read_content.reset();
+  platform_clipboard.item.text.reset();
   clipboard_tasks.Launch(Receive(clipboard_service->ReadImageAsync(), image));
   platform.RunPlatformModuleTasks();
   REQUIRE(image);
@@ -234,26 +247,27 @@ TEST_CASE("Clipboard rich text preserves character ranges and falls back to plai
   const auto formatted = AttributedText::FromRanges(
       "\xF0\x9F\x98\x80 Link\n", {{{0, 2}, {.font_size = 12.5F, .font_weight = FontWeight::Bold}}},
       {{{3, 7}, Uri("https://example.test/?a=1&b=2")}});
-  REQUIRE(clipboard_service->WriteContent(formatted));
-  REQUIRE(platform_clipboard.written_content);
-  CHECK(std::get<AttributedText>(*platform_clipboard.written_content) == formatted);
+  auto item = ClipboardItem::FromAttributedText(formatted);
+  REQUIRE(clipboard_service->WriteItem(item));
+  REQUIRE(platform_clipboard.written_item);
+  CHECK(platform_clipboard.written_item->text == formatted.PlainText());
+  CHECK(platform_clipboard.written_item->html == item.html);
 
-  std::optional<IoResult<AttributedText>> text;
-  platform_clipboard.html = detail::ClipboardHtml(formatted);
-  clipboard_tasks.Launch(Receive(clipboard_service->ReadRichTextAsync(), text));
+  std::optional<IoResult<ClipboardItem>> read;
+  platform_clipboard.item = std::move(item);
+  clipboard_tasks.Launch(Receive(clipboard_service->ReadItemAsync(), read));
   platform.RunPlatformModuleTasks();
-  REQUIRE(text);
-  REQUIRE(text->Succeeded());
-  CHECK(text->Value() == formatted);
+  REQUIRE(read);
+  REQUIRE(read->Succeeded());
+  auto rich = read->Value().ToAttributedText();
+  REQUIRE(rich.Succeeded());
+  CHECK(rich.Value() == formatted);
 
-  platform_clipboard.html.reset();
-  platform_clipboard.read_content = std::string("plain");
-  clipboard_tasks.Launch(Receive(clipboard_service->ReadRichTextAsync(), text));
-  platform.RunPlatformModuleTasks();
-  REQUIRE(text);
-  REQUIRE(text->Succeeded());
-  CHECK(text->Value().PlainText() == "plain");
-  CHECK(text->Value().StyleRanges().empty());
+  const ClipboardItem plain{.text = "plain", .html = "<span", .image = {}, .custom_formats = {}};
+  rich = plain.ToAttributedText();
+  REQUIRE(rich.Succeeded());
+  CHECK(rich.Value().PlainText() == "plain");
+  CHECK(rich.Value().StyleRanges().empty());
 }
 
 TEST_CASE("Clipboard HTML preserves supported font sizes and ignores invalid sizes") {
@@ -267,7 +281,7 @@ TEST_CASE("Clipboard HTML preserves supported font sizes and ignores invalid siz
   const auto expected = AttributedText::FromRanges(
       "ABCDEFGHIJ",
       {{{0, 1}, {.font_size = 12.0F}}, {{1, 2}, {.font_size = 1.0e-40F}}, {{2, 3}, {.font_size = 1000.0F}}});
-  CHECK(std::get<AttributedText>(content.Value()) == expected);
+  CHECK(content.Value() == expected);
 }
 
 TEST_CASE("Clipboard validates typed publication before calling the platform") {
@@ -278,10 +292,20 @@ TEST_CASE("Clipboard validates typed publication before calling the platform") {
   UiWindow runtime(ClipboardApp, platform);
   runtime.BuildFrame();
 
-  CHECK_THROWS_AS(clipboard_service->WriteContent(std::vector<File>{}), std::invalid_argument);
-  CHECK_THROWS_AS(clipboard_service->WriteContent(ImageAsset{}), std::invalid_argument);
-  CHECK_THROWS_AS(clipboard_service->WriteContentAsync(ImageAsset{}), std::invalid_argument);
-  CHECK_FALSE(platform_clipboard.written_content.has_value());
+  CHECK_THROWS_AS(clipboard_service->WriteFiles(std::vector<File>{}), std::invalid_argument);
+  CHECK_THROWS_AS(clipboard_service->WriteItem({}), std::invalid_argument);
+  ClipboardItem item;
+  item.image.emplace();
+  CHECK_THROWS_AS(clipboard_service->WriteItemAsync(item), std::invalid_argument);
+  item.image.reset();
+  item.custom_formats.emplace("TEXT/HTML", Bytes{});
+  CHECK_THROWS_AS(clipboard_service->WriteItem(item), std::invalid_argument);
+  item.custom_formats.clear();
+  item.custom_formats.emplace("Application/Vnd.Example.Selection", Bytes{});
+  item.custom_formats.emplace("application/vnd.example.selection", Bytes{});
+  CHECK_THROWS_AS(clipboard_service->WriteItem(item), std::invalid_argument);
+  CHECK_FALSE(platform_clipboard.written_item);
+  CHECK_FALSE(platform_clipboard.written_files);
 }
 
 TEST_CASE("Clipboard asynchronous publication starts immediately and reports platform acceptance") {
@@ -292,9 +316,20 @@ TEST_CASE("Clipboard asynchronous publication starts immediately and reports pla
   UiWindow runtime(ClipboardApp, platform);
   runtime.BuildFrame();
 
-  auto pending = clipboard_service->WriteContentAsync(std::string("copy"));
-  REQUIRE(platform_clipboard.written_content);
-  CHECK(std::get<std::string>(*platform_clipboard.written_content) == "copy");
+  const ClipboardItem item{
+      .text = "copy",
+      .html = "<b>copy</b>",
+      .image = {},
+      .custom_formats = {{"Application/Vnd.Example.Selection", {std::byte{0}, std::byte{255}}},
+                         {"application/vnd.example.empty", {}}},
+  };
+  auto pending = clipboard_service->WriteItemAsync(item);
+  REQUIRE(platform_clipboard.written_item);
+  CHECK(platform_clipboard.written_item->text == item.text);
+  CHECK(platform_clipboard.written_item->html == item.html);
+  CHECK(platform_clipboard.written_item->custom_formats.at("application/vnd.example.selection") ==
+        item.custom_formats.at("Application/Vnd.Example.Selection"));
+  CHECK(platform_clipboard.written_item->custom_formats.at("application/vnd.example.empty").empty());
 
   std::optional<bool> accepted;
   clipboard_tasks.Launch(Receive(std::move(pending), accepted));
@@ -304,16 +339,62 @@ TEST_CASE("Clipboard asynchronous publication starts immediately and reports pla
 
   platform_clipboard.write_succeeds = false;
   std::optional<bool> rejected;
-  clipboard_tasks.Launch(Receive(clipboard_service->WriteContentAsync(std::string("copy")), rejected));
+  clipboard_tasks.Launch(Receive(clipboard_service->WriteItemAsync(item), rejected));
   platform.RunPlatformModuleTasks();
   REQUIRE(rejected.has_value());
   CHECK_FALSE(*rejected);
 }
 
+TEST_CASE("Clipboard returns readable representations from a single requested item", "[clipboard-item]") {
+  ResetClipboardService();
+  TestClipboard clipboard;
+  TestPlatform platform;
+  platform.platform_clipboard = &clipboard;
+  UiWindow runtime(ClipboardApp, platform);
+  runtime.BuildFrame();
+
+  const Bytes custom{std::byte{255}, std::byte{0}, std::byte{65}};
+  clipboard.item.text = "";
+  clipboard.item.html = "<table><tr><td>a</td><td>b</td></tr></table>";
+  clipboard.item.custom_formats.emplace("application/vnd.example.selection", custom);
+  clipboard.item.custom_formats.emplace("application/vnd.example.empty", Bytes{});
+  const ClipboardReadOptions options{
+      .custom_mime_types = {
+          "Application/Vnd.Example.Selection", "application/vnd.example.empty", "application/vnd.example.missing"},
+  };
+  std::optional<IoResult<ClipboardItem>> read;
+  clipboard_tasks.Launch(Receive(clipboard_service->ReadItemAsync(options), read));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(clipboard.item_reads == 1);
+  REQUIRE(read);
+  REQUIRE(read->Succeeded());
+  CHECK(read->Value().text == "");
+  CHECK(read->Value().html == clipboard.item.html);
+  CHECK(read->Value().custom_formats == clipboard.item.custom_formats);
+
+  clipboard.item.html = std::string("bad\0html", 8);
+  clipboard.item.custom_formats.clear();
+  clipboard.read_error = IoErrorCode::TooLarge;
+  clipboard_tasks.Launch(Receive(clipboard_service->ReadItemAsync(options), read));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(read);
+  REQUIRE(read->Succeeded());
+  CHECK(read->Value().text == "");
+  CHECK_FALSE(read->Value().html);
+  CHECK(read->Value().custom_formats.empty());
+
+  clipboard.changed = true;
+  clipboard_tasks.Launch(Receive(clipboard_service->ReadItemAsync(options), read));
+  platform.RunPlatformModuleTasks();
+  REQUIRE(read);
+  REQUIRE_FALSE(read->Succeeded());
+  CHECK(read->Error() == detail::ClipboardChangedError());
+}
+
 TEST_CASE("A queued clipboard read retires with its original Runtime") {
   ResetClipboardService();
   TestClipboard first_clipboard;
-  first_clipboard.read_content = std::string("original");
+  first_clipboard.item.text = "original";
   TestPlatform first_platform;
   first_platform.platform_clipboard = &first_clipboard;
   Task<IoResult<std::string>> pending;
@@ -338,13 +419,13 @@ TEST_CASE("An asynchronous clipboard remains readable without synchronous text s
   ResetClipboardService();
   TestClipboard platform_clipboard;
   platform_clipboard.synchronous_text = false;
-  platform_clipboard.read_content = std::string("asynchronous");
+  platform_clipboard.item.text = "asynchronous";
   TestPlatform platform;
   platform.platform_clipboard = &platform_clipboard;
   UiWindow runtime(ClipboardApp, platform);
   runtime.BuildFrame();
 
-  CHECK_FALSE(clipboard_service->IsAvailable());
+  CHECK_FALSE(clipboard_service->SupportsSynchronousText());
   CHECK_FALSE(clipboard_service->ReadText());
   CHECK_FALSE(clipboard_service->WriteText("text"));
   CHECK(platform_clipboard.read_count == 0);

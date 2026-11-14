@@ -938,9 +938,9 @@ private:
   std::optional<std::string> ReadText() override { return std::nullopt; }
   bool WriteText(std::string_view) override { return false; }
   bool SupportsSynchronousText() const noexcept override { return false; }
-  Task<bool> WriteContentAsync(ClipboardContent content) override { return WriteWebClipboardAsync(content); }
-  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
-    return ReadWebClipboardAsync(kind);
+  Task<bool> WriteItemAsync(ClipboardItem item) override { return WriteWebClipboardAsync(item); }
+  Task<IoResult<ClipboardItem>> ReadItemAsync(ClipboardReadOptions options) override {
+    return ReadWebClipboardAsync(options);
   }
 
   /// Retained ordinary timer entry shared with its cancellation closure.

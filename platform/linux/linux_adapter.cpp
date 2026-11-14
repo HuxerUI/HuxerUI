@@ -28,7 +28,6 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -485,29 +484,57 @@ GtkWidget* CreateHuxerUICanvas(HuxerUICanvasSnapshot snapshot, void (*style_chan
   return GTK_WIDGET(canvas);
 }
 
-const char** LinuxClipboardTypes(ClipboardKind kind) {
-  static const char* text[] = {"text/plain;charset=utf-8", "text/plain", nullptr};
-  static const char* rich[] = {
-      "text/html", "text/html;charset=utf-8", "text/plain;charset=utf-8", "text/plain", nullptr};
-  static const char* image[] = {"image/png", "image/jpeg", nullptr};
-  static const char* files[] = {"text/uri-list", "x-special/gnome-copied-files", nullptr};
-  switch (kind) {
-  case ClipboardKind::Text: return text;
-  case ClipboardKind::RichText: return rich;
-  case ClipboardKind::Image: return image;
-  case ClipboardKind::Files: return files;
-  }
-  return text;
-}
+const char* linux_clipboard_text[] = {"text/plain;charset=utf-8", "text/plain", nullptr};
+const char* linux_clipboard_html[] = {"text/html", "text/html;charset=utf-8", nullptr};
+const char* linux_clipboard_image[] = {"image/png", "image/jpeg", nullptr};
+const char* linux_clipboard_files[] = {"text/uri-list", "x-special/gnome-copied-files", nullptr};
 
-bool LinuxClipboardMayHave(GdkClipboard* clipboard, ClipboardKind kind) {
-  if (!clipboard) return false;
-  auto* formats = gdk_clipboard_get_formats(clipboard);
-  for (auto type = LinuxClipboardTypes(kind); *type; ++type) {
-    if (gdk_content_formats_contain_mime_type(formats, *type)) return true;
+bool LinuxClipboardMayHave(GdkContentFormats* formats, const char* const* types) {
+  for (; *types; ++types) {
+    if (gdk_content_formats_contain_mime_type(formats, *types)) return true;
   }
   return false;
 }
+
+class LinuxClipboardCapture {
+public:
+  explicit LinuxClipboardCapture(GdkClipboard* clipboard)
+      : clipboard_(GDK_CLIPBOARD(g_object_ref(clipboard)), g_object_unref),
+        formats_(gdk_content_formats_ref(gdk_clipboard_get_formats(clipboard)), gdk_content_formats_unref),
+        cancellable_(g_cancellable_new(), g_object_unref) {
+    changed_handler_ = g_signal_connect(clipboard, "changed", G_CALLBACK(+[](GdkClipboard*, gpointer data) {
+      auto& capture = *static_cast<LinuxClipboardCapture*>(data);
+      capture.changed = true;
+      g_cancellable_cancel(capture.Cancellable());
+    }), this);
+    timeout_ = g_timeout_add_seconds(10, [](gpointer data) -> gboolean {
+      auto& capture = *static_cast<LinuxClipboardCapture*>(data);
+      capture.timeout_ = 0;
+      capture.timed_out = true;
+      g_cancellable_cancel(capture.Cancellable());
+      return G_SOURCE_REMOVE;
+    }, this);
+  }
+
+  ~LinuxClipboardCapture() {
+    g_signal_handler_disconnect(clipboard_.get(), changed_handler_);
+    if (timeout_) g_source_remove(timeout_);
+  }
+
+  GdkClipboard* Clipboard() const noexcept { return clipboard_.get(); }
+  GdkContentFormats* Formats() const noexcept { return formats_.get(); }
+  GCancellable* Cancellable() const noexcept { return cancellable_.get(); }
+
+  bool changed = false;
+  bool timed_out = false;
+
+private:
+  std::unique_ptr<GdkClipboard, decltype(&g_object_unref)> clipboard_;
+  std::unique_ptr<GdkContentFormats, decltype(&gdk_content_formats_unref)> formats_;
+  std::unique_ptr<GCancellable, decltype(&g_object_unref)> cancellable_;
+  gulong changed_handler_ = 0;
+  guint timeout_ = 0;
+};
 
 struct LinuxClipboardData {
   std::string mime;
@@ -516,25 +543,17 @@ struct LinuxClipboardData {
 
 class LinuxClipboardRead final : public std::enable_shared_from_this<LinuxClipboardRead> {
 public:
-  LinuxClipboardRead(CallbackCompletion<IoResult<LinuxClipboardData>> completion, std::size_t limit)
-      : completion_(completion), limit_(limit) {}
+  LinuxClipboardRead(CallbackCompletion<IoResult<LinuxClipboardData>> completion, std::size_t limit,
+                     GCancellable* cancellable)
+      : completion_(completion), limit_(limit), cancellable_(G_CANCELLABLE(g_object_ref(cancellable))) {}
 
   ~LinuxClipboardRead() {
-    if (timeout_) g_source_remove(timeout_);
     if (stream_) g_object_unref(stream_);
     g_object_unref(cancellable_);
   }
 
-  void Start(GdkClipboard* clipboard, ClipboardKind kind) {
-    timeout_ = g_timeout_add_seconds(10, [](gpointer user_data) -> gboolean {
-      auto& read = *static_cast<LinuxClipboardRead*>(user_data);
-      read.timeout_ = 0;
-      read.timed_out_ = true;
-      read.Cancel();
-      return G_SOURCE_REMOVE;
-    }, this);
-    gdk_clipboard_read_async(clipboard, LinuxClipboardTypes(kind), G_PRIORITY_DEFAULT,
-                             cancellable_, Opened, Retain());
+  void Start(GdkClipboard* clipboard, const char** types) {
+    gdk_clipboard_read_async(clipboard, types, G_PRIORITY_DEFAULT, cancellable_, Opened, Retain());
   }
 
   void Cancel() { g_cancellable_cancel(cancellable_); }
@@ -548,7 +567,7 @@ private:
   }
 
   void Finish(const GError* error) {
-    auto code = timed_out_ ? IoErrorCode::Timeout : IoErrorCode::Io;
+    auto code = IoErrorCode::Io;
     if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED)) code = IoErrorCode::PermissionDenied;
     if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) code = IoErrorCode::Unsupported;
     Finish(code);
@@ -608,91 +627,124 @@ private:
   CallbackCompletion<IoResult<LinuxClipboardData>> completion_;
   LinuxClipboardData data_;
   std::size_t limit_;
-  GCancellable* cancellable_ = g_cancellable_new();
+  GCancellable* cancellable_;
   GInputStream* stream_ = nullptr;
-  guint timeout_ = 0;
-  bool timed_out_ = false;
 };
 
-IoResult<ClipboardContent> ReadLinuxClipboardFiles(std::string_view text, bool includes_operation) {
+using LinuxClipboardFiles = std::vector<FileReference>;
+
+IoResult<LinuxClipboardFiles> ParseLinuxClipboardFiles(std::string_view text, bool includes_operation) {
   if (includes_operation) {
     const auto end = text.find('\n');
     const auto operation = text.substr(0, end);
     if (end == text.npos || (operation != "copy" && operation != "cut")) {
-      return ClipboardFailure(IoErrorCode::InvalidEncoding);
+      return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::InvalidEncoding);
     }
     text.remove_prefix(end + 1);
   }
-  std::vector<FileReference> references;
+  LinuxClipboardFiles references;
   while (!text.empty()) {
     const auto end = text.find('\n');
     auto line = text.substr(0, end);
     text.remove_prefix(end == text.npos ? text.size() : end + 1);
     if (line.ends_with('\r')) line.remove_suffix(1);
     if (line.empty() || line.starts_with('#')) continue;
-    if (references.size() == clipboard_max_files) return ClipboardFailure(IoErrorCode::TooLarge);
+    if (references.size() == clipboard_max_files) return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::TooLarge);
     auto uri = Uri::Parse(line);
-    if (!uri) return ClipboardFailure(IoErrorCode::InvalidEncoding);
-    if (uri->Scheme() != "file") return ClipboardFailure(IoErrorCode::Unsupported);
+    if (!uri) return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::InvalidEncoding);
+    if (uri->Scheme() != "file") return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::Unsupported);
     try {
       const File path(*uri);
       const auto stat = path.Stat();
       if (!stat.Succeeded()) {
         const auto code = stat.Error().code;
-        return ClipboardFailure(code == IoErrorCode::NotFound ? IoErrorCode::Io : code);
+        return ClipboardFailure<LinuxClipboardFiles>(code == IoErrorCode::NotFound ? IoErrorCode::Io : code);
       }
       auto file = MakeLinuxFileReference(path, stat.Value().type == FileType::Directory, false);
-      if (!file) return ClipboardFailure(IoErrorCode::Io);
+      if (!file) return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::Io);
       references.push_back(std::move(*file));
     } catch (const std::invalid_argument&) {
-      return ClipboardFailure(IoErrorCode::Unsupported);
+      return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::Unsupported);
     }
   }
-  if (references.empty()) return ClipboardFailure(IoErrorCode::NotFound);
-  return IoResult<ClipboardContent>(ClipboardContent{std::move(references)});
+  if (references.empty()) return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::NotFound);
+  return IoResult<LinuxClipboardFiles>(std::move(references));
 }
 
-Task<IoResult<ClipboardContent>> ReadLinuxClipboardAsync(std::shared_ptr<GdkClipboard> clipboard, ClipboardKind kind) {
-  if (!clipboard) co_return ClipboardFailure(IoErrorCode::Unsupported);
-  if (!LinuxClipboardMayHave(clipboard.get(), kind)) {
-    auto* formats = gdk_clipboard_get_formats(clipboard.get());
-    if (kind == ClipboardKind::Files &&
-        gdk_content_formats_contain_mime_type(formats, "application/vnd.portal.filetransfer")) {
-      co_return ClipboardFailure(IoErrorCode::Unsupported);
-    }
-    if (kind == ClipboardKind::Image) {
+Task<IoResult<LinuxClipboardData>> ReadLinuxClipboardData(LinuxClipboardCapture& capture, const char** types,
+                                                          std::size_t limit) {
+  using Read = IoResult<LinuxClipboardData>;
+  if (capture.changed) co_return Read::Failure(ClipboardChangedError());
+  if (capture.timed_out) co_return ClipboardFailure<LinuxClipboardData>(IoErrorCode::Timeout);
+  if (!LinuxClipboardMayHave(capture.Formats(), types)) {
+    co_return ClipboardFailure<LinuxClipboardData>(IoErrorCode::NotFound);
+  }
+  auto result = co_await AwaitCallback<Read>([&capture, types, limit](CallbackCompletion<Read> completion) {
+    auto read = std::make_shared<LinuxClipboardRead>(completion, limit, capture.Cancellable());
+    read->Start(capture.Clipboard(), types);
+    return [read = std::move(read)] { read->Cancel(); };
+  });
+  if (capture.changed) co_return Read::Failure(ClipboardChangedError());
+  if (capture.timed_out && !result.Succeeded()) co_return ClipboardFailure<LinuxClipboardData>(IoErrorCode::Timeout);
+  co_return std::move(result);
+}
+
+std::string LinuxClipboardString(const Bytes& bytes) {
+  if (bytes.empty()) return {};
+  return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+Task<IoResult<ClipboardItem>> ReadLinuxClipboardItem(std::unique_ptr<LinuxClipboardCapture> capture,
+                                                     ClipboardReadOptions options) {
+  ClipboardItemRead item;
+  const auto read_text = [&](const char** types) -> Task<IoResult<std::string>> {
+    auto captured = co_await ReadLinuxClipboardData(*capture, types, clipboard_max_text_bytes);
+    if (!captured.Succeeded()) co_return IoResult<std::string>::Failure(std::move(captured).Error());
+    co_return IoResult<std::string>(LinuxClipboardString(captured.Value().bytes));
+  };
+  if (options.text) item.SetText(&ClipboardItem::text, co_await read_text(linux_clipboard_text));
+  if (options.html) item.SetText(&ClipboardItem::html, co_await read_text(linux_clipboard_html));
+  if (options.image) {
+    auto image = co_await ReadLinuxClipboardData(*capture, linux_clipboard_image, clipboard_max_image_bytes);
+    if (image.Succeeded()) {
+      item.SetImage(ClipboardImage(std::move(image).Value().bytes));
+    } else if (image.Error().code == IoErrorCode::NotFound) {
       gsize count = 0;
-      const auto* types = gdk_content_formats_get_mime_types(formats, &count);
+      const auto* types = gdk_content_formats_get_mime_types(capture->Formats(), &count);
       for (gsize index = 0; index < count; ++index) {
         if (std::string_view(types[index]).starts_with("image/")) {
-          co_return ClipboardFailure(IoErrorCode::Unsupported);
+          item.RecordError(ClipboardError(IoErrorCode::Unsupported));
+          break;
         }
       }
+    } else {
+      item.RecordError(std::move(image).Error());
     }
-    co_return ClipboardFailure(IoErrorCode::NotFound);
   }
-  auto captured = co_await AwaitCallback<IoResult<LinuxClipboardData>>(
-      [clipboard, kind](CallbackCompletion<IoResult<LinuxClipboardData>> completion) {
-        const auto limit = kind == ClipboardKind::Image ? clipboard_max_image_bytes : clipboard_max_text_bytes;
-        auto read = std::make_shared<LinuxClipboardRead>(completion, limit);
-        read->Start(clipboard.get(), kind);
-        return [read = std::move(read)] { read->Cancel(); };
-      });
-  if (!captured.Succeeded()) co_return IoResult<ClipboardContent>::Failure(std::move(captured).Error());
+  for (const auto& mime : options.custom_mime_types) {
+    if (capture->changed) break;
+    const char* types[] = {mime.c_str(), nullptr};
+    auto data = co_await ReadLinuxClipboardData(*capture, types, item.RemainingCustomBytes());
+    if (data.Succeeded()) item.SetCustom(mime, IoResult<Bytes>(std::move(data).Value().bytes));
+    else item.RecordError(std::move(data).Error());
+  }
+  if (capture->changed) co_return IoResult<ClipboardItem>::Failure(ClipboardChangedError());
+  co_return std::move(item).Finish();
+}
+
+Task<IoResult<LinuxClipboardFiles>> ReadLinuxClipboardFiles(std::unique_ptr<LinuxClipboardCapture> capture) {
+  if (!LinuxClipboardMayHave(capture->Formats(), linux_clipboard_files) &&
+      gdk_content_formats_contain_mime_type(capture->Formats(), "application/vnd.portal.filetransfer")) {
+    co_return ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::Unsupported);
+  }
+  auto captured = co_await ReadLinuxClipboardData(*capture, linux_clipboard_files, clipboard_max_text_bytes);
+  if (!captured.Succeeded()) co_return IoResult<LinuxClipboardFiles>::Failure(std::move(captured).Error());
   auto payload = std::move(captured).Value();
-  if (kind == ClipboardKind::Image) co_return ClipboardImage(std::move(payload.bytes));
-  std::string text(payload.bytes.size(), '\0');
-  if (!text.empty()) std::memcpy(text.data(), payload.bytes.data(), text.size());
-  if (kind == ClipboardKind::Files) {
-    const bool includes_operation = payload.mime == "x-special/gnome-copied-files";
-    co_return co_await RunWorker([text = std::move(text), includes_operation] {
-      return ReadLinuxClipboardFiles(text, includes_operation);
-    });
-  }
-  if (payload.mime.starts_with("text/html")) {
-    co_return co_await RunWorker([text = std::move(text)] { return ReadClipboardHtml(text); });
-  }
-  co_return IoResult<ClipboardContent>(ClipboardContent{std::move(text)});
+  const bool includes_operation = payload.mime == "x-special/gnome-copied-files";
+  capture.reset();
+  co_return co_await RunWorker([text = LinuxClipboardString(payload.bytes), includes_operation] {
+    return ParseLinuxClipboardFiles(text, includes_operation);
+  });
 }
 
 GdkContentProvider* LinuxClipboardBytes(const char* mime, const void* data, std::size_t size) {
@@ -704,38 +756,42 @@ GdkContentProvider* LinuxClipboardText(std::string_view text) {
   return gdk_content_provider_new_typed(G_TYPE_STRING, text.data());
 }
 
-GdkContentProvider* LinuxClipboardProvider(const ClipboardContent& content) {
-  return std::visit([&](const auto& value) -> GdkContentProvider* {
-    using T = std::decay_t<decltype(value)>;
-    if constexpr (std::is_same_v<T, std::string>) {
-      return LinuxClipboardText(value);
-    } else if constexpr (std::is_same_v<T, AttributedText>) {
-      const auto html = ClipboardHtml(value);
-      if (html.empty() && !value.PlainText().empty()) return nullptr;
-      GdkContentProvider* providers[] = {
-          LinuxClipboardBytes("text/html", html.data(), html.size()), LinuxClipboardText(value.PlainText())};
-      return gdk_content_provider_new_union(providers, std::size(providers));
-    } else if constexpr (std::is_same_v<T, ImageAsset>) {
-      const char* mime = value.Format() == ImageFormat::Png ? "image/png" : "image/jpeg";
-      const auto bytes = value.EncodedBytes();
-      return LinuxClipboardBytes(mime, bytes.data(), bytes.size());
-    } else {
-      const auto files = ClipboardFilePaths(content);
-      if (!files) return nullptr;
-      std::string uri_list;
-      std::string copied = "copy\n";
-      for (const auto& file : *files) {
-        const auto uri = file.ToUri();
-        uri_list += uri.ToString() + "\r\n";
-        copied += uri.ToString() + '\n';
-      }
-      GdkContentProvider* providers[] = {
-          LinuxClipboardBytes("text/uri-list", uri_list.data(), uri_list.size()),
-          LinuxClipboardBytes("x-special/gnome-copied-files", copied.data(), copied.size()),
-          LinuxClipboardBytes("application/x-kde-cutselection", "0", 1)};
-      return gdk_content_provider_new_union(providers, std::size(providers));
-    }
-  }, content);
+GdkContentProvider* LinuxClipboardItemProvider(const ClipboardItem& item) {
+  std::vector<GdkContentProvider*> providers;
+  providers.reserve(item.custom_formats.size() + 3);
+  for (const auto& [mime, bytes] : item.custom_formats) {
+    providers.push_back(LinuxClipboardBytes(mime.c_str(), bytes.data(), bytes.size()));
+  }
+  if (item.html) providers.push_back(LinuxClipboardBytes("text/html", item.html->data(), item.html->size()));
+  if (item.image) {
+    const auto bytes = item.image->EncodedBytes();
+    const char* mime = item.image->Format() == ImageFormat::Png ? "image/png" : "image/jpeg";
+    providers.push_back(LinuxClipboardBytes(mime, bytes.data(), bytes.size()));
+  }
+  if (item.text) providers.push_back(LinuxClipboardText(*item.text));
+  return providers.size() == 1 ? providers.front() : gdk_content_provider_new_union(providers.data(), providers.size());
+}
+
+GdkContentProvider* LinuxClipboardFileProvider(const ClipboardFiles& content) {
+  const auto files = ClipboardFilePaths(content);
+  if (!files) return nullptr;
+  std::string uri_list;
+  std::string copied = "copy\n";
+  for (const auto& file : *files) {
+    const auto uri = file.ToUri();
+    uri_list += uri.ToString() + "\r\n";
+    copied += uri.ToString() + '\n';
+  }
+  GdkContentProvider* providers[] = {
+      LinuxClipboardBytes("text/uri-list", uri_list.data(), uri_list.size()),
+      LinuxClipboardBytes("x-special/gnome-copied-files", copied.data(), copied.size()),
+      LinuxClipboardBytes("application/x-kde-cutselection", "0", 1)};
+  return gdk_content_provider_new_union(providers, std::size(providers));
+}
+
+GdkClipboard* LinuxSystemClipboard() {
+  auto* display = gdk_display_get_default();
+  return display ? gdk_display_get_clipboard(display) : nullptr;
 }
 
 } // namespace
@@ -934,31 +990,43 @@ public:
     return true;
   }
 
-  bool WriteContent(ClipboardContent content) override {
-    GdkDisplay* display = gdk_display_get_default();
-    if (!display) return false;
+  bool WriteItem(ClipboardItem item) override {
+    auto* clipboard = LinuxSystemClipboard();
+    if (!clipboard) return false;
     const std::unique_ptr<GdkContentProvider, decltype(&g_object_unref)> provider(
-        LinuxClipboardProvider(content), g_object_unref);
+        LinuxClipboardItemProvider(item), g_object_unref);
+    return provider && gdk_clipboard_set_content(clipboard, provider.get());
+  }
+
+  Task<IoResult<ClipboardItem>> ReadItemAsync(ClipboardReadOptions options) override {
+    auto* clipboard = LinuxSystemClipboard();
+    if (!clipboard) return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+    return ReadLinuxClipboardItem(std::make_unique<LinuxClipboardCapture>(clipboard), std::move(options));
+  }
+
+  bool WriteFiles(ClipboardFiles files) override {
+    auto* clipboard = LinuxSystemClipboard();
+    if (!clipboard) return false;
+    const std::unique_ptr<GdkContentProvider, decltype(&g_object_unref)> provider(
+        LinuxClipboardFileProvider(files), g_object_unref);
     if (!provider) return false;
-    if (auto* references = std::get_if<std::vector<FileReference>>(&content)) {
+    if (auto* references = std::get_if<std::vector<FileReference>>(&files)) {
       g_object_set_data_full(G_OBJECT(provider.get()), "huxerui-clipboard-references",
                              new std::vector<FileReference>(std::move(*references)),
                              [](gpointer value) { delete static_cast<std::vector<FileReference>*>(value); });
     }
-    return gdk_clipboard_set_content(gdk_display_get_clipboard(display), provider.get());
+    return gdk_clipboard_set_content(clipboard, provider.get());
   }
 
-  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
-    GdkDisplay* display = gdk_display_get_default();
-    GdkClipboard* clipboard = display ? gdk_display_get_clipboard(display) : nullptr;
-    auto retained = clipboard ? std::shared_ptr<GdkClipboard>(GDK_CLIPBOARD(g_object_ref(clipboard)), g_object_unref)
-                              : nullptr;
-    return ReadLinuxClipboardAsync(std::move(retained), kind);
+  Task<IoResult<LinuxClipboardFiles>> ReadFilesAsync() override {
+    auto* clipboard = LinuxSystemClipboard();
+    if (!clipboard) return ClipboardResult(ClipboardFailure<LinuxClipboardFiles>(IoErrorCode::Unsupported));
+    return ReadLinuxClipboardFiles(std::make_unique<LinuxClipboardCapture>(clipboard));
   }
 
-  bool MayHaveContent(ClipboardKind kind) const noexcept override {
-    GdkDisplay* display = gdk_display_get_default();
-    return display && LinuxClipboardMayHave(gdk_display_get_clipboard(display), kind);
+  bool MayHaveText() const noexcept override {
+    auto* clipboard = LinuxSystemClipboard();
+    return clipboard && LinuxClipboardMayHave(gdk_clipboard_get_formats(clipboard), linux_clipboard_text);
   }
 
   std::filesystem::path ResourceRoot() const {

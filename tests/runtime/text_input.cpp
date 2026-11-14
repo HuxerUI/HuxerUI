@@ -140,7 +140,8 @@ public:
 
   void PerformTextEditingAction(TextEditingAction action, const Clipboard& clipboard) override {
     actions.push_back(action);
-    tasks.Launch(ReceiveWriteResult(clipboard.WriteContentAsync(std::string("custom"))));
+    tasks.Launch(ReceiveWriteResult(
+        clipboard.WriteItemAsync({.text = "custom", .html = {}, .image = {}, .custom_formats = {}})));
   }
 
   bool ClearSelection() override { return false; }
@@ -176,7 +177,7 @@ public:
   std::optional<std::string> written_text;
 
 private:
-  bool WriteContent(ClipboardContent) override { return false; }
+  bool WriteItem(ClipboardItem) override { return false; }
 };
 
 std::shared_ptr<EditingActionProbe> editing_action_probe;

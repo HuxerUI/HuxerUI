@@ -108,11 +108,11 @@ bool detail::TextInteraction::CanPerformTextEditingAction(TextEditingAction acti
   switch (action) {
   case TextEditingAction::Cut:
   case TextEditingAction::Copy:
-    return clipboard.IsAvailable() && !session.client->State().selection.IsCollapsed();
+    return clipboard.SupportsSynchronousText() && !session.client->State().selection.IsCollapsed();
   case TextEditingAction::Paste: {
     auto* runtime = runtime_state_.application_->owner;
     auto* platform_clipboard = runtime ? runtime->Clipboard() : nullptr;
-    return clipboard.IsAvailable() && platform_clipboard && platform_clipboard->MayHaveContent(ClipboardKind::Text);
+    return clipboard.SupportsSynchronousText() && platform_clipboard && platform_clipboard->MayHaveText();
   }
   case TextEditingAction::SelectAll: {
     const TextInputContext context = session.client->QueryTextInputContext(session.session_id, 0, 0);
@@ -151,7 +151,7 @@ bool detail::TextInteraction::PerformTextEditingAction(TextEditingAction action,
     return true;
   }
   if (source == EditingActionSource::ShortcutRepeat || !target.session ||
-      (action != TextEditingAction::SelectAll && !clipboard->IsAvailable())) {
+      (action != TextEditingAction::SelectAll && !clipboard->SupportsSynchronousText())) {
     return false;
   }
   return PerformDefaultTextEditingAction(*target.session, action, *clipboard) || source == EditingActionSource::Shortcut;

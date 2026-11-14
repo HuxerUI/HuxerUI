@@ -396,28 +396,19 @@ IoErrorCode IosClipboardError(NSError* error) {
   return IoErrorCode::Io;
 }
 
-IoResult<ClipboardContent> DecodeIosClipboardData(NSData* data, ClipboardKind kind) {
-  const bool image = kind == ClipboardKind::Image;
-  if (data.length > (image ? clipboard_max_image_bytes : clipboard_max_text_bytes)) {
-    return ClipboardFailure(IoErrorCode::TooLarge);
-  }
-  if (image) {
-    Bytes bytes(data.length);
-    if (!bytes.empty()) std::memcpy(bytes.data(), data.bytes, bytes.size());
-    return ClipboardImage(std::move(bytes));
-  }
-  std::string text;
-  if (data.length != 0) text.assign(static_cast<const char*>(data.bytes), data.length);
-  if (kind == ClipboardKind::RichText) return ReadClipboardHtml(text);
-  return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)});
-}
-
-Task<IoResult<ClipboardContent>> LoadIosClipboardContent(NSItemProvider* provider, NSString* type, ClipboardKind kind) {
-  return AwaitCallback<IoResult<ClipboardContent>>([provider, type, kind](auto complete) {
-    auto decode = ^(NSData* data, NSError* error) {
+Task<IoResult<Bytes>> LoadIosClipboardData(NSItemProvider* provider, NSString* type, std::size_t limit) {
+  return AwaitCallback<IoResult<Bytes>>([provider, type, limit](auto complete) {
+    auto receive = ^(NSData* data, NSError* error) {
       try {
-        auto result = data != nil ? DecodeIosClipboardData(data, kind) : ClipboardFailure(IosClipboardError(error));
-        complete.Complete(std::move(result));
+        if (!data) {
+          complete.Complete(ClipboardFailure<Bytes>(IosClipboardError(error)));
+        } else if (data.length > limit) {
+          complete.Complete(ClipboardFailure<Bytes>(IoErrorCode::TooLarge));
+        } else {
+          Bytes bytes(data.length);
+          if (!bytes.empty()) std::memcpy(bytes.data(), data.bytes, bytes.size());
+          complete.Complete(IoResult<Bytes>::Success(std::move(bytes)));
+        }
       } catch (...) {
         complete.Fail(std::current_exception());
       }
@@ -427,21 +418,84 @@ Task<IoResult<ClipboardContent>> LoadIosClipboardContent(NSItemProvider* provide
       progress = [provider loadObjectOfClass:NSString.class
                           completionHandler:^(__kindof id<NSItemProviderReading> value, NSError* error) {
         NSString* text = [value isKindOfClass:NSString.class] ? (NSString*)value : nil;
-        if ([text lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > clipboard_max_text_bytes) {
+        if ([text lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > limit) {
           try {
-            complete.Complete(ClipboardFailure(IoErrorCode::TooLarge));
+            complete.Complete(ClipboardFailure<Bytes>(IoErrorCode::TooLarge));
           } catch (...) {
             complete.Fail(std::current_exception());
           }
         } else {
-          decode([text dataUsingEncoding:NSUTF8StringEncoding], error);
+          receive([text dataUsingEncoding:NSUTF8StringEncoding], error);
         }
       }];
     } else {
-      progress = [provider loadDataRepresentationForTypeIdentifier:type completionHandler:decode];
+      progress = [provider loadDataRepresentationForTypeIdentifier:type completionHandler:receive];
     }
     return [progress] { [progress cancel]; };
   });
+}
+
+Task<IoResult<std::string>> LoadIosClipboardString(NSItemProvider* provider, NSString* type) {
+  auto result = co_await LoadIosClipboardData(provider, type, clipboard_max_text_bytes);
+  if (!result.Succeeded()) co_return IoResult<std::string>::Failure(std::move(result).Error());
+  const auto& bytes = result.Value();
+  co_return IoResult<std::string>::Success(bytes.empty() ? std::string{} :
+      std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+}
+
+Task<IoResult<ClipboardItem>> LoadIosClipboardItem(NSItemProvider* provider, bool text, bool html, NSString* image_type,
+                                                   std::vector<std::string> custom_mime_types) {
+  ClipboardItemRead item;
+  if (text) {
+    NSString* type = [provider canLoadObjectOfClass:NSString.class] ? nil : UTTypeUTF8PlainText.identifier;
+    item.SetText(&ClipboardItem::text, co_await LoadIosClipboardString(provider, type));
+  }
+  if (html) item.SetText(&ClipboardItem::html, co_await LoadIosClipboardString(provider, UTTypeHTML.identifier));
+  if (image_type) {
+    auto bytes = co_await LoadIosClipboardData(provider, image_type, clipboard_max_image_bytes);
+    if (bytes.Succeeded()) item.SetImage(ClipboardImage(std::move(bytes).Value()));
+    else item.RecordError(std::move(bytes).Error());
+  }
+  for (const auto& mime : custom_mime_types) {
+    NSString* type = IosClipboardString(ClipboardTypeIdentifier(mime));
+    item.SetCustom(mime, co_await LoadIosClipboardData(provider, type, item.RemainingCustomBytes()));
+  }
+  co_return std::move(item).Finish();
+}
+
+Task<IoResult<ClipboardItem>> ReadIosClipboardItem(UIPasteboard* pasteboard, const ClipboardReadOptions& options) {
+  if (!pasteboard) return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
+  NSArray<NSItemProvider*>* providers = pasteboard.itemProviders;
+  if (providers.count == 0) {
+    const auto code = pasteboard.numberOfItems == 0 ? IoErrorCode::NotFound : IoErrorCode::PermissionDenied;
+    return ClipboardResult(ClipboardFailure(code));
+  }
+  bool unsupported_image = false;
+  for (NSItemProvider* provider in providers) {
+    if (IosClipboardFileType(provider) != nil) continue;
+    const bool html = options.html && [provider hasItemConformingToTypeIdentifier:UTTypeHTML.identifier];
+    const bool text = options.text && ([provider canLoadObjectOfClass:NSString.class] ||
+        [provider hasItemConformingToTypeIdentifier:UTTypeUTF8PlainText.identifier]);
+    NSString* image_type = nil;
+    if (options.image) {
+      for (NSString* type in @[UTTypePNG.identifier, UTTypeJPEG.identifier]) {
+        if (![provider hasItemConformingToTypeIdentifier:type]) continue;
+        image_type = type;
+        break;
+      }
+      unsupported_image |= [provider hasItemConformingToTypeIdentifier:UTTypeImage.identifier];
+    }
+    std::vector<std::string> custom_mime_types;
+    for (const auto& mime : options.custom_mime_types) {
+      NSString* type = IosClipboardString(ClipboardTypeIdentifier(mime));
+      if ([provider.registeredTypeIdentifiers containsObject:type]) custom_mime_types.push_back(mime);
+    }
+    // A retained item provider keeps all loads bound to the selected pasteboard item.
+    if (text || html || image_type || !custom_mime_types.empty()) {
+      return LoadIosClipboardItem(provider, text, html, image_type, std::move(custom_mime_types));
+    }
+  }
+  return ClipboardResult(ClipboardFailure(unsupported_image ? IoErrorCode::Unsupported : IoErrorCode::NotFound));
 }
 
 Task<IoResult<FileReference>> LoadIosClipboardFile(NSItemProvider* provider) {
@@ -480,56 +534,39 @@ Task<IoResult<FileReference>> LoadIosClipboardFile(NSItemProvider* provider) {
   });
 }
 
-Task<IoResult<ClipboardContent>> ReadIosClipboardFiles(NSArray<NSItemProvider*>* providers) {
-  std::vector<FileReference> files;
+using IosClipboardFiles = std::vector<FileReference>;
+
+Task<IoResult<IosClipboardFiles>> LoadIosClipboardFiles(NSArray<NSItemProvider*>* providers) {
+  IosClipboardFiles files;
   files.reserve(providers.count);
-  for (NSUInteger index = 0; index < providers.count; ++index) {
-    auto file = co_await LoadIosClipboardFile(providers[index]);
-    if (!file.Succeeded()) co_return IoResult<ClipboardContent>::Failure(std::move(file).Error());
+  for (NSItemProvider* provider in providers) {
+    auto file = co_await LoadIosClipboardFile(provider);
+    if (!file.Succeeded()) co_return IoResult<IosClipboardFiles>::Failure(std::move(file).Error());
     files.push_back(std::move(file).Value());
   }
-  co_return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(files)});
+  co_return IoResult<IosClipboardFiles>::Success(std::move(files));
 }
 
-Task<IoResult<ClipboardContent>> ReadIosClipboard(UIPasteboard* pasteboard, ClipboardKind kind) {
+Task<IoResult<IosClipboardFiles>> ReadIosClipboardFiles(UIPasteboard* pasteboard) {
+  if (!pasteboard) return ClipboardResult(ClipboardFailure<IosClipboardFiles>(IoErrorCode::Unsupported));
   NSArray<NSItemProvider*>* providers = pasteboard.itemProviders;
   if (providers.count == 0) {
     const auto code = pasteboard.numberOfItems == 0 ? IoErrorCode::NotFound : IoErrorCode::PermissionDenied;
-    return ClipboardResult(ClipboardFailure(code));
+    return ClipboardResult(ClipboardFailure<IosClipboardFiles>(code));
   }
-  if (kind == ClipboardKind::Files) {
-    NSMutableArray<NSItemProvider*>* files = [NSMutableArray array];
-    for (NSItemProvider* provider in providers) {
-      if (IosClipboardFileType(provider) == nil) continue;
-      if (files.count == clipboard_max_files) return ClipboardResult(ClipboardFailure(IoErrorCode::TooLarge));
-      [files addObject:provider];
-    }
-    return files.count != 0 ? ReadIosClipboardFiles(files) : ClipboardResult(ClipboardFailure(IoErrorCode::NotFound));
-  }
-  bool unsupported_image = false;
+  NSMutableArray<NSItemProvider*>* files = [NSMutableArray array];
   for (NSItemProvider* provider in providers) {
-    if (IosClipboardFileType(provider) != nil) continue;
-    if (kind == ClipboardKind::Image) {
-      for (NSString* type in @[UTTypePNG.identifier, UTTypeJPEG.identifier]) {
-        if ([provider hasItemConformingToTypeIdentifier:type]) return LoadIosClipboardContent(provider, type, kind);
-      }
-      unsupported_image |= [provider hasItemConformingToTypeIdentifier:UTTypeImage.identifier];
-    } else {
-      if (kind == ClipboardKind::RichText && [provider hasItemConformingToTypeIdentifier:UTTypeHTML.identifier]) {
-        return LoadIosClipboardContent(provider, UTTypeHTML.identifier, kind);
-      }
-      if ([provider canLoadObjectOfClass:NSString.class]) {
-        return LoadIosClipboardContent(provider, nil, ClipboardKind::Text);
-      }
-      if ([provider hasItemConformingToTypeIdentifier:UTTypeUTF8PlainText.identifier]) {
-        return LoadIosClipboardContent(provider, UTTypeUTF8PlainText.identifier, ClipboardKind::Text);
-      }
+    if (IosClipboardFileType(provider) == nil) continue;
+    if (files.count == clipboard_max_files) {
+      return ClipboardResult(ClipboardFailure<IosClipboardFiles>(IoErrorCode::TooLarge));
     }
+    [files addObject:provider];
   }
-  return ClipboardResult(ClipboardFailure(unsupported_image ? IoErrorCode::Unsupported : IoErrorCode::NotFound));
+  if (files.count == 0) return ClipboardResult(ClipboardFailure<IosClipboardFiles>(IoErrorCode::NotFound));
+  return LoadIosClipboardFiles(files);
 }
 
-bool WriteIosClipboardFiles(UIPasteboard* pasteboard, const ClipboardContent& content) {
+bool WriteIosClipboardFiles(UIPasteboard* pasteboard, const ClipboardFiles& content) {
   const auto paths = ClipboardFilePaths(content);
   if (!paths) return false;
   const auto* references = std::get_if<std::vector<FileReference>>(&content);
@@ -709,35 +746,45 @@ public:
   }
 
 private:
-  bool WriteContent(ClipboardContent content) override {
-    if (const auto* text = std::get_if<std::string>(&content)) return WriteText(*text);
+  bool WriteItem(ClipboardItem item) override {
     UIPasteboard* pasteboard = UIPasteboard.generalPasteboard;
-    if (pasteboard == nil) return false;
-    if (const auto* rich = std::get_if<AttributedText>(&content)) {
-      const auto html = ClipboardHtml(*rich);
-      if (html.empty() && !rich->PlainText().empty()) return false;
-      NSString* text = IosClipboardString(rich->PlainText());
-      if (text == nil) return false;
-      NSData* markup = [NSData dataWithBytes:html.data() length:html.size()];
-      pasteboard.items = @[@{UTTypeUTF8PlainText.identifier: text, UTTypeHTML.identifier: markup}];
-    } else if (const auto* image = std::get_if<ImageAsset>(&content)) {
-      const auto bytes = image->EncodedBytes();
-      NSString* type = image->Format() == ImageFormat::Png ? UTTypePNG.identifier : UTTypeJPEG.identifier;
-      pasteboard.items = @[@{type: [NSData dataWithBytes:bytes.data() length:bytes.size()]}];
-    } else {
-      return WriteIosClipboardFiles(pasteboard, content);
+    if (!pasteboard) return false;
+    NSMutableDictionary<NSString*, id>* formats = [NSMutableDictionary dictionary];
+    if (item.text) {
+      NSString* text = IosClipboardString(*item.text);
+      if (!text) return false;
+      formats[UTTypeUTF8PlainText.identifier] = text;
     }
+    if (item.html) formats[UTTypeHTML.identifier] = [NSData dataWithBytes:item.html->data() length:item.html->size()];
+    if (item.image) {
+      const auto bytes = item.image->EncodedBytes();
+      NSString* type = item.image->Format() == ImageFormat::Png ? UTTypePNG.identifier : UTTypeJPEG.identifier;
+      formats[type] = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+    }
+    for (const auto& [mime, bytes] : item.custom_formats) {
+      NSString* type = IosClipboardString(ClipboardTypeIdentifier(mime));
+      if (!type) return false;
+      formats[type] = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+    }
+    pasteboard.items = @[formats];
     return true;
   }
 
-  Task<IoResult<ClipboardContent>> ReadContentAsync(ClipboardKind kind) override {
-    UIPasteboard* pasteboard = UIPasteboard.generalPasteboard;
-    if (pasteboard == nil) return ClipboardResult(ClipboardFailure(IoErrorCode::Unsupported));
-    return ReadIosClipboard(pasteboard, kind);
+  Task<IoResult<ClipboardItem>> ReadItemAsync(ClipboardReadOptions options) override {
+    return ReadIosClipboardItem(UIPasteboard.generalPasteboard, options);
   }
 
-  bool MayHaveContent(ClipboardKind kind) const noexcept override {
-    return kind == ClipboardKind::Text && UIPasteboard.generalPasteboard.hasStrings;
+  bool WriteFiles(ClipboardFiles files) override {
+    UIPasteboard* pasteboard = UIPasteboard.generalPasteboard;
+    return pasteboard && WriteIosClipboardFiles(pasteboard, files);
+  }
+
+  Task<IoResult<IosClipboardFiles>> ReadFilesAsync() override {
+    return ReadIosClipboardFiles(UIPasteboard.generalPasteboard);
+  }
+
+  bool MayHaveText() const noexcept override {
+    return UIPasteboard.generalPasteboard.hasStrings;
   }
 
   void OnRuntimeStopped() override;

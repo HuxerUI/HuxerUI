@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -7,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/data.h>
 #include <huxerui/file.h>
 #include <huxerui/resource.h>
 #include <huxerui/stream.h>
@@ -17,17 +20,44 @@ namespace huxerui {
 
 namespace detail {
 class ApplicationService;
-enum class ClipboardKind;
 class TextInteraction;
+using ClipboardFiles = std::variant<std::vector<File>, std::vector<FileReference>>;
 }
 
-/// @brief One value to publish to the system clipboard.
-///
-/// Text is UTF-8. AttributedText is published with a plain-text representation where rich text is supported.
-/// ImageAsset represents image content, while either file list represents a copy of the named entries, including
-/// image files. Use a nonempty list for file copies, including single files.
-using ClipboardContent =
-    std::variant<std::string, AttributedText, ImageAsset, std::vector<File>, std::vector<FileReference>>;
+/// Owned representations of one clipboard item. Publish at least one representation.
+struct ClipboardItem {
+  /// Plain UTF-8 text. An empty string is a present representation.
+  std::optional<std::string> text;
+  /// UTF-8 HTML fragment. Set text explicitly to offer a plain-text alternative, which Android requires.
+  std::optional<std::string> html;
+  /// Encoded raster image content. A copied image file uses Clipboard::WriteFiles().
+  std::optional<ImageAsset> image;
+  /// Opaque bytes by MIME type, including empty byte sequences. MIME names are case-insensitive.
+  std::map<std::string, Bytes, std::less<>> custom_formats;
+
+  /// Creates an item with plain text and clipboard HTML for the supported styles and links.
+  /// @param text Formatted text to publish.
+  /// @return The two text representations of the same content.
+  /// @throws std::invalid_argument If the text contains an embedded null character.
+  /// @throws std::length_error If the text or generated HTML exceeds the supported size.
+  static ClipboardItem FromAttributedText(const AttributedText& text);
+
+  /// Converts the available HTML into styled text, or uses the item's plain text if HTML cannot be used.
+  /// @return Owned text with supported styles and links, or an IoError when neither representation can be used.
+  IoResult<AttributedText> ToAttributedText() const;
+};
+
+/// Selects the representations to fetch from one system clipboard item.
+struct ClipboardReadOptions {
+  /// Read plain text when available.
+  bool text = true;
+  /// Read HTML when available.
+  bool html = true;
+  /// Read an encoded image when available.
+  bool image = false;
+  /// Read these custom MIME types. Results use lowercase names.
+  std::vector<std::string> custom_mime_types;
+};
 
 /// @brief Identifies a semantic editing command for the currently focused text client.
 ///
@@ -90,19 +120,24 @@ private:
   /// Indicates whether framework editing actions can use this platform's synchronous plain-text operations.
   virtual bool SupportsSynchronousText() const noexcept { return true; }
 
-  /// Publishes a validated value, retaining any source the system may read after this call.
-  virtual bool WriteContent(ClipboardContent content);
+  /// Publishes all validated representations as one item.
+  virtual bool WriteItem(ClipboardItem item);
 
   /// Starts publication of a validated value. The returned Task owns what it needs to report the result.
   /// The default implementation publishes synchronously and returns the result through the Task.
-  virtual Task<bool> WriteContentAsync(ClipboardContent content);
+  virtual Task<bool> WriteItemAsync(ClipboardItem item);
 
-  /// Starts or prepares one read. Its Task owns the inputs needed to finish independently of this instance.
-  /// File reads return FileReference values. Rich text may return plain text when only that representation is offered.
-  virtual Task<IoResult<ClipboardContent>> ReadContentAsync(detail::ClipboardKind kind);
+  /// Starts or captures one item read. Its Task owns the inputs needed to finish independently of this instance.
+  virtual Task<IoResult<ClipboardItem>> ReadItemAsync(ClipboardReadOptions options);
 
-  /// Tests advertised formats without reading their payloads. An unknown answer permits a paste attempt.
-  virtual bool MayHaveContent(detail::ClipboardKind kind) const noexcept;
+  /// Publishes a file list, retaining any access the system needs for deferred reads.
+  virtual bool WriteFiles(detail::ClipboardFiles files);
+
+  /// Captures the current complete file list and its available read grants.
+  virtual Task<IoResult<std::vector<FileReference>>> ReadFilesAsync();
+
+  /// Tests the advertised text format. An unknown answer permits a paste attempt.
+  virtual bool MayHaveText() const noexcept { return true; }
 
   friend class Clipboard;
   friend class detail::TextInteraction;
@@ -124,7 +159,7 @@ private:
 ///   const auto clipboard = UseApplication().Clipboard();
 ///   return Button("Copy HuxerUI")
 ///       .OnClick([clipboard] { clipboard->WriteText("HuxerUI"); })
-///       .With(Enabled(clipboard->IsAvailable()));
+///       .With(Enabled(clipboard->SupportsSynchronousText()));
 /// }
 /// @endcode
 class Clipboard final {
@@ -139,34 +174,13 @@ public:
   /// @brief Tests whether the Runtime has a synchronous platform clipboard capability.
   /// @return True while a supporting platform Runtime is connected. A true result does not
   /// guarantee that a subsequent operation will succeed because platform access may fail transiently.
-  bool IsAvailable() const noexcept;
-
-  /// @brief Synchronously publishes a value to replace the current system clipboard contents.
-  /// @param content Owned text, image content, or a nonempty list of entries to copy. File publication preserves
-  /// the source and may retain its references for on-demand delivery.
-  /// @return True when the system accepts the publication. Unsupported content, unavailable services, and rejected
-  /// publications return false. Acceptance does not guarantee that another application can later read the data.
-  /// @throws std::invalid_argument If plain text is malformed UTF-8, an image is empty, or a file list is empty.
-  bool WriteContent(ClipboardContent content) const;
-
-  /// @brief Starts a clipboard write and returns a Task for its result.
-  /// @param content Owned value to publish under the same validation and ownership rules as WriteContent().
-  /// @return A Task yielding true after the platform accepts the publication, or false when the service is
-  /// unavailable, the format is unsupported, or the platform rejects the write.
-  /// @throws std::invalid_argument If plain text is malformed UTF-8, an image is empty, or a file list is empty.
-  ///
-  /// On Web, call this directly from the user action. The browser accepts plain text, AttributedText as HTML
-  /// with a plain-text alternative, and PNG images in a secure context. Canceling the Task suppresses result
-  /// delivery. A publication already started may still finish. Platforms with synchronous clipboard writes
-  /// perform the write during the call and deliver its result through the Task.
-  Task<bool> WriteContentAsync(ClipboardContent content) const;
+  bool SupportsSynchronousText() const noexcept;
 
   /// @brief Replaces the clipboard contents with plain text synchronously.
   /// @param text Valid UTF-8 text borrowed for the duration of this call. An empty value writes empty text.
   /// @return True when the connected platform accepts the new contents; false when the service is unavailable or the
   /// platform rejects or cannot complete the operation.
-  /// @throws std::invalid_argument If text is not valid UTF-8. Validation occurs before platform availability is
-  /// checked.
+  /// @throws std::invalid_argument If text contains invalid UTF-8 or embedded nulls.
   bool WriteText(std::string_view text) const;
 
   /// @brief Reads the current plain-text clipboard contents synchronously.
@@ -179,15 +193,49 @@ public:
   /// requested representation is absent. PermissionDenied and Unsupported distinguish denied access and capability.
   Task<IoResult<std::string>> ReadTextAsync() const;
 
-  /// @brief Reads rich text and maps its supported character styles and links to AttributedText.
-  /// @return A Task yielding owned text or an IoError. If rich text is absent, the plain-text representation of
-  /// the same clipboard contents is returned without styles. If neither exists, the result is NotFound.
-  Task<IoResult<AttributedText>> ReadRichTextAsync() const;
+  /// Synchronously replaces the current clipboard contents with all representations in the item. Web uses
+  /// WriteItemAsync().
+  /// @param item Owned representations. Use parameter-free MIME names such as application/vnd.example.selection
+  /// for custom data. Each name must be unique after lowercasing and distinct from the built-in formats.
+  /// @return True when the platform accepts the complete publication. Unsupported representations, unavailable
+  /// access, oversized items, and failed publications return false. A failure may leave the clipboard empty.
+  /// @throws std::invalid_argument For an empty item, invalid MIME names, conflicting formats, invalid UTF-8,
+  /// embedded nulls in text or HTML, or an empty image.
+  bool WriteItem(ClipboardItem item) const;
+
+  /// Starts publication of all representations in the item and returns a Task for its result.
+  /// @param item Owned representations under the same validation and ownership rules as WriteItem().
+  /// @return A Task yielding the same acceptance result as WriteItem().
+  /// @throws std::invalid_argument For invalid representations under the WriteItem() contract.
+  ///
+  /// On Web, call directly from the user action. The browser may require permission and can reject unsupported
+  /// formats. Canceling the Task suppresses delivery. A publication already started may still finish.
+  Task<bool> WriteItemAsync(ClipboardItem item) const;
+
+  /// Captures the requested representations of the first system item that advertises any of them.
+  /// @param options Representations to fetch. The default requests plain text and HTML.
+  /// @return A Task yielding the readable representations of that item. Missing or unreadable representations
+  /// are absent. When none can be read, the result is NotFound or the corresponding read error. If the platform
+  /// loses access to the original item during capture, the whole read fails.
+  /// @throws std::invalid_argument If no representations are requested or the custom MIME list is invalid.
+  Task<IoResult<ClipboardItem>> ReadItemAsync(ClipboardReadOptions options = {}) const;
 
   /// @brief Reads image content advertised by the clipboard.
   /// @return A Task yielding an owned encoded raster image or an IoError. A file-list representation, including one
   /// naming an image file, does not supply image content. Oversized images report TooLarge.
   Task<IoResult<ImageAsset>> ReadImageAsync() const;
+
+  /// Publishes a nonempty list of local files or directories for copying through the system clipboard.
+  /// @param files Owned paths in the order to publish them.
+  /// @return True when the complete list is accepted. Entry support depends on the platform.
+  /// @throws std::invalid_argument If the list is empty.
+  bool WriteFiles(std::vector<File> files) const;
+
+  /// Publishes a nonempty list of file references for copying, retaining grants when needed by the platform.
+  /// @param files Owned references in the order to publish them.
+  /// @return True when the complete list is accepted. Entry and provider support depend on the platform.
+  /// @throws std::invalid_argument If the list is empty.
+  bool WriteFiles(std::vector<FileReference> files) const;
 
   /// @brief Acquires read-only references to the complete ordered list of copied entries.
   /// @return A Task yielding a nonempty list or an IoError. NotFound means there is no file list. A failed entry
@@ -202,8 +250,6 @@ private:
   };
 
   explicit Clipboard(PlatformClipboard* platform);
-
-  template <class T> Task<IoResult<T>> Read(detail::ClipboardKind kind) const;
 
   void Disconnect() noexcept {
     connection_.reset();

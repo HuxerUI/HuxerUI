@@ -1,6 +1,7 @@
 #include <huxerui/clipboard.h>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -8,7 +9,6 @@
 #include <locale>
 #include <sstream>
 #include <stdexcept>
-#include <type_traits>
 #include <utility>
 
 #include "application_internal.h"
@@ -16,7 +16,7 @@
 
 namespace huxerui::detail {
 
-IoResult<ClipboardContent> ClipboardFailure(IoErrorCode code) {
+IoError ClipboardError(IoErrorCode code) {
   const char* message = "HuxerUI could not read clipboard content";
   switch (code) {
   case IoErrorCode::NotFound: message = "HuxerUI clipboard has no matching content"; break;
@@ -24,31 +24,44 @@ IoResult<ClipboardContent> ClipboardFailure(IoErrorCode code) {
   case IoErrorCode::PermissionDenied: message = "HuxerUI clipboard access was denied"; break;
   case IoErrorCode::TooLarge: message = "HuxerUI clipboard content exceeds the supported size"; break;
   case IoErrorCode::InvalidEncoding: message = "HuxerUI clipboard content has an invalid encoding"; break;
+  case IoErrorCode::Timeout: message = "HuxerUI clipboard read timed out"; break;
   default: break;
   }
-  return IoResult<ClipboardContent>::Failure({code, message});
+  return {code, message};
+}
+
+IoError ClipboardChangedError() {
+  return {IoErrorCode::Io, "HuxerUI clipboard item changed during capture"};
+}
+
+IoResult<std::string> ClipboardText(std::string text) {
+  if (text.size() > clipboard_max_text_bytes) return ClipboardFailure<std::string>(IoErrorCode::TooLarge);
+  if (text.find('\0') != text.npos || !Utf16Length(text)) {
+    return ClipboardFailure<std::string>(IoErrorCode::InvalidEncoding);
+  }
+  return IoResult<std::string>::Success(std::move(text));
 }
 
 bool ClipboardImageSizeAllowed(std::size_t width, std::size_t height) noexcept {
   return width != 0 && height != 0 && width <= clipboard_max_image_pixels / height;
 }
 
-IoResult<ClipboardContent> ClipboardImage(Bytes bytes) {
+IoResult<ImageAsset> ClipboardImage(Bytes bytes) {
   if (bytes.size() > clipboard_max_image_bytes) {
-    return ClipboardFailure(IoErrorCode::TooLarge);
+    return ClipboardFailure<ImageAsset>(IoErrorCode::TooLarge);
   }
   try {
     ImageAsset image = ImageAsset::FromEncoded(std::move(bytes));
     if (!ClipboardImageSizeAllowed(image.PixelWidth(), image.PixelHeight())) {
-      return ClipboardFailure(IoErrorCode::TooLarge);
+      return ClipboardFailure<ImageAsset>(IoErrorCode::TooLarge);
     }
-    return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(image)});
+    return IoResult<ImageAsset>::Success(std::move(image));
   } catch (const std::invalid_argument&) {
-    return ClipboardFailure(IoErrorCode::InvalidEncoding);
+    return ClipboardFailure<ImageAsset>(IoErrorCode::InvalidEncoding);
   }
 }
 
-std::optional<std::vector<File>> ClipboardFilePaths(const ClipboardContent& content) {
+std::optional<std::vector<File>> ClipboardFilePaths(const ClipboardFiles& content) {
   if (const auto* files = std::get_if<std::vector<File>>(&content)) {
     return *files;
   }
@@ -61,6 +74,59 @@ std::optional<std::vector<File>> ClipboardFilePaths(const ClipboardContent& cont
     paths.push_back(std::move(*path));
   }
   return paths;
+}
+
+std::string ClipboardTypeIdentifier(std::string_view mime) {
+  constexpr std::string_view hex = "0123456789abcdef";
+  std::string result = "org.huxerui.clipboard.mime.";
+  for (const auto value : mime) {
+    const auto byte = static_cast<unsigned char>(value);
+    result += hex[byte >> 4];
+    result += hex[byte & 15];
+  }
+  return result;
+}
+
+void ClipboardItemRead::SetText(std::optional<std::string> ClipboardItem::* field, IoResult<std::string> result) {
+  if (result.Succeeded()) result = ClipboardText(std::move(result).Value());
+  if (result.Succeeded()) item_.*field = std::move(result).Value();
+  else RecordError(std::move(result).Error());
+}
+
+void ClipboardItemRead::SetImage(IoResult<ImageAsset> result) {
+  if (result.Succeeded()) item_.image.emplace(std::move(result).Value());
+  else RecordError(std::move(result).Error());
+}
+
+void ClipboardItemRead::SetCustom(std::string_view mime, IoResult<Bytes> result) {
+  if (!result.Succeeded()) {
+    RecordError(std::move(result).Error());
+    return;
+  }
+  const auto size = result.Value().size();
+  if (size > remaining_custom_bytes_) {
+    RecordError(ClipboardError(IoErrorCode::TooLarge));
+    return;
+  }
+  remaining_custom_bytes_ -= size;
+  item_.custom_formats.emplace(mime, std::move(result).Value());
+}
+
+void ClipboardItemRead::RecordError(IoError error) {
+  if (!error_ && error.code != IoErrorCode::NotFound) error_ = std::move(error);
+}
+
+IoResult<ClipboardItem> ClipboardItemRead::Finish() && {
+  if (item_.text || item_.html || item_.image || !item_.custom_formats.empty()) {
+    return IoResult<ClipboardItem>::Success(std::move(item_));
+  }
+  return IoResult<ClipboardItem>::Failure(error_ ? std::move(*error_) : ClipboardError(IoErrorCode::NotFound));
+}
+
+Task<IoResult<ClipboardItem>> FinishClipboardItemRead(ClipboardItemRead item,
+                                                      std::optional<Task<IoResult<ImageAsset>>> image) {
+  if (image) item.SetImage(co_await std::move(*image));
+  co_return std::move(item).Finish();
 }
 
 namespace {
@@ -462,10 +528,10 @@ std::string ClipboardHtml(const AttributedText& text) {
   return fragment;
 }
 
-IoResult<ClipboardContent> ReadClipboardHtml(std::string_view fragment) {
-  if (fragment.size() > clipboard_max_text_bytes) return ClipboardFailure(IoErrorCode::TooLarge);
+IoResult<AttributedText> ReadClipboardHtml(std::string_view fragment) {
+  if (fragment.size() > clipboard_max_text_bytes) return ClipboardFailure<AttributedText>(IoErrorCode::TooLarge);
   if (fragment.find('\0') != fragment.npos || !Utf16Length(fragment)) {
-    return ClipboardFailure(IoErrorCode::InvalidEncoding);
+    return ClipboardFailure<AttributedText>(IoErrorCode::InvalidEncoding);
   }
   ClipboardFragment result;
   try {
@@ -481,7 +547,7 @@ IoResult<ClipboardContent> ReadClipboardHtml(std::string_view fragment) {
         continue;
       }
       const auto end = TagEnd(fragment);
-      if (end == fragment.npos) return ClipboardFailure(IoErrorCode::InvalidEncoding);
+      if (end == fragment.npos) return ClipboardFailure<AttributedText>(IoErrorCode::InvalidEncoding);
       const auto contents = Trim(fragment.substr(1, end - 1));
       fragment.remove_prefix(end + 1);
       if (contents.empty() || contents.starts_with('!') || contents.starts_with('?')) continue;
@@ -496,11 +562,11 @@ IoResult<ClipboardContent> ReadClipboardHtml(std::string_view fragment) {
         result.AddTag(contents);
       }
     }
-    return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(result).Finish()});
+    return IoResult<AttributedText>::Success(std::move(result).Finish());
   } catch (const std::length_error&) {
-    return ClipboardFailure(IoErrorCode::TooLarge);
+    return ClipboardFailure<AttributedText>(IoErrorCode::TooLarge);
   } catch (const std::invalid_argument&) {
-    return ClipboardFailure(IoErrorCode::InvalidEncoding);
+    return ClipboardFailure<AttributedText>(IoErrorCode::InvalidEncoding);
   }
 }
 
@@ -510,143 +576,202 @@ namespace huxerui {
 
 namespace {
 
-template <class T> Task<IoResult<T>> ReadAs(std::weak_ptr<const void> connection,
-                                         Task<IoResult<ClipboardContent>> operation) {
-  if (connection.expired()) {
-    co_return IoResult<T>::Failure({IoErrorCode::Unsupported, "HuxerUI clipboard service is unavailable"});
+std::string NormalizeClipboardMime(std::string_view mime) {
+  constexpr std::string_view punctuation = "!#$%&'*+-.^_`|~";
+  const auto slash = mime.find('/');
+  const auto token = [&](std::string_view value) {
+    return !value.empty() && std::ranges::all_of(value, [&](char c) {
+      return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+             (c != '*' && punctuation.find(c) != punctuation.npos);
+    });
+  };
+  if (mime.size() > 127 || slash == mime.npos || !token(mime.substr(0, slash)) || !token(mime.substr(slash + 1))) {
+    throw std::invalid_argument("HuxerUI clipboard custom format must be a parameter-free MIME type");
   }
+  auto normalized = detail::Lower(mime);
+  constexpr std::array<std::string_view, 9> reserved{
+      "text/plain", "text/html", "image/png", "image/jpeg", "image/tiff", "text/uri-list",
+      "x-special/gnome-copied-files", "application/x-kde-cutselection", "application/vnd.portal.filetransfer"};
+  if (std::ranges::find(reserved, normalized) != reserved.end()) {
+    throw std::invalid_argument("HuxerUI clipboard custom format conflicts with a built-in representation");
+  }
+  return normalized;
+}
+
+bool ValidateClipboardText(std::string_view text) {
+  if (text.size() > detail::clipboard_max_text_bytes) return false;
+  if (text.find('\0') != text.npos || !detail::Utf16Length(text)) {
+    throw std::invalid_argument("HuxerUI clipboard text must contain valid UTF-8 without null characters");
+  }
+  return true;
+}
+
+bool PrepareClipboardItem(ClipboardItem& item) {
+  if (!item.text && !item.html && !item.image && item.custom_formats.empty()) {
+    throw std::invalid_argument("HuxerUI clipboard item must contain a representation");
+  }
+  if ((item.text && !ValidateClipboardText(*item.text)) || (item.html && !ValidateClipboardText(*item.html))) {
+    return false;
+  }
+  if (item.image) {
+    if (item.image->EncodedBytes().empty()) {
+      throw std::invalid_argument("HuxerUI clipboard image must contain encoded pixels");
+    }
+    if (item.image->EncodedBytes().size() > detail::clipboard_max_image_bytes ||
+        !detail::ClipboardImageSizeAllowed(item.image->PixelWidth(), item.image->PixelHeight())) return false;
+  }
+  if (item.custom_formats.size() > detail::clipboard_max_custom_formats) return false;
+  decltype(item.custom_formats) normalized;
+  auto remaining = detail::clipboard_max_custom_bytes;
+  for (auto& [mime, bytes] : item.custom_formats) {
+    if (bytes.size() > remaining) return false;
+    remaining -= bytes.size();
+    if (!normalized.emplace(NormalizeClipboardMime(mime), std::move(bytes)).second) {
+      throw std::invalid_argument("HuxerUI clipboard custom formats must be unique");
+    }
+  }
+  item.custom_formats = std::move(normalized);
+  return true;
+}
+
+void NormalizeClipboardReadOptions(ClipboardReadOptions& options) {
+  if ((!options.text && !options.html && !options.image && options.custom_mime_types.empty()) ||
+      options.custom_mime_types.size() > detail::clipboard_max_custom_formats) {
+    throw std::invalid_argument("HuxerUI clipboard read must request a supported number of representations");
+  }
+  for (auto current = options.custom_mime_types.begin(); current != options.custom_mime_types.end(); ++current) {
+    *current = NormalizeClipboardMime(*current);
+    if (std::find(options.custom_mime_types.begin(), current, *current) != current) {
+      throw std::invalid_argument("HuxerUI clipboard requested formats must be unique");
+    }
+  }
+}
+
+bool ValidateClipboardFiles(std::size_t size) {
+  if (size == 0) throw std::invalid_argument("HuxerUI clipboard file list must not be empty");
+  return size <= detail::clipboard_max_files;
+}
+
+template <class T>
+Task<IoResult<T>> ReadWhileConnected(std::weak_ptr<const void> connection, Task<IoResult<T>> operation) {
+  if (connection.expired()) co_return detail::ClipboardFailure<T>(IoErrorCode::Unsupported);
   auto result = co_await std::move(operation);
-  if (connection.expired()) {
-    co_return IoResult<T>::Failure({IoErrorCode::Unsupported, "HuxerUI clipboard service is unavailable"});
-  }
-  if (!result.Succeeded()) {
-    co_return IoResult<T>::Failure(std::move(result).Error());
-  }
-  auto& content = result.Value();
-  if (auto* plain = std::get_if<std::string>(&content)) {
-    if (plain->size() > detail::clipboard_max_text_bytes) {
-      co_return IoResult<T>::Failure({IoErrorCode::TooLarge, "HuxerUI clipboard text exceeds the supported size"});
-    }
-    if (!detail::Utf16Length(*plain)) {
-      co_return IoResult<T>::Failure({IoErrorCode::InvalidEncoding, "HuxerUI clipboard text is not valid UTF-8"});
-    }
-    if constexpr (std::is_same_v<T, AttributedText>) {
-      co_return IoResult<T>::Success(AttributedText::FromRanges(std::move(*plain), {}));
-    }
-  }
-  if (auto* value = std::get_if<T>(&content)) {
-    co_return IoResult<T>::Success(std::move(*value));
-  }
-  co_return IoResult<T>::Failure({IoErrorCode::Unsupported, "HuxerUI clipboard did not return the requested content"});
+  if (connection.expired()) co_return detail::ClipboardFailure<T>(IoErrorCode::Unsupported);
+  co_return std::move(result);
 }
 
-Task<IoResult<ClipboardContent>> UnsupportedRead() {
-  return detail::ClipboardResult(detail::ClipboardFailure(IoErrorCode::Unsupported));
-}
-
-void ValidateClipboardText(std::string_view text) {
-  if (!detail::Utf16Length(text)) {
-    throw std::invalid_argument("HuxerUI clipboard text must contain valid UTF-8");
-  }
-}
-
-bool IsPublishableClipboardContent(const ClipboardContent& content) {
-  return std::visit([](const auto& value) {
-    using T = std::decay_t<decltype(value)>;
-    if constexpr (std::is_same_v<T, std::string>) {
-      ValidateClipboardText(value);
-      return value.size() <= detail::clipboard_max_text_bytes && value.find('\0') == std::string::npos;
-    } else if constexpr (std::is_same_v<T, AttributedText>) {
-      return value.PlainText().size() <= detail::clipboard_max_text_bytes &&
-          value.PlainText().find('\0') == std::string::npos;
-    } else if constexpr (std::is_same_v<T, ImageAsset>) {
-      if (value.EncodedBytes().empty()) {
-        throw std::invalid_argument("HuxerUI clipboard image must contain encoded pixels");
-      }
-      return value.EncodedBytes().size() <= detail::clipboard_max_image_bytes &&
-          detail::ClipboardImageSizeAllowed(value.PixelWidth(), value.PixelHeight());
-    } else {
-      if (value.empty()) {
-        throw std::invalid_argument("HuxerUI clipboard file list must not be empty");
-      }
-      return value.size() <= detail::clipboard_max_files;
-    }
-  }, content);
+template <class T>
+Task<IoResult<T>> ReadItemField(Task<IoResult<ClipboardItem>> operation, std::optional<T> ClipboardItem::* field) {
+  auto result = co_await std::move(operation);
+  if (!result.Succeeded()) co_return IoResult<T>::Failure(std::move(result).Error());
+  auto& value = result.Value().*field;
+  if (!value) co_return detail::ClipboardFailure<T>(IoErrorCode::NotFound);
+  co_return IoResult<T>::Success(std::move(*value));
 }
 
 } // namespace
 
-bool PlatformClipboard::WriteContent(ClipboardContent content) {
-  const auto* text = std::get_if<std::string>(&content);
-  return text && WriteText(*text);
+ClipboardItem ClipboardItem::FromAttributedText(const AttributedText& text) {
+  if (!ValidateClipboardText(text.PlainText())) {
+    throw std::length_error("HuxerUI clipboard text exceeds the supported size");
+  }
+  auto html = detail::ClipboardHtml(text);
+  if (html.empty() && !text.PlainText().empty()) {
+    throw std::length_error("HuxerUI clipboard HTML exceeds the supported size");
+  }
+  return {.text = text.PlainText(), .html = std::move(html), .image = {}, .custom_formats = {}};
 }
 
-Task<bool> PlatformClipboard::WriteContentAsync(ClipboardContent content) {
-  return detail::ClipboardResult(WriteContent(std::move(content)));
+IoResult<AttributedText> ClipboardItem::ToAttributedText() const {
+  auto result = html ? detail::ReadClipboardHtml(*html)
+                     : detail::ClipboardFailure<AttributedText>(IoErrorCode::NotFound);
+  if (result.Succeeded() || !text) return result;
+  auto plain = detail::ClipboardText(*text);
+  if (!plain.Succeeded()) return IoResult<AttributedText>::Failure(std::move(plain).Error());
+  return IoResult<AttributedText>::Success(AttributedText::FromRanges(std::move(plain).Value(), {}));
 }
 
-Task<IoResult<ClipboardContent>> PlatformClipboard::ReadContentAsync(detail::ClipboardKind) {
-  return UnsupportedRead();
+bool PlatformClipboard::WriteItem(ClipboardItem item) {
+  return item.text && !item.html && !item.image && item.custom_formats.empty() && WriteText(*item.text);
 }
 
-bool PlatformClipboard::MayHaveContent(detail::ClipboardKind kind) const noexcept {
-  return kind == detail::ClipboardKind::Text;
+Task<bool> PlatformClipboard::WriteItemAsync(ClipboardItem item) {
+  return detail::ClipboardResult(WriteItem(std::move(item)));
+}
+
+Task<IoResult<ClipboardItem>> PlatformClipboard::ReadItemAsync(ClipboardReadOptions options) {
+  if (!SupportsSynchronousText() || !options.text) {
+    return detail::ClipboardResult(detail::ClipboardFailure(IoErrorCode::Unsupported));
+  }
+  detail::ClipboardItemRead item;
+  if (auto text = ReadText()) item.SetText(&ClipboardItem::text, IoResult<std::string>::Success(std::move(*text)));
+  return detail::ClipboardResult(std::move(item).Finish());
+}
+
+bool PlatformClipboard::WriteFiles(detail::ClipboardFiles) {
+  return false;
+}
+
+Task<IoResult<std::vector<FileReference>>> PlatformClipboard::ReadFilesAsync() {
+  return detail::ClipboardResult(detail::ClipboardFailure<std::vector<FileReference>>(IoErrorCode::Unsupported));
 }
 
 Clipboard::Clipboard(PlatformClipboard* platform)
     : connection_(platform ? std::make_shared<Connection>(Connection{platform}) : nullptr) {}
 
-bool Clipboard::IsAvailable() const noexcept {
+bool Clipboard::SupportsSynchronousText() const noexcept {
   return connection_ && connection_->platform->SupportsSynchronousText();
 }
 
-bool Clipboard::WriteContent(ClipboardContent content) const {
-  return IsPublishableClipboardContent(content) && connection_ &&
-         connection_->platform->WriteContent(std::move(content));
-}
-
-Task<bool> Clipboard::WriteContentAsync(ClipboardContent content) const {
-  if (!IsPublishableClipboardContent(content) || !connection_) {
-    return detail::ClipboardResult(false);
-  }
-  return connection_->platform->WriteContentAsync(std::move(content));
+bool Clipboard::WriteText(std::string_view text) const {
+  return ValidateClipboardText(text) && SupportsSynchronousText() && connection_->platform->WriteText(text);
 }
 
 std::optional<std::string> Clipboard::ReadText() const {
-  if (!IsAvailable()) {
-    return std::nullopt;
-  }
-  std::optional<std::string> text = connection_->platform->ReadText();
-  if (text.has_value() && !detail::Utf16Length(*text).has_value()) {
-    return std::nullopt;
-  }
-  return text;
-}
-
-bool Clipboard::WriteText(std::string_view text) const {
-  ValidateClipboardText(text);
-  return IsAvailable() && connection_->platform->WriteText(text);
-}
-
-template <class T> Task<IoResult<T>> Clipboard::Read(detail::ClipboardKind kind) const {
-  auto operation = connection_ ? connection_->platform->ReadContentAsync(kind) : Task<IoResult<ClipboardContent>>{};
-  return ReadAs<T>(connection_, std::move(operation));
+  if (!SupportsSynchronousText()) return std::nullopt;
+  auto text = connection_->platform->ReadText();
+  if (!text) return std::nullopt;
+  auto result = detail::ClipboardText(std::move(*text));
+  if (!result.Succeeded()) return std::nullopt;
+  return std::move(result).Value();
 }
 
 Task<IoResult<std::string>> Clipboard::ReadTextAsync() const {
-  return Read<std::string>(detail::ClipboardKind::Text);
+  return ReadItemField(ReadItemAsync({.html = false, .custom_mime_types = {}}), &ClipboardItem::text);
 }
 
-Task<IoResult<AttributedText>> Clipboard::ReadRichTextAsync() const {
-  return Read<AttributedText>(detail::ClipboardKind::RichText);
+bool Clipboard::WriteItem(ClipboardItem item) const {
+  return PrepareClipboardItem(item) && connection_ && connection_->platform->WriteItem(std::move(item));
+}
+
+Task<bool> Clipboard::WriteItemAsync(ClipboardItem item) const {
+  if (!PrepareClipboardItem(item) || !connection_) return detail::ClipboardResult(false);
+  return connection_->platform->WriteItemAsync(std::move(item));
+}
+
+Task<IoResult<ClipboardItem>> Clipboard::ReadItemAsync(ClipboardReadOptions options) const {
+  NormalizeClipboardReadOptions(options);
+  auto operation =
+      connection_ ? connection_->platform->ReadItemAsync(std::move(options)) : Task<IoResult<ClipboardItem>>{};
+  return ReadWhileConnected(connection_, std::move(operation));
 }
 
 Task<IoResult<ImageAsset>> Clipboard::ReadImageAsync() const {
-  return Read<ImageAsset>(detail::ClipboardKind::Image);
+  return ReadItemField(ReadItemAsync({.text = false, .html = false, .image = true, .custom_mime_types = {}}),
+                       &ClipboardItem::image);
+}
+
+bool Clipboard::WriteFiles(std::vector<File> files) const {
+  return ValidateClipboardFiles(files.size()) && connection_ && connection_->platform->WriteFiles(std::move(files));
+}
+
+bool Clipboard::WriteFiles(std::vector<FileReference> files) const {
+  return ValidateClipboardFiles(files.size()) && connection_ && connection_->platform->WriteFiles(std::move(files));
 }
 
 Task<IoResult<std::vector<FileReference>>> Clipboard::ReadFilesAsync() const {
-  return Read<std::vector<FileReference>>(detail::ClipboardKind::Files);
+  auto operation = connection_ ? connection_->platform->ReadFilesAsync() : Task<IoResult<std::vector<FileReference>>>{};
+  return ReadWhileConnected(connection_, std::move(operation));
 }
 
 } // namespace huxerui

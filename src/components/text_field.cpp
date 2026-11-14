@@ -1139,7 +1139,7 @@ public:
       return TextEditingActionStatus::UseDefault;
     }
     const TextRange selection = editing_.value.selection.Range();
-    if (action == TextEditingAction::Copy && !selection.IsCollapsed() && clipboard.IsAvailable()) {
+    if (action == TextEditingAction::Copy && !selection.IsCollapsed() && clipboard.SupportsSynchronousText()) {
       return TextEditingActionStatus::Handle;
     }
     if (action == TextEditingAction::SelectAll) {

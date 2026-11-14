@@ -287,6 +287,47 @@ std::optional<std::string> OptionalString(JNIEnv* environment, jstring value) {
   return android::JavaStringToUtf8(environment, value);
 }
 
+std::optional<IoError> AndroidClipboardError(jint status) {
+  switch (status) {
+  case 0: return std::nullopt;
+  case 1: return ClipboardError(IoErrorCode::NotFound);
+  case 2: return ClipboardError(IoErrorCode::Unsupported);
+  case 3: return ClipboardError(IoErrorCode::PermissionDenied);
+  case 4: return ClipboardError(IoErrorCode::TooLarge);
+  default: return ClipboardError(IoErrorCode::Io);
+  }
+}
+
+template <class T, class Decode>
+Task<IoResult<T>> LoadAndroidClipboard(JavaVM* vm, JNIEnv* environment, jobject capture, Decode decode) {
+  auto retained = std::shared_ptr<std::remove_pointer_t<jobject>>(
+      environment->NewGlobalRef(capture), [vm](jobject object) {
+        JniEnvironment attached(vm);
+        if (object && attached.Get()) attached.Get()->DeleteGlobalRef(object);
+      });
+  if (!retained) return ClipboardResult(ClipboardFailure<T>(IoErrorCode::Io));
+  return RunWorker([vm, retained = std::move(retained), decode = std::move(decode)] {
+    JniEnvironment attached(vm);
+    JNIEnv* environment = attached.Get();
+    if (!environment) return ClipboardFailure<T>(IoErrorCode::Io);
+    const jobject capture = retained.get();
+    android::LocalRef<jclass> type(environment, environment->GetObjectClass(capture));
+    const jmethodID load = type ? environment->GetMethodID(type.Get(), "load", "()V") : nullptr;
+    if (load) environment->CallVoidMethod(capture, load);
+    const jfieldID status = load && !environment->ExceptionCheck()
+        ? environment->GetFieldID(type.Get(), "status", "I") : nullptr;
+    if (status && !environment->ExceptionCheck()) {
+      try {
+        return decode(environment, capture, type.Get(),
+                      AndroidClipboardError(environment->GetIntField(capture, status)));
+      } catch (const std::exception&) {
+      }
+    }
+    ClearJavaException(environment);
+    return ClipboardFailure<T>(IoErrorCode::Io);
+  });
+}
+
 } // namespace
 
 std::optional<ApplicationActivation> DecodeAndroidApplicationActivation(
@@ -357,75 +398,75 @@ std::optional<ApplicationActivation> DecodeAndroidApplicationActivation(
   return ApplicationActivation{FileActivation{std::move(files)}};
 }
 
-Task<IoResult<ClipboardContent>>
-ReadAndroidClipboardAsync(JavaVM* vm, JNIEnv* environment, jobject context, jobject capture, ClipboardKind kind) {
-  auto retained = std::shared_ptr<std::remove_pointer_t<jobject>>(
-      environment->NewGlobalRef(capture), [vm](jobject object) {
-        JniEnvironment attached(vm);
-        if (JNIEnv* current = attached.Get()) current->DeleteGlobalRef(object);
+Task<IoResult<ClipboardItem>> ReadAndroidClipboardItem(JavaVM* vm, JNIEnv* environment, jobject capture,
+                                                       std::vector<std::string> types) {
+  return LoadAndroidClipboard<ClipboardItem>(
+      vm, environment, capture,
+      [types = std::move(types)](JNIEnv* env, jobject capture, jclass type, std::optional<IoError> error) {
+        ClipboardItemRead item;
+        if (error) item.RecordError(std::move(*error));
+        const auto field = env->GetFieldID(type, "bytes", "[[B");
+        android::LocalRef<jobjectArray> representations(env, field
+            ? static_cast<jobjectArray>(env->GetObjectField(capture, field)) : nullptr);
+        if (env->ExceptionCheck()) {
+          ClearJavaException(env);
+          return ClipboardFailure(IoErrorCode::Io);
+        }
+        if (!representations) return std::move(item).Finish();
+        if (env->GetArrayLength(representations.Get()) != static_cast<jsize>(types.size())) {
+          return ClipboardFailure(IoErrorCode::Io);
+        }
+        bool has_image = false;
+        for (std::size_t index = 0; index < types.size(); ++index) {
+          android::LocalRef<jbyteArray> value(env, static_cast<jbyteArray>(
+              env->GetObjectArrayElement(representations.Get(), static_cast<jsize>(index))));
+          if (env->ExceptionCheck()) {
+            ClearJavaException(env);
+            return ClipboardFailure(IoErrorCode::Io);
+          }
+          if (!value) continue;
+          const auto& mime = types[index];
+          auto bytes = android::JavaByteArrayToBytes(env, value.Get());
+          if (env->ExceptionCheck()) {
+            ClearJavaException(env);
+            return ClipboardFailure(IoErrorCode::Io);
+          }
+          if (mime == "text/plain" || mime == "text/html") {
+            std::string text;
+            if (!bytes.empty()) text.assign(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            item.SetText(mime == "text/plain" ? &ClipboardItem::text : &ClipboardItem::html,
+                         IoResult<std::string>::Success(std::move(text)));
+          } else if (mime == "image/png" || mime == "image/jpeg") {
+            if (has_image) continue;
+            auto image = ClipboardImage(std::move(bytes));
+            has_image = image.Succeeded();
+            item.SetImage(std::move(image));
+          } else {
+            item.SetCustom(mime, IoResult<Bytes>::Success(std::move(bytes)));
+          }
+        }
+        return std::move(item).Finish();
       });
-  if (!retained) return ClipboardResult(ClipboardFailure(IoErrorCode::Io));
-  auto decode_files = kind == ClipboardKind::Files
-      ? CreateAndroidFileReferenceDecoder(vm, environment, context) : AndroidFileReferenceDecoder{};
-  return RunWorker([vm, retained = std::move(retained), decode_files = std::move(decode_files)] {
-    JniEnvironment attached(vm);
-    JNIEnv* environment = attached.Get();
-    if (!environment) return ClipboardFailure(IoErrorCode::Io);
-    const jobject capture = retained.get();
-    android::LocalRef<jclass> type(environment, environment->GetObjectClass(capture));
-    const jmethodID load = type ? environment->GetMethodID(type.Get(), "load", "()V") : nullptr;
-    if (!load) {
-      ClearJavaException(environment);
-      return ClipboardFailure(IoErrorCode::Io);
-    }
-    environment->CallVoidMethod(capture, load);
-    if (environment->ExceptionCheck()) {
-      ClearJavaException(environment);
-      return ClipboardFailure(IoErrorCode::Io);
-    }
-    const jfieldID status_field = environment->GetFieldID(type.Get(), "status", "I");
-    const jfieldID kind_field = status_field ? environment->GetFieldID(type.Get(), "kind", "I") : nullptr;
-    if (!status_field || !kind_field) {
-      ClearJavaException(environment);
-      return ClipboardFailure(IoErrorCode::Io);
-    }
-    switch (environment->GetIntField(capture, status_field)) {
-    case 0: break;
-    case 1: return ClipboardFailure(IoErrorCode::NotFound);
-    case 2: return ClipboardFailure(IoErrorCode::Unsupported);
-    case 3: return ClipboardFailure(IoErrorCode::PermissionDenied);
-    case 4: return ClipboardFailure(IoErrorCode::TooLarge);
-    default: return ClipboardFailure(IoErrorCode::Io);
-    }
-    const auto kind = static_cast<ClipboardKind>(environment->GetIntField(capture, kind_field));
-    try {
-      if (kind == ClipboardKind::Files) {
-        const jfieldID field = environment->GetFieldID(
-            type.Get(), "files", "[Lorg/huxerui/HuxerUIFileReference$Metadata;");
-        android::LocalRef<jobjectArray> files(environment, field
-            ? static_cast<jobjectArray>(environment->GetObjectField(capture, field)) : nullptr);
-        if (decode_files && files && !environment->ExceptionCheck()) {
-          auto references = decode_files(environment, files.Get());
-          return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(references)});
+}
+
+Task<IoResult<std::vector<FileReference>>> ReadAndroidClipboardFiles(JavaVM* vm, JNIEnv* environment, jobject context,
+                                                                     jobject capture) {
+  using Files = std::vector<FileReference>;
+  auto decode_files = CreateAndroidFileReferenceDecoder(vm, environment, context);
+  return LoadAndroidClipboard<Files>(
+      vm, environment, capture,
+      [decode_files = std::move(decode_files)](
+          JNIEnv* env, jobject capture, jclass type, std::optional<IoError> error) {
+        if (error) return IoResult<Files>::Failure(std::move(*error));
+        const auto field = env->GetFieldID(type, "files", "[Lorg/huxerui/HuxerUIFileReference$Metadata;");
+        android::LocalRef<jobjectArray> files(env, field
+            ? static_cast<jobjectArray>(env->GetObjectField(capture, field)) : nullptr);
+        if (!decode_files || !files || env->ExceptionCheck()) {
+          ClearJavaException(env);
+          return ClipboardFailure<Files>(IoErrorCode::Io);
         }
-      } else {
-        const jfieldID field = environment->GetFieldID(type.Get(), "bytes", "[B");
-        android::LocalRef<jbyteArray> bytes(environment, field
-            ? static_cast<jbyteArray>(environment->GetObjectField(capture, field)) : nullptr);
-        if (bytes && !environment->ExceptionCheck()) {
-          auto data = android::JavaByteArrayToBytes(environment, bytes.Get());
-          if (kind == ClipboardKind::Image) return ClipboardImage(std::move(data));
-          std::string text;
-          if (!data.empty()) text.assign(reinterpret_cast<const char*>(data.data()), data.size());
-          if (kind == ClipboardKind::RichText) return ReadClipboardHtml(text);
-          return IoResult<ClipboardContent>::Success(ClipboardContent{std::move(text)});
-        }
-      }
-    } catch (const std::exception&) {
-    }
-    ClearJavaException(environment);
-    return ClipboardFailure(IoErrorCode::Io);
-  });
+        return IoResult<Files>::Success(decode_files(env, files.Get()));
+      });
 }
 
 std::shared_ptr<PermissionTransport>

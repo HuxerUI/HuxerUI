@@ -48,11 +48,11 @@ Text, built-in labels, TextField, and Canvas text inherit the effective `Locale`
 
 ## Clipboard
 
-Obtain the application clipboard with `UseApplication().Clipboard()` on the application thread. `IsAvailable()` reports synchronous plain-text support. `ReadText()` returns an optional UTF-8 string, and `WriteText(text)` reports whether the system accepted valid UTF-8 text.
+Obtain the application clipboard with `UseApplication().Clipboard()`. `SupportsSynchronousText()` checks synchronous plain-text support. `ReadText()` returns an optional UTF-8 string, and `WriteText()` reports whether the system accepted the text.
 
-On desktop, Android, and iOS, publish `ClipboardContent` with `WriteContent()`. Use `ReadTextAsync()`, `ReadRichTextAsync()`, `ReadImageAsync()`, or `ReadFilesAsync()` for typed reads. Handle `NotFound` as absent content. Keep copied image files as `FileReference` attachments and use `ImageAsset` for image content.
+Publish plain text, HTML, encoded pixels, and custom MIME bytes as one `ClipboardItem` with `WriteItem()` or `WriteItemAsync()`. Use `ClipboardItem::FromAttributedText()` for HTML and plain-text alternatives. `ReadItemAsync()` returns the readable requested formats of the same item, and `ToAttributedText()` converts its text representations. Request images and custom bytes through `ClipboardReadOptions`. Use `WriteFiles()` and `ReadFilesAsync()` for file lists and their access grants.
 
-On Web, use `WriteContentAsync()` for text, `AttributedText` as HTML with a plain-text alternative, and PNG images. Call the write or supported read directly in the user action before scheduling the returned Task. Browser-managed TextField copy, cut, and paste use browser editing events.
+On Web, start `WriteItemAsync()` and reads directly inside the user action before scheduling the returned Task. Browser support controls which formats are available. Browser-managed TextField actions use browser editing events.
 
 ## Files and directories
 

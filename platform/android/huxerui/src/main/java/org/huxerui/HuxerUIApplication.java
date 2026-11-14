@@ -11,6 +11,7 @@ import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.AssetFileDescriptor;
 import android.content.res.Configuration;
 import android.database.Cursor;
 import android.database.MatrixCursor;
@@ -37,9 +38,11 @@ import java.io.InputStream;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
@@ -435,15 +438,15 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
      */
     private byte[] readClipboardText() {
         ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard == null || !clipboard.hasPrimaryClip()) {
+        if (clipboard == null) return null;
+        try {
+            ClipData clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() == 0) return null;
+            CharSequence text = clip.getItemAt(0).getText();
+            return text == null ? null : text.toString().getBytes(StandardCharsets.UTF_8);
+        } catch (RuntimeException ignored) {
             return null;
         }
-        ClipData clip = clipboard.getPrimaryClip();
-        if (clip == null || clip.getItemCount() == 0) {
-            return null;
-        }
-        CharSequence text = clip.getItemAt(0).coerceToText(context);
-        return text == null ? null : text.toString().getBytes(StandardCharsets.UTF_8);
     }
 
     /**
@@ -456,17 +459,24 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
                 Collections.emptyMap());
     }
 
-    private boolean writeClipboardHtml(byte[] utf8, byte[] html) {
-        return publishClipboard(ClipData.newHtmlText("HuxerUI", new String(utf8, StandardCharsets.UTF_8),
-                new String(html, StandardCharsets.UTF_8)), Collections.emptyMap());
-    }
-
-    private boolean writeClipboardImage(byte[] bytes, boolean png) {
-        String type = png ? "image/png" : "image/jpeg";
-        Uri uri = newClipboardUri();
-        ClipData clip = new ClipData("HuxerUI", new String[] {type}, new ClipData.Item(uri));
-        ClipboardProvider.Entry entry = new ClipboardProvider.Entry(png ? "image.png" : "image.jpg", type, bytes);
-        return publishClipboard(clip, Collections.singletonMap(uri, entry));
+    private boolean writeClipboardItem(byte[] utf8, byte[] html, String[] types, byte[][] bytes) {
+        String text = utf8 == null ? null : new String(utf8, StandardCharsets.UTF_8);
+        String markup = html == null ? null : new String(html, StandardCharsets.UTF_8);
+        // ClipData.Item requires a text value when it carries HTML.
+        if (markup != null && text == null) return false;
+        ArrayList<String> formats = new ArrayList<>();
+        if (text != null) formats.add(ClipDescription.MIMETYPE_TEXT_PLAIN);
+        if (markup != null) formats.add(ClipDescription.MIMETYPE_TEXT_HTML);
+        Map<String, byte[]> streams = new LinkedHashMap<>();
+        for (int index = 0; index < types.length; ++index) {
+            streams.put(types[index], bytes[index]);
+            formats.add(types[index]);
+        }
+        Uri uri = streams.isEmpty() ? null : newClipboardUri();
+        ClipData clip = new ClipData("HuxerUI", formats.toArray(new String[0]),
+                new ClipData.Item(text, markup, null, uri));
+        return publishClipboard(clip, uri == null ? Collections.emptyMap() :
+                Collections.singletonMap(uri, new ClipboardProvider.Entry(streams)));
     }
 
     private boolean writeClipboardFiles(String[] paths, String[] uris) {
@@ -538,157 +548,254 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
         if (clipboard == null) return false;
         try {
             ClipDescription description = clipboard.getPrimaryClipDescription();
-            return description != null && description.hasMimeType("text/*");
+            return description != null && description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN);
         } catch (SecurityException ignored) {
             return false;
         }
     }
 
-    private ClipboardRead captureClipboard(int kind, int byteLimit, int fileLimit) {
-        ClipboardRead read = new ClipboardRead(context.getContentResolver(), kind, byteLimit, fileLimit);
+    private static final int CLIPBOARD_MISSING = 1;
+    private static final int CLIPBOARD_UNSUPPORTED = 2;
+    private static final int CLIPBOARD_DENIED = 3;
+    private static final int CLIPBOARD_TOO_LARGE = 4;
+    private static final int CLIPBOARD_IO = 5;
+
+    private ClipData captureClipboard() {
         ClipboardManager clipboard = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboard == null) {
-            read.status = ClipboardRead.UNSUPPORTED;
-            return read;
-        }
-        try {
-            read.clip = clipboard.getPrimaryClip();
-            if (read.clip == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                for (Activity activity : activities.keySet()) {
-                    if (activity.hasWindowFocus()) return read;
-                }
-                read.status = ClipboardRead.DENIED;
+        if (clipboard == null) throw new UnsupportedOperationException();
+        ClipData clip = clipboard.getPrimaryClip();
+        if (clip == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            for (Activity activity : activities.keySet()) {
+                if (activity.hasWindowFocus()) return null;
             }
+            throw new SecurityException();
+        }
+        return clip;
+    }
+
+    private ClipboardItemRead captureClipboardItem(String[] types, int textLimit, int imageLimit, int customLimit) {
+        ClipboardItemRead read =
+                new ClipboardItemRead(context.getContentResolver(), types, textLimit, imageLimit, customLimit);
+        try {
+            read.clip = captureClipboard();
+        } catch (UnsupportedOperationException ignored) {
+            read.status = CLIPBOARD_UNSUPPORTED;
         } catch (SecurityException ignored) {
-            read.status = ClipboardRead.DENIED;
+            read.status = CLIPBOARD_DENIED;
         } catch (RuntimeException ignored) {
-            read.status = ClipboardRead.IO;
+            read.status = CLIPBOARD_IO;
         }
         return read;
     }
 
-    /** Captures one clip on the application thread and resolves its requested representation on a worker. */
-    private static final class ClipboardRead {
-        private static final int TEXT = 0;
-        private static final int HTML = 1;
-        private static final int IMAGE = 2;
-        private static final int FILES = 3;
-        private static final int MISSING = 1;
-        private static final int UNSUPPORTED = 2;
-        private static final int DENIED = 3;
-        private static final int TOO_LARGE = 4;
-        private static final int IO = 5;
+    private ClipboardFilesRead captureClipboardFiles(int fileLimit) {
+        ClipboardFilesRead read = new ClipboardFilesRead(context.getContentResolver(), fileLimit);
+        try {
+            read.clip = captureClipboard();
+        } catch (UnsupportedOperationException ignored) {
+            read.status = CLIPBOARD_UNSUPPORTED;
+        } catch (SecurityException ignored) {
+            read.status = CLIPBOARD_DENIED;
+        } catch (RuntimeException ignored) {
+            read.status = CLIPBOARD_IO;
+        }
+        return read;
+    }
 
+    /** Loads only requested representations from the captured clip and one of its items. */
+    private static final class ClipboardItemRead {
         private final ContentResolver resolver;
-        private final int byteLimit;
+        private final String[] types;
+        private final int textLimit;
+        private final int imageLimit;
+        private int customLimit;
+        private ClipData clip;
+        private int status;
+        private byte[][] bytes;
+
+        ClipboardItemRead(ContentResolver resolver, String[] types, int textLimit, int imageLimit, int customLimit) {
+            this.resolver = resolver;
+            this.types = types;
+            this.textLimit = textLimit;
+            this.imageLimit = imageLimit;
+            this.customLimit = customLimit;
+        }
+
+        private void load() {
+            if (status != 0) return;
+            if (clip == null) {
+                status = CLIPBOARD_MISSING;
+                return;
+            }
+            ClipDescription description = clip.getDescription();
+            boolean files = description.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST);
+            try {
+                for (int index = 0; index < clip.getItemCount(); ++index) {
+                    if (loadItem(clip.getItemAt(index), description, files)) return;
+                }
+            } catch (SecurityException ignored) {
+                status = CLIPBOARD_DENIED;
+                return;
+            } catch (RuntimeException ignored) {
+                status = CLIPBOARD_IO;
+                return;
+            }
+            status = CLIPBOARD_MISSING;
+        }
+
+        private boolean loadItem(ClipData.Item item, ClipDescription description, boolean files) {
+            Uri uri = item.getUri();
+            boolean contentUri = !files && uri != null && ContentResolver.SCHEME_CONTENT.equals(uri.getScheme());
+            boolean queriedStreams = false;
+            String[] streams = null;
+            String primaryType = null;
+            int streamError = 0;
+            boolean selected = false;
+            bytes = new byte[types.length][];
+            for (int index = 0; index < types.length; ++index) {
+                String type = types[index];
+                boolean plain = ClipDescription.MIMETYPE_TEXT_PLAIN.equals(type);
+                boolean html = ClipDescription.MIMETYPE_TEXT_HTML.equals(type);
+                boolean image = "image/png".equals(type) || "image/jpeg".equals(type);
+                CharSequence text = plain ? item.getText() : html ? item.getHtmlText() : null;
+                boolean advertisedStream = !plain && !html && contentUri &&
+                        description.hasMimeType(image ? "image/*" : type);
+                if (advertisedStream && !queriedStreams) {
+                    queriedStreams = true;
+                    try {
+                        streams = resolver.getStreamTypes(uri, "*/*");
+                        primaryType = resolver.getType(uri);
+                    } catch (SecurityException ignored) {
+                        streamError = CLIPBOARD_DENIED;
+                    } catch (RuntimeException ignored) {
+                        streamError = CLIPBOARD_IO;
+                    }
+                }
+                boolean typedStream = advertisedStream && streams != null && Arrays.asList(streams).contains(type);
+                boolean directStream = advertisedStream && type.equals(primaryType);
+                boolean unsupportedImage = image && advertisedStream &&
+                        primaryType != null && primaryType.startsWith("image/") &&
+                        !"image/png".equals(primaryType) && !"image/jpeg".equals(primaryType);
+                boolean inaccessibleStream = advertisedStream && streamError != 0;
+                if (text == null && !typedStream && !directStream && !unsupportedImage && !inaccessibleStream) continue;
+                selected = true;
+                int limit = plain || html ? textLimit : image ? imageLimit : customLimit;
+                try {
+                    if (text != null) {
+                        if (text.length() > limit) {
+                            recordError(CLIPBOARD_TOO_LARGE);
+                            continue;
+                        }
+                        byte[] value = text.toString().getBytes(StandardCharsets.UTF_8);
+                        if (value.length > limit) recordError(CLIPBOARD_TOO_LARGE);
+                        else bytes[index] = value;
+                    } else if (typedStream) {
+                        try (AssetFileDescriptor stream = resolver.openTypedAssetFileDescriptor(uri, type, null)) {
+                            bytes[index] = readStream(stream == null ? null : stream.createInputStream(), limit);
+                        }
+                    } else if (directStream) {
+                        bytes[index] = readStream(resolver.openInputStream(uri), limit);
+                    } else {
+                        recordError(inaccessibleStream ? streamError : CLIPBOARD_UNSUPPORTED);
+                    }
+                    if (!plain && !html && !image && bytes[index] != null) customLimit -= bytes[index].length;
+                } catch (SecurityException ignored) {
+                    recordError(CLIPBOARD_DENIED);
+                } catch (IOException | RuntimeException ignored) {
+                    recordError(CLIPBOARD_IO);
+                }
+            }
+            return selected;
+        }
+
+        private byte[] readStream(InputStream input, int limit) throws IOException {
+            if (input == null) {
+                recordError(CLIPBOARD_IO);
+                return null;
+            }
+            try (InputStream source = input) {
+                ByteArrayOutputStream output = new ByteArrayOutputStream();
+                byte[] buffer = new byte[16 * 1024];
+                for (int count; (count = source.read(buffer)) != -1;) {
+                    if (count > limit - output.size()) {
+                        recordError(CLIPBOARD_TOO_LARGE);
+                        return null;
+                    }
+                    output.write(buffer, 0, count);
+                }
+                return output.toByteArray();
+            }
+        }
+
+        private void recordError(int code) {
+            if (status == 0) status = code;
+        }
+    }
+
+    /** Retains access to the complete file list captured on the application thread. */
+    private static final class ClipboardFilesRead {
+        private final ContentResolver resolver;
         private final int fileLimit;
         private ClipData clip;
-        private int kind;
         private int status;
-        private byte[] bytes;
         private HuxerUIFileReference.Metadata[] files;
 
-        ClipboardRead(ContentResolver resolver, int kind, int byteLimit, int fileLimit) {
+        ClipboardFilesRead(ContentResolver resolver, int fileLimit) {
             this.resolver = resolver;
-            this.kind = kind;
-            this.byteLimit = byteLimit;
             this.fileLimit = fileLimit;
         }
 
         private void load() {
             if (status != 0) return;
             if (clip == null || clip.getItemCount() == 0) {
-                status = MISSING;
+                status = CLIPBOARD_MISSING;
                 return;
             }
             try {
-                ClipData.Item first = clip.getItemAt(0);
-                if (kind == TEXT || kind == HTML) {
-                    String html = kind == HTML ? first.getHtmlText() : null;
-                    CharSequence text = html == null ? first.getText() : html;
-                    kind = html == null ? TEXT : HTML;
-                    if (text == null) {
-                        status = MISSING;
-                    } else if (text.length() > byteLimit) {
-                        status = TOO_LARGE;
-                    } else {
-                        bytes = text.toString().getBytes(StandardCharsets.UTF_8);
-                        if (bytes.length > byteLimit) status = TOO_LARGE;
-                    }
-                    return;
-                }
                 ClipDescription description = clip.getDescription();
                 boolean uriList = description.hasMimeType(ClipDescription.MIMETYPE_TEXT_URILIST);
-                boolean image = !uriList && description.hasMimeType("image/*");
-                Uri firstUri = first.getUri();
-                if (kind == IMAGE) {
-                    if (!image || firstUri == null) {
-                        status = MISSING;
-                    } else if (!ContentResolver.SCHEME_CONTENT.equals(firstUri.getScheme())) {
-                        status = UNSUPPORTED;
-                    } else {
-                        readImage(firstUri);
-                    }
-                } else if (kind == FILES) {
-                    if (image || (!uriList && (firstUri == null || first.getText() != null))) {
-                        status = MISSING;
-                    } else {
-                        readFiles();
-                    }
+                ClipData.Item first = clip.getItemAt(0);
+                Uri uri = first.getUri();
+                if (!uriList && (uri == null || first.getText() != null || description.hasMimeType("image/*") ||
+                        (uri.getAuthority() != null && uri.getAuthority().endsWith(".huxerui.clipboard")))) {
+                    status = CLIPBOARD_MISSING;
+                } else {
+                    readFiles();
                 }
             } catch (SecurityException ignored) {
-                status = DENIED;
+                status = CLIPBOARD_DENIED;
             } catch (FileNotFoundException ignored) {
-                status = MISSING;
+                status = CLIPBOARD_MISSING;
             } catch (ErrnoException | IOException | RuntimeException ignored) {
-                status = IO;
-            }
-        }
-
-        private void readImage(Uri uri) throws IOException {
-            try (InputStream input = resolver.openInputStream(uri)) {
-                if (input == null) {
-                    status = IO;
-                    return;
-                }
-                ByteArrayOutputStream output = new ByteArrayOutputStream();
-                byte[] buffer = new byte[16 * 1024];
-                for (int count; (count = input.read(buffer)) != -1;) {
-                    if (count > byteLimit - output.size()) {
-                        status = TOO_LARGE;
-                        return;
-                    }
-                    output.write(buffer, 0, count);
-                }
-                bytes = output.toByteArray();
+                status = CLIPBOARD_IO;
             }
         }
 
         private void readFiles() throws IOException, ErrnoException {
             int count = clip.getItemCount();
             if (count > fileLimit) {
-                status = TOO_LARGE;
+                status = CLIPBOARD_TOO_LARGE;
                 return;
             }
             files = new HuxerUIFileReference.Metadata[count];
             for (int index = 0; index < count; ++index) {
                 Uri uri = clip.getItemAt(index).getUri();
                 if (uri == null || !ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) {
-                    status = UNSUPPORTED;
+                    status = CLIPBOARD_UNSUPPORTED;
                     return;
                 }
                 HuxerUIFileReference.Metadata metadata = HuxerUIFileReference.describe(resolver, uri, 0);
                 if (DocumentsContract.Document.MIME_TYPE_DIR.equals(metadata.contentType)) {
-                    status = UNSUPPORTED;
+                    status = CLIPBOARD_UNSUPPORTED;
                     return;
                 }
                 try (ParcelFileDescriptor file = resolver.openFileDescriptor(uri, "r")) {
                     if (file == null) {
-                        status = IO;
+                        status = CLIPBOARD_IO;
                         return;
                     }
                     if (OsConstants.S_ISDIR(Os.fstat(file.getFileDescriptor()).st_mode)) {
-                        status = UNSUPPORTED;
+                        status = CLIPBOARD_UNSUPPORTED;
                         return;
                     }
                 }
@@ -705,14 +812,14 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
             private final String name;
             private final String type;
             private final long size;
-            private final byte[] bytes;
+            private final Map<String, byte[]> streams;
             private ParcelFileDescriptor file;
 
-            Entry(String name, String type, byte[] bytes) {
-                this.name = name;
-                this.type = type;
-                this.size = bytes.length;
-                this.bytes = bytes;
+            Entry(Map<String, byte[]> streams) {
+                this.streams = Collections.unmodifiableMap(streams);
+                type = streams.keySet().iterator().next();
+                name = "image/png".equals(type) ? "image.png" : "image/jpeg".equals(type) ? "image.jpg" : "clipboard";
+                size = streams.get(type).length;
             }
 
             Entry(File source) throws ErrnoException, IOException {
@@ -720,7 +827,7 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
                 String extension = MimeTypeMap.getFileExtensionFromUrl(Uri.fromFile(source).toString());
                 String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.toLowerCase(Locale.ROOT));
                 type = mime == null ? "application/octet-stream" : mime;
-                bytes = null;
+                streams = Collections.emptyMap();
                 FileDescriptor descriptor = Os.open(source.getPath(),
                         OsConstants.O_RDONLY | OsConstants.O_NONBLOCK | OsConstants.O_CLOEXEC, 0);
                 try {
@@ -779,16 +886,45 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
             return cursor;
         }
 
+        @Override public String[] getStreamTypes(Uri uri, String mimeTypeFilter) {
+            Entry entry = entries.get(uri);
+            if (entry == null || entry.streams.isEmpty()) return null;
+            ArrayList<String> matches = new ArrayList<>();
+            for (String type : entry.streams.keySet()) {
+                if (ClipDescription.compareMimeTypes(type, mimeTypeFilter)) matches.add(type);
+            }
+            return matches.isEmpty() ? null : matches.toArray(new String[0]);
+        }
+
+        @Override public AssetFileDescriptor openTypedAssetFile(Uri uri, String mimeTypeFilter, Bundle options)
+                throws FileNotFoundException {
+            Entry entry = entries.get(uri);
+            if (entry != null && !entry.streams.isEmpty()) {
+                for (Map.Entry<String, byte[]> stream : entry.streams.entrySet()) {
+                    if (ClipDescription.compareMimeTypes(stream.getKey(), mimeTypeFilter)) {
+                        return new AssetFileDescriptor(openBytes(uri, stream.getKey(), stream.getValue()), 0,
+                                AssetFileDescriptor.UNKNOWN_LENGTH);
+                    }
+                }
+                throw new FileNotFoundException("HuxerUI clipboard representation is unavailable");
+            }
+            return super.openTypedAssetFile(uri, mimeTypeFilter, options);
+        }
+
         @Override public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
             Entry entry = entries.get(uri);
             if (entry == null || !"r".equals(mode)) {
                 throw new FileNotFoundException("HuxerUI clipboard entry is unavailable");
             }
-            if (entry.bytes == null) return entry.open();
-            return openPipeHelper(uri, entry.type, null, entry.bytes, (output, item, mime, options, bytes) -> {
+            if (entry.streams.isEmpty()) return entry.open();
+            return openBytes(uri, entry.type, entry.streams.get(entry.type));
+        }
+
+        private ParcelFileDescriptor openBytes(Uri uri, String type, byte[] bytes) throws FileNotFoundException {
+            return openPipeHelper(uri, type, null, bytes, (output, item, mime, options, data) -> {
                 try (ParcelFileDescriptor.AutoCloseOutputStream stream =
                         new ParcelFileDescriptor.AutoCloseOutputStream(output)) {
-                    stream.write(bytes);
+                    stream.write(data);
                 } catch (IOException ignored) {}
             });
         }
