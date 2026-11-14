@@ -1515,6 +1515,45 @@ TEST_CASE("Pager uses touch release velocity and returns after pointer cancellat
   }
 }
 
+TEST_CASE("Pager returns to the controlled page when dragging is disabled mid-gesture") {
+  const bool released = GENERATE(false, true);
+  CAPTURE(released);
+  pager_proposals.clear();
+  pager_settlements.clear();
+  accept_pager_proposals = true;
+  TestPlatform platform;
+  UiWindow runtime{InteractivePagerApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 80.0F}});
+  runtime.BuildFrame();
+
+  runtime.HandlePointerEvent({PointerEventType::Down, 308, {80.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.HandlePointerEvent({PointerEventType::Move, 308, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children[2]->PresentationBounds().x == Catch::Approx(40.0F));
+  if (released) {
+    runtime.HandlePointerEvent({PointerEventType::Up, 308, {20.0F, 40.0F}, PointerDeviceKind::Mouse});
+  }
+
+  // A programmatic page change and drag disable in the same turn must settle on the controlled page.
+  interactive_pager_page = 2;
+  interactive_pager_drag_enabled = false;
+  runtime.BuildFrame();
+
+  platform.AdvanceTime(0.05);
+  runtime.BuildFrame();
+  REQUIRE(runtime.RootNode()->children[2]->PresentationBounds().x < 40.0F);
+  REQUIRE(runtime.RootNode()->children[1]->PresentationBounds().x < -60.0F);
+
+  for (int frame = 0; frame < 6; ++frame) {
+    platform.AdvanceTime(0.25);
+    runtime.BuildFrame();
+  }
+  REQUIRE(pager_proposals.empty());
+  REQUIRE(interactive_pager_page.Get() == 2);
+  REQUIRE(pager_settlements == std::vector<std::size_t>{2});
+  REQUIRE(runtime.RootNode()->children[2]->PresentationBounds().x == Catch::Approx(0.0F));
+}
+
 TEST_CASE("RefreshBox transfers direct pull displacement into controlled refresh state") {
   refresh_requests = 0;
   accept_refresh_requests = true;
