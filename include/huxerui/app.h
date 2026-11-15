@@ -746,6 +746,7 @@ class SceneTransitionService;
 struct ViewSpec;
 class RecomposeScope;
 class VirtualMeasureSession;
+class WindowDrag;
 
 } // namespace detail
 
@@ -944,6 +945,11 @@ public:
 protected:
   UiWindow();
 
+  /// Starts platform transport for an accepted typed mouse drag on this window's application thread.
+  /// A false result leaves the original pointer sequence in charge. Keep the operation for asynchronous delivery
+  /// only after accepting it. Deliver platform callbacks after the handoff returns.
+  virtual bool BeginApplicationDrag(std::shared_ptr<detail::WindowDrag>) { return false; }
+
   /// Requests a fullscreen transition from the native host. Unsupported attachments ignore the request.
   virtual void RequestFullscreen(bool) {}
 
@@ -1097,6 +1103,7 @@ private:
   friend class detail::SemanticTree;
   friend class detail::TextInteraction;
   friend class detail::VirtualMeasureSession;
+  friend class detail::WindowDrag;
   friend class detail::WindowService;
   friend struct detail::InternalAccess;
   Runtime* application_runtime_ = nullptr;

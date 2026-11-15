@@ -31,6 +31,8 @@ private:
   Target* target_;
 };
 
+void RunWin32ApplicationDrag(const std::shared_ptr<WindowDrag>& drag, bool swapped_buttons);
+
 [[nodiscard]] AppDirectories
 ResolveWin32AppDirectories(std::wstring_view executable_path, std::wstring_view local_app_data);
 [[nodiscard]] AppDirectories

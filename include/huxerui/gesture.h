@@ -153,9 +153,15 @@ struct DragEvents {
   struct Canceled : Event<void(const DragEvent&)> {};
 };
 
+/// Controls whether typed drag-and-drop may cross windows of the same application Runtime.
+enum class DragDropScope {
+  Window,      ///< Use ordinary window-local drag-and-drop.
+  Application, ///< Allow cross-window mouse drag-and-drop where the host supports it.
+};
+
 // Describes one target-relative update during a typed drag-and-drop session.
 struct DropEvent {
-  // Pointer sequence that owns the drag-and-drop session.
+  // Original source pointer sequence, including when the target is in another window.
   std::int64_t pointer_id = 0;
   // Device kind reported by the owning pointer sequence.
   PointerDeviceKind device_kind = PointerDeviceKind::Mouse;
@@ -169,6 +175,7 @@ struct DropEvent {
 
 // Describes normal completion of a drag source, including whether a target accepted the drop.
 struct DragDropResult {
+  // Latest source-window snapshot. Platform drag transport may provide no further source positions.
   DragEvent drag;
   bool dropped = false;
 
@@ -226,6 +233,10 @@ public:
 
   static const detail::ModifierDescriptor& Descriptor();
 
+  /// Selects the transfer scope. The default is Window. The active pointer sequence retains its original value.
+  /// @throws std::invalid_argument If scope is not a declared DragDropScope value.
+  DragSource&& Scope(DragDropScope scope) &&;
+
 private:
   DragSource(std::type_index payload_type, std::shared_ptr<const void> payload, std::function<View()> preview,
              DragGesture gesture);
@@ -234,6 +245,7 @@ private:
   std::shared_ptr<const void> payload_;
   std::function<View()> preview_;
   DragGesture gesture_;
+  DragDropScope scope_ = DragDropScope::Window;
 
   friend class detail::DragSourceExtension;
 };
@@ -276,6 +288,11 @@ public:
 
   static const detail::ModifierDescriptor& Descriptor();
 
+  /// Enables reception from other windows when both declarations use Application and share a Runtime.
+  /// The default is Window. Same-window matching accepts either scope.
+  /// @throws std::invalid_argument If scope is not a declared DragDropScope value.
+  DropTarget&& Scope(DragDropScope scope) &&;
+
 private:
   DropTarget(std::type_index payload_type, std::function<bool(const void*)> accepts,
              detail::DropTargetDispatch dispatch);
@@ -283,6 +300,7 @@ private:
   std::type_index payload_type_ = typeid(void);
   std::function<bool(const void*)> accepts_;
   detail::DropTargetDispatch dispatch_;
+  DragDropScope scope_ = DragDropScope::Window;
 
   friend class detail::DropTargetExtension;
 };

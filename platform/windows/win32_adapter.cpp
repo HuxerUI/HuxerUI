@@ -39,6 +39,7 @@
 #include "internal_access.h"
 #include "application/platform_frame_internal.h"
 #include "resources/resource_internal.h"
+#include "runtime/gesture_internal.h"
 #include "text/text_internal.h"
 #include "win32_accessibility.h"
 #include "win32_application_internal.h"
@@ -62,6 +63,7 @@ namespace {
 constexpr UINT kRenderMessage = WM_APP + 1;
 constexpr UINT kWindowCommandMessage = WM_APP + 3;
 constexpr UINT kFullscreenMessage = WM_APP + 4;
+constexpr UINT kApplicationDragMessage = WM_APP + 5;
 constexpr UINT_PTR kFrameTimer = 1;
 constexpr float kDipsPerInch = 96.0F;
 
@@ -1283,6 +1285,13 @@ public:
     }
   }
 
+  bool BeginApplicationDrag(std::shared_ptr<WindowDrag> drag) override {
+    if (!window_ || !file_drop_ || pending_drag_ || transport_drag_) return false;
+    if (!PostMessageW(window_, kApplicationDragMessage, 0, 0)) return false;
+    pending_drag_ = std::move(drag);
+    return true;
+  }
+
   FontMetrics Metrics(const Font& font) override {
     return renderer_.Metrics(font);
   }
@@ -1664,6 +1673,7 @@ private:
 
   void SendPointer(PointerEventType type, Point position, PointerButton changed_button = PointerButton::None,
                    PointerButton pressed_buttons = PointerButton::None) {
+    if (transport_drag_) return;
     last_pointer_position_ = position;
     UiWindow::HandlePointerEvent({
         type,
@@ -1680,6 +1690,7 @@ private:
     if (!IsInitialized()) {
       return;
     }
+    if (transport_drag_) return;
     SendPointer(PointerEventType::Cancel, last_pointer_position_);
     pointer_down_ = false;
     if (GetCapture() != nullptr) {
@@ -1940,6 +1951,26 @@ private:
   }
 
   LRESULT HandleMessage(HWND window, UINT message, WPARAM w_param, LPARAM l_param) {
+    if (message == kApplicationDragMessage) {
+      const auto drag = std::exchange(pending_drag_, {});
+      if (!drag || !drag->Active()) return 0;
+      const bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
+      if (!(GetAsyncKeyState(swapped ? VK_RBUTTON : VK_LBUTTON) & 0x8000)) {
+        drag->Finish(false);
+        return 0;
+      }
+      transport_drag_ = true;
+      pointer_down_ = false;
+      if (GetCapture() == window) ReleaseCapture();
+      try {
+        RunWin32ApplicationDrag(drag, swapped);
+      } catch (...) {
+        transport_drag_ = false;
+        throw;
+      }
+      transport_drag_ = false;
+      return 0;
+    }
     if (!IsInitialized() && message != WM_NCCREATE && message != WM_CREATE && message != WM_DESTROY &&
         message != WM_NCCALCSIZE && message != WM_GETMINMAXINFO && message != WM_NCDESTROY) {
       return message == WM_CLOSE ? 0 : DefWindowProcW(window, message, w_param, l_param);
@@ -2282,6 +2313,8 @@ private:
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   HWND mouse_tracking_window_ = nullptr;
   bool pointer_down_ = false;
+  bool transport_drag_ = false;
+  std::shared_ptr<WindowDrag> pending_drag_;
   bool performing_close_ = false;
   Point last_pointer_position_;
   Win32Accessibility accessibility_;

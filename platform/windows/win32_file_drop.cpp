@@ -2,6 +2,7 @@
 
 #include <ole2.h>
 #include <shellapi.h>
+#include <shlobj.h>
 
 #include <atomic>
 #include <cmath>
@@ -15,10 +16,107 @@
 #include <huxerui/file_drop.h>
 
 #include "io/file_internal.h"
+#include "internal_access.h"
 #include "macros_internal.h"
+#include "runtime/gesture_internal.h"
 
 namespace huxerui::detail {
 namespace {
+
+UINT ApplicationDragFormat() {
+  static const UINT format = RegisterClipboardFormatW(L"HuxerUI.ApplicationDrag");
+  return format;
+}
+
+class Win32ApplicationDrag final : public IDataObject, public IDropSource {
+public:
+  Win32ApplicationDrag(std::shared_ptr<WindowDrag> drag, bool swapped_buttons)
+      : drag_(std::move(drag)), button_(swapped_buttons ? MK_RBUTTON : MK_LBUTTON) {}
+
+  const std::shared_ptr<WindowDrag>& Drag() const noexcept { return drag_; }
+  bool Released() const noexcept { return released_; }
+
+  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override {
+    if (!value) return E_POINTER;
+    *value = nullptr;
+    if (IsEqualIID(iid, IID_IUnknown) || IsEqualIID(iid, IID_IDataObject)) {
+      *value = static_cast<IDataObject*>(this);
+    } else if (IsEqualIID(iid, IID_IDropSource)) {
+      *value = static_cast<IDropSource*>(this);
+    } else {
+      return E_NOINTERFACE;
+    }
+    AddRef();
+    return S_OK;
+  }
+  ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
+  ULONG STDMETHODCALLTYPE Release() override {
+    const ULONG remaining = --references_;
+    if (!remaining) delete this;
+    return remaining;
+  }
+
+  HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
+    if (escape || !drag_->Active()) return DRAGDROP_S_CANCEL;
+    if (!(keys & button_)) {
+      released_ = true;
+      return DRAGDROP_S_DROP;
+    }
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GiveFeedback(DWORD) override { return DRAGDROP_S_USEDEFAULTCURSORS; }
+
+  HRESULT STDMETHODCALLTYPE GetData(FORMATETC* format, STGMEDIUM* medium) override {
+    if (!medium) return E_POINTER;
+    *medium = {};
+    const HRESULT match = QueryGetData(format);
+    if (FAILED(match)) return match;
+    medium->hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 1);
+    if (!medium->hGlobal) return E_OUTOFMEMORY;
+    medium->tymed = TYMED_HGLOBAL;
+    return S_OK;
+  }
+  HRESULT STDMETHODCALLTYPE GetDataHere(FORMATETC*, STGMEDIUM*) override { return DV_E_FORMATETC; }
+  HRESULT STDMETHODCALLTYPE QueryGetData(FORMATETC* format) override {
+    if (!format) return E_POINTER;
+    return format->cfFormat == ApplicationDragFormat() && (format->tymed & TYMED_HGLOBAL) &&
+           format->dwAspect == DVASPECT_CONTENT && format->lindex == -1 ? S_OK : DV_E_FORMATETC;
+  }
+  HRESULT STDMETHODCALLTYPE GetCanonicalFormatEtc(FORMATETC*, FORMATETC* output) override {
+    if (!output) return E_POINTER;
+    *output = {};
+    return DATA_S_SAMEFORMATETC;
+  }
+  HRESULT STDMETHODCALLTYPE SetData(FORMATETC*, STGMEDIUM*, BOOL) override { return E_NOTIMPL; }
+  HRESULT STDMETHODCALLTYPE EnumFormatEtc(DWORD direction, IEnumFORMATETC** value) override {
+    if (!value) return E_POINTER;
+    *value = nullptr;
+    if (direction != DATADIR_GET) return E_NOTIMPL;
+    const FORMATETC format{static_cast<CLIPFORMAT>(ApplicationDragFormat()), nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    return SHCreateStdEnumFmtEtc(1, &format, value);
+  }
+  HRESULT STDMETHODCALLTYPE DAdvise(FORMATETC*, DWORD, IAdviseSink*, DWORD*) override {
+    return OLE_E_ADVISENOTSUPPORTED;
+  }
+  HRESULT STDMETHODCALLTYPE DUnadvise(DWORD) override { return OLE_E_ADVISENOTSUPPORTED; }
+  HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA**) override { return OLE_E_ADVISENOTSUPPORTED; }
+
+private:
+  std::atomic<ULONG> references_{1};
+  std::shared_ptr<WindowDrag> drag_;
+  DWORD button_;
+  bool released_ = false;
+};
+
+// OLE presents the source IDataObject directly to targets in the same thread.
+thread_local Win32ApplicationDrag* current_application_drag = nullptr;
+
+std::shared_ptr<WindowDrag> LocalApplicationDrag(IDataObject* object) {
+  if (current_application_drag && object == static_cast<IDataObject*>(current_application_drag)) {
+    return current_application_drag->Drag();
+  }
+  return {};
+}
 
 FORMATETC ShellFileFormat() {
   return {CF_HDROP, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
@@ -79,6 +177,22 @@ FileDropPreparation CaptureFiles(IDataObject* object) {
 
 } // namespace
 
+void RunWin32ApplicationDrag(const std::shared_ptr<WindowDrag>& drag, bool swapped_buttons) {
+  if (current_application_drag || !drag->Active()) {
+    drag->Finish(true);
+    return;
+  }
+  struct ReleaseDrag {
+    void operator()(Win32ApplicationDrag* drag) const noexcept { drag->Release(); }
+  };
+  std::unique_ptr<Win32ApplicationDrag, ReleaseDrag> operation(new Win32ApplicationDrag(drag, swapped_buttons));
+  current_application_drag = operation.get();
+  DWORD effect = DROPEFFECT_NONE;
+  const HRESULT result = DoDragDrop(operation.get(), operation.get(), DROPEFFECT_COPY, &effect);
+  current_application_drag = nullptr;
+  drag->Finish(FAILED(result) || (result == DRAGDROP_S_CANCEL && !operation->Released()));
+}
+
 class Win32FileDrop::Target final : public IDropTarget {
 public:
   Target(HWND platform_window, UiWindow& ui_window, std::function<float()> scale)
@@ -113,6 +227,11 @@ public:
     const bool copy = (*effect & DROPEFFECT_COPY) != 0;
     *effect = DROPEFFECT_NONE;
     Leave();
+    if (auto drag = LocalApplicationDrag(object)) {
+      application_drag_ = std::move(drag);
+      MoveApplicationDrag(point, copy, effect);
+      return S_OK;
+    }
     FORMATETC format = ShellFileFormat();
     offered_ = object && SUCCEEDED(object->QueryGetData(&format));
     if (!ui_window_ || !offered_ || !copy) {
@@ -135,6 +254,10 @@ public:
     }
     const bool copy = (*effect & DROPEFFECT_COPY) != 0;
     *effect = DROPEFFECT_NONE;
+    if (application_drag_) {
+      MoveApplicationDrag(point, copy, effect);
+      return S_OK;
+    }
     if (!copy) {
       EndHover();
       return S_OK;
@@ -167,6 +290,15 @@ public:
     }
     const bool copy = (*effect & DROPEFFECT_COPY) != 0;
     *effect = DROPEFFECT_NONE;
+    if (auto drag = std::exchange(application_drag_, {})) {
+      if (ui_window_ && copy && LocalApplicationDrag(object) == drag) {
+        ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
+        try {
+          if (drag->Drop(*ui_window_, Position(point))) *effect = DROPEFFECT_COPY;
+        } catch (...) {}
+      }
+      return S_OK;
+    }
     if (ui_window_ && offered_ && copy) {
       try {
         auto source = CaptureFiles(object);
@@ -188,6 +320,19 @@ public:
   }
 
 private:
+  void MoveApplicationDrag(POINTL point, bool copy, DWORD* effect) noexcept {
+    if (!ui_window_) return;
+    const auto drag = application_drag_;
+    ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
+    try {
+      if (copy) {
+        if (drag->Move(*ui_window_, Position(point))) *effect = DROPEFFECT_COPY;
+      } else {
+        drag->Leave(*ui_window_);
+      }
+    } catch (...) {}
+  }
+
   Point Position(POINTL point) const {
     POINT client{point.x, point.y};
     if (!ScreenToClient(platform_window_, &client)) {
@@ -211,6 +356,10 @@ private:
   }
 
   void Leave() noexcept {
+    if (auto drag = std::exchange(application_drag_, {}); drag && ui_window_) {
+      ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
+      try { drag->Leave(*ui_window_); } catch (...) {}
+    }
     offered_ = false;
     EndHover();
   }
@@ -219,6 +368,7 @@ private:
   HWND platform_window_;
   UiWindow* ui_window_;
   std::function<float()> scale_;
+  std::shared_ptr<WindowDrag> application_drag_;
   std::uint64_t session_ = 0;
   bool offered_ = false;
   bool hovering_ = false;

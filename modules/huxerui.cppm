@@ -102,6 +102,7 @@ export namespace huxerui {
     using huxerui::DockPlacement;
     using huxerui::DockTree;
     using huxerui::DragDropResult;
+    using huxerui::DragDropScope;
     using huxerui::DragEvent;
     using huxerui::DragEvents;
     using huxerui::DragGesture;

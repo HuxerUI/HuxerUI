@@ -65,17 +65,20 @@ private:
   void UpdateDragDrop(PointerSession& session, const DragEvent& drag);
   void UpdateDropTarget(PointerSession& session, const DragEvent& drag, bool emit_moved);
   [[nodiscard]] std::optional<ActiveDropTarget>
-  ResolveDropTarget(const DragDropSession& session, Point window_position) const;
+  ResolveDropTarget(std::type_index type, const void* payload, Point window_position, bool cross_window = false) const;
   void AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& frame);
   void FinishDragDrop(PointerSession& session, const DragEvent& drag);
   void CancelDragDrop(PointerSession& session, const DragEvent& drag);
+  void CompleteWindowDrag(const WindowDrag& drag, bool canceled);
 
   UiWindow::State& runtime_state_;
   std::optional<PointerHoverState> pointer_hover_;
   PointerCursorKind pointer_cursor_kind_ = PointerCursorKind::Default;
   std::unordered_map<std::int64_t, PointerSession> pointer_sessions_;
+  std::weak_ptr<WindowDrag> incoming_drag_;
 
   friend class TextInteraction;
+  friend class WindowDrag;
 };
 
 } // namespace huxerui::detail

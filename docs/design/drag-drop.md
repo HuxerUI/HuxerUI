@@ -1,7 +1,7 @@
 # Typed Drag-and-Drop Design
 
 This document defines in-process typed drag-and-drop between mounted HuxerUI nodes.
-It extends the shared gesture ownership path without adding public pointer capture, event propagation, a drag registry, or platform transfer formats.
+It extends the shared gesture ownership path with optional platform transport between windows in one application Runtime.
 
 The underlying recognizer and PointerSession rules remain defined by [Gesture Recognition and Arbitration](gestures.md).
 Layer ownership remains defined by [Architecture](architecture.md), and scrolling remains defined by [Incremental Layout and Rendering](incremental-rendering.md).
@@ -157,11 +157,18 @@ PointerSession
 ```
 
 DragDropSession coordinates the accepted operation but does not own or transfer the physical pointer.
-There is no Runtime-wide active-drag slot, target registry, or second route.
-Independent PointerSessions may own independent transfers.
+Independent PointerSessions may own independent transfers. An application-scoped mouse session can hand transport to the platform after the recognizer wins. The source still owns the session and its immutable payload.
 
 Runtime discovers source and target behavior through private NodeExtension capabilities.
 It never branches on DragSourceExtension, DropTargetExtension, a component NodeKind, or the payload type.
+
+## Application scope
+
+`DragSource::Scope(DragDropScope::Application)` allows a mouse drag using the primary button to cross windows. A receiving target in another window must select the same scope and share the application's Runtime. Same-window matching accepts either scope. Platforms or pointer devices without this transport keep the window-local path.
+
+The transport carries one local session identity. The receiver uses its current hit route, window context, target declarations, and edge scrolling. It does not start pointer recognition. The preview uses the captured source Environment and is mounted in the window currently receiving the drag. Drop coordinates are relative to the receiver; the source keeps its latest source-window drag snapshot.
+
+Drop commits once and withdraws the preview before calling the target, followed by the source result if it remains live. Closing a receiver clears only that receiver; closing the source cancels the session. Late notifications cannot revive it. AppKit completion without an explicit cancellation reason reports an unsuccessful Ended event.
 
 ## Target selection
 

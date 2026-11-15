@@ -305,7 +305,7 @@ Set `AppOptions::quit_on_last_window_closed = false` to keep application service
 Hidden windows count, while initial windowless startup, failed creation, and retirement of external UI attachments do not trigger this policy.
 `ApplicationHandle::Quit()` shuts down the entire application without invoking per-window close interception, retiring windows before application services.
 
-[Multiple-window example](../../examples/multi_window/main.cpp) demonstrates shared and local counters, observable closure, and reopening.
+[Multiple-window example](../../examples/multi_window/main.cpp) uses shared application state to move tabs between two open windows. Click **Open secondary**, then drag a tab onto the other window's tab bar to move and select it.
 
 ## Runtime model
 

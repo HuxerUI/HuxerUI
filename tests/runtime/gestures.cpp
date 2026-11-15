@@ -9,8 +9,28 @@
 #include <utility>
 #include <vector>
 
+#include "runtime/gesture_internal.h"
+
 namespace huxerui::test {
 namespace {
+
+class DragTestPlatform final : public TestPlatform {
+public:
+  void Attach(huxerui::Runtime& runtime, ViewFactory content) {
+    InitializeWindow(runtime, std::move(content), {});
+    SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+    BuildFrame();
+  }
+
+  bool BeginApplicationDrag(std::shared_ptr<detail::WindowDrag> operation) override {
+    drag = std::move(operation);
+    return true;
+  }
+
+  void Detach() { huxerui::UiWindow::Retire(); }
+
+  std::shared_ptr<detail::WindowDrag> drag;
+};
 
 std::vector<std::string> gesture_events;
 std::vector<DragEvent> drag_events;
@@ -1261,6 +1281,94 @@ TEST_CASE("Typed drag-and-drop preserves source and target lifecycle order") {
                                 "source ended",
                             });
   REQUIRE(drag_drop_completed);
+}
+
+TEST_CASE("Application-scoped drag routes typed events between live windows") {
+  DragTestPlatform source;
+  DragTestPlatform target;
+  DragTestPlatform foreign;
+  Application application([]() -> View { return {}; }, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, source);
+  detail::InternalAccess::InitializeRuntime(foreign, application);
+  std::vector<std::string> events;
+  int received = 0;
+  DropEvent dropped;
+  std::optional<DragDropResult> completed;
+  auto receiver = [&](DragDropScope scope) {
+    return [&, scope]() -> View {
+      return Text("target").With(Frame{100.0F, 60.0F}, DropTarget::Accepts<int>().Scope(scope))
+          .On<DropEvents<int>::Entered>([&](const int&, const DropEvent&) { events.emplace_back("entered"); })
+          .On<DropEvents<int>::Exited>([&](const int&, const DropEvent&) { events.emplace_back("exited"); })
+          .On<DropEvents<int>::Dropped>([&](const int& value, const DropEvent& drop) {
+            events.emplace_back("dropped");
+            received = value;
+            dropped = drop;
+          })
+          .OnClick([&] { events.emplace_back("click"); });
+    };
+  };
+  const bool opted_in = GENERATE(false, true);
+  const auto scope = opted_in ? DragDropScope::Application : DragDropScope::Window;
+  foreign.Attach(foreign, receiver(DragDropScope::Application));
+  target.Attach(source, receiver(scope));
+  source.Attach(source, [&] {
+    return Text("source").With(Frame{100.0F, 60.0F}, DragSource(42).Scope(DragDropScope::Application))
+        .On<DragSourceEvents::Started>([&](const DragEvent&) { events.emplace_back("started"); })
+        .On<DragSourceEvents::Ended>([&](const DragDropResult& result) {
+          completed = result;
+          events.emplace_back("ended");
+        })
+        .On<DragSourceEvents::Canceled>([&](const DragEvent&) { events.emplace_back("canceled"); });
+  });
+
+  const auto start_drag = [&] {
+    source.drag.reset();
+    source.HandlePointerEvent({PointerEventType::Down, 7, {12.0F, 22.0F}, PointerDeviceKind::Mouse,
+                               PointerButton::Primary, PointerButton::Primary});
+    source.HandlePointerEvent({PointerEventType::Move, 7, {39.0F, 22.0F}, PointerDeviceKind::Mouse,
+                               PointerButton::None, PointerButton::Primary});
+    REQUIRE(source.drag);
+  };
+  start_drag();
+  REQUIRE_FALSE(source.drag->Move(foreign, {25.0F, 30.0F}));
+  REQUIRE(events == std::vector<std::string>{"started"});
+  REQUIRE(source.drag->Move(target, {20.0F, 30.0F}) == opted_in);
+  REQUIRE(source.drag->Drop(target, {25.0F, 30.0F}) == opted_in);
+  REQUIRE_FALSE(source.drag->Drop(target, {25.0F, 30.0F}));
+  source.drag->Leave(target);
+  source.drag->Finish(false);
+  source.drag->Finish(true);
+  REQUIRE(completed.has_value());
+  REQUIRE(completed->dropped == opted_in);
+  REQUIRE(completed->drag.window_position == Point{39.0F, 22.0F});
+  if (opted_in) {
+    REQUIRE(events == std::vector<std::string>{"started", "entered", "dropped", "ended"});
+    REQUIRE(received == 42);
+    REQUIRE(dropped.pointer_id == 7);
+    REQUIRE(dropped.window_position == Point{25.0F, 30.0F});
+    REQUIRE(dropped.position == Point{25.0F, 30.0F});
+
+    events.clear();
+    start_drag();
+    REQUIRE(source.drag->Move(target, {20.0F, 30.0F}));
+    source.drag->Finish(true);
+    REQUIRE_FALSE(source.drag->Drop(target, {20.0F, 30.0F}));
+    REQUIRE(events == std::vector<std::string>{"started", "entered", "exited", "canceled"});
+
+    events.clear();
+    start_drag();
+    REQUIRE(source.drag->Move(target, {20.0F, 30.0F}));
+    target.Detach();
+    REQUIRE(source.drag->Active());
+    REQUIRE_FALSE(source.drag->Drop(target, {20.0F, 30.0F}));
+    source.drag->Finish(false);
+    REQUIRE(events == std::vector<std::string>{"started", "entered", "ended"});
+  } else {
+    REQUIRE(events == std::vector<std::string>{"started", "ended"});
+  }
+  foreign.Detach();
+  target.Detach();
+  source.Detach();
 }
 
 TEST_CASE("Cancel exits the active drop target before canceling the source") {

@@ -766,6 +766,7 @@ private:
     capability_.payload_type = source.payload_type_;
     capability_.payload = source.payload_;
     capability_.preview = source.preview_;
+    capability_.scope = source.scope_;
   }
 
   DragGesture gesture_;
@@ -795,6 +796,7 @@ private:
     capability_.payload_type = target.payload_type_;
     capability_.accepts = target.accepts_;
     capability_.dispatch = target.dispatch_;
+    capability_.scope = target.scope_;
   }
 
   DropTargetCapability capability_;
@@ -826,12 +828,28 @@ DragSource::DragSource(std::type_index payload_type, std::shared_ptr<const void>
   Validate(gesture_);
 }
 
+DragSource&& DragSource::Scope(DragDropScope scope) && {
+  if (scope != DragDropScope::Window && scope != DragDropScope::Application) {
+    throw std::invalid_argument("HuxerUI invalid drag-and-drop scope");
+  }
+  scope_ = scope;
+  return std::move(*this);
+}
+
 DropTarget::DropTarget(std::type_index payload_type, std::function<bool(const void*)> accepts,
                        detail::DropTargetDispatch dispatch)
     : payload_type_(payload_type), accepts_(std::move(accepts)), dispatch_(dispatch) {
   if (!accepts_) {
     throw std::invalid_argument("HuxerUI drop target predicate must not be empty");
   }
+}
+
+DropTarget&& DropTarget::Scope(DragDropScope scope) && {
+  if (scope != DragDropScope::Window && scope != DragDropScope::Application) {
+    throw std::invalid_argument("HuxerUI invalid drag-and-drop scope");
+  }
+  scope_ = scope;
+  return std::move(*this);
 }
 
 const detail::ModifierDescriptor& MultiTapGesture::Descriptor() {
