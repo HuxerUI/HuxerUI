@@ -6,7 +6,16 @@
 #include <d2d1effects.h>
 #include <d3d11.h>
 #include <d3d11_1.h>
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+// Expose the SDK declarations for runtime-loaded DirectComposition.
+#pragma push_macro("NTDDI_VERSION")
+#undef NTDDI_VERSION
+#define NTDDI_VERSION NTDDI_WIN8
+#endif
 #include <dcomp.h>
+#if defined(HUXERUI_WINDOWS_7_COMPAT)
+#pragma pop_macro("NTDDI_VERSION")
+#endif
 #include <dwrite.h>
 #include <dxgi1_2.h>
 #include <wincodec.h>
