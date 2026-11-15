@@ -261,8 +261,8 @@ public:
 
   /// Ends platform delivery and completes the source session if it is still live. Duplicate completions are ignored.
   /// Pass true for an explicit cancellation or platform failure. A normal release without a target reports
-  /// Ended with dropped set to false. A committed drop reports Ended with dropped set to true.
-  void Finish(bool canceled);
+  /// Ended with dropped set to false. Report a release outside the application only when the platform confirms it.
+  void Finish(bool canceled, bool released_outside_application = false);
 
   /// Registers a nonthrowing callback to stop platform delivery if HuxerUI cancels the drag before a drop commits.
   void SetPlatformCancel(std::function<void()> cancel);

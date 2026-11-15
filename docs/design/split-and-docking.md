@@ -1,6 +1,6 @@
 # Split and Docking Layouts
 
-SplitLayout and DockLayout provide controlled pane resizing and single-window workspace rearrangement through the existing View, modifier, event, and mounted-node contracts. The foundations are [Layout and Scrolling](../guide/layout.md), [Indexed Pages](indexed-pages.md), [Typed Drag-and-Drop](drag-drop.md), and [Semantics and Accessibility](semantics.md).
+SplitLayout and DockLayout provide controlled pane resizing and workspace rearrangement through the existing View, modifier, event, and mounted-node contracts. The foundations are [Layout and Scrolling](../guide/layout.md), [Indexed Pages](indexed-pages.md), [Typed Drag-and-Drop](drag-drop.md), and [Semantics and Accessibility](semantics.md).
 
 ## Scope and ownership
 
@@ -11,7 +11,7 @@ SplitLayout and DockLayout provide controlled pane resizing and single-window wo
 | `DockTree` | Store split relationships, tab groups, selection, and Frame/Grow configuration |
 | `DockItem` | Declare one panel's stable ID, title, content, and close affordance |
 
-SplitLayout supports dynamic pane counts and nesting. DockLayout adds tab ordering, grouping, splitting, panel removal from the layout, and explicit reopening within one UiWindow. An overlapping bottom panel remains ordinary Stack composition; a bottom region that takes space from its neighbors belongs in a vertical split.
+SplitLayout supports dynamic pane counts and nesting. DockLayout adds tab ordering, grouping, splitting, panel removal, explicit reopening, and opt-in transfers between layouts. An overlapping bottom panel remains ordinary Stack composition; a bottom region that takes space from its neighbors belongs in a vertical split.
 
 Floating native windows, cross-window transfers, automatic hiding at workspace edges, implicit reopening history, and a serialized layout format are outside this design. There is no workspace Runtime service, controller, global panel registry, content factory, or new size-unit type.
 
@@ -139,6 +139,9 @@ class DockLayout final : public detail::TypedView<DockLayout> {
 public:
   DockLayout(std::vector<DockItem> items, DockTree tree);
 
+  DockLayout TabBar(std::function<View(const DockTabBarContext&)> factory) &&;
+  DockLayout Workspace(std::string workspace_id, std::string layout_id) &&;
+
   template <class Function>
   DockLayout OnChanged(Function&& function) &&;
 };
@@ -235,7 +238,21 @@ Dock can move an existing panel or insert an item that is currently absent from 
 
 Select activates an existing panel in its current group. Remove does nothing for an absent panel; removing the selected tab chooses its successor, or its predecessor when no successor exists. Empty groups are removed, single-child splits are collapsed, and the surviving region keeps the collapsed position's external Frame/Grow. The workspace may become empty; create its first group with Tabs. Reopening uses an explicit Dock destination rather than hidden previous-position history.
 
-Drag onto either half of a tab to insert before or after it. The empty part of a tab strip appends to that group. A drop near the edge of a panel splits its group, and a drop in the center inserts after its selected tab. Dragging changes only the preview until a successful drop proposes one complete tree edit. Cancellation leaves the tree unchanged, and topology changes invalidate the transfer. Tab context menus expose the same edits through pointer or keyboard commands.
+Drag onto either half of a tab to insert before or after it. The empty part of the built-in tab strip appends to that group. A drop near the edge of a panel splits its group, and a drop in the center inserts after its selected tab. Dragging changes only the preview until a successful drop proposes one complete tree edit. Cancellation leaves the tree unchanged, and topology changes invalidate the transfer. Built-in tab context menus expose the same edits through pointer or keyboard commands.
+
+## Tab bar composition
+
+TabBar installs a factory on the View declaration, with DockTree remaining the authoritative, presentation-independent value. The factory runs during composition for each group. It receives a borrowed DockTabBarContext with ordered panel IDs, resolved titles and close flags, and the selected ID. DefaultBar builds the standard bar and its interactions. An empty View omits the group bar and gives the panel the full height. The layout measures a supplied bar under the group's width and measures the selected panel in the remaining height.
+
+BindTabDrag and BindTabDrop attach the same typed drag source and tab drop marker used by the built-in bar. The former is attached to the application-selected grip or label, while the latter uses the actual layout bounds of the designated tab View. Bound Views retain the current panel ID, session, and topology through their event handlers independently of the borrowed context. The custom bar owns focus, activation, closing and accessibility, and only its explicit bindings act as drop targets. The default strip retains its append target. Pane targets, sibling splits, and keyed panel slots are independent of the chosen bar.
+
+## Transfers between layouts
+
+Workspace assigns a nonempty application-local workspace ID and a nonempty layout ID. A different layout can receive a panel when both assignments share a workspace ID, have distinct layout IDs, and the receiver binds DockEvents::TransferRequested. Opted-in drag sources and targets use the existing application-scoped transport. The payload keeps the live source's session identity and its topology at drag start. Drop acceptance checks the current source and destination, and a destination that already contains the panel ID refuses it.
+
+Only the receiver emits TransferRequested. The request names the source, destination, and panel, and optionally describes a DockPlacement relative to a target panel. An empty target requests insertion as the first group in an empty receiving layout. The receiving layout uses the same insertion and split geometry as a move within one layout. Applications revalidate the request against their current workspace model and publish the two new trees and their associated panel declarations together.
+
+Binding DockEvents::DetachRequested opts into application-scoped drag completion for the source. It emits the panel ID only for a confirmed release outside the application, from a source whose topology is still current. The application creates and closes windows through its existing window handles. A successful drop, canceled drag, release within the application, or unconfirmed release produces no detachment request.
 
 ## Panel identity and retention
 
@@ -257,4 +274,4 @@ All declared panel content is mounted; this is retention rather than lazy creati
 
 SplitLayout and DockLayout share the split measurement, clipped pane slot, and separator extension. A layout records the separator geometry; its owner publishes it after presentation transforms resolve. SplitLayout reads its pane declarations directly. DockLayout measures logical regions recursively and places tabs, separators, and selected panel slots in tree order under one mounted parent. Its separator callbacks apply sizing changes to the corresponding branch of the latest committed tree.
 
-DockLayout decorates the existing Tabs labels privately, retaining Tabs layout, selection, scrolling, and keyboard navigation. Typed drag-and-drop owns pointer recognition and the preview layer. Each transfer belongs to one workspace and topology. Drop targets live on the tab strip, tab items, and clipped pane slots; panel content uses its ordinary input contract.
+DockLayout decorates the existing Tabs labels privately, retaining Tabs layout, selection, scrolling, and keyboard navigation. Typed drag-and-drop owns pointer recognition, application transport, and the preview layer. Drop targets live on the tab strip, tab items, clipped pane slots, and the bounds of an empty receiving layout. Panel content uses its ordinary input contract.

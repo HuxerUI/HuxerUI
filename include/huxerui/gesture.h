@@ -173,11 +173,15 @@ struct DropEvent {
   bool operator==(const DropEvent&) const = default;
 };
 
-// Describes normal completion of a drag source, including whether a target accepted the drop.
+/// Describes normal completion of a drag source.
 struct DragDropResult {
-  // Latest source-window snapshot. Platform drag transport may provide no further source positions.
+  /// Latest source-window snapshot. Platform drag transport may provide no further source positions.
   DragEvent drag;
+  /// Whether a compatible target received the drop.
   bool dropped = false;
+  /// Whether the platform confirmed that an application-scoped mouse drag ended outside the application's windows.
+  /// Always false after a successful drop or when the platform cannot confirm the release location.
+  bool released_outside_application = false;
 
   bool operator==(const DragDropResult&) const = default;
 };

@@ -711,6 +711,8 @@ return CardView(card)
 
 Use a long-press DragGesture configuration for reorder behavior inside scrolling content.
 To drag between Windows, macOS, or Linux windows in the same application, call `Scope(DragDropScope::Application)` on both `DragSource` and `DropTarget`. This supports the primary mouse button. The default `Window` scope keeps transfers in their source window.
+
+For an application-scoped drag, `DragSourceEvents::Ended` can report `DragDropResult::released_outside_application` when the platform confirms a mouse release outside the application's windows. Windows provides that confirmation. Use `dropped` to check whether a target received the drop.
 Typed DragSource/DropTarget transfers are in-process; native files, URLs, and PlatformView targets are not inferred from an application payload.
 Use [FileDropTarget](files.md#receiving-dropped-files) to receive external ordinary files through the separate host-owned file-drop lifecycle.
 See [Typed Drag-and-Drop Design](../design/drag-drop.md) for ownership, target selection, preview, and auto-scroll behavior.

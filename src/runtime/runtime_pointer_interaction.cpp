@@ -599,7 +599,7 @@ bool detail::WindowDrag::Drop(UiWindow& window, Point position) {
   }
 }
 
-void detail::WindowDrag::Finish(bool canceled) {
+void detail::WindowDrag::Finish(bool canceled, bool released_outside_application) {
   if (!std::exchange(active_, false)) return;
   cancel_platform_ = {};
   const auto source = source_.lock();
@@ -612,7 +612,7 @@ void detail::WindowDrag::Finish(bool canceled) {
     throw;
   }
   if (source && source->ui_window && source->ui_window->IsInitialized()) {
-    source->ui_window->state_->pointer_->CompleteWindowDrag(*this, canceled && !dropped_);
+    source->ui_window->state_->pointer_->CompleteWindowDrag(*this, canceled && !dropped_, released_outside_application);
   }
 }
 
@@ -1098,7 +1098,8 @@ void detail::PointerInteraction::CancelDragDrop(PointerSession& session, const D
   }
 }
 
-void detail::PointerInteraction::CompleteWindowDrag(const WindowDrag& drag, bool canceled) {
+void detail::PointerInteraction::CompleteWindowDrag(const WindowDrag& drag, bool canceled,
+                                                   bool released_outside_application) {
   ExecutionGuard guard(runtime_state_.execution_);
   const auto found = pointer_sessions_.find(drag.drag_.pointer_id);
   if (found == pointer_sessions_.end() || !found->second.drag_drop ||
@@ -1112,7 +1113,9 @@ void detail::PointerInteraction::CompleteWindowDrag(const WindowDrag& drag, bool
     if (canceled) {
       EmitEvent<DragSourceEvents::Canceled>(node->event_bindings, drag.drag_);
     } else {
-      EmitEvent<DragSourceEvents::Ended>(node->event_bindings, DragDropResult{drag.drag_, drag.dropped_});
+      EmitEvent<DragSourceEvents::Ended>(node->event_bindings, DragDropResult{
+        drag.drag_, drag.dropped_, released_outside_application && !drag.dropped_,
+      });
     }
   }
 }

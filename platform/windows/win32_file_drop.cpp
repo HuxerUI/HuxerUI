@@ -28,6 +28,27 @@ UINT ApplicationDragFormat() {
   return format;
 }
 
+struct ApplicationReleasePosition {
+  POINT position;
+  DWORD process_id;
+};
+
+BOOL CALLBACK CheckApplicationReleaseWindow(HWND window, LPARAM data) {
+  const auto& release = *reinterpret_cast<const ApplicationReleasePosition*>(data);
+  DWORD process_id = 0;
+  GetWindowThreadProcessId(window, &process_id);
+  if (process_id != release.process_id || !IsWindowVisible(window) || IsIconic(window)) return TRUE;
+  RECT bounds{};
+  return GetWindowRect(window, &bounds) && !PtInRect(&bounds, release.position);
+}
+
+bool IsReleaseOutsideApplication() {
+  ApplicationReleasePosition release{{}, GetCurrentProcessId()};
+  // Include window chrome and disabled windows, which may belong to an active modal interaction.
+  return GetCursorPos(&release.position) &&
+         EnumWindows(CheckApplicationReleaseWindow, reinterpret_cast<LPARAM>(&release));
+}
+
 class Win32ApplicationDrag final : public IDataObject, public IDropSource {
 public:
   Win32ApplicationDrag(std::shared_ptr<WindowDrag> drag, bool swapped_buttons)
@@ -35,6 +56,7 @@ public:
 
   const std::shared_ptr<WindowDrag>& Drag() const noexcept { return drag_; }
   bool Released() const noexcept { return released_; }
+  bool ReleasedOutsideApplication() const noexcept { return released_outside_application_; }
 
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override {
     if (!value) return E_POINTER;
@@ -59,6 +81,7 @@ public:
   HRESULT STDMETHODCALLTYPE QueryContinueDrag(BOOL escape, DWORD keys) override {
     if (escape || !drag_->Active()) return DRAGDROP_S_CANCEL;
     if (!(keys & button_)) {
+      if (!released_) released_outside_application_ = IsReleaseOutsideApplication();
       released_ = true;
       return DRAGDROP_S_DROP;
     }
@@ -106,6 +129,7 @@ private:
   std::shared_ptr<WindowDrag> drag_;
   DWORD button_;
   bool released_ = false;
+  bool released_outside_application_ = false;
 };
 
 // OLE presents the source IDataObject directly to targets in the same thread.
@@ -190,7 +214,8 @@ void RunWin32ApplicationDrag(const std::shared_ptr<WindowDrag>& drag, bool swapp
   DWORD effect = DROPEFFECT_NONE;
   const HRESULT result = DoDragDrop(operation.get(), operation.get(), DROPEFFECT_COPY, &effect);
   current_application_drag = nullptr;
-  drag->Finish(FAILED(result) || (result == DRAGDROP_S_CANCEL && !operation->Released()));
+  drag->Finish(FAILED(result) || (result == DRAGDROP_S_CANCEL && !operation->Released()),
+               operation->ReleasedOutsideApplication());
 }
 
 class Win32FileDrop::Target final : public IDropTarget {

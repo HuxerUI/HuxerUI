@@ -111,7 +111,47 @@ Tabs can be dropped before or after another tab, or on a panel edge to create a 
 
 For application commands, use `Select`, `Remove`, or `Dock` on the current tree. For example, `tree = tree->Dock("search", "editor", DockPlacement::TabAfter)` reopens or moves Search beside Editor. Removing Search from the tree hides it. Keeping its DockItem declaration preserves its mounted content and local State; removing the declaration unmounts it. If the tree is empty, start it again with `DockTree::Tabs`.
 
-The [DockLayout example](../../examples/dock_layout/main.cpp) is a project workspace with a file tree, an editor, an inspector, and an activity log. Move or resize panels, then close and reopen a pinned Inspector from the Panels menu to see its local state retained. Build `example_dock_layout` to run it. See the [design contract](../design/split-and-docking.md) for sizing and retention details.
+### Custom tab bars
+
+Use `DockLayout::TabBar()` to build the bar above each group. `DockTabBarContext::Items()` provides the ordered panel IDs, resolved titles, and close flags. `Selected()` gives the active panel ID. Return `bar.DefaultBar()` to use the built-in control for that group, or `View{}` to hide its bar and give the panel the full height. Copy an ID before capturing it in a callback that outlives the factory call.
+
+```cpp
+return DockLayout(items, tree)
+    .TabBar([tree](const DockTabBarContext& bar) {
+      return Row {
+        ForEach(bar.Items(), [&](const DockTabBarItem& item) {
+          const std::string id(item.id);
+          View label = Chip(item.title, id == bar.Selected())
+              .OnClick([tree, id] { tree = tree->Select(id); });
+          return bar.BindTabDrop(id, Row {
+            bar.BindTabDrag(id, std::move(label)),
+            item.closable ? Button("×").OnClick([tree, id] { tree = tree->Remove(id); }) : View{},
+          }).Key(id);
+        }),
+      }.With(Spacing(4.0F));
+    })
+    .OnChanged([tree](DockTree next) { tree = std::move(next); });
+```
+
+`BindTabDrag()` makes the label a drag source, including when its panel is inactive. `BindTabDrop()` uses the left and right halves of the supplied View to insert before or after its panel. In the example, the close button is part of the insertion target and outside the drag source. Only bound zones in a custom bar accept a drop. For example, the right half of the last tab appends to its group. Custom bars own click, closing, keyboard and accessibility behavior, while completed docking moves still use `OnChanged()`.
+
+### Moving panels between windows
+
+Bind each participating `DockLayout` to the same workspace ID and give it a stable, distinct layout ID. The receiving layout handles `DockEvents::TransferRequested`. Use the request's panel and layout IDs to look up both trees and publish one state update. Remove the panel from the source tree and put it in the target tree with `DockTree::Dock()`. An empty `request.target` means the receiving layout is empty, so start it with `DockTree::Tabs()`.
+
+```cpp
+return DockLayout(std::move(items), tree)
+    .Workspace("editor", layout_id)
+    .OnChanged(apply_tree)
+    .On<DockEvents::TransferRequested>(move_panel)
+    .On<DockEvents::DetachRequested>(open_panel_window);
+```
+
+Transfer the panel's declaration along with its placement and rebuild it in the destination. Use shared application state for document contents, drafts, and any selection that should follow the panel. A canceled drag or a rejected request leaves the application state as it was.
+
+`DetachRequested` supplies the panel ID after a confirmed mouse release outside the application. Open the window first, then update the trees if it succeeds. Windows reports the outside release. Windows, macOS, and Linux support mouse transfers between participating windows through application-scoped drag-and-drop. A menu command can call the same window-opening handler on any platform where `SupportsMultipleWindows()` is true.
+
+Build `example_dock_layout` to run the [Harbor Studio example](../../examples/dock_layout/main.cpp). Edit a file, then drag its tab beside another document or onto an editor edge. On Windows, release it outside the application to open a detached window. You can also open a document tab's context menu and choose **Move to new window**. Drag the tab into any participating window to dock it again. The draft follows the document, and an emptied floating window closes. Tool-only groups use the built-in bar. See the [design contract](../design/split-and-docking.md) for sizing and retention details.
 
 ## Mounted coordinate spaces
 

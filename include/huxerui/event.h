@@ -19,6 +19,7 @@
 namespace huxerui {
 
 class DockTree;
+struct DockTransferRequest;
 
 /// Stores the complete controlled text value emitted by TextFieldEvents::Changed.
 struct TextEditingValue;
@@ -582,6 +583,14 @@ struct SplitEvents {
 struct DockEvents {
   /// Proposes a complete replacement tree for one user edit. Supply it to DockLayout to accept the edit.
   struct Changed : Event<void(DockTree)> {};
+
+  /// Requests that the source layout's panel open in a new window after a confirmed release outside the application.
+  /// The argument is the panel ID. Update the source tree after the new window opens successfully.
+  struct DetachRequested : Event<void(std::string)> {};
+
+  /// Requests one move between layouts in the same workspace. Only the receiving layout emits this event.
+  /// The request is borrowed for the callback. Accept it by publishing both trees and the panel declarations together.
+  struct TransferRequested : Event<void(const DockTransferRequest&)> {};
 };
 
 /// Event keys emitted by SegmentedButton.

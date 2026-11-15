@@ -75,6 +75,7 @@ struct DropEvent {
 struct DragDropResult {
   DragEvent drag;
   bool dropped = false;
+  bool released_outside_application = false;
 };
 
 struct DragSourceEvents {
@@ -169,6 +170,8 @@ It never branches on DragSourceExtension, DropTargetExtension, a component NodeK
 The transport carries one local session identity. The receiver uses its current hit route, window context, target declarations, and edge scrolling. It does not start pointer recognition. The preview uses the captured source Environment and is mounted in the window currently receiving the drag. Drop coordinates are relative to the receiver; the source keeps its latest source-window drag snapshot.
 
 Drop commits once and withdraws the preview before calling the target, followed by the source result if it remains live. Closing a receiver clears only that receiver; closing the source cancels the session. Late notifications cannot revive it. AppKit completion without an explicit cancellation reason reports an unsuccessful Ended event.
+
+An application-scoped drag with no successful drop reports `released_outside_application` only when the platform confirms that the primary button was released outside the application's windows. The Windows adapter checks visible, non-minimized application windows at the release, including window chrome. A rejection or lack of a target alone gives no information about the release location. A committed drop takes precedence over the outside-release flag.
 
 ## Target selection
 

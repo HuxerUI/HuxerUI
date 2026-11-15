@@ -69,7 +69,7 @@ private:
   void AdvanceDragDropSession(std::int64_t pointer_id, const FrameInfo& frame);
   void FinishDragDrop(PointerSession& session, const DragEvent& drag);
   void CancelDragDrop(PointerSession& session, const DragEvent& drag);
-  void CompleteWindowDrag(const WindowDrag& drag, bool canceled);
+  void CompleteWindowDrag(const WindowDrag& drag, bool canceled, bool released_outside_application = false);
 
   UiWindow::State& runtime_state_;
   std::optional<PointerHoverState> pointer_hover_;

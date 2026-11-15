@@ -100,6 +100,9 @@ export namespace huxerui {
     using huxerui::DockItem;
     using huxerui::DockLayout;
     using huxerui::DockPlacement;
+    using huxerui::DockTabBarContext;
+    using huxerui::DockTabBarItem;
+    using huxerui::DockTransferRequest;
     using huxerui::DockTree;
     using huxerui::DragDropResult;
     using huxerui::DragDropScope;
