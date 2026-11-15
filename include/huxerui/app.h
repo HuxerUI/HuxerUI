@@ -522,6 +522,9 @@ protected:
   void Retire() noexcept;
   /// Reports whether this host can create additional native top-level windows on the application thread.
   virtual bool SupportsMultipleWindows() const noexcept;
+  /// Reports optional native desktop window behaviors on the application thread.
+  /// Hosts without top-level window creation use the empty capabilities returned by the default implementation.
+  virtual WindowCapabilities QueryWindowSupport() const noexcept;
   /// Creates an initialized, hidden window belonging to this Runtime without starting another event loop.
   /// Shared admission and configuration checks precede this call. Failure must release partial native facilities.
   virtual std::unique_ptr<UiWindow> CreateUiWindow(ViewFactory content, const WindowOptions& options);
@@ -600,6 +603,9 @@ public:
   /// Queries programmatic native top-level window support on the original application's thread.
   /// External UI attachments do not imply support. A stopped application reports false.
   [[nodiscard]] bool SupportsMultipleWindows() const;
+  /// Reports optional desktop window behaviors available on the original application's thread.
+  /// A disconnected application or a host without top-level window creation returns all flags false.
+  WindowCapabilities WindowSupport() const;
   /// Creates and presents an independently composed window sharing this application's services and State.
   /// The retained factory executes later in the new window's root scope, with a fresh root Environment.
   /// Requires the original application thread, outside composition and application/window installation.
@@ -819,6 +825,12 @@ public:
   /// window;
   /// native minimize/close callbacks still pass through HandleWindowRequest before applying their default operation.
   virtual void RequestWindowCommand(WindowCommand) {}
+  /// Applies a native desktop window level on the application thread without changing activation or geometry.
+  /// @return Whether the host accepted the requested level. The default implementation returns false.
+  virtual bool SetWindowAlwaysOnTop(bool) { return false; }
+  /// Changes the native hit testing policy for the entire window on the application thread.
+  /// Enabling releases this window's pointer capture. The default implementation returns false.
+  virtual bool SetWindowPointerPassThrough(bool) { return false; }
   /// Updates native system-bar foreground contrast on the application thread.
   /// The first SystemBarContentBrightness argument describes the status bar; the second describes the navigation bar.
   /// The UI paints backgrounds separately. Hosts without these system bars may ignore the request.
@@ -833,7 +845,7 @@ public:
   /// @param metrics Complete viewport, safe-area insets, and optional title-bar geometry in logical window-local units.
   /// Call on the application thread after successful initialization; native geometry is authoritative.
   void SetWindowMetrics(WindowMetrics metrics);
-  /// Queries the committed tree for a native title-bar drag hit.
+  /// Queries the committed tree for a native window drag hit in Custom or None chrome mode.
   /// @param position Point in logical window-local coordinates.
   /// @return True when a declared drag region claims the point and interactive descendants do not take precedence.
   /// Native non-client hit testing uses this result without rebuilding the UI tree.

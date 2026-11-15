@@ -564,6 +564,10 @@ bool ApplicationService::SupportsMultipleWindows() const {
          runtime_->state_->phase != ApplicationRuntimeState::Phase::Stopped && runtime_->SupportsMultipleWindows();
 }
 
+WindowCapabilities ApplicationService::WindowSupport() const {
+  return SupportsMultipleWindows() ? runtime_->QueryWindowSupport() : WindowCapabilities{};
+}
+
 WindowHandle ApplicationService::OpenWindow(ViewFactory content, WindowOptions options) const {
   if (!runtime_) throw std::logic_error("HuxerUI application is disconnected");
   return runtime_->OpenWindow(std::move(content), std::move(options));
@@ -702,6 +706,10 @@ Task<bool> ApplicationHandle::OpenPermissionSettingsAsync(
 
 bool ApplicationHandle::SupportsMultipleWindows() const {
   return service_->SupportsMultipleWindows();
+}
+
+WindowCapabilities ApplicationHandle::WindowSupport() const {
+  return service_->WindowSupport();
 }
 
 WindowHandle ApplicationHandle::OpenWindow(ViewFactory content, WindowOptions options) const {

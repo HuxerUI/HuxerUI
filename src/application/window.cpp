@@ -160,7 +160,8 @@ View MakeWindowControls(
   Composer::Guard guard(composer);
   return WindowControlsLayout {
     WindowControl(WindowCommand::Minimize, service, window, window->caption_labels),
-    WindowControl(WindowCommand::ToggleMaximize, service, window, window->caption_labels),
+    WindowControl(WindowCommand::ToggleMaximize, service, window, window->caption_labels)
+        .With(Enabled(window->resizable)),
     WindowControl(WindowCommand::Close, service, window, window->caption_labels),
   }.With(Enabled(visible), Semantics{.hidden = !visible});
 }
@@ -197,11 +198,26 @@ void ValidateWindowOptions(const WindowOptions& window_options) {
     throw std::invalid_argument("HuxerUI window content mode is invalid");
   }
   if (window_options.chrome_mode != WindowChromeMode::System &&
-      window_options.chrome_mode != WindowChromeMode::Custom) {
+      window_options.chrome_mode != WindowChromeMode::Custom && window_options.chrome_mode != WindowChromeMode::None) {
     throw std::invalid_argument("HuxerUI window chrome mode is invalid");
   }
   if (!std::isfinite(window_options.title_bar_height) || window_options.title_bar_height <= 0.0F) {
     throw std::invalid_argument("HuxerUI window title-bar height must be finite and positive");
+  }
+}
+
+void ValidateWindowSupport(const WindowOptions& options, const WindowCapabilities& support) {
+  if (options.transparent_background && !support.transparent_background) {
+    throw std::runtime_error("HuxerUI host does not support transparent window backgrounds");
+  }
+  if (options.always_on_top && !support.always_on_top) {
+    throw std::runtime_error("HuxerUI host does not support always-on-top windows");
+  }
+  if (!options.activatable && !support.non_activating) {
+    throw std::runtime_error("HuxerUI host does not support non-activating windows");
+  }
+  if (options.pointer_pass_through && !support.pointer_pass_through) {
+    throw std::runtime_error("HuxerUI host does not support window pointer pass-through");
   }
 }
 
@@ -285,7 +301,20 @@ void WindowService::Request(WindowCommand command) {
   if (!IsOpen()) return;
   ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
   if ((command == WindowCommand::Minimize || command == WindowCommand::Close) && HandleRequest(command)) return;
+  if (command == WindowCommand::Activate && !ui_window_->state_->window_->activatable) command = WindowCommand::Show;
   if (ui_window_ && IsOpen()) ui_window_->RequestWindowCommand(command);
+}
+
+bool WindowService::SetAlwaysOnTop(bool enabled) {
+  if (!IsOpen()) return false;
+  ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
+  return ui_window_->SetWindowAlwaysOnTop(enabled);
+}
+
+bool WindowService::SetPointerPassThrough(bool enabled) {
+  if (!IsOpen()) return false;
+  ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
+  return ui_window_->SetWindowPointerPassThrough(enabled);
 }
 
 void WindowService::RequestKeyboard(bool show) {
@@ -543,6 +572,14 @@ void WindowHandle::HideKeyboard() const {
 
 void WindowHandle::Activate() const {
   service_->Request(WindowCommand::Activate);
+}
+
+bool WindowHandle::SetAlwaysOnTop(bool enabled) const {
+  return service_->SetAlwaysOnTop(enabled);
+}
+
+bool WindowHandle::SetPointerPassThrough(bool enabled) const {
+  return service_->SetPointerPassThrough(enabled);
 }
 
 void WindowHandle::Minimize() const {

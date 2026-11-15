@@ -30,7 +30,7 @@ public:
   AppKitPlatformViews& operator=(const AppKitPlatformViews&) = delete;
 
   [[nodiscard]] bool Commit(NSView* root, const RenderFrame& frame);
-  std::optional<double> DrawBase(CGContextRef context, CGRect dirty_rect, bool platform_ready);
+  std::optional<double> DrawBase(CGContextRef context, CGRect dirty_rect, bool draw_background, bool platform_ready);
   void DrawSlice(CGContextRef context, CGRect dirty_rect, std::size_t first_command, std::size_t command_count);
   void InvalidateSlices();
   NSView* HitTest(Point point) const;

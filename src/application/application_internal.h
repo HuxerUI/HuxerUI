@@ -346,6 +346,7 @@ public:
   [[nodiscard]] const AppDirectories& Directories() const;
   void Quit() const;
   [[nodiscard]] bool SupportsMultipleWindows() const;
+  WindowCapabilities WindowSupport() const;
   WindowHandle OpenWindow(ViewFactory content, WindowOptions options) const;
   void Enqueue(ApplicationActivation activation);
   void UpdateLifecycleState(ApplicationLifecycleState lifecycle_state);

@@ -17,7 +17,7 @@ It complements the mobile-oriented [Window Insets and System Bars Design](window
 
 Custom mode does not provide:
 
-- Runtime switching between System and Custom chrome.
+- Runtime switching between window chrome modes.
 - Application interception of native close requests beyond existing platform behavior.
 - Application replacement or removal of the standard macOS traffic lights.
 - A second generic window-property or platform-handle abstraction.
@@ -35,12 +35,13 @@ The platform uses it for the taskbar, application switcher, window manager, syst
 `WindowTitleBar` is application-defined content.
 It may contain a document tab strip, menu, search field, toolbar, status content, a conventional title, or no visible title.
 
-Only two public chrome modes exist:
+The public chrome modes are:
 
 ```cpp
 enum class WindowChromeMode {
   System,
   Custom,
+  None,
 };
 ```
 
@@ -53,6 +54,8 @@ This does not require every platform to render those controls through HuxerUI:
 - Windows uses HuxerUI-provided caption controls because native DWM controls cannot be embedded into a fully client-rendered surface with reliable edge alignment.
 - macOS keeps the native AppKit traffic lights and reserves their actual bounds for application content.
 - Linux client-side decoration support may use HuxerUI controls when the window manager does not provide controls over client content.
+
+`None` omits native decorations and framework caption controls. It enables `WindowDragRegion` without publishing title-bar metrics.
 
 The public contract describes responsibility and behavior rather than requiring identical rendering mechanisms.
 Applications own their title-bar content; the framework owns the standard window affordances.
@@ -68,6 +71,7 @@ The window contract remains in `<huxerui/window.h>`.
 enum class WindowChromeMode {
   System,
   Custom,
+  None,
 };
 
 struct WindowTitleBarMetrics {
@@ -105,6 +109,11 @@ struct WindowOptions {
   WindowChromeMode chrome_mode = WindowChromeMode::System;
   float title_bar_height = 40.0F;
   WindowCaptionLabels caption_labels;
+  bool transparent_background = false;
+  bool always_on_top = false;
+  bool activatable = true;
+  bool pointer_pass_through = false;
+  bool resizable = true;
 };
 
 struct AppOptions {
@@ -113,7 +122,7 @@ struct AppOptions {
 };
 ```
 
-`WindowOptions::minimum_size` is an optional minimum logical client size for framework-owned resizable desktop windows.
+`WindowOptions::minimum_size` is an optional minimum logical client size for framework-owned desktop windows.
 Both dimensions must be finite and positive when present, and an initial size below the minimum is raised independently on each axis.
 Windows, macOS, and Linux map the value to their native top-level window constraint while preserving any larger platform minimum.
 Android, iOS, and Web viewports remain host-owned, so adapters report their actual size without applying this option or clamping `SetWindowMetrics()`.
@@ -363,12 +372,19 @@ Activation visuals, high-contrast integration, and exhaustive keyboard and syste
 
 ## Platform mapping
 
-The shared chrome API exposes `WindowChromeMode::System`, `WindowChromeMode::Custom`, `WindowTitleBar`, `WindowDragRegion`, and `UseWindow()`.
-The removed Windows Extended experiment has no compatibility alias or retained DWM transparency path.
+The shared chrome API exposes `WindowChromeMode::System`, `WindowChromeMode::Custom`, `WindowChromeMode::None`, `WindowTitleBar`, `WindowDragRegion`, and `UseWindow()`.
 
-Windows Custom mode uses the normal opaque renderer, full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
+Windows Custom mode uses full-client non-client calculation, framework controls, and native resize, drag, system-command, and maximize-button hit testing.
 macOS Custom mode uses full-size AppKit content, AppKit traffic lights, converted left-side control geometry, AppKit dragging, and system window commands.
 Linux Custom mode uses framework controls in a `WindowControlsLayout` layer, GTK decoration policy and window commands, GDK move and resize operations, and GTK-tracked maximized state.
+
+## Desktop window policies
+
+The application Runtime owns capability discovery and validates requested policies before creating the window. Each UiWindow applies its own configuration and uses the existing WindowService for requests. Creation and later activation requests show a non-activating window without moving keyboard focus. Native input and shared focus dispatch both honor that policy.
+
+Transparency configures the base surface and renderer. Windows uses the retained Direct2D scene and a premultiplied DirectComposition swap chain, clearing damaged pixels to transparent before replay. HWND and DirectComposition presentation both support changing pointer pass-through with layered window styles at full opacity. AppKit clears the dirty region of the nonopaque content surface and uses a non-activating panel when required. GTK clears its themed window background through a scoped style and uses the GDK surface input region for pass-through, including after surface layout updates.
+
+Window level and pointer pass-through can change independently of background transparency. Pointer capture belongs to the window that is switching policy. GTK reports only the behaviors it can provide with the current display backend.
 
 ## Fullscreen and keyboard shortcuts
 

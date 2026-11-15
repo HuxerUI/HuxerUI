@@ -817,10 +817,36 @@ public:
   ~LinuxRuntime() override {
     Retire();
     StopObservingLifecycle();
+    if (transparent_window_style_) {
+      gtk_style_context_remove_provider_for_display(transparent_window_display_,
+                                                     GTK_STYLE_PROVIDER(transparent_window_style_));
+      g_clear_object(&transparent_window_style_);
+      g_clear_object(&transparent_window_display_);
+    }
     dispatcher_->Shutdown();
   }
   bool SupportsMultipleWindows() const noexcept override { return true; }
+  WindowCapabilities QueryWindowSupport() const noexcept override {
+    GdkDisplay* display = gdk_display_get_default();
+    if (!display) return {};
+    return {
+        .transparent_background = gdk_display_is_rgba(display) && gdk_display_is_composited(display),
+        .pointer_pass_through = gdk_display_supports_input_shapes(display) != FALSE,
+    };
+  }
   std::unique_ptr<UiWindow> CreateUiWindow(ViewFactory content, const WindowOptions& options) override;
+
+  void ApplyTransparentWindowStyle(GtkWidget* widget) {
+    if (!transparent_window_style_) {
+      transparent_window_display_ = GDK_DISPLAY(g_object_ref(gtk_widget_get_display(widget)));
+      transparent_window_style_ = gtk_css_provider_new();
+      gtk_css_provider_load_from_string(transparent_window_style_,
+          "window.huxerui-transparent-window { background-color: transparent; background-image: none; }");
+      gtk_style_context_add_provider_for_display(transparent_window_display_,
+          GTK_STYLE_PROVIDER(transparent_window_style_), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    gtk_widget_add_css_class(widget, "huxerui-transparent-window");
+  }
 
   void ReportFailure(std::exception_ptr failure) {
     if (!failure_) failure_ = std::move(failure);
@@ -1109,6 +1135,8 @@ private:
     stopped_ = true;
   }
   std::shared_ptr<LinuxUiThreadDispatcher> dispatcher_;
+  GdkDisplay* transparent_window_display_ = nullptr;
+  GtkCssProvider* transparent_window_style_ = nullptr;
   GListModel* windows_ = nullptr;
   std::vector<GObject*> observed_windows_;
   bool stopped_ = false;
@@ -1133,6 +1161,12 @@ public:
     renderer_.Initialize();
     const Size initial_size = ResolveInitialWindowSize(options);
     CreateWindow(options, initial_size);
+    if (options.transparent_background) {
+      static_cast<LinuxRuntime&>(application).ApplyTransparentWindowStyle(GTK_WIDGET(window_));
+    }
+    if (options.pointer_pass_through && !SetWindowPointerPassThrough(true)) {
+      throw std::runtime_error("HuxerUI could not enable GTK window pointer pass-through");
+    }
     RefreshTextDpi();
     auto configuration = application.Resources()->Configuration();
     configuration.display_scale = static_cast<float>(gtk_widget_get_scale_factor(drawing_area_));
@@ -1261,6 +1295,21 @@ public:
     }
   }
 
+  bool SetWindowPointerPassThrough(bool enabled) override {
+    if (!window_ || (enabled && platform_drag_) ||
+        !gdk_display_supports_input_shapes(gtk_widget_get_display(GTK_WIDGET(window_)))) return false;
+    if (pointer_pass_through_ == enabled) return true;
+    // Realize the surface before the first show so initial pass-through is in effect at mapping.
+    gtk_widget_realize(GTK_WIDGET(window_));
+    GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(window_));
+    if (!surface) return false;
+    pointer_pass_through_ = enabled;
+    UpdatePointerInputRegion(surface);
+    if (enabled) CancelPointer();
+    else gtk_widget_queue_allocate(GTK_WIDGET(window_));
+    return true;
+  }
+
   void RequestFullscreen(bool fullscreen) override {
     if (!IsInitialized() || window_ == nullptr) return;
     if (fullscreen) {
@@ -1283,6 +1332,7 @@ private:
 
   void CreateWindow(const WindowOptions& options, Size initial_size) {
     custom_chrome_ = options.chrome_mode == WindowChromeMode::Custom;
+    borderless_ = options.chrome_mode == WindowChromeMode::None;
     custom_title_bar_height_ = options.title_bar_height;
     window_ = GTK_WINDOW(gtk_window_new());
     gtk_window_set_title(window_, options.title.c_str());
@@ -1291,7 +1341,8 @@ private:
         std::max(1, static_cast<int>(std::lround(initial_size.width))),
         std::max(1, static_cast<int>(std::lround(initial_size.height)))
     );
-    gtk_window_set_decorated(window_, !custom_chrome_);
+    gtk_window_set_decorated(window_, options.chrome_mode == WindowChromeMode::System);
+    gtk_window_set_resizable(window_, options.resizable);
 
     drawing_area_ = CreateHuxerUICanvas(Snapshot, StyleChanged, this);
     if (options.minimum_size.has_value()) {
@@ -1447,6 +1498,12 @@ private:
     });
   }
 
+  void UpdatePointerInputRegion(GdkSurface* surface) const {
+    cairo_region_t* region = pointer_pass_through_ ? cairo_region_create() : nullptr;
+    gdk_surface_set_input_region(surface, region);
+    if (region) cairo_region_destroy(region);
+  }
+
   void AttachToplevelState() {
     if (window_ == nullptr) {
       return;
@@ -1460,17 +1517,14 @@ private:
     toplevel_ = toplevel;
     if (toplevel_ != nullptr) {
       minimized_ = (gdk_toplevel_get_state(toplevel_) & GDK_TOPLEVEL_STATE_MINIMIZED) != 0;
-      toplevel_state_handler_ =
-          g_signal_connect(toplevel_, "notify::state", G_CALLBACK(ToplevelStateChanged), this);
+      g_signal_connect(toplevel_, "notify::state", G_CALLBACK(ToplevelStateChanged), this);
+      g_signal_connect_after(surface, "layout", G_CALLBACK(ToplevelLayoutChanged), this);
     }
   }
 
   void DetachToplevelState() noexcept {
-    if (toplevel_ != nullptr && toplevel_state_handler_ != 0) {
-      g_signal_handler_disconnect(toplevel_, toplevel_state_handler_);
-    }
+    if (toplevel_ != nullptr) g_signal_handlers_disconnect_by_data(toplevel_, this);
     toplevel_ = nullptr;
-    toplevel_state_handler_ = 0;
     minimized_ = false;
   }
 
@@ -1489,7 +1543,7 @@ private:
   }
 
   std::optional<LinuxResizeEdge> HitTestResizeEdge(Point point) const noexcept {
-    if (!custom_chrome_ || window_ == nullptr || drawing_area_ == nullptr || !IsInitialized()) {
+    if ((!custom_chrome_ && !borderless_) || window_ == nullptr || drawing_area_ == nullptr || !IsInitialized()) {
       return std::nullopt;
     }
     return ResolveLinuxResizeEdge(
@@ -1515,7 +1569,7 @@ private:
   }
 
   bool BeginWindowOperation(GdkEvent* event, guint button, Point point) {
-    if (!custom_chrome_ || window_ == nullptr || !IsInitialized() || event == nullptr ||
+    if ((!custom_chrome_ && !borderless_) || window_ == nullptr || !IsInitialized() || event == nullptr ||
         gtk_window_is_fullscreen(window_)) {
       return false;
     }
@@ -1561,9 +1615,9 @@ private:
 
   void CancelPointer() {
     if (platform_drag_) return;
-    pointer_inside_ = false;
+    const bool was_inside = std::exchange(pointer_inside_, false);
     suppress_pointer_release_ = false;
-    if (pressed_buttons_ != PointerButton::None) {
+    if (was_inside || pressed_buttons_ != PointerButton::None) {
       pressed_buttons_ = PointerButton::None;
       SendPointer(PointerEventType::Cancel, last_pointer_position_);
     }
@@ -1669,7 +1723,6 @@ private:
     self.key_tracker_.Reset();
     if (self.IsInitialized()) self.CloseWindow();
     self.toplevel_ = nullptr;
-    self.toplevel_state_handler_ = 0;
     self.window_ = nullptr;
     self.drawing_area_ = nullptr;
   }
@@ -1678,6 +1731,7 @@ private:
     auto& self = *static_cast<LinuxUiWindow*>(data);
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
     self.AttachToplevelState();
+    if (self.pointer_pass_through_ && self.toplevel_) self.UpdatePointerInputRegion(GDK_SURFACE(self.toplevel_));
     self.UpdateLifecycleState();
   }
 
@@ -1691,6 +1745,12 @@ private:
 
   static void WindowActiveChanged(GObject*, GParamSpec*, gpointer data) {
     static_cast<LinuxUiWindow*>(data)->UpdateLifecycleState();
+  }
+
+  static void ToplevelLayoutChanged(GdkSurface* surface, int, int, gpointer data) {
+    const auto& self = *static_cast<LinuxUiWindow*>(data);
+    // GTK can restore its decoration input region during a surface layout.
+    if (self.pointer_pass_through_) self.UpdatePointerInputRegion(surface);
   }
 
   static void ToplevelStateChanged(GObject*, GParamSpec*, gpointer data) {
@@ -2002,7 +2062,6 @@ private:
   GtkWindow* window_ = nullptr;
   GtkWidget* drawing_area_ = nullptr;
   GdkToplevel* toplevel_ = nullptr;
-  gulong toplevel_state_handler_ = 0;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   std::unique_ptr<LinuxFileDrop> file_drop_;
@@ -2014,6 +2073,8 @@ private:
   bool performing_minimize_ = false;
   bool performing_close_ = false;
   bool custom_chrome_ = false;
+  bool borderless_ = false;
+  bool pointer_pass_through_ = false;
   float custom_title_bar_height_ = 0.0F;
   PointerButton pressed_buttons_ = PointerButton::None;
   GdkDevice* pointer_device_ = nullptr;

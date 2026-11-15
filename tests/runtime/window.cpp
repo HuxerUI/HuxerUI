@@ -309,6 +309,19 @@ TEST_CASE("WindowMetricsRejectInvalidValues") {
   REQUIRE_THROWS_AS(invalid_appearance.BuildFrame(), std::invalid_argument);
 }
 
+TEST_CASE("Borderless windows honor drag regions without title-bar metrics") {
+  TestPlatform platform;
+  AppOptions options;
+  options.window.chrome_mode = WindowChromeMode::None;
+  options.show_debug_overlay = false;
+  UiWindow runtime(WindowTitleBarApp, platform, options);
+  runtime.SetWindowMetrics({.viewport = {300.0F, 100.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.IsWindowDragRegion({30.0F, 14.0F}));
+  REQUIRE_FALSE(runtime.IsWindowDragRegion({90.0F, 14.0F}));
+}
+
 TEST_CASE("WindowHandleForwardsCommandsToThePlatform") {
   window_handle.reset();
   TestPlatform platform;
@@ -823,7 +836,19 @@ public:
     TestPlatform::RequestWindowCommand(command);
     if (command == WindowCommand::Close) huxerui::UiWindow::CloseWindow();
   }
+  bool SetWindowAlwaysOnTop(bool enabled) override {
+    always_on_top_requests.push_back(enabled);
+    return true;
+  }
+  bool SetWindowPointerPassThrough(bool enabled) override {
+    pass_through_requests.push_back(enabled);
+    return true;
+  }
   void Frame() { huxerui::UiWindow::BuildFrame(); }
+
+  std::vector<bool> always_on_top_requests;
+  std::vector<bool> pass_through_requests;
+
 private:
   int& destroyed_;
 };
@@ -833,6 +858,7 @@ public:
   using TestPlatform::TestPlatform;
   ~OwnedWindowPlatform() override { huxerui::Runtime::Retire(); }
   bool SupportsMultipleWindows() const noexcept override { return true; }
+  WindowCapabilities QueryWindowSupport() const noexcept override { return window_support; }
   std::unique_ptr<huxerui::UiWindow> CreateUiWindow(ViewFactory content, const WindowOptions& options) override {
     ++creations;
     if (before_create) before_create();
@@ -843,6 +869,7 @@ public:
   }
   int creations = 0;
   int destroyed = 0;
+  WindowCapabilities window_support;
   std::function<void()> before_create;
   std::vector<OwnedTestWindow*> windows;
 };
@@ -918,8 +945,48 @@ TEST_CASE("Owned windows have independent content and local State while sharing 
   REQUIRE(platform.destroyed == 2);
   REQUIRE(platform.application_quit_requests == 1);
   REQUIRE_FALSE(app.SupportsMultipleWindows());
+  REQUIRE(app.WindowSupport() == WindowCapabilities{});
   REQUIRE_THROWS_AS(app.OpenWindow(EmptyOwnedWindow), std::logic_error);
   REQUIRE_NOTHROW(first.Close());
+}
+
+TEST_CASE("Optional desktop window behavior uses host capabilities and the addressed window") {
+  OwnedWindowPlatform platform;
+  Application application(EmptyOwnedWindow, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, platform);
+  const auto app = UseApplication();
+  REQUIRE(app.WindowSupport() == WindowCapabilities{});
+  REQUIRE_THROWS_WITH(app.OpenWindow(EmptyOwnedWindow, {.transparent_background = true}),
+                      "HuxerUI host does not support transparent window backgrounds");
+  REQUIRE_THROWS_WITH(app.OpenWindow(EmptyOwnedWindow, {.activatable = false}),
+                      "HuxerUI host does not support non-activating windows");
+  REQUIRE(platform.creations == 0);
+
+  platform.window_support = {true, true, true, true};
+  REQUIRE(app.WindowSupport() == platform.window_support);
+  const auto ordinary = app.OpenWindow(EmptyOwnedWindow);
+  const auto overlay = app.OpenWindow(EmptyOwnedWindow, {
+      .chrome_mode = WindowChromeMode::None,
+      .transparent_background = true,
+      .always_on_top = true,
+      .activatable = false,
+      .pointer_pass_through = true,
+      .resizable = false,
+  });
+  overlay.Activate();
+  REQUIRE(platform.windows[0]->window_commands == std::vector<WindowCommand>{WindowCommand::Activate});
+  REQUIRE(platform.windows[1]->window_commands == std::vector<WindowCommand>{WindowCommand::Show, WindowCommand::Show});
+  REQUIRE(overlay.SetAlwaysOnTop(false));
+  REQUIRE(overlay.SetPointerPassThrough(false));
+  REQUIRE(platform.windows[0]->always_on_top_requests.empty());
+  REQUIRE(platform.windows[0]->pass_through_requests.empty());
+  REQUIRE(platform.windows[1]->always_on_top_requests == std::vector<bool>{false});
+  REQUIRE(platform.windows[1]->pass_through_requests == std::vector<bool>{false});
+
+  overlay.Close();
+  REQUIRE_FALSE(overlay.SetAlwaysOnTop(true));
+  REQUIRE_FALSE(overlay.SetPointerPassThrough(true));
+  REQUIRE(ordinary.IsOpen());
 }
 
 TEST_CASE("Owned window closure is observable and waits for the outer UI callback") {

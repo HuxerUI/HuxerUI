@@ -28,7 +28,7 @@ public:
   Win32Renderer(const Win32Renderer&) = delete;
   Win32Renderer& operator=(const Win32Renderer&) = delete;
 
-  void Initialize();
+  void Initialize(bool transparent_background = false);
   void Discard() noexcept;
   void ResetDeviceResources() noexcept;
   void UpdateTextLocale();

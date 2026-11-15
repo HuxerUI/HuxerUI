@@ -485,16 +485,20 @@ bool AppKitPlatformViews::Commit(NSView* root, const RenderFrame& frame) {
   return composition_changed;
 }
 
-std::optional<double> AppKitPlatformViews::DrawBase(CGContextRef context, CGRect dirty_rect, bool platform_ready) {
+std::optional<double> AppKitPlatformViews::DrawBase(
+    CGContextRef context, CGRect dirty_rect, bool draw_background, bool platform_ready
+) {
   if (impl_->frame_coordinator.DeferPaintIfCommitting()) {
     return std::nullopt;
   }
   impl_->frame_coordinator.BeginPaint();
+  if (!draw_background) CGContextClearRect(context, dirty_rect);
   if (impl_->base_slice.has_value()) {
     const RenderSlice& slice = *impl_->base_slice;
-    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, slice.first_command, slice.command_count, true);
+    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, slice.first_command, slice.command_count,
+                              draw_background);
   } else {
-    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, 0, 0, true);
+    impl_->renderer->DrawSlice(context, dirty_rect, impl_->frame, 0, 0, draw_background);
   }
   return impl_->frame_coordinator.EndPaint(platform_ready);
 }

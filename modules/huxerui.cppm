@@ -605,6 +605,7 @@ export namespace huxerui {
     using huxerui::VirtualList;
     using huxerui::VirtualViewport;
     using huxerui::VisualFill;
+    using huxerui::WindowCapabilities;
     using huxerui::WindowCaptionLabels;
     using huxerui::WindowChromeMode;
     using huxerui::WindowCommand;

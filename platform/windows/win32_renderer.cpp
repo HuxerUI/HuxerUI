@@ -1403,7 +1403,7 @@ struct Win32Renderer::Impl {
       return false;
     }
     if (!EnsureDirectComposition()) {
-      throw std::logic_error("HuxerUI Windows PlatformView requires unavailable DirectComposition");
+      throw std::runtime_error("HuxerUI could not initialize DirectComposition for a Windows window");
     }
     RECT client{};
     GetClientRect(window_, &client);
@@ -1638,8 +1638,13 @@ struct Win32Renderer::Impl {
     try {
       device_context_->SetTransform(D2D1::Matrix3x2F::Identity());
       device_context_->PushAxisAlignedClip(ToD2DRect(paint_bounds), D2D1_ANTIALIAS_MODE_ALIASED);
-      SetBrushColor(Color::Rgb(247, 248, 250));
-      device_context_->FillRectangle(ToD2DRect(client_bounds), brush_.Get());
+      if (transparent_background_) {
+        // Clear damaged pixels even when the old drawing has disappeared from the retained scene.
+        device_context_->Clear(D2D1::ColorF(0.0F, 0.0F));
+      } else {
+        SetBrushColor(Color::Rgb(247, 248, 250));
+        device_context_->FillRectangle(ToD2DRect(client_bounds), brush_.Get());
+      }
 
       if (frame.scene.root != nullptr) {
         RenderSceneNode(*frame.scene.root);
@@ -2906,6 +2911,7 @@ struct Win32Renderer::Impl {
   float dpi_ = kDipsPerInch;
   bool force_full_repaint_ = true;
   bool supports_dirty_present_ = false;
+  bool transparent_background_ = false;
   bool platform_composition_ = false;
   ComPtr<ID2D1Factory1> d2d_factory_;
   ComPtr<IDWriteFactory> write_factory_;
@@ -2947,14 +2953,17 @@ Win32Renderer::Win32Renderer() : impl_(std::make_unique<Impl>()) {}
 
 Win32Renderer::~Win32Renderer() = default;
 
-void Win32Renderer::Initialize() {
+void Win32Renderer::Initialize(bool transparent_background) {
   impl_->InitializeFactories();
+  impl_->transparent_background_ = transparent_background;
+  impl_->platform_composition_ = transparent_background;
 }
 
 void Win32Renderer::Discard() noexcept {
   impl_->DiscardDeviceResources();
   impl_->pixel_textures_.clear();
   impl_->d3d11_textures_.clear();
+  impl_->transparent_background_ = false;
   impl_->platform_composition_ = false;
   impl_->paragraph_locale_.clear();
   impl_->text_runs_.clear();

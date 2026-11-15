@@ -1903,8 +1903,9 @@ void UiWindow::SetWindowMetrics(WindowMetrics metrics) {
 }
 
 bool UiWindow::IsWindowDragRegion(Point position) const {
-  return state_->window_->metrics.title_bar.has_value() && state_->mounted_root_ &&
-         detail::HitTestWindowDragRegion(*state_->mounted_root_, position);
+  const auto& window = *state_->window_;
+  return (window.metrics.title_bar.has_value() || window.chrome_mode == WindowChromeMode::None) &&
+         state_->mounted_root_ && detail::HitTestWindowDragRegion(*state_->mounted_root_, position);
 }
 
 std::optional<std::uint64_t> UiWindow::HitTestPlatformView(Point position) const {
@@ -2676,7 +2677,7 @@ bool UiWindow::RequestFocus(std::uint64_t identity, bool focus_visible) {
 void UiWindow::SetFocusedNode(std::optional<std::uint64_t> identity, std::optional<bool> focus_visible, bool reverse) {
   if (state_->focus_change_in_progress_) return;
   if (identity.has_value()) {
-    if (!state_->mounted_root_) {
+    if (!state_->window_->activatable || !state_->mounted_root_) {
       identity.reset();
     } else {
       detail::MountedNode* candidate = FindNode(*state_->mounted_root_, *identity);
