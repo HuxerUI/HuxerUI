@@ -827,11 +827,15 @@ public:
     huxerui::UiWindow::Retire();
     ++destroyed_;
   }
-  void Initialize(huxerui::Runtime& runtime, ViewFactory content, const WindowOptions& options) {
+
+  void Initialize(huxerui::Runtime& runtime, ViewFactory content, const WindowOptions& options,
+                  std::shared_ptr<detail::WindowService> service = {}) {
     InitializeWindow(runtime, std::move(content), options,
-                     ResourceConfiguration{Locale::FromLanguageTag("fr-FR"), 2.0F});
+                     ResourceConfiguration{Locale::FromLanguageTag("fr-FR"), 2.0F},
+                     WindowLifecycleState::Background, std::move(service));
     SetWindowMetrics({.viewport = options.initial_size});
   }
+
   void RequestWindowCommand(WindowCommand command) override {
     TestPlatform::RequestWindowCommand(command);
     if (command == WindowCommand::Close) huxerui::UiWindow::CloseWindow();
@@ -915,6 +919,7 @@ TEST_CASE("Owned windows have independent content and local State while sharing 
   REQUIRE(hooks == 2);
   REQUIRE(first.IsOpen());
   REQUIRE(second.IsOpen());
+  REQUIRE(first != second);
   platform.windows[0]->Frame();
   platform.windows[1]->Frame();
   REQUIRE(first_value == 10);
@@ -948,6 +953,44 @@ TEST_CASE("Owned windows have independent content and local State while sharing 
   REQUIRE(app.WindowSupport() == WindowCapabilities{});
   REQUIRE_THROWS_AS(app.OpenWindow(EmptyOwnedWindow), std::logic_error);
   REQUIRE_NOTHROW(first.Close());
+}
+
+TEST_CASE("A host window session survives replacing its UI attachment") {
+  OwnedWindowPlatform platform;
+  Application application(EmptyOwnedWindow, {.show_debug_overlay = false});
+  RuntimeLifetime runtime(application, platform);
+  std::vector<WindowCommand> commands;
+  const auto service = std::make_shared<detail::WindowService>([&](WindowCommand command) {
+    commands.push_back(command);
+  });
+  const auto handle = service->Handle();
+  REQUIRE_FALSE(handle.IsOpen());
+
+  auto attachment = std::make_unique<OwnedTestWindow>(platform.destroyed);
+  attachment->Initialize(platform, EmptyOwnedWindow, {}, service);
+  attachment->UpdateWindowLifecycleState(WindowLifecycleState::Active);
+  REQUIRE(handle.IsOpen());
+  REQUIRE(handle.LifecycleState() == WindowLifecycleState::Active);
+  attachment.reset();
+
+  REQUIRE(handle.IsOpen());
+  REQUIRE(handle.LifecycleState() == WindowLifecycleState::Background);
+  REQUIRE_FALSE(handle.SetAlwaysOnTop(true));
+  handle.Activate();
+  REQUIRE(commands == std::vector{WindowCommand::Activate});
+
+  attachment = std::make_unique<OwnedTestWindow>(platform.destroyed);
+  attachment->Initialize(platform, EmptyOwnedWindow, {}, service);
+  REQUIRE(service->Handle() == handle);
+  REQUIRE(handle.IsOpen());
+  handle.Close();
+  REQUIRE(commands == std::vector{WindowCommand::Activate, WindowCommand::Close});
+  REQUIRE(handle.IsOpen());
+  service->EndSession();
+  attachment.reset();
+  REQUIRE_FALSE(handle.IsOpen());
+  handle.Close();
+  REQUIRE(commands.size() == 2);
 }
 
 TEST_CASE("Optional desktop window behavior uses host capabilities and the addressed window") {

@@ -56,6 +56,11 @@
   <string>Demonstrate the HuxerUI application permission API.</string>
   <key>NSLocationWhenInUseUsageDescription</key>
   <string>Show how to request location access and update it in Settings.</string>
+  <key>UIApplicationSceneManifest</key>
+  <dict>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <true/>
+  </dict>
   <key>UILaunchStoryboardName</key>
   <string>LaunchScreen</string>
   <key>UISupportedInterfaceOrientations</key>

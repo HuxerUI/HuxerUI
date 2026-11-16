@@ -52,6 +52,12 @@ struct WindowState {
 class WindowService : public std::enable_shared_from_this<WindowService> {
 public:
   explicit WindowService(UiWindow& ui_window);
+  explicit WindowService(std::function<void(WindowCommand)> session_command);
+  WindowHandle Handle();
+
+  void Attach(UiWindow& ui_window);
+  void Disconnect() noexcept;
+  void EndSession() noexcept;
 
   [[nodiscard]] bool IsOpen() const;
   bool IsFullscreen() const;
@@ -72,7 +78,7 @@ public:
   [[nodiscard]] std::function<void()>
   ConnectRequest(WindowCommand command, std::function<bool()> handler);
   void ClearHandlers() noexcept;
-  void Disconnect() noexcept;
+
   /// Reads the current native window state and subscribes active composition.
   /// @return This window's state, independent of application foreground aggregation.
   [[nodiscard]] WindowLifecycleState LifecycleState() const;
@@ -94,7 +100,7 @@ private:
   RequestHandler& Handler(WindowCommand command);
   void DisconnectRequest(WindowCommand command, std::uint64_t connection) noexcept;
 
-  UiWindow* ui_window_;
+  UiWindow* ui_window_ = nullptr;
   State<bool> open_{false};
   State<bool> fullscreen_{false};
   bool handling_minimize_request_ = false;
@@ -106,6 +112,7 @@ private:
   State<WindowLifecycleState> lifecycle_state_{WindowLifecycleState::Background};
   std::map<std::uint64_t, std::function<void(WindowLifecycleState)>> lifecycle_handlers_;
   std::weak_ptr<ApplicationRuntimeState> application_;
+  std::function<void(WindowCommand)> session_command_;
 };
 
 View MakeWindowControls(

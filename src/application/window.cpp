@@ -224,6 +224,36 @@ void ValidateWindowSupport(const WindowOptions& options, const WindowCapabilitie
 WindowService::WindowService(UiWindow& ui_window)
     : ui_window_(&ui_window), application_(CurrentApplicationRuntime()) {}
 
+WindowService::WindowService(std::function<void(WindowCommand)> session_command)
+    : application_(CurrentApplicationRuntime()), session_command_(std::move(session_command)) {}
+
+WindowHandle WindowService::Handle() {
+  return WindowHandle{shared_from_this()};
+}
+
+void WindowService::Attach(UiWindow& ui_window) {
+  if (ui_window_ || !session_command_) {
+    throw std::logic_error("HuxerUI window requires a live session without a UI attachment");
+  }
+  ui_window_ = &ui_window;
+}
+
+void WindowService::Disconnect() noexcept {
+  if (!ui_window_) return;
+  if (session_command_) {
+    lifecycle_state_ = WindowLifecycleState::Background;
+  } else {
+    BeginClose();
+  }
+  ui_window_ = nullptr;
+  ClearHandlers();
+}
+
+void WindowService::EndSession() noexcept {
+  session_command_ = {};
+  BeginClose();
+}
+
 bool WindowService::IsOpen() const {
   const auto application = application_.lock();
   if (!application || application->phase == ApplicationRuntimeState::Phase::Stopped) return false;
@@ -291,7 +321,7 @@ std::function<void()> WindowService::ConnectLifecycle(std::function<void(WindowL
 }
 
 void WindowService::Request(WindowCommand command) {
-  if (!ui_window_) return;
+  if (!ui_window_ && !session_command_) return;
   const auto application = application_.lock();
   if (!application) return;
   application->RequireThread();
@@ -299,20 +329,27 @@ void WindowService::Request(WindowCommand command) {
     throw std::logic_error("HuxerUI window commands are unavailable during window installation");
   }
   if (!IsOpen()) return;
-  ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
+  ExecutionGuard guard(ui_window_ ? InternalAccess::WindowExecution(*ui_window_) : application->execution);
   if ((command == WindowCommand::Minimize || command == WindowCommand::Close) && HandleRequest(command)) return;
+  if (!IsOpen()) return;
+  if (session_command_ && (command == WindowCommand::Close || command == WindowCommand::Activate)) {
+    auto request = session_command_;
+    request(command);
+    return;
+  }
+  if (!ui_window_) return;
   if (command == WindowCommand::Activate && !ui_window_->state_->window_->activatable) command = WindowCommand::Show;
-  if (ui_window_ && IsOpen()) ui_window_->RequestWindowCommand(command);
+  ui_window_->RequestWindowCommand(command);
 }
 
 bool WindowService::SetAlwaysOnTop(bool enabled) {
-  if (!IsOpen()) return false;
+  if (!ui_window_ || !IsOpen()) return false;
   ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
   return ui_window_->SetWindowAlwaysOnTop(enabled);
 }
 
 bool WindowService::SetPointerPassThrough(bool enabled) {
-  if (!IsOpen()) return false;
+  if (!ui_window_ || !IsOpen()) return false;
   ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
   return ui_window_->SetWindowPointerPassThrough(enabled);
 }
@@ -328,7 +365,7 @@ void WindowService::RequestKeyboard(bool show) {
 }
 
 void WindowService::RequestFullscreen(bool fullscreen) {
-  if (!IsOpen()) return;
+  if (!ui_window_ || !IsOpen()) return;
   ExecutionGuard guard(InternalAccess::WindowExecution(*ui_window_));
   ui_window_->RequestFullscreen(fullscreen);
 }
@@ -347,7 +384,7 @@ bool WindowService::HandleShortcut(const KeyEvent& event) {
 }
 
 std::function<void()> WindowService::ConnectShortcut(Key key, KeyModifiers modifiers, std::function<bool()> handler) {
-  if (!IsOpen() || CurrentUiWindow() != ui_window_) {
+  if (!ui_window_ || !IsOpen() || CurrentUiWindow() != ui_window_) {
     throw std::logic_error("HuxerUI window shortcuts require a composition in the target window");
   }
   const auto shortcut = ShortcutKey(key, modifiers);
@@ -435,13 +472,6 @@ void WindowService::DisconnectRequest(WindowCommand command, std::uint64_t conne
   }
   request->handler = {};
   request->connection = 0;
-}
-
-void WindowService::Disconnect() noexcept {
-  if (!ui_window_) return;
-  BeginClose();
-  ui_window_ = nullptr;
-  ClearHandlers();
 }
 
 void WindowService::ClearHandlers() noexcept {
@@ -621,7 +651,7 @@ WindowHandle::ConnectShortcut(Key key, KeyModifiers modifiers, std::function<boo
 }
 
 WindowHandle UseWindow() {
-  return WindowHandle{UseService<detail::WindowService>()};
+  return UseService<detail::WindowService>()->Handle();
 }
 
 } // namespace huxerui

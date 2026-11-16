@@ -13,11 +13,13 @@
 #include <exception>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -36,6 +38,7 @@
 #include "uikit_view.h"
 #include "application/application_internal.h"
 #include "application/platform_frame_internal.h"
+#include "application/window_internal.h"
 #include "resources/resource_internal.h"
 #include "text/text_internal.h"
 #include "macros_internal.h"
@@ -50,6 +53,9 @@ class IosRuntime;
   huxerui::detail::IosRuntime* huxeruiApplicationRuntime;
 }
 - (void)resourceConfigurationDidChange:(NSNotification*)notification;
+@end
+
+@interface HuxerUIIOSSceneDelegate : UIResponder <UIWindowSceneDelegate>
 @end
 
 @interface HuxerUIIOSViewController : UIViewController {
@@ -600,9 +606,41 @@ bool WriteIosClipboardFiles(UIPasteboard* pasteboard, const ClipboardFiles& cont
   return true;
 }
 
+WindowLifecycleState IosWindowLifecycle(UISceneActivationState state) {
+  if (state == UISceneActivationStateForegroundActive) return WindowLifecycleState::Active;
+  if (state == UISceneActivationStateForegroundInactive) return WindowLifecycleState::Inactive;
+  return WindowLifecycleState::Background;
+}
+
+bool IosHasFirstResponder(UIView* view) {
+  if (view.isFirstResponder) return true;
+  for (UIView* child in view.subviews) {
+    if (IosHasFirstResponder(child)) return true;
+  }
+  return false;
+}
+
+void ActivateIosScene(UISceneSession* session, NSUserActivity* activity, UIWindowScene* source,
+                      void (^on_error)(NSError*)) {
+  auto* options = [[UISceneActivationRequestOptions alloc] init];
+  options.requestingScene = source;
+  if (@available(iOS 17.0, *)) {
+    auto* request = session ? [UISceneSessionActivationRequest requestWithSession:session]
+                            : [UISceneSessionActivationRequest requestWithRole:UIWindowSceneSessionRoleApplication];
+    request.userActivity = activity;
+    request.options = options;
+    [UIApplication.sharedApplication activateSceneSessionForRequest:request errorHandler:on_error];
+  } else {
+    [UIApplication.sharedApplication requestSceneSessionActivation:session userActivity:activity
+                                                           options:options errorHandler:on_error];
+  }
+}
+
+NSString* const scene_request_activity = @"org.huxerui.open-window";
+
 } // namespace
 
-/// Owns UIKit application services and lazily attaches UI when the native application becomes active.
+/// Owns UIKit application services and the sessions managed by this Runtime.
 /// Native facilities are prepared before shared startup and remain alive until Runtime::Retire completes.
 class IosRuntime final : public Runtime, public PlatformClipboard, public PlatformResources {
 public:
@@ -610,49 +648,26 @@ public:
   ~IosRuntime() override;
 
   int Run();
-  /// Initializes shared services from UIApplication startup and attaches UI only when needed.
-  /// @param launch_options Borrowed UIKit launch dictionary, possibly nil, consumed on the main thread.
-  /// @return Whether application initialization succeeded; exceptions do not cross the delegate boundary.
-  bool FinishLaunching(NSDictionary* launch_options) noexcept;
+  bool FinishLaunching() noexcept;
   void Shutdown();
-  void CancelActiveTouches();
-  /// Publishes process lifecycle and coordinates the lazily created window attachment.
-  /// @param state Native UIApplication state reported on the main thread.
-  void UpdateApplicationLifecycleState(ApplicationLifecycleState state);
-  /// Handles the UIKit activation callback through the shared application/window lifecycle path.
-  void ApplicationDidBecomeActive() { UpdateApplicationLifecycleState(ApplicationLifecycleState::Active); }
-  /// Borrows the current UIKit Runtime for delegate callbacks on the main thread.
-  /// @return The original Runtime, or null outside its lifetime; never retain this raw pointer.
+
+  bool CanOpenWindow() const noexcept;
+  std::function<void()> RequestOpenWindow(ViewFactory content, WindowOptions options,
+                                          CallbackCompletion<WindowHandle> completion, IosUiWindow* source);
+
+  void ConnectScene(UIWindowScene* scene, UISceneConnectionOptions* options);
+  void UpdateSceneLifecycle(UIWindowScene* scene, WindowLifecycleState state);
+  // Keep the window factory and handle across a temporary disconnect. UIKit discards the session separately.
+  void DisconnectScene(UIWindowScene* scene);
+  void DiscardScene(UISceneSession* session);
+
+  void OpenURLs(NSSet<UIOpenURLContext*>* contexts) noexcept;
+  void HandleNotificationResponse(UNNotificationResponse* response) noexcept;
+
   static IosRuntime* Active() noexcept { return active_runtime_; }
 
   void UpdateResourceConfiguration() {
     if (IsInitialized()) Runtime::UpdateResourceConfiguration(Configuration());
-  }
-  bool OpenURL(NSURL* url, NSDictionary<UIApplicationOpenURLOptionsKey, id>* options) noexcept {
-    try {
-      NSNumber* open_in_place = options[UIApplicationOpenURLOptionsOpenInPlaceKey];
-      std::optional<ApplicationActivation> activation =
-          DecodeIosApplicationActivation(url, open_in_place == nil || !open_in_place.boolValue);
-      if (!activation.has_value()) {
-        return false;
-      }
-      if (!IsInitialized()) return false;
-      Runtime::HandleApplicationActivation(std::move(*activation));
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
-
-  void HandleNotificationActivation(NotificationActivation activation) noexcept {
-    try {
-      if (!IsInitialized()) {
-        pending_notification_activations_.push_back(std::move(activation));
-      } else {
-        Runtime::HandleApplicationActivation(std::move(activation));
-      }
-    } catch (...) {
-    }
   }
 
   PlatformClipboard* Clipboard() noexcept override {
@@ -701,9 +716,7 @@ public:
     NSString* language = NSLocale.preferredLanguages.firstObject;
     const char* language_tag = language == nil ? nullptr : language.UTF8String;
     Locale locale = language_tag == nullptr ? Locale::Default() : Locale::FromLanguageTag(language_tag);
-    UIScreen* screen = UIScreen.mainScreen;
-    const float scale = screen == nil ? 1.0F : static_cast<float>(screen.scale);
-    return {std::move(locale), scale};
+    return {std::move(locale), 1.0F};
   }
 
   std::optional<InputStream> OpenRead(std::string_view package_path) override {
@@ -787,15 +800,33 @@ private:
     return UIPasteboard.generalPasteboard.hasStrings;
   }
 
+  struct Scene {
+    UISceneSession* session = nil;
+    ViewFactory content;
+    WindowOptions options;
+    std::shared_ptr<WindowService> service;
+    std::unique_ptr<IosUiWindow> window;
+    bool closing = false;
+  };
+
+  struct OpenRequest {
+    ViewFactory content;
+    WindowOptions options;
+    CallbackCompletion<WindowHandle> completion;
+  };
+
+  void RequestSceneCommand(const std::string& id, WindowCommand command);
+  void UpdateLifecycle();
+  void ReleaseScenes();
   void OnRuntimeStopped() override;
-  /// Creates the owned UIKit window only when an active application needs its first UI attachment.
-  /// @return True when the attachment exists and is ready, false if it cannot be started.
-  bool EnsureUi();
+
   static inline IosRuntime* active_runtime_ = nullptr;
   const Application& application_;
-  std::unique_ptr<IosUiWindow> ui_;
+  NSString* request_origin_ = NSUUID.UUID.UUIDString;
+  std::map<std::string, Scene, std::less<>> scenes_;
+  std::map<std::string, OpenRequest, std::less<>> open_requests_;
   std::vector<NotificationActivation> pending_notification_activations_;
-  bool stopped_ = false;
+  std::vector<std::tuple<std::string, std::string, double>> recent_notification_responses_;
 };
 
 /// Owns one UIKit window attachment and retires shared UI state before releasing native input/rendering facilities.
@@ -803,79 +834,66 @@ class IosUiWindow final : public UiWindow {
 public:
   ~IosUiWindow() override { Shutdown(); }
 
-  ThemeBrightness QuerySystemThemeBrightness() const override {
-    return view_.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark
-        ? ThemeBrightness::Dark : ThemeBrightness::Light;
-  }
+  void Start(Runtime& application, UIWindowScene* scene, const ViewFactory& content, const WindowOptions& options,
+             const std::shared_ptr<WindowService>& service) {
+    window_ = [[UIWindow alloc] initWithWindowScene:scene];
+    scene.title = IosClipboardString(options.title);
+    view_controller_ = [[HuxerUIIOSViewController alloc] init];
+    presentation_ = [[HUXPresentationCoordinator alloc] initWithOwner:view_controller_];
+    view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
 
-  void RefreshSystemTheme() {
-    if (IsInitialized()) UpdateSystemThemeBrightness(QuerySystemThemeBrightness());
-  }
-
-  bool Start(Runtime& application) noexcept {
-    try {
-      window_ = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-      view_controller_ = [[HuxerUIIOSViewController alloc] init];
-      presentation_ = [[HUXPresentationCoordinator alloc] initWithOwner:view_controller_];
-      view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
-
-      view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
-      view_.translatesAutoresizingMaskIntoConstraints = NO;
-      view_->huxeruiPlatformWindow = this;
-      if (@available(iOS 17.0, *)) {
-        [view_ registerForTraitChanges:@[UITraitUserInterfaceStyle.class]
-                          withHandler:^(__kindof id<UITraitEnvironment> environment, UITraitCollection*) {
-          HuxerUIView* host = (HuxerUIView*)environment;
-          if (host->huxeruiPlatformWindow != nullptr) host->huxeruiPlatformWindow->RefreshSystemTheme();
-        }];
-      }
-      [view_controller_.view addSubview:view_];
-      [NSLayoutConstraint activateConstraints:@[
-        [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
-        [view_.trailingAnchor constraintEqualToAnchor:view_controller_.view.trailingAnchor],
-        [view_.topAnchor constraintEqualToAnchor:view_controller_.view.topAnchor],
-        [view_.bottomAnchor constraintEqualToAnchor:view_controller_.view.bottomAnchor],
-      ]];
-
-      window_.rootViewController = view_controller_;
-      [view_controller_.view layoutIfNeeded];
-
-      auto configuration = application.Resources()->Configuration();
-      if (view_.window.screen != nil) configuration.display_scale = static_cast<float>(view_.window.screen.scale);
-      platform_views_ = std::make_unique<UIKitPlatformViews>(
-          renderer_, frame_coordinator_, InternalAccess::ApplicationRegistry(application), *this);
-      text_input_ = std::make_unique<UIKitTextInput>(*this, view_);
-      accessibility_ =
-          std::make_unique<UIKitAccessibility>(*this, view_, *platform_views_, text_input_->Responder());
-      frame_scheduler_ = [[HuxerUIIOSFrameScheduler alloc] initWithView:view_];
-      InitializeWindow(application, CurrentApplication().root_factory, CurrentApplication().options.window, configuration);
-      view_->huxeruiWindow = this;
-      [window_ makeKeyAndVisible];
-      [view_controller_.view layoutIfNeeded];
-      RefreshSystemTheme();
-
-      NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
-      [notifications addObserver:view_
-                        selector:@selector(huxeruiKeyboardFrameDidChange:)
-                            name:UIKeyboardWillChangeFrameNotification
-                          object:nil];
-      [notifications addObserver:view_
-                        selector:@selector(huxeruiKeyboardFrameDidChange:)
-                            name:UIKeyboardWillHideNotification
-                          object:nil];
-      [notifications addObserver:view_
-                        selector:@selector(huxeruiResourceConfigurationDidChange:)
-                            name:NSCurrentLocaleDidChangeNotification
-                          object:nil];
-
-      UiWindow::UpdateResourceConfiguration(Configuration());
-      Resize(view_.bounds.size);
-      RequestFrameAt(Now());
-      return true;
-    } catch (...) {
-      Shutdown();
-      return false;
+    view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
+    view_.translatesAutoresizingMaskIntoConstraints = NO;
+    view_->huxeruiPlatformWindow = this;
+    if (@available(iOS 17.0, *)) {
+      [view_ registerForTraitChanges:@[UITraitUserInterfaceStyle.class]
+                        withHandler:^(__kindof id<UITraitEnvironment> environment, UITraitCollection*) {
+        HuxerUIView* host = (HuxerUIView*)environment;
+        if (host->huxeruiPlatformWindow != nullptr) host->huxeruiPlatformWindow->RefreshSystemTheme();
+      }];
     }
+    [view_controller_.view addSubview:view_];
+    [NSLayoutConstraint activateConstraints:@[
+      [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
+      [view_.trailingAnchor constraintEqualToAnchor:view_controller_.view.trailingAnchor],
+      [view_.topAnchor constraintEqualToAnchor:view_controller_.view.topAnchor],
+      [view_.bottomAnchor constraintEqualToAnchor:view_controller_.view.bottomAnchor],
+    ]];
+
+    window_.rootViewController = view_controller_;
+    [view_controller_.view layoutIfNeeded];
+
+    auto configuration = application.Resources()->Configuration();
+    configuration.display_scale = std::max(1.0F, static_cast<float>(view_.traitCollection.displayScale));
+    platform_views_ = std::make_unique<UIKitPlatformViews>(
+        renderer_, frame_coordinator_, InternalAccess::ApplicationRegistry(application), *this);
+    text_input_ = std::make_unique<UIKitTextInput>(*this, view_);
+    accessibility_ =
+        std::make_unique<UIKitAccessibility>(*this, view_, *platform_views_, text_input_->Responder());
+    frame_scheduler_ = [[HuxerUIIOSFrameScheduler alloc] initWithView:view_];
+    InitializeWindow(application, content, options, configuration, IosWindowLifecycle(scene.activationState), service);
+    view_->huxeruiWindow = this;
+    [window_ makeKeyAndVisible];
+    [view_controller_.view layoutIfNeeded];
+    ApplySceneLifecycle(IosWindowLifecycle(scene.activationState));
+
+    NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
+    [notifications addObserver:view_
+                      selector:@selector(huxeruiKeyboardFrameDidChange:)
+                          name:UIKeyboardWillChangeFrameNotification
+                        object:nil];
+    [notifications addObserver:view_
+                      selector:@selector(huxeruiKeyboardFrameDidChange:)
+                          name:UIKeyboardWillHideNotification
+                        object:nil];
+    [notifications addObserver:view_
+                      selector:@selector(huxeruiResourceConfigurationDidChange:)
+                          name:NSCurrentLocaleDidChangeNotification
+                        object:nil];
+
+    UiWindow::UpdateResourceConfiguration(Configuration());
+    Resize(view_.bounds.size);
+    RequestFrameAt(Now());
   }
 
   void Shutdown() {
@@ -901,11 +919,38 @@ public:
     view_ = nil;
     view_controller_ = nil;
     presentation_ = nil;
+    window_.hidden = YES;
+    window_.rootViewController = nil;
     window_ = nil;
+  }
+
+  void CancelActiveTouches() {
+    [view_ cancelHuxerUITouches];
+  }
+
+  void ApplySceneLifecycle(WindowLifecycleState state) {
+    if (!IsInitialized()) return;
+    if (state != WindowLifecycleState::Background) RefreshSystemTheme();
+    if (state != WindowLifecycleState::Active) CancelActiveTouches();
+    [presentation_ setActive:state == WindowLifecycleState::Active];
+    UpdateWindowLifecycleState(state);
+  }
+
+  ThemeBrightness QuerySystemThemeBrightness() const override {
+    return view_.traitCollection.userInterfaceStyle == UIUserInterfaceStyleDark
+        ? ThemeBrightness::Dark : ThemeBrightness::Light;
+  }
+
+  void RefreshSystemTheme() {
+    if (IsInitialized()) UpdateSystemThemeBrightness(QuerySystemThemeBrightness());
   }
 
   UIViewController* ViewController() const noexcept {
     return view_controller_;
+  }
+
+  UIWindowScene* Scene() const noexcept {
+    return window_.windowScene;
   }
 
   void RequestFrameAt(double deadline) override {
@@ -939,8 +984,22 @@ public:
   void KeyboardFrameChanged(NSNotification* notification) {
     keyboard_frame_.reset();
     NSValue* value = notification.userInfo[UIKeyboardFrameEndUserInfoKey];
-    if (value != nil && view_ != nil && view_.window != nil && notification.name != UIKeyboardWillHideNotification) {
-      keyboard_frame_ = [view_ convertRect:value.CGRectValue fromView:nil];
+    if (value != nil && window_ != nil && notification.name != UIKeyboardWillHideNotification &&
+        IosHasFirstResponder(window_)) {
+      id<UICoordinateSpace> screen = window_.windowScene.screen.coordinateSpace;
+      if ([notification.object isKindOfClass:UIScreen.class]) {
+        UIScreen* keyboard_screen = notification.object;
+        if (keyboard_screen != window_.windowScene.screen) {
+          ApplyViewport();
+          return;
+        }
+        screen = keyboard_screen.coordinateSpace;
+      }
+      if (screen != nil) {
+        const CGRect keyboard_in_view = [view_ convertRect:value.CGRectValue fromCoordinateSpace:screen];
+        const CGRect frame = CGRectIntersection(view_.bounds, keyboard_in_view);
+        if (!CGRectIsEmpty(frame)) keyboard_frame_ = frame;
+      }
     }
     ApplyViewport();
   }
@@ -990,23 +1049,6 @@ public:
     }
   }
 
-  void CancelActiveTouches() {
-    [view_ cancelHuxerUITouches];
-  }
-
-  /// Combines UIApplication state with this UIWindow's visibility and key status.
-  /// @param application_state Current native process state, supplied on the UIKit main thread.
-  void UpdateWindowLifecycleState(ApplicationLifecycleState application_state) {
-    if (!IsInitialized()) return;
-    if (application_state != ApplicationLifecycleState::Background) RefreshSystemTheme();
-    WindowLifecycleState state = WindowLifecycleState::Background;
-    if (window_ != nil && !window_.hidden && application_state != ApplicationLifecycleState::Background) {
-      state = application_state == ApplicationLifecycleState::Active && window_.keyWindow
-          ? WindowLifecycleState::Active : WindowLifecycleState::Inactive;
-    }
-    [presentation_ setActive:state == WindowLifecycleState::Active];
-    UiWindow::UpdateWindowLifecycleState(state);
-  }
   UIView* HitTestPlatformView(Point point, UIEvent* event) const {
     if (!IsInitialized() || platform_views_ == nullptr) {
       return nil;
@@ -1054,9 +1096,10 @@ public:
 
   ResourceConfiguration Configuration() const {
     auto configuration = ApplicationRuntime().Resources()->Configuration();
-    if (view_.window.screen != nil) configuration.display_scale = static_cast<float>(view_.window.screen.scale);
+    configuration.display_scale = std::max(1.0F, static_cast<float>(view_.traitCollection.displayScale));
     return configuration;
   }
+
 private:
   void ApplyViewport() {
     if (!IsInitialized()) {
@@ -1174,68 +1217,262 @@ int IosRuntime::Run() {
   return result;
 }
 
-bool IosRuntime::FinishLaunching(NSDictionary*) noexcept {
-  if (IsInitialized()) return false;
+bool IosRuntime::FinishLaunching() noexcept {
   try {
     const bool background = UIApplication.sharedApplication.applicationState == UIApplicationStateBackground;
-    InitializeApplication(application_,
-        background ? std::nullopt : std::optional<ApplicationActivation>(LaunchActivation{}),
-        background ? ApplicationLifecycleState::Background : ApplicationLifecycleState::Inactive);
-    for (auto& activation : pending_notification_activations_) {
-      Runtime::HandleApplicationActivation(std::move(activation));
-    }
+    InitializeApplication(
+        application_, background ? std::nullopt : std::optional<ApplicationActivation>(LaunchActivation{}));
+    for (auto& activation : pending_notification_activations_) HandleApplicationActivation(std::move(activation));
     pending_notification_activations_.clear();
     [NSNotificationCenter.defaultCenter addObserver:UIApplication.sharedApplication.delegate
                                            selector:@selector(resourceConfigurationDidChange:)
                                                name:NSCurrentLocaleDidChangeNotification object:nil];
-    return background || EnsureUi();
+    return true;
   } catch (...) {
     Shutdown();
     return false;
   }
 }
 
-bool IosRuntime::EnsureUi() {
-  if (ui_) return true;
-  if (!IsInitialized() || stopped_) return false;
-  auto ui = std::make_unique<IosUiWindow>();
-  if (!ui->Start(*this)) return false;
-  const auto native_state = UIApplication.sharedApplication.applicationState;
-  ui->UpdateWindowLifecycleState(native_state == UIApplicationStateActive ? ApplicationLifecycleState::Active :
-      native_state == UIApplicationStateBackground ? ApplicationLifecycleState::Background : ApplicationLifecycleState::Inactive);
-  ui_ = std::move(ui);
-  return true;
-}
-
 void IosRuntime::Shutdown() {
   [NSNotificationCenter.defaultCenter removeObserver:UIApplication.sharedApplication.delegate
                                                 name:NSCurrentLocaleDidChangeNotification object:nil];
-  ui_.reset();
+  ReleaseScenes();
   Retire();
   pending_notification_activations_.clear();
 }
 
-void IosRuntime::OnRuntimeStopped() {
-  stopped_ = true;
-  ui_.reset();
+bool IosRuntime::CanOpenWindow() const noexcept {
+  return IsInitialized() && UIApplication.sharedApplication.supportsMultipleScenes;
 }
 
-void IosRuntime::CancelActiveTouches() {
-  if (ui_) ui_->CancelActiveTouches();
+std::function<void()> IosRuntime::RequestOpenWindow(ViewFactory content, WindowOptions options,
+                                                    CallbackCompletion<WindowHandle> completion, IosUiWindow* source) {
+  if (!CanOpenWindow()) throw std::runtime_error("HuxerUI host does not support creating another iOS window");
+  ValidateWindowSupport(options, {});
+  NSString* request_id = NSUUID.UUID.UUIDString;
+  const std::string id = request_id.UTF8String;
+  NSUserActivity* activity = [[NSUserActivity alloc] initWithActivityType:scene_request_activity];
+  activity.userInfo = @{@"origin" : request_origin_, @"request" : request_id};
+
+  std::weak_ptr<ApplicationRuntimeState> application = CurrentApplicationRuntime();
+  open_requests_.emplace(id, OpenRequest{std::move(content), std::move(options), completion});
+  ActivateIosScene(nil, activity, source ? source->Scene() : nil, ^(NSError* error) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      const auto owner = application.lock();
+      if (!owner || owner->owner != this || !open_requests_.erase(id)) return;
+      const char* message = error.localizedDescription.UTF8String;
+      const char* reason = message ? message : "scene activation failed";
+      const auto diagnostic = std::string("HuxerUI could not open an iOS window: ") + reason;
+      completion.Fail(std::make_exception_ptr(std::runtime_error(diagnostic)));
+    });
+  });
+  return [this, application, id] {
+    if (const auto owner = application.lock(); owner && owner->owner == this) open_requests_.erase(id);
+  };
 }
 
-void IosRuntime::UpdateApplicationLifecycleState(ApplicationLifecycleState state) {
-  if (!IsInitialized() || stopped_) return;
-  Runtime::UpdateApplicationLifecycleState(state);
-  if (state != ApplicationLifecycleState::Background) EnsureUi();
-  if (ui_) ui_->UpdateWindowLifecycleState(state);
+void IosRuntime::ConnectScene(UIWindowScene* native_scene, UISceneConnectionOptions* options) {
+  if (!IsInitialized()) return;
+  UISceneSession* session = native_scene.session;
+  const std::string id = session.persistentIdentifier.UTF8String;
+  auto entry = scenes_.find(id);
+  std::optional<OpenRequest> request;
+  if (entry == scenes_.end()) {
+    for (NSUserActivity* activity in options.userActivities) {
+      if (![activity.activityType isEqualToString:scene_request_activity] ||
+          ![request_origin_ isEqual:activity.userInfo[@"origin"]]) continue;
+      NSString* token = activity.userInfo[@"request"];
+      if (![token isKindOfClass:NSString.class]) continue;
+      auto pending = open_requests_.extract(token.UTF8String);
+      if (pending.empty()) {
+        // UIKit can deliver a scene after its Task has been canceled.
+        [UIApplication.sharedApplication requestSceneSessionDestruction:session options:nil errorHandler:nil];
+        return;
+      }
+      request = std::move(pending.mapped());
+      break;
+    }
+    auto service = std::make_shared<WindowService>([this, id](WindowCommand command) {
+      RequestSceneCommand(id, command);
+    });
+    entry = scenes_.emplace(id, Scene{
+        .session = session,
+        .content = request ? std::move(request->content) : ViewFactory(application_.root_factory),
+        .options = request ? std::move(request->options) : application_.options.window,
+        .service = std::move(service),
+        .window = {},
+    }).first;
+  }
+
+  auto& scene = entry->second;
+  if (scene.window || scene.closing) return;
+  scene.window = std::make_unique<IosUiWindow>();
+  try {
+    scene.window->Start(*this, native_scene, scene.content, scene.options, scene.service);
+  } catch (...) {
+    scene.window.reset();
+    if (request) {
+      const auto error = std::current_exception();
+      DiscardScene(session);
+      [UIApplication.sharedApplication requestSceneSessionDestruction:session options:nil errorHandler:nil];
+      request->completion.Fail(error);
+    } else {
+      throw;
+    }
+    return;
+  }
+  if (request) request->completion.Complete(scene.service->Handle());
+  UpdateLifecycle();
+  OpenURLs(options.URLContexts);
+  if (options.notificationResponse) HandleNotificationResponse(options.notificationResponse);
+}
+
+void IosRuntime::UpdateSceneLifecycle(UIWindowScene* scene, WindowLifecycleState state) {
+  const auto entry = scenes_.find(scene.session.persistentIdentifier.UTF8String);
+  if (entry == scenes_.end() || !entry->second.window || entry->second.window->Scene() != scene ||
+      !IsInitialized()) return;
+  entry->second.window->ApplySceneLifecycle(state);
+  UpdateLifecycle();
+}
+
+void IosRuntime::DisconnectScene(UIWindowScene* scene) {
+  const auto entry = scenes_.find(scene.session.persistentIdentifier.UTF8String);
+  if (entry == scenes_.end() || !entry->second.window || entry->second.window->Scene() != scene) return;
+  entry->second.window.reset();
+  UpdateLifecycle();
+}
+
+void IosRuntime::DiscardScene(UISceneSession* session) {
+  auto removed = scenes_.extract(session.persistentIdentifier.UTF8String);
+  if (removed.empty()) return;
+  auto& scene = removed.mapped();
+  scene.service->EndSession();
+  scene.window.reset();
+  UpdateLifecycle();
+}
+
+void IosRuntime::OpenURLs(NSSet<UIOpenURLContext*>* contexts) noexcept {
+  if (!IsInitialized()) return;
+  for (UIOpenURLContext* context in contexts) {
+    try {
+      auto activation = DecodeIosApplicationActivation(context.URL, !context.options.openInPlace);
+      if (activation) HandleApplicationActivation(std::move(*activation));
+    } catch (...) {
+    }
+  }
+}
+
+void IosRuntime::HandleNotificationResponse(UNNotificationResponse* response) noexcept {
+  try {
+    auto activation = DecodeIosLocalNotificationActivation(response.notification.request, response.actionIdentifier);
+    if (!activation) return;
+    // Connection options and the notification delegate can both carry the same response.
+    const auto identity = std::tuple{
+        activation->identifier, std::string(response.actionIdentifier.UTF8String),
+        response.notification.date.timeIntervalSinceReferenceDate,
+    };
+    if (std::ranges::find(recent_notification_responses_, identity) != recent_notification_responses_.end()) return;
+    if (recent_notification_responses_.size() == 32) {
+      recent_notification_responses_.erase(recent_notification_responses_.begin());
+    }
+    recent_notification_responses_.push_back(identity);
+    if (IsInitialized()) {
+      HandleApplicationActivation(std::move(*activation));
+    } else {
+      pending_notification_activations_.push_back(std::move(*activation));
+    }
+  } catch (...) {
+  }
+}
+
+void IosRuntime::RequestSceneCommand(const std::string& id, WindowCommand command) {
+  const auto entry = scenes_.find(id);
+  if (entry == scenes_.end() || entry->second.closing) return;
+  auto& scene = entry->second;
+  if (command == WindowCommand::Activate) {
+    ActivateIosScene(scene.session, nil, nil, nil);
+    return;
+  }
+
+  scene.closing = true;
+  std::weak_ptr<ApplicationRuntimeState> application = CurrentApplicationRuntime();
+  [UIApplication.sharedApplication requestSceneSessionDestruction:scene.session options:nil errorHandler:^(NSError*) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      const auto owner = application.lock();
+      if (!owner || owner->owner != this) return;
+      if (auto window = scenes_.find(id); window != scenes_.end()) window->second.closing = false;
+    });
+  }];
+}
+
+void IosRuntime::UpdateLifecycle() {
+  if (!IsInitialized()) return;
+  auto state = ApplicationLifecycleState::Background;
+  for (const auto& [id, scene] : scenes_) {
+    if (!scene.window) continue;
+    const auto lifecycle = scene.service->LifecycleState();
+    if (lifecycle == WindowLifecycleState::Active) {
+      state = ApplicationLifecycleState::Active;
+      break;
+    }
+    if (lifecycle == WindowLifecycleState::Inactive) state = ApplicationLifecycleState::Inactive;
+  }
+  UpdateApplicationLifecycleState(state);
+}
+
+void IosRuntime::ReleaseScenes() {
+  open_requests_.clear();
+  auto scenes = std::exchange(scenes_, {});
+  for (auto& [id, scene] : scenes) scene.service->EndSession();
+}
+
+void IosRuntime::OnRuntimeStopped() { ReleaseScenes(); }
+
+bool ApplicationService::CanOpenWindow() const {
+  if (!runtime_) return false;
+  runtime_->state_->RequireThread();
+  const auto* ios = dynamic_cast<IosRuntime*>(runtime_);
+  return ios && ios->CanOpenWindow();
+}
+
+Task<WindowHandle> ApplicationService::OpenWindowAsync(ViewFactory content, WindowOptions options) const {
+  if (!runtime_) throw std::logic_error("HuxerUI application is disconnected");
+  auto source = CapturePresentationContext(runtime_->state_->execution);
+  return RunCallbackTask<WindowHandle>(
+      [source = std::move(source), content = std::move(content), options = std::move(options)](
+          CallbackCompletion<WindowHandle> completion) mutable {
+        if (!IsPresentationSourceAvailable(source)) {
+          throw std::logic_error("HuxerUI originating application or window is disconnected");
+        }
+        auto* owner = source->application.lock()->owner;
+        owner->ValidateWindowCreation(content, options);
+        auto* ios = dynamic_cast<IosRuntime*>(owner);
+        if (!ios) throw std::runtime_error("HuxerUI host does not support creating another iOS window");
+        const auto ui = source->ui.lock();
+        return ios->RequestOpenWindow(std::move(content), std::move(options), completion,
+                                      ui ? dynamic_cast<IosUiWindow*>(ui->ui_window) : nullptr);
+      });
 }
 
 int RunPlatformApplication(const Application& application) {
   IosRuntime platform(application);
   return platform.Run();
 }
+
 } // namespace huxerui::detail
+
+namespace huxerui {
+
+bool ApplicationHandle::CanOpenWindow() const {
+  return service_->CanOpenWindow();
+}
+
+Task<WindowHandle> ApplicationHandle::OpenWindowAsync(ViewFactory content, WindowOptions options) const {
+  return service_->OpenWindowAsync(std::move(content), std::move(options));
+}
+
+} // namespace huxerui
 
 namespace huxerui::ios::detail {
 
@@ -1513,47 +1750,21 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 }
 
 - (BOOL)application:(UIApplication*)application didFinishLaunchingWithOptions:(NSDictionary*)launchOptions {
-  return huxeruiApplicationRuntime != nullptr && huxeruiApplicationRuntime->FinishLaunching(launchOptions);
+  return huxeruiApplicationRuntime != nullptr && huxeruiApplicationRuntime->FinishLaunching();
 }
 
-- (void)userNotificationCenter:(UNUserNotificationCenter*)center
-       willPresentNotification:(UNNotification*)notification
-         withCompletionHandler:(void (^)(UNNotificationPresentationOptions options))completionHandler {
-  completionHandler(huxerui::detail::IosLocalNotificationPresentationOptions(notification.request));
+- (UISceneConfiguration*)application:(UIApplication*)application
+    configurationForConnectingSceneSession:(UISceneSession*)session
+                                    options:(UISceneConnectionOptions*)options {
+  auto* configuration = [[UISceneConfiguration alloc] initWithName:nil sessionRole:session.role];
+  configuration.sceneClass = UIWindowScene.class;
+  configuration.delegateClass = HuxerUIIOSSceneDelegate.class;
+  return configuration;
 }
 
-- (void)userNotificationCenter:(UNUserNotificationCenter*)center
-    didReceiveNotificationResponse:(UNNotificationResponse*)response
-             withCompletionHandler:(void (^)(void))completionHandler {
-  std::optional<huxerui::NotificationActivation> activation =
-      huxerui::detail::DecodeIosLocalNotificationActivation(response.notification.request, response.actionIdentifier);
-  if (!activation.has_value()) {
-    completionHandler();
-    return;
-  }
-
-  if ([NSThread isMainThread]) {
-    if (huxeruiApplicationRuntime != nullptr) {
-      huxeruiApplicationRuntime->HandleNotificationActivation(std::move(*activation));
-    }
-    completionHandler();
-    return;
-  }
-
-  // Retain the complete snapshot across the dispatch boundary, including application data.
-  const huxerui::NotificationActivation notification_activation = std::move(*activation);
-  dispatch_async(dispatch_get_main_queue(), ^{
-    if (huxeruiApplicationRuntime != nullptr) {
-      huxeruiApplicationRuntime->HandleNotificationActivation(notification_activation);
-    }
-    completionHandler();
-  });
-}
-
-- (BOOL)application:(UIApplication*)application
-            openURL:(NSURL*)url
-            options:(NSDictionary<UIApplicationOpenURLOptionsKey, id>*)options {
-  return huxeruiApplicationRuntime != nullptr && huxeruiApplicationRuntime->OpenURL(url, options);
+- (void)application:(UIApplication*)application didDiscardSceneSessions:(NSSet<UISceneSession*>*)sessions {
+  if (!huxeruiApplicationRuntime) return;
+  for (UISceneSession* session in sessions) huxeruiApplicationRuntime->DiscardScene(session);
 }
 
 - (void)applicationWillTerminate:(UIApplication*)application {
@@ -1566,29 +1777,73 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
   }
 }
 
-- (void)applicationWillResignActive:(UIApplication*)application {
-  if (huxeruiApplicationRuntime != nullptr) {
-    huxeruiApplicationRuntime->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
-    huxeruiApplicationRuntime->CancelActiveTouches();
+- (void)userNotificationCenter:(UNUserNotificationCenter*)center
+       willPresentNotification:(UNNotification*)notification
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions options))completionHandler {
+  completionHandler(huxerui::detail::IosLocalNotificationPresentationOptions(notification.request));
+}
+
+- (void)userNotificationCenter:(UNUserNotificationCenter*)center
+    didReceiveNotificationResponse:(UNNotificationResponse*)response
+             withCompletionHandler:(void (^)(void))completionHandler {
+  const auto deliver = ^{
+    if (huxeruiApplicationRuntime) huxeruiApplicationRuntime->HandleNotificationResponse(response);
+    completionHandler();
+  };
+  if ([NSThread isMainThread]) {
+    deliver();
+  } else {
+    dispatch_async(dispatch_get_main_queue(), deliver);
   }
 }
 
-- (void)applicationDidBecomeActive:(UIApplication*)application {
-  if (huxeruiApplicationRuntime != nullptr) {
-    huxeruiApplicationRuntime->ApplicationDidBecomeActive();
+@end
+
+@implementation HuxerUIIOSSceneDelegate
+
+- (void)scene:(UIScene*)scene willConnectToSession:(UISceneSession*)session options:(UISceneConnectionOptions*)options {
+  if (![scene isKindOfClass:UIWindowScene.class]) return;
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) {
+    try {
+      runtime->ConnectScene((UIWindowScene*)scene, options);
+    } catch (const std::exception& error) {
+      NSLog(@"HuxerUI could not connect a window scene: %s", error.what());
+    } catch (...) {
+      NSLog(@"HuxerUI could not connect a window scene");
+    }
   }
 }
 
-- (void)applicationDidEnterBackground:(UIApplication*)application {
-  if (huxeruiApplicationRuntime != nullptr) {
-    huxeruiApplicationRuntime->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Background);
+- (void)sceneWillEnterForeground:(UIScene*)scene {
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) {
+    runtime->UpdateSceneLifecycle((UIWindowScene*)scene, huxerui::WindowLifecycleState::Inactive);
   }
 }
 
-- (void)applicationWillEnterForeground:(UIApplication*)application {
-  if (huxeruiApplicationRuntime != nullptr) {
-    huxeruiApplicationRuntime->UpdateApplicationLifecycleState(huxerui::ApplicationLifecycleState::Inactive);
+- (void)sceneDidBecomeActive:(UIScene*)scene {
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) {
+    runtime->UpdateSceneLifecycle((UIWindowScene*)scene, huxerui::WindowLifecycleState::Active);
   }
+}
+
+- (void)sceneWillResignActive:(UIScene*)scene {
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) {
+    runtime->UpdateSceneLifecycle((UIWindowScene*)scene, huxerui::WindowLifecycleState::Inactive);
+  }
+}
+
+- (void)sceneDidEnterBackground:(UIScene*)scene {
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) {
+    runtime->UpdateSceneLifecycle((UIWindowScene*)scene, huxerui::WindowLifecycleState::Background);
+  }
+}
+
+- (void)sceneDidDisconnect:(UIScene*)scene {
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) runtime->DisconnectScene((UIWindowScene*)scene);
+}
+
+- (void)scene:(UIScene*)scene openURLContexts:(NSSet<UIOpenURLContext*>*)contexts {
+  if (auto* runtime = huxerui::detail::IosRuntime::Active()) runtime->OpenURLs(contexts);
 }
 
 @end

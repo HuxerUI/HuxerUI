@@ -564,6 +564,7 @@ private:
   void FinishShutdown();
   /// Idempotently closes the ordinary timer queue before its dispatcher or native owner can disappear.
   void CloseTimers() noexcept;
+  void ValidateWindowCreation(const ViewFactory& content, const WindowOptions& options);
   WindowHandle OpenWindow(ViewFactory content, WindowOptions options);
   void CloseWindow(UiWindow& window);
   void ScheduleWindowMaintenance();
@@ -613,6 +614,25 @@ public:
   /// failed native creation throws std::runtime_error. Success does not imply that the first frame has rendered.
   /// Discarding the returned handle leaves the window open. Options do not inherit from the opening window.
   WindowHandle OpenWindow(ViewFactory content, WindowOptions options = {}) const;
+#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+  /// Reports whether the iOS host supports requesting another window scene.
+  /// Query on the application thread. UIKit can still reject an individual request.
+  /// @note Available only on iOS and iPadOS.
+  bool CanOpenWindow() const;
+
+  /// Requests another UIKit window.
+  /// @param content Owned factory for the new window's root composition and fresh Environment.
+  /// @param options Startup options; UIKit determines the window placement and size.
+  /// @return A lazy Task that yields the new handle on the application thread after UIKit connects the scene
+  /// and HuxerUI initializes its attachment.
+  /// @throws std::invalid_argument If the factory or options are invalid.
+  /// @throws std::logic_error If the application or requesting attachment is unavailable when started.
+  /// @throws std::runtime_error If UIKit rejects the request or the window cannot be initialized.
+  /// Start outside composition and installation. Canceling before initialization suppresses a late window.
+  /// @note Available only on iOS and iPadOS.
+  Task<WindowHandle> OpenWindowAsync(ViewFactory content, WindowOptions options = {}) const;
+#endif
+
   /// Reads the immutable activation that originally started this application.
   /// @return A service-owned optional value valid while this handle retains the service; empty for background-only
   /// startup.
@@ -989,11 +1009,13 @@ protected:
   /// @param options Independent startup geometry and chrome policy for this window.
   /// @param configuration Optional per-window resource overrides; absence uses application defaults.
   /// @param initial_lifecycle Initial native foreground state, visible to WindowHook before first composition.
+  /// @param window_service Optional service for a host window that can reconnect to a new UI attachment.
   /// Runs window_hooks, installs shared UI services, then admits native input. Failure retires partial UI state.
   /// @throws std::logic_error If initialized twice, the application is not running, or the calling thread differs.
   void InitializeWindow(Runtime& application, ViewFactory content, const WindowOptions& options,
                         std::optional<ResourceConfiguration> configuration = std::nullopt,
-                        WindowLifecycleState initial_lifecycle = WindowLifecycleState::Background);
+                        WindowLifecycleState initial_lifecycle = WindowLifecycleState::Background,
+                        std::shared_ptr<detail::WindowService> window_service = {});
   /// Builds the next frame, replacing the window's content with the built-in error page on composition failure.
   /// @param report_error Optional synchronous diagnostic sink. The UTF-8 message is borrowed during the call.
   /// Passing null uses standard error.

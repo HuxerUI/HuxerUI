@@ -542,7 +542,9 @@ TEST_CASE("HuxerUICliAddsMissingPlatformsFromNestedProjectDirectories") {
           std::string::npos);
   REQUIRE(Read(temporary.Path() / "sample/platform/macos/huxerui.cmake").find("MACOSX_PACKAGE_LOCATION Resources") !=
           std::string::npos);
-  REQUIRE(std::filesystem::is_regular_file(temporary.Path() / "sample/platform/ios/App/Info.plist"));
+  const auto ios_plist = Read(temporary.Path() / "sample/platform/ios/App/Info.plist");
+  REQUIRE(ios_plist.find("UIApplicationSceneManifest") != std::string::npos);
+  REQUIRE(ios_plist.find("<key>UIApplicationSupportsMultipleScenes</key>\n    <false/>") != std::string::npos);
   const std::filesystem::path ios_app_icons =
       temporary.Path() / "sample/platform/ios/App/Assets.xcassets/AppIcon.appiconset";
   REQUIRE(std::filesystem::is_regular_file(ios_app_icons / "Contents.json"));

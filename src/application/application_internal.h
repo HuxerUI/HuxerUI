@@ -348,6 +348,11 @@ public:
   [[nodiscard]] bool SupportsMultipleWindows() const;
   WindowCapabilities WindowSupport() const;
   WindowHandle OpenWindow(ViewFactory content, WindowOptions options) const;
+#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+  bool CanOpenWindow() const;
+  Task<WindowHandle> OpenWindowAsync(ViewFactory content, WindowOptions options) const;
+#endif
+
   void Enqueue(ApplicationActivation activation);
   void UpdateLifecycleState(ApplicationLifecycleState lifecycle_state);
   void DispatchPending();

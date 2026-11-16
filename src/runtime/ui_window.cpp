@@ -1470,7 +1470,8 @@ bool UiWindow::IsInitialized() const noexcept {
 }
 
 void UiWindow::InitializeWindow(Runtime& application_runtime, ViewFactory content, const WindowOptions& window_options,
-                                std::optional<ResourceConfiguration> configuration, WindowLifecycleState initial_lifecycle) {
+                                std::optional<ResourceConfiguration> configuration,
+                                WindowLifecycleState initial_lifecycle, std::shared_ptr<WindowService> window_service) {
   if (state_)
     throw std::logic_error("HuxerUI UI window has already been initialized");
   const auto application_state = application_runtime.state_;
@@ -1543,7 +1544,12 @@ void UiWindow::InitializeWindow(Runtime& application_runtime, ViewFactory conten
     text_measurer->dependency = state_->text_metrics_dependency_;
 #endif
     root.Provide(std::move(text_measurer));
-    state_->window_service_ = std::make_shared<WindowService>(*this);
+    if (window_service) {
+      window_service->Attach(*this);
+      state_->window_service_ = std::move(window_service);
+    } else {
+      state_->window_service_ = std::make_shared<WindowService>(*this);
+    }
     state_->window_service_->UpdateLifecycleState(initial_lifecycle);
     root.Provide(state_->window_service_);
     state_->scene_transition_service_ = std::make_shared<SceneTransitionService>(*state_);

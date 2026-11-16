@@ -351,6 +351,18 @@ An Activity hosting several HuxerUI views forwards results until one consumes th
 The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
 Build on macOS with Xcode 26 or later and an installed simulator runtime or paired device; release CI uses Xcode 26.2. This toolchain requirement does not raise the iOS 15 deployment target.
 
+The CLI generates an iOS bundle with a `UIApplicationSceneManifest` and one window scene by default. When upgrading an existing generated shell that predates scenes, add this dictionary to its own `App/Info.plist`:
+
+```xml
+<key>UIApplicationSceneManifest</key>
+<dict>
+  <key>UIApplicationSupportsMultipleScenes</key>
+  <false/>
+</dict>
+```
+
+The HuxerUI application delegate supplies the scene configuration. Set the key to `true` to opt into [multiple windows](core-concepts.md#multiple-windows). The scene manifest is required for the scene lifecycle, including in applications that only open one window. See [Apple's migration guidance](https://developer.apple.com/documentation/uikit/transitioning-to-the-uikit-scene-based-life-cycle).
+
 ```bash
 huxerui devices ios
 huxerui open ios

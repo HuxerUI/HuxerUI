@@ -196,7 +196,7 @@ The implemented platform mappings are:
 
 - Windows maps an active restored window to `Active`, deactivation to `Inactive`, and minimization to `Background`.
 - Android maps Activity resume to `Active`, pause or foreground transition to `Inactive`, and stop to `Background`; embedded owners explicitly update their `HuxerUIView`.
-- iOS maps UIKit active, inactive, and background application callbacks directly.
+- iOS maps each UIKit scene independently and aggregates the most active connected scene for the application.
 - macOS maps application activation to `Active` or `Inactive` and application hiding to `Background`.
 - Linux maps top-level GTK focus to `Active` or `Inactive` and minimization or unmapping to `Background`.
 - Web maps a focused visible document to `Active`, a visible unfocused document to `Inactive`, and a hidden document to `Background`.
@@ -257,18 +257,17 @@ The `example_application` bundle declares the `huxerui-example` custom URL schem
 
 ## iOS mapping
 
-The current UIKit shell is application-delegate based and does not declare scenes. When `UIApplicationLaunchOptionsURLKey` indicates a URL launch, `didFinishLaunchingWithOptions` defers Runtime construction until the corresponding `application:openURL:options:` callback supplies the complete open options. The decoded value then becomes the immutable startup activation before first composition. A later callback submits through the same decoder to the existing Runtime. An open-in-place file URL becomes a one-element `FileActivation` backed by the existing security-scoped iOS `FileReference`; when UIKit requires copying before use, the adapter establishes a private read-only temporary snapshot before the callback returns and retains that snapshot through the same `FileReference` contract. Another URL becomes `UrlActivation`.
+The UIKit shell initializes one Runtime from its application delegate. The shell declares a scene manifest, and its application delegate supplies the HuxerUI window scene configuration. Each connected `UIWindowScene` gets a `UIWindow` and an `IosUiWindow` with independent geometry, input, rendering, window hooks, and presentation. The application lifecycle is active if any window scene is active, inactive if a foreground scene remains, and background otherwise. An initially windowless or temporarily disconnected application retains its application services.
 
-UIKit installs its User Notifications delegate during `willFinishLaunchingWithOptions`.
-Only a primary interaction with a HuxerUI-created local notification becomes `NotificationActivation`.
-User Notifications delivers that response after host launch; if Runtime does not yet exist, the adapter retains the value and submits it through `Runtime::HandleApplicationActivation()` immediately after construction.
-The immutable startup value remains `LaunchActivation` or the independently decoded URL/file activation, while both warm and cold notification interactions are observed through `ApplicationContext::OnActivation()`.
+Programmatically created sessions carry a private request identifier in `NSUserActivity`. The Runtime completes the corresponding Task after the new UI attachment initializes. The remaining scene sessions use the application root when they first connect. A temporary disconnect tears down only the UI attachment. Its session keeps the factory, options, and observable window service so reconnection uses the same handle. A discarded session permanently closes the handle. Application data that must survive reattachment belongs to the application, and a fresh process uses the default application root for restored sessions.
 
-The launch-options URL alone does not contain `UIApplicationOpenURLOptionsOpenInPlaceKey`, so it is never used to guess document ownership or suppress the callback that carries that information. Equal URLs opened later remain distinct activations as required by the shared queue.
+The scene connection options supply initial URL and file input; later URL opens arrive through the scene delegate. Both submit through the subsequent activation queue, preserving the `openInPlace` option. An in-place file URL becomes a security-scoped `FileReference`. When UIKit requires copying before use, the adapter establishes a private read-only temporary snapshot before the callback returns. Other URLs become `UrlActivation` values.
+
+UIKit installs its User Notifications delegate during `willFinishLaunchingWithOptions`. A notification response can also accompany a scene connection. Both paths deliver primary interactions with HuxerUI notifications through `OnActivation()`, with one delivery for the same response. The immutable process startup value remains `LaunchActivation` for a foreground start or empty for a background-only start.
 
 Temporary activation snapshots do not become application documents. Their directory remains private to the platform reference and is removed after the last shared `FileReference` state is released. Applications still explicitly import a selected document into durable storage through the file API, while `CanWrite()` remains false for a copied activation that cannot write back to its source.
 
-The repository iOS runner declares `huxerui-example` and `public.text` so `example_application` can exercise both paths. Generated and consumer applications own their URL schemes, document types, and associated entitlements in the source-controlled Xcode project. Universal Links, `NSUserActivity`, Associated Domains, scene URL contexts, and multi-window target selection are not part of the current adapter.
+The repository iOS runner declares `huxerui-example` and `public.text` so `example_application` can exercise both paths. Generated and consumer applications own their URL schemes, document types, and associated entitlements in the source-controlled Xcode project. The adapter accepts custom and file URL contexts. Private window-request activities are consumed in the shell, and application activation continues to target its Runtime.
 
 Hosts without a completed activation mapping deliver `LaunchActivation` and retain the same Runtime submission boundary.
 Embedded platform views do not consume an enclosing application shell's activation implicitly; their owner explicitly chooses the target Runtime.
@@ -276,7 +275,7 @@ Embedded platform views do not consume an enclosing application shell's activati
 ## Future work
 
 - Map Linux desktop activation and Web PWA launch inputs through the same shared activation values.
-- Add iOS Universal Links, scene URL contexts, and multi-window target selection when the application shell adopts scenes.
+- Map iOS Universal Links and user activities into application activation when the corresponding application contracts are defined.
 - Define OHOS activation only through the existing platform normalization boundary.
 
 ## Implementation ownership
@@ -302,7 +301,7 @@ The application capability does not add a separate session, public service, call
 - Windows forwards only external URL and file payloads; ordinary launches remain independent.
 - Android maps only supported Activity Intents, validates notification identifier identity, and preserves URI permission boundaries inside `FileReference`.
 - macOS rejects an incomplete native URL batch before submitting any activation from it.
-- iOS uses the complete open-URL options before constructing a URL-launched Runtime and never deduplicates later equal URLs.
+- iOS preserves open-in-place options on both connection and later URL callbacks, and treats equal URLs opened later as distinct activations.
 - iOS and macOS notification delegate responses always use the subsequent activation queue and never replace immutable startup input.
 - Lifecycle updates use one validated current value and invalidate only scopes that observe it.
 - A mounted lifecycle handler preserves distinct transitions independently of current-value coalescing.

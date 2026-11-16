@@ -14,6 +14,8 @@ xcrun simctl openurl booted "huxerui-example://documents/42"
 
 The runner also declares text documents, so the Files share sheet can open a UTF-8 text file with the application example. URL schemes and document types are native application metadata; generated applications declare their own values in `App/Info.plist`.
 
+The runner opts into multiple window scenes. Set `HUXERUI_APP_TARGET=example_dock_layout`, touch and hold a document tab on iPad or the iPhone Duo inner display, then choose **Move to new window**. Window creation depends on the current UIKit environment.
+
 ## Download notification example
 
 Select the shared **HuxerUINotifications** scheme to build the dedicated notification application and its embedded **DownloadNotification** Content Extension. Setting only `HUXERUI_APP_TARGET=example_local_notification` on the generic HuxerUIExamples scheme does not embed the extension and therefore does not enable the example's template. The generic target has no dependency on the extension and keeps its existing behavior.

@@ -389,7 +389,7 @@ std::unique_ptr<UiWindow> Runtime::CreateUiWindow(ViewFactory, const WindowOptio
   throw std::runtime_error("HuxerUI host does not support creating top-level windows");
 }
 
-WindowHandle Runtime::OpenWindow(ViewFactory content, WindowOptions options) {
+void Runtime::ValidateWindowCreation(const ViewFactory& content, const WindowOptions& options) {
   state_->RequireThread();
   if (state_->phase != ApplicationRuntimeState::Phase::Running || state_->window_installations) {
     throw std::logic_error("HuxerUI cannot open a window during installation or shutdown");
@@ -400,6 +400,10 @@ WindowHandle Runtime::OpenWindow(ViewFactory content, WindowOptions options) {
   }
   if (!content) throw std::invalid_argument("HuxerUI window content must not be empty");
   ValidateWindowOptions(options);
+}
+
+WindowHandle Runtime::OpenWindow(ViewFactory content, WindowOptions options) {
+  ValidateWindowCreation(content, options);
   if (!SupportsMultipleWindows()) {
     throw std::runtime_error("HuxerUI host does not support creating top-level windows");
   }
@@ -419,7 +423,7 @@ WindowHandle Runtime::OpenWindow(ViewFactory content, WindowOptions options) {
   }
   --state_->window_installations;
   ResumeWindowMaintenance();
-  WindowHandle handle(window->state_->window_service_);
+  auto handle = window->state_->window_service_->Handle();
   auto* created = window.get();
   owned_windows_.push_back(std::move(window));
   try {

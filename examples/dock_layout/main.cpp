@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <exception>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -217,7 +218,6 @@ void PublishLayout(State<WorkspaceModel> state, WorkspaceModel next, std::string
   std::optional<WindowHandle> closing;
   if (source != next.windows.end() && source->id != main_layout_id && source->tree.Empty()) {
     closing = source->handle;
-    next.windows.erase(source);
   }
   state = std::move(next);
   if (closing) closing->Close();
@@ -260,14 +260,85 @@ void MovePanel(WorkspaceState workspace, const DockTransferRequest& request) {
 }
 
 void MovePanelToMain(WorkspaceState workspace, const std::string& source_id, std::string panel) {
+  const auto& windows = workspace.model->windows;
+  const auto main = std::ranges::find(windows, main_layout_id, &WorkspaceWindow::id);
+  if (main == windows.end() || !main->handle.IsOpen()) return;
   DockTransferRequest request{std::move(panel), source_id, std::string(main_layout_id), {}};
-  const auto& tree = workspace.model->windows.front().tree;
-  if (!tree.Empty()) {
+  if (!main->tree.Empty()) {
     request.target = DockTransferRequest::Target{
-        std::string(DockAnchor(tree, workspace.active)), DockPlacement::TabAfter,
+        std::string(DockAnchor(main->tree, workspace.active)), DockPlacement::TabAfter,
     };
   }
   MovePanel(workspace, request);
+}
+
+void RehomePanels(DockTree& target, const DockTree& source) {
+  for (const auto& panel : source.Panels()) {
+    if (target.Empty()) {
+      target = DockTree::Tabs({panel});
+    } else if (!target.Contains(panel)) {
+      target = target.Dock(panel, DockAnchor(target, 0), DockPlacement::TabAfter);
+    }
+  }
+  for (const auto& child : source.Children()) RehomePanels(target, child);
+}
+
+void UseRecoverClosedWindows(State<WorkspaceModel> model) {
+  std::vector<std::string> closed_windows;
+  for (const auto& window : model->windows) {
+    if (!window.handle.IsOpen()) closed_windows.push_back(window.id);
+  }
+  Lifecycle([model, has_closed_window = !closed_windows.empty()] {
+    if (!has_closed_window) return;
+    WorkspaceModel next = model;
+    const auto receiving = std::ranges::find_if(next.windows, [](const WorkspaceWindow& window) {
+      return window.handle.IsOpen();
+    });
+    if (receiving == next.windows.end()) return;
+    bool recovered = false;
+    for (const auto& window : next.windows) {
+      if (window.handle.IsOpen()) continue;
+      RehomePanels(receiving->tree, window.tree);
+      recovered = true;
+    }
+    if (!recovered) return;
+    std::erase_if(next.windows, [](const WorkspaceWindow& window) { return !window.handle.IsOpen(); });
+    model = std::move(next);
+  }, std::move(closed_windows));
+}
+
+void TransferToNewWindow(WorkspaceState workspace, std::string source_id, std::string panel, std::string layout_id,
+                         WindowHandle opened) {
+  // Recheck the source against the current trees after a window request completes.
+  WorkspaceModel next = workspace.model;
+  next.windows.push_back({layout_id, {}, opened});
+  if (!ApplyTransfer(next, DockTransferRequest{panel, source_id, layout_id, {}})) {
+    opened.Close();
+    return;
+  }
+  PublishLayout(workspace.model, std::move(next), source_id);
+  if (const auto file = FileIndex(panel)) workspace.active = *file;
+  RecordActivity(workspace.activity, "Opened " + panel + " in a new window");
+}
+
+#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+Task<void> OpenPanelScene(Task<WindowHandle> opening, WorkspaceState workspace, std::string source_id,
+                          std::string panel, std::string layout_id) {
+  try {
+    auto opened = co_await std::move(opening);
+    TransferToNewWindow(workspace, std::move(source_id), std::move(panel), std::move(layout_id), std::move(opened));
+  } catch (const std::exception& error) {
+    RecordActivity(workspace.activity, "Could not open window: " + std::string(error.what()));
+  }
+}
+#endif
+
+bool CanOpenPanelWindow(const ApplicationHandle& application) {
+#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+  return application.CanOpenWindow();
+#else
+  return application.SupportsMultipleWindows();
+#endif
 }
 
 View FloatingWorkspace(WorkspaceState workspace, std::string layout_id);
@@ -277,33 +348,30 @@ void OpenPanelWindow(ApplicationHandle application, WorkspaceState workspace, co
   const auto source = FindPanelWindow(workspace.model, panel);
   if (!source || source->id != source_id) return;
   const std::string layout_id = "floating-" + std::to_string(workspace.model->next_window);
+  workspace.model.Update([](WorkspaceModel& next) { ++next.next_window; });
   const auto file = FileIndex(panel);
   const std::string title = file ? std::string(project_files[*file].Name()) : "Harbor Panel";
-  std::optional<WindowHandle> opened;
+  auto content = [workspace, layout_id] { return FloatingWorkspace(workspace, layout_id); };
+  WindowOptions options{
+      .title = title + " | Harbor Studio",
+      .initial_size = {560.0F, 420.0F},
+      .minimum_size = Size{320.0F, 260.0F},
+      .chrome_mode = WindowChromeMode::Custom,
+      .title_bar_height = 44.0F,
+  };
+
   try {
-    opened = application.OpenWindow([workspace, layout_id] { return FloatingWorkspace(workspace, layout_id); }, {
-        .title = title + " | Harbor Studio",
-        .initial_size = {560.0F, 420.0F},
-        .minimum_size = Size{320.0F, 260.0F},
-        .chrome_mode = WindowChromeMode::Custom,
-        .title_bar_height = 44.0F,
-    });
+#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+    auto opening = application.OpenWindowAsync(std::move(content), std::move(options));
+    UseApplicationTaskScope().Launch(
+        OpenPanelScene(std::move(opening), workspace, source_id, std::move(panel), layout_id));
+#else
+    auto opened = application.OpenWindow(std::move(content), std::move(options));
+    TransferToNewWindow(workspace, source_id, std::move(panel), layout_id, std::move(opened));
+#endif
   } catch (const std::exception& error) {
     RecordActivity(workspace.activity, "Could not open window: " + std::string(error.what()));
-    return;
   }
-
-  // Publish ownership only after the new window has opened. Its layout observes this same state.
-  WorkspaceModel next = workspace.model;
-  next.windows.push_back({layout_id, {}, *opened});
-  if (!ApplyTransfer(next, DockTransferRequest{panel, source_id, layout_id, {}})) {
-    opened->Close();
-    return;
-  }
-  ++next.next_window;
-  PublishLayout(workspace.model, std::move(next), source_id);
-  if (file) workspace.active = *file;
-  RecordActivity(workspace.activity, "Opened " + panel + " in a new window");
 }
 
 VectorAsset StrokeIcon(Path outline) {
@@ -544,16 +612,25 @@ View EditorTabBar(const DockTabBarContext& bar, WorkspaceState workspace, const 
         }
       });
       if (detach) {
-        title = std::move(title).On<ViewEvents::ContextMenuRequested>(
-            [workspace, layout_id, menu, detach, id](Point point) {
-              std::vector<MenuEntry> entries{MenuItem("Move to new window", [detach, id] { detach(id); })};
-              if (layout_id != main_layout_id && workspace.model->windows.front().handle.IsOpen()) {
-                entries.emplace_back(MenuItem("Move to main window", [workspace, layout_id, id] {
-                  MovePanelToMain(workspace, layout_id, id);
-                }));
-              }
-              menu.ShowAt(point, std::move(entries));
-            });
+        auto show_menu = [workspace, layout_id, menu, detach, id](Point position) {
+          std::vector<MenuEntry> entries{MenuItem("Move to new window", [detach, id] { detach(id); })};
+          const auto& windows = workspace.model->windows;
+          const auto main = std::ranges::find(windows, main_layout_id, &WorkspaceWindow::id);
+          if (layout_id != main_layout_id && main != windows.end() && main->handle.IsOpen()) {
+            entries.emplace_back(MenuItem("Move to main window", [workspace, layout_id, id] {
+              MovePanelToMain(workspace, layout_id, id);
+            }));
+          }
+          menu.ShowAt(position, std::move(entries));
+        };
+        title = std::move(title).On<ViewEvents::ContextMenuRequested>(show_menu);
+#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+        if (index) {
+          title = std::move(title).With(LongPressGesture{}).On<LongPressEvents::Started>(
+              [show_menu = std::move(show_menu)](const LongPressEvent& event) { show_menu(event.window_position); }
+          );
+        }
+#endif
       }
       View close;
       if (item.closable) {
@@ -787,7 +864,7 @@ View WorkspaceDock(WorkspaceState workspace, std::string layout_id, bool compact
   }
 
   std::function<void(std::string)> detach;
-  if (application.SupportsMultipleWindows()) {
+  if (CanOpenPanelWindow(application)) {
     detach = [application, workspace, layout_id](std::string panel) {
       OpenPanelWindow(application, workspace, layout_id, std::move(panel));
     };
@@ -838,12 +915,39 @@ View WorkspaceDock(WorkspaceState workspace, std::string layout_id, bool compact
 View Workspace() {
   const auto& colors = UseTheme().colors;
   const bool compact = UseViewportClass() != ViewportClass::Expanded;
-  const WorkspaceState workspace{
-      UseState(WorkspaceModel{{{std::string(main_layout_id), InitialLayout(compact), UseWindow()}}}),
-      UseState(InitialDocuments()),
-      UseState<std::size_t>(0),
-      UseState(std::vector<std::string>{"Opened src/workspace.cpp", "Harbor workspace ready"}),
-  };
+  const WorkspaceState workspace = *UseService<WorkspaceState>();
+  const auto window = UseWindow();
+  Lifecycle([model = workspace.model, window, compact] {
+    const auto& windows = model->windows;
+    if (std::ranges::find(windows, window, &WorkspaceWindow::handle) != windows.end()) return;
+
+    WorkspaceModel next = model;
+    const auto main = std::ranges::find(next.windows, main_layout_id, &WorkspaceWindow::id);
+    if (main == next.windows.end()) {
+      auto tree = InitialLayout(compact);
+      for (const auto& other : next.windows) {
+        if (other.handle.IsOpen()) RemovePanels(tree, other.tree);
+      }
+      next.windows.insert(next.windows.begin(), {std::string(main_layout_id), std::move(tree), window});
+    } else if (!main->handle.IsOpen()) {
+      main->handle = window;
+    } else {
+      const auto file = std::ranges::find_if(project_files, [&next](const ProjectFile& candidate) {
+        return !FindPanelWindow(next, candidate.path);
+      });
+      auto tree = file == project_files.end() ? DockTree{} : DockTree::Tabs({std::string(file->path)});
+      auto layout_id = "scene-" + std::to_string(next.next_window++);
+      next.windows.push_back({std::move(layout_id), std::move(tree), window});
+    }
+    model = std::move(next);
+  }, window, compact);
+
+  const auto& windows = workspace.model->windows;
+  const auto current = std::ranges::find(windows, window, &WorkspaceWindow::handle);
+  if (current == windows.end()) return {};
+  if (current->id != main_layout_id) return FloatingWorkspace(workspace, current->id);
+
+  UseRecoverClosedWindows(workspace.model);
   return Column {
     Toolbar(workspace, compact),
     Divider(),
@@ -855,15 +959,7 @@ View Workspace() {
 
 [[huxerui::composable]]
 View FloatingWorkspace(WorkspaceState workspace, std::string layout_id) {
-  UseWindow().OnCloseRequest([state = workspace.model, layout_id] {
-    WorkspaceModel next = state;
-    const auto closing = std::ranges::find(next.windows, layout_id, &WorkspaceWindow::id);
-    if (closing != next.windows.end()) {
-      next.windows.erase(closing);
-      state = std::move(next);
-    }
-    return false;
-  }, layout_id);
+  UseRecoverClosedWindows(workspace.model);
   const auto theme = StudioTheme();
   const auto& colors = theme.colors;
   return FlatTheme(theme, Column {
@@ -896,5 +992,15 @@ const Application application{
             .title_bar_height = 46.0F,
         },
         .show_debug_overlay = false,
+        .application_hooks = {
+            [](ApplicationContext& context) {
+              context.Provide(std::make_shared<WorkspaceState>(WorkspaceState{
+                  State{WorkspaceModel{}},
+                  State{InitialDocuments()},
+                  State<std::size_t>{0},
+                  ActivityLog{std::vector<std::string>{"Opened src/workspace.cpp", "Harbor workspace ready"}},
+              }));
+            },
+        },
     }
 };

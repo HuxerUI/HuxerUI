@@ -404,9 +404,10 @@ public:
 /// @endcode
 class WindowHandle {
 public:
-  /// Whether this attachment is initialized and has not committed closure or retirement.
+  /// Whether the original window is initialized and has not committed closure.
+  /// On iOS, a temporarily disconnected scene session remains open.
   /// Reads on the application thread and observes changes during composition. Hidden/minimized windows remain open.
-  /// A handle outliving its original window or Runtime reports false and never targets a replacement window.
+  /// A handle outliving its original window or Runtime reports false. A reconnected iOS scene uses the same handle.
   [[nodiscard]] bool IsOpen() const;
 
   /// Reads the host-confirmed fullscreen state on the application thread.
@@ -527,6 +528,8 @@ public:
     );
   }
 
+  bool operator==(const WindowHandle&) const noexcept = default;
+
 private:
   template <class... Dependencies>
   void RegisterRequest(
@@ -557,8 +560,7 @@ private:
 
   std::shared_ptr<detail::WindowService> service_;
 
-  friend WindowHandle UseWindow();
-  friend class Runtime;
+  friend class detail::WindowService;
 };
 
 /// Returns a handle for the UiWindow in the current composition or captured window callback context.
