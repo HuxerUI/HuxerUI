@@ -4,6 +4,8 @@
 
 #include <epoxy/gl.h>
 
+#include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -15,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "graphics/bitmap_internal.h"
 #include "linux_external_texture_internal.h"
 #include "macros_internal.h"
 
@@ -441,6 +444,32 @@ std::shared_ptr<const GdkFrame> GdkFrame::CopyGl(
   return std::shared_ptr<const GdkFrame>(new GdkFrame(texture, frame.origin, std::move(resources)));
 }
 
+namespace {
+
+Task<std::optional<Bitmap>> ReadGdkFrame(std::shared_ptr<const GdkFrame> frame) {
+  if (!frame) co_return std::nullopt;
+  auto* texture = frame->Texture();
+  const auto width = static_cast<std::uint32_t>(gdk_texture_get_width(texture));
+  const auto height = static_cast<std::uint32_t>(gdk_texture_get_height(texture));
+  const auto stride = static_cast<std::size_t>(width) * 4;
+  Bytes pixels(detail::BitmapByteSize(width, height));
+  const std::unique_ptr<GdkTextureDownloader, decltype(&gdk_texture_downloader_free)> downloader(
+      gdk_texture_downloader_new(texture), gdk_texture_downloader_free);
+  gdk_texture_downloader_set_format(downloader.get(), GDK_MEMORY_R8G8B8A8);
+  gdk_texture_downloader_download_into(
+      downloader.get(), reinterpret_cast<guchar*>(pixels.data()), stride);
+  if (frame->TextureOrigin() == GlTexture::Origin::BottomLeft) {
+    for (std::uint32_t row = 0; row < height / 2; ++row) {
+      auto* top = pixels.data() + row * stride;
+      auto* bottom = pixels.data() + (height - row - 1) * stride;
+      std::swap_ranges(top, top + stride, bottom);
+    }
+  }
+  co_return Bitmap::FromRgba8(width, height, std::move(pixels));
+}
+
+} // namespace
+
 struct GdkTexture::Storage {
   std::mutex mutex;
   std::shared_ptr<const GdkFrame> frame;
@@ -479,6 +508,10 @@ void GdkTexture::Finish() noexcept {
 std::shared_ptr<const GdkFrame> GdkTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->mutex);
   return storage_->frame;
+}
+
+Task<std::optional<Bitmap>> GdkTexture::SnapshotAsync() const {
+  return ReadGdkFrame(AcquireFrame());
 }
 
 struct GlTexture::Storage {
@@ -534,6 +567,10 @@ std::shared_ptr<const GdkFrame> GlTexture::AcquireFrame() const noexcept {
   return storage_->frame;
 }
 
+Task<std::optional<Bitmap>> GlTexture::SnapshotAsync() const {
+  return ReadGdkFrame(AcquireFrame());
+}
+
 struct PixelTexture::Storage {
   std::mutex mutex;
   std::shared_ptr<const detail::LinuxPixelFrame> frame;
@@ -567,6 +604,16 @@ void PixelTexture::Finish() noexcept {
 std::shared_ptr<const detail::LinuxPixelFrame> PixelTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->mutex);
   return storage_->frame;
+}
+
+Task<std::optional<Bitmap>> PixelTexture::SnapshotAsync() const {
+  return RunWorker([](const std::shared_ptr<const detail::LinuxPixelFrame>& frame) -> std::optional<Bitmap> {
+    if (!frame) return std::nullopt;
+    constexpr auto format = std::endian::native == std::endian::little
+        ? Bitmap::PixelFormat::Bgra8888 : Bitmap::PixelFormat::Argb8888;
+    return detail::CopyBitmapRows(frame->PixelWidth(), frame->PixelHeight(), frame->Pixels().data(),
+                                  frame->BytesPerRow(), format, detail::PixelAlpha::Premultiplied);
+  }, AcquireFrame());
 }
 
 } // namespace huxerui::linux

@@ -2458,12 +2458,16 @@ public final class HuxerUIView extends ViewGroup {
         return Layout.Alignment.ALIGN_NORMAL;
     }
 
-    private boolean drawImage(Canvas canvas, long identity, byte[] encoded, float sourceX, float sourceY,
-            float sourceWidth, float sourceHeight, float destinationX, float destinationY, float destinationWidth,
-            float destinationHeight, float opacity, int sampling) {
+    private boolean drawImage(Canvas canvas, long identity, byte[] encoded, Bitmap decoded,
+            float sourceX, float sourceY, float sourceWidth, float sourceHeight,
+            float destinationX, float destinationY, float destinationWidth, float destinationHeight,
+            float opacity, int sampling) {
         Bitmap bitmap = imageCache.get(identity);
-        if (bitmap == null && encoded != null) {
-            bitmap = BitmapFactory.decodeByteArray(encoded, 0, encoded.length);
+        if (bitmap == null) {
+            bitmap = decoded;
+            if (bitmap == null && encoded != null) {
+                bitmap = BitmapFactory.decodeByteArray(encoded, 0, encoded.length);
+            }
             if (bitmap != null) {
                 imageCache.put(identity, bitmap);
             }

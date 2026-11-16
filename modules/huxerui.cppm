@@ -45,6 +45,7 @@ export namespace huxerui {
     using huxerui::BackEvent;
     using huxerui::BackPhase;
     using huxerui::Background;
+    using huxerui::Bitmap;
     using huxerui::Border;
     using huxerui::BottomSheetContext;
     using huxerui::BottomSheetFactory;
@@ -201,6 +202,7 @@ export namespace huxerui {
     using huxerui::IconButtonStyle;
     using huxerui::Image;
     using huxerui::ImageAsset;
+    using huxerui::ImageEncodeOptions;
     using huxerui::ImageFill;
     using huxerui::ImageFit;
     using huxerui::ImageFormat;

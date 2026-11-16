@@ -105,6 +105,11 @@ bool ExternalTexture::IsActive() const noexcept {
   });
 }
 
+Task<std::optional<Bitmap>> ExternalTexture::SnapshotAsync() const {
+  throw std::runtime_error("HuxerUI external texture does not support pixel readback");
+  co_return std::nullopt;
+}
+
 void ExternalTexture::NotifyFrameAvailable() {
   revision_.fetch_add(1, std::memory_order_release);
   std::vector<std::shared_ptr<detail::ExternalTextureFrameRequester>> requesters;

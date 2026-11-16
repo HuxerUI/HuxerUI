@@ -4,9 +4,12 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/geometry.h>
+#include <huxerui/task.h>
 
 namespace huxerui {
 
@@ -57,6 +60,14 @@ public:
   /// This is a production hint, not an ownership or lifecycle signal. It may change after any frame commit, and the
   /// producer remains responsible for starting, pausing, and finishing its own work.
   [[nodiscard]] bool IsActive() const noexcept;
+
+  /// Retains the latest published frame at the call site and returns a lazy pixel readback task.
+  /// Call from the owning UI thread, including the browser main thread on Web.
+  /// The selected frame survives later publications and Finish().
+  /// @return A task yielding a bitmap at the frame's pixel dimensions with Scale() == 1, or std::nullopt before
+  /// the first publication.
+  /// @throws std::runtime_error When awaited if the texture cannot provide a pixel readback.
+  virtual Task<std::optional<Bitmap>> SnapshotAsync() const;
 
 protected:
   /// Creates a texture with a finite, strictly positive immutable logical size.

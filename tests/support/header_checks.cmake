@@ -2,6 +2,7 @@ set(HUXERUI_PUBLIC_HEADERS
         testing/ui_test.h
         animation.h
         app.h
+        bitmap.h
         clipboard.h
         color.h
         data.h

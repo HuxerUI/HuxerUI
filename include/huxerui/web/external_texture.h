@@ -1,11 +1,14 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include <emscripten/val.h>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
+#include <huxerui/task.h>
 
 namespace huxerui {
 
@@ -47,6 +50,8 @@ public:
   /// The clone remains usable across later publications and source destruction. Finish() keeps the last frame
   /// available for acquisition. Close the clone on the browser main thread after GPU use.
   [[nodiscard]] emscripten::val AcquireFrame() const noexcept;
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   emscripten::val frame_ = emscripten::val::undefined();

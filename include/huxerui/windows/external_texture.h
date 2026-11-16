@@ -2,10 +2,13 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
+#include <huxerui/task.h>
 
 struct ID3D11DeviceContext;
 struct ID3D11Texture2D;
@@ -85,6 +88,8 @@ public:
   /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
 
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
+
 private:
   struct Storage;
 
@@ -146,6 +151,8 @@ public:
   /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
   /// publications and source destruction. Finish() keeps the last frame available for acquisition.
   std::shared_ptr<const D3D11Frame> AcquireFrame() const noexcept;
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   struct Storage;

@@ -882,8 +882,8 @@ Emscripten glue owns IDBFS mounting and synchronization, the Web adapter publish
 
 ## Integration with existing APIs
 
-`ImageAsset::FromFile(const std::filesystem::path&)` should migrate to `ImageAsset::FromFile(const File&)` with the rest of the approved public breaking change.
-Asynchronous image loading may read bytes through `ReadBytesAsync()` and construct the existing encoded `ImageAsset` without adding an image-specific file transport.
+`ImageAsset::FromFile(const File&)` reads local files through `File::ReadBytes()`.
+For asynchronous image loading, read bytes from a `File` or `FileReference` through `ReadBytesAsync()` and pass the result to `ImageAsset::FromEncoded()`.
 
 HTTP response streams can copy into file streams without a dedicated file-download API.
 Request bodies remain owned `Bytes`; a future upload contract may accept `File` or `FileReference` explicitly.

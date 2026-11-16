@@ -197,7 +197,7 @@ float DisclosureExtent(const TreeViewStyle& style) {
 }
 
 View MakeDisclosureIcon(const TreeSnapshot& snapshot, const TreeRow& row) {
-  const bool raster = std::holds_alternative<ImageAsset>(snapshot.disclosure_icon);
+  const bool raster = !std::holds_alternative<VectorAsset>(snapshot.disclosure_icon);
   Image icon = std::visit([](const auto& value) { return Image(ImageVariant{value}); }, snapshot.disclosure_icon);
   if (!raster) {
     icon = std::move(icon).Tint(row.declaration.info.enabled ? snapshot.style.foreground

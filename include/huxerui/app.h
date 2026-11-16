@@ -324,7 +324,7 @@ struct SystemTrayOptions {
 ///   const auto tray = application.SystemTray();
 ///   tray.OnActivate([] { HandleTrayActivation(); });
 ///   tray.Show(
-///       ImageAsset::FromFile("tray.png"),
+///       ImageAsset::FromFile(File("tray.png")),
 ///       {.tooltip = "Demo", .menu = {MenuItem("Quit", [application] { application.Quit(); })}}
 ///   );
 /// }
@@ -336,10 +336,10 @@ public:
   /// @throws std::logic_error If called on the wrong application thread or from a different application context.
   [[nodiscard]] bool IsAvailable() const;
   /// Creates or replaces the application tray presentation.
-  /// @param icon Raster image asset or resource resolving to one; vector images are rejected.
+  /// @param icon Encoded raster image asset or resource resolving to one.
   /// @param options Tooltip and native menu resolved using the application's resource configuration.
   /// The desired presentation survives temporary host unavailability and UI retirement while the application is live.
-  /// @throws std::invalid_argument If the icon is empty, invalid, or resolves to a vector.
+  /// @throws std::invalid_argument If the icon is empty, invalid, or fails to resolve to an encoded raster image.
   /// @throws std::logic_error If the original application has expired or the application thread/context is wrong.
   void Show(ImageVariant icon, SystemTrayOptions options = {}) const;
   /// Removes the current application tray presentation and its desired contents.

@@ -4,6 +4,18 @@
 
 namespace huxerui::detail {
 
+using RasterImage = decltype(DrawImageCommand::image);
+
+inline Size RasterImageSize(const RasterImage& image) noexcept {
+  return std::visit([](const auto& value) { return value.IntrinsicSize(); }, image);
+}
+
+inline float RasterImageScale(const RasterImage& image) noexcept {
+  return std::visit([](const auto& value) { return value.Scale(); }, image);
+}
+
+std::uint64_t RasterImageIdentity(const RasterImage& image) noexcept;
+
 void ValidateColor(Color color, const char* message);
 void ValidateCornerRadii(CornerRadii radii, const char* message);
 void ValidateGradient(const LinearGradient& gradient);

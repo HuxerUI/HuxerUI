@@ -3,10 +3,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
+#include <huxerui/task.h>
 
 typedef struct _GdkTexture GdkTexture;
 
@@ -70,6 +73,8 @@ public:
   /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
   /// publications and source destruction. Finish() keeps the last frame available for acquisition.
   std::shared_ptr<const GdkFrame> AcquireFrame() const noexcept;
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   struct Storage;
@@ -141,6 +146,8 @@ public:
   /// Acquisition may run concurrently with publication. The returned frame retains its resources across later
   /// publications and source destruction. Finish() keeps the last frame available for acquisition.
   std::shared_ptr<const GdkFrame> AcquireFrame() const noexcept;
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   struct Storage;
@@ -239,6 +246,8 @@ public:
   void Publish(const PixelFrame& frame);
   /// Idempotently stops publication while preserving the last successfully published frame.
   void Finish() noexcept;
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   struct Storage;

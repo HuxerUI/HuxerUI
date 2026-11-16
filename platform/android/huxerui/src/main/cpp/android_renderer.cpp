@@ -185,7 +185,8 @@ void AndroidRenderer::Initialize(JNIEnv* environment, jclass view_class) {
       view_class, "drawPreparedText", "(Landroid/graphics/Canvas;Ljava/lang/Object;FFFFFFI)V");
   draw_text_runs_ =
       environment->GetMethodID(view_class, "drawTextRuns", "(Landroid/graphics/Canvas;[B[I[F[I[F[I[B[I)V");
-  draw_image_ = environment->GetMethodID(view_class, "drawImage", "(Landroid/graphics/Canvas;J[BFFFFFFFFFI)Z");
+  draw_image_ = environment->GetMethodID(
+      view_class, "drawImage", "(Landroid/graphics/Canvas;J[BLandroid/graphics/Bitmap;FFFFFFFFFI)Z");
   draw_external_texture_ = environment->GetMethodID(
       view_class,
       "drawExternalTexture",
@@ -512,15 +513,16 @@ void AndroidRenderer::RenderCommand(
 void AndroidRenderer::RenderCommand(
     JNIEnv* environment, jobject view, jobject canvas, const DrawImageCommand& command
 ) {
-  const std::uint64_t identity = InternalAccess::ImageIdentity(command.image);
-  const float scale = command.image.Scale();
-  const auto draw = [&](jbyteArray encoded) {
+  const std::uint64_t identity = RasterImageIdentity(command.image);
+  const float scale = RasterImageScale(command.image);
+  const auto draw = [&](jbyteArray encoded, jobject bitmap) {
     return environment->CallBooleanMethod(
                view,
                draw_image_,
                canvas,
                static_cast<jlong>(identity),
                encoded,
+               bitmap,
                command.source.x * scale,
                command.source.y * scale,
                command.source.width * scale,
@@ -534,12 +536,15 @@ void AndroidRenderer::RenderCommand(
            ) == JNI_TRUE;
   };
   // Probe the Java Bitmap cache without allocating or copying encoded bytes; transfer the payload only on a miss.
-  if (draw(nullptr) || environment->ExceptionCheck()) {
+  if (draw(nullptr, nullptr) || environment->ExceptionCheck()) {
     return;
   }
-  auto encoded = android::BytesToJavaByteArray(environment, command.image.EncodedBytes());
-  if (encoded) {
-    HUXERUI_DISCARD(draw(encoded.Get()));
+  if (const auto* bitmap = std::get_if<Bitmap>(&command.image)) {
+    const auto native = CreateAndroidBitmap(environment, *bitmap);
+    HUXERUI_DISCARD(draw(nullptr, native.Get()));
+  } else {
+    const auto encoded = android::BytesToJavaByteArray(environment, std::get<ImageAsset>(command.image).EncodedBytes());
+    if (encoded) HUXERUI_DISCARD(draw(encoded.Get(), nullptr));
   }
 }
 

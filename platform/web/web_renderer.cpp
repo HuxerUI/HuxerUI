@@ -6,6 +6,8 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <limits>
 #include <numbers>
 #include <sstream>
@@ -19,6 +21,7 @@
 
 #include <emscripten.h>
 
+#include "graphics/bitmap_internal.h"
 #include "graphics/path_internal.h"
 #include "graphics/paint_internal.h"
 #include "resources/resource_internal.h"
@@ -82,7 +85,8 @@ EM_JS(void, ReleaseWebFont, (const char* name), {
 EM_JS(
     void,
     RequestWebImageDecode,
-    (std::uintptr_t session_id, std::uint64_t image_id, const void* data, std::size_t size, const char* mime_type),
+    (std::uintptr_t session_id, std::uint64_t image_id, const void* data, std::size_t size,
+     const char* mime_type, std::uint32_t width, std::uint32_t height),
     {
       const sessions = Module.huxerUIWebSessions;
       const session = sessions && sessions.get(session_id);
@@ -94,84 +98,141 @@ EM_JS(
       }
       session.images.set(image_id, null);
       const bytes = HEAPU8.slice(data, data + size);
-      const blob = new Blob([bytes], {
-        type:
-          UTF8ToString(mime_type)
-      });
-      createImageBitmap(blob)
-          .then(
-              (image) =>
-                        {
-                          const current = sessions.get(session_id);
-                          if (!current) {
-                            try {
-                              image.close();
-                            } catch (error) {
-                              console.error("HuxerUI Web decoded image cleanup failed", error);
-                            }
-                            return;
-                          }
-                          const byteSize = Math.max(0, image.width * image.height * 4);
-                          const budget = 64 * 1024 * 1024;
-                          const evictOldest = () => {
-                            for (const [identity, cached] of current.images) {
-                              if (identity === image_id || !cached) {
-                                continue;
-                              }
-                              current.images.delete(identity);
-                              current.imageBytes = Math.max(
-                                  0,
-                                  current.imageBytes - (current.imageSizes.get(identity) || 0)
-                              );
-                              current.imageSizes.delete(identity);
-                              try {
-                                if (cached.close) {
-                                  cached.close();
-                                }
-                              } catch (error) {
-                                console.error("HuxerUI Web cached image cleanup failed", error);
-                              }
-                              return true;
-                            }
-                            return false;
-                          };
-                          if (byteSize > budget) {
-                            while (evictOldest()) {
-                            }
-                          } else {
-                            while (current.imageBytes > budget - byteSize && evictOldest()) {
-                            }
-                          }
-                          current.images.delete(image_id);
-                          current.images.set(image_id, image);
-                          current.imageSizes.set(image_id, byteSize);
-                          current.imageBytes += byteSize;
-                          current.imageFailures.delete(image_id);
-                          Module._huxerui_web_image_ready(session_id);
-                        }
-          )
-          .catch((error) => {
-            const current = sessions.get(session_id);
-            if (current) {
-              current.images.delete(image_id);
-              const failures = (current.imageFailures.get(image_id) || 0) + 1;
-              current.imageFailures.delete(image_id);
-              current.imageFailures.set(image_id, failures);
-              while (current.imageFailures.size > 256) {
-                current.imageFailures.delete(current.imageFailures.keys().next().value);
-              }
-              if (failures < 3) {
-                setTimeout(() => {
-                  if (sessions.get(session_id) === current && !current.images.has(image_id)) {
-                    Module._huxerui_web_image_ready(session_id);
-                  }
-                }, failures * 500);
-              }
+      const store = (image) => {
+        const current = sessions.get(session_id);
+        if (!current) {
+          try {
+            if (image.close) image.close();
+          } catch (error) {
+            console.error("HuxerUI Web decoded image cleanup failed", error);
+          }
+          return;
+        }
+        const byteSize = Math.max(0, image.width * image.height * 4);
+        const budget = 64 * 1024 * 1024;
+        const evictOldest = () => {
+          for (const [identity, cached] of current.images) {
+            if (identity === image_id || !cached) {
+              continue;
             }
-            console.error("HuxerUI Web image decode failed", error);
-          });
+            current.images.delete(identity);
+            current.imageBytes = Math.max(
+                0,
+                current.imageBytes - (current.imageSizes.get(identity) || 0)
+            );
+            current.imageSizes.delete(identity);
+            try {
+              if (cached.close) {
+                cached.close();
+              }
+            } catch (error) {
+              console.error("HuxerUI Web cached image cleanup failed", error);
+            }
+            return true;
+          }
+          return false;
+        };
+        while (current.imageBytes > Math.max(0, budget - byteSize) && evictOldest()) {
+        }
+        current.images.delete(image_id);
+        current.images.set(image_id, image);
+        current.imageSizes.set(image_id, byteSize);
+        current.imageBytes += byteSize;
+        current.imageFailures.delete(image_id);
+        if (!width) {
+          Module._huxerui_web_image_ready(session_id);
+        }
+      };
+      const fail = (error) => {
+        const current = sessions.get(session_id);
+        if (current) {
+          current.images.delete(image_id);
+          const failures = (current.imageFailures.get(image_id) || 0) + 1;
+          current.imageFailures.delete(image_id);
+          current.imageFailures.set(image_id, failures);
+          while (current.imageFailures.size > 256) {
+            current.imageFailures.delete(current.imageFailures.keys().next().value);
+          }
+          if (failures < 3) {
+            setTimeout(() => {
+              if (sessions.get(session_id) === current && !current.images.has(image_id)) {
+                Module._huxerui_web_image_ready(session_id);
+              }
+            }, failures * 500);
+          }
+        }
+        console.error("HuxerUI Web image decode failed", error);
+      };
+      try {
+        if (width) {
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          context.putImageData(new ImageData(new Uint8ClampedArray(bytes.buffer), width, height), 0, 0);
+          store(canvas);
+        } else {
+          createImageBitmap(new Blob([bytes], { type: UTF8ToString(mime_type) })).then(store).catch(fail);
+        }
+      } catch (error) {
+        fail(error);
+      }
     }
 );
+
+EM_JS(void, StartWebBitmapCodec,
+      (emscripten::EM_VAL handle, std::uintptr_t callback, const void* data, std::size_t size,
+       const char* mime, std::uint32_t width, std::uint32_t height, double quality), {
+  const operation = Emval.toValue(handle);
+  operation.callback = callback;
+  const finish = (value) => {
+    const target = operation.callback;
+    operation.callback = 0;
+    if (target) Module._huxerui_web_bitmap_complete(target, Emval.toHandle(value));
+  };
+  const makeCanvas = (w, h) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    return canvas;
+  };
+  try {
+    const bytes = HEAPU8.slice(data, data + size);
+    const type = UTF8ToString(mime);
+    if (width) {
+      const canvas = makeCanvas(width, height);
+      canvas.getContext("2d").putImageData(
+          new ImageData(new Uint8ClampedArray(bytes.buffer), width, height), 0, 0);
+      canvas.toBlob((blob) => {
+        if (!operation.callback) return;
+        if (!blob || blob.type !== type) {
+          finish(null);
+          return;
+        }
+        blob.arrayBuffer().then((buffer) => finish({ bytes: new Uint8Array(buffer) }), () => finish(null));
+      }, type, quality);
+    } else {
+      createImageBitmap(new Blob([bytes], { type }), { imageOrientation: "from-image" }).then((image) => {
+        try {
+          if (!operation.callback) return;
+          const canvas = makeCanvas(image.width, image.height);
+          const context = canvas.getContext("2d");
+          context.drawImage(image, 0, 0);
+          const pixels = context.getImageData(0, 0, image.width, image.height).data;
+          finish({ width: image.width, height: image.height, bytes: pixels });
+        } finally {
+          image.close();
+        }
+      }).catch(() => finish(null));
+    }
+  } catch (_) {
+    finish(null);
+  }
+});
+
+EM_JS(void, CancelWebBitmapCodec, (emscripten::EM_VAL handle), {
+  Emval.toValue(handle).callback = 0;
+});
 
 EM_JS(emscripten::EM_VAL, GetWebImage, (std::uintptr_t session_id, std::uint64_t image_id), {
   const sessions = Module.huxerUIWebSessions;
@@ -1280,20 +1341,28 @@ void WebRenderer::RenderCommand(const DrawTextRunsCommand& command) {
 }
 
 void WebRenderer::RenderCommand(const DrawImageCommand& command) {
-  const std::uint64_t identity = InternalAccess::ImageIdentity(command.image);
+  const auto identity = RasterImageIdentity(command.image);
   val image = val::take_ownership(GetWebImage(session_id_, identity));
   if (image.isNull() || image.isUndefined()) {
-    if (session_id_ != 0) {
-      const std::span<const std::byte> bytes = command.image.EncodedBytes();
-      const std::string mime_type{command.image.MimeType()};
-      RequestWebImageDecode(session_id_, identity, bytes.data(), bytes.size(), mime_type.c_str());
+    if (session_id_ == 0) return;
+    if (const auto* bitmap = std::get_if<Bitmap>(&command.image)) {
+      const auto bytes = bitmap->Pixels();
+      RequestWebImageDecode(session_id_, identity, bytes.data(), bytes.size(), "",
+                            bitmap->PixelWidth(), bitmap->PixelHeight());
+      image = val::take_ownership(GetWebImage(session_id_, identity));
+      if (image.isNull() || image.isUndefined()) return;
+    } else {
+      const auto& asset = std::get<ImageAsset>(command.image);
+      const auto bytes = asset.EncodedBytes();
+      const std::string mime_type{asset.MimeType()};
+      RequestWebImageDecode(session_id_, identity, bytes.data(), bytes.size(), mime_type.c_str(), 0, 0);
+      return;
     }
-    return;
   }
   context_.call<void>("save");
   context_.set("globalAlpha", context_["globalAlpha"].as<double>() * command.opacity);
   context_.set("imageSmoothingEnabled", command.sampling == ImageSampling::Linear);
-  const float scale = command.image.Scale();
+  const float scale = RasterImageScale(command.image);
   context_.call<void>(
       "drawImage",
       image,
@@ -1602,6 +1671,69 @@ void WebRenderer::DrawTarget(
     throw;
   }
   context_ = std::move(previous_context);
+}
+
+namespace {
+
+using BitmapCodecCompletion = std::function<void(const val&)>;
+
+template <class T, class Start, class Read>
+Task<T> WebBitmapCodec(Start start, Read read) {
+  return AwaitCallback<T>([start = std::move(start), read = std::move(read)](CallbackCompletion<T> complete) {
+    auto operation = val::object();
+    auto callback = std::make_unique<BitmapCodecCompletion>([complete, read](const val& result) {
+      try {
+        if (result.isNull()) throw std::runtime_error("HuxerUI browser image codec failed");
+        complete.Complete(read(result));
+      } catch (...) {
+        complete.Fail(std::current_exception());
+      }
+    });
+    auto* registered = callback.get();
+    std::function<void()> cancel = [operation, registered] {
+      CancelWebBitmapCodec(operation.as_handle());
+      delete registered;
+    };
+    start(operation.as_handle(), reinterpret_cast<std::uintptr_t>(callback.release()));
+    return cancel;
+  });
+}
+
+Bytes CopyWebPixels(const val& source) {
+  Bytes bytes(source["length"].as<std::size_t>());
+  val(emscripten::typed_memory_view(bytes.size(), reinterpret_cast<unsigned char*>(bytes.data())))
+      .call<void>("set", source);
+  return bytes;
+}
+
+} // namespace
+
+extern "C" EMSCRIPTEN_KEEPALIVE void huxerui_web_bitmap_complete(std::uintptr_t handle, emscripten::EM_VAL result) {
+  const std::unique_ptr<BitmapCodecCompletion> callback(reinterpret_cast<BitmapCodecCompletion*>(handle));
+  (*callback)(val::take_ownership(result));
+}
+
+Task<Bitmap> DecodeBitmap(ImageAsset image, std::uint16_t) {
+  if (!image.HasValue()) throw std::logic_error("HuxerUI cannot decode a missing image asset");
+  const auto scale = image.Scale();
+  co_return co_await WebBitmapCodec<Bitmap>([image](emscripten::EM_VAL handle, std::uintptr_t callback) {
+    const auto bytes = image.EncodedBytes();
+    const std::string mime(image.MimeType());
+    StartWebBitmapCodec(handle, callback, bytes.data(), bytes.size(), mime.c_str(), 0, 0, 0.0);
+  }, [scale](const val& result) {
+    return Bitmap::FromRgba8(result["width"].as<std::uint32_t>(), result["height"].as<std::uint32_t>(),
+                             CopyWebPixels(result["bytes"]), scale);
+  });
+}
+
+Task<Bytes> EncodeBitmap(Bitmap bitmap, ImageEncodeOptions options) {
+  const bool jpeg = options.format == ImageFormat::Jpeg;
+  if (jpeg) bitmap = FlattenBitmap(std::move(bitmap), options.jpeg_background);
+  co_return co_await WebBitmapCodec<Bytes>([bitmap, options, jpeg](emscripten::EM_VAL handle, std::uintptr_t callback) {
+    const auto bytes = bitmap.Pixels();
+    StartWebBitmapCodec(handle, callback, bytes.data(), bytes.size(), jpeg ? "image/jpeg" : "image/png",
+                        bitmap.PixelWidth(), bitmap.PixelHeight(), options.jpeg_quality / 100.0);
+  }, [](const val& result) { return CopyWebPixels(result["bytes"]); });
 }
 
 } // namespace huxerui::detail

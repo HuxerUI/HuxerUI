@@ -1040,7 +1040,7 @@ private:
   ValidationResult validation_;
 };
 
-/// Displays an image resource, vector asset, raster asset, or ExternalTexture.
+/// Displays an image resource, vector asset, encoded image, bitmap, or ExternalTexture.
 /// @code
 /// return Image(images::avatar).Fit(ImageFit::Cover).Align(HorizontalAlignment::Center, VerticalAlignment::Center);
 /// @endcode

@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "graphics/bitmap_internal.h"
 #include "win32_external_texture_internal.h"
 #include "macros_internal.h"
 
@@ -361,6 +362,15 @@ std::shared_ptr<const detail::Win32PixelFrame> PixelTexture::AcquireFrame() cons
   return storage_->frame;
 }
 
+Task<std::optional<Bitmap>> PixelTexture::SnapshotAsync() const {
+  return RunWorker([](const std::shared_ptr<const detail::Win32PixelFrame>& frame) -> std::optional<Bitmap> {
+    if (!frame) return std::nullopt;
+    return detail::CopyBitmapRows(
+        frame->PixelWidth(), frame->PixelHeight(), frame->Pixels().data(), frame->BytesPerRow(),
+        Bitmap::PixelFormat::Bgra8888, detail::PixelAlpha::Premultiplied);
+  }, AcquireFrame());
+}
+
 D3D11Texture::D3D11Texture(Size intrinsic_size)
     : huxerui::ExternalTexture(intrinsic_size), storage_(std::make_unique<Storage>()) {}
 
@@ -394,6 +404,62 @@ void D3D11Texture::Finish() noexcept {
 std::shared_ptr<const D3D11Frame> D3D11Texture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->mutex);
   return storage_->frame;
+}
+
+Task<std::optional<Bitmap>> D3D11Texture::SnapshotAsync() const {
+  return RunWorker([](const std::shared_ptr<const D3D11Frame>& frame) -> std::optional<Bitmap> {
+    if (!frame) return std::nullopt;
+    // Own the readback context so publishing and rendering can use their immediate contexts independently.
+    ComPtr<ID3D11Device> owner;
+    frame->texture_->GetDevice(owner.GetAddressOf());
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    detail::ThrowIfFailed(owner.As(&dxgi), "HuxerUI could not identify the D3D11 frame adapter");
+    detail::ThrowIfFailed(
+        dxgi->GetAdapter(adapter.GetAddressOf()), "HuxerUI could not identify the D3D11 frame adapter");
+    detail::ThrowIfFailed(D3D11CreateDevice(
+        adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        nullptr, 0, D3D11_SDK_VERSION,
+        device.GetAddressOf(), nullptr, context.GetAddressOf()
+    ), "HuxerUI could not create a D3D11 readback device");
+
+    const auto source = detail::D3D11FrameAccess::Open(*frame, *device.Get());
+    D3D11_TEXTURE2D_DESC description{};
+    source->GetDesc(&description);
+    description.Usage = D3D11_USAGE_STAGING;
+    description.BindFlags = 0;
+    description.MiscFlags = 0;
+    description.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> staging;
+    detail::ThrowIfFailed(device->CreateTexture2D(&description, nullptr, staging.GetAddressOf()),
+                          "HuxerUI could not allocate a D3D11 staging texture");
+
+    ComPtr<IDXGIKeyedMutex> mutex;
+    detail::ThrowIfFailed(source.As(&mutex), "HuxerUI could not synchronize a D3D11 frame readback");
+    if (mutex->AcquireSync(1, 1000) != S_OK) {
+      throw std::runtime_error("HuxerUI could not acquire the D3D11 frame for readback");
+    }
+    detail::KeyedMutexLease lease(std::move(mutex));
+    lease.SetReleaseKey(1);
+    context->CopyResource(staging.Get(), source.Get());
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    detail::ThrowIfFailed(context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+                          "HuxerUI could not map the D3D11 frame pixels");
+    struct UnmapOnExit {
+      ID3D11DeviceContext& context;
+      ID3D11Texture2D& texture;
+      ~UnmapOnExit() { context.Unmap(&texture, 0); }
+    } unmap{*context.Get(), *staging.Get()};
+    lease.Release();
+
+    const auto alpha = frame->Alpha() == Alpha::Opaque ? detail::PixelAlpha::Opaque : detail::PixelAlpha::Premultiplied;
+    return detail::CopyBitmapRows(
+        description.Width, description.Height, static_cast<const std::byte*>(mapped.pData), mapped.RowPitch,
+        Bitmap::PixelFormat::Bgra8888, alpha
+    );
+  }, AcquireFrame());
 }
 
 } // namespace huxerui::windows

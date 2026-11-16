@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "ios_external_texture_internal.h"
+#include "graphics/bitmap_internal.h"
 #include "graphics/path_internal.h"
 #include "graphics/paint_internal.h"
 #include "resources/resource_internal.h"
@@ -68,6 +69,36 @@ public:
 private:
   T value_ = nullptr;
 };
+
+CFRef<CGImageRef> DecodeImage(const ImageAsset& image) {
+  const auto bytes = image.EncodedBytes();
+  if (bytes.empty() || bytes.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
+    return CFRef<CGImageRef>{};
+  }
+  CFRef<CFDataRef> data{CFDataCreate(kCFAllocatorDefault, reinterpret_cast<const UInt8*>(bytes.data()),
+                                    static_cast<CFIndex>(bytes.size()))};
+  CFRef<CGImageSourceRef> source{data.Get() ? CGImageSourceCreateWithData(data.Get(), nullptr) : nullptr};
+  return CFRef<CGImageRef>{source.Get() ? CGImageSourceCreateImageAtIndex(source.Get(), 0, nullptr) : nullptr};
+}
+
+CFRef<CGImageRef> CreateBitmapImage(const Bitmap& bitmap) {
+  auto retained = std::make_unique<Bitmap>(bitmap);
+  const auto bytes = retained->Pixels();
+  CFRef<CGDataProviderRef> provider{CGDataProviderCreateWithData(
+      retained.get(), bytes.data(), bytes.size(), [](void* owner, const void*, std::size_t) {
+        delete static_cast<Bitmap*>(owner);
+      })};
+  if (!provider.Get()) return CFRef<CGImageRef>{};
+  retained.release();
+  CFRef<CGColorSpaceRef> color_space{CGColorSpaceCreateWithName(kCGColorSpaceSRGB)};
+  if (!color_space.Get()) return CFRef<CGImageRef>{};
+  return CFRef<CGImageRef>{CGImageCreate(
+      bitmap.PixelWidth(), bitmap.PixelHeight(), 8, 32, static_cast<std::size_t>(bitmap.PixelWidth()) * 4,
+      color_space.Get(), kCGBitmapByteOrder32Big | static_cast<CGBitmapInfo>(kCGImageAlphaLast),
+      provider.Get(), nullptr, false,
+      kCGRenderingIntentDefault
+  )};
+}
 
 CFRef<CGGradientRef> CreateGradient(const std::vector<GradientStop>& stops) {
   std::vector<CGFloat> components;
@@ -688,6 +719,69 @@ void ClipCurrentPath(CGContextRef context, PathFillRule fill_rule) {
 
 } // namespace
 
+Bitmap CopyCGImagePixels(CGImageRef image, float scale) {
+  if (!image || CGImageGetWidth(image) > std::numeric_limits<std::uint32_t>::max() ||
+      CGImageGetHeight(image) > std::numeric_limits<std::uint32_t>::max()) {
+    throw std::runtime_error("HuxerUI could not decode image pixels");
+  }
+  const auto width = static_cast<std::uint32_t>(CGImageGetWidth(image));
+  const auto height = static_cast<std::uint32_t>(CGImageGetHeight(image));
+  const auto stride = static_cast<std::size_t>(width) * 4;
+  Bytes pixels(BitmapByteSize(width, height));
+  CFRef<CGColorSpaceRef> color_space{CGColorSpaceCreateWithName(kCGColorSpaceSRGB)};
+  if (!color_space.Get()) throw std::runtime_error("HuxerUI could not create an sRGB color space");
+  CFRef<CGContextRef> context{CGBitmapContextCreate(
+      pixels.data(), width, height, 8, stride, color_space.Get(),
+      kCGBitmapByteOrder32Big | static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast)
+  )};
+  if (!context.Get()) throw std::runtime_error("HuxerUI could not allocate a Core Graphics bitmap");
+  CGContextSetBlendMode(context.Get(), kCGBlendModeCopy);
+  CGContextDrawImage(context.Get(), CGRectMake(0, 0, width, height), image);
+  UnpremultiplyRgba(pixels);
+  return Bitmap::FromRgba8(width, height, std::move(pixels), scale);
+}
+
+Task<Bitmap> DecodeBitmap(ImageAsset image, std::uint16_t orientation) {
+  return RunWorker([orientation](ImageAsset source) {
+    if (!source.HasValue()) throw std::logic_error("HuxerUI cannot decode a missing image asset");
+    return ApplyEncodedOrientation(CopyCGImagePixels(DecodeImage(source).Get(), source.Scale()), orientation);
+  }, std::move(image));
+}
+
+Task<Bytes> EncodeBitmap(Bitmap bitmap, ImageEncodeOptions options) {
+  return RunWorker([](Bitmap pixels, ImageEncodeOptions settings) {
+    const bool jpeg = settings.format == ImageFormat::Jpeg;
+    if (jpeg) pixels = FlattenBitmap(std::move(pixels), settings.jpeg_background);
+    const auto image = CreateBitmapImage(pixels);
+    CFRef<CFMutableDataRef> data{CFDataCreateMutable(kCFAllocatorDefault, 0)};
+    if (!image.Get() || !data.Get()) throw std::runtime_error("HuxerUI could not prepare image encoding");
+    CFRef<CGImageDestinationRef> destination{
+        CGImageDestinationCreateWithData(data.Get(), jpeg ? CFSTR("public.jpeg") : CFSTR("public.png"), 1, nullptr)
+    };
+    if (!destination.Get()) throw std::runtime_error("HuxerUI could not create the image encoder");
+
+    CFRef<CFNumberRef> quality;
+    CFRef<CFDictionaryRef> properties;
+    if (jpeg) {
+      const double value = settings.jpeg_quality / 100.0;
+      quality = CFRef<CFNumberRef>{CFNumberCreate(kCFAllocatorDefault, kCFNumberDoubleType, &value)};
+      if (!quality.Get()) throw std::runtime_error("HuxerUI could not create JPEG encoder settings");
+      const void* keys[] = {kCGImageDestinationLossyCompressionQuality};
+      const void* values[] = {quality.Get()};
+      properties = CFRef<CFDictionaryRef>{CFDictionaryCreate(
+          kCFAllocatorDefault, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks
+      )};
+      if (!properties.Get()) throw std::runtime_error("HuxerUI could not create JPEG encoder settings");
+    }
+    CGImageDestinationAddImage(destination.Get(), image.Get(), properties.Get());
+    if (!CGImageDestinationFinalize(destination.Get()) || CFDataGetLength(data.Get()) <= 0) {
+      throw std::runtime_error("HuxerUI could not encode the bitmap");
+    }
+    const auto* bytes = reinterpret_cast<const std::byte*>(CFDataGetBytePtr(data.Get()));
+    return Bytes(bytes, bytes + CFDataGetLength(data.Get()));
+  }, std::move(bitmap), options);
+}
+
 struct UIKitRenderer::Impl {
   struct CachedImage {
     std::uint64_t identity = 0;
@@ -1042,31 +1136,21 @@ struct UIKitRenderer::Impl {
     return paragraph;
   }
 
-  CGImageRef ImageFor(const ImageAsset& image) {
-    const std::uint64_t identity = InternalAccess::ImageIdentity(image);
+  CGImageRef ImageFor(const RasterImage& image) {
+    const std::uint64_t identity = RasterImageIdentity(image);
     const auto cached =
         std::ranges::find_if(images, [identity](const CachedImage& entry) { return entry.identity == identity; });
     if (cached != images.end()) {
       std::rotate(cached, cached + 1, images.end());
       return images.back().cg_image.Get();
     }
-    const std::span<const std::byte> bytes = image.EncodedBytes();
-    if (bytes.empty() || bytes.size() > static_cast<std::size_t>(std::numeric_limits<CFIndex>::max())) {
-      return nullptr;
-    }
-    CFRef<CFDataRef> data{CFDataCreate(
-        kCFAllocatorDefault,
-        reinterpret_cast<const UInt8*>(bytes.data()),
-        static_cast<CFIndex>(bytes.size())
-    )};
-    if (data.Get() == nullptr) {
-      return nullptr;
-    }
-    CFRef<CGImageSourceRef> source{CGImageSourceCreateWithData(data.Get(), nullptr)};
-    if (source.Get() == nullptr) {
-      return nullptr;
-    }
-    CFRef<CGImageRef> cg_image{CGImageSourceCreateImageAtIndex(source.Get(), 0, nullptr)};
+    auto cg_image = std::visit([](const auto& value) {
+      if constexpr (std::same_as<std::decay_t<decltype(value)>, Bitmap>) {
+        return CreateBitmapImage(value);
+      } else {
+        return DecodeImage(value);
+      }
+    }, image);
     if (cg_image.Get() == nullptr) {
       return nullptr;
     }
@@ -1798,7 +1882,7 @@ void UIKitRenderer::RenderCommand(CGContextRef context, const DrawImageCommand& 
   DrawCGImage(
       context,
       impl_->ImageFor(command.image),
-      command.image.IntrinsicSize(),
+      RasterImageSize(command.image),
       command.source,
       command.destination,
       command.sampling,

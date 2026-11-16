@@ -1,20 +1,19 @@
 #include <huxerui/resource.h>
 
 #include <algorithm>
-#include <atomic>
 #include <array>
 #include <cctype>
 #include <cmath>
-#include <fstream>
+#include <filesystem>
 #include <iterator>
-#include <limits>
 #include <ranges>
 #include <stdexcept>
 
-#include <huxerui/paint.h>
 #include <huxerui/file.h>
+#include <huxerui/paint.h>
 
 #include "resource_internal.h"
+#include "graphics/bitmap_internal.h"
 #include "internal_access.h"
 #include "io/stream_internal.h"
 
@@ -102,7 +101,36 @@ struct ImageMetadata {
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   std::string_view mime_type;
+  std::uint16_t orientation = 1;
 };
+
+std::uint16_t ReadExifOrientation(std::span<const std::byte> tiff) {
+  if (tiff.size() < 8) return 1;
+  const bool little_endian = tiff[0] == std::byte{'I'} && tiff[1] == std::byte{'I'};
+  const bool big_endian = tiff[0] == std::byte{'M'} && tiff[1] == std::byte{'M'};
+  if (!little_endian && !big_endian) return 1;
+
+  const auto read = [tiff, little_endian](std::size_t offset, std::size_t size) {
+    std::uint32_t value = 0;
+    for (std::size_t index = 0; index < size; ++index) {
+      const auto byte = little_endian ? size - index - 1 : index;
+      value = (value << 8U) | std::to_integer<std::uint32_t>(tiff[offset + byte]);
+    }
+    return value;
+  };
+  const auto directory = read(4, 4);
+  if (read(2, 2) != 42 || directory > tiff.size() - 2) return 1;
+  const auto entries = read(directory, 2);
+  const auto start = static_cast<std::size_t>(directory) + 2;
+  if (entries > (tiff.size() - start) / 12) return 1;
+  for (std::size_t offset = start; offset < start + entries * 12; offset += 12) {
+    if (read(offset, 2) == 0x0112 && read(offset + 2, 2) == 3 && read(offset + 4, 4) == 1) {
+      const auto orientation = read(offset + 8, 2);
+      return orientation >= 1 && orientation <= 8 ? static_cast<std::uint16_t>(orientation) : 1;
+    }
+  }
+  return 1;
+}
 
 bool IsPngChunk(std::span<const std::byte> bytes, std::size_t offset, std::string_view type) noexcept {
   return type.size() == 4 && offset + 8 <= bytes.size() &&
@@ -137,6 +165,7 @@ ImageMetadata ReadImageMetadata(std::span<const std::byte> bytes) {
       throw std::invalid_argument("HuxerUI PNG image dimensions must be positive");
     }
     bool has_image_data = false;
+    std::span<const std::byte> exif;
     std::size_t offset = 8;
     while (offset + 12 <= bytes.size()) {
       const std::uint32_t length = ReadBigEndian32(bytes.data() + offset);
@@ -146,9 +175,11 @@ ImageMetadata ReadImageMetadata(std::span<const std::byte> bytes) {
       const std::size_t end = offset + 12 + length;
       if (IsPngChunk(bytes, offset, "IDAT")) {
         has_image_data = true;
+      } else if (exif.empty() && IsPngChunk(bytes, offset, "eXIf")) {
+        exif = bytes.subspan(offset + 8, length);
       } else if (IsPngChunk(bytes, offset, "IEND")) {
         if (length == 0 && has_image_data && end == bytes.size()) {
-          return {ImageFormat::Png, width, height, "image/png"};
+          return {ImageFormat::Png, width, height, "image/png", ReadExifOrientation(exif)};
         }
         break;
       }
@@ -158,8 +189,12 @@ ImageMetadata ReadImageMetadata(std::span<const std::byte> bytes) {
   }
 
   if (bytes.size() >= 4 && bytes[0] == std::byte{0xFF} && bytes[1] == std::byte{0xD8}) {
+    constexpr std::array exif_signature{
+        std::byte{'E'}, std::byte{'x'}, std::byte{'i'}, std::byte{'f'}, std::byte{0}, std::byte{0},
+    };
     std::uint32_t width = 0;
     std::uint32_t height = 0;
+    std::span<const std::byte> exif;
     std::size_t offset = 2;
     while (offset + 3 < bytes.size()) {
       while (offset < bytes.size() && bytes[offset] == std::byte{0xFF}) {
@@ -176,8 +211,15 @@ ImageMetadata ReadImageMetadata(std::span<const std::byte> bytes) {
         break;
       }
       const std::uint16_t segment_size = ReadBigEndian16(bytes.data() + offset);
-      if (segment_size < 2 || offset + segment_size > bytes.size()) {
+      if (segment_size < 2 || segment_size > bytes.size() - offset) {
         break;
+      }
+      if (marker == 0xE1 && exif.empty()) {
+        const auto segment = bytes.subspan(offset + 2, segment_size - 2);
+        if (segment.size() >= exif_signature.size() &&
+            std::ranges::equal(segment.first(exif_signature.size()), exif_signature)) {
+          exif = segment.subspan(exif_signature.size());
+        }
       }
       const bool size_of_frame = (marker >= 0xC0 && marker <= 0xC3) || (marker >= 0xC5 && marker <= 0xC7) ||
                                  (marker >= 0xC9 && marker <= 0xCB) || (marker >= 0xCD && marker <= 0xCF);
@@ -191,7 +233,7 @@ ImageMetadata ReadImageMetadata(std::span<const std::byte> bytes) {
       if (marker == 0xDA) {
         if (width != 0 && height != 0 && bytes.size() >= 2 && bytes[bytes.size() - 2] == std::byte{0xFF} &&
             bytes.back() == std::byte{0xD9}) {
-          return {ImageFormat::Jpeg, width, height, "image/jpeg"};
+          return {ImageFormat::Jpeg, width, height, "image/jpeg", ReadExifOrientation(exif)};
         }
         break;
       }
@@ -205,11 +247,6 @@ void ValidateScale(float scale) {
   if (!std::isfinite(scale) || scale <= 0.0F) {
     throw std::invalid_argument("HuxerUI image scale must be finite and positive");
   }
-}
-
-std::uint64_t NextImageIdentity() noexcept {
-  static std::atomic_uint64_t next_identity{1};
-  return next_identity.fetch_add(1, std::memory_order_relaxed);
 }
 
 } // namespace
@@ -265,6 +302,7 @@ struct ImageAsset::Data {
   std::uint32_t pixel_width = 0;
   std::uint32_t pixel_height = 0;
   float scale = 1.0F;
+  std::uint16_t orientation = 1;
   // Copies share this process-local native decode-cache identity; it is neither value equality nor a ResourceId.
   std::uint64_t identity = 0;
 };
@@ -459,22 +497,12 @@ bool RawAsset::operator==(const RawAsset& other) const noexcept {
   return std::ranges::equal(detail::InternalAccess::RawBytes(*this), detail::InternalAccess::RawBytes(other));
 }
 
-ImageAsset ImageAsset::FromFile(const std::filesystem::path& path, float scale) {
-  std::ifstream stream(path, std::ios::binary);
-  if (!stream) {
-    throw std::invalid_argument("HuxerUI image file could not be opened: " + path.string());
+ImageAsset ImageAsset::FromFile(const File& file, float scale) {
+  auto bytes = file.ReadBytes();
+  if (!bytes.Succeeded()) {
+    throw std::invalid_argument("HuxerUI image file could not be read: " + file.Path() + ": " + bytes.Error().message);
   }
-  stream.seekg(0, std::ios::end);
-  const std::streamoff length = stream.tellg();
-  if (length < 0 || static_cast<std::uintmax_t>(length) > std::numeric_limits<std::size_t>::max()) {
-    throw std::invalid_argument("HuxerUI image file size is invalid: " + path.string());
-  }
-  stream.seekg(0, std::ios::beg);
-  std::vector<std::byte> bytes(static_cast<std::size_t>(length));
-  if (!bytes.empty() && !stream.read(reinterpret_cast<char*>(bytes.data()), length)) {
-    throw std::invalid_argument("HuxerUI image file could not be read: " + path.string());
-  }
-  return FromEncoded(std::move(bytes), scale);
+  return FromEncoded(std::move(bytes).Value(), scale);
 }
 
 ImageAsset ImageAsset::FromEncoded(Bytes bytes, float scale) {
@@ -504,10 +532,23 @@ ImageAsset ImageAsset::FromRawAsset(RawAsset asset, float scale) {
           metadata.width,
           metadata.height,
           scale,
-          NextImageIdentity(),
+          metadata.orientation,
+          detail::NextImageIdentity(),
       })
   );
 }
+
+namespace {
+
+Task<bool> SaveImageAsset(ImageAsset image, File destination) {
+  if (!image.HasValue()) {
+    throw std::logic_error("HuxerUI cannot save a missing image asset");
+  }
+  const auto bytes = image.EncodedBytes();
+  co_return co_await destination.WriteBytesAsync(Bytes(bytes.begin(), bytes.end()));
+}
+
+} // namespace
 
 std::span<const std::byte> ImageAsset::EncodedBytes() const noexcept {
   return data_ ? detail::InternalAccess::RawBytes(data_->encoded) : std::span<const std::byte>{};
@@ -541,6 +582,14 @@ Size ImageAsset::IntrinsicSize() const noexcept {
 
 bool ImageAsset::HasValue() const noexcept {
   return static_cast<bool>(data_);
+}
+
+Task<Bitmap> ImageAsset::DecodeAsync() const {
+  return detail::DecodeBitmap(*this, data_ ? data_->orientation : 1);
+}
+
+Task<bool> ImageAsset::SaveAsync(File destination) const {
+  return SaveImageAsset(*this, std::move(destination));
 }
 
 bool ImageAsset::operator==(const ImageAsset& other) const noexcept {

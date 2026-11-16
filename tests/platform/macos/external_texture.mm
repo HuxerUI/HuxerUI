@@ -7,8 +7,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <stdexcept>
 #include <utility>
 
@@ -177,6 +179,57 @@ TEST_CASE("MacExternalTexturePublishesLatestFrameThroughAppKitRenderer") {
     CVPixelBufferRef rejected = CreatePixelBuffer({0, 0, 0, 255});
     REQUIRE_THROWS_AS(texture->Publish(rejected), std::logic_error);
     CVPixelBufferRelease(rejected);
+  }
+}
+
+TEST_CASE("MacExternalTextureSnapshotRetainsTheFrameSelectedAtTheCallSite") {
+  @autoreleasepool {
+    const auto texture = std::make_shared<macos::PixelBufferTexture>(Size{2.0F, 2.0F});
+    auto before_publication = texture->SnapshotAsync();
+    CVPixelBufferRef red = CreatePixelBuffer({0, 0, 255, 255});
+    texture->Publish(red);
+    CVPixelBufferRelease(red);
+    auto first = texture->SnapshotAsync();
+    CVPixelBufferRef blue = CreatePixelBuffer({255, 0, 0, 255});
+    texture->Publish(blue);
+    CVPixelBufferRelease(blue);
+    texture->Finish();
+
+    TestPlatform platform([](std::function<void()> task) {
+      dispatch_async(dispatch_get_main_queue(), ^{ task(); });
+    });
+    const Application application(MacExternalTextureApp);
+    RuntimeLifetime runtime(application, platform);
+    bool complete = false;
+    std::exception_ptr failure;
+    const auto tasks = UseApplicationTaskScope();
+    tasks.Launch([&]() -> Task<void> {
+      try {
+        const auto empty = co_await std::move(before_publication);
+        REQUIRE_FALSE(empty.has_value());
+        const auto snapshot = co_await std::move(first);
+        REQUIRE(snapshot.has_value());
+        REQUIRE(snapshot->PixelWidth() == 2);
+        REQUIRE(snapshot->PixelHeight() == 2);
+        REQUIRE(snapshot->Pixels()[0] == std::byte{255});
+        REQUIRE(snapshot->Pixels()[2] == std::byte{0});
+        const auto latest = co_await texture->SnapshotAsync();
+        REQUIRE(latest.has_value());
+        REQUIRE(latest->Pixels()[0] == std::byte{0});
+        REQUIRE(latest->Pixels()[2] == std::byte{255});
+      } catch (...) {
+        failure = std::current_exception();
+      }
+      complete = true;
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (!complete && std::chrono::steady_clock::now() < deadline) {
+      CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.01, true);
+    }
+    REQUIRE(complete);
+    if (failure) {
+      std::rethrow_exception(failure);
+    }
   }
 }
 

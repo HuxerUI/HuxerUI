@@ -14,6 +14,8 @@
 
 namespace huxerui::detail {
 
+android::LocalRef<jobject> CreateAndroidBitmap(JNIEnv* environment, const Bitmap& bitmap);
+
 class AndroidBitmapFrame final {
 public:
   AndroidBitmapFrame() noexcept = default;

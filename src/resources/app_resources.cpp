@@ -458,6 +458,7 @@ ResolvedImageAsset UseImageVariant(const ImageVariant& image) {
     if (const auto* raster = std::get_if<ImageAsset>(&image)) {
       return *raster;
     }
+    if (const auto* bitmap = std::get_if<Bitmap>(&image)) return *bitmap;
     return std::get<VectorAsset>(image);
   }
   std::shared_ptr<AppResources> resources = CurrentResources();

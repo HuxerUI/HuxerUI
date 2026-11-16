@@ -37,6 +37,7 @@
 
 #include "android_external_texture_internal.h"
 #include "android_renderer.h"
+#include "graphics/bitmap_internal.h"
 #include "macros_internal.h"
 
 namespace huxerui::detail {
@@ -336,6 +337,7 @@ public:
       const std::shared_ptr<OutputSurface>& output, const std::shared_ptr<const android::GlFrame>& frame, Rect source,
       ImageSampling sampling
   );
+  Bitmap ReadFrame(const android::GlFrame& frame);
   [[nodiscard]] GLuint ImportFrameCurrent(const android::GlFrame& frame);
   void DeleteTexture(GLuint texture_name, EGLImageKHR image = EGL_NO_IMAGE_KHR) noexcept;
 
@@ -1120,6 +1122,39 @@ bool GpuContext::Render(
   });
 }
 
+Bitmap GpuContext::ReadFrame(const android::GlFrame& frame) {
+  const auto width = frame.PixelWidth();
+  const auto height = frame.PixelHeight();
+  Bytes pixels(BitmapByteSize(width, height));
+  impl_->Invoke([this, &frame, &pixels, width, height] {
+    impl_->MakeUtilityCurrent();
+    GLuint framebuffer = 0;
+    glGenFramebuffers(1, &framebuffer);
+    if (framebuffer == 0) {
+      throw std::runtime_error("HuxerUI could not allocate an Android texture readback framebuffer");
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, frame.texture_name_, 0);
+    const bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (complete) glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glDeleteFramebuffers(1, &framebuffer);
+    if (!complete || glGetError() != GL_NO_ERROR) {
+      throw std::runtime_error("HuxerUI could not read the Android GPU texture frame");
+    }
+  });
+
+  // The canonical GL texture starts at the bottom row; bitmaps start at the top.
+  const auto stride = static_cast<std::size_t>(width) * 4;
+  for (int y = 0; y < height / 2; ++y) {
+    auto* bottom = pixels.data() + y * stride;
+    auto* top = pixels.data() + (height - 1 - y) * stride;
+    std::swap_ranges(bottom, bottom + stride, top);
+  }
+  UnpremultiplyRgba(pixels);
+  return Bitmap::FromRgba8(width, height, std::move(pixels));
+}
+
 GLuint GpuContext::ImportFrameCurrent(const android::GlFrame& frame) {
   const EGLContext context = eglGetCurrentContext();
   const EGLDisplay display = eglGetCurrentDisplay();
@@ -1563,6 +1598,15 @@ struct GlTexture::Storage {
   bool finished = false;
 };
 
+namespace {
+
+std::optional<Bitmap> ReadGlFrame(const std::shared_ptr<const GlFrame>& frame) {
+  if (!frame) return std::nullopt;
+  return huxerui::detail::GpuContext::Instance().ReadFrame(*frame);
+}
+
+} // namespace
+
 GlTexture::GlTexture(Size intrinsic_size)
     : huxerui::ExternalTexture(intrinsic_size), storage_(std::make_unique<Storage>()) {}
 
@@ -1608,6 +1652,10 @@ void GlTexture::Finish() noexcept {
 std::shared_ptr<const GlFrame> GlTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->frame_mutex);
   return storage_->frame;
+}
+
+Task<std::optional<Bitmap>> GlTexture::SnapshotAsync() const {
+  return RunWorker(ReadGlFrame, AcquireFrame());
 }
 
 struct SurfaceStreamTexture::Storage {
@@ -1730,6 +1778,10 @@ void SurfaceStreamTexture::FrameAvailable() {
 std::shared_ptr<const GlFrame> SurfaceStreamTexture::AcquireFrame() const noexcept {
   std::lock_guard lock(storage_->mutex);
   return storage_->frame;
+}
+
+Task<std::optional<Bitmap>> SurfaceStreamTexture::SnapshotAsync() const {
+  return RunWorker(ReadGlFrame, AcquireFrame());
 }
 
 } // namespace huxerui::android

@@ -394,6 +394,10 @@ void PaintContext::DrawTextRuns(std::vector<TextRun> runs) {
   sequence_.commands_.emplace_back(DrawTextRunsCommand{std::move(runs)});
 }
 
+std::uint64_t detail::RasterImageIdentity(const RasterImage& image) noexcept {
+  return std::visit([](const auto& value) { return InternalAccess::ImageIdentity(value); }, image);
+}
+
 void PaintContext::DrawImage(ImageAsset image, Rect destination, ImageSampling sampling, float opacity) {
   const Size intrinsic = image.IntrinsicSize();
   DrawImageRect(std::move(image), {0.0F, 0.0F, intrinsic.width, intrinsic.height}, destination, sampling, opacity);
@@ -402,13 +406,28 @@ void PaintContext::DrawImage(ImageAsset image, Rect destination, ImageSampling s
 void PaintContext::DrawImageRect(
     ImageAsset image, Rect source, Rect destination, ImageSampling sampling, float opacity
 ) {
+  DrawRasterImage(std::move(image), source, destination, sampling, opacity);
+}
+
+void PaintContext::DrawImage(Bitmap bitmap, Rect destination, ImageSampling sampling, float opacity) {
+  const Size intrinsic = bitmap.IntrinsicSize();
+  DrawImageRect(std::move(bitmap), {0.0F, 0.0F, intrinsic.width, intrinsic.height}, destination, sampling, opacity);
+}
+
+void PaintContext::DrawImageRect(Bitmap bitmap, Rect source, Rect destination, ImageSampling sampling, float opacity) {
+  DrawRasterImage(std::move(bitmap), source, destination, sampling, opacity);
+}
+
+void PaintContext::DrawRasterImage(
+    detail::RasterImage image, Rect source, Rect destination, ImageSampling sampling, float opacity
+) {
   RequireOpen();
-  if (!image.HasValue()) {
+  if (!std::visit([](const auto& value) { return value.HasValue(); }, image)) {
     throw std::invalid_argument("HuxerUI paint image must not be empty");
   }
   RequireRect(source);
   RequireRect(destination);
-  const Size intrinsic = image.IntrinsicSize();
+  const Size intrinsic = detail::RasterImageSize(image);
   if (source.x < 0.0F || source.y < 0.0F || source.x + source.width > intrinsic.width ||
       source.y + source.height > intrinsic.height) {
     throw std::invalid_argument("HuxerUI image source rectangle must be inside the intrinsic image bounds");

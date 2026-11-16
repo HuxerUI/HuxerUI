@@ -41,6 +41,7 @@
 #include <variant>
 #include <vector>
 
+#include "graphics/bitmap_internal.h"
 #include "graphics/path_internal.h"
 #include "graphics/paint_internal.h"
 #include "resources/resource_internal.h"
@@ -56,6 +57,91 @@ namespace huxerui::detail {
 namespace {
 
 using Microsoft::WRL::ComPtr;
+
+ComPtr<IWICImagingFactory> CreateWicFactory() {
+  ComPtr<IWICImagingFactory> factory;
+  CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(factory.GetAddressOf()));
+  return factory;
+}
+
+ComPtr<IWICBitmapFrameDecode> DecodeWicFrame(IWICImagingFactory& factory, const ImageAsset& image) {
+  const auto bytes = image.EncodedBytes();
+  if (bytes.empty() || bytes.size() > std::numeric_limits<DWORD>::max()) return {};
+  ComPtr<IWICStream> stream;
+  ComPtr<IWICBitmapDecoder> decoder;
+  ComPtr<IWICBitmapFrameDecode> frame;
+  if (FAILED(factory.CreateStream(stream.GetAddressOf())) ||
+      FAILED(stream->InitializeFromMemory(reinterpret_cast<BYTE*>(const_cast<std::byte*>(bytes.data())),
+                                          static_cast<DWORD>(bytes.size()))) ||
+      FAILED(factory.CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad,
+                                             decoder.GetAddressOf())) ||
+      FAILED(decoder->GetFrame(0, frame.GetAddressOf()))) {
+    return {};
+  }
+  return frame;
+}
+
+ComPtr<IWICBitmapSource> ConvertWicPixels(
+    IWICImagingFactory& factory, IWICBitmapSource& source, REFWICPixelFormatGUID format) {
+  ComPtr<IWICFormatConverter> converter;
+  if (FAILED(factory.CreateFormatConverter(converter.GetAddressOf())) ||
+      FAILED(converter->Initialize(&source, format, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))) {
+    return {};
+  }
+  return converter;
+}
+
+ComPtr<IWICBitmap> CreateWicBitmap(IWICImagingFactory& factory, const Bitmap& bitmap) {
+  const auto bytes = bitmap.Pixels();
+  if (bytes.empty() || bytes.size() > std::numeric_limits<UINT>::max()) return {};
+  ComPtr<IWICBitmap> source;
+  if (FAILED(factory.CreateBitmapFromMemory(
+          bitmap.PixelWidth(), bitmap.PixelHeight(), GUID_WICPixelFormat32bppRGBA, bitmap.PixelWidth() * 4,
+          static_cast<UINT>(bytes.size()), reinterpret_cast<BYTE*>(const_cast<std::byte*>(bytes.data())),
+          source.GetAddressOf()))) {
+    return {};
+  }
+  return source;
+}
+
+ComPtr<IWICBitmapSource> SrgbWicFrame(IWICImagingFactory& factory, IWICBitmapFrameDecode& frame) {
+  UINT count = 0;
+  if (SUCCEEDED(frame.GetColorContexts(0, nullptr, &count)) && count > 0) {
+    std::vector<ComPtr<IWICColorContext>> contexts(count);
+    std::vector<IWICColorContext*> pointers;
+    pointers.reserve(count);
+    for (auto& context : contexts) {
+      if (FAILED(factory.CreateColorContext(context.GetAddressOf()))) return {};
+      pointers.push_back(context.Get());
+    }
+    UINT found = 0;
+    if (SUCCEEDED(frame.GetColorContexts(count, pointers.data(), &found)) && found <= count) {
+      ComPtr<IWICColorContext> target;
+      if (FAILED(factory.CreateColorContext(target.GetAddressOf())) ||
+          FAILED(target->InitializeFromExifColorSpace(1))) return {};
+      for (UINT index = 0; index < found; ++index) {
+        ComPtr<IWICColorTransform> transform;
+        if (SUCCEEDED(factory.CreateColorTransformer(transform.GetAddressOf())) &&
+            SUCCEEDED(transform->Initialize(&frame, pointers[index], target.Get(), GUID_WICPixelFormat32bppRGBA))) {
+          return transform;
+        }
+      }
+    }
+  }
+  return ConvertWicPixels(factory, frame, GUID_WICPixelFormat32bppRGBA);
+}
+
+class WicWorkerApartment {
+public:
+  WicWorkerApartment() {
+    if (FAILED(CoInitializeEx(nullptr, COINIT_MULTITHREADED))) {
+      throw std::runtime_error("HuxerUI could not initialize the image codec's COM apartment");
+    }
+  }
+  ~WicWorkerApartment() { CoUninitialize(); }
+  WicWorkerApartment(const WicWorkerApartment&) = delete;
+  WicWorkerApartment& operator=(const WicWorkerApartment&) = delete;
+};
 
 template <class Interface> class ComObject : public Interface {
 public:
@@ -325,6 +411,91 @@ std::size_t HashShaping(const TextShapingOptions& shaping) noexcept {
 }
 
 } // namespace
+
+Task<Bitmap> DecodeBitmap(ImageAsset image, std::uint16_t orientation) {
+  return RunWorker([orientation](ImageAsset source) {
+    if (!source.HasValue()) throw std::logic_error("HuxerUI cannot decode a missing image asset");
+    const WicWorkerApartment apartment;
+    const auto factory = CreateWicFactory();
+    auto frame = factory ? DecodeWicFrame(*factory.Get(), source) : ComPtr<IWICBitmapFrameDecode>{};
+    UINT width = 0;
+    UINT height = 0;
+    if (!frame || FAILED(frame->GetSize(&width, &height))) {
+      throw std::runtime_error("HuxerUI could not decode image pixels");
+    }
+    const auto size = BitmapByteSize(width, height);
+    if (size > std::numeric_limits<UINT>::max()) {
+      throw std::runtime_error("HuxerUI image exceeds the Windows codec size limit");
+    }
+    Bytes pixels(size);
+    const auto converted = SrgbWicFrame(*factory.Get(), *frame.Get());
+    if (!converted || FAILED(converted->CopyPixels(nullptr, width * 4, static_cast<UINT>(size),
+                                                    reinterpret_cast<BYTE*>(pixels.data())))) {
+      throw std::runtime_error("HuxerUI could not copy image pixels");
+    }
+    return ApplyEncodedOrientation(Bitmap::FromRgba8(width, height, std::move(pixels), source.Scale()), orientation);
+  }, std::move(image));
+}
+
+Task<Bytes> EncodeBitmap(Bitmap bitmap, ImageEncodeOptions options) {
+  return RunWorker([](Bitmap pixels, ImageEncodeOptions settings) {
+    const WicWorkerApartment apartment;
+    const bool jpeg = settings.format == ImageFormat::Jpeg;
+    if (jpeg) pixels = FlattenBitmap(std::move(pixels), settings.jpeg_background);
+    const auto factory = CreateWicFactory();
+    const auto source = factory ? CreateWicBitmap(*factory.Get(), pixels) : ComPtr<IWICBitmap>{};
+    ComPtr<IStream> stream;
+    ComPtr<IWICBitmapEncoder> encoder;
+    ComPtr<IWICBitmapFrameEncode> frame;
+    ComPtr<IPropertyBag2> properties;
+    if (!source || FAILED(CreateStreamOnHGlobal(nullptr, TRUE, stream.GetAddressOf())) ||
+        FAILED(factory->CreateEncoder(jpeg ? GUID_ContainerFormatJpeg : GUID_ContainerFormatPng,
+                                      nullptr, encoder.GetAddressOf())) ||
+        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
+        FAILED(encoder->CreateNewFrame(frame.GetAddressOf(), properties.GetAddressOf()))) {
+      throw std::runtime_error("HuxerUI could not prepare image encoding");
+    }
+    if (jpeg) {
+      PROPBAG2 property{};
+      wchar_t name[] = L"ImageQuality";
+      property.pstrName = name;
+      VARIANT value{};
+      value.vt = VT_R4;
+      value.fltVal = settings.jpeg_quality / 100.0F;
+      if (!properties || FAILED(properties->Write(1, &property, &value))) {
+        throw std::runtime_error("HuxerUI could not set the JPEG quality");
+      }
+    }
+    WICPixelFormatGUID format = jpeg ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA;
+    if (FAILED(frame->Initialize(properties.Get())) ||
+        FAILED(frame->SetSize(pixels.PixelWidth(), pixels.PixelHeight())) ||
+        FAILED(frame->SetPixelFormat(&format))) {
+      throw std::runtime_error("HuxerUI could not configure image encoding");
+    }
+    if (format != (jpeg ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA)) {
+      throw std::runtime_error("HuxerUI Windows encoder rejected the required output pixel format");
+    }
+    const auto converted = ConvertWicPixels(*factory.Get(), *source.Get(), format);
+    if (!converted || FAILED(frame->WriteSource(converted.Get(), nullptr)) || FAILED(frame->Commit()) ||
+        FAILED(encoder->Commit())) {
+      throw std::runtime_error("HuxerUI could not encode the bitmap");
+    }
+
+    STATSTG stats{};
+    LARGE_INTEGER start{};
+    if (FAILED(stream->Stat(&stats, STATFLAG_NONAME)) || stats.cbSize.QuadPart == 0 ||
+        stats.cbSize.QuadPart > std::numeric_limits<ULONG>::max() ||
+        FAILED(stream->Seek(start, STREAM_SEEK_SET, nullptr))) {
+      throw std::runtime_error("HuxerUI could not read encoded image bytes");
+    }
+    Bytes bytes(static_cast<std::size_t>(stats.cbSize.QuadPart));
+    ULONG count = 0;
+    if (FAILED(stream->Read(bytes.data(), static_cast<ULONG>(bytes.size()), &count)) || count != bytes.size()) {
+      throw std::runtime_error("HuxerUI could not read encoded image bytes");
+    }
+    return bytes;
+  }, std::move(bitmap), options);
+}
 
 class Win32InlineObject final : public ComObject<IDWriteInlineObject> {
 public:
@@ -1892,51 +2063,28 @@ struct Win32Renderer::Impl {
     }
   }
 
-  ComPtr<ID2D1Bitmap1> ImageBitmapFor(const ImageAsset& image) {
-    const std::uint64_t identity = InternalAccess::ImageIdentity(image);
+  ComPtr<ID2D1Bitmap1> ImageBitmapFor(const RasterImage& image) {
+    const auto identity = RasterImageIdentity(image);
     const auto cached =
         std::ranges::find_if(images_, [identity](const CachedImage& entry) { return entry.identity == identity; });
     if (cached != images_.end()) {
       std::rotate(cached, cached + 1, images_.end());
       return images_.back().bitmap;
     }
-    if (!wic_factory_ && FAILED(CoCreateInstance(
-                             CLSID_WICImagingFactory,
-                             nullptr,
-                             CLSCTX_INPROC_SERVER,
-                             IID_PPV_ARGS(wic_factory_.GetAddressOf())
-                         ))) {
-      return {};
-    }
-    const std::span<const std::byte> bytes = image.EncodedBytes();
-    if (bytes.empty() || bytes.size() > std::numeric_limits<DWORD>::max()) {
-      return {};
-    }
-    ComPtr<IWICStream> stream;
-    ComPtr<IWICBitmapDecoder> decoder;
-    ComPtr<IWICBitmapFrameDecode> frame;
-    ComPtr<IWICFormatConverter> converter;
+    if (!wic_factory_) wic_factory_ = CreateWicFactory();
+    if (!wic_factory_) return {};
+    const auto source = std::visit([this](const auto& value) -> ComPtr<IWICBitmapSource> {
+      if constexpr (std::same_as<std::decay_t<decltype(value)>, Bitmap>) {
+        return CreateWicBitmap(*wic_factory_.Get(), value);
+      } else {
+        return DecodeWicFrame(*wic_factory_.Get(), value);
+      }
+    }, image);
+    if (!source) return {};
+    const auto converted = ConvertWicPixels(*wic_factory_.Get(), *source.Get(), GUID_WICPixelFormat32bppPBGRA);
     ComPtr<ID2D1Bitmap1> bitmap;
-    if (FAILED(wic_factory_->CreateStream(stream.GetAddressOf())) ||
-        FAILED(stream->InitializeFromMemory(
-            reinterpret_cast<BYTE*>(const_cast<std::byte*>(bytes.data())),
-            static_cast<DWORD>(bytes.size())
-        )) ||
-        FAILED(
-            wic_factory_
-                ->CreateDecoderFromStream(stream.Get(), nullptr, WICDecodeMetadataCacheOnLoad, decoder.GetAddressOf())
-        ) ||
-        FAILED(decoder->GetFrame(0, frame.GetAddressOf())) ||
-        FAILED(wic_factory_->CreateFormatConverter(converter.GetAddressOf())) ||
-        FAILED(converter->Initialize(
-            frame.Get(),
-            GUID_WICPixelFormat32bppPBGRA,
-            WICBitmapDitherTypeNone,
-            nullptr,
-            0.0,
-            WICBitmapPaletteTypeMedianCut
-        )) ||
-        FAILED(device_context_->CreateBitmapFromWicBitmap(converter.Get(), nullptr, bitmap.GetAddressOf()))) {
+    if (!converted ||
+        FAILED(device_context_->CreateBitmapFromWicBitmap(converted.Get(), nullptr, bitmap.GetAddressOf()))) {
       return {};
     }
     const D2D1_SIZE_U pixel_size = bitmap->GetPixelSize();
@@ -1969,7 +2117,7 @@ struct Win32Renderer::Impl {
     if (!bitmap) {
       return;
     }
-    const float scale = command.image.Scale();
+    const float scale = RasterImageScale(command.image);
     const D2D1_RECT_F source = D2D1::RectF(
         command.source.x * scale,
         command.source.y * scale,

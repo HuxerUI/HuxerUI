@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <locale>
 #include <memory>
 #include <optional>
@@ -14,9 +13,11 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/data.h>
 #include <huxerui/geometry.h>
 #include <huxerui/stream.h>
+#include <huxerui/task.h>
 #include <huxerui/vector.h>
 
 namespace huxerui {
@@ -277,20 +278,8 @@ private:
   friend class detail::AppResources;
 };
 
-/// Encoded raster formats recognized by ImageAsset metadata parsing.
-enum class ImageFormat {
-  Png,  ///< Portable Network Graphics payload.
-  Jpeg, ///< JPEG payload.
-};
-
-/// Sampling policy used when a renderer scales an image.
-enum class ImageSampling {
-  Nearest, ///< Select nearby source pixels without interpolation; useful for pixel art.
-  Linear,  ///< Interpolate nearby source pixels for smoother scaling.
-};
-
 /// Immutable encoded PNG or JPEG data with pixel dimensions and a logical density scale.
-/// Factories read metadata rather than decoding pixels; the platform renderer owns pixel decoding.
+/// Factories read metadata without decoding pixels.
 /// A default asset has no image. Use generated ImageResource keys for packaged images that need locale/density selection.
 /// @code{.cpp}
 /// Size MeasureImage(Bytes encoded) {
@@ -303,12 +292,12 @@ public:
   ImageAsset() = default;
 
   /// Synchronously reads a local file into owned encoded-image storage.
-  /// @param path Native filesystem path accessible to this process; this is not a resource key or provider URI.
+  /// @param file Local file accessible to the application through File::ReadBytes().
   /// @param scale Finite, positive pixels per logical unit.
   /// @return An image with parsed format and dimensions, independent of the source file's later lifetime.
   /// @throws std::invalid_argument If the file cannot be read, its metadata/format is invalid, or scale is invalid.
   /// Full pixel decoding is deferred; successful metadata parsing does not guarantee platform decoding will succeed.
-  static ImageAsset FromFile(const std::filesystem::path& path, float scale = 1.0F);
+  static ImageAsset FromFile(const File& file, float scale = 1.0F);
   /// Retains an owned encoded image and parses its metadata.
   /// @param bytes Complete PNG or JPEG payload, not raw pixels or SVG text.
   /// @param scale Finite, positive pixels per logical unit; dimensions divided by scale must remain finite.
@@ -347,6 +336,20 @@ public:
   /// @return True for an image value; false for a missing default asset. No platform decoding is performed.
   [[nodiscard]] bool HasValue() const noexcept;
 
+  /// Decodes upright RGBA8 pixels and preserves the asset density.
+  /// The result can have different pixel dimensions from the encoded asset when orientation swaps the axes.
+  /// Linux currently interprets decoded RGB samples as sRGB without applying embedded ICC profiles.
+  /// The lazy task retains the asset.
+  /// @throws std::logic_error When awaited if the asset has no value.
+  /// @throws std::runtime_error When awaited if decoding fails.
+  Task<Bitmap> DecodeAsync() const;
+
+  /// Writes the original encoded bytes using File::WriteBytesAsync(), preserving metadata.
+  /// The lazy task retains the asset and destination.
+  /// @return A task yielding true if written, or false if the file write fails.
+  /// @throws std::logic_error When awaited if the asset has no value.
+  Task<bool> SaveAsync(File destination) const;
+
   bool operator==(const ImageAsset& other) const noexcept;
 
 private:
@@ -360,10 +363,10 @@ private:
   friend struct detail::InternalAccess;
 };
 
-/// Image input retaining either a deferred packaged key, encoded raster asset, or compiled/programmatic vector asset.
+/// Image input retaining either a deferred packaged key, encoded raster asset, vector asset, or bitmap.
 /// Components resolve a key in their effective resource environment; already resolved assets need no key lookup.
 /// ExternalTexture is separate because it represents a live shared texture rather than an immutable image value.
-using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
+using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset, Bitmap>;
 
 /// Resolves immediate resource values without subscribing composition.
 /// The application service uses the original application thread and the calling context's effective configuration.

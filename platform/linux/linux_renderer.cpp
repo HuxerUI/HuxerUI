@@ -28,6 +28,7 @@
 #include <variant>
 #include <vector>
 
+#include "graphics/bitmap_internal.h"
 #include "graphics/external_texture_internal.h"
 #include "linux_external_texture_internal.h"
 #include "graphics/path_internal.h"
@@ -40,6 +41,53 @@
 
 namespace huxerui::detail {
 namespace {
+
+GdkPixbuf* DecodeImage(const ImageAsset& image) {
+  GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
+  const auto bytes = image.EncodedBytes();
+  const bool wrote = gdk_pixbuf_loader_write(
+      loader, reinterpret_cast<const guchar*>(bytes.data()), bytes.size(), nullptr);
+  const bool closed = gdk_pixbuf_loader_close(loader, nullptr);
+  GdkPixbuf* pixbuf = wrote && closed ? gdk_pixbuf_loader_get_pixbuf(loader) : nullptr;
+  if (pixbuf) g_object_ref(pixbuf);
+  g_object_unref(loader);
+  return pixbuf;
+}
+
+GdkPixbuf* CreateBitmapPixbuf(const Bitmap& bitmap) {
+  if (bitmap.PixelWidth() > static_cast<std::uint32_t>(std::numeric_limits<int>::max() / 4) ||
+      bitmap.PixelHeight() > static_cast<std::uint32_t>(std::numeric_limits<int>::max())) {
+    return nullptr;
+  }
+  auto* owner = new Bitmap(bitmap);
+  const auto* pixels = reinterpret_cast<const guchar*>(owner->Pixels().data());
+  auto* pixbuf = gdk_pixbuf_new_from_data(
+      pixels, GDK_COLORSPACE_RGB, TRUE, 8, static_cast<int>(bitmap.PixelWidth()),
+      static_cast<int>(bitmap.PixelHeight()), static_cast<int>(bitmap.PixelWidth() * 4),
+      [](guchar*, gpointer data) { delete static_cast<Bitmap*>(data); }, owner);
+  if (!pixbuf) delete owner;
+  return pixbuf;
+}
+
+Bitmap CopyPixbuf(GdkPixbuf* pixbuf, float scale) {
+  const auto width = static_cast<std::uint32_t>(gdk_pixbuf_get_width(pixbuf));
+  const auto height = static_cast<std::uint32_t>(gdk_pixbuf_get_height(pixbuf));
+  const auto stride = static_cast<std::size_t>(gdk_pixbuf_get_rowstride(pixbuf));
+  const auto* pixels = reinterpret_cast<const std::byte*>(gdk_pixbuf_read_pixels(pixbuf));
+  if (gdk_pixbuf_get_has_alpha(pixbuf)) {
+    return CopyBitmapRows(width, height, pixels, stride, Bitmap::PixelFormat::Rgba8888, PixelAlpha::Straight, scale);
+  }
+  Bytes result(BitmapByteSize(width, height));
+  auto* output = result.data();
+  for (std::uint32_t y = 0; y < height; ++y) {
+    const auto* source = pixels + y * stride;
+    for (std::uint32_t x = 0; x < width; ++x, source += 3, output += 4) {
+      std::copy_n(source, 3, output);
+      output[3] = std::byte{255};
+    }
+  }
+  return Bitmap::FromRgba8(width, height, std::move(result), scale);
+}
 
 // The font map retains snapshots until its last paragraph and native font release it.
 class LinuxFontStore {
@@ -782,6 +830,34 @@ struct CairoSurfaceHandle {
 
 } // namespace
 
+Task<Bitmap> DecodeBitmap(ImageAsset image, std::uint16_t orientation) {
+  return RunWorker([orientation](ImageAsset source) {
+    if (!source.HasValue()) throw std::logic_error("HuxerUI cannot decode a missing image asset");
+    const std::unique_ptr<GdkPixbuf, decltype(&g_object_unref)> pixbuf(DecodeImage(source), g_object_unref);
+    if (!pixbuf) throw std::runtime_error("HuxerUI could not decode image pixels");
+    return ApplyEncodedOrientation(CopyPixbuf(pixbuf.get(), source.Scale()), orientation);
+  }, std::move(image));
+}
+
+Task<Bytes> EncodeBitmap(Bitmap bitmap, ImageEncodeOptions options) {
+  return RunWorker([](Bitmap pixels, ImageEncodeOptions settings) {
+    const bool jpeg = settings.format == ImageFormat::Jpeg;
+    if (jpeg) pixels = FlattenBitmap(std::move(pixels), settings.jpeg_background);
+    const std::unique_ptr<GdkPixbuf, decltype(&g_object_unref)> pixbuf(CreateBitmapPixbuf(pixels), g_object_unref);
+    if (!pixbuf) throw std::runtime_error("HuxerUI could not prepare bitmap encoding");
+    gchar* output = nullptr;
+    gsize size = 0;
+    const std::string quality = std::to_string(settings.jpeg_quality);
+    const bool encoded = jpeg
+        ? gdk_pixbuf_save_to_buffer(pixbuf.get(), &output, &size, "jpeg", nullptr, "quality", quality.c_str(), nullptr)
+        : gdk_pixbuf_save_to_buffer(pixbuf.get(), &output, &size, "png", nullptr, nullptr);
+    const std::unique_ptr<gchar, decltype(&g_free)> owner(output, g_free);
+    if (!encoded || !output || size == 0) throw std::runtime_error("HuxerUI could not encode the bitmap");
+    const auto* bytes = reinterpret_cast<const std::byte*>(output);
+    return Bytes(bytes, bytes + size);
+  }, std::move(bitmap), options);
+}
+
 struct LinuxRenderer::Impl {
   struct SnapshotTexture {
     ::GdkTexture* texture = nullptr;
@@ -887,11 +963,9 @@ struct LinuxRenderer::Impl {
     text_layout_bytes = 0;
   }
 
-  GdkPixbuf* ImageFor(const ImageAsset& image) {
-    if (!image.HasValue()) {
-      return nullptr;
-    }
-    const std::uint64_t identity = InternalAccess::ImageIdentity(image);
+  GdkPixbuf* ImageFor(const RasterImage& image) {
+    const auto identity = RasterImageIdentity(image);
+    if (identity == 0) return nullptr;
     const auto existing = std::find_if(images.begin(), images.end(), [identity](const CachedImage& candidate) {
       return candidate.identity == identity;
     });
@@ -899,19 +973,14 @@ struct LinuxRenderer::Impl {
       std::rotate(existing, existing + 1, images.end());
       return images.back().pixbuf;
     }
-    GdkPixbufLoader* loader = gdk_pixbuf_loader_new();
-    GError* error = nullptr;
-    const std::span<const std::byte> bytes = image.EncodedBytes();
-    const gboolean wrote = gdk_pixbuf_loader_write(
-        loader,
-        reinterpret_cast<const guchar*>(bytes.data()),
-        bytes.size(),
-        &error
-    );
-    const gboolean closed = wrote != FALSE && gdk_pixbuf_loader_close(loader, &error);
-    GdkPixbuf* pixbuf = closed != FALSE ? gdk_pixbuf_loader_get_pixbuf(loader) : nullptr;
+    GdkPixbuf* pixbuf = std::visit([](const auto& value) {
+      if constexpr (std::same_as<std::decay_t<decltype(value)>, Bitmap>) {
+        return CreateBitmapPixbuf(value);
+      } else {
+        return DecodeImage(value);
+      }
+    }, image);
     if (pixbuf != nullptr) {
-      g_object_ref(pixbuf);
       const std::uint64_t decoded_bytes = gdk_pixbuf_get_byte_length(pixbuf);
       while (!images.empty() &&
              (images.size() >= kMaxImages || image_cache_bytes + decoded_bytes > kImageCacheBudget)) {
@@ -922,10 +991,6 @@ struct LinuxRenderer::Impl {
       images.push_back({identity, pixbuf, decoded_bytes});
       image_cache_bytes += decoded_bytes;
     }
-    if (error != nullptr) {
-      g_error_free(error);
-    }
-    g_object_unref(loader);
     return pixbuf;
   }
 
@@ -1305,7 +1370,7 @@ private:
         context_, command.destination.x, command.destination.y, command.destination.width, command.destination.height
     );
     cairo_clip(context_);
-    const float image_scale = command.image.Scale();
+    const float image_scale = RasterImageScale(command.image);
     const double scale_x = command.destination.width / (command.source.width * image_scale);
     const double scale_y = command.destination.height / (command.source.height * image_scale);
     cairo_translate(context_, command.destination.x, command.destination.y);

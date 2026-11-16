@@ -87,9 +87,12 @@ NS_ASSUME_NONNULL_END
 #endif
 #include <memory>
 #include <mutex>
+#include <optional>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
+#include <huxerui/task.h>
 
 namespace huxerui {
 
@@ -129,6 +132,8 @@ public:
   /// and source destruction. Finish() keeps the last buffer available for acquisition.
   /// Treat the buffer as read-only and call CVPixelBufferRelease after all CPU and GPU reads have completed.
   [[nodiscard]] CVPixelBufferRef AcquireFrame() const noexcept CF_RETURNS_RETAINED;
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   mutable std::mutex frame_mutex_;
@@ -196,6 +201,8 @@ public:
   /// ARC manages the returned reference. Without ARC, the caller balances it with release.
   [[nodiscard]] id<MTLTexture> AcquireFrame(Origin& origin) const noexcept NS_RETURNS_RETAINED;
 #endif
+
+  Task<std::optional<Bitmap>> SnapshotAsync() const override;
 
 private:
   struct Storage;

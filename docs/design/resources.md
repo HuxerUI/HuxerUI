@@ -37,7 +37,7 @@ Resource ownership follows the existing Runtime, UiWindow, Environment, Platform
 | PaintContext | Record raster and ExternalTexture commands or expand immutable vector paths with source geometry, tint, and opacity |
 | Platform renderer | Decode and cache raster images, consume platform-owned ExternalTexture frames, then replay the common platform-neutral commands |
 
-Runtime and application state never retain `Bitmap`, `CGImage`, `ID2D1Bitmap`, platform paths, or platform resource identifiers.
+Runtime and application state may retain the SDK's immutable `Bitmap`. Platform image objects such as `CGImage` and `ID2D1Bitmap`, platform resource identifiers, and platform cache ownership stay within their adapters.
 Platform renderers never resolve localized strings or decide ImageFit behavior.
 
 ## Typed resource identity
@@ -50,7 +50,7 @@ class ImageResource;
 class StringResource;
 class RawResource;
 
-using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset>;
+using ImageVariant = std::variant<ImageResource, ImageAsset, VectorAsset, Bitmap>;
 ```
 
 The typed keys derive from ResourceId, so shared identity operations remain available without another storage wrapper.
@@ -374,7 +374,7 @@ class ImageAsset {
 public:
   ImageAsset() = default;
 
-  static ImageAsset FromFile(const std::filesystem::path& path, float scale = 1.0F);
+  static ImageAsset FromFile(const File& file, float scale = 1.0F);
   static ImageAsset FromEncoded(Bytes bytes, float scale = 1.0F);
   static ImageAsset CopyEncoded(std::span<const std::byte> bytes, float scale = 1.0F);
 
@@ -386,6 +386,9 @@ public:
   [[nodiscard]] float Scale() const noexcept;
   [[nodiscard]] Size IntrinsicSize() const noexcept;
   [[nodiscard]] bool HasValue() const noexcept;
+
+  Task<Bitmap> DecodeAsync() const;
+  Task<bool> SaveAsync(File destination) const;
 
   bool operator==(const ImageAsset& other) const noexcept;
 };
@@ -400,12 +403,9 @@ Copying it does not copy encoded bytes, and recording it in a PaintCommand retai
 
 `FromEncoded()` moves caller-owned bytes into shared storage.
 `CopyEncoded()` explicitly copies a borrowed span.
-Both detect the image format and read dimensions from the encoded header without performing a platform pixel decode.
+Both detect the image format and read dimensions and EXIF orientation during a single scan of the encoded container. Intrinsic size continues to use the encoded dimensions; decoding applies the orientation and may swap the axes.
 
-`FromFile()` is a synchronous convenience for real filesystem paths.
-It reads the file once and delegates to the encoded-data path.
-It is not a cross-platform URI loader and must not interpret Android content URIs or Apple security-scoped URLs.
-On Web it addresses only files already mounted in the WASM virtual filesystem and never treats an HTTP URL as a file path.
+`FromFile()` reads a local `File` synchronously through `ReadBytes()` and delegates to `FromEncoded()`. Browser paths use the mounted Web filesystem. For a provider-granted file, read through its `FileReference` and construct the asset from the returned bytes.
 Callers retain the resulting ImageAsset rather than recreating it during every composition.
 
 AppResources trusts bytes supplied by the installed platform package and caches shared ImageAsset storage by immutable package path and content hash.
@@ -413,6 +413,18 @@ The encoded bytes are therefore already present when a renderer first decodes th
 
 The initial guaranteed formats are PNG and JPEG.
 Additional formats extend ImageFormat and every renderer together.
+
+`SaveAsync()` retains the encoded payload and writes it through `File::WriteBytesAsync()`, including the original metadata. `DecodeAsync()` retains the payload until the platform decoder finishes and returns upright pixels at the asset's scale.
+
+The Linux GdkPixbuf decoder currently supplies RGB samples without converting embedded ICC profiles to sRGB. For color-sensitive editing on Linux, supply an image whose pixels are already in sRGB.
+
+## Bitmap
+
+`Bitmap` owns immutable, tightly packed RGBA8 pixels with straight alpha and shares storage by identity. Layout uses the logical size, while pixel operations use the stored dimensions. Crops copy pixel rectangles, resizes extend the edge pixels when sampling, and an affine transform treats pixels outside the source as transparent. Linear sampling premultiplies alpha during interpolation to keep invisible RGB out of the result.
+
+`FromRgba8()` takes ownership of a tightly packed buffer. `CopyPixels()` accepts top-down RGBA, BGRA, or ARGB byte rows with a caller-supplied stride and converts them into the same RGBA8 storage.
+
+`Bitmap::EncodeAsync()` uses the platform image codec. JPEG encoding composites against the selected opaque sRGB background before encoding. `Bitmap::SaveAsync()` starts writing only after encoding succeeds and delegates file write semantics to `File::WriteBytesAsync()`.
 
 ## VectorAsset and SVG resources
 
@@ -550,15 +562,15 @@ public:
 };
 ```
 
-`ImageVariant` is the shared public value for ImageResource, ImageAsset, and VectorAsset inputs.
-It lets Runtime resolve a resource to either immutable image format from the node's Environment and PlatformResources configuration while preserving already-resolved assets.
+`ImageVariant` is the shared public value for ImageResource, ImageAsset, VectorAsset, and Bitmap inputs.
+It lets Runtime resolve a resource from the node's Environment and PlatformResources configuration while preserving already-resolved values.
 ImageAsset supports files, network results, platform picker libraries, generated images, and explicitly shared application data.
 Packaged SVG resources resolve to VectorAsset values through ImageResource, while VectorAsset::Create constructs programmatic vector geometry.
 ExternalTexture remains a separate constructor because it is a live platform-owned texture with frame and lifecycle semantics rather than an immutable ImageVariant value.
 
 Sampling configures raster and ExternalTexture filtering and is invalid for a VectorAsset.
 Tint replaces the RGB channels of vector fills and strokes while preserving their per-layer alpha, then multiplies the supplied tint alpha.
-Tint is invalid for an ImageAsset or ExternalTexture; a future raster color-filter API remains a distinct operation.
+Tint is invalid for an ImageAsset, Bitmap, or ExternalTexture.
 
 Image does not add component-specific opacity.
 The existing Opacity presentation modifier applies to the node as a whole.
@@ -595,7 +607,7 @@ PaintCommand keeps immutable raster data and live platform texture capabilities 
 
 ```cpp
 struct DrawImageCommand {
-  ImageAsset image;
+  std::variant<ImageAsset, Bitmap> image;
   Rect source;
   Rect destination;
   ImageSampling sampling = ImageSampling::Linear;
@@ -616,7 +628,7 @@ struct DrawExternalTextureCommand {
 ```
 
 Source geometry uses intrinsic logical image coordinates rather than encoded pixels.
-The renderer converts source coordinates using ImageAsset::Scale().
+The renderer converts source coordinates using the raster value's `Scale()`. Both whole-image and cropped-image methods accept an `ImageAsset` or a `Bitmap`.
 
 PaintContext exposes separate whole-image and cropped-image methods:
 
@@ -691,7 +703,7 @@ return Canvas([logo](PaintContext& paint, Size size) {
 
 ## Platform image caches
 
-Each renderer caches decoded platform images by the resolved immutable ImageAsset's private stable identity.
+Each renderer caches platform images by the private stable identity shared across copies of an `ImageAsset` or `Bitmap`. Encoded assets are decoded on cache misses. Bitmap pixels are uploaded or wrapped directly on cache misses.
 
 - Windows decodes through WIC and creates a Direct2D bitmap.
 - macOS decodes through ImageIO and replays a retained CGImage.
@@ -731,7 +743,7 @@ Resource lookup and localized string formatting therefore remain synchronous aft
 Browser image decoding may complete asynchronously.
 The Web renderer keeps its loading entry, creates an ImageBitmap, and requests another frame through WebUiWindow when the image becomes ready.
 Decoded browser images follow the same 64 MiB renderer-owned LRU budget as platform decoded-image caches.
-The current PaintSequence remains valid because DrawImageCommand already retains immutable encoded bytes and complete geometry.
+The current PaintSequence remains valid because DrawImageCommand retains the immutable raster value and its complete geometry.
 
 Network fetches are not ResourceIds.
 Application or library code fetches bytes asynchronously, constructs ImageAsset with FromEncoded, updates controlled state, and lets ordinary recomposition replace the image.
@@ -942,6 +954,7 @@ Focused shared coverage includes:
 - Locale normalization and fallback.
 - Scale-variant selection.
 - ImageAsset moved-byte and copied-byte metadata, scale, equality, and byte-lifetime behavior.
+- Bitmap geometry, alpha-aware sampling, PNG round trips, JPEG orientation, and encoded-byte preservation on save.
 - VectorAsset construction, immutable geometry, painting, tint, and validation.
 - SVG compilation, payload signatures, runtime resolution, unsupported features, and density-suffix rejection.
 - RawAsset lazy lookup, shared optional caching, independent synchronous/asynchronous cursors, failure and cancellation, Runtime disconnection, MIME, and owned binary/string results.
@@ -963,7 +976,7 @@ Windows common builds and tests, a macOS build on macOS, and Android compilation
 - Runtime consumes one final merged index rather than a stack of bundles or an override registry.
 - HuxerUI source resource roots use `resources/images`, `resources/strings`, and `resources/raw` directly.
 - Resource payload values are immutable and cheap to copy.
-- ImageAsset exposes encoded bytes but never platform image objects or ambiguous decoded pixel data.
+- ImageAsset exposes encoded bytes and decodes explicitly to Bitmap. Platform image objects stay in the renderers.
 - VectorAsset exposes immutable platform-neutral geometry without a public ImageKind or platform path objects.
 - RawResource is the explicit arbitrary-byte resource kind.
 - PlatformResources opens incremental streams; RawAsset chooses complete reading, optional caching, or incremental consumption.

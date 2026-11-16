@@ -10,6 +10,7 @@
 #include <variant>
 #include <vector>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/color.h>
 #include <huxerui/external_texture.h>
 #include <huxerui/geometry.h>
@@ -128,7 +129,7 @@ private:
 
 /// Configures an image-backed fill inside resolved destination bounds.
 struct ImageFill {
-  /// Resource, raster asset, or vector asset used as the fill source.
+  /// Image resource, encoded image, vector asset, or bitmap used as the fill source.
   ImageVariant source;
   /// Source-to-destination sizing policy.
   ImageFit fit = ImageFit::Fill;
@@ -236,9 +237,9 @@ struct DrawTextRunsCommand {
 
 /// Draws a cropped region of an immutable raster image.
 struct DrawImageCommand {
-  /// Owning encoded raster image value.
-  ImageAsset image;
-  /// Source rectangle in intrinsic logical image coordinates; renderers apply ImageAsset::Scale() at the boundary.
+  /// Owning encoded raster image or immutable bitmap.
+  std::variant<ImageAsset, Bitmap> image;
+  /// Source rectangle in intrinsic logical image coordinates; renderers apply the image density at the boundary.
   Rect source;
   /// Destination rectangle in the active logical coordinate space.
   Rect destination;
@@ -599,18 +600,28 @@ public:
   ///
   /// Each run must contain no line break. Runs with empty text or bounds are omitted.
   void DrawTextRuns(std::vector<TextRun> runs);
+
   /// Draws a complete raster image into destination.
   void DrawImage(ImageAsset image, Rect destination, ImageSampling sampling = ImageSampling::Linear,
                  float opacity = 1.0F);
   /// Draws source, expressed in intrinsic logical image coordinates, into destination.
   void DrawImageRect(ImageAsset image, Rect source, Rect destination, ImageSampling sampling = ImageSampling::Linear,
                      float opacity = 1.0F);
+
+  /// Draws a complete bitmap into destination.
+  void DrawImage(Bitmap bitmap, Rect destination, ImageSampling sampling = ImageSampling::Linear,
+                 float opacity = 1.0F);
+  /// Draws source, expressed in intrinsic logical bitmap coordinates, into destination.
+  void DrawImageRect(Bitmap bitmap, Rect source, Rect destination, ImageSampling sampling = ImageSampling::Linear,
+                     float opacity = 1.0F);
+
   /// Draws a complete live external texture into destination.
   void DrawImage(std::shared_ptr<ExternalTexture> texture, Rect destination,
                  ImageSampling sampling = ImageSampling::Linear, float opacity = 1.0F);
   /// Draws source, expressed in intrinsic logical texture coordinates, into destination.
   void DrawImageRect(std::shared_ptr<ExternalTexture> texture, Rect source, Rect destination,
                      ImageSampling sampling = ImageSampling::Linear, float opacity = 1.0F);
+
   /// Draws a complete vector asset into destination with optional color tint and opacity.
   void DrawImage(VectorAsset image, Rect destination, std::optional<Color> tint = {}, float opacity = 1.0F);
   /// Draws source, expressed in intrinsic logical vector coordinates, into destination.
@@ -678,6 +689,8 @@ private:
     Transform,
   };
 
+  void DrawRasterImage(decltype(DrawImageCommand::image) image, Rect source, Rect destination,
+                       ImageSampling sampling, float opacity);
   void Include(Rect rect) noexcept;
   void PlacePlatformView(PlacePlatformViewCommand command);
   void RequireOpen() const;

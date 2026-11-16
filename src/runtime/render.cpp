@@ -188,7 +188,8 @@ void PaintImage(const ImageProperties& properties, PaintContext& context, Rect c
     std::visit(
         [&](const auto& asset) {
           using Asset = std::decay_t<decltype(asset)>;
-          if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, std::shared_ptr<ExternalTexture>>) {
+          if constexpr (std::same_as<Asset, ImageAsset> || std::same_as<Asset, Bitmap> ||
+                        std::same_as<Asset, std::shared_ptr<ExternalTexture>>) {
             context.DrawImageRect(asset, source, destination, properties.sampling, opacity);
           } else if constexpr (std::same_as<Asset, VectorAsset>) {
             context.DrawImageRect(asset, source, destination, vector_tint, opacity);

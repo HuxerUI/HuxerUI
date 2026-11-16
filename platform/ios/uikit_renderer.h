@@ -6,11 +6,14 @@
 #include <memory>
 #include <string_view>
 
+#include <huxerui/bitmap.h>
 #include <huxerui/geometry.h>
 #include <huxerui/render_scene.h>
 #include <huxerui/text.h>
 
 namespace huxerui::detail {
+
+Bitmap CopyCGImagePixels(CGImageRef image, float scale = 1.0F);
 
 class TextLayoutBackend;
 

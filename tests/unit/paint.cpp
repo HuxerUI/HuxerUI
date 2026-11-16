@@ -322,6 +322,19 @@ TEST_CASE("PaintContextRecordsResolvedImageGeometry") {
   REQUIRE(sequence.Bounds() == command.destination);
 }
 
+TEST_CASE("PaintContextRecordsBitmapUsingLogicalSourceGeometry") {
+  const auto bitmap = Bitmap::FromRgba8(4, 2, Bytes(32), 2.0F);
+  PaintSequence sequence;
+  PaintContext context{sequence, Rect{0.0F, 0.0F, 40.0F, 20.0F}};
+  context.DrawImage(bitmap, {0.0F, 0.0F, 40.0F, 20.0F});
+  context.Finish();
+
+  REQUIRE(sequence.Commands().size() == 1);
+  const auto& command = std::get<DrawImageCommand>(sequence.Commands().front());
+  REQUIRE(std::get<Bitmap>(command.image) == bitmap);
+  REQUIRE(command.source == Rect{0.0F, 0.0F, 2.0F, 1.0F});
+}
+
 TEST_CASE("PaintContextValidatesImageSourceAndOpacity") {
   PaintSequence sequence;
   PaintContext context{sequence, Rect{0.0F, 0.0F, 100.0F, 80.0F}};

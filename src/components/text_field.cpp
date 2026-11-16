@@ -211,7 +211,7 @@ void PaintTextFieldIcon(PaintContext& context, const detail::ResolvedImageAsset&
         }
         const Rect source{0.0F, 0.0F, intrinsic.width, intrinsic.height};
         using Asset = std::decay_t<decltype(asset)>;
-        if constexpr (std::is_same_v<Asset, ImageAsset>) {
+        if constexpr (!std::is_same_v<Asset, VectorAsset>) {
           context.DrawImageRect(asset, source, destination, ImageSampling::Linear);
         } else {
           context.DrawImageRect(asset, source, destination, tint);

@@ -1480,6 +1480,8 @@ If no newer frame is ready during an unrelated redraw, the renderer reuses its l
 Before the first frame, Image contributes transparent visual content without treating the valid texture as an error.
 After `Finish()`, rendering freezes on the last published frame until the final shared texture and renderer caches release it.
 
+`SnapshotAsync()` acquires this same immutable frame at the call site and retains it until conversion to a `Bitmap`. The conversion and any GPU readback run only when the task executes. An empty mailbox yields `std::nullopt`, while a failed or unsupported readback raises an error through the task.
+
 Committed visibility controls scheduling rather than production ownership.
 When no committed visible command references the texture, publication updates the mailbox but does not continuously wake the UI.
 `IsActive()` reports whether at least one live UiWindow currently displays the texture, but UiWindow does not own or pause the producer automatically.

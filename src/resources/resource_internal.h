@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -58,7 +59,7 @@ struct ResolvedStringResource {
 std::vector<ResourceIndexEntry> ParseResourceIndex(RawAsset index);
 bool IsValidResourcePackagePath(std::string_view path) noexcept;
 
-using ResolvedImageAsset = std::variant<ImageAsset, VectorAsset>;
+using ResolvedImageAsset = std::variant<ImageAsset, VectorAsset, Bitmap>;
 
 class AppResources : public std::enable_shared_from_this<AppResources> {
 public:

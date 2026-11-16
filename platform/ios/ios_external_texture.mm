@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "ios_external_texture_internal.h"
+#include "uikit_renderer.h"
 
 // The base wrapper owns the shared C++ texture so concrete subclasses and payload-created wrappers have one lifetime.
 @interface HUXExternalTexture () {
@@ -22,6 +23,15 @@
 namespace huxerui::ios {
 
 namespace {
+
+Bitmap CopyFramePixels(CIImage* image, CIContext* context) {
+  if (image == nil || context == nil || CGRectIsEmpty(image.extent) || CGRectIsInfinite(image.extent)) {
+    throw std::runtime_error("HuxerUI could not read the texture frame");
+  }
+  auto cg_image = std::unique_ptr<std::remove_pointer_t<CGImageRef>, decltype(&CGImageRelease)>(
+      [context createCGImage:image fromRect:image.extent], CGImageRelease);
+  return huxerui::detail::CopyCGImagePixels(cg_image.get());
+}
 
 bool IsSupportedMetalPixelFormat(MTLPixelFormat format) noexcept {
   return format == MTLPixelFormatBGRA8Unorm || format == MTLPixelFormatBGRA8Unorm_sRGB ||
@@ -105,6 +115,16 @@ CVPixelBufferRef PixelBufferTexture::AcquireFrame() const noexcept {
     CVPixelBufferRetain(frame_);
   }
   return frame_;
+}
+
+Task<std::optional<Bitmap>> PixelBufferTexture::SnapshotAsync() const {
+  std::shared_ptr<std::remove_pointer_t<CVPixelBufferRef>> frame(AcquireFrame(), CVPixelBufferRelease);
+  return RunWorker([](const auto& retained) -> std::optional<Bitmap> {
+    if (!retained) return std::nullopt;
+    @autoreleasepool {
+      return CopyFramePixels([CIImage imageWithCVPixelBuffer:retained.get()], [CIContext contextWithOptions:nil]);
+    }
+  }, std::move(frame));
 }
 
 MetalTexture::MetalTexture(Size intrinsic_size)
@@ -226,6 +246,21 @@ id<MTLTexture> MetalTexture::AcquireFrame(Origin& origin) const noexcept {
   std::lock_guard frame_lock(storage_->frame_mutex);
   origin = storage_->origin;
   return storage_->frame;
+}
+
+Task<std::optional<Bitmap>> MetalTexture::SnapshotAsync() const {
+  Origin origin = Origin::TopLeft;
+  id<MTLTexture> frame = AcquireFrame(origin);
+  return RunWorker([frame, origin]() -> std::optional<Bitmap> {
+    if (frame == nil) return std::nullopt;
+    @autoreleasepool {
+      CIImage* image = [CIImage imageWithMTLTexture:frame options:nil];
+      if (origin == Origin::BottomLeft && image != nil) {
+        image = [image imageByApplyingTransform:CGAffineTransformMake(1, 0, 0, -1, 0, image.extent.size.height)];
+      }
+      return CopyFramePixels(image, [CIContext contextWithMTLDevice:frame.device options:nil]);
+    }
+  });
 }
 
 } // namespace huxerui::ios

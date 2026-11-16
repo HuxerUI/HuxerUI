@@ -7,6 +7,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <exception>
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <mutex>
@@ -1756,6 +1758,96 @@ struct ResourceTaskQueue {
 };
 
 } // namespace
+
+#if !defined(__EMSCRIPTEN__)
+TEST_CASE("BitmapCodecRoundTripsAndSavesEncodedAssetsWithoutRewriting") {
+  ResourceTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  TaskScope tasks;
+  resource_test_root = [&] {
+    tasks = UseTaskScope();
+    return Text("bitmap");
+  };
+  UiWindow runtime{ResourceTestRoot, platform};
+  runtime.SetWindowMetrics({.viewport = {200.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  const Bitmap source = Bitmap::FromRgba8(2, 1, {
+      std::byte{255}, std::byte{0}, std::byte{0}, std::byte{128},
+      std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255},
+  }, 2.0F);
+  const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+  const File destination((std::filesystem::temp_directory_path() /
+      ("huxerui-bitmap-" + std::to_string(suffix))).u8string());
+  bool finished = false;
+  std::exception_ptr failure;
+  tasks.Launch([&]() -> Task<void> {
+    try {
+      auto png = co_await source.EncodeAsync();
+      auto asset = ImageAsset::FromEncoded(png, 2.0F);
+      auto decode = asset.DecodeAsync();
+      const bool asset_saved = co_await asset.SaveAsync(destination);
+      REQUIRE(asset_saved);
+      asset = {};
+      const auto decoded = co_await std::move(decode);
+      REQUIRE(decoded.IntrinsicSize() == source.IntrinsicSize());
+      REQUIRE(std::ranges::equal(decoded.Pixels(), source.Pixels()));
+      REQUIRE(destination.ReadBytes().Value() == png);
+      const auto loaded = ImageAsset::FromFile(destination, 2.0F);
+      REQUIRE(loaded.IntrinsicSize() == source.IntrinsicSize());
+      REQUIRE(std::ranges::equal(loaded.EncodedBytes(), png));
+
+      try {
+        HUXERUI_DISCARD(co_await source.SaveAsync(destination, ImageEncodeOptions{
+            .format = ImageFormat::Jpeg, .jpeg_quality = 101,
+        }));
+        FAIL("The invalid JPEG quality was accepted");
+      } catch (const std::invalid_argument&) {
+        REQUIRE(destination.ReadBytes().Value() == png);
+      }
+
+      const bool bitmap_saved = co_await source.SaveAsync(destination, {.format = ImageFormat::Jpeg});
+      REQUIRE(bitmap_saved);
+      auto jpeg = destination.ReadBytes().Value();
+      const std::array<unsigned char, 26> orientation{
+          'I', 'I', 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0,
+          1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0,
+      };
+      const auto tiff = std::as_bytes(std::span(orientation));
+      const std::array<unsigned char, 10> app1_header{
+          0xff, 0xe1, 0x00, 0x22, 'E', 'x', 'i', 'f', 0, 0,
+      };
+      const auto app1 = std::as_bytes(std::span(app1_header));
+      jpeg.insert(jpeg.begin() + 2, app1.begin(), app1.end());
+      jpeg.insert(jpeg.begin() + 2 + app1.size(), tiff.begin(), tiff.end());
+      const auto oriented_jpeg = co_await ImageAsset::FromEncoded(std::move(jpeg)).DecodeAsync();
+      REQUIRE(oriented_jpeg.IntrinsicSize() == Size{1.0F, 2.0F});
+
+      const std::array<unsigned char, 8> png_header{0, 0, 0, 26, 'e', 'X', 'I', 'f'};
+      const std::array<unsigned char, 4> png_checksum{0xb7, 0x48, 0x11, 0x29};
+      const auto chunk = std::as_bytes(std::span(png_header));
+      const auto checksum = std::as_bytes(std::span(png_checksum));
+      constexpr std::ptrdiff_t after_ihdr = 33;
+      png.insert(png.begin() + after_ihdr, chunk.begin(), chunk.end());
+      png.insert(png.begin() + after_ihdr + chunk.size(), tiff.begin(), tiff.end());
+      png.insert(png.begin() + after_ihdr + chunk.size() + tiff.size(), checksum.begin(), checksum.end());
+      const auto tagged_png = ImageAsset::FromEncoded(std::move(png), 2.0F);
+      REQUIRE(tagged_png.IntrinsicSize() == Size{1.0F, 0.5F});
+      const auto oriented_png = co_await tagged_png.DecodeAsync();
+      REQUIRE(oriented_png.IntrinsicSize() == Size{0.5F, 1.0F});
+      REQUIRE(std::ranges::equal(oriented_png.Pixels(), source.Pixels()));
+    } catch (...) {
+      failure = std::current_exception();
+    }
+    finished = true;
+  });
+  queue.RunUntil([&] { return finished; });
+  REQUIRE(destination.Delete());
+  if (failure) {
+    std::rethrow_exception(failure);
+  }
+}
+#endif
 
 TEST_CASE("RawResourceLookupAndRecompositionDoNotOpenThePayload") {
   TestResources resources;

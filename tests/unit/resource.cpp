@@ -1,11 +1,15 @@
 #include <catch2/catch_amalgamated.hpp>
 
+#include <algorithm>
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -34,6 +38,62 @@ static_assert(std::is_constructible_v<StringVariant, StringResource>);
 static_assert(std::is_constructible_v<ImageVariant, ImageResource>);
 static_assert(std::is_constructible_v<ImageVariant, ImageAsset>);
 static_assert(std::is_constructible_v<ImageVariant, VectorAsset>);
+static_assert(std::is_constructible_v<ImageVariant, Bitmap>);
+
+TEST_CASE("BitmapGeometryUsesPixelsAndPreservesLogicalDensity") {
+  const Bitmap source = Bitmap::FromRgba8(2, 1, {
+      std::byte{255}, std::byte{0}, std::byte{0}, std::byte{255},
+      std::byte{0}, std::byte{0}, std::byte{255}, std::byte{0},
+  }, 2.0F);
+
+  REQUIRE(source.IntrinsicSize() == Size{1.0F, 0.5F});
+  REQUIRE(source.Crop(0, 0, 2, 1) == source);
+  REQUIRE(source.Resize(2, 1) == source);
+  REQUIRE_THROWS_AS(source.Crop(1, 0, 2, 1), std::invalid_argument);
+  REQUIRE_THROWS_AS(Bitmap::FromRgba8(2, 1, Bytes(7)), std::invalid_argument);
+
+  const auto crop = source.Crop(1, 0, 1, 1);
+  REQUIRE(crop.Scale() == source.Scale());
+  REQUIRE(std::ranges::equal(crop.Pixels(), source.Pixels().last(4)));
+
+  const auto resized = source.Resize(3, 1);
+  const auto middle = resized.Pixels().subspan(4, 4);
+  REQUIRE(std::ranges::equal(middle, std::array{
+      std::byte{255}, std::byte{0}, std::byte{0}, std::byte{128},
+  }));
+
+  const auto shifted = source.Transform({.translate_x = 1.0F}, 3, 1, ImageSampling::Nearest);
+  REQUIRE(std::ranges::equal(shifted.Pixels().first(4), std::array<std::byte, 4>{}));
+  REQUIRE(std::ranges::equal(shifted.Pixels().subspan(4), source.Pixels()));
+}
+
+TEST_CASE("BitmapCopiesStridedPixelsInExplicitByteOrder") {
+  using Format = Bitmap::PixelFormat;
+  const std::array rgba{
+      std::byte{1}, std::byte{2}, std::byte{3}, std::byte{0},
+      std::byte{5}, std::byte{6}, std::byte{7}, std::byte{255},
+  };
+  const std::array bgra{
+      std::byte{3}, std::byte{2}, std::byte{1}, std::byte{0}, std::byte{99},
+      std::byte{7}, std::byte{6}, std::byte{5}, std::byte{255},
+  };
+  const std::array argb{
+      std::byte{0}, std::byte{1}, std::byte{2}, std::byte{3},
+      std::byte{255}, std::byte{5}, std::byte{6}, std::byte{7},
+  };
+  for (const auto& [bytes, stride, format] : {
+      std::tuple{std::span<const std::byte>(rgba), std::size_t{4}, Format::Rgba8888},
+      std::tuple{std::span<const std::byte>(bgra), std::size_t{5}, Format::Bgra8888},
+      std::tuple{std::span<const std::byte>(argb), std::size_t{4}, Format::Argb8888},
+  }) {
+    const auto bitmap = Bitmap::CopyPixels(1, 2, bytes, stride, format, 2.0F);
+    REQUIRE(std::ranges::equal(bitmap.Pixels(), rgba));
+    REQUIRE(bitmap.IntrinsicSize() == Size{0.5F, 1.0F});
+  }
+  REQUIRE_THROWS_AS(Bitmap::CopyPixels(1, 2, bgra, 6, Format::Bgra8888), std::invalid_argument);
+  REQUIRE_THROWS_AS(Bitmap::CopyPixels(1, 2, rgba, 3, Format::Rgba8888), std::invalid_argument);
+  REQUIRE_THROWS_AS(Bitmap::CopyPixels(1, 2, rgba, 4, static_cast<Format>(-1)), std::invalid_argument);
+}
 
 void AppendU32(std::vector<std::byte>& bytes, std::uint32_t value) {
   for (unsigned shift = 0; shift < 32; shift += 8) {

@@ -2342,7 +2342,9 @@ View MenuService::ItemView(
       if (item.icon_tint_.has_value()) {
         throw std::invalid_argument("HuxerUI raster menu item icons do not support tint");
       }
-      content.push_back(Image(std::move(std::get<ImageAsset>(*resolved_icon))).Fit(ImageFit::Contain).With(icon_frame));
+      content.push_back(std::visit([&](auto&& image) {
+        return Image(std::move(image)).Fit(ImageFit::Contain).With(icon_frame);
+      }, std::move(*resolved_icon)));
     }
   }
 
