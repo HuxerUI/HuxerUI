@@ -53,6 +53,8 @@ huxerui run windows
 huxerui run web
 ```
 
+Use `huxerui run <platform> --watch` to rebuild after edits and relaunch the application or refresh the Web page. A build failure leaves the current instance running. A successful reload starts a new application session and rebuilds in-memory state. Press Ctrl+C to end the watch session.
+
 Build and run use the `debug` configuration by default. Use `--config release` to select a release build.
 Use `--generator <name>` only when the host has multiple compatible CMake generators and an explicit selection is required.
 Use `--sdk <path>` to select an installed SDK or a HuxerUI source checkout for `build`, `run`, `package`, or `open ios`. A source checkout builds HuxerUI from source.
@@ -190,7 +192,7 @@ huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
 huxerui build [platform-list] [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>] [--watch]
 huxerui package <platform-list> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui open ios [--sdk <path>]
 ```

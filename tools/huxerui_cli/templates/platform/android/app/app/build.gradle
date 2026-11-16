@@ -2,6 +2,8 @@ import com.android.build.api.artifact.SingleArtifact
 import com.android.build.api.variant.BuildConfigField
 import groovy.json.JsonOutput
 import groovy.json.JsonSlurper
+import java.security.MessageDigest
+import java.util.zip.ZipFile
 import javax.inject.Inject
 
 plugins {
@@ -41,6 +43,7 @@ def huxeruiTargetSdk = huxeruiProperty("huxeruiTargetSdk").toInteger()
 def huxeruiNdkVersion = huxeruiProperty("huxeruiNdkVersion")
 def huxeruiAbis = huxeruiProperty("huxeruiAbis").split(",")
 def huxeruiStl = huxeruiProperty("huxeruiStl")
+def huxeruiWatch = providers.gradleProperty("huxeruiWatch").map { it == "true" }.orElse(false)
 
 android {
     buildFeatures {
@@ -172,6 +175,78 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     }
     // Register ownership once so asset merging, lint, and other consumers all depend on staging.
     variant.sources.assets.addGeneratedSourceDirectory(stageAssets) { it.outputDirectory }
+
+    def watchEnabled = variant.buildType == "debug" && huxeruiWatch.get()
+    variant.buildConfigFields.put("HUXERUI_WATCH", new BuildConfigField("boolean", watchEnabled.toString(),
+            "Enable the development loader for this invocation."))
+    if (watchEnabled) {
+        def apkDirectory = variant.artifacts.get(SingleArtifact.APK.INSTANCE)
+        def assetsDirectory = stageAssets.flatMap { it.outputDirectory }
+        def outputDirectory = layout.buildDirectory.dir("generated/huxerui/watch/${variant.name}")
+        def stageWatch = tasks.register("stageHuxerUI${variant.name.capitalize()}Watch") {
+            inputs.dir(apkDirectory)
+            inputs.dir(assetsDirectory)
+            inputs.dir(integrationRoot)
+            outputs.dir(outputDirectory)
+            doLast {
+                def dest = outputDirectory.get().asFile
+                delete(dest)
+                def apks = apkDirectory.get().asFile.listFiles()?.findAll { it.name.endsWith(".apk") } ?: []
+                if (apks.size() != 1) return
+
+                def assets = assetsDirectory.get().asFile
+                def resources = fileTree(assets).files.collectEntries {
+                    [("assets/" + assets.toPath().relativize(it.toPath()).toString().replace('\\', '/')): it]
+                }
+                def libraries = appLibraries.get().collectEntries {
+                    [("lib/${it.abi}/lib${it.library}.so".toString()): it.abi]
+                }
+                def shell = MessageDigest.getInstance("SHA-256")
+                def signingStore = android.buildTypes.getByName("debug").signingConfig?.storeFile
+                if (signingStore?.isFile()) {
+                    signingStore.withInputStream { input ->
+                        input.eachByte(16384) { buffer, count -> shell.update(buffer, 0, count) }
+                    }
+                }
+                new ZipFile(apks.first()).withCloseable { apk ->
+                    apk.entries().toList().sort { it.name }.each { entry ->
+                        def name = entry.name
+                        if (entry.isDirectory() || resources.containsKey(name) ||
+                                name == "META-INF/MANIFEST.MF" || name ==~ /META-INF\/[^\/]+\.(SF|RSA|DSA|EC)/) {
+                            return
+                        }
+                        if (libraries.containsKey(name)) {
+                            def library = new File(dest, "${libraries[name]}/app.so")
+                            library.parentFile.mkdirs()
+                            library.withOutputStream { out ->
+                                apk.getInputStream(entry).withCloseable { out << it }
+                            }
+                            name = "watch:" + name
+                            shell.update(name.getBytes("UTF-8"))
+                            return
+                        }
+                        shell.update(("${name}\n${entry.size}\n").toString().getBytes("UTF-8"))
+                        apk.getInputStream(entry).withCloseable { input ->
+                            input.eachByte(16384) { buffer, count -> shell.update(buffer, 0, count) }
+                        }
+                    }
+                }
+                libraries.values().each { abi ->
+                    def payload = new File(dest, abi)
+                    if (!new File(payload, "app.so").isFile()) return
+                    project.copy {
+                        from assets
+                        into new File(payload, "resources")
+                    }
+                }
+                dest.mkdirs()
+                new File(dest, "shell.txt").setText(shell.digest().encodeHex().toString(), "UTF-8")
+            }
+        }
+        tasks.matching { it.name == "assemble${variant.name.capitalize()}" }.configureEach {
+            finalizedBy(stageWatch)
+        }
+    }
 }
 
 dependencies {

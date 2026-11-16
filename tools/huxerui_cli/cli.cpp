@@ -18,6 +18,7 @@
 #include "process_runner.h"
 #include "project.h"
 #include "mcpp/mcpp.h"
+#include "watch.h"
 
 namespace huxerui::cli {
 namespace {
@@ -53,6 +54,7 @@ constexpr std::array agent_skill_mappings{
 constexpr std::string_view build_options =
     "[-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]";
 constexpr std::string_view package_format_option = " [-f|--format appimage|deb|rpm]";
+constexpr std::string_view watch_option_help = "--watch rebuilds and relaunches the selected application after edits.\n";
 constexpr std::string_view sdk_option_help =
     "--sdk <path> selects an installed SDK or a HuxerUI source checkout for this invocation.\n";
 constexpr std::string_view sdk_commands =
@@ -82,11 +84,15 @@ void PrintBuildHelp(std::ostream& output, std::string_view command) {
   output << ' ' << platforms << ' ' << build_options;
   if (command == "package") {
     output << package_format_option;
+  } else if (command == "run") {
+    output << " [--watch]";
   }
   output << "\n\n";
   PrintBuildOptions(output);
   if (command == "package") {
     PrintPackageOptions(output);
+  } else if (command == "run") {
+    output << watch_option_help;
   }
 }
 
@@ -105,7 +111,7 @@ void PrintHelp(std::ostream& output) {
          << "  huxerui devices [platform]\n"
          << "  huxerui build [platform-list] " << build_options << '\n'
          << "  huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]\n"
-         << "  huxerui run <platform> " << build_options << '\n'
+         << "  huxerui run <platform> " << build_options << " [--watch]\n"
          << "  huxerui package <platform-list> " << build_options << package_format_option << '\n'
          << "  huxerui open ios [--sdk <path>]\n"
          << "  huxerui --version\n\n";
@@ -115,6 +121,7 @@ void PrintHelp(std::ostream& output) {
   }
   output << "\nA platform list is a comma-separated list or all.\n";
   PrintBuildOptions(output);
+  output << watch_option_help;
   PrintPackageOptions(output);
   output << "Without --platform, an app and a common library's Preview enable all platforms.\n"
          << "An agent list is comma-separated and supports ";
@@ -743,6 +750,7 @@ struct BuildOptions {
   std::optional<std::string> optimization;
   std::optional<bool> lto;
   bool profiling = false;
+  bool watch = false;
   std::vector<std::string> abis;
   std::optional<std::string> package_format;
 };
@@ -768,6 +776,9 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
         throw UsageError("--profile may be specified only once");
       }
       options.profiling = true;
+    } else if (option == "--watch" && command == "run") {
+      if (options.watch) throw UsageError("--watch may be specified only once");
+      options.watch = true;
     } else if (option == "--abi") {
       if (!options.abis.empty()) {
         throw UsageError("--abi may be specified only once");
@@ -960,6 +971,7 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
   if (options.profiling) {
     build_profile += "-profiling";
   }
+  if (options.watch) build_profile += "-watch";
   const std::filesystem::path build_directory =
       project.root / ".huxerui/build" / BuildHomeKey(huxerui_home) / build_variant / build_profile;
   std::string cmake_generator = options.cmake_generator;
@@ -990,6 +1002,7 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
       {abis.begin(), abis.end()},
       options.package_format,
       options.profiling,
+      options.watch,
   };
 }
 
@@ -1031,7 +1044,9 @@ void BuildPlatform(const PlatformDriver& platform, const PlatformCommandContext&
   }
   output << ")\n";
   platform.PrepareBuildEnvironment();
-  ExecuteCommands(platform.LibraryGraphCommands(context), output);
+  auto library_graph = platform.LibraryGraphCommands(context);
+  if (options.watch && library_graph.empty()) library_graph = detail::LibraryGraphConfigureCommands(context);
+  ExecuteCommands(library_graph, output);
   platform.UpdateProjectIntegration(context);
   if (platform.Id() == "android" && options.java_home) {
     output << "Java home: " << options.java_home->string() << '\n';
@@ -1105,7 +1120,7 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
 }
 
 int RunApplication(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-                   const std::filesystem::path& sdk_home, std::ostream& output) {
+                   const std::filesystem::path& sdk_home, std::ostream& output, std::ostream& error) {
   BuildOptions options = ParseBuildOptions(arguments, "run");
   const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
@@ -1126,6 +1141,9 @@ int RunApplication(std::span<const std::string_view> arguments, const std::files
   }
   const auto contexts = MakeBuildContexts(project, platform, huxerui_home, options);
   const auto& context = contexts.front();
+  if (options.watch) {
+    return WatchApplication(platform, context, [&] { BuildPlatform(platform, context, options, output); }, output, error);
+  }
   BuildPlatform(platform, context, options, output);
 
   output << "Running " << platform.Id() << '\n';
@@ -1375,7 +1393,7 @@ int Run(std::span<const std::string_view> arguments, const std::filesystem::path
       return RunBuild(arguments, working_directory, sdk.home, output);
     }
     if (command == "run") {
-      return RunApplication(arguments, working_directory, sdk.home, output);
+      return RunApplication(arguments, working_directory, sdk.home, output, error);
     }
     if (command == "package") {
       return RunPackage(arguments, working_directory, sdk.home, output);

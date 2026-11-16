@@ -404,6 +404,9 @@ AndroidBuildCommands(const PlatformCommandContext& context, std::string_view hos
   if (context.profiling) {
     arguments.push_back("-PhuxeruiProfiling=ON");
   }
+  if (context.watch && context.profile == "debug" && host_id != "android") {
+    arguments.push_back("-PhuxeruiWatch=true");
+  }
   return {{wrapper.string(), std::move(arguments), shell}};
 }
 

@@ -2,11 +2,14 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <cwctype>
 #include <stdexcept>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #if defined(_WIN32)
@@ -257,6 +260,24 @@ ProcessResult RunWindowsProcess(const ProcessCommand& command, bool capture_outp
 #endif
 
 #if !defined(_WIN32)
+[[noreturn]] void ExecPosixProcess(const ProcessCommand& command) {
+  if (!command.working_directory.empty() && chdir(command.working_directory.c_str()) != 0) {
+    _exit(126);
+  }
+  std::vector<std::string> values;
+  values.reserve(command.arguments.size() + 1);
+  values.push_back(command.executable);
+  values.insert(values.end(), command.arguments.begin(), command.arguments.end());
+  std::vector<char*> arguments;
+  arguments.reserve(values.size() + 1);
+  for (std::string& value : values) {
+    arguments.push_back(value.data());
+  }
+  arguments.push_back(nullptr);
+  execvp(command.executable.c_str(), arguments.data());
+  _exit(errno == ENOENT ? 127 : 126);
+}
+
 ProcessResult RunPosixProcess(const ProcessCommand& command, bool capture_output) {
   std::array<int, 2> output_pipe{-1, -1};
   if (capture_output && pipe(output_pipe.data()) != 0) {
@@ -279,21 +300,7 @@ ProcessResult RunPosixProcess(const ProcessCommand& command, bool capture_output
       }
       close(output_pipe[1]);
     }
-    if (!command.working_directory.empty() && chdir(command.working_directory.c_str()) != 0) {
-      _exit(126);
-    }
-    std::vector<std::string> values;
-    values.reserve(command.arguments.size() + 1);
-    values.push_back(command.executable);
-    values.insert(values.end(), command.arguments.begin(), command.arguments.end());
-    std::vector<char*> arguments;
-    arguments.reserve(values.size() + 1);
-    for (std::string& value : values) {
-      arguments.push_back(value.data());
-    }
-    arguments.push_back(nullptr);
-    execvp(command.executable.c_str(), arguments.data());
-    _exit(errno == ENOENT ? 127 : 126);
+    ExecPosixProcess(command);
   }
 
   std::string output;
@@ -331,6 +338,94 @@ ProcessResult RunPosixProcess(const ProcessCommand& command, bool capture_output
 #endif
 
 } // namespace
+
+ManagedProcess::~ManagedProcess() {
+  Stop();
+}
+
+void ManagedProcess::Start(const ProcessCommand& command) {
+  if (Running()) throw std::logic_error("a managed process is already running");
+#if defined(_WIN32)
+  std::wstring command_line = WindowsCommandLine(command);
+  const auto directory = command.working_directory.wstring();
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  const HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
+    const DWORD error = GetLastError();
+    if (job) CloseHandle(job);
+    throw std::runtime_error("cannot create a development process job, Win32 error " + std::to_string(error));
+  }
+  PROCESS_INFORMATION process{};
+  if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
+                      CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED, nullptr,
+                      directory.empty() ? nullptr : directory.c_str(), &startup, &process)) {
+    const DWORD error = GetLastError();
+    CloseHandle(job);
+    throw std::runtime_error("cannot start process, Win32 error " + std::to_string(error));
+  }
+  if (!AssignProcessToJobObject(job, process.hProcess) || ResumeThread(process.hThread) == static_cast<DWORD>(-1)) {
+    const DWORD error = GetLastError();
+    TerminateProcess(process.hProcess, 1);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    CloseHandle(job);
+    throw std::runtime_error("cannot manage development process, Win32 error " + std::to_string(error));
+  }
+  CloseHandle(process.hThread);
+  process_ = reinterpret_cast<std::intptr_t>(process.hProcess);
+  job_ = reinterpret_cast<std::intptr_t>(job);
+#else
+  const pid_t child = fork();
+  if (child < 0) throw std::runtime_error("cannot fork process");
+  if (child == 0) {
+    setpgid(0, 0);
+    ExecPosixProcess(command);
+  }
+  setpgid(child, child);
+  process_ = child;
+#endif
+}
+
+bool ManagedProcess::Running() noexcept {
+  if (process_ == 0) return false;
+#if defined(_WIN32)
+  const auto handle = reinterpret_cast<HANDLE>(process_);
+  if (WaitForSingleObject(handle, 0) == WAIT_TIMEOUT) return true;
+  CloseHandle(handle);
+  CloseHandle(reinterpret_cast<HANDLE>(job_));
+  job_ = 0;
+#else
+  const auto child = static_cast<pid_t>(process_);
+  const auto result = waitpid(child, nullptr, WNOHANG);
+  if (result == 0 || (result < 0 && errno == EINTR)) return true;
+#endif
+  process_ = 0;
+  return false;
+}
+
+void ManagedProcess::Stop() noexcept {
+  if (!Running()) return;
+#if defined(_WIN32)
+  const auto handle = reinterpret_cast<HANDLE>(process_);
+  CloseHandle(reinterpret_cast<HANDLE>(job_));
+  job_ = 0;
+  WaitForSingleObject(handle, INFINITE);
+  CloseHandle(handle);
+#else
+  const auto child = static_cast<pid_t>(process_);
+  kill(-child, SIGTERM);
+  for (int attempt = 0; attempt < 20 && Running(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(25));
+  }
+  if (process_ == 0) return;
+  kill(-child, SIGKILL);
+  while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+#endif
+  process_ = 0;
+}
 
 std::optional<std::string> ReadEnvironmentVariable(std::string_view name) {
   const std::string key(name);

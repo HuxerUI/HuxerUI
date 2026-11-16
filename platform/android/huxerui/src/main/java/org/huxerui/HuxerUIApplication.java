@@ -27,12 +27,14 @@ import android.provider.OpenableColumns;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
+import android.util.Log;
 import android.webkit.MimeTypeMap;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.ref.WeakReference;
@@ -192,6 +194,7 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
                     activation == null ? null : activation.name, activation == null ? -1L : activation.size,
                     activation == null ? null : activation.contentType, activation != null && activation.writable,
                     activation == null ? null : activation.data);
+            if (application.nativeHandle != 0L) application.confirmDevelopmentRevision();
             return application;
         } catch (RuntimeException | Error exception) {
             application.onRuntimeStopped();
@@ -935,6 +938,36 @@ public final class HuxerUIApplication implements Application.ActivityLifecycleCa
         }
         @Override public int update(Uri uri, ContentValues values, String selection, String[] arguments) {
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private String developmentRevision() {
+        if ((context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) == 0) {
+            return null;
+        }
+        String revision = System.getProperty("org.huxerui.watch.revision");
+        return revision != null && revision.matches("[0-9]+") ? revision : null;
+    }
+
+    /**
+     * Reads the resource package selected by the debugging shell before startup.
+     * @return A UTF-8 filesystem path, or null when the APK owns resources.
+     */
+    private byte[] developmentResourceRoot() {
+        String revision = developmentRevision();
+        if (revision == null) return null;
+        File resources = new File(context.getFilesDir(), "huxerui-watch/" + revision + "/resources");
+        return resources.getAbsolutePath().getBytes(StandardCharsets.UTF_8);
+    }
+
+    private void confirmDevelopmentRevision() {
+        String revision = developmentRevision();
+        if (revision == null) return;
+        File marker = new File(context.getFilesDir(), "huxerui-watch/loaded");
+        try (FileWriter loaded = new FileWriter(marker)) {
+            loaded.write(revision);
+        } catch (IOException exception) {
+            Log.w("HuxerUI", "Could not report the loaded development revision", exception);
         }
     }
 

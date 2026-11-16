@@ -50,6 +50,7 @@ add_library(huxerui_cli_core STATIC
         project.cpp
         sdk.cpp
         template.cpp
+        watch.cpp
 )
 target_compile_features(huxerui_cli_core PUBLIC cxx_std_20)
 target_compile_definitions(huxerui_cli_core PRIVATE

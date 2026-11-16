@@ -116,6 +116,8 @@ struct PlatformCommandContext {
   std::optional<std::string> package_format = std::nullopt;
   /// Whether to compile profiling support into the selected HuxerUI source build.
   bool profiling = false;
+  /// Whether this build belongs to a development watch session.
+  bool watch = false;
 };
 
 /// One file or directory published by the `package` command.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -24,6 +25,28 @@ struct ProcessResult {
   int exit_code = 0;
   /// Captured standard output decoded as UTF-8.
   std::string output;
+};
+
+/// Owns one long-running child launched by a development session.
+class ManagedProcess {
+public:
+  ManagedProcess() = default;
+  ~ManagedProcess();
+  ManagedProcess(const ManagedProcess&) = delete;
+  ManagedProcess& operator=(const ManagedProcess&) = delete;
+
+  /// Starts a child with inherited streams. Stop the previous child before starting another.
+  void Start(const ProcessCommand& command);
+  /// Returns true while the child is alive and reaps a completed child.
+  bool Running() noexcept;
+  /// Stops only the process owned by this handle and reaps it.
+  void Stop() noexcept;
+
+private:
+  std::intptr_t process_ = 0;
+#if defined(_WIN32)
+  std::intptr_t job_ = 0;
+#endif
 };
 
 /// Reads a process environment variable.

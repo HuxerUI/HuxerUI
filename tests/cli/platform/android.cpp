@@ -366,3 +366,15 @@ TEST_CASE("HuxerUICliPassesAndroidBuildOverridesToGradle") {
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiProfiling=ON") != arguments.end());
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiAbis=arm64-v8a,x86_64") != arguments.end());
 }
+
+TEST_CASE("HuxerUICliEnablesPrivateDeploymentOnlyForAndroidDebugWatch") {
+  huxerui::cli::PlatformCommandContext context;
+  context.profile = "debug";
+  context.watch = true;
+  const auto debug = huxerui::cli::detail::AndroidBuildCommands(context, "windows", {});
+  REQUIRE(debug.front().arguments.back() == "-PhuxeruiWatch=true");
+  context.profile = "release";
+  const auto release = huxerui::cli::detail::AndroidBuildCommands(context, "windows", {});
+  REQUIRE(std::find(release.front().arguments.begin(), release.front().arguments.end(), "-PhuxeruiWatch=true") ==
+          release.front().arguments.end());
+}

@@ -234,7 +234,7 @@ huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
 huxerui build [platform-list] [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>] [--watch]
 huxerui package <platform-list> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui open ios [--sdk <path>]
 ```
@@ -388,6 +388,16 @@ This path never selects Emscripten's ADB-backed Android mode or exposes the serv
 For Android on desktop hosts, one ready device is selected automatically.
 Multiple ready devices require `--device <id>`, and an explicit device must exist and be ready before building.
 For Android on Termux, `run` opens the generated APK through `termux-open` and delegates user confirmation and application launch to the system package installer.
+
+#### Watching development builds
+
+`run <platform> --watch` owns one development session using the selected build, SDK, and device. The CLI tracks changes in the project and its declared local library roots, coalesces saves, and runs the existing incremental build. Changes to generated output do not trigger a new build. After a build failure, the current application keeps running and the next edit can retry.
+
+Desktop sessions launch a copy of the built application from an independent directory, including its bundled or adjacent resources and adjacent shared libraries. A completed build is staged before the CLI stops the application it previously launched. Web publishes versioned copies of the generated entry and its assets to the same loopback server and refreshes the open page. iOS installs each successful build and launches it using the original device selection.
+
+For Android Debug watch sessions on desktop hosts, the current shell prepares a fingerprint of the APK outside the application library and HuxerUI resource package. On a compatible device, the first installation records that fingerprint and the installed APK path. A later matching build transfers the selected ABI library and full resource package together through ADB and `run-as`, then restarts the process. Startup loads one version's read-only library and binds its matching resource package. APK shell changes, older generated shells, and devices without private deployment support use the normal install and launch path. Incomplete transfers leave the running application alone. If the staged library cannot load, the session selects the previous valid version again.
+
+The development session recreates in-memory application state on each successful restart. Ctrl+C ends the session and stops local processes owned by the CLI. Android and iOS applications remain installed on their selected device.
 
 ### Package
 

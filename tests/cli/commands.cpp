@@ -153,6 +153,20 @@ TEST_CASE("HuxerUICliShortCommandsShareDispatchAndHelp") {
   REQUIRE(Invoke(temporary.Path(), {"open", "--help"}).output.find("open ios [--sdk <path>]") != std::string::npos);
 }
 
+TEST_CASE("HuxerUICliRestrictsWatchToRun") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"run", "--help"}).output.find("[--watch]") != std::string::npos);
+  REQUIRE(Invoke(temporary.Path(), {"package", "windows", "--watch"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "windows", "--watch"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"open", "ios", "--watch"}).result == 2);
+  const auto duplicate = Invoke(temporary.Path(), {"run", "windows", "--watch", "--watch"});
+  REQUIRE(duplicate.result == 2);
+  REQUIRE(duplicate.error.find("--watch may be specified only once") != std::string::npos);
+  const auto selected = Invoke(temporary.Path(), {"r", "windows", "--watch", "--sdk", "missing"});
+  REQUIRE(selected.result == 1);
+  REQUIRE(selected.error.find("HuxerUI SDK or source checkout is invalid:") != std::string::npos);
+}
+
 TEST_CASE("HuxerUICliDoctorReportsIncompleteAndUnknownPlatforms") {
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "sample", "--platform", "windows"}).result == 0);
