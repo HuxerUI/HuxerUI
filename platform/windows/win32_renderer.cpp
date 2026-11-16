@@ -472,7 +472,7 @@ Task<Bytes> EncodeBitmap(Bitmap bitmap, ImageEncodeOptions options) {
         FAILED(frame->SetPixelFormat(&format))) {
       throw std::runtime_error("HuxerUI could not configure image encoding");
     }
-    if (format != (jpeg ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA)) {
+    if (!IsEqualGUID(format, jpeg ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA)) {
       throw std::runtime_error("HuxerUI Windows encoder rejected the required output pixel format");
     }
     const auto converted = ConvertWicPixels(*factory.Get(), *source.Get(), format);
