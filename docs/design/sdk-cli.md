@@ -232,10 +232,10 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui build [platform-list] [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
-huxerui package <platform-list> [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui package <platform-list> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui open ios [--sdk <path>]
 ```
 
@@ -329,18 +329,19 @@ Desktop drivers do not expose synthetic devices.
 
 ### Build
 
-CLI-managed build directories live below `.huxerui/build/<home-key>/<platform>/<profile>`. iOS uses explicit `ios-simulator` and `ios-device` DerivedData roots so Simulator and device products, intermediates, architectures, and signing state never share one directory.
+CLI-managed build directories live below `.huxerui/build/<home-key>/<platform>/<configuration>`. iOS uses explicit `ios-simulator` and `ios-device` DerivedData roots so Simulator and device products, intermediates, architectures, and signing state never share one directory.
 The CLI validates the complete requested set before executing commands and prints each platform command.
 `build`, `run`, `package`, and `open ios` accept `--sdk <path>` to select a HuxerUI installation or source checkout for one invocation. The CLI validates the selected layout before invoking platform tools.
 The override replaces only the effective HuxerUI home passed through the existing platform command context and child-process environment; it does not persist or rewrite the parent shell's installed SDK selection.
 Configure commands pass the effective home through `-DHUXERUI_HOME`. Each framework location uses its own CMake cache, so switching between an installed SDK and a source checkout preserves both incremental builds.
+`--profile` enables `HUXERUI_ENABLE_PROFILING` for `build`, `run`, and `package` and requires an explicit source checkout through `--sdk`. CLI-managed build directories append `-profiling` to the configuration directory. Android forwards the option as a Gradle property so it participates in the native build inputs.
 
 Desktop builds configure the root CMake project and then build it.
 Fresh Linux and macOS builds use Ninja when it is available unless an explicit generator, `CMAKE_GENERATOR`, or an existing CMake cache takes precedence.
 Windows discovers the latest Visual Studio installation that provides the C++ x64 tools without constraining its product version, imports its developer environment, and explicitly selects MSVC.
 Fresh Windows builds use Ninja when available and NMake otherwise; an existing Windows cache retains its compatible generator while the compiler remains MSVC.
 `huxerui_add_app` selects the Windows GUI subsystem on the application target only. MSVC applications retain `main()` through `mainCRTStartup`; the installer helper selects `wWinMainCRTStartup` through the private `HUXERUI_WINDOWS_CRT_ENTRY` target property for its existing `wWinMain()` entry. Both paths preserve CRT initialization. The framework's public link interface carries no subsystem or entry-point option, and Runtime does not allocate or hide a console.
-The Windows SDK packages matching Debug and Release shared and static libraries so the CLI's default Debug profile and explicit Release profile use the corresponding MSVC runtime.
+The Windows SDK packages matching Debug and Release shared and static libraries so each build configuration uses the corresponding MSVC runtime.
 `--generator` applies to Linux, macOS, and Web builds. Windows, Android, and iOS reject it because their platform drivers own the supported generator and toolchain selection.
 
 iOS builds invoke the source-controlled Xcode project. A build without `--device` uses the generic Simulator destination; selecting a Simulator or physical device uses its Xcode destination identifier, and a physical-device build allows automatic provisioning updates. The App target invokes CMake through source-controlled scripts to produce a destination-specific application core, links it into the bundle, and stages its resources.
@@ -390,8 +391,8 @@ For Android on Termux, `run` opens the generated APK through `termux-open` and d
 
 ### Package
 
-`package <platform-list>` builds Release output unless `--profile` is explicit, then asks each platform driver to produce its platform-native distribution artifact.
-Intermediate staging lives below `.huxerui/package/<platform>/<profile>` and is never a user-facing result.
+`package <platform-list>` uses the `release` configuration by default and accepts `--config debug` to override it. Each platform driver produces its distribution artifact.
+Intermediate staging lives below `.huxerui/package/<platform>/<configuration>` and is never a user-facing result.
 The shared command validates the final artifact and publishes it below `dist/<platform>` only after every preparation and packaging command succeeds, so a failed package never removes the previous valid result.
 
 Desktop platforms intentionally use different containers:
@@ -531,7 +532,7 @@ The former `HUXERUI_SDK_ROOT` input has been removed rather than retained as an 
 
 A source root exposes the same canonical targets, helpers, tools, and resource contract as a local development override.
 Project templates use `add_subdirectory` for the selected source checkout and `find_package` for an installed SDK. Both expose the same application, library, resource, and codegen helpers, and both enter declaration-only graph discovery without configuring native framework targets. No separate source package entry point or build-mode setting is required.
-CLI-managed CMake directories live under `.huxerui/build/<home-key>/<platform>/<profile>`; the home key derives only from the normalized framework location. Graph discovery uses `<home-key>/library-graph`. Switching framework locations preserves independent caches instead of reusing imported-target or source-build state.
+CLI-managed CMake directories live under `.huxerui/build/<home-key>/<platform>/<configuration>`. The home key derives only from the normalized framework location. Graph discovery uses `<home-key>/library-graph`. Switching framework locations preserves independent caches instead of reusing imported-target or source-build state.
 Android reads the effective `HUXERUI_HOME` from the child-process environment. Gradle loads the matching source project or AAR and passes the home to externalNativeBuild, whose argument-specific CMake directories separate native configurations. iOS receives the home as an explicit `xcodebuild` setting, and the CLI's home-specific DerivedData path separates native configurations. The CLI does not write framework selection into `local.properties` or `Local.xcconfig`; existing Android SDK and signing settings remain user-owned. Direct IDE builds use the IDE's environment or explicit build settings and do not retain the CLI's last `--sdk` selection.
 The executable's embedded templates and source-tree development skill lookup remain separate from framework build selection.
 No `sdk.json` is required: standard CMake and platform-package metadata describe the installed SDK and platform artifacts, while platform-specific facts remain in the platform integration that owns them.

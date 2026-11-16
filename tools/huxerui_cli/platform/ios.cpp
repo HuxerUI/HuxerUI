@@ -493,6 +493,9 @@ public:
     if (context.lto) {
       build_arguments.push_back(std::string("HUXERUI_ENABLE_LTO=") + (*context.lto ? "ON" : "OFF"));
     }
+    if (context.profiling) {
+      build_arguments.push_back("HUXERUI_ENABLE_PROFILING=ON");
+    }
     build_arguments.push_back("build");
     return {{"xcodebuild", std::move(build_arguments), context.project_root}};
   }

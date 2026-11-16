@@ -817,6 +817,9 @@ void ApplyViewDeclaration(MountedNode& mounted, ViewSpec& compiled, std::shared_
   mounted.component_semantics = std::move(compiled.component_semantics);
   mounted.author_semantics = std::move(compiled.author_semantics);
   mounted.scope_factory = std::move(compiled.scope_factory);
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  mounted.profile_source = compiled.profile_source;
+#endif
   mounted.canvas_painter = std::move(compiled.canvas_painter);
   mounted.image_properties = std::move(compiled.image_properties);
   mounted.platform_view = std::move(compiled.platform_view);
@@ -3469,6 +3472,7 @@ bool UiWindow::ComposeScope(detail::MountedNode& mounted) {
     mounted.measure_dirty = mounted.measure_dirty || layout_changed;
     return layout_changed;
   }
+  HUXERUI_PROFILE_COMPONENT(mounted);
   HUXERUI_PROFILE_SCOPE(profile_scope, Scope, mounted.identity);
   HUXERUI_PROFILE_FLAG(
       profile_scope,

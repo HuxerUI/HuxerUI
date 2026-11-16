@@ -339,6 +339,11 @@ TEST_CASE("HuxerUICliRendersAndroidTemplatePathsAndContents") {
   REQUIRE(application != files.end());
   REQUIRE(application->content.find("extends Application") != std::string::npos);
   REQUIRE(application->content.find("System.loadLibrary(BuildConfig.HUXERUI_APP_LIBRARY)") != std::string::npos);
+  const auto gradle = std::find_if(files.begin(), files.end(), [](const huxerui::cli::GeneratedFile& file) {
+    return file.path == "app/build.gradle";
+  });
+  REQUIRE(gradle != files.end());
+  REQUIRE(gradle->content.find("gradleProperty('huxeruiProfiling').orElse('OFF')") != std::string::npos);
   const std::vector<huxerui::cli::GeneratedFile> wrapper = huxerui::cli::CopyTemplateTree("platform/android/wrapper");
   const auto wrapper_jar = std::find_if(wrapper.begin(), wrapper.end(), [](const huxerui::cli::GeneratedFile& file) {
     return file.path == "gradle/wrapper/gradle-wrapper.jar";
@@ -352,10 +357,12 @@ TEST_CASE("HuxerUICliPassesAndroidBuildOverridesToGradle") {
   context.profile = "release";
   context.optimization = "size";
   context.lto = false;
+  context.profiling = true;
   context.abis = {"arm64-v8a", "x86_64"};
   const auto commands = huxerui::cli::detail::AndroidBuildCommands(context, "windows", {});
   const auto& arguments = commands.front().arguments;
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiOptimization=size") != arguments.end());
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiLto=OFF") != arguments.end());
+  REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiProfiling=ON") != arguments.end());
   REQUIRE(std::find(arguments.begin(), arguments.end(), "-PhuxeruiAbis=arm64-v8a,x86_64") != arguments.end());
 }

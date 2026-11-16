@@ -43,6 +43,8 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   });
   REQUIRE(build_script != shell.end());
   REQUIRE(build_script->content.find("sample_app_huxerui_ios_core") != std::string::npos);
+  REQUIRE(build_script->content.find("-DHUXERUI_ENABLE_PROFILING=\"${HUXERUI_ENABLE_PROFILING:-OFF}\"") !=
+          std::string::npos);
   const auto resource_script = std::find_if(shell.begin(), shell.end(), [](const huxerui::cli::GeneratedFile& file) {
     return file.path == "Scripts/stage_huxerui_resources.sh";
   });
@@ -99,6 +101,12 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
           "build",
       }
   );
+  auto profiling_context = context;
+  profiling_context.profiling = true;
+  const auto profiling_commands = ios->BuildCommands(profiling_context);
+  const auto& profiling_arguments = profiling_commands.front().arguments;
+  REQUIRE(std::find(profiling_arguments.begin(), profiling_arguments.end(), "HUXERUI_ENABLE_PROFILING=ON") !=
+          profiling_arguments.end());
 
   const std::filesystem::path bundle = build / "bin/Debug/sample.app";
   const std::filesystem::path plan = build / "huxerui-integration/sample/Debug/app.json";

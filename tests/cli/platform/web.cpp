@@ -70,6 +70,9 @@ TEST_CASE("HuxerUICliCreatesWebBuildAndRunCommands") {
   cached_context.cmake_generator.clear();
   const std::vector<huxerui::cli::ProcessCommand> cached_build_commands = web->BuildCommands(cached_context);
   REQUIRE(cached_build_commands[0].arguments == build_commands[0].arguments);
+  cached_context.profiling = true;
+  const auto profiling_build_commands = web->BuildCommands(cached_context);
+  REQUIRE(profiling_build_commands[0].arguments.back() == "-DHUXERUI_ENABLE_PROFILING=ON");
 
   const std::filesystem::path artifact = build / "sample.js";
   const std::filesystem::path entry = build / "sample.html";

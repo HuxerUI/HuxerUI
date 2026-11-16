@@ -15,7 +15,7 @@ namespace huxerui::cli {
 /// output is written to `output`. The supplied streams make confirmation prompts and command output testable without
 /// replacing process-wide standard streams.
 ///
-/// @param arguments Command and options, such as `{"build", "windows", "--profile", "release"}`.
+/// @param arguments Command and options, such as `{"build", "windows", "--config", "release"}`.
 /// @param working_directory Directory used for project discovery and relative command behavior.
 /// @param sdk Resolved HuxerUI SDK location for this invocation.
 /// @param input Input stream used by interactive commands such as `setup`.

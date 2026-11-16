@@ -204,6 +204,7 @@ private:
   std::shared_ptr<detail::ViewSpec> spec_;
 
   friend View ProvideEnvironment(Environment environment, View content);
+  friend class Scope;
   friend class Text;
   friend class UiWindow;
   friend class detail::VirtualMeasureSession;
@@ -1449,6 +1450,19 @@ private:
   std::optional<float> step_;
 };
 
+namespace detail {
+
+/// Source metadata emitted by hcg for an instrumented composable definition.
+struct ProfileSource {
+  std::string_view function;
+  std::string_view file;
+  std::size_t line = 0;
+
+  bool operator==(const ProfileSource&) const = default;
+};
+
+} // namespace detail
+
 /// Establishes an independently recomposable child declaration from a copyable factory and captured arguments.
 ///
 /// Prefer ordinary composable functions for reusable UI. Scope is useful when a declaration explicitly needs a child
@@ -1459,6 +1473,9 @@ private:
 class Scope final : public View {
 public:
   explicit Scope(std::function<View()> factory);
+
+  /// Constructs a scope with hcg-generated metadata. The source strings must have static storage duration.
+  Scope(detail::ProfileSource source, std::function<View()> factory);
 
   template <class Factory, class... Arguments>
     requires detail::ViewFactoryFor<Factory, Arguments...>

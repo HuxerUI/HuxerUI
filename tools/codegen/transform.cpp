@@ -802,7 +802,8 @@ SourcePosition PositionAt(std::string_view source, std::size_t offset) noexcept 
   return position;
 }
 
-TransformResult TransformSource(std::string_view source, std::string_view source_path) {
+TransformResult TransformSource(std::string_view source, std::string_view source_path,
+                                std::string_view profile_source_path) {
   std::vector<ComposableBody> composables;
   std::size_t cursor = 0;
 
@@ -843,12 +844,19 @@ TransformResult TransformSource(std::string_view source, std::string_view source
   }
 
   const std::string escaped_path = EscapeLinePath(source_path);
+  const std::string escaped_profile_path = EscapeLinePath(profile_source_path);
   std::vector<Edit> edits;
   edits.reserve(composables.size() * 3);
 
   for (const ComposableBody& composable : composables) {
     const SourcePosition opening = PositionAt(source, composable.opening_brace);
     const SourcePosition closing = PositionAt(source, composable.closing_brace);
+    std::string scope_open(kScopeOpenText);
+    if (!profile_source_path.empty()) {
+      const auto definition = source.find_first_not_of(" \t\r\n", composable.marker_offset + kComposableMarker.size());
+      scope_open = "return ::huxerui::Scope({__func__, \"" + escaped_profile_path + "\", " +
+                   std::to_string(PositionAt(source, definition).line) + "}, [=]() -> ::huxerui::View {";
+    }
 
     edits.push_back(
         Edit{
@@ -861,8 +869,7 @@ TransformResult TransformSource(std::string_view source, std::string_view source
         Edit{
             composable.opening_brace + 1,
             0,
-            "\n  " + std::string(kScopeOpenText) + "\n" +
-                LineDirective(opening.line, escaped_path),
+            "\n  " + scope_open + "\n" + LineDirective(opening.line, escaped_path),
         }
     );
     edits.push_back(

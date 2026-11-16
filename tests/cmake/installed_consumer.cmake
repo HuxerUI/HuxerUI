@@ -265,7 +265,7 @@ set(BUILD_COMMAND
         "${CMAKE_COMMAND}" -E env --unset=HUXERUI_HOME
         "HUXERUI_SDK_ROOT=${TEST_ROOT}/missing"
         "${HUXERUI_CLI}" build "${PLATFORM_ID}"
-        --profile "${BUILD_PROFILE}"
+        --config "${BUILD_PROFILE}"
 )
 if (NOT PLATFORM_ID STREQUAL "windows")
     list(APPEND BUILD_COMMAND --generator "${HOST_GENERATOR}")
@@ -322,7 +322,7 @@ endif ()
 
 set(SOURCE_BUILD_COMMAND
         "${CMAKE_COMMAND}" -E env "HUXERUI_HOME=${TEST_ROOT}/missing-sdk"
-        "${HUXERUI_CLI}" b "${PLATFORM_ID}" --profile "${BUILD_PROFILE}" --sdk "${SOURCE_DIRECTORY}"
+        "${HUXERUI_CLI}" b "${PLATFORM_ID}" --config "${BUILD_PROFILE}" --sdk "${SOURCE_DIRECTORY}"
 )
 if (NOT PLATFORM_ID STREQUAL "windows")
     list(APPEND SOURCE_BUILD_COMMAND --generator "${HOST_GENERATOR}")
@@ -338,7 +338,7 @@ endif ()
 report_stage("Return to SDK build")
 set(EXPLICIT_SDK_BUILD_COMMAND
         "${CMAKE_COMMAND}" -E env "HUXERUI_HOME=${TEST_ROOT}/missing-sdk"
-        "${HUXERUI_CLI}" b "${PLATFORM_ID}" --profile "${BUILD_PROFILE}" --sdk "${SDK_ROOT}"
+        "${HUXERUI_CLI}" b "${PLATFORM_ID}" --config "${BUILD_PROFILE}" --sdk "${SDK_ROOT}"
 )
 if (NOT PLATFORM_ID STREQUAL "windows")
     list(APPEND EXPLICIT_SDK_BUILD_COMMAND --generator "${HOST_GENERATOR}")

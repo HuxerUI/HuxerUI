@@ -120,6 +120,13 @@ function(_huxerui_apply_codegen target_name)
 
     set(HUXERUI_CODEGEN_REWRITTEN_SOURCES)
     set(HUXERUI_CODEGEN_GENERATED_SOURCES)
+    set(HUXERUI_CODEGEN_PROFILING_ARGUMENTS)
+    if (TARGET HuxerUI::huxerui)
+        get_target_property(HUXERUI_CODEGEN_PROFILING HuxerUI::huxerui HUXERUI_SOURCE_PROFILING)
+        if (HUXERUI_CODEGEN_PROFILING)
+            set(HUXERUI_CODEGEN_PROFILING_ARGUMENTS --profile-source-root "${CMAKE_SOURCE_DIR}")
+        endif ()
+    endif ()
 
     foreach (HUXERUI_CODEGEN_SOURCE IN LISTS HUXERUI_CODEGEN_SOURCES)
         if (HUXERUI_CODEGEN_SOURCE MATCHES "^\\$<")
@@ -215,6 +222,7 @@ function(_huxerui_apply_codegen target_name)
                 COMMAND "${HUXERUI_CODEGEN_COMMAND}"
                         --input "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
                         --output "${HUXERUI_CODEGEN_OUTPUT}"
+                        ${HUXERUI_CODEGEN_PROFILING_ARGUMENTS}
                 DEPENDS
                         "${HUXERUI_CODEGEN_ABSOLUTE_SOURCE}"
                         "${HUXERUI_CODEGEN_COMMAND}"

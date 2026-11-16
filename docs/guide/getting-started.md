@@ -53,9 +53,10 @@ huxerui run windows
 huxerui run web
 ```
 
-Use `--profile release` for a release configuration.
+Build and run use the `debug` configuration by default. Use `--config release` to select a release build.
 Use `--generator <name>` only when the host has multiple compatible CMake generators and an explicit selection is required.
 Use `--sdk <path>` to select an installed SDK or a HuxerUI source checkout for `build`, `run`, `package`, or `open ios`. A source checkout builds HuxerUI from source.
+Pass `--profile` with a [HuxerUI source checkout](../development/building.md#runtime-profiling) to enable performance recording support for `build`, `run`, or `package`.
 
 ```bash
 huxerui run windows --sdk ../HuxerUI
@@ -187,10 +188,10 @@ huxerui platform add <platform-list>
 huxerui doctor [platform-list]
 huxerui setup <platform-list> [--yes]
 huxerui devices [platform]
-huxerui build [platform-list] [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui build [platform-list] [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
-huxerui package <platform-list> [-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
+huxerui package <platform-list> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui open ios [--sdk <path>]
 ```
 

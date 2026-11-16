@@ -401,6 +401,9 @@ AndroidBuildCommands(const PlatformCommandContext& context, std::string_view hos
   if (context.lto) {
     arguments.push_back(std::string("-PhuxeruiLto=") + (*context.lto ? "ON" : "OFF"));
   }
+  if (context.profiling) {
+    arguments.push_back("-PhuxeruiProfiling=ON");
+  }
   return {{wrapper.string(), std::move(arguments), shell}};
 }
 

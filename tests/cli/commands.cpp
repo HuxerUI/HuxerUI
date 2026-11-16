@@ -71,7 +71,7 @@ TEST_CASE("HuxerUICliMcppRequiresAManifest") {
 
 TEST_CASE("HuxerUICliRejectsInvalidSdkAndDeviceOptions") {
   TemporaryDirectory temporary;
-  for (const auto option : {"--sdk", "-d", "--generator", "--profile", "--abi", "--java-home"}) {
+  for (const auto option : {"--sdk", "-d", "--generator", "--config", "--abi", "--java-home"}) {
     const Invocation missing = Invoke(temporary.Path(), {"build", "windows", option, "--help"});
     REQUIRE(missing.result == 2);
     REQUIRE(missing.error.find(std::string(option) + " requires a value") != std::string::npos);
@@ -91,6 +91,46 @@ TEST_CASE("HuxerUICliRejectsInvalidSdkAndDeviceOptions") {
 
   REQUIRE(Invoke(temporary.Path(), {"build", "--source", "."}).result == 2);
   REQUIRE(Invoke(temporary.Path(), {"mcpp", "build", "--source", "."}).result == 2);
+}
+
+TEST_CASE("HuxerUICliAcceptsBuildConfigurations") {
+  TemporaryDirectory temporary;
+  for (const auto command : {"build", "run", "package"}) {
+    const auto help = Invoke(temporary.Path(), {command, "--help"});
+    REQUIRE(help.output.find("[--config debug|release]") != std::string::npos);
+
+    for (const auto config : {"debug", "release"}) {
+      const auto invocation = Invoke(temporary.Path(), {command, "windows", "--config", config, "--sdk", "missing"});
+      REQUIRE(invocation.result == 1);
+      REQUIRE(invocation.error.find("HuxerUI SDK or source checkout is invalid:") != std::string::npos);
+    }
+
+    const auto invalid = Invoke(temporary.Path(), {command, "windows", "--config", "Release"});
+    REQUIRE(invalid.result == 2);
+    REQUIRE(invalid.error.find("--config must be debug or release") != std::string::npos);
+  }
+}
+
+TEST_CASE("HuxerUICliEnablesProfilingForSourceBuilds") {
+  TemporaryDirectory temporary;
+  for (const auto command : {"build", "run", "package"}) {
+    REQUIRE(Invoke(temporary.Path(), {command, "--help"}).output.find("--profile enables profiling") !=
+            std::string::npos);
+
+    const auto missing = Invoke(temporary.Path(), {command, "windows", "--profile"});
+    REQUIRE(missing.result == 2);
+    REQUIRE(missing.error.find("--profile requires --sdk <path>") != std::string::npos);
+    const auto invalid = Invoke(temporary.Path(), {command, "windows", "--profile", "--sdk", "."});
+    REQUIRE(invalid.result == 2);
+    REQUIRE(invalid.error.find("pointing to a HuxerUI source checkout") != std::string::npos);
+
+    const auto source = Invoke(temporary.Path(), {command, "windows", "--profile", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY});
+    REQUIRE(source.result == 1);
+    REQUIRE(source.error.find("no HuxerUI project found") != std::string::npos);
+  }
+  REQUIRE(Invoke(temporary.Path(), {"build", "windows", "--profile", "release"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"build", "windows", "--profile", "--profile"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"open", "ios", "--profile"}).result == 2);
 }
 
 TEST_CASE("HuxerUICliShortCommandsShareDispatchAndHelp") {

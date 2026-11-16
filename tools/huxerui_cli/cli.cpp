@@ -51,7 +51,7 @@ constexpr std::array agent_skill_mappings{
 };
 
 constexpr std::string_view build_options =
-    "[-d|--device <id>] [--profile debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]";
+    "[-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]";
 constexpr std::string_view package_format_option = " [-f|--format appimage|deb|rpm]";
 constexpr std::string_view sdk_option_help =
     "--sdk <path> selects an installed SDK or a HuxerUI source checkout for this invocation.\n";
@@ -62,6 +62,8 @@ constexpr std::string_view sdk_commands =
 
 void PrintBuildOptions(std::ostream& output) {
   output << sdk_option_help
+         << "--config defaults to debug for build and run, and release for package.\n"
+         << "--profile enables profiling in a source build selected with --sdk <path>.\n"
          << "Build, run, and package accept --abi <abi-list> for a single platform.\n"
          << "They also accept --optimization default|size|minsize and --lto on|off.\n";
 }
@@ -740,6 +742,7 @@ struct BuildOptions {
   bool package = false;
   std::optional<std::string> optimization;
   std::optional<bool> lto;
+  bool profiling = false;
   std::vector<std::string> abis;
   std::optional<std::string> package_format;
 };
@@ -754,12 +757,17 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
       }
       return arguments[index];
     };
-    if (option == "--profile") {
+    if (option == "--config") {
       options.profile = read_value();
       options.profile_explicit = true;
       if (options.profile != "debug" && options.profile != "release") {
-        throw UsageError("profile must be debug or release");
+        throw UsageError("--config must be debug or release");
       }
+    } else if (option == "--profile" && command != "open") {
+      if (options.profiling) {
+        throw UsageError("--profile may be specified only once");
+      }
+      options.profiling = true;
     } else if (option == "--abi") {
       if (!options.abis.empty()) {
         throw UsageError("--abi may be specified only once");
@@ -825,9 +833,12 @@ BuildOptions ParseBuildOptions(std::span<const std::string_view> arguments, std:
 }
 
 std::filesystem::path ResolveAndExportBuildHome(const std::filesystem::path& sdk_home,
-                                                const std::optional<std::filesystem::path>& sdk_override,
+                                                const BuildOptions& options,
                                                 const std::filesystem::path& working_directory) {
-  const std::filesystem::path huxerui_home = ResolveBuildHome(sdk_home, sdk_override, working_directory);
+  if (options.profiling && (!options.sdk_override || !IsSourceHome(working_directory / *options.sdk_override))) {
+    throw UsageError("--profile requires --sdk <path> pointing to a HuxerUI source checkout");
+  }
+  const std::filesystem::path huxerui_home = ResolveBuildHome(sdk_home, options.sdk_override, working_directory);
   SetProcessEnvironmentVariable("HUXERUI_HOME", huxerui_home.string());
   return huxerui_home;
 }
@@ -946,6 +957,9 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
   if (options.lto) {
     build_profile += *options.lto ? "-lto" : "-no-lto";
   }
+  if (options.profiling) {
+    build_profile += "-profiling";
+  }
   const std::filesystem::path build_directory =
       project.root / ".huxerui/build" / BuildHomeKey(huxerui_home) / build_variant / build_profile;
   std::string cmake_generator = options.cmake_generator;
@@ -975,6 +989,7 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
       options.lto,
       {abis.begin(), abis.end()},
       options.package_format,
+      options.profiling,
   };
 }
 
@@ -1071,7 +1086,7 @@ std::optional<PlatformDevice> SelectDevice(const PlatformDriver& platform, std::
 int RunBuild(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
              const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, {});
-  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -1092,7 +1107,7 @@ int RunBuild(std::span<const std::string_view> arguments, const std::filesystem:
 int RunApplication(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
                    const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "run");
-  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());
@@ -1204,7 +1219,7 @@ void PublishPackageArtifacts(std::span<const PackageArtifact> artifacts, const s
 int RunPackage(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
                const std::filesystem::path& sdk_home, std::ostream& output) {
   BuildOptions options = ParseBuildOptions(arguments, "package");
-  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options, working_directory);
   if (!options.profile_explicit) {
     options.profile = "release";
   }
@@ -1249,7 +1264,7 @@ int RunOpen(std::span<const std::string_view> arguments, const std::filesystem::
       options.optimization || options.lto || !options.abis.empty()) {
     throw UsageError("open accepts only --sdk <path>");
   }
-  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options.sdk_override, working_directory);
+  const auto huxerui_home = ResolveAndExportBuildHome(sdk_home, options, working_directory);
   const Project project = ResolveApplicationProject(DiscoverProject(working_directory));
   if (!project.unknown_platforms.empty()) {
     throw std::runtime_error("unknown platform directory: " + project.unknown_platforms.front());

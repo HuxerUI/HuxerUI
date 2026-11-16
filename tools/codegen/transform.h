@@ -47,6 +47,7 @@ struct TransformResult {
 
 [[nodiscard]] SourcePosition PositionAt(std::string_view source, std::size_t offset) noexcept;
 
-[[nodiscard]] TransformResult TransformSource(std::string_view source, std::string_view source_path);
+[[nodiscard]] TransformResult TransformSource(std::string_view source, std::string_view source_path,
+                                              std::string_view profile_source_path = {});
 
 } // namespace huxerui::codegen

@@ -188,6 +188,9 @@ public:
     if (context.lto) {
       configure_arguments.push_back(std::string("-DHUXERUI_ENABLE_LTO=") + (*context.lto ? "ON" : "OFF"));
     }
+    if (context.profiling) {
+      configure_arguments.push_back("-DHUXERUI_ENABLE_PROFILING=ON");
+    }
     if (!generator.empty()) {
       configure_arguments.insert(configure_arguments.begin() + 1, {"-G", generator});
     }

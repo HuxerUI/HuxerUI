@@ -1,11 +1,11 @@
 # Packaging Applications
 
 `huxerui package` builds an enabled platform and publishes its distributable output under `dist/<platform>`.
-Release is the default profile for packaging; an explicit `--profile` selects another configured profile.
+Packaging uses the `release` configuration by default. Use `--config debug` to package a debug build.
 
 ```bash
 huxerui package windows
-huxerui package macos,linux --profile release
+huxerui package macos,linux --config release
 ```
 
 Packaging uses the same application target, resources, libraries, and platform shell as `build` and `run`.
@@ -87,7 +87,7 @@ The CLI forwards the same choices for `build`, `run`, and `package`:
 
 ```bash
 huxerui package android --optimization size --lto on
-huxerui build web --profile release --optimization minsize --lto on
+huxerui build web --config release --optimization minsize --lto on
 ```
 
 Direct CMake builds use `-DHUXERUI_OPTIMIZATION=size -DHUXERUI_ENABLE_LTO=ON`.

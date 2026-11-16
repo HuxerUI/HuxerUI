@@ -1,8 +1,12 @@
 #include <huxerui/presentation.h>
 
 #include <algorithm>
+#include <any>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -11,11 +15,16 @@
 
 #include <huxerui/animation.h>
 #include <huxerui/app.h>
+#include <huxerui/file.h>
+#include <huxerui/task.h>
 #include <huxerui/theme.h>
 #include <huxerui/window.h>
 
 #include "huxerui_builtin_resources.h"
 #include "internal_access.h"
+#include "macros_internal.h"
+#include "runtime/profiling_internal.h"
+#include "runtime/task_internal.h"
 #include "runtime/ui_window_internal.h"
 #include "resources/resource_internal.h"
 #include "tooltip_internal.h"
@@ -1230,13 +1239,16 @@ public:
 
   static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
     const Constraints loose = constraints.Loose();
-    for (ViewNode& child : node.Children()) {
-      context.Measure(child, loose);
-    }
-
     LayoutResult result;
     if (node.ChildCount() > 0) {
       ViewNode& panel = node.ChildAt(0);
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+      Constraints panel_constraints = loose;
+      panel_constraints.max_height = std::max(0.0F, panel_constraints.max_height - 16.0F);
+      context.Measure(panel, panel_constraints);
+#else
+      context.Measure(panel, loose);
+#endif
       result.Place(
           panel,
           {
@@ -1248,6 +1260,7 @@ public:
     if (node.ChildCount() > 1) {
       constexpr float corner_inset = 30.0F;
       ViewNode& ribbon = node.ChildAt(1);
+      context.Measure(ribbon, loose);
       result.Place(
           ribbon,
           {
@@ -1558,6 +1571,9 @@ const detail::ModifierDescriptor& DebugLayoutGuides::Descriptor() {
 struct DebugSampler {
   std::shared_ptr<detail::DebugMetricsSampler> metrics;
   State<detail::DebugMetricsSnapshot> snapshot;
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  std::shared_ptr<detail::ProfileRecorder> recorder;
+#endif
 
   static const detail::ModifierDescriptor& Descriptor();
 };
@@ -1574,25 +1590,14 @@ public:
   void Update(ViewNode&, const DebugSampler& modifier) {
     metrics_ = modifier.metrics;
     snapshot_ = modifier.snapshot;
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+    recorder_ = modifier.recorder;
+#endif
   }
 
   NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     constexpr double sample_interval = 1.0;
-    if (!next_sample_at_.has_value()) {
-      if (metrics_) {
-        const detail::DebugMetricsSnapshot sampled = metrics_->Sample(frame.timestamp);
-        const bool changed = snapshot_.Get() != sampled;
-        if (changed) {
-          snapshot_ = sampled;
-        }
-      }
-      next_sample_at_ = frame.timestamp + sample_interval;
-      return {
-          .needs_frame = false,
-          .wake_after = sample_interval,
-      };
-    }
-    const double remaining = *next_sample_at_ - frame.timestamp;
+    const double remaining = next_sample_at_.value_or(frame.timestamp) - frame.timestamp;
     if (remaining > 0.0) {
       return {
           .needs_frame = false,
@@ -1600,7 +1605,14 @@ public:
       };
     }
     if (metrics_) {
-      const detail::DebugMetricsSnapshot sampled = metrics_->Sample(frame.timestamp);
+      auto sampled = metrics_->Sample(frame.timestamp);
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+      if (recorder_) {
+        sampled.recorded_frame_count = recorder_->FrameCount();
+        sampled.recording = recorder_->IsRecording();
+        sampled.trace_full = recorder_->Truncated();
+      }
+#endif
       if (snapshot_.Get() != sampled) {
         snapshot_ = sampled;
       }
@@ -1615,6 +1627,9 @@ public:
 private:
   std::shared_ptr<detail::DebugMetricsSampler> metrics_;
   State<detail::DebugMetricsSnapshot> snapshot_;
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  std::shared_ptr<detail::ProfileRecorder> recorder_;
+#endif
   std::optional<double> next_sample_at_;
 };
 
@@ -1643,12 +1658,132 @@ View DebugMetricCard(std::string label, std::string value, std::string detail, C
   }.With(frame, Grow{}, Spacing{1.0F}, Padding{8.0F}, Background{debug_metric_background}, CornerRadius{8.0F});
 }
 
-View DebugPanel(
-    const detail::DebugMetricsSnapshot& snapshot,
-    const std::shared_ptr<detail::DebugMetricsSampler>& metrics,
-    State<detail::DebugMetricsSnapshot> snapshot_state,
-    State<bool> layout_guides
-) {
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+struct DebugTraceFile {
+  explicit DebugTraceFile(File value) : file(std::move(value)) {}
+  ~DebugTraceFile() { HUXERUI_DISCARD(file.Delete()); }
+
+  File file;
+};
+
+struct DebugTraceExport {
+  std::shared_ptr<DebugTraceFile> prepared;
+  std::string message;
+  bool busy = false;
+
+  bool operator==(const DebugTraceExport&) const = default;
+};
+
+std::shared_ptr<DebugTraceFile> PrepareDebugTrace(const std::shared_ptr<detail::ProfileRecorder>& recorder,
+                                                  const File& directory) {
+  static std::atomic<std::uint64_t> next_identity{1};
+  const auto timestamp = std::chrono::system_clock::now().time_since_epoch().count();
+  auto trace = std::make_shared<DebugTraceFile>(directory.Child(
+      "huxerui-trace-" + std::to_string(timestamp) + "-" + std::to_string(next_identity++) + ".json"));
+  recorder->WriteTraceFile(std::filesystem::u8path(trace->file.Path()));
+  return trace;
+}
+
+View DebugProfileControls(const std::shared_ptr<detail::ProfileRecorder>& recorder,
+                          State<DebugTraceExport> export_state, const TaskScope& tasks) {
+  if (!recorder) {
+    return {};
+  }
+  const auto application = UseApplication();
+  const auto picker = UseService<FilePicker>();
+  const bool can_save = picker->CanSaveFiles();
+  const bool has_frames = recorder->FrameCount() != 0;
+  const bool recording = recorder->IsRecording();
+  const auto stop = [recorder, application, can_save, export_state, tasks] {
+    if (export_state->busy) {
+      return;
+    }
+    export_state = DebugTraceExport{.message = "Preparing trace…", .busy = true};
+    HUXERUI_DISCARD(tasks.Launch([=]() -> Task<void> {
+      co_await Delay({});
+      recorder->Stop();
+      if (!can_save || recorder->FrameCount() == 0) {
+        export_state = DebugTraceExport{};
+        co_return;
+      }
+      try {
+        const File directory = application.Directories().temporary_directory;
+        std::shared_ptr<DebugTraceFile> trace;
+        if (detail::WorkerConcurrency() != 0) {
+          trace = co_await RunWorker(PrepareDebugTrace, recorder, directory);
+        } else {
+          trace = PrepareDebugTrace(recorder, directory);
+        }
+        export_state = DebugTraceExport{.prepared = std::move(trace)};
+      } catch (const std::exception&) {
+        export_state = DebugTraceExport{.message = "Could not prepare the trace"};
+      }
+    }));
+  };
+  const auto start = [recorder, export_state, tasks] {
+    if (export_state->busy) {
+      return;
+    }
+    DebugTraceExport pending = export_state;
+    pending.busy = true;
+    export_state = pending;
+    HUXERUI_DISCARD(tasks.Launch([recorder, export_state, pending = std::move(pending)]() mutable -> Task<void> {
+      co_await Delay({});
+      try {
+        recorder->Start();
+        export_state = DebugTraceExport{};
+      } catch (const std::exception&) {
+        pending.busy = false;
+        pending.message = "Could not start recording";
+        export_state = std::move(pending);
+      }
+    }));
+  };
+
+  const auto prepared = export_state->prepared;
+  View export_button;
+  if (prepared) {
+    export_button = Button("Export trace").OnClick([picker, prepared, export_state, tasks] {
+      if (export_state->busy || export_state->prepared != prepared) {
+        return;
+      }
+      export_state = DebugTraceExport{.prepared = prepared, .message = "Exporting trace…", .busy = true};
+      HUXERUI_DISCARD(tasks.Launch([=]() -> Task<void> {
+        constexpr std::string_view filename = "huxerui-trace.json";
+        bool saved = false;
+        try {
+          saved = co_await picker->SaveFileAsync(prepared->file, {
+            .suggested_name = std::string(filename),
+            .filter = {.name = "Chrome Trace JSON", .extensions = {"json"}, .content_types = {"application/json"}},
+          });
+        } catch (const std::exception&) {
+        }
+        export_state = DebugTraceExport{.prepared = prepared, .message = saved ? "Trace exported" : "Trace not saved"};
+      }));
+    });
+  } else if (!recording && has_frames && can_save) {
+    // A full capture or a failed preparation can be prepared before a separate save gesture.
+    export_button = Button("Prepare trace").OnClick(stop);
+  }
+  const std::string status = std::to_string(recorder->FrameCount()) + " frames" +
+                             (recorder->Truncated() ? " · Buffer full" : recording ? " · Recording" : "");
+  return Column {
+    Text(status).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
+    Row {
+      recording ? View(Button("Stop recording").OnClick(stop)) : View(Button("Start recording").OnClick(start)),
+      std::move(export_button),
+    }.With(Spacing{6.0F}, Enabled{!export_state->busy}),
+    export_state->message.empty()
+        ? View{} : Text(export_state->message).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
+  }.With(Spacing{5.0F});
+}
+#endif
+
+View DebugPanel(const detail::DebugMetricsSnapshot& snapshot, DebugSampler sampler,
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+                View profiling_controls,
+#endif
+                State<bool> layout_guides) {
   const std::string fps =
       snapshot.painted_frame_count == 0 ? "Idle" : std::to_string(static_cast<int>(std::lround(snapshot.fps)));
   const std::string commit_time =
@@ -1668,7 +1803,10 @@ View DebugPanel(
   Frame live_indicator_frame;
   live_indicator_frame.width = 8.0F;
   live_indicator_frame.height = 8.0F;
-  return Column {
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  const bool scroll = static_cast<bool>(profiling_controls);
+#endif
+  View content = Column {
     Row {
       Column {}.With(live_indicator_frame, Background{debug_live_color}, CornerRadius{4.0F}),
       Text("HuxerUI Performance")
@@ -1688,9 +1826,17 @@ View DebugPanel(
         .With(Foreground{debug_panel_foreground}, FontSize{11.0F})
         .OnChanged([layout_guides](bool checked) { layout_guides = checked; }),
     Text(footer).Style(TextStyle{Font::System(10.0F), debug_panel_secondary}),
-  }.With(
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+    std::move(profiling_controls),
+#endif
+  }.With(Spacing{8.0F});
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  if (scroll) {
+    content = ScrollView(std::move(content));
+  }
+#endif
+  return std::move(content).With(
       panel_frame,
-      Spacing{8.0F},
       Padding{12.0F},
       Background{debug_panel_background},
       Shadow{
@@ -1700,7 +1846,7 @@ View DebugPanel(
           .spread = -2.0F,
       },
       CornerRadius{12.0F},
-      DebugSampler{metrics, snapshot_state}
+      std::move(sampler)
   );
 }
 
@@ -2469,9 +2615,21 @@ public:
           auto expanded = UseState(false);
           auto snapshot = UseState(DebugMetricsSnapshot{});
           auto layout_guides = UseState(false);
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+          const auto* existing = std::any_cast<std::shared_ptr<ProfileRecorder>>(FindEnvironmentValue(
+              CurrentEnvironment(), typeid(ProfileRecorder)));
+          const std::shared_ptr<ProfileRecorder> recorder = existing ? *existing : nullptr;
+          const auto export_state = UseState(DebugTraceExport{});
+          const auto tasks = UseTaskScope();
+#endif
           std::vector<View> children;
           if (expanded.Get()) {
-            children.push_back(DebugPanel(snapshot, metrics, snapshot, layout_guides));
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+            children.push_back(DebugPanel(snapshot, {metrics, snapshot, recorder},
+                                          DebugProfileControls(recorder, export_state, tasks), layout_guides));
+#else
+            children.push_back(DebugPanel(snapshot, {metrics, snapshot}, layout_guides));
+#endif
           } else {
             children.push_back(Spacer());
           }

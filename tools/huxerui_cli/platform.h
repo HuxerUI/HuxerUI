@@ -114,6 +114,8 @@ struct PlatformCommandContext {
   std::vector<std::string> abis = {};
   /// Explicit Linux package format, or no override to use AppImage.
   std::optional<std::string> package_format = std::nullopt;
+  /// Whether to compile profiling support into the selected HuxerUI source build.
+  bool profiling = false;
 };
 
 /// One file or directory published by the `package` command.

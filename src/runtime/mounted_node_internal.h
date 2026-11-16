@@ -298,6 +298,9 @@ struct MountedNode final : public huxerui::ViewNode {
   SemanticPatch component_semantics;
   std::optional<SemanticPatch> author_semantics;
   std::function<View()> scope_factory;
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  ProfileSource profile_source;
+#endif
   CanvasPainter canvas_painter;
   ImageProperties image_properties;
   std::shared_ptr<const PlatformViewDeclaration> platform_view;

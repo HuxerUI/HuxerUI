@@ -18,6 +18,9 @@ class Environment;
 
 namespace huxerui::detail {
 
+struct MountedNode;
+struct ProfileSource;
+
 enum class ProfileLevel : std::uint8_t { Overview, Detailed };
 
 enum class ProfileEventKind : std::uint16_t {
@@ -71,6 +74,8 @@ struct ProfileEvent {
   std::int64_t started_ns = 0;
   std::int64_t ended_ns = 0;
   std::uint64_t node = 0;
+  std::uint64_t component_node = 0;
+  const ProfileSource* source = nullptr;
   std::uint32_t parent = no_profile_event;
   ProfileFlag flags = ProfileFlag::None;
   ProfileEventKind kind = ProfileEventKind::Frame;
@@ -94,9 +99,7 @@ public:
   [[nodiscard]] ProfileLevel Level() const noexcept {
     return level_;
   }
-  [[nodiscard]] std::size_t BufferBytes() const noexcept {
-    return capacity_ * sizeof(ProfileEvent);
-  }
+  [[nodiscard]] std::size_t BufferBytes() const noexcept;
   [[nodiscard]] std::span<const ProfileEvent> Events() const noexcept {
     return {events_.get(), size_};
   }
@@ -113,6 +116,7 @@ public:
     return truncated_;
   }
   void WriteTrace(std::ostream& output) const;
+  void WriteTraceFile(const std::filesystem::path& path) const;
 
   std::uint32_t Begin(ProfileEventKind kind, std::uint64_t node, ProfileFlag flags) noexcept;
   void End(std::uint32_t event) noexcept;
@@ -123,6 +127,8 @@ public:
   }
 
 private:
+  struct Sources;
+
   static std::int64_t Now() noexcept;
   void BeginFrame();
   void EndFrame(bool failed) noexcept;
@@ -130,6 +136,7 @@ private:
   Clock clock_;
   ProfileLevel level_ = ProfileLevel::Detailed;
   std::unique_ptr<ProfileEvent[]> events_;
+  std::unique_ptr<Sources> sources_;
   std::size_t capacity_ = 0;
   std::size_t size_ = 0;
   std::size_t frame_start_ = 0;
@@ -138,16 +145,33 @@ private:
   std::uint32_t dropped_frames_ = 0;
   CounterValues counters_{};
   CounterValues frame_counters_{};
+  const ProfileSource* component_source_ = nullptr;
+  std::uint64_t component_node_ = 0;
   bool recording_ = false;
   bool frame_active_ = false;
   bool truncated_ = false;
   std::filesystem::path output_file_;
 
   friend class ProfileFrame;
+  friend class ProfileComponent;
   friend std::shared_ptr<ProfileRecorder> CreateRuntimeProfiler();
 };
 
 [[nodiscard]] ProfileRecorder* CurrentProfileRecorder() noexcept;
+
+// Attribution follows existing recursive walks, including scopes that composed before recording began.
+class ProfileComponent final {
+public:
+  explicit ProfileComponent(const MountedNode& node) noexcept;
+  ~ProfileComponent();
+  ProfileComponent(const ProfileComponent&) = delete;
+  ProfileComponent& operator=(const ProfileComponent&) = delete;
+
+private:
+  ProfileRecorder* recorder_ = nullptr;
+  const ProfileSource* previous_source_ = nullptr;
+  std::uint64_t previous_node_ = 0;
+};
 
 class ProfileScope final {
 public:
@@ -205,7 +229,7 @@ private:
   ProfileRecorder* previous_;
   ProfileRecorder* recorder_;
   std::uint32_t event_ = no_profile_event;
-  int exceptions_;
+  int exceptions_ = 0;
 };
 
 inline void CountProfileEvent(ProfileCounter counter) noexcept {
@@ -218,6 +242,7 @@ inline void CountProfileEvent(ProfileCounter counter) noexcept {
 } // namespace huxerui::detail
 
 #define HUXERUI_PROFILE_FRAME(environment) huxerui::detail::ProfileFrame huxerui_profile_frame{environment}
+#define HUXERUI_PROFILE_COMPONENT(node) huxerui::detail::ProfileComponent huxerui_profile_component{node}
 #define HUXERUI_PROFILE_SCOPE(variable, kind, node) \
   huxerui::detail::ProfileScope variable{ \
       huxerui::detail::ProfileEventKind::kind, huxerui::detail::ProfileLevel::Detailed, node}
@@ -233,6 +258,7 @@ inline void CountProfileEvent(ProfileCounter counter) noexcept {
 #else
 
 #define HUXERUI_PROFILE_FRAME(environment) ((void)0)
+#define HUXERUI_PROFILE_COMPONENT(node) ((void)0)
 #define HUXERUI_PROFILE_SCOPE(variable, kind, node) ((void)0)
 #define HUXERUI_PROFILE_STAGE(variable, kind) ((void)0)
 #define HUXERUI_PROFILE_NEXT(variable, kind) ((void)0)

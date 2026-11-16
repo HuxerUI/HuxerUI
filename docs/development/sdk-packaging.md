@@ -85,7 +85,7 @@ The CLI embeds the SDK installers from the same source revision; no separate run
 `HuxerUISdkUpdateTests` uses local SDK fixtures and a stub release transport to check version comparisons, repeated switches in the same shell, default-version markers, profile preservation, checksum rejection, unsafe links, locking, and publication failure recovery.
 These tests must not query public releases or replace a developer's SDK.
 
-On macOS, also create an iOS-only smoke project and run `huxerui build ios --profile release` so the installed XCFramework participates in a complete Simulator application-core build.
+On macOS, also create an iOS-only smoke project and run `huxerui build ios --config release` so the installed XCFramework participates in a complete Simulator application-core build.
 
 CMake packaging changes require both an incremental build and a separate clean configure and build on the affected host.
 Release CI produces Windows x86_64, macOS arm64 and x86_64, Linux aarch64 and x86_64, and Android arm64-v8a archives.

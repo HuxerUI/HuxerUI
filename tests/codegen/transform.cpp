@@ -64,6 +64,18 @@ View Complex(bool enabled) {
   REQUIRE(result.source.find("const std::string raw") != std::string::npos);
 }
 
+TEST_CASE("Profiling scope generation includes original definition metadata") {
+  const std::string source = "\n[[huxerui::composable]]\n"
+                             "View MessageRow() {\n"
+                             "  return Text(\"Message\");\n"
+                             "}\n";
+  const auto result = TransformSource(source, "/app/src/inbox.cpp", "src/inbox.cpp");
+
+  REQUIRE(result.composable_count == 1);
+  REQUIRE(result.source.find("Scope({__func__, \"src/inbox.cpp\", 3}, [=]()") != std::string::npos);
+  REQUIRE(result.source.find("#line 3 \"/app/src/inbox.cpp\"") != std::string::npos);
+}
+
 TEST_CASE("Multiple composables are transformed") {
   const std::string source = "[[huxerui::composable]]\n"
                              "View First() { return Text(\"first\"); }\n"

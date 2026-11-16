@@ -61,15 +61,6 @@ std::filesystem::path ApplicationDevelopmentSkillDirectory(const std::filesystem
   return huxerui_home / "skills/huxerui-app-development";
 }
 
-bool IsSourceHome(const std::filesystem::path& path) {
-  return std::filesystem::is_regular_file(path / "CMakeLists.txt") &&
-         std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h") &&
-         std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake") &&
-         std::filesystem::is_directory(path / "tools/prebuilt") &&
-         std::filesystem::is_directory(path / "resources") &&
-         std::filesystem::is_directory(ApplicationDevelopmentSkillDirectory(path, SdkLayout::Source));
-}
-
 bool IsInstalledHome(const std::filesystem::path& path) {
   return std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h") &&
          !InstalledCMakeDirectory(path).empty() && std::filesystem::is_directory(path / "share/huxerui/tools") &&
@@ -84,6 +75,15 @@ std::filesystem::path Normalize(const std::filesystem::path& path) {
 }
 
 } // namespace
+
+bool IsSourceHome(const std::filesystem::path& path) {
+  return std::filesystem::is_regular_file(path / "CMakeLists.txt") &&
+         std::filesystem::is_regular_file(path / "include/huxerui/huxerui.h") &&
+         std::filesystem::is_regular_file(path / "cmake/HuxerUIApp.cmake") &&
+         std::filesystem::is_directory(path / "tools/prebuilt") &&
+         std::filesystem::is_directory(path / "resources") &&
+         std::filesystem::is_directory(ApplicationDevelopmentSkillDirectory(path, SdkLayout::Source));
+}
 
 std::filesystem::path ExecutablePath(std::string_view argument_zero) {
 #if defined(_WIN32)

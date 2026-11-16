@@ -1,5 +1,6 @@
 #include "profiling_internal.h"
 
+#include <algorithm>
 #include <any>
 #include <atomic>
 #include <chrono>
@@ -8,12 +9,16 @@
 #include <iomanip>
 #include <iostream>
 #include <locale>
+#include <memory_resource>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 
 #include <huxerui/environment.h>
+
+#include "mounted_node_internal.h"
 
 namespace huxerui::detail {
 namespace {
@@ -22,9 +27,9 @@ namespace {
 constinit thread_local ProfileRecorder* current_profile_recorder = nullptr;
 
 constexpr std::array event_names{
-    "Frame",     "Compose", "MeasureStage", "PlaceStage",   "Interaction",     "Extensions", "Geometry",  "Input",
-    "Semantics", "Scene",   "Damage",       "Commit",       "Scope",           "Factory",    "Reconcile", "Mount",
-    "Compile",   "Measure", "Place",        "PaintContent", "PaintForeground", "Resource",
+    "Runtime frame", "Compose", "MeasureStage", "PlaceStage", "Interaction", "Extensions", "Geometry", "Input",
+    "Semantics", "Build scene", "Damage", "Commit", "Scope", "Factory", "Reconcile", "Mount", "Compile",
+    "Measure", "Place", "Record content paint", "Record foreground paint", "Resource",
 };
 constexpr std::array counter_names{
     "scopes",
@@ -43,7 +48,54 @@ ProfileRecorder* FindProfiler(const Environment& environment) noexcept {
   return service == nullptr ? nullptr : service->get();
 }
 
+void WriteJsonString(std::ostream& output, std::string_view value) {
+  constexpr std::string_view hex = "0123456789abcdef";
+  output << '"';
+  for (unsigned char character : value) {
+    if (character < 0x20) {
+      output << "\\u00" << hex[character >> 4] << hex[character & 0xf];
+    } else {
+      if (character == '"' || character == '\\') {
+        output << '\\';
+      }
+      output << static_cast<char>(character);
+    }
+  }
+  output << '"';
+}
+
 } // namespace
+
+// Source strings belong to the capture even after their mounted scopes retire.
+struct ProfileRecorder::Sources {
+  struct Hash {
+    std::size_t operator()(const ProfileSource& source) const noexcept {
+      const std::hash<std::string_view> hash;
+      return hash(source.function) ^ hash(source.file) ^ source.line;
+    }
+  };
+
+  explicit Sources(std::size_t bytes)
+      : capacity(bytes), storage(std::make_unique<std::byte[]>(bytes)),
+        arena(storage.get(), bytes, std::pmr::null_memory_resource()), entries(&arena) {}
+
+  const ProfileSource* Intern(const ProfileSource& source) {
+    if (auto existing = entries.find(source); existing != entries.end()) {
+      return &*existing;
+    }
+    const auto copy = [this](std::string_view text) {
+      auto* destination = static_cast<char*>(arena.allocate(text.size(), alignof(char)));
+      std::copy(text.begin(), text.end(), destination);
+      return std::string_view{destination, text.size()};
+    };
+    return &*entries.insert(ProfileSource{copy(source.function), copy(source.file), source.line}).first;
+  }
+
+  std::size_t capacity;
+  std::unique_ptr<std::byte[]> storage;
+  std::pmr::monotonic_buffer_resource arena;
+  std::pmr::unordered_set<ProfileSource, Hash> entries;
+};
 
 ProfileRecorder* CurrentProfileRecorder() noexcept {
   return current_profile_recorder;
@@ -64,10 +116,7 @@ ProfileRecorder::~ProfileRecorder() {
     return;
   try {
     Stop();
-    std::ofstream output(output_file_, std::ios::binary | std::ios::trunc);
-    output.exceptions(std::ios::badbit | std::ios::failbit);
-    WriteTrace(output);
-    output.close();
+    WriteTraceFile(output_file_);
   } catch (const std::exception& error) {
     std::cerr << "HuxerUI profiling could not write its trace: " << error.what() << '\n';
   }
@@ -79,15 +128,19 @@ void ProfileRecorder::Start(ProfileLevel level, std::size_t maximum_bytes) {
   if (level != ProfileLevel::Overview && level != ProfileLevel::Detailed) {
     throw std::invalid_argument("HuxerUI profiling level is invalid");
   }
-  const std::size_t capacity = maximum_bytes / sizeof(ProfileEvent);
+  // Reserve part of the same capture budget for detailed source strings and their index.
+  const std::size_t source_bytes = level == ProfileLevel::Detailed && maximum_bytes >= 4096 ? maximum_bytes / 16 : 0;
+  const std::size_t capacity = (maximum_bytes - source_bytes) / sizeof(ProfileEvent);
   if (capacity == 0 || capacity >= no_profile_event) {
     throw std::invalid_argument("HuxerUI profiling buffer capacity is invalid");
   }
+  auto sources = source_bytes != 0 ? std::make_unique<Sources>(source_bytes) : nullptr;
   if (capacity != capacity_) {
     auto events = std::make_unique<ProfileEvent[]>(capacity);
     events_ = std::move(events);
     capacity_ = capacity;
   }
+  sources_ = std::move(sources);
   level_ = level;
   size_ = 0;
   parent_ = no_profile_event;
@@ -96,6 +149,10 @@ void ProfileRecorder::Start(ProfileLevel level, std::size_t maximum_bytes) {
   counters_.fill(0);
   recording_ = true;
   truncated_ = false;
+}
+
+std::size_t ProfileRecorder::BufferBytes() const noexcept {
+  return capacity_ * sizeof(ProfileEvent) + (sources_ ? sources_->capacity : 0);
 }
 
 void ProfileRecorder::Stop() {
@@ -132,7 +189,7 @@ std::uint32_t ProfileRecorder::Begin(ProfileEventKind kind, std::uint64_t node, 
     return no_profile_event;
   }
   const auto event = static_cast<std::uint32_t>(size_++);
-  events_[event] = {clock_(), 0, node, parent_, flags, kind, frame_count_ + 1};
+  events_[event] = {clock_(), 0, node, component_node_, component_source_, parent_, flags, kind, frame_count_ + 1};
   parent_ = event;
   return event;
 }
@@ -154,6 +211,13 @@ void ProfileRecorder::Flag(std::uint32_t event, ProfileFlag flag) noexcept {
 void ProfileRecorder::SetNode(std::uint32_t event, std::uint64_t node) noexcept {
   if (event != no_profile_event)
     events_[event].node = node;
+}
+
+void ProfileRecorder::WriteTraceFile(const std::filesystem::path& path) const {
+  std::ofstream output(path, std::ios::binary | std::ios::trunc);
+  output.exceptions(std::ios::badbit | std::ios::failbit);
+  WriteTrace(output);
+  output.close();
 }
 
 void ProfileRecorder::WriteTrace(std::ostream& output) const {
@@ -186,7 +250,31 @@ void ProfileRecorder::WriteTrace(std::ostream& output) const {
            << static_cast<double>(event.started_ns - origin) / 1000.0
            << ",\"dur\":" << static_cast<double>(event.ended_ns - event.started_ns) / 1000.0
            << ",\"args\":{\"node\":" << event.node << ",\"frame\":" << event.frame
-           << ",\"flags\":" << static_cast<std::uint32_t>(event.flags) << "}}";
+           << ",\"flags\":" << static_cast<std::uint32_t>(event.flags);
+    if (event.source != nullptr) {
+      output << ",\"component_node\":" << event.component_node << ",\"component\":";
+      WriteJsonString(output, event.source->function);
+      output << ",\"source_file\":";
+      WriteJsonString(output, event.source->file);
+      output << ",\"source_line\":" << event.source->line;
+    }
+    switch (event.flags) {
+    case ProfileFlag::InitialComposition:
+      output << ",\"reason\":\"initial composition\"";
+      break;
+    case ProfileFlag::Invalidated:
+      output << ",\"reason\":\"invalidation\"";
+      break;
+    case ProfileFlag::ParentRecomposition:
+      output << ",\"reason\":\"parent recomposition\"";
+      break;
+    case ProfileFlag::MeasureCacheHit:
+      output << ",\"cache_hit\":true";
+      break;
+    default:
+      break;
+    }
+    output << "}}";
   }
   output << "],\"huxerui\":{\"frames\":" << frame_count_ << ",\"dropped_frames\":" << dropped_frames_
          << ",\"truncated\":" << (truncated_ ? "true" : "false") << ",\"counters\":{";
@@ -198,9 +286,34 @@ void ProfileRecorder::WriteTrace(std::ostream& output) const {
   output << "}}}\n";
 }
 
+ProfileComponent::ProfileComponent(const MountedNode& node) noexcept {
+  auto* recorder = CurrentProfileRecorder();
+  if (recorder == nullptr || !recorder->sources_ || recorder->truncated_ || node.profile_source.function.empty()) {
+    return;
+  }
+  try {
+    const auto* source = recorder->sources_->Intern(node.profile_source);
+    recorder_ = recorder;
+    previous_source_ = recorder_->component_source_;
+    previous_node_ = recorder_->component_node_;
+    recorder_->component_source_ = source;
+    recorder_->component_node_ = node.identity;
+  } catch (const std::bad_alloc&) {
+    recorder->truncated_ = true;
+  }
+}
+
+ProfileComponent::~ProfileComponent() {
+  if (recorder_ != nullptr) {
+    recorder_->component_source_ = previous_source_;
+    recorder_->component_node_ = previous_node_;
+  }
+}
+
 ProfileFrame::ProfileFrame(ProfileRecorder* recorder)
-    : previous_(current_profile_recorder), recorder_(nullptr), exceptions_(std::uncaught_exceptions()) {
+    : previous_(current_profile_recorder), recorder_(nullptr) {
   if (recorder != nullptr && recorder->IsRecording()) {
+    exceptions_ = std::uncaught_exceptions();
     recorder->BeginFrame();
     recorder_ = recorder;
     event_ = recorder_->Begin(ProfileEventKind::Frame, 0, ProfileFlag::None);
@@ -226,8 +339,9 @@ ProfileFrame::~ProfileFrame() {
 
 std::shared_ptr<ProfileRecorder> CreateRuntimeProfiler() {
   const char* configured_mode = std::getenv("HUXERUI_PROFILE");
-  const std::string_view mode =
-      configured_mode == nullptr || *configured_mode == '\0' ? "detailed" : configured_mode;
+  const std::string_view mode = configured_mode == nullptr ? "" : configured_mode;
+  if (mode.empty())
+    return std::make_shared<ProfileRecorder>();
   if (mode == "off")
     return nullptr;
   ProfileLevel level;

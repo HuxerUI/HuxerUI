@@ -1383,5 +1383,8 @@ const Application application{
             .content_mode = WindowContentMode::EdgeToEdge,
         },
         .viewport_breakpoints = ViewportBreakpoints{720.0F, 1040.0F},
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+        .show_debug_overlay = true,
+#endif
     }
 };

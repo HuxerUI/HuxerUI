@@ -63,7 +63,8 @@ android {
                 arguments "-DANDROID_STL=${huxeruiStl}",
                         "-DHUXERUI_HOME=${huxeruiHome.absolutePath}",
                         "-DHUXERUI_OPTIMIZATION=${providers.gradleProperty('huxeruiOptimization').orElse('default').get()}",
-                        "-DHUXERUI_ENABLE_LTO=${providers.gradleProperty('huxeruiLto').orElse('OFF').get()}"
+                        "-DHUXERUI_ENABLE_LTO=${providers.gradleProperty('huxeruiLto').orElse('OFF').get()}",
+                        "-DHUXERUI_ENABLE_PROFILING=${providers.gradleProperty('huxeruiProfiling').orElse('OFF').get()}"
             }
         }
 

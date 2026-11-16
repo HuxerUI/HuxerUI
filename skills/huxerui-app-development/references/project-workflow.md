@@ -20,8 +20,8 @@ Choose the name, project identifier, and platforms from the user's request or cu
 huxerui doctor windows
 huxerui create app SampleApp --id org.example.sampleapp --platform windows
 Set-Location SampleApp
-huxerui build windows --profile debug
-huxerui run windows --profile debug
+huxerui build windows --config debug
+huxerui run windows --config debug
 ```
 
 Use `--sdk <path>` with `build`, `run`, `package`, or `open ios` to select a specific SDK installation or HuxerUI repository root for one invocation. Use a source checkout when the user wants to compile HuxerUI from source. Keep the user's persistent `HUXERUI_HOME` as configured.

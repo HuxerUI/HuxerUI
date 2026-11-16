@@ -112,6 +112,11 @@ struct DebugMetricsSnapshot {
   float average_damage_ratio = 0.0F;
   Size viewport;
   std::size_t painted_frame_count = 0;
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  std::uint32_t recorded_frame_count = 0;
+  bool recording = false;
+  bool trace_full = false;
+#endif
 
   bool operator==(const DebugMetricsSnapshot&) const = default;
 };

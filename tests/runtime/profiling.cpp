@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <locale>
+#include <set>
 #include <sstream>
 
 namespace huxerui::test {
@@ -300,11 +301,54 @@ TEST_CASE("UiWindow profiling distinguishes mounting invalidation and cached lay
   CheckTrace(*recorder);
 }
 
+TEST_CASE("Profiling attributes already mounted descendants to each component instance", "[.profiling-runtime]") {
+  const auto content = +[]() -> View {
+    const auto row = [] {
+      return Scope({"MessageRow", "src/inbox.cpp", 82}, [] {
+        return Text("Message").With(Background{Color::White()});
+      });
+    };
+    return Column {row(), row()}.With(CrossAlign{CrossAxisAlignment::Stretch});
+  };
+  auto recorder = std::make_shared<ProfileRecorder>(ProfileClock);
+  TestPlatform platform;
+  UiWindow window{content, platform, ProfileOptions(recorder)};
+  window.SetWindowMetrics({.viewport = {300.0F, 200.0F}});
+  window.BuildCommit();
+
+  recorder->Start();
+  window.SetWindowMetrics({.viewport = {340.0F, 200.0F}});
+  window.BuildCommit();
+  recorder->Stop();
+
+  std::set<std::uint64_t> measured_components;
+  std::set<std::uint64_t> painted_components;
+  for (const auto& event : recorder->Events()) {
+    if (!event.source || event.source->function != "MessageRow") {
+      continue;
+    }
+    REQUIRE(event.source->file == "src/inbox.cpp");
+    REQUIRE(event.source->line == 82);
+    REQUIRE(event.kind != ProfileEventKind::Scope);
+    if (event.node != event.component_node) {
+      if (event.kind == ProfileEventKind::Measure) {
+        measured_components.insert(event.component_node);
+      } else if (event.kind == ProfileEventKind::PaintContent) {
+        painted_components.insert(event.component_node);
+      }
+    }
+  }
+  REQUIRE(measured_components.size() == 2);
+  REQUIRE(painted_components == measured_components);
+  CheckTrace(*recorder);
+}
+
 #else
 
 TEST_CASE("Compiled-out profiling does not evaluate instrumentation arguments", "[profiling]") {
   int evaluations = 0;
   HUXERUI_PROFILE_FRAME(++evaluations);
+  HUXERUI_PROFILE_COMPONENT(++evaluations);
   HUXERUI_PROFILE_STAGE(stage, UnknownEvent);
   HUXERUI_PROFILE_SCOPE(scope, UnknownEvent, ++evaluations);
   HUXERUI_PROFILE_FLAG(scope, UnknownFlag::Value);

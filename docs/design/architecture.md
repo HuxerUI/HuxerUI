@@ -2035,15 +2035,12 @@ Hooks run in declaration order within their own lists. Runtime owns application 
 HuxerUI installs its built-in Toast, SnackBar, Tooltip, Dialog, BottomSheet, Popup, and Menu services for each UiWindow. Applications use command-oriented services through their typed `UseXxx()` handles, while Tooltip remains an ordinary retained modifier; window hooks remain the extension mechanism for third-party per-window services and global components. When `AppOptions::show_debug_overlay` is enabled, UiWindow installs the built-in DebugOverlay after window hooks so its System entry remains above other global layers. The option defaults to enabled in Debug builds and disabled in Release builds.
 
 Detailed performance diagnostics are a private source-build capability controlled by `HUXERUI_ENABLE_PROFILING`, which defaults to off for source builds and must remain disabled for SDK packaging.
-When compiled in, detailed capture is enabled by default, and a window-owned recorder captures its frames; a library-owned thread-local pointer routes nested instrumentation during that frame and restores the previous recorder across nested calls.
-The optional `HUXERUI_PROFILE` selects `overview`, `detailed`, or `off`; an unset or empty value uses `detailed`.
-The optional `HUXERUI_PROFILE_DIRECTORY` overrides the default working-directory `traces/` location resolved at Runtime creation without changing the recording mode.
-Output-directory initialization failures disable capture for that Runtime and report a diagnostic without preventing application startup.
-The recorder uses an independent monotonic clock and stores scalar event data without retaining nodes or application values.
+An idle window can start or stop its recorder from the DEBUG overlay. Explicit `HUXERUI_PROFILE=overview` or `detailed` enables startup capture and export on retirement. Its output path uses `HUXERUI_PROFILE_DIRECTORY` or the working-directory `traces/` directory.
+A library-owned thread-local pointer routes instrumentation for the active frame and restores the previous recorder across nested calls. The recorder reads its monotonic clock only during active capture.
+Generated scopes carry static source metadata in profiling builds. The existing composition, layout, and paint traversals supply the closest component and its mounted identity to detailed spans. The capture owns copies of the source strings inside its bounded storage.
 Buffer exhaustion or an escaping frame exception rolls back that frame's events and counters, so exports contain complete frames only.
-The private recorder's start, stop, and export operations require a frame boundary; calls during an active frame are rejected.
-Recording and capture export do not introduce a public Profiler API, code-generation metadata, platform services, or new DebugOverlay UI.
-With profiling compiled out, neither the recorder nor its instrumentation arguments, storage, timers, or activation checks are present; the existing DebugOverlay contract is unchanged.
+The DEBUG overlay performs start and stop between frames and prepares a temporary export before presenting the existing file picker. Captured frames and the prepared file allow save retries until the next capture or window retirement.
+With profiling compiled out, the profiling controls, recorder, generated source metadata, and instrumentation arguments are removed at build time.
 See [Runtime profiling](../development/building.md#runtime-profiling) for source-build activation and capture limits.
 
 Neither hook provides:

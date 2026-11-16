@@ -11,6 +11,9 @@ namespace huxerui::cli {
 /// Identifies incremental output by the normalized framework location.
 [[nodiscard]] std::string BuildHomeKey(const std::filesystem::path& home);
 
+/// Checks whether a directory contains the HuxerUI source layout required for application builds.
+bool IsSourceHome(const std::filesystem::path& path);
+
 /// Resolves an explicit SDK installation or source checkout, or validates the default installed SDK.
 [[nodiscard]] std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
     const std::optional<std::filesystem::path>& sdk_override, const std::filesystem::path& working_directory);

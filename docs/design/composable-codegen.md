@@ -103,6 +103,8 @@ HuxerUI application and library helpers enable it for their source targets, whil
 Codegen-enabled targets suppress the compiler warning for unknown C++ attributes so editors that consume the CMake compilation database accept the composable marker in original sources.
 Unsupported header definitions remain outside the transformation contract.
 
+Source builds with profiling enabled pass `--profile-source-root` to `hcg`. The transformer attaches the function name, project-relative file or external basename, and definition line to the generated `Scope`. The source root is used for profiling metadata and the original input path continues to drive compiler line directives.
+
 ## Transformer
 
 The implementation uses a lightweight lexical transformation:

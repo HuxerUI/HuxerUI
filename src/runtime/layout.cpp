@@ -504,6 +504,7 @@ Constraints ResolveFrameConstraints(const Frame& frame, const Constraints& const
 
 Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui_window,
                  EdgeInsets safe_area, const WindowTitleBarMetrics* title_bar_metrics) {
+  HUXERUI_PROFILE_COMPONENT(node);
   HUXERUI_PROFILE_SCOPE(profile_measure, Measure, node.identity);
   HUXERUI_PROFILE_COUNT(MeasureRequests);
   // An invalidated ancestor may revisit a clean child. The child's cached result remains valid only for the exact
@@ -690,6 +691,7 @@ Size MeasureNode(MountedNode& node, const Constraints& constraints, UiWindow& ui
 }
 
 void LayoutNode(MountedNode& node, Point offset) {
+  HUXERUI_PROFILE_COMPONENT(node);
   HUXERUI_PROFILE_SCOPE(profile_place, Place, node.identity);
   const bool size_changed =
       node.bounds.width != node.measured_size.width || node.bounds.height != node.measured_size.height;

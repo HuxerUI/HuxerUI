@@ -23,6 +23,7 @@
 #include "resources/resource_internal.h"
 #include "components/indication_internal.h"
 #include "profiling_internal.h"
+#include "macros_internal.h"
 
 namespace huxerui {
 
@@ -119,6 +120,9 @@ ViewSpec CompileViewSpec(const ViewSpec& declaration, const std::shared_ptr<cons
   compiled.component_semantics = declaration.component_semantics;
   compiled.author_semantics = declaration.author_semantics;
   compiled.scope_factory = declaration.scope_factory;
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  compiled.profile_source = declaration.profile_source;
+#endif
   compiled.canvas_painter = declaration.canvas_painter;
   compiled.image_properties = declaration.image_properties;
   if (const auto* resource = std::get_if<ImageResource>(&compiled.image_properties.source)) {
@@ -376,5 +380,13 @@ void View::EnsureUniqueSpec() {
 }
 
 Scope::Scope(std::function<View()> factory) : View(detail::MakeScopeSpec(std::move(factory))) {}
+
+Scope::Scope(detail::ProfileSource source, std::function<View()> factory) : Scope(std::move(factory)) {
+#if defined(HUXERUI_ENABLE_PROFILING) && HUXERUI_ENABLE_PROFILING
+  spec_->profile_source = source;
+#else
+  HUXERUI_UNUSED(source);
+#endif
+}
 
 } // namespace huxerui

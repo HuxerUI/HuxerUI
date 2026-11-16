@@ -13,6 +13,7 @@ namespace {
 struct Arguments {
   std::filesystem::path input;
   std::filesystem::path output;
+  std::filesystem::path profile_source_root;
 };
 
 [[nodiscard]] Arguments ParseArguments(int argc, char** argv) {
@@ -23,16 +24,26 @@ struct Arguments {
       arguments.input = argv[++index];
     } else if (argument == "--output" && index + 1 < argc) {
       arguments.output = argv[++index];
+    } else if (argument == "--profile-source-root" && index + 1 < argc) {
+      arguments.profile_source_root = argv[++index];
     } else {
-      throw std::invalid_argument(
-          "usage: hcg --input <path> --output <path>");
+      throw std::invalid_argument("usage: hcg --input <path> --output <path> [--profile-source-root <path>]");
     }
   }
   if (arguments.input.empty() || arguments.output.empty()) {
-    throw std::invalid_argument(
-        "usage: hcg --input <path> --output <path>");
+    throw std::invalid_argument("usage: hcg --input <path> --output <path> [--profile-source-root <path>]");
   }
   return arguments;
+}
+
+std::string ProfileSourcePath(const Arguments& arguments) {
+  if (arguments.profile_source_root.empty()) {
+    return {};
+  }
+  const auto input = std::filesystem::absolute(arguments.input).lexically_normal();
+  const auto root = std::filesystem::absolute(arguments.profile_source_root).lexically_normal();
+  const auto relative = input.lexically_relative(root);
+  return relative.empty() || *relative.begin() == ".." ? input.filename().generic_string() : relative.generic_string();
 }
 
 [[nodiscard]] std::string ReadFile(
@@ -86,9 +97,7 @@ int main(int argc, char** argv) {
 
     try {
       const huxerui::codegen::TransformResult result =
-          huxerui::codegen::TransformSource(
-              source,
-              arguments.input.string());
+          huxerui::codegen::TransformSource(source, arguments.input.string(), ProfileSourcePath(arguments));
       WriteIfChanged(arguments.output, result.source);
     } catch (const huxerui::codegen::TransformError& error) {
       const huxerui::codegen::SourcePosition position =
